@@ -126,6 +126,14 @@ class Rule(Matcher):
         Optional, and omitted far more often than not — but a rule with a broad
         trigger (anything containing an ``or``) needs it, and the declaration is the
         only place that need can be recorded.
+    :param premise: ``() -> None`` asserting the rule's trigger set is non-empty.
+        Optional, and required in substance by the minority of rules that DERIVE
+        what they look for — the sync methods of a store, the fields of a dataclass,
+        the module names in a tree — rather than naming it as a literal. A derived
+        trigger that came back empty would leave the detector matching nothing,
+        which reads as a property holding. The check belongs in the declaration
+        rather than in an ``assert`` inside the detector: there it is one line
+        among the walk's own logic, and ``python -O`` removes it.
     :param excludes: basenames sanctioned as the rule's own owner, excluded from the
         clean check for the same reason the owner of a chokepoint is.
     :param skip: repo-relative paths exempt from this rule. Separate from
@@ -161,6 +169,7 @@ class Rule(Matcher):
     summary: str = ""
     excludes: frozenset[str] = field(default=SANCTIONED)
     clean: Callable[[], Sequence[str]] | None = None
+    premise: Callable[[], None] | None = None
     skip: frozenset[str] = frozenset()
     kwargs_for: Callable[[str], dict[str, object]] | None = None
     proof_path: pathlib.Path = _SYNTHETIC
@@ -321,6 +330,8 @@ class Rule(Matcher):
         early — reads as a passing property, which is the worst way for a gate to
         lie: green, and enforcing nothing.
         """
+        if self.premise is not None:
+            self.premise()
         for proof in self.proofs():
             self._check_one(proof)
         for source in self.looksalikes():

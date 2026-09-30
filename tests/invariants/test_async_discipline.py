@@ -12,12 +12,6 @@ import inspect
 import pathlib
 
 from tests.chokepoint_walks import (
-    REPO_ROOT,
-    SANCTIONED,
-    app_offenders,
-    app_trees,
-    assert_fires_once,
-    assert_stays_clean,
     async_function_defs,
     attribute_calls,
     calls_to_any,
@@ -26,7 +20,7 @@ from tests.chokepoint_walks import (
     offender_at,
     offenders_over_functions,
 )
-from tests.invariants._shared import assert_trees_clean
+from tests.rules import Bites, Rule, Trips
 
 # ---------------------------------------------------------------------------
 # The admission sizing weights are one value
@@ -52,10 +46,7 @@ _ADMISSION_POLICY = "_build_admission_policy"
 
 def _admission_budget_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
     """A ``_build_admission_policy`` call carrying a sizing weight as a keyword."""
-    from app.resource_pressure import TaskRamBudget
-
-    weights = {field.name for field in dataclasses.fields(TaskRamBudget)}
-    assert weights, "TaskRamBudget declared no weights; this sweep would be a no-op"
+    weights = {field.name for field in dataclasses.fields(_task_ram_budget())}
     offenders: list[str] = []
     for node in calls_to_any(tree, {_ADMISSION_POLICY}):
         for keyword in node.keywords:
@@ -73,50 +64,70 @@ def _admission_budget_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
     return offenders
 
 
+def _task_ram_budget():
+    """The budget dataclass, imported late so the module docstring stays the first prose."""
+    from app.resource_pressure import TaskRamBudget
+
+    return TaskRamBudget
+
+
+def _admission_weights_are_known() -> None:
+    """The weights this rule bans as keywords are read from the dataclass, not listed.
+
+    A weight added to ``TaskRamBudget`` is covered here the day it lands, and a
+    dataclass emptied or renamed leaves this failing rather than leaving the rule
+    matching nothing -- which would read as the property holding.
+    """
+    weights = {field.name for field in dataclasses.fields(_task_ram_budget())}
+    assert weights, "TaskRamBudget declared no weights; this sweep would be a no-op"
+
+
+ADMISSION_WEIGHTS_ARE_KEYWORDS = (
+    "from app.resource_pressure import _build_admission_policy\n"
+    "def build(limit, pool_size):\n"
+    "    return _build_admission_policy(limit, pool_size=pool_size,"
+    " max_concurrent_pages=3, doc_workers=2)\n"
+)
+
+ADMISSION_BUDGET_ARRIVES_AS_A_BUDGET = Rule(
+    name="admission-weights-arrive-as-a-budget",
+    find=_admission_budget_offenders,
+    summary=(
+        "admission sizing weights must arrive as a TaskRamBudget, not as four"
+        " keywords that can drift from the budget the policy reports"
+    ),
+    premise=_admission_weights_are_known,
+    bite=lambda: Bites(ADMISSION_WEIGHTS_ARE_KEYWORDS, marker="doc_workers=2"),
+    clean=lambda: (
+        "from app.resource_pressure import TaskRamBudget, _build_admission_policy\n"
+        "def build(limit, pool_size):\n"
+        "    return _build_admission_policy(limit, pool_size=pool_size,"
+        " max_concurrent_pages=3, budget=TaskRamBudget(doc_workers=2))\n",
+        # The computation itself is not this guard's subject.
+        "from app.resource_pressure import max_http_concurrency_for\n"
+        "def ceiling(limit, pool_size):\n"
+        "    return max_http_concurrency_for(limit, pool_size, doc_workers=2)\n",
+        "from app.resource_pressure import _build_admission_policy\n"
+        "def build(limit, pool_size):\n"
+        "    return _build_admission_policy(limit, pool_size=pool_size, max_concurrent_pages=3)\n",
+    ),
+)
+
+
 def test_admission_sizing_reaches_the_policy_as_one_budget():
     """No caller re-spells the four sizing weights as keywords to the policy builder."""
-    assert_trees_clean(
-        _admission_budget_offenders,
-        "admission sizing weights must arrive as a TaskRamBudget, not as four"
-        " keywords that can drift from the budget the policy reports",
-    )
+    ADMISSION_BUDGET_ARRIVES_AS_A_BUDGET.scan()
 
 
 def test_admission_budget_detector_bites():
     """The flat keyword fires on every weight; the budget form is clean.
 
-    ``max_http_concurrency_for`` is deliberately NOT in this set: it is the
-    per-call computation the budget is bound for, so it still takes the four
-    weights flat and its own call inside the policy function is the sanctioned
-    forwarding. What is banned is a *caller* re-spelling them.
+    ``max_http_concurrency_for`` is deliberately NOT in the clean set's
+    counterpart: it is the per-call computation the budget is bound for, so it
+    still takes the four weights flat and its own call inside the policy function
+    is the sanctioned forwarding. What is banned is a *caller* re-spelling them.
     """
-    assert_fires_once(
-        _admission_budget_offenders,
-        {
-            "from app.resource_pressure import _build_admission_policy\n"
-            "def build(limit, pool_size):\n"
-            "    return _build_admission_policy(limit, pool_size=pool_size,"
-            " max_concurrent_pages=3, doc_workers=2)\n": "doc_workers=2",
-        },
-        REPO_ROOT / "app" / "_synthetic.py",
-    )
-    assert_stays_clean(
-        _admission_budget_offenders,
-        (
-            "from app.resource_pressure import TaskRamBudget, _build_admission_policy\n"
-            "def build(limit, pool_size):\n"
-            "    return _build_admission_policy(limit, pool_size=pool_size,"
-            " max_concurrent_pages=3, budget=TaskRamBudget(doc_workers=2))\n",
-            # The computation itself is not this guard's subject.
-            "from app.resource_pressure import max_http_concurrency_for\n"
-            "def ceiling(limit, pool_size):\n"
-            "    return max_http_concurrency_for(limit, pool_size, doc_workers=2)\n",
-            "from app.resource_pressure import _build_admission_policy\n"
-            "def build(limit, pool_size):\n"
-            "    return _build_admission_policy(limit, pool_size=pool_size, max_concurrent_pages=3)\n",
-        ),
-        REPO_ROOT / "app" / "_synthetic.py",
-    )
+    ADMISSION_BUDGET_ARRIVES_AS_A_BUDGET.check_bites()
 
 
 # ---------------------------------------------------------------------------
@@ -153,36 +164,41 @@ def _unsanctioned_readiness_counter_offenders(tree, path):
     ]
 
 
-def test_readiness_slots_are_admitted_and_released_by_the_gate():
-    offenders = app_offenders(_unsanctioned_readiness_counter_offenders, skip=_READINESS_GATE_EXEMPT)
-    assert not offenders, (
+READINESS_SLOTS_GO_THROUGH_THE_GATE = Rule(
+    name="readiness-slots-go-through-the-gate",
+    find=_unsanctioned_readiness_counter_offenders,
+    summary=(
         "take a readiness slot with app.api.main_helpers.request_gate; a hand-written "
-        "admit/release is how a rejected request holds its slot for the life of the "
-        "process: " + ", ".join(offenders)
-    )
+        "admit/release is how a rejected request holds its slot for the life of the process"
+    ),
+    skip=_READINESS_GATE_EXEMPT,
+    bite=lambda: (
+        Bites("def f():\n    readiness_state.begin_request()\n", "begin_request"),
+        # The release is the expensive one to lose, in both its spellings: a finally
+        # and a return.
+        Bites(
+            "def f():\n    try:\n        pass\n    finally:\n"
+            "        readiness_state.end_request()\n",
+            "end_request",
+        ),
+        Bites("def f():\n    return READINESS_STATE.end_request()\n", "end_request"),
+    ),
+    clean=lambda: (
+        "async def f(payload):\n"
+        '    with request_gate("crawl_request_rejected", logger=logger):\n'
+        "        return await execute(payload)\n",
+        "def f():\n    get_metrics().observe_crawl(errors=1)\n",
+    ),
+)
+
+
+def test_readiness_slots_are_admitted_and_released_by_the_gate():
+    READINESS_SLOTS_GO_THROUGH_THE_GATE.scan()
 
 
 def test_readiness_counter_detector_bites():
     """A hand-rolled admit, and a hand-rolled release, both fire; the gate stays clean."""
-    fires = {
-        "def f():\n    readiness_state.begin_request()\n": "begin_request",
-        "def f():\n    try:\n        pass\n    finally:\n"
-        "        readiness_state.end_request()\n": "end_request",
-        "def f():\n    return READINESS_STATE.end_request()\n": "end_request",
-    }
-    assert_fires_once(
-        _unsanctioned_readiness_counter_offenders, fires, REPO_ROOT / "app" / "api" / "_synthetic.py"
-    )
-    assert_stays_clean(
-        _unsanctioned_readiness_counter_offenders,
-        (
-            "async def f(payload):\n"
-            '    with request_gate("crawl_request_rejected", logger=logger):\n'
-            "        return await execute(payload)\n",
-            "def f():\n    get_metrics().observe_crawl(errors=1)\n",
-        ),
-        REPO_ROOT / "app" / "api" / "_synthetic.py",
-    )
+    READINESS_SLOTS_GO_THROUGH_THE_GATE.check_bites()
 
 
 # ---------------------------------------------------------------------------
@@ -248,36 +264,48 @@ def _ungated_job_visited_offenders(tree: ast.AST, path: pathlib.Path) -> list[st
     return offenders
 
 
+WHOLE_SITE_VISIT_IS_TRANSIENT_GATED = Rule(
+    name="whole-site-visit-is-transient-gated",
+    find=_ungated_job_visited_offenders,
+    summary=(
+        "gate every job.visited.add on is_transient_classification() "
+        "so transient failures are re-queued, not marked visited"
+    ),
+    bite=lambda: Bites(
+        "def run(job):\n    for url in batch:\n        job.visited.add(url)\n",
+        marker="is_transient_classification",
+    ),
+    clean=lambda: (
+        # The accessor, bare and qualified: the import style is the module's choice
+        # and must not decide whether the gate is recognised. The set is what the
+        # accessor consults, so a direct membership test is legitimate rather than a
+        # bypass.
+        "def run(job, outcome):\n    for url in batch:\n"
+        "        if is_transient_classification(outcome):\n            continue\n"
+        "        job.visited.add(url)\n",
+        "def run(job, outcome):\n    for url in batch:\n"
+        "        if constants.is_transient_classification(outcome):\n            continue\n"
+        "        job.visited.add(url)\n",
+        "def run(job, outcome):\n    for url in batch:\n"
+        "        if outcome in TRANSIENT_CLASSIFICATIONS:\n            continue\n"
+        "        job.visited.add(url)\n",
+    ),
+)
+
+
 def test_whole_site_visited_commit_is_transient_gated():
     """A transiently-failed whole-site URL is re-queued, never counted done."""
-    assert_trees_clean(
-        _ungated_job_visited_offenders,
-        "gate every job.visited.add on is_transient_classification() "
-        "so transient failures are re-queued, not marked visited",
-        trees=app_trees(exclude=SANCTIONED),
-    )
+    WHOLE_SITE_VISIT_IS_TRANSIENT_GATED.scan()
 
 
 def test_whole_site_visited_gate_detector_bites():
-    """An unguarded whole-site visited commit fires; both gate spellings stay clean."""
-    bad = ast.parse("def run(job):\n    for url in batch:\n        job.visited.add(url)\n")
-    offenders = _ungated_job_visited_offenders(bad, REPO_ROOT / "app" / "_synthetic.py")
-    assert len(offenders) == 1, offenders
-    # The message must name the seam to route through, or a red detector is only
-    # as useful as the guess it forces.
-    assert "is_transient_classification" in offenders[0], offenders
+    """An unguarded whole-site visited commit fires; both gate spellings stay clean.
 
-    # The accessor, bare and qualified: the import style is the module's choice
-    # and must not decide whether the gate is recognised.
-    for gate in (
-        "if is_transient_classification(outcome):\n            continue",
-        "if constants.is_transient_classification(outcome):\n            continue",
-        "if outcome in TRANSIENT_CLASSIFICATIONS:\n            continue",
-    ):
-        good = ast.parse(
-            f"def run(job, outcome):\n    for url in batch:\n        {gate}\n        job.visited.add(url)\n"
-        )
-        assert not _ungated_job_visited_offenders(good, REPO_ROOT / "app" / "_synthetic.py"), gate
+    The message must name the seam to route through, or a red detector is only as
+    useful as the guess it forces -- which is why this is a :class:`Bites` proof
+    rather than a bare firing check.
+    """
+    WHOLE_SITE_VISIT_IS_TRANSIENT_GATED.check_bites()
 
 
 # The store-offload invariant: inside an async def, a store is reached through
@@ -316,6 +344,23 @@ def _sync_store_methods() -> dict[str, frozenset[str]]:
             and not inspect.iscoroutinefunction(getattr(store_class, member))
         )
     return derived
+
+
+def _stores_still_have_sync_methods() -> None:
+    """The trigger set is derived, so prove it is not empty.
+
+    ``load`` and ``aload`` are the pair that makes the whole rule meaningful: a
+    store whose methods were all made async would leave this detector matching
+    nothing, and matching nothing reads exactly like a store that is never
+    misused. Named rather than counted, because the count could be satisfied by
+    one synchronous method nobody calls in an async frame.
+    """
+    sync_methods = _sync_store_methods()
+    assert "load" in sync_methods["JobStore"] and "aload" not in sync_methods["JobStore"], (
+        f"JobStore's sync/async pair moved: {sorted(sync_methods['JobStore'])[:8]}. This rule's "
+        f"trigger set is derived from the class, so it is re-derived rather than listed -- "
+        f"which means a renamed method makes the rule match nothing instead of reporting."
+    )
 
 
 def _store_receivers(function: ast.AST) -> dict[str, str]:
@@ -358,12 +403,50 @@ def _sync_store_call_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
     return offenders
 
 
+STORE_CALLS_ON_THE_LOOP = Rule(
+    name="store-calls-on-the-loop",
+    find=_sync_store_call_offenders,
+    summary="A store call on the event loop stalls every in-flight request",
+    premise=_stores_still_have_sync_methods,
+    bite=lambda: (
+        Trips(
+            "async def get_crawl_result(job_store, result_store):\n"
+            "    stored = result_store.get(request_id)\n"
+            "    job = job_store.load(request_id)\n",
+            count=2,
+        ),
+        Bites("async def runner(store: JobStore):\n    return store.list_jobs()\n", "store.list_jobs"),
+        Bites(
+            "async def lifespan():\n"
+            "    store = JobStore(path, policy=policy)\n"
+            "    return store.delete(job_id)\n",
+            "store.delete",
+        ),
+    ),
+    clean=lambda: (
+        "async def get_crawl_result(job_store, result_store):\n"
+        "    stored = await result_store.aget(request_id)\n"
+        "    job = await job_store.aload(request_id)\n",
+        # A sync frame is not the hazard: startup recovery before the loop exists
+        # and test setup are both entitled to the synchronous methods.
+        "def seed(job_store):\n    return job_store.load(job_id)\n",
+    ),
+)
+
+
 def test_no_sync_store_method_is_called_from_an_async_frame():
-    assert_trees_clean(
-        _sync_store_call_offenders,
-        "A store call on the event loop stalls every in-flight request",
-        trees=app_trees(exclude=SANCTIONED),
-    )
+    """A store call on the event loop stalls every in-flight request.
+
+    The proof covers the four ways a frame names a store -- unannotated by
+    convention, annotated, constructed, and awaited -- because a detector that
+    resolved only one of them would pass on the other three while reporting the
+    property as held.
+    """
+    STORE_CALLS_ON_THE_LOOP.scan()
+
+
+def test_sync_store_call_detector_bites():
+    STORE_CALLS_ON_THE_LOOP.check_bites()
 
 
 def _action_chain_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
@@ -392,52 +475,31 @@ def _action_chain_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
     return offenders
 
 
+ACTION_CHAIN_ALWAYS_CARRIES_A_BUDGET = Rule(
+    name="action-chain-always-carries-a-budget",
+    find=_action_chain_offenders,
+    summary=(
+        "_run_action_chain runs without a budget, so a wedged action holds the "
+        "browser pool slot for as long as it likes"
+    ),
+    bite=lambda: Bites(
+        "async def render(self, page, actions):\n    await self._run_action_chain(page, actions)\n",
+        marker="_run_action_chain",
+    ),
+    clean=lambda: (
+        "async def render(self, page, actions, budget):\n"
+        "    await self._run_action_chain(page, actions, budget_seconds=budget)\n",
+        "async def render(self):\n    await self._run_action_chain_forever()\n",
+    ),
+)
+
+
 def test_the_action_chain_is_always_invoked_with_a_budget():
-    offenders = app_offenders(_action_chain_offenders)
-    assert not offenders, "; ".join(offenders)
+    ACTION_CHAIN_ALWAYS_CARRIES_A_BUDGET.scan()
 
 
 def test_action_chain_budget_detector_bites():
-    path = REPO_ROOT / "app" / "crawl" / "strategies" / "browser.py"
-    unbudgeted = ast.parse(
-        "async def render(self, page, actions):\n    await self._run_action_chain(page, actions)\n"
-    )
-    assert len(_action_chain_offenders(unbudgeted, path)) == 1
-    budgeted = ast.parse(
-        "async def render(self, page, actions, budget):\n"
-        "    await self._run_action_chain(page, actions, budget_seconds=budget)\n"
-    )
-    assert not _action_chain_offenders(budgeted, path)
-    unrelated = ast.parse("async def render(self):\n    await self._run_action_chain_forever()\n")
-    assert not _action_chain_offenders(unrelated, path)
-
-
-def test_sync_store_call_detector_bites():
-    path = REPO_ROOT / "app" / "api" / "crawl_endpoint.py"
-    sync_methods = _sync_store_methods()
-    assert "load" in sync_methods["JobStore"] and "aload" not in sync_methods["JobStore"]
-    on_the_loop = ast.parse(
-        "async def get_crawl_result(job_store, result_store):\n"
-        "    stored = result_store.get(request_id)\n"
-        "    job = job_store.load(request_id)\n"
-    )
-    assert len(_sync_store_call_offenders(on_the_loop, path)) == 2
-    annotated = ast.parse("async def runner(store: JobStore):\n    return store.list_jobs()\n")
-    assert len(_sync_store_call_offenders(annotated, path)) == 1
-    constructed = ast.parse(
-        "async def lifespan():\n    store = JobStore(path, policy=policy)\n    return store.delete(job_id)\n"
-    )
-    assert len(_sync_store_call_offenders(constructed, path)) == 1
-    compliant = ast.parse(
-        "async def get_crawl_result(job_store, result_store):\n"
-        "    stored = await result_store.aget(request_id)\n"
-        "    job = await job_store.aload(request_id)\n"
-    )
-    assert not _sync_store_call_offenders(compliant, path)
-    # A sync frame is not the hazard: startup recovery before the loop exists
-    # and test setup are both entitled to the synchronous methods.
-    sync_frame = ast.parse("def seed(job_store):\n    return job_store.load(job_id)\n")
-    assert not _sync_store_call_offenders(sync_frame, path)
+    ACTION_CHAIN_ALWAYS_CARRIES_A_BUDGET.check_bites()
 
 
 # The scheduler's delivery sink is not a worker step. A pipeline that hands the
@@ -492,30 +554,26 @@ def _sink_call_in_try_body(tree: ast.AST, path: pathlib.Path) -> list[str]:
     return offenders_over_functions(tree, check)
 
 
-def test_result_delivery_never_runs_inside_the_worker_try():
-    assert_trees_clean(
-        _sink_call_in_try_body,
-        "Delivery raised from a worker handler",
-        trees=app_trees(exclude=SANCTIONED),
-    )
-
-
-def test_sink_try_detector_bites():
-    path = REPO_ROOT / "app" / "scheduler.py"
-    contaminated = ast.parse(
-        "async def run(self, jobs, worker, on_result=None):\n"
-        "    async def deliver(index, result):\n"
-        "        await on_result(index, result)\n"
-        "    try:\n"
-        "        result = await worker(job)\n"
-        "        await deliver(job.index, result)\n"
-        "    except Exception as error:\n"
-        "        await deliver(job.index, failed_result(job, error))\n"
-    )
-    # The handler delivery is REQUIRED (that is the worker's failure path); only
-    # the try-body one is the defect.
-    assert len(_sink_call_in_try_body(contaminated, path)) == 1
-    clean = ast.parse(
+DELIVERY_NEVER_RUNS_INSIDE_THE_WORKER_TRY = Rule(
+    name="delivery-never-runs-inside-the-worker-try",
+    find=_sink_call_in_try_body,
+    summary="Delivery raised from a worker handler",
+    bite=lambda: (
+        # The handler delivery is REQUIRED (that is the worker's failure path);
+        # only the try-body one is the defect, so the count is 1 and not 2.
+        Bites(
+            "async def run(self, jobs, worker, on_result=None):\n"
+            "    async def deliver(index, result):\n"
+            "        await on_result(index, result)\n"
+            "    try:\n"
+            "        result = await worker(job)\n"
+            "        await deliver(job.index, result)\n"
+            "    except Exception as error:\n"
+            "        await deliver(job.index, failed_result(job, error))\n",
+            marker="inside the worker's try",
+        )
+    ),
+    clean=lambda: (
         "async def run(self, jobs, worker, on_result=None):\n"
         "    async def deliver(index, result):\n"
         "        await on_result(index, result)\n"
@@ -524,15 +582,20 @@ def test_sink_try_detector_bites():
         "    except Exception as error:\n"
         "        await deliver(job.index, failed_result(job, error))\n"
         "        return\n"
-        "    await deliver(job.index, result)\n"
-    )
-    assert not _sink_call_in_try_body(clean, path)
-    # A function with no sink is not this detector's business, try or not.
-    unrelated = ast.parse(
+        "    await deliver(job.index, result)\n",
+        # A function with no sink is not this detector's business, try or not.
         "async def run(worker):\n"
         "    try:\n"
         "        return await worker(job)\n"
         "    except Exception:\n"
-        "        return None\n"
-    )
-    assert not _sink_call_in_try_body(unrelated, path)
+        "        return None\n",
+    ),
+)
+
+
+def test_result_delivery_never_runs_inside_the_worker_try():
+    DELIVERY_NEVER_RUNS_INSIDE_THE_WORKER_TRY.scan()
+
+
+def test_sink_try_detector_bites():
+    DELIVERY_NEVER_RUNS_INSIDE_THE_WORKER_TRY.check_bites()
