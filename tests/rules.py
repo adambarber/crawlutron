@@ -282,7 +282,7 @@ class Rule:
         The rule's own ``excludes`` and ``skip`` are applied here rather than only
         by :meth:`scan`. A caller that hands a rule a hand-built list would otherwise
         be able to drive it outside its sanctioned scope, which would make the
-        scope a property of the call site instead of of the rule -- and a scope
+        scope a property of the call site instead of the rule's -- and a scope
         that lives at the call site is a scope that drifts.
         """
         found: list[str] = []

@@ -696,12 +696,33 @@ MAX_CRAWL_STRATEGIES: Final[int] = 16
 _REQUEST_PROFILE_KEYS_JSON: dict[str, Any] = {"keys": sorted(REQUEST_PROFILE_KEYS)}
 
 
+# ---------------------------------------------------------------------------
+# Why each rejected ``policy.headers`` name is rejected.
+#
+# The map itself is ``CrawlPolicy._BANNED_HEADERS``; the reasoning is here rather
+# than in the class body because it is a paragraph about the whole list, and a
+# class that has to stay under a size ceiling is the wrong place to keep prose
+# that is not about that class. The entries fall into three kinds, and the kinds
+# are the reason the list is not shorter:
+#
+#   * Conditional pairs, which must arrive via ``validators`` so the engine can
+#     re-evaluate them per request instead of replaying a stale answer.
+#   * Headers an engine chokepoint owns -- ``Host``, ``Cookie``,
+#     ``Proxy-Authorization`` -- where a raw header would bypass the thing that
+#     makes the hop safe. ``Cookie`` has a second sanctioned door,
+#     ``request_profile.cookies``; the reason names both.
+#   * Body-framing and hop-by-hop headers, which belong to the HTTP client that
+#     frames and negotiates them. A caller cannot describe its own connection,
+#     and letting one try corrupts the framing.
+#
+# The map is the single ban list -- adding an entry there is the whole change
+# surface.
+# ---------------------------------------------------------------------------
+
+
 class CrawlPolicy(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    # Rejected policy.headers names -> why. Conditional pairs keep the
-    # reason (they must arrive via ``validators``); the rest bypass an
-    # engine chokepoint or spoof origin-side identity. The map is the single
-    # ban list -- adding an entry here is the whole change surface.
+    # See the module preamble: why each name is rejected, in three kinds.
     _BANNED_HEADERS: ClassVar[dict[str, str]] = {
         "if-none-match": "conditional headers belong to the validators map",
         "if-modified-since": "conditional headers belong to the validators map",
