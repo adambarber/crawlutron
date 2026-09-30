@@ -468,7 +468,7 @@ class ContentCache:
         self._index_total_bytes += size - old_size
 
     def _write_data(self, path: Path, data: str) -> None:
-        """Persist a pre-serialized envelope (N1: ``aset`` sizes the exact
+        """Persist a pre-serialized envelope: ``aset`` sizes the exact
         bytes before writing; ``set`` keeps its synchronous inline write)."""
         atomic_write_text(path, data)
 

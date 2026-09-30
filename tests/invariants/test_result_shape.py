@@ -433,7 +433,7 @@ def _dict_keys(node: ast.Dict) -> set[str]:
 def _envelope_dict_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
     """Flag hand-rolled error envelopes; the factory is the only definition.
 
-    Three shapes: ANY ``HTTPException(...)`` construction (M8: the wire shape
+    Three shapes: ANY ``HTTPException(...)`` construction (the wire shape
     may only be built by :func:`http_error`/``browser_pool_unavailable`` -- a
     bare ``HTTPException(detail="str")`` reaches the handler's fallback and
     used to be laundered into a fabricated ``http_<status>`` code); a

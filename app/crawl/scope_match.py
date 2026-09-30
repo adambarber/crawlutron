@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 def scope_allows(compiled, url: str) -> bool:
     """Bounded scope check: a RegexTimeout fails CLOSED (link excluded).
 
-    A pathological pattern must never hang the crawl or BFS loop (N-1); if the
+    A pathological pattern must never hang the crawl or BFS loop; if the
     wall-clock budget fires, the URL is treated as out-of-scope and the crawl
     continues.
     """

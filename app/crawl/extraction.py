@@ -206,7 +206,7 @@ def _doc_worker_main(conn) -> None:
 
     Each task arrives as ``(body, hooks)``; hooks come from the parent's
     per-call snapshot (never the worker's spawn-time env). A ``die`` hook
-    exits without sending (M8: a worker segfaulting on hostile input).
+    exits without sending (a worker segfaulting on hostile input).
     """
     try:
         _configure_doc_worker_logging()

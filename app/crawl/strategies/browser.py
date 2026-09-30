@@ -715,7 +715,7 @@ class BrowserRenderer:
                 # Clear the page-scoped Host override: it was only needed for
                 # the pinned navigation. Leaving it set would spoof Host on
                 # every later request from this page (third-party XHR,
-                # subsequent navigations, M2).
+                # subsequent navigations).
                 await page.set_extra_http_headers({})
 
             # Browser action chains: run policy-specified interactions before extraction.

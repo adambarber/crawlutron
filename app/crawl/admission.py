@@ -54,7 +54,7 @@ def compile_scope_pattern(scope_regex: Any) -> BoundedPattern | None:
     (job links) both bound a caller-supplied ``scope_regex`` through here, so
     a pattern one path refuses cannot be compiled by the other.
 
-    Defense in depth (N-1): static shape rejection is bypassable by
+    Defense in depth: static shape rejection is bypassable by
     construction -- the depth-3 nested-quantifier ``(((a|aa)))*`` defeated
     every enumerated heuristic -- so the durable guarantee is BOUNDED
     EXECUTION via :mod:`app.safe_regex`: every match runs on the ``regex``

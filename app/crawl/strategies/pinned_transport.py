@@ -130,7 +130,7 @@ def _resolve_and_pin_host(url: str) -> tuple[str, str]:
     except socket.gaierror:
         # Do NOT fall back to loopback. Returning the original hostname makes
         # the HTTP client attempt resolution itself and fail with a connection
-        # error instead of silently connecting to 127.0.0.1 (SSRF bypass, F9).
+        # error instead of silently connecting to 127.0.0.1 (SSRF bypass).
         return hostname, hostname
     for ip in ips:
         if _is_public_ip_value(ip):

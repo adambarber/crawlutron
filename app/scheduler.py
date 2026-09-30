@@ -423,7 +423,7 @@ class DomainScheduler:
         # channels (spill-to-disk vs. in-memory). The single sink below keeps
         # that invariant in one place: narrowing ``dict | None`` inside the
         # closure could not track which branch held, and the two delivery
-        # channels had historically drifted (H1: a slot silently vanished).
+        # channels had historically drifted: a slot silently vanished.
         #
         # Both a worker's return and the failure envelopes are ``_Result``: the
         # caller supplies ``failed_result`` so the shape a broken job gets is

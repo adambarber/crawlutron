@@ -583,7 +583,7 @@ _UrlSourceT = TypeVar("_UrlSourceT", bound=_UrlSource)
 
 
 def _require_exactly_one_url_source(model: _UrlSourceT) -> _UrlSourceT:
-    """Shared url/urls contract for crawl and render requests (L5, N4).
+    """Shared url/urls contract for crawl and render requests.
 
     Both set silently ignored ``url``; neither failed late in
     ``_payload_urls``. Exactly one source is required, and ``urls=[]`` is

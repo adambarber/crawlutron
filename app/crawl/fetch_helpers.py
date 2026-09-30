@@ -127,7 +127,7 @@ async def _fetch_and_decode(
 
     The body is present only on 200; the status lets callers distinguish
     "no such document" (404) from "origin is erroring" (5xx), which
-    robots handling treats differently (fail closed, M7). ``(None, None)``
+    robots handling treats differently (fail closed). ``(None, None)``
     on transport-level failure.
     """
     resp = await _fetch_decode_discovery(fetcher, url, headers, timeout_seconds)

@@ -113,7 +113,7 @@ def _default_document_text_extractor(url: str, policy: HostPolicy) -> str:
     Used by the browser strategy for ``.pdf`` final URLs. Injectable via
     ``BrowserRenderer(pdf_text_extractor=...)`` for tests.
 
-    SSRF (F2, H2) is now inherited rather than reimplemented: the fetch goes
+    SSRF is now inherited rather than reimplemented: the fetch goes
     through :func:`pinned_transport.apinned_hops`, the same walk every other
     fetch uses, so the initial URL and every redirect hop are re-validated
     against the SSRF blocklist and re-pinned to a resolved IP before anything

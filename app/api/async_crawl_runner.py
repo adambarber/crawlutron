@@ -102,7 +102,7 @@ async def run_async_crawl(
     if job is None:
         logger.error("async_crawl_job_missing", extra={"request_id": request_id})
         return
-    # Claim RUNNING on the control plane (H3: status moves only via CAS;
+    # Claim RUNNING on the control plane: status moves only via CAS;
     # a lost claim means the row was deleted or already transitioned).
     claimed = await job_store.aset_status(request_id, JobStatus.RUNNING, expected=JobStatus.PENDING)
     if not claimed:
