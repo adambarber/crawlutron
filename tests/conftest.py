@@ -486,9 +486,8 @@ def etag_server():
     yield from _served(EtagHandler)
 
 
-@pytest.fixture(autouse=True)
-def _reset_sitemap_cache():
-    """Clear the module-level sitemap TTL cache between tests.
+def _clear_sitemap_cache() -> None:
+    """Clear the module-level sitemap TTL cache.
 
     Tests inject fake fetchers serving different content for the same
     sitemap URLs; without this the shared cache leaks across tests.
@@ -496,13 +495,24 @@ def _reset_sitemap_cache():
     import app.crawl.fetch_helpers as fh
 
     fh._SITEMAP_CACHE.clear()
-    yield
-    fh._SITEMAP_CACHE.clear()
 
 
-@pytest.fixture(autouse=True)
-def _reset_global_http_state():
-    """Reset crawler global singletons after each test.
+def _clear_metrics() -> None:
+    """Reset the process-local metrics store.
+
+    ``get_metrics()`` returns the module-level singleton accumulated by
+    crawl_request / the engine. Without a reset, metric assertions become
+    order-dependent (e.g. a later test could observe non-zero utilization left
+    by an earlier recursive crawl). Resetting in place keeps every test hermetic
+    while preserving the object identity that ``engine``/``main`` obtain via ``get_metrics()``.
+    """
+    from app.metrics import get_metrics
+
+    get_metrics().reset()
+
+
+def _clear_global_http_state() -> None:
+    """Reset crawler global singletons.
 
     Tests drive many short-lived ``asyncio.run`` loops; without this the pooled
     httpx client keeps sockets bound to dead loops (pytest's unraisable-warning
@@ -516,7 +526,6 @@ def _reset_global_http_state():
     calling ``asyncio.run`` from inside a running loop (which raises and was
     previously swallowed, leaving the client un-reset).
     """
-    yield
     import asyncio
 
     from app.crawl.strategies import cookie_jar as cookie_mod
@@ -575,7 +584,7 @@ def _reset_global_http_state():
     # DNS cache + pending client close queue + cookie namespace contextvar
     # isolation between tests. Without these a test that mutates ``_DNS_CACHE``
     # or schedules a client close would leak state into the next test.
-    # ``cookie_mod``/``pool_mod`` are the ones bound at the top of this fixture;
+    # ``cookie_mod``/``pool_mod`` are the ones bound at the top of this function;
     # only ``pinned_mod`` is new here.
     from app.crawl.strategies import pinned_transport as pinned_mod
 
@@ -592,21 +601,23 @@ def _reset_global_http_state():
         cookie_mod._COOKIE_NAMESPACE.set("")
 
 
+# The three resets above are one concern -- "no module global survives a test"
+# -- and were three autouse fixtures. One fixture means one setup and one
+# teardown per test instead of three, and it means a new global is cleared in
+# one place rather than in whichever reset happened to be spelled last. The
+# rationale for each stays on the function that does the work; what was removed
+# is the duplicated fixture scaffolding, not the argument for it.
+_MODULE_GLOBAL_RESETS = (_clear_sitemap_cache, _clear_metrics, _clear_global_http_state)
+
+
 @pytest.fixture(autouse=True)
-def _reset_metrics():
-    """Reset the process-local metrics store between tests.
-
-    ``get_metrics()`` returns the module-level singleton accumulated by
-    crawl_request / the engine. Without a reset, metric assertions become
-    order-dependent (e.g. a later test could observe non-zero utilization left
-    by an earlier recursive crawl). Resetting in place keeps every test hermetic
-    while preserving the object identity that ``engine``/``main`` obtain via ``get_metrics()``.
-    """
-    from app.metrics import get_metrics
-
-    get_metrics().reset()
+def _reset_module_globals():
+    """Clear every process-global the production code shares, around each test."""
+    for reset in _MODULE_GLOBAL_RESETS:
+        reset()
     yield
-    get_metrics().reset()
+    for reset in _MODULE_GLOBAL_RESETS:
+        reset()
 
 
 # NOTE: there is deliberately no autouse extraction-process-pool reset here.

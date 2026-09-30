@@ -35,23 +35,22 @@ import pathlib
 from collections.abc import Callable, Iterable, Iterator, Sequence
 from dataclasses import dataclass, field
 
-from tests.chokepoint_walks import REPO_ROOT, SANCTIONED, app_trees
+from tests.chokepoint_walks import REPO_ROOT, SANCTIONED, app_trees, relative_posix
 from tests.matching import Matcher
-
-__all__ = [
-    "Rule",
-    "Registry",
-    "rule_ids",
-    "registry_ids",
-]
 
 #: Where a bite proof's synthetic module is pretended to live. The path is part of
 #: what a detector may legitimately inspect (a rule scoped to one directory reads
 #: it), so it has to name a real directory rather than a bare basename, and it has
 #: to be absolute because offenders are reported relative to the repo root.
+#: Individual rules override it with :attr:`Rule.proof_path` when a detector
+#: resolves imports or package structure relative to where the module sits.
 _SYNTHETIC = REPO_ROOT / "app" / "_synthetic.py"
 
-Detector = Callable[[ast.Module, pathlib.Path], Iterable[str]]
+#: ``(tree, path, **per_module) -> offender strings``. The trailing keyword
+#: arguments are the ones a rule supplies through :attr:`Rule.kwargs_for`; a
+#: detector that takes none simply ignores them, which is what lets a plain
+#: two-argument walk be swept through the same path as a parameterized one.
+Detector = Callable[..., Iterable[str]]
 
 
 @dataclass(frozen=True)
@@ -88,6 +87,20 @@ class Trips:
 Proof = Bites | Trips | str
 
 
+def _relative(path: pathlib.Path) -> str:
+    """``path`` as a repo-relative posix string, or unchanged if it lies outside.
+
+    :func:`relative_posix` deliberately raises for a path the repo does not own,
+    which is right for a sweep over ``app/`` but not for the synthetic paths a
+    proof runs against. Scope has to degrade to "matches nothing" there, not blow
+    up, or a rule could not be proved at all.
+    """
+    try:
+        return relative_posix(path)
+    except ValueError:
+        return path.as_posix()
+
+
 @dataclass(frozen=True)
 class Rule(Matcher):
     """One property, the detector that decides it, and the proof it can fire.
@@ -104,6 +117,18 @@ class Rule(Matcher):
         only place that need can be recorded.
     :param excludes: basenames sanctioned as the rule's own owner, excluded from the
         clean check for the same reason the owner of a chokepoint is.
+    :param skip: repo-relative paths exempt from this rule. Separate from
+        :attr:`excludes` because a chokepoint is usually named by its path: two
+        modules may share a basename, and a basename exclusion written for one of
+        them silently excuses the other.
+    :param kwargs_for: per-module keyword arguments for :attr:`find`, keyed on the
+        repo-relative path. A rule whose detector takes parameters declares here
+        which module gets which, so "which path holds the definition" is a fact of
+        the rule rather than a decision re-made at every call site.
+    :param proof_path: where a bite proof's synthetic module is pretended to live.
+        Defaults to the shared ``app/_synthetic.py``; a detector that resolves
+        imports or package structure from the path needs a path inside the right
+        package instead.
     :param summary: one line naming the property, used in failure text. Prefer the
         property sentence to the mechanism: "every URL egress door applies the
         refusal" tells a reader what is wrong, "calls safe_public_url_or_none"
@@ -116,9 +141,17 @@ class Rule(Matcher):
     summary: str = ""
     excludes: frozenset[str] = field(default=SANCTIONED)
     clean: Callable[[], Sequence[str]] | None = None
+    skip: frozenset[str] = frozenset()
+    kwargs_for: Callable[[str], dict[str, object]] | None = None
+    proof_path: pathlib.Path = _SYNTHETIC
+
+    def _run(self, tree: ast.Module, path: pathlib.Path) -> list[str]:
+        """Apply the rule's per-module parameters, then the detector."""
+        per_path = self.kwargs_for(_relative(path)) if self.kwargs_for is not None else {}
+        return list(self.find(tree, path, **per_path))
 
     def offenders(self, tree: ast.Module, path: pathlib.Path) -> list[str]:
-        return list(self.find(tree, path))
+        return self._run(tree, path)
 
     def matches(self, actual: tuple[ast.Module, pathlib.Path]) -> bool:
         """A ``(tree, path)`` pair satisfies the rule when nothing fires on it."""
@@ -136,17 +169,17 @@ class Rule(Matcher):
     def violations(self, trees: Sequence[tuple[pathlib.Path, ast.Module]]) -> list[str]:
         """Every offender across ``trees``, each naming the file it came from.
 
-        The rule's own ``excludes`` are applied here rather than only by
-        :meth:`scan`. A caller that hands a rule a hand-built list would otherwise
+        The rule's own ``excludes`` and ``skip`` are applied here rather than only
+        by :meth:`scan`. A caller that hands a rule a hand-built list would otherwise
         be able to drive it outside its sanctioned scope, which would make the
         scope a property of the call site instead of of the rule -- and a scope
         that lives at the call site is a scope that drifts.
         """
         found: list[str] = []
         for path, tree in trees:
-            if path.name in self.excludes:
+            if path.name in self.excludes or _relative(path) in self.skip:
                 continue
-            found.extend(self.offenders(tree, path))
+            found.extend(self._run(tree, path))
         return found
 
     def check_clean(self, trees: Sequence[tuple[pathlib.Path, ast.Module]]) -> None:
@@ -203,7 +236,7 @@ class Rule(Matcher):
     def _check_one(self, proof: Proof) -> None:
         """Run a single proof and explain, in the rule's own words, what it wanted."""
         if isinstance(proof, str):
-            found = self.offenders(self._parse(proof, kind="bite"), _SYNTHETIC)
+            found = self.offenders(self._parse(proof, kind="bite"), self.proof_path)
             if found:
                 return
             raise AssertionError(
@@ -213,7 +246,7 @@ class Rule(Matcher):
             )
 
         if isinstance(proof, Bites):
-            found = self.offenders(self._parse(proof.source, kind="bite"), _SYNTHETIC)
+            found = self.offenders(self._parse(proof.source, kind="bite"), self.proof_path)
             if not found:
                 raise AssertionError(
                     f"{self.name}: the bite proof did NOT fire on {proof.source!r}. This rule "
@@ -241,7 +274,7 @@ class Rule(Matcher):
                 f"{self.name}: Trips({proof.source!r}) = {proof.count}: a source that must "
                 f"not fire belongs in clean, not in trips."
             )
-        found = self.offenders(self._parse(proof.source, kind="bite"), _SYNTHETIC)
+        found = self.offenders(self._parse(proof.source, kind="bite"), self.proof_path)
         if len(found) != proof.count:
             raise AssertionError(
                 f"{self.name}: expected {proof.count} offenders for {proof.source!r}, got "
@@ -259,7 +292,7 @@ class Rule(Matcher):
         for proof in self.proofs():
             self._check_one(proof)
         for source in self.looksalikes():
-            found = self.offenders(self._parse(source, kind="clean"), _SYNTHETIC)
+            found = self.offenders(self._parse(source, kind="clean"), self.proof_path)
             if found:
                 raise AssertionError(
                     f"{self.name}: fired on a lookalike that must be spared: {source!r} -> "

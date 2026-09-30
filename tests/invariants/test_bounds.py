@@ -13,12 +13,7 @@ import re
 from tests.chokepoint_walks import (
     REPO_ROOT,
     SANCTIONED,
-    TESTS_DIR,
     app_offenders,
-    app_trees,
-    assert_detector,
-    assert_fires_once,
-    assert_stays_clean,
     assignments,
     attribute_calls,
     attribute_reads,
@@ -33,7 +28,48 @@ from tests.chokepoint_walks import (
     resolved_expr_name,
     writes,
 )
-from tests.invariants._shared import assert_trees_clean
+from tests.rules import Bites, Registry, Rule, Trips
+
+# ---------------------------------------------------------------------------
+# An extractor's text is coerced to a string in exactly one place
+# ---------------------------------------------------------------------------
+
+# ``_extract_document``/``_extract_html``/``extract_content`` each had the same
+# ``extracted.text or ""`` tail spelled at their call site. That coercion is what
+# keeps an extractor's ``None`` text from reaching a result at all, so a branch
+# that omitted it produced a None that only surfaced further downstream.
+# ``extraction.normalized_extraction`` is the owner; it lives beside
+# ``ExtractedContent`` because the coercion is a fact about extractor output, not
+# about any one strategy's result builder.
+
+
+def _inline_extraction_normalizations(tree: ast.AST, path: pathlib.Path) -> list[str]:
+    """Flag an inline ``<something>.text or ""`` outside the extraction normalizer.
+
+    Keyed on the *normalization itself* -- an extractor's text being coerced to
+    a string -- rather than on the extractor branches that happened to spell it,
+    so a fourth extractor is caught too. An ``or ""`` on a non-``.text``
+    attribute is somebody else's business.
+    """
+    offenders: list[str] = []
+    for node in or_nodes(tree):
+        left, right = node.values
+        if not (isinstance(left, ast.Attribute) and left.attr == "text"):
+            continue
+        if isinstance(right, ast.Constant) and right.value == "":
+            offenders.append(offender_at(path, node, "extraction-text-normalization"))
+    return offenders
+
+
+EXTRACTION_TEXT_NORMALIZATION = Rule(
+    name="extraction-text-normalization",
+    find=_inline_extraction_normalizations,
+    summary="normalizes extraction text inline instead of through extraction.normalized_extraction",
+    excludes=SANCTIONED | {"extraction.py"},
+    bite=lambda: Bites('def f(e):\n    return e.text or ""\n', "extraction-text-normalization"),
+    clean=lambda: ('def f(d):\n    return d.label or ""\n',),
+)
+
 
 # ---------------------------------------------------------------------------
 # A bounded HTML input has exactly one cap
@@ -49,7 +85,7 @@ from tests.invariants._shared import assert_trees_clean
 # the same as every other drift-prone twin here: a resource bound is a policy, and
 # a policy with two declarations is a policy that will disagree with itself. The
 # cap now lives once in app/bounded_io.py next to the stream caps that share its
-# purpose, and this gate keeps the second copy from reappearing.
+# purpose, and this rule keeps the second copy from reappearing.
 
 
 def _html_input_cap_name(target: ast.expr, value: ast.expr | None) -> str | None:
@@ -77,53 +113,6 @@ def _local_html_input_caps(tree: ast.AST, path: pathlib.Path) -> list[str]:
     ]
 
 
-def _inline_extraction_normalizations(tree: ast.AST, path: pathlib.Path) -> list[str]:
-    """Flag an inline ``<something>.text or \"\"`` outside the extraction normalizer.
-
-    Keyed on the *normalization itself* -- an extractor's text being coerced to
-    a string -- rather than on the extractor branches that happened to spell it,
-    so a fourth extractor is caught too. An ``or \"\"`` on a non-``.text``
-    attribute is somebody else's business.
-    """
-    offenders: list[str] = []
-    for node in or_nodes(tree):
-        left, right = node.values
-        if not (isinstance(left, ast.Attribute) and left.attr == "text"):
-            continue
-        if isinstance(right, ast.Constant) and right.value == "":
-            offenders.append(offender_at(path, node, "extraction-text-normalization"))
-    return offenders
-
-
-def test_extraction_text_is_normalized_by_one_owner():
-    """An extractor's text is coerced to a string in exactly one place.
-
-    ``_extract_document``/``_extract_html``/``extract_content`` each had the
-    same ``extracted.text or ""`` tail spelled at their call site. That
-    coercion is what keeps an extractor's ``None`` text from reaching a result
-    at all, so a branch that omitted it produced a None that only surfaced
-    further downstream. ``extraction.normalized_extraction`` is the owner; it
-    lives beside ``ExtractedContent`` because the coercion is a fact about
-    extractor output, not about any one strategy's result builder.
-    """
-    offenders = app_offenders(_inline_extraction_normalizations, exclude=SANCTIONED | {"extraction.py"})
-    assert not offenders, "extraction text is normalized inline instead of by its owner:\n  " + "\n  ".join(
-        offenders
-    )
-
-
-def test_extraction_text_normalization_detector_bites():
-    """The normalization sweep must fire on a hand-rolled one, and not on a
-    lookalike -- otherwise it either misses the shape or flags a pattern that
-    belongs to somebody else."""
-    assert_detector(
-        _inline_extraction_normalizations,
-        path=REPO_ROOT / "app" / "_synthetic.py",
-        fires={'def f(e):\n    return e.text or ""\n': "extraction-text-normalization"},
-        clean=('def f(d):\n    return d.label or ""\n',),
-    )
-
-
 def _is_numeric_expr(node: ast.expr) -> bool:
     """True for a literal/computed number, e.g. ``4 * 1024 * 1024``."""
     if isinstance(node, ast.Constant) and isinstance(node.value, int | float):
@@ -131,35 +120,26 @@ def _is_numeric_expr(node: ast.expr) -> bool:
     return isinstance(node, ast.BinOp) and _is_numeric_expr(node.left) and _is_numeric_expr(node.right)
 
 
-def test_html_input_cap_is_declared_once():
-    """The bounded-HTML-input cap has one declaration, in app/bounded_io.py.
-
-    app/bounded_io.py is exempt because it IS the chokepoint that owns the cap
-    alongside the stream caps.
-    """
-    assert_trees_clean(
-        _local_html_input_caps,
-        "Import MAX_HTML_INPUT_BYTES and call bounded_io.truncate_html_input "
-        "instead of declaring a second HTML input cap",
-        trees=app_trees(exclude=SANCTIONED | {"bounded_io.py"}),
-    )
-
-
-def test_local_html_input_cap_detector_bites():
-    """Every twin shape fires; delegating and unrelated names stay clean."""
-    path = TESTS_DIR.parent / "app" / "_synthetic.py"
-    fires = {
+HTML_INPUT_CAP = Rule(
+    name="local-html-input-cap",
+    find=_local_html_input_caps,
+    summary=(
+        "declares a second HTML input byte cap; import MAX_HTML_INPUT_BYTES from "
+        "app/bounded_io.py and call truncate_html_input instead"
+    ),
+    # app/bounded_io.py is exempt because it IS the chokepoint that owns the cap
+    # alongside the stream caps.
+    excludes=SANCTIONED | {"bounded_io.py"},
+    bite=lambda: (
         # The two historical spellings, verbatim.
-        "_MAX_HTML_NOISE_INPUT_BYTES = 4 * 1024 * 1024\n": "_MAX_HTML_NOISE_INPUT_BYTES",
-        "_MAX_LLM_FORMAT_HTML_INPUT_BYTES = 4 * 1024 * 1024\n": "_MAX_LLM_FORMAT_HTML_INPUT_BYTES",
+        Bites("_MAX_HTML_NOISE_INPUT_BYTES = 4 * 1024 * 1024\n", "_MAX_HTML_NOISE_INPUT_BYTES"),
+        Bites("_MAX_LLM_FORMAT_HTML_INPUT_BYTES = 4 * 1024 * 1024\n", "_MAX_LLM_FORMAT_HTML_INPUT_BYTES"),
         # Annotated, and a plain literal.
-        "HTML_INPUT_BYTES: int = 4194304\n": "HTML_INPUT_BYTES",
+        Bites("HTML_INPUT_BYTES: int = 4194304\n", "HTML_INPUT_BYTES"),
         # A third name for the same policy must not slip past the intent keying.
-        "MAX_DOC_HTML_BYTES = 5_000_000\n": "MAX_DOC_HTML_BYTES",
-    }
-    assert_fires_once(_local_html_input_caps, fires, path)
-
-    clean = (
+        Bites("MAX_DOC_HTML_BYTES = 5_000_000\n", "MAX_DOC_HTML_BYTES"),
+    ),
+    clean=lambda: (
         # The sanctioned import-and-delegate shape.
         "from app.bounded_io import MAX_HTML_INPUT_BYTES, truncate_html_input\n",
         "body = truncate_html_input(html)\n",
@@ -167,8 +147,8 @@ def test_local_html_input_cap_detector_bites():
         "MAX_WEBHOOK_RESPONSE_BYTES = 10_485_760\n",
         "MAX_CACHE_ENTRIES = 100_000\n",
         "HTML_FIELDS = ('title', 'description')\n",
-    )
-    assert_stays_clean(_local_html_input_caps, clean, path)
+    ),
+)
 
 
 # ---------------------------------------------------------------------------
@@ -202,50 +182,49 @@ def _decompress_cap_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
     return offenders
 
 
-def test_all_decompress_calls_pass_a_cap():
-    """Every production decompression is size-bounded ()."""
-    assert_trees_clean(
-        _decompress_cap_offenders,
-        "decompress_body needs max_output_bytes=",
-        trees=app_trees(exclude=SANCTIONED | _DECOMPRESS_SANCTIONED),
+def _decompress_cap_proofs() -> tuple[Bites, ...]:
+    """Every shape a cap-less call arrives under, each of which must be caught.
+
+    The four alias forms are the reason this is a resolved-name sweep rather
+    than a substring match: the property is about the function that is called,
+    and an alias is the cheapest way to defeat a detector that reads the source
+    text. The getattr form is listed because it is the one spelling a plain
+    attribute read cannot resolve.
+    """
+    calls = "    return {call}(raw, enc)\n"
+    return (
+        Bites("def f(raw, enc):\n" + calls.format(call="decompress_body"), "without max_output_bytes"),
+        Bites(
+            "import app.crawl.decompression as compression\ndef f(raw, enc):\n"
+            + calls.format(call="compression.decompress_body"),
+            "without max_output_bytes",
+        ),
+        Bites(
+            "from app.crawl.decompression import decompress_body as decode\ndef f(raw, enc):\n"
+            + calls.format(call="decode"),
+            "without max_output_bytes",
+        ),
+        Bites(
+            "from app.crawl.decompression import decompress_body\ndecode = decompress_body\n"
+            "def f(raw, enc):\n" + calls.format(call="decode"),
+            "without max_output_bytes",
+        ),
+        Bites(
+            "import app.crawl.decompression as compression\ndef f(raw, enc):\n"
+            + calls.format(call="getattr(compression, 'decompress_body')"),
+            "without max_output_bytes",
+        ),
     )
 
 
-def test_decompress_cap_detector_bites():
-    path = REPO_ROOT / "app" / "crawl" / "_synthetic.py"
-    bad = ast.parse("def f(raw, enc):\n    return decompress_body(raw, enc)\n")
-    offenders = _decompress_cap_offenders(bad, path)
-    assert len(offenders) == 1, offenders
-
-    alias_shapes = {
-        "import as": (
-            "import app.crawl.decompression as compression\n"
-            "def f(raw, enc):\n"
-            "    return compression.decompress_body(raw, enc)\n"
-        ),
-        "from import as": (
-            "from app.crawl.decompression import decompress_body as decode\n"
-            "def f(raw, enc):\n"
-            "    return decode(raw, enc)\n"
-        ),
-        "assignment alias": (
-            "from app.crawl.decompression import decompress_body\n"
-            "decode = decompress_body\n"
-            "def f(raw, enc):\n"
-            "    return decode(raw, enc)\n"
-        ),
-        "getattr": (
-            "import app.crawl.decompression as compression\n"
-            "def f(raw, enc):\n"
-            "    return getattr(compression, 'decompress_body')(raw, enc)\n"
-        ),
-    }
-    for label, source in alias_shapes.items():
-        offenders = _decompress_cap_offenders(ast.parse(source), path)
-        assert len(offenders) == 1, (label, offenders)
-
-    good = ast.parse("def f(raw, enc):\n    return decompress_body(raw, enc, max_output_bytes=1024)\n")
-    assert not _decompress_cap_offenders(good, path)
+DECOMPRESS_CAP = Rule(
+    name="decompress-cap",
+    find=_decompress_cap_offenders,
+    summary="calls decompress_body without max_output_bytes",
+    excludes=SANCTIONED | _DECOMPRESS_SANCTIONED,
+    bite=_decompress_cap_proofs,
+    clean=lambda: ("def f(raw, enc):\n    return decompress_body(raw, enc, max_output_bytes=1024)\n",),
+)
 
 
 # ---------------------------------------------------------------------------
@@ -280,7 +259,7 @@ def _decompress_bypass_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]
     error (so a forged ``Content-Encoding`` cannot expand or corrupt unbounded).
     A module that imports or calls ``gzip``/``zlib``/``brotli`` directly can
     re-introduce the header-trusting, uncapped decompress the legacy cleanup
-    removed — the ``_decompress_cap`` sweep only guards the chokepoint's own
+    removed -- the ``_decompress_cap`` sweep only guards the chokepoint's own
     callers, so this closes the bypass around it.
     """
     return (
@@ -310,36 +289,30 @@ def _decompress_bypass_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]
     )
 
 
-def test_decompression_reaches_only_through_the_chokepoint():
-    """No app module touches gzip/zlib/brotli except the decompression chokepoint."""
-    assert_trees_clean(
-        _decompress_bypass_offenders,
-        "decompress only via decompression.decompress_body()",
-        trees=app_trees(exclude=SANCTIONED | _DECOMPRESS_SANCTIONED),
-    )
-
-
-def test_decompress_bypass_detector_bites():
-    """A header-driven raw decompress fires on both import and call."""
-    # Two offenders from one source: the import AND the call are each a bypass, so
-    # a source that imports the codec but routes through decompress_body has to
-    # report 1, not 2 -- the count is what proves the detector is not just
-    # keying on the import.
-    assert_detector(
-        _decompress_bypass_offenders,
-        path=REPO_ROOT / "app" / "crawl" / "_synthetic.py",
-        trips={
+DECOMPRESS_BYPASS = Rule(
+    name="decompress-bypass",
+    find=_decompress_bypass_offenders,
+    summary="touches gzip/zlib/brotli directly instead of via decompression.decompress_body()",
+    excludes=SANCTIONED | _DECOMPRESS_SANCTIONED,
+    bite=lambda: (
+        # Two offenders from one source: the import AND the call are each a bypass, so
+        # a source that imports the codec but routes through decompress_body has to
+        # report 1, not 2 -- the count is what proves the detector is not just
+        # keying on the import.
+        Trips(
             "import gzip\n"
             "def f(raw, hdr):\n"
             "    if 'gzip' in hdr.get('content-encoding', ''):\n"
-            "        return gzip.decompress(raw)\n": 2,
-        },
-        clean=(
-            "from app.crawl.decompression import decompress_body\n"
-            "def f(raw, hdr):\n"
-            "    return decompress_body(raw, hdr.get('content-encoding', ''), max_output_bytes=1024)\n",
+            "        return gzip.decompress(raw)\n",
+            2,
         ),
-    )
+    ),
+    clean=lambda: (
+        "from app.crawl.decompression import decompress_body\n"
+        "def f(raw, hdr):\n"
+        "    return decompress_body(raw, hdr.get('content-encoding', ''), max_output_bytes=1024)\n",
+    ),
+)
 
 
 # ---------------------------------------------------------------------------
@@ -410,36 +383,31 @@ def _discovery_response_offenders(tree: ast.AST, path: pathlib.Path) -> list[str
     ]
 
 
-def test_discovery_response_is_read_through_one_owner():
-    """Only _Discovery's accessors touch a discovery response's header map."""
-    offenders = app_offenders(_discovery_response_offenders, skip=(_DISCOVERY_CHOKEPOINT,))
-    assert not offenders, "Read a discovery response via _Discovery accessors: " + ", ".join(offenders)
-
-
-def test_discovery_response_detector_bites():
-    """Both restoration shapes fire; going through the accessors stays clean."""
-    bad = ast.parse(
-        "async def f(fetcher):\n"
-        "    text, status, resp_headers = await _fetch_decode_discovery(fetcher, 'u', {}, 5)\n"
-        "    return text, status, resp_headers.get('etag')\n"
-    )
-    offenders = _discovery_response_offenders(bad, REPO_ROOT / "app" / "crawl" / "_synthetic.py")
-    assert len(offenders) == 1, offenders
-    assert "destructures a discovery response" in offenders[0], offenders
-    attr_bad = ast.parse(
-        "async def f(fetcher):\n"
-        "    resp = await _fetch_decode_discovery(fetcher, 'u', {}, 5)\n"
-        "    return resp.headers\n"
-    )
-    offenders = _discovery_response_offenders(attr_bad, REPO_ROOT / "app" / "crawl" / "_synthetic.py")
-    assert len(offenders) == 1, offenders
-    assert "header map directly" in offenders[0], offenders
-    good = ast.parse(
+DISCOVERY_RESPONSE = Rule(
+    name="discovery-response",
+    find=_discovery_response_offenders,
+    summary="reads a discovery response off the tuple instead of through _Discovery accessors",
+    skip=frozenset({_DISCOVERY_CHOKEPOINT}),
+    bite=lambda: (
+        Bites(
+            "async def f(fetcher):\n"
+            "    text, status, resp_headers = await _fetch_decode_discovery(fetcher, 'u', {}, 5)\n"
+            "    return text, status, resp_headers.get('etag')\n",
+            "destructures a discovery response",
+        ),
+        Bites(
+            "async def f(fetcher):\n"
+            "    resp = await _fetch_decode_discovery(fetcher, 'u', {}, 5)\n"
+            "    return resp.headers\n",
+            "header map directly",
+        ),
+    ),
+    clean=lambda: (
         "async def f(fetcher):\n"
         "    resp = await _fetch_decode_discovery(fetcher, 'u', {}, 5)\n"
-        "    return resp.validators(), resp.not_modified(), resp.text, resp.status\n"
-    )
-    assert not _discovery_response_offenders(good, REPO_ROOT / "app" / "crawl" / "_synthetic.py")
+        "    return resp.validators(), resp.not_modified(), resp.text, resp.status\n",
+    ),
+)
 
 
 # ---------------------------------------------------------------------------
@@ -519,35 +487,50 @@ def _unguarded_header_int_offenders(tree: ast.AST, path: pathlib.Path) -> list[s
     return offenders
 
 
-def test_header_numbers_are_converted_under_guard():
-    """No unguarded int()/float() on a header value anywhere in app/."""
-    assert_trees_clean(
-        _unguarded_header_int_offenders,
-        "parse header numbers through a guard or try/except ValueError",
-        trees=app_trees(exclude=SANCTIONED),
-    )
-
-
-def test_header_int_detector_bites():
-    bad = ast.parse(
+HEADER_INT_GUARD = Rule(
+    name="header-int-guard",
+    find=_unguarded_header_int_offenders,
+    summary="converts a header number unguarded; parse through a guard or try/except ValueError",
+    bite=lambda: (
+        # Through a local bound from the header map.
         "async def fetcher(resp):\n    content_length = resp.headers.get('content-length')\n"
-        "    return int(content_length) > 100\n"
+        "    return int(content_length) > 100\n",
+        # And inline on the read itself.
+        "async def fetcher(resp):\n    return int(resp.headers.get('content-length', 0)) > 100\n",
+    ),
+    clean=lambda: (
+        # The try/except shape.
+        "def guard(value):\n    try:\n        return int(value)\n    except ValueError:\n        return 0\n",
+        # A sanitizer takes a parameter, not a live header read -- never flagged.
+        "def _declared_length_exceeds(header_value, limit):\n    return int(header_value) > limit\n",
+    ),
+)
+
+
+RULES = Registry(
+    (
+        EXTRACTION_TEXT_NORMALIZATION,
+        HTML_INPUT_CAP,
+        DECOMPRESS_CAP,
+        DECOMPRESS_BYPASS,
+        DISCOVERY_RESPONSE,
+        HEADER_INT_GUARD,
     )
-    offenders = _unguarded_header_int_offenders(bad, REPO_ROOT / "app" / "crawl" / "_synthetic.py")
-    assert len(offenders) == 1, offenders
-    inline_bad = ast.parse(
-        "async def fetcher(resp):\n    return int(resp.headers.get('content-length', 0)) > 100\n"
-    )
-    assert _unguarded_header_int_offenders(inline_bad, REPO_ROOT / "app" / "crawl" / "_synthetic.py")
-    guarded = ast.parse(
-        "def guard(value):\n    try:\n        return int(value)\n    except ValueError:\n        return 0\n"
-    )
-    assert not _unguarded_header_int_offenders(guarded, REPO_ROOT / "app" / "crawl" / "_synthetic.py")
-    # A sanitizer takes a parameter, not a live header read -- never flagged.
-    param_based = ast.parse(
-        "def _declared_length_exceeds(header_value, limit):\n    return int(header_value) > limit\n"
-    )
-    assert not _unguarded_header_int_offenders(param_based, REPO_ROOT / "app" / "crawl" / "_synthetic.py")
+)
+
+
+def test_no_rule_violations():
+    RULES.check_all_clean()
+
+
+def test_every_rule_bites():
+    """Every rule must reject what it forbids, and spare what it merely resembles.
+
+    Declared on the rule rather than written here, so a detector cannot be added
+    without a proof that it can fire -- and cannot be quietly weakened to match a
+    proof that no longer fires.
+    """
+    RULES.check_all_bite()
 
 
 # ---------------------------------------------------------------------------
@@ -637,6 +620,16 @@ def _undecodable_encoding_offenders(tree, path, *, decodable: set[str] | None = 
             # A standalone encoding list, however it reaches the header.
             check(node, node.value)
     return [seen[key] for key in sorted(seen)]
+
+
+# This one rule keeps a hand-written gate and bite rather than joining RULES
+# above, and the reason is the shape of its proof rather than its size. Every
+# other rule's bite runs against one fixed configuration. This one's proof is
+# about the *check*: it feeds the detector a decoder set without brotli and
+# requires `br` to fire, then feeds a set *with* brotli and requires the same
+# literal to be spared. One configuration cannot express both, and pinning the
+# set at the call site so the rule could be registered would mean the thing
+# being proved is the thing the rule encodes.
 
 
 def test_no_request_header_advertises_an_undecodable_encoding():
