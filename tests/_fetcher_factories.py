@@ -4,8 +4,6 @@ from collections.abc import Callable
 from typing import Any
 from urllib.parse import urlparse
 
-import trafilatura.core
-
 from app.constants import (
     DEFAULT_MAX_CONTENT_LENGTH_BYTES,
     HTTP_DECLARED_CRAWLER,
@@ -818,6 +816,18 @@ async def invoke_http_strategy(
     cap_capture: list[int] | None = None,
 ) -> Any:
     if dedupe_patch:
+        # Lazy on purpose, and the reason is measured: `import trafilatura` costs
+        # roughly 400ms because it transitively pulls dateparser, ua_parser,
+        # browserforge, onnxruntime, mammoth, lxml and PIL. Every test module in
+        # the tree imports this one, so a module-level import charged that 400ms
+        # to every xdist worker for the sake of the handful of tests that ask
+        # for `dedupe_patch` -- and the suite's own profile said the fixed
+        # per-worker import cost, not the test bodies, was where the CPU went.
+        # The seam only needs the module when it is actually patching it, which
+        # is what the other helpers here already do (`_spawn_fetch`,
+        # `run_http_strategy`, `run_default_http_fetcher`).
+        import trafilatura.core
+
         monkeypatch.setattr(trafilatura.core, "duplicate_test", lambda *a, **k: False)
 
     def answer(url, _sent_headers, *_):

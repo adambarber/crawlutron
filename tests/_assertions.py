@@ -8,7 +8,6 @@ import os
 from contextlib import contextmanager
 
 import pytest
-from camoufox.utils import launch_path
 
 
 def set_optional_env(monkeypatch, name: str, value: str | None) -> None:
@@ -203,7 +202,19 @@ def one_search_result(override_settings, fake_provider_http, **overrides):
 
 @functools.lru_cache(maxsize=1)
 def browser_available() -> bool:
+    # Both probes import inside the function, matching the idiom the playwright
+    # probe below already used. This is deliberately NOT claimed as a saving:
+    # the collection hook in tests/conftest.py calls this unconditionally, so
+    # every xdist worker paid camoufox's ~330ms import either way, and moving it
+    # out of module scope relocated the cost from import to collection rather
+    # than removing it. What the module-level import did charge was to *import*
+    # time, inflating the cost of collecting any test at all. Unlike the
+    # trafilatura seam in _fetcher_factories, this one is not a single guarded
+    # call site, so the number never showed up anywhere profileable. Written
+    # down so nobody re-profiles this expecting a win that is not there.
     with contextlib.suppress(Exception):
+        from camoufox.utils import launch_path
+
         path = launch_path()
         return bool(path) and os.path.exists(path)
     try:
