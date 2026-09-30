@@ -9,9 +9,11 @@ from __future__ import annotations
 import ast
 import pathlib
 from collections.abc import Iterator
+from functools import lru_cache
 
 from tests.chokepoint_walks import (
     APP_ROOT,
+    REPO_ROOT,
     TESTS_DIR,
     app_python_files,
     app_trees,
@@ -23,7 +25,7 @@ from tests.chokepoint_walks import (
     resolved_expr_name,
     trees_under,
 )
-from tests.rules import Bites, Rule, Trips
+from tests.rules import Bites, Rule, Silent, Trips
 
 
 #: Every rule in this file governs ``tests/``, not ``app/``. One owner for the
@@ -705,3 +707,223 @@ def test_a_narrowed_walk_is_shared_too():
         f"only {checked} narrowed walks were checked across the tree; the assertion "
         "has to span the snapshot to be evidence about the snapshot"
     )
+
+
+# ===========================================================================
+# NO PUBLIC PRIMITIVE IN THE VOCABULARY LAYER MAY GO UNREFERENCED
+#
+# The suite has a convention rather than a registry for this: a leading
+# underscore means "mine, not yours". That works only while public names are
+# actually referenced, because a public name in a shared-vocabulary module
+# reads as sanctioned -- it is the spelling the module's own docstring teaches
+# the next author to reach for. `chokepoint_walks.py` published five walkers
+# with no caller, and `matching.py` advertised three properties of a composition
+# API for nine symbols nothing constructed. Both headers were right about the
+# vocabulary and wrong about the API, which is the expensive shape: a reader who
+# trusts the header writes a detector through `all_of(...)` and lands in code no
+# gate, bite or drift check will ever exercise, because nothing uses it and
+# nothing notices.
+#
+# `matching.py` turned out to be worse than unused. It was a vestigial
+# architecture -- a matcher protocol that `Rule` inherited but never used,
+# because `find` returning offender strings had already replaced it -- so the
+# gate deleted the module rather than its dead half.
+#
+# So the property is the boolean the underscore already encodes: a public name
+# in the vocabulary layer that no module outside it names is dead code, or a
+# helper that was never marked private. Both have the same mechanical fix --
+# delete it, or prefix it -- so one rule covers both, and it cannot be tuned
+# because there is no number in it.
+#
+# Nineteen names were in this state when the rule landed: fifteen dead outright
+# and four alive but mislabelled -- used only inside their own module, so public
+# in name and private in fact. Two of the dead ones (`rule_ids`, `registry_ids`)
+# were leftovers from the pre-`Registry` design and referenced nothing at all,
+# including their own file.
+# ===========================================================================
+
+#: The modules a test author is told to reach into. Named rather than derived
+#: from a directory: these are the shared vocabulary, and a directory sweep would
+#: also catch the fixture factories, whose doubles are legitimately built and
+#: referenced by exactly one consumer each.
+_VOCABULARY_LAYER = frozenset(
+    {
+        "chokepoint_walks.py",
+        "membership_gate.py",
+        "property_registry.py",
+        "rules.py",
+    }
+)
+
+
+def _referenced_names(tree: ast.AST, path: pathlib.Path) -> frozenset[str]:
+    """Every name this module could be reaching for, in all three spellings.
+
+    A bare ``Name`` covers local use and an unaliased import. An ``alias`` tail
+    covers ``from tests.x import y as z``: the *original* name is what proves the
+    primitive is used, and ``z`` would otherwise make an aliased import look like
+    a reference to something else entirely.
+
+    The qualified form is resolved through imports rather than pattern-matched,
+    because ``Attribute.attr`` alone is what made this measurement lie in the
+    first place: ``"".join(...)`` puts a name called ``join`` in 134 places, and a
+    gate built on that would never have fired on the ``matching.join`` it was
+    written for. Resolving the chain through the module's own import bindings
+    counts ``walks.foo`` and leaves ``str.join`` alone.
+    """
+    local = _test_tree_module_names()
+    names: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Name):
+            names.add(node.id)
+        elif isinstance(node, ast.alias):
+            tail = node.name.rsplit(".", 1)[-1]
+            # A local module bound by a bare import names a file, not a primitive.
+            if tail not in local:
+                names.add(tail)
+        elif isinstance(node, ast.Attribute):
+            dotted = resolved_expr_name(tree, node)
+            if dotted.startswith("tests.") or dotted.split(".", 1)[0] in local:
+                names.add(dotted.rsplit(".", 1)[-1])
+    return frozenset(names)
+
+
+@lru_cache(maxsize=1)
+def _reference_index() -> dict[pathlib.Path, frozenset[str]]:
+    """What every test module names, keyed by the module that names it.
+
+    Cached for the reason ``_test_tree_module_names`` is: the question is asked
+    once per public primitive and the answer cannot change within a run.
+    """
+    return {path: _referenced_names(tree, path) for path, tree in _tests_tree(exclude=frozenset())}
+
+
+def _public_definitions(
+    tree: ast.AST,
+) -> Iterator[ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef]:
+    """The top-level definitions a module advertises by not hiding them.
+
+    "Public" here means exactly that, and nothing more: top-level, and no leading
+    underscore. One implementation on purpose -- the detector and its premise
+    have to agree on what counts as public, and a second spelling of the
+    predicate is how the two drift into disagreeing about which names the rule
+    is even deciding.
+    """
+    return (
+        node
+        for node in tree.body
+        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef)
+        and not node.name.startswith("_")
+    )
+
+
+def _unreferenced_primitive_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
+    """A public vocabulary primitive that no module outside its own names.
+
+    Restricted to the vocabulary layer by name. Every other test module is full
+    of symbols referenced by exactly one consumer, and a helper that is genuinely
+    private to a fixture module is exactly the ``_`` case below -- neither is the
+    false memory this exists to catch, and sweeping them would make the rule
+    unadoptable.
+    """
+    if path.name not in _VOCABULARY_LAYER:
+        return []
+    outside: set[str] = set()
+    for other, names in _reference_index().items():
+        if other != path:
+            outside |= names
+    return [
+        offender_at(
+            path,
+            node,
+            f"'{node.name}' is public in the shared vocabulary layer but no module "
+            f"outside {path.name} names it: delete it, or mark it private with a "
+            "leading underscore so the declaration matches the usage",
+        )
+        for node in _public_definitions(tree)
+        if node.name not in outside
+    ]
+
+
+PLANTED_ORPHAN_PRIMITIVE = "def orphan_walker(tree, path):\n    return []\n"
+
+
+def _vocabulary_has_public_primitives() -> None:
+    """The rule has something to decide, derived from the tree rather than named.
+
+    This detector's trigger set is whatever the vocabulary layer currently
+    exports, so an emptied or renamed layer would leave it matching nothing --
+    which reports as a property holding. The check belongs here because inside
+    the detector it would be one line among the walk's own logic, and ``-O``
+    removes it.
+    """
+    exported = [
+        node.name
+        for path, tree in _tests_tree(exclude=frozenset())
+        if path.name in _VOCABULARY_LAYER
+        for node in _public_definitions(tree)
+    ]
+    if not exported:
+        raise AssertionError(
+            "the vocabulary layer exports no public primitives, so this rule is deciding "
+            "nothing and would report every sweep as clean"
+        )
+
+
+VOCABULARY_PRIMITIVES_ARE_REFERENCED = Rule(
+    name="vocabulary-primitives-are-referenced",
+    find=_unreferenced_primitive_offenders,
+    summary=(
+        "a public name in the shared vocabulary layer has at least one caller: an "
+        "unreferenced one is dead code or an unmarked private helper, and either way "
+        "it is advertised to the next author as the sanctioned spelling"
+    ),
+    scope=_tests_tree,
+    premise=_vocabulary_has_public_primitives,
+    bite=lambda: Bites(
+        PLANTED_ORPHAN_PRIMITIVE,
+        marker="no module outside",
+        count=1,
+        at=REPO_ROOT / "tests" / "chokepoint_walks.py",
+    ),
+    clean=lambda: (
+        # A leading underscore is the whole declaration, so a private helper at the
+        # same path as the offender must be spared. Placed at a second vocabulary
+        # module because "correct" and "correct in this module" are different claims.
+        Silent(
+            "def _mine(tree):\n    return []\n",
+            at=REPO_ROOT / "tests" / "rules.py",
+        ),
+        # And the sweep is a named list, not a directory walk: a fixture factory's
+        # public double has one consumer and is not the false memory this catches.
+        Silent(
+            "def script_walker(tree, path):\n    return []\n",
+            at=REPO_ROOT / "tests" / "_fetcher_factories.py",
+        ),
+    ),
+)
+
+
+def test_vocabulary_primitives_are_referenced():
+    """Every public name in the shared vocabulary layer has a caller somewhere.
+
+    This is the class of defect that reads as tidiness rather than as a bug: a
+    deleted caller leaves a well-formed, well-documented, unreferenced function,
+    and nothing else in the suite can notice. The header is what makes it
+    expensive, because it is what the next author trusts.
+    """
+    VOCABULARY_PRIMITIVES_ARE_REFERENCED.scan()
+
+
+def test_vocabulary_primitive_detector_bites():
+    """Bites, and the two neighbours that must stay quiet.
+
+    The offender is a public function at a real vocabulary path with no caller,
+    which is the whole defect. The two Silent halves are the claims that keep the
+    rule from becoming useless: a private helper at a *different* vocabulary
+    module proves the underscore is the declaration, and a public helper outside
+    the named layer proves the layer is a list rather than a directory sweep --
+    without it the rule would eventually fire on a fixture factory's
+    single-consumer double, and a gate that does that gets deleted.
+    """
+    VOCABULARY_PRIMITIVES_ARE_REFERENCED.check_bites()
