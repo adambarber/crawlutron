@@ -1,4 +1,4 @@
-"""Resolve_render_options chokepoint (C2/M11).
+"""Resolve_render_options chokepoint.
 
 Effective render options used to be decided in several places that had
 already drifted: the engine's browser strategy hard-coded the capture

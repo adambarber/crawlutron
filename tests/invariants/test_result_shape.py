@@ -409,12 +409,12 @@ def test_job_row_accumulator_detector_bites():
 
 
 # ---------------------------------------------------------------------------
-# Render-options construction chokepoint (C2/M11)
+# Render-options construction chokepoint
 # ---------------------------------------------------------------------------
 
 
 def _render_options_construction_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
-    """Flag ``RenderOptions(...)`` construction outside the resolver (C2/M11).
+    """Flag ``RenderOptions(...)`` construction outside the resolver.
 
     The effective render options were once hand-assembled at every entry
     point and the copies drifted -- the browser strategy hardcoded the

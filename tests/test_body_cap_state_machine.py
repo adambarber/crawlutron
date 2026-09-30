@@ -72,7 +72,7 @@ async def test_no_bytes_admitted_after_truncating_final_chunk(small_cap):
 
 
 async def test_drain_still_empties_the_client_stream(small_cap):
-    """Regression guard for the C1/C4 property the removed flags encoded:
+    """Regression guard for the property the removed flags encoded:
     after truncation every receive() still awaits the underlying receive()
     (so a reading app keeps consuming the socket) and never admits a byte."""
     messages = [

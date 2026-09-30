@@ -1,4 +1,4 @@
-"""Tests for async single-shot crawl jobs (Option 3 / Item 3)."""
+"""Tests for async single-shot crawl jobs."""
 
 import asyncio
 
