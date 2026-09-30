@@ -593,6 +593,29 @@ class TestJobApi(_AsgiEndpointTests):
         assert job["status"] == "pending"
         assert job["frontier_size"] == 1
 
+    async def _assert_unknown_action_refused_without_side_effect(
+        self, job_id: str, expected_status: str
+    ) -> None:
+        """An unknown control action is refused, and the persisted row does not move.
+
+        ``expected_status`` is the row's state *before* the bad request, which is
+        the only thing that differs between a row nobody ever controlled and one
+        cancelled a moment earlier. That is the reason this is one helper taking a
+        status rather than two copies of a fixed assertion: asserting the row is
+        *unchanged* is what makes it a refusal test, and a fixed ``pending`` would
+        have passed against a rejection that silently advanced the row, while a
+        fixed ``cancelled`` would not have run at all on a fresh row.
+
+        The contract is the EXACT envelope code, not a prefix -- jobs_router
+        declares ``invalid_action``, and a substring check would keep passing
+        through any drift that keeps the prefix.
+        """
+        resp_bad = await self.client.post(f"/v1/jobs/{job_id}/control", json={"action": "invalid"})
+        assert resp_bad.status_code == 422
+        assert resp_bad.json()["code"] == "invalid_action"
+        resp_after = await self.client.get(f"/v1/jobs/{job_id}")
+        assert resp_after.json()["status"] == expected_status
+
     async def test_v1_jobs_control_transitions_persisted_row(self):
         # Directly-persisted (never-run) rows are PENDING: pause implies an
         # active run (409). Cancel is valid from pending (aborts before start).
@@ -605,15 +628,9 @@ class TestJobApi(_AsgiEndpointTests):
         assert resp_cancel.status_code == 200, resp_cancel.text
         assert resp_cancel.json()["status"] == "cancelled"
 
-        # Unknown actions stay 422 (shape validation precedes dispatch).
-        # The contract is the EXACT envelope code (a substring check would
-        # keep passing through any code drift that keeps the prefix) and the
-        # persisted row being untouched by the rejected request.
-        resp_bad = await self.client.post(f"/v1/jobs/{job_id}/control", json={"action": "invalid"})
-        assert resp_bad.status_code == 422
-        assert resp_bad.json()["code"] == "invalid_action"
-        resp_after = await self.client.get(f"/v1/jobs/{job_id}")
-        assert resp_after.json()["status"] == "cancelled"
+        # Unknown actions stay 422 (shape validation precedes dispatch), and the
+        # cancelled row is still cancelled -- the rejection is side-effect free.
+        await self._assert_unknown_action_refused_without_side_effect(job_id, "cancelled")
 
     async def test_v1_jobs_delete_of_persisted_row(self):
         job_id = await self._seed_job(f"{self.base}/")
@@ -629,11 +646,7 @@ class TestJobApi(_AsgiEndpointTests):
     async def test_v1_jobs_invalid_action(self):
         job_id = await self._seed_job(f"{self.base}/")
 
-        resp_bad = await self.client.post(f"/v1/jobs/{job_id}/control", json={"action": "invalid"})
-        assert resp_bad.status_code == 422
         # Exact code is the wire contract (jobs_router declares
         # "invalid_action"); the rejection must also leave the persisted
         # row exactly as it was -- a side-effect-free refusal.
-        assert resp_bad.json()["code"] == "invalid_action"
-        resp_after = await self.client.get(f"/v1/jobs/{job_id}")
-        assert resp_after.json()["status"] == "pending"
+        await self._assert_unknown_action_refused_without_side_effect(job_id, "pending")
