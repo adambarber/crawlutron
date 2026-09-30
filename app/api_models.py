@@ -381,7 +381,7 @@ def _narrows_credential_scope(key: str) -> bool:
 
 
 class Credential(BaseModel):
-    """A scoped HTTP credential (Tier 2b).
+    """A scoped HTTP credential, scoped to one origin.
 
     Keyed in ``CrawlPolicy.credentials`` by canonical origin
     (``scheme://host[:port]``), so a credential is addressable only for the
@@ -640,10 +640,10 @@ class CrawlPolicy(BaseModel):
 
         ``authorization`` is deliberately absent: credentialed crawling of
         one's own site is a real use case, and the typed replacement
-        (``policy.credentials``, Tier 2b) scopes it per origin. Callers may
+        (``policy.credentials``) scopes it per origin. Callers may
         still set a raw ``Authorization`` header for one-off needs, but the
         credentials field is the supported path: origin-scoped, scrubbed on
-        cross-host hops by the same Fix-3 chokepoint as cookies.
+        cross-host hops by the same redirect scrub as cookies.
 
         A field validator rather than a model validator so the rejection
         carries a location. From a ``mode="after"`` hook pydantic reports

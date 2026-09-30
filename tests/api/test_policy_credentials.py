@@ -1,4 +1,4 @@
-"""Tier 2b: policy.credentials -- scoped, typed, host-bounded credentials.
+"""policy.credentials: scoped, typed, host-bounded credentials.
 
 Spoofable headers are banned but deliberately kept ``authorization``
 available: credentialed crawling of one's own site is real use, and banning

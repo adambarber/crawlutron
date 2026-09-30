@@ -1,4 +1,4 @@
-"""Origin-scoped credentials (Tier 2b chokepoint).
+"""Origin-scoped credentials, keyed by canonical origin.
 
 One module owns the two decisions that must never disagree:
 
@@ -12,7 +12,7 @@ One module owns the two decisions that must never disagree:
   ``Authorization`` header value.
 
 Cross-host containment is NOT re-implemented here: the produced value lands
-in the normal header set, and the redirect loop's Fix-3 scrub
+in the normal header set, and the redirect loop's credential scrub
 (``_CREDENTIAL_HEADERS`` strips ``authorization`` across hosts) enforces
 "credentials never cross host boundaries" at the hop boundary, exactly as
 it does for cookies.

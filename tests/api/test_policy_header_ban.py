@@ -14,7 +14,7 @@ never a silent strip at consumption):
 credentialed crawling of one's own site is a real use case, and banning the
 header without a typed replacement would push callers into worse patterns
 (baked-in URL credentials). It moves under the ``policy.credentials``
-chokepoint when that lands (Tier 2b); until then the ban list and this test
+chokepoint; until then the ban list and this test
 pin exactly the six, no more.
 """
 

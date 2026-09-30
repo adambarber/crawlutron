@@ -245,7 +245,7 @@ def _headers_for_strategy(
         headers["Cookie"] = cookie_header
     headers.update(policy.headers)
     # Origin-scoped credentials last: the value is attached only when this
-    # exact URL's origin holds one, and the redirect loop's Fix-3 scrub
+    # exact URL's origin holds one, and the redirect loop's credential scrub
     # strips it on any cross-host hop (same chokepoint as cookies).
     _apply_credentials(headers, url, policy.credentials)
     return headers
