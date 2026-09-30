@@ -11,7 +11,6 @@ import asyncio
 import json
 import logging
 import sqlite3
-import threading
 import time
 from collections.abc import Iterable
 from dataclasses import asdict, dataclass, field
@@ -25,7 +24,7 @@ from app.crawl.ids import new_job_id
 from app.crawl.migrations import StoreSchema
 from app.crawl.policy import PolicyLike, PolicyTier, read_policy
 from app.crawl.policy import stored_policy as _stored_policy
-from app.crawl.sqlite_store import connect_store
+from app.crawl.sqlite_store import connect_store, process_lock, store_lock_key
 from app.validation import HostPolicy, normalize_public_http_url, safe_public_url_or_none
 
 logger = logging.getLogger(__name__)
@@ -716,8 +715,9 @@ class JobStore:
         # chokepoint (busy_timeout + WAL; M1 confinement invariant).
         self._conn = connect_store(self.db_path, schema=StoreSchema.CRAWL_JOBS)
         # Serialize all connection use across threads (sqlite3 connections are
-        # not safe for concurrent use even with check_same_thread=False).
-        self._lock = threading.Lock()
+        # not safe for concurrent use even with check_same_thread=False), and
+        # across every other store instance and migration touching this file.
+        self._lock = process_lock(store_lock_key(self.db_path))
         # Column-addressed rows: the schema grows by migration, so positional
         # indexing for a later-added column would couple the read path to ALTER
         # ordering. sqlite3.Row still supports row[n].

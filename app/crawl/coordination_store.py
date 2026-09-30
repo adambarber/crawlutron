@@ -20,12 +20,11 @@ name it owns.
 from __future__ import annotations
 
 import sqlite3
-import threading
 from pathlib import Path
 from typing import ClassVar
 
 from app.crawl.migrations.manifest import StoreSchema
-from app.crawl.sqlite_store import connect_store
+from app.crawl.sqlite_store import connect_store, process_lock, store_lock_key
 
 __all__ = ["CoordinationStore"]
 
@@ -48,9 +47,13 @@ class CoordinationStore:
         # opened its own connection could run the migration twice or drift the
         # WAL setting, which is the whole M1 defect class.
         self._conn: sqlite3.Connection = connect_store(db_path, schema=self.schema)
-        # Intra-process serialization only. Cross-process ordering is SQLite's
-        # job, and is the entire reason these stores exist.
-        self._lock = threading.Lock()
+        # The same file-wide lock the migration took, and not a private one: a
+        # per-instance lock excludes this store from nothing else, so a write
+        # here would run straight through a migration in flight on this file --
+        # and through a second store instance writing to it. Cross-process
+        # ordering remains SQLite's job, which is the entire reason these stores
+        # exist.
+        self._lock = process_lock(store_lock_key(db_path))
 
     def close(self) -> None:
         """Close the connection under the lock.

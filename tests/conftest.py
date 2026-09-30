@@ -114,11 +114,16 @@ def _enable_loopback_for_test_suite():
 # own log/cache files so parallel workers cannot clobber shared state. The
 # platform temp dir, not a hardcoded /tmp: on macOS gettempdir() is under
 # /var/folders, and a /tmp literal would scatter the suite's state off-platform.
+#
+# The cache directory is set above, and only above. A second `setdefault` for
+# `CRAWLUTRON_CACHE_DIR` further down could never fire, yet it named a
+# different path from the one `_remove_test_cache_dir` actually removes -- so
+# the file read as though the suite isolated its database somewhere it does
+# not. One declaration, so there is one path to keep true.
 _XDIST_WORKER = os.environ.get("PYTEST_XDIST_WORKER", "")
 _WORKER_SUFFIX = f"-{_XDIST_WORKER}" if _XDIST_WORKER else ""
 _TEST_TMP = tempfile.gettempdir()
 os.environ.setdefault("CRAWLUTRON_LOG_FILE", f"{_TEST_TMP}/crawlutron_test{_WORKER_SUFFIX}.log")
-os.environ.setdefault("CRAWLUTRON_CACHE_DIR", f"{_TEST_TMP}/crawlutron_test_cache{_WORKER_SUFFIX}")
 os.environ["CRAWLUTRON_CACHE_TTL_SECONDS"] = os.environ.get("CRAWLUTRON_CACHE_TTL_SECONDS", "3600")
 # Keep the opt-in content cache disabled during tests so fake-fetcher suites that
 # serve different content for the same URL stay isolated.

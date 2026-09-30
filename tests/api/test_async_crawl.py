@@ -2,6 +2,7 @@
 
 import asyncio
 
+from app.api import job_runner
 from tests._assertions import accepted_crawl, completed_crawl, poll_webhook_delivery, submit_async_crawl
 from tests._async_harnesses import crawl_api as _crawl_api
 from tests._fetcher_factories import make_crawl_payload
@@ -254,3 +255,45 @@ class TestAsyncCrawlJobStoreIntegration:
             assert loaded.status == JobStatus.COMPLETED
             assert len(loaded.results) == 1
             assert loaded.results[0]["request_id"] == "test-id"
+
+
+class TestAsyncCrawlShutdownOwnership:
+    """The async crawl path is work the job runner already owns a registry for."""
+
+    async def test_an_in_flight_async_crawl_is_cancelled_by_the_shutdown_drain(self, crawl_api, monkeypatch):
+        """A shutdown that cannot see the async crawl cannot stop it.
+
+        The endpoint hands the crawl to a Starlette background task, which the
+        runner's registry never learns about, so the drain that app/main.py
+        documents as stopping the world first skips it. A crawl left running
+        past shutdown is the one thing that can publish a webhook against
+        dependencies the shutdown just cleared.
+        """
+        started = asyncio.Event()
+        cancelled = asyncio.Event()
+
+        async def blocked_crawl(*args, **kwargs):
+            started.set()
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                cancelled.set()
+                raise
+
+        monkeypatch.setattr("app.api.async_crawl_runner.run_async_crawl", blocked_crawl)
+
+        # A 202 is a promise that the work outlives the request. Handed to a
+        # Starlette background task instead, the crawl is awaited inside the
+        # request cycle, so the call does not return until the crawl is done.
+        body = await asyncio.wait_for(
+            accepted_crawl(crawl_api.client, crawl_api.payload(async_mode=True)),
+            timeout=5,
+        )
+        job_id = body["request_id"]
+
+        assert await asyncio.wait_for(started.wait(), timeout=5), "the crawl never started"
+        assert job_runner.is_running(job_id), "an in-flight async crawl is invisible to the runner"
+
+        await job_runner.shutdown_job_runner()
+        assert await asyncio.wait_for(cancelled.wait(), timeout=5), "shutdown did not stop the crawl"
+        assert not job_runner.is_running(job_id)

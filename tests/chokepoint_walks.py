@@ -280,6 +280,20 @@ def writes(root: ast.AST) -> tuple[ast.Assign | ast.AnnAssign | ast.AugAssign, .
     )
 
 
+def assignment_targets(node: ast.Assign | ast.AnnAssign) -> list[ast.expr]:
+    """The target expressions of a write, whatever form the write took.
+
+    ``ast.Assign`` carries a list and ``ast.AnnAssign`` a single node, so every
+    detector that cares what a statement binds had to branch on the form before
+    it could look at a target. That branch is four lines, it reads as incidental,
+    and it was written out in six detectors across four files -- which is how one
+    of them grew a variant that handled only ``Assign`` and quietly read a tuple
+    where an annotated assignment was written. The question every caller is
+    actually asking is "what does this statement bind", and this is that answer.
+    """
+    return list(node.targets) if isinstance(node, ast.Assign) else [node.target]
+
+
 def import_statements(root: ast.AST) -> tuple[ast.Import | ast.ImportFrom, ...]:
     """Every import, plain and from-form alike, in walk order."""
     return tuple(
@@ -1064,7 +1078,7 @@ def _import_bindings(tree: ast.AST) -> dict[str, str]:
             canonical = named or _static_string(value, bindings)
             if not canonical:
                 continue
-            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+            targets = assignment_targets(node)
             for target in targets:
                 if isinstance(target, ast.Name) and target.id not in bindings:
                     bindings[target.id] = canonical

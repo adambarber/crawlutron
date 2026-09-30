@@ -21,6 +21,7 @@ from tests.chokepoint_walks import (
     assert_detector,
     assert_fires_once,
     assert_stays_clean,
+    assignment_targets,
     call_nodes,
     has_method_call,
     lineno,
@@ -85,7 +86,7 @@ _OWNER_PUBLIC_SURFACE_RATCHET = {
     "app/crawl/admission.py": (20, 14),
     "app/validation.py": (17, 11),
     "app/api/response_shaping.py": (9, 8),
-    "app/crawl/sqlite_store.py": (7, 5),
+    "app/crawl/sqlite_store.py": (9, 7),
     "app/safe_regex.py": (7, 2),
     "app/crawl/robots.py": (13, 4),
     "app/bounded_io.py": (4, 2),
@@ -116,7 +117,7 @@ def _owned_public_symbols(tree: ast.Module) -> set[str]:
             if not node.name.startswith("_"):
                 public.add(node.name)
         elif isinstance(node, (ast.Assign, ast.AnnAssign)):
-            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+            targets = assignment_targets(node)
             public.update(
                 target.id
                 for target in targets

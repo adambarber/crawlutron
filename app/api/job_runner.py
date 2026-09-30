@@ -26,7 +26,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import Awaitable, Callable, Coroutine, Sequence
 from typing import Any
 from urllib.parse import urlparse
 
@@ -425,6 +425,30 @@ async def _run_job(
         await arecord_terminal_failure(job_store, job_id, str(exc))
 
 
+def start_tracked_task(
+    job_id: str,
+    factory: Callable[[], Coroutine[Any, Any, Any]],
+) -> asyncio.Task:
+    """Spawn ``factory()`` as the task that owns ``job_id``, or return the live one.
+
+    One registry means one shutdown drain and one cancel path. The factory is
+    called only once a slot is free, so a job that is already running does not
+    leave a coroutine constructed and never awaited.
+
+    Taking a factory rather than a coroutine is what lets the async crawl come
+    through here too. Handed to a Starlette background task instead, it was
+    awaited inside the request cycle -- so the 202 did not return until the
+    crawl finished, and the drain in ``app/main.py`` could not see it either.
+    """
+    existing = _tasks.get(job_id)
+    if existing is not None and not existing.done():
+        return existing
+    task = asyncio.create_task(factory())
+    _tasks[job_id] = task
+    task.add_done_callback(lambda t: _tasks.pop(job_id, None))
+    return task
+
+
 def start_job(
     job_id: str,
     job_store: JobStore,
@@ -432,13 +456,7 @@ def start_job(
     shutdown_event: asyncio.Event,
 ) -> asyncio.Task:
     """Spawn (or return) the runner task for a job."""
-    existing = _tasks.get(job_id)
-    if existing is not None and not existing.done():
-        return existing
-    task = asyncio.create_task(_run_job(job_id, job_store, settings, shutdown_event))
-    _tasks[job_id] = task
-    task.add_done_callback(lambda t: _tasks.pop(job_id, None))
-    return task
+    return start_tracked_task(job_id, lambda: _run_job(job_id, job_store, settings, shutdown_event))
 
 
 def cancel_job_task(job_id: str) -> None:

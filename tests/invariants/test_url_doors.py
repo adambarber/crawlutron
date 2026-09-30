@@ -16,6 +16,7 @@ from tests.chokepoint_walks import (
     app_offenders,
     app_trees,
     assert_detector,
+    assignment_targets,
     callable_defs,
     enclosing_function,
     f_strings,
@@ -1319,7 +1320,7 @@ def _direct_frontier_growth_offenders(
             if node.func.attr in growth_methods and _frontier_expression(node.func.value):
                 offenders.append(offender_at(path, node, "direct frontier growth bypasses admit_job_links"))
         elif isinstance(node, ast.Assign | ast.AnnAssign | ast.AugAssign):
-            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+            targets = assignment_targets(node)
             if any(_frontier_expression(target) for target in targets):
                 offenders.append(offender_at(path, node, "frontier replacement bypasses admit_job_links"))
             if isinstance(node, ast.Assign) and isinstance(node.value, ast.Attribute):

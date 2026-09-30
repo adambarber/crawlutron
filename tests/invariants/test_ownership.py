@@ -16,6 +16,7 @@ from tests.chokepoint_walks import (
     app_trees,
     assert_detector,
     assert_fires_once,
+    assignment_targets,
     call_nodes,
     calls_named_leaf,
     functions,
@@ -330,7 +331,7 @@ def _unbounded_domain_delay_writes(tree: ast.AST, path: pathlib.Path) -> list[st
         if func.name == "set_domain_min_delay":
             continue
         for node in unannotated_writes(func):
-            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+            targets = assignment_targets(node)
             for target in targets:
                 if (
                     isinstance(target, ast.Subscript)

@@ -23,6 +23,7 @@ from fastapi.responses import JSONResponse, Response
 
 from app.api.crawl_executor import execute_crawl
 from app.api.exceptions import http_error, validation_http_error
+from app.api.job_runner import start_tracked_task
 from app.api.main_helpers import record_crawl_completion, request_gate
 from app.api.response_shaping import _aunified_response_from_result
 from app.api.webhooks import validate_webhook_url_async
@@ -140,16 +141,18 @@ async def crawl(
             )
             from app.api.async_crawl_runner import run_async_crawl
 
-            background_tasks.add_task(
-                run_async_crawl,
+            start_tracked_task(
                 request_id,
-                payload_dict,
-                webhook_url,
-                settings,
-                job_store,
-                result_store,
-                shutdown_event,
-                urls=checked,
+                lambda: run_async_crawl(
+                    request_id,
+                    payload_dict,
+                    webhook_url,
+                    settings,
+                    job_store,
+                    result_store,
+                    shutdown_event,
+                    urls=checked,
+                ),
             )
             get_metrics().observe_crawl(accepted=True)
             return JSONResponse(

@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import os
 import secrets
 import sqlite3
+import sys
+import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -123,16 +126,88 @@ def _open_raw_store_connection(
     return sqlite3.connect(str(db_path), check_same_thread=False), None
 
 
+_PROCESS_LOCKS: dict[str, threading.RLock] = {}
+_PROCESS_LOCKS_GUARD = threading.Lock()
+
+
+def store_lock_key(db_path: str | Path, memory_name: str | None = None) -> str:
+    """One lock key per database, however the caller happened to spell the path.
+
+    The migration backend opens the *resolved* file, so a key built from the
+    raw path would name a different lock whenever the two differ -- a symlinked
+    temp directory being the ordinary case. Two keys for one file means the
+    writer and the migration never actually exclude each other.
+    """
+    if memory_name is not None:
+        return f"memory:{memory_name}"
+    return str(Path(db_path).resolve())
+
+
+def process_lock(key: str) -> threading.RLock:
+    """The one lock every writer and every migration on this database takes.
+
+    A store's own lock only serializes writes that go through *that* instance,
+    and a migration runs on a connection of its own. Within a single process
+    that left a migration free to collide with a write already in flight: the
+    store's ``busy_timeout`` then decides how long the collision is survivable
+    rather than whether it happens, and past that the caller sees
+    ``sqlite3.OperationalError: database is locked`` raised from inside a
+    migration step it had nothing to do with.
+
+    One lock per database file, shared by the writers and by
+    ``migrate_store``, is what makes the collision unrepresentable instead of
+    merely rare. Build the key with :func:`store_lock_key`.
+    """
+    with _PROCESS_LOCKS_GUARD:
+        lock = _PROCESS_LOCKS.get(key)
+        if lock is None:
+            lock = _PROCESS_LOCKS[key] = threading.RLock()
+        return lock
+
+
+_STORE_TRACE_ENV = "CRAWLUTRON_TRACE_STORE_CONNECTIONS"
+
+
+def _trace_store_connection(
+    db_path: str | Path,
+    schema: StoreSchema,
+    memory_name: str | None,
+) -> None:
+    """Write one line per opened connection to stderr, when asked.
+
+    ``database is locked`` reproduces on one run in twelve and never on demand,
+    so the question that decides it -- which process and thread reached which
+    file, under which schema -- has to be answerable from a record made at the
+    moment of the call. Emitting to stderr rather than keeping a registry is
+    what lets that record exist without adding query and reset functions to the
+    store chokepoint's public surface for the sake of a debugging aid::
+
+        CRAWLUTRON_TRACE_STORE_CONNECTIONS=1 pytest -n 4 2> connections.log
+    """
+    if os.environ.get(_STORE_TRACE_ENV) != "1":
+        return
+    target = f"memory:{memory_name}" if memory_name is not None else store_lock_key(db_path)
+    print(
+        f"store-connection pid={os.getpid()} thread={threading.current_thread().name} "
+        f"schema={StoreSchema(schema).value} db={target}",
+        file=sys.stderr,
+        flush=True,
+    )
+
+
 def connect_store(db_path: str | Path, *, schema: StoreSchema) -> sqlite3.Connection:
     """Open and configure the long-lived store connection, then migrate its database.
 
-    Service PRAGMAs are configured only by ``configure_store_connection`` on this
-    connection. Yoyo uses a separate temporary DBAPI connection for ledger and
-    migration work; it receives no PRAGMA configuration.
+    Service PRAGMAs come from ``configure_store_connection``, applied to this
+    connection. The migration's own connection is configured separately and
+    carries the same PRAGMAs, including the busy timeout -- which is precisely
+    why the store's own writes serialize on the file's process lock rather than
+    leaving a migration to lose a race it was never meant to take part in.
     """
     conn, memory_name = _open_raw_store_connection(db_path)
     try:
         configure_store_connection(conn)
+        _trace_store_connection(db_path, schema, memory_name)
         from app.crawl.migrations import migrate_store
 
         migrate_store(db_path, schema, memory_name=memory_name)
@@ -183,6 +258,8 @@ __all__ = [
     "IndexInfo",
     "configure_store_connection",
     "connect_store",
+    "process_lock",
+    "store_lock_key",
     "table_columns",
     "table_has_column",
     "table_indexes",

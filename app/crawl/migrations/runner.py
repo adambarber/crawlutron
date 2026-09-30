@@ -22,7 +22,7 @@ from app.crawl.migrations.manifest import (
     legacy_stamp_drift,
     schema_drift,
 )
-from app.crawl.sqlite_store import table_has_column
+from app.crawl.sqlite_store import process_lock, store_lock_key, table_has_column
 
 __all__ = ["migration_step"]
 
@@ -63,10 +63,18 @@ def _locked_backend(
     db_path: str | Path,
     memory_name: str | None = None,
 ) -> Iterator[DatabaseBackend]:
-    backend = _backend(db_path, memory_name)
-    with backend:
-        with backend.lock():
-            yield backend
+    """Open a migration backend under the same lock the store's writers take.
+
+    A migration writes the schema, and a write already in flight on this file
+    holds exactly the lock a DDL statement needs. Taking the store's own
+    process lock here is what keeps the two from meeting, instead of leaving
+    the outcome to whichever one loses the race for ``busy_timeout``.
+    """
+    with process_lock(store_lock_key(db_path, memory_name)):
+        backend = _backend(db_path, memory_name)
+        with backend:
+            with backend.lock():
+                yield backend
 
 
 def _migrations(schema: StoreSchema) -> MigrationList:

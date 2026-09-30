@@ -16,6 +16,7 @@ from tests._assertions import (
     assert_result_failed,
     browser_available,
     completed_crawl,
+    poll_webhook_delivery,
 )
 from tests._fetcher_factories import make_crawl_payload
 from tests._job_harnesses import post_render_with_pool
@@ -144,9 +145,10 @@ class TestCrawlApi(_AsgiEndpointTests):
         }
         body = await accepted_crawl(self.client, payload)
         assert "status_url" in body
-        # The background task crawls + POSTs the result to the webhook sink.
-        assert len(WEBHOOK_RECEIVED) == 1
-        delivered = json.loads(WEBHOOK_RECEIVED[0].decode("utf-8"))
+        # The accepted envelope is a promise that the work outlives the
+        # request, so the delivery is polled for rather than assumed to have
+        # already happened by the time the 202 came back.
+        delivered = await poll_webhook_delivery(WEBHOOK_RECEIVED)
         assert delivered["submitted_count"] == 1
         assert "results" in delivered
 
