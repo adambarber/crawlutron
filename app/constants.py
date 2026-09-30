@@ -250,12 +250,14 @@ ResultStatus = Literal["success", "blocked", "disallowed", "retry_exhausted", "f
 # ---------------------------------------------------------------------------
 # Browser action vocabulary: THE single source of truth.
 #
-# ``BrowserRenderer._perform_actions`` recognises these by an if/elif chain and
-# ``CrawlPolicy._reject_execute_js_actions`` refuses one member of the same set
-# at the model boundary. Two hand-written lists that must agree is the shape of
-# bug this table exists to remove: the consumer silently no-ops a type it does
+# ``BrowserRenderer._dispatch_action`` recognises these by an if/elif chain and
+# ``CrawlPolicy._close_browser_profile_vocabulary`` refuses one member of the same
+# set at the model boundary. Two hand-written lists that must agree is the shape
+# of bug this table exists to remove: the consumer silently no-ops a type it does
 # not recognise, so a caller whose action was misspelled got a page that loaded
-# with nothing done and nothing said.
+# with nothing done and nothing said. The agreement is asserted against the
+# renderer's own chain rather than against a test-local copy, so renaming a
+# branch there fails here instead of silently widening the gap.
 #
 # ``execute_js`` is listed rather than omitted because refusing it is a decision
 # about a member of this vocabulary, not a fact about a different one. It is
@@ -281,12 +283,22 @@ ALLOWED_BROWSER_ACTION_TYPES: Final[frozenset[str]] = frozenset(BROWSER_ACTION_T
     {"execute_js"}
 )
 
-#: The top-level keys a ``browser_profile`` may carry. Read off the renderer,
-#: which is where they take effect; an unknown key is inert, so accepting one
-#: silently is the same failure as a misspelled action type.
+#: The actions that cannot do anything without naming what to act on. The chain
+#: guards its target-taking branches with ``and selector``, so one of these
+#: arriving without a ``selector`` falls past every branch and returns having done
+#: nothing -- a 200 with a page that loaded and no interaction performed, which
+#: the caller cannot distinguish from the action having worked. ``scroll_bottom``
+#: and ``wait_seconds`` are absent because they address the page rather than an
+#: element. This is the chain's requirement set, restated so the model can refuse
+#: it up front; the two are asserted equal against the chain itself.
+ACTIONS_REQUIRING_SELECTOR: Final[frozenset[str]] = frozenset({"click", "fill", "hover", "scroll", "wait"})
+
+#: The top-level keys a ``browser_profile`` may carry. Read off the consumers,
+#: which are where they take effect; an unknown key is inert, so accepting one
+#: silently is the same failure as a misspelled action type -- and so is ALLOWING
+#: one that no consumer reads. The set holds only keys with a real reader.
 BROWSER_PROFILE_KEYS: Final[frozenset[str]] = frozenset(
     {
-        "state",
         "viewport",
         "resource_mode",
         "storage_state",

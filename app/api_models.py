@@ -31,6 +31,15 @@ from app.constants import (
     SERVICE_VERSION,
 )
 
+#: The output formats a request may name, imported from the module that has to
+#: dispatch on them rather than restated. The field description ("One of: json
+#: (default), jsonl, ndjson, markdown, csv"), this annotation, and
+#: ``SUPPORTED_OUTPUT_FORMATS`` are one decision with one home:
+#: ``app.output_formats``. This module used to spell its own ``Literal`` beside
+#: that set and comment that it was the only copy, which was true of neither the
+#: code nor the tests.
+from app.output_formats import OutputFormat
+
 # `plugins = pydantic.mypy` in mypy.ini is what lets the declared fail gate read
 # these models; without it every pydantic import resolves as untyped and the gate
 # is blind to all of them.
@@ -55,14 +64,12 @@ POLICY_SCHEMA_VERSION = "2026-06-23"
 MAX_URLS_PER_REQUEST = 500
 MAX_VALIDATORS_PER_REQUEST = 64
 MAX_HEADERS_PER_REQUEST = 64
-
-#: The output formats a request may name. Bound to the type rather than left as
-#: prose: this description ("One of: json (default), jsonl, ndjson, markdown,
-#: csv") and the serializer's own vocabulary are one decision, and a second
-#: hand-kept copy of the list is the drift this project already refuses
-#: elsewhere. ``Literal`` needs its members written out, so this is the one
-#: place the set is spelled, and the test asserts it equals the serializer's.
-OutputFormat = Literal["json", "jsonl", "ndjson", "markdown", "csv"]
+#: The key allowlist bounds how many keys a ``browser_profile`` may carry, not how
+#: big their values are. Execution is already bounded by the render budget, so an
+#: oversized action list costs parse time and memory rather than unbounded work --
+#: but it is the same shape as the unbounded ``urls`` collection above, and a
+#: caller should not be able to hand the model 200,000 dicts.
+MAX_BROWSER_ACTIONS = 64
 
 # The identity block every discovery response opens with, declared once. It lives
 # here rather than in ``app.constants`` because it spans both: the version comes
@@ -336,6 +343,13 @@ def _close_browser_profile_vocabulary(profile: dict[str, Any]) -> dict[str, Any]
     Action types are compared case-insensitively because the renderer lowercases
     before matching. Refusing ``CLICK`` while permitting ``click`` would refuse
     something the consumer handles.
+
+    Refusals are ``ValueError`` on purpose, including for the two shape errors
+    below. Pydantic wraps a ``ValueError`` into a 422 but lets a ``TypeError``
+    escape the request handler entirely, so the first version of this function --
+    which iterated ``profile["actions"]`` directly -- turned ``{"actions": 5}``
+    into an HTTP 500 on every policy-bearing endpoint. A caller mistake must
+    arrive as a refusal, which is the only shape the caller can act on.
     """
     from app.constants import ALLOWED_BROWSER_ACTION_TYPES, BROWSER_PROFILE_KEYS
 
@@ -350,20 +364,57 @@ def _close_browser_profile_vocabulary(profile: dict[str, Any]) -> dict[str, Any]
             f"supported keys are: {', '.join(sorted(BROWSER_PROFILE_KEYS))}"
         )
 
-    for action in profile.get("actions") or []:
-        if not isinstance(action, dict):
-            raise ValueError("each browser_profile action must be an object with a 'type'")
-        action_type = str(action.get("type", "")).lower()
-        if action_type == "execute_js":
-            raise ValueError(
-                "execute_js actions are not permitted in browser_profile: this service does not "
-                "run caller-supplied script in the browser context"
-            )
-        if action_type not in ALLOWED_BROWSER_ACTION_TYPES:
-            raise ValueError(
-                f"browser_profile action type {action_type!r} is not permitted; allowed types are: {allowed}"
-            )
+    actions = profile.get("actions")
+    if actions is None:
+        return profile
+    if not isinstance(actions, list):
+        raise ValueError(
+            f"browser_profile actions must be a list of action objects, got {type(actions).__name__}"
+        )
+    if len(actions) > MAX_BROWSER_ACTIONS:
+        raise ValueError(
+            f"browser_profile actions may carry at most {MAX_BROWSER_ACTIONS} entries, got {len(actions)}"
+        )
+
+    for index, action in enumerate(actions):
+        _refuse_unusable_action(action, index, allowed)
     return profile
+
+
+def _refuse_unusable_action(action: Any, index: int, allowed: str) -> None:
+    """Refuse one action the renderer would accept and then do nothing about.
+
+    Split out of :func:`_close_browser_profile_vocabulary` so the three
+    refusals read as the three distinct failures they are, rather than as one
+    long loop body. ``allowed`` is the already-formatted list of permitted types,
+    passed in so this stays a check on one action rather than a place the
+    vocabulary is read a second time.
+    """
+    from app.constants import ACTIONS_REQUIRING_SELECTOR, ALLOWED_BROWSER_ACTION_TYPES
+
+    if not isinstance(action, dict):
+        raise ValueError("each browser_profile action must be an object with a 'type'")
+    action_type = str(action.get("type", "")).lower()
+    if action_type == "execute_js":
+        raise ValueError(
+            "execute_js actions are not permitted in browser_profile: this service does not "
+            "run caller-supplied script in the browser context"
+        )
+    if action_type not in ALLOWED_BROWSER_ACTION_TYPES:
+        raise ValueError(
+            f"browser_profile action type {action_type!r} is not permitted; allowed types are: {allowed}"
+        )
+    # The chain cannot report this one. Its branch reads
+    # ``if action_type == "click" and selector:``, so a selector-less click
+    # is not an error there, it is a no-op, and the request returns 200 with
+    # a page that loaded and nothing done. Refusing here is the only place the
+    # caller learns why. ``selector: ""`` counts as absent for the same reason:
+    # it is falsy at the branch, so it behaves identically once it gets there.
+    if action_type in ACTIONS_REQUIRING_SELECTOR and not action.get("selector"):
+        raise ValueError(
+            f"browser_profile action at index {index} is of type {action_type!r}, which acts "
+            "on a named element, so it must carry a non-empty 'selector'"
+        )
 
 
 def _narrows_credential_scope(key: str) -> bool:
@@ -514,9 +565,11 @@ class CrawlPolicy(BaseModel):
     )
     browser_profile: dict[str, Any] = Field(
         default_factory=dict,
-        description="Optional browser state profile for browser strategies. Supported keys include state "
-        "(fresh), viewport (desktop or mobile), resource_mode (full or reduced), benign cookie jar hints, "
-        "and auto_accept_cookie_consent (default false; when true the browser may click consent banners). "
+        description="Browser interaction profile for browser strategies. Supported keys: viewport "
+        "(desktop or mobile), resource_mode (full or reduced), storage_state, actions, include_html, "
+        "include_screenshot, screenshot_selectors, auto_accept_cookie_consent (default false; when "
+        "true the browser may click consent banners), lazy_scroll_steps, lazy_scroll_delay_seconds, "
+        "and cookie_harvest_timeout_seconds. "
         "Viewport changes Firefox window size; reduced resource mode disables images.",
     )
     discovery: Annotated[

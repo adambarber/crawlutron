@@ -5,6 +5,7 @@ Fail fast at the model boundary instead.
 """
 
 import inspect
+import textwrap
 import typing
 
 import httpx
@@ -12,8 +13,14 @@ import pytest
 from httpx import AsyncClient
 from pydantic import BaseModel, ValidationError
 
-from app import api_models
-from app.api_models import CrawlRequest, RenderRequest
+from app import api_models, api_responses
+from app.api_models import MAX_BROWSER_ACTIONS, CrawlRequest, RenderRequest
+from app.constants import (
+    ACTIONS_REQUIRING_SELECTOR,
+    ALLOWED_BROWSER_ACTION_TYPES,
+    BROWSER_ACTION_TYPES,
+    BROWSER_PROFILE_KEYS,
+)
 from tests._app_factory import service_app
 
 
@@ -71,15 +78,25 @@ _BOUND_REQUEST_BODIES = (
 )
 
 
+#: Both wire-model modules. The output half of the split moved to
+#: ``app.api_responses``, and a walk that only looks at ``app.api_models`` no
+#: longer sees a single response model -- which is what the response-side tests
+#: below were written to cover. The set is a list of modules rather than a list
+#: of class names so a model is covered the day it is written, and a module
+#: added to the split is covered by editing one line.
+_WIRE_MODEL_MODULES = (api_models, api_responses)
+
+
 def _declared_models() -> dict[str, type[BaseModel]]:
-    """Every request/response model the wire layer declares."""
+    """Every request/response model the wire layer declares, across both modules."""
     return {
         name: obj
-        for name, obj in vars(api_models).items()
+        for module in _WIRE_MODEL_MODULES
+        for name, obj in vars(module).items()
         if inspect.isclass(obj)
         and issubclass(obj, BaseModel)
         and obj is not BaseModel
-        and obj.__module__ == api_models.__name__
+        and obj.__module__ == module.__name__
     }
 
 
@@ -458,12 +475,52 @@ class TestBrowserProfileVocabularyIsClosed:
 
         assert CrawlPolicy(browser_profile={"actions": [{"type": "CLICK", "selector": "#x"}]})
 
-    @pytest.mark.parametrize("key", ["state", "viewport", "resource_mode", "actions"])
-    def test_documented_profile_keys_are_accepted(self, key):
+    @pytest.mark.parametrize("key", sorted(BROWSER_PROFILE_KEYS))
+    def test_every_allowed_profile_key_is_accepted(self, key):
+        """Parametrised over the constant, not over a hand-kept list of keys.
+
+        The list this replaced included ``state``, which nothing in ``app/``
+        reads -- so the test was asserting that a key the service ignores is
+        accepted, which is the inert-input failure the closure exists to
+        prevent. Deriving the parameters from the constant means a key added to
+        it has to earn a reader, and one removed cannot keep a test alive.
+        """
         from app.api_models import CrawlPolicy
 
-        value = [] if key == "actions" else "desktop"
+        value: object = [] if key == "actions" else "desktop"
         assert CrawlPolicy(browser_profile={key: value}).browser_profile[key] == value
+
+    def test_no_allowed_profile_key_is_inert(self):
+        """Every allowed key must have a reader, or allowing it is a lie.
+
+        ``state`` was allowed and read nowhere, so a caller who set it got no
+        error and no effect -- indistinguishable from a key that worked. This
+        asserts the property directly: each key appears as a literal read
+        somewhere in ``app/``.
+        """
+        import ast
+        import pathlib
+
+        app_root = pathlib.Path(__file__).resolve().parents[2] / "app"
+        reads: set[str] = set()
+        for path in app_root.rglob("*.py"):
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+            for node in ast.walk(tree):
+                if not isinstance(node, ast.Call):
+                    continue
+                # profile.get("k") puts the key first; _profile_int(profile, "k", …)
+                # puts the profile first. Both read a literal key, but not from the
+                # same argument position.
+                func = node.func
+                name = func.attr if isinstance(func, ast.Attribute) else getattr(func, "id", "")
+                if name != "get" and not name.startswith("_profile_"):
+                    continue
+                args = node.args[0:1] if name == "get" else node.args[1:2]
+                for arg in args:
+                    if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
+                        reads.add(arg.value)
+        inert = sorted(BROWSER_PROFILE_KEYS - reads)
+        assert not inert, f"allowed but never read, so inert: {inert}"
 
     @pytest.mark.parametrize("typo", ["viewports", "resourceMode", "user_agent_family", "exec_js"])
     def test_an_unknown_profile_key_is_refused(self, typo):
@@ -472,3 +529,154 @@ class TestBrowserProfileVocabularyIsClosed:
 
         with pytest.raises(ValidationError):
             CrawlPolicy(browser_profile={typo: "x"})
+
+
+class TestBrowserProfileActionsAreWellFormed:
+    """A recognised action name is not the same as a usable action.
+
+    The vocabulary closure proves a name is one the renderer implements. It
+    proved nothing about whether the action carries what that name needs: the
+    dispatch chain guards its target-taking branches with ``and selector``, so
+    a ``click`` arriving without a selector falls past every branch and returns
+    having done nothing. The request returns 200 with a page that loaded and no
+    interaction performed -- the caller cannot tell that from success.
+
+    Two shapes reach that outcome, and both were accepted:
+
+    - ``{"actions": 5}``. The closure iterated the value directly, so a
+      non-iterable raised ``TypeError``. Pydantic wraps ``ValueError`` into a
+      422 and does not wrap ``TypeError``, so the exception escaped the request
+      handler entirely -- one caller typo became an HTTP 500 on every policy-
+      bearing endpoint, and an uncaught traceback over MCP.
+    - ``{"actions": [{"type": "click"}]}``, which validated cleanly and then
+      did nothing at all.
+    """
+
+    def test_actions_must_be_a_list(self):
+        """A non-list is a caller mistake to report, not a crash to propagate."""
+        from app.api_models import CrawlPolicy
+
+        with pytest.raises(ValidationError):
+            CrawlPolicy(browser_profile={"actions": 5})
+
+    def test_a_bare_string_is_not_a_list_of_actions(self):
+        from app.api_models import CrawlPolicy
+
+        with pytest.raises(ValidationError):
+            CrawlPolicy(browser_profile={"actions": "click"})
+
+    @pytest.mark.parametrize("action_type", sorted(ACTIONS_REQUIRING_SELECTOR))
+    def test_an_action_that_names_a_target_must_carry_one(self, action_type):
+        from app.api_models import CrawlPolicy
+
+        with pytest.raises(ValidationError):
+            CrawlPolicy(browser_profile={"actions": [{"type": action_type}]})
+
+    @pytest.mark.parametrize("action_type", sorted(ALLOWED_BROWSER_ACTION_TYPES - ACTIONS_REQUIRING_SELECTOR))
+    def test_an_action_needing_no_target_still_validates(self, action_type):
+        from app.api_models import CrawlPolicy
+
+        assert CrawlPolicy(browser_profile={"actions": [{"type": action_type}]})
+
+    def test_actions_is_bounded(self):
+        """The key allowlist bounds key COUNT; the values were unbounded.
+
+        Execution is already bounded by the render budget, so this is a parse
+        and memory cost rather than unbounded work -- but a caller can still
+        hand the model a 200,000-element action list, which is the same shape as
+        the unbounded ``urls`` collection the ceiling above already refuses.
+        """
+        from app.api_models import CrawlPolicy
+
+        one = {"type": "click", "selector": "#a"}
+        assert CrawlPolicy(browser_profile={"actions": [one] * MAX_BROWSER_ACTIONS})
+        with pytest.raises(ValidationError):
+            CrawlPolicy(browser_profile={"actions": [one] * (MAX_BROWSER_ACTIONS + 1)})
+
+    async def test_a_broken_actions_value_is_a_422_on_the_wire(self, async_client: httpx.AsyncClient):
+        """The exception has to be one the handler converts, not one it re-raises.
+
+        Asserted on the wire rather than only against the model because the two
+        failure shapes are indistinguishable there: a ``TypeError`` out of a
+        validator surfaces as a 500, a ``ValueError`` as a 422, and only the
+        second is the behaviour this field promises.
+        """
+        response = await async_client.post(
+            "/v1/crawl",
+            json={"url": "https://example.com/", "policy": {"browser_profile": {"actions": 5}}},
+        )
+        assert response.status_code == 422, response.text
+
+
+class TestTheRendererAgreesWithTheVocabulary:
+    """The vocabulary table is only the source of truth if the renderer reads it.
+
+    The closure refuses an action type the renderer does not implement, so the
+    two are one decision that happens to be written twice: once as a table in
+    ``app.constants`` and once as an if/elif chain in the renderer. The previous
+    guard compared the table to a tuple written in this test file, so it was a
+    third copy that could not see the chain at all -- adding a member to the
+    table without adding an ``elif`` reproduced the exact defect the closure
+    exists to prevent, and the test stayed green.
+
+    These read the chain's own AST, so the guard fails when the renderer changes
+    rather than when this file is edited.
+    """
+
+    @staticmethod
+    def _dispatch_chain() -> tuple[set[str], set[str]]:
+        """Return ``(types the chain recognises, of which the ones needing a selector)``.
+
+        Parsed rather than executed: the branches are the contract, and running
+        them would need a live page. ``and selector`` in a branch test is how the
+        chain expresses "this action needs a target", so a branch carrying it is
+        exactly a member of the requiring set.
+        """
+        import ast
+        import inspect
+
+        from app.crawl.strategies.browser_actions import BrowserActionsMixin
+
+        source = inspect.getsource(BrowserActionsMixin._dispatch_action)
+        tree = ast.parse(textwrap.dedent(source))
+        recognised: set[str] = set()
+        requiring: set[str] = set()
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.If):
+                continue
+            test = node.test
+            # A guarded branch reads ``action_type == "click" and selector``, so its
+            # test is a BoolOp whose first value is the comparison; an unguarded one
+            # reads ``action_type == "wait_seconds"`` and the test IS the comparison.
+            guarded = isinstance(test, ast.BoolOp)
+            comparison = test.values[0] if guarded else test
+            if not (
+                isinstance(comparison, ast.Compare)
+                and len(comparison.comparators) == 1
+                and isinstance(comparison.comparators[0], ast.Constant)
+                and isinstance(comparison.comparators[0].value, str)
+                and isinstance(comparison.left, ast.Name)
+                and comparison.left.id == "action_type"
+            ):
+                continue
+            name = comparison.comparators[0].value
+            recognised.add(name)
+            if guarded:
+                requiring.add(name)
+        return recognised, requiring
+
+    def test_every_recognised_action_type_is_in_the_table(self):
+        recognised, _ = self._dispatch_chain()
+        assert recognised == set(BROWSER_ACTION_TYPES), (
+            f"the chain and the table disagree: table-only={set(BROWSER_ACTION_TYPES) - recognised}, "
+            f"chain-only={recognised - set(BROWSER_ACTION_TYPES)}"
+        )
+
+    def test_the_requiring_set_is_the_chain_own_guard(self):
+        """``ACTIONS_REQUIRING_SELECTOR`` must be what the chain skips without."""
+        _, requiring = self._dispatch_chain()
+        declared = set(ACTIONS_REQUIRING_SELECTOR)
+        assert requiring == declared, (
+            "the chain's ``and selector`` guards and the model's requirement set disagree: "
+            f"model-only={declared - requiring}, chain-only={requiring - declared}"
+        )
