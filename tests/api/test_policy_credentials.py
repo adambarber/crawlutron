@@ -127,3 +127,87 @@ class TestPayloadPolicy:
             _payload_policy(
                 {"policy": {"credentials": {"https://a.example": {"kind": "carrier"}}}}, MODEL_DEFAULTS_TIER
             )
+
+    def test_two_keys_collapsing_to_one_origin_are_rejected(self):
+        """Two spellings of one origin must not silently become one credential.
+
+        Both keys canonicalize to ``https://a.example``, so the comprehension that
+        builds the canonical map keeps the last and drops the first. The caller
+        then holds a policy that lists two credentials and has one, and nothing
+        at either end says so -- the same failure the sibling validator exists to
+        prevent when it REJECTS a path-scoped key, since that path would silently
+        widen a credential rather than silently narrow the set.
+
+        Asserted at the MODEL boundary because that is where the detail lives.
+        Over HTTP FastAPI validates ``CrawlRequest.policy`` as this model before
+        the handler runs, so this message is what a caller is shown. The bare-code
+        edges (MCP, direct caller) keep the code, exactly as they do for every
+        other validation error here -- so the code is asserted separately below
+        rather than pretending the detail rides along on edges that drop it.
+        """
+        with pytest.raises(ValueError) as exc:
+            CrawlPolicy(
+                credentials={
+                    "HTTPS://a.example": {"kind": "bearer", "token": "first"},
+                    "https://a.example:443": {"kind": "bearer", "token": "second"},
+                }
+            )
+        message = str(exc.value)
+        assert "HTTPS://a.example" in message, message
+        assert "https://a.example:443" in message, message
+
+    def test_a_colliding_credential_map_is_rejected_on_the_wire_path(self):
+        """The wire path must reject too, not repair the collision away.
+
+        ``read_policy`` is total and repairs a policy field by field. A collision
+        is not a bad single field -- it is a disagreement BETWEEN two fields -- so
+        if this ever became repairable, the repair would drop one of the two
+        credentials and return a policy that validated. That is the original bug
+        with an extra step, so the wire path is asserted to reject outright.
+        """
+        with pytest.raises(ValueError, match="invalid_policy_credentials"):
+            _payload_policy(
+                {
+                    "policy": {
+                        "credentials": {
+                            "HTTPS://a.example": {"kind": "bearer", "token": "first"},
+                            "https://a.example:443": {"kind": "bearer", "token": "second"},
+                        }
+                    }
+                },
+                MODEL_DEFAULTS_TIER,
+            )
+
+    def test_distinct_origins_still_validate(self):
+        """The collision check must not reject a policy that merely looks similar."""
+        policy = _payload_policy(
+            {
+                "policy": {
+                    "credentials": {
+                        "https://a.example": {"kind": "bearer", "token": "one"},
+                        "https://b.example": {"kind": "bearer", "token": "two"},
+                        "https://a.example:8443": {"kind": "bearer", "token": "three"},
+                    }
+                }
+            },
+            MODEL_DEFAULTS_TIER,
+        )
+        assert set(policy.credentials) == {
+            "https://a.example",
+            "https://b.example",
+            "https://a.example:8443",
+        }
+
+    def test_an_already_canonical_policy_revalidates_without_collision(self):
+        """Re-validating a validated policy is how a policy round-trips through storage.
+
+        If the collision check compared keys against each other rather than
+        canonical forms, a policy that was already canonical would report itself
+        as colliding with itself on every reload.
+        """
+        once = _payload_policy(
+            {"policy": {"credentials": {"https://a.example": {"kind": "bearer", "token": "t"}}}},
+            MODEL_DEFAULTS_TIER,
+        )
+        twice = _payload_policy({"policy": {"credentials": dict(once.credentials)}}, MODEL_DEFAULTS_TIER)
+        assert dict(twice.credentials) == dict(once.credentials)

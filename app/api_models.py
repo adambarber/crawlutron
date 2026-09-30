@@ -503,37 +503,59 @@ class CrawlPolicy(BaseModel):
     def _canonicalize_credential_origins(cls, value: Any) -> Any:
         """Key every credential by its canonical origin, at the read edge.
 
-        The lookup at request time is a plain dict hit on
-        ``app.crawl.credentials.origin_of(url)``, which lowercases the scheme
-        and host and drops a default port. The canonicality rule itself lives
-        in ``origin_of`` -- the same function every lookup uses, so one rule at
-        one site -- and this is the only place it is applied to a stored key.
+                The lookup at request time is a plain dict hit on
+                ``app.crawl.credentials.origin_of(url)``, which lowercases the scheme
+                and host and drops a default port. The canonicality rule itself lives
+                in ``origin_of`` -- the same function every lookup uses, so one rule at
+                one site -- and this is the only place it is applied to a stored key.
 
-        Two spellings of one origin are canonicalized; a key that is not an
-        origin is REJECTED rather than narrowed. ``https://a.example/secret``
-        is a path-scoped key, and canonicalizing it to ``https://a.example``
-        would silently widen the credential from one path to every request to
-        that host, which is the outcome this rejection exists to prevent. So only the
-        parts that cannot change what the credential reaches are normalized --
-        scheme and host case, and a default port -- and a key that narrows the
-        scope is reported to the caller rather than rewritten into a broader
-        one.
+                Two spellings of one origin are canonicalized; a key that is not an
+                origin is REJECTED rather than narrowed. ``https://a.example/secret``
+                is a path-scoped key, and canonicalizing it to ``https://a.example``
+                would silently widen the credential from one path to every request to
+                that host, which is the outcome this rejection exists to prevent. So only the
+                parts that cannot change what the credential reaches are normalized --
+                scheme and host case, and a default port -- and a key that narrows the
+                scope is reported to the caller rather than rewritten into a broader
+                one.
 
-        The distinction matters because rejecting both was a real failure in
-        the other direction: a caller who wrote ``HTTPS://Private.Example:443/``
-        is naming the origin they meant, and rejection left them with a
-        credential that validated, appeared in their policy, and then never
-        applied to the request it was for. Nothing said so at either end.
+                The distinction matters because rejecting both was a real failure in
+                the other direction: a caller who wrote ``HTTPS://Private.Example:443/``
+                is naming the origin they meant, and rejection left them with a
+                credential that validated, appeared in their policy, and then never
+                applied to the request it was for. Nothing said so at either end.
+        Two keys that canonicalize to the SAME origin are rejected, for the same
+                reason a path-scoped key is: the comprehension that builds the canonical
+                map keeps the last and drops the first, so the caller ends up holding a
+                policy that lists two credentials and has one, and nothing said so at
+                either end. A credential the caller believes is applied is worse than one
+                rejected here -- the request would simply go out unauthenticated.
+
+                The error names both spellings, because "duplicate origin" alone leaves
+                the caller to work out which two of their own keys collided.
+
+                Each key is canonicalized ONCE, into the map that is returned, so the form
+                a key is checked against is by construction the form it is stored under;
+                there is no second computation that could disagree with the first.
         """
         if not isinstance(value, dict):
             return value
         from app.crawl.credentials import origin_of
 
-        for key in value:
+        canonical: dict[str, Any] = {}
+        spelling: dict[str, str] = {}
+        for key, credential in value.items():
             if not isinstance(key, str) or _narrows_credential_scope(key):
                 raise ValueError("credentials key must be a bare origin: scheme://host[:port]")
-            origin_of(key)
-        return {origin_of(key): credential for key, credential in value.items()}
+            origin = origin_of(key)
+            if origin in canonical:
+                raise ValueError(
+                    f"credentials keys {spelling[origin]!r} and {key!r} are both origin "
+                    f"{origin!r}; one would silently replace the other"
+                )
+            canonical[origin] = credential
+            spelling[origin] = key
+        return canonical
 
     @field_validator("headers")
     @classmethod
