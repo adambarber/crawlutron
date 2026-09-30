@@ -1,0 +1,326 @@
+"""One declaration per property: the rule, its proof, and the two tests they generate.
+
+Every property in this repository was written the same way: a ``_something_offenders``
+function that walks the AST and returns offender strings, a ``test_something`` that
+asserts the list is empty, and a ``test_something_detector_bites`` that feeds the
+detector a snippet of deliberately wrong code and asserts it fires. That is 71
+detectors, 93 bite proofs and roughly 10,900 lines of invariant test, and the three
+halves drift apart: a detector can be rewritten so the bite no longer fails, and
+the bite is a separate function that nothing forces anyone to update.
+
+A :class:`Rule` collapses the triple into one declaration, and the two tests are
+generated from the registry rather than written. Two consequences, both of which
+are the point:
+
+* **A rule cannot be registered without a bite proof.** ``bite`` has no default,
+  so ``Rule(name=..., find=...)`` raises ``TypeError`` at import time. The
+  invariant that every detector is known to be capable of firing is enforced by
+  the type, not by a reviewer remembering to ask. This is the failure the repo
+  actually had: bite proofs existed, but nothing tied a detector to one.
+* **The tests cannot drift from the rules.** There is one ``test_no_rule_violations``
+  and one ``test_every_rule_bites``, parametrized over the registry. Renaming a
+  rule or adding one changes the parametrization; there is no hand-written gate to
+  leave behind pointing at the old name.
+
+The bite proof parses one small synthetic source. It deliberately does not mutate
+production code: a test that edits ``app/`` to prove a detector works cannot run
+under ``-n auto`` alongside the suite that is reading those same files, and the
+detector's job is to decide about an AST, not to be surprised by a file's name.
+"""
+
+from __future__ import annotations
+
+import ast
+import pathlib
+from collections.abc import Callable, Iterable, Iterator, Sequence
+from dataclasses import dataclass, field
+
+from tests.chokepoint_walks import REPO_ROOT, SANCTIONED, app_trees
+from tests.matching import Matcher
+
+__all__ = [
+    "Rule",
+    "Registry",
+    "rule_ids",
+    "registry_ids",
+]
+
+#: Where a bite proof's synthetic module is pretended to live. The path is part of
+#: what a detector may legitimately inspect (a rule scoped to one directory reads
+#: it), so it has to name a real directory rather than a bare basename, and it has
+#: to be absolute because offenders are reported relative to the repo root.
+_SYNTHETIC = REPO_ROOT / "app" / "_synthetic.py"
+
+Detector = Callable[[ast.Module, pathlib.Path], Iterable[str]]
+
+
+@dataclass(frozen=True)
+class Bites:
+    """A violating snippet whose single offender must name ``marker``.
+
+    The strongest of the three proof shapes: it fires *once*, and what it says is
+    checked too. A detector that matches everything satisfies "it fired", so
+    requiring the count to be one and the message to carry a specific word is
+    what turns a proof into a specification. This is the form to reach for when a
+    rule has a natural single finding; the bare :class:`str` form is for the
+    sources that are only ever about firing at all.
+    """
+
+    source: str
+    marker: str
+
+
+@dataclass(frozen=True)
+class Trips:
+    """A violating snippet that must produce exactly ``count`` offenders.
+
+    For a source that is wrong in more than one place: a ``uuid4()`` call *and*
+    the ``.hex`` slice on it are two findings, not one. A count of zero is
+    rejected — "must not fire" already has a spelling (:attr:`Rule.clean`), and
+    allowing a second one for the same fact lets the claim drift between forms
+    and turns a mis-edited count into a passing proof.
+    """
+
+    source: str
+    count: int
+
+
+Proof = Bites | Trips | str
+
+
+@dataclass(frozen=True)
+class Rule(Matcher):
+    """One property, the detector that decides it, and the proof it can fire.
+
+    :param find: ``(tree, path) -> offender strings``. An empty iterable means the
+        property holds for that file.
+    :param bite: ``() -> proof`` (or several) for code that **violates** the
+        property: a bare source, a :class:`Bites` marker check, or a :class:`Trips`
+        count. Required, with no default, so a rule without a proof cannot be
+        constructed.
+    :param clean: ``() -> lookalikes`` that resemble a violation but must be spared.
+        Optional, and omitted far more often than not — but a rule with a broad
+        trigger (anything containing an ``or``) needs it, and the declaration is the
+        only place that need can be recorded.
+    :param excludes: basenames sanctioned as the rule's own owner, excluded from the
+        clean check for the same reason the owner of a chokepoint is.
+    :param summary: one line naming the property, used in failure text. Prefer the
+        property sentence to the mechanism: "every URL egress door applies the
+        refusal" tells a reader what is wrong, "calls safe_public_url_or_none"
+        tells them how it was decided.
+    """
+
+    name: str
+    find: Detector
+    bite: Callable[[], Proof | Sequence[Proof]]
+    summary: str = ""
+    excludes: frozenset[str] = field(default=SANCTIONED)
+    clean: Callable[[], Sequence[str]] | None = None
+
+    def offenders(self, tree: ast.Module, path: pathlib.Path) -> list[str]:
+        return list(self.find(tree, path))
+
+    def matches(self, actual: tuple[ast.Module, pathlib.Path]) -> bool:
+        """A ``(tree, path)`` pair satisfies the rule when nothing fires on it."""
+        tree, path = actual
+        return not self.offenders(tree, path)
+
+    def describe(self, actual: tuple[ast.Module, pathlib.Path]) -> str:
+        tree, path = actual
+        found = self.offenders(tree, path)
+        wanted = self.summary or self.name
+        return f"{path}: expected {wanted}, found {len(found)}: {'; '.join(found)}"
+
+    # -- the clean half ---------------------------------------------------
+
+    def violations(self, trees: Sequence[tuple[pathlib.Path, ast.Module]]) -> list[str]:
+        """Every offender across ``trees``, each naming the file it came from.
+
+        The rule's own ``excludes`` are applied here rather than only by
+        :meth:`scan`. A caller that hands a rule a hand-built list would otherwise
+        be able to drive it outside its sanctioned scope, which would make the
+        scope a property of the call site instead of of the rule -- and a scope
+        that lives at the call site is a scope that drifts.
+        """
+        found: list[str] = []
+        for path, tree in trees:
+            if path.name in self.excludes:
+                continue
+            found.extend(self.offenders(tree, path))
+        return found
+
+    def check_clean(self, trees: Sequence[tuple[pathlib.Path, ast.Module]]) -> None:
+        """Assert the property holds across every tree not sanctioned for this rule."""
+        found = self.violations(trees)
+        if not found:
+            return
+        wanted = self.summary or self.name
+        raise AssertionError(f"{len(found)} violation(s) of {self.name} ({wanted}):\n  " + "\n  ".join(found))
+
+    def scan(self) -> None:
+        """Check the property across the real ``app/`` tree for this rule's scope."""
+        self.check_clean(app_trees(exclude=self.excludes))
+
+    # -- the bite half ----------------------------------------------------
+
+    def proofs(self) -> tuple[Proof, ...]:
+        """Every violating snippet this rule claims its detector rejects.
+
+        A rule usually has more than one way to be wrong — the same fallback
+        spelled against the alias and against the root function, say — and a
+        single proof would leave the second spelling unwatched.
+        """
+        if not callable(self.bite):
+            raise TypeError(
+                f"{self.name}: bite must be a callable returning a proof, not a "
+                f"{type(self.bite).__name__}. It is a thunk so that a registry of "
+                f"seventy-odd rules does not build every proof at import time."
+            )
+        produced = self.bite()
+        if isinstance(produced, (str, Bites, Trips)):
+            return (produced,)
+        return tuple(produced)
+
+    def looksalikes(self) -> tuple[str, ...]:
+        """Code that resembles a violation but must not be flagged.
+
+        The half of the proof that stops a detector crying wolf. Without it a
+        rule can pass its firing cases by flagging every ``or`` in the tree, and
+        the cost of that rule being wrong is paid in false positives until
+        somebody deletes it.
+        """
+        return tuple(self.clean()) if self.clean is not None else ()
+
+    def _parse(self, source: str, *, kind: str) -> ast.Module:
+        try:
+            return ast.parse(source)
+        except SyntaxError as exc:
+            raise AssertionError(
+                f"{self.name}: its {kind} proof does not parse ({exc}). A proof that cannot "
+                f"be parsed proves nothing, so this is a failure of the proof, not of the rule."
+            ) from exc
+
+    def _check_one(self, proof: Proof) -> None:
+        """Run a single proof and explain, in the rule's own words, what it wanted."""
+        if isinstance(proof, str):
+            found = self.offenders(self._parse(proof, kind="bite"), _SYNTHETIC)
+            if found:
+                return
+            raise AssertionError(
+                f"{self.name}: the bite proof did NOT fire on {proof!r}. This rule is "
+                f"enforcing nothing. Either the detector is too weak or the proof no "
+                f"longer violates the property."
+            )
+
+        if isinstance(proof, Bites):
+            found = self.offenders(self._parse(proof.source, kind="bite"), _SYNTHETIC)
+            if not found:
+                raise AssertionError(
+                    f"{self.name}: the bite proof did NOT fire on {proof.source!r}. This rule "
+                    f"is enforcing nothing. Either the detector is too weak or the proof no "
+                    f"longer violates the property."
+                )
+            if len(found) != 1:
+                raise AssertionError(
+                    f"{self.name}: expected exactly 1 offender for {proof.source!r}, got "
+                    f"{len(found)}: {found!r}. A detector that fires several times on one "
+                    f"shape is usually over-broad, and the lookalike proofs exist to catch "
+                    f"that — check them before widening this rule."
+                )
+            if proof.marker not in found[0]:
+                raise AssertionError(
+                    f"{self.name}: the offender for {proof.source!r} does not say "
+                    f"{proof.marker!r} — got {found[0]!r}. A proof that only checks firing "
+                    f"is satisfied by a detector whose message has decayed into a generic "
+                    f"string, which is how a gate stops explaining itself without failing."
+                )
+            return
+
+        if proof.count < 1:
+            raise ValueError(
+                f"{self.name}: Trips({proof.source!r}) = {proof.count}: a source that must "
+                f"not fire belongs in clean, not in trips."
+            )
+        found = self.offenders(self._parse(proof.source, kind="bite"), _SYNTHETIC)
+        if len(found) != proof.count:
+            raise AssertionError(
+                f"{self.name}: expected {proof.count} offenders for {proof.source!r}, got "
+                f"{len(found)}: {found!r}"
+            )
+
+    def check_bites(self) -> None:
+        """Assert the detector rejects what the rule forbids and spares what it resembles.
+
+        The half that makes the rule worth having. Without it a detector that
+        silently matches nothing — a typo in a callee name, a walk that returns
+        early — reads as a passing property, which is the worst way for a gate to
+        lie: green, and enforcing nothing.
+        """
+        for proof in self.proofs():
+            self._check_one(proof)
+        for source in self.looksalikes():
+            found = self.offenders(self._parse(source, kind="clean"), _SYNTHETIC)
+            if found:
+                raise AssertionError(
+                    f"{self.name}: fired on a lookalike that must be spared: {source!r} -> "
+                    f"{'; '.join(found)}. A detector that flags innocent code gets deleted, "
+                    f"and the property it was written to hold goes with it."
+                )
+
+    def __repr__(self) -> str:
+        return f"Rule({self.name!r})"
+
+
+@dataclass(frozen=True)
+class Registry:
+    """A named collection of rules, so a file can own one without owning the tests."""
+
+    rules: tuple[Rule, ...]
+
+    def scan(self) -> None:
+        for rule in self.rules:
+            rule.scan()
+
+    def check_all_clean(self) -> None:
+        """Every rule at once, so one run reports every violation rather than the first.
+
+        Running rules in a loop inside a single test rather than relying on
+        parametrization is deliberate: a rule that fails should not hide the other
+        twenty that also fail. ``raise`` on the first would make fixing a broken
+        tree a sequence of one-line changes instead of one pass.
+        """
+        failures: list[str] = []
+        for rule in self.rules:
+            found = rule.violations(app_trees(exclude=rule.excludes))
+            if found:
+                failures.append(f"  {rule.name}: {len(found)} violation(s)\n    " + "\n    ".join(found))
+        if failures:
+            raise AssertionError(f"{len(failures)} rule(s) violated:\n" + "\n".join(failures))
+
+    def check_all_bite(self) -> None:
+        failures: list[str] = []
+        for rule in self.rules:
+            try:
+                rule.check_bites()
+            except AssertionError as exc:
+                failures.append(f"  {exc}")
+        if failures:
+            raise AssertionError(
+                f"{len(failures)} rule(s) have no working bite proof:\n" + "\n".join(failures)
+            )
+
+    def __iter__(self) -> Iterator[Rule]:
+        return iter(self.rules)
+
+    def __len__(self) -> int:
+        return len(self.rules)
+
+
+def rule_ids(rule: Rule) -> str:
+    """pytest id for one rule: its name, plus its bite when that is what failed."""
+    return rule.name
+
+
+def registry_ids(registry: Registry) -> list[str]:
+    """pytest ids for a whole registry."""
+    return [rule.name for rule in registry]

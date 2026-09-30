@@ -10,6 +10,7 @@ import ast
 import pathlib
 from collections.abc import Mapping, Sequence
 from contextvars import ContextVar
+from functools import cache
 from pathlib import Path
 from typing import Any
 
@@ -1011,7 +1012,22 @@ def _bool_env_offenders(tree: ast.AST, path: pathlib.Path, prop: Property) -> li
     return offenders
 
 
+@cache
 def _source_and_literals(node: ast.AST) -> tuple[str, str]:
+    """Unparse ``node``'s own subtree once, for the signal predicates below.
+
+    Cached on the node, and the cache is the point. ``_robot_signal`` asks this
+    question of every node in every module, and ``_parser_definition`` asks it
+    again about the same nodes; without the cache each node's whole subtree is
+    re-serialised by each caller. The cost is superlinear in tree depth rather
+    than in file count, because a nested node's subtree is unparsed again by
+    every ancestor that asks -- which is what made the robots-policy sweep the
+    most expensive gate in the suite rather than one of dozens of equal ones.
+
+    Keying on the node is safe without an explicit identity: ``ast.AST`` defines
+    no ``__eq__``, so hashing is by object identity, and the trees these nodes
+    belong to are already held alive for the process by the parsed-tree cache.
+    """
     nodes = local_subtree(node)
     source = (
         " ".join(ast.unparse(child) for child in nodes[1:]).lower()

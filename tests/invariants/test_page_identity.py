@@ -30,9 +30,6 @@ import ast
 import pathlib
 
 from tests.chokepoint_walks import (
-    REPO_ROOT,
-    app_offenders,
-    assert_detector,
     enclosing_function,
     nodes_of,
     offender_at,
@@ -40,6 +37,7 @@ from tests.chokepoint_walks import (
     parent_map,
     resolved_call_name,
 )
+from tests.rules import Registry, Rule
 
 _OWNER = "durable_page_identity"
 
@@ -98,12 +96,32 @@ def _names_canonical_call(tree: ast.AST, node: ast.AST) -> bool:
     )
 
 
+PAGE_IDENTITY_FALLBACK = Rule(
+    name="page-identity-fallback",
+    find=_inline_identity_fallbacks,
+    summary=(
+        f"identity is computed as `<canonical function>(...) or <raw>` at a call "
+        f"site instead of through {_OWNER}()"
+    ),
+    bite=lambda: (
+        "def f(u, hp):\n    return canonical_page_identity(u, host_policy=hp) or u\n",
+        # The same rule written against the root function, which is how
+        # extraction.py and request_pipeline.py spelled it.
+        "def f(u, hp):\n    return safe_public_url_or_none(u, policy=hp) or u\n",
+    ),
+    clean=lambda: (
+        # An `or` over something that cannot be None is a different rule.
+        "def f(a, b):\n    return a or b\n",
+        # The owner itself is where the fallback belongs.
+        "def durable_page_identity(u, hp):\n    return _raw(u) or u\n",
+    ),
+)
+
+RULES = Registry((PAGE_IDENTITY_FALLBACK,))
+
+
 def test_page_identity_fallback_is_not_written_out_at_call_sites():
-    offenders = app_offenders(_inline_identity_fallbacks)
-    assert not offenders, (
-        "identity is computed as `<canonical function>(...) or <raw>` at a call "
-        f"site instead of through {_OWNER}():\n  " + "\n  ".join(offenders)
-    )
+    RULES.check_all_clean()
 
 
 def test_page_identity_fallback_detector_bites():
@@ -111,28 +129,10 @@ def test_page_identity_fallback_detector_bites():
 
     Without the clean case this either flags some unrelated ``or`` -- a detector
     that cries wolf is a detector that gets deleted -- and without the firing
-    case it is a gate that proves nothing.
+    case it is a gate that proves nothing. Both are declared on the rule, so
+    neither can be dropped without the declaration failing to build.
     """
-    assert_detector(
-        _inline_identity_fallbacks,
-        path=REPO_ROOT / "app" / "_synthetic.py",
-        fires={
-            "def f(u, hp):\n    return canonical_page_identity(u, host_policy=hp) or u\n": (
-                "inline-identity-fallback"
-            ),
-            # The same rule written against the root function, which is how
-            # extraction.py and request_pipeline.py spelled it.
-            "def f(u, hp):\n    return safe_public_url_or_none(u, policy=hp) or u\n": (
-                "inline-identity-fallback"
-            ),
-        },
-        clean=(
-            # An `or` over something that cannot be None is a different rule.
-            "def f(a, b):\n    return a or b\n",
-            # The owner itself is where the fallback belongs.
-            "def durable_page_identity(u, hp):\n    return _raw(u) or u\n",
-        ),
-    )
+    RULES.check_all_bite()
 
 
 def test_durable_page_identity_returns_the_stored_form():
