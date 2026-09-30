@@ -577,6 +577,34 @@ def attribute_calls(tree: ast.AST) -> Iterator[tuple[ast.Call, ast.Attribute]]:
             yield node, node.func
 
 
+def string_argument(call: ast.Call, index: int = 0) -> str | None:
+    """The ``index``-th positional argument of ``call`` if it is a string literal, else ``None``.
+
+    Half the detectors in this tree are "find the call and look at what it was
+    handed" -- ``x.get("selector")``, ``conn.execute("PRAGMA journal_mode=...")``,
+    ``foo("some_name")``. Each wrote out the same four lines to do it:
+
+        and node.args
+        and isinstance(node.args[0], ast.Constant)
+        and isinstance(node.args[0].value, str)
+
+    Which is three lines of clone per detector and, worse, four chances to spell
+    the narrowing slightly differently. Detectors here are also expected to prove
+    they bite, and a four-line guard in the middle of one is a thing to retype
+    rather than reason about.
+
+    ``None`` for a non-literal rather than a truthiness check on the value,
+    because ``""`` is a legitimate string argument and a caller asking "is this
+    the empty string?" should not have to defeat this helper to ask it.
+    """
+    if len(call.args) <= index:
+        return None
+    argument = call.args[index]
+    if isinstance(argument, ast.Constant) and isinstance(argument.value, str):
+        return argument.value
+    return None
+
+
 def single_target_name_assignments(
     nodes: Iterable[ast.AST],
     value_predicate: Callable[[ast.expr], bool],

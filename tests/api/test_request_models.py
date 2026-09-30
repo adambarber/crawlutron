@@ -867,21 +867,20 @@ class TestRequestProfileValueTypesMatchTheHeaderMapTheyCorrupt:
       builder -- the same shape as #58, one module over.
     """
 
-    def test_a_non_string_pool_entry_is_refused(self):
-        from app.api_models import CrawlPolicy
-
-        for key in ("user_agents", "accept_languages"):
-            with pytest.raises(ValidationError, match=key):
-                CrawlPolicy(request_profile={key: [{"x": 1}]})
-            with pytest.raises(ValidationError, match=key):
-                CrawlPolicy(request_profile={key: [None]})
-
     def test_a_pool_must_be_a_list_of_strings(self):
+        """One test over the two shapes, not one per shape.
+
+        ``user_agents`` and ``accept_languages`` are the same reader reached
+        through two keys, so a case that failed for one failed for the other;
+        splitting them produced two tests with a duplicated body and no way to
+        add a third key without a third copy.
+        """
         from app.api_models import CrawlPolicy
 
         for key in ("user_agents", "accept_languages"):
-            with pytest.raises(ValidationError, match=key):
-                CrawlPolicy(request_profile={key: "Mozilla"})
+            for bad in ({"a_string": "Mozilla"}, {"an_entry": [{"x": 1}]}, {"a_none_entry": [None]}):
+                with pytest.raises(ValidationError, match=key):
+                    CrawlPolicy(request_profile={key: bad})
 
     def test_a_pool_at_the_ceiling_is_accepted(self):
         from app.api_models import CrawlPolicy
@@ -965,22 +964,14 @@ class TestBrowserActionKeysAreClosed:
         import ast
 
         from app.constants import BROWSER_ACTION_KEYS
-        from tests.chokepoint_walks import STRATEGIES_DIR
+        from tests.chokepoint_walks import STRATEGIES_DIR, attribute_calls, string_argument
 
         source = (STRATEGIES_DIR / "browser_actions.py").read_text()
         read: set[str] = set()
-        for node in ast.walk(ast.parse(source)):
-            if (
-                isinstance(node, ast.Call)
-                and isinstance(node.func, ast.Attribute)
-                and node.func.attr == "get"
-                and isinstance(node.func.value, ast.Name)
-                and node.func.value.id == "action"
-                and node.args
-                and isinstance(node.args[0], ast.Constant)
-                and isinstance(node.args[0].value, str)
-            ):
-                read.add(node.args[0].value)
+        for node, func in attribute_calls(ast.parse(source)):
+            if func.attr == "get" and isinstance(func.value, ast.Name) and func.value.id == "action":
+                read.add(string_argument(node))
+        read.discard(None)
 
         assert read == set(BROWSER_ACTION_KEYS), (
             f"the chain and the table disagree: chain-only={read - set(BROWSER_ACTION_KEYS)}, "

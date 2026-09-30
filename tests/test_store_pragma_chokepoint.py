@@ -17,6 +17,7 @@ from tests.chokepoint_walks import (
     attribute_calls,
     nodes_of,
     single_target_name_assignments,
+    string_argument,
 )
 
 
@@ -27,13 +28,8 @@ def _pragma_exec_offenders() -> list[str]:
         if path.name == "sqlite_store.py":
             continue
         for node, func in attribute_calls(tree):
-            if (
-                func.attr == "execute"
-                and node.args
-                and isinstance(node.args[0], ast.Constant)
-                and isinstance(node.args[0].value, str)
-                and "pragma" in node.args[0].value.lower()
-            ):
+            sql = string_argument(node) if func.attr == "execute" else None
+            if sql is not None and "pragma" in sql.lower():
                 found.append(f"{path.name}:{node.lineno}")
     return found
 
