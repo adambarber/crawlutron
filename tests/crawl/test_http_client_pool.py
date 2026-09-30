@@ -43,8 +43,7 @@ class TestPendingClientCloseCap:
         rather than scheduled for close via ``asyncio.ensure_future``. The drop path
         must work without a running event loop (sync tests / shutdown paths) so
         any attempt to schedule a future here would either raise or schedule on
-        the wrong loop, silently leaking the sockets (adversarial review
-        F-pending-client-close).
+        the wrong loop, silently leaking the sockets.
         """
         from unittest.mock import MagicMock
 
