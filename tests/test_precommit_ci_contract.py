@@ -11,8 +11,8 @@ from pathlib import Path
 import pytest
 import yaml
 
-import tests._jscpd_gate as gate
-from tests._executables import BASH, GIT, require_executable, require_repo_tool
+from scripts import jscpd_gate as gate
+from scripts.executables import BASH, GIT, require_executable, require_repo_tool
 
 SERVICE_ROOT = Path(__file__).resolve().parents[1]
 CONFIG_PATH = SERVICE_ROOT / ".pre-commit-config.yaml"
@@ -48,6 +48,11 @@ ERREXIT_SHELL = "bash -e {0}"
 ENFORCEMENT_INPUTS = (
     "app/settings.py",
     "tests/test_jscpd_gate.py",
+    # The duplication gate's own implementation. A commit that edits it changes
+    # what every root is measured against, so it belongs beside the config that
+    # names the floor -- the same "the thing that decides cannot itself be the
+    # change that skips the check" case `scripts/gate` is named for below.
+    "scripts/jscpd_gate.py",
     "scripts/module_graph.py",
     # The Makefile is a gate entry point: `make lint` and `make typecheck` run
     # hooks out of the config. A commit that edits it can silently retarget or
@@ -128,7 +133,7 @@ QUOTED_SECOND_JSCPD_HOOK = (
     "repos:\n"
     "  - repo: local\n"
     "    hooks:\n"
-    + _fixture_hook("jscpd", "jscpd", ".venv/bin/python tests/_jscpd_gate.py all")
+    + _fixture_hook("jscpd", "jscpd", ".venv/bin/python -m scripts.jscpd_gate all")
     + _fixture_hook(
         "jscpd-legacy",
         "jscpd legacy",
@@ -436,7 +441,7 @@ def test_ci_runs_every_precommit_hook_through_one_surface() -> None:
     assert all(block.get("stages") == ["pre-commit"] for _, block in hooks)
 
     entry = _entry(jscpd)
-    assert ".venv/bin/python tests/_jscpd_gate.py all" in entry
+    assert ".venv/bin/python -m scripts.jscpd_gate all" in entry
     # The floor is on the command line rather than inside the gate so the
     # command stays the one place a reviewer looks to see what duplication costs.
     # One floor for every root: the split it replaced existed only while a
@@ -463,7 +468,7 @@ def test_ci_runs_every_precommit_hook_through_one_surface() -> None:
     assert all("profiles" not in pair for pair in expectations["pairs"])
 
     assert workflow.count(ENFORCEMENT_COMMAND) == 1
-    assert "tests/_jscpd_gate.py" not in workflow
+    assert "scripts/jscpd_gate.py" not in workflow
     required = _required_needs(workflow)
     assert required == REPORTING_JOBS
     assert "pre-commit==4.6.2" in (SERVICE_ROOT / "requirements-dev.txt").read_text(encoding="utf-8")
@@ -484,7 +489,7 @@ def test_no_ci_job_reruns_a_precommit_hook_command() -> None:
     hook_tools = {
         "python -m ruff check",
         "python -m mypy",
-        "python tests/_jscpd_gate.py",
+        "python -m scripts.jscpd_gate",
         "tests/test_pyright_budget.py",
         "tests/invariants/",
     }
@@ -540,7 +545,7 @@ def assert_no_hook_command_rerun(workflow: str, hook_tools) -> None:
 GATE_TOOL_PATTERNS = (
     r"-m\s+ruff\b",
     r"-m\s+mypy\b",
-    r"_jscpd_gate\.py\b",
+    r"scripts/jscpd_gate\b",
     r"test_pyright_budget\.py\b",
     r"tests/invariants/\b",
 )

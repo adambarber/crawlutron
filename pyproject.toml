@@ -239,7 +239,7 @@ max-statements = 87
                # every seeded fixture and every property sweep trips it
     "S404",    # importing subprocess is not itself the risk. The risks live at
                # the call site, and the two that can be satisfied are: S607 is
-               # satisfied by tests/_executables.require_executable, and S602
+               # satisfied by scripts/executables.require_executable, and S602
                # (shell=True) is enforced here with no exemption at all
     "S603",    # fires whenever a command element is not a string literal, which
                # is every call passing a resolved executable or a runtime path.

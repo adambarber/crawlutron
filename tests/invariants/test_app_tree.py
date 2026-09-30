@@ -303,7 +303,7 @@ def test_app_tree_mutation_detector_bites():
     plausible fix could regress the rule into either a no-op or a false alarm.
     """
     planted = ast.parse(
-        "import _jscpd_gate as gate\n"
+        "from scripts import jscpd_gate as gate\n"
         "\n"
         "def test_migrations_clones_are_not_reported(capsys):\n"
         "    in_migrations = gate.SERVICE_ROOT / 'app' / 'crawl' / 'migrations' / 'zz_probe.py'\n"
@@ -505,7 +505,7 @@ def test_bare_sibling_import_detector_bites():
     path = REPO_ROOT / "tests" / "_synthetic.py"
     planted = ast.parse(
         "from _chain_policies import chain_policy\n"
-        "import _jscpd_gate as gate\n"
+        "import _job_harnesses as harnesses\n"
         "from _policy_factories import _policy\n"
     )
     found = _bare_sibling_import_offenders(planted, path)

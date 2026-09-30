@@ -8,12 +8,12 @@ staircase, and the interesting question is not "how many pairs at 4/39" but
 appears. A file that first appears at 2/20 holds a genuine three-line
 repetition that the current floor cannot see at all.
 
-It scans each root separately, for the same reason `_jscpd_gate` does: jscpd
+It scans each root separately, for the same reason `jscpd_gate` does: jscpd
 reports paths relative to the scan root, so one whole-tree scan's pair set is
 not the union of the per-root pair sets. A sweep run any other way reports a
 frontier for a tool configuration that does not exist.
 
-Run: .venv/bin/python tests/_jscpd_sweep.py [--max-lines 4] [--max-tokens 35]
+Run: .venv/bin/python -m scripts.jscpd_sweep [--max-lines 4] [--max-tokens 35]
      [--min-lines 2] [--min-tokens 20] [--show N] [--json OUT]
 """
 
@@ -23,15 +23,11 @@ import argparse
 import ast
 import concurrent.futures
 import json
-import sys
 import textwrap
 from pathlib import Path
 
-from tests.chokepoint_walks import SCOPE_OPENING_NODES
-
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-
-import tests._jscpd_gate as gate
+from scripts import jscpd_gate as gate
+from scripts.ast_scopes import SCOPE_OPENING_NODES
 
 
 def _scan(root: str, min_lines: int, min_tokens: int) -> tuple[str, list[dict]]:

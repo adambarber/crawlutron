@@ -183,7 +183,7 @@ repos:
         name: jscpd per tree (3 lines / 30 tokens, zero tolerance)
         entry: >-
           bash -c 'for d in "$(git rev-parse --show-toplevel)/docker/browser-crawler" "$(git rev-parse --show-toplevel)"; do [ -x "$d/scripts/gate" ] && exec bash "$d/scripts/gate" "$@"; done; echo "scripts/gate not found in either layout" >&2; exit 1' gate
-          .venv/bin/python tests/_jscpd_gate.py all --fail-on-empty
+          .venv/bin/python -m scripts.jscpd_gate all --fail-on-empty
           --min-lines 3
           --min-tokens 30
           --threshold 0

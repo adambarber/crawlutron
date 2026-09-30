@@ -49,9 +49,10 @@ from pathlib import Path
 
 import pytest
 
-from tests._executables import GIT, require_executable
-from tests._jscpd_sweep import COMPOUND_NODES
-from tests.chokepoint_walks import APP_ROOT, app_trees, is_scope_opener, nodes_of
+from scripts.ast_scopes import is_scope_opener
+from scripts.executables import GIT, require_executable
+from scripts.jscpd_sweep import COMPOUND_NODES
+from tests.chokepoint_walks import APP_ROOT, app_trees, nodes_of
 
 # Every collector in this file reads the same app tree, and `offenders()` is
 # called sixteen times per run (four metrics x the budget test, four x the

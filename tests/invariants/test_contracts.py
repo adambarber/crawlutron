@@ -15,6 +15,7 @@ from pathlib import Path
 import pytest
 
 from app.settings import ENVIRONMENT_FIELD_ALIASES
+from scripts.ast_scopes import is_body_owner
 from tests.chokepoint_walks import (
     APP_ROOT,
     REPO_ROOT,
@@ -29,7 +30,6 @@ from tests.chokepoint_walks import (
     class_defs,
     file_tree,
     functions,
-    is_body_owner,
     name_reads,
     nodes_of,
     offender,

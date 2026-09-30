@@ -10,8 +10,8 @@ from pathlib import Path
 
 import pytest
 
-import tests._jscpd_gate as gate
-from tests._executables import require_repo_tool
+from scripts import jscpd_gate as gate
+from scripts.executables import require_repo_tool
 
 
 def _args(threshold: float = 0) -> argparse.Namespace:

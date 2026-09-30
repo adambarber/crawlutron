@@ -25,7 +25,7 @@ from typing import Any
 
 import yaml
 
-from tests._executables import require_repo_tool
+from scripts.executables import require_repo_tool
 
 SERVICE_ROOT = Path(__file__).resolve().parents[1]
 # A clone's location: repo-relative path and the line range jscpd reported.
