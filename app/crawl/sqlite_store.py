@@ -126,8 +126,65 @@ def _open_raw_store_connection(
     return sqlite3.connect(str(db_path), check_same_thread=False), None
 
 
-_PROCESS_LOCKS: dict[str, threading.RLock] = {}
+_PROCESS_LOCKS: dict[str, _TracedLock] = {}
 _PROCESS_LOCKS_GUARD = threading.Lock()
+
+#: A wait at least this long is worth a line. A store write against a migration
+#: in the same process is sub-millisecond; anything near this means the lock is
+#: held across real work, which is the thing worth seeing.
+_LOCK_TRACE_ENV = "CRAWLUTRON_TRACE_STORE_LOCKS"
+_LOCK_TRACE_THRESHOLD = 0.05
+
+
+class _TracedLock:
+    """A re-entrant lock that can name the thread holding it.
+
+    The connection trace answers which process opened which file. It cannot
+    answer the question a locked database actually raises: a thread is blocked,
+    and the thread it is blocked on is inside a migration. Both are invisible
+    from outside the lock, so the lock records its holder and reports a waiter
+    that waited long enough to be worth a line::
+
+        CRAWLUTRON_TRACE_STORE_LOCKS=1 pytest -n 4 2> locks.log
+
+    The holder is cleared by whichever release runs first, so a re-entrant
+    inner release loses the outer holder's name. That is the wrong answer in a
+    case the trace exists to disprove -- a thread waiting on a lock the same
+    thread already holds is a deadlock, not contention, and it announces
+    itself by never returning.
+    """
+
+    def __init__(self) -> None:
+        self._lock = threading.RLock()
+        self._holder: str | None = None
+
+    def acquire(self, blocking: bool = True, timeout: float = -1) -> bool:
+        if os.environ.get(_LOCK_TRACE_ENV) != "1":
+            return self._lock.acquire(blocking, timeout)
+        started = time.monotonic()
+        holder = self._holder
+        acquired = self._lock.acquire(blocking, timeout)
+        waited = time.monotonic() - started
+        if waited >= _LOCK_TRACE_THRESHOLD:
+            print(
+                f"store-lock-wait pid={os.getpid()} "
+                f"thread={threading.current_thread().name} waited={waited:.3f}s holder={holder}",
+                file=sys.stderr,
+                flush=True,
+            )
+        if acquired:
+            self._holder = threading.current_thread().name
+        return acquired
+
+    def release(self) -> None:
+        self._holder = None
+        self._lock.release()
+
+    def __enter__(self) -> bool:
+        return self.acquire()
+
+    def __exit__(self, *exc: object) -> None:
+        self.release()
 
 
 def store_lock_key(db_path: str | Path, memory_name: str | None = None) -> str:
@@ -143,7 +200,7 @@ def store_lock_key(db_path: str | Path, memory_name: str | None = None) -> str:
     return str(Path(db_path).resolve())
 
 
-def process_lock(key: str) -> threading.RLock:
+def process_lock(key: str) -> _TracedLock:
     """The one lock every writer and every migration on this database takes.
 
     A store's own lock only serializes writes that go through *that* instance,
@@ -161,7 +218,7 @@ def process_lock(key: str) -> threading.RLock:
     with _PROCESS_LOCKS_GUARD:
         lock = _PROCESS_LOCKS.get(key)
         if lock is None:
-            lock = _PROCESS_LOCKS[key] = threading.RLock()
+            lock = _PROCESS_LOCKS[key] = _TracedLock()
         return lock
 
 
@@ -187,9 +244,14 @@ def _trace_store_connection(
     if os.environ.get(_STORE_TRACE_ENV) != "1":
         return
     target = f"memory:{memory_name}" if memory_name is not None else store_lock_key(db_path)
+    # ``schema`` is a StoreSchema, but that name is TYPE_CHECKING-only here:
+    # manifest.py imports from this module, so importing it back is circular.
+    # The member carries its own value, and this formatter must not be the
+    # thing that decides whether a diagnostic run gets as far as a diagnosis.
+    name = getattr(schema, "value", schema)
     print(
         f"store-connection pid={os.getpid()} thread={threading.current_thread().name} "
-        f"schema={StoreSchema(schema).value} db={target}",
+        f"schema={name} db={target}",
         file=sys.stderr,
         flush=True,
     )

@@ -71,11 +71,34 @@ os.environ.setdefault("CRAWLUTRON_ALLOW_PRIVATE_TARGETS", "0")
 # module reaches `app.main`. A path rather than a created directory, so nothing
 # accumulates at import; the app makes it on demand, and
 # `_remove_test_cache_dir` below takes it away when the worker is done.
+# One cache directory per PROCESS, not per worker, set here because import order
+# is the whole constraint: this runs while conftest is imported, before any test
+# module reaches `app.main`. A path rather than a created directory, so nothing
+# accumulates at import; the app makes it on demand, and
+# `_remove_test_cache_dir` below takes it away when the worker is done.
+#
+# The pid is in the name AND the inherited value is re-derived, because the two
+# are not the same fix. Every worker really did get its own directory -- and
+# every child those workers spawned inherited the *parent's* value verbatim,
+# because `setdefault` leaves an already-set variable alone. A pre-commit gate,
+# a uvicorn child, a forked extraction worker: fourteen processes opening and
+# migrating one `crawler.db`. A process lock cannot arbitrate that, and it is
+# where `database is locked` came from -- raised inside a yoyo migration, by a
+# subprocess that had no business touching the parent's database.
 _SCRATCH_CACHE_DIR = (
     Path(tempfile.gettempdir())
     / f"crawlutron-tests-{os.environ.get('PYTEST_XDIST_WORKER', 'master')}-{os.getpid()}"
 )
-os.environ.setdefault("CRAWLUTRON_CACHE_DIR", str(_SCRATCH_CACHE_DIR))
+_INHERITED_CACHE_DIR = os.environ.get("CRAWLUTRON_CACHE_DIR", "")
+_INHERITED_IS_SUITE_SCRATCH = (
+    _INHERITED_CACHE_DIR.startswith(f"{Path(tempfile.gettempdir())}{os.sep}")
+    and "crawlutron-tests-" in _INHERITED_CACHE_DIR
+)
+if _INHERITED_IS_SUITE_SCRATCH:
+    # A parent process in this suite exported its scratch dir. Derive our own.
+    os.environ["CRAWLUTRON_CACHE_DIR"] = str(_SCRATCH_CACHE_DIR)
+else:
+    os.environ.setdefault("CRAWLUTRON_CACHE_DIR", str(_SCRATCH_CACHE_DIR))
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -85,7 +108,9 @@ def _remove_test_cache_dir():
     Guarded on identity rather than on the env var: if the operator pointed
     ``CRAWLUTRON_CACHE_DIR`` somewhere real, that directory is not the suite's
     to delete, and the teardown must be the one thing in this file that cannot
-    destroy their data.
+    destroy their data. The comparison is against the value this process
+    installed, which is why a child that re-derived its own still cleans up
+    after itself.
     """
     yield
     if os.environ.get("CRAWLUTRON_CACHE_DIR") == str(_SCRATCH_CACHE_DIR):
