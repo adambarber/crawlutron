@@ -12,7 +12,6 @@ from collections.abc import Iterator
 
 from tests.chokepoint_walks import (
     APP_ROOT,
-    REPO_ROOT,
     TESTS_DIR,
     app_python_files,
     app_trees,
@@ -24,7 +23,22 @@ from tests.chokepoint_walks import (
     resolved_expr_name,
     trees_under,
 )
-from tests.invariants._shared import assert_trees_clean
+from tests.rules import Bites, Rule, Trips
+
+
+#: Every rule in this file governs ``tests/``, not ``app/``. One owner for the
+#: answer, so the rules below cannot disagree about the tree they sweep.
+def _tests_tree(*, exclude: frozenset[str]) -> tuple[tuple[pathlib.Path, ast.Module], ...]:
+    """The test tree, swept whole.
+
+    Carries ``exclude`` so it is a drop-in for ``app_trees``, and ignores it: the
+    exemptions a rule needs are named against ``app/`` modules, and a helper or a
+    fixture under a directory this rule has never heard of is exactly what it is
+    here to catch. A sanctioned-name list for ``tests/`` would be a list that has
+    to be extended by every file the suite gains.
+    """
+    return trees_under(TESTS_DIR)
+
 
 # ===========================================================================
 # NO TEST MAY MUTATE THE PRODUCTION TREE
@@ -279,84 +293,102 @@ def _app_tree_mutation_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]
     return offenders
 
 
+PLANTED_MUTATION = (
+    "from scripts import jscpd_gate as gate\n"
+    "\n"
+    "def test_migrations_clones_are_not_reported(capsys):\n"
+    "    in_migrations = gate.SERVICE_ROOT / 'app' / 'crawl' / 'migrations' / 'zz_probe.py'\n"
+    "    in_production = gate.SERVICE_ROOT / 'app' / 'zz_probe.py'\n"
+    "    in_migrations.write_text('x')\n"
+    "    try:\n"
+    "        assert True\n"
+    "    finally:\n"
+    "        in_production.unlink()\n"
+)
+
+MIRRORED_SCRATCH_TREE = (
+    "def test_mirrored_tree(tmp_path):\n"
+    "    app = tmp_path / 'app'\n"
+    "    (app / 'crawl' / 'migrations').mkdir(parents=True)\n"
+    "    (app / 'zz_probe.py').write_text('payload')\n"
+    "    (tmp_path / 'tests' / 'fixtures' / 'app' / 'x.py').write_text('fixture')\n"
+    "    Path = __import__('pathlib').Path\n"
+    "    (Path(__file__).resolve().parent / 'test_jscpd_gate.py').read_text()\n"
+)
+
+TESTS_MUST_NOT_MUTATE_APP = Rule(
+    name="tests-do-not-mutate-app",
+    find=_app_tree_mutation_offenders,
+    scope=_tests_tree,
+    summary=(
+        "mirror the path shape under tmp_path and point the code under test at the mirror: "
+        "a test that mutates app/ turns every concurrent tree walk into a list-then-read race, "
+        "and the detectors that lose it report nothing while looking green"
+    ),
+    bite=lambda: (
+        # The real offender -- a fixed path under the live tree, written and unlinked
+        # from a test -- so the sweep has to catch the exact spelling in the tree, not a
+        # paraphrase of it. Two findings in one shape, so the count is part of the claim.
+        Bites(PLANTED_MUTATION, marker="mutates the production tree", count=2),
+        # The qualified spellings, which take the path as an argument instead of as a
+        # receiver, and the aliased ones where the root is bound before it is used.
+        Trips(
+            "from pathlib import Path\n"
+            "from chokepoint_walks import APP_ROOT\n"
+            "import shutil\n"
+            "\n"
+            "def wipe():\n"
+            "    shutil.rmtree(APP_ROOT)\n"
+            "    Path.cwd()\n"
+            "    Path(APP_ROOT / 'settings.py').replace(APP_ROOT / 'settings.py.bak')\n"
+            "    open(APP_ROOT / 'settings.py', 'w').write('x')\n",
+            count=3,
+        ),
+        Trips(
+            "from pathlib import Path\n"
+            "import os\n"
+            "\n"
+            "ROOT = Path(__file__).resolve().parent.parent\n"
+            "APP = ROOT / 'app'\n"
+            "\n"
+            "def rename_it():\n"
+            "    (APP / 'crawl' / 'ids.py').rename(APP / 'crawl' / 'ids_v2.py')\n"
+            "    os.remove(ROOT / 'app' / 'main.py')\n",
+            count=2,
+        ),
+    ),
+    clean=lambda: (
+        # A test's own scratch tree is not the production tree, and `read_text` on an
+        # app/ module is a legitimate thing for a detector test to do.
+        MIRRORED_SCRATCH_TREE,
+    ),
+)
+
+
 def test_tests_do_not_mutate_the_production_tree():
     """No test writes, unlinks, renames, or replaces a path inside `app/`.
 
     Tree-wide, and read from the tree rather than from a file list, so the
     sweep covers a test added tomorrow with nothing to register.
     """
-    assert_trees_clean(
-        _app_tree_mutation_offenders,
-        "mirror the path shape under tmp_path and point the code under test at the mirror: "
-        "a test that mutates app/ turns every concurrent tree walk into a list-then-read race, "
-        "and the detectors that lose it report nothing while looking green",
-        trees=trees_under(TESTS_DIR),
-    )
+    TESTS_MUST_NOT_MUTATE_APP.scan()
 
 
-def test_app_tree_mutation_detector_bites():
+def test_tree_detectors_bite():
     """Bites: the shapes that actually shipped, and the near-misses beside them.
 
-    The first three are the real offender -- a fixed path under the live tree,
-    written and unlinked from a test -- so the sweep has to catch the exact
-    spelling in the tree, not a paraphrase of it. The rest are the ways a
-    plausible fix could regress the rule into either a no-op or a false alarm.
+    The first is the real offender -- the exact path written and unlinked from a test
+    that made `app/` a directory that MOVES while the suite runs. The rest are the
+    ways a plausible fix could regress the rule into either a no-op or a false alarm.
+    All of it is declared on the rules, so neither half can be dropped without the
+    declaration failing to build.
     """
-    planted = ast.parse(
-        "from scripts import jscpd_gate as gate\n"
-        "\n"
-        "def test_migrations_clones_are_not_reported(capsys):\n"
-        "    in_migrations = gate.SERVICE_ROOT / 'app' / 'crawl' / 'migrations' / 'zz_probe.py'\n"
-        "    in_production = gate.SERVICE_ROOT / 'app' / 'zz_probe.py'\n"
-        "    in_migrations.write_text('x')\n"
-        "    try:\n"
-        "        assert True\n"
-        "    finally:\n"
-        "        in_production.unlink()\n"
-    )
-    offenders = _app_tree_mutation_offenders(planted, REPO_ROOT / "tests" / "_synthetic.py")
-    assert len(offenders) == 2, offenders
-    assert all("write_text" in found or "unlink" in found for found in offenders), offenders
+    TESTS_MUST_NOT_MUTATE_APP.check_bites()
 
-    module_qualified = ast.parse(
-        "from pathlib import Path\n"
-        "from chokepoint_walks import APP_ROOT\n"
-        "import shutil\n"
-        "\n"
-        "def wipe():\n"
-        "    shutil.rmtree(APP_ROOT)\n"
-        "    Path.cwd()\n"
-        "    Path(APP_ROOT / 'settings.py').replace(APP_ROOT / 'settings.py.bak')\n"
-        "    open(APP_ROOT / 'settings.py', 'w').write('x')\n"
-    )
-    qualified = _app_tree_mutation_offenders(module_qualified, REPO_ROOT / "tests" / "_synthetic.py")
-    assert len(qualified) == 3, qualified
 
-    aliased = ast.parse(
-        "from pathlib import Path\n"
-        "import os\n"
-        "\n"
-        "ROOT = Path(__file__).resolve().parent.parent\n"
-        "APP = ROOT / 'app'\n"
-        "\n"
-        "def rename_it():\n"
-        "    (APP / 'crawl' / 'ids.py').rename(APP / 'crawl' / 'ids_v2.py')\n"
-        "    os.remove(ROOT / 'app' / 'main.py')\n"
-    )
-    assert len(_app_tree_mutation_offenders(aliased, REPO_ROOT / "tests" / "_synthetic.py")) == 2
-
-    scratch = ast.parse(
-        "def test_mirrored_tree(tmp_path):\n"
-        "    app = tmp_path / 'app'\n"
-        "    (app / 'crawl' / 'migrations').mkdir(parents=True)\n"
-        "    (app / 'zz_probe.py').write_text('payload')\n"
-        "    (tmp_path / 'tests' / 'fixtures' / 'app' / 'x.py').write_text('fixture')\n"
-        "    Path = __import__('pathlib').Path\n"
-        "    (Path(__file__).resolve().parent / 'test_jscpd_gate.py').read_text()\n"
-    )
-    assert not _app_tree_mutation_offenders(scratch, REPO_ROOT / "tests" / "_synthetic.py"), (
-        "a test's own scratch tree is not the production tree"
-    )
+# ===========================================================================
+# NO TEST REACHES A SIBLING HELPER BY BARE NAME
+# ===========================================================================
 
 
 # ===========================================================================
@@ -478,51 +510,55 @@ def _bare_sibling_import_offenders(tree: ast.AST, path: pathlib.Path) -> list[st
     ]
 
 
-def test_tests_import_their_helpers_by_package_path():
-    """No test module reaches a sibling helper by bare name.
+PLANTED_BARE_IMPORT = (
+    "from _chain_policies import chain_policy\n"
+    "import _job_harnesses as harnesses\n"
+    "from _policy_factories import _policy\n"
+)
 
-    Tree-wide over ``tests/``, so a helper added tomorrow is covered by existing
-    the same way, and read from the tree rather than a file list.
-    """
-    assert_trees_clean(
-        _bare_sibling_import_offenders,
+TEST_HELPERS_IMPORTED_BY_PACKAGE_PATH = Rule(
+    name="test-helpers-imported-by-package-path",
+    find=_bare_sibling_import_offenders,
+    summary=(
         "import the helper through its package path (tests.<pkg>.<module>): a bare sibling name "
         "resolves only because pytest put this file's directory on sys.path, which is invisible to "
-        "both E402 and the type checker",
-        trees=trees_under(TESTS_DIR),
-    )
-
-
-def test_bare_sibling_import_detector_bites():
-    """Bites: the shipped spellings, and the neighbors that must stay quiet.
-
-    The first is the real thing -- the exact ``from _chain_policies import
-    chain_policy`` that two test modules carried. The rest pin both directions:
-    the package form, a stdlib import, and a third-party import all name a
-    module that is not a test file and must be left alone, so the rule cannot
-    degenerate into "no unqualified imports".
-    """
-    path = REPO_ROOT / "tests" / "_synthetic.py"
-    planted = ast.parse(
-        "from _chain_policies import chain_policy\n"
-        "import _job_harnesses as harnesses\n"
-        "from _policy_factories import _policy\n"
-    )
-    found = _bare_sibling_import_offenders(planted, path)
-    assert len(found) == 3, f"one offender per import statement, got {found}"
-
-    quiet = ast.parse(
+        "both E402 and the type checker"
+    ),
+    scope=_tests_tree,
+    bite=lambda: Bites(PLANTED_BARE_IMPORT, marker="imports the test helper", count=3),
+    clean=lambda: (
+        # Package, stdlib and third-party forms name a module that is not a test file, so
+        # the rule cannot degenerate into "no unqualified imports".
         "from __future__ import annotations\n"
         "from pathlib import Path\n"
         "import httpx\n"
         "import pytest\n"
         "from tests._policy_factories import _policy\n"
         "from tests.crawl._chain_policies import chain_policy\n"
-        "from app.crawl.policy import read_policy\n"
-    )
-    assert not _bare_sibling_import_offenders(quiet, path), (
-        "package, stdlib and third-party forms are not offenders"
-    )
+        "from app.crawl.policy import read_policy\n",
+    ),
+)
+
+
+def test_tests_import_their_helpers_by_package_path():
+    """No test module reaches a sibling helper by bare name.
+
+    Tree-wide over ``tests/``, so a helper added tomorrow is covered by existing
+    the same way, and read from the tree rather than a file list.
+    """
+    TEST_HELPERS_IMPORTED_BY_PACKAGE_PATH.scan()
+
+
+def test_bare_sibling_import_detector_bites():
+    """Bites: the shipped spellings, and the neighbors that must stay quiet.
+
+    The first is the real thing -- the exact ``from _chain_policies import
+    chain_policy`` that two test modules carried. The clean case pins both
+    directions: the package form, a stdlib import, and a third-party import all
+    name a module that is not a test file and must be left alone, so the rule
+    cannot degenerate into "no unqualified imports".
+    """
+    TEST_HELPERS_IMPORTED_BY_PACKAGE_PATH.check_bites()
 
 
 def test_every_detector_sees_the_same_app_trees():
