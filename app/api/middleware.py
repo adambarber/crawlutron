@@ -2,8 +2,8 @@
 
 Caps request bodies to 16 MiB at the ASGI ``receive()`` layer so a
 malicious caller cannot OOM the container before pydantic validation.
-Extracted from ``app/main.py`` so the FastAPI app factory stays thin
-and the middleware is testable in isolation.
+Extracted from ``app/main.py`` so the app's construction in that module
+stays thin, and so the middleware is testable in isolation.
 
 Two properties of the cap are load-bearing:
 
