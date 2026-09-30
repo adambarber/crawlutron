@@ -693,7 +693,7 @@ class TestHttpScaleEscapesMemory:
 
 async def test_max_pages_default_is_bounded_not_unlimited():
     policy = _payload_policy({"url": "http://example.com/", "policy": {}}, PolicyTier.model_defaults())
-    # DEFAULT_MAX_PAGES, not 0/"unlimited" (F4).
+    # DEFAULT_MAX_PAGES, not 0/"unlimited".
     assert policy.limits.max_pages == 100
 
 

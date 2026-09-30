@@ -73,7 +73,7 @@ class TestCrawlApi(_AsgiEndpointTests):
         assert result["classification"] == "rendered"
         assert result["http_status"] == 200
         assert result["metadata"].get("json_ld") is not None
-        # #2-fix: plain single-page crawl skips link extraction entirely
+        # Plain single-page crawl skips link extraction entirely
         assert result["discovered_link_count"] == 0
         assert result["discovered_links"] == []
         # next_page_url stays a standard field regardless
@@ -158,7 +158,7 @@ class TestCrawlApi(_AsgiEndpointTests):
         assert "crawler_crawl_results_total" in resp.text
 
     async def test_v1_crawl_jsonl_output_format(self):
-        # #17: output_format=jsonl returns newline-delimited JSON (one object per URL).
+        # output_format=jsonl returns newline-delimited JSON (one object per URL).
         resp = await self.client.post(
             "/v1/crawl", json=make_crawl_payload(f"{self.base}/", output_format="jsonl")
         )
@@ -431,7 +431,7 @@ class TestDiscoveryAndRenderApi:
 
 
 class TestMapApi(_AsgiEndpointTests):
-    """#2 /v1/map against a real local server (no mocks)."""
+    """/v1/map against a real local server (no mocks)."""
 
     def _map_payload(self, **extra):
         payload = {
@@ -463,7 +463,7 @@ class TestMapApi(_AsgiEndpointTests):
 
 
 class TestShadowDomApi(_AsgiEndpointTests):
-    """#25 Shadow-DOM flattening via browser renderer (real camoufox)."""
+    """Shadow-DOM flattening via browser renderer (real camoufox)."""
 
     @pytest.mark.browser
     @pytest.mark.skipif(not browser_available(), reason="no usable browser binary (camoufox/playwright)")
@@ -496,7 +496,7 @@ class TestShadowDomApi(_AsgiEndpointTests):
 
 
 class TestCookiePersistenceApi:
-    """#9 Cookie persistence integration tests (real server, real cookie jar)."""
+    """Cookie persistence integration tests (real server, real cookie jar)."""
 
     @pytest.fixture(autouse=True)
     def setup(self, async_client, base_url, tmp_path):
@@ -540,10 +540,10 @@ class TestCookiePersistenceApi:
 
 
 class TestJobApi(_AsgiEndpointTests):
-    """#3+#14 Job API integration tests (real server)."""
+    """Job API integration tests (real server)."""
 
     async def _seed_job(self, root_url):
-        """Seed a persisted row directly; create_endpoint refuses (H5)."""
+        """Seed a persisted row directly; create_endpoint refuses."""
         from app.main import job_store
 
         job = job_store.create(root_url, CrawlPolicy())

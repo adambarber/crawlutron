@@ -86,7 +86,7 @@ _KEYWORD_ONLY = frozenset({inspect.Parameter.KEYWORD_ONLY})
 
 # What a production fetcher is this call PLUS: the keyword-only arguments the
 # engine binds and the call site never passes. Typed here rather than read off a
-# second Protocol, because that Protocol was the duplication jscpd reported -- the
+# second Protocol, because that Protocol was the duplication -- the
 # four positional parameters written twice, kept in step only by comparing each
 # half against something else. ``HttpFetcher`` is the single declaration of the
 # shared shape; what each fetcher adds on top of it is a fact about that fetcher,

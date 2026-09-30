@@ -1,4 +1,4 @@
-"""#1722 envelope contract: every HTTP error body is exactly {code, message, details}.
+"""The envelope contract: every HTTP error body is exactly {code, message, details}.
 
 The pre-helper state had 13 hand-rolled dict literals across 7 files; three
 silently omitted ``details``, and any future site could drift the key names
@@ -78,7 +78,8 @@ class TestErrorEnvelope:
         }
         override = browser_pool_unavailable("exhausted: 4/4")
         # Compared whole rather than indexed into: `HTTPException.detail` is
-        # annotated `str` upstream, but #1722 makes it the envelope dict, and
+        # annotated `str` upstream, but the envelope contract makes it the
+        # envelope dict, and
         # asserting the full shape is this file's own convention -- the point is
         # that an override changes one key and leaves the other two alone.
         assert override.detail == {

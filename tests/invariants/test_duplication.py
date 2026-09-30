@@ -39,7 +39,7 @@ from tests.chokepoint_walks import (
 from tests.invariants._shared import _enclosing_defs, assert_trees_clean
 
 # ---------------------------------------------------------------------------
-# Search-provider result normalization (jscpd #4 family)
+# Search-provider result normalization
 # ---------------------------------------------------------------------------
 
 
@@ -218,7 +218,7 @@ def _keyed_provider_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
     The normalize/dedupe/clip contract above is only half the shared flow. The
     other half -- issue the request, refuse a non-200, hand the result list to
     the collector -- used to be spelled once per provider, and the per-provider
-    request bodies jscpd reported were those spellings: identical but for the
+    request bodies were those spellings: identical but for the
     endpoint and the credential placement, so the only part that genuinely
     varied was the part left as a hook. The flow then moved into the base, and
     what a provider supplies is a ``_call`` describing its request and an
@@ -338,7 +338,7 @@ def test_keyed_provider_flow_detector_bites():
 
 
 # ---------------------------------------------------------------------------
-# robots.txt scanning (jscpd #5 family)
+# robots.txt scanning
 # ---------------------------------------------------------------------------
 
 _ROBOTS_SCANNER_SANCTIONED = "iter_robots_fields"
@@ -398,7 +398,7 @@ def test_robots_scanner_detector_bites():
 
 
 # ---------------------------------------------------------------------------
-# Test-fake construction (jscpd #6: sanctioned builders over hand-built fakes)
+# Test-fake construction: sanctioned builders over hand-built fakes
 # ---------------------------------------------------------------------------
 
 _FAKE_BUILDER_SANCTIONED = frozenset({"_fetcher_factories.py"})
@@ -409,7 +409,7 @@ def _fetcher_factory_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
 
     HttpFetchResult's field set is the crawl contract; a fixture that spells
     it out by hand silently diverges when the contract grows (the exact
-    drift #1797 is about). _fetcher_factories.make_fetch is the sanctioned builder.
+    drift this detector exists to catch). _fetcher_factories.make_fetch is the sanctioned builder.
     """
     offenders: list[str] = []
     for node in call_nodes(tree):
@@ -439,7 +439,7 @@ def test_fetch_builder_detector_bites():
 
 
 # ---------------------------------------------------------------------------
-# Poll-loop reimplementation (jscpd test-side drift, sibling to the fake
+# Poll-loop reimplementation (test-side drift, sibling to the fake
 # builder finding): _assertions.poll_until is the sanctioned predicate poller.
 # A hand-rolled ``while True`` poller that awaits ``asyncio.wait_for`` without
 # a ``pytest.fail`` termination silently returns False on timeout, diverging
@@ -683,7 +683,7 @@ def _robots_compile_call_offenders(tree: ast.AST, path: pathlib.Path) -> list[st
     PER-HOST LRU. A second caller reintroduces a process-global matcher cache
     keyed only on the pattern string -- patterns arrive from remotely-fetched
     robots.txt, so a hostile site spraying distinct patterns would evict every
-    other site's matchers and control the whole cache (P2-E). The home method
+    other site's matchers and control the whole cache. The home method
     is the single sanctioned call site; the module-level wrapper
     (``_robots_pattern_to_regex``) goes through it too.
     """

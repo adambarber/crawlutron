@@ -1,4 +1,4 @@
-"""TDD tests for CRITICAL #3: webhook SSRF (hostname not resolved).
+"""TDD tests for webhook SSRF (hostname not resolved).
 
 The webhook validator must resolve DNS hostnames and reject any that map to a
 private/loopback address, and the delivery POST must connect to a pinned IP

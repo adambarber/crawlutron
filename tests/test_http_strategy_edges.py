@@ -63,7 +63,7 @@ class TestHttpStrategyEdges:
     def test_impersonating_fetcher_response(self):
         """real_cffi subprocess: a normal fetch returns the served 200.
 
-        In-process real cffi is banned (#1744/#1746): under fast_sleeps the
+        In-process real cffi is banned: under fast_sleeps the
         curl watchdog busy-spins the GIL and wedges the pytest process, so
         the fetch runs in an isolated interpreter with a hard join.
 

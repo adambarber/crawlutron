@@ -106,7 +106,7 @@ def test_crawljobstate_serialization():
 
 
 def test_create_returns_full_uuid_hex():
-    """HIGH #9: job IDs must not be short brute-forceable suffixes."""
+    """Job IDs must not be short brute-forceable suffixes."""
     store = job_store(":memory:", policy=UNRESTRICTED_HOST_POLICY)
     job = store.create("https://example.com/", CrawlPolicy())
     assert len(job.job_id) == 32

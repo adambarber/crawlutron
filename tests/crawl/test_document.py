@@ -101,7 +101,7 @@ class TestDocumentRedirectSsrf:
                 # resolved a connect-URL host as if it were a hostname, the
                 # hop must fail loudly instead of silently succeeding. That
                 # is what makes the logical-vs-connection URL split
-                # observable (H5-B).
+                # observable.
                 raise socket.gaierror(8, "nodename nor servname provided")
             if hostname == "evil.test":
                 return ["169.254.169.254"]

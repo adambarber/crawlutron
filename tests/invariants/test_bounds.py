@@ -175,7 +175,7 @@ def test_local_html_input_cap_detector_bites():
 
 
 # ---------------------------------------------------------------------------
-# Decompression bomb guard (jscpd #5 family / H2 closure)
+# Decompression bomb guard
 # ---------------------------------------------------------------------------
 
 _DECOMPRESS_FUNCS = frozenset({"decompress_body", "_decompress_body"})
@@ -252,7 +252,7 @@ def test_decompress_cap_detector_bites():
 
 
 # ---------------------------------------------------------------------------
-# Decompression reaches only through the capped chokepoint (legacy #3)
+# Decompression reaches only through the capped chokepoint
 # ---------------------------------------------------------------------------
 
 # The codecs app/crawl/decompression.py imports to implement decompress_body.
@@ -346,9 +346,10 @@ def test_decompress_bypass_detector_bites():
 
 
 # ---------------------------------------------------------------------------
-# A discovery response is read through _Discovery, never off the tuple (jscpd)
+# A discovery response is read through _Discovery, never off the tuple
 #
-# The jscpd pair at fetch_helpers.py was the two discovery-fetch signatures, but
+# The duplicated pair at fetch_helpers.py was the two discovery-fetch
+# signatures, but
 # the rule underneath them was never owned: what a discovery response *means*.
 # The load-bearing part of that is ``headers: dict | None``, where None is the
 # transport-failure marker. ``_Discovery``'s accessors are total over it, so a

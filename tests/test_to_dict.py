@@ -1,4 +1,4 @@
-"""#2: to_dict must be JSON-serializable and must not deep-copy leaf values."""
+"""to_dict must be JSON-serializable and must not deep-copy leaf values."""
 
 from __future__ import annotations
 
@@ -48,7 +48,7 @@ def test_to_dict_non_dataclass_passthrough():
 
 def test_to_dict_handles_cyclic_link_graph():
     # A DiscoveredLink-style graph where a node's parent points back to an
-    # ancestor must serialize without infinite recursion (B2).
+    # ancestor must serialize without infinite recursion.
     from dataclasses import dataclass, field
 
     @dataclass

@@ -1,4 +1,4 @@
-"""#7 Auto-escalation: a blocked/challenge page must not be returned as a
+"""Auto-escalation: a blocked/challenge page must not be returned as a
 successful result; the engine must try the next strategy in the chain
 (e.g. direct HTTP -> curl_cffi TLS impersonation -> headless browser)."""
 
@@ -33,7 +33,7 @@ class TestBlockAutoEscalation:
                 "bot_challenge_detected",
                 id="cloudflare",
             ),
-            # The #7 regression guard: a busy CAPTCHA interstitial still carries
+            # The regression guard: a busy CAPTCHA interstitial still carries
             # text, so quality_score may be > 0 and escalation must still happen.
             pytest.param(
                 b"<html><body><h1>Verify you are human</h1><p>Some boilerplate text.</p></body></html>",

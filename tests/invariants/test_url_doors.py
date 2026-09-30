@@ -305,7 +305,7 @@ def test_no_inline_pinned_url_composition():
 
     Three divergent copies of that composition had already drifted into the
     tree (safe_url, http fetcher, webhook builder); the copies disagreed on
-    Host-port handling and all lacked IPv6 bracketing (H5-C). An f-string
+    Host-port handling and all lacked IPv6 bracketing. An f-string
     that mentions pinned_ip outside app/safe_url.py re-opens that drift.
     """
     offenders: list[str] = []
@@ -469,7 +469,7 @@ def test_optional_host_policy_detector_bites():
 
 
 def test_no_raw_href_frontier_sinks():
-    """The frontier only ever carries frontier_link_url()-validated URLs (H1)."""
+    """The frontier only ever carries frontier_link_url()-validated URLs."""
     assert_trees_clean(
         _frontier_sink_offenders,
         "Read normalized_url via frontier_link_url(), never raw url",
@@ -1039,7 +1039,7 @@ def test_resolved_call_name_handles_getattr_alias_and_static_name():
 
 
 # ---------------------------------------------------------------------------
-# Normalize-or-None chokepoint (jscpd #5 family)
+# Normalize-or-None chokepoint
 #
 # The same three-line wrapper -- try normalize_public_http_url(x) except
 # ValueError: return None -- was hand-rolled in three modules (search

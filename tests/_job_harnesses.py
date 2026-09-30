@@ -20,7 +20,7 @@ the commit were green, which is the signature of a scheduling failure and not a
 defect. Raising the number would have hidden that without fixing it.
 
 The fix is the instrument, not the number. ``JobStore.save()`` deliberately
-never writes ``status`` (H3) -- control state moves exclusively through
+never writes ``status`` -- control state moves exclusively through
 :meth:`JobStore.set_status` -- so that single compare-and-set is the COMPLETE
 set of edges a job-state wait has to observe. Subscribing to it turns the poll
 into an edge-triggered wait: the wait returns the instant the status is

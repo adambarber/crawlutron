@@ -1,4 +1,4 @@
-"""The manual redirect loop re-checks every hop against the SSRF policy (F1).
+"""The manual redirect loop re-checks every hop against the SSRF policy.
 
 The fetcher used to hand httpx ``follow_redirects=True``, so a 302 to an
 internal target was connected to without ever being looked at. It now follows
@@ -108,7 +108,7 @@ async def test_redirect_to_safe_target_is_followed(monkeypatch):
 
 
 async def test_redirect_loop_is_bounded_by_hop_limit(monkeypatch):
-    """The manual loop must terminate even on indefinite redirects (F1)."""
+    """The manual loop must terminate even on indefinite redirects."""
     requested, _seen = _scripted_pool(
         monkeypatch,
         [

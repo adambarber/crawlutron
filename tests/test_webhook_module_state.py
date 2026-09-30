@@ -1,4 +1,4 @@
-"""Guards for ``app.api.webhooks`` after the dead-delivery-island deletion (H3).
+"""Guards for ``app.api.webhooks`` after the dead-delivery-island deletion.
 
 The crawl-plus-deliver story lives solely in ``app.api.async_crawl_runner``;
 ``app.api.webhooks`` is the delivery funnel (``post_webhook`` ->

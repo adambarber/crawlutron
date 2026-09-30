@@ -96,14 +96,14 @@ def test_cache_envelope_detector_bites():
 
 
 # ---------------------------------------------------------------------------
-# Crawl-response shaping chokepoint (jscpd #1 class)
+# Crawl-response shaping chokepoint
 # ---------------------------------------------------------------------------
 
 
 def _crawl_response_construction_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
     """Flag explicit ``UnifiedCrawlResponse(..., results=[...])`` construction
     outside response_shaping — callers must use build_unified_crawl_response so
-    persisted/webhook/REST payloads cannot drift (the #1754 rule, endpoint-wide).
+    persisted/webhook/REST payloads cannot drift (endpoint-wide).
     ``**stored`` deserialization splats have no explicit results= keyword."""
     if path.name == "response_shaping.py":
         return []
@@ -418,7 +418,7 @@ def test_render_options_chokepoint_detector_bites():
 
 
 # ---------------------------------------------------------------------------
-# Error-envelope shape (jscpd #3 class)
+# Error-envelope shape
 # ---------------------------------------------------------------------------
 
 # app/api/exceptions.py owns the envelope; it is the sanctioned definition

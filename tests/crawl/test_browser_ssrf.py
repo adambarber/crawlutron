@@ -24,12 +24,12 @@ from tests._browser_doubles import (
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY
 
 # --------------------------------------------------------------------------
-# document.py: SSRF gate on urlopen (F2)
+# document.py: SSRF gate on urlopen
 # --------------------------------------------------------------------------
 
 
 async def test_document_extractor_blocks_internal_url(monkeypatch):
-    # F2: the document fetch must refuse a loopback target, and refuse it
+    # The document fetch must refuse a loopback target, and refuse it
     # loudly -- a refused target is not the same outcome as an empty PDF.
     monkeypatch.setenv("CRAWLUTRON_ALLOW_PRIVATE_TARGETS", "0")
     with pytest.raises(ValueError):
@@ -65,7 +65,7 @@ async def test_document_extractor_invokes_ssrf_check(monkeypatch):
 
 
 # --------------------------------------------------------------------------
-# browser.py helpers (F2): pinning + post-navigation re-validation
+# browser.py helpers: pinning + post-navigation re-validation
 # --------------------------------------------------------------------------
 
 
@@ -129,7 +129,7 @@ async def test_assert_safe_final_url_blocks_internal(monkeypatch):
 
 # --------------------------------------------------------------------------
 # browser.py integration: _render_with_browser navigates to the pinned IP and
-# re-validates the post-navigation URL (F2).
+# re-validates the post-navigation URL.
 # --------------------------------------------------------------------------
 
 

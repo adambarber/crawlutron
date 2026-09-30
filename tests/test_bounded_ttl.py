@@ -1,4 +1,4 @@
-"""BoundedTTLCache contract: lock-inside, TTL, LRU eviction (chokepoint #1)."""
+"""BoundedTTLCache contract: lock-inside, TTL, LRU eviction."""
 
 from typing import Any
 

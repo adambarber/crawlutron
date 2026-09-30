@@ -354,7 +354,7 @@ class _FakeCffiClient:
         self._body = body
         #: Set by ``get``; ``None`` until this client has answered a request.
         self.response: _FakeCffiResponse | None = None
-        # Session acquisition is now construction (shared session, perf #4),
+        # Session acquisition is now construction (shared session),
         # not per-request __aenter__; record here so construction counts.
         type(self).last_instance = self
 

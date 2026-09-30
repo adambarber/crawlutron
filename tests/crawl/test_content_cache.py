@@ -355,7 +355,7 @@ async def test_crawl_request_serves_recursive_pages_from_content_cache(tmp_path)
 async def test_mirror_gate_uses_serialized_size_not_shallow_getsizeof(tmp_path):
     """Shallow sys.getsizeof on a dict sees only the container (~200 B), so a
     multi-MB serialized entry passed the old mirror gate and landed in RAM
-    (final-review #1: worst case _MEMORY_CACHE_MAX x full-size entries)."""
+    (worst case _MEMORY_CACHE_MAX x full-size entries)."""
     cache = ContentCache(tmp_path)
     fat = {"body": "x" * (cache._MEMORY_CACHE_MAX_SIZE + 1024)}
     assert sys.getsizeof(fat) < cache._MEMORY_CACHE_MAX_SIZE  # shallow size: tiny
@@ -446,7 +446,7 @@ class TestSharedContentCache:
 
 
 def test_default_max_entries_is_bounded_not_none():
-    """ContentCache has a bounded default max_entries (F6)."""
+    """ContentCache has a bounded default max_entries."""
 
     with scoped_cache(default_ttl=3600) as c:
         # The default should be a positive integer, not None (which meant unbounded).
@@ -456,7 +456,7 @@ def test_default_max_entries_is_bounded_not_none():
 
 
 def test_max_entries_enforces_bound(tmp_path):
-    """Cache never exceeds max_entries (F6)."""
+    """Cache never exceeds max_entries."""
     cache = _make_cache(tmp_path, max_entries=3)
     cache.set("a", 1)
     cache.set("b", 2)
@@ -681,7 +681,7 @@ class TestContentCacheByteBudget:
         assert json.loads(path.read_text())["value"] == {"body": "v" * 300}
 
     def test_set_routes_through_write_seam(self, tmp_path, monkeypatch):
-        """#1733 twins: the sync write must go through _write_data like aset, so
+        """Twins: the sync write must go through _write_data like aset, so
         a failure is observable/testable at the same seam (a spy on an inline
         atomic_write_text call site is silently vacuous)."""
         cache = _make_cache(tmp_path)
@@ -691,7 +691,7 @@ class TestContentCacheByteBudget:
         assert "k" not in cache._index
 
     async def test_aget_cold_reads_honor_mirror_count_cap(self, tmp_path):
-        """#1733 twins: aget's disk-hit mirror enforces the same
+        """Twins: aget's disk-hit mirror enforces the same
         _MEMORY_CACHE_MAX cap as set/aset — otherwise repeated cold reads of
         distinct small keys grow the RAM mirror without bound."""
         cache = _make_cache(tmp_path, max_entry_bytes=10_000, max_total_bytes=10_000_000)
@@ -706,7 +706,7 @@ class TestContentCacheByteBudget:
             assert key in cache._memory_cache  # the cap must evict OLDEST, not block new
 
     def test_get_disk_hit_mirrors_small_value(self, tmp_path):
-        """#1733 twins: a hot URL read through the SYNC path warms the RAM
+        """Twins: a hot URL read through the SYNC path warms the RAM
         mirror exactly like the async path (the accelerator contract is
         method-independent)."""
         cache = _make_cache(tmp_path, max_entry_bytes=10_000)
@@ -716,7 +716,7 @@ class TestContentCacheByteBudget:
         assert "hot" in cache._memory_cache
 
     async def test_aset_write_failure_rolls_back_stale_mirror(self, tmp_path, monkeypatch):
-        """#1733 twins: when the async disk write fails with a surviving older
+        """Twins: when the async disk write fails with a surviving older
         entry, the in-memory mirror must not keep serving the value that was
         never persisted — rollback covers RAM, not just the index."""
         cache = _make_cache(tmp_path, max_entry_bytes=10_000)

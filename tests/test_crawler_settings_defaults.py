@@ -11,7 +11,7 @@ from app.validation import parse_bool_value
 
 def test_parallelism_defaults():
     s = CrawlerSettings.from_mapping()
-    # #7: faster single-domain crawling without being reckless.
+    # Faster single-domain crawling without being reckless.
     assert s.per_domain_concurrency == 2
     assert s.per_domain_delay_ms == 500
     # Adaptive throttling capped so a slow server cannot serialize crawls to

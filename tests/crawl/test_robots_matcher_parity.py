@@ -1,7 +1,7 @@
 """The hand-rolled robots matcher must agree with the dialect it implements.
 
-``_RobotsPathMatcher`` replaces ``re`` to kill catastrophic backtracking
-(#1766/#1783), so the reference oracle is the regex translation IT claims to
+``_RobotsPathMatcher`` replaces ``re`` to kill catastrophic backtracking,
+so the reference oracle is the regex translation IT claims to
 implement -- ``*`` -> ``.*``, left-anchored, trailing ``$`` = end anchor --
 run here over a tiny generated alphabet where backtracking is irrelevant.
 One implementation (the "exactly one definition" invariant) is not one
