@@ -213,6 +213,24 @@ def single_shot_job(job_id: str = "test-id", root: str = "http://example.com/"):
         yield store, store.create_single_shot(job_id, root, CrawlPolicy())
 
 
+@contextmanager
+def single_shot_orphan(job_id: str = "test-id", root: str = "http://example.com/"):
+    """A throwaway store holding one SINGLE_SHOT job stranded in RUNNING.
+
+    The state a process crash leaves behind: the row was claimed for a crawl
+    that the service can never resume, because a single-shot job has no
+    frontier to continue from. Recovery has to retire it rather than rewind it.
+
+    Separate from :func:`single_shot_job` because that one seeds the *fresh*
+    state, and a test about recovery has to state the stranded one -- spelling
+    the claim-and-crash out again at each call site is how the two states came
+    to be confused.
+    """
+    with single_shot_job(job_id, root) as (store, job):
+        store.set_status(job.job_id, JobStatus.RUNNING, expected=JobStatus.PENDING)
+        yield store, job
+
+
 def make_crawled_job_store(tmpdir: str, pages: int) -> tuple[JobStore, CrawlJobState]:
     """A store holding one job that has already crawled ``pages`` pages.
 

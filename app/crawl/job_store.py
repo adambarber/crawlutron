@@ -470,6 +470,7 @@ ON CONFLICT(job_id) DO UPDATE SET
 # would let the list quietly describe a different job than the detail view.
 _JOB_STATUS_PROJECTION = """
     SELECT job_id, root_url, status, created_at, updated_at, stats, error,
+           COALESCE(kind, 'whole_site') AS kind,
            json_array_length(frontier) AS frontier_size,
            COALESCE(json_extract(stats, '$.cap_truncated'), 0) AS cap_truncated
       FROM crawl_jobs
@@ -481,11 +482,20 @@ def _status_row(row: sqlite3.Row, visited: int, results: int) -> dict[str, Any]:
 
     ``frontier_size`` and ``cap_truncated`` are NULL when the row has no
     frontier or no stats object, which is the normal state of a fresh job.
+
+    ``kind`` is here because recovery reads it from this view. It was missing,
+    and both recovery seams asked for it anyway: the rewind checked
+    ``summary.get("kind")`` and the startup scan filtered on the same key, so
+    every summary answered ``None``, every job looked whole-site, and the
+    startup scan's kind check filtered nothing. A caller reading a key that the
+    projection never selected is a missing column, not a defensive default.
+    ``COALESCE`` covers rows written before the column existed.
     """
     return {
         "job_id": row["job_id"],
         "root_url": row["root_url"],
         "status": row["status"],
+        "kind": row["kind"],
         "created_at": row["created_at"],
         "updated_at": row["updated_at"],
         "frontier_size": row["frontier_size"] or 0,

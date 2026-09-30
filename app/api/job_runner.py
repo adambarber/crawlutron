@@ -126,17 +126,37 @@ def reset_job_runner() -> None:
     reset_execute_crawl()
 
 
+def _is_resumable_kind(kind: str | None) -> bool:
+    """Whether a job of this kind can be resumed from its persisted frontier.
+
+    One definition, read by both recovery seams, because the two used to
+    disagree: the rewind accepted every kind while the startup scan resumed
+    only whole-site jobs. A single-shot job killed mid-flight was therefore
+    marked recoverable and then never recovered -- PENDING indefinitely, and a
+    ``202 "pending"`` to every client that polled for it, from an endpoint
+    that is otherwise authoritative.
+
+    A seam that cannot resume must not rewind. It has to retire the row.
+    """
+    return kind in (None, JobKind.WHOLE_SITE.value)
+
+
 async def recover_orphaned_running_jobs(job_store: JobStore) -> int:
-    """Rewind RUNNING rows to PENDING (crash recovery). Returns count.
+    """Retire crash orphans: rewind the resumable, fail the rest.
 
     Async: the lifespan calls it with a live loop, and it reads every job row.
     """
     recovered = 0
     for summary in await job_store.alist_jobs():
         if summary.get("status") == JobStatus.RUNNING.value:
-            # Control-plane CAS: rewind RUNNING -> PENDING without rewriting
-            # the row's data; save() no longer carries status anyway.
-            if await job_store.aset_status(summary["job_id"], JobStatus.PENDING, expected=JobStatus.RUNNING):
+            # A job that cannot be resumed is given a terminal status here,
+            # while this is still the only place that knows the service has
+            # given up on it. Rewinding it instead would hand the next startup
+            # a row it has already decided to skip.
+            retired = JobStatus.PENDING if _is_resumable_kind(summary.get("kind")) else JobStatus.FAILED
+            # Control-plane CAS: retires the row without rewriting its data;
+            # save() no longer carries status anyway.
+            if await job_store.aset_status(summary["job_id"], retired, expected=JobStatus.RUNNING):
                 recovered += 1
     return recovered
 
@@ -146,17 +166,20 @@ async def recover_and_start_pending_jobs(
     settings: Any,
     shutdown_event: asyncio.Event,
 ) -> int:
-    """Lifespan startup: rewind crash orphans, then run every PENDING job.
+    """Lifespan startup: retire crash orphans, then run every PENDING job.
 
     Whole-site jobs resume from their persisted frontier; returns the number
-    of runner tasks started.
+    of runner tasks started. Jobs of any other kind reach the scan already
+    terminal -- `recover_orphaned_running_jobs` fails the orphans it cannot
+    resume -- so the kind check here is a guard against a row seeded
+    straight into PENDING, not the orphan path.
     """
     await recover_orphaned_running_jobs(job_store)
     started = 0
     for summary in await job_store.alist_jobs():
         if summary.get("status") != JobStatus.PENDING.value:
             continue
-        if summary.get("kind") not in (None, JobKind.WHOLE_SITE.value):
+        if not _is_resumable_kind(summary.get("kind")):
             continue
         job = await job_store.aload(summary["job_id"])
         if job is None:
