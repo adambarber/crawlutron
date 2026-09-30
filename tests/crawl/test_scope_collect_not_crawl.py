@@ -7,6 +7,8 @@
   regardless of strategy.
 """
 
+import pytest
+
 from app.crawl.cache import HttpCache
 from app.crawl.engine import crawl_request
 from tests._fetcher_factories import site_fetcher, tap_fetcher
@@ -127,3 +129,70 @@ async def test_document_urls_fetched_when_extraction_document_requested():
     )
     crawled = {r["normalized_url"] for r in out["results"]}
     assert "http://example.com/reports/2024-minutes.pdf" in crawled
+
+
+class TestSitemapCandidateBuilderUsesTheCanonicalOrigin:
+    """``fetch_job_sitemap_candidates`` re-derived the origin by hand.
+
+    It called ``urlparse`` and rebuilt ``scheme://netloc`` itself instead of
+    going through ``normalize_public_http_url``, the function whose docstring
+    says it is the single source of truth for what a normalized URL is. The
+    hand-built form keeps a default port, keeps host case, and keeps a trailing
+    dot -- so the same job root produced a different sitemap URL depending on
+    which spelling the caller happened to store. The policy is also never
+    consulted here, so a host the canonicalizer would refuse is used as a
+    sitemap origin before the fetcher sees it.
+
+    Asserted behaviourally: the URL the builder fetches is the one the
+    canonicalizer would produce for the same root.
+    """
+
+    async def _sitemap_url_for(self, root_url: str) -> str | None:
+        """Run the builder with the sitemap fetch stubbed, returning the URL asked for."""
+        import app.crawl.admission as admission
+
+        seen: list[str] = []
+
+        async def _capture(_fetcher, sitemap_url, _timeout, **_kwargs):
+            seen.append(sitemap_url)
+            return set()
+
+        from app.api_models import CrawlPolicy
+        from app.crawl.admission import JobAdmissionContext
+        from app.crawl.policy import PolicyTier
+        from app.settings import CrawlerSettings
+
+        context = JobAdmissionContext.create(
+            CrawlPolicy(), PolicyTier.model_defaults(), CrawlerSettings.from_mapping({})
+        )
+        original = admission.fetch_sitemap_urls
+        admission.fetch_sitemap_urls = _capture
+        try:
+            await admission.fetch_job_sitemap_candidates(root_url, context)
+        finally:
+            admission.fetch_sitemap_urls = original
+        return seen[0] if seen else None
+
+    @pytest.mark.parametrize(
+        "root_url",
+        [
+            "https://example.com/deep/path",
+            "HTTPS://Example.COM:443/deep/path",
+            "https://example.com.:443/deep/path",
+            "http://example.com:80/deep/path",
+        ],
+    )
+    async def test_the_origin_is_canonical_regardless_of_how_the_root_was_spelled(self, root_url):
+        from urllib.parse import urlsplit
+
+        from app.validation import HostPolicy, normalize_public_http_url
+
+        canonical = normalize_public_http_url(root_url, policy=HostPolicy.unrestricted())
+        parts = urlsplit(canonical)
+        expected = f"{parts.scheme}://{parts.netloc}/sitemap.xml"
+
+        actual = await self._sitemap_url_for(root_url)
+        assert actual == expected, f"{root_url!r} -> {actual!r}, canonicalizer says {expected!r}"
+
+    async def test_a_non_http_root_yields_no_candidates(self):
+        assert await self._sitemap_url_for("ftp://example.com/") is None

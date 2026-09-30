@@ -9,7 +9,7 @@ from collections.abc import Awaitable, Callable, Iterable, MutableSequence
 from dataclasses import dataclass, field
 from functools import partial
 from typing import Any, TypeVar
-from urllib.parse import urljoin, urlparse
+from urllib.parse import urljoin, urlsplit
 
 from app.api_models import CrawlExtractionMethod, CrawlPolicy
 from app.constants import is_analytics_host, is_document_url
@@ -573,10 +573,24 @@ def requeue_admitted_pages(
 
 
 async def fetch_job_sitemap_candidates(root_url: str, context: JobAdmissionContext) -> list[str]:
-    parsed = urlparse(root_url)
-    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+    """Sitemap candidates for a job root, or none if the root is not crawlable.
+
+    The origin is taken from ``normalize_public_http_url`` rather than rebuilt
+    here. This used to call ``urlparse`` and reassemble ``scheme://netloc``
+    itself, which kept host case, kept a default port and kept a trailing dot --
+    so the same job root produced a different sitemap URL depending on which
+    spelling had been stored, and a host the canonicalizer refuses was used as
+    a sitemap origin before any fetcher saw it. Routing through the declared
+    chokepoint makes this path agree with every other URL the service handles.
+    """
+    from app.validation import normalize_public_http_url
+
+    try:
+        canonical_root = normalize_public_http_url(root_url, policy=context.host_policy)
+    except ValueError:
         return []
-    sitemap_url = urljoin(f"{parsed.scheme}://{parsed.netloc}", "/sitemap.xml")
+    canonical = urlsplit(canonical_root)
+    sitemap_url = f"{canonical.scheme}://{canonical.netloc}/sitemap.xml"
     found = await fetch_sitemap_urls(
         partial(_default_http_fetcher, policy=context.host_policy),
         sitemap_url,
