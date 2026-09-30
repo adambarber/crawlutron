@@ -27,6 +27,7 @@ from tests.chokepoint_walks import (
     class_defs,
     file_tree,
     functions,
+    lineno,
     name_reads,
     nodes_of,
     offender,
@@ -41,6 +42,7 @@ from tests.chokepoint_walks import (
 from tests.invariants._shared import (
     _declared_public_symbols,
     _enclosing_calls,
+    _enclosing_nodes,
     _relative_app_path,
     assert_property_detector_bites,
 )
@@ -1135,118 +1137,83 @@ def test_cycle_guard_detector_respects_the_owner_parameter():
     ), "a guard call must fire when the sanctioned owner is renamed"
 
 
-#: The lock constructors a store must not hand itself. ``process_lock`` is the
-#: only sanctioned way to serialize writes to a store, and it is keyed by the
-#: database file, so every instance and every migration on that file shares one.
-_PRIVATE_LOCK_NAMES = frozenset({"Lock", "RLock"})
+_META_REASON_OWNER = "_require_meta_key"
 
 
-def _opens_a_store_connection(class_node: ast.ClassDef) -> bool:
-    """Whether this class reaches ``connect_store``, the one connection chokepoint.
+_META_WRONG_TYPE_FRAGMENT = "Invalid _meta key (must be "
 
-    Scoping the rule to this call is what keeps it from being wrong rather than
-    merely strict. Most of the tree holds state that no other process can reach
-    -- parsed robots rules, a content cache, a cookie jar, readiness counters --
-    and for all of those a private ``threading.Lock`` is the correct and only
-    sensible choice. A blanket ban reports those as violations, and a rule whose
-    violations include correct code is a rule people learn to ignore.
 
-    The class reaching the chokepoint is the set the rule is actually about, and
-    it is derived from the code rather than listed, so a new store is covered
-    the moment it opens a connection and no exemption list can rot.
+def _meta_key_reason_offenders(tree: ast.AST, path: Path, *, owner: str = _META_REASON_OWNER) -> list[str]:
+    """The wrong-type half of the ``_meta`` key rejection authored outside its owner.
+
+    ``validate_meta`` checked two required ``_meta`` keys and, for each, spelled
+    out the same two-part reason -- absent versus wrong type -- and raised the
+    same error around it. The distinction is the caller's only way to learn it
+    forgot a key rather than sent the wrong shape, so it is a contract, and a
+    duplicated one can drift in both directions at once: the two arms can stop
+    agreeing on wording, or one can stop distinguishing the two cases at all,
+    with the suite green either way.
+
+    Matching the *literal* rather than the shape is deliberate. A second arm that
+    built the same sentence a different way -- an f-string split across lines, a
+    helper, a new noun -- would be precisely the drift, and a test that recognised
+    the shape would wave it through. The rule is that the sentence is authored
+    once, in the function both keys check through.
     """
-    return any(
-        isinstance(node, ast.Call)
-        and resolved_call_name(class_node, node).rsplit(".", 1)[-1] == "connect_store"
-        for node in nodes_of(class_node)
-    )
+
+    def is_reason(node: ast.AST) -> bool:
+        return (
+            isinstance(node, ast.Constant)
+            and isinstance(node.value, str)
+            and _META_WRONG_TYPE_FRAGMENT in node.value
+        )
+
+    return [
+        offender(path, lineno(node), f"the _meta key reason is authored in {enclosing!r}, not {owner}()")
+        for node, enclosing in _enclosing_nodes(tree, is_reason)
+        if enclosing != owner
+    ]
 
 
-def _private_store_lock_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
-    """A store must take the file's process lock, not a lock of its own.
-
-    A per-instance ``threading.Lock`` excludes that store from nothing else. The
-    migration it already ran takes ``process_lock``, and a second instance
-    writing the same file brings its own private lock again -- so a write runs
-    straight through a migration in flight, and the only thing left deciding
-    whether that is survivable is ``busy_timeout``. That is how a shared
-    database becomes ``database is locked`` raised from inside a migration step
-    on one run in twelve, in some other worker's test, with no way to reproduce
-    it on demand.
-
-    It is invisible by construction: a private lock is locally correct, passes
-    every single-store test, and only fails once a second writer exists. So the
-    rule has to be a gate rather than a review convention.
-    """
-    offenders: list[str] = []
-    for class_node in class_defs(tree):
-        if not _opens_a_store_connection(class_node):
-            continue
-        for node in writes(class_node):
-            value = node.value
-            if not (isinstance(value, ast.Call) and isinstance(value.func, ast.Attribute)):
-                continue
-            if value.func.attr not in _PRIVATE_LOCK_NAMES:
-                continue
-            if not (isinstance(value.func.value, ast.Name) and value.func.value.id == "threading"):
-                continue
-            targets = assignment_targets(node)
-            for target in targets:
-                if isinstance(target, ast.Attribute) and target.attr == "_lock":
-                    offenders.append(
-                        offender_at(
-                            path,
-                            node,
-                            f"{class_node.name} serializes on a private lock, not process_lock",
-                        )
-                    )
-    return offenders
-
-
-STORES_SERIALIZE_ON_THE_FILES_PROCESS_LOCK = Rule(
-    name="stores-serialize-on-the-files-process-lock",
-    find=_private_store_lock_offenders,
+THE_META_KEY_REJECTION_REASON_IS_AUTHORED_ONCE = Rule(
+    name="the-meta-key-rejection-reason-is-authored-once",
+    find=_meta_key_reason_offenders,
     summary=(
-        "A per-instance threading.Lock excludes that store from no other process, "
-        "so a write can run straight through a migration in flight; serialize on "
-        "process_lock(store_lock_key(db_path))"
+        "the wrong-type _meta reason is a contract the caller reads to learn it "
+        "forgot a key rather than sent the wrong shape, so it is authored once, in "
+        "the function both keys check through"
     ),
-    proof_path=REPO_ROOT / "app" / "crawl" / "store.py",
     bite=lambda: (
         Bites(
-            "class Store:\n"
-            "    def __init__(self, db_path):\n"
-            "        self._conn = connect_store(db_path, schema=schema)\n"
-            "        self._lock = threading.Lock()\n",
-            "private lock, not process_lock",
+            "def validate_meta(meta, request_id):\n"
+            f'    reason = f"{{key}} "\n'
+            f'    reason += "{_META_WRONG_TYPE_FRAGMENT}{{key}})"\n',
+            "authored in 'validate_meta'",
         ),
         Bites(
-            "class Store:\n"
-            "    def __init__(self, db_path):\n"
-            "        self._conn = connect_store(db_path, schema=schema)\n"
-            "        self._lock = threading.RLock()\n",
-            "private lock, not process_lock",
+            f'WHY = "{_META_WRONG_TYPE_FRAGMENT}protocolVersion)"\n',
+            "authored in '<module>'",
         ),
     ),
     clean=lambda: (
-        "class Store:\n"
-        "    def __init__(self, db_path):\n"
-        "        self._lock = process_lock(store_lock_key(db_path))\n"
-        "        self._conn = connect_store(db_path, schema=schema)\n",
-        # A module-level guard is not a store's write lock, and banning it would
-        # be the rule being wrong rather than the code.
-        "_PROCESS_LOCKS_GUARD = threading.Lock()\n",
-        # State no other process can reach. A private lock is the right answer
-        # here, which is the whole reason the rule is scoped to the connection
-        # chokepoint rather than banning the constructor.
-        "class RobotsCache:\n    def __init__(self):\n        self._lock = threading.Lock()\n",
+        # The one place the sentence legitimately lives: the owner function both
+        # keys check through.
+        f"def {_META_REASON_OWNER}(meta, key, expected, label, request_id):\n"
+        f'    return f"{_META_WRONG_TYPE_FRAGMENT}{{label}}): {{key}})"\n',
+        # Unrelated reasons are not the contract, so they must not be swept up
+        # with it.
+        'def validate_meta(meta):\n    raise ProtocolValidationError("Missing _meta block")\n',
+        'def validate_meta(meta):\n    reason = f"Missing required _meta key: {key}"\n',
     ),
+    proof_path=REPO_ROOT / "app" / "mcp" / "protocol.py",
 )
 
 
-def test_stores_serialize_on_the_files_process_lock():
-    STORES_SERIALIZE_ON_THE_FILES_PROCESS_LOCK.scan()
+def test_the_meta_key_rejection_reason_is_authored_once():
+    """app/mcp/protocol.py spells the wrong-type _meta reason in one function."""
+    THE_META_KEY_REJECTION_REASON_IS_AUTHORED_ONCE.scan()
 
 
-def test_private_store_lock_detector_bites():
-    STORES_SERIALIZE_ON_THE_FILES_PROCESS_LOCK.check_bites()
+def test_meta_key_reason_detector_bites():
+    """A second authoring of the sentence fires; the one in the owner stays clean."""
+    THE_META_KEY_REJECTION_REASON_IS_AUTHORED_ONCE.check_bites()
