@@ -8,6 +8,7 @@ import pytest
 
 import app.crawl.strategies.pinned_transport as http_mod
 from app.crawl.strategies.pinned_transport import _check_ssrf_protection, _resolve_and_pin_host
+from app.safe_url import SafeUrl
 from app.validation import HostPolicy, normalize_public_http_url
 from tests._assertions import (
     assert_dns_pinning_uses_first_resolution,
@@ -109,26 +110,69 @@ def _fail_resolution(host, *args, **kwargs):
     raise socket.gaierror("name or service not known")
 
 
-def test_check_ssrf_protection_blocks_unresolvable_host(monkeypatch):
-    monkeypatch.setenv("CRAWLUTRON_ALLOW_PRIVATE_TARGETS", "0")
+def _unresolvable_host(monkeypatch, *, allow_private: str = "0") -> None:
+    """Establish the unresolvable-host precondition every pinning test needs.
+
+    Two facts, always together: DNS resolution fails, and the private-target
+    escape hatch is set to the stated value. Stating them per test meant five
+    copies of the same precondition, and a test that set only one of the two
+    would still have run -- which is the failure this chokepoint removes, since
+    the hatch defaults on and silently turns the fail-closed assertions into
+    passthrough ones.
+
+    ``allow_private`` exists only for the test that proves the hatch is the sole
+    exception; everything else takes the default, so a test that means "closed"
+    cannot spell it wrongly.
+    """
     monkeypatch.setattr(socket, "getaddrinfo", _fail_resolution)
+    monkeypatch.setenv("CRAWLUTRON_ALLOW_PRIVATE_TARGETS", allow_private)
+
+
+def test_check_ssrf_protection_blocks_unresolvable_host(monkeypatch):
+    _unresolvable_host(monkeypatch)
     with pytest.raises(ValueError):
         http_mod._check_ssrf_protection("http://nonexistent.invalid/")
 
 
-def test_resolve_and_pin_host_does_not_fall_back_to_loopback(monkeypatch):
-    monkeypatch.setattr(socket, "getaddrinfo", _fail_resolution)
-    monkeypatch.setenv("CRAWLUTRON_ALLOW_PRIVATE_TARGETS", "0")
-    hostname, pinned_ip = http_mod._resolve_and_pin_host("http://nonexistent.invalid/")
-    assert pinned_ip != "127.0.0.1", "unresolvable host must not pin to loopback"
-    assert pinned_ip == "nonexistent.invalid"
+def test_resolve_and_pin_host_fails_closed_when_resolution_fails(monkeypatch):
+    """An unresolvable host must be refused, not handed back for re-resolution.
+
+    Returning ``(hostname, hostname)`` here does not merely avoid loopback: it
+    gives the HTTP client permission to resolve the name a THIRD time, at connect
+    time, with no validation applied to the answer. ``_check_ssrf_protection``
+    validated the IPs it saw, and this discards them, so an attacker who can make
+    the pin-time lookup fail gets a connection to an address nothing checked.
+    That is the rebinding this function exists to prevent, reached by breaking
+    the pin instead of racing it.
+
+    The refusal is a ValueError for the same reason the no-public-IP branch below
+    raises one: both mean "this hostname cannot be safely connected to", and both
+    are surfaced to callers as an ordinary SSRF refusal rather than a crash.
+    """
+    _unresolvable_host(monkeypatch)
+    with pytest.raises(ValueError, match="cannot resolve hostname"):
+        http_mod._resolve_and_pin_host("http://nonexistent.invalid/")
+
+
+def test_resolve_and_pin_host_escape_hatch_survives_resolution_failure(monkeypatch):
+    """The local-dev escape hatch is the ONLY path that returns an unpinned host.
+
+    ``_allow_private_targets()`` exists so a developer can crawl a service on
+    their own machine, which necessarily means an unresolvable-on-the-internet
+    name. It is a deliberate, environment-gated bypass -- so it is pinned to the
+    env var and only the env var. If a future change made this the fallback for
+    an ordinary DNS failure, the test below would keep passing while the bypass
+    quietly became the default.
+    """
+    _unresolvable_host(monkeypatch, allow_private="1")
+    hostname, pinned_ip = http_mod._resolve_and_pin_host("http://service.local/")
+    assert (hostname, pinned_ip) == ("service.local", "service.local")
 
 
 def test_build_pinned_request_never_targets_loopback_for_unresolvable(monkeypatch):
     # Defense-in-depth: even if a caller skips the SSRF check, pinning must not
     # point at 127.0.0.1 for an attacker-influenced, unresolvable hostname.
-    monkeypatch.setattr(socket, "getaddrinfo", _fail_resolution)
-    monkeypatch.setenv("CRAWLUTRON_ALLOW_PRIVATE_TARGETS", "0")
+    _unresolvable_host(monkeypatch)
     # _build_pinned_request raises now (check fails closed), so assert it raises.
     with pytest.raises(ValueError):
         http_mod._build_pinned_request(
@@ -136,6 +180,26 @@ def test_build_pinned_request_never_targets_loopback_for_unresolvable(monkeypatc
             {},
             policy=HostPolicy.unrestricted(),
         )
+
+
+def test_safe_url_parse_surfaces_unresolvable_host_as_an_ssrf_refusal(monkeypatch):
+    """The caller-visible contract: an unresolvable host is refused, not crashed on.
+
+    ``SafeUrl.parse(pin=True)`` is the public entry point every pinned fetch goes
+    through, and it is the thing a caller actually catches. Pinning ``_resolve_and_pin_host``
+    fixed the low-level helper; this pins that the refusal reaches the caller as the
+    ordinary ValueError it has always been -- the same refusal
+    ``_check_ssrf_protection`` raises, with the same message -- and not as a
+    ``socket.gaierror`` escaping a layer that documents raising ValueError.
+
+    The assertion is deliberately on the message, not merely the type: a bare
+    ``pytest.raises(ValueError)`` would also pass if an unrelated ValueError were
+    raised from somewhere else in the parse, which is what a silent regression
+    here would look like.
+    """
+    _unresolvable_host(monkeypatch)
+    with pytest.raises(ValueError, match="SSRF protection: cannot resolve hostname"):
+        SafeUrl.parse("http://nonexistent.invalid/", policy=HostPolicy.unrestricted(), pin=True)
 
 
 class TestSSRFProtection:

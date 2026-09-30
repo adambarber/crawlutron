@@ -111,6 +111,16 @@ def _resolve_and_pin_host(url: str) -> tuple[str, str]:
     the resolved IPs, then this helper returns the FIRST public IP so the HTTP
     client connects to that exact IP instead of re-resolving at connect time.
     The original ``Host`` header is preserved by the caller.
+
+    Fails closed. A hostname that cannot be resolved here raises rather than
+    falling back to ``(hostname, hostname)``, which read as harmless but is not:
+    it hands the HTTP client permission to resolve the name a third time, at
+    connect time, with nothing validating the answer. ``_check_ssrf_protection``
+    checked the IPs it saw and this discarded them, so an attacker able to fail
+    the pin-time lookup got an unvalidated connection -- the rebinding this
+    function exists to prevent, reached by breaking the pin instead of racing it.
+    ``_check_ssrf_protection`` already refuses the same condition with the same
+    message; this keeps the two halves of one guarantee refusing together.
     """
 
     parsed = urlparse(url)
@@ -128,10 +138,10 @@ def _resolve_and_pin_host(url: str) -> tuple[str, str]:
         # DNS rebind inside the cache TTL cannot bypass the check (TOCTOU).
         ips = _resolve_ips(hostname, use_cache=False)
     except socket.gaierror:
-        # Do NOT fall back to loopback. Returning the original hostname makes
-        # the HTTP client attempt resolution itself and fail with a connection
-        # error instead of silently connecting to 127.0.0.1 (SSRF bypass).
-        return hostname, hostname
+        # Fail closed. Returning the hostname here let the client resolve it again
+        # at connect time with no validation applied, which is the open door
+        # _check_ssrf_protection closes on the other side of this same lookup.
+        raise ValueError(f"SSRF protection: cannot resolve hostname {hostname}") from None
     for ip in ips:
         if _is_public_ip_value(ip):
             return hostname, ip
