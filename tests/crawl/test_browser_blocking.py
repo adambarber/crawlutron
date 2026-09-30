@@ -129,7 +129,7 @@ async def test_ssrf_route_handler_fails_closed_on_unexpected_errors(monkeypatch)
 
 
 async def test_ssrf_route_handler_allows_non_network_schemes():
-    """data:/blob:/about: requests never touch DNS; they must pass through."""
+    """Data:/blob:/about: requests never touch DNS; they must pass through."""
     await assert_route_decision(
         ssrf_route_handler(),
         ("data:text/html;base64,PGI+", "blob:https://x/y", "about:blank"),
@@ -174,7 +174,7 @@ async def test_pinterest_aborted_with_and_without_www():
 
 
 async def test_cdcgov_aborted_with_and_without_www():
-    # H3: cdc.gov is a government CONTENT host, not tracking infrastructure.
+    # Cdc.gov is a government CONTENT host, not tracking infrastructure.
     # It was removed from ANALYTICS_HOST_SUFFIXES (data poisoning); the
     # route handler must let it through. Suffix match still covers apex
     # and subdomains alike for hosts that ARE on the list (see pinterest).
@@ -186,7 +186,7 @@ async def test_cdcgov_aborted_with_and_without_www():
 
 
 async def test_xcom_aborted_regardless_of_mode():
-    # x.com (X/Twitter) is on the hard-skip tracking list: aborted in every mode,
+    # X.com (X/Twitter) is on the hard-skip tracking list: aborted in every mode,
     # including bare-apex and www subdomain forms.
     await assert_route_decision(
         ssrf_route_handler(),
@@ -196,17 +196,17 @@ async def test_xcom_aborted_regardless_of_mode():
 
 
 async def test_image_blocked_by_default_unless_screenshot():
-    # default (no screenshot requested) -> abort unconditionally
+    # Default (no screenshot requested) -> abort unconditionally
     route = FakeRoute()
     await ssrf_route_handler()(route, FakeRequest("https://x.test/logo.png", "image"))
     assert route.decision == "abort"
 
-    # reduced mode -> also abort
+    # Reduced mode -> also abort
     route = FakeRoute()
     await ssrf_route_handler("reduced")(route, FakeRequest("https://x.test/logo.png", "image"))
     assert route.decision == "abort"
 
-    # screenshot explicitly requested -> continue (renders need images/fonts)
+    # Screenshot explicitly requested -> continue (renders need images/fonts)
     route = FakeRoute()
     with patch.object(browser_mod, "_build_pinned_request", return_value=("http://1.2.3.4/", {})):
         await ssrf_route_handler(include_screenshot=True)(
@@ -309,7 +309,7 @@ def _make_mock_page() -> MagicMock:
     page = MagicMock()
     for name in ("click", "fill", "hover", "query_selector", "wait_for_selector", "evaluate", "close"):
         setattr(page, name, AsyncMock())
-    # scroll's query_selector should resolve to an element
+    # Scroll's query_selector should resolve to an element
     page.query_selector.return_value = MagicMock()
     return page
 

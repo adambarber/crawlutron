@@ -7,7 +7,7 @@ from urllib.parse import urlsplit
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.constants import (
-    # when pyright handles pydantic v2's Field/validator overloads without help.
+    # When pyright handles pydantic v2's Field/validator overloads without help.
     BROWSER_HEADED_WARMED,
     BROWSER_HEADLESS,
     DEFAULT_CHALLENGE_WAIT_SECONDS,
@@ -316,7 +316,7 @@ class Credential(BaseModel):
     Keyed in ``CrawlPolicy.credentials`` by canonical origin
     (``scheme://host[:port]``), so a credential is addressable only for the
     origin it was written for -- the per-hop redirect scrub for
-    ``authorization`` (Fix 3) then enforces "credentials never cross host
+    ``authorization`` then enforces "credentials never cross host
     boundaries" for free. Values are secrets: never logged, never echoed in
     diagnostics (policy echoes strip them, same discipline as cookies).
     """
@@ -358,7 +358,7 @@ class Credential(BaseModel):
 
 class CrawlPolicy(BaseModel):
     # Rejected policy.headers names -> why. Conditional pairs keep the
-    # M14 reason (they must arrive via ``validators``); the rest bypass an
+    # reason (they must arrive via ``validators``); the rest bypass an
     # engine chokepoint or spoof origin-side identity. The map is the single
     # ban list -- adding an entry here is the whole change surface.
     _BANNED_HEADERS: ClassVar[dict[str, str]] = {

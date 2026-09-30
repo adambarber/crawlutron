@@ -1,5 +1,5 @@
-"""N10: lifespan installs the readiness utilization sampler at startup and
-uninstalls it at shutdown (symmetry with M11's wiring).
+"""Lifespan installs the readiness utilization sampler at startup and
+uninstalls it at shutdown.
 
 Also the shutdown sequence's own contract: every teardown step is attempted,
 so one pool whose close() raises cannot cost the others theirs.

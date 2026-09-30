@@ -1,4 +1,4 @@
-"""M10: _ResultSpill.load_ordered single-pass reassembly contract."""
+"""_ResultSpill.load_ordered single-pass reassembly contract."""
 
 import fcntl
 import inspect
@@ -10,7 +10,7 @@ from app.crawl.engine import _ResultSpill
 
 
 class TestLoadOrderedContract:
-    """M10: load_ordered assembles results in one pass, in submission order."""
+    """Load_ordered assembles results in one pass, in submission order."""
 
     def test_shuffled_writes_reassemble_in_submission_order(self):
         spill = _ResultSpill()
@@ -47,7 +47,7 @@ class TestLoadOrderedContract:
 
 
 class TestSpillGcCadence:
-    """Tier-2 T5: stale-spill GC is rate-limited, not per-construction.
+    """Tier-2 stale-spill GC is rate-limited, not per-construction.
 
     The listdir+getmtime sweep of the system temp dir ran on EVERY crawl
     request. The cadence gate keeps exactly one guarantee shape: the first
@@ -165,7 +165,7 @@ class TestGcNeverUnlinksASpillStillInUse:
         spill = _ResultSpill()
         path = spill.path
         spill.close()
-        # close() unlinks an owned spill, so recreate one to stand in for a
+        # Close() unlinks an owned spill, so recreate one to stand in for a
         # spill abandoned by a worker that died without closing it.
         with open(path, "w", encoding="utf-8") as handle:
             handle.write('{"i":0,"r":{}}\n')

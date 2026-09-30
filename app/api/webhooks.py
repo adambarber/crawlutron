@@ -64,7 +64,7 @@ async def deliver_pinned_webhook(
     # composition is exactly the shape that produced the redirect findings.
     # validate_webhook_url already ran at the edge; parsing again here closes
     # the TOCTOU between validation and delivery. The parse runs off the event
-    # loop (D3): see _parse_pinned_off_loop.
+    # loop; see _parse_pinned_off_loop.
     safe = await _parse_pinned_off_loop(webhook_url, host_policy=host_policy)
     connect_url, connect_headers = safe.connect()
     request_headers = {"Content-Type": "application/json", **connect_headers}
@@ -192,11 +192,11 @@ async def validate_webhook_url_async(webhook_url: str, *, host_policy: HostPolic
 
 
 async def _parse_pinned_off_loop(webhook_url: str, *, host_policy: HostPolicy) -> SafeUrl:
-    """Off-event-loop ``SafeUrl.parse(webhook_url, pin=True)`` (D3).
+    """Off-event-loop ``SafeUrl.parse(webhook_url, pin=True)``.
 
     The delivery path re-parses through the chokepoint to close the TOCTOU
     between validation and delivery, and that parse is the SAME synchronous
-    ``getaddrinfo`` the validation twin offloads in M6. Running it inline would
+    ``getaddrinfo`` the validation twin offloads in Running it inline would
     stall the whole FastAPI loop on every webhook delivery -- the validation
     path was offloaded and this one was missed -- so it reuses the ONE
     ``dns-resolve`` pool rather than a second offload mechanism. Both the

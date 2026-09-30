@@ -45,7 +45,7 @@ def _get_on_a_fresh_loop():
 
 
 def test_semaphore_is_rebuilt_when_the_running_loop_changes(reset_semaphore):
-    """P2-C: two separate loops must not share one loop-bound primitive."""
+    """-C: two separate loops must not share one loop-bound primitive."""
     first = _get_on_a_fresh_loop()
     second = _get_on_a_fresh_loop()
 

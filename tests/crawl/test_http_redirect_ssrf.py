@@ -54,7 +54,7 @@ def _allow_every_host(monkeypatch) -> None:
 
 
 async def test_redirect_to_unsafe_loopback_is_not_followed(monkeypatch):
-    """F1: a 302 to an internal (loopback) target must NOT be fetched.
+    """A 302 to an internal (loopback) target must NOT be fetched.
 
     The original code used follow_redirects=True, so httpx would connect to
     the redirect target without re-checking it -> SSRF. The fix follows

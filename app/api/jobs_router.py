@@ -1,4 +1,4 @@
-"""``/v1/jobs`` URL→handler mapping for whole-site crawl jobs (H5 make-it-work).
+"""``/v1/jobs`` URL→handler mapping for whole-site crawl jobs.
 
 Create spawns a background runner task (module :mod:`app.api.job_runner`)
 that consumes the persisted frontier through the shared crawl engine.

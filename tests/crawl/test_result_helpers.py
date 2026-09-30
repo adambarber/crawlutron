@@ -25,7 +25,7 @@ class TestResultHelpersEdges:
 
 
 class TestTerminalResultContract:
-    """M1: the three terminal builders differ only in status and error defaulting.
+    """The three terminal builders differ only in status and error defaulting.
 
     Pinning every wire-visible field makes the collapse of
     _failed/_blocked/_skipped_engine_result onto one primitive provably

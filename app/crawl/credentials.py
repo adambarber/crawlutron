@@ -75,7 +75,7 @@ def apply_credentials(
 
     Lookup is exact canonical-origin equality: a credential written for
     origin A can never attach to a request for origin B (same-origin
-    redirects keep it; cross-host redirects strip it via Fix 3).
+    redirects keep it; cross-host redirects strip it).
     """
     if not credentials:
         return headers

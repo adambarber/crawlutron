@@ -136,7 +136,7 @@ class _TokenBucket:
 # Upper bound on how long any single job will sleep on a domain cooldown.
 _MAX_COOLDOWN_WAIT = 300.0
 
-# T8: purge the cooldown/circuit mappings at most once per this many
+# Purge the cooldown/circuit mappings at most once per this many
 # set_domain_cooldown calls, so a crawl with many 429s does not rebuild both
 # dicts on every rate-limited result. ``run`` still purges up front.
 _COOLDOWN_PURGE_INTERVAL = 100
@@ -238,7 +238,7 @@ class DomainScheduler:
         # re-climbing the ladder from the cheapest strategy.
         self._domain_strategy_pins: dict[str, str] = {}
 
-        # T8: every rate-limited result calls set_domain_cooldown; purging both
+        # Every rate-limited result calls set_domain_cooldown; purging both
         # dicts per call made a crawl with many 429s quadratic. The purge is
         # amortized to one per ``_COOLDOWN_PURGE_INTERVAL`` sets (``run`` still
         # purges up front), so the mappings stay bounded without per-429 work.
@@ -291,7 +291,7 @@ class DomainScheduler:
         exponentially with each threshold-crossing batch of failures."""
         self._domain_failures[domain] += 1
         # Each completed batch of ``threshold`` failures escalates one step:
-        # trip 1 -> base, trip 2 -> base*2, trip 3 -> base*4, ... capped. A
+        # trip 1 -> base, trip 2 -> base*2, trip 3 -> base*4,... capped. A
         # domain that fails 40 times in a row is parked for the max cooldown.
         n = self._domain_failures[domain] // self._circuit_threshold
         if n >= 1 and n > self._circuit_trip_count.get(domain, 0):
@@ -433,7 +433,7 @@ class DomainScheduler:
         # caller's sink raising is not evidence the job failed, so letting it out
         # was answered with a failure envelope for a page that succeeded -- then
         # delivered through the same broken sink, and discarded by gather's
-        # return_exceptions with no log line. The H1 "job vanished" shape.
+        # return_exceptions with no log line. The "job vanished" shape.
         async def deliver(index: int, result: _Result) -> None:
             if on_result is None:
                 results[index] = result
@@ -516,7 +516,7 @@ class DomainScheduler:
                     # failure, not a reason to charge the domain's breaker.
                     await deliver(job.index, result)
 
-        # return_exceptions=True: a single job failure must not cancel the
+        # Return_exceptions=True: a single job failure must not cancel the
         # other in-flight jobs. Exceptions are captured here; the
         # failing job is simply absent from the returned mapping.
         await asyncio.gather(*(run_one(job) for job in jobs), return_exceptions=True)

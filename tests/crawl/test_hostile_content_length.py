@@ -1,4 +1,4 @@
-"""L2: a hostile ``Content-Length`` must not crash the fetcher.
+"""A hostile ``Content-Length`` must not crash the fetcher.
 
 Both fetchers pre-check the declared length against the per-page cap. The
 parse must treat a non-numeric (or negative, or absent) ``Content-Length`` as

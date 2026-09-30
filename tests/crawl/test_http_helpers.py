@@ -483,7 +483,7 @@ class TestCrawlRequest:
             )
 
     def test_checked_payload_urls_accepts_a_forwarded_batch_without_rederiving(self) -> None:
-        """Tier-2 T3: the endpoint gate's result may be handed to the engine so
+        """Tier-2 the endpoint gate's result may be handed to the engine so
         the batch is parsed once per request. A forwarded batch is returned as
         the job set without re-deriving from the payload..."""
         from app.crawl.payload_helpers import checked_payload_urls
@@ -573,7 +573,7 @@ class TestFetchHelperUtilities:
         assert any("https://ok/x" in getattr(link, "url", str(link)) for link in links)
 
     def test_extract_discovered_links_handles_unnormalizable_source_url(self) -> None:
-        # normalize_public_http_url rejects non-http source URLs; the link extractor
+        # Normalize_public_http_url rejects non-http source URLs; the link extractor
         # must fall back to the raw source rather than crash.
         links, count, truncated = _extract_discovered_links(
             "<a href='https://ok.example/x'>ok</a>", "ftp://example.com/"
@@ -618,9 +618,9 @@ class TestFingerprintInjectionRotation:
         # Use more hosts than pool size so rotation is clearly visible.
         hosts = [f"{c}.com" for c in "abcdef"]
         seen = {d: _select_fingerprint(profile, d).get("user_agent") for d in hosts}
-        # rotation: different hosts get a variety of UAs (not all identical)
+        # Rotation: different hosts get a variety of UAs (not all identical)
         assert len(set(seen.values())) > 1
-        # stability: same host -> same UA across calls (keeps content-cache key stable)
+        # Stability: same host -> same UA across calls (keeps content-cache key stable)
         assert _select_fingerprint(profile, "a.com")["user_agent"] == seen["a.com"]
         assert _select_fingerprint(profile, "a.com")["user_agent"] == seen["a.com"]
 
@@ -632,9 +632,9 @@ class TestFingerprintInjectionRotation:
             ]
             for d in ("a.com", "b.com", "c.com", "d.com", "e.com")
         }
-        # across 5 distinct hosts the built-in pool (size 5) yields variety
+        # Across 5 distinct hosts the built-in pool (size 5) yields variety
         assert len(set(langs.values())) > 1
-        # same host is stable
+        # Same host is stable
         again = _headers_for_strategy("HTTP_DECLARED_CRAWLER", read_policy(base), "http://a.com/")[
             "Accept-Language"
         ]

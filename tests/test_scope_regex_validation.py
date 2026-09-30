@@ -1,4 +1,4 @@
-"""G4: scope_regex validation contract.
+"""Scope_regex validation contract.
 
 compile_untrusted RAISES UnsafePattern on over-long/invalid patterns; the
 API field validator must convert that into a pydantic ValidationError (which

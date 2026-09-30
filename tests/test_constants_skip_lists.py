@@ -1,4 +1,4 @@
-"""Adversarial review H3: the analytics hard-skip list must not contain
+"""Adversarial review the analytics hard-skip list must not contain
 legitimate content hosts.
 
 ``ANALYTICS_HOST_SUFFIXES`` silently drops every discovered link to a listed
@@ -23,7 +23,7 @@ class TestAnalyticsSkipListBoundaries:
             assert is_analytics_host(url), url
 
     def test_government_content_host_is_never_skipped(self):
-        # H3: cdc.gov was in the skip list, silently dropping an entire
+        # Cdc.gov was in the skip list, silently dropping an entire
         # government domain from every crawl.
         assert "cdc.gov" not in ANALYTICS_HOST_SUFFIXES
         assert not is_analytics_host("https://www.cdc.gov/flu/weekly/index.htm")

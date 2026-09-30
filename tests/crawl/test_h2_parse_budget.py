@@ -1,4 +1,4 @@
-"""H2 parse-budget contract: lxml tree parses per page, measured not assumed.
+"""Lxml tree parses per page, measured not assumed.
 
 The chokepoint-theory review claimed "two parses per page"; measurement
 through the real production paths (this file) found the codebase's own
@@ -8,7 +8,7 @@ block (tree= threading covers diagnostics/frames/forms/links), and ONE
 re-parse in _extract_llm_metadata at shaping time, across the persistence
 boundary.
 
-H2 consolidation moved the shaping-side re-parse to its computation site:
+Consolidation moved the shaping-side re-parse to its computation site:
 when the discovery tree exists it also reads the LLM page metadata once, and
 the result carries the small plain-data dict (``llm_metadata``) across the
 persistence boundary; shaping reads the carried dict instead of rebuilding a
@@ -94,7 +94,7 @@ async def test_selector_mode_adds_no_parse_inside_the_strategy(parse_counter):
 
 
 async def test_engine_computes_metadata_once_from_the_discovery_tree(parse_counter):
-    """H2: the discovery tree also produces the page metadata, once.
+    """The discovery tree also produces the page metadata, once.
 
     The engine item carries the small metadata dict (persisted, plain data)
     so shaping never rebuilds a tree from the stored HTML string.

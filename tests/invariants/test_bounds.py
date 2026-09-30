@@ -206,7 +206,7 @@ def _decompress_cap_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
 
 
 def test_all_decompress_calls_pass_a_cap():
-    """Every production decompression is size-bounded (H2 closure)."""
+    """Every production decompression is size-bounded ()."""
     assert_trees_clean(
         _decompress_cap_offenders,
         "decompress_body needs max_output_bytes=",
@@ -490,7 +490,7 @@ def _unguarded_header_int_offenders(tree: ast.AST, path: pathlib.Path) -> list[s
     """Flag ``int``/``float`` of a header-derived value outside a try/except ValueError.
 
     Parsing a ``Content-Length`` (or any header) into a number without guarding
-    the conversion is the L2 class: one crafted ``Content-Length: abc`` raises
+    the conversion is its own class: one crafted ``Content-Length: abc`` raises
     out of the fetcher and fails the whole request. The safe shapes either go
     through a guard predicate (the arg is a parameter, not an in-scope header
     read) or wrap the ``int()`` in ``try/except ValueError`` (middleware's

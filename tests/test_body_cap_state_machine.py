@@ -1,4 +1,4 @@
-"""B5: the body-size middleware must stay truncated once the cap is breached.
+"""The body-size middleware must stay truncated once the cap is breached.
 
 After truncating a chunk that carried ``more_body=False``, ``already_drained``
 was set while ``bytes_delivered`` was never charged for the truncating chunk, so

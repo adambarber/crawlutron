@@ -138,7 +138,7 @@ def _make_ssrf_route_handler(
 
     Plain-HTTP requests keep the FRESH (uncached) pinned IP, which governs the
     actual connection: a rebind inside the resolver cache TTL must not slip
-    onto the wire (TOCTOU, F7/F8). HTTPS requests are validated through the
+    onto the wire. HTTPS requests are validated through the
     same cached check the websocket handler uses: ``SafeUrl.connect`` keeps
     the original hostname there (real certificates carry no IP address SAN,
     so a pin would only break SNI/cert verification), making an uncached pin
@@ -148,14 +148,14 @@ def _make_ssrf_route_handler(
 
     async def _handler(route, request):
         # Re-validate and pin the IP for this specific subresource request
-        # to prevent DNS-rebinding TOCTOU (F7/F8). _build_pinned_request
+        # to prevent DNS-rebinding TOCTOU. _build_pinned_request
         # raises ValueError if the target resolves to a private/loopback IP,
         # and returns (pinned_url, {Host: original_hostname}) so we can
         # force the browser to connect to the validated IP while preserving
         # the Host header (virtual-host routing).
         request_scheme = request.url.split(":", 1)[0].lower()
         if request_scheme not in ("http", "https", ""):
-            # data:, blob:, about:, javascript: never touch the network via DNS;
+            # Data:, blob:, about:, javascript: never touch the network via DNS;
             # let the browser handle them locally instead of aborting.
             await route.continue_()
             return
@@ -667,7 +667,7 @@ class BrowserRenderer:
 
         browser = await self._acquire_browser(options)
         page = await browser.new_page(**self._get_page_kwargs(options.browser_profile))
-        # F8: abort any request (navigation, redirect, or subresource) that
+        # Abort any request (navigation, redirect, or subresource) that
         # resolves to an SSRF-unsafe host before the browser connects.
         await page.route(
             "**/*",
@@ -682,7 +682,7 @@ class BrowserRenderer:
         if ws_router is None:
             logger.warning("websocket_interception_unsupported")
         else:
-            # route_websocket is sync in Playwright (unlike page.route); accept
+            # Route_websocket is sync in Playwright (unlike page.route); accept
             # both sync and async implementations for test doubles.
             outcome = ws_router("**/*", ws_guard)
             if asyncio.iscoroutine(outcome):
@@ -791,8 +791,8 @@ class BrowserRenderer:
         finally:
             # Always release the page so the rendered tab/process is not leaked
             # between crawls (the root of the Camoufox memory growth).
-            # N6: a wedged context.cookies() must not hold the pooled renderer
-            # for the whole per-URL budget; fall back to cookieless (pre-M3
+            # a wedged context.cookies() must not hold the pooled renderer
+            # for the whole per-URL budget; fall back to cookieless (
             # behavior) after a short bounded wait.
             try:
                 await asyncio.wait_for(
@@ -1106,7 +1106,7 @@ class BrowserRenderer:
 
     async def _extract_text(self, page: Any) -> str:
         try:
-            return await page.evaluate("() => document.body ? document.body.innerText : ''")
+            return await page.evaluate("() => document.body ? document.body.innerText: ''")
         except Exception:
             return ""
 
@@ -1123,7 +1123,7 @@ class BrowserRenderer:
             await page.evaluate(
                 """() => {
                     const collect = (root, acc) => {
-                        const els = root.querySelectorAll ? root.querySelectorAll('*') : [];
+                        const els = root.querySelectorAll ? root.querySelectorAll('*'): [];
                         for (const el of els) {
                             acc.push(el);
                             if (el.shadowRoot && el.shadowRoot.mode === 'open') {

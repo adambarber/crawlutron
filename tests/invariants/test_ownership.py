@@ -39,13 +39,13 @@ from tests.invariants._shared import (
 
 
 def _lock_bodies_with_awaits(tree: ast.AST, path: pathlib.Path) -> list[str]:
-    """Flag `with <lock>:` bodies containing an await (the M3 class).
+    """Flag `with <lock>:` bodies containing an await (the ).
 
     A THREADING lock held across an await blocks the event loop and can
     deadlock. `async with` (asyncio.Lock/Condition) bodies may legitimately
     await -- that is the sanctioned pattern -- so only sync `with` is
     checked. Sync-with bodies that await include any `threading.Lock`/
-    `RLock` context (which is what ContentCache.aset did before its N1
+    `RLock` context (which is what ContentCache.aset did before
     rework).
 
     A lock is recognized by case-insensitive name stem (lock/mutex/guard)
@@ -160,7 +160,7 @@ def _memory_cache_twin_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]
 
 
 def test_memory_cache_only_via_locked_helpers():
-    """get/set/aget/aset never touch the raw RAM-mirror dict."""
+    """Get/set/aget/aset never touch the raw RAM-mirror dict."""
     assert_trees_clean(
         _memory_cache_twin_offenders,
         "Use _take_memory_locked/_remember_memory_locked",
@@ -239,7 +239,7 @@ def _locked_calls_outside_lock_offenders(tree: ast.AST, path: pathlib.Path) -> l
 
 
 def test_locked_cache_helpers_are_called_under_the_lock():
-    """M1 class: every ``_*_locked`` call sits inside a ``with ...lock`` block."""
+    """Every ``_*_locked`` call sits inside a ``with...lock`` block."""
     assert_trees_clean(
         _locked_calls_outside_lock_offenders,
         "call *_locked helpers inside `with self._lock`",
@@ -293,7 +293,7 @@ def _id_mint_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
 
 
 def test_handles_are_minted_in_one_place():
-    """Only app/crawl/ids.py calls uuid4 or slices its hex (H4 residue)."""
+    """Only app/crawl/ids.py calls uuid4 or slices its hex ()."""
     assert_trees_clean(
         _id_mint_offenders,
         "handle minting is single-sourced in app/crawl/ids.py",
@@ -305,7 +305,7 @@ def test_id_mint_detector_bites():
     assert_detector(
         _id_mint_offenders,
         path=REPO_ROOT / "app" / "api" / "_synthetic.py",
-        # uuid4 call AND hex slice are two findings, not one.
+        # Uuid4 call AND hex slice are two findings, not one.
         trips={"import uuid\n\ndef f():\n    return uuid.uuid4().hex[:12]\n": 2},
         clean=("from app.crawl.ids import new_request_id\n\ndef f():\n    return new_request_id()\n",),
     )
@@ -322,7 +322,7 @@ def _unbounded_domain_delay_writes(tree: ast.AST, path: pathlib.Path) -> list[st
     The robots Crawl-delay floor is clamped to a finite politeness ceiling only
     in ``set_domain_min_delay``; a bare ``self._domain_min_delay[...] = ...``
     anywhere else (even ``+=``) bypasses that bound and can drop an
-    ``inf``/huge value straight into ``asyncio.sleep`` (the M1 hang).
+    ``inf``/huge value straight into ``asyncio.sleep``.
     """
     offenders: list[str] = []
     for func in (
@@ -345,7 +345,7 @@ def _unbounded_domain_delay_writes(tree: ast.AST, path: pathlib.Path) -> list[st
 
 
 def test_domain_politeness_floor_is_committed_only_via_the_setter():
-    """Only set_domain_min_delay writes _domain_min_delay (M1 chokepoint)."""
+    """Only set_domain_min_delay writes _domain_min_delay (chokepoint)."""
     assert_trees_clean(
         _unbounded_domain_delay_writes,
         "commit the Crawl-delay floor through the clamped set_domain_min_delay",
@@ -520,9 +520,9 @@ def _has_retired_attr(node: ast.AST) -> bool:
 
 
 def _reaps_retired(value: ast.AST) -> bool:
-    """A ``_DOC_POOL = [... for each ... if not each.retired]`` style rebuild.
+    """A ``_DOC_POOL = [... for each... if not each.retired]`` style rebuild.
 
-    ``not each.retired`` parses as a ``UnaryOp(Not, ...)`` and an explicit
+    ``not each.retired`` parses as a ``UnaryOp(Not,...)`` and an explicit
     comparison as a ``Compare``; both shapes are admitted.
     """
     if not isinstance(value, ast.ListComp):
@@ -552,7 +552,7 @@ def _rebuilds_pool_without_retired(node: ast.AST) -> bool:
 def _doc_pool_reap_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
     """``_acquire_doc_worker`` must rebuild the pool without retired slots.
 
-    P2-D: a retired slot has been terminated and can never be handed out, so it
+    A retired slot has been terminated and can never be handed out, so it
     must not keep occupying a pool entry. The respawn scan only replaces a slot
     whose process is dead, which leaves a retired-but-still-``is_alive()`` slot
     skipped by both scans and stranded in the pool forever -- the entry count
@@ -776,7 +776,7 @@ class Renderer:
         "fields": _BROWSER_RELEASE_FIELDS,
         "chokepoint": _BROWSER_RELEASE_CHOKEPOINT,
     }
-    # list(), not the generator: a generator object is always truthy, so
+    # List(), not the generator: a generator object is always truthy, so
     # asserting on one directly would pass without ever running the sweep.
     offenders = list(
         _browser_release_offenders(ast.parse(source), REPO_ROOT / _BROWSER_RELEASE_OWNER, **args)

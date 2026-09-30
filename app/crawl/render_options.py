@@ -1,4 +1,4 @@
-"""The single decision point for effective browser-render options (C2/M11).
+"""The single decision point for effective browser-render options.
 
 Render options were once assembled by hand at every entry point, and the
 copies had already drifted: the engine's browser strategy hard-coded the
@@ -57,7 +57,7 @@ def resolve_render_options(
     rest through ``defaults``). Unknown keys are ignored: a stale client
     sending a removed knob (``wait_until``) must keep working.
     ``browser_profile`` is forwarded as a defensive copy — dropping it was
-    the M11 asymmetry that made every worker knob unreachable from
+    the asymmetry that made every worker knob unreachable from
     ``/v1/render``.
     """
     request = request_options or {}

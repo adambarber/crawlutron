@@ -38,7 +38,7 @@ def _spy_resolver_threads(monkeypatch) -> list[threading.Thread]:
 
 
 class TestAsyncCrawlFailureWebhookDelivery:
-    """the async-crawl FAILURE webhook must actually be delivered.
+    """The async-crawl FAILURE webhook must actually be delivered.
 
     ``await coro().model_dump()`` parses as ``await (coro().model_dump())``:
     ``model_dump()`` runs on the coroutine object (TypeError) and the adjacent
@@ -164,7 +164,7 @@ class TestWebhookValidationRunsOffLoop:
     via ``_build_pinned_request_async`` (a dedicated dns-resolve thread pool);
     webhook validation must reuse that off-thread path, not a second one.
 
-    D3 is the delivery-path twin: ``deliver_pinned_webhook`` re-parses through
+    The delivery-path twin: ``deliver_pinned_webhook`` re-parses through
     the same chokepoint to close the validation->delivery TOCTOU, and that
     parse ran inline too -- offloading validation while leaving delivery on the
     loop would still stall every webhook callback.
@@ -196,7 +196,7 @@ class TestWebhookValidationRunsOffLoop:
             )
 
     async def test_deliver_pinned_webhook_parses_off_the_event_loop(self, monkeypatch):
-        """D3: the delivery parse must also leave the event loop.
+        """The delivery parse must also leave the event loop.
 
         Unlike the validation test above, delivery is NOT mocked away: the
         whole point is that ``deliver_pinned_webhook`` itself reaches

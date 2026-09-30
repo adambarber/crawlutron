@@ -39,7 +39,7 @@ def _render_options(payload: dict[str, Any], settings: CrawlerSettings) -> Rende
     if not isinstance(options, dict):
         raise ValueError("invalid_options")
     # The /v1/render caller legitimately owns every capture knob, including
-    # browser_profile (forwarded since M11 -- it used to be dropped, which
+    # browser_profile (forwarded because it used to be dropped, which
     # made every worker knob unreachable from this path).
     return resolve_render_options(
         options,
@@ -154,7 +154,7 @@ async def render_request(
             failed_result=_failed_render_result,
         )
 
-    # M12: pool exhaustion is a capacity condition, not a per-URL page failure.
+    # Pool exhaustion is a capacity condition, not a per-URL page failure.
     # The worker returns a classified terminal result instead of raising, so
     # the 503 signal is read off the results: an exhausted slot means renderer
     # capacity was unavailable, the request cannot be served at all, and the

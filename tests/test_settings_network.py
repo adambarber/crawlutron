@@ -1,4 +1,4 @@
-"""M15: the service binds loopback by default.
+"""The service binds loopback by default.
 
 Unauthenticated by design, so the default bind must be 127.0.0.1; only an
 explicit CRAWLUTRON_HOST=0.0.0.0 (as the compose file sets, where the

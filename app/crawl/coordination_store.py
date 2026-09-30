@@ -45,7 +45,7 @@ class CoordinationStore:
         Path(db_path).parent.mkdir(parents=True, exist_ok=True)
         # The store chokepoint owns the PRAGMAs and the migration; a store that
         # opened its own connection could run the migration twice or drift the
-        # WAL setting, which is the whole M1 defect class.
+        # WAL setting, which is the whole defect class.
         self._conn: sqlite3.Connection = connect_store(db_path, schema=self.schema)
         # The same file-wide lock the migration took, and not a private one: a
         # per-instance lock excludes this store from nothing else, so a write

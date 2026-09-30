@@ -10,7 +10,7 @@ _APP_ROOT = Path(__file__).resolve().parents[2]
 
 
 def test_default_max_content_length_is_none_so_ram_scaling_stays_live():
-    """N3: a concrete pydantic default materialized on every API request and
+    """A concrete pydantic default materialized on every API request and
     silently disabled the concurrency-scaled RAM cap. The field must default
     to None (absent => RAM-scaled), keeping explicit values as true overrides.
     """

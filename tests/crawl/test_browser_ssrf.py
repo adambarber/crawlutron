@@ -152,7 +152,7 @@ async def test_render_rejects_internal_redirect_target(monkeypatch):
 
 
 # --------------------------------------------------------------------------
-# F8: route-level guard aborts SSRF-unsafe requests (subresources + redirects)
+# route-level guard aborts SSRF-unsafe requests (subresources + redirects)
 # --------------------------------------------------------------------------
 
 

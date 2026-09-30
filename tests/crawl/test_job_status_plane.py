@@ -1,4 +1,4 @@
-"""H3: control state (status) and data state are separate write planes.
+"""Control state (status) and data state are separate write planes.
 
 The runner reloads its row every loop iteration and saves the WHOLE row --
 including ``status`` -- from a pre-engine snapshot. A pause/cancel handled
@@ -50,7 +50,7 @@ class TestStatusPlane:
         assert store.set_status("ghost", JobStatus.CANCELLED, expected=JobStatus.RUNNING) is False
 
     def test_save_never_clobbers_a_control_transition(self, tmp_path):
-        """The H3 regression, at the store boundary.
+        """The, at the store boundary.
 
         The runner holds a pre-engine snapshot (status RUNNING); a handler
         pauses the row mid-batch; the runner's next data save must persist
@@ -82,7 +82,7 @@ def _status_assignment_offenders() -> list[str]:
     """Any ``X.status = ...`` in app/ outside the store itself.
 
     The dataclass field exists for reads (loaded rows carry it); writing it
-    outside ``JobStore`` reconstructs the pre-H3 world where an in-memory
+    outside ``JobStore`` reconstructs the old world where an in-memory
     status view could reach ``save()`` and clobber a control transition.
     """
     found: list[str] = []
@@ -93,7 +93,7 @@ def _status_assignment_offenders() -> list[str]:
             if isinstance(node, ast.Assign) and any(
                 isinstance(t, ast.Attribute) and t.attr == "status" for t in node.targets
             ):
-                found.append(offender(path, node.lineno, "assigns .status"))
+                found.append(offender(path, node.lineno, "assigns.status"))
     return found
 
 

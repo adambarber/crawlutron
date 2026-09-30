@@ -1,4 +1,4 @@
-"""resolve_render_options chokepoint (C2/M11).
+"""Resolve_render_options chokepoint (C2/M11).
 
 Effective render options used to be decided in several places that had
 already drifted: the engine's browser strategy hard-coded the capture
@@ -88,7 +88,7 @@ class TestResolveRenderOptions:
         assert options.timeout_seconds == 11
 
     def test_browser_profile_is_carried(self):
-        """M11: worker knobs must reach the worker, not die in the builder."""
+        """Worker knobs must reach the worker, not die in the builder."""
         options = resolve_render_options({"browser_profile": {"viewport": "mobile"}}, {})
         assert options.browser_profile == {"viewport": "mobile"}
 

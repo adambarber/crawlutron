@@ -65,7 +65,7 @@ class CookieJar:
     def __init__(self, store: SharedCookieStore | None = None) -> None:
         self._store = store
         # OrderedDict: insertion order doubles as the eviction order for the
-        # (namespace, host) LRU cap (R1) — plain dict has no move_to_end.
+        # (namespace, host) LRU cap — plain dict has no move_to_end.
         self._cookies: OrderedDict[tuple[str, str], dict[str, str]] = OrderedDict()
         # No per-namespace isolation is enforced here -- callers opt in by
         # passing a non-empty ``namespace``. The shared default is preserved

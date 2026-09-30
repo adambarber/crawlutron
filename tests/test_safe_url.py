@@ -93,7 +93,7 @@ class TestSafeUrlRedirectHop:
 
 
 class TestSafeUrlConnect:
-    """connect() applies the pin policy so a fetcher cannot re-resolve at
+    """Connect() applies the pin policy so a fetcher cannot re-resolve at
     connect time (DNS rebinding TOCTOU): plain HTTP connects to the exact
     validated IP with a Host header preserving the hostname; HTTPS keeps the
     hostname (SNI/cert), matching the sibling HTTP fetcher."""
@@ -131,7 +131,7 @@ class TestSafeUrlConnect:
         assert "Host" not in headers
 
     def test_http_connect_brackets_ipv6_literal(self, monkeypatch):
-        # H5-C: getaddrinfo can hand back a public IPv6 address; an unbracketed
+        # -C: getaddrinfo can hand back a public IPv6 address; an unbracketed
         # literal corrupts the URL netloc (its colons collide with port
         # parsing) and urllib misroutes. Pinned URLs must bracket v6 literals.
         block_private_targets(monkeypatch)

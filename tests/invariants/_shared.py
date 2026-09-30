@@ -169,7 +169,7 @@ def _declared_public_symbols(tree: ast.Module) -> set[str] | None:
 
 
 # ---------------------------------------------------------------------------
-# Chokepoint drift detectors for the P0-P2 fix tiers
+# Chokepoint drift detectors for the fix tiers
 #
 # Each behavioral test below pins what the code DOES today; these pin the
 # CHOKEPOINT so a future edit that bypasses it turns the suite red instead of

@@ -15,7 +15,7 @@ _CAP = 10_000_000
 
 
 def test_cap_is_required_keyword():
-    # H2 closure: the uncapped branch existed only as a default; making the
+    # The uncapped branch existed only as a default; making the
     # cap mandatory turns "forgot to bound a bomb" into a TypeError.
     #
     # The call is made through a mapping of arguments on purpose. Spelling it
@@ -177,7 +177,7 @@ def test_identity_in_a_stack_is_a_no_op():
 
 def test_encoding_tokens_are_case_and_space_insensitive():
     body = _stack("gzip", "br")
-    assert decompress_body(body, "  GZIP ,\tBr ", max_output_bytes=_CAP) == b"stacked payload"
+    assert decompress_body(body, "  GZIP,\tBr ", max_output_bytes=_CAP) == b"stacked payload"
 
 
 def test_decode_valid_utf8_strict():
@@ -217,7 +217,7 @@ def test_decode_handles_bytearray_and_headers():
     assert out == "compressed"
 
 
-"""decompress_body must accept bytearray without requiring a bytes copy."""
+"""Decompress_body must accept bytearray without requiring a bytes copy."""
 
 
 def test_accepts_bytearray_gzip():
@@ -285,7 +285,7 @@ def test_decompression_succeeds_under_limit():
 def test_decompression_without_limit_is_rejected():
     payload = b"hello world"
     bomb = gzip.compress(payload)
-    # H2 closure: no cap is no longer a legal call — the bound is required.
+    # No cap is no longer a legal call — the bound is required.
     uncapped: dict[str, Any] = {"body": bomb, "content_encoding": "gzip"}
     with pytest.raises(TypeError):
         decompress_body(**uncapped)
@@ -299,7 +299,7 @@ def test_deflate_bomb_is_bounded():
 
 
 def test_brotli_bomb_is_bounded():
-    # H6: a brotli bomb must raise, not expand unbounded in RAM.
+    # A brotli bomb must raise, not expand unbounded in RAM.
 
     bomb = brotli.compress(b"C" * 1_000_000)
     assert len(bomb) < 10_000
@@ -308,7 +308,7 @@ def test_brotli_bomb_is_bounded():
 
 
 def test_brotli_feeds_incrementally(monkeypatch):
-    # H6 mechanism: the google-brotli streaming API must be fed in chunks
+    # The google-brotli streaming API must be fed in chunks
     # so the full output is never materialized before the cap is checked.
     # A single process() call with the whole input means unbounded RAM.
 

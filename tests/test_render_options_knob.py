@@ -1,4 +1,4 @@
-"""N10: RenderOptions.wait_until was an advertised-but-inert knob.
+"""RenderOptions.wait_until was an advertised-but-inert knob.
 
 The browser strategy hardcodes goto(wait_until="domcontentloaded") and
 implements the documented "network_idle_or_timeout" settle semantic in

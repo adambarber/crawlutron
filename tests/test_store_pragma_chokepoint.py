@@ -1,4 +1,4 @@
-"""M1: every SQLite store must share one durability configuration.
+"""Every SQLite store must share one durability configuration.
 
 JobStore enables busy_timeout + WAL; CrawlResultStore plain-connected --
 the sibling-drift class the extraction pattern already absorbed twice
@@ -49,7 +49,7 @@ def _dynamic_pragma_calls(tree: ast.AST) -> list[tuple[ast.Call, str]]:
     Bandit's S608 is the standing gate for built SQL, and it covers the four
     injection shapes (f-string, ``+``, ``%``, ``!r``) -- but its keyword set is
     DML, and ``PRAGMA`` is not in it. Probed against this tree's own ruff
-    config: ``conn.execute(f"SELECT ... {x}")`` is flagged, the identical
+    config: ``conn.execute(f"SELECT... {x}")`` is flagged, the identical
     ``conn.execute(f"PRAGMA table_info({x})")`` is clean. So the one place a
     SQLite identifier is interpolated is the one place the linter is silent.
 
@@ -230,7 +230,7 @@ def test_both_stores_share_the_pragma_configuration(tmp_path):
 
 def test_store_pragmas_are_confined_to_the_configurator():
     """Adding a store means reusing the chokepoint, not re-typing the
-    settings -- drifting them is exactly the M1 defect."""
+    settings -- drifting them is exactly the defect."""
     offenders = _pragma_exec_offenders()
     assert not offenders, "PRAGMA outside sqlite_store.configure_store_connection: " + ", ".join(offenders)
 

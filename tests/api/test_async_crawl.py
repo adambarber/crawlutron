@@ -20,7 +20,7 @@ class TestAsyncCrawlApi:
     """Tests for async_mode on /v1/crawl endpoint."""
 
     async def test_v1_crawl_async_mode_returns_202(self, crawl_api):
-        """async_mode=true returns 202 with request_id and status_url."""
+        """Async_mode=true returns 202 with request_id and status_url."""
         body = await accepted_crawl(crawl_api.client, crawl_api.payload(async_mode=True))
         assert "request_id" in body
         assert body["request_id"].startswith("crawl_")
@@ -29,7 +29,7 @@ class TestAsyncCrawlApi:
         assert body["webhook_url"] is None
 
     async def test_v1_crawl_async_mode_over_batch_size_returns_422(self, crawl_api):
-        """L4: an oversized batch is rejected at accept-time, never 202'd then failed async."""
+        """An oversized batch is rejected at accept-time, never 202'd then failed async."""
         from app.settings import CrawlerSettings
 
         urls = [f"{crawl_api.base}/{i}" for i in range(CrawlerSettings.from_mapping().max_batch_size + 1)]
@@ -101,7 +101,7 @@ class TestAsyncCrawlApi:
         assert row.stats["total_failed"] == 0
 
     async def test_v1_crawl_async_mode_with_webhook_delivers(self, crawl_api):
-        """async_mode with webhook_url delivers result to webhook on completion."""
+        """Async_mode with webhook_url delivers result to webhook on completion."""
         resp = await crawl_api.client.post(
             "/v1/crawl",
             json=crawl_api.payload(async_mode=True, webhook_url=f"{crawl_api.base}/webhook_sink"),
@@ -135,7 +135,7 @@ class TestAsyncCrawlApi:
         assert job.results[0]["request_id"] == request_id
 
     async def test_v1_crawl_async_mode_404_for_unknown_request_id(self, crawl_api):
-        """status_url returns 404 for unknown request_id."""
+        """Status_url returns 404 for unknown request_id."""
         resp = await crawl_api.client.get("/v1/crawl/crawl_unknown123")
         assert resp.status_code == 404
         assert resp.json()["code"] == "not_found"
@@ -148,11 +148,11 @@ class TestAsyncCrawlApi:
         assert "request_id" in body
 
     async def test_v1_crawl_async_mode_counts_failed_results(self, crawl_api):
-        """L5d: job stats must count failed results, not hardcode zero."""
+        """Job stats must count failed results, not hardcode zero."""
         from app.main import job_store
 
         # One page fetches fine, one 404s (failed). A dead host would not
-        # work here: post-M7, robots fetch errors fail closed to
+        # work here: robots fetch errors fail closed to
         # robots_disallowed/skipped instead of reaching the fetch.
         request_id, _ = await submit_async_crawl(
             crawl_api.client,
@@ -163,7 +163,7 @@ class TestAsyncCrawlApi:
         assert job.stats["total_crawled"] == 2
 
     async def test_v1_crawl_async_mode_batch_urls(self, crawl_api):
-        """async_mode works with batch urls."""
+        """Async_mode works with batch urls."""
         request_id, response = await submit_async_crawl(
             crawl_api.client,
             crawl_api.batch_payload(["/", "/page2"], async_mode=True),
@@ -174,7 +174,7 @@ class TestAsyncCrawlApi:
         assert len(body["results"]) == 2
 
     async def test_v1_crawl_webhook_backward_compat(self, crawl_api):
-        """webhook_url without async_mode still works (backward compat)."""
+        """Webhook_url without async_mode still works (backward compat)."""
         payload = crawl_api.payload(webhook_url=f"{crawl_api.base}/webhook_sink")
         body = await accepted_crawl(crawl_api.client, payload)
         assert "request_id" in body
@@ -204,7 +204,7 @@ class TestAsyncCrawlJobStoreIntegration:
     """Tests verifying job_store integration for async crawls."""
 
     async def test_job_store_single_shot_kind(self):
-        """job_store.create_single_shot creates job with SINGLE_SHOT kind."""
+        """Job_store.create_single_shot creates job with SINGLE_SHOT kind."""
         from app.crawl.job_store import JobKind, JobStatus
 
         with single_shot_job() as (_store, job):

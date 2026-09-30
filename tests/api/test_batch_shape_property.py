@@ -1,4 +1,4 @@
-"""Batch-shape resilience property (C1).
+"""Batch-shape resilience property.
 
 ``_shape_all`` reshapes each item inside a per-item guard so one poison item
 cannot 500 the batch. The original defect had two halves: a bare except

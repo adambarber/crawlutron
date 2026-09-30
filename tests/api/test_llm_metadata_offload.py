@@ -137,7 +137,7 @@ async def test_async_response_empty_results():
 
 
 async def test_abuild_unified_crawl_response_batches_into_one_offload(monkeypatch):
-    """P5: one response must pay one thread-submission, not one per item.
+    """One response must pay one thread-submission, not one per item.
 
     Fanning N items to N ``asyncio.to_thread`` calls makes every batch carry N
     Future/thread-dispatch overheads. The whole list is shaped in a single

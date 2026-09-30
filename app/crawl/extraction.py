@@ -32,7 +32,7 @@ from html import unescape
 from typing import Any, Literal, NamedTuple, TypeVar
 from urllib.parse import urljoin, urlparse
 
-# lxml does not mark re-exports, so importing a name that IS present at runtime is
+# Lxml does not mark re-exports, so importing a name that IS present at runtime is
 # reported as a private import; `reportPrivateImportUsage` is off in
 # pyrightconfig.json for that reason. These carried
 # `reportAttributeAccessIssue` suppressions on the theory that lxml ships partial
@@ -89,7 +89,7 @@ class Selectors:
         return self.css is not None or self.xpath is not None
 
 
-# Shared thread pool for extraction tasks to avoid thread leaks (Fix 4).
+# Shared thread pool for extraction tasks to avoid thread leaks.
 # Bounded to 4 workers to limit resource consumption.
 _EXTRACTION_EXECUTOR = concurrent.futures.ThreadPoolExecutor(max_workers=4, thread_name_prefix="extraction")
 
@@ -343,7 +343,7 @@ def _acquire_doc_worker() -> _DocWorker | None:
         with _POOL_LOCK:
             if _DOC_POOL is None:
                 _DOC_POOL = []
-            # P2-D: reap retired slots before the scans. A retired slot has been
+            # Reap retired slots before the scans. A retired slot has been
             # terminated and can never be handed out again (the handout scan
             # requires ``not retired``), so it must not keep occupying a pool
             # entry. The respawn scan below only replaces a slot whose process
@@ -496,7 +496,7 @@ def _eval_selector(fn: Callable[[], _SelectorResult], timeout: float) -> _Select
     Returns the callable's result, or ``_EXTRACTION_SELECTOR_SENTINEL`` if it
     exceeded ``timeout`` seconds.
 
-    Uses a shared bounded thread pool to avoid thread leaks (Fix 4).
+    Uses a shared bounded thread pool to avoid thread leaks.
     """
     fut = _EXTRACTION_EXECUTOR.submit(fn)
     try:
@@ -706,7 +706,7 @@ def _extract_selected(
 
 
 class _LogRestorer:
-    """Restore logger levels a :func:`_suppress_trafilatura_chatter` call muted.
+    """Restore logger levels a:func:`_suppress_trafilatura_chatter` call muted.
 
     A module-level class (rather than one defined inside the function) so the
     suppressor can declare it as its return type: an inner class would leave
@@ -1188,7 +1188,7 @@ def extract_post_fetch_discovery(
         if include_js_endpoints
         else []
     )
-    # H2: the page metadata rides the tree that was parsed for THIS call's
+    # The page metadata rides the tree that was parsed for THIS call's
     # diagnostics/links -- never a parse of its own. An empty dict means
     # "no tree existed", and shaping falls back to its own single parse;
     # a non-empty dict is authoritative and crosses the persistence

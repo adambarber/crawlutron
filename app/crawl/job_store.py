@@ -712,7 +712,7 @@ class JobStore:
         self.tier = tier
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         # Durability/concurrency settings come from the shared store
-        # chokepoint (busy_timeout + WAL; M1 confinement invariant).
+        # chokepoint (busy_timeout + WAL; confinement invariant).
         self._conn = connect_store(self.db_path, schema=StoreSchema.CRAWL_JOBS)
         # Serialize all connection use across threads (sqlite3 connections are
         # not safe for concurrent use even with check_same_thread=False), and
@@ -841,7 +841,7 @@ class JobStore:
         """
         wanted = {expected} if isinstance(expected, JobStatus) else set(expected)
         with self._lock:
-            # json_each keeps the expected set a BOUND parameter -- no SQL is
+            # Json_each keeps the expected set a BOUND parameter -- no SQL is
             # ever constructed from values (and no S608-shaped f-string).
             cur = self._conn.execute(
                 "UPDATE crawl_jobs SET status = ?, updated_at = ? "

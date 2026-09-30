@@ -123,7 +123,7 @@ async def test_engine_routes_validators_by_url():
     assert len(results) == 2
     # Plain URL fetched fully (no conditional header).
     assert "If-None-Match" not in seen_headers["/plain"]
-    # etagged URL revalidated conditionally -> 304 -> not_modified.
+    # Etagged URL revalidated conditionally -> 304 -> not_modified.
     assert seen_headers["/etagged"]["If-None-Match"] == '"v9"'
     plain_status = [r for u, r in results.items() if u.endswith("/plain")][0]
     assert plain_status["status"] == "success"
@@ -170,7 +170,7 @@ def test_validators_conflict_with_policy_headers_rejected():
 
 
 def test_conditional_headers_rejected_without_validators():
-    """M14: raw If-* in policy.headers is rejected even with no validators.
+    """Raw If-* in policy.headers is rejected even with no validators.
 
     Without validators the raw headers flow into the fetch, an origin 304
     yields a bodyless not_modified result -- caller-controlled content

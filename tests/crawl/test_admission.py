@@ -398,7 +398,7 @@ def test_batch_scale_full_below_target():
 
 
 def test_batch_scale_scales_linearly_between_target_and_hard():
-    # halfway into the soft zone -> roughly half throughput
+    # Halfway into the soft zone -> roughly half throughput
     s = batch_scale(used=0.945, total=1.0, target=0.92)
     assert 0.0 < s < 1.0
     assert abs(s - 0.5) < 0.2
@@ -443,7 +443,7 @@ async def test_engine_throttles_batches_under_pressure(monkeypatch, cpu_ratio, m
 
 
 def test_direct_reads_do_not_perturb_slope(monkeypatch):
-    """L7: _usage_ratio() is read by readiness/metrics/waits between dispatch
+    """_usage_ratio() is read by readiness/metrics/waits between dispatch
     scale computations. Those reads must not mutate the slope series, or a
     single stray sample invents a climb that is not there."""
     import app.memory_pressure as mp
@@ -508,7 +508,7 @@ class TestBatchIsHttpHeavy:
         assert _http_heavy(pins, ["a.gov", "b.gov", "c.gov"]) is False
 
     def test_no_pins_is_false(self):
-        # cold start, nothing proven cheap
+        # Cold start, nothing proven cheap
         assert _http_heavy({}, [f"site{i}.gov" for i in range(4)]) is False
 
     def test_empty_frontier_is_false(self):
@@ -517,7 +517,7 @@ class TestBatchIsHttpHeavy:
     def test_sample_window_limits_lookahead(self):
         # Beyond the sample window the composition is not considered.
         sched = _Scheduler({"a.gov": HTTP_DECLARED_CRAWLER})
-        # first task unpinned, second pinned HTTP; sample=1 looks only at first
+        # First task unpinned, second pinned HTTP; sample=1 looks only at first
         frontier = [(0, make_crawl_task(0, "z.gov")), (0, make_crawl_task(0, "a.gov"))]
         assert _batch_is_http_heavy(sched, frontier, sample=1) is False
 
@@ -675,7 +675,7 @@ class TestHttpScaleEscapesMemory:
         monkeypatch.setattr(gate.cpu, "_usage_ratio", lambda: 0.93)  # headroom 0.4 < 0.5
 
         http_scale = gate.http_scale_factor()
-        # combined batch_scale = min(cpu 0.4, mem 1.0) = 0.4
+        # Combined batch_scale = min(cpu 0.4, mem 1.0) = 0.4
         assert http_scale == pytest.approx(0.4, rel=0.01)
 
     def test_http_scale_and_browser_scale_diverge(self, monkeypatch):
@@ -768,7 +768,7 @@ class TestPolicyDerivation:
         assert p.browser_pool_reserve_bytes == 2 * _BROWSER_TASK_RAM_BYTES
         assert p.doc_pool_reserve_bytes == 2 * _DOC_TASK_RAM_BYTES
         assert p.max_http_concurrency == max(1, _unreserved_bytes(p) // _HTTP_TASK_RAM_BYTES)
-        # browser tier is capped at pool_size * max_concurrent_pages
+        # Browser tier is capped at pool_size * max_concurrent_pages
         assert p.max_browser_concurrency == 2 * 3
 
     def test_http_ceiling_capped_at_hard_max(self):
@@ -798,7 +798,7 @@ class TestPolicyDerivation:
         assert with_docs.max_http_concurrency < without.max_http_concurrency
 
     def test_default_policy_reserves_the_default_doc_pool(self):
-        # default_admission_policy is the conservative fallback (3 GiB box);
+        # Default_admission_policy is the conservative fallback (3 GiB box);
         # it must reserve the default doc worker count, not zero.
         gate = ResourceGate()
         wa = default_admission_policy(gate)
@@ -809,7 +809,7 @@ class TestWeightedAdmission:
     def test_headroom_from_most_contended_resource(self):
         gate = PinnedGate(mem=0.3, cpu=0.8)
         a = WeightedAdmission(gate, _policy())
-        # min(1-0.3, 1-0.8) = 0.2
+        # Min(1-0.3, 1-0.8) = 0.2
         assert a.headroom_fraction() == pytest.approx(0.2)
 
     def test_http_capacity_scales_with_headroom(self):
@@ -838,7 +838,7 @@ class TestWeightedAdmission:
     async def test_admit_shrinks_http_under_memory_pressure(self):
         a = WeightedAdmission(PinnedGate(mem=0.9, cpu=0.0), _policy())
         h, b = await a.admit(want_http=200, want_browser=0)
-        # headroom 0.1 -> http capacity ~10% of ceiling
+        # Headroom 0.1 -> http capacity ~10% of ceiling
         assert h < 200
         assert h > 0
 
@@ -854,7 +854,7 @@ class TestWeightedAdmission:
 
 
 class TestBrowserTierDoesNotDoubleScale:
-    """T9: the browser pool's RAM is reserved up front, so the tier must not
+    """The browser pool's RAM is reserved up front, so the tier must not
     shrink against its own reserved footprint — only usage beyond the fraction
     the pool sizing already assumed should yield browser capacity."""
 
@@ -880,7 +880,7 @@ class TestBrowserTierDoesNotDoubleScale:
 
 
 class TestHTTPTaskRamEstimate:
-    """T10: the per-HTTP-task estimate must cover a real task — a max-length
+    """The per-HTTP-task estimate must cover a real task — a max-length
     body plus the trafilatura/lxml parse state — or admission over-grants and
     the box swaps. 12 MiB measured optimistic at the review's live scale."""
 

@@ -357,7 +357,7 @@ async def test_extract_document_child_death_returns_empty(monkeypatch):
     monkeypatch.setenv("CRAWLUTRON_TEST_HOOKS", "1")
     assert_extraction_empty(_extract_document(b"%PDF-1.4 fake", "http://example.com/x.pdf"))
 
-    # M8 is per worker, not process-global: the pool is persistent and sized
+    # Is per worker, not process-global: the pool is persistent and sized
     # above one, so an idle worker from an earlier extraction legitimately
     # stays alive. The dead worker must be reaped (no zombie) and no worker
     # may be left orphaned mid-task.
@@ -483,7 +483,7 @@ async def test_extract_document_recovers_after_timeout(monkeypatch):
 
 
 async def test_test_hooks_inert_without_gate(monkeypatch):
-    """N10: TEST_MARKITDOWN_* flags are inert unless CRAWLUTRON_TEST_HOOKS=1
+    """TEST_MARKITDOWN_* flags are inert unless CRAWLUTRON_TEST_HOOKS=1
     is also set — production children must not honor stray test flags."""
     monkeypatch.setenv("TEST_MARKITDOWN_OUTPUT", "## hijacked")
     monkeypatch.delenv("CRAWLUTRON_TEST_HOOKS", raising=False)
@@ -614,7 +614,7 @@ def test_shared_tree_parses_once_across_passes(monkeypatch):
         host_policy=UNRESTRICTED_HOST_POLICY,
         tree=tree,
     )
-    # frames, forms, and links all reused the single pre-parsed tree.
+    # Frames, forms, and links all reused the single pre-parsed tree.
     assert calls["n"] == 1
     assert links
 

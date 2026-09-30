@@ -261,7 +261,7 @@ def test_extract_document_degrades_when_no_worker_can_be_acquired(fake_pool, mon
     assert result.text is None and result.markdown is None
 
 
-# --- 4/5/6: D5 acquire refinements ---------------------------------------
+# --- 4/5/6: ---------------------------------------
 
 
 class _LockWatcherProc(StubProc):
@@ -290,7 +290,7 @@ class _LockWatcherProc(StubProc):
 
 
 def test_acquire_budget_starts_after_the_lock_not_before_it(fake_pool):
-    """D5(a): time spent queued on ``_POOL_LOCK`` is not acquire budget.
+    """Time spent queued on ``_POOL_LOCK`` is not acquire budget.
     A caller blocked behind a slow in-lock operation must not find its whole
     budget already spent when it finally enters -- it would then report "no
     worker" for a pool that had a usable slot freed the entire time it waited.
@@ -300,7 +300,7 @@ def test_acquire_budget_starts_after_the_lock_not_before_it(fake_pool):
     condition, and the only reason a wall clock appears here at all. The
     assertion is on what the acquirer returned, and the test proves its own
     precondition first: the acquirer is observed INSIDE the lock, with the
-    slot still busy, at the moment the budget is computed. The D5(a) mutant
+    slot still busy, at the moment the budget is computed. The mutant
     (budget computed before the lock) then leaves it with an elapsed budget,
     it gives up, and ``box["worker"]`` is ``None`` -- deterministically, not
     by a race over which thread wins the lock.
@@ -317,7 +317,7 @@ def test_acquire_budget_starts_after_the_lock_not_before_it(fake_pool):
     # the slot still busy, at the moment its budget is computed. Without
     # that, an acquirer that happened to enter after the holder freed the
     # slot would collect the worker with a budget it never spent and the
-    # test would pass against the D5(a) regression it exists to catch.
+    # test would pass against the it exists to catch.
     acquirer_thread: dict[str, int] = {}
     acquirer_inside = threading.Event()
 
@@ -351,7 +351,7 @@ def test_acquire_budget_starts_after_the_lock_not_before_it(fake_pool):
             holder_ready.set()
             threading.Event().wait(bound * 2)
         # The acquirer is now inside the lock with the slot still busy and
-        # its budget already elapsed -- exactly the D5(a) failure point. Only
+        # its budget already elapsed -- exactly the failure point. Only
         # now is the slot freed and the waiter notified, like a real release.
         assert acquirer_inside.wait(timeout=10), "the acquirer never entered the pool lock"
         with ext_mod._POOL_LOCK:
@@ -378,7 +378,7 @@ def test_acquire_budget_starts_after_the_lock_not_before_it(fake_pool):
 
 
 def test_respawn_terminates_the_replaced_worker_off_the_pool_lock(fake_pool):
-    """D5(b): the replaced worker's kill-escalation must not hold the pool lock.
+    """The replaced worker's kill-escalation must not hold the pool lock.
 
     The retirement is what can take ~10s; the slot swap itself is instant. The
     pool lock only needs to cover the swap, so the termination is deferred until
@@ -408,7 +408,7 @@ def test_respawn_terminates_the_replaced_worker_off_the_pool_lock(fake_pool):
 
 
 def test_undead_retired_slot_does_not_consume_a_pool_slot(fake_pool, monkeypatch):
-    """D5(c): a slot that will not die must not permanently shrink the pool.
+    """A slot that will not die must not permanently shrink the pool.
 
     A retired-but-still-``is_alive()`` slot is skipped by BOTH scans (handout
     requires ``not retired``; respawn requires ``not is_alive``), so nothing in
@@ -578,7 +578,7 @@ def test_doc_timeout_kills_and_pool_recovers(monkeypatch):
 
 
 def test_undead_retired_slot_is_reaped_from_the_pool(fake_pool, monkeypatch):
-    """D5(d)/P2-D: a retired slot whose process will not die is skipped by both
+    """-D: a retired slot whose process will not die is skipped by both
     the handout scan (needs ``not retired``) and the respawn scan (needs
     ``not is_alive``), so nothing can ever recover it. Leaving it in the pool
     means it occupies a list slot -- and holds a PID -- forever while the size

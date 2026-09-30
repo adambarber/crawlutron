@@ -1,4 +1,4 @@
-"""robots.txt parsing, rule matching, caching, fail-closed fetch and crawl-delay behavior."""
+"""Robots.txt parsing, rule matching, caching, fail-closed fetch and crawl-delay behavior."""
 
 from __future__ import annotations
 
@@ -91,12 +91,12 @@ class TestGroupAccumulator:
         assert parse_robots_rules(text, token=TOKEN) == []
 
     def test_empty_value_kept_when_consumer_accepts_it(self):
-        # rules semantics: `Disallow:` (empty) is allow-all and MUST survive.
+        # Rules semantics: `Disallow:` (empty) is allow-all and MUST survive.
         groups = _groups("User-agent: a\nDisallow:\n", lambda k, v: k in ("allow", "disallow"))
         assert groups == [(("a",), [("disallow", "")])]
 
     def test_empty_value_rejected_when_consumer_predicate_says_so(self):
-        # crawl-delay semantics: an empty value never opens a group.
+        # Crawl-delay semantics: an empty value never opens a group.
         groups = _groups("User-agent: a\ncrawl-delay:\n", lambda k, v: k == "crawl-delay" and v != "")
         assert groups == []
 
@@ -114,7 +114,7 @@ class TestSelection:
         assert best == [("disallow", "/long")]
 
     def test_foreign_agents_never_claim_our_token(self):
-        # M7: matching the *token*, not the full UA string, and only substrings
+        # Matching the *token*, not the full UA string, and only substrings
         # of it — a URL or version fragment must not select a group.
         text = "User-agent: https://bot.example/crawlutron/9\nDisallow: /x\n\nUser-agent: *\nDisallow: /*\n"
         best, star = select_robots_values(_groups(text, lambda k, v: True), TOKEN)
@@ -296,7 +296,7 @@ def test_pathological_pattern_match_parity_with_simple_cases():
 
 
 def test_pattern_cache_is_bound_per_host_so_one_site_cannot_evict_another():
-    """P2-E: the matcher cache used to be a process-global LRU keyed only on the
+    """-E: the matcher cache used to be a process-global LRU keyed only on the
     pattern string, so a hostile robots.txt spraying distinct patterns evicted
     legitimate sites' matchers. Binding the key per host confines eviction to
     the offending site: it can only evict its own entries."""
@@ -347,7 +347,7 @@ def test_purge_removes_only_expired_production_tuples():
 
 
 async def test_purge_handles_production_shaped_entries():
-    """L10: a full robots cache must not crash purging during a real crawl.
+    """A full robots cache must not crash purging during a real crawl.
 
     Production stores a ``RobotsRules`` 3-tuple -- ``(rules, sitemaps,
     crawl_delay)`` -- under a ``(canonical_origin, policy)`` key. Both halves of
@@ -365,7 +365,7 @@ async def test_purge_handles_production_shaped_entries():
     try:
         for i in range(ROBOTS_CACHE_MAX_ENTRIES + 1):
             # Stale entries (ttl -1) stay present under the chokepoint's
-            # purge-only-deletion semantics; the L10 regression is that a
+            # purge-only-deletion semantics; the is that a
             # full cache must not crash purging during a real crawl.
             em.robots_cache.put(robots_entry_key(f"http://purge-{i}.test"), ([], [], None), ttl=-1.0)
 
@@ -452,7 +452,7 @@ async def test_robots_cache_shared_across_requests():
         out = await crawl_request(payload, http_fetcher=make_fetcher(), cache=HttpCache())
         assert out["results"]
 
-    # robots.txt must be fetched once and reused across the two requests.
+    # Robots.txt must be fetched once and reused across the two requests.
     assert calls["robots"] == 1, f"robots.txt fetched {calls['robots']} times"
 
 
@@ -553,14 +553,14 @@ async def _run_diag(calls, *, engine_robots_sitemaps):
 async def test_discovery_skips_robots_fetch_when_sitemaps_passed():
     calls: list[Any] = []
     diag = await _run_diag(calls, engine_robots_sitemaps=["https://x.test/sitemap.xml"])
-    # robots.txt must NOT be fetched again; the engine-provided sitemaps are used.
+    # Robots.txt must NOT be fetched again; the engine-provided sitemaps are used.
     assert "https://x.test/robots.txt" not in calls
-    # sitemap still fetched + parsed
+    # Sitemap still fetched + parsed
     assert "https://x.test/sitemap.xml" in calls
     assert diag["discovery"]["sitemap_urls"] == ["https://x.test/p1"]
     assert diag["robots"]["evaluation"] == "cached"
     assert diag["robots"]["reused_from_engine"] is True
-    # lastmod is surfaced for downstream skip-if-unchanged logic
+    # Lastmod is surfaced for downstream skip-if-unchanged logic
     assert diag.get("sitemap_lastmod") == {"https://x.test/p1": "2024-05-05"}
 
 

@@ -336,7 +336,7 @@ def test_the_contract_is_not_vacuous_tree_wide():
 
 
 class TestNormalizedUrlSeedType:
-    """M6: seeds and crawl tasks flow as a typed value, not a bare str.
+    """Seeds and crawl tasks flow as a typed value, not a bare str.
 
     The request URL enters as a bare string, but once it passes through
     ``normalize_public_http_url`` -- the single source of truth for what a

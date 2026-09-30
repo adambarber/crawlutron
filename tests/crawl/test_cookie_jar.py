@@ -53,7 +53,7 @@ def test_save_to_file_persists_and_no_temp_leftovers():
     jar.add_cookie_header("http://x.example/p", "sess=abc; Path=/")
     with cookie_file(jar, "ck_persist_test.json") as target:
         assert read_cookie_file(target) == {"x.example": {"sess": "abc"}}
-    # No leftover .tmp files in the directory. Checked after the context exits
+    # No leftover.tmp files in the directory. Checked after the context exits
     # because the export's temp file is written beside the target, and the
     # teardown that removes the target is the last thing that could strand one.
     leftovers = [n for n in os.listdir(tempfile.gettempdir()) if n.startswith(".cookiejar.")]
@@ -144,7 +144,7 @@ class _RecordingRequest:
 
 
 def test_no_store_cookie_jar_inherits_the_stdlib_jar_not_the_storing_one():
-    """P2-B: ``_NoStoreCookieJar`` must subclass ``http.cookiejar.CookieJar``.
+    """-B: ``_NoStoreCookieJar`` must subclass ``http.cookiejar.CookieJar``.
 
     The module defines its own storing ``CookieJar`` further down, and the
     inert jar's base is resolved at class-creation time. Binding it through the

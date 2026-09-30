@@ -86,7 +86,7 @@ class TestScheduler:
         jobs = [make_job(i, f"http://example.com/{i}") for i in range(3)]
         results = await scheduler.run(jobs, ok_worker, failed_result=engine_envelope)
         assert results is not None
-        # run reports a job.index -> result mapping so callers align each result
+        # Run reports a job.index -> result mapping so callers align each result
         # with its own job regardless of completion order.
         assert sorted(results) == [0, 1, 2]
         assert [results[i].normalized_url for i in sorted(results)] == [
@@ -224,7 +224,7 @@ class TestObservedLatencyCrossesPipelines:
 
 
 class TestCircuitBreakerSpillsOnResult:
-    """with ``on_result`` set, an open circuit must spill the failed
+    """With ``on_result`` set, an open circuit must spill the failed
     envelope through ``on_result`` instead of writing ``results[index]``
     (which is ``None`` in that mode -> TypeError, swallowed by
     ``gather(..., return_exceptions=True)`` -> the URL silently vanishes).
@@ -290,7 +290,7 @@ class TestSchedulerCircuitBreaker:
         scheduler = make_scheduler(circuit_cooldown=0.0)
         trip_circuit(scheduler, "example.com")
         assert scheduler.is_circuit_open("example.com")
-        # record_success resets failure counter; with cooldown=0, circuit is not open
+        # Record_success resets failure counter; with cooldown=0, circuit is not open
         scheduler.record_success("example.com")
         assert scheduler._domain_failures.get("example.com", 0) == 0
 
@@ -422,7 +422,7 @@ class TestSchedulerPolicies:
         assert _parse_robots_crawl_delay("User-agent: *\nDisallow: /\n") is None
 
     def test_set_domain_min_delay_is_capped_at_the_politeness_ceiling(self):
-        """M1: a huge (finite) robots Crawl-delay must not install an
+        """A huge (finite) robots Crawl-delay must not install an
         unbounded politeness floor — the scheduler clamps it at the write."""
         from app.scheduler import _MAX_COOLDOWN_WAIT
 
@@ -431,7 +431,7 @@ class TestSchedulerPolicies:
         assert scheduler.current_delay("example.com") == _MAX_COOLDOWN_WAIT
 
     def test_set_domain_min_delay_ignores_non_finite(self):
-        """M1: inf/nan must never become a stored politeness floor."""
+        """Inf/nan must never become a stored politeness floor."""
         scheduler = make_scheduler(global_limit=10, per_domain_limit=10)
         scheduler.set_domain_min_delay("example.com", float("inf"))
         assert "example.com" not in scheduler._domain_min_delay
@@ -596,7 +596,7 @@ async def test_domain_delay_does_not_block_other_domains(monkeypatch):
     async def _sleep(delay, *args, **kwargs):
         del args, kwargs
         if delay >= 0.2:
-            # slow.example.com's 0.4s per-domain delay (jittered). It may not
+            # Slow.example.com's 0.4s per-domain delay (jittered). It may not
             # finish until the fast domain has been served. The starvation is
             # recorded rather than raised because ``run`` gathers with
             # return_exceptions=True, which would swallow an exception raised
@@ -670,7 +670,7 @@ class TestDeliveryFailuresAreNotWorkerFailures:
             f"{scheduler.domain_cooldowns}"
         )
         assert any("on_result" in record.message for record in caplog.records), (
-            "the swallowed delivery failure left no log line, which is what made H1 "
+            "the swallowed delivery failure left no log line, which is what made "
             f"undiagnosable: {[record.message for record in caplog.records]}"
         )
 
@@ -726,7 +726,7 @@ class TestSchedulerFailureAccountingIsAboutStatuses:
         from app.constants import status_for_classification
         from app.crawl.result_helpers import _terminal_engine_result
 
-        # status is the outer function's own keyword, not a field of the shared
+        # Status is the outer function's own keyword, not a field of the shared
         # value: it is what the per-status constructors pin, and a
         # CONTEXT_VARYING_STATUS classification needs one the table cannot
         # derive. See _terminal_engine_result.

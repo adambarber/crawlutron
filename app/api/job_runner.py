@@ -1,4 +1,4 @@
-"""Background whole-site job runner for ``/v1/jobs`` (H5 make-it-work).
+"""Background whole-site job runner for ``/v1/jobs``.
 
 Consumes the persisted frontier of a whole-site job in persistent batches:
 every transition (pause, resume, cancel, crash) leaves the store in a
@@ -202,7 +202,7 @@ def _job_engine_payload(job: Any, batch: Sequence[FrontierEntry]) -> dict[str, A
     """
     urls = [entry.url for entry in batch]
     policy = read_policy(job.policy, job.tier)
-    # model_copy is safe here specifically because max_depth=0 is a value the
+    # Model_copy is safe here specifically because max_depth=0 is a value the
     # model declares and this line is ours, not a caller's: a single engine
     # batch is one page deep by definition.
     policy = policy.model_copy(update={"limits": policy.limits.model_copy(update={"max_depth": 0})})

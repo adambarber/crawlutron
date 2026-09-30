@@ -89,7 +89,7 @@ class TestPolicyValidation:
         assert registrable_domain("https://a.b.example.co.uk/x") == "example.co.uk"
 
     def test_integer_ip_literal_blocked(self, monkeypatch):
-        # L4: resolvers read bare integers/hex as IPv4; layer 1 must too.
+        # Resolvers read bare integers/hex as IPv4; layer 1 must too.
         monkeypatch.setenv("CRAWLUTRON_ALLOW_PRIVATE_TARGETS", "0")
         with pytest.raises(ValueError):
             normalize_public_http_url("http://2130706433/")  # 127.0.0.1
@@ -111,7 +111,7 @@ class TestPolicyValidation:
             normalize_public_http_url("http://6425673729/")
 
     def test_registrable_domain_multi_level_suffixes(self):
-        # M5: the hand-rolled 7-entry suffix set collapsed every unlisted
+        # The hand-rolled 7-entry suffix set collapsed every unlisted
         # two-part suffix to itself (a.co.jp and b.co.jp both -> co.jp),
         # sharing gates across unrelated sites. The real PSL keeps them distinct.
         assert registrable_domain("https://a.co.jp/x") == "a.co.jp"

@@ -1,4 +1,4 @@
-"""L5c: crawl/render requests take exactly one of url/urls.
+"""Crawl/render requests take exactly one of url/urls.
 
 Both set silently ignored url; neither failed downstream in _payload_urls.
 Fail fast at the model boundary instead.
@@ -35,7 +35,7 @@ def test_exactly_one_url_source_accepted(model):
 
 @pytest.mark.parametrize("model", [CrawlRequest, RenderRequest])
 def test_empty_urls_list_with_url_rejected(model):
-    """N4: urls=[] is not "absent" -- exclude_none dumps it, _payload_urls
+    """Urls=[] is not "absent" -- exclude_none dumps it, _payload_urls
     resolves it to zero targets, and url is silently ignored."""
     with pytest.raises(ValidationError):
         model(url="http://example.com/", urls=[])

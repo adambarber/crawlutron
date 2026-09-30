@@ -144,7 +144,7 @@ class _PooledFake:
     ``AsyncSession`` exposes ``close`` and NO ``is_closed`` at all. The cffi fake
     must therefore not grow an ``is_closed`` -- doing so hides the fact that the
     shared reaper's ``getattr(client, "is_closed", True)`` guard silently treats
-    every real session as already closed (D2). Each descriptor's own ``is_closed``
+    every real session as already closed. Each descriptor's own ``is_closed``
     predicate is what decides reuse-safety.
     """
 
@@ -199,7 +199,7 @@ def _build_httpx_fake(settings=None) -> _PooledFake:
 
 
 def _build_cffi_fake(settings=None) -> _PooledFake:
-    # curl_cffi's AsyncSession publishes no is_closed attribute, so neither may
+    # Curl_cffi's AsyncSession publishes no is_closed attribute, so neither may
     # this fake: see the class docstring.
     session = _PooledFake("close", publishes_is_closed=False)
     try:
@@ -477,14 +477,14 @@ class _PooledClientDouble:
 
 
 class _RealShapedSession(_PooledClientDouble):
-    """curl_cffi-shaped: a coroutine ``close`` and NO ``is_closed`` attribute."""
+    """Curl_cffi-shaped: a coroutine ``close`` and NO ``is_closed`` attribute."""
 
     async def close(self) -> None:
         await self._finish_close()
 
 
 class _RealShapedHttpClient(_PooledClientDouble):
-    """httpx-shaped: a coroutine ``aclose`` and no sync ``close``."""
+    """Httpx-shaped: a coroutine ``aclose`` and no sync ``close``."""
 
     def __init__(self) -> None:
         super().__init__()
@@ -507,7 +507,7 @@ class _ThirdKind(_PooledClientDouble):
 
 
 def test_real_pooled_classes_have_no_synchronous_close():
-    """The premise of D1, pinned against the installed libraries.
+    """The premise of, pinned against the installed libraries.
 
     If either class ever gains a synchronous close, the reasoning behind
     ``_release_dropped_client`` has to be revisited -- this test is the trip
@@ -541,7 +541,7 @@ def _released_on_a_live_loop(client, what: str) -> bool:
 
 
 def test_displaced_client_is_actually_released_when_a_loop_is_running():
-    """D1: the cap's displacement must reach a real close, not a reference drop.
+    """The cap's displacement must reach a real close, not a reference drop.
 
     Both kinds in one test. The cffi session's coroutine ``close`` is the only
     teardown it has, so if the release dropped the reference for that kind
@@ -588,7 +588,7 @@ def test_none_displacement_is_a_noop():
 
 
 def test_real_shaped_session_is_closed_eagerly_on_a_live_loop(monkeypatch):
-    """D2: the eager close must fire for a session with no ``is_closed``.
+    """The eager close must fire for a session with no ``is_closed``.
 
     Driven through the production ``get_cffi_session`` rebuild path with a
     curl_cffi-shaped object, so the guard cannot be satisfied by a fake
@@ -706,7 +706,7 @@ def test_already_closed_pooled_client_is_not_re_closed_on_the_live_loop(monkeypa
 
 
 def test_a_third_pooled_kind_is_not_left_out_by_the_httpx_attribute_shape(monkeypatch):
-    """D2's generalization: the closed-decision belongs to the descriptor.
+    """'s generalization: the closed-decision belongs to the descriptor.
 
     The merged guard probed for an attribute name (``is_closed``) instead of
     asking the descriptor that owns the kind. Any future pooled client that

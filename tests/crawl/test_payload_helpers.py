@@ -84,7 +84,7 @@ class TestPayloadPolicyCarriesAdvertisedLimits:
 
 
 class TestPydanticDefaultPreservesRamScaling:
-    """N3: the pydantic default must not silently disable the RAM-scaled cap.
+    """The pydantic default must not silently disable the RAM-scaled cap.
 
     CrawlRequest.model_dump(exclude_none=True) is what the endpoints feed the
     engine. A concrete default on CrawlPolicyLimits.max_content_length_bytes

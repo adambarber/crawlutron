@@ -77,7 +77,7 @@ class TestCrawlApi(_AsgiEndpointTests):
         # Plain single-page crawl skips link extraction entirely
         assert result["discovered_link_count"] == 0
         assert result["discovered_links"] == []
-        # next_page_url stays a standard field regardless
+        # Next_page_url stays a standard field regardless
         assert result["next_page_url"] == f"{self.base}/page2"
 
     async def test_v1_crawl_batch_returns_one_result_per_url(self):
@@ -160,7 +160,7 @@ class TestCrawlApi(_AsgiEndpointTests):
         assert "crawler_crawl_results_total" in resp.text
 
     async def test_v1_crawl_jsonl_output_format(self):
-        # output_format=jsonl returns newline-delimited JSON (one object per URL).
+        # Output_format=jsonl returns newline-delimited JSON (one object per URL).
         resp = await self.client.post(
             "/v1/crawl", json=make_crawl_payload(f"{self.base}/", output_format="jsonl")
         )
@@ -219,7 +219,7 @@ class TestDiscoveryAndRenderApi:
         assert "max_active_requests" in body
 
     async def test_readiness_uses_live_gate_not_stale_gauges(self):
-        # M11: saturation must come from the live resource gate. No crawl
+        # Saturation must come from the live resource gate. No crawl
         # has run here, so the metrics gauges are stale zeros -- a sampler
         # reporting saturation must still yield 503.
         from app.health.readiness import READINESS_STATE
@@ -261,7 +261,7 @@ class TestDiscoveryAndRenderApi:
         assert resp.status_code == 422
 
     async def test_v1_render_exhausted_pool_returns_503(self, monkeypatch):
-        # M12: when every renderer is wedged, the request surfaces as 503, not
+        # When every renderer is wedged, the request surfaces as 503, not
         # a hang or a 500.
         #
         # The fake mirrors the production worker's contract: pool exhaustion is
@@ -307,7 +307,7 @@ class TestDiscoveryAndRenderApi:
         # correctly-shaped terminal result instead.
         #
         # PooledBrowserWorker catches every Exception itself, so this is latent
-        # for the production worker -- but the P0 getattr fix silenced mypy's
+        # for the production worker -- but the getattr fix silenced mypy's
         # only static signal of the polymorphism, so nothing else catches a
         # future caller that lets one escape.
         import app.api.render_endpoint as render_endpoint
@@ -336,7 +336,7 @@ class TestDiscoveryAndRenderApi:
         assert secret not in resp.text, f"raw exception text leaked into the response: {resp.text!r}"
 
     async def test_v1_render_without_pool_returns_503(self):
-        # M13: a None browser pool (startup/shutdown window) must surface as
+        # A None browser pool (startup/shutdown window) must surface as
         # a clean 503, not an AttributeError 500 from inside the worker.
         resp = await post_render_with_pool(self.client, None, "http://127.0.0.1:1/x")
         assert resp.status_code == 503
@@ -451,12 +451,12 @@ class TestMapApi(_AsgiEndpointTests):
         assert resp.status_code == 200, resp.text
         body = resp.json()
         assert "all_urls" in body
-        # sitemap advertises /page1 and /page2, resolved to absolute URLs
-        # against the origin (L6: SiteMapResponse contract).
+        # Sitemap advertises /page1 and /page2, resolved to absolute URLs
+        # against the origin (SiteMapResponse contract).
         assert f"{self.base}/page2" in body["all_urls"]
-        # robots points at /sitemap.xml
+        # Robots points at /sitemap.xml
         assert f"{self.base}/sitemap.xml" in body["sitemaps"]
-        # in-page links are discovered too
+        # In-page links are discovered too
         assert len(body["links"]) >= 1
 
     async def test_v1_map_rejects_missing_url(self):

@@ -271,7 +271,7 @@ def _redirect_target(
     redirect, else ``None`` (terminal response). The caller must re-run
     ``_build_pinned_request`` for ``new_url`` so every hop re-validates against
     the SSRF blocklist and re-pins DNS. Sensitive headers (Cookie,
-    Authorization) are stripped when crossing host boundaries (Fix 3).
+    Authorization) are stripped when crossing host boundaries.
     """
     if status_code not in _REDIRECT_STATUSES or not location or hops >= _MAX_REDIRECT_HOPS:
         return None

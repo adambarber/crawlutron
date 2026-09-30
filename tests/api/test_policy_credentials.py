@@ -1,11 +1,11 @@
 """Tier 2b: policy.credentials -- scoped, typed, host-bounded credentials.
 
-M12 banned spoofable headers but deliberately kept ``authorization``
+Spoofable headers are banned but deliberately kept ``authorization``
 available: credentialed crawling of one's own site is real use, and banning
 the header would push callers to bake credentials into URLs (userinfo),
 which then leak through logs, Referer and retries. The typed field is the
 replacement path: credentials are keyed by canonical origin, so the
-existing cross-host redirect scrub (Fix 3, ``_CREDENTIAL_HEADERS``) is also
+existing cross-host redirect scrub (``_CREDENTIAL_HEADERS``) is also
 the enforcement point for "credentials never cross host boundaries" -- a
 credential attached to origin A is scrubbed from every request to origin B
 by the chokepoint that already scrubs cookies.
@@ -74,7 +74,7 @@ class TestApplyCredentials:
         assert headers["Authorization"] == "Bearer tok"
 
     def test_scrubbed_on_cross_host_redirect_by_the_existing_chokepoint(self):
-        """The invariant rides Fix 3: authorization is in _CREDENTIAL_HEADERS,
+        """The invariant: authorization is in _CREDENTIAL_HEADERS,
         so the manual redirect loop strips it when the hop changes host --
         credentials applied to the seed URL never reach the redirect target."""
         from app.crawl.strategies.pinned_transport import _CREDENTIAL_HEADERS, _redirect_target

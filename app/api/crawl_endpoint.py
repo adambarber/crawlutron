@@ -109,7 +109,7 @@ async def crawl(
             # fails inside a detached task the caller can no longer inspect.
             _serialize_or_reject([], payload.output_format)
         payload_dict = payload.model_dump(exclude_none=True)
-        # L4: gate the batch size at the boundary, before the 202 is ever
+        # Gate the batch size at the boundary, before the 202 is ever
         # returned. The async branch otherwise accepts an oversized batch and
         # only fails it inside the detached background task, where the caller
         # can no longer see why. Same chokepoint the engine uses, so sync and

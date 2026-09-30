@@ -190,7 +190,7 @@ async def test_extracts_lastmod_per_loc():
         10,
         host_policy=UNRESTRICTED_HOST_POLICY,
     )
-    # returns (loc, lastmod) tuples
+    # Returns (loc, lastmod) tuples
     by_loc = {loc: lastmod for loc, lastmod in urls}
     assert by_loc["http://x.test/a"] == "2024-01-15"
     assert by_loc["http://x.test/b"] is None
@@ -268,13 +268,13 @@ def test_seed_is_fresh(tmp_path):
     url = "http://example.com/page"
     cache = _cache_with_fresh(tmp_path, url, "2020-01-01T00:00:00Z", _policy())
 
-    # sitemap older than our cache -> cached copy is fresh -> skip
+    # Sitemap older than our cache -> cached copy is fresh -> skip
     assert _seed_is_fresh(url, "2020-01-01T00:00:00Z", cache, _policy()) is True
-    # sitemap newer than our cache -> stale -> fetch
+    # Sitemap newer than our cache -> stale -> fetch
     assert _seed_is_fresh(url, "2025-01-01T00:00:00Z", cache, _policy()) is False
-    # no lastmod -> fetch
+    # No lastmod -> fetch
     assert _seed_is_fresh(url, None, cache, _policy()) is False
-    # not cached at all -> fetch
+    # Not cached at all -> fetch
     assert _seed_is_fresh("http://example.com/other", "2020-01-01T00:00:00Z", cache, _policy()) is False
 
 
@@ -296,7 +296,7 @@ _POLICY_SEED_BATCH = partial(_policy, extraction="trafilatura")
 class TestStaleSeedBatch:
     def test_batch_matches_per_url_verdicts(self, tmp_path):
         """The batch helper returns exactly the URLs whose cached copy is
-        fresh (the same verdicts the per-URL helper produced before T7)."""
+        fresh (the same verdicts the per-URL helper produced before )."""
         fresh = "http://seed-batch.test/fresh"
         stale = "http://seed-batch.test/stale"
         cache = _cache_with_fresh(tmp_path, fresh, "2020-01-01T00:00:00Z", _POLICY_SEED_BATCH())
@@ -444,7 +444,7 @@ def test_build_site_map_empty():
 
 
 def test_build_site_map_resolves_relative_paths():
-    # L6: origin-relative paths must resolve against the root instead of
+    # Origin-relative paths must resolve against the root instead of
     # leaking verbatim -- the SiteMapResponse contract promises normalized
     # public URLs.
     crawl_response = _crawl_response(
@@ -457,7 +457,7 @@ def test_build_site_map_resolves_relative_paths():
 
 
 # ---------------------------------------------------------------------------
-# H7: future-skew bound on sitemap <lastmod> (reject garbage at the parse
+# future-skew bound on sitemap <lastmod> (reject garbage at the parse
 # chokepoint; degradation direction is re-fetch, never "fresher than now").
 # ---------------------------------------------------------------------------
 

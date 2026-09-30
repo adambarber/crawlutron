@@ -58,7 +58,7 @@ async def _default_http_fetcher(
     blocklist and re-pinned to its resolved IP. Automatic httpx following is off
     because it would connect to a redirect target without re-checking it.
     Sensitive headers (Cookie, Authorization) are stripped when crossing host
-    boundaries to prevent credential leakage (Fix 3).
+    boundaries to prevent credential leakage.
 
     The signature is :data:`app.models.HttpFetcher` plus the two bound keywords,
     checked tree-wide by ``test_http_fetcher_contract_holds_tree_wide``.
@@ -72,7 +72,7 @@ async def _default_http_fetcher(
     started = time.monotonic()
     timeout = Timeouts.for_request(timeout_seconds).as_httpx()
     async for chain, pinned_url, hop_headers in pinned_transport.apinned_hops(url, headers, policy=policy):
-        # follow_redirects=False: we follow manually so each hop is SSRF-checked.
+        # Follow_redirects=False: we follow manually so each hop is SSRF-checked.
         async with client.stream(
             "GET", pinned_url, headers=hop_headers, timeout=timeout, follow_redirects=False
         ) as response:
@@ -215,13 +215,13 @@ async def _cffi_fetch(
             # Content-length check
             content_length = response.headers.get("content-length")
             if pinned_transport._declared_length_exceeds(content_length, max_content_length):
-                await response.aclose()  # N8: release the curl handle
+                await response.aclose()  # release the curl handle
                 return _cffi_too_large_result(
                     url, chain.url, response, int((time.monotonic() - started) * 1000)
                 )
             status_code = response.status_code
             if chain.advance(response):
-                await response.aclose()  # N8: release the curl handle
+                await response.aclose()  # release the curl handle
                 continue
             # Do not trust response.elapsed across curl_cffi versions
             # (timedelta in a requests-compatible build would TypeError

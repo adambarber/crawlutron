@@ -140,7 +140,7 @@ def test_both_failure_primitives_log_the_same_server_side_payload(caplog):
         assert "/app/" not in json.dumps(to_dict(result), default=str)
 
 
-# H3: one representative exception per branch of _classify_error_code, paired
+# One representative exception per branch of _classify_error_code, paired
 # with the stable code that branch emits. Every one of these codes is stored
 # verbatim into CrawlStrategyAttempt.classification.
 _ERROR_CODE_CASES = (
@@ -154,7 +154,7 @@ _ERROR_CODE_CASES = (
     (RuntimeError("unknown"), "network_error"),
 )
 
-# The three codes H3 adds to the taxonomy: known-dead fetch outcomes that must
+# The three codes adds to the taxonomy: known-dead fetch outcomes that must
 # land in the ONE status table (and as "failed", matching the status the
 # strategy already reported) instead of falling through to the default.
 _NEW_ERROR_CODES = (
@@ -165,7 +165,7 @@ _NEW_ERROR_CODES = (
 
 
 class TestEmittedErrorCodesAreValidClassifications:
-    """H3: every emitted error code must be a ``CrawlClassification`` member.
+    """Every emitted error code must be a ``CrawlClassification`` member.
 
     The strategy layer stores the code straight into
     ``CrawlStrategyAttempt.classification``. The internal attempt model is a
@@ -215,7 +215,7 @@ class TestEmittedErrorCodesAreValidClassifications:
 
 
 class TestFailureDiagnosticsRedaction:
-    """the FAILURE path dumped the raw ``request_profile`` (which can carry
+    """The FAILURE path dumped the raw ``request_profile`` (which can carry
     live cookies, fingerprint_seed, cookie_namespace) into diagnostics, while
     the SUCCESS path exports only ``user_agent_family`` + ``cookie_jar``.
     Diagnostics reach the API response, result store, persisted job.results and

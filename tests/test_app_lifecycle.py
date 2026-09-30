@@ -110,7 +110,7 @@ class TestAppLifecycleEdges:
         assert (app.main) is not None
 
     async def test_render_endpoint_value_error(self, async_client):
-        # ASGI harness runs no lifespan, so the pool is None; M13's guard
+        # ASGI harness runs no lifespan, so the pool is None; 's guard
         # answers 503 browser_pool_unavailable before URL validation.
         # Own the premise explicitly: ordering must never decide it.
         assert_pool_unavailable(await post_render_with_pool(async_client, None, "invalid"))
@@ -140,7 +140,7 @@ class TestAppLifecycleEdges:
     async def test_job_endpoints_not_found(self, async_client):
         resp = await async_client.get("/v1/jobs/nonexistent")
         assert resp.status_code == 404
-        # H5 execution contract: control resolves the row first — a
+        # Execution contract: control resolves the row first — a
         # missing job is 404, not the (reversed) 501 refusal.
         resp = await async_client.post("/v1/jobs/nonexistent/control", json={"action": "cancel"})
         assert resp.status_code == 404

@@ -90,7 +90,7 @@ class TestErrorEnvelope:
 
 
 class TestEnvelopeFromDetail:
-    """M8: the funnel is the only way an HTTPException detail becomes a wire body."""
+    """The funnel is the only way an HTTPException detail becomes a wire body."""
 
     def test_conforming_detail_unwraps_one_to_one(self):
         from app.api.exceptions import error_envelope_from_detail

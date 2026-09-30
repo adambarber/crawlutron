@@ -40,7 +40,7 @@ class TestCapabilitiesPayload:
         assert "async_mode" in timing["large_crawl_guidance"]
 
     def test_large_crawl_guidance_routes_to_durable_jobs(self):
-        """M14 ruling: the no-ceiling note must name BOTH escape hatches.
+        """The no-ceiling note must name BOTH escape hatches.
 
         async_mode de-risks the HTTP request; only POST /v1/jobs is durable
         (pause/cancel/resume, crash recovery). An agent that reads only
@@ -73,7 +73,7 @@ class TestCapabilitiesWireContract:
         assert body["features"]["async_mode"] is True
 
     async def test_timing_guidance_is_one_string_shared_by_every_surface(self, async_client):
-        """M14 follow-up: the no-time-ceiling guidance shipped as three
+        """The no-time-ceiling guidance shipped as three
         hand-maintained copies (capabilities, agent-hints, the OpenAPI
         endpoint description). One constant now feeds all three, so the
         surfaces cannot drift; this pins the identity on the WIRE,
@@ -100,7 +100,7 @@ class TestAgentHintsPayload:
         assert "example_policies" in payload
 
     def test_agent_hints_time_guidance_names_both_escape_hatches(self):
-        """M14 ruling: the no-ceiling hint must point at async_mode AND jobs.
+        """The no-ceiling hint must point at async_mode AND jobs.
 
         Same rationale as the capabilities guidance test: the hints are what
         agents actually read before constructing a first request, so the

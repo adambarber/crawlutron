@@ -45,7 +45,7 @@ def format_crawl_item(item: dict[str, Any]) -> tuple[str | None, dict[str, Any]]
     without HTML fall back to the strategy's extracted ``text`` so the consumer always
     receives a consistent Markdown payload regardless of how the content was acquired.
 
-    H2 (solved): engine-produced items carry ``llm_metadata`` -- page
+    Engine-produced items carry ``llm_metadata`` -- page
     metadata computed ONCE from the discovery tree in the strategy stage --
     and this formatter reads that plain-data dict instead of rebuilding an
     lxml tree from the stored HTML. The reparse (``_extract_llm_metadata``)
@@ -403,7 +403,7 @@ def _failed_unified_result(item: Any) -> UnifiedCrawlResult:
         normalized_url=url,
         final_url=peeked.get("final_url"),
         status=CrawlStatus.failed,
-        # site_error is a FAILED_CLASSIFICATIONS member, so its status-table
+        # Site_error is a FAILED_CLASSIFICATIONS member, so its status-table
         # entry is "failed" -- this keeps (status, classification) consistent
         # for any consumer that re-derives status from classification.
         # unknown_error maps to "blocked", which would disagree with the

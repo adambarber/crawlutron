@@ -114,7 +114,7 @@ def decompress_body(
 
     ``max_output_bytes`` is a required keyword: every caller states the
     decompression-bomb bound explicitly, so a new call site physically cannot
-    expand attacker-compressed bytes without a cap (H2 closure — the optional
+    expand attacker-compressed bytes without a cap (the optional
     default existed only for the uncapped legacy branches, which are gone).
     Every layer is held to it, not just the outermost, so an intermediate stage
     of a stack cannot expand past the bound on its way to a small final body.
@@ -165,12 +165,12 @@ def _decompress_brotli(body: bytes | bytearray | memoryview[int], max_output_byt
 
     try:
         if decoder is not None and hasattr(decoder, "decompress"):
-            # brotlicffi-style bounded API
+            # Brotlicffi-style bounded API
             bounded = cast("_BoundedDecompressor", decoder)
             decoded: bytes | bytearray = bounded.decompress(body, max_output_bytes + 1)
         elif decoder is not None and hasattr(decoder, "process"):
             streaming = cast("_StreamingDecompressor", decoder)
-            # google-brotli streaming API: feed incrementally and stop past the
+            # Google-brotli streaming API: feed incrementally and stop past the
             # cap. A single process(body) call would materialize the entire
             # bomb in RAM. Stopping early leaves the output over the cap, which
             # the caller's post-hoc check turns into DecompressionTooLargeError.

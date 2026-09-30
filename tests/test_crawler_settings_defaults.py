@@ -45,7 +45,7 @@ def test_the_pool_default_is_derived_per_construction_not_frozen_at_import():
         built = CrawlerSettings()
         assert built.http_max_connections == expected
         assert built.http_max_keepalive == max(20, min(128, expected // 2))
-        # from_mapping used to read these off the class, which a default_factory
+        # From_mapping used to read these off the class, which a default_factory
         # field does not have -- so it has to call the same factory.
         with patch.dict("os.environ", {}, clear=False):
             import os
@@ -71,7 +71,7 @@ def test_a_failed_memory_read_still_yields_the_declared_fallback_every_time():
 
 
 class TestFromMappingHardening:
-    """H1: from_mapping must absorb garbage env values, never crash, and
+    """From_mapping must absorb garbage env values, never crash, and
     never fail a policy open on a typo'd boolean."""
 
     def test_garbage_numeric_values_fall_back_to_defaults(self, caplog):

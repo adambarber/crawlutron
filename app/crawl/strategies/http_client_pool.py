@@ -65,7 +65,7 @@ def _default_settings() -> CrawlerSettings:
 
 
 class _NoStoreCookieJar(_StdlibCookieJar):
-    """A cookie jar that never stores or replays anything (C2).
+    """A cookie jar that never stores or replays anything.
 
     The long-lived httpx client would otherwise accumulate every Set-Cookie and
     replay domain-matching cookies on later requests independently of the
@@ -161,7 +161,7 @@ def _build_async_client(settings: CrawlerSettings | None = None) -> httpx.AsyncC
             keepalive_expiry=settings.http_keepalive_expiry,
         ),
         headers={"User-Agent": DEFAULT_USER_AGENT},
-        # C2: an inert jar, so cookies only ever flow through the namespaced
+        # An inert jar, so cookies only ever flow through the namespaced
         # _GLOBAL_COOKIE_JAR chokepoint.
         cookies=_NoStoreCookieJar(),
     )
@@ -289,7 +289,7 @@ def _client_is_closed(client: Any) -> bool:
     Only used as a last-resort defensive check for callers that have no
     descriptor to ask. An absent ``is_closed`` means "this kind cannot say",
     which is NOT evidence of being closed -- treating it as such is what
-    silently disabled the eager close for every curl_cffi session (D2). So this
+    silently disabled the eager close for every curl_cffi session. So this
     returns False for unknown shapes and lets the caller's own predicate decide.
     """
     return bool(getattr(client, "is_closed", False))
@@ -327,7 +327,7 @@ def _schedule_client_close(client, *, is_closed: Callable[[Any], bool]) -> None:
         # client is dropped instead -- process teardown reclaims its sockets.
         return
     task = loop.create_task(_safe_aclose(client))
-    # asyncio keeps only a weak reference to a running task, so a teardown
+    # Asyncio keeps only a weak reference to a running task, so a teardown
     # scheduled from a synchronous rebuild could be garbage collected before it
     # finished -- reproducing the leak this function exists to prevent. The done
     # callback is what evicts again, so this set cannot grow without bound.
@@ -339,7 +339,7 @@ class _LoopBoundPooledClient:
     """One pooled HTTP client per running event loop, released on loop change.
 
     The contract, not the narrative: :meth:`current` is the pooled client as the
-    module global holds it, :meth:`_supersede` and :meth:`_rebuild` implement the
+    module global holds it,:meth:`_supersede` and :meth:`_rebuild` implement the
     three-step supersession lifecycle documented at module level, and both
     pooled singletons (httpx and curl_cffi) are descriptors of this one class so
     they cannot drift apart.
@@ -492,7 +492,7 @@ def _build_cffi_session() -> Any:
     The per-request timeout travels on each ``get()`` call instead of the
     session so one session serves every policy budget.
     """
-    # discard_cookies=True (C2): the session ships a requests-compatible jar
+    # discard_cookies=True: the session ships a requests-compatible jar
     # that would otherwise absorb every Set-Cookie and replay domain-matching
     # cookies on later requests INDEPENDENTLY of the namespaced
     # _GLOBAL_COOKIE_JAR -- the exact cross-tenant leak cookie_namespace exists

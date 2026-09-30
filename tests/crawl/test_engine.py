@@ -63,7 +63,7 @@ class TestEngineCrawlRequest:
     async def test_crawl_request_http_failure_falls_back_to_browser(self, base_url):
 
         # Fail page fetches but serve robots.txt: robots is per-origin
-        # (M7 fail-closed), so a fake that also breaks robots would
+        # , so a fake that also breaks robots would
         # skip the crawl before the browser fallback is ever reached.
         # The intent here is page-fetch failure -> browser fallback.
         failing_fetcher = routed_fetcher(
@@ -94,7 +94,7 @@ class TestEngineCrawlRequest:
 
 
 def test_seed_freshness_uses_real_default_strategies():
-    """L5b: without an explicit strategies list, freshness must probe the
+    """Without an explicit strategies list, freshness must probe the
     real default chain -- not the placeholder ["HTTP"], whose cache keys
     can never match anything actually stored."""
     from app.api_models import CrawlExtractionMethod
@@ -170,7 +170,7 @@ class TestEngineChainEdges:
             _payload_policy({"policy": {"strategies": ["BOGUS"]}}, PolicyTier.model_defaults())
 
     async def test_browser_strategy_document_extraction(self, base_url):
-        # Live origin: M7's robots gate fail-closes connection-refused origins
+        # Live origin: 's robots gate fail-closes connection-refused origins
         # (127.0.0.1:1), so the subject here needs a server that 404s robots.
         result = await crawled_result(
             f"{base_url}/doc",

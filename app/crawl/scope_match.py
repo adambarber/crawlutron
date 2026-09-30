@@ -1,4 +1,4 @@
-"""Single canonical bounded scope matcher (M10 dedupe).
+"""Single canonical bounded scope matcher.
 
 Both the engine's sitemap-seed filter and the recursive BFS loop apply a
 caller-supplied scope regex per URL. The identical "bounded match, fail closed

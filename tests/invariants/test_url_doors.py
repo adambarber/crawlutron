@@ -190,7 +190,7 @@ def _is_response_like(node: ast.expr | None) -> bool:
 
 
 def test_no_bare_body_reads():
-    """Every HTTP body read anywhere must be capped (N2 class).
+    """Every HTTP body read anywhere must be capped ().
 
     Scope note: app/bounded_io.py IS the chokepoint and streams the capped body
     itself -- exempt by receiver, not path, so it survives a tree-wide sweep.
@@ -207,7 +207,7 @@ def test_no_bare_body_reads():
 def _scope_matcher_definitions() -> list[str]:
     """File labels of every ``def scope_allows``/``_scope_allows`` under app/.
 
-    M10: the bounded scope check was verbatim-copied into engine.py and
+    The bounded scope check was verbatim-copied into engine.py and
     recursive.py; a one-sided fix would have left the other on the stale
     contract. Deduped into app/crawl/scope_match.py -- a second definition
     anywhere means the copy crept back.
@@ -244,7 +244,7 @@ def test_no_pinned_url_leaks_into_final_url():
     offenders = []
     for path, tree in app_trees():
         for node in nodes_of(tree):
-            # final_url = str(response.url)  (assignment)
+            # Final_url = str(response.url)  (assignment)
             if isinstance(node, ast.Assign):
                 targets = [t.id for t in node.targets if isinstance(t, ast.Name) and t.id == "final_url"]
                 if targets and _is_response_url(node.value):
@@ -274,7 +274,7 @@ def _is_response_url(node: ast.expr) -> bool:
 def _unpinned_safe_url_parses(tree, path):
     """Every SafeUrl.parse fetch consumer must pass an explicit ``pin=``.
 
-    An unpinned parse is the H5 rebinding window: validation resolves one IP,
+    An unpinned parse is the rebinding window: validation resolves one IP,
     then ``connect`` re-resolves at open time and a hostile DNS can swap the
     answer. Forcing an explicit pin at every call site makes "forgot to pin"
     impossible to merge; safe_url.py itself is exempt (redirect_hop passes a
@@ -319,7 +319,7 @@ def test_no_inline_pinned_url_composition():
                 if isinstance(value, ast.FormattedValue):
                     expr = value.value
                     if isinstance(expr, ast.Attribute) and expr.attr == "pinned_ip":
-                        offenders.append(offender_at(path, node, "f-string interpolates .pinned_ip"))
+                        offenders.append(offender_at(path, node, "f-string interpolates.pinned_ip"))
                     if (
                         isinstance(expr, ast.Name)
                         and isinstance(expr.ctx, ast.Load)
@@ -330,7 +330,7 @@ def test_no_inline_pinned_url_composition():
 
 
 # ---------------------------------------------------------------------------
-# Frontier raw-href sinks (H1 class)
+# Frontier raw-href sinks ()
 # ---------------------------------------------------------------------------
 
 
@@ -479,7 +479,7 @@ def test_no_raw_href_frontier_sinks():
 
 
 def test_raw_href_frontier_detector_bites():
-    """Prove the detector fires on the historical H1 shape."""
+    """Prove the detector fires on the historical shape."""
     bad = ast.parse(
         "async def _run(job, item):\n"
         "    for link in item.get('discovered_links') or []:\n"
@@ -1206,7 +1206,7 @@ def test_unfiltered_urljoin_detector_bites():
         "def f(href, final_url):\n    return public_url_or_none(href, resolve_against=final_url)\n"
     )
     assert not _unfiltered_urljoin_return_offenders(good, REPO_ROOT / "app" / "crawl" / "_synthetic.py")
-    # safe_url.py composes urljoin inside SafeUrl.parse / redirect_hop.
+    # Safe_url.py composes urljoin inside SafeUrl.parse / redirect_hop.
     hop = ast.parse(
         "def hop(self, location):\n    return SafeUrl.parse(urljoin(self.raw, location), pin=True)\n"
     )

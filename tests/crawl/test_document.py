@@ -72,9 +72,9 @@ class TestPdfTablePreservation:
 
 
 class TestDocumentRedirectSsrf:
-    """H2: a public PDF that redirects to an internal host must not be followed.
+    """A public PDF that redirects to an internal host must not be followed.
 
-    H5: the extractor connects to the PINNED IP returned by validation, so
+    The extractor connects to the PINNED IP returned by validation, so
     urllib never re-resolves DNS at connect time -- the rebinding TOCTOU is
     closed. The logical hostname rides the Host header, which is what the
     fake opener dispatches on (both test hosts resolve to the same IP).
@@ -119,7 +119,7 @@ class TestDocumentRedirectSsrf:
             fetched.append(host)
             location = redirects.get(f"{host}{urlparse(str(request.url)).path}")
             if location is not None:
-                # httpx hands a 30x back as a response rather than raising, and
+                # Httpx hands a 30x back as a response rather than raising, and
                 # the shared chain reads the Location off it -- the opposite of
                 # urllib, where a redirect surfaced as HTTPError. Driving the
                 # real client is what makes that difference observable.
@@ -155,7 +155,7 @@ class TestDocumentRedirectSsrf:
         assert "allowed.test" in run.fetched
 
     def test_connect_is_pinned_to_validated_ip(self, monkeypatch):
-        """H5: the connection URL carries the validated IP, not the hostname.
+        """The connection URL carries the validated IP, not the hostname.
 
         urllib never re-resolves because the request URL host IS the IP that
         passed the SSRF check; the original hostname rides the Host header.
@@ -165,7 +165,7 @@ class TestDocumentRedirectSsrf:
         assert urlparse(connect_urls[0]).hostname == self.PINNED_IP
 
     def test_https_document_connects_by_hostname_not_ip(self, monkeypatch):
-        """H5-A: https keeps the hostname (certs carry no IP SANs) -- the
+        """-A: https keeps the hostname (certs carry no IP SANs) -- the
         pinned IP must never surface in an https request URL, or every properly
         configured site would fail TLS and silently break extraction.
 
@@ -187,7 +187,7 @@ class TestDocumentRedirectSsrf:
         assert https_hop.hostname != self.PINNED_IP, "the pinned IP must not surface in an https URL"
 
     def test_second_hop_dns_rebind_aborts(self, monkeypatch):
-        """H5-B: hops 2+ re-validate and re-pin. A hop whose resolution is
+        """-B: hops 2+ re-validate and re-pin. A hop whose resolution is
         link-local must abort the extraction, closing the rebind window that
         would otherwise reopen on every hop after the first."""
         run = self._drive_extraction(
@@ -205,7 +205,7 @@ class TestDocumentRedirectSsrf:
         assert "evil.test" not in run.fetched
 
     def test_relative_redirect_resolves_against_hostname_url(self, monkeypatch):
-        """H5-B: the next Location urljoins against the LOGICAL (hostname)
+        """-B: the next Location urljoins against the LOGICAL (hostname)
         URL, never the pinned-IP connect URL -- the resolver must see the
         hostname, and a resolver that refuses IP literals proves which one
         the code actually used."""
@@ -246,7 +246,7 @@ class TestDocumentExtractionEdges:
         assert text == ""
 
     def test_oversized_pdf_body_yields_empty_text(self, base_url):
-        # N2: the read itself is capped. /sample_table.pdf is a real PDF far
+        # The read itself is capped. /sample_table.pdf is a real PDF far
         # larger than the shrunken cap, so the extractor must fail closed
         # (empty text) instead of buffering the whole body.
         import app.crawl.extraction as extraction_mod

@@ -1,4 +1,4 @@
-"""Whole-site job execution contract for ``/v1/jobs`` (H5 make-it-work).
+"""Whole-site job execution contract for ``/v1/jobs`` (make-it-work).
 
 The runner consumes the persisted frontier in persistent batches so every
 transition (pause, resume, cancel, crash) leaves the store consistent.
@@ -134,7 +134,7 @@ def test_creating_and_controlling_a_job_need_the_same_providers():
 
     def _providers(handler) -> dict[str, Callable[..., Any]]:
         declared: dict[str, Callable[..., Any]] = {}
-        # eval_str: the router module defers its annotations (PEP 563), so the
+        # Eval_str: the router module defers its annotations (PEP 563), so the
         # alias objects are only reachable after the string is resolved.
         for name, param in inspect.signature(handler, eval_str=True).parameters.items():
             for meta in getattr(param.annotation, "__metadata__", ()):
@@ -378,7 +378,7 @@ class TestWholeSiteJobExecution:
         assert job.stats["total_failed"] == 2
 
     async def test_failed_item_failing_to_build_counts_once(self, client, job_store):
-        """M3: an item that fails to build AND carries status=failed counts once.
+        """An item that fails to build AND carries status=failed counts once.
 
         build_unified_result requires original_url; an item with a resolvable
         URL but no original_url raises inside the try, and its
@@ -404,7 +404,7 @@ class TestWholeSiteJobExecution:
         assert job.stats["total_failed"] == 1
 
     async def test_wide_fanout_crawls_every_discovered_url_once(self, client, job_store):
-        """M2: a 25-link fan-out across batches discovers and crawls each URL."""
+        """A 25-link fan-out across batches discovers and crawls each URL."""
         leaves = [f"http://example.test/l{i}" for i in range(25)]
         job = await run_scripted_api_job(
             client,
@@ -418,7 +418,7 @@ class TestWholeSiteJobExecution:
         assert job.frontier == []
 
     async def test_discovered_links_dedupe(self, client, job_store):
-        # a discovers b and c; b discovers a again — visited dedupe wins.
+        # A discovers b and c; b discovers a again — visited dedupe wins.
         job_id = await _create_api_job(
             client,
             GRAPH_ROOT,
@@ -507,7 +507,7 @@ class TestTransientFailureRequeue:
         assert job.stats["total_failed"] == 1
 
     async def test_frontier_expansion_uses_normalized_url(self, client, job_store):
-        """H1: the frontier must carry the validated URL, never the raw href.
+        """The frontier must carry the validated URL, never the raw href.
 
         extraction.py can legitimately emit url="/rel" with normalized_url set
         to the resolved absolute URL; a runner that reads ``url`` re-queues
@@ -598,7 +598,7 @@ class TestRunnerLifecycle:
 
 
 class TestWholeSiteRedirectedUrlResolution:
-    """whole-site results are keyed by final_url but looked up by the
+    """Whole-site results are keyed by final_url but looked up by the
     pre-redirect frontier URL, so a redirected page misses -> "transient" ->
     re-queued forever, then counted failed and dropped: its content never
     reaches job.results.
@@ -824,12 +824,12 @@ class TestJobControlTransitions:
         await self._control("invalid_action", 422)
 
     async def test_main_job_control_cancel_completed(self):
-        # H5: cancel from a terminal state is a state conflict (409), not a
+        # Cancel from a terminal state is a state conflict (409), not a
         # shape error (422) — the request shape is valid, the transition isn't.
         await self._control("cancel", 409, seed_terminal=True)
 
     async def test_main_job_control_resume_not_paused(self):
-        # H5: resume requires PAUSED; from PENDING it is a state conflict.
+        # Resume requires PAUSED; from PENDING it is a state conflict.
         await self._control("resume", 409)
 
 
@@ -872,7 +872,7 @@ class TestWholeSiteAdmissionContract:
         return policy
 
     async def _admitted(self, client, job_store, root, links, policy):
-        """``links`` offered, :data:`ADMITTED` the only survivor; assert the settled shape.
+        """``links`` offered,:data:`ADMITTED` the only survivor; assert the settled shape.
 
         The three admission tests differ in *why* the other links were refused --
         scope regex, robots, shape -- and agree on everything else. This carries

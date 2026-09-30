@@ -51,7 +51,7 @@ async def _fetch_with_redirect(monkeypatch, redirect_location):
 
 async def test_http_fetcher_strips_cookie_on_cross_domain_redirect(monkeypatch):
     """HTTP fetcher should strip Cookie and Authorization headers when redirecting
-    to a different hostname (Fix 3)."""
+    to a different hostname."""
     mock_client, _ = await _fetch_with_redirect(monkeypatch, "http://attacker.com/steal")
 
     # First request should have the sensitive headers
@@ -65,7 +65,7 @@ async def test_http_fetcher_strips_cookie_on_cross_domain_redirect(monkeypatch):
 
 async def test_http_fetcher_keeps_cookie_on_same_domain_redirect(monkeypatch):
     """HTTP fetcher should keep Cookie/Authorization headers when redirecting
-    within the same hostname (Fix 3)."""
+    within the same hostname."""
     mock_client, _ = await _fetch_with_redirect(monkeypatch, "/new-path")
 
     # Both requests should have the sensitive headers (same host)

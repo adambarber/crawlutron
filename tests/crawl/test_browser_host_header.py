@@ -1,4 +1,4 @@
-"""M2: the pinned Host header must not leak to later page requests.
+"""The pinned Host header must not leak to later page requests.
 
 set_extra_http_headers() applies page-wide: without clearing after the
 pinned navigation, every later request from that page (third-party XHR,
@@ -18,7 +18,7 @@ async def test_pinned_host_cleared_after_navigation(monkeypatch):
 
 
 async def test_route_continue_omits_empty_headers(monkeypatch):
-    # M1: an explicit headers={} can replace (wipe) the request's headers
+    # An explicit headers={} can replace (wipe) the request's headers
     # in Playwright; the kwarg must be omitted when there are no overrides.
     # https URL kept, no Host override -- supplying neither `pinned` nor
     # `raises` is that shape.

@@ -145,7 +145,7 @@ def read_cpu_quota(cgroup_root: str = "/sys/fs/cgroup") -> float | None:
                 return quota_v2 / period_v2
         return None
 
-    # cgroup v1: cpu.cfs_quota_us / cpu.cfs_period_us; quota -1 means unlimited.
+    # Cgroup v1: cpu.cfs_quota_us / cpu.cfs_period_us; quota -1 means unlimited.
     # Both reads are ``int | None`` (the files may be missing on a v2-only host),
     # which is why the v2 branch above binds its own names.
     quota = _read_int(os.path.join(cgroup_root, "cpu", "cpu.cfs_quota_us"))
@@ -173,7 +173,7 @@ def read_cpu_usage_seconds(cgroup_root: str = "/sys/fs/cgroup") -> float | None:
                         return None
         return None
 
-    # cgroup v1
+    # Cgroup v1
     usage_ns = _read_int(os.path.join(cgroup_root, "cpuacct", "cpuacct.usage"))
     if usage_ns is None:
         usage_ns = _read_int(os.path.join(cgroup_root, "cpu", "cpuacct.usage"))
@@ -408,7 +408,7 @@ class ResourceGate:
 # stays RAM-budgeted.
 
 _HTTP_TASK_RAM_BYTES = get_env_int("CRAWLUTRON_HTTP_TASK_RAM_BYTES", 48 * 1024 * 1024, lo=0)
-# P2-H: the 700 MiB default reservation sits BELOW the measured RSS range for a
+# The 700 MiB default reservation sits BELOW the measured RSS range for a
 # live renderer (~600-900 MiB once WebExtensions/Web Content are counted; see
 # app/crawl/strategies/browser_pool.py). That gap is deliberate, not an
 # oversight, and this comment exists so it is not "corrected" by reflex: the
@@ -662,7 +662,7 @@ class WeightedAdmission:
     def browser_capacity(self) -> int:
         # Browsers hold most of the cgroup RAM, and that footprint is exactly
         # what ``browser_pool_reserve_bytes`` reserved up front — so the tier
-        # must not shrink against its own reserved usage (double scaling, T9).
+        # must not shrink against its own reserved usage (double scaling).
         # Capacity is full while usage stays within the fraction the pool
         # sizing assumed, then ramps down to zero as the box exhausts, and the
         # CPU gate applies on top. Never admit new browser renders when

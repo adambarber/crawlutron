@@ -36,7 +36,7 @@ from tests.helpers.server import EtagHandler
 def scoped_cache(**settings) -> Iterator[ContentCache]:
     """A ContentCache over a throwaway directory, removed when the block ends.
 
-    ``with tempfile.TemporaryDirectory() as d: cache = ContentCache(d, ...)``
+    ``with tempfile.TemporaryDirectory() as d: cache = ContentCache(d,...)``
     was the arrange at a dozen sites in this file, differing only in the
     settings; owning it here means a test cannot leave a cache writing into a
     directory it meant to clean up. The directory itself is ``cache.cache_dir``
@@ -372,7 +372,7 @@ async def test_mirror_gate_small_value_still_mirrors(tmp_path):
 
 
 async def test_cold_aget_does_not_mirror_oversized_envelope(tmp_path):
-    """H2: after a warm restart ``_index_sizes`` is empty for pre-existing files,
+    """After a warm restart ``_index_sizes`` is empty for pre-existing files,
     so ``aget`` must gate the RAM mirror on the actual envelope bytes (stat),
     not ``_index_sizes.get(key, 0)`` -- which defaults to 0 and lets a multi-MB
     cold read into the small-value mirror (the RAM exhaustion path the
@@ -479,7 +479,7 @@ def test_max_entries_enforces_bound(tmp_path):
 
 
 def test_explicit_max_entries_zero_disables_limit():
-    """max_entries=0 means no limit (opt-out).
+    """Max_entries=0 means no limit (opt-out).
 
     Two records, run twice: once under a cap of one, once under a cap of zero.
     The contrast at the same volume is the point -- "nothing was evicted" only
@@ -627,7 +627,7 @@ class TestContentCacheByteBudget:
         assert await cache.aget("k3") is not None
 
     async def test_aset_oversized_never_written(self, tmp_path, monkeypatch):
-        """N1: the async path must refuse oversized entries before any disk
+        """The async path must refuse oversized entries before any disk
         write -- the payload must not transiently hit disk (crash window).
         Mirrors set(): pre-serialize, size-check under the lock, then write.
         The spy sits on ``_write_data``, the seam the real code uses."""
@@ -644,7 +644,7 @@ class TestContentCacheByteBudget:
         assert await cache.aget("ok") is not None
 
     async def test_aset_accounting_matches_written_bytes(self, tmp_path):
-        """N1: aset() byte accounting must equal the exact bytes on disk
+        """Aset() byte accounting must equal the exact bytes on disk
         (cross-instance equality is nondeterministic: the envelope embeds
         clock() floats whose repr width varies between writes)."""
         cache_b = _make_cache(tmp_path / "b", max_entry_bytes=10_000)
@@ -654,7 +654,7 @@ class TestContentCacheByteBudget:
         assert cache_b._index_total_bytes == path.stat().st_size
 
     async def test_aset_write_failure_leaves_no_dangling_index(self, tmp_path, monkeypatch):
-        """N1: a failed disk write must roll the index entry back so aget()
+        """A failed disk write must roll the index entry back so aget()
         does not keep consulting a path that does not exist."""
         cache = _make_cache(tmp_path, max_entry_bytes=10_000)
         watch_writes(cache, monkeypatch, fail=True)
@@ -665,7 +665,7 @@ class TestContentCacheByteBudget:
         assert await cache.aget("k") is None
 
     def test_prune_repairs_unknown_sizes(self, tmp_path):
-        """N1: prune() must reconcile byte accounting for index entries whose
+        """Prune() must reconcile byte accounting for index entries whose
         recorded size is missing (e.g. crash between index insert and
         accounting update) by stat'ing the surviving file."""
         cache = _make_cache(tmp_path, max_entry_bytes=10_000)
@@ -727,11 +727,11 @@ class TestContentCacheByteBudget:
         assert cache.get("k") == {"body": "old"}
 
     async def test_aset_new_key_write_failure_preserves_byte_total(self, tmp_path, monkeypatch):
-        """L1: a failed write of a NEW key must not move _index_total_bytes.
+        """A failed write of a NEW key must not move _index_total_bytes.
 
         Bytes enter the total only at commit (after a successful write), so the
         old rollback's `total -= size` decremented bytes that were never added;
-        the max(0, ...) clamp only hid it when the cache was otherwise empty."
+        the max(0,...) clamp only hid it when the cache was otherwise empty."
         """
         cache = _make_cache(tmp_path, max_entry_bytes=10_000)
         await cache.aset("keep", {"body": "v" * 200}, ttl=60)  # counts once, stays
@@ -746,7 +746,7 @@ class TestContentCacheByteBudget:
         assert cache._index_total_bytes == sum(cache._index_sizes.values())
 
     async def test_aset_existing_key_write_failure_preserves_byte_total(self, tmp_path, monkeypatch):
-        """L1: an existing key whose re-write fails keeps its prior bytes counted
+        """An existing key whose re-write fails keeps its prior bytes counted
         (the old rollback applied a spurious `prior_size - size` delta)."""
         cache = _make_cache(tmp_path, max_entry_bytes=10_000)
         await _seeded_then_write_fails(cache, monkeypatch)
@@ -761,7 +761,7 @@ class TestContentCacheByteBudget:
 
 
 class TestExpiredEntryFreesByteAccounting:
-    """reading an expired (or unreadable) entry popped ``_index`` but left
+    """Reading an expired (or unreadable) entry popped ``_index`` but left
     ``_index_sizes``/``_index_total_bytes`` untouched. The phantom bytes keep
     ``_over_limits()`` true, so the next ``set()``'s ``_enforce_limits`` evicts
     LIVE LRU entries it should not -- a sustained self-inflicted cache wipe-out
@@ -899,7 +899,7 @@ class TestContentCacheEntryLifecycle:
 
 
 class TestCachedAtReadsMetadataWithoutDeserializingTheValue:
-    """P6: cached_at_of must not deserialize the whole envelope on every call.
+    """Cached_at_of must not deserialize the whole envelope on every call.
 
     Sitemap freshness checks call this for many keys per crawl, and each
     envelope can hold a multi-MB body. Reading the value bytes off disk (and

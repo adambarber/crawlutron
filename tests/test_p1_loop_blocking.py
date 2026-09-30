@@ -1,4 +1,4 @@
-"""P1 defect tier: blocking disk I/O, serialization and DNS held on the
+"""Blocking disk I/O, serialization and DNS held on the
 asyncio event loop, or run under a ``threading.Lock`` the loop contends on.
 
 Every test asserts an observable outcome — a concurrent lock holder or the
@@ -149,7 +149,7 @@ class TestContentCacheDiskIOOffTheLock:
 
             return wrapper
 
-        # read_text/read_bytes both: _read_envelope is the single chokepoint for
+        # Read_text/read_bytes both: _read_envelope is the single chokepoint for
         # full reads, and the guard must hold whichever syscall it uses.
         monkeypatch.setattr(cc.Path, "read_text", guard("read_text", cc.Path.read_text))
         monkeypatch.setattr(cc.Path, "read_bytes", guard("read_bytes", cc.Path.read_bytes))
@@ -255,7 +255,7 @@ class TestContentCacheDiskIOOffTheLock:
         cache.set("k", {"body": "b" * 200}, ttl=900)  # expires 1905
         now[0] = 1020.0  # the OLD envelope is expired, the new one is live
 
-        # prune's glob reads the bytes as they were just before the refresh:
+        # Prune's glob reads the bytes as they were just before the refresh:
         # an expired verdict computed from superseded bytes.
         stale = json.dumps({"expires": 1010.0, "value": {"body": "a" * 100}, "cached_at": 1000.0}).encode()
         assert len(stale) != cache._index_sizes["k"], "the refresh must change the byte size"
@@ -292,7 +292,7 @@ class TestContentCacheDiskIOOffTheLock:
         assert len(stale) != cache._index_sizes["k"]
         serve_stale = _serve_stale_envelope(monkeypatch, cache, stale)
         assert cache.cached_at_of("k") == 1.0  # served the bytes that were read
-        # but the superseded read must not enter the freshness mirror: a
+        # But the superseded read must not enter the freshness mirror: a
         # fabricated cached_at=1.0 and a stale expires=None (which makes a live
         # entry look never-expiring) both answer later lookups from metadata the
         # slow path would have expired -- the mirror contract the value-mirror
@@ -349,7 +349,7 @@ class TestJobRunnerSavesOffTheEventLoop:
         assert progress >= liveness.needed, (
             f"the event loop made {progress} heartbeat ticks while a job-store save ran"
         )
-        # H3 two-plane contract: the data save ran (recorded below) off the
+        # Two-plane contract: the data save ran (recorded below) off the
         # loop, and the shutdown pause is a pure CONTROL write -- a CAS,
         # observed on the row, never carried by save() anymore.
         assert saved, "the runner's write-ahead data save never ran"
@@ -360,7 +360,7 @@ class TestAsyncCrawlRunnerSavesOffTheEventLoop:
     """``run_async_crawl`` must not serialize+commit the job row on the loop.
 
     ``_run_job`` (the whole-site runner above) already offloads its saves via
-    ``asyncio.to_thread(job_store.save, ...)``. The async single-shot runner
+    ``asyncio.to_thread(job_store.save,...)``. The async single-shot runner
     called ``job_store.save`` directly at its RUNNING / COMPLETED / FAILED
     transitions -- same store, contradictory discipline, and the full response
     body was serialized and written while the loop stalled. The blind spot

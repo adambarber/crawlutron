@@ -1,4 +1,4 @@
-"""L2: service identity must be coherent (single source of truth).
+"""Service identity must be coherent (single source of truth).
 
 The User-Agent version drifted from the API version, and the agent hints
 advertised a different impersonation target than the code uses. Both now

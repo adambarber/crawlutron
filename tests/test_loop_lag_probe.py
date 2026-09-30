@@ -1,4 +1,4 @@
-"""M16: the loop-lag probe must start on a running loop.
+"""The loop-lag probe must start on a running loop.
 
 ResourceGate is constructed at import time (engine module level) where no
 event loop runs, so an __init__-time probe start silently never schedules

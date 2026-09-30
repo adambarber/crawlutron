@@ -1,4 +1,4 @@
-"""H4 regression: a plain-HTTP fetch must never leak the pinned IP.
+"""A plain-HTTP fetch must never leak the pinned IP.
 
 _build_pinned_request rewrites the wire URL's host to the resolved IP
 (DNS-rebinding defense) while preserving the logical URL via Host. The

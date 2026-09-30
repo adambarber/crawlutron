@@ -1,4 +1,4 @@
-"""H1 drift guard: never re-derive env numbers without the parser.
+"""Never re-derive env numbers without the parser.
 
 Bare `int()`/`float()` on an env-sourced mapping read is the config-typo
 crash the env parser (`app/validation.py:get_env_int`/`get_env_float`)
@@ -11,7 +11,7 @@ single-shape detector):
 
 1. ``int/float(<anything>.get("CRAWLUTRON_..."))`` -- the constant
    env-key prefix is the robust signal regardless of how the mapping is
-   aliased (settings.py:from_mapping blinds spot, OSS-review H1).
+   aliased (settings.py:from_mapping blinds spot).
 2. ``int/float(os.environ.get(...))`` -- the direct shape, any key name.
 3. ``var = <env read>; ... int(var)`` -- the alias read-back. The original
    bypass for this shape lived in resource_pressure.derive_browser_pool_size

@@ -68,7 +68,7 @@ async def _fetch_with_retries(
             transient_errors.append(_classify_error_code(error))
             if attempt >= max_attempts:
                 raise
-            # L3: back off between attempts (capped exponential) so a failing
+            # Back off between attempts (capped exponential) so a failing
             # or rate-limiting origin sees widening gaps instead of a tight
             # hammering loop. The gap is bounded so a large retry budget can
             # never park a URL beyond the per-retry ceiling.

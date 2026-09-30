@@ -103,7 +103,7 @@ def test_store_updates_and_refreshes_ttl():
 
 
 def test_eviction_touches_only_the_overflow_window():
-    """Tier-2 T4: eviction caps work at the overflow, not the table size.
+    """Tier-2 eviction caps work at the overflow, not the table size.
 
     A recording mapping shows how many keys each eviction draws from the
     iteration order; over-cap stores must stay bounded by the number of

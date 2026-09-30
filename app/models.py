@@ -109,7 +109,7 @@ _CLASSIFICATION_TABLE: dict[str, Classification] = {name: name for name in get_a
 
 
 def as_classification(value: str, *, default: Classification = "unknown_error") -> Classification:
-    """Return ``value`` as a :data:`Classification`, or ``default`` if it is not one.
+    """Return ``value`` as a:data:`Classification`, or ``default`` if it is not one.
 
     Callers that pull a code off a string boundary (an exception message, a
     cached dict value) route through here rather than asserting, so an
@@ -296,7 +296,7 @@ class CrawlStrategyAttempt(_LiteralChecked):
 @dataclass(frozen=True)
 class DiscoveredLink:
     url: str
-    # M6: the frontier/visited-eligible form; producers build it from
+    # The frontier/visited-eligible form; producers build it from
     # ``normalize_public_http_url`` output (``frontier_link_url`` is the only
     # read allowed for queueing -- the raw ``url`` href stays unqueue-able).
     normalized_url: NormalizedUrl
@@ -307,7 +307,7 @@ class DiscoveredLink:
     is_same_host: bool
 
 
-# M6: the canonical form produced by ``app.validation.normalize_public_http_url``
+# The canonical form produced by ``app.validation.normalize_public_http_url``
 # (the single source of truth for "what a normalized URL is"). A NewType over
 # str: erased at runtime -- spill JSON, cache keys, and the wire keep plain
 # strings -- but mypy rejects putting a raw request/sitemap/crawl string into

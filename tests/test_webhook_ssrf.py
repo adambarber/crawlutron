@@ -72,7 +72,7 @@ class TestWebhookDeliveryPinning:
         assert delivered[0].headers.get("Host") == "webhook.example.com", delivered
 
     async def test_https_delivery_uses_validated_hostname_not_ip(self, monkeypatch):
-        """L3: rewriting an https URL to the pinned IP breaks TLS (certs
+        """Rewriting an https URL to the pinned IP breaks TLS (certs
         never carry IP SANs), so HTTPS webhooks were effectively dead.
         HTTPS delivery POSTs to the validated hostname; HTTP keeps IP pinning."""
         from app.api.webhooks import deliver_pinned_webhook
@@ -90,7 +90,7 @@ class TestWebhookDeliveryPinning:
         assert "8.8.8.8" not in str(delivered[0].url), delivered
 
     async def test_delivery_response_body_is_capped(self, monkeypatch, caplog):
-        """M3: the webhook RESPONSE is attacker-controlled and must never be
+        """The webhook RESPONSE is attacker-controlled and must never be
         buffered unboundedly. The delivery must consume it through the
         bounded_io cap and survive an oversized body without raising."""
         import logging
@@ -115,7 +115,7 @@ class TestWebhookDeliveryPinning:
 
 
 def test_webhook_size_cap_honors_a_live_env_override(monkeypatch):
-    """P2-F: the cap is read 2-3 times per delivery and used to be re-read and
+    """-F: the cap is read 2-3 times per delivery and used to be re-read and
     re-parsed from ``os.environ`` on every call. Caching it on the raw env value
     parses once per distinct value while an override -- operator env, or a test
     -- is still picked up on the very next call."""

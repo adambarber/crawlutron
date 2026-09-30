@@ -1,4 +1,4 @@
-"""policy.headers may not carry chokepoint-bypassing header names.
+"""Policy.headers may not carry chokepoint-bypassing header names.
 
 Two families, both rejected at the *model* (rejection at the validation site,
 never a silent strip at consumption):
@@ -99,7 +99,7 @@ def test_benign_headers_are_unaffected():
 
 
 def test_conditional_headers_keep_their_specific_reason():
-    """The M14 reason survives the consolidation: conditionals point at validators."""
+    """The reason survives the consolidation: conditionals point at validators."""
     from app.api_models import CrawlRequest
 
     with pytest.raises(ValidationError, match="validators"):

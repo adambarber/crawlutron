@@ -1,4 +1,4 @@
-"""M9: caller time budgets must be honored and bounded.
+"""Caller time budgets must be honored and bounded.
 
 - RenderOptions.timeout_seconds was never enforced (page.goto ran on
   Playwright's default); the navigation must honor it and surface
@@ -77,7 +77,7 @@ class TestNavigationTimeout:
         # otherwise wedge the run instead of reporting.
         # Seconds as an int, which is what the policy model carries and what
         # the renderer floors at one. A fractional value was reaching past the
-        # contract only to be raised back to 1.0 by ``max(1.0, ...)``, so the
+        # contract only to be raised back to 1.0 by ``max(1.0,...)``, so the
         # deadline this test asserts on was never the one it asked for.
         options = RenderOptions(timeout_seconds=1, max_retries=0)
         result = await asyncio.wait_for(

@@ -96,7 +96,7 @@ async def _afetch_document_bytes(url: str, policy: HostPolicy) -> bytes:
     client = http_client_pool.get_async_http_client()
     timeout = Timeouts.defaults().as_httpx()
     async for chain, pinned_url, hop_headers in pinned_transport.apinned_hops(url, {}, policy=policy):
-        # follow_redirects=False: the chain below is the redirect loop, so httpx
+        # Follow_redirects=False: the chain below is the redirect loop, so httpx
         # following one too would connect to a target nobody re-validated.
         async with client.stream(
             "GET", pinned_url, headers=hop_headers, timeout=timeout, follow_redirects=False
@@ -119,11 +119,11 @@ def _default_document_text_extractor(url: str, policy: HostPolicy) -> str:
     against the SSRF blocklist and re-pinned to a resolved IP before anything
     connects.
 
-    F2's other half is the loud failure, and it is a separate obligation from
+    The other half is the loud failure, and it is a separate obligation from
     the per-hop check: an unsafe *initial* URL raises here rather than degrading
     to empty text, so a caller can tell "this target was refused" from "this
     document had no text". The pre-flight below is that obligation. It pins for
-    the same reason the fetch walk does -- an unpinned parse is the H5 rebinding
+    the same reason the fetch walk does -- an unpinned parse is the rebinding
     window, and ``test_safe_url_parse_always_pins`` holds every call site to
     that. Its result is discarded, so the walk re-parses; that resolve is served
     from the resolver cache the pinning rule already owns.

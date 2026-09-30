@@ -1,4 +1,4 @@
-"""M3: the cookie harvest must complete before the render returns.
+"""The cookie harvest must complete before the render returns.
 
 The harvest used to fire-and-forget a collection task, so the cffi retry's
 synchronous store read usually raced it and retried cookieless. Awaiting
@@ -63,7 +63,7 @@ class TestCookieHarvestCompletes:
 
 
 class _WedgedContext:
-    """N6: cookies() that never resolves (simulates a wedged transport)."""
+    """Cookies() that never resolves (simulates a wedged transport)."""
 
     # The declared return is what this WOULD answer if it ever did. Left
     # undeclared, the signature inferred ``Coroutine[..., None]`` and the class
@@ -75,7 +75,7 @@ class _WedgedContext:
 
 
 class TestHarvestWaitBounded:
-    """N6: a wedged cookies() must not hold the pooled renderer for the
+    """A wedged cookies() must not hold the pooled renderer for the
     whole per-URL budget; the finally-block caps the harvest wait."""
 
     async def test_render_finally_harvest_timeout(self, monkeypatch):

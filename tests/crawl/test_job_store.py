@@ -45,7 +45,7 @@ def test_jobstore_save_updates_state(job_store):
     assert loaded.visited == {"http://example.com"}
     assert len(loaded.results) == 1
     assert loaded.stats["total_crawled"] == 1
-    # ...but the STATUS plane moves only via set_status (H3 separation).
+    # ...but the STATUS plane moves only via set_status ().
     assert loaded.status == JobStatus.PENDING
     assert job_store.set_status(job.job_id, JobStatus.RUNNING, expected=JobStatus.PENDING)
     assert job_store.load(job.job_id).status == JobStatus.RUNNING
@@ -155,7 +155,7 @@ class TestJobStoreCorruptRow:
             conn.execute("UPDATE crawl_jobs SET policy = ? WHERE job_id = ?", ("invalid json{", job.job_id))
             conn.commit()
             conn.close()
-            # load should catch the JSON decode error and return None
+            # Load should catch the JSON decode error and return None
             result = store.load(job.job_id)
             assert (result) is None
 
@@ -207,7 +207,7 @@ def _store_test_job_store_serialization(tmp_path):
 def test_save_survives_non_serializable_results(tmp_path):
     store = _store_test_job_store_serialization(tmp_path)
     job = store.create("http://example.com/", {"strategies": ["HTTP_DECLARED_CRAWLER"]})
-    # results contain non-JSON-native types (datetime, bytes, set)
+    # Results contain non-JSON-native types (datetime, bytes, set)
     job.results = [
         {"ts": datetime.datetime(2020, 1, 1, 12, 0, 0), "raw": b"\x00\x01binary", "tags": {1, 2, 3}},
     ]

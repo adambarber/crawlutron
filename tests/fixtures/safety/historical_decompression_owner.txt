@@ -90,8 +90,8 @@ def decompress_body(
             except Exception:
                 return body
         # Bounded brotli decompression. The brotli ecosystem has two
-        # incompatible streaming APIs (google-brotli exposes .process(),
-        # brotlicffi exposes .decompress(data, cap)) -- detect and use whichever
+        # incompatible streaming APIs (google-brotli exposes.process(),
+        # brotlicffi exposes.decompress(data, cap)) -- detect and use whichever
         # exists. Fall back to full decompress + post-hoc cap check.
         d = None
         try:
@@ -105,7 +105,7 @@ def decompress_body(
                 out = d.decompress(body, max_output_bytes + 1)
             elif d is not None and hasattr(d, "process"):
                 # google-brotli streaming API: feed incrementally and stop
-                # past the cap (H6). A single process(body) call would
+                # past the cap. A single process(body) call would
                 # materialize the entire bomb in RAM. Stopping early leaves
                 # out over the cap, which the post-hoc check below turns
                 # into DecompressionTooLargeError (raising here would be

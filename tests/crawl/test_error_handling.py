@@ -85,7 +85,7 @@ def test_primitive_builds_classified_failed_result():
 
 
 def test_primitive_never_leaks_raw_exception_text():
-    """Raw detail stays out of the wire-visible fields (H4 redaction contract)."""
+    """Raw detail stays out of the wire-visible fields."""
     secret = "internal-host.local /etc/passwd"
     result = _engine_result_from_exception(
         error=ValueError(secret),

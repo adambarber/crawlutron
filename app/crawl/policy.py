@@ -404,7 +404,7 @@ def validate_wire_policy(raw: Any, tier: PolicyTier | None = None) -> CrawlPolic
         except ValidationError as exc:
             raise ValueError(_code_for(exc)) from None
     limits = dict(raw_limits or {})
-    # F4: a missing/zero max_pages must be bounded, never "unlimited". The
+    # A missing/zero max_pages must be bounded, never "unlimited". The
     # model's own ge/le bounds a positive request; only the absent/zero/
     # negative case is translated, because "0 means the default page budget"
     # is a meaning the model does not have.

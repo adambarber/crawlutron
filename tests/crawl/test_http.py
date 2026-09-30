@@ -127,10 +127,10 @@ class TestHttpStrategy:
 
         fetcher = _html_fetcher(html)
         kwargs = _run_kwargs(fetcher)
-        # discovery omitted -> no frames in diagnostics
+        # Discovery omitted -> no frames in diagnostics
         r1 = await _run(policy=http_policy(discovery=None), **kwargs)
         assert "frames" not in r1.diagnostics
-        # discovery requested -> frames computed
+        # Discovery requested -> frames computed
         r2 = await _run(policy=http_policy(discovery={"sitemaps": True}), **kwargs)
         assert "frames" in r2.diagnostics
 
@@ -212,7 +212,7 @@ class TestHttpStrategy:
         assert "Example Org" in response["results"][0]["markdown"]
 
     async def test_js_endpoints_and_sitemap_discovery_gated_without_discovery(self):
-        # B1: the heavier discovery-only extras -- JS-endpoint extraction and the
+        # The heavier discovery-only extras -- JS-endpoint extraction and the
         # remote sitemap/feed discovery fetches -- must be skipped when discovery
         # is not requested, to avoid per-page regex scans and extra HTTP requests
         # on content-only crawls. discovered_links / next_page_url stay on (they
@@ -226,17 +226,17 @@ class TestHttpStrategy:
 
         fetcher = _html_fetcher(html)
         kwargs = _run_kwargs(fetcher)
-        # discovery omitted -> js_endpoints empty, no discovery diagnostics block
+        # Discovery omitted -> js_endpoints empty, no discovery diagnostics block
         r1 = await _run(policy=http_policy(discovery=None), **kwargs)
         assert r1.diagnostics["js_endpoints"] == []
         assert "discovery" not in r1.diagnostics
-        # content-only crawl: link extraction skipped entirely
+        # Content-only crawl: link extraction skipped entirely
         assert r1.discovered_link_count == 0
-        # next_page_url is always computed (standard field, proven by
+        # Next_page_url is always computed (standard field, proven by
         # test_http_strategy_extracts_html_markdown_and_links); it must not be
         # gated behind discovery.
         assert r1.next_page_url is None or isinstance(r1.next_page_url, str)
-        # discovery requested -> js_endpoints extracted; the (remote)
+        # Discovery requested -> js_endpoints extracted; the (remote)
         # sitemap/feed discovery is performed, so the robots diagnostics block
         # is populated (proving the gated function ran for this crawl).
         r2 = await _run(
