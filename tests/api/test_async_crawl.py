@@ -4,6 +4,7 @@ import asyncio
 
 from app.api import job_runner
 from tests._assertions import accepted_crawl, completed_crawl, poll_webhook_delivery, submit_async_crawl
+from tests._async_harnesses import CountingSemaphore
 from tests._async_harnesses import crawl_api as _crawl_api
 from tests._fetcher_factories import make_crawl_payload
 from tests._job_harnesses import loaded_job, single_shot_job
@@ -191,10 +192,38 @@ class TestAsyncCrawlApi:
         assert resp.status_code == 422
         assert resp.json()["code"] == "validation_error"
 
-    async def test_v1_crawl_async_mode_concurrent_limit(self, crawl_api):
-        """Concurrent async crawls are bounded by semaphore."""
+    async def test_v1_crawl_async_mode_concurrent_limit(self, crawl_api, monkeypatch):
+        """Concurrent async crawls queue on the bound rather than all running.
+
+        The bound is asserted, not assumed. A counting semaphore of width one
+        is installed in place of the runner's, so the test observes how many
+        crawls were inside the bound at once rather than inferring it from the
+        fact that the submissions returned.
+
+        That is what the previous version of this test failed to do. It
+        submitted three crawls against the default limit of four -- under the
+        limit, so no queueing happened -- and then asserted only that all
+        three succeeded. An implementation with no bound at all passed it.
+
+        The peak is also the falsifiable half: it reads 1 only because the
+        crawler entered the semaphore, so removing the `async with` drops it to
+        0, and a width other than 1 pushes it above 1. Both are caught without
+        a slow page, a sleep, or a wall clock anywhere in the test.
+        """
+        from app.api import async_crawl_runner
+
+        counter = CountingSemaphore(1)
+        monkeypatch.setattr(async_crawl_runner, "_build_async_crawl_semaphore", lambda: counter)
+        # The runner caches one semaphore per event loop and only rebuilds it
+        # when the loop changes. Clearing the cache is what makes the patch
+        # visible to the first crawl of this test rather than the second.
+        monkeypatch.setattr(async_crawl_runner, "_async_crawl_semaphore", None, raising=False)
+        monkeypatch.setattr(async_crawl_runner, "_async_crawl_semaphore_loop", None, raising=False)
+
         payload = crawl_api.payload(async_mode=True)
         completed = await asyncio.gather(*(submit_async_crawl(crawl_api.client, payload) for _ in range(3)))
+
+        assert counter.peak_holders == 1, f"bound not honoured: peak {counter.peak_holders} concurrent crawls"
         for _request_id, response in completed:
             assert response.status_code == 200
             assert response.json()["success"] is True

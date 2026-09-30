@@ -21,6 +21,37 @@ import pytest
 from tests._timing_harnesses import await_until
 
 
+class CountingSemaphore:
+    """A fixed-width semaphore that records the peak number of holders.
+
+    Replaces the runner's semaphore so a test can assert the *bound* rather
+    than infer it. A test that only checks that N concurrent submissions all
+    complete proves nothing about the limit when N is under it -- three
+    submissions against a limit of four exercises no queueing, and an
+    implementation with no bound at all passes.
+
+    The peak is also what makes the bound falsifiable. It reads 1 only if the
+    crawler entered this object, so deleting the ``async with`` in
+    ``run_async_crawl`` drops it to 0, and a width that is not 1 pushes it
+    above 1. Neither needs a slow page or a wall clock to observe.
+    """
+
+    def __init__(self, width: int) -> None:
+        self._semaphore = asyncio.Semaphore(width)
+        self._holders = 0
+        self.peak_holders = 0
+
+    async def __aenter__(self) -> "CountingSemaphore":
+        await self._semaphore.acquire()
+        self._holders += 1
+        self.peak_holders = max(self.peak_holders, self._holders)
+        return self
+
+    async def __aexit__(self, *exc: object) -> None:
+        self._holders -= 1
+        self._semaphore.release()
+
+
 @dataclass(frozen=True)
 class CrawlApi:
     """The client, the origin, and the request payloads rooted at that origin."""
