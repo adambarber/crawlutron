@@ -55,18 +55,29 @@ Detector = Callable[..., Iterable[str]]
 
 @dataclass(frozen=True)
 class Bites:
-    """A violating snippet whose single offender must name ``marker``.
+    """A violating snippet that must produce ``count`` offenders, naming ``marker``.
 
-    The strongest of the three proof shapes: it fires *once*, and what it says is
-    checked too. A detector that matches everything satisfies "it fired", so
-    requiring the count to be one and the message to carry a specific word is
-    what turns a proof into a specification. This is the form to reach for when a
-    rule has a natural single finding; the bare :class:`str` form is for the
-    sources that are only ever about firing at all.
+    The strongest of the three proof shapes: it pins *how many* findings the shape
+    is worth and *what* the message has to say. A detector that matches everything
+    satisfies "it fired", so requiring an exact count and a specific word is what
+    turns a proof into a specification.
+
+    ``count`` defaults to 1, which is the right default for a rule with a single
+    natural finding. A shape wrong in two places -- a path written and a path
+    unlinked -- is two findings, and pinning the count without a ``Trips`` beside
+    it means either the framework cannot express both halves or the migration drops
+    one. Nearly every bite proof in the invariant suite asserts a count *and* a
+    marker, so this is the form the framework actually has to carry.
+
+    The marker is checked against a real offender rather than against the first
+    one, because the two claims fail independently: a detector can hit the count
+    while every message it emits has decayed to a bare path, and that is how a gate
+    stops explaining itself without ever going red.
     """
 
     source: str
     marker: str
+    count: int = 1
 
 
 @dataclass(frozen=True)
@@ -125,6 +136,15 @@ class Rule(Matcher):
         repo-relative path. A rule whose detector takes parameters declares here
         which module gets which, so "which path holds the definition" is a fact of
         the rule rather than a decision re-made at every call site.
+    :param scope: ``(*, exclude) -> trees`` naming the tree this rule governs.
+        Defaults to :func:`app_trees`, which is right for most rules and silently
+        wrong for the rest: a rule about the *test* tree -- no test may write into
+        ``app/``, no test may import a sibling helper by bare name -- swept
+        production code, found nothing, and reported green. That is the failure a
+        registry hides best, because a rule enforcing nothing looks exactly like a
+        rule holding. The walker is handed the rule's own exclude set, so a scope
+        can honour the owner exemption rather than being handed a name it has no
+        way to apply.
     :param proof_path: where a bite proof's synthetic module is pretended to live.
         Defaults to the shared ``app/_synthetic.py``; a detector that resolves
         imports or package structure from the path needs a path inside the right
@@ -144,6 +164,17 @@ class Rule(Matcher):
     skip: frozenset[str] = frozenset()
     kwargs_for: Callable[[str], dict[str, object]] | None = None
     proof_path: pathlib.Path = _SYNTHETIC
+    scope: Callable[[frozenset[str]], Sequence[tuple[pathlib.Path, ast.Module]]] | None = None
+
+    def trees(self) -> tuple[tuple[pathlib.Path, ast.Module], ...]:
+        """The tree this rule governs, with its own owner exemptions applied.
+
+        One definition rather than a ``app_trees(exclude=...)`` written at each
+        call site, because the two call sites -- :meth:`scan` and the registry's
+        combined sweep -- are exactly where a scope would be honoured by one and
+        dropped by the other.
+        """
+        return (self.scope or app_trees)(exclude=self.excludes)
 
     def _run(self, tree: ast.Module, path: pathlib.Path) -> list[str]:
         """Apply the rule's per-module parameters, then the detector."""
@@ -191,8 +222,8 @@ class Rule(Matcher):
         raise AssertionError(f"{len(found)} violation(s) of {self.name} ({wanted}):\n  " + "\n  ".join(found))
 
     def scan(self) -> None:
-        """Check the property across the real ``app/`` tree for this rule's scope."""
-        self.check_clean(app_trees(exclude=self.excludes))
+        """Check the property across the tree this rule declares."""
+        self.check_clean(self.trees())
 
     # -- the bite half ----------------------------------------------------
 
@@ -253,17 +284,18 @@ class Rule(Matcher):
                     f"is enforcing nothing. Either the detector is too weak or the proof no "
                     f"longer violates the property."
                 )
-            if len(found) != 1:
+            if len(found) != proof.count:
                 raise AssertionError(
-                    f"{self.name}: expected exactly 1 offender for {proof.source!r}, got "
+                    f"{self.name}: expected {proof.count} offender(s) for {proof.source!r}, got "
                     f"{len(found)}: {found!r}. A detector that fires several times on one "
                     f"shape is usually over-broad, and the lookalike proofs exist to catch "
                     f"that — check them before widening this rule."
                 )
-            if proof.marker not in found[0]:
+            named = [hit for hit in found if proof.marker in hit]
+            if not named:
                 raise AssertionError(
-                    f"{self.name}: the offender for {proof.source!r} does not say "
-                    f"{proof.marker!r} — got {found[0]!r}. A proof that only checks firing "
+                    f"{self.name}: no offender for {proof.source!r} says "
+                    f"{proof.marker!r} — got {found!r}. A proof that only checks firing "
                     f"is satisfied by a detector whose message has decayed into a generic "
                     f"string, which is how a gate stops explaining itself without failing."
                 )
@@ -324,7 +356,7 @@ class Registry:
         """
         failures: list[str] = []
         for rule in self.rules:
-            found = rule.violations(app_trees(exclude=rule.excludes))
+            found = rule.violations(rule.trees())
             if found:
                 failures.append(f"  {rule.name}: {len(found)} violation(s)\n    " + "\n    ".join(found))
         if failures:

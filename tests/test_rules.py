@@ -14,6 +14,7 @@ import pathlib
 
 import pytest
 
+from tests.chokepoint_walks import trees_under
 from tests.rules import Bites, Registry, Rule, Trips
 
 
@@ -107,7 +108,7 @@ class TestMarkerAndCountProofs:
 
     def test_a_marker_that_is_absent_from_the_offender_is_reported(self):
         rule = _urljoin_rule(bite=lambda: Bites("urljoin(a, b)\n", marker="safe_urljoin"))
-        with pytest.raises(AssertionError, match="does not say"):
+        with pytest.raises(AssertionError, match="no offender"):
             rule.check_bites()
 
     def test_a_marker_that_is_present_passes(self):
@@ -125,7 +126,7 @@ class TestMarkerAndCountProofs:
             find=_every_or,
             bite=lambda: Bites("a = urljoin(x, y) or x\nb = x or y\n", marker="an or"),
         )
-        with pytest.raises(AssertionError, match="exactly 1 offender"):
+        with pytest.raises(AssertionError, match="expected 1 offender"):
             rule.check_bites()
 
     def test_an_exact_trip_count_passes(self):
@@ -134,13 +135,52 @@ class TestMarkerAndCountProofs:
 
     def test_a_wrong_trip_count_is_reported(self):
         rule = _urljoin_rule(find=_every_or, bite=lambda: Trips("urljoin(a, b) or a\n", count=3))
-        with pytest.raises(AssertionError, match="expected 3 offenders"):
+        with pytest.raises(AssertionError, match="expected 3 offender"):
             rule.check_bites()
 
     def test_a_zero_trip_count_is_refused_rather_than_satisfied(self):
         """Zero has its own spelling: a source that must not fire belongs in clean."""
         rule = _urljoin_rule(find=_every_or, bite=lambda: Trips("nothing()\n", count=0))
         with pytest.raises(ValueError, match="belongs in clean"):
+            rule.check_bites()
+
+    def test_a_marker_and_a_count_can_be_required_together(self):
+        """Both halves at once, which is what most of the migrated proofs actually assert.
+
+        A shape wrong in two places -- a path written and a path unlinked -- is two
+        findings, so ``Trips`` states the count and ``Bites`` states what the message
+        has to say. Neither alone is the claim: with only the count, a detector whose
+        offender text has decayed to a bare path passes; with only the marker, one
+        that fires three times where two were wrong passes too. Nearly every bite
+        test in the invariant suite asserts both, so a framework that can only
+        express one of them forces the migration to drop half the proof.
+        """
+        rule = _urljoin_rule(
+            find=_every_or,
+            bite=lambda: Bites("a = urljoin(x, y) or x\nb = x or y\n", marker="an or", count=2),
+        )
+        rule.check_bites()
+
+    def test_a_count_below_what_was_found_is_reported_with_the_marker_too(self):
+        rule = _urljoin_rule(
+            find=_every_or,
+            bite=lambda: Bites("a = urljoin(x, y) or x\nb = x or y\n", marker="an or", count=3),
+        )
+        with pytest.raises(AssertionError, match="expected 3 offender"):
+            rule.check_bites()
+
+    def test_a_matching_count_with_a_missing_marker_is_still_reported(self):
+        """The marker is checked against a real offender, not against the count.
+
+        A count of 2 and a marker no offender carries is the combination the two
+        checks exist to catch independently, and an implementation that only
+        verified the marker against the first offender would miss it here.
+        """
+        rule = _urljoin_rule(
+            find=_every_or,
+            bite=lambda: Bites("a = urljoin(x, y) or x\nb = x or y\n", marker="no-such-marker", count=2),
+        )
+        with pytest.raises(AssertionError, match="no offender"):
             rule.check_bites()
 
 
@@ -194,6 +234,74 @@ class TestCleanCheck:
         """Sanctioned basenames keep a rule from failing on the owner that defines it."""
         rule = _urljoin_rule(excludes=frozenset({"validation.py"}))
         rule.check_clean([(pathlib.Path("app/validation.py"), ast.parse("urljoin(a, b)\n"))])
+
+
+class TestRuleScope:
+    """A rule's tree is a property of the rule, not of whoever sweeps it.
+
+    ``Registry.check_all_clean`` used to sweep ``app_trees()`` for every rule,
+    which was harmless while every rule was about ``app/`` and became a silent
+    no-op the moment one was not. A rule about the test tree -- no test may write
+    into ``app/``, no test may import a sibling helper by bare name -- swept
+    production code instead, found nothing, and reported green. It is the
+    worst failure this suite has: not a false alarm, a rule enforcing nothing
+    while looking like it enforces something.
+    """
+
+    @staticmethod
+    def _planted(tmp_path: pathlib.Path, source: str) -> pathlib.Path:
+        target = tmp_path / "x.py"
+        target.write_text(source, encoding="utf-8")
+        return target
+
+    def test_a_rule_declares_the_tree_it_is_swept_over(self, tmp_path):
+        self._planted(tmp_path, "def f(a, b):\n    return urljoin(a, b)\n")
+        rule = _urljoin_rule(scope=lambda *, exclude: trees_under(tmp_path))
+        with pytest.raises(AssertionError) as caught:
+            Registry((rule,)).check_all_clean()
+        assert "x.py" in str(caught.value)
+
+    def test_the_scope_is_honoured_by_check_all_clean_and_not_only_by_scan(self, tmp_path):
+        """The registry path is the one the migrated files actually use.
+
+        ``Rule.scan`` and ``Registry.check_all_clean`` are separate callers of the
+        same sweep, and fixing one of them would leave a rule green through the
+        other. Both have to read the declared scope.
+        """
+        self._planted(tmp_path, "def f(a, b):\n    return urljoin(a, b)\n")
+        rule = _urljoin_rule(scope=lambda *, exclude: trees_under(tmp_path))
+        with pytest.raises(AssertionError):
+            rule.scan()
+
+    def test_a_violation_outside_the_declared_scope_is_not_reported(self, tmp_path):
+        """The scope narrows the sweep; it does not widen it to everything.
+
+        Without this the first two tests would also be satisfied by a sweep that
+        reads every tree it can find: a rule scoped to an empty directory must
+        find nothing in the file beside it, and that is the only thing that
+        distinguishes "swept where it said" from "swept more".
+        """
+        self._planted(tmp_path, "def f(a, b):\n    return urljoin(a, b)\n")
+        empty = tmp_path / "clean"
+        empty.mkdir()
+        Registry((_urljoin_rule(scope=lambda *, exclude: trees_under(empty)),)).check_all_clean()
+
+    def test_the_exclude_set_reaches_the_scope_walker(self, tmp_path):
+        """A scope that is handed an empty exclude set cannot honour one.
+
+        The owner of a chokepoint is sanctioned by basename, and a scope that
+        ignores the exclude set would sweep the owner it is meant to spare.
+        """
+        self._planted(tmp_path, "def f(a, b):\n    return urljoin(a, b)\n")
+        seen: list[frozenset[str]] = []
+
+        def recording(*, exclude):
+            seen.append(exclude)
+            return trees_under(tmp_path)
+
+        rule = _urljoin_rule(scope=recording, excludes=frozenset({"x.py"}))
+        rule.scan()
+        assert seen == [frozenset({"x.py"})]
 
 
 class TestRegistryReportsEveryFailure:

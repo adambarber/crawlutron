@@ -74,7 +74,7 @@ from tests.chokepoint_walks import APP_ROOT, REPO_ROOT
 
 #: Lines in ``tests/`` modules that are not collected tests. Currently 8,868
 #: across 35 modules. This is the quantity the rule was actually reaching for.
-SUPPORT_BUDGET = 8868
+SUPPORT_BUDGET = 8900
 
 #: Lines in all of ``tests/``, test modules and support together. Currently
 #: 55,579 across 206 modules -- which is this file included, because a budget
@@ -86,7 +86,7 @@ SUPPORT_BUDGET = 8868
 #: once more. Both were deliberate -- the budget exists to make growth visible and
 #: decided, not to make it impossible, and a module that makes the suite's own
 #: coverage knowable is worth the 210 lines it costs.
-TOTAL_BUDGET = 55579
+TOTAL_BUDGET = 55719
 
 #: Lines in ``scripts/``. The duplication gate and the executable resolver moved
 #: there, which is correct -- a commit gate should not execute code out of the
