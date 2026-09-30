@@ -77,14 +77,16 @@ from tests.chokepoint_walks import APP_ROOT, REPO_ROOT
 SUPPORT_BUDGET = 8868
 
 #: Lines in all of ``tests/``, test modules and support together. Currently
-#: 55,367 across 205 modules -- which is this file included, because a budget
+#: 55,579 across 206 modules -- which is this file included, because a budget
 #: that excludes its own author is a budget that can be met by writing more gate.
 #: That makes this number self-referential: it is the only measurement in the
 #: repository that a line added anywhere under ``tests/`` has to pass, so it
 #: cannot be set until the file that sets it is finished. Writing this gate moved
-#: it three times on the way here. That is the gate working, not misfiring. Set
-#: it last, from the measurement, never from an estimate.
-TOTAL_BUDGET = 55367
+#: it three times on the way here; adding the detector-accounting module moved it
+#: once more. Both were deliberate -- the budget exists to make growth visible and
+#: decided, not to make it impossible, and a module that makes the suite's own
+#: coverage knowable is worth the 210 lines it costs.
+TOTAL_BUDGET = 55579
 
 #: Lines in ``scripts/``. The duplication gate and the executable resolver moved
 #: there, which is correct -- a commit gate should not execute code out of the
@@ -92,13 +94,13 @@ TOTAL_BUDGET = 55367
 #: 1,775.
 SCRIPTS_BUDGET = 1775
 
-#: ``tests/`` as a percent of ``app/``, as an integer. 2.0973 measured, so 210.
+#: ``tests/`` as a percent of ``app/``, as an integer. 2.1054 measured, so 211.
 #: An integer rather than a float because a float comparison here would fail on
 #: the last bit of an unrelated edit, and a gate that fails for a reason it
 #: cannot explain gets deleted. Coarse on purpose: it moves a whole percent at a
 #: time, so the twenty lines of an ordinary change cannot trip it and the ~260
 #: that a new harness adds cannot miss it.
-RATIO_BUDGET = 210
+RATIO_BUDGET = 211
 
 TESTS_ROOT = REPO_ROOT / "tests"
 SCRIPTS_ROOT = REPO_ROOT / "scripts"
