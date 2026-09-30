@@ -391,10 +391,18 @@ def _refuse_unusable_action(action: Any, index: int, allowed: str) -> None:
     passed in so this stays a check on one action rather than a place the
     vocabulary is read a second time.
     """
-    from app.constants import ACTIONS_REQUIRING_SELECTOR, ALLOWED_BROWSER_ACTION_TYPES
+    from app.constants import ACTIONS_REQUIRING_SELECTOR, ALLOWED_BROWSER_ACTION_TYPES, BROWSER_ACTION_KEYS
 
     if not isinstance(action, dict):
         raise ValueError("each browser_profile action must be an object with a 'type'")
+
+    unknown_keys = sorted(set(action) - BROWSER_ACTION_KEYS)
+    if unknown_keys:
+        raise ValueError(
+            f"browser_profile action keys not permitted: {', '.join(unknown_keys)}; "
+            f"supported keys are: {', '.join(sorted(BROWSER_ACTION_KEYS))}"
+        )
+
     action_type = str(action.get("type", "")).lower()
     if action_type == "execute_js":
         raise ValueError(

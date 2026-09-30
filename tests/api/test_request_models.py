@@ -903,3 +903,86 @@ class TestRequestProfileValueTypesMatchTheHeaderMapTheyCorrupt:
         for key in ("fingerprint_seed", "user_agent_family", "cookie_jar", "fingerprint_rotation"):
             with pytest.raises(ValidationError, match=key):
                 CrawlPolicy(request_profile={key: {"not": "a scalar"}})
+
+
+class TestBrowserActionKeysAreClosed:
+    """The action *type* vocabulary is closed. The keys inside an action are not.
+
+    ``_close_browser_profile_vocabulary`` refuses a top-level key that is not in
+    the table and an action ``type`` that is not in the vocabulary, then hands
+    each action dict to the chain, which reads four keys out of it. Nothing
+    checks those. So::
+
+        {"type": "fill", "selector": "#q", "val": "hi"}
+
+    is accepted, and the chain fills an empty string -- a 200 on a page that
+    loaded with no interaction performed, which is exactly the silent no-op the
+    ``type`` check exists to prevent, one level down.
+
+    This is the ``state`` key again (#61) and the ``accept_language``
+    description (#64): the same failure, at the third place it can hide.
+    """
+
+    #: The keys the action chain reads, per ``browser_actions.py``.
+    READ_KEYS = frozenset({"selector", "timeout", "seconds", "value"})
+
+    def test_an_unknown_action_key_is_refused(self):
+        from app.api_models import CrawlPolicy
+
+        with pytest.raises(ValidationError, match="action keys not permitted"):
+            CrawlPolicy(
+                browser_profile={"actions": [{"type": "click", "selector": "#x", "url": "http://e/"}]}
+            )
+
+    def test_a_misspelled_action_key_is_refused_rather_than_ignored(self):
+        """``val`` for ``value`` is the reported case: the action then does nothing."""
+        from app.api_models import CrawlPolicy
+
+        with pytest.raises(ValidationError, match="action keys not permitted"):
+            CrawlPolicy(browser_profile={"actions": [{"type": "fill", "selector": "#q", "val": "hi"}]})
+
+    def test_a_permitted_action_still_validates(self):
+        from app.api_models import CrawlPolicy
+
+        for action in (
+            {"type": "click", "selector": "#x"},
+            {"type": "fill", "selector": "#q", "value": "hi"},
+            {"type": "wait", "selector": "#x", "timeout": 1000},
+            {"type": "wait_seconds", "seconds": 2},
+            {"type": "scroll_bottom"},
+        ):
+            policy = CrawlPolicy(browser_profile={"actions": [action]})
+            assert policy.browser_profile["actions"][0]["type"] == action["type"]
+
+    def test_the_chain_reads_exactly_the_declared_keys(self):
+        """The drift guard: a reader added without a declaration fails here.
+
+        Read off the chain's own ``action.get(...)`` calls rather than restated,
+        because the whole failure of this issue is a key the consumer reads and
+        the producer never named. Restating the list here would just be a second
+        place to forget.
+        """
+        import ast
+
+        from app.constants import BROWSER_ACTION_KEYS
+        from tests.chokepoint_walks import STRATEGIES_DIR
+
+        source = (STRATEGIES_DIR / "browser_actions.py").read_text()
+        read: set[str] = set()
+        for node in ast.walk(ast.parse(source)):
+            if (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Attribute)
+                and node.func.attr == "get"
+                and isinstance(node.func.value, ast.Name)
+                and node.func.value.id == "action"
+                and node.args
+                and isinstance(node.args[0], ast.Constant)
+                and isinstance(node.args[0].value, str)
+            ):
+                read.add(node.args[0].value)
+
+        assert read == set(BROWSER_ACTION_KEYS), (
+            f"the chain and the table disagree: chain-only={read - set(BROWSER_ACTION_KEYS)}, "
+            f"table-only={set(BROWSER_ACTION_KEYS) - read}"
+        )

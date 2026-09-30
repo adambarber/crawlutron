@@ -313,6 +313,15 @@ BROWSER_PROFILE_KEYS: Final[frozenset[str]] = frozenset(
     }
 )
 
+#: Every key a single ``browser_profile.actions`` entry may carry, ``type``
+#: included, read off the chain's own ``action.get(...)`` calls and asserted
+#: equal to them by a test. The reason it is read off the chain rather than
+#: restated: the failure this prevents is a key the consumer reads and the
+#: producer never named, so ``{"type": "fill", "selector": "#q", "val": "hi"}``
+#: fills an empty string and reports success. A hand-kept second copy of this
+#: set would be a third place to forget.
+BROWSER_ACTION_KEYS: Final[frozenset[str]] = frozenset({"type", "selector", "timeout", "seconds", "value"})
+
 # ---------------------------------------------------------------------------
 # ``request_profile`` vocabulary and ceilings.
 #
