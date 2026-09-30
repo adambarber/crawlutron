@@ -322,6 +322,39 @@ BROWSER_PROFILE_KEYS: Final[frozenset[str]] = frozenset(
 #: set would be a third place to forget.
 BROWSER_ACTION_KEYS: Final[frozenset[str]] = frozenset({"type", "selector", "timeout", "seconds", "value"})
 
+#: Most element screenshots in one render. Each is a full base64 PNG appended to
+#: the result metadata, so this bounds the response body as well as the render.
+MAX_SCREENSHOT_SELECTORS: Final[int] = 16
+
+# ---------------------------------------------------------------------------
+# Ceilings on the caller-supplied knobs behind the closed browser-profile keys.
+#
+# A closed key set answers *which* keys exist. It is silent about how large their
+# values may be, and four of these took whatever the caller sent. Each ceiling is
+# placed where the code already said the value should have one: the scroll runs
+# directly below an action chain that is explicitly budgeted and whose docstring
+# says production must pass a budget, and the cookie harvest holds a *pooled*
+# renderer from a finally block.
+#
+# These are enforced twice, on purpose. The model refuses so the caller gets a
+# 422 naming the key; the readers clamp so a profile reaching a renderer by any
+# route other than the model -- which is every route, since the profile is a
+# dict by then -- is still bounded. The model is a boundary; the reader is the
+# guarantee.
+# ---------------------------------------------------------------------------
+
+#: Most scroll steps in one lazy-load pass. Deep pages settle in a few dozen;
+#: this is well past the point of usefulness, not the point of cost.
+MAX_LAZY_SCROLL_STEPS: Final[int] = 50
+
+#: Longest pause between scroll steps, in seconds.
+MAX_LAZY_SCROLL_DELAY_SECONDS: Final[float] = 5.0
+
+#: Longest wait for a session-cookie harvest, in seconds. The harvest runs in a
+#: finally block against a pooled renderer, so this is a hold on a shared
+#: resource rather than on the caller's own budget.
+MAX_COOKIE_HARVEST_TIMEOUT_SECONDS: Final[float] = 5.0
+
 # ---------------------------------------------------------------------------
 # ``request_profile`` vocabulary and ceilings.
 #

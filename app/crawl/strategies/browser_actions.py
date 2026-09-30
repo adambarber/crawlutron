@@ -23,7 +23,7 @@ import asyncio
 import base64
 import contextlib
 import logging
-from typing import Any
+from typing import Any, TypeVar
 
 from app.constants import (
     BROWSER_ACTION_TYPES,
@@ -34,24 +34,48 @@ from app.constants import (
 logger = logging.getLogger(__name__)
 
 
-def _profile_int(profile: dict[str, Any], key: str, default: int) -> int:
-    """Read a non-negative int knob from a browser_profile (never raises)."""
+def _profile_int(profile: dict[str, Any], key: str, default: int, ceiling: int | None = None) -> int:
+    """Read a non-negative int knob from a browser_profile (never raises).
+
+    ``ceiling`` clamps a caller-supplied value on the way through. Without one
+    this is ``max(0, value)``, which is why ``lazy_scroll_steps: 10**12`` used to
+    be honoured: a closed key set says which keys exist, and says nothing about
+    how large their values may be. Clamping here rather than only at the model is
+    the point -- by the time a profile reaches a renderer it is a dict, so the
+    validator is no longer in the path.
+    """
     try:
         value = int(profile.get(key, default))
     except (TypeError, ValueError):
         return default
-    return max(0, value)
+    return _clamp_knob(max(0, value), ceiling)
 
 
-def _profile_float(profile: dict[str, Any], key: str, default: float) -> float:
-    """Read a non-negative float knob from a browser_profile (never raises)."""
+def _profile_float(profile: dict[str, Any], key: str, default: float, ceiling: float | None = None) -> float:
+    """Read a non-negative float knob from a browser_profile (never raises).
+
+    The float sibling of :func:`_profile_int`, and bounded for the same reason:
+    ``cookie_harvest_timeout_seconds`` became the ``wait_for`` timeout holding a
+    pooled renderer, with nothing above it but a wall-clock budget.
+    """
     try:
         value = float(profile.get(key, default))
     except (TypeError, ValueError):
         return default
     if value != value:  # NaN: keep the default rather than poisoning waits
         return default
-    return max(0.0, value)
+    return _clamp_knob(max(0.0, value), ceiling)
+
+
+#: The numeric knobs a browser profile carries. Constrained rather than bound to
+#: ``float`` so ``_clamp_knob`` returns an ``int`` for the int readers: a
+#: ``float`` return would quietly widen every scroll step through a float.
+_Knob = TypeVar("_Knob", int, float)
+
+
+def _clamp_knob(value: _Knob, ceiling: _Knob | None) -> _Knob:
+    """Hold a knob at its ceiling when it has one, and pass it through when it does not."""
+    return value if ceiling is None else min(value, ceiling)
 
 
 # Session cookies harvested from browser renders, keyed by registrable domain.
@@ -238,16 +262,40 @@ class BrowserActionsMixin:
         return shots
 
     def _harvest_timeout_for(self, browser_profile: dict[str, Any] | None) -> float:
-        """Resolve the cookie-harvest wait bound: policy profile beats settings."""
+        """Resolve the cookie-harvest wait bound: policy profile beats settings.
+
+        Ceilinged because this is the ``wait_for`` timeout on a *pooled* renderer
+        held from a finally block, so an unbounded value is a hold on a shared
+        resource rather than on the caller's own budget.
+        """
+        from app.constants import MAX_COOKIE_HARVEST_TIMEOUT_SECONDS
+
         profile = browser_profile or {}
-        return _profile_float(profile, "cookie_harvest_timeout_seconds", self._harvest_timeout_seconds)
+        return _profile_float(
+            profile,
+            "cookie_harvest_timeout_seconds",
+            self._harvest_timeout_seconds,
+            MAX_COOKIE_HARVEST_TIMEOUT_SECONDS,
+        )
 
     def _scroll_config_for(self, browser_profile: dict[str, Any] | None) -> tuple[int, float]:
-        """Resolve lazy-scroll steps/delay: policy profile beats settings."""
+        """Resolve lazy-scroll steps/delay: policy profile beats settings.
+
+        Ceilinged for the same reason as the harvest, one step further out: this
+        runs directly below the budgeted action chain, and 10**12 steps is a
+        render that never returns.
+        """
+        from app.constants import MAX_LAZY_SCROLL_DELAY_SECONDS, MAX_LAZY_SCROLL_STEPS
+
         profile = browser_profile or {}
         return (
-            _profile_int(profile, "lazy_scroll_steps", self._lazy_scroll_steps),
-            _profile_float(profile, "lazy_scroll_delay_seconds", self._lazy_scroll_delay_seconds),
+            _profile_int(profile, "lazy_scroll_steps", self._lazy_scroll_steps, MAX_LAZY_SCROLL_STEPS),
+            _profile_float(
+                profile,
+                "lazy_scroll_delay_seconds",
+                self._lazy_scroll_delay_seconds,
+                MAX_LAZY_SCROLL_DELAY_SECONDS,
+            ),
         )
 
     async def _lazy_load_scroll(self, page: Any, browser_profile: dict[str, Any] | None = None) -> None:

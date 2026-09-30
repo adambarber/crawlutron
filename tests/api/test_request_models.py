@@ -986,3 +986,121 @@ class TestBrowserActionKeysAreClosed:
             f"the chain and the table disagree: chain-only={read - set(BROWSER_ACTION_KEYS)}, "
             f"table-only={set(BROWSER_ACTION_KEYS) - read}"
         )
+
+
+class TestCallerKnobsBehindClosedKeysAreCeilinged:
+    """A closed key set answers *which* keys exist. It is silent about how large their values may be.
+
+    The browser profile's vocabulary was closed in aa46380 and the ceiling
+    question was not asked, so every knob behind the closed keys took whatever
+    the caller sent. Four of them, each with a place in the code that already
+    said the value should be bounded:
+
+    - ``_profile_int`` and ``_profile_float`` return ``max(0, value)`` with no
+      upper clamp, so ``lazy_scroll_steps: 10**12`` is accepted.
+    - ``_lazy_load_scroll`` is called with no budget, immediately below
+      ``_run_action_chain``, which is passed ``budget_seconds=navigation_timeout``
+      and whose docstring says production must pass a budget. The one call site
+      documented as needing a ceiling is the one without one.
+    - ``cookie_harvest_timeout_seconds`` is the ``wait_for`` timeout, and the
+      comment at that call site says the harvest must not hold the pooled
+      renderer for the per-URL budget.
+    - ``screenshot_selectors`` has no ``max_length``; each entry appends a
+      base64 PNG to the result metadata, so it is a response-size knob too.
+
+    All four returned 200. The 900 s chain budget bounds wall clock and none of
+    these.
+    """
+
+    #: Longest scroll a lazy-load pass will take, in steps. Deep pages still load
+    #: in a few dozen; this is past the point of usefulness, not the point of cost.
+    MAX_LAZY_SCROLL_STEPS = 50
+    #: Longest per-step scroll pause, in seconds.
+    MAX_LAZY_SCROLL_DELAY_SECONDS = 5.0
+    #: Longest cookie-harvest wait, in seconds. The harvest runs in a finally
+    #: block on a pooled renderer, so this is a hold on a shared resource.
+    MAX_COOKIE_HARVEST_TIMEOUT_SECONDS = 5.0
+    #: Most element screenshots in one render. Each is a full base64 PNG in the
+    #: result metadata, so this bounds the response as well as the render.
+    MAX_SCREENSHOT_SELECTORS = 16
+
+    def test_scroll_steps_over_the_ceiling_are_refused(self):
+        from app.api_models import CrawlPolicy
+
+        with pytest.raises(ValidationError, match="lazy_scroll_steps"):
+            CrawlPolicy(browser_profile={"lazy_scroll_steps": 10**12})
+
+    def test_a_scroll_delay_over_the_ceiling_is_refused(self):
+        from app.api_models import CrawlPolicy
+
+        with pytest.raises(ValidationError, match="lazy_scroll_delay_seconds"):
+            CrawlPolicy(browser_profile={"lazy_scroll_delay_seconds": 3600.0})
+
+    def test_a_cookie_harvest_timeout_over_the_ceiling_is_refused(self):
+        from app.api_models import CrawlPolicy
+
+        with pytest.raises(ValidationError, match="cookie_harvest_timeout_seconds"):
+            CrawlPolicy(browser_profile={"cookie_harvest_timeout_seconds": 10**9})
+
+    def test_too_many_screenshot_selectors_are_refused(self):
+        from app.api_models import CrawlPolicy
+
+        over = [f"#{index}" for index in range(self.MAX_SCREENSHOT_SELECTORS + 1)]
+        with pytest.raises(ValidationError, match="screenshot_selectors"):
+            CrawlPolicy(browser_profile={"screenshot_selectors": over})
+
+    def test_a_value_at_each_ceiling_is_accepted(self):
+        """The ceilings are the boundary, not a lower bound the caller cannot reach."""
+        from app.api_models import CrawlPolicy
+
+        policy = CrawlPolicy(
+            browser_profile={
+                "lazy_scroll_steps": self.MAX_LAZY_SCROLL_STEPS,
+                "lazy_scroll_delay_seconds": self.MAX_LAZY_SCROLL_DELAY_SECONDS,
+                "cookie_harvest_timeout_seconds": self.MAX_COOKIE_HARVEST_TIMEOUT_SECONDS,
+                "screenshot_selectors": [f"#{i}" for i in range(self.MAX_SCREENSHOT_SELECTORS)],
+            }
+        )
+        assert policy.browser_profile["lazy_scroll_steps"] == self.MAX_LAZY_SCROLL_STEPS
+
+    def test_the_readers_clamp_too_even_when_the_model_is_bypassed(self):
+        """Defence in depth, asserted at the call path rather than at a helper.
+
+        The model is a boundary, not the only door: by the time a profile reaches
+        a renderer it is a dict, so the validator is not in the path any more.
+        The readers are what actually bound the work, so they are what is
+        asserted -- through ``_scroll_config_for`` and ``_harvest_timeout_for``,
+        which is how the renderer calls them, rather than through
+        ``_profile_int`` with no ceiling, whose contract is deliberately to pass a
+        value through.
+        """
+        from app.constants import (
+            MAX_COOKIE_HARVEST_TIMEOUT_SECONDS,
+            MAX_LAZY_SCROLL_DELAY_SECONDS,
+            MAX_LAZY_SCROLL_STEPS,
+        )
+        from app.crawl.strategies.browser_actions import BrowserActionsMixin
+
+        class _Renderer(BrowserActionsMixin):
+            _lazy_scroll_steps = 3
+            _lazy_scroll_delay_seconds = 0.5
+            _harvest_timeout_seconds = 2.0
+
+        renderer = _Renderer()
+
+        steps, delay = renderer._scroll_config_for(
+            {"lazy_scroll_steps": 10**12, "lazy_scroll_delay_seconds": 10**9}
+        )
+        assert (steps, delay) == (MAX_LAZY_SCROLL_STEPS, MAX_LAZY_SCROLL_DELAY_SECONDS)
+        assert renderer._harvest_timeout_for({"cookie_harvest_timeout_seconds": 10**9}) == (
+            MAX_COOKIE_HARVEST_TIMEOUT_SECONDS
+        )
+
+        # The knob still moves inside the ceiling: a clamp that pinned every
+        # value to the ceiling would pass the same assertions.
+        assert renderer._scroll_config_for({"lazy_scroll_steps": 7}) == (7, 0.5)
+        assert renderer._harvest_timeout_for({}) == 2.0
+
+        # Garbage still falls back to the default rather than raising, as before.
+        assert renderer._scroll_config_for({"lazy_scroll_steps": "not a number"}) == (3, 0.5)
+        assert renderer._scroll_config_for({"lazy_scroll_steps": -5}) == (0, 0.5)

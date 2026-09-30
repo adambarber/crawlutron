@@ -365,6 +365,8 @@ def _close_browser_profile_vocabulary(profile: dict[str, Any]) -> dict[str, Any]
             f"supported keys are: {', '.join(sorted(BROWSER_PROFILE_KEYS))}"
         )
 
+    _refuse_over_ceiling_knobs(profile)
+
     actions = profile.get("actions")
     if actions is None:
         return profile
@@ -380,6 +382,46 @@ def _close_browser_profile_vocabulary(profile: dict[str, Any]) -> dict[str, Any]
     for index, action in enumerate(actions):
         _refuse_unusable_action(action, index, allowed)
     return profile
+
+
+def _refuse_over_ceiling_knobs(profile: dict[str, Any]) -> None:
+    """Refuse a closed key whose value is larger than the work it buys is worth.
+
+    The vocabulary is closed, which is a claim about which keys exist and nothing
+    about how large their values may be. Four knobs took whatever the caller
+    sent, each in a place the code already said should be bounded: the lazy scroll
+    runs directly below an action chain that *is* budgeted and whose docstring
+    says production must pass a budget; the cookie harvest holds a pooled
+    renderer from a finally block; and every screenshot selector appends a
+    base64 PNG to the result, so that one bounds the response body too.
+
+    The readers clamp the same values (see ``_profile_int``), because by the time
+    a profile reaches a renderer it is a dict and the validator is not in the
+    path. This refusal exists so the caller is *told*, rather than silently
+    handed a render that finished early.
+    """
+    from app.constants import (
+        MAX_COOKIE_HARVEST_TIMEOUT_SECONDS,
+        MAX_LAZY_SCROLL_DELAY_SECONDS,
+        MAX_LAZY_SCROLL_STEPS,
+        MAX_SCREENSHOT_SELECTORS,
+    )
+
+    for key, ceiling in (
+        ("lazy_scroll_steps", MAX_LAZY_SCROLL_STEPS),
+        ("lazy_scroll_delay_seconds", MAX_LAZY_SCROLL_DELAY_SECONDS),
+        ("cookie_harvest_timeout_seconds", MAX_COOKIE_HARVEST_TIMEOUT_SECONDS),
+    ):
+        value = profile.get(key)
+        if isinstance(value, (int, float)) and not isinstance(value, bool) and value > ceiling:
+            raise ValueError(f"browser_profile {key} may be at most {ceiling}, got {value}")
+
+    selectors = profile.get("screenshot_selectors")
+    if isinstance(selectors, list) and len(selectors) > MAX_SCREENSHOT_SELECTORS:
+        raise ValueError(
+            f"browser_profile screenshot_selectors may carry at most {MAX_SCREENSHOT_SELECTORS} "
+            f"entries, got {len(selectors)}"
+        )
 
 
 def _refuse_unusable_action(action: Any, index: int, allowed: str) -> None:
