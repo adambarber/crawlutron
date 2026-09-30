@@ -20,7 +20,7 @@ import pathlib
 import tempfile
 
 import pytest
-from fastapi import BackgroundTasks, HTTPException
+from fastapi import HTTPException
 
 from app.api import map_endpoint
 from app.api.crawl_endpoint import crawl
@@ -104,7 +104,6 @@ async def test_rejected_crawl_hands_its_slot_back_and_still_counts_the_error(cap
         with caplog.at_level(logging.WARNING), pytest.raises(HTTPException) as exc_info:
             await crawl(
                 CrawlRequest(urls=["http://example.com/", "http://example.com/2"]),
-                BackgroundTasks(),
                 _denied_by_batch_cap(),
                 make_job_store(tmpdir),
                 CrawlResultStore(pathlib.Path(tmpdir) / "results.db"),

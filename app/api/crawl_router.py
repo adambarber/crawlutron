@@ -9,7 +9,7 @@ FastAPI machinery.
 
 from __future__ import annotations
 
-from fastapi import APIRouter, BackgroundTasks, Body, Depends, Request
+from fastapi import APIRouter, Body, Depends, Request
 
 from app.api.crawl_endpoint import crawl as crawl_handler
 from app.api.crawl_endpoint import get_crawl_result as get_crawl_result_handler
@@ -98,7 +98,6 @@ router = APIRouter(tags=["Crawler"])
 )
 async def crawl(
     request: Request,
-    background_tasks: BackgroundTasks,
     payload: CrawlRequest = Body(
         ...,
         examples=[
@@ -115,7 +114,6 @@ async def crawl(
 ):
     return await crawl_handler(
         payload,
-        background_tasks,
         settings=settings,
         job_store=job_store,
         result_store=result_store,

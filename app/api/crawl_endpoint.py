@@ -18,7 +18,7 @@ import time
 from collections.abc import Awaitable
 from typing import Any
 
-from fastapi import BackgroundTasks, HTTPException, Request
+from fastapi import HTTPException, Request
 from fastapi.responses import JSONResponse, Response
 
 from app.api.crawl_executor import execute_crawl
@@ -94,7 +94,6 @@ def _serialize_or_reject(items: list[dict[str, Any]], output_format: str) -> tup
 
 async def crawl(
     payload: CrawlRequest,
-    background_tasks: BackgroundTasks,
     settings: CrawlerSettings,
     job_store: JobStore,
     result_store: CrawlResultStore,

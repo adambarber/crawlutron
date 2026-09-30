@@ -9,7 +9,7 @@ from typing import Any
 
 import httpx
 import pytest
-from fastapi import BackgroundTasks, HTTPException
+from fastapi import HTTPException
 
 from app.crawl.result_store import CrawlResultStore
 from app.validation import HOST_POLICY_ENTRY_POINTS
@@ -248,16 +248,13 @@ async def _probe_crawl_endpoint(monkeypatch, tmp_path):
     from app.api.crawl_endpoint import crawl
     from app.api_models import CrawlRequest
 
-    background_tasks = BackgroundTasks()
     effects = _effects()
-    effects["queued"] = background_tasks.tasks
     job_store = type(
         "Store", (), {"create_single_shot": lambda self, *args: effects["persisted"].append(args)}
     )()
     await _assert_refused(
         crawl(
             CrawlRequest(url=_BLOCKED_URL),
-            background_tasks,
             _denied_settings(),
             job_store,
             # A real result store, not ``object()``. The gate refuses before it
