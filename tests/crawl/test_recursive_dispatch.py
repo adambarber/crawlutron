@@ -90,6 +90,27 @@ async def _run(
     )
 
 
+def _expanding_worker():
+    """A worker whose ROOT result discovers ``/1`` and ``/2``; every other page is a leaf.
+
+    One definition of the site these dispatch tests crawl, so a test that differs
+    only in the bound under test does not restate the worker. That matters here
+    specifically because the ``max_pages`` pair asserts the unbounded reading and
+    the bounded one against the SAME crawl -- if each spelled its own worker, the
+    two could expand to different shapes and stop being comparable, while still
+    passing individually.
+
+    Only the root carries links, so the frontier terminates at exactly three
+    pages and the page count IS the shape under test.
+    """
+
+    async def worker(job):
+        links = [_link("http://a/1"), _link("http://a/2")] if job.normalized_url == _ROOT_CANONICAL else []
+        return make_engine_result(job.normalized_url, links)
+
+    return worker
+
+
 @pytest.mark.parametrize(
     ("keyword", "value"),
     (("max_dept", 2), ("retired_keyword", True)),
@@ -175,14 +196,45 @@ async def test_expands_frontier_from_discovered_links():
 async def test_gate_scale_shrinks_batch_but_still_crawls_all():
     # scale 0.0 forces batch_size to its floor (>=1); every discovered page must
     # still be crawled, just across more scheduler runs.
-    async def worker(job):
-        links = [_link("http://a/1"), _link("http://a/2")] if job.normalized_url == _ROOT_CANONICAL else []
-        return make_engine_result(job.normalized_url, links)
-
-    jobs = [_task(_ROOT)]
-    spill, scheduler, _ = await _run(jobs, worker, gate=ContentionFreeGate(0.0))
+    spill, scheduler, _ = await _run([_task(_ROOT)], _expanding_worker(), gate=ContentionFreeGate(0.0))
     assert len(spill.writes) == 3
     assert scheduler.runs >= 2  # shrunk batches => multiple scheduler runs
+
+
+async def test_max_pages_zero_is_unbounded_at_the_dispatch_loop():
+    """A cap of 0 means "no cap" here, so it must not fetch nothing.
+
+    ``remaining_page_capacity`` has always answered None -- unbounded -- for
+    ``max_pages <= 0``, and a whole-site job read back from its row keeps its
+    stored 0 all the way here: ``validate_wire_policy`` returns an already-built
+    model as it stands, so the API edge's "a crawl must be bounded" substitution
+    does not apply to it. That makes this the only place 0 reaches the loop, and
+    the loop compared ``page_count < max_pages`` directly -- so it read the
+    unbounded sentinel as "already at the cap" and returned before the first
+    batch. A whole-site job asking for an unlimited crawl returned zero results,
+    and because the loop had done nothing wrong there was no error to explain it.
+
+    Driven directly rather than through the API precisely because the API path
+    substitutes a budget and would have hidden this: a test through
+    ``crawl_request`` passes here today, for a reason unrelated to the loop.
+    """
+
+    spill, _scheduler, _gate = await _run([_task(_ROOT)], _expanding_worker(), max_pages=0)
+    assert set(spill.writes) == {0, 1, 2}, (
+        f"max_pages=0 wrote {sorted(spill.writes)}; 0 means unbounded, so root + /1 + /2"
+    )
+
+
+async def test_a_positive_cap_still_bounds_the_same_crawl():
+    """The unbounded reading must not have cost the bounded one.
+
+    Stated against the same site and the same harness as the test above, because
+    "treat 0 as unbounded" and "ignore the cap" are the same edit to a reader
+    skimming a diff, and only a positive cap in the same fixture separates them.
+    """
+
+    spill, _scheduler, _gate = await _run([_task(_ROOT)], _expanding_worker(), max_pages=1)
+    assert set(spill.writes) == {0}, f"a cap of 1 admitted {sorted(spill.writes)} pages"
 
 
 async def test_robots_disallows_discovered_link_silently():

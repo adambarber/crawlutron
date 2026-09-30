@@ -300,7 +300,7 @@ async def run_recursive_crawl(
         spill_write=_spill_write,
     )
     state = await _start_recursive_state(run, jobs)
-    while state.frontier and state.page_count < max_pages:
+    while state.frontier and (max_pages <= 0 or state.page_count < max_pages):
         if shutdown_event.is_set():
             break
         allowed_jobs = await admit_recursive_batch(cast(Any, run), state, metrics)

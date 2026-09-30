@@ -43,6 +43,28 @@ class TestRecursiveCrawl:
         out = await crawled_results(pages, limits={"max_depth": 2, "max_pages": 2})
         assert len(out["results"]) <= 2
 
+    async def test_wire_edge_bounds_an_absent_or_zero_cap_before_the_crawl_sees_it(self):
+        """0 means "unbounded" to a stored policy, but the API substitutes a budget.
+
+        Two layers read 0 as unbounded: ``remaining_page_capacity`` returns None
+        for it, and a whole-site job read back from its row keeps the 0. The API
+        edge is deliberately different -- an externally-triggered crawl must be
+        bounded -- and substitutes the default page budget. This pins that
+        substitution where a test can see it end to end.
+
+        It matters because the dispatch loop has its own, different reading of 0,
+        asserted directly in ``test_recursive_dispatch``. Without a test on this
+        substitution, deleting it would not fail here; the loop would just
+        quietly receive 0 and crawl nothing.
+        """
+        from app.api_models import CrawlPolicy as PolicyModel
+        from app.crawl.policy import validate_wire_policy
+
+        assert PolicyModel.model_fields["limits"].annotation.model_fields["max_pages"].default == 0, (
+            "the model default is the 'unbounded' sentinel this edge substitutes"
+        )
+        assert validate_wire_policy({"limits": {"max_pages": 0}}).limits.max_pages > 0
+
     async def test_scope_regex_limits_discovered_links(self):
         urls = await run_scoped_crawl(r"/keep/")
         assert "http://example.com/keep/x" in urls
