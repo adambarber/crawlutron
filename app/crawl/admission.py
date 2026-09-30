@@ -42,6 +42,20 @@ def canonical_page_identity(url: str, *, host_policy: HostPolicy) -> NormalizedU
 
 
 def remaining_page_capacity(admitted_count: int, max_pages: int) -> int | None:
+    """Pages still admissible, or None when the cap is UNBOUNDED.
+
+    None is the answer for ``max_pages <= 0``, and it is the codebase's single
+    definition of that sentinel -- every cap-reading site defers here rather than
+    restating it. 0 means "no cap", NOT "zero pages", because the alternative
+    reading makes an unlimited whole-site job (which stores 0) admit nothing and
+    report no error, while a caller who means zero has ``max_pages=1`` with an
+    empty frontier.
+
+    Note the one deliberate exception: the API edge substitutes a real budget
+    for an absent-or-zero request, so an externally-triggered crawl is always
+    bounded. A whole-site job read back from its row keeps its 0, which is how
+    the unbounded reading reaches the crawl loop.
+    """
     if max_pages <= 0:
         return None
     return max(0, max_pages - max(0, admitted_count))
@@ -168,7 +182,15 @@ class AdmittedLink:
 @dataclass(frozen=True)
 class AdmissionOutcome:
     accepted: int = 0
+    # Candidates the page cap REFUSED. The page is not admitted and will not be.
     cap_blocked: int = 0
+    # Candidates admitted PAST the cap, which is a different event with an
+    # opposite meaning: nothing was refused. Only the requeue path sets this,
+    # and only because those pages were already admitted and possibly fetched
+    # before the cap was reached. The two are kept apart because a caller that
+    # reconciles this outcome against the frontier it can see cannot otherwise
+    # tell "refused" from "admitted anyway" -- one number claimed both.
+    cap_overcommitted: int = 0
     robots_blocked: int = 0
     # Candidates dropped because their canonical identity was already admitted
     # (within this call or by the job's existing state). Counted separately from
@@ -452,7 +474,7 @@ def _record_cap_flag(job: Any, stat_key: str, level: int, event: str) -> None:
         _logger.log(
             level,
             event,
-            extra={"job_id": job.job_id, "max_pages": job_max_pages(job.policy)},
+            extra={"job_id": job.job_id, "max_pages": job_max_pages(job.policy, job.tier)},
         )
     job.stats[stat_key] = 1
 
@@ -497,33 +519,40 @@ async def admit_job_links(
     return outcome
 
 
-def _admit_page_identities(
+def _requeue_page_identities(
     job: Any,
     known: set[str],
     candidates: Iterable[tuple[str, int]],
 ) -> tuple[list[FrontierEntry], int]:
-    """Admit the candidates that are new *and* within the page cap.
+    """Re-admit already-admitted identities, counting how far past the cap they go.
 
-    The dedupe and the cap are one decision, not two: a page is admitted if it is
-    not already known and there is room for it, and whatever the cap refused is
-    counted so the job can record that its frontier was truncated. The count is
-    the only thing that distinguishes "the cap said no" from "we had nothing to
-    admit", and it is what a caller reports back as ``cap_blocked``.
+    The ONLY path in this module that can admit past the page cap, and it is
+    deliberately so. Every other route to the frontier -- ``admit_discovered_links``
+    -- refuses past the cap and reports the refusal. This one does not, because
+    the pages it is given were admitted before the cap was reached, may already
+    have been fetched once, and are being requeued for a transient retry.
+    Refusing them now would strand work that has already been paid for.
 
-    A candidate is ``(identity, depth)``. ``known`` is mutated as identities are
-    admitted, so a caller passing the same identity twice admits it once.
+    The count is returned rather than folded into the caller's outcome under the
+    old name, because it is not a refusal: the entries are appended either way.
+    Naming it the way the normal path names its refusals meant an outcome could
+    report a refusal for an entry that was simultaneously present in the frontier.
+
+    ``known`` is mutated as identities are admitted, so a caller passing the same
+    identity twice admits it once.
     """
     accepted: list[FrontierEntry] = []
-    cap_blocked = 0
+    overcommitted = 0
+    max_pages = job_max_pages(job.policy, job.tier)
     for identity, depth in candidates:
         if identity in known:
             continue
-        capacity = remaining_page_capacity(len(known), job_max_pages(job.policy))
+        capacity = remaining_page_capacity(len(known), max_pages)
         if capacity is not None and capacity <= 0:
-            cap_blocked += 1
+            overcommitted += 1
         accepted.append(FrontierEntry(url=identity, depth=depth))
         known.add(identity)
-    return accepted, cap_blocked
+    return accepted, overcommitted
 
 
 def requeue_admitted_pages(
@@ -532,15 +561,15 @@ def requeue_admitted_pages(
     context: JobAdmissionContext,
 ) -> AdmissionOutcome:
     known = admitted_page_identities(job, host_policy=context.host_policy)
-    accepted_entries, cap_blocked = _admit_page_identities(
+    accepted_entries, overcommitted = _requeue_page_identities(
         job,
         known,
         ((durable_page_identity(entry.url, context.host_policy), entry.depth) for entry in entries),
     )
     job.frontier.extend(accepted_entries)
-    if cap_blocked:
+    if overcommitted:
         record_cap_overcommitted(job)
-    return AdmissionOutcome(accepted=len(accepted_entries), cap_blocked=cap_blocked)
+    return AdmissionOutcome(accepted=len(accepted_entries), cap_overcommitted=overcommitted)
 
 
 async def fetch_job_sitemap_candidates(root_url: str, context: JobAdmissionContext) -> list[str]:

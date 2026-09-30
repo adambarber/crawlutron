@@ -2,6 +2,7 @@
 
 import asyncio
 import time
+from types import SimpleNamespace
 
 import pytest
 
@@ -9,6 +10,8 @@ from app.constants import (
     BROWSER_HEADLESS,
     HTTP_DECLARED_CRAWLER,
 )
+from app.crawl.admission import requeue_admitted_pages
+from app.crawl.job_store import FrontierEntry, durable_page_identity
 from app.crawl.payload_helpers import _payload_policy
 from app.crawl.policy import PolicyTier
 from app.crawl.recursive_admission import _batch_is_http_heavy
@@ -34,6 +37,7 @@ from app.resource_pressure import (
     read_cpu_quota,
     read_cpu_usage_seconds,
 )
+from app.validation import HostPolicy
 from tests._fetcher_factories import LINKED_PAIR_LIMITS, crawled_results, site_linking_to
 from tests._policy_factories import admit
 from tests._recursive_harnesses import drive_recursive_crawl, make_crawl_task
@@ -905,6 +909,101 @@ class TestHTTPTaskRamEstimate:
 async def _no_crawl_delay(url: str) -> float | None:
     """A host that states no Crawl-delay, so a scenario about capacity can pass one."""
     return None
+
+
+class _RequeueJob:
+    """The slice of a job state that the requeue path actually reads.
+
+    Deliberately narrow: this names the contract ``requeue_admitted_pages``
+    depends on, so a change that widens what it reads shows up as a missing
+    attribute here rather than as a confusing failure inside a real job row.
+    """
+
+    def __init__(self, *, policy, tier=None, visited=()):
+        self.policy = policy
+        self.tier = tier
+        self.visited = set(visited)
+        self.in_flight = []
+        self.frontier = []
+        self.stats: dict[str, int] = {}
+        self.job_id = "job-requeue"
+
+
+def _requeue_context():
+    return SimpleNamespace(host_policy=HostPolicy.unrestricted())
+
+
+class TestRequeueOvercommitContract:
+    """``cap_blocked`` and ``cap_overcommitted`` must mean opposite things.
+
+    Both arrive as a number in an ``AdmissionOutcome``, and on the requeue path
+    the count was reported as ``cap_blocked`` -- "the cap refused this" -- for
+    entries that were admitted anyway. A reader reconciling the outcome against
+    the frontier would find one candidate that was simultaneously refused and
+    present, and the two facts are not reconcilable.
+    """
+
+    def test_requeue_past_the_cap_admits_and_reports_overcommit_not_blocked(self):
+        job = _RequeueJob(policy={"limits": {"max_pages": 2}}, visited=["https://a.test/", "https://b.test/"])
+
+        outcome = requeue_admitted_pages(
+            job,
+            [FrontierEntry(url="https://c.test/", depth=1)],
+            _requeue_context(),
+        )
+
+        # The page was already fetched once and is being retried; refusing it now
+        # would strand work already paid for, so it is preserved. The expected
+        # URL is the canonical identity rather than the string passed in,
+        # because that is what the frontier holds -- asserting the literal would
+        # make this test fail for a normalization improvement and pass for a
+        # dedupe regression.
+        policy = HostPolicy.unrestricted()
+        assert [entry.url for entry in job.frontier] == [durable_page_identity("https://c.test/", policy)]
+        assert outcome.accepted == 1
+        assert outcome.cap_overcommitted == 1
+        assert outcome.cap_blocked == 0, "admitting past the cap is not a refusal"
+        assert job.stats["cap_overcommitted"] == 1
+
+    def test_requeue_under_the_cap_is_plain_admission_with_no_cap_signal(self):
+        job = _RequeueJob(policy={"limits": {"max_pages": 2}}, visited=["https://a.test/"])
+
+        outcome = requeue_admitted_pages(
+            job,
+            [FrontierEntry(url="https://b.test/", depth=1)],
+            _requeue_context(),
+        )
+
+        assert outcome.accepted == 1
+        assert outcome.cap_blocked == 0
+        assert outcome.cap_overcommitted == 0
+        assert "cap_overcommitted" not in job.stats
+        assert "cap_truncated" not in job.stats
+
+    async def test_normal_admission_refuses_past_the_cap_and_flags_no_overcommit(self):
+        """The ordinary path refuses, and the two signals never both fire.
+
+        Together with the two tests above this is the whole contract: refusal
+        and overcommit are opposites, each belongs to exactly one path, and a
+        caller can tell them apart by which number is non-zero.
+        """
+        frontier: list[str] = []
+        outcome = await admit(
+            ["https://example.test/one", "https://example.test/two"],
+            frontier=frontier,
+            max_pages=1,
+            robots_allows=lambda url: _allowed(),
+            robots_crawl_delay=_no_crawl_delay,
+            commit_crawl_delay=lambda domain, delay: None,
+        )
+
+        assert outcome.cap_blocked == 1, "the cap refused the second link"
+        assert outcome.cap_overcommitted == 0, "a refusal is not an overcommit"
+        assert frontier == ["https://example.test/one"]
+
+
+async def _allowed() -> bool:
+    return True
 
 
 async def test_discovered_link_delay_commits_in_order_and_breaks_at_cap():
