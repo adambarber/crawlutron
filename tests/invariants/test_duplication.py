@@ -16,14 +16,8 @@ from pathlib import Path
 
 from tests.chokepoint_walks import (
     REPO_ROOT,
-    SANCTIONED,
     TESTS_DIR,
-    app_offenders,
     app_python_files,
-    app_trees,
-    assert_detector,
-    assert_fires_once,
-    assert_stays_clean,
     call_nodes,
     calls_named,
     class_defs,
@@ -36,7 +30,8 @@ from tests.chokepoint_walks import (
     resolved_expr_name,
     trees_excluding,
 )
-from tests.invariants._shared import _enclosing_defs, assert_trees_clean
+from tests.invariants._shared import _enclosing_defs
+from tests.rules import Bites, Rule, Silent
 
 # ---------------------------------------------------------------------------
 # Search-provider result normalization
@@ -74,43 +69,46 @@ def _provider_loop_reinlines(tree: ast.AST, path: pathlib.Path) -> list[str]:
     return offenders
 
 
+PROVIDER_DEDUPE_LOOP_LIVES_IN_THE_COLLECTOR = Rule(
+    name="provider-dedupe-loop-lives-in-the-collector",
+    find=_provider_loop_reinlines,
+    summary="Use app.search.providers._collect_results",
+    bite=lambda: Bites(
+        # The keyed-provider copy: seen:set + isinstance(item, dict) guard +
+        # SearchResult construction in one function, re-inlined off the collector.
+        "async def search(self, query, limit, timeout_seconds):\n"
+        "    results = []\n"
+        "    seen: set[str] = set()\n"
+        "    for item in payload.get('results') or []:\n"
+        "        if not isinstance(item, dict):\n"
+        "            continue\n"
+        "        results.append(SearchResult(url=item.get('url')))\n"
+        "    return results\n",
+        "dedupe loop re-inlined outside _collect_results",
+    ),
+    clean=lambda: (
+        # DDG walks lxml nodes instead of provider dicts, so it has no dict guard
+        # and the sink never reaches it -- the scope boundary is the whole reason
+        # one collector can be mandatory for keyed providers and irrelevant here.
+        "async def search(self, query, limit, timeout_seconds):\n"
+        "    results = []\n"
+        "    seen: set[str] = set()\n"
+        "    for node in tree.xpath('//div'):\n"
+        "        href = node.get('href')\n"
+        "        results.append(SearchResult(url=href))\n"
+        "    return results\n",
+    ),
+)
+
+
 def test_no_provider_dedupe_loop_reinlines():
     """One normalize/dedupe/clip contract for all keyed providers."""
-    assert_trees_clean(
-        _provider_loop_reinlines,
-        "Use app.search.providers._collect_results",
-        trees=app_trees(),
-    )
+    PROVIDER_DEDUPE_LOOP_LIVES_IN_THE_COLLECTOR.scan()
 
 
 def test_provider_loop_detector_bites():
     """The three-provider copy fires; the DDG lxml-walk shape stays clean."""
-    assert_detector(
-        _provider_loop_reinlines,
-        path=REPO_ROOT / "app" / "search" / "_synthetic.py",
-        fires={
-            "async def search(self, query, limit, timeout_seconds):\n"
-            "    results = []\n"
-            "    seen: set[str] = set()\n"
-            "    for item in payload.get('results') or []:\n"
-            "        if not isinstance(item, dict):\n"
-            "            continue\n"
-            "        results.append(SearchResult(url=item.get('url')))\n"
-            "    return results\n": "dedupe loop re-inlined outside _collect_results",
-        },
-        # DDG walks lxml nodes instead of provider dicts, so it has no dict guard
-        # and the sink never reaches it -- the scope boundary is the whole reason
-        # one collector can be mandatory for keyed providers and irrelevant here.
-        clean=(
-            "async def search(self, query, limit, timeout_seconds):\n"
-            "    results = []\n"
-            "    seen: set[str] = set()\n"
-            "    for node in tree.xpath('//div'):\n"
-            "        href = node.get('href')\n"
-            "        results.append(SearchResult(url=href))\n"
-            "    return results\n",
-        ),
-    )
+    PROVIDER_DEDUPE_LOOP_LIVES_IN_THE_COLLECTOR.check_bites()
 
 
 # The names of the one selector contract, and the single parameter that carries
@@ -173,43 +171,47 @@ def _selector_contract_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]
     return offenders
 
 
-def test_the_selector_pair_is_one_contract():
-    """A narrowing extractor carries the pair in one value, never as two names."""
-    assert_trees_clean(
-        _selector_contract_offenders,
+THE_SELECTOR_PAIR_IS_ONE_CONTRACT = Rule(
+    name="the-selector-pair-is-one-contract",
+    find=_selector_contract_offenders,
+    summary=(
         "a narrowing function must take one `selectors` value carrying both, and"
         " must not declare css_selector/xpath as parameters of its own; the pair is"
-        " one contract and half of it is a request that cannot be honoured",
-    )
+        " one contract and half of it is a request that cannot be honoured"
+    ),
+    bite=lambda: (
+        Bites(
+            "def _extract_html(html, url, css_selector=None, xpath=None) -> ExtractedContent:\n    ...\n",
+            "declares ['css_selector', 'xpath'] instead of carrying",
+        ),
+        Bites(
+            "def _narrow(html, css_selector=None) -> ExtractedContent:\n    ...\n",
+            "declares ['css_selector'] instead of carrying",
+        ),
+    ),
+    clean=lambda: (
+        # The carrier itself: the one place the two names are spelled.
+        "class Selectors:\n    css: str | None = None\n    xpath: str | None = None\n",
+        # An extractor carrying the pair as the one value.
+        "def _extract_html(html, url, selectors=None) -> ExtractedContent:\n    ...\n",
+        # A key builder legitimately requires both: it keys a request rather
+        # than narrowing one.
+        "def _content_cache_key(url, strategy, headers, extraction, css_selector, xpath):\n    ...\n",
+        # A function that takes no selector is somebody else's business.
+        "def _extract_document(body, url) -> ExtractedContent:\n    ...\n",
+    ),
+    proof_path=REPO_ROOT / "app" / "crawl" / "_synthetic.py",
+)
+
+
+def test_the_selector_pair_is_one_contract():
+    """A narrowing extractor carries the pair in one value, never as two names."""
+    THE_SELECTOR_PAIR_IS_ONE_CONTRACT.scan()
 
 
 def test_selector_contract_detector_bites():
     """A re-spelled pair fires, a lone name fires, the real shape passes."""
-    assert_fires_once(
-        _selector_contract_offenders,
-        {
-            "def _extract_html(html, url, css_selector=None, xpath=None)"
-            " -> ExtractedContent:\n    ...\n": "declares ['css_selector', 'xpath'] instead of carrying",
-            "def _narrow(html, css_selector=None) -> ExtractedContent:\n"
-            "    ...\n": "declares ['css_selector'] instead of carrying",
-        },
-        REPO_ROOT / "app" / "crawl" / "_synthetic.py",
-    )
-    assert_stays_clean(
-        _selector_contract_offenders,
-        (
-            # The carrier itself: the one place the two names are spelled.
-            "class Selectors:\n    css: str | None = None\n    xpath: str | None = None\n",
-            # An extractor carrying the pair as the one value.
-            "def _extract_html(html, url, selectors=None) -> ExtractedContent:\n    ...\n",
-            # A key builder legitimately requires both: it keys a request rather
-            # than narrowing one.
-            "def _content_cache_key(url, strategy, headers, extraction, css_selector, xpath):\n    ...\n",
-            # A function that takes no selector is somebody else's business.
-            "def _extract_document(body, url) -> ExtractedContent:\n    ...\n",
-        ),
-        REPO_ROOT / "app" / "crawl" / "_synthetic.py",
-    )
+    THE_SELECTOR_PAIR_IS_ONE_CONTRACT.check_bites()
 
 
 def _keyed_provider_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
@@ -258,14 +260,78 @@ def _keyed_provider_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
     return offenders
 
 
-def test_keyed_providers_inherit_the_shared_response_flow():
-    """One flow for the keyed providers: a request declared, never written."""
-    assert_trees_clean(
-        _keyed_provider_offenders,
+KEYED_PROVIDERS_INHERIT_THE_SHARED_RESPONSE_FLOW = Rule(
+    name="keyed-providers-inherit-the-shared-response-flow",
+    find=_keyed_provider_offenders,
+    summary=(
         "a keyed search provider must state a _call() and an _items_path and not"
         " define search()/_request()/_results()/_items_of(), so the non-200 check"
-        " cannot be re-spelled or dropped",
-    )
+        " cannot be re-spelled or dropped"
+    ),
+    bite=lambda: (
+        Bites(
+            "from app.search.providers import _ApiKeyProvider\n"
+            "class SerperProvider(_ApiKeyProvider):\n"
+            "    name = 'serper'\n"
+            "    _items_path = ('organic',)\n"
+            "    def _call(self, query, limit):\n"
+            "        return _ProviderCall('POST', url)\n"
+            "    async def search(self, query, limit, timeout_seconds):\n"
+            "        status, body = await self._request(query, limit, timeout_seconds)\n"
+            "        return self._results(status, body, lambda p: p.get('organic'),\n"
+            "            url_key='link')\n",
+            "re-spells the shared provider flow in search()",
+        ),
+        Bites(
+            "from app.search.providers import _ApiKeyProvider\n"
+            "class BraveProvider(_ApiKeyProvider):\n"
+            "    name = 'brave'\n"
+            "    _items_path = ('web', 'results')\n"
+            "    def _call(self, query, limit):\n"
+            "        return _ProviderCall('GET', url)\n"
+            "    async def _request(self, query, limit, timeout_seconds):\n"
+            "        return await _provider_http('GET', url)\n",
+            "re-spells the shared provider flow in _request()",
+        ),
+        Bites(
+            "from app.search.providers import _ApiKeyProvider\n"
+            "class TavilyProvider(_ApiKeyProvider):\n"
+            "    name = 'tavily'\n"
+            "    _items_path = ('results',)\n",
+            "does not state a _call()",
+        ),
+        Bites(
+            "from app.search.providers import _ApiKeyProvider\n"
+            "class BingProvider(_ApiKeyProvider):\n"
+            "    name = 'bing'\n"
+            "    def _call(self, query, limit):\n"
+            "        return _ProviderCall('GET', url)\n",
+            "does not declare _items_path",
+        ),
+    ),
+    clean=lambda: (
+        "class TavilyProvider(_ApiKeyProvider):\n"
+        "    name = 'tavily'\n"
+        "    _url_key = 'url'\n"
+        "    _title_key = 'title'\n"
+        "    _description_key = 'content'\n"
+        "    _items_path = ('results',)\n"
+        "    def _call(self, query, limit):\n"
+        "        return _ProviderCall('POST', url, json_body={'api_key': self._api_key})\n",
+        # A provider that does not inherit the keyed flow (DuckDuckGo) is not
+        # this guard's business; the loop guard above owns its shape.
+        "class DuckDuckGoProvider:\n"
+        "    name = 'duckduckgo'\n"
+        "    async def search(self, query, limit, timeout_seconds):\n"
+        "        return []\n",
+    ),
+    proof_path=REPO_ROOT / "app" / "search" / "_synthetic.py",
+)
+
+
+def test_keyed_providers_inherit_the_shared_response_flow():
+    """One flow for the keyed providers: a request declared, never written."""
+    KEYED_PROVIDERS_INHERIT_THE_SHARED_RESPONSE_FLOW.scan()
 
 
 def test_keyed_provider_flow_detector_bites():
@@ -281,60 +347,7 @@ def test_keyed_provider_flow_detector_bites():
     source is built to trip exactly one rule, so a rule that started firing for
     the wrong reason shows up as a count change rather than a green run.
     """
-    assert_fires_once(
-        _keyed_provider_offenders,
-        {
-            "from app.search.providers import _ApiKeyProvider\n"
-            "class SerperProvider(_ApiKeyProvider):\n"
-            "    name = 'serper'\n"
-            "    _items_path = ('organic',)\n"
-            "    def _call(self, query, limit):\n"
-            "        return _ProviderCall('POST', url)\n"
-            "    async def search(self, query, limit, timeout_seconds):\n"
-            "        status, body = await self._request(query, limit, timeout_seconds)\n"
-            "        return self._results(status, body, lambda p: p.get('organic'),\n"
-            "            url_key='link')\n": "re-spells the shared provider flow in search()",
-            "from app.search.providers import _ApiKeyProvider\n"
-            "class BraveProvider(_ApiKeyProvider):\n"
-            "    name = 'brave'\n"
-            "    _items_path = ('web', 'results')\n"
-            "    def _call(self, query, limit):\n"
-            "        return _ProviderCall('GET', url)\n"
-            "    async def _request(self, query, limit, timeout_seconds):\n"
-            "        return await _provider_http('GET', url)\n": "re-spells the shared"
-            " provider flow in _request()",
-            "from app.search.providers import _ApiKeyProvider\n"
-            "class TavilyProvider(_ApiKeyProvider):\n"
-            "    name = 'tavily'\n"
-            "    _items_path = ('results',)\n": "does not state a _call()",
-            "from app.search.providers import _ApiKeyProvider\n"
-            "class BingProvider(_ApiKeyProvider):\n"
-            "    name = 'bing'\n"
-            "    def _call(self, query, limit):\n"
-            "        return _ProviderCall('GET', url)\n": "does not declare _items_path",
-        },
-        REPO_ROOT / "app" / "search" / "_synthetic.py",
-    )
-    assert_stays_clean(
-        _keyed_provider_offenders,
-        (
-            "class TavilyProvider(_ApiKeyProvider):\n"
-            "    name = 'tavily'\n"
-            "    _url_key = 'url'\n"
-            "    _title_key = 'title'\n"
-            "    _description_key = 'content'\n"
-            "    _items_path = ('results',)\n"
-            "    def _call(self, query, limit):\n"
-            "        return _ProviderCall('POST', url, json_body={'api_key': self._api_key})\n",
-            # A provider that does not inherit the keyed flow (DuckDuckGo) is not
-            # this guard's business; the loop guard above owns its shape.
-            "class DuckDuckGoProvider:\n"
-            "    name = 'duckduckgo'\n"
-            "    async def search(self, query, limit, timeout_seconds):\n"
-            "        return []\n",
-        ),
-        REPO_ROOT / "app" / "search" / "_synthetic.py",
-    )
+    KEYED_PROVIDERS_INHERIT_THE_SHARED_RESPONSE_FLOW.check_bites()
 
 
 # ---------------------------------------------------------------------------
@@ -371,30 +384,35 @@ def _robots_scanner_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
     return offenders
 
 
+ROBOTS_LINE_SCANNER_LIVES_IN_ONE_PLACE = Rule(
+    name="robots-line-scanner-lives-in-one-place",
+    find=_robots_scanner_offenders,
+    summary=(
+        "app/crawl/robots_parse.iter_robots_fields is the single scanner for robots"
+        " consumers, so the shared line-walk cannot drift on the empty-value gate"
+    ),
+    bite=lambda: Bites(
+        "def parse_robots_rules(text):\n"
+        "    for raw in text.lstrip('\\ufeff').splitlines():\n"
+        "        yield raw\n",
+        "re-rolls the robots line-scanner",
+    ),
+    clean=lambda: (
+        "def iter_robots_fields(text):\n"
+        "    for raw in text.lstrip('\\ufeff').splitlines():\n"
+        "        yield raw.strip()\n",
+    ),
+    proof_path=REPO_ROOT / "app" / "crawl" / "_synthetic.py",
+)
+
+
 def test_robots_line_scanner_lives_in_one_place():
     """Every robots consumer walks lines through the shared tokenizer."""
-    assert_trees_clean(
-        _robots_scanner_offenders,
-        "app/crawl/robots_parse.iter_robots_fields is the single scanner",
-        trees=app_trees(),
-    )
+    ROBOTS_LINE_SCANNER_LIVES_IN_ONE_PLACE.scan()
 
 
 def test_robots_scanner_detector_bites():
-    assert_detector(
-        _robots_scanner_offenders,
-        path=REPO_ROOT / "app" / "crawl" / "_synthetic.py",
-        fires={
-            "def parse_robots_rules(text):\n"
-            "    for raw in text.lstrip('\\ufeff').splitlines():\n"
-            "        yield raw\n": "parse_robots_rules re-rolls the robots line-scanner",
-        },
-        clean=(
-            "def iter_robots_fields(text):\n"
-            "    for raw in text.lstrip('\\ufeff').splitlines():\n"
-            "        yield raw.strip()\n",
-        ),
-    )
+    ROBOTS_LINE_SCANNER_LIVES_IN_ONE_PLACE.check_bites()
 
 
 # ---------------------------------------------------------------------------
@@ -420,31 +438,28 @@ def _fetcher_factory_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
     return offenders
 
 
+FETCH_FAKES_COME_FROM_THE_SANCTIONED_BUILDER = Rule(
+    name="fetch-fakes-come-from-the-sanctioned-builder",
+    find=_fetcher_factory_offenders,
+    summary="Use _fetcher_factories.make_fetch()",
+    excludes=_FAKE_BUILDER_SANCTIONED,
+    bite=lambda: Bites(
+        "def f():\n    return HttpFetchResult(url='u')\n",
+        "make_fetch",
+    ),
+    clean=lambda: ("def f():\n    return make_fetch(url='u')\n",),
+    scope=lambda *, exclude: trees_excluding(TESTS_DIR, *exclude),
+    proof_path=REPO_ROOT / "tests" / "_synthetic.py",
+)
+
+
 def test_tests_do_not_hand_build_http_fetch_results():
     """Every fetch fake comes from the one sanctioned builder."""
-    assert_trees_clean(
-        _fetcher_factory_offenders,
-        "Use _fetcher_factories.make_fetch()",
-        trees=trees_excluding(TESTS_DIR, *_FAKE_BUILDER_SANCTIONED),
-    )
+    FETCH_FAKES_COME_FROM_THE_SANCTIONED_BUILDER.scan()
 
 
 def test_fetch_builder_detector_bites():
-    assert_detector(
-        _fetcher_factory_offenders,
-        path=REPO_ROOT / "tests" / "_synthetic.py",
-        fires={"def f():\n    return HttpFetchResult(url='u')\n": "make_fetch"},
-        clean=("def f():\n    return make_fetch(url='u')\n",),
-    )
-
-
-# ---------------------------------------------------------------------------
-# Poll-loop reimplementation (test-side drift, sibling to the fake
-# builder finding): _assertions.poll_until is the sanctioned predicate poller.
-# A hand-rolled ``while True`` poller that awaits ``asyncio.wait_for`` without
-# a ``pytest.fail`` termination silently returns False on timeout, diverging
-# from the one that names the failing condition. Flag the shape.
-# ---------------------------------------------------------------------------
+    FETCH_FAKES_COME_FROM_THE_SANCTIONED_BUILDER.check_bites()
 
 
 def _call_node_names(node: ast.AST) -> set[str]:
@@ -474,40 +489,44 @@ def _poll_loop_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
     return offenders_over_functions(tree, check)
 
 
+TESTS_USE_THE_SANCTIONED_POLLER = Rule(
+    name="tests-use-the-sanctioned-poller",
+    find=_poll_loop_offenders,
+    summary="Use _testkit.poll_until",
+    excludes=_FAKE_BUILDER_SANCTIONED,
+    bite=lambda: Bites(
+        "async def _poll_until(pred, *, timeout=10.0):\n"
+        "    async def _runner():\n"
+        "        while True:\n"
+        "            v = pred()\n"
+        "            if asyncio.iscoroutine(v):\n"
+        "                v = await v\n"
+        "            if v:\n"
+        "                return True\n"
+        "    return await asyncio.wait_for(_runner(), timeout=timeout)\n",
+        "poll_until",
+    ),
+    clean=lambda: (
+        "async def poll_until(pred, *, timeout=10.0, message=None):\n"
+        "    async def _runner():\n"
+        "        while True:\n"
+        "            if pred():\n"
+        "                return True\n"
+        "    await asyncio.wait_for(_runner(), timeout=timeout)\n"
+        "    pytest.fail(message)\n",
+    ),
+    scope=lambda *, exclude: trees_excluding(TESTS_DIR, *exclude),
+    proof_path=REPO_ROOT / "tests" / "_synthetic.py",
+)
+
+
 def test_tests_do_not_relinline_poll_loop():
     """One sanctioned poller; tests must not re-roll their own."""
-    assert_trees_clean(
-        _poll_loop_offenders,
-        "Use _testkit.poll_until",
-        trees=trees_excluding(TESTS_DIR, *_FAKE_BUILDER_SANCTIONED),
-    )
+    TESTS_USE_THE_SANCTIONED_POLLER.scan()
 
 
 def test_poll_loop_detector_bites():
-    assert_detector(
-        _poll_loop_offenders,
-        path=REPO_ROOT / "tests" / "_synthetic.py",
-        fires={
-            "async def _poll_until(pred, *, timeout=10.0):\n"
-            "    async def _runner():\n"
-            "        while True:\n"
-            "            v = pred()\n"
-            "            if asyncio.iscoroutine(v):\n"
-            "                v = await v\n"
-            "            if v:\n"
-            "                return True\n"
-            "    return await asyncio.wait_for(_runner(), timeout=timeout)\n": "poll_until",
-        },
-        clean=(
-            "async def poll_until(pred, *, timeout=10.0, message=None):\n"
-            "    async def _runner():\n"
-            "        while True:\n"
-            "            if pred():\n"
-            "                return True\n"
-            "    await asyncio.wait_for(_runner(), timeout=timeout)\n"
-            "    pytest.fail(message)\n",
-        ),
-    )
+    TESTS_USE_THE_SANCTIONED_POLLER.check_bites()
 
 
 # ---------------------------------------------------------------------------
@@ -565,35 +584,39 @@ def _asdict_rebuild_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
     return offenders
 
 
+ASDICT_IS_NEVER_UNPACKED_INTO_A_CONSTRUCTOR = Rule(
+    name="asdict-is-never-unpacked-into-a-constructor",
+    find=_asdict_rebuild_offenders,
+    summary="copy dataclasses with dataclasses.replace(), not asdict(**...)",
+    bite=lambda: (
+        Bites(
+            "import dataclasses\ndef f(r):\n    return Thing(**{**dataclasses.asdict(r), 'd': 1})\n",
+            "dataclasses.replace",
+        ),
+        Bites(
+            "from dataclasses import asdict\ndef f(r):\n    return Thing(**asdict(r))\n",
+            "dataclasses.replace",
+        ),
+    ),
+    clean=lambda: (
+        # Serialization keeps asdict: a dict result used as a dict is its real job.
+        "import dataclasses\ndef f(s):\n    data = dataclasses.asdict(s)\n    return json.dumps(data)\n",
+        "import dataclasses\ndef f(s):\n    return dataclasses.asdict(s)['results']\n",
+        "import dataclasses\ndef f(s):\n    data = dataclasses.asdict(s)\n    data['x'] = 1\n    "
+        "return data\n",
+    ),
+    proof_path=REPO_ROOT / "app" / "_synthetic.py",
+)
+
+
 def test_asdict_is_never_unpacked_into_a_constructor():
     """Copying a dataclass with asdict must not survive anywhere in app/."""
-    assert_trees_clean(
-        _asdict_rebuild_offenders,
-        "copy dataclasses with dataclasses.replace(), not asdict(**...)",
-        trees=app_trees(exclude=SANCTIONED),
-    )
+    ASDICT_IS_NEVER_UNPACKED_INTO_A_CONSTRUCTOR.scan()
 
 
 def test_asdict_rebuild_detector_bites():
     """The rebuild shape fires; genuine serialization does not."""
-    path = REPO_ROOT / "app" / "_synthetic.py"
-    fires = [
-        "import dataclasses\ndef f(r):\n    return Thing(**{**dataclasses.asdict(r), 'd': 1})\n",
-        "from dataclasses import asdict\ndef f(r):\n    return Thing(**asdict(r))\n",
-    ]
-    for src in fires:
-        offenders = _asdict_rebuild_offenders(ast.parse(src), path)
-        assert len(offenders) == 1 and "dataclasses.replace" in offenders[0], src
-
-    # Serialization keeps asdict: a dict result used as a dict is its real job.
-    clean = [
-        "import dataclasses\ndef f(s):\n    data = dataclasses.asdict(s)\n    return json.dumps(data)\n",
-        "import dataclasses\ndef f(s):\n    return dataclasses.asdict(s)['results']\n",
-        "import dataclasses\ndef f(s):\n    data = dataclasses.asdict(s)\n    data['x'] = 1\n    return "
-        "data\n",
-    ]
-    for src in clean:
-        assert not _asdict_rebuild_offenders(ast.parse(src), path), src
+    ASDICT_IS_NEVER_UNPACKED_INTO_A_CONSTRUCTOR.check_bites()
 
 
 # ---------------------------------------------------------------------------
@@ -633,38 +656,58 @@ def _reinline_js_endpoints_filter_offenders(tree: ast.AST, path: pathlib.Path) -
     return offenders
 
 
+_JS_EGRESS_ELSEWHERE = REPO_ROOT / "app" / "crawl" / "content_cache.py"
+
+
+# The chokepoint's own comprehension really is the matched shape: the file
+# exemption is what keeps the real tree clean, not a predicate that misses it.
+_JS_ENDPOINTS_VALIDATION_SOURCE = (
+    "def filter_js_endpoints(endpoints, *, resolve_against=None, policy=None):\n"
+    "    return [\n"
+    "        {**endpoint, 'url': clean}\n"
+    "        for endpoint in endpoints\n"
+    "        if (clean := public_url_or_none(endpoint)) is not None\n"
+    "    ]\n"
+)
+
+
+JS_ENDPOINTS_FILTER_IS_NOT_REINLINED = Rule(
+    name="js-endpoints-filter-is-not-reinlined",
+    find=_reinline_js_endpoints_filter_offenders,
+    summary="route endpoints through filter_js_endpoints",
+    excludes=frozenset({"validation.py"}),
+    bite=lambda: (
+        Bites(
+            "def f(endpoints, base):\n"
+            '    return [{**e, "url": c} for e in endpoints\n'
+            '           if (c := public_url_or_none(e["url"])) is not None]\n',
+            "filter_js_endpoints",
+        ),
+        # The detector genuinely matches the chokepoint's OWN comprehension too:
+        # the exemption is the path, not a predicate that happens to miss it.
+        Bites(
+            _JS_ENDPOINTS_VALIDATION_SOURCE,
+            "filter_js_endpoints",
+            at=_JS_EGRESS_ELSEWHERE,
+        ),
+    ),
+    clean=lambda: (
+        "def f(endpoints, base):\n    return filter_js_endpoints(endpoints, resolve_against=base)\n",
+        # The very same chokepoint comprehension stays clean at its own path:
+        # validation.py is where the filter legitimately lives.
+        Silent(_JS_ENDPOINTS_VALIDATION_SOURCE, at=REPO_ROOT / "app" / "validation.py"),
+    ),
+)
+
+
 def test_js_endpoints_filter_is_not_reinlined():
     """Scraped JS endpoints are filtered through ``filter_js_endpoints``."""
-    assert_trees_clean(
-        _reinline_js_endpoints_filter_offenders,
-        "route endpoints through filter_js_endpoints",
-        trees=app_trees(exclude=_JS_ENDPOINTS_FILTER_SANCTIONED),
-    )
+    JS_ENDPOINTS_FILTER_IS_NOT_REINLINED.scan()
 
 
 def test_reinline_js_endpoints_detector_bites():
     """The historical inline shape fires; the chokepoint call stays clean."""
-    bad = ast.parse(
-        "def f(endpoints, base):\n"
-        '    return [{**e, "url": c} for e in endpoints\n'
-        '           if (c := public_url_or_none(e["url"])) is not None]\n'
-    )
-    offenders = _reinline_js_endpoints_filter_offenders(bad, REPO_ROOT / "app" / "crawl" / "_synthetic.py")
-    assert len(offenders) == 1 and "filter_js_endpoints" in offenders[0], offenders
-    good = ast.parse(
-        "def f(endpoints, base):\n    return filter_js_endpoints(endpoints, resolve_against=base)\n"
-    )
-    assert not _reinline_js_endpoints_filter_offenders(good, REPO_ROOT / "app" / "crawl" / "_synthetic.py")
-    # The chokepoint's own comprehension really is the matched shape: the file
-    # exemption is what keeps the real tree clean, not a predicate that misses it.
-    validation = next(((path, tree) for path, tree in app_trees() if path.name == "validation.py"), None)
-    assert validation is not None
-    validation_path, validation_tree = validation
-    assert _reinline_js_endpoints_filter_offenders(validation_tree, validation_path) == []
-    hits = _reinline_js_endpoints_filter_offenders(
-        validation_tree, REPO_ROOT / "app" / "crawl" / "_synthetic.py"
-    )
-    assert len(hits) == 1 and "filter_js_endpoints" in hits[0], hits
+    JS_ENDPOINTS_FILTER_IS_NOT_REINLINED.check_bites()
 
 
 # --- 4a: the robots matcher compiler is reachable only via its host cache ----
@@ -703,38 +746,50 @@ def _robots_compile_call_offenders(tree: ast.AST, path: pathlib.Path) -> list[st
     return offenders
 
 
-def test_robots_pattern_compile_lives_behind_the_per_host_cache():
-    offenders = app_offenders(_robots_compile_call_offenders)
-    assert not offenders, ", ".join(offenders)
-
-
-def test_robots_pattern_compile_detector_bites():
-    # A direct caller -- exactly the shape that reintroduces a global,
-    # attacker-keyed matcher cache.
-    bad = ast.parse("def f(pattern):\n    return _compile_robots_pattern(pattern)\n")
-    offenders = list(_robots_compile_call_offenders(bad, REPO_ROOT / "app" / "_synthetic.py"))
-    assert len(offenders) == 1 and "per-host cache" in offenders[0], offenders
-    # The sanctioned home passes.
-    good = ast.parse(
+ROBOTS_PATTERN_COMPILE_LIVES_BEHIND_THE_PER_HOST_CACHE = Rule(
+    name="robots-pattern-compile-lives-behind-the-per-host-cache",
+    find=_robots_compile_call_offenders,
+    summary=(
+        "Every caller reaches the pattern compiler through _RobotsPatternCache.get, "
+        "so a hostile robots.txt spraying distinct patterns cannot evict another "
+        "site's matchers from a global cache"
+    ),
+    bite=lambda: (
+        # A direct caller -- exactly the shape that reintroduces a global,
+        # attacker-keyed matcher cache.
+        Bites(
+            "def f(pattern):\n    return _compile_robots_pattern(pattern)\n",
+            "per-host cache",
+        ),
+        # A same-named method on any OTHER class is not the home.
+        Bites(
+            "class OtherCache:\n    def get(self, pattern):\n"
+            "        return _compile_robots_pattern(pattern)\n",
+            "per-host cache",
+        ),
+    ),
+    clean=lambda: (
+        # The sanctioned home passes.
         "class _RobotsPatternCache:\n"
         "    def get(self, host, pattern):\n"
-        "        return _compile_robots_pattern(pattern)\n"
-    )
-    assert not _robots_compile_call_offenders(good, REPO_ROOT / "app" / "_synthetic.py")
-    # A nested helper inside the home class is still inside the home scope.
-    nested = ast.parse(
+        "        return _compile_robots_pattern(pattern)\n",
+        # A nested helper inside the home class is still inside the home scope.
         "class _RobotsPatternCache:\n"
         "    def get(self, host, pattern):\n"
         "        def build():\n"
         "            return _compile_robots_pattern(pattern)\n"
-        "        return build()\n"
-    )
-    assert not _robots_compile_call_offenders(nested, REPO_ROOT / "app" / "_synthetic.py")
-    # A same-named method on any OTHER class is not the home.
-    impostor = ast.parse(
-        "class OtherCache:\n    def get(self, pattern):\n        return _compile_robots_pattern(pattern)\n"
-    )
-    assert len(_robots_compile_call_offenders(impostor, REPO_ROOT / "app" / "_synthetic.py")) == 1
+        "        return build()\n",
+    ),
+    proof_path=REPO_ROOT / "app" / "_synthetic.py",
+)
+
+
+def test_robots_pattern_compile_lives_behind_the_per_host_cache():
+    ROBOTS_PATTERN_COMPILE_LIVES_BEHIND_THE_PER_HOST_CACHE.scan()
+
+
+def test_robots_pattern_compile_detector_bites():
+    ROBOTS_PATTERN_COMPILE_LIVES_BEHIND_THE_PER_HOST_CACHE.check_bites()
 
 
 _COMMENT_CLONE_MIN_LINES = 3

@@ -19,10 +19,7 @@ from scripts.ast_scopes import is_body_owner
 from tests.chokepoint_walks import (
     APP_ROOT,
     REPO_ROOT,
-    SANCTIONED,
-    app_offenders,
     app_trees,
-    assert_detector,
     assignment_targets,
     attribute_reads,
     call_nodes,
@@ -46,9 +43,9 @@ from tests.invariants._shared import (
     _enclosing_calls,
     _relative_app_path,
     assert_property_detector_bites,
-    assert_trees_clean,
 )
 from tests.property_registry import Property
+from tests.rules import Bites, Rule, Silent
 
 
 def _job_engine_payload_chokepoint_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
@@ -93,34 +90,43 @@ def _job_engine_payload_chokepoint_offenders(tree: ast.AST, path: pathlib.Path) 
     return offenders
 
 
+JOB_ENGINE_PAYLOAD_USES_SINGLE_BUILDER = Rule(
+    name="job-engine-payload-uses-single-builder",
+    find=_job_engine_payload_chokepoint_offenders,
+    summary=(
+        "Build whole-site engine payloads only with _job_engine_payload, "
+        "so a new call site to _execute_crawl cannot silently skip the builder"
+    ),
+    proof_path=REPO_ROOT / "app" / "api" / "job_runner.py",
+    bite=lambda: (
+        Bites(
+            "async def run(job, batch):\n"
+            "    payload = {'urls': batch, 'policy': dict(job.policy)}\n"
+            "    await _execute_crawl(payload)\n",
+            "payload bypasses _job_engine_payload",
+        ),
+        # An alias of the executor is the same bypass spelled a second way.
+        Bites(
+            "async def run(job, batch):\n"
+            "    execute = _execute_crawl\n"
+            "    await execute({'urls': batch, 'policy': {}})\n",
+            "payload bypasses _job_engine_payload",
+        ),
+    ),
+    clean=lambda: (
+        "async def run(job, batch):\n"
+        "    payload = _job_engine_payload(job, batch)\n"
+        "    await _execute_crawl(payload)\n",
+    ),
+)
+
+
 def test_job_engine_payload_uses_single_builder():
-    assert_trees_clean(
-        _job_engine_payload_chokepoint_offenders,
-        "Build whole-site engine payloads only with _job_engine_payload",
-        trees=app_trees(exclude=SANCTIONED),
-    )
+    JOB_ENGINE_PAYLOAD_USES_SINGLE_BUILDER.scan()
 
 
 def test_job_engine_payload_chokepoint_detector_bites():
-    pre_fix = ast.parse(
-        "async def run(job, batch):\n"
-        "    payload = {'urls': batch, 'policy': dict(job.policy)}\n"
-        "    await _execute_crawl(payload)\n"
-    )
-    alias = ast.parse(
-        "async def run(job, batch):\n"
-        "    execute = _execute_crawl\n"
-        "    await execute({'urls': batch, 'policy': {}})\n"
-    )
-    path = REPO_ROOT / "app" / "api" / "job_runner.py"
-    assert _job_engine_payload_chokepoint_offenders(pre_fix, path)
-    assert _job_engine_payload_chokepoint_offenders(alias, path)
-    good = ast.parse(
-        "async def run(job, batch):\n"
-        "    payload = _job_engine_payload(job, batch)\n"
-        "    await _execute_crawl(payload)\n"
-    )
-    assert not _job_engine_payload_chokepoint_offenders(good, path)
+    JOB_ENGINE_PAYLOAD_USES_SINGLE_BUILDER.check_bites()
 
 
 # The strategy chain's raise-chokepoint. A strategy is a STEP in a ladder, so
@@ -178,70 +184,76 @@ def _unguarded_strategy_runner_offenders(tree: ast.AST, path: pathlib.Path) -> l
     return offenders
 
 
-def test_every_strategy_runner_call_is_guarded():
-    assert_trees_clean(
-        _unguarded_strategy_runner_offenders,
-        "A strategy that raises must become a failed step, not escape the chain",
-        trees=app_trees(exclude=SANCTIONED),
-    )
-
-
-def test_strategy_runner_guard_detector_bites():
-    path = REPO_ROOT / "app" / "crawl" / "strategy_chain.py"
-    pre_fix = ast.parse(
-        "async def _execute_strategy(context, strategy):\n"
-        "    if strategy in HTTP_STRATEGIES:\n"
-        "        return await _run_http_strategy(context, strategy)\n"
-        "    return await _run_browser_strategy(context, strategy)\n"
-    )
-    assert _unguarded_strategy_runner_offenders(pre_fix, path)
-    # A narrow handler is not a guard: a bare ``except TypeError`` lets every
-    # other raise through, which is the shape the bug shipped as.
-    narrow = ast.parse(
-        "async def _execute_strategy(context, strategy):\n"
-        "    try:\n"
-        "        return await _run_http_strategy(context, strategy)\n"
-        "    except TypeError:\n"
-        "        return None\n"
-    )
-    assert _unguarded_strategy_runner_offenders(narrow, path)
-    good = ast.parse(
+STRATEGY_RUNNERS_ARE_CALLED_UNDER_A_GUARD = Rule(
+    name="strategy-runners-are-called-under-a-guard",
+    find=_unguarded_strategy_runner_offenders,
+    summary=(
+        "A strategy that raises must become a classified failed step that the ladder "
+        "moves on from, not an exception that escapes the chain; call each runner "
+        "inside a try with an except Exception"
+    ),
+    proof_path=REPO_ROOT / "app" / "crawl" / "strategy_chain.py",
+    bite=lambda: (
+        # Both runners called bare, outside any try: each unguarded call is a finding.
+        Bites(
+            "async def _execute_strategy(context, strategy):\n"
+            "    if strategy in HTTP_STRATEGIES:\n"
+            "        return await _run_http_strategy(context, strategy)\n"
+            "    return await _run_browser_strategy(context, strategy)\n",
+            "invoked outside a try/except Exception",
+            count=2,
+        ),
+        # A narrow handler is not a guard: a bare except TypeError lets every
+        # other raise through, which is the shape the bug shipped as.
+        Bites(
+            "async def _execute_strategy(context, strategy):\n"
+            "    try:\n"
+            "        return await _run_http_strategy(context, strategy)\n"
+            "    except TypeError:\n"
+            "        return None\n",
+            "invoked outside a try/except Exception",
+        ),
+        # The runner reached as a METHOD is the same sink. A detector that matched
+        # only a bare name goes blind at the moment the runner becomes a method --
+        # which is a refactor that looks like it cannot weaken the invariant.
+        Bites(
+            "class Run:\n"
+            "    async def execute(self, strategy):\n"
+            "        return await self._run_browser_strategy(strategy)\n",
+            "invoked outside a try/except Exception",
+        ),
+    ),
+    clean=lambda: (
+        # The guarded form parses and is spared.
         "async def _execute_strategy(context, strategy):\n"
         "    try:\n"
         "        return await _run_http_strategy(context, strategy)\n"
         "    except Exception as error:\n"
-        "        return _engine_result_from_exception(error=error)\n"
-    )
-    assert not _unguarded_strategy_runner_offenders(good, path)
-    # The guard is satisfied by an enclosing try too, not only a sibling one.
-    enclosing = ast.parse(
+        "        return _engine_result_from_exception(error=error)\n",
+        # The guard is satisfied by an enclosing try too, not only a sibling one.
         "async def _execute_strategy(context, strategy):\n"
         "    try:\n"
         "        if strategy:\n"
         "            return await _run_browser_strategy(context, strategy)\n"
         "    except Exception:\n"
-        "        return None\n"
-    )
-    assert not _unguarded_strategy_runner_offenders(enclosing, path)
-    # The runner reached as a METHOD is the same sink. A detector that matched
-    # only a bare name goes blind at the moment the runner becomes a method --
-    # which is a refactor that looks like it cannot weaken the invariant, and is
-    # therefore the one most likely to make it silently unenforced.
-    method_unguarded = ast.parse(
-        "class Run:\n"
-        "    async def execute(self, strategy):\n"
-        "        return await self._run_browser_strategy(strategy)\n"
-    )
-    assert _unguarded_strategy_runner_offenders(method_unguarded, path)
-    method_guarded = ast.parse(
+        "        return None\n",
+        # A method form under the guard stays clean.
         "class Run:\n"
         "    async def execute(self, strategy):\n"
         "        try:\n"
         "            return await self._run_browser_strategy(strategy)\n"
         "        except Exception as error:\n"
-        "            return _engine_result_from_exception(error=error)\n"
-    )
-    assert not _unguarded_strategy_runner_offenders(method_guarded, path)
+        "            return _engine_result_from_exception(error=error)\n",
+    ),
+)
+
+
+def test_every_strategy_runner_call_is_guarded():
+    STRATEGY_RUNNERS_ARE_CALLED_UNDER_A_GUARD.scan()
+
+
+def test_strategy_runner_guard_detector_bites():
+    STRATEGY_RUNNERS_ARE_CALLED_UNDER_A_GUARD.check_bites()
 
 
 _KNOB_PATTERN = re.compile(r"\bCRAWLUTRON_[A-Z0-9_]+\b")
@@ -795,31 +807,42 @@ def _ddl_offenders(tree: ast.AST, path: pathlib.Path, prop: Property) -> list[st
     return found
 
 
+DDL_IS_CONFINED_TO_THE_MIGRATIONS_PACKAGE = Rule(
+    name="ddl-is-confined-to-the-migrations-package",
+    find=lambda tree, path: _ddl_offenders(tree, path, _MIGRATION_DDL_PROPERTY),
+    summary=(
+        "CREATE/ALTER/DROP statements belong only in app/crawl/migrations, where "
+        "they are ordered and reversible; a DDL statement anywhere else is a "
+        "schema change that ships without a migration"
+    ),
+    # The scan needs every module including the sanctioned wrappers, not the
+    # default SANCTIONED exclusion.
+    scope=lambda *, exclude: app_trees(exclude=frozenset()),
+    bite=lambda: Bites(
+        "def bypass(conn):\n"
+        "    conn.execute('CREATE TABLE x (id TEXT)')\n"
+        "    conn.execute('ALTER TABLE x ADD COLUMN y TEXT')\n"
+        "    conn.execute('DROP TABLE x')\n",
+        "CREATE TABLE",
+        count=3,
+    ),
+    clean=lambda: (
+        # The migrations package is where DDL is allowed, so this shape is spared
+        # there and must fire at every other module.
+        Silent(
+            "def apply(conn):\n    conn.execute('CREATE TABLE x (id TEXT)')\n",
+            at=REPO_ROOT / "app" / "crawl" / "migrations" / "0001_crawl_jobs_initial.py",
+        ),
+    ),
+)
+
+
 def test_ddl_is_confined_to_the_migrations_package():
-    offenders = [
-        found
-        for path, tree in app_trees(exclude=frozenset())
-        for found in _ddl_offenders(tree, path, _MIGRATION_DDL_PROPERTY)
-    ]
-    assert not offenders, "DDL outside app/crawl/migrations: " + ", ".join(offenders)
+    DDL_IS_CONFINED_TO_THE_MIGRATIONS_PACKAGE.scan()
 
 
 def test_ddl_detector_bites():
-    assert_property_detector_bites(
-        _MIGRATION_DDL_PROPERTY,
-        _ddl_offenders,
-        caught={
-            "create alter drop": (
-                "def bypass(conn):\n"
-                "    conn.execute('CREATE TABLE x (id TEXT)')\n"
-                "    conn.execute('ALTER TABLE x ADD COLUMN y TEXT')\n"
-                "    conn.execute('DROP TABLE x')\n",
-                3,
-            )
-        },
-        quiet="def apply(conn):\n    conn.execute('CREATE TABLE x (id TEXT)')\n",
-        quiet_path=REPO_ROOT / "app" / "crawl" / "migrations" / "0001_crawl_jobs_initial.py",
-    )
+    DDL_IS_CONFINED_TO_THE_MIGRATIONS_PACKAGE.check_bites()
 
 
 # --- MCP tool request models --------------------------------------------------
@@ -836,16 +859,12 @@ _MCP_TOOLS_MODULE = "app/mcp/tools.py"
 def _mcp_unvalidated_tool_offenders(tree, path, *, tools_module):
     if path.name != tools_module:
         return
-    for node in ast.walk(tree):
-        if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Name):
-            continue
-        if node.func.id != "ToolSpec":
-            continue
-        named = {kw.arg for kw in node.keywords if kw.arg}
+    for call in calls_to_any(tree, {"ToolSpec"}):
+        named = {kw.arg for kw in call.keywords if kw.arg}
         if "request_model" not in named:
             yield offender_at(
                 path,
-                node,
+                call,
                 "ToolSpec registers a tool without a request_model; the inputSchema and the call's argument "
                 "validation are both derived from it, so a tool without one has no validated contract",
             )
@@ -863,33 +882,48 @@ def _mcp_unvalidated_tool_offenders(tree, path, *, tools_module):
                 )
 
 
+#: The module's own basename, compared by the detector to each swept file's
+#: ``path.name``. The old scan passed the full repo-relative path, which never
+#: matched a basename -- sweeping nothing and reporting green. Passing the
+#: basename is what actually confines the rule to app/mcp/tools.py.
+_MCP_TOOLS_BASENAME = "tools.py"
+
+
+EVERY_MCP_TOOL_DECLARES_THE_MODEL_THAT_VALIDATES_ITS_ARGUMENTS = Rule(
+    name="every-mcp-tool-declares-the-model-that-validates-its-arguments",
+    find=lambda tree, path: _mcp_unvalidated_tool_offenders(tree, path, tools_module=_MCP_TOOLS_BASENAME),
+    summary=(
+        "The inputSchema and the call's argument validation are both derived from "
+        "the pydantic request model, so a tool without one has no validated "
+        "contract and a handler that derives its own schema bypasses the dispatcher"
+    ),
+    proof_path=REPO_ROOT / _MCP_TOOLS_MODULE,
+    bite=lambda: (
+        Bites(
+            "def register():\n    return ToolSpec(\n        name='x',\n        description='d',\n"
+            "        output_schema=None,\n        handler=h,\n    )\n",
+            "no validated contract",
+        ),
+        # A handler that builds its own schema is the other half of the bypass.
+        Bites(
+            "async def _handle_x(payload, settings, shutdown_event):\n"
+            "    schema = CrawlRequest.model_json_schema()\n"
+            "    return schema\n",
+            "still derives a schema itself",
+        ),
+    ),
+)
+
+
 def test_every_mcp_tool_declares_the_model_that_validates_its_arguments():
-    offenders = app_offenders(_mcp_unvalidated_tool_offenders, tools_module=_MCP_TOOLS_MODULE)
-    assert not offenders, "an MCP tool is missing its validated contract: " + ", ".join(offenders)
+    EVERY_MCP_TOOL_DECLARES_THE_MODEL_THAT_VALIDATES_ITS_ARGUMENTS.scan()
 
 
 def test_mcp_request_model_detector_bites():
     from app.mcp.tools import TOOL_SPECS
 
-    missing = ast.parse(
-        "def register():\n    return ToolSpec(\n        name='x',\n        description='d',\n"
-        "        output_schema=None,\n        handler=h,\n    )\n"
-    )
-    offenders = list(
-        _mcp_unvalidated_tool_offenders(
-            missing, REPO_ROOT / "crawl" / "synthetic.py", tools_module="synthetic.py"
-        )
-    )
-    assert offenders, "a ToolSpec without a request_model escaped the sweep"
-    # A handler that builds its own schema is the other half of the bypass.
-    self_scheming = ast.parse(
-        "async def _handle_x(payload, settings, shutdown_event):\n"
-        "    schema = CrawlRequest.model_json_schema()\n"
-        "    return schema\n"
-    )
-    assert list(
-        _mcp_unvalidated_tool_offenders(self_scheming, REPO_ROOT / _MCP_TOOLS_MODULE, tools_module="tools.py")
-    ), "a handler deriving its own schema escaped the sweep"
+    EVERY_MCP_TOOL_DECLARES_THE_MODEL_THAT_VALIDATES_ITS_ARGUMENTS.check_bites()
+
     # And the live registry must satisfy the invariant the guard asserts.
     for spec in TOOL_SPECS:
         assert spec.request_model is not None, spec.name
@@ -1056,31 +1090,44 @@ def _cycle_guard_offenders(
     ]
 
 
+CYCLE_GUARD_IS_CONSULTED_IN_EXACTLY_ONE_PLACE = Rule(
+    name="cycle-guard-is-consulted-in-exactly-one-place",
+    find=_cycle_guard_offenders,
+    summary=(
+        "app/models.py consults the cycle guard in one function; a call from "
+        "an arm re-inlines the 'descend, give up if already on the path' pair it "
+        "was deduped away from, so route every arm through the owner"
+    ),
+    proof_path=REPO_ROOT / "app" / "models.py",
+    bite=lambda: (
+        Bites(
+            "def arm(value, seen):\n    entered = _entered(value, seen)\n    return entered\n",
+            "is called from 'arm', not _build_guarded()",
+        ),
+        Bites("entered = _entered(value, seen)\n", "is called from '<module>'"),
+    ),
+    clean=lambda: (
+        f"def {_CYCLE_GUARD_OWNER}(value, seen, build):\n"
+        "    entered = _entered(value, seen)\n"
+        "    return build(value, entered)\n",
+    ),
+)
+
+
 def test_the_cycle_guard_is_applied_in_exactly_one_place():
     """app/models.py consults the cycle guard in one function, not once per container arm."""
-    offenders = app_offenders(_cycle_guard_offenders)
-    assert not offenders, "the cycle guard is applied outside its single owner: " + ", ".join(offenders)
+    CYCLE_GUARD_IS_CONSULTED_IN_EXACTLY_ONE_PLACE.scan()
 
 
 def test_cycle_guard_detector_bites():
     """A guard call inlined at an arm fires; the same call in the owner stays clean."""
-    assert_detector(
-        _cycle_guard_offenders,
-        path=REPO_ROOT / "app" / "models.py",
-        fires={
-            "def arm(value, seen):\n"
-            "    entered = _entered(value, seen)\n"
-            "    return entered\n": "is called from 'arm', not _build_guarded()",
-            "entered = _entered(value, seen)\n": "is called from '<module>'",
-        },
-        clean=(
-            f"def {_CYCLE_GUARD_OWNER}(value, seen, build):\n"
-            "    entered = _entered(value, seen)\n"
-            "    return build(value, entered)\n",
-        ),
-    )
-    # An owner by another name is still a second place, so the rule is about
-    # being the one sanctioned function rather than about a literal spelling.
+    CYCLE_GUARD_IS_CONSULTED_IN_EXACTLY_ONE_PLACE.check_bites()
+
+
+def test_cycle_guard_detector_respects_the_owner_parameter():
+    # An owner by another name is still a second place, so the rule is about being
+    # the one sanctioned function rather than about a literal spelling. Stated as a
+    # direct detector call because the Rule layer hands one owner to every proof.
     assert _cycle_guard_offenders(
         ast.parse("def other(value, seen):\n    return _entered(value, seen)\n"),
         REPO_ROOT / "app" / "models.py",
@@ -1156,38 +1203,50 @@ def _private_store_lock_offenders(tree: ast.AST, path: pathlib.Path) -> list[str
     return offenders
 
 
+STORES_SERIALIZE_ON_THE_FILES_PROCESS_LOCK = Rule(
+    name="stores-serialize-on-the-files-process-lock",
+    find=_private_store_lock_offenders,
+    summary=(
+        "A per-instance threading.Lock excludes that store from no other process, "
+        "so a write can run straight through a migration in flight; serialize on "
+        "process_lock(store_lock_key(db_path))"
+    ),
+    proof_path=REPO_ROOT / "app" / "crawl" / "store.py",
+    bite=lambda: (
+        Bites(
+            "class Store:\n"
+            "    def __init__(self, db_path):\n"
+            "        self._conn = connect_store(db_path, schema=schema)\n"
+            "        self._lock = threading.Lock()\n",
+            "private lock, not process_lock",
+        ),
+        Bites(
+            "class Store:\n"
+            "    def __init__(self, db_path):\n"
+            "        self._conn = connect_store(db_path, schema=schema)\n"
+            "        self._lock = threading.RLock()\n",
+            "private lock, not process_lock",
+        ),
+    ),
+    clean=lambda: (
+        "class Store:\n"
+        "    def __init__(self, db_path):\n"
+        "        self._lock = process_lock(store_lock_key(db_path))\n"
+        "        self._conn = connect_store(db_path, schema=schema)\n",
+        # A module-level guard is not a store's write lock, and banning it would
+        # be the rule being wrong rather than the code.
+        "_PROCESS_LOCKS_GUARD = threading.Lock()\n",
+        # State no other process can reach. A private lock is the right answer
+        # here, which is the whole reason the rule is scoped to the connection
+        # chokepoint rather than banning the constructor.
+        "class RobotsCache:\n    def __init__(self):\n        self._lock = threading.Lock()\n",
+    ),
+)
+
+
 def test_stores_serialize_on_the_files_process_lock():
-    assert_trees_clean(
-        _private_store_lock_offenders,
-        "Stores must serialize writes on process_lock(store_lock_key(db_path))",
-    )
+    STORES_SERIALIZE_ON_THE_FILES_PROCESS_LOCK.scan()
 
 
 def test_private_store_lock_detector_bites():
-    assert_detector(
-        _private_store_lock_offenders,
-        path=REPO_ROOT / "app" / "crawl" / "store.py",
-        fires={
-            "class Store:\n"
-            "    def __init__(self, db_path):\n"
-            "        self._conn = connect_store(db_path, schema=schema)\n"
-            "        self._lock = threading.Lock()\n": "private lock",
-            "class Store:\n"
-            "    def __init__(self, db_path):\n"
-            "        self._conn = connect_store(db_path, schema=schema)\n"
-            "        self._lock = threading.RLock()\n": "private lock",
-        },
-        clean=(
-            "class Store:\n"
-            "    def __init__(self, db_path):\n"
-            "        self._lock = process_lock(store_lock_key(db_path))\n"
-            "        self._conn = connect_store(db_path, schema=schema)\n",
-            # A module-level guard is not a store's write lock, and banning it
-            # would be the rule being wrong rather than the code.
-            "_PROCESS_LOCKS_GUARD = threading.Lock()\n",
-            # State no other process can reach. A private lock is the right
-            # answer here, which is the whole reason the rule is scoped to the
-            # connection chokepoint rather than banning the constructor.
-            "class RobotsCache:\n    def __init__(self):\n        self._lock = threading.Lock()\n",
-        ),
-    )
+    STORES_SERIALIZE_ON_THE_FILES_PROCESS_LOCK.check_bites()

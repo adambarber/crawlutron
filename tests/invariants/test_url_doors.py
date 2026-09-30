@@ -13,9 +13,7 @@ import pathlib
 from tests.chokepoint_walks import (
     REPO_ROOT,
     SANCTIONED,
-    app_offenders,
     app_trees,
-    assert_detector,
     assignment_targets,
     callable_defs,
     enclosing_function,
@@ -35,10 +33,10 @@ from tests.invariants._shared import (
     _SCOPE_COMPILER_NAMES,
     _SCOPE_PATTERN_LENGTH_BOUND,
     assert_property_detector_bites,
-    assert_trees_clean,
     function_defs,
 )
 from tests.property_registry import Property
+from tests.rules import Bites, Rule, Silent
 
 # --- SafeUrl chokepoint (final review) ------------------------------------
 
@@ -85,14 +83,32 @@ def _hand_rolled_redirect_hops(tree: ast.AST, path: pathlib.Path) -> list[str]:
     return offenders
 
 
+REDIRECT_HOPS_GO_THROUGH_SAFEURL_REDIRECT_HOP = Rule(
+    name="redirect-hops-go-through-safeurl-redirect-hop",
+    find=_hand_rolled_redirect_hops,
+    summary=(
+        "A hand-rolled redirect hop is the 'forgot one of the five steps' class "
+        "SafeUrl exists to kill; use SafeUrl.redirect_hop (or the pinned fetch "
+        "helper) rather than a raw urljoin combined with a 3xx status test"
+    ),
+    excludes=SANCTIONED | {"safe_url.py"},
+    bite=lambda: Bites(
+        "def hop(location, base):\n    if code in (301, 302):\n        return urljoin(base, location)\n",
+        "hop()",
+    ),
+    clean=lambda: ("def link(href, base):\n    return SafeUrl.redirect_hop(href, base)\n",),
+)
+
+
 def test_no_hand_rolled_redirect_hops():
     """Redirect hops anywhere go through SafeUrl.redirect_hop (or the pinned
     fetch helper), never a raw urljoin combined with a 3xx status test."""
-    assert_trees_clean(
-        _hand_rolled_redirect_hops,
-        "Use SafeUrl.redirect_hop for redirect hops",
-        trees=app_trees(exclude=SANCTIONED | {"safe_url.py"}),
-    )
+    REDIRECT_HOPS_GO_THROUGH_SAFEURL_REDIRECT_HOP.scan()
+
+
+def test_redirect_hops_detector_bites():
+    """A urljoin that tests a redirect status and skips the chokepoint fires."""
+    REDIRECT_HOPS_GO_THROUGH_SAFEURL_REDIRECT_HOP.check_bites()
 
 
 _CANONICALIZER = frozenset({"normalize_public_http_url"})
@@ -136,25 +152,33 @@ def _raw_batch_dedup_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
     return offenders
 
 
+BATCH_DEDUP_KEYS_ON_CANONICAL_PAGE_IDENTITY = Rule(
+    name="batch-dedup-keys-on-canonical-page-identity",
+    find=_raw_batch_dedup_offenders,
+    summary=(
+        "The url-batch dedup must collapse duplicates by canonical page identity "
+        "(normalize_public_http_url), not the raw string, or a request carrying "
+        "both .../x and .../x/?utm_source=tw crawls one page twice"
+    ),
+    bite=lambda: Bites(
+        "def _payload_urls(payload):\n    return list(dict.fromkeys(payload['urls']))\n",
+        "dedups a batch with dict.fromkeys, not the canonicalizer",
+    ),
+    clean=lambda: (
+        "def _payload_urls(payload):\n"
+        "    return [u for u in payload['urls'] if normalize_public_http_url(u) not in seen]\n",
+    ),
+)
+
+
 def test_batch_dedup_keys_on_canonical_page_identity():
     """URL-batch dedup must collapse by ``normalize_public_http_url``, never raw strings."""
-    assert_trees_clean(
-        _raw_batch_dedup_offenders,
-        "dedup url batches via normalize_public_http_url, not raw dict.fromkeys",
-        trees=app_trees(),
-    )
+    BATCH_DEDUP_KEYS_ON_CANONICAL_PAGE_IDENTITY.scan()
 
 
 def test_batch_dedup_detector_bites():
-    raw = ast.parse("def _payload_urls(payload):\n    return list(dict.fromkeys(payload['urls']))\n")
-    assert _raw_batch_dedup_offenders(raw, REPO_ROOT / "app" / "crawl" / "_synthetic.py"), (
-        "detector missed raw dict.fromkeys dedup"
-    )
-    good = ast.parse(
-        "def _payload_urls(payload):\n"
-        "    return [u for u in payload['urls'] if normalize_public_http_url(u) not in seen]\n"
-    )
-    assert not _raw_batch_dedup_offenders(good, REPO_ROOT / "app" / "crawl" / "_synthetic.py")
+    """A raw dict.fromkeys batch dedup fires; the canonicalized form stays clean."""
+    BATCH_DEDUP_KEYS_ON_CANONICAL_PAGE_IDENTITY.check_bites()
 
 
 def _bare_body_reads(tree: ast.AST, path: pathlib.Path) -> list[str]:
@@ -189,6 +213,22 @@ def _is_response_like(node: ast.expr | None) -> bool:
     return head.startswith("response") or head.startswith("resp") or head in {"r"}
 
 
+EVERY_HTTP_BODY_READ_IS_CAPPED = Rule(
+    name="every-http-body-read-is-capped",
+    find=_bare_body_reads,
+    summary=(
+        "A response.read() with no size arg, or response.content, pulls the whole "
+        "body into RAM; use app.bounded_io.read_capped_async instead"
+    ),
+    excludes=SANCTIONED | {"bounded_io.py"},
+    bite=lambda: (
+        Bites("def f(resp):\n    return resp.read()\n", ".read()"),
+        Bites("def f(resp):\n    return resp.content\n", ".content"),
+    ),
+    clean=lambda: ("def f(resp):\n    return read_capped_async(resp)\n",),
+)
+
+
 def test_no_bare_body_reads():
     """Every HTTP body read anywhere must be capped ().
 
@@ -197,11 +237,12 @@ def test_no_bare_body_reads():
     Widening kept precise on the response-object convention to avoid flagging
     file/socket reads.
     """
-    assert_trees_clean(
-        _bare_body_reads,
-        "Use app.bounded_io.read_capped_async",
-        trees=app_trees(exclude=SANCTIONED | {"bounded_io.py"}),
-    )
+    EVERY_HTTP_BODY_READ_IS_CAPPED.scan()
+
+
+def test_bare_body_read_detector_bites():
+    """Both unbounded read() and .content fire on a response-like receiver."""
+    EVERY_HTTP_BODY_READ_IS_CAPPED.check_bites()
 
 
 def _scope_matcher_definitions() -> list[str]:
@@ -295,9 +336,30 @@ def _unpinned_safe_url_parses(tree, path):
     return offenders
 
 
+SAFE_URL_PARSE_ALWAYS_PINS = Rule(
+    name="safe-url-parse-always-pins",
+    find=_unpinned_safe_url_parses,
+    summary=(
+        "An unpinned SafeUrl.parse is the DNS-rebinding window: validation resolves "
+        "one IP and connect re-resolves at open time, so every call site must pass "
+        "an explicit pin=True"
+    ),
+    excludes=SANCTIONED | {"safe_url.py"},
+    bite=lambda: Bites(
+        "def f(url):\n    return SafeUrl.parse(url)\n",
+        "must pass pin=True",
+    ),
+    clean=lambda: ("def f(url):\n    return SafeUrl.parse(url, pin=True)\n",),
+)
+
+
 def test_safe_url_parse_always_pins():
-    offenders = app_offenders(_unpinned_safe_url_parses, exclude=SANCTIONED | {"safe_url.py"})
-    assert not offenders, "unpinned SafeUrl.parse (DNS-rebinding window): " + "; ".join(offenders)
+    SAFE_URL_PARSE_ALWAYS_PINS.scan()
+
+
+def test_safe_url_parse_detector_bites():
+    """A parse without an explicit pin fires; the pinned form stays clean."""
+    SAFE_URL_PARSE_ALWAYS_PINS.check_bites()
 
 
 def test_no_inline_pinned_url_composition():
@@ -441,54 +503,78 @@ def _optional_host_policy_offenders(tree, path):
                 )
 
 
+HOST_POLICY_IS_NEVER_OPTIONAL = Rule(
+    name="host-policy-is-never-optional",
+    find=_optional_host_policy_offenders,
+    summary=(
+        "A HostPolicy parameter must be required everywhere in app/; an optional "
+        "one is an SSRF bypass that neither mypy nor any other guard catches, so "
+        "a caller that omits the policy must get a TypeError rather than a default"
+    ),
+    bite=lambda: (
+        Bites(
+            "async def f(url, *, policy: HostPolicy = HostPolicy((), ())):\n    return url\n",
+            "is a HostPolicy and is optional",
+        ),
+        # A default on a *positional* HostPolicy is caught too, not just the
+        # keyword-only form the mutations used.
+        Bites(
+            "def g(policy: HostPolicy = HostPolicy((), ())):\n    pass\n",
+            "is a HostPolicy and is optional",
+        ),
+    ),
+    clean=lambda: (
+        # The required form is left alone, and so is a required parameter the rule
+        # does not key off -- it is the annotation that matters, not the name.
+        "async def h(url, *, policy: HostPolicy, host_policy: HostPolicy, other: str = 'x'):\n"
+        "    return url\n",
+    ),
+)
+
+
 def test_the_host_policy_is_never_optional():
-    offenders = app_offenders(_optional_host_policy_offenders)
-    assert not offenders, (
-        "a HostPolicy parameter must be required everywhere in app/; an optional one is an "
-        "SSRF bypass that neither mypy nor any other guard catches: " + ", ".join(offenders)
-    )
+    HOST_POLICY_IS_NEVER_OPTIONAL.scan()
 
 
 def test_optional_host_policy_detector_bites():
-    bad = ast.parse("async def f(url, *, policy: HostPolicy = HostPolicy((), ())):\n    return url\n")
-    found = list(_optional_host_policy_offenders(bad, REPO_ROOT / "app" / "_synthetic.py"))
-    assert len(found) == 1, found
-    assert "is a HostPolicy and is optional" in found[0], found
-
-    # A default on a *positional* HostPolicy is caught too, not just the
-    # keyword-only form the mutations used.
-    positional = ast.parse("def g(policy: HostPolicy = HostPolicy((), ())):\n    pass\n")
-    assert list(_optional_host_policy_offenders(positional, REPO_ROOT / "app" / "_synthetic.py"))
-
-    # The required form is left alone, and so is a required parameter the rule
-    # does not key off -- it is the annotation that matters, not the name.
-    good = ast.parse(
-        "async def h(url, *, policy: HostPolicy, host_policy: HostPolicy, other: str = 'x'):\n"
-        "    return url\n"
-    )
-    assert not list(_optional_host_policy_offenders(good, REPO_ROOT / "app" / "_synthetic.py"))
+    """A defaulted keyword or positional HostPolicy fires; required stays clean."""
+    HOST_POLICY_IS_NEVER_OPTIONAL.check_bites()
 
 
-def test_no_raw_href_frontier_sinks():
-    """The frontier only ever carries frontier_link_url()-validated URLs."""
-    assert_trees_clean(
-        _frontier_sink_offenders,
-        "Read normalized_url via frontier_link_url(), never raw url",
-        trees=app_trees(),
-    )
-
-
-def test_raw_href_frontier_detector_bites():
-    """Prove the detector fires on the historical shape."""
-    bad = ast.parse(
+FRONTIER_CARRIES_ONLY_LINK_VALIDATED_URLS = Rule(
+    name="frontier-carries-only-link-validated-urls",
+    find=_frontier_sink_offenders,
+    summary=(
+        "The frontier only ever carries frontier_link_url()-validated URLs; a raw "
+        "href read straight out of a payload, or a same-function binding of one, "
+        "is an unvalidated URL entering the crawl queue"
+    ),
+    bite=lambda: Bites(
         "async def _run(job, item):\n"
         "    for link in item.get('discovered_links') or []:\n"
         "        link_url = link.get('url') if isinstance(link, dict) else str(link)\n"
         "        if link_url:\n"
-        "            job.frontier.append(link_url)\n"
-    )
-    offenders = _frontier_sink_offenders(bad, REPO_ROOT / "app" / "api" / "_synthetic.py")
-    assert len(offenders) == 1 and "frontier.append" in offenders[0], offenders
+        "            job.frontier.append(link_url)\n",
+        "frontier.append",
+    ),
+    clean=lambda: (
+        "async def _run(job, item):\n"
+        "    for link in item.get('discovered_links') or []:\n"
+        "        link_url = frontier_link_url(link)\n"
+        "        if link_url:\n"
+        "            job.frontier.append(link_url)\n",
+    ),
+)
+
+
+def test_no_raw_href_frontier_sinks():
+    """The frontier only ever carries frontier_link_url()-validated URLs."""
+    FRONTIER_CARRIES_ONLY_LINK_VALIDATED_URLS.scan()
+
+
+def test_raw_href_frontier_detector_bites():
+    """Prove the detector fires on the historical shape."""
+    FRONTIER_CARRIES_ONLY_LINK_VALIDATED_URLS.check_bites()
 
 
 # ---------------------------------------------------------------------------
@@ -534,16 +620,15 @@ def _unchecked_parameter_return_offenders(tree, path) -> list[str]:
     return offenders
 
 
-def test_path_validators_never_return_an_unchecked_parameter():
-    offenders = app_offenders(_unchecked_parameter_return_offenders)
-    assert not offenders, "; ".join(offenders)
-
-
-def test_unchecked_parameter_return_detector_bites():
-    synthetic = REPO_ROOT / "app" / "_synthetic.py"
-    # The exact shape that shipped: an allowlist, plus a branch that returns the
-    # caller's string before the allowlist ever sees it.
-    bad = ast.parse(
+PATH_VALIDATORS_RETURN_AN_ALLOWLISTED_VALUE_OR_NONE = Rule(
+    name="path-validators-return-an-allowlisted-value-or-none",
+    find=_unchecked_parameter_return_offenders,
+    summary=(
+        "A function that allowlists by resolving and testing containment must not, "
+        "on some other branch, return the caller's unvalidated input; a path "
+        "validator returns a resolved, allowlisted path or None"
+    ),
+    bite=lambda: Bites(
         "def _validate_storage_state_path(self, storage_state: str) -> str | None:\n"
         '    if storage_state in {"default", "session"}:\n'
         "        return storage_state\n"
@@ -554,12 +639,11 @@ def test_unchecked_parameter_return_detector_bites():
         "            return str(path)\n"
         "        except ValueError:\n"
         "            continue\n"
-        "    return None\n"
-    )
-    assert len(_unchecked_parameter_return_offenders(bad, synthetic)) == 1
-
-    # The fixed shape: only a resolved, allowlisted path ever comes back.
-    good = ast.parse(
+        "    return None\n",
+        "returns its own parameter",
+    ),
+    clean=lambda: (
+        # The fixed shape: only a resolved, allowlisted path ever comes back.
         "def _validate_storage_state_path(self, storage_state: str) -> str | None:\n"
         "    path = Path(storage_state).resolve()\n"
         "    for allowed in allowed_dirs:\n"
@@ -568,23 +652,26 @@ def test_unchecked_parameter_return_detector_bites():
         "            return str(path)\n"
         "        except ValueError:\n"
         "            continue\n"
-        "    return None\n"
-    )
-    assert not _unchecked_parameter_return_offenders(good, synthetic)
-
-    # Without a containment check there is nothing to bypass, so a function that
-    # echoes its input is not this gate's business.
-    no_check = ast.parse("def _label(name: str) -> str:\n    return name\n")
-    assert not _unchecked_parameter_return_offenders(no_check, synthetic)
-
-    # Returning a derived value, or None, is what the contract allows.
-    derived = ast.parse(
+        "    return None\n",
+        # Without a containment check there is nothing to bypass, so a function that
+        # echoes its input is not this gate's business.
+        "def _label(name: str) -> str:\n    return name\n",
+        # Returning a derived value, or None, is what the contract allows.
         "def _resolve(base: str, name: str) -> str | None:\n"
         "    path = (Path(base) / name).resolve()\n"
         "    path.relative_to(base)\n"
-        "    return str(path)\n"
-    )
-    assert not _unchecked_parameter_return_offenders(derived, synthetic)
+        "    return str(path)\n",
+    ),
+)
+
+
+def test_path_validators_never_return_an_unchecked_parameter():
+    PATH_VALIDATORS_RETURN_AN_ALLOWLISTED_VALUE_OR_NONE.scan()
+
+
+def test_unchecked_parameter_return_detector_bites():
+    """The allowlist-vs-return drift shape fires; fixed, derived and None stay clean."""
+    PATH_VALIDATORS_RETURN_AN_ALLOWLISTED_VALUE_OR_NONE.check_bites()
 
 
 _HOST_POLICY_VALIDATORS = frozenset(
@@ -877,56 +964,45 @@ def _required_host_policy_offenders(tree: ast.AST, path: pathlib.Path) -> list[s
     return found
 
 
-def test_required_host_policy_detector_bites():
-    bad = ast.parse("def normalize_public_http_url(url, *, policy=None):\n    return url\n")
-    offenders = _required_host_policy_offenders(
-        bad,
-        REPO_ROOT / "app" / "_synthetic.py",
-    )
-    assert len(offenders) == 1 and "HostPolicy" in offenders[0], offenders
-
-    good = ast.parse(
+URL_RETURNING_HELPERS_REQUIRE_HOST_POLICY = Rule(
+    name="url-returning-helpers-require-host-policy",
+    find=_required_host_policy_offenders,
+    summary=(
+        "Every URL boundary must apply the host policy before forwarding a URL, "
+        "so a function that returns URLs must both require a HostPolicy and route "
+        "the returned URL through it; an optional, unused, or absent policy is a bypass"
+    ),
+    bite=lambda: (
+        Bites(
+            "def normalize_public_http_url(url, *, policy=None):\n    return url\n",
+            "returns URLs without required HostPolicy",
+        ),
+        Bites(
+            "class SafeUrl:\n    def parse(self, url, *, policy=None):\n        return url\n",
+            "returns URLs without required HostPolicy",
+        ),
+        # A method with no policy at all must still be caught.
+        Bites(
+            "class JobStore:\n    def canonical_root(self, root_url):\n        return str(root_url)\n",
+            "returns URLs without required HostPolicy",
+        ),
+    ),
+    clean=lambda: (
         "from app.validation import public_url_or_none\n"
         "def normalize_public_http_url(url, *, policy: HostPolicy):\n"
-        "    return public_url_or_none(url, policy=policy)\n"
-    )
-    assert not _required_host_policy_offenders(
-        good,
-        REPO_ROOT / "app" / "_synthetic.py",
-    )
-    safe_bad = ast.parse("class SafeUrl:\n    def parse(self, url, *, policy=None):\n        return url\n")
-    assert (
-        len(
-            _required_host_policy_offenders(
-                safe_bad,
-                REPO_ROOT / "app" / "_synthetic.py",
-            )
-        )
-        == 1
-    )
-    # The private spelling. ``self._host_policy`` is what this codebase writes
-    # everywhere, and the rule could not see it -- so a method validating through
-    # the instance's own policy read as a method with no policy at all, and the
-    # rule fired on it while staying silent on the one that really had none.
-    via_instance = ast.parse(
+        "    return public_url_or_none(url, policy=policy)\n",
         "from app.validation import public_url_or_none\n"
         "class JobStore:\n"
         "    def __init__(self, host_policy):\n"
         "        self._host_policy = host_policy\n"
         "    def canonical_root(self, root_url):\n"
-        "        return str(public_url_or_none(root_url, policy=self._host_policy))\n"
-    )
-    assert not _required_host_policy_offenders(
-        via_instance,
-        REPO_ROOT / "app" / "_synthetic.py",
-    ), "a method validating through self._host_policy read as having no policy"
-    with_no_policy = ast.parse(
-        "class JobStore:\n    def canonical_root(self, root_url):\n        return str(root_url)\n"
-    )
-    assert _required_host_policy_offenders(
-        with_no_policy,
-        REPO_ROOT / "app" / "_synthetic.py",
-    ), "a method with no policy at all must still be caught"
+        "        return str(public_url_or_none(root_url, policy=self._host_policy))\n",
+    ),
+)
+
+
+def test_required_host_policy_detector_bites():
+    URL_RETURNING_HELPERS_REQUIRE_HOST_POLICY.check_bites()
 
 
 _HOST_POLICY_PROPERTY = Property(
@@ -1017,8 +1093,7 @@ def test_host_policy_detector_accepts_fixed_extraction_boundaries():
 
 
 def test_url_returning_helpers_require_host_policy():
-    offenders = app_offenders(_required_host_policy_offenders)
-    assert not offenders, ", ".join(offenders)
+    URL_RETURNING_HELPERS_REQUIRE_HOST_POLICY.scan()
 
 
 def test_resolved_call_name_handles_getattr_alias_and_static_name():
@@ -1100,27 +1175,35 @@ def _normalize_or_none_offenders(tree, path):
                 )
 
 
-def test_normalize_or_none_is_not_reinlined():
-    offenders = []
+NORMALIZE_OR_NONE_IS_NOT_REINLINED = Rule(
+    name="normalize-or-none-is-not-reinlined",
+    find=_normalize_or_none_offenders,
+    summary=(
+        "The same three-line try/except ValueError wrapper around a normalizer was "
+        "hand-rolled in three modules, each silently dropping the SSRF policy for "
+        "its door; use app.validation.safe_public_url_or_none instead"
+    ),
     # The chokepoint's own definition is the sanctioned site.
-    for path, tree in app_trees(exclude=frozenset({"validation.py"})):
-        offenders.extend(_normalize_or_none_offenders(tree, path))
-    assert not offenders, ", ".join(offenders)
+    scope=lambda *, exclude: app_trees(exclude=frozenset({"validation.py"})),
+    bite=lambda: Bites(
+        "def f(u):\n"
+        "    try:\n"
+        "        return normalize_public_http_url(u)\n"
+        "    except ValueError:\n"
+        "        return None\n",
+        "safe_public_url_or_none",
+    ),
+    clean=lambda: ("def f(u):\n    return safe_public_url_or_none(u)\n",),
+)
+
+
+def test_normalize_or_none_is_not_reinlined():
+    # The chokepoint's own definition is the sanctioned site.
+    NORMALIZE_OR_NONE_IS_NOT_REINLINED.scan()
 
 
 def test_normalize_or_none_detector_bites():
-    assert_detector(
-        _normalize_or_none_offenders,
-        path=REPO_ROOT / "app" / "_synthetic.py",
-        fires={
-            "def f(u):\n"
-            "    try:\n"
-            "        return normalize_public_http_url(u)\n"
-            "    except ValueError:\n"
-            "        return None\n": "safe_public_url_or_none",
-        },
-        clean=("def f(u):\n    return safe_public_url_or_none(u)\n",),
-    )
+    NORMALIZE_OR_NONE_IS_NOT_REINLINED.check_bites()
 
 
 # ---------------------------------------------------------------------------
@@ -1186,31 +1269,45 @@ def _unfiltered_urljoin_return_offenders(tree: ast.AST, path: pathlib.Path) -> l
     return offenders
 
 
+JOINED_URLS_ARE_EGRESS_FILTERED = Rule(
+    name="joined-urls-are-egress-filtered",
+    find=_unfiltered_urljoin_return_offenders,
+    summary=(
+        "A URL resolved out of untrusted text becomes an egress door as soon as a "
+        "caller trusts it, so the join and the filter belong together; filter "
+        "joined URLs through public_url_or_none"
+    ),
+    bite=lambda: (
+        Bites(
+            "def _detect_pagination(html, final_url):\n    return urljoin(final_url, href)\n",
+            "no egress filter",
+        ),
+        # A urljoin bound to a name and returned is the same leak.
+        Bites(
+            "def f(base, href):\n    u = urljoin(base, href)\n    return u\n",
+            "no egress filter",
+        ),
+    ),
+    clean=lambda: (
+        "def f(href, final_url):\n    return public_url_or_none(href, resolve_against=final_url)\n",
+        # Safe_url.py composes urljoin inside SafeUrl.parse / redirect_hop, so the
+        # join is sanctioned there and must fire at every other module.
+        Silent(
+            "def hop(self, location):\n    return SafeUrl.parse(urljoin(self.raw, location), pin=True)\n",
+            at=REPO_ROOT / "app" / "safe_url.py",
+        ),
+    ),
+)
+
+
 def test_no_unfiltered_urljoin_returns():
     """A URL joined from untrusted input is egress-filtered before it leaves."""
-    assert_trees_clean(
-        _unfiltered_urljoin_return_offenders,
-        "filter joined URLs through public_url_or_none",
-        trees=app_trees(),
-    )
+    JOINED_URLS_ARE_EGRESS_FILTERED.scan()
 
 
 def test_unfiltered_urljoin_detector_bites():
     """The historical leak shape fires; the filtered and sanctioned shapes stay clean."""
-    raw = ast.parse("def _detect_pagination(html, final_url):\n    return urljoin(final_url, href)\n")
-    offenders = _unfiltered_urljoin_return_offenders(raw, REPO_ROOT / "app" / "crawl" / "_synthetic.py")
-    assert len(offenders) == 1 and "no egress filter" in offenders[0], offenders
-    binding = ast.parse("def f(base, href):\n    u = urljoin(base, href)\n    return u\n")
-    assert _unfiltered_urljoin_return_offenders(binding, REPO_ROOT / "app" / "crawl" / "_synthetic.py")
-    good = ast.parse(
-        "def f(href, final_url):\n    return public_url_or_none(href, resolve_against=final_url)\n"
-    )
-    assert not _unfiltered_urljoin_return_offenders(good, REPO_ROOT / "app" / "crawl" / "_synthetic.py")
-    # Safe_url.py composes urljoin inside SafeUrl.parse / redirect_hop.
-    hop = ast.parse(
-        "def hop(self, location):\n    return SafeUrl.parse(urljoin(self.raw, location), pin=True)\n"
-    )
-    assert not _unfiltered_urljoin_return_offenders(hop, REPO_ROOT / "app" / "safe_url.py")
+    JOINED_URLS_ARE_EGRESS_FILTERED.check_bites()
 
 
 def _definitions_in(tree: ast.AST, path: pathlib.Path) -> list[str]:
@@ -1337,33 +1434,53 @@ def _direct_frontier_growth_offenders(
     return offenders
 
 
-def test_job_frontier_growth_only_uses_funnel():
-    offenders = app_offenders(
-        _direct_frontier_growth_offenders,
-        skip=(_ADMISSION_CHOKEPOINT,),
-        kwargs_for=lambda relative: (
-            {"allowed_functions": frozenset({"normalize_job_state", "_persist"})}
-            if relative == "app/crawl/job_store.py"
-            else {}
+JOB_FRONTIER_GROWTH_ONLY_USES_FUNNEL = Rule(
+    name="job-frontier-growth-only-uses-funnel",
+    find=_direct_frontier_growth_offenders,
+    summary=(
+        "Grow whole-site frontiers only through admit_job_links: a direct append, "
+        "replacement, alias or slice mutation elsewhere re-opens the funnel every "
+        "other entry point is collapsed through"
+    ),
+    skip=frozenset({_ADMISSION_CHOKEPOINT}),
+    kwargs_for=lambda relative: (
+        {"allowed_functions": frozenset({"normalize_job_state", "_persist"})}
+        if relative == "app/crawl/job_store.py"
+        else {}
+    ),
+    proof_path=REPO_ROOT / "app" / "api" / "job_runner.py",
+    bite=lambda: (
+        Bites(
+            "def run(job, url):\n    job.frontier.append(url)\n",
+            "direct frontier growth bypasses admit_job_links",
         ),
-    )
-    assert not offenders, "Grow whole-site frontiers only through admit_job_links: " + ", ".join(offenders)
+        Bites(
+            "def run(job, url):\n    append = job.frontier.append\n    append(url)\n",
+            "frontier method alias bypasses admit_job_links",
+        ),
+        Bites(
+            "def run(job, url):\n    job.frontier += [url]\n",
+            "frontier replacement bypasses admit_job_links",
+        ),
+        Bites(
+            "def run(job, urls):\n    job.frontier = urls\n",
+            "frontier replacement bypasses admit_job_links",
+        ),
+        Bites(
+            "def run(job, url):\n    frontier = job.frontier\n    frontier.append(url)\n",
+            "frontier alias bypasses admit_job_links",
+        ),
+    ),
+    clean=lambda: ("async def run(job, links):\n    await admit_job_links(job, links)\n",),
+)
+
+
+def test_job_frontier_growth_only_uses_funnel():
+    JOB_FRONTIER_GROWTH_ONLY_USES_FUNNEL.scan()
 
 
 def test_job_frontier_growth_detector_bites():
-    path = REPO_ROOT / "app" / "api" / "job_runner.py"
-    pre_fix_owners = (
-        "def run(job, url):\n    job.frontier.append(url)\n",
-        "def run(job, url):\n    append = job.frontier.append\n    append(url)\n",
-        "def run(job, url):\n    job.frontier += [url]\n",
-        "def run(job, urls):\n    job.frontier = urls\n",
-    )
-    for source in pre_fix_owners:
-        assert _direct_frontier_growth_offenders(ast.parse(source), path), source
-    alias = ast.parse("def run(job, url):\n    frontier = job.frontier\n    frontier.append(url)\n")
-    assert _direct_frontier_growth_offenders(alias, path)
-    good = ast.parse("async def run(job, links):\n    await admit_job_links(job, links)\n")
-    assert not _direct_frontier_growth_offenders(good, path)
+    JOB_FRONTIER_GROWTH_ONLY_USES_FUNNEL.check_bites()
 
 
 _FILTER_NAMES = {
@@ -1416,28 +1533,37 @@ def _shared_admission_filter_offenders(tree: ast.AST, path: pathlib.Path) -> lis
     return offenders
 
 
+SHARED_ADMISSION_FILTER_SET_HAS_NO_TWIN_LIST = Rule(
+    name="shared-admission-filter-set-has-no-twin-list",
+    find=_shared_admission_filter_offenders,
+    summary=(
+        "The is_analytics_host / is_document_url / scope_allows filter ladder is one "
+        "shared list; a function re-inlining more than one of them by hand is a "
+        "twin that drifts from the chokepoint\u2019s future edits"
+    ),
+    skip=frozenset({_ADMISSION_CHOKEPOINT}),
+    bite=lambda: Bites(
+        "def expand(links, visited, scope):\n"
+        "    candidates = []\n"
+        "    for link in links:\n"
+        "        if link.url in visited: continue\n"
+        "        if is_analytics_host(link.url): continue\n"
+        "        if is_document_url(link.url): continue\n"
+        "        if scope is not None and not scope_allows(scope, link.url): continue\n"
+        "        candidates.append(link)\n"
+        "    return candidates\n",
+        "recursive admission filter list is re-inlined",
+    ),
+    clean=lambda: ("async def expand(links):\n    return await admit_discovered_links(links)\n",),
+)
+
+
 def test_shared_admission_filter_set_has_no_twin_list():
-    offenders = app_offenders(_shared_admission_filter_offenders, skip=(_ADMISSION_CHOKEPOINT,))
-    assert not offenders, "Use the shared admission filter chokepoint: " + ", ".join(offenders)
+    SHARED_ADMISSION_FILTER_SET_HAS_NO_TWIN_LIST.scan()
 
 
 def test_shared_admission_filter_detector_bites():
-    assert_detector(
-        _shared_admission_filter_offenders,
-        path=REPO_ROOT / "app" / "_synthetic.py",
-        fires={
-            "def expand(links, visited, scope):\n"
-            "    candidates = []\n"
-            "    for link in links:\n"
-            "        if link.url in visited: continue\n"
-            "        if is_analytics_host(link.url): continue\n"
-            "        if is_document_url(link.url): continue\n"
-            "        if scope is not None and not scope_allows(scope, link.url): continue\n"
-            "        candidates.append(link)\n"
-            "    return candidates\n": "admission filter list is re-inlined",
-        },
-        clean=("async def expand(links):\n    return await admit_discovered_links(links)\n",),
-    )
+    SHARED_ADMISSION_FILTER_SET_HAS_NO_TWIN_LIST.check_bites()
 
 
 def test_job_frontier_detector_sanction_is_narrow():

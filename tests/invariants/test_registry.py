@@ -19,9 +19,6 @@ from tests.chokepoint_walks import (
     TESTS_DIR,
     app_offenders,
     app_trees,
-    assert_detector,
-    assert_fires_once,
-    assert_stays_clean,
     assignment_targets,
     call_nodes,
     has_method_call,
@@ -46,6 +43,7 @@ from tests.invariants._shared import (
     assert_trees_clean,
 )
 from tests.property_registry import PROPERTY_BY_NAME, PROPERTY_REGISTRY, Property
+from tests.rules import Bites, Rule
 
 # Values are (declared public symbols, executable entry points). Public data
 # classes, exceptions, type aliases, and constants remain part of the contract,
@@ -317,30 +315,31 @@ def _uncollectible_tests(tree: ast.Module, path: pathlib.Path) -> list[str]:
     return offenders
 
 
-def test_every_test_function_is_one_pytest_can_collect():
-    assert_trees_clean(
-        _uncollectible_tests,
+EVERY_TEST_FUNCTION_IS_ONE_PYTEST_CAN_COLLECT = Rule(
+    name="every-test-function-is-one-pytest-can-collect",
+    find=_uncollectible_tests,
+    summary=(
         "these test functions are silently never run; pytest "
-        "collects only module-level tests and Test* class methods",
-        trees=trees_under(TESTS_DIR),
-    )
-
-
-def test_uncollectible_test_detector_bites():
-    """Every uncollectible shape fires; both collectible shapes stay clean."""
-    path = TESTS_DIR / "_synthetic.py"
-    fires = {
+        "collects only module-level tests and Test* class methods"
+    ),
+    bite=lambda: (
         # Nested inside another function: the shape that silently ate 9 tests.
-        "def helper():\n    def test_inner():\n        pass\n": "nested inside helper()",
+        Bites(
+            "def helper():\n    def test_inner():\n        pass\n",
+            "nested inside helper()",
+        ),
         # A method of a class pytest will not collect from.
-        "class Cases:\n    def test_inner(self):\n        pass\n": "not a module-level test",
+        Bites(
+            "class Cases:\n    def test_inner(self):\n        pass\n",
+            "not a module-level test",
+        ),
         # Two levels deep inside a class, still invisible.
-        "class TestOuter:\n    def helper(self):\n"
-        "        def test_inner(self):\n            pass\n": "nested inside helper()",
-    }
-    assert_fires_once(_uncollectible_tests, fires, path)
-
-    clean = (
+        Bites(
+            "class TestOuter:\n    def helper(self):\n        def test_inner(self):\n            pass\n",
+            "nested inside helper()",
+        ),
+    ),
+    clean=lambda: (
         "def test_module_level():\n    pass\n",
         "async def test_module_level_async():\n    pass\n",
         "class TestThings:\n    def test_method(self):\n        pass\n",
@@ -348,8 +347,19 @@ def test_uncollectible_test_detector_bites():
         # Fixtures and helpers are not tests and must not be reported.
         "class TestThings:\n    def helper_fixture(self):\n        pass\n",
         "def not_a_test_helper():\n    pass\n",
-    )
-    assert_stays_clean(_uncollectible_tests, clean, path)
+    ),
+    scope=lambda *, exclude: trees_under(TESTS_DIR),
+    proof_path=TESTS_DIR / "_synthetic.py",
+)
+
+
+def test_every_test_function_is_one_pytest_can_collect():
+    EVERY_TEST_FUNCTION_IS_ONE_PYTEST_CAN_COLLECT.scan()
+
+
+def test_uncollectible_test_detector_bites():
+    """Every uncollectible shape fires; both collectible shapes stay clean."""
+    EVERY_TEST_FUNCTION_IS_ONE_PYTEST_CAN_COLLECT.check_bites()
 
 
 # ===========================================================================
@@ -465,22 +475,7 @@ def test_failed_result_binding_detector_bites():
     would have kept this test green against a rule that had stopped recognising
     the shape that actually shipped.
     """
-    path = REPO_ROOT / "tests" / "_synthetic.py"
-    positionals = ", ".join(_scheduler_run_positional_names())
-    drops = ast.parse(f"class _S:\n    async def run(self, {positionals}, **kwargs):\n        return {{}}\n")
-    found = _failed_result_binding_offenders(drops, path)
-    assert len(found) == 1 and "failed_result" in found[0], found
-
-    binds = ast.parse(
-        f"class _S:\n    async def run(self, {positionals}, *, failed_result=None, **kwargs):\n"
-        "        return {}\n"
-    )
-    assert not _failed_result_binding_offenders(binds, path)
-
-    unrelated = ast.parse("def run(a, b, **kwargs):\n    return 1\n")
-    assert not _failed_result_binding_offenders(unrelated, path), (
-        "a run that does not take the scheduler's own positional arguments is not a scheduler double"
-    )
+    SCHEDULER_DOUBLES_BIND_FAILED_RESULT.check_bites()
 
 
 def test_swallowing_double_detector_bites():
@@ -566,17 +561,50 @@ def _failed_result_binding_offenders(tree: ast.AST, path: pathlib.Path) -> list[
     return offenders
 
 
+def _failed_result_binding_source() -> str:
+    """The proof's violating ``run``, its positionals read from the real scheduler.
+
+    Written out here rather than typed so the bite tracks the production
+    signature: a double that mirrors two of three real parameters is not a
+    scheduler double, and spelling the tuple in the proof would keep it green
+    against a rule that had stopped recognising the shape that shipped.
+    """
+    positionals = ", ".join(_scheduler_run_positional_names())
+    return f"class _S:\n    async def run(self, {positionals}, **kwargs):\n        return {{}}\n"
+
+
+SCHEDULER_DOUBLES_BIND_FAILED_RESULT = Rule(
+    name="scheduler-doubles-bind-failed-result",
+    find=_failed_result_binding_offenders,
+    summary=(
+        "the DomainScheduler.run contract requires failed_result; a double that omits it"
+        " silently drops the envelope the pipeline supplies"
+    ),
+    premise=lambda: _scheduler_run_positional_names(),
+    bite=lambda: Bites(_failed_result_binding_source(), "failed_result"),
+    clean=lambda: (
+        # The method that does bind the name is the property being asserted.
+        (
+            "class _S:\n    async def run(self, "
+            + ", ".join(_scheduler_run_positional_names())
+            + ", *, failed_result=None, **kwargs):\n"
+            + "        return {}\n"
+        ),
+        # A ``run`` with no scheduler-shaped signature at all is not a scheduler
+        # double, so it is not the property's business.
+        "def run(a, b, **kwargs):\n    return 1\n",
+    ),
+    scope=lambda *, exclude: trees_under(TESTS_DIR),
+    proof_path=REPO_ROOT / "tests" / "_synthetic.py",
+)
+
+
 def test_no_existing_double_swallows_failed_result():
     """Derived from the production signature, not a hand-kept list: every
     scheduler double in tests/ binds ``failed_result`` by name today, which is
     the property the ``failed_result`` refactor needed. A double that regressed
     to ``**kwargs``-only would be caught by both this and the sweep above."""
-    assert_trees_clean(
-        _failed_result_binding_offenders,
-        "the DomainScheduler.run contract requires failed_result; a double that omits it"
-        " silently drops the envelope the pipeline supplies",
-        trees=trees_under(TESTS_DIR),
-    )
+    SCHEDULER_DOUBLES_BIND_FAILED_RESULT.scan()
 
 
 # ===========================================================================
@@ -1779,34 +1807,45 @@ def _meta_key_reason_offenders(tree: ast.AST, path: Path, *, owner: str = _META_
     ]
 
 
+THE_META_KEY_REJECTION_REASON_IS_AUTHORED_ONCE = Rule(
+    name="the-meta-key-rejection-reason-is-authored-once",
+    find=_meta_key_reason_offenders,
+    summary=(
+        "the wrong-type _meta reason is a contract the caller reads to learn it "
+        "forgot a key rather than sent the wrong shape, so it is authored once, in "
+        "the function both keys check through"
+    ),
+    bite=lambda: (
+        Bites(
+            "def validate_meta(meta, request_id):\n"
+            f'    reason = f"{{key}} "\n'
+            f'    reason += "{_META_WRONG_TYPE_FRAGMENT}{{key}})"\n',
+            "authored in 'validate_meta'",
+        ),
+        Bites(
+            f'WHY = "{_META_WRONG_TYPE_FRAGMENT}protocolVersion)"\n',
+            "authored in '<module>'",
+        ),
+    ),
+    clean=lambda: (
+        # The one place the sentence legitimately lives: the owner function both
+        # keys check through.
+        f"def {_META_REASON_OWNER}(meta, key, expected, label, request_id):\n"
+        f'    return f"{_META_WRONG_TYPE_FRAGMENT}{{label}}): {{key}})"\n',
+        # Unrelated reasons are not the contract, so they must not be swept up
+        # with it.
+        'def validate_meta(meta):\n    raise ProtocolValidationError("Missing _meta block")\n',
+        'def validate_meta(meta):\n    reason = f"Missing required _meta key: {key}"\n',
+    ),
+    proof_path=REPO_ROOT / "app" / "mcp" / "protocol.py",
+)
+
+
 def test_the_meta_key_rejection_reason_is_authored_once():
     """app/mcp/protocol.py spells the wrong-type _meta reason in one function."""
-    offenders = app_offenders(_meta_key_reason_offenders)
-    assert not offenders, "the _meta key rejection reason is authored more than once: " + ", ".join(offenders)
+    THE_META_KEY_REJECTION_REASON_IS_AUTHORED_ONCE.scan()
 
 
 def test_meta_key_reason_detector_bites():
     """A second authoring of the sentence fires; the one in the owner stays clean."""
-    assert_detector(
-        _meta_key_reason_offenders,
-        path=REPO_ROOT / "app" / "mcp" / "protocol.py",
-        fires={
-            "def validate_meta(meta, request_id):\n"
-            f'    reason = f"{{key}} "\n'
-            f'    reason += "{_META_WRONG_TYPE_FRAGMENT}{{key}})"\n': "authored in 'validate_meta'",
-            f'WHY = "{_META_WRONG_TYPE_FRAGMENT}protocolVersion)"\n': "authored in '<module>'",
-        },
-        clean=(
-            f"def {_META_REASON_OWNER}(meta, key, expected, label, request_id):\n"
-            f'    return f"{_META_WRONG_TYPE_FRAGMENT}{{label}}): {{key}})"\n',
-        ),
-    )
-    # Unrelated reasons are not the contract, so they must not be swept up with it.
-    assert_stays_clean(
-        _meta_key_reason_offenders,
-        clean=(
-            'def validate_meta(meta):\n    raise ProtocolValidationError("Missing _meta block")\n',
-            'def validate_meta(meta):\n    reason = f"Missing required _meta key: {key}"\n',
-        ),
-        path=REPO_ROOT / "app" / "mcp" / "protocol.py",
-    )
+    THE_META_KEY_REJECTION_REASON_IS_AUTHORED_ONCE.check_bites()

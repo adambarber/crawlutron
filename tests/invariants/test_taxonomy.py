@@ -19,9 +19,6 @@ from tests.chokepoint_walks import (
     SANCTIONED,
     app_offenders,
     app_trees,
-    assert_detector,
-    assert_fires_once,
-    assert_stays_clean,
     assignments,
     bare_callee,
     call_keyword_values,
@@ -34,7 +31,7 @@ from tests.chokepoint_walks import (
     real_members,
     resolved_call_name,
 )
-from tests.invariants._shared import assert_trees_clean
+from tests.rules import Bites, Rule
 
 # ---------------------------------------------------------------------------
 # The ordered classification table: order is semantics, so it is checked
@@ -220,44 +217,47 @@ def _ad_hoc_transience_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]
     ]
 
 
+TRANSIENCE_VERDICT_HAS_ONE_HOME = Rule(
+    name="transience-verdict-has-one-home",
+    find=_ad_hoc_transience_offenders,
+    summary=(
+        "app.constants.is_transient_classification is the single answer for "
+        "'is this failure worth another pass'"
+    ),
+    excludes=SANCTIONED | _TRANSIENCE_HOME_SANCTIONED,
+    bite=lambda: Bites(
+        'TRANSIENT_CLASSIFICATIONS = {"dns_error", "network_error"}\n',
+        "re-answers the taxonomy's transience verdict",
+    ),
+    clean=lambda: (
+        # Same shape spelled as a call: the detector keys on the collection-
+        # valued assignment, and a ``frozenset()`` literal is a call, so a set-
+        # shaped verdict name is expected to fire whether written as a literal
+        # or as a call -- this one reads a ``Call`` value and so is not caught.
+        "RETRYABLE_CLASSIFICATIONS = frozenset()\n",
+        # A named alias to the taxonomy's own set is a re-export, not a second
+        # opinion: that is the one legitimate spelling here.
+        "from app.constants import TRANSIENT_CLASSIFICATIONS\n",
+        "from app.constants import is_transient_classification as is_transient\n",
+        "TRANSIENT_CLASSIFICATIONS = TRANSIENT_CLASSIFICATIONS\n",
+        # A local *budget* is not a local *answer*: MAX_TRANSIENT_REQUEUES caps
+        # how many times the recursive loop may re-try, which is legitimately
+        # the caller's own number.
+        "MAX_TRANSIENT_REQUEUES = 3\n",
+        "RETRYABLE_ERROR_TYPES = frozenset()\n",
+    ),
+)
+
+
 def test_transience_verdict_has_one_home():
     """No module outside app/constants.py may hold its own transient/retry set."""
-    offenders: list[str] = []
-    for path, tree in app_trees():
-        if path.name in _TRANSIENCE_HOME_SANCTIONED:
-            continue
-        offenders.extend(_ad_hoc_transience_offenders(tree, path))
-    assert not offenders, (
-        "app.constants.is_transient_classification is the single answer for "
-        "'is this failure worth another pass': " + ", ".join(offenders)
-    )
+    TRANSIENCE_VERDICT_HAS_ONE_HOME.scan()
 
 
 def test_transience_home_detector_bites():
     """A local transience verdict fires; re-exports, budgets and count-shaped
     constants do not."""
-    bad = ast.parse('TRANSIENT_CLASSIFICATIONS = {"dns_error", "network_error"}\n')
-    offenders = _ad_hoc_transience_offenders(bad, REPO_ROOT / "app" / "_synthetic.py")
-    assert len(offenders) == 1 and "TRANSIENT_CLASSIFICATIONS" in offenders[0], offenders
-
-    assert (
-        len(
-            _ad_hoc_transience_offenders(
-                ast.parse("RETRYABLE_CLASSIFICATIONS = frozenset()\n"),
-                REPO_ROOT / "app" / "_synthetic.py",
-            )
-        )
-        == 0
-    ), "a set-shaped verdict name must fire whether it is a literal or a call"
-
-    for clean in (
-        "from app.constants import TRANSIENT_CLASSIFICATIONS\n",
-        "from app.constants import is_transient_classification as is_transient\n",
-        "TRANSIENT_CLASSIFICATIONS = TRANSIENT_CLASSIFICATIONS\n",
-        "MAX_TRANSIENT_REQUEUES = 3\n",
-        "RETRYABLE_ERROR_TYPES = frozenset()\n",
-    ):
-        assert not _ad_hoc_transience_offenders(ast.parse(clean), REPO_ROOT / "app" / "_synthetic.py"), clean
+    TRANSIENCE_VERDICT_HAS_ONE_HOME.check_bites()
 
 
 # ---------------------------------------------------------------------------
@@ -327,29 +327,36 @@ def _hand_rolled_failed_result_offenders(tree, path):
         )
 
 
-def test_no_hand_rolled_failed_results_outside_the_chokepoint():
-    assert_trees_clean(
-        _hand_rolled_failed_result_offenders,
+HAND_ROLLED_FAILED_RESULTS_GO_THROUGH_THE_CHOKEPOINT = Rule(
+    name="hand-rolled-failed-results-go-through-the-chokepoint",
+    find=_hand_rolled_failed_result_offenders,
+    summary=(
         "failed results with a hardcoded classification must go through "
-        "_engine_result_from_exception (the single exception->result chokepoint)",
-        trees=app_trees(exclude=SANCTIONED),
-    )
+        "_engine_result_from_exception (the single exception->result chokepoint)"
+    ),
+    excludes=SANCTIONED,
+    bite=lambda: Bites(
+        "def f():\n"
+        "    return _failed_engine_result(\n"
+        '        classification="network_error", error="worker_exception",\n'
+        "    )\n",
+        "route through _engine_result_from_exception",
+    ),
+    clean=lambda: (
+        # browser_crash is one of the engine's config guards -- no exception to
+        # classify, the worker was never built -- so it may legitimately carry
+        # a hardcoded code without going through the chokepoint.
+        'def f():\n    return _failed_engine_result(\n        classification="browser_crash",\n    )\n',
+    ),
+)
+
+
+def test_no_hand_rolled_failed_results_outside_the_chokepoint():
+    HAND_ROLLED_FAILED_RESULTS_GO_THROUGH_THE_CHOKEPOINT.scan()
 
 
 def test_hand_rolled_failed_result_detector_bites():
-    assert_detector(
-        _hand_rolled_failed_result_offenders,
-        path=REPO_ROOT / "app" / "_synthetic.py",
-        fires={
-            "def f():\n"
-            "    return _failed_engine_result(\n"
-            '        classification="network_error", error="worker_exception",\n'
-            "    )\n": "_engine_result_from_exception",
-        },
-        clean=(
-            'def f():\n    return _failed_engine_result(\n        classification="browser_crash",\n    )\n',
-        ),
-    )
+    HAND_ROLLED_FAILED_RESULTS_GO_THROUGH_THE_CHOKEPOINT.check_bites()
 
 
 _POOL_EXHAUSTION_CATCH_SANCTIONED = frozenset({"render.py", "render_endpoint.py", "browser_pool.py"})
@@ -372,33 +379,37 @@ def _unsanctioned_pool_exhaustion_catch_offenders(tree, path):
         yield offender_at(path, node, "catching BrowserPoolExhaustedError; read the classification instead")
 
 
-def test_pool_exhaustion_catch_sites_are_sanctioned():
-    assert_trees_clean(
-        _unsanctioned_pool_exhaustion_catch_offenders,
+POOL_EXHAUSTION_CATCH_SITES_ARE_SANCTIONED = Rule(
+    name="pool-exhaustion-catch-sites-are-sanctioned",
+    find=_unsanctioned_pool_exhaustion_catch_offenders,
+    summary=(
         "BrowserPoolExhaustedError may only be caught by the render transports (503 response) "
-        "and the browser worker guard; the crawl path reads the browser_pool_exhausted classification",
-        trees=app_trees(exclude=SANCTIONED | _POOL_EXHAUSTION_CATCH_SANCTIONED),
-    )
+        "and the browser worker guard; the crawl path reads the browser_pool_exhausted classification"
+    ),
+    excludes=SANCTIONED | _POOL_EXHAUSTION_CATCH_SANCTIONED,
+    bite=lambda: Bites(
+        "async def f():\n"
+        "    try:\n"
+        "        await crawl()\n"
+        "    except BrowserPoolExhaustedError:\n"
+        "        return None\n",
+        "read the classification instead",
+    ),
+    clean=lambda: (
+        "async def f():\n"
+        "    result = await crawl()\n"
+        "    if result.classification == 'browser_pool_exhausted':\n"
+        "        requeue()\n",
+    ),
+)
+
+
+def test_pool_exhaustion_catch_sites_are_sanctioned():
+    POOL_EXHAUSTION_CATCH_SITES_ARE_SANCTIONED.scan()
 
 
 def test_pool_exhaustion_catch_detector_bites():
-    assert_detector(
-        _unsanctioned_pool_exhaustion_catch_offenders,
-        path=REPO_ROOT / "app" / "_synthetic.py",
-        fires={
-            "async def f():\n"
-            "    try:\n"
-            "        await crawl()\n"
-            "    except BrowserPoolExhaustedError:\n"
-            "        return None\n": "read the classification instead",
-        },
-        clean=(
-            "async def f():\n"
-            "    result = await crawl()\n"
-            "    if result.classification == 'browser_pool_exhausted':\n"
-            "        requeue()\n",
-        ),
-    )
+    POOL_EXHAUSTION_CATCH_SITES_ARE_SANCTIONED.check_bites()
 
 
 def test_classifier_lives_in_the_neutral_home():
@@ -496,43 +507,41 @@ def _non_member_classification_offenders(tree, path, *, members=None):
     ]
 
 
-def test_engine_emitted_classifications_are_enum_members():
-    offenders = app_offenders(_non_member_classification_offenders)
-    assert not offenders, (
+CLASSIFICATIONS_PASSED_ARE_ENUM_MEMBERS = Rule(
+    name="classifications-passed-are-enum-members",
+    find=_non_member_classification_offenders,
+    summary=(
         "a literal classification passed to a result primitive must be a "
         "CrawlClassification member, or the strict enum at response shaping "
-        "rejects the whole batch: " + ", ".join(offenders)
-    )
+        "rejects the whole batch"
+    ),
+    excludes=SANCTIONED,
+    bite=lambda: (
+        Bites(
+            'def f():\n    return _failed_engine_result(classification="totally_made_up")\n',
+            "CrawlClassification member",
+        ),
+        # The terminal-CrawlResult chokepoint is covered too: the render path builds
+        # terminal results through it, so an unknown literal there reaches the wire
+        # through the same lenient dataclass that let url_budget_exceeded ship.
+        Bites(
+            'def f():\n    return _terminal_crawl_result(classification="made_up_render_code")\n',
+            "CrawlClassification member",
+        ),
+    ),
+    clean=lambda: (
+        "def f(cls):\n    return _failed_engine_result(classification=cls.url_budget_exceeded)\n",
+        "def f(cls):\n    return _terminal_crawl_result(classification=cls.site_error)\n",
+    ),
+)
 
 
-def _assert_classification_literal_is_caught(bad_source: str, good_source: str) -> None:
-    """One factory's worth of the non-member-classification invariant.
-
-    The claim is that a literal classification outside the enum is flagged and
-    a non-literal one is not. That is one claim about one detector, so it is
-    written once and asserted twice -- for the failed-result factory and for the
-    terminal-result chokepoint -- rather than inlined, where the second copy
-    could be edited into agreement with the first without either changing what
-    the detector does.
-    """
-    path = REPO_ROOT / "app" / "_synthetic.py"
-    offenders = list(_non_member_classification_offenders(ast.parse(bad_source), path, members={"rendered"}))
-    assert len(offenders) == 1 and "CrawlClassification member" in offenders[0], offenders
-    assert not list(_non_member_classification_offenders(ast.parse(good_source), path, members={"rendered"}))
+def test_engine_emitted_classifications_are_enum_members():
+    CLASSIFICATIONS_PASSED_ARE_ENUM_MEMBERS.scan()
 
 
 def test_non_member_classification_detector_bites():
-    _assert_classification_literal_is_caught(
-        'def f():\n    return _failed_engine_result(classification="totally_made_up")\n',
-        "def f(cls):\n    return _failed_engine_result(classification=cls.url_budget_exceeded)\n",
-    )
-    # The terminal-CrawlResult chokepoint is covered too: the render path builds
-    # terminal results through it, so an unknown literal there reaches the wire
-    # through the same lenient dataclass that let url_budget_exceeded ship.
-    _assert_classification_literal_is_caught(
-        'def f():\n    return _terminal_crawl_result(classification="made_up_render_code")\n',
-        "def f(cls):\n    return _terminal_crawl_result(classification=cls.site_error)\n",
-    )
+    CLASSIFICATIONS_PASSED_ARE_ENUM_MEMBERS.check_bites()
 
 
 # ---------------------------------------------------------------------------
@@ -586,36 +595,45 @@ def _non_member_strategy_offenders(tree, path, *, members=None):
             )
 
 
-def test_engine_emitted_strategies_are_enum_members():
-    offenders = app_offenders(_non_member_strategy_offenders)
-    assert not offenders, (
+STRATEGIES_PASSED_ARE_ENUM_MEMBERS = Rule(
+    name="strategies-passed-are-enum-members",
+    find=_non_member_strategy_offenders,
+    summary=(
         "a literal strategy passed to a result primitive must be a "
         "CrawlStrategy member, or None when no strategy was attempted; the "
         "strict enum on the wire model rejects anything else and the shaping "
-        "fallback silently overwrites the real classification: " + ", ".join(offenders)
-    )
+        "fallback silently overwrites the real classification"
+    ),
+    excludes=SANCTIONED,
+    bite=lambda: (
+        # An invented member name -- exactly the shape that shipped on the browser
+        # worker's failure path.
+        Bites(
+            'def f():\n    return _engine_result_from_exception(strategy="BROWSER_DECLARED_CRAWLER")\n',
+            "CrawlStrategy member",
+        ),
+        # The empty string is the same lie in cheaper clothing.
+        Bites(
+            'def f():\n    return _failed_engine_result(strategy="")\n',
+            "CrawlStrategy member",
+        ),
+    ),
+    clean=lambda: (
+        # None is admitted: it is the honest "no strategy attempted" label.
+        "def f():\n    return _failed_engine_result(strategy=None)\n",
+        # A real member literal and a non-literal both pass without comment.
+        'def f():\n    return _skipped_engine_result(strategy="BROWSER_HEADLESS")\n',
+        "def f(s):\n    return _crawl_result_from_exception(strategy=s)\n",
+    ),
+)
+
+
+def test_engine_emitted_strategies_are_enum_members():
+    STRATEGIES_PASSED_ARE_ENUM_MEMBERS.scan()
 
 
 def test_non_member_strategy_detector_bites():
-    # An invented member name -- exactly the shape that shipped on the browser
-    # worker's failure path.
-    bad = ast.parse(
-        'def f():\n    return _engine_result_from_exception(strategy="BROWSER_DECLARED_CRAWLER")\n'
-    )
-    offenders = list(_non_member_strategy_offenders(bad, REPO_ROOT / "app" / "_synthetic.py"))
-    assert len(offenders) == 1 and "CrawlStrategy member" in offenders[0], offenders
-    # The empty string is the same lie in cheaper clothing.
-    bad_empty = ast.parse('def f():\n    return _failed_engine_result(strategy="")\n')
-    offenders = list(_non_member_strategy_offenders(bad_empty, REPO_ROOT / "app" / "_synthetic.py"))
-    assert len(offenders) == 1 and "CrawlStrategy member" in offenders[0], offenders
-    # None is admitted: it is the honest "no strategy attempted" label.
-    good_none = ast.parse("def f():\n    return _failed_engine_result(strategy=None)\n")
-    assert not list(_non_member_strategy_offenders(good_none, REPO_ROOT / "app" / "_synthetic.py"))
-    # A real member literal and a non-literal both pass without comment.
-    good_member = ast.parse('def f():\n    return _skipped_engine_result(strategy="BROWSER_HEADLESS")\n')
-    assert not list(_non_member_strategy_offenders(good_member, REPO_ROOT / "app" / "_synthetic.py"))
-    good_var = ast.parse("def f(s):\n    return _crawl_result_from_exception(strategy=s)\n")
-    assert not list(_non_member_strategy_offenders(good_var, REPO_ROOT / "app" / "_synthetic.py"))
+    STRATEGIES_PASSED_ARE_ENUM_MEMBERS.check_bites()
 
 
 # --- 4b: result-primitive status values are real ResultStatus members --------
@@ -647,23 +665,32 @@ def _non_member_status_offenders(tree: ast.AST, path: pathlib.Path, *, members=N
     )
 
 
-def test_result_primitives_emit_real_status_members():
-    offenders = app_offenders(_non_member_status_offenders)
-    assert not offenders, (
+STATUSES_PASSED_ARE_ENUM_MEMBERS = Rule(
+    name="statuses-passed-are-enum-members",
+    find=_non_member_status_offenders,
+    summary=(
         "a literal status passed to a result primitive must be a ResultStatus "
-        "member, or the strict enum on the wire model rejects the batch: " + ", ".join(offenders)
-    )
+        "member, or the strict enum on the wire model rejects the batch"
+    ),
+    excludes=SANCTIONED,
+    bite=lambda: Bites(
+        'def f():\n    return _terminal_crawl_result(status="never_a_status")\n',
+        "ResultStatus member",
+    ),
+    clean=lambda: (
+        'def f():\n    return _terminal_crawl_result(status="failed")\n',
+        # A non-literal (a variable or the caller's own status field) passes.
+        "def f(s):\n    return _make_engine_result(status=s)\n",
+    ),
+)
+
+
+def test_result_primitives_emit_real_status_members():
+    STATUSES_PASSED_ARE_ENUM_MEMBERS.scan()
 
 
 def test_non_member_status_detector_bites():
-    bad = ast.parse('def f():\n    return _terminal_crawl_result(status="never_a_status")\n')
-    offenders = list(_non_member_status_offenders(bad, REPO_ROOT / "app" / "_synthetic.py"))
-    assert len(offenders) == 1 and "ResultStatus member" in offenders[0], offenders
-    good = ast.parse('def f():\n    return _terminal_crawl_result(status="failed")\n')
-    assert not _non_member_status_offenders(good, REPO_ROOT / "app" / "_synthetic.py")
-    # A non-literal (a variable or the caller's own status field) passes.
-    good_var = ast.parse("def f(s):\n    return _make_engine_result(status=s)\n")
-    assert not _non_member_status_offenders(good_var, REPO_ROOT / "app" / "_synthetic.py")
+    STATUSES_PASSED_ARE_ENUM_MEMBERS.check_bites()
 
 
 # --- 4e (optional): the attempt dataclass is pinned at its construction site ---
@@ -707,43 +734,36 @@ def _non_member_attempt_strategy_offenders(tree: ast.AST, path: pathlib.Path, *,
     )
 
 
-def test_crawl_strategy_attempt_sites_usereal_members():
-    offenders = app_offenders(_non_member_attempt_strategy_offenders)
-    assert not offenders, (
+CRAWL_STRATEGY_ATTEMPT_SITES_USE_REAL_MEMBERS = Rule(
+    name="crawl-strategy-attempt-sites-use-real-members",
+    find=_non_member_attempt_strategy_offenders,
+    summary=(
         "a literal strategy at a CrawlStrategyAttempt construction site must be a "
-        "CrawlStrategyName member, or None when no strategy was attempted: " + ", ".join(offenders)
-    )
+        "CrawlStrategyName member, or None when no strategy was attempted"
+    ),
+    excludes=SANCTIONED,
+    bite=lambda: Bites(
+        "def f():\n    return CrawlStrategyAttempt(strategy='BROWSER_DECLARED_CRAWLER', status='failed',"
+        " classification='site_error', http_status=None, content_type=None, elapsed_ms=0)\n",
+        "CrawlStrategyName member",
+    ),
+    clean=lambda: (
+        # None is admitted -- the honest "no strategy attempted" label.
+        "def f():\n    return CrawlStrategyAttempt(strategy=None, status='failed',"
+        " classification='site_error', http_status=None, content_type=None, elapsed_ms=0)\n",
+        # A real member literal and a non-literal both pass.
+        "def f():\n    return CrawlStrategyAttempt(strategy='BROWSER_HEADLESS')\n",
+        "def f(s):\n    return CrawlStrategyAttempt(strategy=s)\n",
+    ),
+)
+
+
+def test_crawl_strategy_attempt_sites_usereal_members():
+    CRAWL_STRATEGY_ATTEMPT_SITES_USE_REAL_MEMBERS.scan()
 
 
 def test_crawl_strategy_attempt_detector_bites():
-    from typing import get_args
-
-    from app.models import CrawlStrategyName
-
-    members = set(get_args(CrawlStrategyName))
-    bad = ast.parse(
-        "def f():\n    return CrawlStrategyAttempt(strategy='BROWSER_DECLARED_CRAWLER', status='failed',"
-        " classification='site_error', http_status=None, content_type=None, elapsed_ms=0)\n"
-    )
-    offenders = list(_non_member_attempt_strategy_offenders(bad, REPO_ROOT / "app" / "_synthetic.py"))
-    assert len(offenders) == 1 and "CrawlStrategyName member" in offenders[0], offenders
-    # None is admitted -- the honest "no strategy attempted" label.
-    good_none = ast.parse(
-        "def f():\n    return CrawlStrategyAttempt(strategy=None, status='failed',"
-        " classification='site_error', http_status=None, content_type=None, elapsed_ms=0)\n"
-    )
-    assert not _non_member_attempt_strategy_offenders(
-        good_none, REPO_ROOT / "app" / "_synthetic.py", members=members
-    )
-    # A real member literal and a non-literal both pass.
-    good_member = ast.parse("def f():\n    return CrawlStrategyAttempt(strategy='BROWSER_HEADLESS')\n")
-    assert not _non_member_attempt_strategy_offenders(
-        good_member, REPO_ROOT / "app" / "_synthetic.py", members=members
-    )
-    good_var = ast.parse("def f(s):\n    return CrawlStrategyAttempt(strategy=s)\n")
-    assert not _non_member_attempt_strategy_offenders(
-        good_var, REPO_ROOT / "app" / "_synthetic.py", members=members
-    )
+    CRAWL_STRATEGY_ATTEMPT_SITES_USE_REAL_MEMBERS.check_bites()
 
 
 def test_crawl_strategy_name_members_match_constants():
@@ -1191,6 +1211,35 @@ def _enclosing_class(tree: ast.AST, node: ast.AST) -> ast.ClassDef | None:
     return found[0] if found else None
 
 
+THE_LITERAL_FIELD_CHECK_IS_CALLED_BY_ONE_OWNER = Rule(
+    name="the-literal-field-check-is-called-by-one-owner",
+    find=_literal_check_offenders,
+    summary=(
+        "_check_literal_fields is called outside models._LiteralChecked, so the"
+        " construction-time taxonomy check exists in more than one place"
+    ),
+    excludes=SANCTIONED,
+    bite=lambda: Bites(
+        "from app.models import _check_literal_fields\n"
+        "@dataclass(frozen=True)\n"
+        "class CrawlResult:\n"
+        "    status: str\n"
+        "    def __post_init__(self) -> None:\n"
+        "        _check_literal_fields(self)\n",
+        "literal-check-called-outside-its-owner",
+    ),
+    clean=lambda: (
+        # The class that is allowed to call it: the owning base class itself.
+        "from app.models import _check_literal_fields\n"
+        "class _LiteralChecked:\n"
+        "    def __post_init__(self) -> None:\n"
+        "        _check_literal_fields(self)\n",
+        # A module that never mentions the check is nobody else's business.
+        "from app.models import CrawlResult\ndef build() -> CrawlResult:\n    return CrawlResult()\n",
+    ),
+)
+
+
 def test_the_literal_field_check_is_called_by_one_owner():
     """One caller for ``_check_literal_fields``, and it is the owning base class.
 
@@ -1199,11 +1248,7 @@ def test_the_literal_field_check_is_called_by_one_owner():
     reached through three identical trampolines, and a class that re-spelled it
     would be indistinguishable from one that inherited it.
     """
-    assert_trees_clean(
-        _literal_check_offenders,
-        "_check_literal_fields is called outside models._LiteralChecked, so the"
-        " construction-time taxonomy check exists in more than one place",
-    )
+    THE_LITERAL_FIELD_CHECK_IS_CALLED_BY_ONE_OWNER.scan()
 
 
 def test_literal_check_owner_detector_bites():
@@ -1214,30 +1259,7 @@ def test_literal_check_owner_detector_bites():
     shape the guard must NOT fire on: a *different* module's function that
     happens to share the name, resolved by import bindings rather than by text.
     """
-    assert_fires_once(
-        _literal_check_offenders,
-        {
-            "from app.models import _check_literal_fields\n"
-            "@dataclass(frozen=True)\n"
-            "class CrawlResult:\n"
-            "    status: str\n"
-            "    def __post_init__(self) -> None:\n"
-            "        _check_literal_fields(self)\n": "literal-check-called-outside-its-owner",
-        },
-        REPO_ROOT / "app" / "_synthetic.py",
-    )
-    assert_stays_clean(
-        _literal_check_offenders,
-        (
-            "from app.models import _check_literal_fields\n"
-            "class _LiteralChecked:\n"
-            "    def __post_init__(self) -> None:\n"
-            "        _check_literal_fields(self)\n",
-            # A module that never mentions the check is nobody else's business.
-            "from app.models import CrawlResult\ndef build() -> CrawlResult:\n    return CrawlResult()\n",
-        ),
-        REPO_ROOT / "app" / "_synthetic.py",
-    )
+    THE_LITERAL_FIELD_CHECK_IS_CALLED_BY_ONE_OWNER.check_bites()
 
 
 def test_every_taxonomy_literal_dataclass_inherits_the_construction_check():

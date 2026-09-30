@@ -18,11 +18,7 @@ from app.crawl.migrations.manifest import LEGACY_COLUMNS, StoreSchema
 from tests.chokepoint_walks import (
     REPO_ROOT,
     SANCTIONED,
-    app_offenders,
     app_trees,
-    assert_detector,
-    assert_fires_once,
-    assert_stays_clean,
     call_keyword_values,
     call_nodes,
     calls_named,
@@ -39,7 +35,7 @@ from tests.chokepoint_walks import (
     resolved_expr_name,
     string_literals,
 )
-from tests.invariants._shared import assert_trees_clean
+from tests.rules import Bites, Rule, Silent, Trips
 
 
 def _cache_envelope_literals(tree: ast.AST, path: pathlib.Path) -> list[str]:
@@ -61,6 +57,24 @@ def _cache_envelope_literals(tree: ast.AST, path: pathlib.Path) -> list[str]:
     return offenders
 
 
+CACHE_ENVELOPE_IS_BUILT_BY_ONE_OWNER = Rule(
+    name="cache-envelope-is-built-by-one-owner",
+    find=_cache_envelope_literals,
+    summary="the content-cache envelope is built outside its owner",
+    excludes=SANCTIONED | {"content_cache.py"},
+    bite=lambda: Bites(
+        "def write(self, key, value, expires):\n"
+        '    return {"expires": expires, "value": value, "cached_at": expires}\n',
+        "cache-envelope",
+    ),
+    clean=lambda: (
+        # A dict that merely mentions one envelope key is not an envelope, and
+        # flagging it would make the guard something people route around.
+        'def f(expires, value):\n    return {"expires": expires, "value": value}\n',
+    ),
+)
+
+
 def test_cache_envelope_is_built_by_one_owner():
     """The content-cache entry envelope has one builder.
 
@@ -70,10 +84,7 @@ def test_cache_envelope_is_built_by_one_owner():
     reader expects. ``ContentCache._entry_to_store`` is the owner; a new write
     path has to go through it.
     """
-    offenders = app_offenders(_cache_envelope_literals, exclude=SANCTIONED | {"content_cache.py"})
-    assert not offenders, "the content-cache envelope is built outside its owner:\n  " + "\n  ".join(
-        offenders
-    )
+    CACHE_ENVELOPE_IS_BUILT_BY_ONE_OWNER.scan()
 
 
 def test_cache_envelope_detector_bites():
@@ -82,17 +93,7 @@ def test_cache_envelope_detector_bites():
     Without this, an exhausted or renamed sink pattern would report zero
     offenders and the guard above would pass forever while covering nothing.
     """
-    # A dict that merely mentions one envelope key is not an envelope, and
-    # flagging it would make the guard something people route around.
-    assert_detector(
-        _cache_envelope_literals,
-        path=REPO_ROOT / "app" / "_synthetic.py",
-        fires={
-            "def write(self, key, value, expires):\n"
-            '    return {"expires": expires, "value": value, "cached_at": expires}\n': "cache-envelope",
-        },
-        clean=('def f(expires, value):\n    return {"expires": expires, "value": value}\n',),
-    )
+    CACHE_ENVELOPE_IS_BUILT_BY_ONE_OWNER.check_bites()
 
 
 # ---------------------------------------------------------------------------
@@ -117,24 +118,27 @@ def _crawl_response_construction_offenders(tree: ast.AST, path: pathlib.Path) ->
     return offenders
 
 
+CRAWL_RESPONSE_BUILT_ONLY_BY_THE_SHAPING_CHOKEPOINT = Rule(
+    name="crawl-response-built-only-by-the-shaping-chokepoint",
+    find=_crawl_response_construction_offenders,
+    summary="Use app.api.response_shaping.build_unified_crawl_response",
+    excludes=SANCTIONED,
+    bite=lambda: Bites(
+        "def f(results):\n    return UnifiedCrawlResponse(request_id='r', results=results)\n",
+        "explicit UnifiedCrawlResponse",
+    ),
+    clean=lambda: ("def f(stored):\n    return UnifiedCrawlResponse(**stored)\n",),
+)
+
+
 def test_crawl_response_built_only_by_shaping_chokepoint():
     """Every UnifiedCrawlResponse-with-results flows through the shaper."""
-    offenders = app_offenders(_crawl_response_construction_offenders)
-    assert not offenders, "Use app.api.response_shaping.build_unified_crawl_response: " + ", ".join(offenders)
+    CRAWL_RESPONSE_BUILT_ONLY_BY_THE_SHAPING_CHOKEPOINT.scan()
 
 
 def test_crawl_response_chokepoint_detector_bites():
     """Synthetic bypass fires; **stored deserialization splat stays clean."""
-    assert_detector(
-        _crawl_response_construction_offenders,
-        path=REPO_ROOT / "app" / "api" / "_synthetic.py",
-        fires={
-            "def f(results):\n    return UnifiedCrawlResponse(request_id='r', results=results)\n": (
-                "explicit UnifiedCrawlResponse"
-            )
-        },
-        clean=("def f(stored):\n    return UnifiedCrawlResponse(**stored)\n",),
-    )
+    CRAWL_RESPONSE_BUILT_ONLY_BY_THE_SHAPING_CHOKEPOINT.check_bites()
 
 
 # ---------------------------------------------------------------------------
@@ -188,45 +192,59 @@ def _unsanctioned_envelope_adapter_offenders(tree, path):
     ]
 
 
+_ENVELOPE_ADAPTER_PROOF_PATH = REPO_ROOT / "app" / "api" / "crawl_endpoint.py"
+
+
+CRAWL_RESPONSE_ENVELOPE_IS_ADAPTED_BY_ONE_OWNER = Rule(
+    name="crawl-response-envelope-is-adapted-by-one-owner",
+    find=_unsanctioned_envelope_adapter_offenders,
+    summary=(
+        "adapt a producer envelope with app.api.response_shaping's envelope owner, "
+        "so an envelope field cannot be passed on one path and forgotten on another"
+    ),
+    excludes=SANCTIONED,
+    bite=lambda: (
+        Bites(
+            "async def f(result):\n"
+            "    return await abuild_unified_crawl_response(result['results'], "
+            "options=EnvelopeOptions(request_id=result['request_id']))\n",
+            "abuild_unified_crawl_response",
+            at=_ENVELOPE_ADAPTER_PROOF_PATH,
+        ),
+        Bites(
+            "def f(results):\n    return build_unified_crawl_response(results)\n",
+            "build_unified_crawl_response",
+            at=_ENVELOPE_ADAPTER_PROOF_PATH,
+        ),
+    ),
+    clean=lambda: (
+        # The sanctioned adaptation, run at the owner's own module: the owner is
+        # exempt by path, and that exemption is the whole content of the rule.
+        Silent(
+            "async def f(result):\n"
+            "    return await _aunified_response_from_result(result, adapt=render_result_to_unified)\n",
+            at=REPO_ROOT / _ENVELOPE_OWNER_MODULE,
+        ),
+        # The detached background runner reads the envelope LENIENTLY
+        # (``result.get("submitted_count")``) and is a named exempt producer.
+        Silent(
+            "async def f(request_id):\n"
+            "    return await abuild_unified_crawl_response([], "
+            "options=EnvelopeOptions(request_id=request_id, success=False))\n",
+            at=REPO_ROOT / "app" / "api" / "async_crawl_runner.py",
+        ),
+    ),
+)
+
+
 def test_crawl_response_envelope_is_adapted_by_one_owner():
     """Endpoints read a producer envelope through the shaping owner, not by hand."""
-    assert_trees_clean(
-        _unsanctioned_envelope_adapter_offenders,
-        "adapt a producer envelope with app.api.response_shaping's envelope owner, "
-        "so an envelope field cannot be passed on one path and forgotten on another",
-    )
+    CRAWL_RESPONSE_ENVELOPE_IS_ADAPTED_BY_ONE_OWNER.scan()
 
 
 def test_crawl_response_envelope_adapter_detector_bites():
     """A hand-rolled adapter fires; the owner module and the exempt producers stay clean."""
-    fires = {
-        "async def f(result):\n"
-        "    return await abuild_unified_crawl_response(result['results'], "
-        "options=EnvelopeOptions(request_id=result['request_id']))\n": "abuild_unified_crawl_response",
-        "def f(results):\n    return build_unified_crawl_response(results)\n": "build_unified_crawl_response",
-    }
-    assert_fires_once(
-        _unsanctioned_envelope_adapter_offenders,
-        fires,
-        REPO_ROOT / "app" / "api" / "crawl_endpoint.py",
-    )
-    assert_stays_clean(
-        _unsanctioned_envelope_adapter_offenders,
-        (
-            "async def f(result):\n"
-            "    return await _aunified_response_from_result(result, adapt=render_result_to_unified)\n",
-        ),
-        REPO_ROOT / _ENVELOPE_OWNER_MODULE,
-    )
-    assert_stays_clean(
-        _unsanctioned_envelope_adapter_offenders,
-        (
-            "async def f(request_id):\n"
-            "    return await abuild_unified_crawl_response([], "
-            "options=EnvelopeOptions(request_id=request_id, success=False))\n",
-        ),
-        REPO_ROOT / "app" / "api" / "async_crawl_runner.py",
-    )
+    CRAWL_RESPONSE_ENVELOPE_IS_ADAPTED_BY_ONE_OWNER.check_bites()
 
 
 def _hand_rolled_envelope_fields_offenders(tree, path):
@@ -261,37 +279,61 @@ def _hand_rolled_envelope_fields_offenders(tree, path):
     return offenders
 
 
-def test_crawl_response_envelope_fields_are_passed_by_one_owner():
-    assert_trees_clean(
-        _hand_rolled_envelope_fields_offenders,
-        "pass the unified envelope's fields in app.api.response_shaping._response_envelope; "
-        "a field the model requires is dropped, not rejected, when a caller forgets it",
+_HAND_ROLLED_ENVELOPE_PROOF_PATH = REPO_ROOT / "app" / "api" / "crawl_endpoint.py"
+
+
+def _hand_rolled_envelope_source(fn_name: str) -> str:
+    """The proof's hand-rolled ``UnifiedCrawlResponse`` build, named ``fn_name``.
+
+    Written out twice it was the same drift-prone block of fixture; the owner
+    half is the identical source with the function renamed to the owner's, so
+    the one spelling backs both the firing and the sanctioned-owner proof.
+    """
+    return (
+        f"def {fn_name}(results, request_id):\n"
+        "    return UnifiedCrawlResponse(results=results, request_id=request_id, success=True, "
+        "submitted_count=len(results), policy_schema_version='v')\n"
     )
+
+
+CRAWL_RESPONSE_ENVELOPE_FIELDS_ARE_PASSED_BY_ONE_OWNER = Rule(
+    name="crawl-response-envelope-fields-are-passed-by-one-owner",
+    find=_hand_rolled_envelope_fields_offenders,
+    summary=(
+        "pass the unified envelope's fields in app.api.response_shaping._response_envelope; "
+        "a field the model requires is dropped, not rejected, when a caller forgets it"
+    ),
+    excludes=SANCTIONED,
+    bite=lambda: Bites(
+        _hand_rolled_envelope_source("build"),
+        _ENVELOPE_OWNER_FUNCTION,
+        at=_HAND_ROLLED_ENVELOPE_PROOF_PATH,
+    ),
+    clean=lambda: (
+        # A ``**stored`` deserialization splat carries no explicit scalar fields,
+        # so it is not a second spelling of the envelope's field list.
+        Silent(
+            "def get_crawl_result(stored):\n    return UnifiedCrawlResponse(**stored)\n",
+            at=_HAND_ROLLED_ENVELOPE_PROOF_PATH,
+        ),
+        # The owner's own build is the ONE sanctioned site; the fields are passed
+        # only there, so the identical source is silent at the owner module.
+        Silent(
+            _hand_rolled_envelope_source(_ENVELOPE_OWNER_FUNCTION),
+            at=REPO_ROOT / _ENVELOPE_OWNER_MODULE,
+        ),
+    ),
+)
+
+
+def test_crawl_response_envelope_fields_are_passed_by_one_owner():
+    CRAWL_RESPONSE_ENVELOPE_FIELDS_ARE_PASSED_BY_ONE_OWNER.scan()
 
 
 def test_crawl_response_envelope_fields_detector_bites():
     """A second field spelling fires, anywhere; the owner's own build and a
     ``**stored`` deserialization stay clean."""
-    hand_rolled = (
-        "def build(results, request_id):\n"
-        "    return UnifiedCrawlResponse(results=results, request_id=request_id, success=True, "
-        "submitted_count=len(results), policy_schema_version='v')\n"
-    )
-    assert_fires_once(
-        _hand_rolled_envelope_fields_offenders,
-        {hand_rolled: _ENVELOPE_OWNER_FUNCTION},
-        REPO_ROOT / "app" / "api" / "crawl_endpoint.py",
-    )
-    assert_stays_clean(
-        _hand_rolled_envelope_fields_offenders,
-        ("def get_crawl_result(stored):\n    return UnifiedCrawlResponse(**stored)\n",),
-        REPO_ROOT / "app" / "api" / "crawl_endpoint.py",
-    )
-    assert_stays_clean(
-        _hand_rolled_envelope_fields_offenders,
-        (hand_rolled.replace("def build(", f"def {_ENVELOPE_OWNER_FUNCTION}("),),
-        REPO_ROOT / _ENVELOPE_OWNER_MODULE,
-    )
+    CRAWL_RESPONSE_ENVELOPE_FIELDS_ARE_PASSED_BY_ONE_OWNER.check_bites()
 
 
 # ---------------------------------------------------------------------------
@@ -331,36 +373,37 @@ def _job_row_accumulator_offenders(tree: ast.AST, path: pathlib.Path) -> list[st
     return offenders
 
 
+CRAWL_JOBS_ACCUMULATORS_ARE_NEVER_ROW_COLUMNS = Rule(
+    name="crawl-jobs-accumulators-are-never-row-columns",
+    find=_job_row_accumulator_offenders,
+    summary=("Append-only accumulators belong in crawl_job_results / crawl_job_visited, not on the job row"),
+    excludes=SANCTIONED,
+    bite=lambda: Bites(
+        'def f(conn, job):\n    return conn.execute("UPDATE crawl_jobs SET visited = ?", (job.visited,))\n',
+        "visited",
+    ),
+    clean=lambda: (
+        # The live shape: subqueries over the accumulator tables aliased back to
+        # names that CONTAIN the dropped columns. A substring match would reject
+        # this, which is why the detector matches whole words.
+        "def f(conn, job):\n"
+        '    conn.execute("UPDATE crawl_jobs SET frontier = ?", (job.frontier,))\n'
+        "    conn.execute('INSERT INTO \"crawl_job_results\" (job_id, seq, payload) VALUES (?, ?, ?)')\n"
+        "    conn.execute('INSERT INTO \"crawl_job_visited\" (job_id, url) VALUES (?, ?)')\n"
+        '    conn.execute("SELECT (SELECT count(*) FROM crawl_job_results r WHERE r.job_id = job.job_id) '
+        'as results_count FROM crawl_jobs job")\n',
+    ),
+)
+
+
 def test_crawl_jobs_accumulators_are_never_row_columns():
     """No SQL outside the migrations may name a column the row no longer has."""
-    offenders = app_offenders(_job_row_accumulator_offenders)
-    assert not offenders, (
-        "Append-only accumulators belong in crawl_job_results / crawl_job_visited, "
-        "not on the job row: " + ", ".join(offenders)
-    )
+    CRAWL_JOBS_ACCUMULATORS_ARE_NEVER_ROW_COLUMNS.scan()
 
 
 def test_job_row_accumulator_detector_bites():
     """A synthetic wide-row write fires; the accumulator tables and the queue stay clean."""
-    # The live shape: subqueries over the accumulator tables aliased back to
-    # names that CONTAIN the dropped columns. A substring match would reject
-    # this, which is why the detector matches whole words.
-    assert_detector(
-        _job_row_accumulator_offenders,
-        path=REPO_ROOT / "app" / "crawl" / "_synthetic.py",
-        fires={
-            'def f(conn, job):\n    return conn.execute("UPDATE crawl_jobs SET visited = ?", '
-            "(job.visited,))\n": ("visited")
-        },
-        clean=(
-            "def f(conn, job):\n"
-            '    conn.execute("UPDATE crawl_jobs SET frontier = ?", (job.frontier,))\n'
-            "    conn.execute('INSERT INTO \"crawl_job_results\" (job_id, seq, payload) VALUES (?, ?, ?)')\n"
-            "    conn.execute('INSERT INTO \"crawl_job_visited\" (job_id, url) VALUES (?, ?)')\n"
-            '    conn.execute("SELECT (SELECT count(*) FROM crawl_job_results r WHERE r.job_id = job.job_id) '
-            'as results_count FROM crawl_jobs job")\n',
-        ),
-    )
+    CRAWL_JOBS_ACCUMULATORS_ARE_NEVER_ROW_COLUMNS.check_bites()
 
 
 # ---------------------------------------------------------------------------
@@ -385,36 +428,39 @@ def _render_options_construction_offenders(tree: ast.AST, path: pathlib.Path) ->
     return offenders
 
 
+RENDER_OPTIONS_BUILT_ONLY_BY_THE_RESOLVER = Rule(
+    name="render-options-built-only-by-the-resolver",
+    find=_render_options_construction_offenders,
+    summary=(
+        "Use app.crawl.render_options.resolve_render_options so request-side "
+        "options and server defaults merge in exactly one place"
+    ),
+    excludes=SANCTIONED,
+    bite=lambda: Bites(
+        "def f(policy):\n    return RenderOptions(timeout_seconds=policy['t'], include_html=True)\n",
+        "built outside resolve_render_options",
+    ),
+    clean=lambda: (
+        # The resolver's own construction is the ONE sanctioned build site, and the
+        # exemption is a PATH exemption -- so it has to be proved at the real path. At
+        # a synthetic path the same source fires, which is the whole point: the
+        # exemption is narrow enough to not generalize, and this asserts that.
+        Silent(
+            "def f(request, defaults):\n    return RenderOptions(**kwargs)\n",
+            at=REPO_ROOT / "app" / "crawl" / "render_options.py",
+        ),
+    ),
+)
+
+
 def test_render_options_built_only_by_resolver():
     """Every effective RenderOptions flows through resolve_render_options."""
-    offenders = app_offenders(_render_options_construction_offenders)
-    assert not offenders, (
-        "Use app.crawl.render_options.resolve_render_options so request-side "
-        "options and server defaults merge in exactly one place: " + ", ".join(offenders)
-    )
+    RENDER_OPTIONS_BUILT_ONLY_BY_THE_RESOLVER.scan()
 
 
 def test_render_options_chokepoint_detector_bites():
     """Synthetic bypass fires; the resolver's own construction stays clean."""
-    assert_detector(
-        _render_options_construction_offenders,
-        path=REPO_ROOT / "app" / "crawl" / "_synthetic.py",
-        fires={
-            "def f(policy):\n    return RenderOptions(timeout_seconds=policy['t'], include_html=True)\n": (
-                "built outside resolve_render_options"
-            )
-        },
-    )
-    # The resolver's own construction is the ONE sanctioned build site, and the
-    # exemption is a PATH exemption -- so it has to be proved at the real path. At
-    # a synthetic path the same source fires, which is the whole point: the
-    # exemption is narrow enough to not generalize, and this asserts that.
-    assert_detector(
-        _render_options_construction_offenders,
-        path=REPO_ROOT / "app" / "crawl" / "render_options.py",
-        fires={},
-        clean=("def f(request, defaults):\n    return RenderOptions(**kwargs)\n",),
-    )
+    RENDER_OPTIONS_BUILT_ONLY_BY_THE_RESOLVER.check_bites()
 
 
 # ---------------------------------------------------------------------------
@@ -464,35 +510,39 @@ def _envelope_dict_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
     return offenders
 
 
+_HAND_ROLLED_ERROR_ENVELOPES_FORBIDDEN = Rule(
+    name="no-hand-rolled-error-envelopes",
+    find=_envelope_dict_offenders,
+    summary="Use app.api.exceptions.http_error/browser_pool_unavailable",
+    excludes=ENVELOPE_SANCTIONED,
+    bite=lambda: (
+        # Four offenders from one source: two bare HTTPException builds, one
+        # detail= envelope literal, one three-key dict. Counted exactly, because a
+        # detector that reported one here would be hiding which shapes it still sees.
+        Trips(
+            "raise HTTPException(status_code=404, detail={'code': 'not_found', 'message': 'gone'})\n"
+            "response = {'code': 'pending', 'message': 'm', 'details': {}}\n"
+            "raise HTTPException(status_code=404, detail='plain string')\n"
+            "raise fastapi.HTTPException(status_code=500)\n",
+            count=4,
+        ),
+    ),
+    clean=lambda: (
+        "from app.api.exceptions import http_error\n"
+        "raise http_error(404, 'not_found', 'gone')\n"
+        "response = build_thing({'code': 1, 'message': 'x'})\n",
+    ),
+)
+
+
 def test_no_hand_rolled_error_envelopes():
     """Every HTTP error body flows through error_envelope/http_error."""
-    assert_trees_clean(
-        _envelope_dict_offenders,
-        "Use app.api.exceptions.http_error/browser_pool_unavailable",
-        trees=app_trees(exclude=ENVELOPE_SANCTIONED),
-    )
+    _HAND_ROLLED_ERROR_ENVELOPES_FORBIDDEN.scan()
 
 
 def test_envelope_detector_bites():
     """All three drift shapes fire; factory-shaped code stays clean."""
-    # Four offenders from one source: two bare HTTPException builds, one
-    # detail= envelope literal, one three-key dict. Counted exactly, because a
-    # detector that reported one here would be hiding which shapes it still sees.
-    assert_detector(
-        _envelope_dict_offenders,
-        path=REPO_ROOT / "app" / "api" / "_synthetic.py",
-        trips={
-            "raise HTTPException(status_code=404, detail={'code': 'not_found', 'message': 'gone'})\n"
-            "response = {'code': 'pending', 'message': 'm', 'details': {}}\n"
-            "raise HTTPException(status_code=404, detail='plain string')\n"
-            "raise fastapi.HTTPException(status_code=500)\n": 4,
-        },
-        clean=(
-            "from app.api.exceptions import http_error\n"
-            "raise http_error(404, 'not_found', 'gone')\n"
-            "response = build_thing({'code': 1, 'message': 'x'})\n",
-        ),
-    )
+    _HAND_ROLLED_ERROR_ENVELOPES_FORBIDDEN.check_bites()
 
 
 # ---------------------------------------------------------------------------
@@ -539,28 +589,35 @@ def _raw_exception_error_offenders(tree: ast.AST, path: pathlib.Path) -> list[st
     return offenders
 
 
+NO_RAW_EXCEPTION_TEXT_IN_RESULT_ERROR_FIELD = Rule(
+    name="no-raw-exception-text-in-result-error-field",
+    find=_raw_exception_error_offenders,
+    summary="classify via _classify_error_code, never raw exception text",
+    excludes=SANCTIONED | _TERMINAL_RESULT_SANCTIONED,
+    bite=lambda: (
+        # ``str(exc)`` on a direct result construction, and the same through the
+        # sanctioned primitive -- both sinks carry the raw text verbatim.
+        Bites("def f(exc):\n    return CrawlResult(error=str(exc))\n", "raw exception text"),
+        Bites("def f(exc):\n    return _terminal_crawl_result(error=str(exc))\n", "raw exception text"),
+        # An f-string interpolating the exception is the leak in disguise.
+        Bites("def f(error):\n    return CrawlResult(error=f'failed: {error}')\n", "raw exception text"),
+        Bites("def f(e):\n    return CrawlResult(error=repr(e))\n", "raw exception text"),
+    ),
+    clean=lambda: (
+        # The classified shape: an already-classified error reaches the wire.
+        "def f(exc):\n    return _terminal_crawl_result(error=_classify_error_code(exc))\n",
+    ),
+)
+
+
 def test_no_raw_exception_text_in_result_error_field():
     """The ``error`` field is a stable classification, never ``str(exc)``."""
-    assert_trees_clean(
-        _raw_exception_error_offenders,
-        "classify via _classify_error_code, never raw exception text",
-        trees=app_trees(exclude=_TERMINAL_RESULT_SANCTIONED),
-    )
+    NO_RAW_EXCEPTION_TEXT_IN_RESULT_ERROR_FIELD.scan()
 
 
 def test_raw_exception_error_detector_bites():
     """The leak shape fires on both sinks; the classified shape stays clean."""
-    direct = ast.parse("def f(exc):\n    return CrawlResult(error=str(exc))\n")
-    offenders = _raw_exception_error_offenders(direct, REPO_ROOT / "app" / "api" / "_synthetic.py")
-    assert len(offenders) == 1 and "raw exception text" in offenders[0], offenders
-    via_primitive = ast.parse("def f(exc):\n    return _terminal_crawl_result(error=str(exc))\n")
-    assert _raw_exception_error_offenders(via_primitive, REPO_ROOT / "app" / "api" / "_synthetic.py")
-    fstring = ast.parse("def f(error):\n    return CrawlResult(error=f'failed: {error}')\n")
-    assert _raw_exception_error_offenders(fstring, REPO_ROOT / "app" / "api" / "_synthetic.py")
-    repr_shape = ast.parse("def f(e):\n    return CrawlResult(error=repr(e))\n")
-    assert _raw_exception_error_offenders(repr_shape, REPO_ROOT / "app" / "api" / "_synthetic.py")
-    good = ast.parse("def f(exc):\n    return _terminal_crawl_result(error=_classify_error_code(exc))\n")
-    assert not _raw_exception_error_offenders(good, REPO_ROOT / "app" / "api" / "_synthetic.py")
+    NO_RAW_EXCEPTION_TEXT_IN_RESULT_ERROR_FIELD.check_bites()
 
 
 # --- A wire model may not silently drop a domain model's field ---------------
@@ -823,44 +880,59 @@ def _literal_status_classification_pairs(tree: ast.AST, path: pathlib.Path) -> l
     return offenders
 
 
-def test_results_derive_their_status_from_the_taxonomy():
-    """No result outside the chokepoint spells both taxonomy axes as literals."""
-    offenders = app_offenders(_literal_status_classification_pairs)
-    assert not offenders, (
+RESULTS_DERIVE_THEIR_STATUS_FROM_THE_TAXONOMY = Rule(
+    name="results-derive-their-status-from-the-taxonomy",
+    find=_literal_status_classification_pairs,
+    summary=(
         f"Build results through {_RESULT_CHOKEPOINT_MODULE}, or derive one axis with "
-        f"constants.status_for_classification, so _enforce_status_classification can see "
-        f"the pair: " + ", ".join(offenders)
-    )
-
-
-def test_result_status_pair_detector_bites():
-    """A spelled pair fires; deriving either axis stays clean."""
-    path = REPO_ROOT / "app" / "_synthetic.py"
-    fires = {
-        'CrawlResult(url=u, status="success", classification="rendered")\n': "hand-written",
-        'EngineCrawlResult(url=u, status="failed", classification="dns_error")\n': "hand-written",
+        "constants.status_for_classification, so _enforce_status_classification can see "
+        "the pair"
+    ),
+    excludes=SANCTIONED,
+    bite=lambda: (
+        Bites(
+            'CrawlResult(url=u, status="success", classification="rendered")\n',
+            "hand-written",
+        ),
+        Bites(
+            'EngineCrawlResult(url=u, status="failed", classification="dns_error")\n',
+            "hand-written",
+        ),
         # A qualified call is the same construction.
-        'models.CrawlResult(url=u, status="failed", classification="blocked")\n': "hand-written",
-    }
-    assert_fires_once(_literal_status_classification_pairs, fires, path)
-
-    clean = (
+        Bites(
+            'models.CrawlResult(url=u, status="failed", classification="blocked")\n',
+            "hand-written",
+        ),
+        # And the chokepoint exemption is keyed on the module, not on a name: a
+        # spelled pair anywhere else still fires even under the same function name.
+        Bites(
+            'def make():\n    return CrawlResult(url=u, status="failed", classification="blocked")\n',
+            "hand-written",
+        ),
+    ),
+    clean=lambda: (
         # Derived, not spelled -- what the browser strategy does.
         "CrawlResult(url=u, status=status, classification=classification)\n",
         "CrawlResult(url=u, status=status_for_classification(label), classification=label)\n",
         # One axis spelled and one derived still cannot disagree silently.
         'CrawlResult(url=u, status="failed", classification=label)\n',
         # The same spelled pair inside the chokepoint module is the definition.
-        'CrawlResult(url=u, status="failed", classification=label)\n',
-    )
-    assert_stays_clean(_literal_status_classification_pairs, clean, REPO_ROOT / _RESULT_CHOKEPOINT_MODULE)
-    assert_stays_clean(_literal_status_classification_pairs, clean[:3], path)
-    # And the chokepoint exemption is keyed on the module, not on a name: a
-    # spelled pair anywhere else still fires even under the same function name.
-    assert _literal_status_classification_pairs(
-        ast.parse('def make():\n    return CrawlResult(url=u, status="failed", classification="blocked")\n'),
-        path,
-    )
+        Silent(
+            'CrawlResult(url=u, status="failed", classification=label)\n',
+            at=REPO_ROOT / _RESULT_CHOKEPOINT_MODULE,
+        ),
+    ),
+)
+
+
+def test_results_derive_their_status_from_the_taxonomy():
+    """No result outside the chokepoint spells both taxonomy axes as literals."""
+    RESULTS_DERIVE_THEIR_STATUS_FROM_THE_TAXONOMY.scan()
+
+
+def test_result_status_pair_detector_bites():
+    """A spelled pair fires; deriving either axis stays clean."""
+    RESULTS_DERIVE_THEIR_STATUS_FROM_THE_TAXONOMY.check_bites()
 
 
 # ---------------------------------------------------------------------------
@@ -952,44 +1024,61 @@ def _extraction_reach_past_offenders(tree: ast.AST, path: pathlib.Path) -> list[
     return offenders
 
 
+_EXTRACTION_PROOF_PATH = REPO_ROOT / "app" / "crawl" / "strategies" / "_synthetic.py"
+
+
+def _assert_owner_extraction_still_fires() -> None:
+    """The exemption is not what makes the tree clean: the owner's own calls are
+    the shape this detector matches, so the real pipeline must still fire when
+    its tree is read at a non-sanctioned path."""
+    owner = next((path, tree) for path, tree in app_trees() if path.name in _CONTENT_PIPELINE_OWNER)
+    assert owner[0].name == "content_pipeline.py", owner[0]
+    assert _extraction_reach_past_offenders(owner[1], _EXTRACTION_PROOF_PATH), (
+        "the detector no longer matches the owner"
+    )
+
+
+EXTRACTION_IS_DISPATCHED_BY_THE_CONTENT_PIPELINE_ALONE = Rule(
+    name="extraction-is-dispatched-by-the-content-pipeline-alone",
+    find=_extraction_reach_past_offenders,
+    summary="dispatch extraction through strategies/content_pipeline._run_extraction",
+    excludes=SANCTIONED | _CONTENT_PIPELINE_OWNER,
+    premise=_assert_owner_extraction_still_fires,
+    bite=lambda: (
+        # The offloaded extractor AND the bare extractor call are two dispatch
+        # shapes, so a source carrying both is worth exactly two findings.
+        Bites(
+            "from app.crawl.extraction import _extract_html, normalized_extraction\n"
+            "async def f(decoded, final_url):\n"
+            "    extracted = await asyncio.to_thread(_extract_html, decoded, final_url)\n"
+            "    return normalized_extraction(extracted)\n",
+            "_run_extraction",
+            count=2,
+        ),
+        Bites(
+            "from app.crawl.extraction import extract_content as _ec\n"
+            "def f(body, content_type, url):\n"
+            "    return _ec(body, content_type, url)\n",
+            "_run_extraction",
+        ),
+    ),
+    clean=lambda: (
+        # Routing through the chokepoint is the sanctioned shape.
+        "from app.crawl.strategies.content_pipeline import _run_extraction\n"
+        "async def f(body, final_url):\n"
+        "    return await _run_extraction(extraction='full', content=body, decoded='')\n",
+    ),
+)
+
+
 def test_extraction_is_dispatched_by_the_content_pipeline_alone():
     """The three extraction modes are dispatched in one module, not per strategy."""
-    assert_trees_clean(
-        _extraction_reach_past_offenders,
-        "dispatch extraction through strategies/content_pipeline._run_extraction",
-        trees=app_trees(exclude=SANCTIONED | _CONTENT_PIPELINE_OWNER),
-    )
+    EXTRACTION_IS_DISPATCHED_BY_THE_CONTENT_PIPELINE_ALONE.scan()
 
 
 def test_extraction_reach_past_detector_bites():
     """A re-spelled dispatch fires, offloaded and aliased; routing through it stays clean."""
-    synthetic = REPO_ROOT / "app" / "crawl" / "strategies" / "_synthetic.py"
-    spelled = ast.parse(
-        "from app.crawl.extraction import _extract_html, normalized_extraction\n"
-        "async def f(decoded, final_url):\n"
-        "    extracted = await asyncio.to_thread(_extract_html, decoded, final_url)\n"
-        "    return normalized_extraction(extracted)\n"
-    )
-    offenders = _extraction_reach_past_offenders(spelled, synthetic)
-    assert len(offenders) == 2, offenders
-    assert all("_run_extraction" in item for item in offenders), offenders
-    aliased = ast.parse(
-        "from app.crawl.extraction import extract_content as _ec\n"
-        "def f(body, content_type, url):\n"
-        "    return _ec(body, content_type, url)\n"
-    )
-    assert _extraction_reach_past_offenders(aliased, synthetic), "an aliased extractor call escaped the sweep"
-    routed = ast.parse(
-        "from app.crawl.strategies.content_pipeline import _run_extraction\n"
-        "async def f(body, final_url):\n"
-        "    return await _run_extraction(extraction='full', content=body, decoded='')\n"
-    )
-    assert not _extraction_reach_past_offenders(routed, synthetic), "the chokepoint call was flagged"
-    # The exemption is not what makes the tree clean: the owner's own calls are
-    # the shape this detector matches.
-    owner = next((path, tree) for path, tree in app_trees() if path.name in _CONTENT_PIPELINE_OWNER)
-    assert owner[0].name == "content_pipeline.py", owner[0]
-    assert _extraction_reach_past_offenders(owner[1], synthetic), "the detector no longer matches the owner"
+    EXTRACTION_IS_DISPATCHED_BY_THE_CONTENT_PIPELINE_ALONE.check_bites()
 
 
 def _respelled_discovery_result_fields_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
@@ -1014,48 +1103,45 @@ def _respelled_discovery_result_fields_offenders(tree: ast.AST, path: pathlib.Pa
     return offenders
 
 
-def test_discovered_link_result_fields_come_from_the_pipeline():
-    """A discovery envelope reaches a result through one projection."""
-    assert_trees_clean(
-        _respelled_discovery_result_fields_offenders,
-        "project the discovery envelope through content_pipeline._discovery_result_fields",
-        trees=app_trees(exclude=SANCTIONED | _CONTENT_PIPELINE_OWNER),
-    )
-
-
-def test_discovery_result_field_detector_bites():
-    """A re-spelled projection fires; the spread, and a non-result sink, stay clean."""
-    synthetic = REPO_ROOT / "app" / "crawl" / "strategies" / "_synthetic.py"
-    # The historical shape: the block spelled at the result call.
-    respelled = ast.parse(
-        "def build(post_fetch, error):\n"
-        "    return _make_engine_result(\n"
-        "        discovered_link_count=post_fetch['discovered_link_count'],\n"
-        "        discovered_links=post_fetch['discovered_links'],\n"
-        "        error=error,\n"
-        "    )\n"
-    )
-    offenders = _respelled_discovery_result_fields_offenders(respelled, synthetic)
-    assert len(offenders) == 1, offenders
-    assert "_discovery_result_fields" in offenders[0], offenders
-    spread = ast.parse(
+DISCOVERED_LINK_RESULT_FIELDS_COME_FROM_THE_PIPELINE = Rule(
+    name="discovered-link-result-fields-come-from-the-pipeline",
+    find=_respelled_discovery_result_fields_offenders,
+    summary=("project the discovery envelope through content_pipeline._discovery_result_fields"),
+    excludes=SANCTIONED | _CONTENT_PIPELINE_OWNER,
+    bite=lambda: (
+        # The historical shape: the block spelled at the result call.
+        Bites(
+            "def build(post_fetch, error):\n"
+            "    return _make_engine_result(\n"
+            "        discovered_link_count=post_fetch['discovered_link_count'],\n"
+            "        discovered_links=post_fetch['discovered_links'],\n"
+            "        error=error,\n"
+            "    )\n",
+            "_discovery_result_fields",
+        ),
+    ),
+    clean=lambda: (
+        # The sanctioned spread is not a spelling of individual fields.
         "def build(post_fetch, error):\n"
         "    return _make_engine_result(\n"
         "        **_discovery_result_fields(post_fetch, classification_evidence=[], error=error),\n"
         "        next_page_url=post_fetch['next_page_url'],\n"
-        "    )\n"
-    )
-    assert not _respelled_discovery_result_fields_offenders(spread, synthetic), (
-        "the sanctioned spread was flagged"
-    )
-    # A discovered-links field that is not a result field is somebody else's.
-    unrelated = ast.parse(
+        "    )\n",
+        # A discovered-links field that is not a result field is somebody else's.
         "def count(post_fetch):\n"
-        "    return stats(discovered_link_count=post_fetch['discovered_link_count'])\n"
-    )
-    assert not _respelled_discovery_result_fields_offenders(unrelated, synthetic), (
-        "a non-result sink was flagged"
-    )
+        "    return stats(discovered_link_count=post_fetch['discovered_link_count'])\n",
+    ),
+)
+
+
+def test_discovered_link_result_fields_come_from_the_pipeline():
+    """A discovery envelope reaches a result through one projection."""
+    DISCOVERED_LINK_RESULT_FIELDS_COME_FROM_THE_PIPELINE.scan()
+
+
+def test_discovery_result_field_detector_bites():
+    """A re-spelled projection fires; the spread, and a non-result sink, stay clean."""
+    DISCOVERED_LINK_RESULT_FIELDS_COME_FROM_THE_PIPELINE.check_bites()
 
 
 def test_discovery_result_projection_has_exactly_one_definition():
