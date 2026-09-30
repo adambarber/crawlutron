@@ -27,6 +27,7 @@ from tests.chokepoint_walks import (
     functions,
     nodes_of,
     offender_at,
+    or_nodes,
     plain_imports,
     resolved_call_name,
     resolved_expr_name,
@@ -85,11 +86,7 @@ def _inline_extraction_normalizations(tree: ast.AST, path: pathlib.Path) -> list
     attribute is somebody else's business.
     """
     offenders: list[str] = []
-    for node in nodes_of(tree):
-        if not isinstance(node, ast.BoolOp) or not isinstance(node.op, ast.Or):
-            continue
-        if len(node.values) != 2:
-            continue
+    for node in or_nodes(tree):
         left, right = node.values
         if not (isinstance(left, ast.Attribute) and left.attr == "text"):
             continue

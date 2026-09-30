@@ -48,7 +48,14 @@ from app.crawl.admission import (
     remaining_page_capacity,
     requeue_admitted_pages,
 )
-from app.crawl.job_store import FrontierEntry, JobKind, JobStatus, JobStore, normalize_job_state
+from app.crawl.job_store import (
+    FrontierEntry,
+    JobKind,
+    JobStatus,
+    JobStore,
+    durable_page_identity,
+    normalize_job_state,
+)
 from app.crawl.policy import read_policy
 from app.models import Classification, CrawlResult, CrawlTask
 
@@ -194,7 +201,7 @@ def _pop_frontier(job: Any) -> list[FrontierEntry]:
     max_pages = job_max_pages(job.policy, job.tier)
     if job.in_flight:
         fixed = {
-            canonical_page_identity(url, host_policy=job.host_policy) or url
+            durable_page_identity(url, job.host_policy)
             for url in set(job.visited) | {entry.url for entry in job.in_flight}
         }
         if max_pages > 0 and len(fixed) > max_pages:
@@ -358,25 +365,24 @@ async def _run_job(
                 original = item.get("original_url")
                 if isinstance(original, str) and original:
                     resolved.setdefault(
-                        canonical_page_identity(original, host_policy=context.host_policy) or original,
+                        durable_page_identity(original, context.host_policy),
                         item,
                     )
             for item in items:
                 for key in (item.get("final_url"), item.get("normalized_url")):
                     if not isinstance(key, str) or not key:
                         continue
-                    identity = canonical_page_identity(key, host_policy=context.host_policy) or key
+                    identity = durable_page_identity(key, context.host_policy)
                     resolved.setdefault(identity, item)
 
             failed = 0
             for entry in batch:
                 url = entry.url
-                identity = canonical_page_identity(url, host_policy=context.host_policy) or url
+                identity = durable_page_identity(url, context.host_policy)
                 job.in_flight = [
                     pending
                     for pending in job.in_flight
-                    if (canonical_page_identity(pending.url, host_policy=context.host_policy) or pending.url)
-                    != identity
+                    if durable_page_identity(pending.url, context.host_policy) != identity
                 ]
                 item = resolved.get(identity)
                 if item is None:

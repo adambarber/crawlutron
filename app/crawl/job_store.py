@@ -94,8 +94,22 @@ def _canonical_cached(url: str, host_policy: HostPolicy) -> str:
     return str(safe_public_url_or_none(url, policy=host_policy) or url)
 
 
-def _canonical_or_raw(url: str, host_policy: HostPolicy) -> str:
+def durable_page_identity(url: str, host_policy: HostPolicy) -> str:
     """Canonical page identity for ``url``, or the raw value when it has none.
+
+    THE definition of the key a URL occupies in ``visited``, ``in_flight`` and
+    ``frontier``. Those three collections have to agree with each other, so the
+    identity is one function rather than the same rule written at each call
+    site; ``tests/invariants/test_page_identity.py`` holds the line.
+
+    The return type is ``str``, and deliberately NOT ``NormalizedUrl``: when
+    ``url`` has no canonical form -- it failed the SSRF policy, or it is not a
+    URL -- the raw value comes back unchanged, and a type that claims otherwise
+    is a claim this function cannot keep. The old spelling inferred that claim
+    from ``canonical_page_identity``'s ``NormalizedUrl | None`` return combined
+    with an ``or url`` at each call site, so it was made eleven times over and
+    read in none. A caller that genuinely needs a ``NormalizedUrl`` converts at
+    the model boundary, where the model makes it ask.
 
     Memoized: the job store re-reads the same durable collections on every loop
     iteration, and re-deriving identity for every stored URL on every read made
@@ -168,11 +182,11 @@ def normalize_frontier(
     SQL write, a migration, an older writer) and then the read path skips
     normalization on a row that needs it; migration 0002 dropped the column,
     which is why the flag could not be trusted. The cost is bounded by the
-    canonicalization memo in :func:`_canonical_or_raw`.
+    canonicalization memo in :func:`durable_page_identity`.
     """
     if not isinstance(values, (list, tuple)):
         return []
-    canonical_root = _canonical_or_raw(root_url, host_policy)
+    canonical_root = durable_page_identity(root_url, host_policy)
     legacy_depth = policy.limits.max_depth
     entries: dict[str, FrontierEntry] = {}
     order: list[str] = []
@@ -190,7 +204,7 @@ def normalize_frontier(
             depth = legacy_depth
         if not isinstance(raw_url, str) or not raw_url:
             continue
-        url = _canonical_or_raw(raw_url, host_policy)
+        url = durable_page_identity(raw_url, host_policy)
         entry_depth = 0 if url == canonical_root else _entry_depth(depth, legacy_depth)
         entry = FrontierEntry(url=url, depth=entry_depth)
         previous = entries.get(url)
@@ -211,7 +225,7 @@ def normalize_job_collections(
     in_flight: _PersistedJSON,
     host_policy: HostPolicy,
 ) -> tuple[set[str], list[FrontierEntry], list[FrontierEntry]]:
-    canonical_root = _canonical_or_raw(root_url, host_policy)
+    canonical_root = durable_page_identity(root_url, host_policy)
     if isinstance(visited, str):
         visited_values = [visited]
     elif isinstance(visited, Iterable):
@@ -222,7 +236,7 @@ def normalize_job_collections(
         # below still bounds what it will fetch.
         visited_values = []
     normalized_visited = {
-        _canonical_or_raw(url, host_policy) for url in visited_values if isinstance(url, str) and url
+        durable_page_identity(url, host_policy) for url in visited_values if isinstance(url, str) and url
     }
     normalized_frontier = normalize_frontier(
         frontier,
@@ -325,7 +339,7 @@ class CrawlJobState:
         Normalizes first, so the serialized form carries canonical page identity
         (the read boundary enforces it too, but a writer that emits an alias
         makes every reader pay for it). This is affordable only because
-        canonicalization is memoized in :func:`_canonical_or_raw`: the same
+        canonicalization is memoized in :func:`durable_page_identity`: the same
         durable URL set is re-serialized on every job loop iteration.
         """
         normalize_job_state(self)
@@ -349,7 +363,7 @@ class CrawlJobState:
         here, so a row written by any writer -- including one that put
         non-canonical URLs inside well-formed records -- cannot reintroduce a
         second identity for a page. The cost is bounded by the canonicalization
-        memo in :func:`_canonical_or_raw` rather than by skipping the work.
+        memo in :func:`durable_page_identity` rather than by skipping the work.
 
         This used to branch on a persisted ``canonicalized`` column, read from
         a local that was hardcoded ``False`` -- the column is gone (migration
@@ -361,11 +375,11 @@ class CrawlJobState:
         kind = data.get("kind", JobKind.WHOLE_SITE.value)
         policy = read_policy(data.get("policy"), tier)
         root_url = str(data.get("root_url") or "")
-        root_url = _canonical_or_raw(root_url, host_policy)
+        root_url = durable_page_identity(root_url, host_policy)
         visited_raw = data.get("visited", [])
         if isinstance(visited_raw, list):
             visited = {
-                _canonical_or_raw(url, host_policy) for url in visited_raw if isinstance(url, str) and url
+                durable_page_identity(url, host_policy) for url in visited_raw if isinstance(url, str) and url
             }
         else:
             visited = set()
@@ -376,7 +390,7 @@ class CrawlJobState:
                 if not isinstance(url, str):
                     continue
                 try:
-                    key = _canonical_or_raw(url, host_policy)
+                    key = durable_page_identity(url, host_policy)
                     transient_retries[key] = max(0, int(attempts))
                 except (TypeError, ValueError):
                     continue
@@ -417,7 +431,7 @@ class CrawlJobState:
 
 
 def normalize_job_state(job: CrawlJobState) -> CrawlJobState:
-    root_url = _canonical_or_raw(job.root_url, job.host_policy)
+    root_url = durable_page_identity(job.root_url, job.host_policy)
     policy = read_policy(job.policy, job.tier)
     visited, frontier, in_flight = normalize_job_collections(
         root_url=root_url,
@@ -435,7 +449,7 @@ def normalize_job_state(job: CrawlJobState) -> CrawlJobState:
             value = max(0, int(attempts))
         except (TypeError, ValueError):
             continue
-        identity = _canonical_or_raw(url, job.host_policy)
+        identity = durable_page_identity(url, job.host_policy)
         transient_retries[identity] = max(transient_retries.get(identity, 0), value)
     job.root_url = root_url
     job.policy = _stored_policy(policy)

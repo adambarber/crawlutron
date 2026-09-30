@@ -14,7 +14,7 @@ from urllib.parse import urljoin, urlparse
 from app.api_models import CrawlExtractionMethod, CrawlPolicy
 from app.constants import is_analytics_host, is_document_url
 from app.crawl.fetch_helpers import _fetch_and_decode, fetch_sitemap_urls
-from app.crawl.job_store import FrontierEntry, job_max_pages
+from app.crawl.job_store import FrontierEntry, durable_page_identity, job_max_pages
 from app.crawl.policy import PolicyTier, discovery_flags, read_policy
 from app.crawl.robots import load_robots_rules, robots_allows, robots_origin
 from app.crawl.scope_match import scope_allows
@@ -210,9 +210,7 @@ async def admit_discovered_links(
         return AdmissionOutcome()
     next_depth = source_depth + 1
     normalized_known = {
-        str(canonical_page_identity(url, host_policy=host_policy) or url)
-        for url in known
-        if isinstance(url, str) and url
+        durable_page_identity(url, host_policy) for url in known if isinstance(url, str) and url
     }
     known.clear()
     known.update(normalized_known)
@@ -401,7 +399,7 @@ def admitted_page_identities(job: Any, *, host_policy: HostPolicy) -> set[str]:
     values = set(job.visited) | {entry.url for entry in job.in_flight} | {entry.url for entry in job.frontier}
     for value in values:
         if isinstance(value, str) and value:
-            identities.add(str(canonical_page_identity(value, host_policy=host_policy) or value))
+            identities.add(durable_page_identity(value, host_policy))
     return identities
 
 
@@ -528,10 +526,7 @@ def requeue_admitted_pages(
     accepted_entries, cap_blocked = _admit_page_identities(
         job,
         known,
-        (
-            (canonical_page_identity(entry.url, host_policy=context.host_policy) or entry.url, entry.depth)
-            for entry in entries
-        ),
+        ((durable_page_identity(entry.url, context.host_policy), entry.depth) for entry in entries),
     )
     job.frontier.extend(accepted_entries)
     if cap_blocked:

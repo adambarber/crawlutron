@@ -20,8 +20,8 @@ from app.constants import ENGINE_BATCH_CONCURRENCY_MULTIPLIER, is_transient_clas
 from app.crawl.admission import (
     AdmittedLink,
     admit_discovered_links,
-    canonical_page_identity,
 )
+from app.crawl.job_store import durable_page_identity
 from app.crawl.recursive_admission import RecursiveRunState, admit_recursive_batch
 from app.crawl.result_helpers import _failed_result_for
 from app.metrics import get_metrics
@@ -141,14 +141,14 @@ async def _seed_recursive_frontier(
     if not run.seed_sitemaps:
         return
     for seed in await run.sitemap_seeds():
-        identity = canonical_page_identity(seed, host_policy=run.host_policy) or seed
+        identity = durable_page_identity(seed, run.host_policy)
         if identity in seed_identities:
             continue
         seed_identities.add(identity)
         task = CrawlTask(
             index=state.next_index,
             original_url=seed,
-            normalized_url=identity,
+            normalized_url=NormalizedUrl(identity),
             domain=registrable_domain(identity),
         )
         frontier.append((0, task))
@@ -241,10 +241,7 @@ async def _start_recursive_state(
         next_index=len(jobs),
         ramp=float(run.global_concurrency),
     )
-    seed_identities: set[str] = {
-        canonical_page_identity(job.normalized_url, host_policy=run.host_policy) or job.normalized_url
-        for job in jobs
-    }
+    seed_identities: set[str] = {durable_page_identity(job.normalized_url, run.host_policy) for job in jobs}
     await _seed_recursive_frontier(run, state, state.frontier, seed_identities)
     return state
 

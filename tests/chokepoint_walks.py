@@ -208,6 +208,23 @@ def call_nodes(root: ast.AST) -> tuple[ast.Call, ...]:
     return tuple(node for node in _narrow(root, "call", ast.Call) if isinstance(node, ast.Call))
 
 
+def or_nodes(root: ast.AST) -> tuple[ast.BoolOp, ...]:
+    """Every two-valued ``a or b``, in walk order.
+
+    A detector's rule is very often "an expression that coerces a possibly-absent
+    value into a present one", and in Python that is spelled ``x or y``. The
+    shape appears once per rule, so it is a vocabulary word rather than a guard
+    each rule re-derives: written out, the three-line guard below was the same
+    clone in every file that needed it, which is exactly what the clone gate
+    exists to prevent.
+    """
+    return tuple(
+        node
+        for node in _narrow(root, "boolop", ast.BoolOp)
+        if isinstance(node, ast.BoolOp) and isinstance(node.op, ast.Or) and len(node.values) == 2
+    )
+
+
 def attribute_reads(root: ast.AST) -> tuple[ast.Attribute, ...]:
     """Every ``obj.attr`` read. What a rule about member access walks."""
     return tuple(

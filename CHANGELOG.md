@@ -6,6 +6,18 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- **A page's durable identity is one function, and a gate holds it there.**
+  `visited`, `in_flight` and `frontier` all key on page identity, so they have
+  to agree — but "canonical form, else the raw URL" was written out at ten call
+  sites across three modules in three spellings. Two of them recomputed what
+  the job store had already memoized, and that memoization exists because
+  re-deriving identity for every stored URL on every read cost ~0.23s on a
+  20k-entry job. `durable_page_identity` now owns the rule;
+  `tests/invariants/test_page_identity.py` fails on a twelfth call site written
+  in a fourth way. The owner returns `str` rather than `NormalizedUrl` on
+  purpose: when a URL has no canonical form the raw value comes back unchanged,
+  and the old `... or url` spelling made a type claim the function could not
+  keep, eleven times over, implicitly.
 - **Address classification is now one primitive, and the service says when it
   is reachable from the network.** Parsing a host into an address, unwrapping
   any IPv4 inside an IPv6 wrapper, and reading the range predicates was written
