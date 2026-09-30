@@ -321,3 +321,66 @@ class TestRequestCollectionsAreBounded:
         over = {f"https://h{i}.example": {"kind": "bearer", "token": "t"} for i in range(33)}
         with pytest.raises(ValidationError):
             CrawlPolicy(credentials=over)
+
+
+class TestOutputFormatIsTheDocumentedSet:
+    """``output_format`` describes itself as an enum, so it is one.
+
+    The field is annotated ``str | None`` and its description reads "One of:
+    json (default), jsonl, ndjson, markdown, csv". Nothing bound the value to
+    that set, so a typo fell back to JSON and the caller received valid JSON
+    having asked for CSV, with nothing to indicate the substitution.
+
+    A census of every model for a field whose description enumerates values
+    while its annotation does not enforce them returns exactly this one field,
+    so the fix is deliberately not generalised into a sweep.
+    """
+
+    DOCUMENTED = ("json", "jsonl", "ndjson", "markdown", "csv")
+
+    def test_the_documented_set_is_what_the_type_accepts(self):
+        """The description and the annotation must state the same set.
+
+        This is the drift guard for the field: the description is what a caller
+        reads, the Literal is what is enforced, and the failure this issue
+        describes is exactly the two disagreeing while both look correct.
+        """
+        from typing import get_args
+
+        from app.api_models import CrawlRequest
+
+        args = get_args(CrawlRequest.model_fields["output_format"].annotation)
+        enforced = {value for arg in args for value in get_args(arg) if isinstance(value, str)}
+        assert enforced == set(self.DOCUMENTED), f"documented and enforced sets disagree: {enforced}"
+
+    @pytest.mark.parametrize("value", DOCUMENTED)
+    def test_each_documented_value_validates(self, value):
+        from app.api_models import CrawlRequest
+
+        assert CrawlRequest(url="https://example.com/", output_format=value).output_format == value
+
+    def test_absent_still_means_the_default(self):
+        from app.api_models import CrawlRequest
+
+        assert CrawlRequest(url="https://example.com/").output_format is None
+        assert CrawlRequest(url="https://example.com/", output_format=None).output_format is None
+
+    @pytest.mark.parametrize("typo", ["jsonlines", "JSON", "csv2", "md", "yaml", ""])
+    def test_a_value_outside_the_set_is_refused(self, typo):
+        from app.api_models import CrawlRequest
+
+        with pytest.raises(ValidationError):
+            CrawlRequest(url="https://example.com/", output_format=typo)
+
+    def test_the_refusal_names_the_field(self):
+        """A caller whose only mistake was a typo must be told WHICH field.
+
+        Asserted here because a model-level rejection reports loc=() and the
+        API derives its error code from where pydantic points -- so a bare
+        "invalid request" would name nothing the caller can act on.
+        """
+        from app.api_models import CrawlRequest
+
+        with pytest.raises(ValidationError) as exc:
+            CrawlRequest(url="https://example.com/", output_format="jsonlines")
+        assert any("output_format" in str(error["loc"]) for error in exc.value.errors())

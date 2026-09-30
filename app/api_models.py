@@ -57,6 +57,14 @@ MAX_URLS_PER_REQUEST = 500
 MAX_VALIDATORS_PER_REQUEST = 64
 MAX_HEADERS_PER_REQUEST = 64
 
+#: The output formats a request may name. Bound to the type rather than left as
+#: prose: this description ("One of: json (default), jsonl, ndjson, markdown,
+#: csv") and the serializer's own vocabulary are one decision, and a second
+#: hand-kept copy of the list is the drift this project already refuses
+#: elsewhere. ``Literal`` needs its members written out, so this is the one
+#: place the set is spelled, and the test asserts it equals the serializer's.
+OutputFormat = Literal["json", "jsonl", "ndjson", "markdown", "csv"]
+
 # The identity block every discovery response opens with, declared once. It lives
 # here rather than in ``app.constants`` because it spans both: the version comes
 # from constants, the policy schema version is this module's own. Two payloads
@@ -720,7 +728,7 @@ class CrawlRequest(_SingleUrlSourceRequest):
         ),
     ] = None
     output_format: Annotated[
-        str | None,
+        OutputFormat | None,
         Field(
             description="Multiple output formats for the crawl results. One of: json (default), jsonl, "
             "ndjson, markdown, csv. Non-json formats are returned as a plain Response with the matching "
