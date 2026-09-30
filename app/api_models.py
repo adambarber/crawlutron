@@ -27,6 +27,7 @@ from app.constants import (
     MAX_JOB_MAX_RETRIES,
     MAX_RETRIES,
     MAX_TOTAL_URL_BUDGET_SECONDS,
+    REQUEST_PROFILE_KEYS,
     SERVICE_ID,
     SERVICE_VERSION,
 )
@@ -417,6 +418,152 @@ def _refuse_unusable_action(action: Any, index: int, allowed: str) -> None:
         )
 
 
+def _close_request_profile_vocabulary(profile: dict[str, Any]) -> dict[str, Any]:
+    """Refuse inert keys and malformed values in ``request_profile``, and say what is allowed.
+
+    This model was ``dict[str, Any]`` with no constraints at all, while its
+    siblings on the same class are closed: ``headers`` refuses a banned name and
+    ``credentials`` refuses a colliding origin. Two consequences, both silent:
+
+    - A misspelled key is accepted and does nothing. ``{"cookie_jarr":
+      "per_host"}`` disables the per-host jar; ``{"fingerprint_rotatoin": True}``
+      disables fingerprint rotation. Both report success, which is the same
+      failure as the inert ``state`` key this series removed from
+      ``browser_profile``, and the same one the field description was already
+      committing by advertising ``accept_language`` when the code reads
+      ``accept_languages``.
+    - A malformed *value* is accepted and breaks deeper in, where it cannot be
+      reported. The consumer is annotated ``-> dict[str, str]``, so a pool entry
+      that is a mapping puts a ``dict`` in ``User-Agent``; and
+      ``{"user_agents": [None]}`` raises ``TypeError`` from inside the header
+      builder, which is an HTTP 500. The same validator-shape bug that turned
+      ``{"actions": 5}`` into a 500 in the browser profile, one module over.
+
+    ``cookies`` is a second door to the ``Cookie`` header, which is why its size
+    and shape are bounded here. ``headers`` refuses a raw ``Cookie`` on the
+    grounds that "the cookie jar owns Cookie; a raw header bypasses the
+    cookie-namespace chokepoint", and a caller-supplied nested dict assembled
+    into that same header is the same capability reached by a door the ban does
+    not inspect. What that means for *isolation* is not this validator's call to
+    make: a ``cookie_namespace`` is a string the caller picks, with no
+    authentication behind it, so it is a tenant key and not a boundary. The ban's
+    rationale and ``cookie_jar``'s isolation claim are corrected in #64 to say
+    so; here the ceiling is the part that is unambiguous.
+
+    Every refusal here is ``ValueError`` on purpose. Pydantic wraps a
+    ``ValueError`` into a 422 and lets a ``TypeError`` past the request handler,
+    so a caller mistake must arrive as a refusal, which is the only shape the
+    caller can act on.
+    """
+    if not isinstance(profile, dict):
+        return profile
+
+    unknown_keys = sorted(set(profile) - REQUEST_PROFILE_KEYS)
+    if unknown_keys:
+        raise ValueError(
+            f"request_profile keys not permitted: {', '.join(unknown_keys)}; "
+            f"supported keys are: {', '.join(sorted(REQUEST_PROFILE_KEYS))}"
+        )
+
+    _refuse_malformed_profile_values(profile)
+    return profile
+
+
+def _refuse_malformed_profile_values(profile: dict[str, Any]) -> None:
+    """Refuse a value of the wrong shape behind a permitted key.
+
+    Split from the vocabulary check because the two answer different questions:
+    the caller asked for a key that exists, or the caller asked for something that
+    is not the thing that key means. The second was the one that had no home, so
+    a malformed value reached the header builder and raised from inside it.
+    """
+    from app.constants import (
+        MAX_COOKIE_NAMESPACE_LENGTH,
+        MAX_PROFILE_COOKIE_HOSTS,
+        MAX_PROFILE_COOKIE_PAIRS,
+        MAX_PROFILE_POOL_ENTRIES,
+        REQUEST_PROFILE_FLAG_KEYS,
+        REQUEST_PROFILE_POOL_KEYS,
+        REQUEST_PROFILE_TEXT_KEYS,
+    )
+
+    for key, value in profile.items():
+        if key in REQUEST_PROFILE_FLAG_KEYS and not isinstance(value, bool):
+            raise ValueError(f"request_profile {key} must be true or false, got {type(value).__name__}")
+        if key in REQUEST_PROFILE_TEXT_KEYS and not isinstance(value, str):
+            raise ValueError(f"request_profile {key} must be a string, got {type(value).__name__}")
+
+    namespace = profile.get("cookie_namespace")
+    if isinstance(namespace, str) and len(namespace) > MAX_COOKIE_NAMESPACE_LENGTH:
+        raise ValueError(
+            f"request_profile cookie_namespace may carry at most {MAX_COOKIE_NAMESPACE_LENGTH} "
+            f"characters, got {len(namespace)}"
+        )
+
+    for key in sorted(REQUEST_PROFILE_POOL_KEYS & profile.keys()):
+        _refuse_malformed_pool(profile, key, MAX_PROFILE_POOL_ENTRIES)
+
+    if "cookies" in profile:
+        _refuse_malformed_cookie_map(profile, MAX_PROFILE_COOKIE_HOSTS, MAX_PROFILE_COOKIE_PAIRS)
+
+
+def _refuse_malformed_pool(profile: dict[str, Any], key: str, ceiling: int) -> None:
+    """Refuse a header pool that is not a bounded list of strings.
+
+    Split out so the two refusals read as the two failures they are: the wrong
+    container, and the wrong thing inside the right container. A ``[None]`` here
+    used to reach the header builder and raise from inside it.
+    """
+    pool = profile[key]
+    if not isinstance(pool, list):
+        raise ValueError(f"request_profile {key} must be a list of strings, got {type(pool).__name__}")
+    if len(pool) > ceiling:
+        raise ValueError(f"request_profile {key} may carry at most {ceiling} entries, got {len(pool)}")
+    for entry in pool:
+        if not isinstance(entry, str):
+            raise ValueError(f"request_profile {key} entries must be strings, got {type(entry).__name__}")
+
+
+def _refuse_malformed_cookie_map(profile: dict[str, Any], host_ceiling: int, pair_ceiling: int) -> None:
+    """Refuse a static cookie map that is unbounded or malformed.
+
+    Without these a 200,000-host map parsed into one policy, and because
+    ``content_cache_key`` serialises the whole header map into the cache key,
+    every distinct value became a distinct cache slot holding a full response
+    body.
+
+    Note what this deliberately does NOT refuse: a cookie map with no
+    ``cookie_namespace``. That is the documented single-tenant path, and
+    ``cookie_jar``'s docstring commits to preserving it. A namespace is a tenant
+    key chosen by the caller, and this service has no caller authentication, so
+    it cannot be an authorization boundary -- see #64.
+    """
+    cookies = profile["cookies"]
+    if not isinstance(cookies, dict):
+        raise ValueError(
+            f"request_profile cookies must be a mapping of host to cookies, got {type(cookies).__name__}"
+        )
+    if len(cookies) > host_ceiling:
+        raise ValueError(f"request_profile cookies may name at most {host_ceiling} hosts, got {len(cookies)}")
+    for host, pairs in cookies.items():
+        if not isinstance(pairs, dict):
+            raise ValueError(
+                f"request_profile cookies for host {host!r} must be a mapping of name to value, "
+                f"got {type(pairs).__name__}"
+            )
+        if len(pairs) > pair_ceiling:
+            raise ValueError(
+                f"request_profile cookies for host {host!r} may carry at most {pair_ceiling} "
+                f"entries, got {len(pairs)}"
+            )
+        for name, value in pairs.items():
+            if not isinstance(name, str) or not isinstance(value, (str, int, float)):
+                raise ValueError(
+                    f"request_profile cookie {name!r} for host {host!r} must be a string name and a "
+                    "string or number value"
+                )
+
+
 def _narrows_credential_scope(key: str) -> bool:
     """True when a credential key names less than a whole origin.
 
@@ -479,6 +626,13 @@ class Credential(BaseModel):
         return self
 
 
+#: The ``request_profile`` key set, as it appears in the OpenAPI document. A sorted
+#: list rather than a ``frozenset`` because a set is not JSON serialisable and the
+#: document is served; a test reads this back to assert every advertised key has a
+#: reader in ``app/``.
+_REQUEST_PROFILE_KEYS_JSON: dict[str, Any] = {"keys": sorted(REQUEST_PROFILE_KEYS)}
+
+
 class CrawlPolicy(BaseModel):
     model_config = ConfigDict(extra="forbid")
     # Rejected policy.headers names -> why. Conditional pairs keep the
@@ -488,7 +642,8 @@ class CrawlPolicy(BaseModel):
     _BANNED_HEADERS: ClassVar[dict[str, str]] = {
         "if-none-match": "conditional headers belong to the validators map",
         "if-modified-since": "conditional headers belong to the validators map",
-        "cookie": "the cookie jar owns Cookie; a raw header bypasses the cookie-namespace chokepoint",
+        "cookie": "the cookie jar owns Cookie, and request_profile.cookies is its sanctioned second door; "
+        "a raw header bypasses both",
         "host": "Host is owned by the pinned-request chokepoint and is never forwarded verbatim",
         "proxy-authorization": "proxy credentials are not a crawl input",
         "x-forwarded-for": "origin-side identity headers must not be caller-controlled",
@@ -558,10 +713,11 @@ class CrawlPolicy(BaseModel):
     )
     request_profile: dict[str, Any] = Field(
         default_factory=dict,
-        description="Optional direct HTTP compatibility profile for HTTP_CFFI_IMPERSONATE. Supported keys "
-        "include user_agent_family (for example desktop_chrome), accept_language, fetch metadata hints, "
-        "cookie_jar, and benign per-host cookies for public sessions. Applied only to direct HTTP strategies "
-        "and echoed in diagnostics.",
+        description="Optional direct HTTP compatibility profile for HTTP_CFFI_IMPERSONATE. Supported keys: "
+        "user_agent_family (for example desktop_chrome), user_agents, accept_languages, "
+        "fingerprint_seed, fingerprint_rotation, cookie_jar, and cookies for public sessions. Applied only "
+        "to direct HTTP strategies and echoed in diagnostics.",
+        json_schema_extra=_REQUEST_PROFILE_KEYS_JSON,
     )
     browser_profile: dict[str, Any] = Field(
         default_factory=dict,
@@ -620,6 +776,11 @@ class CrawlPolicy(BaseModel):
     @classmethod
     def _close_the_browser_profile_vocabulary(cls, profile: dict[str, Any]) -> dict[str, Any]:
         return _close_browser_profile_vocabulary(profile)
+
+    @field_validator("request_profile")
+    @classmethod
+    def _close_the_request_profile_vocabulary(cls, profile: dict[str, Any]) -> dict[str, Any]:
+        return _close_request_profile_vocabulary(profile)
 
     @field_validator("credentials", mode="before")
     @classmethod

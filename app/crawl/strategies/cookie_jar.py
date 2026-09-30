@@ -31,6 +31,18 @@ if TYPE_CHECKING:
 # tenants. The legacy shared behavior is intentionally NOT opt-in because
 # silently switching to per-tenant isolation would break deployments that
 # depend on cross-request cookie persistence for a single user.
+#
+# READ THAT SENTENCE AS A REQUIREMENT ON THE OPERATOR, NOT AS A GUARANTEE.
+# The namespace is a string the caller supplies in its own request profile, and
+# this service authenticates no callers (``app/mcp/server.py`` states as much).
+# So the namespace separates tenants only as far as callers choose distinct
+# values and are trusted not to reuse each other's: a caller that names another
+# tenant's namespace reads that tenant's cookies straight out of the shared
+# module-global jar, and one that omits the key shares ``""`` with everyone.
+# There is no configuration of this class that turns a self-asserted key into an
+# authorization boundary; that would need a trusted caller identity the service
+# does not have. Treat the namespace as a partitioning convention and put
+# authentication in front of the service if isolation is required.
 _COOKIE_NAMESPACE: contextvars.ContextVar[str] = contextvars.ContextVar(
     "crawlutron_cookie_namespace", default=""
 )
