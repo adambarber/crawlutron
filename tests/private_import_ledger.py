@@ -43,10 +43,19 @@ Kinds, and what each one claims:
     implementation step by definition: the class is public and the method is not.
 
 ``implementation step``
-    A step inside an algorithm rather than a contract. A test reaching one is
-    asserting a mechanism; the fix is to rewrite the test to drive the contract
-    above, not to promote the step.
+    A step inside an algorithm rather than a contract. A test reaching one is asserting a
+    mechanism; the fix is to rewrite the test to drive the contract above, not to promote
+    the step.
 
+``substituted seam``
+    The suite replaces the name rather than reading it -- a collaborator swapped for a
+    double, or a cap shrunk until the path behind it is reachable inside a test. This is
+    the largest single category of reach in the suite, and the one the gate could not see
+    at all until ``monkeypatch.setattr(module, "_name", ...)`` was recognised as a
+    spelling rather than treated as a string. It stays private on purpose: a public
+    collaborator is a collaborator production can be broken by, so the reach is correct
+    and the fix for it is nothing. Promoting the name would quiet the gate and lose the
+    property.
 ``unreviewed``
     Recorded from the tree when this file was created. No one has argued for it
     yet, and these are the debt.
@@ -67,6 +76,7 @@ Kind = Literal[
     "chokepoint state",
     "private type",
     "implementation step",
+    "substituted seam",
 ]
 Side = Literal["test", "app"]
 
@@ -150,6 +160,36 @@ _PROCESS_WIDE_JAR = _d(
 )
 
 
+_SUBSTITUTED_COLLABORATOR = _d(
+    "substituted seam",
+    "The suite replaces this name with a double rather than reading what it returns.\n"
+    "A read asserts on a mechanism; a substitution asserts that the code under test\n"
+    "takes this collaborator at all, which is a contract -- and the only way to observe\n"
+    "that contract from outside the module is to *be* the collaborator.\n"
+    "\n"
+    "It stays private on purpose. A public collaborator is one production can reach too,\n"
+    "and a double production can reach is a double production can be broken by. So the\n"
+    "reach is correct and the fix for it is nothing; promoting the name would quiet this\n"
+    "gate and lose the property that made the gate worth having.\n",
+    side=("test",),
+)
+
+
+_SUBSTITUTED_CAP = _d(
+    "substituted seam",
+    "A private cap, timeout or retry delay the suite shrinks until the path behind it is\n"
+    "reachable inside a test. The shipped value is minutes, or tens of megabytes; a test\n"
+    "that waits that long does not run, so the suite substitutes a value small enough for\n"
+    "the guard to fire or the retry to happen.\n"
+    "\n"
+    "This is deliberately not `chokepoint state`, which is about *reading* module-private\n"
+    "data. Here the suite writes a name no caller may set: raising it is not a missing\n"
+    "seam, it is a caller moving a bound the module owns. The name stays private and the\n"
+    "substitution is recorded.\n",
+    side=("test",),
+)
+
+
 _PRIVATE_TYPE = _d(
     "private type",
     "A private class, or a private method on a public one. A private *method* is an\n"
@@ -166,6 +206,7 @@ DECLARED: dict[str, Declaration] = {
     "app.api.async_crawl_runner._async_crawl_semaphore_loop": _d(
         _CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]
     ),
+    "app.api.async_crawl_runner._build_async_crawl_semaphore": _SUBSTITUTED_COLLABORATOR,
     "app.api.async_crawl_runner._get_async_crawl_semaphore": _d(
         "unreviewed",
         "Not yet triaged.\n",
@@ -187,6 +228,7 @@ DECLARED: dict[str, Declaration] = {
         "Not yet triaged.\n",
         ["test"],
     ),
+    "app.api.middleware._MAX_REQUEST_BODY_BYTES": _SUBSTITUTED_CAP,
     "app.api.render._render_options": _d(
         "unreviewed",
         "Not yet triaged.\n",
@@ -248,6 +290,7 @@ DECLARED: dict[str, Declaration] = {
         _CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]
     ),
     "app.crawl.engine._SPILL_PREFIX": _d(_CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]),
+    "app.crawl.engine._fetch_and_decode": _SUBSTITUTED_COLLABORATOR,
     "app.crawl.engine._get_shared_content_cache": _d(
         "unreviewed",
         "Not yet triaged.\n",
@@ -293,9 +336,11 @@ DECLARED: dict[str, Declaration] = {
     "app.crawl.extraction._EXTRACTION_DOC_TIMEOUT": _d(
         _CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]
     ),
+    "app.crawl.extraction._EXTRACTION_SELECTOR_TIMEOUT": _SUBSTITUTED_CAP,
     "app.crawl.extraction._FrameCollector": _d(
         _IMPLEMENTATION_STEP.kind, _IMPLEMENTATION_STEP.reason, ["test"]
     ),
+    "app.crawl.extraction._MAX_EXTRACTED_MARKDOWN": _SUBSTITUTED_CAP,
     "app.crawl.extraction._POOL_LOCK": _d(_CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]),
     "app.crawl.extraction._acquire_doc_worker": _d(
         "unreviewed",
@@ -305,6 +350,7 @@ DECLARED: dict[str, Declaration] = {
     "app.crawl.extraction._configure_doc_worker_logging": _d(
         _LIFECYCLE_CONFIGURE_DOC_WORKER_LOGGING.kind, _LIFECYCLE_CONFIGURE_DOC_WORKER_LOGGING.reason, ["test"]
     ),
+    "app.crawl.extraction._doc_extraction_worker_count": _SUBSTITUTED_CAP,
     "app.crawl.extraction._doc_pool_health": _d(
         "unreviewed",
         "Not yet triaged.\n",
@@ -422,27 +468,40 @@ DECLARED: dict[str, Declaration] = {
         "Not yet triaged.\n",
         ["app"],
     ),
+    "app.crawl.robots._fetch_and_decode": _SUBSTITUTED_COLLABORATOR,
     "app.crawl.robots._robots_pattern_to_regex": _d(
         "unreviewed",
         "Not yet triaged.\n",
         ["app"],
     ),
     "app.crawl.robots.robots_cache._entries": _d(_CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]),
+    "app.crawl.sqlite_store._BUSY_TIMEOUT_MS": _SUBSTITUTED_CAP,
+    "app.crawl.sqlite_store._WAL_RETRY_SECONDS": _SUBSTITUTED_CAP,
+    "app.crawl.strategies.browser.BrowserRenderer._acquire_browser": _SUBSTITUTED_COLLABORATOR,
+    "app.crawl.strategies.browser.BrowserRenderer._auto_accept_cookie_consent": _SUBSTITUTED_COLLABORATOR,
     "app.crawl.strategies.browser.BrowserRenderer._extract_text": _d(
         _PRIVATE_TYPE.kind, _PRIVATE_TYPE.reason, ["test"]
     ),
+    "app.crawl.strategies.browser.BrowserRenderer._extract_with_challenge_wait": _SUBSTITUTED_COLLABORATOR,
+    "app.crawl.strategies.browser.BrowserRenderer._flatten_shadow_dom": _SUBSTITUTED_COLLABORATOR,
     "app.crawl.strategies.browser.BrowserRenderer._get_browser_kwargs": _d(
         _PRIVATE_TYPE.kind, _PRIVATE_TYPE.reason, ["test"]
     ),
+    "app.crawl.strategies.browser.BrowserRenderer._get_page_kwargs": _SUBSTITUTED_COLLABORATOR,
     "app.crawl.strategies.browser.BrowserRenderer._harvest_timeout_for": _d(
         _PRIVATE_TYPE.kind, _PRIVATE_TYPE.reason, ["test"]
     ),
+    "app.crawl.strategies.browser.BrowserRenderer._lazy_load_scroll": _SUBSTITUTED_COLLABORATOR,
+    "app.crawl.strategies.browser.BrowserRenderer._looks_like_pdf": _SUBSTITUTED_COLLABORATOR,
     "app.crawl.strategies.browser.BrowserRenderer._make_response_handler": _d(
         _PRIVATE_TYPE.kind, _PRIVATE_TYPE.reason, ["test"]
     ),
+    "app.crawl.strategies.browser.BrowserRenderer._run_action_chain": _SUBSTITUTED_COLLABORATOR,
+    "app.crawl.strategies.browser.BrowserRenderer._safe_close_page": _SUBSTITUTED_COLLABORATOR,
     "app.crawl.strategies.browser.BrowserRenderer._scroll_config_for": _d(
         _PRIVATE_TYPE.kind, _PRIVATE_TYPE.reason, ["test"]
     ),
+    "app.crawl.strategies.browser.BrowserRenderer._wait_for_ready_state": _SUBSTITUTED_COLLABORATOR,
     "app.crawl.strategies.browser._BROWSER_COOKIES_BY_DOMAIN": _d(
         _CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]
     ),
@@ -457,6 +516,8 @@ DECLARED: dict[str, Declaration] = {
         "Not yet triaged.\n",
         ["test"],
     ),
+    "app.crawl.strategies.browser._build_pinned_request": _SUBSTITUTED_COLLABORATOR,
+    "app.crawl.strategies.browser._build_pinned_request_async": _SUBSTITUTED_COLLABORATOR,
     "app.crawl.strategies.browser._is_ssrf_blocked": _d(
         "unreviewed",
         "Not yet triaged.\n",
@@ -493,6 +554,7 @@ DECLARED: dict[str, Declaration] = {
         "Not yet triaged.\n",
         ["test"],
     ),
+    "app.crawl.strategies.content_cache_key._RAM_SAFETY_BYTES": _SUBSTITUTED_CAP,
     "app.crawl.strategies.content_cache_key._effective_max_content_length": _d(
         "unreviewed",
         "Not yet triaged.\n",
@@ -535,6 +597,8 @@ DECLARED: dict[str, Declaration] = {
         "Not yet triaged.\n",
         ["test"],
     ),
+    "app.crawl.strategies.fetchers._release_stream_noblock": _SUBSTITUTED_COLLABORATOR,
+    "app.crawl.strategies.http_client_pool._DEFAULT_CFFI_SESSION": _SUBSTITUTED_COLLABORATOR,
     "app.crawl.strategies.http_client_pool._DEFAULT_HTTP_CLIENT": _d(
         _CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]
     ),
@@ -553,6 +617,7 @@ DECLARED: dict[str, Declaration] = {
     "app.crawl.strategies.http_client_pool._PENDING_CLIENT_CLOSE_MAX": _d(
         _CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]
     ),
+    "app.crawl.strategies.http_client_pool._THIRD_POOL_SLOT": _SUBSTITUTED_COLLABORATOR,
     "app.crawl.strategies.http_client_pool._build_async_client": _d(
         "unreviewed",
         "Not yet triaged.\n",
@@ -669,6 +734,7 @@ DECLARED: dict[str, Declaration] = {
         "Not yet triaged.\n",
         ["test"],
     ),
+    "app.mcp.server._call_tool": _SUBSTITUTED_COLLABORATOR,
     "app.mcp.tools._handle_crawl": _d(
         "unreviewed",
         "Not yet triaged.\n",
@@ -720,6 +786,7 @@ DECLARED: dict[str, Declaration] = {
     "app.resource_pressure._HTTP_TASK_RAM_BYTES": _d(
         _CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]
     ),
+    "app.resource_pressure._LOOP_LAG_PROBE_ENABLED": _SUBSTITUTED_CAP,
     "app.resource_pressure._MAX_DERIVED_POOL_SIZE": _d(
         _CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]
     ),

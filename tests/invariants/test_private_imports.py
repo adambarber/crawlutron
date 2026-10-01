@@ -51,17 +51,36 @@ _TESTS_DIR = REPO_ROOT / "tests"
 # lifecycle rows legitimately live, so the name is worth naming in the failure text.
 _LIFECYCLE_OWNER = "conftest"
 
+# The three spellings by which the suite substitutes a private name. All three are in
+# live use: ``monkeypatch.setattr`` (112 sites), ``unittest.mock.patch.object`` (3)
+# and ``monkeypatch.delattr`` (1).
+_PATCH_CALLS = frozenset({"setattr", "object", "delattr"})
+
 
 def _private_app_names(tree: ast.Module) -> dict[str, int]:
     """``"module.name" -> lineno`` for every private ``app`` name the file reaches.
 
-    Two forms reach the same private name and the first version of this gate read
+    Three forms reach the same private name and the first version of this gate read
     only one of them, which left 19 welds invisible: nineteen modules the suite
     reaches through a bound module object rather than a from-import, as in
     ``extraction_mod.quality_score``. A gate that can be walked around by
-    spelling the import differently is not a gate, so both forms are resolved to
-    the same ``"module.name"`` key and the ledger holds names rather than
-    spellings.
+    spelling the import differently is not a gate, so every form is resolved to the
+    same ``"module.name"`` key and the ledger holds names rather than spellings.
+
+    The third form is the one the suite uses most and the gate could not see at all:
+    ``monkeypatch.setattr(module, "_name", value)`` passes the reach as a string
+    literal, so a detector reading imports and attribute accesses finds nothing.
+    That is not a spelling detail -- it is 98 reaches, 45 of which had no ledger
+    row while this gate reported the suite clean. The target is resolved through the
+    module's own import bindings so the three spellings agree, and a target that
+    resolves to a non-``app`` module is skipped: a test's own private double is the
+    suite substituting something it owns, not reaching into ``app``.
+
+    One blind spot survives and is not papered over: a name patched on an *object*
+    the suite holds in a local (``monkeypatch.setattr(gate, "_usage_ratio", ...)``,
+    18 sites) names no module, so no syntactic gate can resolve it. That reach is
+    real and undeclared; closing it needs the factory's return type, not a wider
+    spelling.
     """
     found: dict[str, int] = {}
 
@@ -79,6 +98,19 @@ def _private_app_names(tree: ast.Module) -> dict[str, int]:
         if not isinstance(node, ast.Attribute) or node.attr.startswith("__"):
             continue
         record(resolved_expr_name(tree, node), node.lineno)
+    for node in nodes_of(tree):
+        if not isinstance(node, ast.Call) or len(node.args) < 2:
+            continue
+        callee = node.func
+        spelling = callee.attr if isinstance(callee, ast.Attribute) else getattr(callee, "id", "")
+        if spelling not in _PATCH_CALLS:
+            continue
+        literal = node.args[1]
+        if not isinstance(literal, ast.Constant) or not isinstance(literal.value, str):
+            continue
+        target = resolved_expr_name(tree, node.args[0])
+        if target:
+            record(f"{target}.{literal.value}", node.lineno)
     return found
 
 
@@ -109,6 +141,11 @@ PRIVATE_IMPORT_LEDGER = Rule(
         # And the `import x.y` / `x.y._name` form, which reaches the same private
         # name through a module object instead of a from-import.
         "import app.crawl.engine\n\nassert app.crawl.engine._undeclared_probe\n",
+        # And the string form, which is how the suite actually substitutes most of
+        # what it reaches: the private name is a literal argument, so a detector
+        # reading imports and attribute reads sees nothing at all.
+        "import app.crawl.engine as engine\n\n"
+        'monkeypatch.setattr(engine, "_undeclared_probe_name", lambda: None)\n',
     ),
     clean=lambda: (
         # A public name needs no ledger row -- that is the whole point of the fix.
@@ -120,6 +157,10 @@ PRIVATE_IMPORT_LEDGER = Rule(
         # A public name through a bound module object is the same name publicly,
         # so it needs no row either.
         "import app.crawl.extraction as extraction\n\nvalue = extraction.extract_content\n",
+        # And the same exemption for the string form: a private name on a *test*
+        # module, patched by string, is the suite substituting its own double.
+        "import tests.membership_gate as gate\n\n"
+        'monkeypatch.setattr(gate, "_local_probe_name", lambda: None)\n',
     ),
 )
 
