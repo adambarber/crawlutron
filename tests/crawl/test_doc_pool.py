@@ -8,6 +8,7 @@ import pytest
 import app.crawl.extraction as ext_mod
 from app.crawl.extraction import ExtractedContent
 from tests._app_factory import service_app
+from tests._extraction_helpers import settings_with
 from tests._lifespan_doubles import stub_heavy_teardown
 from tests._lock_doubles import DelegatingLock
 from tests._process_doubles import (
@@ -61,7 +62,7 @@ def _spawn_replacement(monkeypatch, pid: int) -> list[ext_mod._DocWorker]:
     return spawned
 
 
-def _acquire_the_replacement(fake_pool, monkeypatch, pid: int, bound: float = 0.3):
+def _acquire_the_replacement(fake_pool, pid: int, bound: float = 0.3):
     """Acquire from a pool whose only slots are unusable; report the spawn too.
 
     Three tests here ask the same question -- can acquire still grow past a slot
@@ -75,24 +76,21 @@ def _acquire_the_replacement(fake_pool, monkeypatch, pid: int, bound: float = 0.
     asked for a replacement -- and the worker acquire handed back.
     """
     spawned = _spawn_replacement(fake_pool, pid)
-    monkeypatch.setattr(ext_mod, "_EXTRACTION_DOC_ACQUIRE_TIMEOUT", bound, raising=False)
-    return spawned, ext_mod._acquire_doc_worker()
+    return spawned, ext_mod._acquire_doc_worker(bound)
 
 
-def _acquire_with_bound(monkeypatch, bound: float = 0.25):
+def _acquire_with_bound(bound: float = 0.25):
     """Call ``_acquire_doc_worker`` under a small acquire bound, in a thread.
 
-    Returns ``(returned, still_blocked, elapsed)``. ``raising=False`` so this
-    scenario also runs against un-bounded code, where the defect is the wedge
-    itself rather than a missing knob; the thread is not a convenience: without
-    a deadline the call never returns and the test would hang instead of
-    reporting it.
+    Returns ``(returned, still_blocked, elapsed)``. The bound is a real argument
+    rather than a patched module constant, so the deadline this scenario proves
+    is the one it asks for; the thread is not a convenience: without a deadline
+    the call never returns and the test would hang instead of reporting it.
     """
-    monkeypatch.setattr(ext_mod, "_EXTRACTION_DOC_ACQUIRE_TIMEOUT", bound, raising=False)
     box: dict[str, object] = {}
 
     def _call() -> None:
-        box["worker"] = ext_mod._acquire_doc_worker()
+        box["worker"] = ext_mod._acquire_doc_worker(bound)
 
     thread = threading.Thread(target=_call, daemon=True)
     started = time.monotonic()
@@ -144,7 +142,7 @@ def test_retired_stubborn_worker_is_not_acquired_again(fake_pool):
 
     spawned = _spawn_replacement(fake_pool, 9999)
 
-    worker = ext_mod._acquire_doc_worker()
+    worker = ext_mod._acquire_doc_worker(settings_with().extraction_doc_acquire_timeout)
 
     assert spawned, "the retired slot was not replaced"
     assert worker is spawned[0], f"acquire handed back a retired worker: {worker!r}"
@@ -162,7 +160,7 @@ def test_healthy_idle_worker_is_reused_not_respawned(fake_pool):
 
     fake_pool.setattr(ext_mod, "_spawn_doc_worker", _should_not_spawn)
 
-    assert ext_mod._acquire_doc_worker() is live
+    assert ext_mod._acquire_doc_worker(settings_with().extraction_doc_acquire_timeout) is live
 
 
 # --- 3: bounded acquisition --------------------------------------------------
@@ -180,7 +178,7 @@ def test_acquire_gives_up_instead_of_wedging_on_a_stuck_busy_flag(fake_pool):
     with ext_mod._POOL_LOCK:
         ext_mod._DOC_POOL = [stuck]
 
-    worker, still_blocked, elapsed = _acquire_with_bound(fake_pool)
+    worker, still_blocked, elapsed = _acquire_with_bound()
 
     assert not still_blocked, "_acquire_doc_worker waited forever on a stuck busy flag"
     assert worker is None, f"expected degradation to 'no worker', got {worker!r}"
@@ -208,7 +206,10 @@ def test_acquire_returns_promptly_when_a_worker_is_released(fake_pool):
 
     def _call() -> None:
         waiter_entered.set()
-        box["worker"] = ext_mod._acquire_doc_worker()
+        # The configured bound, not a short one: the claim is that a release
+        # wakes the waiter, and that only holds if the waiter was still waiting
+        # when the release landed.
+        box["worker"] = ext_mod._acquire_doc_worker(settings_with().extraction_doc_acquire_timeout)
 
     thread = threading.Thread(target=_call, daemon=True)
     thread.start()
@@ -228,8 +229,9 @@ def test_acquire_returns_promptly_when_a_worker_is_released(fake_pool):
 
 def test_acquire_timeout_is_configured_and_bounded():
     """Same invariant style as the browser pool: the bound exists and is finite."""
-    assert ext_mod._EXTRACTION_DOC_ACQUIRE_TIMEOUT > 0
-    assert ext_mod._EXTRACTION_DOC_ACQUIRE_TIMEOUT < 3600
+    configured = settings_with().extraction_doc_acquire_timeout
+    assert configured > 0
+    assert configured < 3600
 
 
 def test_extract_document_degrades_when_no_worker_can_be_acquired(fake_pool, monkeypatch):
@@ -243,14 +245,16 @@ def test_extract_document_degrades_when_no_worker_can_be_acquired(fake_pool, mon
     stuck.busy = True
     with ext_mod._POOL_LOCK:
         ext_mod._DOC_POOL = [stuck]
-    monkeypatch.setattr(ext_mod, "_EXTRACTION_DOC_ACQUIRE_TIMEOUT", 0.25, raising=False)
+    settings = settings_with(extraction_doc_acquire_timeout=0.25)
 
     # The extraction result's own type, so the two reads below are checks about
     # a document-shaped value rather than about `object` having attributes.
     result_box: dict[str, ExtractedContent] = {}
 
     def _call() -> None:
-        result_box["result"] = ext_mod.extract_document(b"%PDF-1.4 fake", "http://example.com/x.pdf")
+        result_box["result"] = ext_mod.extract_document(
+            b"%PDF-1.4 fake", "http://example.com/x.pdf", settings=settings
+        )
 
     thread = threading.Thread(target=_call, daemon=True)
     thread.start()
@@ -306,7 +310,6 @@ def test_acquire_budget_starts_after_the_lock_not_before_it(fake_pool):
     by a race over which thread wins the lock.
     """
     bound = 0.5
-    fake_pool.setattr(ext_mod, "_EXTRACTION_DOC_ACQUIRE_TIMEOUT", bound, raising=False)
     worker = _stub_worker(6060)
     worker.busy = True
     with ext_mod._POOL_LOCK:
@@ -335,7 +338,7 @@ def test_acquire_budget_starts_after_the_lock_not_before_it(fake_pool):
 
     def _acquire() -> None:
         acquirer_thread["id"] = threading.get_ident()
-        box["worker"] = ext_mod._acquire_doc_worker()
+        box["worker"] = ext_mod._acquire_doc_worker(bound)
 
     holder_ready = threading.Event()
     holder_done = threading.Event()
@@ -396,7 +399,7 @@ def test_respawn_terminates_the_replaced_worker_off_the_pool_lock(fake_pool):
 
     fake_pool.setattr(ext_mod, "_spawn_doc_worker", _fake_spawn)
 
-    worker = ext_mod._acquire_doc_worker()
+    worker = ext_mod._acquire_doc_worker(settings_with().extraction_doc_acquire_timeout)
 
     assert worker is replacement, "the dead slot was not respawned"
     assert worker.busy is True
@@ -418,7 +421,7 @@ def test_undead_retired_slot_does_not_consume_a_pool_slot(fake_pool, monkeypatch
     """
     install_unkillable_doc_worker()
 
-    spawned, worker = _acquire_the_replacement(fake_pool, monkeypatch, 31337)
+    spawned, worker = _acquire_the_replacement(fake_pool, 31337)
 
     assert spawned, "the pool did not grow past the unkillable slot"
     assert worker is spawned[0], (
@@ -550,22 +553,28 @@ def test_doc_timeout_kills_and_pool_recovers(monkeypatch):
 
     constructions = _counted_spawns(monkeypatch)
     _use_single_worker(monkeypatch)
-    monkeypatch.setattr(ext_mod, "_EXTRACTION_DOC_TIMEOUT", 0.05)
     try:
         import time
 
         monkeypatch.setenv("TEST_MARKITDOWN_HANG", "1")
         started = time.monotonic()
-        result = ext_mod.extract_document(b"%PDF-1.4 fake", "http://example.com/hang.pdf")
+        result = ext_mod.extract_document(
+            b"%PDF-1.4 fake",
+            "http://example.com/hang.pdf",
+            settings=settings_with(extraction_doc_timeout=0.05),
+        )
         assert time.monotonic() - started < 5.0
         assert result.text is None and result.markdown is None
         hung_pids = ext_mod._doc_pool_pids()
 
         monkeypatch.delenv("TEST_MARKITDOWN_HANG")
-        # Normal timeout for recovery: the respawned worker must boot (spawn
+        # A normal deadline for recovery: the respawned worker must boot (spawn
         # platforms) before the task timeout starts mattering again.
-        monkeypatch.setattr(ext_mod, "_EXTRACTION_DOC_TIMEOUT", 10.0)
-        recovered = ext_mod.extract_document(b"%PDF-1.4 fake", "http://example.com/ok.pdf")
+        recovered = ext_mod.extract_document(
+            b"%PDF-1.4 fake",
+            "http://example.com/ok.pdf",
+            settings=settings_with(extraction_doc_timeout=10.0),
+        )
         assert recovered.markdown == "## Hello Markdown"
         # The hung worker was killed and its slot respawned: exactly one
         # replacement construction, pool back at one live worker.
@@ -587,7 +596,7 @@ def test_undead_retired_slot_is_reaped_from_the_pool(fake_pool, monkeypatch):
     """
     zombie = install_unkillable_doc_worker()
 
-    spawned, worker = _acquire_the_replacement(fake_pool, monkeypatch, 31337)
+    spawned, worker = _acquire_the_replacement(fake_pool, 31337)
 
     assert worker is spawned[0], "the pool did not grow past the unkillable slot"
     assert zombie not in (ext_mod._DOC_POOL or []), (
@@ -607,7 +616,7 @@ def test_a_retired_dead_slot_is_also_reaped_not_left_as_a_placeholder(fake_pool,
     with ext_mod._POOL_LOCK:
         ext_mod._DOC_POOL = [retired]
 
-    spawned, worker = _acquire_the_replacement(fake_pool, monkeypatch, 4242)
+    spawned, worker = _acquire_the_replacement(fake_pool, 4242)
 
     assert worker is spawned[0]
     assert retired not in (ext_mod._DOC_POOL or []), (

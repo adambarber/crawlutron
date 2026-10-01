@@ -8,6 +8,9 @@ from app.constants import (
     DEFAULT_BROWSER_POOL_SIZE,
     DEFAULT_CHALLENGE_WAIT_SECONDS,
     DEFAULT_COOKIE_HARVEST_TIMEOUT_SECONDS,
+    DEFAULT_EXTRACTION_DOC_ACQUIRE_TIMEOUT,
+    DEFAULT_EXTRACTION_DOC_TIMEOUT,
+    DEFAULT_EXTRACTION_SELECTOR_TIMEOUT,
     DEFAULT_LAZY_SCROLL_DELAY_SECONDS,
     DEFAULT_LAZY_SCROLL_STEPS,
     DEFAULT_MAX_BROWSER_RENDERS,
@@ -110,6 +113,13 @@ class CrawlerSettings:
     browser_lazy_scroll_steps: int = DEFAULT_LAZY_SCROLL_STEPS
     browser_lazy_scroll_delay_seconds: float = DEFAULT_LAZY_SCROLL_DELAY_SECONDS
     browser_cookie_harvest_timeout_seconds: float = DEFAULT_COOKIE_HARVEST_TIMEOUT_SECONDS
+    # Extraction deadlines (previously read from raw CRAWLUTRON_* env vars inside
+    # extraction.py and frozen there at import; centralized here for the same
+    # reason the browser ones above are). A deadline a caller cannot construct is
+    # a deadline only an operator can move, and only before the process starts.
+    extraction_doc_timeout: float = DEFAULT_EXTRACTION_DOC_TIMEOUT
+    extraction_selector_timeout: float = DEFAULT_EXTRACTION_SELECTOR_TIMEOUT
+    extraction_doc_acquire_timeout: float = DEFAULT_EXTRACTION_DOC_ACQUIRE_TIMEOUT
     # Web search provider configuration (POST /v1/search). ``search_provider``
     # selects the backend: "auto" (default) picks the first configured keyed
     # provider in priority order (tavily -> brave -> serper) and falls back to
@@ -256,6 +266,18 @@ class CrawlerSettings:
                 source,
                 ENVIRONMENT_FIELD_ALIASES["browser_cookie_harvest_timeout_seconds"],
                 cls.browser_cookie_harvest_timeout_seconds,
+                lo=0.0,
+            ),
+            extraction_doc_timeout=get_mapping_float(
+                source, "CRAWLUTRON_EXTRACTION_DOC_TIMEOUT", cls.extraction_doc_timeout, lo=0.0
+            ),
+            extraction_selector_timeout=get_mapping_float(
+                source, "CRAWLUTRON_EXTRACTION_SELECTOR_TIMEOUT", cls.extraction_selector_timeout, lo=0.0
+            ),
+            extraction_doc_acquire_timeout=get_mapping_float(
+                source,
+                "CRAWLUTRON_EXTRACTION_DOC_ACQUIRE_TIMEOUT",
+                cls.extraction_doc_acquire_timeout,
                 lo=0.0,
             ),
             search_provider=source.get("CRAWLUTRON_SEARCH_PROVIDER", cls.search_provider),

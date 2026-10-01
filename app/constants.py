@@ -799,6 +799,14 @@ DEFAULT_LAZY_SCROLL_STEPS: int = 3
 DEFAULT_LAZY_SCROLL_DELAY_SECONDS = 1
 DEFAULT_COOKIE_HARVEST_TIMEOUT_SECONDS: float = 5.0
 
+# Extraction deadlines: how long one document extraction may run in its worker,
+# how long one selector evaluation may block, and how long acquiring a free
+# worker may wait before the crawl gives up on the document. Change them via
+# CrawlerSettings/env, never by editing these defaults.
+DEFAULT_EXTRACTION_DOC_TIMEOUT: float = 10.0
+DEFAULT_EXTRACTION_SELECTOR_TIMEOUT: float = 2.0
+DEFAULT_EXTRACTION_DOC_ACQUIRE_TIMEOUT: float = 90.0
+
 # Browser pool: number of persistent browser instances to keep warm PER WORKER.
 # Each browser uses ~300MB (200MB binary + ~100MB WebExtensions).
 # With 4 uvicorn workers, default 1 per worker = 4 browsers total (~1.2GB,

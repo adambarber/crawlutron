@@ -1,3 +1,5 @@
+from dataclasses import replace
+
 import app.crawl.extraction as _extraction_module
 from app.crawl.document_text import format_extracted_document_text
 from app.crawl.extraction import (
@@ -16,6 +18,7 @@ from app.crawl.strategies.document import (
 )
 from app.crawl.strategies.document import _format_table
 from app.crawl.strategies.fetchers import default_http_fetcher as _default_http_fetcher_with_policy
+from app.settings import CrawlerSettings
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY
 
 
@@ -94,3 +97,14 @@ __all__ = [
     "extract_content",
     "extract_js_endpoints",
 ]
+
+
+def settings_with(**overrides: object) -> CrawlerSettings:
+    """Settings carrying the extraction deadlines a test wants.
+
+    Built from ``from_mapping()`` and then overridden, so a test that only cares
+    about one deadline still runs against whatever the environment says about
+    every other knob -- which is what production does, and what patching a module
+    constant silently stopped doing.
+    """
+    return replace(CrawlerSettings.from_mapping(), **overrides)

@@ -1,6 +1,7 @@
 """CrawlerSettings defaults tuned for faster parallel single-domain crawls."""
 
 import logging
+import os
 from dataclasses import dataclass
 from unittest.mock import patch
 
@@ -114,3 +115,37 @@ class TestFromMappingHardening:
         )
         assert settings.respect_robots is False
         assert settings.adaptive_throttling is True
+
+
+def test_the_extraction_deadlines_are_settings_rather_than_module_snapshots():
+    """The extraction deadlines are operator knobs, so they belong in settings.
+
+    Each of the three was read from its environment variable by ``extraction.py``
+    at import and kept as a module-private constant. That made them the only
+    knobs in that module with no home in the config -- ``EXTRACTION_DOC_MAX_INPUT_BYTES``
+    sits ten lines above them and is public for exactly the same reason. And a
+    deadline frozen at import is a knob no caller can move: a test could only
+    reach it by rewriting a private module global, which is why fourteen patch
+    sites existed for three numbers.
+
+    The browser deadlines were centralized here for the same reason and carry
+    that in their comment. These are the remaining three in the same category.
+    """
+    defaults = CrawlerSettings.from_mapping()
+    assert defaults.extraction_doc_timeout == 10.0
+    assert defaults.extraction_selector_timeout == 2.0
+    assert defaults.extraction_doc_acquire_timeout == 90.0
+
+    with patch.dict(
+        os.environ,
+        {
+            "CRAWLUTRON_EXTRACTION_DOC_TIMEOUT": "0.25",
+            "CRAWLUTRON_EXTRACTION_SELECTOR_TIMEOUT": "0.5",
+            "CRAWLUTRON_EXTRACTION_DOC_ACQUIRE_TIMEOUT": "1.5",
+        },
+        clear=False,
+    ):
+        configured = CrawlerSettings.from_mapping()
+    assert configured.extraction_doc_timeout == 0.25
+    assert configured.extraction_selector_timeout == 0.5
+    assert configured.extraction_doc_acquire_timeout == 1.5

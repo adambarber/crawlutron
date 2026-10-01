@@ -351,13 +351,6 @@ DECLARED: dict[str, Declaration] = {
     "app.crawl.engine.robots_cache._lock": _d(_CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]),
     "app.crawl.extraction._DOC_POOL": _d(_CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]),
     "app.crawl.extraction._DocWorker": _d(_PRIVATE_TYPE.kind, _PRIVATE_TYPE.reason, ["test"]),
-    "app.crawl.extraction._EXTRACTION_DOC_ACQUIRE_TIMEOUT": _d(
-        _CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]
-    ),
-    "app.crawl.extraction._EXTRACTION_DOC_TIMEOUT": _d(
-        _CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]
-    ),
-    "app.crawl.extraction._EXTRACTION_SELECTOR_TIMEOUT": _SUBSTITUTED_CAP,
     "app.crawl.extraction._FrameCollector": _d(
         _IMPLEMENTATION_STEP.kind, _IMPLEMENTATION_STEP.reason, ["test"]
     ),
@@ -371,7 +364,7 @@ DECLARED: dict[str, Declaration] = {
     "app.crawl.extraction._doc_pool_health": _OWNED_POOL_MACHINERY,
     "app.crawl.extraction._doc_pool_pids": _OWNED_POOL_MACHINERY,
     "app.crawl.extraction._doc_task_hooks": _OWNED_POOL_MACHINERY,
-    "app.crawl.extraction._parse_html_tree": _SUBSTITUTED_COLLABORATOR,
+    "app.crawl.extraction._parse_html_tree": _IMPLEMENTATION_STEP,
     "app.crawl.extraction._reset_doc_pool": _OWNED_POOL_MACHINERY,
     "app.crawl.extraction._retire_doc_worker": _OWNED_POOL_MACHINERY,
     "app.crawl.extraction._spawn_doc_worker": _SUBSTITUTED_COLLABORATOR,

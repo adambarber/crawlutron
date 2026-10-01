@@ -24,8 +24,8 @@ duplicated parse inside a stage fails here rather than in a perf profile.
 
 import pytest
 
-from app.crawl import extraction
 from tests._fetcher_factories import run_http_strategy, scripted_fetcher
+from tests._parse_budget import ParseBudget
 
 HTML = (
     "<html><head><title>T</title></head><body>"
@@ -45,16 +45,9 @@ META_HTML = (
 
 
 @pytest.fixture
-def parse_counter(monkeypatch):
-    calls: list[str] = []
-    real = extraction._parse_html_tree
-
-    def counting(html):
-        calls.append(html if isinstance(html, str) else repr(html))
-        return real(html)
-
-    monkeypatch.setattr(extraction, "_parse_html_tree", counting)
-    return calls
+def parse_budget() -> ParseBudget:
+    """This test's parse budget, measured against the real parser."""
+    return ParseBudget()
 
 
 async def _run(policy_extra: dict, *, html: str = HTML):
@@ -68,19 +61,19 @@ async def _run(policy_extra: dict, *, html: str = HTML):
     )
 
 
-async def test_single_shot_parses_no_tree(parse_counter):
+async def test_single_shot_parses_no_tree(parse_budget):
     """No discovery, no links, no selector: zero lxml parses in the engine."""
     await _run({})
-    assert parse_counter == []
+    assert parse_budget.parses == 0
 
 
-async def test_link_discovery_is_one_shared_parse(parse_counter):
+async def test_link_discovery_is_one_shared_parse(parse_budget):
     """The frontier path parses ONCE; frames/forms/diagnostics reuse the tree."""
     await _run({"limits": {"max_depth": 1}})
-    assert len(parse_counter) == 1
+    assert parse_budget.parses == 1
 
 
-async def test_selector_mode_adds_no_parse_inside_the_strategy(parse_counter):
+async def test_selector_mode_adds_no_parse_inside_the_strategy(parse_budget):
     """Selector + discovery is still ONE parse inside the strategy layer.
 
     Selector extraction itself parses later (engine phase, extract_content ->
@@ -90,10 +83,10 @@ async def test_selector_mode_adds_no_parse_inside_the_strategy(parse_counter):
     raise the per-stage count.
     """
     await _run({"css_selector": "body", "limits": {"max_depth": 1}})
-    assert len(parse_counter) == 1
+    assert parse_budget.parses == 1
 
 
-async def test_engine_computes_metadata_once_from_the_discovery_tree(parse_counter):
+async def test_engine_computes_metadata_once_from_the_discovery_tree(parse_budget):
     """The discovery tree also produces the page metadata, once.
 
     The engine item carries the small metadata dict (persisted, plain data)
@@ -101,13 +94,13 @@ async def test_engine_computes_metadata_once_from_the_discovery_tree(parse_count
     """
     result = await _run({"limits": {"max_depth": 1}}, html=META_HTML)
     # Engine stage still owns exactly one parse; the metadata read added none.
-    assert len(parse_counter) == 1
+    assert parse_budget.parses == 1
     assert result.llm_metadata
     assert result.llm_metadata["title"] == "Meta T"
     assert result.llm_metadata["description"] == "the description"
 
 
-async def test_shaping_never_reparses_engine_produced_items(parse_counter):
+async def test_shaping_never_reparses_engine_produced_items(parse_budget):
     """The shaping ceiling for engine items went 1 -> 0: it reads the dict."""
     import json
 
@@ -119,14 +112,14 @@ async def test_shaping_never_reparses_engine_produced_items(parse_counter):
     item = to_dict(result) | {"markdown": result.markdown or "# hello"}
     # The carried payload crosses the persistence boundary as plain JSON.
     json.dumps(item)
-    parse_counter.clear()
+    parse_budget.mark()
     _markdown, metadata = format_crawl_item(item)
-    assert parse_counter == [], "shaping rebuilt an lxml tree from the carried item"
+    assert parse_budget.parses == 0, "shaping rebuilt an lxml tree from the carried item"
     # Byte-for-byte the same computation site output the metadata replaced.
     assert metadata == extract_llm_metadata(META_HTML, "http://example.com/")
 
 
-async def test_engine_item_without_a_tree_still_shapes_once(parse_counter):
+async def test_engine_item_without_a_tree_still_shapes_once(parse_budget):
     """Single-shot pages never parse at engine stage; shaping keeps their one.
 
     Carrying is conditional on a tree the pipeline built anyway -- asking
@@ -139,9 +132,9 @@ async def test_engine_item_without_a_tree_still_shapes_once(parse_counter):
     result = await _run({}, html=META_HTML)
     assert result.llm_metadata is None  # no tree existed to read from
     item = to_dict(result) | {"markdown": "# hello"}
-    parse_counter.clear()
+    parse_budget.mark()
     _markdown, metadata = format_crawl_item(item)
-    assert len(parse_counter) == 1
+    assert parse_budget.parses == 1
     assert metadata["title"] == "Meta T"
 
 

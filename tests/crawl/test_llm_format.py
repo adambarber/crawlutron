@@ -3,6 +3,7 @@
 from app.crawl.llm_format import extract_llm_metadata, text_from_html
 from tests._extraction_helpers import extract_content
 from tests._fetcher_factories import LLM_FORMAT_TEST_HTML
+from tests._parse_budget import ParseBudget
 
 
 class TestPageMetadata:
@@ -43,17 +44,8 @@ class TestJsonLdExtraction:
         meta = extract_llm_metadata("<html><body>x</body></html>", "https://example.com")
         assert "json_ld" not in meta
 
-    def test_single_parse_per_html(self, monkeypatch):
-        import app.crawl.extraction as extraction
-
-        calls = {"n": 0}
-        real = extraction._parse_html_tree
-
-        def spy(h):
-            calls["n"] += 1
-            return real(h)
-
-        monkeypatch.setattr(extraction, "_parse_html_tree", spy)
+    def test_single_parse_per_html(self):
+        budget = ParseBudget()
         html = (
             '<html lang="en"><head><title>Test Page</title>'
             '<meta name="description" content="A test page">'
@@ -66,7 +58,7 @@ class TestJsonLdExtraction:
         meta = extract_llm_metadata(html, "https://example.com")
         # Title, meta, JSON-LD, canonical, favicon, language all read from
         # ONE lxml parse instead of 8+ independent regex scans.
-        assert calls["n"] == 1
+        assert budget.parses == 1
         assert meta["title"] == "Test Page"
         assert meta["canonical_url"] == "https://example.com/c"
         assert meta["favicon"] == "https://example.com/f.ico"

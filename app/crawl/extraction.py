@@ -51,10 +51,10 @@ from app.crawl.job_store import durable_page_identity
 from app.crawl.llm_format import _llm_metadata_from_tree, text_from_html
 from app.models import DiscoveredLink
 from app.resource_pressure import doc_worker_count
+from app.settings import CrawlerSettings
 from app.validation import (
     HostPolicy,
     filter_js_endpoints,
-    get_env_float,
     get_env_int,
     parse_bool_env,
     public_url_or_none,
@@ -138,9 +138,9 @@ def _doc_extraction_worker_count() -> int:
 # processes. Each worker imports markitdown once (it
 # stays in the worker's sys.modules) and serves many documents, amortizing
 # the spawn + import cost of the old spawn-per-document design. Timeout-kill
-# semantics are kept per task: a worker that exceeds
-# _EXTRACTION_DOC_TIMEOUT -- or dies mid-task -- is terminated and reaped
-# immediately, and its slot is respawned on the next acquisition, so a
+# semantics are kept per task: a worker that exceeds the document deadline
+# (settings.extraction_doc_timeout) -- or dies mid-task -- is terminated and
+# reaped immediately, and its slot is respawned on the next acquisition, so a
 # pathological document can neither block the pool nor linger as a zombie.
 # Sized by doc_worker_count() (app.resource_pressure -- the single home for the
 # count) so memory stays within the container ceiling. Defined after the
@@ -336,7 +336,7 @@ def _document_extraction_enabled() -> bool:
     return parse_bool_env("CRAWLUTRON_EXTRACTION_DOC_ENABLED", default=True)
 
 
-def _acquire_doc_worker() -> _DocWorker | None:
+def _acquire_doc_worker(acquire_timeout: float) -> _DocWorker | None:
     """Take an idle pool worker, spawning on demand up to the configured size.
 
     The pool starts empty and grows only as concurrent demand requires: a
@@ -347,7 +347,7 @@ def _acquire_doc_worker() -> _DocWorker | None:
     out, alive-report or not.
 
     Returns ``None`` when no worker became available within
-    ``_EXTRACTION_DOC_ACQUIRE_TIMEOUT``. Callers must treat that as "document
+    ``settings.extraction_doc_acquire_timeout``. Callers must treat that as "document
     extraction unavailable for this document" (the same degradation as a
     per-task timeout): the alternative used to be waiting with no deadline, so
     one busy flag that its holder never cleared -- an exception escaping
@@ -388,7 +388,11 @@ def _acquire_doc_worker() -> _DocWorker | None:
             # behind a slow in-lock operation would otherwise pay that wait out
             # of a budget it never consumed, and could give up on a pool that
             # had a free slot the whole time it was blocked.
-            deadline = time.monotonic() + _EXTRACTION_DOC_ACQUIRE_TIMEOUT
+            # A healthy pool releases a worker when its own task hits the
+            # document deadline, so a full round of the pool is already generous;
+            # this bound exists for the unhealthy case, where a busy flag is never
+            # cleared and an unbounded wait would take the whole pool down with it.
+            deadline = time.monotonic() + acquire_timeout
             while True:
                 for worker in _DOC_POOL:
                     if not worker.busy and not worker.retired and worker.proc.is_alive():
@@ -474,22 +478,12 @@ async def shutdown_doc_extraction_executor() -> None:
         executor.shutdown(wait=False)
 
 
-# Wall-clock bound (seconds) for a single CSS/XPath selector evaluation.
-# A pathological selector (or a hostile payload) could otherwise run
-# unbounded and tie up a request worker. Override via env var.
-_EXTRACTION_SELECTOR_TIMEOUT = get_env_float("CRAWLUTRON_EXTRACTION_SELECTOR_TIMEOUT", 2.0)
-
-# Wall-clock bound (seconds) for document extraction (markitdown).
-# Override via CRAWLUTRON_EXTRACTION_DOC_TIMEOUT.
-_EXTRACTION_DOC_TIMEOUT = get_env_float("CRAWLUTRON_EXTRACTION_DOC_TIMEOUT", 10.0)
-
-# How long a caller waits for a free worker slot. A healthy pool releases a
-# worker when its own task hits _EXTRACTION_DOC_TIMEOUT, so a full round of the
-# pool is already generous; this bound exists for the unhealthy case, where a
-# busy flag is never cleared and an unbounded wait would take the whole pool
-# down with it. Override via CRAWLUTRON_EXTRACTION_DOC_ACQUIRE_TIMEOUT.
-_EXTRACTION_DOC_ACQUIRE_TIMEOUT = get_env_float("CRAWLUTRON_EXTRACTION_DOC_ACQUIRE_TIMEOUT", 90.0)
-
+# The three extraction deadlines (one selector evaluation, one document task in
+# its worker, and the wait for a free worker slot) live in CrawlerSettings, which
+# is where they get their env mapping and their operators. They used to sit here
+# as module constants read once at import, which made a deadline no caller could
+# construct and put fourteen private patch sites in the suite for three numbers.
+#
 # Re-check interval for a waiting acquirer (the escape hatch for "nothing will
 # ever notify"); releases still wake waiters immediately via notify_all.
 _DOC_ACQUIRE_RECHECK_SECONDS = 1.0
@@ -683,6 +677,8 @@ def extract_selected(
     source_url: str | None,
     *,
     selectors: Selectors | None = None,
+    settings: CrawlerSettings | None = None,
+    tree: Any | None = None,
 ) -> ExtractedContent:
     """Mechanical DOM targeting: extract only the matched nodes as Markdown.
 
@@ -690,9 +686,17 @@ def extract_selected(
     The matched subtree(s) are serialized and converted to Markdown, so callers
     can target a specific section (e.g. an agenda table) without Trafilatura's
     full-page boilerplate removal.
+
+    ``tree`` accepts an already-parsed lxml tree for the XPath form, the same
+    seam ``html_diagnostics`` offers: a caller that already holds the tree pays
+    for one parse, and a test can hand in the tree whose evaluation it wants
+    bounded instead of replacing the parser.
     """
     if not html or not selectors:
         return ExtractedContent(None, None)
+    # One evaluation deadline for every selector form. A pathological selector or
+    # a hostile payload could otherwise run unbounded and tie up a request worker.
+    selector_timeout = (settings or CrawlerSettings.from_mapping()).extraction_selector_timeout
     fragment: str | None = None
     css_selector = selectors.css
     if css_selector:
@@ -701,7 +705,7 @@ def extract_selected(
         except ImportError:
             return ExtractedContent(None, None)
         soup = BeautifulSoup(html, "html.parser")
-        selected = _eval_selector(lambda: soup.select(css_selector), _EXTRACTION_SELECTOR_TIMEOUT)
+        selected = _eval_selector(lambda: soup.select(css_selector), selector_timeout)
         if isinstance(selected, _SelectorTimedOut):
             logger.warning(
                 "extraction_selector_timeout",
@@ -713,11 +717,11 @@ def extract_selected(
         fragment = "\n".join(str(tag) for tag in selected)
     elif selectors.xpath:
         xpath = selectors.xpath
-        tree = _parse_html_tree(html)
+        tree = tree if tree is not None else _parse_html_tree(html)
         if tree is None:
             return ExtractedContent(None, None)
         try:
-            nodes = _eval_selector(lambda: tree.xpath(xpath), _EXTRACTION_SELECTOR_TIMEOUT)
+            nodes = _eval_selector(lambda: tree.xpath(xpath), selector_timeout)
         except Exception:  # invalid XPath is caller error, not extraction
             return ExtractedContent(None, None)
         if isinstance(nodes, _SelectorTimedOut):
@@ -823,7 +827,9 @@ def extract_html(
     return ExtractedContent(md, md)
 
 
-def extract_document(body: bytes, url: str | None) -> ExtractedContent:
+def extract_document(
+    body: bytes, url: str | None, settings: CrawlerSettings | None = None
+) -> ExtractedContent:
     """Extract markdown from document bytes with a wall-clock timeout.
 
     The markitdown conversion runs on a persistent pool worker with a hard
@@ -831,6 +837,7 @@ def extract_document(body: bytes, url: str | None) -> ExtractedContent:
     indefinitely; the worker is forcefully killed and its slot respawned.
     Output is also capped to prevent unbounded memory growth.
     """
+    active = settings or CrawlerSettings.from_mapping()
     if not _document_extraction_enabled():
         return ExtractedContent(None, None)
     if len(body) > EXTRACTION_DOC_MAX_INPUT_BYTES:
@@ -846,7 +853,7 @@ def extract_document(body: bytes, url: str | None) -> ExtractedContent:
     # as a zombie, and its slot is respawned on the
     # next acquisition. Pool size bounds concurrent processes so memory
     # stays within the container ceiling.
-    worker = _acquire_doc_worker()
+    worker = _acquire_doc_worker(active.extraction_doc_acquire_timeout)
     if worker is None:
         # No slot within the acquire budget: degrade this document like every
         # other document failure instead of wedging the request.
@@ -860,7 +867,7 @@ def extract_document(body: bytes, url: str | None) -> ExtractedContent:
             _retire_doc_worker(worker)
             return ExtractedContent(None, None)
         try:
-            ready = worker.conn.poll(_EXTRACTION_DOC_TIMEOUT)
+            ready = worker.conn.poll(active.extraction_doc_timeout)
         except (EOFError, OSError):
             logger.warning("extraction_document_child_died")
             _retire_doc_worker(worker)
@@ -905,6 +912,28 @@ def extract_document(body: bytes, url: str | None) -> ExtractedContent:
 # ---------------------------------------------------------------------------
 
 
+# lxml parsing is invisible: the per-page parse budget is a real performance
+# property, and nothing but a count can show a parse that stopped happening or
+# started happening twice. The alternative -- replacing the parser and counting
+# calls -- would measure a patched function rather than the real one, and would
+# miss every parse the patch did not sit in front of. A lock because the
+# pipeline parses from worker threads and a racy tally would make that budget
+# flaky rather than merely imprecise.
+_parse_tally_lock = threading.Lock()
+_parse_tally = 0
+
+
+def parse_count() -> int:
+    """How many lxml trees this process has parsed.
+
+    Cumulative and monotonic: a caller measuring one stage brackets it and takes
+    the difference, so a budget that spans several pipeline phases is expressible
+    without production code having to know where the phase boundaries are.
+    """
+    with _parse_tally_lock:
+        return _parse_tally
+
+
 def _parse_html_tree(html: str | None):
     """Parse HTML once with lxml and return the root element.
 
@@ -917,6 +946,9 @@ def _parse_html_tree(html: str | None):
     ``<frame>`` markup that the lenient ``fromstring`` path otherwise drops.
     Returns ``None`` for empty/invalid input.
     """
+    global _parse_tally
+    with _parse_tally_lock:
+        _parse_tally += 1
     if not html:
         return None
     try:
