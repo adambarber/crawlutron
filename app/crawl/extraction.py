@@ -101,7 +101,22 @@ class Selectors:
 # shutdown`` -- and because the shutdown is wired into the app lifespan, any
 # caller that starts and stops the app once kills extraction for the rest of the
 # process.
-_EXTRACTION_EXECUTOR = concurrent.futures.ThreadPoolExecutor(max_workers=4, thread_name_prefix="extraction")
+_EXTRACTION_EXECUTOR: concurrent.futures.ThreadPoolExecutor | None = None
+
+
+def _extraction_executor() -> concurrent.futures.ThreadPoolExecutor:
+    """The shared pool, created on first use. Caller must hold ``_POOL_LOCK``.
+
+    Every worker is idle before this returns: a pool handed out while a
+    shutdown is in flight is a pool whose ``submit`` may land after it was
+    closed, which is the same failure one layer down.
+    """
+    global _EXTRACTION_EXECUTOR
+    if _EXTRACTION_EXECUTOR is None:
+        _EXTRACTION_EXECUTOR = concurrent.futures.ThreadPoolExecutor(
+            max_workers=4, thread_name_prefix="extraction"
+        )
+    return _EXTRACTION_EXECUTOR
 
 
 # Default 2 keeps memory bounded: each worker loads markitdown + parsers and the
@@ -453,8 +468,10 @@ async def shutdown_doc_extraction_executor() -> None:
     """
     with _POOL_LOCK:
         _teardown_doc_pool_locked()
-    if _EXTRACTION_EXECUTOR is not None:
-        _EXTRACTION_EXECUTOR.shutdown(wait=False)
+        global _EXTRACTION_EXECUTOR
+        executor, _EXTRACTION_EXECUTOR = _EXTRACTION_EXECUTOR, None
+    if executor is not None:
+        executor.shutdown(wait=False)
 
 
 # Wall-clock bound (seconds) for a single CSS/XPath selector evaluation.
@@ -517,7 +534,7 @@ def _eval_selector(fn: Callable[[], _SelectorResult], timeout: float) -> _Select
 
     Uses a shared bounded thread pool to avoid thread leaks.
     """
-    fut = _EXTRACTION_EXECUTOR.submit(fn)
+    fut = _extraction_executor().submit(fn)
     try:
         return fut.result(timeout=timeout)
     except concurrent.futures.TimeoutError:

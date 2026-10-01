@@ -20,6 +20,7 @@ from app.crawl.extraction import (
     html_to_markdown,
     is_html,
     looks_like_document,
+    shutdown_doc_extraction_executor,
     text_from_html,
 )
 from tests._assertions import set_optional_env
@@ -631,6 +632,32 @@ class TestExtractionEdges:
         html = '<div class="target">selected</div><div>ignored</div>'
         result = extract_content(html.encode(), "text/html", "http://e.com/", selectors=selectors)
         assert result.text == "selected"
+
+    def test_extraction_still_works_after_a_shutdown(self):
+        """A shutdown releases the workers; it does not retire extraction.
+
+        ``shutdown_doc_extraction_executor`` is on the app lifespan, so every test
+        that drives the lifespan once ran it -- and a module-global executor that
+        is shut down and never rebuilt left every LATER extraction test in that
+        worker raising ``cannot schedule new futures after shutdown``. The suite
+        passed or failed on test ordering rather than on behaviour, and only
+        randomized order ever exposed it.
+
+        The sibling process pool in the same module already had this right: it is
+        built on demand, torn down to ``None``, and rebuilt by the next caller. A
+        shutdown there means "not right now", so it has to mean the same thing
+        here -- otherwise the two pools in one module disagree about what
+        shutdown means, and only one of them is safe to call twice.
+        """
+        asyncio.run(shutdown_doc_extraction_executor())
+
+        result = extract_content(
+            b'<div class="target">still working</div>',
+            "text/html",
+            "http://e.com/",
+            selectors=Selectors(css=".target"),
+        )
+        assert result.text == "still working"
 
     def test_html_to_markdown_markdownify_success(self):
         text, md = html_to_markdown("<p>hello <strong>world</strong></p>")
