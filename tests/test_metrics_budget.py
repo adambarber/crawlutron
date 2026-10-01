@@ -11,18 +11,18 @@ split the enforcement story across two exit codes.
     largest class     body span of the single biggest class
     block length      span of one compound statement's body
 
-Each is a BUDGET, not a threshold. The budget is the number of offenders the
-tree is currently allowed to have, so this suite is green on the day it lands
-and every later failure means the tree got worse. The offender list is in the
-failure message, which makes the gate and the work list the same artifact --
-there is no separate report to fall out of date.
+Each is a BUDGET, not a threshold. A budget is the value the tree is currently
+allowed to hold -- an offender count for three of them, the size of the worst
+class for the fourth -- so this suite is green on the day it lands and every
+later failure means the tree got worse. The offender list is in the failure
+message, which makes the gate and the work list the same artifact -- there is
+no separate report to fall out of date.
 
-The target is zero in every case. At zero the budget does the failing on its
-own, so the flip from "warn" to "enforce" is not a change to this file; it is
-four integers in `_BUDGETS` reaching the value they are already heading for.
-That is the whole reason this is a measurement and not a severity threshold: a
-severity threshold never reaches zero on its own, and a gate that can be
-satisfied forever is not a ratchet.
+The target is zero in every case where zero means the property holds. For a
+count that is "no offenders"; for ``largest class`` zero would mean "no classes
+at all", which is not a thing a tree can reach by getting better. That metric's
+zero is a tree with no class over the line, and the size of the worst class is
+what lets a gate read that without counting what it is trying to eliminate.
 
 Three of the four measure a COUNT. The fourth, ``largest class``, measures a
 VALUE, and that is the amendment -- it replaced a count of classes over 250
@@ -77,13 +77,17 @@ from scripts.executables import GIT, require_executable
 from scripts.jscpd_sweep import COMPOUND_NODES
 from tests.chokepoint_walks import APP_ROOT, app_trees, nodes_of
 
-# Every collector in this file reads the same app tree, and `offenders()` is
-# called sixteen times per run (four metrics x the budget test, four x the
-# tight test, four x two in the determinism test). It used to re-glob, re-read
-# and re-parse all 106 modules on each of those, so one run paid for the same
-# parse sixteen times over -- the exact redundancy a962c7b removed from the
-# chokepoint suite, in the file next door. `app_trees` is that same owned
-# snapshot, and `nodes_of` shares the walk underneath it.
+# Every collector in this file reads the same app tree, and they are called
+# once per metric per test that reads a number: the budget test reads both
+# `offenders()` and `measurement()`, the tight test reads `measurement()`, and
+# the determinism test reads `offenders()` twice -- and `measurement()` itself
+# calls `offenders()` for the three count metrics. That is the same redundant
+# re-glob, re-read and re-parse of all 106 modules the a962c7b commit removed
+# from the chokepoint suite in the file next door; `app_trees` is that same
+# owned snapshot, and `nodes_of` shares the walk underneath it. The count is
+# left out on purpose: it is a property of how many tests read a number, so
+# quoting one here is a number that rots the next time a test is added, and
+# rotted arithmetic in a comment is worse than none.
 #
 # `exclude=frozenset()` is load-bearing, not decoration: the default excludes
 # app/safe_regex.py, and these budgets are measured over EVERY app module. A
@@ -94,12 +98,14 @@ FUNCTION_LENGTH = 60
 ABC_SIZE = 30
 BLOCK_LENGTH = 40
 
-# Offender counts the tree is currently allowed to have. These are the
-# measurements at 0a87dd2, and they are the whole mechanism: a wave that
-# splits a file lowers the number it is allowed to have, in the same commit
-# that did the splitting. Lowering a budget below the true count fails the
-# suite, so a budget cannot be quietly inflated -- the code has to actually get
-# smaller first.
+# What the tree is currently allowed to hold: offender counts for three
+# metrics, and the size of the worst class for the fourth. The counts are the
+# measurements at 0a87dd2; `largest class` is 550, recorded when the browser
+# split put it there. They are the whole mechanism: a wave that splits a file
+# lowers the value it is allowed to have, in the same commit that did the
+# splitting. Lowering a budget below the true count fails the suite, so a
+# budget cannot be quietly inflated -- the code has to actually get smaller
+# first.
 _BUDGETS = {
     "function length": 38,
     "abc size": 5,
@@ -275,8 +281,9 @@ def test_metric_budget_is_not_exceeded(metric: str) -> None:
     assert shown <= budget, (
         f"{metric}: {shown} exceeds the budget of {budget}.\n"
         f"Each of these is work that was already on the list; a wave that fixes one "
-        f"lowers the budget in `_BUDGETS` in the same commit. The target is 0, at which "
-        f"point this assertion enforces the rule on its own.\n" + "\n".join(f"  {item}" for item in found)
+        f"lowers the budget in `_BUDGETS` in the same commit. The target is no "
+        f"offenders, at which point this assertion enforces the rule on its own.\n"
+        + "\n".join(f"  {item}" for item in found)
     )
 
 
@@ -320,6 +327,12 @@ def test_metric_collection_is_deterministic() -> None:
     """The numbers in the budgets came from somewhere; make that somewhere checkable."""
     for metric in _BUDGETS:
         assert offenders(metric) == offenders(metric), f"{metric} collection is not deterministic"
+        # Both ratchet assertions read `measurement`, so that is the number the
+        # budget is actually compared against. Checking determinism only on
+        # `offenders` left the compared value unchecked -- vacuously so for
+        # `largest class`, whose offender list is empty while nothing is over
+        # budget, which is the state the tree is in today.
+        assert measurement(metric) == measurement(metric), f"{metric} measurement is not deterministic"
 
 
 def _git(root: Path, *args: str) -> subprocess.CompletedProcess[str]:
@@ -348,6 +361,15 @@ def test_metric_budgets_have_never_risen() -> None:
     one check here that needs a full clone; a shallow one cannot see the past and
     is skipped rather than passed, because a gate that silently goes inert is
     worse than one that is absent.
+
+    What this cannot police is a metric with too little history to compare: a
+    budget introduced yesterday yields no adjacent-revision pair, so the loop
+    below never runs for it and its first recorded value stands unchecked until
+    a second point exists. `largest class` is in exactly that state. Its real
+    protection is `test_metric_budget_is_tight` -- the budget cannot be above
+    what the tree actually measures -- which is what makes this a disclosure
+    rather than a fix: history is what catches a budget raised to hide a
+    regression, and no amount of history helps a metric that has none yet.
     """
     service_root = pathlib.Path(__file__).resolve().parent.parent
     # Git paths are repo-root-relative, not service-relative. Getting this wrong
