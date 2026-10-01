@@ -38,7 +38,7 @@ from tests.chokepoint_walks import (
     resolved_expr_name,
     trees_under,
 )
-from tests.private_import_ledger import LEDGER
+from tests.private_import_ledger import DECLARED as LEDGER
 from tests.rules import Registry, Rule
 
 _TESTS_DIR = REPO_ROOT / "tests"
@@ -151,8 +151,94 @@ def test_ledger_rows_all_correspond_to_a_real_import():
     actual: set[str] = set()
     for _, tree in trees_under(_TESTS_DIR):
         actual |= set(_private_app_names(tree))
-    stale = sorted(set(LEDGER) - actual)
+    stale = sorted(key for key, dec in LEDGER.items() if "test" in dec.side and key not in actual)
     assert not stale, (
         f"{len(stale)} ledger row(s) name a private import the suite no longer makes; "
         f"delete them: {', '.join(stale)}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# app/ reaching into app/
+# ---------------------------------------------------------------------------
+
+_APP_DIR = REPO_ROOT / "app"
+
+
+def _module_of(path: pathlib.Path) -> str:
+    return ".".join(path.relative_to(REPO_ROOT).with_suffix("").parts)
+
+
+def _cross_module_private_names(tree: ast.Module, path: pathlib.Path) -> dict[str, int]:
+    """``"module.name" -> lineno`` for private names reached across a module boundary.
+
+    A module reaching its own privates is ordinary -- that is what private means --
+    so the owning module has to be resolved and compared rather than assumed. The
+    resolved name supplies both: ``from app.crawl.strategies import body_decode``
+    binds ``body_decode``, so ``body_decode._decode_body`` resolves to
+    ``app.crawl.strategies.body_decode._decode_body``, which names the module that
+    owns the definition and not merely the binding the caller happens to use.
+    """
+    here = _module_of(path)
+    found: dict[str, int] = {}
+    for node in nodes_of(tree):
+        if not isinstance(node, ast.Attribute) or node.attr.startswith("__"):
+            continue
+        key = resolved_expr_name(tree, node)
+        if not key.startswith("app."):
+            continue
+        owner, _, attr = key.rpartition(".")
+        if not owner.startswith("app") or "." not in owner or not attr.startswith("_"):
+            continue
+        if owner == here or owner == f"{here}.{attr}":
+            continue
+        found.setdefault(key, node.lineno)
+    return found
+
+
+def _cross_module_private_offenders(tree: ast.Module, path: pathlib.Path) -> list[str]:
+    return [
+        f"{relative_posix(path)}:{lineno}: {key} is private to another module"
+        for key, lineno in sorted(_cross_module_private_names(tree, path).items())
+        if key not in LEDGER
+    ]
+
+
+APP_PRIVATE_WELDS = Rule(
+    name="app-modules-reach-each-other-through-public-names",
+    find=_cross_module_private_offenders,
+    summary=(
+        "reaches into another module's private name; a sibling module is a caller, so the name is "
+        "part of the seam between them and the module boundary is a fiction until it is public"
+    ),
+    bite=lambda: ("from app.crawl.strategies import body_decode\n\ntext = body_decode._undeclared_probe\n",),
+    clean=lambda: (
+        # The public name for the same reach.
+        "from app.crawl.strategies import body_decode\n\ntext = body_decode.decode_body\n",
+        # A module's own private name is what private means.
+        "def helper():\n    return _internal_step()\n",
+        # A declared lifecycle drain.
+        "from app.crawl.strategies import http_client_pool as pool\n\npool._drain_pending_client_closes()\n",
+    ),
+)
+
+APP_RULES = Registry((APP_PRIVATE_WELDS,))
+
+
+def test_app_has_no_cross_module_private_welds():
+    APP_RULES.check_all_clean()
+
+
+def test_app_weld_rule_bites():
+    APP_RULES.check_all_bite()
+
+
+def test_app_weld_rows_all_correspond_to_a_real_reach():
+    """Same both-directions guard as the test-side ledger, for the same reason."""
+    actual: set[str] = set()
+    for path, tree in trees_under(_APP_DIR):
+        actual |= set(_cross_module_private_names(tree, path))
+    stale = sorted(key for key, dec in LEDGER.items() if "app" in dec.side and key not in actual)
+    assert not stale, (
+        f"{len(stale)} app weld row(s) name a reach that no longer happens; delete them: {', '.join(stale)}"
     )
