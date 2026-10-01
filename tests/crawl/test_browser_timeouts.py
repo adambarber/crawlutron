@@ -4,15 +4,14 @@
   Playwright's default); the navigation must honor it and surface
   navigation_timeout through the existing retry envelope.
 - The action-chain "wait" timeout was caller-unbounded (contrast the
-  clamped wait_seconds); it is clamped to _MAX_ACTION_WAIT_SECONDS.
+  clamped wait_seconds); it is clamped to MAX_ACTION_WAIT_SECONDS.
 """
 
 import asyncio
 
 import pytest
 
-from app.crawl.strategies.browser import BrowserRenderer
-from app.crawl.strategies.browser_actions import _MAX_ACTION_WAIT_SECONDS
+from app.crawl.strategies.browser_driver import MAX_ACTION_WAIT_SECONDS, BrowserDriver
 from app.models import RenderOptions
 from tests._browser_doubles import BrowserFakePage, pinned_page_renderer
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY
@@ -34,7 +33,7 @@ class TestWaitActionClamp:
         [
             pytest.param(
                 890000,
-                lambda seen: seen == [int(_MAX_ACTION_WAIT_SECONDS * 1000)],
+                lambda seen: seen == [int(MAX_ACTION_WAIT_SECONDS * 1000)],
                 id="caller-value-is-clamped",
             ),
             pytest.param(
@@ -53,8 +52,7 @@ class TestWaitActionClamp:
     )
     async def test_wait_timeout_is_bounded(self, timeout, assert_timeout):
         page = _TimeoutRecordingPage()
-        renderer = BrowserRenderer()
-        await renderer._run_action_chain(page, [{"type": "wait", "selector": "#x", "timeout": timeout}])
+        await BrowserDriver().run_action_chain(page, [{"type": "wait", "selector": "#x", "timeout": timeout}])
         assert_timeout(page.wait_timeouts)
 
 

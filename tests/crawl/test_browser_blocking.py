@@ -11,6 +11,7 @@ from pydantic import ValidationError
 import app.crawl.strategies.browser as browser_mod
 from app.api_models import CrawlPolicy
 from app.crawl.strategies.browser import BrowserRenderer, _make_ssrf_route_handler
+from app.crawl.strategies.browser_driver import BrowserDriver
 from tests._browser_doubles import (
     BrowserFakePage,
     FakeRequest,
@@ -238,7 +239,7 @@ class _FakeResponse:
 
 async def test_response_handler_caps_entries_and_payload_size():
     collected: list[Any] = []
-    handler = BrowserRenderer._make_response_handler(collected)
+    handler = BrowserRenderer.make_response_handler(collected)
 
     # Over the entry cap: only the first max_entries (10) are kept.
     big = {"blob": "x" * 200_000}
@@ -265,7 +266,7 @@ async def test_response_handler_caps_the_url_it_retains():
     bound the module documented as covering the whole entry.
     """
     collected: list[Any] = []
-    handler = BrowserRenderer._make_response_handler(collected)
+    handler = BrowserRenderer.make_response_handler(collected)
     long_url = "https://x/api?" + "k" * 500_000
 
     await handler(_FakeResponse(long_url, {"a": 1}))
@@ -280,7 +281,7 @@ async def test_response_handler_caps_the_url_it_retains():
 
 async def test_response_handler_does_not_flag_a_url_within_the_cap():
     collected: list[Any] = []
-    handler = BrowserRenderer._make_response_handler(collected)
+    handler = BrowserRenderer.make_response_handler(collected)
 
     await handler(_FakeResponse("https://x/api/data", {"a": 1}))
 
@@ -318,8 +319,7 @@ class TestExecuteJsBlocked:
     async def test_run_action_chain_does_not_execute_user_js(self):
         """A user-supplied ``execute_js`` script must never reach page.evaluate."""
         page = _make_mock_page()
-        renderer = BrowserRenderer()
-        await renderer._run_action_chain(
+        await BrowserDriver().run_action_chain(
             page,
             [
                 {"type": "execute_js", "script": "malicious()"},
@@ -377,13 +377,11 @@ class _ConsentPage(BrowserFakePage):
 
 async def test_consent_clicking_off_by_default():
     page = _ConsentPage()
-    renderer = BrowserRenderer()
-    assert await renderer._auto_accept_cookie_consent(page, False) is False
+    assert await BrowserDriver().auto_accept_cookie_consent(page, False) is False
     assert page.element.clicks == 0
 
 
 async def test_consent_clicking_when_opted_in():
     page = _ConsentPage()
-    renderer = BrowserRenderer()
-    assert await renderer._auto_accept_cookie_consent(page, True) is True
+    assert await BrowserDriver().auto_accept_cookie_consent(page, True) is True
     assert page.element.clicks == 1

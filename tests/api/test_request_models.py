@@ -636,9 +636,9 @@ class TestTheRendererAgreesWithTheVocabulary:
         import ast
         import inspect
 
-        from app.crawl.strategies.browser_actions import BrowserActionsMixin
+        from app.crawl.strategies.browser_driver import BrowserDriver
 
-        source = inspect.getsource(BrowserActionsMixin._dispatch_action)
+        source = inspect.getsource(BrowserDriver._dispatch_action)
         tree = ast.parse(textwrap.dedent(source))
         recognised: set[str] = set()
         requiring: set[str] = set()
@@ -922,7 +922,7 @@ class TestBrowserActionKeysAreClosed:
     description (#64): the same failure, at the third place it can hide.
     """
 
-    #: The keys the action chain reads, per ``browser_actions.py``.
+    #: The keys the action chain reads, per ``browser_driver.py``.
     READ_KEYS = frozenset({"selector", "timeout", "seconds", "value"})
 
     def test_an_unknown_action_key_is_refused(self):
@@ -966,7 +966,7 @@ class TestBrowserActionKeysAreClosed:
         from app.constants import BROWSER_ACTION_KEYS
         from tests.chokepoint_walks import STRATEGIES_DIR, attribute_calls, string_argument
 
-        source = (STRATEGIES_DIR / "browser_actions.py").read_text()
+        source = (STRATEGIES_DIR / "browser_driver.py").read_text()
         read: set[str] = set()
         for node, func in attribute_calls(ast.parse(source)):
             if func.attr == "get" and isinstance(func.value, ast.Name) and func.value.id == "action":
@@ -1070,31 +1070,28 @@ class TestCallerKnobsBehindClosedKeysAreCeilinged:
             MAX_LAZY_SCROLL_DELAY_SECONDS,
             MAX_LAZY_SCROLL_STEPS,
         )
-        from app.crawl.strategies.browser_actions import BrowserActionsMixin
+        from app.crawl.strategies.browser_driver import BrowserDriver
 
-        class _Renderer(BrowserActionsMixin):
-            _lazy_scroll_steps = 3
-            _lazy_scroll_delay_seconds = 0.5
-            _harvest_timeout_seconds = 2.0
+        driver = BrowserDriver(
+            lazy_scroll_steps=3, lazy_scroll_delay_seconds=0.5, harvest_timeout_seconds=2.0
+        )
 
-        renderer = _Renderer()
-
-        steps, delay = renderer._scroll_config_for(
+        steps, delay = driver.scroll_config_for(
             {"lazy_scroll_steps": 10**12, "lazy_scroll_delay_seconds": 10**9}
         )
         assert (steps, delay) == (MAX_LAZY_SCROLL_STEPS, MAX_LAZY_SCROLL_DELAY_SECONDS)
-        assert renderer._harvest_timeout_for({"cookie_harvest_timeout_seconds": 10**9}) == (
+        assert driver.harvest_timeout_for({"cookie_harvest_timeout_seconds": 10**9}) == (
             MAX_COOKIE_HARVEST_TIMEOUT_SECONDS
         )
 
         # The knob still moves inside the ceiling: a clamp that pinned every
         # value to the ceiling would pass the same assertions.
-        assert renderer._scroll_config_for({"lazy_scroll_steps": 7}) == (7, 0.5)
-        assert renderer._harvest_timeout_for({}) == 2.0
+        assert driver.scroll_config_for({"lazy_scroll_steps": 7}) == (7, 0.5)
+        assert driver.harvest_timeout_for({}) == 2.0
 
         # Garbage still falls back to the default rather than raising, as before.
-        assert renderer._scroll_config_for({"lazy_scroll_steps": "not a number"}) == (3, 0.5)
-        assert renderer._scroll_config_for({"lazy_scroll_steps": -5}) == (0, 0.5)
+        assert driver.scroll_config_for({"lazy_scroll_steps": "not a number"}) == (3, 0.5)
+        assert driver.scroll_config_for({"lazy_scroll_steps": -5}) == (0, 0.5)
 
 
 class TestStrategyLadderIsBounded:

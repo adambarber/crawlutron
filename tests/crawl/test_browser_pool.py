@@ -6,6 +6,7 @@ import pytest
 
 import app.crawl.strategies.browser_pool as bp
 from app import resource_pressure as rp
+from app.crawl.strategies.browser_driver import BrowserDriver
 from app.crawl.strategies.browser_pool import (
     BROWSER_POOL_ACQUIRE_TIMEOUT_SECONDS,
     BrowserPool,
@@ -48,10 +49,25 @@ class TestAcquireTimeout:
 class _ExplodingContextManager:
     def __init__(self):
         self.exits = 0
+        self.enters = 0
+
+    async def __aenter__(self):
+        self.enters += 1
+        return _BrowserDouble()
 
     async def __aexit__(self, *args):
         self.exits += 1
         raise RuntimeError("teardown failed")
+
+
+class _BrowserDouble:
+    """The minimum a driver needs from a browser: one page, per open."""
+
+    def __init__(self):
+        self.is_closed = False
+
+    async def new_page(self, **_kwargs):
+        return _page()
 
 
 def _clear():
@@ -150,37 +166,42 @@ def test_explicit_pool_size_arg_wins(monkeypatch):
     assert pool._pool_size == 1
 
 
-def _renderer_with_exploding_cm():
+def _driver_with_exploding_cm(*, max_browser_renders: int = 1):
     """A renderer holding a browser whose context manager raises on exit.
 
     Both slots cleared and the CM exited exactly once is the contract under
     test, so the fixture asserts it and the caller only has to say *which* call
     was made.
     """
-    renderer = _bare_renderer()
     context_manager = _ExplodingContextManager()
-    renderer._browser = object()
-    renderer._browser_cm = context_manager
+    driver = BrowserDriver(
+        browser_factory=lambda **_kwargs: context_manager,
+        max_browser_renders=max_browser_renders,
+    )
 
     def assert_cleanly_released() -> None:
-        assert renderer._browser is None
-        assert renderer._browser_cm is None
+        assert driver.browser is None
         assert context_manager.exits == 1
 
-    return renderer, context_manager, assert_cleanly_released
+    return driver, context_manager, assert_cleanly_released
 
 
-def _bare_renderer():
+def _bare_renderer(**overrides):
     """A real ``BrowserRenderer`` with no browser factory and no warmup.
 
-    Every test in ``TestWorkerExtractorErrorDegrades`` drives one page-facing
-    helper directly, so there is nothing to acquire and nothing to warm up. The
-    renderer stays real; only the page is a double, which is what keeps these
-    tests about the renderer's own error handling.
+    Only the renderer-owned collaborators are exercised through this; page-facing
+    steps go to :func:`_bare_driver`, which owns them. Both stay real -- only the
+    page is a double, which is what keeps these tests about the strategy's own
+    error handling rather than a stub's.
     """
     from app.crawl.strategies.browser import BrowserRenderer
 
-    return BrowserRenderer()
+    return BrowserRenderer(**overrides)
+
+
+def _bare_driver(**overrides):
+    """The driver's counterpart to :func:`_bare_renderer`, for the page-facing steps."""
+    return BrowserDriver(**overrides)
 
 
 def _page(**stubs):
@@ -224,31 +245,41 @@ async def _challenge_wait_outcome(renderer, page):
     the one that gets through.
     """
     options = type("obj", (), {"include_html": True, "include_text": True})()
-    return await renderer._extract_with_challenge_wait(page, options)
+    return await renderer.extract_with_challenge_wait(page, options)
 
 
 class TestWorkerExtractorErrorDegrades:
     """Cover remaining branches in browser.py"""
 
-    async def test_browser_renderer_reset_browser_error(self):
-        renderer, _cm, assert_released = _renderer_with_exploding_cm()
-        await renderer._release_browser()
-        assert_released()
+    async def test_recycle_releases_the_browser_it_replaces(self):
+        """The per-render recycle path must drop the browser it is replacing.
 
-    async def test_browser_renderer_close_error(self):
-        renderer, _cm, assert_released = _renderer_with_exploding_cm()
-        await renderer.close()
+        A separate entry point from shutdown: the driver releases the old
+        context manager on the way to launching a replacement, so a raise there
+        has to be swallowed the same way or every recycle after the first
+        browser breaks the render.
+        """
+        driver, cm, _ = _driver_with_exploding_cm(max_browser_renders=1)
+        await driver.open_page({})
+        driver.note_render()
+        await driver.open_page({})
+        assert cm.exits == 1, "the recycle path did not release the browser it replaced"
+
+    async def test_close_releases_browser_when_teardown_raises(self):
+        driver, _cm, assert_released = _driver_with_exploding_cm()
+        await driver.open_page({})
+        await driver.close()
         assert_released()
 
     def test_browser_renderer_pdf_text_extractor_error(self):
-        text = _bare_renderer()._pdf_text_extractor(
+        text = _bare_renderer().pdf_text_extractor(
             "http://127.0.0.1:1/nonexistent.pdf",
             UNRESTRICTED_HOST_POLICY,
         )
         assert text == ""
 
     async def test_browser_renderer_capture_element_screenshots_error(self):
-        result = await _bare_renderer()._capture_element_screenshots(_page(evaluate=[]), [])
+        result = await _bare_driver().capture_element_screenshots(_page(evaluate=[]), [])
         assert result == []
 
     async def test_browser_renderer_flatten_shadow_dom_error(self):
@@ -258,12 +289,11 @@ class TestWorkerExtractorErrorDegrades:
             calls.append("evaluate")
             raise Exception("flatten failed")
 
-        await _bare_renderer()._flatten_shadow_dom(_page(evaluate=_record_then_fail))
+        await _bare_driver().flatten_shadow_dom(_page(evaluate=_record_then_fail))
         assert calls == ["evaluate"]
 
     async def test_browser_renderer_extract_with_challenge_wait_timeout(self):
-        renderer = _bare_renderer()
-        renderer._challenge_wait_seconds = 0.001
+        renderer = _bare_renderer(challenge_wait_seconds=0.001)
 
         # Page that always shows Cloudflare challenge
         page = _page(evaluate="Just a moment...", content="<html><body>Just a moment...</body></html>")
@@ -272,8 +302,7 @@ class TestWorkerExtractorErrorDegrades:
         assert not (escaped)
 
     async def test_browser_renderer_extract_with_challenge_wait_escaped(self):
-        renderer = _bare_renderer()
-        renderer._challenge_wait_seconds = 0.001
+        renderer = _bare_renderer(challenge_wait_seconds=0.001)
         polls = 0
 
         def _challenge_then_normal(*_args, **_kwargs):
@@ -299,12 +328,12 @@ class TestWorkerExtractorErrorDegrades:
         assert result == ""
 
     async def test_browser_renderer_extract_text_error(self):
-        result = await _bare_renderer()._extract_text(_page(evaluate=Exception("evaluate failed")))
+        result = await _bare_renderer().extract_text(_page(evaluate=Exception("evaluate failed")))
         assert result == ""
 
     async def test_browser_renderer_auto_accept_cookie_consent(self):
         # Opt-in required: disabled by default, no click without consent.
-        result = await _bare_renderer()._auto_accept_cookie_consent(_page(query_selector=None), False)
+        result = await _bare_driver().auto_accept_cookie_consent(_page(query_selector=None), False)
         assert not (result)
 
     async def test_browser_renderer_click_consent_button(self):
@@ -317,9 +346,7 @@ class TestWorkerExtractorErrorDegrades:
         def _consent_query(*_args, **_kwargs):
             return _page(is_visible=_visible, click=_click)
 
-        result = await _bare_renderer()._auto_accept_cookie_consent(
-            _page(query_selector=_consent_query), True
-        )
+        result = await _bare_driver().auto_accept_cookie_consent(_page(query_selector=_consent_query), True)
         assert result
 
 
@@ -338,8 +365,10 @@ class TestCloseLeavesNoStaleRendererToAcquire:
     def _pool(pool_size: int = 2) -> BrowserPool:
         # A real BrowserRenderer never launches a browser at construction, so the
         # pool, its renderers and the whole queue lifecycle are exercised for
-        # real; the factory is simply never called because nothing renders here.
-        return BrowserPool(pool_size=pool_size, browser_factory=lambda **kwargs: None)
+        # real; nothing renders here, so no browser factory is ever called and
+        # none needs supplying. (The renderer no longer accepts one anyway --
+        # controlling the browser means building a driver and passing it.)
+        return BrowserPool(pool_size=pool_size)
 
     async def test_acquire_after_a_recycle_returns_a_live_renderer(self):
         pool = self._pool()

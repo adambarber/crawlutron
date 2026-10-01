@@ -322,17 +322,6 @@ def base_url(test_server):
     return test_server.base_url
 
 
-@pytest.fixture(autouse=True, scope="session")
-def _disable_lazy_scroll():
-    """Set lazy scroll delay to 0 for browser tests."""
-    import app.crawl.strategies.browser as browser_module
-
-    original_delay = browser_module.LAZY_SCROLL_DELAY_SECONDS
-    browser_module.LAZY_SCROLL_DELAY_SECONDS = 0
-    yield
-    browser_module.LAZY_SCROLL_DELAY_SECONDS = original_delay
-
-
 @pytest.fixture
 async def async_client():
     """Async HTTP client using ASGI transport for FastAPI app."""

@@ -11,6 +11,7 @@ with nothing red.
 
 import base64
 
+from app.crawl.strategies.browser_driver import BrowserDriver
 from app.models import RenderOptions
 from tests._browser_doubles import BrowserFakeContextManager, ScriptedPage, scripted_renderer
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY
@@ -127,7 +128,7 @@ async def _render(renderer, path: str = "/"):
 class TestActionChain:
     async def test_action_chain_dispatches_correctly(self):
         page = FakePage()
-        renderer = _renderer()
+        driver = BrowserDriver()
         actions = [
             {"type": "click", "selector": "#go"},
             {"type": "fill", "selector": "#q", "value": "hello"},
@@ -137,7 +138,7 @@ class TestActionChain:
             {"type": "wait", "selector": "#loaded", "timeout": 3000},
             {"type": "wait_seconds", "seconds": 0.0},
         ]
-        await renderer._run_action_chain(page, actions)
+        await driver.run_action_chain(page, actions)
         called = {(c[0], c[1]) for c in page.calls}
         assert ("click", "#go") in called
         assert ("fill", "#q", "hello") in page.calls
@@ -152,15 +153,13 @@ class TestActionChain:
             raise RuntimeError("nope")
 
         page.click = boom
-        renderer = _renderer()
-        await renderer._run_action_chain(page, [{"type": "click", "selector": "#x"}])
+        await BrowserDriver().run_action_chain(page, [{"type": "click", "selector": "#x"}])
 
 
 class TestElementScreenshot:
     async def test_capture_element_screenshots(self):
         page = FakePage()
-        renderer = _renderer()
-        shots = await renderer._capture_element_screenshots(page, ["#a", "#missing"])
+        shots = await BrowserDriver().capture_element_screenshots(page, ["#a", "#missing"])
         selectors = {s["selector"] for s in shots}
         assert "#a" in selectors
         assert "#missing" not in selectors
@@ -173,18 +172,20 @@ class TestBrowserReuse:
     async def test_single_browser_reused_across_renders(self):
         browser, cm, renderer = _reuse_renderer()
         await _render(renderer)
-        assert not renderer._browser_reused
+        assert not renderer.driver.reused
         await _render(renderer, "/page")
-        assert renderer._browser_reused
+        assert renderer.driver.reused
         assert cm.enters == 1
         assert browser.pages == 2
 
     async def test_close_releases_browser(self):
-        _, _, renderer = _reuse_renderer()
+        _, cm, renderer = _reuse_renderer()
         await _render(renderer)
         await renderer.close()
-        assert renderer._browser is None
-        assert renderer._browser_cm is None
+        assert renderer.driver.browser is None
+        # The handle going away is the observable; the context manager actually
+        # being exited is the part that would otherwise leak a browser process.
+        assert cm.exits == 1
 
     async def test_render_still_succeeds_with_fake_browser(self):
         result = await _render(_renderer())

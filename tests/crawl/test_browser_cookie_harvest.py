@@ -11,8 +11,9 @@ from contextlib import contextmanager
 
 from app.crawl.strategies import browser as browser_mod
 from app.crawl.strategies.browser import BrowserRenderer
+from app.crawl.strategies.browser_driver import BrowserDriver
 from app.validation import registrable_domain
-from tests._browser_doubles import BrowserFakePage, ScriptedPage, build_pinned_renderer
+from tests._browser_doubles import BrowserFakePage, FakeBrowserDriver, ScriptedPage, build_pinned_renderer
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY
 
 
@@ -84,23 +85,23 @@ class TestHarvestWaitBounded:
         url = "http://example.com/page"
         with isolated_browser_cookies(url) as domain:
             page = BrowserFakePage(context=_WedgedContext())
-            renderer = build_pinned_renderer(monkeypatch, page)
-            # The cap is the thing under test, so it is driven to a value the
-            # test can afford rather than observed as five elapsed seconds. The
-            # deadline is enforced with ``asyncio.wait_for``, which is loop-time
-            # based and therefore unaffected by the suite's zero-second sleep
-            # patch -- the old version needed real sleeps purely to let the
-            # five-second default expire, which is a slow way to assert "the cap
-            # fired". The resolution path itself is covered by
-            # ``_harvest_timeout_for``.
-            monkeypatch.setattr(renderer, "_harvest_timeout_seconds", 0.05)
-
             close_calls: list[bool] = []
 
-            async def fake_close(self, p):
-                close_calls.append(True)
+            async def record_close(closed_page):
+                close_calls.append(closed_page)
 
-            monkeypatch.setattr(BrowserRenderer, "_safe_close_page", fake_close)
+            renderer = build_pinned_renderer(
+                page,
+                monkeypatch,
+                driver=FakeBrowserDriver(page, harvest_timeout=0.05, on_close=record_close),
+            )
+            # The cap is the thing under test, so the driver reports the short
+            # deadline rather than the five-second default. The deadline is
+            # enforced with ``asyncio.wait_for``, which is loop-time based and
+            # therefore unaffected by the suite's zero-second sleep patch -- the
+            # old version needed real sleeps purely to let the five-second
+            # default expire, which is a slow way to assert "the cap fired". The
+            # resolution path itself is covered by ``harvest_timeout_for``.
 
             async def call_finally():
                 await renderer._render_with_page_unlocked(
@@ -112,7 +113,7 @@ class TestHarvestWaitBounded:
             await asyncio.wait_for(call_finally(), timeout=10.0)
 
             # The harvest cap fired; page close still happened afterwards.
-            assert close_calls == [True]
+            assert close_calls == [page]
             # No cookies were stored from the wedged context.
             assert browser_mod.get_browser_cookies_for(domain) is None
 
@@ -125,20 +126,14 @@ class TestActionChainFailuresAreVisible:
     That costs extraction quality on exactly the pages an operator most wants to
     hear about (SPA content that never arrived), and it left no evidence at all.
 
-    These drive a REAL ``BrowserRenderer`` and the REAL ``_run_action_chain``.
-    The shared ``build_pinned_renderer`` helper monkeypatches that method to a
-    no-op (it is there to drive the render), so a test using it asserts against
-    the stub and passes no matter what the production chain does.
+    These drive the REAL ``BrowserDriver``, which is where the chain lives. The
+    shared ``build_pinned_renderer`` helper substitutes a driver whose chain is
+    a no-op (it is there to drive the render), so a test using it asserts
+    against the stub and passes no matter what the production chain does.
     """
 
-    @staticmethod
-    def _real_renderer():
-        from app.crawl.strategies.browser import BrowserRenderer
-
-        return BrowserRenderer(warmup_urls=[])
-
     async def test_a_selector_timeout_names_the_selector_url_and_budget(self, caplog):
-        renderer = self._real_renderer()
+        driver = BrowserDriver()
 
         async def never_appears(selector, timeout=None, **kwargs):
             raise TimeoutError(f"waiting for selector {selector!r} timed out after {timeout}ms")
@@ -146,7 +141,7 @@ class TestActionChainFailuresAreVisible:
         page = BrowserFakePage(on_wait_for_selector=never_appears)
 
         with caplog.at_level("WARNING"):
-            await renderer._run_action_chain(
+            await driver.run_action_chain(
                 page,
                 [{"type": "wait", "selector": "#hydration-done", "timeout": 2500}],
                 url="http://example.com/page",
@@ -178,7 +173,7 @@ class TestActionChainIsOneBoundedHold:
     """
 
     async def test_a_wedged_chain_releases_the_slot_at_the_render_budget(self, caplog):
-        renderer = BrowserRenderer(warmup_urls=[])
+        driver = BrowserDriver()
         page = BrowserFakePage()
         observed: list[float | None] = []
 
@@ -198,7 +193,7 @@ class TestActionChainIsOneBoundedHold:
         # loop-time-based wait_for, which the suite's sleep patch cannot fake.
         with caplog.at_level("WARNING"):
             await asyncio.wait_for(
-                renderer._run_action_chain(page, actions, url="http://example.com/page", budget_seconds=0.05),
+                driver.run_action_chain(page, actions, url="http://example.com/page", budget_seconds=0.05),
                 timeout=10.0,
             )
 

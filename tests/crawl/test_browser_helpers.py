@@ -1,6 +1,7 @@
-"""Real tests for browser.py logic (no browser; inject failing factories)."""
+"""Real tests for the browser strategy's logic (no browser; inject failing factories)."""
 
 from app.crawl.strategies.browser import BrowserRenderer
+from app.crawl.strategies.browser_driver import BrowserDriver
 from app.models import RenderOptions
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY
 
@@ -20,7 +21,10 @@ async def _retry_exhausted(browser_factory, *, max_retries: int = 1):
     so a test claiming "exhausted" cannot pass because the first attempt already
     failed. Returns the result for the caller to classify.
     """
-    renderer = BrowserRenderer(browser_factory=browser_factory, sleep=lambda _s: None)
+    renderer = BrowserRenderer(
+        driver=BrowserDriver(browser_factory=browser_factory),
+        sleep=lambda _s: None,
+    )
     result = await renderer.render(
         "http://example.com/",
         RenderOptions(max_retries=max_retries),
@@ -43,20 +47,20 @@ class TestBrowserRenderRetry:
 
 class TestBrowserKwargs:
     def test_default_viewport_is_desktop(self):
-        renderer = BrowserRenderer()
-        launch_kwargs = renderer._get_browser_kwargs({})
+        driver = BrowserDriver()
+        launch_kwargs = driver.browser_kwargs({})
         assert "viewport" not in launch_kwargs
-        assert renderer._get_page_kwargs({})["viewport"] == {"width": 1365, "height": 768}
+        assert driver.page_kwargs({})["viewport"] == {"width": 1365, "height": 768}
 
     def test_mobile_viewport_is_applied(self):
-        renderer = BrowserRenderer()
-        assert renderer._get_page_kwargs({"viewport": "mobile"})["viewport"] == {
+        driver = BrowserDriver()
+        assert driver.page_kwargs({"viewport": "mobile"})["viewport"] == {
             "width": 390,
             "height": 844,
         }
 
     def test_reduced_resource_mode_disables_images(self):
-        renderer = BrowserRenderer()
-        assert renderer._get_browser_kwargs({"resource_mode": "reduced"})["args"] == [
+        driver = BrowserDriver()
+        assert driver.browser_kwargs({"resource_mode": "reduced"})["args"] == [
             "--blink-settings=imagesEnabled=false"
         ]

@@ -15,10 +15,10 @@ class TestBrowserRendererStatus:
     def test_headless_enabled_default(self, monkeypatch):
         monkeypatch.delenv("CRAWLUTRON_HEADLESS", raising=False)
         renderer = BrowserRenderer()
-        assert renderer._headless_enabled() is True
+        assert renderer.driver.headless_enabled() is True
 
     def test_headless_enabled_false_values(self, monkeypatch):
         for val in ["0", "false", "no", "off", "FALSE"]:
             monkeypatch.setenv("CRAWLUTRON_HEADLESS", val)
             renderer = BrowserRenderer()
-            assert renderer._headless_enabled() is False
+            assert renderer.driver.headless_enabled() is False

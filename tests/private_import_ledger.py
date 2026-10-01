@@ -453,31 +453,6 @@ DECLARED: dict[str, Declaration] = {
     "app.crawl.robots.robots_cache._entries": _d(_CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]),
     "app.crawl.sqlite_store._BUSY_TIMEOUT_MS": _SUBSTITUTED_CAP,
     "app.crawl.sqlite_store._WAL_RETRY_SECONDS": _SUBSTITUTED_CAP,
-    "app.crawl.strategies.browser.BrowserRenderer._acquire_browser": _SUBSTITUTED_COLLABORATOR,
-    "app.crawl.strategies.browser.BrowserRenderer._auto_accept_cookie_consent": _SUBSTITUTED_COLLABORATOR,
-    "app.crawl.strategies.browser.BrowserRenderer._extract_text": _d(
-        _PRIVATE_TYPE.kind, _PRIVATE_TYPE.reason, ["test"]
-    ),
-    "app.crawl.strategies.browser.BrowserRenderer._extract_with_challenge_wait": _SUBSTITUTED_COLLABORATOR,
-    "app.crawl.strategies.browser.BrowserRenderer._flatten_shadow_dom": _SUBSTITUTED_COLLABORATOR,
-    "app.crawl.strategies.browser.BrowserRenderer._get_browser_kwargs": _d(
-        _PRIVATE_TYPE.kind, _PRIVATE_TYPE.reason, ["test"]
-    ),
-    "app.crawl.strategies.browser.BrowserRenderer._get_page_kwargs": _SUBSTITUTED_COLLABORATOR,
-    "app.crawl.strategies.browser.BrowserRenderer._harvest_timeout_for": _d(
-        _PRIVATE_TYPE.kind, _PRIVATE_TYPE.reason, ["test"]
-    ),
-    "app.crawl.strategies.browser.BrowserRenderer._lazy_load_scroll": _SUBSTITUTED_COLLABORATOR,
-    "app.crawl.strategies.browser.BrowserRenderer._looks_like_pdf": _SUBSTITUTED_COLLABORATOR,
-    "app.crawl.strategies.browser.BrowserRenderer._make_response_handler": _d(
-        _PRIVATE_TYPE.kind, _PRIVATE_TYPE.reason, ["test"]
-    ),
-    "app.crawl.strategies.browser.BrowserRenderer._run_action_chain": _SUBSTITUTED_COLLABORATOR,
-    "app.crawl.strategies.browser.BrowserRenderer._safe_close_page": _SUBSTITUTED_COLLABORATOR,
-    "app.crawl.strategies.browser.BrowserRenderer._scroll_config_for": _d(
-        _PRIVATE_TYPE.kind, _PRIVATE_TYPE.reason, ["test"]
-    ),
-    "app.crawl.strategies.browser.BrowserRenderer._wait_for_ready_state": _SUBSTITUTED_COLLABORATOR,
     "app.crawl.strategies.browser._BROWSER_COOKIES_BY_DOMAIN": _d(
         _CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]
     ),
@@ -519,11 +494,8 @@ DECLARED: dict[str, Declaration] = {
         "Not yet triaged.\n",
         ["test"],
     ),
-    "app.crawl.strategies.browser_actions.BrowserActionsMixin._dispatch_action": _d(
+    "app.crawl.strategies.browser_driver.BrowserDriver._dispatch_action": _d(
         _PRIVATE_TYPE.kind, _PRIVATE_TYPE.reason, ["test"]
-    ),
-    "app.crawl.strategies.browser_actions._MAX_ACTION_WAIT_SECONDS": _d(
-        _CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]
     ),
     "app.crawl.strategies.browser_pool._derive_browser_pool_size": _d(
         "unreviewed",

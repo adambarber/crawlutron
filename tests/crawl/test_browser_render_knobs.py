@@ -1,4 +1,4 @@
-"""Browser renderer fixed overhead must be configurable via render knobs.
+"""Browser driver fixed overhead must be configurable via render knobs.
 
 Lazy-scroll steps/delay and the cookie-harvest timeout are hardcoded
 (3 / 1s / 5.0s). They must be policy/env-configurable with byte-identical
@@ -9,7 +9,7 @@ import tempfile
 
 import pytest
 
-from app.crawl.strategies.browser import BrowserRenderer
+from app.crawl.strategies.browser_driver import BrowserDriver
 from tests._assertions import set_optional_env
 from tests._browser_doubles import ScriptedPage
 from tests._policy_factories import BOOL_ENV_CASES
@@ -31,45 +31,45 @@ def _settings(**overrides):
 async def test_lazy_scroll_follows_settings_or_profile(profile, expected_evaluates, expected_sleeps):
     """Settings-provided steps/delay drive the scroll; a browser_profile overrides."""
     sleeps: list[float] = []
-    renderer = BrowserRenderer(
+    driver = BrowserDriver(
         sleep=lambda seconds: sleeps.append(seconds),
         settings=_settings(browser_lazy_scroll_steps=1, browser_lazy_scroll_delay_seconds=0.25),
     )
     page = ScriptedPage(answers={})
-    await renderer._lazy_load_scroll(page, profile)
+    await driver.lazy_load_scroll(page, profile)
     assert len(page.evaluates) == expected_evaluates
     assert sleeps == expected_sleeps
 
 
 async def test_lazy_scroll_zero_steps_skips_work():
-    renderer = BrowserRenderer(
+    driver = BrowserDriver(
         sleep=lambda seconds: (_ for _ in ()).throw(AssertionError("must not sleep")),
         settings=_settings(browser_lazy_scroll_steps=0),
     )
     page = ScriptedPage(answers={})
-    await renderer._lazy_load_scroll(page)
+    await driver.lazy_load_scroll(page)
     assert page.evaluates == []
 
 
 def test_harvest_timeout_resolution_order():
     """profile -> settings -> 5.0 default; garbage falls back, never raises."""
-    default = BrowserRenderer()._harvest_timeout_for({})
+    default = BrowserDriver().harvest_timeout_for({})
     assert default == 5.0
-    via_settings = BrowserRenderer(
+    via_settings = BrowserDriver(
         settings=_settings(browser_cookie_harvest_timeout_seconds=0.75)
-    )._harvest_timeout_for({})
+    ).harvest_timeout_for({})
     assert via_settings == 0.75
-    via_profile = BrowserRenderer()._harvest_timeout_for({"cookie_harvest_timeout_seconds": 1.5})
+    via_profile = BrowserDriver().harvest_timeout_for({"cookie_harvest_timeout_seconds": 1.5})
     assert via_profile == 1.5
-    assert BrowserRenderer()._harvest_timeout_for({"cookie_harvest_timeout_seconds": "junk"}) == 5.0
+    assert BrowserDriver().harvest_timeout_for({"cookie_harvest_timeout_seconds": "junk"}) == 5.0
 
 
 def test_browser_knob_defaults_unchanged():
     """Configurability must not move the shipped defaults (policy: keep 3/1/5.0).
 
-    The module globals are deliberately NOT asserted here: the session
-    ``_disable_lazy_scroll`` fixture owns them at runtime. Shipped defaults
-    live in constants + settings, which no fixture mutates.
+    Shipped defaults live in constants + settings, which nothing mutates at
+    runtime: a driver reads its knobs at construction, so there is no module
+    global for a test to patch and drift behind.
     """
     from app.constants import (
         DEFAULT_COOKIE_HARVEST_TIMEOUT_SECONDS,
@@ -84,14 +84,14 @@ def test_browser_knob_defaults_unchanged():
     assert plain.browser_lazy_scroll_steps == 3
     assert plain.browser_lazy_scroll_delay_seconds == 1
     assert plain.browser_cookie_harvest_timeout_seconds == 5.0
-    assert BrowserRenderer(settings=plain)._harvest_timeout_for({}) == 5.0
-    assert BrowserRenderer(settings=plain)._scroll_config_for({}) == (3, 1)
+    assert BrowserDriver(settings=plain).harvest_timeout_for({}) == 5.0
+    assert BrowserDriver(settings=plain).scroll_config_for({}) == (3, 1)
 
 
 @pytest.mark.parametrize(("raw", "expected"), BOOL_ENV_CASES)
 def test_headless_decision_uses_shared_bool_parser(monkeypatch, raw, expected):
     set_optional_env(monkeypatch, "CRAWLUTRON_HEADLESS", raw)
-    assert BrowserRenderer()._get_browser_kwargs({})["headless"] is expected
+    assert BrowserDriver().browser_kwargs({})["headless"] is expected
 
 
 def test_browser_knob_env_mapping():

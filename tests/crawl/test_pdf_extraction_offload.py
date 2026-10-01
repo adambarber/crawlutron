@@ -33,24 +33,26 @@ class _PdfPage(BrowserFakePage):
         return None
 
 
-async def _real_extraction(self, page, options):
+async def _real_extraction(page, options):
     """Un-stub the builder's canned extraction so the real branch is driven.
 
-    ``build_pinned_renderer`` pins ``_extract_with_challenge_wait`` to a
-    success fixture and disables ``_looks_like_pdf``; the PDF-offload contract
-    needs the REAL branch, so both stubs are re-enabled here (the shared
-    builder's defaults are deliberately preserved for every other consumer).
+    ``build_pinned_renderer`` pins the extraction *step* to a success fixture
+    and ``looks_like_pdf`` to False; the PDF-offload contract needs the REAL
+    branch, so both collaborators are replaced here (the shared builder's
+    defaults are deliberately preserved for every other consumer). Both
+    extractors are static, so this needs no renderer to call them on.
     """
-    html = await BrowserRenderer.extract_html(self, page)
-    text = await BrowserRenderer._extract_text(self, page)
+    html = await BrowserRenderer.extract_html(page) if options.include_html else None
+    text = await BrowserRenderer.extract_text(page) if options.include_text else None
     return html, text, "rendered", False
 
 
+async def _looks_like_pdf(url):
+    return url.lower().endswith(".pdf")
+
+
 def _build_pdf_renderer(monkeypatch, page):
-    renderer = build_pinned_renderer(monkeypatch, page)
-    monkeypatch.setattr(BrowserRenderer, "_extract_with_challenge_wait", _real_extraction)
-    monkeypatch.setattr(BrowserRenderer, "_looks_like_pdf", lambda self, url: url.lower().endswith(".pdf"))
-    return renderer
+    return build_pinned_renderer(page, monkeypatch, extract=_real_extraction, looks_like_pdf=_looks_like_pdf)
 
 
 async def _render_pdf(monkeypatch):

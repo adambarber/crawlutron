@@ -234,65 +234,110 @@ class ScriptedPage(BrowserFakePage):
         return self.closed
 
 
-class BrowserFakeBrowser:
-    def __init__(self, page):
-        self._page = page
-
-    async def new_page(self, **kwargs):
-        return self._page
-
-
 class BrowserFakeContextManager:
     """The ``async with`` wrapper a browser factory hands back, over one browser."""
 
     def __init__(self, browser):
         self.browser = browser
         self.enters = 0
+        self.exits = 0
 
     async def __aenter__(self):
         self.enters += 1
         return self.browser
 
     async def __aexit__(self, *exc):
+        self.exits += 1
         return False
 
 
-async def _browser_noop(self, *a, **k):
-    return None
+class FakeBrowserDriver:
+    """A real :class:`BrowserDriver` collaborator with a fake browser behind it.
+
+    Substituted as one object instead of the ten private ``BrowserRenderer``
+    methods this used to need rebound: the driver is the boundary the renderer
+    was missing, so a test that wants the renderer's orchestration against a
+    non-browser page now hands it a driver and says nothing else.
+
+    ``open_page`` returns the page it was constructed with -- there is no fake
+    *browser* any more, because nothing above the driver ever saw one.
+    """
+
+    def __init__(self, page, *, harvest_timeout=0.0, on_close=None):
+        self.page = page
+        self.harvest_timeout = harvest_timeout
+        self.on_close = on_close
+        self.opened: list[str | None] = []
+        self.closed = 0
+
+    async def open_page(self, browser_profile):
+        self.opened.append(browser_profile)
+        return self.page
+
+    async def close(self):
+        self.closed += 1
+
+    def note_render(self):
+        return None
+
+    @property
+    def reused(self):
+        return False
+
+    def harvest_timeout_for(self, browser_profile):
+        return self.harvest_timeout
+
+    async def wait_for_ready_state(self, page):
+        return None
+
+    async def run_action_chain(self, page, actions, *, url="", budget_seconds=None):
+        return None
+
+    async def lazy_load_scroll(self, page, browser_profile=None):
+        return None
+
+    async def flatten_shadow_dom(self, page):
+        return None
+
+    async def auto_accept_cookie_consent(self, page, enabled):
+        return None
+
+    async def safe_close_page(self, page):
+        if self.on_close is not None:
+            await self.on_close(page)
+
+    async def capture_element_screenshots(self, page, selectors):
+        return []
 
 
-def _async_return(value):
-    async def coro():
-        return value
-
-    return coro()
+async def _static_extraction(page, options):
+    return ("<html>hi</html>", "hi", "rendered", False)
 
 
-def build_pinned_renderer(monkeypatch, page):
+async def _never_pdf(url):
+    return False
+
+
+def build_pinned_renderer(page, monkeypatch=None, **overrides):
+    """A renderer whose page work is a fake driver and whose output is fixed.
+
+    ``overrides`` steer the two renderer-owned collaborators a test varies:
+    ``extract=`` and ``looks_like_pdf=``.
+    """
     from app.crawl.strategies.browser import BrowserRenderer
 
-    renderer = BrowserRenderer(warmup_urls=[])
-
-    async def fake_acquire(self, options):
-        return BrowserFakeBrowser(page)
-
-    monkeypatch.setattr(BrowserRenderer, "_acquire_browser", fake_acquire)
-    monkeypatch.setattr(BrowserRenderer, "_get_page_kwargs", lambda self, prof: {})
-    monkeypatch.setattr(BrowserRenderer, "_wait_for_ready_state", _browser_noop)
-    monkeypatch.setattr(BrowserRenderer, "_run_action_chain", _browser_noop)
-    monkeypatch.setattr(BrowserRenderer, "_lazy_load_scroll", _browser_noop)
-    monkeypatch.setattr(BrowserRenderer, "_flatten_shadow_dom", _browser_noop)
-    monkeypatch.setattr(BrowserRenderer, "_auto_accept_cookie_consent", _browser_noop)
-    monkeypatch.setattr(BrowserRenderer, "_safe_close_page", _browser_noop)
-    monkeypatch.setattr(
-        BrowserRenderer,
-        "_extract_with_challenge_wait",
-        lambda self, page, options: _async_return(("<html>hi</html>", "hi", "rendered", False)),
+    renderer = BrowserRenderer(
+        warmup_urls=[],
+        # a driver the caller may have supplied its own; otherwise the default
+        driver=overrides.pop("driver", None) or FakeBrowserDriver(page),
+        extract=overrides.pop("extract", _static_extraction),
+        looks_like_pdf=overrides.pop("looks_like_pdf", _never_pdf),
+        **overrides,
     )
-    monkeypatch.setattr(BrowserRenderer, "_looks_like_pdf", lambda self, url: False)
-    from app.crawl.strategies import browser as browser_module
+    if monkeypatch is not None:
+        from app.crawl.strategies import browser as browser_module
 
-    monkeypatch.setattr(browser_module, "status_for_classification", lambda c: "success")
+        monkeypatch.setattr(browser_module, "status_for_classification", lambda c: "success")
     return renderer
 
 
@@ -332,7 +377,7 @@ def pinned_page_renderer(monkeypatch, page=None, *, pinned=PINNED_PUBLIC_IP):
     import app.crawl.strategies.browser as browser_mod
 
     page = BrowserFakePage() if page is None else page
-    renderer = build_pinned_renderer(monkeypatch, page)
+    renderer = build_pinned_renderer(page, monkeypatch)
     monkeypatch.setattr(browser_mod, "_build_pinned_request_async", stub_pinned_request(pinned))
     return page, renderer
 
@@ -410,7 +455,6 @@ def _fake_browser(html=None, text="doc", metadata=None, status="success", classi
 
 
 __all__ = [
-    "BrowserFakeBrowser",
     "BrowserFakePage",
     "FakeRequest",
     "FakeRoute",
@@ -532,10 +576,17 @@ def scripted_renderer(browser, cm=None, *, sleep=None):
     explicitly is not.
     """
     from app.crawl.strategies.browser import BrowserRenderer
+    from app.crawl.strategies.browser_driver import BrowserDriver
+
+    def _sleep(_seconds):
+        return None if sleep is None else sleep(_seconds)
 
     return BrowserRenderer(
-        browser_factory=lambda **kw: cm or BrowserFakeContextManager(browser),
-        sleep=lambda _s: None if sleep is None else sleep(_s),
+        driver=BrowserDriver(
+            browser_factory=lambda **kw: cm or BrowserFakeContextManager(browser),
+            sleep=_sleep,
+        ),
+        sleep=_sleep,
     )
 
 
@@ -572,7 +623,7 @@ def response_handler_double(url: str, payload=None, error=None):
     from app.crawl.strategies.browser import BrowserRenderer
 
     collected: list[dict] = []
-    handler = BrowserRenderer._make_response_handler(collected)
+    handler = BrowserRenderer.make_response_handler(collected)
     response_url = url
 
     class FakeResponse:

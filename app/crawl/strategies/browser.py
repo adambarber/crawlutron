@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import asyncio
 import base64
-import contextlib
 import json
 import logging
 import os
@@ -31,13 +30,10 @@ from typing import TYPE_CHECKING, Any, Literal
 if TYPE_CHECKING:
     from _typeshed import SupportsKeysAndGetItem
 
-from camoufox.async_api import AsyncCamoufox
 
 from app.classify import classify_page
 from app.constants import (
     DEFAULT_CHALLENGE_WAIT_SECONDS,
-    DEFAULT_COOKIE_HARVEST_TIMEOUT_SECONDS,
-    DEFAULT_MAX_BROWSER_RENDERS,
     DEFAULT_MAX_CONCURRENT_PAGES,
     status_for_classification,
 )
@@ -45,11 +41,7 @@ from app.constants import (
     is_analytics_host as _is_analytics_url,
 )
 from app.crawl.result_helpers import classify_error_code, terminal_crawl_result
-from app.crawl.strategies.browser_actions import (
-    LAZY_SCROLL_DELAY_SECONDS,
-    LAZY_SCROLL_STEPS,
-    BrowserActionsMixin,
-)
+from app.crawl.strategies.browser_driver import BrowserDriver, async_sleep
 from app.crawl.strategies.document import _default_document_text_extractor
 from app.crawl.strategies.pinned_transport import (
     _build_pinned_request,
@@ -65,42 +57,10 @@ from app.validation import (
     get_env_float,
     get_env_int,
     normalize_public_http_url,
-    parse_bool_value,
     registrable_domain,
 )
 
 logger = logging.getLogger(__name__)
-
-
-def _refuse_storage_state_without_cache_dir(storage_state: str) -> None:
-    """Log why a ``storage_state`` was dropped because no ``cache_dir`` is set.
-
-    The caller owns the return value; this owns the explanation. A separate
-    chokepoint for one reason: this is the only refusal in the validator that is
-    not "that path is not allowed". The configured-``cache_dir`` rejections stay
-    silent, because there the allowlist exists and the answer is simply no. With
-    no ``cache_dir`` no allowlist was ever configured, and that is the actionable
-    fact -- so this one names the setting instead of letting the caller return a
-    bare ``None`` indistinguishable from a path merely outside the allowlist.
-
-    The allowlist this replaced was the platform temp dir, which is not operator
-    control: it is world-readable on most hosts, so any local user could seed a
-    file another tenant's render then loads as its session. Losing a local dev's
-    ``storage_state`` is the cost; that is a diagnostic and a config line, against
-    a deployment's session otherwise.
-    """
-    logger.warning(
-        "browser_storage_state_no_cache_dir",
-        extra={
-            "storage_state": str(storage_state),
-            "detail": (
-                "no cache_dir is configured, so there is no allowlist to check this path "
-                "against and the storage_state is dropped; set CRAWLUTRON_CACHE_DIR to a "
-                "directory this deployment owns and place the file there"
-            ),
-        },
-    )
-    return None
 
 
 async def _resolve_browser_target(url: str, *, policy: HostPolicy) -> tuple[str, dict[str, str]]:
@@ -432,18 +392,22 @@ def get_browser_cookies_for(domain: str) -> str | None:
     return _BROWSER_COOKIES_BY_DOMAIN.touch_get(domain)
 
 
-class BrowserRenderer(BrowserActionsMixin):
+class BrowserRenderer:
     def __init__(
         self,
         *,
-        browser_factory: Callable[[], Any] | None = None,
         sleep: Callable[[float], None] = time.sleep,
         challenge_wait_seconds: float | None = None,
         pdf_text_extractor: Callable[[str, HostPolicy], str] | None = None,
+        extract: Callable[
+            [Any, RenderOptions], Awaitable[tuple[str | None, str | None, Classification, bool]]
+        ]
+        | None = None,
+        looks_like_pdf: Callable[[str], bool] | None = None,
         warmup_urls: list[str] | None = None,
         settings: CrawlerSettings | None = None,
+        driver: BrowserDriver | None = None,
     ) -> None:
-        self._browser_factory = browser_factory or self._create_camoufox_browser
         self._sleep = sleep
         # Prefer the passed policy limit, then the centralized settings field,
         # then the raw env var (falling back to the canonical default). This
@@ -458,40 +422,25 @@ class BrowserRenderer(BrowserActionsMixin):
                 )
         else:
             self._challenge_wait_seconds = challenge_wait_seconds
-        # Fixed-overhead knobs (configurability only):
-        # operator settings when present, else the module defaults above
-        # (identical values). Per-request browser_profile keys override both
-        # at render time via _scroll_config_for/_harvest_timeout_for.
-        self._lazy_scroll_steps = (
-            settings.browser_lazy_scroll_steps if settings is not None else LAZY_SCROLL_STEPS
-        )
-        self._lazy_scroll_delay_seconds = (
-            settings.browser_lazy_scroll_delay_seconds if settings is not None else LAZY_SCROLL_DELAY_SECONDS
-        )
-        self._harvest_timeout_seconds = (
-            settings.browser_cookie_harvest_timeout_seconds
-            if settings is not None
-            else DEFAULT_COOKIE_HARVEST_TIMEOUT_SECONDS
-        )
         self._pdf_text_extractor = pdf_text_extractor or _default_document_text_extractor
+        # The two renderer-owned predicates a test has to steer: what the page
+        # yielded, and whether it was a PDF. Overridable as collaborators rather
+        # than rebound on the class, so a test substitutes behaviour instead of
+        # the renderer's own internals.
+        self._extract = extract or self.extract_with_challenge_wait
+        self._looks_like = looks_like_pdf or self._looks_like_pdf
         self._warmup_urls = warmup_urls if warmup_urls is not None else self._warmup_urls_from_env()
-        # Reusable browser instance: one browser per BrowserRenderer lifecycle.
-        self._browser_cm: Any = None
-        # Cache dir for safe storage_state validation. Defaults to /tmp if no
-        # settings were passed (single-tenant local-mode usage), but when
-        # settings are available the operator-controlled cache_dir is used so
-        # a malicious storage_state path cannot piggy-back on the world-
-        # readable /tmp.
-        self._cache_dir = settings.cache_dir if settings is not None else None
-        self._browser: Any = None
-        self._browser_reused = False
-        # Recycle the reused browser after this many successful renders to bound
-        # the memory of a long-lived Camoufox process (see _acquire_browser).
-        self._render_count = 0
-        self._max_browser_renders = (
-            settings.max_browser_renders
-            if settings is not None
-            else get_env_int("CRAWLUTRON_MAX_BROWSER_RENDERS", DEFAULT_MAX_BROWSER_RENDERS, lo=1)
+        # The browser and every step done to a page live in the driver, which
+        # also owns the recycle bound, the scroll/harvest knobs, and the
+        # storage_state allowlist. A test substitutes the driver, not methods
+        # on this class -- see app/crawl/strategies/browser_driver.py.
+        self._driver = (
+            driver
+            if driver is not None
+            else BrowserDriver(
+                sleep=sleep,
+                settings=settings,
+            )
         )
         # Cap concurrent page renders: N simultaneous requests each open a tab,
         # which otherwise crashes/OOMs the browser under burst load.
@@ -501,6 +450,36 @@ class BrowserRenderer(BrowserActionsMixin):
             else get_env_int("CRAWLUTRON_MAX_CONCURRENT_PAGES", DEFAULT_MAX_CONCURRENT_PAGES, lo=1)
         )
         self._page_semaphore = asyncio.Semaphore(max(1, _concurrent_pages))
+
+    async def _async_sleep(self, seconds: float) -> None:
+        """Non-blocking sleep for use inside coroutines.
+
+        The default ``time.sleep`` clock (injectable for tests) would block the
+        whole event loop; run it in a thread so one render can never freeze the
+        service.
+        """
+        await async_sleep(self._sleep, seconds)
+
+    @property
+    def pdf_text_extractor(self) -> Callable[[str, HostPolicy], str]:
+        """The collaborator that turns a PDF URL into text.
+
+        Public because it is an injection point: a caller that supplied one, or a
+        test asserting the supplied/default behaviour, should not have to read a
+        private attribute to say which extractor is in play.
+        """
+        return self._pdf_text_extractor
+
+    @property
+    def driver(self) -> BrowserDriver:
+        """The driver this renderer drives the page with.
+
+        Public because the driver is a collaborator rather than an
+        implementation detail: it owns the browser lifecycle and the per-page
+        steps, and a test asserting on either needs to name it rather than reach
+        past the renderer into a private attribute.
+        """
+        return self._driver
 
     @property
     def warmup_urls(self) -> list[str]:
@@ -512,17 +491,6 @@ class BrowserRenderer(BrowserActionsMixin):
         of inventing a strategy name on a failure path.
         """
         return self._warmup_urls
-
-    async def _async_sleep(self, seconds: float) -> None:
-        """Non-blocking sleep for use inside coroutines.
-
-        The default ``time.sleep`` clock (injectable for tests) would block the
-        whole event loop; run it in a thread so one render can never freeze the
-        service.
-        """
-        if seconds <= 0:
-            return
-        await asyncio.to_thread(self._sleep, seconds)
 
     async def _harvest_session_cookies(self, page: Any, url: str) -> None:
         """Capture the page's cookies into the per-domain bootstrap store.
@@ -548,24 +516,6 @@ class BrowserRenderer(BrowserActionsMixin):
         except Exception as error:
             logger.debug("browser_cookies_harvest_failed", extra={"error": str(error)})
 
-    async def _release_browser(self) -> None:
-        """Take the cached context manager and tear it down, best-effort.
-
-        The single owner of "forget the browser": both the per-attempt reset
-        and the service-shutdown close have to drop the same three fields, and
-        when they were spelled separately one of them grew a stale
-        ``_browser_reused`` that the other did not clear. Clearing the whole
-        set here means a field added later is cleared in both places or in
-        neither, which is the only way that stays true.
-        """
-        cm = self._browser_cm
-        self._browser_cm = None
-        self._browser = None
-        self._browser_reused = False
-        if cm is not None:
-            with contextlib.suppress(Exception):  # best-effort teardown
-                await cm.__aexit__(None, None, None)
-
     async def render(
         self,
         url: str,
@@ -588,7 +538,7 @@ class BrowserRenderer(BrowserActionsMixin):
                     "navigation_timeout" if isinstance(error, TimeoutError) else "unknown_error"
                 )
                 last_error = classify_error_code(error)
-                await self._release_browser()
+                await self._driver.close()
                 if attempts >= max_attempts:
                     return self._failure_result(
                         url, "retry_exhausted", classification, attempts, started, last_error
@@ -597,42 +547,9 @@ class BrowserRenderer(BrowserActionsMixin):
 
         return self._failure_result(url, "failed", "unknown_error", attempts, started, last_error)
 
-    async def _acquire_browser(self, options: RenderOptions) -> Any:
-        """Return a reused browser instance, launching one on first use.
-
-        Recycles the browser once it has served ``_max_browser_renders`` to
-        bound memory growth of a long-lived Camoufox process.
-        """
-        if (
-            self._browser is None
-            or getattr(self._browser, "is_closed", False)
-            or self._render_count >= self._max_browser_renders
-        ):
-            if self._browser is not None:
-                await self._release_browser()
-            launch_kwargs = self._get_browser_kwargs(options.browser_profile)
-            cm = self._browser_factory(**launch_kwargs)
-            self._browser = await cm.__aenter__()
-            self._browser_cm = cm
-            self._browser_reused = False
-            self._render_count = 0
-        else:
-            self._browser_reused = True
-        return self._browser
-
-    @staticmethod
-    async def _safe_close_page(page: Any) -> None:
-        """Best-effort page teardown so rendered tabs/processes are not leaked."""
-        if page is None:
-            return
-        with contextlib.suppress(Exception):  # best-effort teardown
-            close = getattr(page, "close", None)
-            if close is not None:
-                await close()
-
     async def close(self) -> None:
         """Release the reused browser instance at service shutdown."""
-        await self._release_browser()
+        await self._driver.close()
 
     async def _render_with_browser(
         self,
@@ -649,7 +566,7 @@ class BrowserRenderer(BrowserActionsMixin):
     async def _navigate_and_settle(self, page: Any, pinned_url: str) -> None:
         """Goto the pinned URL and wait for a settled ready state."""
         await page.goto(pinned_url, wait_until="domcontentloaded")
-        await self._wait_for_ready_state(page)
+        await self._driver.wait_for_ready_state(page)
 
     async def _render_with_page_unlocked(
         self,
@@ -665,8 +582,7 @@ class BrowserRenderer(BrowserActionsMixin):
 
         started = time.monotonic()
 
-        browser = await self._acquire_browser(options)
-        page = await browser.new_page(**self._get_page_kwargs(options.browser_profile))
+        page = await self._driver.open_page(options.browser_profile)
         # Abort any request (navigation, redirect, or subresource) that
         # resolves to an SSRF-unsafe host before the browser connects.
         await page.route(
@@ -690,13 +606,13 @@ class BrowserRenderer(BrowserActionsMixin):
         try:
             # Katana-style XHR/fetch interception.
             intercepted_xhr: list[dict[str, Any]] = []
-            page.on("response", self._make_response_handler(intercepted_xhr))
+            page.on("response", self.make_response_handler(intercepted_xhr))
 
             # Warmup URLs (no Host header needed)
             for warmup_url in self._warmup_urls:
                 normalized_warmup = normalize_public_http_url(warmup_url, policy=policy)
                 await page.goto(normalized_warmup, wait_until="domcontentloaded")
-                await self._wait_for_ready_state(page)
+                await self._driver.wait_for_ready_state(page)
 
             # Navigate to target URL: set Host header for pinned IP navigation.
             # page.goto() does not accept extra_http_headers; use set_extra_http_headers().
@@ -721,24 +637,22 @@ class BrowserRenderer(BrowserActionsMixin):
             # Browser action chains: run policy-specified interactions before extraction.
             actions = (options.browser_profile or {}).get("actions") or []
             if actions:
-                await self._run_action_chain(page, actions, url=url, budget_seconds=navigation_timeout)
+                await self._driver.run_action_chain(page, actions, url=url, budget_seconds=navigation_timeout)
 
             # Lazy-load scroll: trigger deferred/infinite-scroll content.
-            await self._lazy_load_scroll(page, options.browser_profile)
+            await self._driver.lazy_load_scroll(page, options.browser_profile)
 
             # Shadow-DOM flattening: inline open shadow roots so their links
             # and visible text are reachable by the standard HTML/text extractors.
-            await self._flatten_shadow_dom(page)
+            await self._driver.flatten_shadow_dom(page)
 
             # Auto-accept cookie consent (opt-in only) before extraction
-            await self._auto_accept_cookie_consent(
+            await self._driver.auto_accept_cookie_consent(
                 page, bool((options.browser_profile or {}).get("auto_accept_cookie_consent"))
             )
 
             # Extract with challenge waiting
-            html, text, classification, challenge_resolved = await self._extract_with_challenge_wait(
-                page, options
-            )
+            html, text, classification, challenge_resolved = await self._extract(page, options)
 
             extraction_method = "dom_text"
             final_url = page.url
@@ -747,7 +661,7 @@ class BrowserRenderer(BrowserActionsMixin):
             _assert_safe_final_url(final_url, policy=policy)
 
             # PDF extraction fallback
-            if self._looks_like_pdf(final_url) and not (text or "").strip():
+            if self._looks_like(final_url) and not (text or "").strip():
                 # Blocking file read + parse: keep it off the event loop like
                 # every other document-extraction path (the extractor may be a
                 # sync downloader/parser).
@@ -762,7 +676,7 @@ class BrowserRenderer(BrowserActionsMixin):
             metadata: dict[str, Any] = {
                 "title": await page.evaluate("() => document.title"),
                 "content_length": len(html or ""),
-                "browser_reused": self._browser_reused,
+                "browser_reused": self._driver.reused,
                 "challenge_resolved": challenge_resolved,
                 "extraction_method": extraction_method,
                 "intercepted_xhr": intercepted_xhr,
@@ -774,7 +688,9 @@ class BrowserRenderer(BrowserActionsMixin):
                 metadata["screenshot"] = base64.b64encode(screenshot_bytes).decode("ascii")
             element_shots = (options.browser_profile or {}).get("screenshot_selectors") or []
             if element_shots:
-                metadata["element_screenshots"] = await self._capture_element_screenshots(page, element_shots)
+                metadata["element_screenshots"] = await self._driver.capture_element_screenshots(
+                    page, element_shots
+                )
 
             return CrawlResult(
                 url=url,
@@ -797,17 +713,17 @@ class BrowserRenderer(BrowserActionsMixin):
             try:
                 await asyncio.wait_for(
                     self._harvest_session_cookies(page, url),
-                    timeout=self._harvest_timeout_for(options.browser_profile or {}),
+                    timeout=self._driver.harvest_timeout_for(options.browser_profile or {}),
                 )
             except TimeoutError:
                 pass
-            await self._safe_close_page(page)
+            await self._driver.safe_close_page(page)
             # Increment render count for ALL attempts (success or failure) so
             # browser recycle logic bounds total attempts per browser instance.
-            self._render_count += 1
+            self._driver.note_render()
 
     @staticmethod
-    def _make_response_handler(collected: list[dict[str, Any]]) -> Callable[[Any], Awaitable[None]]:
+    def make_response_handler(collected: list[dict[str, Any]]) -> Callable[[Any], Awaitable[None]]:
         # Bounds on intercepted XHR: a hostile page can fire thousands of
         # JSON responses. Cap at 10 entries x 8KB payload (was 50 x 64KB =
         # ~3.2MB held per page in result metadata); feed/API discovery does not
@@ -858,79 +774,11 @@ class BrowserRenderer(BrowserActionsMixin):
 
         return on_response
 
-    def _get_browser_kwargs(self, browser_profile: dict[str, Any]) -> dict[str, Any]:
-        """Launch-only kwargs for the Camoufox/Playwright browser factory.
-
-        Persistent cookies are passed via ``storage_state`` so cookies from a
-        previous session are retained across recursive page loads."""
-        kwargs: dict[str, Any] = {
-            "headless": self._headless_enabled(),
-            "humanize": True,
-        }
-
-        profile = browser_profile or {}
-
-        if profile.get("resource_mode") == "reduced":
-            kwargs["args"] = ["--blink-settings=imagesEnabled=false"]
-
-        storage_state = profile.get("storage_state")
-        if storage_state:
-            # Validate storage_state path to prevent path traversal
-            safe_path = self._validate_storage_state_path(storage_state)
-            if safe_path:
-                kwargs["storage_state"] = safe_path
-            else:
-                logger.warning("invalid_storage_state_path", extra={"path": str(storage_state)})
-
-        return kwargs
-
-    def _validate_storage_state_path(self, storage_state: str) -> str | None:
-        """Validate storage_state path is safe (no traversal, under allowed dirs).
-
-        Returns a path that is safe to hand to Playwright, or None.
-
-        Every return value is a real path under an operator-controlled
-        directory. Playwright types ``storage_state`` as ``Union[str,
-        pathlib.Path] | Dict`` -- "can be a path to a file or a dictionary" --
-        so a string here is ALWAYS read as a file path and there is no
-        named-session form to support. This used to wave through the literals
-        "default", "session" and "persistent" as if they named sessions, which
-        made the chokepoint that exists to stop a caller reaching a path it
-        should not instead hand out three unvalidated paths relative to the
-        process working directory.
-
-        The allowlist is exactly the operator's ``cache_dir`` and nothing else.
-        The platform temp dir is NOT an implicit root: it is world-readable on
-        most hosts, so treating it as trusted would let any local user seed a
-        file another tenant's render then loads as its session. See
-        :func:`_refuse_storage_state_without_cache_dir` for the no-``cache_dir``
-        case, which fails closed rather than substituting a guess.
-        """
-        from pathlib import Path
-
-        # For file paths, ensure they live under an operator-controlled dir.
-        with contextlib.suppress(Exception):
-            path = Path(storage_state).resolve()
-            if not self._cache_dir:
-                _refuse_storage_state_without_cache_dir(storage_state)
-                return None
-            path.relative_to(Path(self._cache_dir).resolve())
-            return str(path)
-        return None
-
-    def _get_page_kwargs(self, browser_profile: dict[str, Any]) -> dict[str, Any]:
-        """Page/context kwargs, applied at ``browser.new_page`` time."""
-        profile = browser_profile or {}
-        viewport = profile.get("viewport")
-        if viewport == "mobile":
-            return {"viewport": {"width": 390, "height": 844}}
-        return {"viewport": {"width": 1365, "height": 768}}
-
-    async def _extract_with_challenge_wait(
+    async def extract_with_challenge_wait(
         self, page: Any, options: RenderOptions
     ) -> tuple[str | None, str | None, Classification, bool]:
         html = await self.extract_html(page) if options.include_html else None
-        text = await self._extract_text(page) if options.include_text else None
+        text = await self.extract_text(page) if options.include_text else None
         title = await page.evaluate("() => document.title")
         classification = classify_page(html, text, title=title)
 
@@ -941,9 +789,9 @@ class BrowserRenderer(BrowserActionsMixin):
         while time.monotonic() < deadline:
             # Use asyncio.sleep to avoid busy-waiting if injected sleep is patched/no-op
             await asyncio.sleep(1)
-            await self._wait_for_ready_state(page)
+            await self._driver.wait_for_ready_state(page)
             next_html = await self.extract_html(page) if options.include_html else None
-            next_text = await self._extract_text(page) if options.include_text else None
+            next_text = await self.extract_text(page) if options.include_text else None
             next_title = await page.evaluate("() => document.title")
             next_classification = classify_page(next_html, next_text, title=next_title)
             if next_classification != "bot_challenge_detected":
@@ -952,153 +800,26 @@ class BrowserRenderer(BrowserActionsMixin):
 
         return html, text, classification, False
 
-    async def _wait_for_ready_state(self, page: Any) -> None:
-        for _ in range(10):
-            state = await page.evaluate("() => document.readyState")
-            if state in {"interactive", "complete"}:
-                return
-            await self._async_sleep(0.1)
-
-    async def extract_html(self, page: Any) -> str:
+    @staticmethod
+    async def extract_html(page: Any) -> str:
+        """The page's serialized HTML, or empty string if the page will not say."""
         try:
             return await page.content()
         except Exception:
             return ""
 
-    async def _extract_text(self, page: Any) -> str:
+    @staticmethod
+    async def extract_text(page: Any) -> str:
+        """The rendered visible text, or empty string if the page will not say.
+
+        Static and public for the same reason ``extract_html`` is: neither reads
+        renderer state, so a test that substitutes the extraction *step* needs
+        these without carrying a renderer around to call them on.
+        """
         try:
             return await page.evaluate("() => document.body ? document.body.innerText: ''")
         except Exception:
             return ""
-
-    async def _flatten_shadow_dom(self, page: Any) -> None:
-        # Move the children of every open shadow root into its light-DOM host
-        # so that page.content() (and thus link/text extraction) includes shadow-DOM
-        # content. Closed shadow roots are not accessible and are left untouched.
-        # Nested shadow roots are handled by recursing into each shadow root before
-        # its children are moved.
-        # FIX: Collect shadow root children FIRST, then move in separate pass to
-        # avoid mutation during iteration (could cause duplicates, infinite loops,
-        # or HierarchyRequestError if moving a node into its own descendant).
-        with contextlib.suppress(Exception):  # flattening is best-effort; never fail a render over it
-            await page.evaluate(
-                """() => {
-                    const collect = (root, acc) => {
-                        const els = root.querySelectorAll ? root.querySelectorAll('*'): [];
-                        for (const el of els) {
-                            acc.push(el);
-                            if (el.shadowRoot && el.shadowRoot.mode === 'open') {
-                                collect(el.shadowRoot, acc);
-                            }
-                        }
-                    };
-                    const all = [];
-                    collect(document, all);
-                    // Phase 1: Collect all (host, child) pairs to move
-                    const moves = [];
-                    for (const el of all) {
-                        const sr = el.shadowRoot;
-                        if (sr && sr.mode === 'open') {
-                            const kids = Array.from(sr.childNodes);
-                            for (const k of kids) {
-                                if (k.nodeType === 1) {
-                                    // Deep-clone to avoid mutation issues
-                                    moves.push({host: el, child: document.importNode(k, true)});
-                                }
-                            }
-                        }
-                    }
-                    // Phase 2: Apply all moves
-                    for (const {host, child} of moves) {
-                        try {
-                            host.appendChild(child);
-                        } catch (e) {
-                            // Ignore HierarchyRequestError etc. (best-effort)
-                        }
-                    }
-                    return true;
-                }"""
-            )
-
-    async def _auto_accept_cookie_consent(self, page: Any, enabled: bool) -> bool:
-        """Auto-click cookie consent accept buttons (best-effort, opt-in).
-
-        Clicking "Accept All" on the caller's behalf is an action with legal
-        weight, so it never happens implicitly: callers must pass
-        ``browser_profile.auto_accept_cookie_consent = true``. Returns True if
-        a consent button was clicked, False otherwise.
-        """
-        if not enabled:
-            return False
-        try:
-            # Common cookie consent button selectors and text patterns
-            consent_selectors = [
-                # Generic button/anchor with common accept text
-                'button:has-text("Accept All")',
-                'button:has-text("Accept all")',
-                'button:has-text("Accept All Cookies")',
-                'button:has-text("Accept all cookies")',
-                'button:has-text("I Accept")',
-                'button:has-text("I Agree")',
-                'button:has-text("Allow All")',
-                'button:has-text("Allow all")',
-                'button:has-text("Continue")',
-                'button:has-text("Got it")',
-                'button:has-text("OK")',
-                'button:has-text("Ok")',
-                'a:has-text("Accept All")',
-                'a:has-text("Accept all")',
-                'a:has-text("I Accept")',
-                'a:has-text("I Agree")',
-                # Common ID/class patterns
-                'button[id*="accept"]',
-                'button[class*="accept"]',
-                'button[id*="consent"]',
-                'button[class*="consent"]',
-                'button[id*="cookie"]',
-                'button[class*="cookie"]',
-                "#onetrust-accept-btn-handler",
-                ".cc-btn.cc-allow",
-                ".cookie-consent-accept",
-                '[data-testid="cookie-accept"]',
-                '[data-cy="accept-cookies"]',
-            ]
-
-            for selector in consent_selectors:
-                with contextlib.suppress(Exception):
-                    element = await page.query_selector(selector)
-                    if element:
-                        # Check if element is visible
-                        is_visible = await element.is_visible()
-                        if is_visible:
-                            await element.click()
-                            await self._async_sleep(0.5)  # Brief wait for consent to register
-                            return True
-            # Fallback: evaluate JS to find buttons by text content
-            clicked = await page.evaluate("""() => {
-                const acceptTexts = [
-                    'accept all', 'accept all cookies', 'i accept', 'i agree',
-                    'allow all', 'allow all cookies', 'continue', 'got it', 'ok'
-                ];
-                const buttons = document.querySelectorAll('button, a, input[type="button"],
-                input[type="submit"]');
-                for (const btn of buttons) {
-                    const text = (btn.innerText || btn.value || btn.textContent || '').toLowerCase().trim();
-                    if (acceptTexts.some(t => text.includes(t))) {
-                        // Check if visible
-                        const style = window.getComputedStyle(btn);
-                        if (style.display !== 'none' && style.visibility !== 'hidden' && style.opacity !==
-                        '0') {
-                            btn.click();
-                            return true;
-                        }
-                    }
-                }
-                return false;
-            }""")
-            return bool(clicked)
-        except Exception:
-            return False
 
     def _failure_result(
         self,
@@ -1119,20 +840,9 @@ class BrowserRenderer(BrowserActionsMixin):
             error=error,
         )
 
-    def _create_camoufox_browser(self, **kwargs: Any):
-        """Factory for AsyncCamoufox browser."""
-        return AsyncCamoufox(**kwargs)
-
     def _warmup_urls_from_env(self) -> list[str]:
         value = os.environ.get("CRAWLUTRON_WARMUP_URLS", "")
         return [url.strip() for url in value.split(",") if url.strip()]
-
-    def _headless_enabled(self) -> bool:
-        return parse_bool_value(
-            os.environ.get("CRAWLUTRON_HEADLESS"),
-            default=True,
-            env_name="CRAWLUTRON_HEADLESS",
-        )
 
     def _looks_like_pdf(self, url: str) -> bool:
         return url.split("?", 1)[0].lower().endswith(".pdf")

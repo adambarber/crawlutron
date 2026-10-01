@@ -12,9 +12,9 @@ class TestStorageStatePathValidation:
         settings = CrawlerSettings(cache_dir="/app/cache")
         r = BrowserRenderer(settings=settings)
         # Neither the platform temp dir nor anything else outside cache_dir.
-        assert r._validate_storage_state_path(f"{tempfile.gettempdir()}/some-storage.json") is None
-        assert r._validate_storage_state_path("/etc/some-storage.json") is None
-        assert r._validate_storage_state_path("/app/cache/some-storage.json") is not None
+        assert r.driver.validate_storage_state_path(f"{tempfile.gettempdir()}/some-storage.json") is None
+        assert r.driver.validate_storage_state_path("/etc/some-storage.json") is None
+        assert r.driver.validate_storage_state_path("/app/cache/some-storage.json") is not None
 
     def test_no_cache_dir_means_no_allowed_storage_state_path(self):
         """Fail closed: with no ``cache_dir`` there is no allowlist, so nothing passes.
@@ -32,11 +32,11 @@ class TestStorageStatePathValidation:
         costs a deployment its session, silently.
         """
         r = BrowserRenderer()
-        assert r._cache_dir is None
-        assert r._validate_storage_state_path(f"{tempfile.gettempdir()}/storage.json") is None
-        assert r._validate_storage_state_path(f"{tempfile.gettempdir()}/../etc/storage.json") is None
-        assert r._validate_storage_state_path("/app/cache/some-storage.json") is None
-        assert r._validate_storage_state_path("relative/storage.json") is None
+        assert r.driver.cache_dir is None
+        assert r.driver.validate_storage_state_path(f"{tempfile.gettempdir()}/storage.json") is None
+        assert r.driver.validate_storage_state_path(f"{tempfile.gettempdir()}/../etc/storage.json") is None
+        assert r.driver.validate_storage_state_path("/app/cache/some-storage.json") is None
+        assert r.driver.validate_storage_state_path("relative/storage.json") is None
 
     def test_refusing_without_a_cache_dir_names_the_setting_to_configure(self, caplog):
         """A refused path must say WHY it was refused, not just return None.
@@ -52,7 +52,7 @@ class TestStorageStatePathValidation:
 
         r = BrowserRenderer()
         with caplog.at_level(logging.WARNING, logger="app.crawl.strategies.browser"):
-            assert r._validate_storage_state_path(f"{tempfile.gettempdir()}/storage.json") is None
+            assert r.driver.validate_storage_state_path(f"{tempfile.gettempdir()}/storage.json") is None
 
         assert any("cache_dir" in record.getMessage() for record in caplog.records), (
             f"the refusal did not name the setting to configure: {[r.getMessage() for r in caplog.records]}"
@@ -74,7 +74,7 @@ class TestStorageStatePathValidation:
         settings = CrawlerSettings(cache_dir="/app/cache")
         r = BrowserRenderer(settings=settings)
         for key in ("default", "session", "persistent"):
-            assert r._validate_storage_state_path(key) is None, (
+            assert r.driver.validate_storage_state_path(key) is None, (
                 f"{key!r} was accepted as a storage_state, which Playwright would read as a "
                 f"file named {key!r} in the process working directory"
             )
@@ -83,11 +83,11 @@ class TestStorageStatePathValidation:
 
         settings = CrawlerSettings(cache_dir="/app/cache")
         r = BrowserRenderer(settings=settings)
-        assert r._validate_storage_state_path("/app/elsewhere/x.json") is None
+        assert r.driver.validate_storage_state_path("/app/elsewhere/x.json") is None
 
     def test_browser_renderer_stores_cache_dir(self):
         """The cache_dir set on settings is accessible for storage_state validation."""
 
         settings = CrawlerSettings(cache_dir="/var/lib/crawlutron/cache")
         r = BrowserRenderer(settings=settings)
-        assert r._cache_dir == "/var/lib/crawlutron/cache"
+        assert r.driver.cache_dir == "/var/lib/crawlutron/cache"
