@@ -252,7 +252,7 @@ class BrowserFakeContextManager:
 
 
 class FakeBrowserDriver:
-    """A real :class:`BrowserDriver` collaborator with a fake browser behind it.
+    """A stand-in for :class:`BrowserDriver` -- a duck type, NOT a subclass.
 
     Substituted as one object instead of the ten private ``BrowserRenderer``
     methods this used to need rebound: the driver is the boundary the renderer
@@ -261,6 +261,15 @@ class FakeBrowserDriver:
 
     ``open_page`` returns the page it was constructed with -- there is no fake
     *browser* any more, because nothing above the driver ever saw one.
+
+    It is deliberately a hand-written duck type rather than a subclass, and the
+    docstring used to call it "a real ``BrowserDriver`` collaborator", which is
+    the one description it is not: the renderer's parameter is annotated
+    ``BrowserDriver | None`` and this is not a ``BrowserDriver``, so the
+    annotation is a lie the type checker cannot see (mypy does not cover
+    ``tests/``). Anything the renderer calls that this does not implement fails
+    loudly with ``AttributeError``, which is the intended trade: a missing method
+    on the double must not read as a passing test.
     """
 
     def __init__(self, page, *, harvest_timeout=0.0, on_close=None):

@@ -87,6 +87,9 @@ def _profile_float(profile: dict[str, Any], key: str, default: float, ceiling: f
     return _clamp_knob(max(0.0, value), ceiling)
 
 
+#: The numeric knobs a browser profile carries. Constrained rather than bound to
+#: ``float`` so ``_clamp_knob`` returns an ``int`` for the int readers: a
+#: ``float`` return would quietly widen every scroll step through a float.
 _Knob = TypeVar("_Knob", int, float)
 
 
@@ -101,6 +104,9 @@ LAZY_SCROLL_STEPS = DEFAULT_LAZY_SCROLL_STEPS
 LAZY_SCROLL_DELAY_SECONDS = DEFAULT_LAZY_SCROLL_DELAY_SECONDS
 
 
+# Server-side clamp for caller-supplied action wait durations: a hostile
+# policy must not be able to park a render (or, pre-fix, the event loop)
+# for an arbitrary time.
 MAX_ACTION_WAIT_SECONDS = 10.0
 
 

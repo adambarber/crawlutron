@@ -51,11 +51,23 @@ class TestStorageStatePathValidation:
         import logging
 
         r = BrowserRenderer()
-        with caplog.at_level(logging.WARNING, logger="app.crawl.strategies.browser"):
+        # The refusal is raised by the driver's validator, so the record is
+        # emitted under that module's name. `logger=` here does NOT make this
+        # assertion load-bearing -- `at_level` sets that logger's level, and a
+        # level is permissive enough either way, so the stale name the split
+        # left behind was invisible to a passing test. Asserting on the record's
+        # `name` is what pins the emitter: it is the one thing that fails when a
+        # rename moves the log to a module this test no longer names.
+        with caplog.at_level(logging.WARNING, logger="app.crawl.strategies.browser_driver"):
             assert r.driver.validate_storage_state_path(f"{tempfile.gettempdir()}/storage.json") is None
 
-        assert any("cache_dir" in record.getMessage() for record in caplog.records), (
-            f"the refusal did not name the setting to configure: {[r.getMessage() for r in caplog.records]}"
+        messages = [record.getMessage() for record in caplog.records]
+        assert any("cache_dir" in message for message in messages), (
+            f"the refusal did not name the setting to configure: {messages}"
+        )
+        assert [record.name for record in caplog.records] == ["app.crawl.strategies.browser_driver"], (
+            f"the refusal moved module; the logger pinned above is now the wrong one: "
+            f"{[record.name for record in caplog.records]}"
         )
 
     def test_storage_state_rejects_bare_names_that_are_not_paths(self):

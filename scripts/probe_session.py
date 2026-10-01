@@ -35,11 +35,15 @@ _PROBE_OUTPUT = os.environ.get("CRAWLUTRON_PROBE_OUTPUT", str(_REPO_ROOT / "tmp"
 
 async def main() -> None:
     out = []
-    from app.crawl.strategies.browser import BrowserRenderer
+    from app.crawl.strategies.browser_driver import BrowserDriver
 
-    r = BrowserRenderer(warmup_urls=[])
-    browser = await r._acquire_browser(type("O", (), {"browser_profile": {}, "max_retries": 0})())
-    page = await browser.new_page()
+    # open_page, not acquire-then-new_page: a caller that wants a page has no
+    # reason to know the browser is recycled underneath it. Reaching past that
+    # for `_acquire_browser` is how this probe stopped running when the
+    # lifecycle split moved the method -- a script nobody executes fails
+    # silently, and "silently" here meant "AttributeError on the first run".
+    driver = BrowserDriver()
+    page = await driver.open_page({})
     await page.goto(_PROBE_TARGET, wait_until="domcontentloaded", timeout=45000)
     ua = await page.evaluate("navigator.userAgent")
     cookies = await page.context.cookies(_PROBE_TARGET)

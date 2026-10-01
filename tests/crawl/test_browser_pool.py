@@ -167,11 +167,11 @@ def test_explicit_pool_size_arg_wins(monkeypatch):
 
 
 def _driver_with_exploding_cm(*, max_browser_renders: int = 1):
-    """A renderer holding a browser whose context manager raises on exit.
+    """A driver holding a browser whose context manager raises on exit.
 
-    Both slots cleared and the CM exited exactly once is the contract under
-    test, so the fixture asserts it and the caller only has to say *which* call
-    was made.
+    A released browser (no cached one left) and exactly one exit of the context
+    manager is the contract under test, so the fixture asserts both and the
+    caller only has to say *which* call was made.
     """
     context_manager = _ExplodingContextManager()
     driver = BrowserDriver(
@@ -249,7 +249,12 @@ async def _challenge_wait_outcome(renderer, page):
 
 
 class TestWorkerExtractorErrorDegrades:
-    """Cover remaining branches in browser.py"""
+    """The error branches of the browser strategy, across renderer and driver.
+
+    Split by owner rather than by file: the split moved half of these onto the
+    driver, and naming the class after the module it used to live in is how the
+    retarget left five driver tests wearing a renderer's name.
+    """
 
     async def test_recycle_releases_the_browser_it_replaces(self):
         """The per-render recycle path must drop the browser it is replacing.
@@ -278,11 +283,23 @@ class TestWorkerExtractorErrorDegrades:
         )
         assert text == ""
 
-    async def test_browser_renderer_capture_element_screenshots_error(self):
-        result = await _bare_driver().capture_element_screenshots(_page(evaluate=[]), [])
-        assert result == []
+    async def test_driver_capture_element_screenshots_error(self):
+        calls = []
 
-    async def test_browser_renderer_flatten_shadow_dom_error(self):
+        def _record_then_fail(*_args, **_kwargs):
+            calls.append("query_selector")
+            raise Exception("capture failed")
+
+        result = await _bare_driver().capture_element_screenshots(
+            _page(query_selector=_record_then_fail), ["h1"]
+        )
+        assert result == [], "a best-effort per-element capture must swallow the failure"
+        # The empty result is true of any implementation unless the loop is
+        # known to have run. Passing an empty selector list made this test
+        # assert nothing at all, and it had been green for exactly that reason.
+        assert calls == ["query_selector"], "the selector was never attempted"
+
+    async def test_driver_flatten_shadow_dom_error(self):
         calls = []
 
         def _record_then_fail(*_args, **_kwargs):
@@ -331,12 +348,12 @@ class TestWorkerExtractorErrorDegrades:
         result = await _bare_renderer().extract_text(_page(evaluate=Exception("evaluate failed")))
         assert result == ""
 
-    async def test_browser_renderer_auto_accept_cookie_consent(self):
+    async def test_driver_auto_accept_cookie_consent(self):
         # Opt-in required: disabled by default, no click without consent.
         result = await _bare_driver().auto_accept_cookie_consent(_page(query_selector=None), False)
         assert not (result)
 
-    async def test_browser_renderer_click_consent_button(self):
+    async def test_driver_click_consent_button(self):
         async def _visible(*_args, **_kwargs):
             return True
 

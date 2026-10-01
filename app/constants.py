@@ -250,7 +250,7 @@ ResultStatus = Literal["success", "blocked", "disallowed", "retry_exhausted", "f
 # ---------------------------------------------------------------------------
 # Browser action vocabulary: THE single source of truth.
 #
-# ``BrowserRenderer._dispatch_action`` recognises these by an if/elif chain and
+# ``BrowserDriver._dispatch_action`` recognises these by an if/elif chain and
 # ``CrawlPolicy._close_browser_profile_vocabulary`` refuses one member of the same
 # set at the model boundary. Two hand-written lists that must agree is the shape
 # of bug this table exists to remove: the consumer silently no-ops a type it does
