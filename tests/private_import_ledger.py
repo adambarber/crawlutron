@@ -546,10 +546,6 @@ DECLARED: dict[str, Declaration] = {
         ["test"],
     ),
     "app.crawl.strategies.fetchers._release_stream_noblock": _SUBSTITUTED_COLLABORATOR,
-    "app.crawl.strategies.http_client_pool._DEFAULT_CFFI_SESSION": _SUBSTITUTED_COLLABORATOR,
-    "app.crawl.strategies.http_client_pool._DEFAULT_HTTP_CLIENT": _d(
-        _CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]
-    ),
     "app.crawl.strategies.http_client_pool._LoopBoundPooledClient": _d(
         _PRIVATE_TYPE.kind, _PRIVATE_TYPE.reason, ["test"]
     ),
@@ -565,10 +561,8 @@ DECLARED: dict[str, Declaration] = {
     "app.crawl.strategies.http_client_pool._PENDING_CLIENT_CLOSE_MAX": _d(
         _CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]
     ),
-    "app.crawl.strategies.http_client_pool._THIRD_POOL_SLOT": _SUBSTITUTED_COLLABORATOR,
     "app.crawl.strategies.http_client_pool._build_async_client": _SUBSTITUTED_COLLABORATOR,
     "app.crawl.strategies.http_client_pool._build_cffi_session": _SUBSTITUTED_COLLABORATOR,
-    "app.crawl.strategies.http_client_pool._default_settings": _SUBSTITUTED_COLLABORATOR,
     "app.crawl.strategies.http_client_pool._drain_pending_client_closes": _d(
         _LIFECYCLE_DRAIN_PENDING_CLIENT_CLOSES.kind,
         _LIFECYCLE_DRAIN_PENDING_CLIENT_CLOSES.reason,
@@ -576,7 +570,6 @@ DECLARED: dict[str, Declaration] = {
     ),
     "app.crawl.strategies.http_client_pool._queue_superseded_close": _SUBSTITUTED_COLLABORATOR,
     "app.crawl.strategies.http_client_pool._release_dropped_client": _OWNED_POOL_MACHINERY,
-    "app.crawl.strategies.http_client_pool._safe_aclose": _OWNED_POOL_MACHINERY,
     "app.crawl.strategies.http_client_pool._schedule_client_close": _OWNED_POOL_MACHINERY,
     "app.crawl.strategies.pinned_transport._CREDENTIAL_HEADERS": _d(
         _CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]

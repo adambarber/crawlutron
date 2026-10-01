@@ -116,22 +116,25 @@ class _Session:
         return self._response
 
 
-def _patch_session(monkeypatch, response: _Response) -> _Session:
+def _patch_session(stub_builder, response: _Response) -> _Session:
     session = _Session(response)
-    monkeypatch.setattr(http_mod, "_DEFAULT_CFFI_SESSION", session)
-    monkeypatch.setattr(http_mod, "_build_cffi_session", lambda *a, **k: session)
+    stub_builder("cffi", lambda settings: session)
     return session
 
 
 @pytest.fixture(autouse=True)
 def _clean_pooled_client_queue():
-    """Start the pending-close queue empty.
+    """Start each test with the pooled state released and the close queue empty.
 
     Pooled-client bookkeeping is irrelevant here and other suites leave entries
     behind; start clean so a drain here cannot try to close one of their fakes.
+    ``reset_process_state`` is the one operation for this: it releases both
+    pooled clients and clears the queue as a unit, which is the unit production
+    releases them as, and these tests used to clear the queue by hand while
+    separately nulling the curl_cffi session global -- two halves of a state no
+    caller can reach.
     """
-    with http_mod._PENDING_CLIENT_CLOSE_LOCK:
-        http_mod._PENDING_CLIENT_CLOSE.clear()
+    http_mod.reset_process_state()
 
 
 def _scheduled_closes(monkeypatch):
@@ -141,7 +144,9 @@ def _scheduled_closes(monkeypatch):
     return released
 
 
-def _scripted_stream(monkeypatch, items, *, headers=None) -> tuple[_Response, _Session, list[object]]:
+def _scripted_stream(
+    stub_builder, monkeypatch, items, *, headers=None
+) -> tuple[_Response, _Session, list[object]]:
     """A cffi session whose queue replays `items`; return it and the release log.
 
     Every test here is about what one streaming fetch did with its response
@@ -153,13 +158,17 @@ def _scripted_stream(monkeypatch, items, *, headers=None) -> tuple[_Response, _S
     silently.
     """
     response = _Response(items, headers=headers)
-    return response, _patch_session(monkeypatch, response), _scheduled_closes(monkeypatch)
+    return response, _patch_session(stub_builder, response), _scheduled_closes(monkeypatch)
 
 
-async def test_request_exception_from_the_queue_releases_the_handle(monkeypatch, counting_server):
+async def test_request_exception_from_the_queue_releases_the_handle(
+    stub_builder, monkeypatch, counting_server
+):
     """The error exit: a queued RequestException must not orphan the handle."""
     url = f"http://127.0.0.1:{counting_server.server_port}/"
-    response, _session, released = _scripted_stream(monkeypatch, [b"partial", RequestException("boom")])
+    response, _session, released = _scripted_stream(
+        stub_builder, monkeypatch, [b"partial", RequestException("boom")]
+    )
 
     result = await _DEFAULT_CFFI_FETCHER(url, {}, 5, 4096)
 
@@ -171,7 +180,7 @@ async def test_request_exception_from_the_queue_releases_the_handle(monkeypatch,
     assert response.awaited is False, "abandoning must not await a live producer"
 
 
-async def test_cancellation_of_the_queue_wait_releases_the_handle(monkeypatch):
+async def test_cancellation_of_the_queue_wait_releases_the_handle(stub_builder, monkeypatch):
     """The cancel exit: the engine's per-URL budget cancels fetches routinely.
 
     The wait below is on the named state -- the fetch has taken the session
@@ -180,7 +189,9 @@ async def test_cancellation_of_the_queue_wait_releases_the_handle(monkeypatch):
     no-op that never yielded, so the fetch task could never be scheduled at
     all; the zero-second patch yields now, so the poll works without wall time.
     """
-    response, session, released = _scripted_stream(monkeypatch, [b"first"])  # then the producer wedges
+    response, session, released = _scripted_stream(
+        stub_builder, monkeypatch, [b"first"]
+    )  # then the producer wedges
 
     fetch = asyncio.create_task(_DEFAULT_CFFI_FETCHER(URL, {}, 5, 4096))
     await await_until(
@@ -195,7 +206,7 @@ async def test_cancellation_of_the_queue_wait_releases_the_handle(monkeypatch):
     assert response.awaited is False
 
 
-async def test_cap_exceeded_and_still_releases_exactly_once(monkeypatch):
+async def test_cap_exceeded_and_still_releases_exactly_once(stub_builder, monkeypatch):
     """Boundary: the pre-existing abandon paths must not double-release.
 
     Wrapping the loop in a release-on-any-exit guard is the obvious shape for
@@ -203,7 +214,7 @@ async def test_cap_exceeded_and_still_releases_exactly_once(monkeypatch):
     producer gets two scheduled closes. One release per fetch, whichever exit
     was taken.
     """
-    response, _session, released = _scripted_stream(monkeypatch, [b"x" * 100] * 5)
+    response, _session, released = _scripted_stream(stub_builder, monkeypatch, [b"x" * 100] * 5)
 
     result = await _DEFAULT_CFFI_FETCHER(URL, {}, 5, 50)
 
@@ -211,14 +222,16 @@ async def test_cap_exceeded_and_still_releases_exactly_once(monkeypatch):
     assert len(released) == 1, f"expected one release, got {len(released)}"
 
 
-async def test_clean_stream_end_awaits_the_close_and_never_abandons(monkeypatch):
+async def test_clean_stream_end_awaits_the_close_and_never_abandons(stub_builder, monkeypatch):
     """Inverse case: a finished producer is safe to await, and required now.
 
     The shared session only recovers the handle for the next streamed request if
     the completed fetch closed it, so the success path must NOT downgrade to the
     non-blocking release.
     """
-    response, _session, released = _scripted_stream(monkeypatch, [b"<html>ok</html>", STREAM_END])
+    response, _session, released = _scripted_stream(
+        stub_builder, monkeypatch, [b"<html>ok</html>", STREAM_END]
+    )
 
     result = await _DEFAULT_CFFI_FETCHER(URL, {}, 5, 4096)
 
@@ -442,7 +455,6 @@ async def test_cffi_session_reused_across_requests(base_url, monkeypatch):
             super().__init__(*args, **kwargs)
 
     monkeypatch.setattr(cffi_requests, "AsyncSession", _CountingSession)
-    monkeypatch.setattr(http_mod, "_DEFAULT_CFFI_SESSION", None)
     try:
         r1, r2 = await _fetch_twice(base_url)
     finally:
@@ -484,7 +496,6 @@ async def test_cffi_missing_falls_back_to_httpx(monkeypatch, counting_server):
     from app.crawl.strategies import http_client_pool as http_mod
 
     monkeypatch.setitem(sys.modules, "curl_cffi.requests", None)
-    monkeypatch.setattr(http_mod, "_DEFAULT_CFFI_SESSION", None)
     url = f"http://127.0.0.1:{counting_server.server_port}/"
     try:
         resp = await _DEFAULT_CFFI_FETCHER(url, {}, 5, 1024)

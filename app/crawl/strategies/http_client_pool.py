@@ -39,7 +39,8 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import threading
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from http.cookiejar import CookieJar as _StdlibCookieJar
 from typing import TYPE_CHECKING, Any, Protocol, TypeVar, cast
 
@@ -345,12 +346,13 @@ class _LoopBoundPooledClient:
     they cannot drift apart.
 
     ``is_closed`` is the owning kind's own predicate, consulted for every
-    decision about whether a client still needs closing. ``build`` is a
-    late-bound lambda rather than a called symbol so a test that monkeypatches
-    ``_build_async_client`` or ``_build_cffi_session`` is still observed; the
-    pooled instance lives in the module global named by ``slot`` for the same
-    reason, since service teardown and the suites reset pooled state by
-    assigning that global.
+    decision about whether a client still needs closing. ``build`` is the only
+    part of the pool a caller supplies, and
+    :func:`pooled_client_builders` is where they supply it, so ``build`` is a
+    plain value that can be a direct reference. The pooled instance lives in the
+    module global named by ``slot`` because that global is the pooled client's
+    identity, and :func:`reset_process_state` releases it and the close queue as
+    the one unit production releases them as.
     """
 
     __slots__ = ("build", "consults_settings", "is_closed", "lock", "slot")
@@ -455,7 +457,7 @@ class _LoopBoundPooledClient:
 # The two pooled clients, described once and managed by the code above.
 _HTTP_CLIENT_SINGLETON = _LoopBoundPooledClient(
     slot="_DEFAULT_HTTP_CLIENT",
-    build=lambda settings: _build_async_client(settings),
+    build=_build_async_client,
     is_closed=lambda client: bool(client.is_closed),
     lock=_HTTP_CLIENT_INIT_LOCK,
     consults_settings=True,
@@ -486,11 +488,18 @@ _DEFAULT_CFFI_SESSION: Any | None = None
 _CFFI_SESSION_INIT_LOCK = threading.Lock()
 
 
-def _build_cffi_session() -> Any:
+def _build_cffi_session(settings: CrawlerSettings | None = None) -> Any:
     """Build a shared curl_cffi AsyncSession (impersonation fixed, no timeout).
 
     The per-request timeout travels on each ``get()`` call instead of the
     session so one session serves every policy budget.
+
+    ``settings`` is accepted and ignored so the builder matches the
+    ``build(settings)`` contract both pooled singletons share. It is not
+    decoration: an httpx client is configured from the operator's pool limits and
+    a curl_cffi session is not, so the shape that carries them is not the shape
+    that needs them. Saying so in the signature is what lets this be a direct
+    reference rather than a lambda discarding its argument.
     """
     # discard_cookies=True: the session ships a requests-compatible jar
     # that would otherwise absorb every Set-Cookie and replay domain-matching
@@ -510,7 +519,7 @@ def _build_cffi_session() -> Any:
 
 _CFFI_SESSION_SINGLETON = _LoopBoundPooledClient(
     slot="_DEFAULT_CFFI_SESSION",
-    build=lambda settings: _build_cffi_session(),
+    build=_build_cffi_session,
     # AsyncSession publishes no is_closed flag and nothing else closes it in
     # process, so only the loop identity decides whether it is reusable.
     is_closed=lambda session: False,
@@ -589,3 +598,41 @@ def has_process_state() -> bool:
     return (
         _DEFAULT_HTTP_CLIENT is not None or _DEFAULT_CFFI_SESSION is not None or bool(_PENDING_CLIENT_CLOSE)
     )
+
+
+@contextmanager
+def pooled_client_builders(
+    *,
+    http: Callable[[CrawlerSettings | None], Any] | None = None,
+    cffi: Callable[[CrawlerSettings | None], Any] | None = None,
+) -> Iterator[None]:
+    """Supply the pooled clients' builders for the duration of a block.
+
+    The pooled clients are process-wide and built lazily on whichever loop asks
+    first, so no caller -- production or test -- ever stands at their
+    construction site. The builder is therefore the one part of the pool a
+    caller can legitimately supply, and this is the argument for it. It replaces
+    rebinding ``_build_async_client`` or ``_build_cffi_session`` on the module,
+    which is how these were substituted before: a name the module keeps for its
+    own use, reached from outside to redirect a process-wide object, and
+    restored by nothing but the test's own teardown.
+
+    Omitting a keyword leaves that pool's builder alone, so a block can
+    substitute one kind without rebuilding the other's identity. The previous
+    builder is restored on the way out *including* when the body raises. That
+    restore is the point rather than a convenience: the pools outlive the block
+    and every later caller in the process would otherwise inherit the double.
+    """
+    swaps = [
+        (singleton, builder)
+        for singleton, builder in ((_HTTP_CLIENT_SINGLETON, http), (_CFFI_SESSION_SINGLETON, cffi))
+        if builder is not None
+    ]
+    saved = [(singleton, singleton.build) for singleton, _ in swaps]
+    for singleton, builder in swaps:
+        singleton.build = builder
+    try:
+        yield
+    finally:
+        for singleton, original in saved:
+            singleton.build = original

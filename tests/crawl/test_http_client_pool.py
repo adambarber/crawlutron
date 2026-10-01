@@ -18,7 +18,50 @@ from app.crawl.strategies.fetchers import _cffi_fetch
 from app.crawl.strategies.http_client_pool import get_async_http_client
 from app.validation import HostPolicy
 from tests._async_harnesses import run_loop_rebind_scenario
+from tests._pool_harnesses import builder_for as _builder_for
 from tests._timing_harnesses import await_until
+
+
+class TestPooledClientBuilders:
+    """The public seam that replaces monkeypatching the builders.
+
+    The pooled clients are process-wide and created lazily on whichever loop
+    asks first, so there is no per-test construction site to inject at. That
+    absence is why the builders used to be patched on the module -- and why the
+    module's own docstring advertised a late-bound lambda as a design goal, so
+    the patch would be observed. The seam states the same capability as an
+    argument and removes the reason for the indirection.
+    """
+
+    def test_a_supplied_builder_produces_the_pooled_client(self):
+        sentinel = object()
+        with http_mod.pooled_client_builders(cffi=lambda settings: sentinel):
+            assert http_mod.get_cffi_session() is sentinel
+
+    def test_the_builder_is_restored_after_the_seam_closes(self):
+        sentinel = object()
+        with http_mod.pooled_client_builders(cffi=lambda settings: sentinel):
+            pass
+        assert http_mod.get_cffi_session() is not sentinel
+
+    def test_the_builder_is_restored_when_the_body_raises(self):
+        """A failing test must not leave a fake in a process-wide singleton.
+
+        This is why the seam restores rather than merely being callable: a
+        builder left installed outlives the test that set it, and every later
+        test in the process that asks for a pooled client then gets the
+        previous test's double. That failure is order-dependent, which is the
+        hardest kind to read.
+        """
+        sentinel = object()
+        with contextlib.suppress(ValueError), http_mod.pooled_client_builders(cffi=lambda settings: sentinel):
+            raise ValueError
+        assert http_mod.get_cffi_session() is not sentinel
+
+    def test_supplying_one_builder_leaves_the_other_alone(self):
+        sentinel = object()
+        with http_mod.pooled_client_builders(cffi=lambda settings: sentinel):
+            assert not isinstance(http_mod.get_async_http_client(), _FakeClient)
 
 
 class TestAsyncHttpClientLifecycle:
@@ -104,17 +147,22 @@ class TestPendingClientCloseCap:
 
 
 @pytest.fixture(autouse=True)
-def _clean_pooled_state(monkeypatch):
-    """Start each test with no pooled client, no queued closes, no leftovers."""
-    for slot in ("_DEFAULT_HTTP_CLIENT", "_DEFAULT_CFFI_SESSION"):
-        monkeypatch.setattr(http_mod, slot, None, raising=False)
-    with http_mod._PENDING_CLIENT_CLOSE_LOCK:
-        http_mod._PENDING_CLIENT_CLOSE.clear()
+def _clean_pooled_state():
+    """Start and end each test with the pooled state production never holds.
+
+    ``reset_process_state`` is the whole of it, and it is the whole of it for a
+    reason: it releases both pooled clients *and* clears the pending-close queue
+    as one unit, because a queue still holding a client that was just released
+    refers to a loop that can no longer drain it. Zeroing the module globals by
+    hand was the same intent written out as four private assignments plus two
+    reaches into the queue and its lock -- the two halves separately, which is
+    precisely the half-state production cannot produce and no test should be
+    asserting against.
+    """
+    http_mod.reset_process_state()
     yield
-    with http_mod._PENDING_CLIENT_CLOSE_LOCK:
-        http_mod._PENDING_CLIENT_CLOSE.clear()
-    monkeypatch.setattr(http_mod, "_DEFAULT_HTTP_CLIENT", None, raising=False)
-    monkeypatch.setattr(http_mod, "_DEFAULT_CFFI_SESSION", None, raising=False)
+    http_mod.reset_process_state()
+    assert not http_mod.has_process_state(), "the pooled state outlived the test that used it"
 
 
 class _TrackedClient(Protocol):
@@ -209,38 +257,16 @@ def _build_cffi_fake(settings=None) -> _PooledFake:
     return session
 
 
-# Every loop-bound pooled client: (builder to patch, getter, module slot, fake).
+# Every loop-bound pooled client: (the seam keyword that supplies its builder,
+# its public getter, the fake that builder should hand out).
 SINGLETONS = [
-    pytest.param(
-        "_build_async_client",
-        "get_async_http_client",
-        "_DEFAULT_HTTP_CLIENT",
-        _build_httpx_fake,
-        id="httpx_client",
-    ),
-    pytest.param(
-        "_build_cffi_session",
-        "get_cffi_session",
-        "_DEFAULT_CFFI_SESSION",
-        _build_cffi_fake,
-        id="cffi_session",
-    ),
+    pytest.param("http", "get_async_http_client", _build_httpx_fake, id="httpx_client"),
+    pytest.param("cffi", "get_cffi_session", _build_cffi_fake, id="cffi_session"),
 ]
 
 
-def _stub_builder(monkeypatch, builder: str, fake) -> None:
-    """Make ``http_mod.<builder>`` hand out `fake` clients.
-
-    Both singleton tests supersede one client with another, and both do it by
-    replacing the builder. Spelled per test it is one line, and it is the line
-    whose absence is invisible: a test that forgot it exercised the real pooled
-    client, which is slower, leaks a connection, and passes.
-    """
-    monkeypatch.setattr(http_mod, builder, lambda *args, **kwargs: fake())
-
-
 def _supersede_without_loop(
-    monkeypatch, builder: str, getter: str, fake
+    stub_builder, seam: str, getter: str, fake
 ) -> tuple[_TrackedClient, _TrackedClient]:
     """Return ``(first, second)`` where the handover happened with no loop running.
 
@@ -248,7 +274,7 @@ def _supersede_without_loop(
     synchronous context, so ``loop is None`` and there is no running loop for a
     best-effort ``ensure_future`` to land on. Only a queued close can save it.
     """
-    _stub_builder(monkeypatch, builder, fake)
+    stub_builder(seam, _builder_for(fake))
 
     async def _on_a_live_loop():
         return getattr(http_mod, getter)()
@@ -263,21 +289,19 @@ def _supersede_without_loop(
     return first, second
 
 
-@pytest.mark.parametrize("builder,getter,slot,fake", SINGLETONS)
-def test_superseded_client_is_queued_for_close_when_no_loop_is_running(
-    builder, getter, slot, fake, monkeypatch
-):
+@pytest.mark.parametrize("seam,getter,fake", SINGLETONS)
+def test_superseded_client_is_queued_for_close_when_no_loop_is_running(seam, getter, fake, stub_builder):
     """The missing half: the superseded client must be *tracked*, not dropped."""
-    first, _second = _supersede_without_loop(monkeypatch, builder, getter, fake)
+    first, _second = _supersede_without_loop(stub_builder, seam, getter, fake)
     with http_mod._PENDING_CLIENT_CLOSE_LOCK:
         queued = list(http_mod._PENDING_CLIENT_CLOSE)
     assert first in queued, f"{getter} superseded a client without queueing it for close"
 
 
-@pytest.mark.parametrize("builder,getter,slot,fake", SINGLETONS)
-def test_queued_superseded_client_is_closed_by_the_next_drain(builder, getter, slot, fake, monkeypatch):
+@pytest.mark.parametrize("seam,getter,fake", SINGLETONS)
+def test_queued_superseded_client_is_closed_by_the_next_drain(seam, getter, fake, stub_builder):
     """Tracking pays off only if a live loop eventually closes the client."""
-    first, _second = _supersede_without_loop(monkeypatch, builder, getter, fake)
+    first, _second = _supersede_without_loop(stub_builder, seam, getter, fake)
     assert first.closed is False
 
     async def _fetch_like_drain():
@@ -287,8 +311,8 @@ def test_queued_superseded_client_is_closed_by_the_next_drain(builder, getter, s
     assert first.closed is True, f"{getter} left a superseded client unclosed after a drain"
 
 
-@pytest.mark.parametrize("builder,getter,slot,fake", SINGLETONS)
-def test_pending_close_queue_dedupes_and_stays_bounded(builder, getter, slot, fake, monkeypatch):
+@pytest.mark.parametrize("seam,getter,fake", SINGLETONS)
+def test_pending_close_queue_dedupes_and_stays_bounded(seam, getter, fake, stub_builder):
     """Re-superseding the same client must not double-queue it, and the backlog
     must stop growing at the cap (a stream of loop changes cannot leak memory).
 
@@ -309,7 +333,7 @@ def test_pending_close_queue_dedupes_and_stays_bounded(builder, getter, slot, fa
         built.append(instance)
         return instance
 
-    monkeypatch.setattr(http_mod, builder, _build)
+    stub_builder(seam, _build)
 
     def acquire_on_fresh_loop() -> _PooledFake:
         loop = asyncio.new_event_loop()
@@ -353,8 +377,8 @@ def test_pending_close_queue_dedupes_and_stays_bounded(builder, getter, slot, fa
     assert after.count(still_queued) == 1
 
 
-@pytest.mark.parametrize("builder,getter,slot,fake", SINGLETONS)
-def test_superseded_client_is_also_closed_eagerly_on_a_live_loop(builder, getter, slot, fake, monkeypatch):
+@pytest.mark.parametrize("seam,getter,fake", SINGLETONS)
+def test_superseded_client_is_also_closed_eagerly_on_a_live_loop(seam, getter, fake, stub_builder):
     """Inverse case: the queue must not have replaced the immediate close.
 
     When the handover happens on a loop that is still live -- the normal
@@ -362,35 +386,40 @@ def test_superseded_client_is_also_closed_eagerly_on_a_live_loop(builder, getter
     finishes, not only at the next drain. The cffi kind publishes no
     ``is_closed`` attribute, so a generic "already closed?" guard in the shared
     reaper would silently drop this eager close for sessions only.
+
+    There is no assertion that the rebuilt client landed in the pool's private
+    module global. That used to be read directly, and it is a caching detail
+    rather than a property: the fixture's teardown asserts the module holds no
+    pooled client after the test, which cannot be true unless the rebuild
+    published one, and it does so through the module's public surface.
     """
-    _stub_builder(monkeypatch, builder, fake)
+    stub_builder(seam, _builder_for(fake))
 
     first, second = asyncio.run(run_loop_rebind_scenario(lambda: getattr(http_mod, getter)()))
     assert second is not first
-    assert getattr(http_mod, slot) is second, f"{getter} did not publish the rebuilt client in {slot}"
     assert first.closed is True, f"{getter} superseded a client without closing it on the live loop"
 
 
-def test_both_singletons_queue_through_one_shared_implementation(monkeypatch):
+def test_both_singletons_queue_through_one_shared_implementation(stub_builder):
     """The anti-divergence guard: one reaper, two call sites.
 
-    Both getters must reach the same queueing code, so a future pooled client
-    cannot quietly re-implement (or omit) the discipline the way the cffi copy
-    did relative to the httpx one.
+    Both getters must land their superseded client in the same queue, so a future
+    pooled client cannot quietly re-implement (or omit) the discipline the way the
+    cffi copy did relative to the httpx one. The queue is read rather than the
+    queueing helper spied: how many times a private helper was *called* is not
+    the property, and where the references end up is. A count would also have
+    passed against a helper that queued nothing at all.
     """
-    seen: list[object] = []
-
-    def _spy(client):
-        seen.append(client)
-        return None
-
-    monkeypatch.setattr(http_mod, "_queue_superseded_close", _spy)
-    _supersede_without_loop(monkeypatch, "_build_async_client", "get_async_http_client", _build_httpx_fake)
-    _supersede_without_loop(monkeypatch, "_build_cffi_session", "get_cffi_session", _build_cffi_fake)
-    assert len(seen) == 2, f"expected both singletons to queue through the shared helper, saw {len(seen)}"
+    http_first, _ = _supersede_without_loop(stub_builder, "http", "get_async_http_client", _build_httpx_fake)
+    cffi_first, _ = _supersede_without_loop(stub_builder, "cffi", "get_cffi_session", _build_cffi_fake)
+    with http_mod._PENDING_CLIENT_CLOSE_LOCK:
+        queued = list(http_mod._PENDING_CLIENT_CLOSE)
+    assert http_first in queued and cffi_first in queued, (
+        f"both pooled clients must supersede into the one shared queue; queued {len(queued)}: {queued}"
+    )
 
 
-def test_cffi_session_superseded_by_a_failing_rebuild_is_still_queued(monkeypatch):
+def test_cffi_session_superseded_by_a_failing_rebuild_is_still_queued(stub_builder):
     """Boundary: the loop changed and the rebuild itself fails.
 
     The session being replaced must not be dropped on the floor with no owner
@@ -400,14 +429,12 @@ def test_cffi_session_superseded_by_a_failing_rebuild_is_still_queued(monkeypatc
     as "impersonation unavailable" and downgraded a TLS-fingerprinted fetch to
     plain httpx while reporting success.
     """
-    _first, second = _supersede_without_loop(
-        monkeypatch, "_build_cffi_session", "get_cffi_session", _build_cffi_fake
-    )
+    _first, second = _supersede_without_loop(stub_builder, "cffi", "get_cffi_session", _build_cffi_fake)
 
     def _boom(settings=None):
         raise ImportError("curl_cffi unavailable")
 
-    monkeypatch.setattr(http_mod, "_build_cffi_session", _boom)
+    stub_builder("cffi", _boom)
 
     async def _on_a_different_live_loop():
         return http_mod.get_cffi_session()
@@ -419,11 +446,19 @@ def test_cffi_session_superseded_by_a_failing_rebuild_is_still_queued(monkeypatc
     assert second in queued, "a superseded session was dropped when the rebuild failed"
 
 
-def test_cffi_fetch_drains_pending_closes_before_taking_the_session(monkeypatch):
+def test_cffi_fetch_drains_pending_closes_before_taking_the_session(stub_builder):
     """Coverage: a queued close is only released if the cffi path drains too.
 
     The http fetcher drains on every request; the cffi transport never did, so
     sessions queued by a cffi loop change had no release point on that path.
+
+    Proved by outcome rather than by counting drains. This used to spy on the
+    private drain helper and assert it was called exactly once, which proved the
+    call and not the release: a drain that emptied the queue without closing
+    anything scored the same. A client is now left sitting in the queue, the
+    cffi transport is asked for a session, and the assertion is that the queued
+    client came back closed -- the property a caller can actually observe, since
+    a session that is tracked but never released is precisely the leak.
 
     ``_cffi_fetch`` is driven directly because it is the function that owns the
     drain. This test used to go through the impersonating fetcher and stub the
@@ -432,26 +467,22 @@ def test_cffi_fetch_drains_pending_closes_before_taking_the_session(monkeypatch)
     attribute after the fact does nothing) and made the assertion ambiguous
     anyway: the total it counted included the httpx path's own drain, so it
     could not tell one drain from two. The transport returns ``None`` for
-    "could not be made", so the count here is exactly the cffi path's.
+    "could not be made", so the fetch below is the cffi path's own.
     """
-    drains = 0
-    real_drain = http_mod._drain_pending_client_closes
-
-    async def _counting_drain():
-        nonlocal drains
-        drains += 1
-        await real_drain()
-
-    monkeypatch.setattr(http_mod, "_drain_pending_client_closes", _counting_drain)
-    monkeypatch.setattr(http_mod, "_build_cffi_session", lambda *a, **k: _build_cffi_fake())
-    monkeypatch.setattr(http_mod, "_DEFAULT_CFFI_SESSION", None)
+    stub_builder("cffi", _builder_for(_build_cffi_fake))
+    waiting = _PooledFake("close", publishes_is_closed=False)
+    with http_mod._PENDING_CLIENT_CLOSE_LOCK:
+        http_mod._PENDING_CLIENT_CLOSE.append(waiting)
 
     async def _attempt():
         return await _cffi_fetch("http://example.invalid/", {}, 1, 1024, policy=HostPolicy.unrestricted())
 
     try:
         assert asyncio.run(_attempt()) is None, "the fake session cannot answer, so the attempt declines"
-        assert drains == 1, f"expected the cffi path's own drain, got {drains}"
+        assert waiting.closed is True, (
+            "the cffi transport took a session without releasing the client it had queued for close, "
+            "so a superseded session has no release point on this path"
+        )
     finally:
         asyncio.run(http_mod.close_cffi_session())
 
@@ -557,29 +588,20 @@ def test_displaced_client_with_no_running_loop_is_not_left_as_a_broken_coroutine
 
     The queue is the only owner in that case, so the reference is dropped --
     but doing it by building a coroutine nobody will await would trade a socket
-    for a RuntimeWarning on every capped rebuild. ``_safe_aclose`` is asserted
-    not to be called at all, which is the structural guarantee (no coroutine
-    object exists to be unawaited), and warnings are escalated so an implicit
-    event-loop fallback anywhere in the path fails loudly.
+    for a RuntimeWarning on every capped rebuild. The assertion is the warning
+    escalation plus the double's own ``closed`` flag, not a spy on the private
+    ``_safe_aclose`` helper this used to replace: an un-awaited coroutine raises
+    "coroutine ... was never awaited" when it is collected, and warnings are
+    escalated to errors, so nothing can create one without the test failing.
+    Spying named the route rather than the property, and would have passed
+    against a rebuild that scheduled a close by some other path.
     """
     displaced = _RealShapedHttpClient()
-    calls: list[object] = []
-    real_aclose = http_mod._safe_aclose
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        http_mod._release_dropped_client(displaced)
 
-    async def _spy(client):
-        calls.append(client)
-        return await real_aclose(client)
-
-    http_mod._safe_aclose = _spy
-    try:
-        with warnings.catch_warnings():
-            warnings.simplefilter("error")
-            http_mod._release_dropped_client(displaced)
-    finally:
-        http_mod._safe_aclose = real_aclose
-
-    assert calls == [], "a teardown was scheduled with no loop able to run it"
-    assert displaced.closed is False
+    assert displaced.closed is False, "a teardown was scheduled with no loop able to run it"
 
 
 def test_none_displacement_is_a_noop():
@@ -587,7 +609,7 @@ def test_none_displacement_is_a_noop():
     http_mod._release_dropped_client(None)
 
 
-def test_real_shaped_session_is_closed_eagerly_on_a_live_loop(monkeypatch):
+def test_real_shaped_session_is_closed_eagerly_on_a_live_loop(stub_builder):
     """The eager close must fire for a session with no ``is_closed``.
 
     Driven through the production ``get_cffi_session`` rebuild path with a
@@ -606,7 +628,7 @@ def test_real_shaped_session_is_closed_eagerly_on_a_live_loop(monkeypatch):
         built.append(session)
         return session
 
-    monkeypatch.setattr(http_mod, "_build_cffi_session", _build)
+    stub_builder("cffi", _build)
 
     first, second = asyncio.run(run_loop_rebind_scenario(http_mod.get_cffi_session))
     assert second is not first
@@ -617,13 +639,13 @@ def test_real_shaped_session_is_closed_eagerly_on_a_live_loop(monkeypatch):
     )
 
 
-def install_httpx_double(monkeypatch) -> list[_RealShapedHttpClient]:
-    """Patch the httpx builder to hand out real-shaped doubles; return them.
+def install_httpx_double(stub_builder) -> list[_RealShapedHttpClient]:
+    """Hand out real-shaped httpx doubles through the public seam; return them.
 
     The list is the point: the getter is typed as handing back a real
     ``httpx.AsyncClient``, whose ``is_closed`` is a read-only property and which
     has no ``closed`` at all, so a test that wants to read or set either has to
-    name the double the stub actually built. Two tests were each spelling this
+    name the double the builder actually built. Two tests were each spelling this
     builder out, and the second copy is the one that would have drifted.
     """
     built: list[_RealShapedHttpClient] = []
@@ -634,78 +656,67 @@ def install_httpx_double(monkeypatch) -> list[_RealShapedHttpClient]:
         built.append(client)
         return client
 
-    monkeypatch.setattr(http_mod, "_build_async_client", _build)
+    stub_builder("http", _build)
     return built
 
 
-def test_httpx_kind_keeps_its_eager_close_after_the_gate_moves(monkeypatch):
+def test_httpx_kind_keeps_its_eager_close_after_the_gate_moves(stub_builder):
     """Inverse: moving the gate to the descriptor predicate must not cost the
     pooled httpx client the eager close it already had.
     """
     # The double list is not read here: the scenario hands the same client back
     # through the getter, and ``first`` is that client. Installed for the
     # builder, not for the list.
-    install_httpx_double(monkeypatch)
+    install_httpx_double(stub_builder)
 
     first, second = asyncio.run(run_loop_rebind_scenario(http_mod.get_async_http_client))
     assert second is not first
     assert first.closed is True, "the pooled httpx client lost its eager close"
 
 
-def test_already_closed_pooled_client_is_not_re_closed_on_the_live_loop(monkeypatch):
+def test_already_closed_pooled_client_is_not_re_closed_on_the_live_loop(stub_builder):
     """Boundary: the descriptor predicate still recognises a closed client.
 
     A client the caller reports as closed owns no live sockets, so the rebuild
     must drop it quietly instead of scheduling a pointless teardown task.
 
-    The assertion is on the scheduling seam, not on a task-count diff and not
-    on a flag sampled after a hopeful pause: ``_safe_aclose`` is spied, and a
-    single loop yield is enough for a teardown that WAS scheduled to have run
-    to completion. So "the spy was never called" is positive evidence that
-    nothing was scheduled, and ``closed`` is only ever set by the close
-    coroutine itself, so its staying False says the same thing a second way.
+    The assertion is the double's own ``closed`` flag, not a spy on the private
+    close helper this used to replace. ``closed`` is only ever set by the close
+    coroutine itself, and one loop yield is enough for a teardown that WAS
+    scheduled to start and finish -- the task goes on the ready queue by
+    ``ensure_future`` and the close yields once itself. So the flag staying
+    False is positive evidence that nothing was scheduled, and it is evidence
+    about the client rather than about one chosen route to closing it.
     """
-    scheduled: list[object] = []
-    real_safe_aclose = http_mod._safe_aclose
+    # The double the builder built, kept so the scenario reads the same object
+    # production will: the getter is typed as handing back a real
+    # ``httpx.AsyncClient``, whose ``is_closed`` is a read-only property and
+    # which has no ``closed`` at all -- the two assignments below are on a
+    # double, and naming it is what says so.
+    built = install_httpx_double(stub_builder)
 
-    async def _spy(client):
-        scheduled.append(client)
-        return await real_safe_aclose(client)
+    async def _scenario():
+        first = http_mod.get_async_http_client()
+        assert built, "the builder must have produced a client"
+        tracked = built[0]
+        tracked.is_closed = True  # someone else already closed it
+        tracked.closed = False  # would flip only if a teardown were scheduled
+        second = http_mod.get_async_http_client()
+        # One yield is enough for a scheduled teardown to run: the task is
+        # put on the ready queue by ensure_future, and this hands the loop
+        # back exactly once, so the coroutine starts and (itself yielding
+        # once) finishes.
+        await asyncio.sleep(0)
+        return first, second
 
-    http_mod._safe_aclose = _spy
-    try:
-        # The double the stub built, kept so the scenario reads the same object
-        # production will: the getter is typed as handing back a real
-        # ``httpx.AsyncClient``, whose ``is_closed`` is a read-only property and
-        # which has no ``closed`` at all -- the two assignments below are on a
-        # double, and naming it is what says so.
-        built = install_httpx_double(monkeypatch)
-
-        async def _scenario():
-            first = http_mod.get_async_http_client()
-            assert built, "the stubbed builder must have produced a client"
-            tracked = built[0]
-            tracked.is_closed = True  # someone else already closed it
-            tracked.closed = False  # would flip only if a teardown were scheduled
-            second = http_mod.get_async_http_client()
-            # One yield is enough for a scheduled teardown to run: the task is
-            # put on the ready queue by ensure_future, and this hands the loop
-            # back exactly once, so the coroutine starts and (itself yielding
-            # once) finishes.
-            await asyncio.sleep(0)
-            return first, second
-
-        first, second = asyncio.run(_scenario())
-    finally:
-        http_mod._safe_aclose = real_safe_aclose
+    first, second = asyncio.run(_scenario())
 
     assert second is not first, "a closed pooled client must be rebuilt"
-    assert scheduled == [], "an already-closed client was scheduled for close"
-    assert built, "the stubbed builder must have produced a client"
+    assert built, "the builder must have produced a client"
     assert built[0].closed is False, "an already-closed client was scheduled for close"
 
 
-def test_a_third_pooled_kind_is_not_left_out_by_the_httpx_attribute_shape(monkeypatch):
+def test_a_third_pooled_kind_is_not_left_out_by_the_httpx_attribute_shape():
     """'s generalization: the closed-decision belongs to the descriptor.
 
     The merged guard probed for an attribute name (``is_closed``) instead of
@@ -716,9 +727,14 @@ def test_a_third_pooled_kind_is_not_left_out_by_the_httpx_attribute_shape(monkey
     """
     import threading
 
-    monkeypatch.setattr(http_mod, "_THIRD_POOL_SLOT", None, raising=False)
+    # The descriptor keeps its pooled instance in the module global named by
+    # ``slot``, so a slot has to name a global that exists. This borrows the
+    # curl_cffi one rather than inventing a third: nothing in this test asks
+    # for the cffi pool, and the module's fixture releases the slot at teardown.
+    # Adding a name to the module for the convenience of a test is how the slot
+    # list and its test-support grew together in the first place.
     third = http_mod._LoopBoundPooledClient(
-        slot="_THIRD_POOL_SLOT",
+        slot="_DEFAULT_CFFI_SESSION",
         build=lambda settings: _ThirdKind(),
         is_closed=lambda client: False,
         lock=threading.Lock(),
@@ -752,29 +768,27 @@ async def _run():
     return http_mod.get_async_http_client()
 
 
-def test_superseded_client_is_closed_on_loop_change(monkeypatch):
-    monkeypatch.setattr(http_mod, "_build_async_client", _fake_builder)
-    http_mod._DEFAULT_HTTP_CLIENT = None
-    try:
-        c1 = asyncio.run(_run())  # builds on loop A
-        c2 = asyncio.run(_run())  # new loop B -> old client closed
-        assert c1.is_closed is True, "superseded HTTP client was leaked"
-        assert c2.is_closed is False
-    finally:
-        http_mod._DEFAULT_HTTP_CLIENT = None
+def test_superseded_client_is_closed_on_loop_change(stub_builder):
+    stub_builder("http", _fake_builder)
+    c1 = asyncio.run(_run())  # builds on loop A
+    c2 = asyncio.run(_run())  # new loop B -> old client closed
+    assert c1.is_closed is True, "superseded HTTP client was leaked"
+    assert c2.is_closed is False
 
 
 def test_get_async_http_client_avoids_deprecated_get_event_loop(monkeypatch):
     # Prove the code path no longer depends on the deprecated get_event_loop:
     # make it raise and confirm the client is still obtainable (it must use
     # get_running_loop instead).
+    # The construction path is forced by the fixture, which released the pooled
+    # client before this body ran; naming the module global to null it again is
+    # what this used to do, and it made the test depend on a name the module
+    # keeps for its own bookkeeping.
     monkeypatch.setattr(
         asyncio,
         "get_event_loop",
         lambda *a, **k: (_ for _ in ()).throw(RuntimeError("get_event_loop is deprecated")),
     )
-    # Force the construction path.
-    monkeypatch.setattr(http_mod, "_DEFAULT_HTTP_CLIENT", None)
 
     async def inner():
         return get_async_http_client()
@@ -784,9 +798,7 @@ def test_get_async_http_client_avoids_deprecated_get_event_loop(monkeypatch):
     assert not client.is_closed
 
 
-def test_get_async_http_client_reuses_same_instance(monkeypatch):
-    monkeypatch.setattr(http_mod, "_DEFAULT_HTTP_CLIENT", None)
-
+def test_get_async_http_client_reuses_same_instance():
     async def inner():
         return get_async_http_client(), get_async_http_client()
 
@@ -794,30 +806,38 @@ def test_get_async_http_client_reuses_same_instance(monkeypatch):
     assert a is b
 
 
-def test_hot_path_client_reuse_skips_env_scan(monkeypatch):
+def test_hot_path_client_reuse_skips_env_scan():
     # Throughput (perf review 1.1): the per-fetch get_async_http_client() call
     # must not pay a full CrawlerSettings.from_mapping() env walk when the
     # pooled client is alive on the current loop. Settings are pool config
     # that is consumed only at construction, so a reuse call consults env zero
     # times while a construction call consults it exactly once.
+    #
+    # The env walk is counted by watching ``CrawlerSettings.from_mapping`` rather
+    # than the module's own ``_default_settings``, which is a private name this
+    # test had to reach into. Counting at the derivation is the stronger claim
+    # anyway: it would catch the walk being paid by any route, where counting one
+    # private helper would not.
     scans = {"count": 0}
-    original = http_mod._default_settings
+    original = settings_mod.CrawlerSettings.from_mapping
 
-    def _counting_settings():
+    def _counting_from_mapping(*args, **kwargs):
         scans["count"] += 1
-        return original()
+        return original(*args, **kwargs)
 
-    monkeypatch.setattr(http_mod, "_default_settings", _counting_settings)
-    monkeypatch.setattr(http_mod, "_DEFAULT_HTTP_CLIENT", None)
+    settings_mod.CrawlerSettings.from_mapping = staticmethod(_counting_from_mapping)
+    try:
 
-    async def inner():
-        first = get_async_http_client()
-        reuse_calls = scans["count"]
-        second = get_async_http_client()
-        third = get_async_http_client()
-        return first, second is first, third is first, reuse_calls, scans["count"]
+        async def inner():
+            first = get_async_http_client()
+            reuse_calls = scans["count"]
+            second = get_async_http_client()
+            third = get_async_http_client()
+            return first, second is first, third is first, reuse_calls, scans["count"]
 
-    first, reuses_second, reuses_third, reuse_calls, total = asyncio.run(inner())
+        first, reuses_second, reuses_third, reuse_calls, total = asyncio.run(inner())
+    finally:
+        settings_mod.CrawlerSettings.from_mapping = original
     assert first is not None
     assert reuses_second and reuses_third
     # Construction walked the env exactly once; the two reuse calls added nothing.

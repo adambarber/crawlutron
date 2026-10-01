@@ -21,6 +21,15 @@ import pytest
 
 from tests._app_factory import service_app
 
+# Fixtures live one-per-file in ``tests/fixtures/`` so each one's setup/teardown
+# contract is legible on its own rather than welded to the test module that
+# happened to want it first. pytest does not scan that directory, so this is the
+# registration list, and it is deliberately the one place the suite's shared
+# fixture surface is written down: a fixture no module here names is a fixture
+# nothing can depend on. See ``tests/fixtures/__init__.py`` for why helpers and
+# fixtures are kept apart.
+pytest_plugins = ("tests.fixtures.stub_builder",)
+
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent  # the repository root, which is now the service root
 
