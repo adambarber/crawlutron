@@ -190,22 +190,28 @@ _SUBSTITUTED_CAP = _d(
 )
 
 
-_POOL_DRIVEN = _d(
+_OWNED_POOL_MACHINERY = _d(
     "harness lifecycle",
-    "The doc-extraction pool's own machinery, driven by ``tests/crawl/test_doc_pool.py``.\n"
-    "That module is this pool's test: it exists to prove the acquire lock, the spawn-once\n"
-    "rule and the kill escalation, none of which the public path can reach. ``extract_content``\n"
-    "hands back a document, not a worker handle, so there is no seam above these names for a\n"
-    "test to work through instead.\n"
+    "A pool's own machinery, driven by the test that exists to prove it.\n"
     "\n"
-    "So the reach is honest and the verdict is that nothing needs promoting. What these rows\n"
-    "must not become is a public pool API: a caller that could acquire and retire workers is\n"
-    "a caller that can wedge the pool, which is the failure the lock and the escalation\n"
-    "exist to contain. The names stay private and the module keeps its own test.\n"
+    "Two pools are reached this way and the argument is identical for both: the\n"
+    "doc-extraction pool (``tests/crawl/test_doc_pool.py``) and the HTTP client pool\n"
+    "(``tests/crawl/test_http_client_pool.py``). Each test exists to prove an acquire\n"
+    "lock, a spawn-once rule and a close path, and none of that is reachable from\n"
+    "above -- ``extract_content`` hands back a document rather than a worker handle, a\n"
+    "request hands back a response rather than a pooled client. So there is no seam\n"
+    "these tests could work through instead.\n"
     "\n"
-    "Held as `harness lifecycle` in the sense the kind already means -- the suite drives a\n"
-    "world it started and cannot reach any other way. Filed as a possible sixth kind\n"
-    '("the owner\'s own test") in #86; deferred rather than grown for three rows.\n',
+    "The reach is honest and the verdict is that nothing needs promoting. What these\n"
+    "rows must not become is a public pool API: a caller that can acquire and retire\n"
+    "workers, or evict a client out from under an in-flight close, is a caller that\n"
+    "can wedge the pool -- which is the failure the locks and the escalation exist to\n"
+    "contain. The names stay private and each pool keeps its own test.\n"
+    "\n"
+    "Held as `harness lifecycle` in the sense the kind already means -- the suite\n"
+    "drives a world it started and cannot reach any other way. Filed as a possible\n"
+    'sixth kind ("the owner\'s own test") in #86, deferred rather than grown for the\n'
+    "three rows that would justify it today.\n",
     side=("test",),
 )
 
@@ -357,19 +363,19 @@ DECLARED: dict[str, Declaration] = {
     ),
     "app.crawl.extraction._MAX_EXTRACTED_MARKDOWN": _SUBSTITUTED_CAP,
     "app.crawl.extraction._POOL_LOCK": _d(_CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]),
-    "app.crawl.extraction._acquire_doc_worker": _POOL_DRIVEN,
+    "app.crawl.extraction._acquire_doc_worker": _OWNED_POOL_MACHINERY,
     "app.crawl.extraction._configure_doc_worker_logging": _d(
         _LIFECYCLE_CONFIGURE_DOC_WORKER_LOGGING.kind, _LIFECYCLE_CONFIGURE_DOC_WORKER_LOGGING.reason, ["test"]
     ),
     "app.crawl.extraction._doc_extraction_worker_count": _SUBSTITUTED_CAP,
-    "app.crawl.extraction._doc_pool_health": _POOL_DRIVEN,
-    "app.crawl.extraction._doc_pool_pids": _POOL_DRIVEN,
-    "app.crawl.extraction._doc_task_hooks": _POOL_DRIVEN,
+    "app.crawl.extraction._doc_pool_health": _OWNED_POOL_MACHINERY,
+    "app.crawl.extraction._doc_pool_pids": _OWNED_POOL_MACHINERY,
+    "app.crawl.extraction._doc_task_hooks": _OWNED_POOL_MACHINERY,
     "app.crawl.extraction._parse_html_tree": _SUBSTITUTED_COLLABORATOR,
-    "app.crawl.extraction._reset_doc_pool": _POOL_DRIVEN,
-    "app.crawl.extraction._retire_doc_worker": _POOL_DRIVEN,
+    "app.crawl.extraction._reset_doc_pool": _OWNED_POOL_MACHINERY,
+    "app.crawl.extraction._retire_doc_worker": _OWNED_POOL_MACHINERY,
     "app.crawl.extraction._spawn_doc_worker": _SUBSTITUTED_COLLABORATOR,
-    "app.crawl.extraction._terminate_doc_process": _POOL_DRIVEN,
+    "app.crawl.extraction._terminate_doc_process": _OWNED_POOL_MACHINERY,
     "app.crawl.extraction._walkable": _d(_IMPLEMENTATION_STEP.kind, _IMPLEMENTATION_STEP.reason, ["test"]),
     "app.crawl.fetch_helpers._SITEMAP_CACHE": _d(_CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]),
     "app.crawl.fetch_helpers._fetch_and_decode": _d(
@@ -588,46 +594,18 @@ DECLARED: dict[str, Declaration] = {
         _CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]
     ),
     "app.crawl.strategies.http_client_pool._THIRD_POOL_SLOT": _SUBSTITUTED_COLLABORATOR,
-    "app.crawl.strategies.http_client_pool._build_async_client": _d(
-        "unreviewed",
-        "Not yet triaged.\n",
-        ["test"],
-    ),
-    "app.crawl.strategies.http_client_pool._build_cffi_session": _d(
-        "unreviewed",
-        "Not yet triaged.\n",
-        ["test"],
-    ),
-    "app.crawl.strategies.http_client_pool._default_settings": _d(
-        "unreviewed",
-        "Not yet triaged.\n",
-        ["test"],
-    ),
+    "app.crawl.strategies.http_client_pool._build_async_client": _SUBSTITUTED_COLLABORATOR,
+    "app.crawl.strategies.http_client_pool._build_cffi_session": _SUBSTITUTED_COLLABORATOR,
+    "app.crawl.strategies.http_client_pool._default_settings": _SUBSTITUTED_COLLABORATOR,
     "app.crawl.strategies.http_client_pool._drain_pending_client_closes": _d(
         _LIFECYCLE_DRAIN_PENDING_CLIENT_CLOSES.kind,
         _LIFECYCLE_DRAIN_PENDING_CLIENT_CLOSES.reason,
         ["test", "app"],
     ),
-    "app.crawl.strategies.http_client_pool._queue_superseded_close": _d(
-        "unreviewed",
-        "Not yet triaged.\n",
-        ["test"],
-    ),
-    "app.crawl.strategies.http_client_pool._release_dropped_client": _d(
-        "unreviewed",
-        "Not yet triaged.\n",
-        ["test"],
-    ),
-    "app.crawl.strategies.http_client_pool._safe_aclose": _d(
-        "unreviewed",
-        "Not yet triaged.\n",
-        ["test"],
-    ),
-    "app.crawl.strategies.http_client_pool._schedule_client_close": _d(
-        "unreviewed",
-        "Not yet triaged.\n",
-        ["test"],
-    ),
+    "app.crawl.strategies.http_client_pool._queue_superseded_close": _SUBSTITUTED_COLLABORATOR,
+    "app.crawl.strategies.http_client_pool._release_dropped_client": _OWNED_POOL_MACHINERY,
+    "app.crawl.strategies.http_client_pool._safe_aclose": _OWNED_POOL_MACHINERY,
+    "app.crawl.strategies.http_client_pool._schedule_client_close": _OWNED_POOL_MACHINERY,
     "app.crawl.strategies.pinned_transport._CREDENTIAL_HEADERS": _d(
         _CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]
     ),
