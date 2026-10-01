@@ -22,7 +22,12 @@ import pytest
 
 from app.crawl.strategies.fetchers import default_http_fetcher
 from app.models import HttpFetcher, HttpFetchResult
-from tests.chokepoint_walks import app_python_files
+from tests.chokepoint_walks import (
+    app_python_files,
+    calls_named_leaf,
+    resolved_call_name,
+    resolved_expr_name,
+)
 
 # There is ONE concrete fetcher. The impersonating transport is a binding of it
 # (`impersonating_fetcher`), not a second function, so the contract's parameters
@@ -101,8 +106,16 @@ _KEYWORD_ONLY = frozenset({inspect.Parameter.KEYWORD_ONLY})
 # an implementation may accept more than the contract asks for), so both the type
 # checker and the tree-wide guard went green on a fetcher that silently stopped
 # requiring the policy.
-_BOUND_KEYWORDS = ("policy", "impersonate")
-_BOUND_KEYWORD_OPTIONAL = frozenset({"impersonate"})
+_BOUND_KEYWORDS = ("policy", "impersonate", "pin")
+# ``pin`` is optional for a reason the safety edge above does not cover, and the
+# distinction is the whole reason it is allowed to be optional at all. A default
+# on ``policy`` substitutes a DIFFERENT, possibly permissive value for one the
+# caller must choose; ``pin``'s default of ``None`` is not a substitute for
+# anything -- it means "use the real rule", so omitting it is the safe direction
+# and the parameter cannot be silently lost into a weaker fetch. That is what
+# makes it a binding rather than a hole, and it is why the guard below compares
+# defaulting and still lets this one through.
+_BOUND_KEYWORD_OPTIONAL = frozenset({"impersonate", "pin"})
 
 # The shape every production fetcher must have: HttpFetcher's own positional
 # parameters, read off the Protocol so a rename there is a rename here, plus the
@@ -303,9 +316,13 @@ def test_the_contract_guard_sees_defaulting_not_just_names():
     )
 
     # Same parameter names, same order, same coroutine-ness -- only the defaulting differs.
+    # The signature is assembled from _EXPECTED_SHAPE rather than written out, because a
+    # hand-spelled copy of the bound keywords is the very second spelling this test
+    # exists to prevent: growing the contract by one would fail this assertion for the
+    # wrong reason, and leave the next reader believing the guard checks more than it does.
+    rest = ", ".join(f"{name}=None" for name in _EXPECTED_SHAPE["keyword_only"][1:])
     mutated = ast.parse(
-        "async def f(url, headers, timeout_seconds, "
-        "max_content_length=1, *, policy=None, impersonate=False): ...\n"
+        f"async def f(url, headers, timeout_seconds, max_content_length=1, *, policy=None, {rest}): ...\n"
     ).body[0]
     assert isinstance(mutated, (ast.FunctionDef, ast.AsyncFunctionDef))
     assert tuple(arg.arg for arg in mutated.args.args) == _EXPECTED_SHAPE["positional"]
@@ -314,6 +331,54 @@ def test_the_contract_guard_sees_defaulting_not_just_names():
     assert widened == _EXPECTED_OMITTABLE | {"policy"}, widened
     assert widened != _EXPECTED_OMITTABLE, (
         "the mutation must differ from the contract in defaulting only, or it proves nothing"
+    )
+
+
+def test_production_never_substitutes_the_pin_rule():
+    """``pin=`` is a test door, and a production call site must never use it.
+
+    The keyword is on the contract precisely so the guard can see it, and seeing
+    it is only half the job: a substituted pin rule skips DNS resolution and the
+    SSRF check that resolution feeds, so passing one in ``app/`` would hand the
+    fetcher a connect-ready URL for a host nobody validated. ``None`` -- the
+    default -- is the real rule, so this is not about the parameter existing; it
+    is about the one value that would weaken the fetch never being supplied.
+
+    Written as a walk rather than a convention because the failure it prevents is
+    silent by construction: a test suite substituting a pin is correct, and the
+    same line in ``app/`` is an SSRF hole that no other gate in this tree looks
+    at.
+    """
+    offenders: list[str] = []
+    for path in app_python_files():
+        tree = ast.parse(path.read_text(), filename=str(path))
+        for call in calls_named_leaf(tree, {"default_http_fetcher", "partial"}):
+            if not _binds_fetcher(call, tree):
+                continue
+            for keyword in call.keywords:
+                if keyword.arg == "pin":
+                    offenders.append(f"{path.name}:{call.lineno}")
+    assert not offenders, (
+        f"production substitutes the pin rule at {', '.join(offenders)}; a substituted rule "
+        "skips the SSRF resolution the default performs. If a module genuinely needs a "
+        "different rule, that is a real seam to design, not a keyword to pass"
+    )
+
+
+def _binds_fetcher(call: ast.Call, tree: ast.Module) -> bool:
+    """Whether ``call`` produces a fetcher -- directly, or by partial-binding one.
+
+    Both spellings reach the same function: the engine hands the strategy a
+    ``functools.partial`` of the fetcher rather than the function itself, so a
+    check that only recognized the bare call would have walked straight past
+    every production site and reported the tree clean for the wrong reason.
+    """
+    if resolved_call_name(tree, call) == "default_http_fetcher":
+        return True
+    return (
+        bool(call.args)
+        and resolved_call_name(tree, call.func) in {"partial", "functools.partial"}
+        and resolved_expr_name(tree, call.args[0]) == "default_http_fetcher"
     )
 
 

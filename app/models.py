@@ -438,13 +438,20 @@ CrawlWorker = SyncCrawlWorker | AsyncCrawlWorker
 # missing SSRF keyword would have become an unrestricted HostPolicy instead of a
 # TypeError, silently.
 class HttpFetcher(Protocol):
-    """The four positional parameters of a fetcher whose policy is already bound.
+    """The four positional parameters of a fetcher whose collaborators are already bound.
 
     Also the declaration of what a fetcher looks like *before* it is bound, which
     is the only sense in which this is a contract for the whole of ``app/``: a
-    production fetcher is this call plus a keyword-only ``policy`` and an
-    ``impersonate`` keyword, and the tree-wide check is what proves the "plus"
-    is exactly those two.
+    production fetcher is this call plus a keyword-only ``policy``, an
+    ``impersonate`` keyword and a ``pin`` keyword, and the tree-wide check is
+    what proves the "plus" is exactly those three.
+
+    ``pin`` is the transport's pin rule, and ``None`` -- the default -- means
+    the real one. It is declared here rather than kept off the contract because
+    the guard compares defaulting as well as names, and a binding a contract
+    cannot see is a binding that drifts. Its safety rests on that default:
+    omitting it cannot substitute a weaker rule, so unlike ``policy`` it is
+    optional in the harmless direction.
     """
 
     async def __call__(

@@ -11,12 +11,15 @@ from __future__ import annotations
 import asyncio
 import io
 from concurrent.futures import ThreadPoolExecutor
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import pdfplumber
 
 from app.timeouts import Timeouts
 from app.validation import HostPolicy
+
+if TYPE_CHECKING:
+    from app.crawl.strategies import pinned_transport
 
 
 def _format_table(rows: list[list[Any]]) -> str:
@@ -72,7 +75,9 @@ def _extract_pdf_bytes_to_markdown(pdf_bytes: bytes) -> str:
         return _pdf_to_markdown(pdf)
 
 
-async def _afetch_document_bytes(url: str, policy: HostPolicy) -> bytes:
+async def _afetch_document_bytes(
+    url: str, policy: HostPolicy, pin: pinned_transport.PinRule | None = None
+) -> bytes:
     """Fetch a document's bytes over the shared pinned transport.
 
     This used to be a hand-rolled ``urllib`` loop, and it was the last one: every
@@ -95,7 +100,9 @@ async def _afetch_document_bytes(url: str, policy: HostPolicy) -> bytes:
     await http_client_pool._drain_pending_client_closes()
     client = http_client_pool.get_async_http_client()
     timeout = Timeouts.defaults().as_httpx()
-    async for chain, pinned_url, hop_headers in pinned_transport.apinned_hops(url, {}, policy=policy):
+    async for chain, pinned_url, hop_headers in pinned_transport.apinned_hops(
+        url, {}, policy=policy, pin=pin
+    ):
         # Follow_redirects=False: the chain below is the redirect loop, so httpx
         # following one too would connect to a target nobody re-validated.
         async with client.stream(

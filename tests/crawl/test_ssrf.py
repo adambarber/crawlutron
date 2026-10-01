@@ -169,16 +169,16 @@ def testresolve_and_pin_host_escape_hatch_survives_resolution_failure(monkeypatc
     assert (hostname, pinned_ip) == ("service.local", "service.local")
 
 
-def test_build_pinned_request_never_targets_loopback_for_unresolvable(monkeypatch):
+async def test_pinned_hop_never_targets_loopback_for_unresolvable(monkeypatch):
     # Defense-in-depth: even if a caller skips the SSRF check, pinning must not
     # point at 127.0.0.1 for an attacker-influenced, unresolvable hostname.
+    # Driven through the redirect walk rather than by naming the builder, so the
+    # test shows the refusal actually reaching the fetch -- a private call could
+    # only show that the rule raises, not that anything built on it is stopped.
     _unresolvable_host(monkeypatch)
-    # _build_pinned_request raises now (check fails closed), so assert it raises.
     with pytest.raises(ValueError):
-        http_mod._build_pinned_request(
-            "http://nonexistent.invalid/",
-            {},
-            policy=HostPolicy.unrestricted(),
+        await anext(
+            http_mod.apinned_hops("http://nonexistent.invalid/", {}, policy=HostPolicy.unrestricted())
         )
 
 

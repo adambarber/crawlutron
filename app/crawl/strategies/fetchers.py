@@ -33,6 +33,7 @@ async def default_http_fetcher(
     *,
     policy: HostPolicy,
     impersonate: bool = False,
+    pin: pinned_transport.PinRule | None = None,
 ) -> HttpFetchResult:
     """The one fetcher: TLS impersonation first when asked, the pooled httpx client otherwise.
 
@@ -64,14 +65,18 @@ async def default_http_fetcher(
     checked tree-wide by ``test_http_fetcher_contract_holds_tree_wide``.
     """
     if impersonate:
-        attempted = await _cffi_fetch(url, headers, timeout_seconds, max_content_length, policy=policy)
+        attempted = await _cffi_fetch(
+            url, headers, timeout_seconds, max_content_length, policy=policy, pin=pin
+        )
         if attempted is not None:
             return attempted
     await http_client_pool._drain_pending_client_closes()
     client = http_client_pool.get_async_http_client()
     started = time.monotonic()
     timeout = Timeouts.for_request(timeout_seconds).as_httpx()
-    async for chain, pinned_url, hop_headers in pinned_transport.apinned_hops(url, headers, policy=policy):
+    async for chain, pinned_url, hop_headers in pinned_transport.apinned_hops(
+        url, headers, policy=policy, pin=pin
+    ):
         # Follow_redirects=False: we follow manually so each hop is SSRF-checked.
         async with client.stream(
             "GET", pinned_url, headers=hop_headers, timeout=timeout, follow_redirects=False
@@ -175,6 +180,7 @@ async def _cffi_fetch(
     max_content_length: int,
     *,
     policy: HostPolicy,
+    pin: pinned_transport.PinRule | None = None,
 ) -> HttpFetchResult | None:
     """The curl_cffi transport behind ``default_http_fetcher(impersonate=True)``.
 
@@ -199,7 +205,7 @@ async def _cffi_fetch(
     try:
         started = time.monotonic()
         async for chain, pinned_url, hop_headers in pinned_transport.apinned_hops(
-            url, headers, policy=policy
+            url, headers, policy=policy, pin=pin
         ):
             try:
                 response = await client.get(

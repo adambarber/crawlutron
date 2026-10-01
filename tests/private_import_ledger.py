@@ -590,14 +590,6 @@ DECLARED: dict[str, Declaration] = {
     "app.crawl.strategies.pinned_transport._MAX_REDIRECT_HOPS": _d(
         _CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]
     ),
-    "app.crawl.strategies.pinned_transport._build_pinned_request": _d(
-        "unreviewed",
-        "Not yet triaged.\n",
-        ["test"],
-    ),
-    "app.crawl.strategies.pinned_transport._build_pinned_request_async": _d(
-        _CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]
-    ),
     "app.crawl.strategies.pinned_transport._declared_length_exceeds": _d(
         "unreviewed",
         "Not yet triaged.\n",

@@ -1,6 +1,6 @@
 """A plain-HTTP fetch must never leak the pinned IP.
 
-_build_pinned_request rewrites the wire URL's host to the resolved IP
+The pin rule rewrites the wire URL's host to the resolved IP
 (DNS-rebinding defense) while preserving the logical URL via Host. The
 pinned IP is a transport detail: final_url, cookie keying, and link-base
 resolution must all reflect the ORIGINAL hostname URL the caller asked
@@ -13,7 +13,6 @@ import asyncio
 from unittest.mock import patch
 
 from app.crawl.strategies import http_client_pool as pool_mod
-from app.crawl.strategies import pinned_transport as pinned_mod
 from app.crawl.strategies.fetchers import default_http_fetcher
 from app.validation import HostPolicy
 
@@ -42,10 +41,7 @@ class _FakeStream:
 def test_final_url_uses_hostname_not_pinned_ip():
     pinned = "http://93.184.216.34:80/page"
     fake = _FakeStream(pinned)
-    with (
-        patch.object(pinned_mod, "_build_pinned_request", return_value=(pinned, {"Host": "example.com"})),
-        patch.object(pool_mod, "get_async_http_client") as gc,
-    ):
+    with patch.object(pool_mod, "get_async_http_client") as gc:
         gc.return_value.stream.return_value = fake
         result = asyncio.run(
             default_http_fetcher(
@@ -54,6 +50,7 @@ def test_final_url_uses_hostname_not_pinned_ip():
                 5,
                 1_000_000,
                 policy=HostPolicy.unrestricted(),
+                pin=lambda url, headers, *, policy: (pinned, {"Host": "example.com"}),
             )
         )
     assert result.final_url == "http://example.com/page"

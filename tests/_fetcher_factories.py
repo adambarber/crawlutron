@@ -860,12 +860,18 @@ def make_html_fetcher(calls: list[str], body: bytes = b"<html><body>page content
     return fetcher_double(lambda url, *_: {"status": 200, "ctype": "text/html", "body": body}, calls)
 
 
-async def run_default_http_fetcher(url: str, headers=None):
+async def run_default_http_fetcher(url: str, headers=None, *, pin=None):
+    """The real default fetcher against a caller-supplied pin rule.
+
+    ``pin`` is the fetcher's own seam, forwarded rather than rebound over the
+    transport module's private builder: a redirect test needs a pin that is not
+    a real resolver, and the fetcher is where that choice belongs.
+    """
     from app.crawl.strategies.fetchers import default_http_fetcher
     from app.validation import HostPolicy
 
     return await default_http_fetcher(
-        url, {} if headers is None else headers, 30, policy=HostPolicy.unrestricted()
+        url, {} if headers is None else headers, 30, policy=HostPolicy.unrestricted(), pin=pin
     )
 
 

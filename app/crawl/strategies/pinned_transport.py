@@ -12,7 +12,7 @@ import functools
 import socket
 import time
 from collections.abc import AsyncIterator, Awaitable, Callable
-from typing import Any, ParamSpec, TypeVar
+from typing import Any, ParamSpec, Protocol, TypeVar
 from urllib.parse import urljoin, urlparse
 
 from app.bounded_ttl import BoundedTTLCache
@@ -206,6 +206,28 @@ def _build_pinned_request(
     return connect_url, {**headers, **connect_headers}
 
 
+class PinRule(Protocol):
+    """The rule that turns a URL into a request safe to connect to.
+
+    Named and injected rather than reached for. A test that wants a pinned
+    request without a real resolver used to rebind this module's private
+    builder, which tied eight test modules to a name the SSRF chokepoint was
+    never meant to expose -- and it made the walk's threading property
+    untestable under substitution, because off-loading was welded to the module
+    binding rather than to the call site.
+
+    It is the rule and not the resolver that travels, deliberately.
+    Substituting the resolver would exercise more of the rule, which is
+    better, but the resolver is the one part of this module a double must
+    never stand in for: it is the SSRF decision itself, not a collaborator. So
+    the seam is placed outside it.
+    """
+
+    def __call__(
+        self, url: str, headers: dict[str, str], *, policy: HostPolicy
+    ) -> tuple[str, dict[str, str]]: ...
+
+
 # Dedicated thread pool for blocking DNS resolution so hundreds of concurrent
 # fetches never block the event loop or contend with the default asyncio executor
 # (used for extraction and other blocking work). The pinning path resolves FRESH
@@ -230,10 +252,10 @@ def _off_loop(resolve: Callable[[], Callable[_P, _R]]) -> Callable[_P, Awaitable
     and the copy is free to disagree with the rule it wraps. Here the two cannot
     disagree, so there is nothing left to keep in sync.
 
-    ``resolve`` is a thunk, not the builder, because the builder is a module
-    global that tests replace: resolving it when the off-loop call is *made*
-    keeps that seam, while binding it at import time would freeze the
-    pre-replacement builder into every later call.
+    ``resolve`` is a thunk, not the builder, because the rule is not known when
+    the wrapper is made: a chain wraps whichever rule it was handed, default or
+    substituted, and binding at wrap time would freeze this module's builder into
+    every later call.
     """
 
     async def _run(*args: _P.args, **kwargs: _P.kwargs) -> _R:
@@ -327,19 +349,34 @@ class _RedirectChain:
     rather than by two call sites that can disagree.
     """
 
-    __slots__ = ("hops", "headers", "policy", "url")
+    __slots__ = ("_off_loop", "hops", "headers", "policy", "url")
 
-    def __init__(self, url: str, headers: dict[str, str], *, policy: HostPolicy) -> None:
+    def __init__(
+        self,
+        url: str,
+        headers: dict[str, str],
+        *,
+        policy: HostPolicy,
+        pin: PinRule,
+    ) -> None:
         self.url = url
         # Copied, not aliased: a cross-host hop strips credentials by rebuilding
         # the mapping, and the caller's dict must not be rewritten underneath it.
         self.headers = dict(headers)
         self.policy = policy
         self.hops = 0
+        # Off-loading belongs to the call site, not to the rule: a blocking rule
+        # goes to the pool whether it is this module's builder or a substituted
+        # one, so "pinning never stalls the loop" is a property the walk
+        # enforces rather than a property of which name happens to be bound.
+        # The rule arrives already resolved: ``None`` means "the real one" is a
+        # question :func:`apinned_hops` answers once, and a chain that held the
+        # sentinel would be re-deciding it on every construction.
+        self._off_loop = _off_loop(lambda: pin)
 
     async def pin(self) -> tuple[str, dict[str, str]]:
         """The connect-ready request for the current hop (DNS off the loop)."""
-        return await _build_pinned_request_async(self.url, self.headers, policy=self.policy)
+        return await self._off_loop(self.url, self.headers, policy=self.policy)
 
     def advance(self, response: Any) -> bool:
         """Step to the next hop; return True when the caller should re-request.
@@ -372,6 +409,7 @@ async def apinned_hops(
     headers: dict[str, str],
     *,
     policy: HostPolicy,
+    pin: PinRule | None = None,
 ) -> AsyncIterator[tuple[_RedirectChain, str, dict[str, str]]]:
     """Yield each hop of the manual redirect walk, already SSRF-checked.
 
@@ -393,7 +431,7 @@ async def apinned_hops(
     apart, and it is the count only ``advance`` increments, so a body that
     forgets to advance cannot silently keep the walk going: it ends here.
     """
-    chain = _RedirectChain(url, headers, policy=policy)
+    chain = _RedirectChain(url, headers, policy=policy, pin=pin or _build_pinned_request)
     while True:
         pinned_url, hop_headers = await chain.pin()
         served_hops = chain.hops

@@ -46,11 +46,16 @@ def _follows_itself(seen: list[httpx.Response]) -> bool:
     return any(response.history for response in seen)
 
 
-def _allow_every_host(monkeypatch) -> None:
+def _allow_every_host():
     """A pin that rewrites nothing, so the loop's own hop budget is what ends it."""
-    monkeypatch.setattr(
-        pinned_mod, "_build_pinned_request", lambda url, headers, *, policy: (url, dict(headers))
-    )
+    return lambda url, headers, *, policy: (url, dict(headers))
+
+
+def _reject_loopback(url, headers, *, policy):
+    """A pin that refuses an internal target, the way the real one does."""
+    if "127.0.0.1" in url:
+        raise ValueError(f"SSRF: blocked target {url}")
+    return url, dict(headers)
 
 
 async def test_redirect_to_unsafe_loopback_is_not_followed(monkeypatch):
@@ -58,24 +63,16 @@ async def test_redirect_to_unsafe_loopback_is_not_followed(monkeypatch):
 
     The original code used follow_redirects=True, so httpx would connect to
     the redirect target without re-checking it -> SSRF. The fix follows
-    redirects manually and re-runs _build_pinned_request (which validates the
-    target against the SSRF blocklist) on every hop, so an unsafe hop raises.
+    redirects manually and re-runs the pin rule (which validates the target
+    against the SSRF blocklist) on every hop, so an unsafe hop raises.
     """
     requested, _seen = _scripted_pool(
         monkeypatch,
         [MockResponse(302, {"location": "http://127.0.0.1:9/secret"})],
     )
 
-    # Simulate the SSRF check: block anything pointing at loopback.
-    def fake_build(url, headers, *, policy):
-        if "127.0.0.1" in url:
-            raise ValueError(f"SSRF: blocked target {url}")
-        return url, dict(headers)
-
-    monkeypatch.setattr(pinned_mod, "_build_pinned_request", fake_build)
-
     with pytest.raises(ValueError):
-        await run_default_http_fetcher("http://public.example/")
+        await run_default_http_fetcher("http://public.example/", pin=_reject_loopback)
 
     # Only the initial (safe) URL was fetched; the unsafe redirect target was
     # validated and rejected before any second request was issued.
@@ -92,9 +89,7 @@ async def test_redirect_to_safe_target_is_followed(monkeypatch):
         ],
     )
     # Treat every host as safe so the loop can follow.
-    _allow_every_host(monkeypatch)
-
-    result = await run_default_http_fetcher("http://public.example/")
+    result = await run_default_http_fetcher("http://public.example/", pin=_allow_every_host())
 
     assert result.status_code == 200
     assert result.body == b"<html>ok</html>"
@@ -116,9 +111,7 @@ async def test_redirect_loop_is_bounded_by_hop_limit(monkeypatch):
             for _ in range(pinned_mod._MAX_REDIRECT_HOPS + 1)
         ],
     )
-    _allow_every_host(monkeypatch)
-
-    result = await run_default_http_fetcher("http://public.example/")
+    result = await run_default_http_fetcher("http://public.example/", pin=_allow_every_host())
 
     # Terminates at the hop cap and returns the last 302 rather than looping.
     assert result.status_code == 302
