@@ -138,7 +138,33 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   running into the next test's teardown, which replaces the app's process-global
   shutdown event. Teardown now drains the crawls the fixture handed out.
 
+### Fixed
+- **A shutdown releases the extraction pools; it no longer retires extraction.**
+  `shutdown_doc_extraction_executor` is wired into the app lifespan and called
+  `shutdown()` on a module-global executor that was built once at import and
+  never rebuilt, so every later selector evaluation raised `cannot schedule new
+  futures after shutdown`. Since the shutdown rides on the lifespan, any caller
+  that started and stopped the app once killed extraction for the rest of the
+  process; in the suite it made the result depend on test ordering, and only a
+  randomized run ever exposed it. The sibling `_DOC_POOL` in the same module
+  already had the right shape — built on demand, torn down to `None`, rebuilt by
+  the next caller — and the thread pool's `if _EXTRACTION_EXECUTOR is not None`
+  guard could never be false, because nothing ever assigned `None` to it. Two
+  pools in one module disagreed about what shutdown means and only one was safe
+  to call twice, so the thread pool now gets the process pool's contract.
+
 ### Changed
+- **A private name is now gated at the package boundary, and 21 names that
+  crossed it were promoted.**
+  A leading underscore means package-internal, which is what lets a reader trust
+  a name they can see — but nothing enforced it, so any new cross-package
+  private import was accepted silently. The rule asks only whether an import
+  crosses a package boundary and ignores the name entirely, which keeps it total
+  and readable; the 28 sibling reaches *inside* one package are what the
+  convention permits and are untouched. Two offenders could not simply lose
+  their underscore: `_content_cache_key` lives in `content_cache_key.py` and
+  became `build_content_cache_key`, and `_make_engine_result` shares its stem
+  with a different test fixture builder and became `build_engine_result`.
 - **Every caller-supplied collection on the policy is now bounded, and every caller-supplied key vocabulary is closed.**
   `strategies` was the last uncapped collection on `CrawlPolicy` while its
   siblings all had ceilings (`urls` 500, `headers` 64, `credentials` 32,
