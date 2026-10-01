@@ -2,13 +2,13 @@ import app.crawl.extraction as _extraction_module
 from app.crawl.document_text import (
     _collect_document_item_lines,
     _document_item_range,
-    _format_extracted_document_text,
     _is_document_item_marker,
     _is_document_non_item_section,
     _join_document_paragraph_lines,
     _looks_like_document_heading,
     _next_non_empty_document_line,
     _should_join_document_paragraph,
+    format_extracted_document_text,
 )
 from app.crawl.extraction import (
     detect_pagination as _detect_pagination_with_policy,
@@ -25,7 +25,7 @@ from app.crawl.strategies.document import (
     _default_document_text_extractor as _default_document_text_extractor_with_policy,
 )
 from app.crawl.strategies.document import _format_table
-from app.crawl.strategies.fetchers import _default_http_fetcher as _default_http_fetcher_with_policy
+from app.crawl.strategies.fetchers import default_http_fetcher as _default_http_fetcher_with_policy
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY
 
 
@@ -88,18 +88,18 @@ def doc_worker_acquisitions(monkeypatch):
     return acquisitions
 
 
-async def _default_http_fetcher(*args, policy=UNRESTRICTED_HOST_POLICY, **kwargs):
+async def default_http_fetcher(*args, policy=UNRESTRICTED_HOST_POLICY, **kwargs):
     return await _default_http_fetcher_with_policy(*args, policy=policy, **kwargs)
 
 
 __all__ = [
     "_collect_document_item_lines",
     "_default_document_text_extractor",
-    "_default_http_fetcher",
+    "default_http_fetcher",
     "detect_pagination",
     "_document_item_range",
     "extract_discovered_links",
-    "_format_extracted_document_text",
+    "format_extracted_document_text",
     "_format_table",
     "html_diagnostics",
     "_is_document_item_marker",

@@ -92,7 +92,17 @@ class Selectors:
 
 # Shared thread pool for extraction tasks to avoid thread leaks.
 # Bounded to 4 workers to limit resource consumption.
+#
+# Built on demand and torn down to ``None`` by
+# ``shutdown_doc_extraction_executor``, exactly as the process pool beside it
+# behaves: a shutdown means "not right now", not "this module is finished". An
+# executor built once at import and shut down in place is a tombstone -- every
+# later selector evaluation raises ``cannot schedule new futures after
+# shutdown`` -- and because the shutdown is wired into the app lifespan, any
+# caller that starts and stops the app once kills extraction for the rest of the
+# process.
 _EXTRACTION_EXECUTOR = concurrent.futures.ThreadPoolExecutor(max_workers=4, thread_name_prefix="extraction")
+
 
 # Default 2 keeps memory bounded: each worker loads markitdown + parsers and the
 # production container runs with a 3g mem limit (compose pins `mem_limit: 3g`).
@@ -470,7 +480,7 @@ _DOC_ACQUIRE_RECHECK_SECONDS = 1.0
 # #mem-guard: a markitdown worker process shares the container cgroup; an
 # unbounded document can balloon it past the memory ceiling. Cap the input
 # size and allow deployments to disable subprocess extraction entirely.
-_EXTRACTION_DOC_MAX_INPUT_BYTES = get_env_int("CRAWLUTRON_EXTRACTION_DOC_MAX_BYTES", 20 * 1024 * 1024, lo=1)
+EXTRACTION_DOC_MAX_INPUT_BYTES = get_env_int("CRAWLUTRON_EXTRACTION_DOC_MAX_BYTES", 20 * 1024 * 1024, lo=1)
 
 # Maximum extracted markdown size (chars) to prevent unbounded output.
 _MAX_EXTRACTED_MARKDOWN = 5 * 1024 * 1024  # 5 MB
@@ -806,10 +816,10 @@ def extract_document(body: bytes, url: str | None) -> ExtractedContent:
     """
     if not _document_extraction_enabled():
         return ExtractedContent(None, None)
-    if len(body) > _EXTRACTION_DOC_MAX_INPUT_BYTES:
+    if len(body) > EXTRACTION_DOC_MAX_INPUT_BYTES:
         logger.warning(
             "extraction_document_too_large",
-            extra={"size_bytes": len(body), "max_bytes": _EXTRACTION_DOC_MAX_INPUT_BYTES},
+            extra={"size_bytes": len(body), "max_bytes": EXTRACTION_DOC_MAX_INPUT_BYTES},
         )
         return ExtractedContent(None, None)
 

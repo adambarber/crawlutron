@@ -30,7 +30,7 @@ _META_MAP = {
 # the reason THIS parse needs one.
 
 
-def _extract_llm_metadata(html: str, url: str) -> dict[str, Any]:
+def extract_llm_metadata(html: str, url: str) -> dict[str, Any]:
     """Extract Page metadata from HTML meta tags.
 
     # Parse the HTML once with lxml and read every field (title, meta

@@ -17,7 +17,7 @@ from app.api_models import CrawlPolicy
 from app.constants import DEFAULT_MAX_CONTENT_LENGTH_BYTES, DISCOVERY_BODY_MAX_BYTES
 from app.crawl.decompression import decompress_body as _decompress_body
 from app.crawl.policy import discovery_flags
-from app.crawl.result_helpers import _classify_error_code
+from app.crawl.result_helpers import classify_error_code
 from app.crawl.strategies.body_decode import decode_body
 from app.models import HttpFetcher
 from app.validation import HostPolicy, public_url_or_none
@@ -65,7 +65,7 @@ async def fetch_with_retries(
                 response = await response
             return response, {"attempts": attempt, "transient_errors": transient_errors}
         except Exception as error:
-            transient_errors.append(_classify_error_code(error))
+            transient_errors.append(classify_error_code(error))
             if attempt >= max_attempts:
                 raise
             # Back off between attempts (capped exponential) so a failing
@@ -216,7 +216,7 @@ async def discovery_diagnostics(
             )
         except Exception as error:
             diagnostics["robots"] = _robots_diagnostics(
-                "evaluated", url=robots_url, error=_classify_error_code(error)
+                "evaluated", url=robots_url, error=classify_error_code(error)
             )
     sitemap_urls: list[str] = []
     if flags.sitemaps:

@@ -231,7 +231,7 @@ STRATEGY_RUNNERS_ARE_CALLED_UNDER_A_GUARD = Rule(
         "    try:\n"
         "        return await _run_http_strategy(context, strategy)\n"
         "    except Exception as error:\n"
-        "        return _engine_result_from_exception(error=error)\n",
+        "        return engine_result_from_exception(error=error)\n",
         # The guard is satisfied by an enclosing try too, not only a sibling one.
         "async def _execute_strategy(context, strategy):\n"
         "    try:\n"
@@ -245,7 +245,7 @@ STRATEGY_RUNNERS_ARE_CALLED_UNDER_A_GUARD = Rule(
         "        try:\n"
         "            return await self._run_browser_strategy(strategy)\n"
         "        except Exception as error:\n"
-        "            return _engine_result_from_exception(error=error)\n",
+        "            return engine_result_from_exception(error=error)\n",
     ),
 )
 

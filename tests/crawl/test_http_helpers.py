@@ -20,9 +20,9 @@ from app.crawl.cache import HttpCache
 from app.crawl.document_text import (
     _collect_document_item_lines,
     _document_item_range,
-    _format_extracted_document_text,
     _next_non_empty_document_line,
     _should_join_document_paragraph,
+    format_extracted_document_text,
 )
 from app.crawl.engine import (
     _payload_policy,
@@ -42,11 +42,11 @@ from app.crawl.strategies.fetch_policy import (
     retry_after_seconds,
     retry_backoff_seconds,
 )
-from app.crawl.strategies.http import _http_strategy_result
+from app.crawl.strategies.http import http_strategy_result
 from app.crawl.strategies.request_profile import (
     _cookie_header_for_url,
-    _headers_for_strategy,
     _select_fingerprint,
+    headers_for_strategy,
 )
 from app.settings import CrawlerSettings
 from app.validation import HostPolicy
@@ -148,12 +148,12 @@ class TestValidationHelpers:
 class TestHeaderHelpers:
     def test_mobile_safari_user_agent(self) -> None:
         policy = {"request_profile": {"user_agent_family": "mobile_safari"}, "headers": {}}
-        headers = _headers_for_strategy(HTTP_DECLARED_CRAWLER, read_policy(policy), "http://x/")
+        headers = headers_for_strategy(HTTP_DECLARED_CRAWLER, read_policy(policy), "http://x/")
         assert "iPhone" in headers["User-Agent"]
 
     def test_configured_user_agent_overrides_identity(self, monkeypatch) -> None:
         monkeypatch.setenv("CRAWLUTRON_USER_AGENT", "crawler-test/1")
-        headers = _headers_for_strategy(HTTP_DECLARED_CRAWLER, read_policy({"headers": {}}), "http://x/")
+        headers = headers_for_strategy(HTTP_DECLARED_CRAWLER, read_policy({"headers": {}}), "http://x/")
         assert headers["User-Agent"] == "crawler-test/1"
 
     def test_cookie_header_invalid_structures(self) -> None:
@@ -230,7 +230,7 @@ class TestPureParsing:
 
     def test_format_extracted_document_text_range_action(self) -> None:
         text = "1a - 1c Approve\n1a.\nBuild the thing\n1b.\nFix the bug\n1c.\nShip it"
-        out = _format_extracted_document_text(text, source_url="http://x/")
+        out = format_extracted_document_text(text, source_url="http://x/")
         assert "Approve" in out
 
     def test_should_join_document_paragraph_heading(self) -> None:
@@ -303,7 +303,7 @@ async def _run_http_result(
     final_url=_PAGE_URL,
     policy=None,
 ):
-    """Drive the real ``_http_strategy_result`` over a default single-page policy.
+    """Drive the real ``http_strategy_result`` over a default single-page policy.
 
     Module-level rather than a method on the class that owns most of the callers,
     because the discovery-diagnostics tests below need the same drive and were
@@ -333,7 +333,7 @@ async def _run_http_result(
     # holding a value its own bounds would have rejected.
     base = make_base_policy()
     pol = read_policy({**base.model_dump(), **policy}) if policy else base
-    return await _http_strategy_result(
+    return await http_strategy_result(
         request=strategy_request("http://example.com/", pol, strategy),
         http_fetcher=fetcher,
     )
@@ -625,7 +625,7 @@ class TestFingerprintInjectionRotation:
     def test_fingerprint_rotation_changes_accept_language_per_domain(self):
         base = {"request_profile": {"fingerprint_rotation": True}, "headers": {}}
         langs = {
-            d: _headers_for_strategy("HTTP_DECLARED_CRAWLER", read_policy(base), f"http://{d}/")[
+            d: headers_for_strategy("HTTP_DECLARED_CRAWLER", read_policy(base), f"http://{d}/")[
                 "Accept-Language"
             ]
             for d in ("a.com", "b.com", "c.com", "d.com", "e.com")
@@ -633,13 +633,13 @@ class TestFingerprintInjectionRotation:
         # Across 5 distinct hosts the built-in pool (size 5) yields variety
         assert len(set(langs.values())) > 1
         # Same host is stable
-        again = _headers_for_strategy("HTTP_DECLARED_CRAWLER", read_policy(base), "http://a.com/")[
+        again = headers_for_strategy("HTTP_DECLARED_CRAWLER", read_policy(base), "http://a.com/")[
             "Accept-Language"
         ]
         assert again == langs["a.com"]
 
     def test_default_request_has_no_fingerprint_rotation(self):
-        headers = _headers_for_strategy(
+        headers = headers_for_strategy(
             "HTTP_DECLARED_CRAWLER",
             read_policy({"request_profile": {}, "headers": {}}),
             "http://x/",
@@ -649,14 +649,14 @@ class TestFingerprintInjectionRotation:
 
     def test_fingerprint_injected_user_agent_lands_in_headers(self):
         profile = {"request_profile": {"user_agents": ["Rotated-UA-1", "Rotated-UA-2"]}, "headers": {}}
-        h1 = _headers_for_strategy("HTTP_DECLARED_CRAWLER", read_policy(profile), "http://a.com/")
-        h2 = _headers_for_strategy("HTTP_DECLARED_CRAWLER", read_policy(profile), "http://b.com/")
+        h1 = headers_for_strategy("HTTP_DECLARED_CRAWLER", read_policy(profile), "http://a.com/")
+        h2 = headers_for_strategy("HTTP_DECLARED_CRAWLER", read_policy(profile), "http://b.com/")
         assert h1["User-Agent"] == "Rotated-UA-1"
         assert h2["User-Agent"] == "Rotated-UA-2"
 
     def test_explicit_headers_still_override_fingerprint(self):
         profile = {"request_profile": {"user_agents": ["Rotated-UA-1"]}, "headers": {"User-Agent": "forced"}}
-        h = _headers_for_strategy("HTTP_DECLARED_CRAWLER", read_policy(profile), "http://a.com/")
+        h = headers_for_strategy("HTTP_DECLARED_CRAWLER", read_policy(profile), "http://a.com/")
         assert h["User-Agent"] == "forced"
 
 
@@ -685,7 +685,7 @@ class TestFetchHelpersEdges:
         )
 
     def test_headers_cffi_impersonate(self):
-        headers = _headers_for_strategy(
+        headers = headers_for_strategy(
             HTTP_CFFI_IMPERSONATE,
             read_policy({"request_profile": {}, "headers": {}}),
             "http://e.com/",
@@ -697,7 +697,7 @@ class TestFetchHelpersEdges:
         assert "Firefox" in headers["User-Agent"]
 
     def test_headers_cookie_added(self):
-        headers = _headers_for_strategy(
+        headers = headers_for_strategy(
             HTTP_DECLARED_CRAWLER,
             read_policy(
                 {
@@ -756,7 +756,7 @@ class TestAcceptEncodingAdvertisesOnlyWhatWeCanDecode:
     """
 
     def test_br_is_advertised(self):
-        headers = _headers_for_strategy(HTTP_DECLARED_CRAWLER, read_policy({"headers": {}}), "http://e.com/")
+        headers = headers_for_strategy(HTTP_DECLARED_CRAWLER, read_policy({"headers": {}}), "http://e.com/")
         assert "br" in headers["Accept-Encoding"]
 
     def test_every_advertised_encoding_is_always_decodable(self):
@@ -781,6 +781,6 @@ class TestAcceptEncodingAdvertisesOnlyWhatWeCanDecode:
         # nothing outside the decoder set, so a future token cannot slip in.
         from app.crawl.decompression import _DECODABLE_ENCODINGS
 
-        headers = _headers_for_strategy(HTTP_DECLARED_CRAWLER, read_policy({"headers": {}}), "http://e.com/")
+        headers = headers_for_strategy(HTTP_DECLARED_CRAWLER, read_policy({"headers": {}}), "http://e.com/")
         advertised = {token.strip() for token in headers["Accept-Encoding"].split(",")}
         assert advertised <= _DECODABLE_ENCODINGS

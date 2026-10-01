@@ -18,7 +18,7 @@ from app.crawl.job_store import FrontierEntry, durable_page_identity, job_max_pa
 from app.crawl.policy import PolicyTier, discovery_flags, read_policy
 from app.crawl.robots import load_robots_rules, robots_allows, robots_origin
 from app.crawl.scope_match import scope_allows
-from app.crawl.strategies.fetchers import _default_http_fetcher
+from app.crawl.strategies.fetchers import default_http_fetcher
 from app.models import NormalizedUrl
 from app.safe_regex import BoundedPattern, UnsafePattern, compile_untrusted
 from app.scheduler import DomainScheduler
@@ -341,7 +341,7 @@ class RobotsGate:
     async def _rules(self, url: str) -> tuple[list[tuple[bool, str]], float | None]:
         rules, _sitemaps, delay = await load_robots_rules(
             robots_origin(url, policy=self._host_policy),
-            partial(_default_http_fetcher, policy=self._host_policy),
+            partial(default_http_fetcher, policy=self._host_policy),
             self._timeout_seconds,
             fetch_and_decode=(
                 _fetch_and_decode if _fetch_and_decode is not _DEFAULT_FETCH_AND_DECODE else None
@@ -592,7 +592,7 @@ async def fetch_job_sitemap_candidates(root_url: str, context: JobAdmissionConte
     canonical = urlsplit(canonical_root)
     sitemap_url = f"{canonical.scheme}://{canonical.netloc}/sitemap.xml"
     found = await fetch_sitemap_urls(
-        partial(_default_http_fetcher, policy=context.host_policy),
+        partial(default_http_fetcher, policy=context.host_policy),
         sitemap_url,
         context.timeout_seconds,
         host_policy=context.host_policy,

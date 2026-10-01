@@ -44,7 +44,7 @@ from app.constants import (
 from app.constants import (
     is_analytics_host as _is_analytics_url,
 )
-from app.crawl.result_helpers import _classify_error_code, _terminal_crawl_result
+from app.crawl.result_helpers import classify_error_code, terminal_crawl_result
 from app.crawl.strategies.browser_actions import (
     LAZY_SCROLL_DELAY_SECONDS,
     LAZY_SCROLL_STEPS,
@@ -587,7 +587,7 @@ class BrowserRenderer(BrowserActionsMixin):
                 classification: Literal["navigation_timeout", "unknown_error"] = (
                     "navigation_timeout" if isinstance(error, TimeoutError) else "unknown_error"
                 )
-                last_error = _classify_error_code(error)
+                last_error = classify_error_code(error)
                 await self._release_browser()
                 if attempts >= max_attempts:
                     return self._failure_result(
@@ -1109,7 +1109,7 @@ class BrowserRenderer(BrowserActionsMixin):
         started: float,
         error: CrawlError | None,
     ) -> CrawlResult:
-        return _terminal_crawl_result(
+        return terminal_crawl_result(
             url=url,
             status=status,
             classification=classification,

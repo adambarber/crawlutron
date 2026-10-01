@@ -14,7 +14,7 @@ from unittest.mock import patch
 
 from app.crawl.strategies import http_client_pool as pool_mod
 from app.crawl.strategies import pinned_transport as pinned_mod
-from app.crawl.strategies.fetchers import _default_http_fetcher
+from app.crawl.strategies.fetchers import default_http_fetcher
 from app.validation import HostPolicy
 
 
@@ -48,7 +48,7 @@ def test_final_url_uses_hostname_not_pinned_ip():
     ):
         gc.return_value.stream.return_value = fake
         result = asyncio.run(
-            _default_http_fetcher(
+            default_http_fetcher(
                 "http://example.com/page",
                 {},
                 5,

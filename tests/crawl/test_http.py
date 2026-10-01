@@ -4,10 +4,10 @@ from functools import partial
 
 from app.constants import EXTRACTION_FULL, HTTP_DECLARED_CRAWLER
 from app.crawl.cache import HttpCache
-from app.crawl.result_helpers import _crawl_result_from_engine_result
+from app.crawl.result_helpers import crawl_result_from_engine_result
 from app.crawl.strategies.fetch_policy import looks_like_binary_body
-from app.crawl.strategies.fetchers import _default_http_fetcher
-from app.crawl.strategies.http import _http_strategy_result
+from app.crawl.strategies.fetchers import default_http_fetcher
+from app.crawl.strategies.http import http_strategy_result
 from app.models import CrawlStrategyAttempt
 from app.validation import HostPolicy
 from tests._assertions import assert_result_success
@@ -20,7 +20,7 @@ from tests._fetcher_factories import (
 )
 
 _default_http_fetcher_with_policy = partial(
-    _default_http_fetcher,
+    default_http_fetcher,
     policy=HostPolicy.unrestricted(),
 )
 
@@ -53,7 +53,7 @@ async def _run(
     http_fetcher=_default_http_fetcher_with_policy,
     **kwargs,
 ):
-    """Drive the real ``_http_strategy_result`` for one page.
+    """Drive the real ``http_strategy_result`` for one page.
 
     The page identity is one argument here rather than five, so a test that
     means to crawl ``/a`` and asserts against ``/b`` cannot be written by
@@ -69,7 +69,7 @@ async def _run(
     transport passes the argument; it does not restate the two it did not mean
     to change.
     """
-    return await _http_strategy_result(
+    return await http_strategy_result(
         request=strategy_request(url, http_policy() if policy is None else policy, strategy),
         http_fetcher=http_fetcher,
         **kwargs,
@@ -336,7 +336,7 @@ async def test_a_binary_body_result_keeps_its_attempt_type_for_the_render_adapte
     assert result.attempted_strategies[0].elapsed_ms > 0
 
     # And the adapter that reads those attributes must not raise.
-    adapted = _crawl_result_from_engine_result(result, url="http://x.test/")
+    adapted = crawl_result_from_engine_result(result, url="http://x.test/")
     assert adapted.classification == "binary_no_text"
     assert adapted.elapsed_ms == result.attempted_strategies[0].elapsed_ms
     assert adapted.attempts == len(result.attempted_strategies)

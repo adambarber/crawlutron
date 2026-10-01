@@ -19,7 +19,7 @@ import app.crawl.content_cache as cc
 from app.constants import HTTP_DECLARED_CRAWLER
 from app.crawl.cache import HttpCache
 from app.crawl.content_cache import ContentCache
-from app.crawl.strategies.fetchers import _default_http_fetcher
+from app.crawl.strategies.fetchers import default_http_fetcher
 from app.validation import HostPolicy
 from tests._fetcher_factories import (
     clocked_cache,
@@ -68,7 +68,7 @@ def etag_case(tmp_path, etag_server):
     return (
         f"http://127.0.0.1:{port}/",
         {"strategies": [HTTP_DECLARED_CRAWLER], "extraction": "full", "headers": {}},
-        tap_fetcher(partial(_default_http_fetcher, policy=HostPolicy.unrestricted())),
+        tap_fetcher(partial(default_http_fetcher, policy=HostPolicy.unrestricted())),
         HttpCache(),
         ContentCache(tmp_path),
     )
@@ -260,7 +260,7 @@ def real_fetcher(calls: list[str] | None = None):
     Every integration below is about what the *real* transport did, so the
     fetcher is production's own; only the observation is test-owned.
     """
-    fetcher = partial(_default_http_fetcher, policy=HostPolicy.unrestricted())
+    fetcher = partial(default_http_fetcher, policy=HostPolicy.unrestricted())
     return fetcher if calls is None else tap_fetcher(fetcher, calls)
 
 

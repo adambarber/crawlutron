@@ -6,7 +6,7 @@ time globally and per domain, no fixed delay -- so the pairs of them are the
 pairs that drift, and a test that needs ``circuit_cooldown=0`` silently
 re-asserts production's 600-second default everywhere it does not ask for it.
 The failure envelope: the shape a broken job is handed back is the crawl
-pipeline's, and it is the pipeline's own ``_failed_result_for`` that decides it.
+pipeline's, and it is the pipeline's own ``failed_result_for`` that decides it.
 The delivery channel: ``on_result`` is where a crawl spills a result to disk, so
 "the sink misbehaved" is a scenario several tests set up, and each of them was
 spelling the same callback, the same log capture and the same run call.
@@ -14,7 +14,7 @@ spelling the same callback, the same log capture and the same run call.
 
 from typing import TypeVar
 
-from app.crawl.result_helpers import _failed_result_for
+from app.crawl.result_helpers import failed_result_for
 from app.models import CrawlJob, CrawlTask, EngineCrawlResult
 from app.scheduler import DomainScheduler
 from tests._result_builders import make_result
@@ -80,14 +80,14 @@ async def ok_worker(job: _EnvelopeJob) -> EngineCrawlResult:
 def engine_envelope(job: _EnvelopeJob, error: BaseException) -> EngineCrawlResult:
     """The crawl pipeline's real failure envelope.
 
-    Routes through the production ``_failed_result_for`` chokepoint rather than
+    Routes through the production ``failed_result_for`` chokepoint rather than
     re-building an envelope here: the classification, redaction and
     ``normalized_url`` fallback are that function's contract, and a test-local
     copy would silently drift from it (it already did twice). The URL accessor
     is supplied here for the same reason production supplies one -- the two job
     shapes carry it under different names.
     """
-    return _failed_result_for(job, error, url_of=_job_url)
+    return failed_result_for(job, error, url_of=_job_url)
 
 
 class FailingSink:

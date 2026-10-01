@@ -7,7 +7,7 @@ import httpx
 import pytest
 
 from app.crawl.strategies import pinned_transport as http_mod
-from app.crawl.strategies.fetchers import _default_http_fetcher
+from app.crawl.strategies.fetchers import default_http_fetcher
 from app.validation import HostPolicy
 
 
@@ -39,7 +39,7 @@ async def test_http_fetcher_offloads_build_pinned_request_to_thread(monkeypatch)
     # blind Exception: a DNS or policy failure would raise a different type, and
     # that difference is what makes this test about offloading at all.
     with pytest.raises(httpx.ConnectError):
-        await _default_http_fetcher(
+        await default_http_fetcher(
             "http://example.com/",
             {},
             timeout_seconds=2,

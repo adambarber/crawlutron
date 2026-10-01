@@ -25,7 +25,7 @@ from app.timeouts import Timeouts
 from app.validation import HostPolicy
 
 
-async def _default_http_fetcher(
+async def default_http_fetcher(
     url: str,
     headers: dict[str, str],
     timeout_seconds: int,
@@ -41,7 +41,7 @@ async def _default_http_fetcher(
     entry point -- ``_default_cffi_fetcher`` -- which meant the contract's five
     parameters had to be spelled twice, and the twin could only be kept honest
     by a guard that walked the tree. The engine now binds the preference instead
-    of the signature: ``partial(_default_http_fetcher, policy=..., impersonate=True)``
+    of the signature: ``partial(default_http_fetcher, policy=..., impersonate=True)``
     is a different *binding* of the same callable, so a parameter can no longer
     be added to one role and missed on the other, because there is only one role
     and one spelling left.
@@ -176,7 +176,7 @@ async def _cffi_fetch(
     *,
     policy: HostPolicy,
 ) -> HttpFetchResult | None:
-    """The curl_cffi transport behind ``_default_http_fetcher(impersonate=True)``.
+    """The curl_cffi transport behind ``default_http_fetcher(impersonate=True)``.
 
     TLS-fingerprint-impersonated, mirroring the httpx transport including its
     SSRF-safe manual redirect handling and sensitive-header stripping on
@@ -322,7 +322,7 @@ def impersonating_fetcher(policy: HostPolicy) -> HttpFetcher:
     transport "the cffi fetcher" meant. One factory is the one place that
     decision is made.
     """
-    return functools.partial(_default_http_fetcher, policy=policy, impersonate=True)
+    return functools.partial(default_http_fetcher, policy=policy, impersonate=True)
 
 
 def _cffi_too_large_result(url: str, current_url: str, response: Any, elapsed_ms: int) -> HttpFetchResult:

@@ -21,7 +21,7 @@ from pydantic import BaseModel, ValidationError
 from app.api.crawl_executor import execute_crawl
 from app.api.map_endpoint import map_site
 from app.api.render_endpoint import render as render_endpoint_handler
-from app.api.response_shaping import _aunified_response_from_result
+from app.api.response_shaping import aunified_response_from_result
 from app.api_models import (
     CrawlRequest,
     MapRequest,
@@ -143,7 +143,7 @@ async def _tool_result(coro) -> ToolResult:
 
 async def _crawled(payload: CrawlRequest, settings, shutdown_event):
     """Run the crawl endpoint and shape it, so the handler owns only the boundary."""
-    return await _aunified_response_from_result(
+    return await aunified_response_from_result(
         await execute_crawl(
             payload.model_dump(exclude_none=True),
             settings=settings,

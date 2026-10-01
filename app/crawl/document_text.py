@@ -10,7 +10,7 @@ testable in isolation.
 import re
 
 
-def _format_extracted_document_text(text: str, *, source_url: str) -> str:
+def format_extracted_document_text(text: str, *, source_url: str) -> str:
     """Normalize scraper-extracted document text for downstream annotation."""
     lines = [_clean_document_line(line) for line in text.splitlines()]
     records: list[str] = []

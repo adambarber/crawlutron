@@ -7,7 +7,7 @@ still bounds the body -- rather than letting ``int("abc")`` raise out of the
 fetch and turn one crafted response into that URL's failure.
 """
 
-from app.crawl.strategies.fetchers import _default_http_fetcher
+from app.crawl.strategies.fetchers import default_http_fetcher
 from app.crawl.strategies.pinned_transport import _declared_length_exceeds
 from app.validation import HostPolicy
 from tests._transport_doubles import MockResponse, patch_http_fetcher_transport
@@ -27,7 +27,7 @@ async def _fetch_behind_declared_length(monkeypatch, declared: str):
         [MockResponse(200, {"content-type": "text/html", "content-length": declared}, b"<html>ok</html>")],
         allow_ssrf_bypass=True,
     )
-    return await _default_http_fetcher(
+    return await default_http_fetcher(
         "http://example.com/",
         {},
         30,

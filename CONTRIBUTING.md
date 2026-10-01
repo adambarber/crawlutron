@@ -63,21 +63,21 @@ preference. `CODE_OF_CONDUCT.md` states the expectations in full.
 
 These require explicit review from a maintainer before merge:
 
-- `app/validation.py` — SSRF guard (`_check_ssrf_protection`,
-  `_resolve_and_pin_host`), URL normalization, `parse_bool_env` for
+- `app/validation.py` — SSRF guard (`check_ssrf_protection`,
+  `resolve_and_pin_host`), URL normalization, `parse_bool_env` for
   private-target opt-in, webhook URL validation.
 - `app/crawl/strategies/http.py` — DNS pinning / cookie isolation /
   redirect handling / `Host:` header rewriting / per-tenant cookie
-  namespace (`_COOKIE_NAMESPACE` ContextVar).
+  namespace (`COOKIE_NAMESPACE` ContextVar).
 - `app/crawl/strategies/browser.py` — browser SSRF / storage_state path
   validation / `_auto_accept_cookie_consent`.
 - `app/crawl/engine.py` — robots cache, recursive crawl caps,
-  `_parse_robots_rules` / `_parse_robots_crawl_delay` group matching
+  `parse_robots_rules` / `parse_robots_crawl_delay` group matching
   (must use `USER_AGENT_TOKEN`).
 - `app/crawl/strategies/browser_pool.py` — browser-pool sizing from
-  cgroup memory limits; ensure `_BROWSER_RAM_FRACTION` is honoured.
+  cgroup memory limits; ensure `BROWSER_RAM_FRACTION` is honoured.
 - `app/main.py` — middleware order, body-size limits, error envelopes,
-  webhook delivery (`_deliver_pinned_webhook`).
+  webhook delivery (`deliver_pinned_webhook`).
 - `app/output_formats.py` — CSV injection (`_csv_neutralize`),
   response serialization.
 - `app/settings.py` — defaults (paths, security knobs); changing a

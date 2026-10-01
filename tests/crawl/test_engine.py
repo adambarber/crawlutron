@@ -100,16 +100,16 @@ def test_seed_freshness_uses_real_default_strategies():
     from app.api_models import CrawlExtractionMethod
     from app.constants import HTTP_DECLARED_CRAWLER
     from app.crawl.engine import _parse_lastmod, _seed_is_fresh
-    from app.crawl.strategies.content_cache_key import _content_cache_key
-    from app.crawl.strategies.request_profile import _headers_for_strategy
+    from app.crawl.strategies.content_cache_key import build_content_cache_key
+    from app.crawl.strategies.request_profile import headers_for_strategy
 
     url = "http://seed-fresh.test/page"
     # Normalized shape but no strategies key: the default must apply.
     policy: dict[str, Any] = {"headers": {}, "request_profile": {}}
-    expected_key = _content_cache_key(
+    expected_key = build_content_cache_key(
         url,
         HTTP_DECLARED_CRAWLER,
-        _headers_for_strategy(HTTP_DECLARED_CRAWLER, read_policy(policy), url),
+        headers_for_strategy(HTTP_DECLARED_CRAWLER, read_policy(policy), url),
         CrawlExtractionMethod.FULL,
         None,
         None,

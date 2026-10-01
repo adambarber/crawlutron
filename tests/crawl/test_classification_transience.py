@@ -28,7 +28,7 @@ from app.constants import (
     CrawlClassification,
     is_transient_classification,
 )
-from app.crawl.result_helpers import _classify_error_code
+from app.crawl.result_helpers import classify_error_code
 
 
 class TestTransienceIsATaxonomyOwnedVerdict:
@@ -103,7 +103,7 @@ class TestClassifiedFailuresGetTheVerdictThatMatchesThem:
         ],
     )
     def test_classified_code_is_transient_except_value_error(self, exc, expected):
-        code = _classify_error_code(exc)
+        code = classify_error_code(exc)
         assert code == expected
         assert is_transient_classification(code) is (expected != "value_error")
 
@@ -113,8 +113,8 @@ class TestClassifiedFailuresGetTheVerdictThatMatchesThem:
         branch with connect/timeout failures. That is a dead taxonomy entry
         *and* a diagnostic that says "connection" when the name never resolved,
         so the two are split."""
-        assert _classify_error_code(socket.gaierror(-2, "Name or service not known")) == "dns_error"
-        assert _classify_error_code(socket.herror("no address associated with hostname")) == "dns_error"
+        assert classify_error_code(socket.gaierror(-2, "Name or service not known")) == "dns_error"
+        assert classify_error_code(socket.herror("no address associated with hostname")) == "dns_error"
 
     def test_dns_error_has_a_producer_in_app(self):
         """The guard for the defect itself: a declared member with no producer

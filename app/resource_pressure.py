@@ -440,7 +440,7 @@ _MAX_HTTP_CONCURRENCY = get_env_int("CRAWLUTRON_MAX_HTTP_CONCURRENCY", 512, lo=1
 # memory limit, centralized here (import-safe from settings) as the single source of
 # truth so the connection ceiling tracks the weighted admission's HTTP concurrency.
 _BROWSER_RAM_BYTES = get_env_int("CRAWLUTRON_BROWSER_RAM_BYTES", 700 * 1024 * 1024)
-_BROWSER_RAM_FRACTION = get_env_float("CRAWLUTRON_BROWSER_RAM_FRACTION", 0.5, lo=0.0, hi=1.0)
+BROWSER_RAM_FRACTION = get_env_float("CRAWLUTRON_BROWSER_RAM_FRACTION", 0.5, lo=0.0, hi=1.0)
 _MAX_DERIVED_POOL_SIZE = get_env_int("CRAWLUTRON_MAX_DERIVED_POOL_SIZE", 4)
 
 
@@ -483,7 +483,7 @@ def derive_browser_pool_size(limit_bytes: int | None = None) -> int:
     """Browser-pool size *for this process*, from the cgroup memory limit.
 
     Honors ``CRAWLUTRON_BROWSER_POOL_SIZE``; else derives so this process's
-    share of the fleet uses at most ``_BROWSER_RAM_FRACTION`` of RAM; falls back
+    share of the fleet uses at most ``BROWSER_RAM_FRACTION`` of RAM; falls back
     to 1 when no limit is discoverable. Shared by
     ``app.crawl.strategies.browser_pool`` and the httpx pool sizing so the
     connection ceiling tracks the admission's HTTP concurrency.
@@ -504,7 +504,7 @@ def derive_browser_pool_size(limit_bytes: int | None = None) -> int:
         # is the worse half of the bug: a large container would let N workers
         # each take the full cap, which is N times the number it names.
         cap = max(1, _MAX_DERIVED_POOL_SIZE // workers)
-        budget = int(limit * _BROWSER_RAM_FRACTION) // workers
+        budget = int(limit * BROWSER_RAM_FRACTION) // workers
         size = max(1, budget // _BROWSER_RAM_BYTES)
         return min(size, cap)
     return 1
@@ -544,7 +544,7 @@ def max_http_concurrency_for(
 class TaskRamBudget:
     """The per-task RAM weights admission sizing is derived from, as one value.
 
-    ``_build_admission_policy`` and ``max_http_concurrency_for`` sized a
+    ``build_admission_policy`` and ``max_http_concurrency_for`` sized a
     process's admission from the same four inputs, and the duplication was those
     two keyword-only parameter lists rather than any logic: the
     duplication was the argument list, not the arithmetic. Binding the list into
@@ -584,10 +584,10 @@ class AdmissionPolicy:
     # The fraction of RAM ``derive_browser_pool_size`` assumed the pool may
     # hold. The browser tier must not shrink against its own reserved usage;
     # only surplus usage beyond this fraction yields browser capacity.
-    browser_ram_fraction: float = _BROWSER_RAM_FRACTION
+    browser_ram_fraction: float = BROWSER_RAM_FRACTION
 
 
-def _build_admission_policy(
+def build_admission_policy(
     limit_bytes: int,
     *,
     pool_size: int,
@@ -632,7 +632,7 @@ def default_admission_policy(gate: ResourceGate) -> WeightedAdmission:
     limit = stats.total_bytes or (4 * 1024 * 1024 * 1024)
     return WeightedAdmission(
         gate,
-        _build_admission_policy(
+        build_admission_policy(
             limit,
             pool_size=2,
             max_concurrent_pages=3,

@@ -96,18 +96,18 @@ class TestApplyCredentials:
     def test_headers_for_strategy_attaches_only_the_matching_origin(self):
         """Integration through the real header assembly seam (the only
         consumer): seed URL gets the header, any other origin does not."""
-        from app.crawl.strategies.request_profile import _headers_for_strategy
+        from app.crawl.strategies.request_profile import headers_for_strategy
 
         policy = {
             "headers": {},
             "request_profile": {},
             "credentials": self._credentials(),
         }
-        scoped = _headers_for_strategy(
+        scoped = headers_for_strategy(
             "http_declared_crawler", read_policy(policy), "https://private.example/docs"
         )
         assert scoped["Authorization"] == "Bearer tok"
-        plain = _headers_for_strategy(
+        plain = headers_for_strategy(
             "http_declared_crawler", read_policy(policy), "https://public.example/docs"
         )
         assert "Authorization" not in plain

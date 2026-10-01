@@ -15,7 +15,7 @@ from tests._fetcher_factories import make_fetch, run_http_strategy
 class _CountingFetcher:
     """A fetcher that counts calls and always returns a fresh 200.
 
-    Stands in for the network boundary only; ``_http_strategy_result`` itself
+    Stands in for the network boundary only; ``http_strategy_result`` itself
     runs for real, so this exercises the production cache+revalidation control
     flow rather than a substituted shape.
 

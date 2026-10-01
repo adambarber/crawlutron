@@ -55,7 +55,7 @@ FUNNELS = [
     (
         "http-strategy",
         "run_http_strategy",
-        "async def f():\n return await _http_strategy_result(request=StrategyRequest(original_url=url, "
+        "async def f():\n return await http_strategy_result(request=StrategyRequest(original_url=url, "
         'normalized_url=url, strategy="HTTP_DECLARED_CRAWLER", policy=policy, '
         "host_policy=HostPolicy.unrestricted()), http_fetcher=fetcher)",
     ),
@@ -80,7 +80,7 @@ FUNNELS = [
     (
         "default-fetcher",
         "run_default_http_fetcher",
-        "async def f():\n return await _default_http_fetcher(url, {}, 30, policy=HostPolicy.unrestricted())",
+        "async def f():\n return await default_http_fetcher(url, {}, 30, policy=HostPolicy.unrestricted())",
     ),
     (
         "job-store",
@@ -227,7 +227,7 @@ def _http_strategy(node):
     fire again and the clone it exists to catch would be reported as clean.
     """
     for child in nodes_of(node):
-        if not isinstance(child, ast.Call) or _name(child.func) != "_http_strategy_result":
+        if not isinstance(child, ast.Call) or _name(child.func) != "http_strategy_result":
             continue
         words = {keyword.arg: keyword.value for keyword in child.keywords}
         request = words.get("request")
@@ -288,7 +288,7 @@ def _loop_rebind(node):
 def _default_fetcher(node):
     return any(
         isinstance(child, ast.Call)
-        and _name(child.func) == "_default_http_fetcher"
+        and _name(child.func) == "default_http_fetcher"
         and len(child.args) == 3
         and isinstance(child.args[1], ast.Dict)
         and _literal(child.args[2]) == 30

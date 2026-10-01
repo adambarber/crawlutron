@@ -4,7 +4,7 @@ import pytest
 
 from app.crawl.cache import HttpCache
 from app.crawl.engine import crawl_request
-from tests._extraction_helpers import _default_http_fetcher
+from tests._extraction_helpers import default_http_fetcher
 from tests._fetcher_factories import run_http_strategy
 from tests._policy_factories import _policy
 
@@ -15,7 +15,7 @@ class TestHttpBodyHandling:
         out = await run_http_strategy(
             url=base_url + "/with_lastmod",
             policy=_policy(),
-            http_fetcher=_default_http_fetcher,
+            http_fetcher=default_http_fetcher,
             cache=cache,
         )
         assert out.status == "success"
@@ -27,7 +27,7 @@ class TestHttpBodyHandling:
         out = await run_http_strategy(
             url=base_url + "/ratelimit",
             policy=_policy(),
-            http_fetcher=_default_http_fetcher,
+            http_fetcher=default_http_fetcher,
             cache=cache,
         )
         assert out.http_status == 429

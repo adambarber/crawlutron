@@ -43,7 +43,7 @@ if TYPE_CHECKING:
 # authorization boundary; that would need a trusted caller identity the service
 # does not have. Treat the namespace as a partitioning convention and put
 # authentication in front of the service if isolation is required.
-_COOKIE_NAMESPACE: contextvars.ContextVar[str] = contextvars.ContextVar(
+COOKIE_NAMESPACE: contextvars.ContextVar[str] = contextvars.ContextVar(
     "crawlutron_cookie_namespace", default=""
 )
 
@@ -249,7 +249,7 @@ def reset_process_state() -> None:
     in production, which is exactly the state a test then believes it found.
     """
     _GLOBAL_COOKIE_JAR.clear()
-    _COOKIE_NAMESPACE.set("")
+    COOKIE_NAMESPACE.set("")
 
 
 def has_process_state() -> bool:
@@ -258,4 +258,4 @@ def has_process_state() -> bool:
     # ``__bool__``, so every object is truthy and that expression is a constant
     # True. A probe stuck on True certifies nothing, so this reads the jar's own
     # cookie mapping instead of asking the jar to be honest about itself.
-    return bool(_GLOBAL_COOKIE_JAR._cookies) or _COOKIE_NAMESPACE.get() != ""
+    return bool(_GLOBAL_COOKIE_JAR._cookies) or COOKIE_NAMESPACE.get() != ""

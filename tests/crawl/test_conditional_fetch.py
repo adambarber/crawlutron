@@ -21,7 +21,7 @@ def _html(body: str) -> str:
 
 
 async def _run_http(fetcher, validators=None):
-    """Drive _http_strategy_result with the standard single-page policy."""
+    """Drive http_strategy_result with the standard single-page policy."""
     return await run_http_strategy(
         url="http://example.com/",
         policy={"strategies": ["HTTP_DECLARED_CRAWLER"], "limits": {}, "headers": {}},

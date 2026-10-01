@@ -13,11 +13,11 @@ from dataclasses import replace
 from typing import Any
 
 from app.constants import BROWSER_HEADED_WARMED, BROWSER_HEADLESS
-from app.crawl.result_helpers import _crawl_result_from_exception
+from app.crawl.result_helpers import crawl_result_from_exception
 from app.crawl.strategies.browser import BrowserRenderer
 from app.models import BrowserPoolExhaustedError, CrawlResult, CrawlStrategyName
 from app.resource_pressure import (
-    _BROWSER_RAM_FRACTION,
+    BROWSER_RAM_FRACTION,
 )
 from app.resource_pressure import (
     derive_browser_pool_size as _derive_browser_pool_size,
@@ -75,7 +75,7 @@ class BrowserPool:
             self._initialized = True
             logger.info(
                 "browser_pool_initialized",
-                extra={"pool_size": self._pool_size, "ram_fraction": _BROWSER_RAM_FRACTION},
+                extra={"pool_size": self._pool_size, "ram_fraction": BROWSER_RAM_FRACTION},
             )
 
     async def acquire(self, timeout: float | None = BROWSER_POOL_ACQUIRE_TIMEOUT_SECONDS) -> BrowserRenderer:
@@ -250,7 +250,7 @@ class PooledBrowserWorker:
             # re-queue. Return the contracted CrawlResult shape instead,
             # classified through the shared primitive so browser_pool_exhausted
             # with retryable=True survives to the frontier layer.
-            return _crawl_result_from_exception(
+            return crawl_result_from_exception(
                 error=error,
                 url=job.url,
                 domain=job.domain,

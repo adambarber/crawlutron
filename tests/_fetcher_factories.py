@@ -791,14 +791,14 @@ async def run_http_strategy(
     content_cache: Any = None,
     **extra: Any,
 ) -> Any:
-    from app.crawl.strategies.http import _http_strategy_result
+    from app.crawl.strategies.http import http_strategy_result
 
     kwargs: dict[str, Any] = {}
     if cache is not None:
         kwargs["cache"] = cache
     if content_cache is not None:
         kwargs["content_cache"] = content_cache
-    return await _http_strategy_result(
+    return await http_strategy_result(
         request=strategy_request(url, policy, HTTP_DECLARED_CRAWLER),
         http_fetcher=http_fetcher,
         **kwargs,
@@ -861,10 +861,10 @@ def make_html_fetcher(calls: list[str], body: bytes = b"<html><body>page content
 
 
 async def run_default_http_fetcher(url: str, headers=None):
-    from app.crawl.strategies.fetchers import _default_http_fetcher
+    from app.crawl.strategies.fetchers import default_http_fetcher
     from app.validation import HostPolicy
 
-    return await _default_http_fetcher(
+    return await default_http_fetcher(
         url, {} if headers is None else headers, 30, policy=HostPolicy.unrestricted()
     )
 

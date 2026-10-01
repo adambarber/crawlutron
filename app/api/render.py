@@ -15,10 +15,10 @@ from app.crawl.ids import new_request_id
 from app.crawl.payload_helpers import checked_payload_urls
 from app.crawl.render_options import resolve_render_options
 from app.crawl.result_helpers import (
-    _classify_error_code,
-    _crawl_result_from_engine_result,
-    _failed_result_for,
-    _terminal_crawl_result,
+    classify_error_code,
+    crawl_result_from_engine_result,
+    failed_result_for,
+    terminal_crawl_result,
 )
 from app.crawl.worker import call_worker
 from app.models import (
@@ -61,8 +61,8 @@ def _failed_render_result(job: CrawlJob, exc: BaseException) -> CrawlResult:
     ``/v1/render`` contract is built on, adapting through the same converter
     ``_collect`` uses so classification and redaction stay centralized.
     """
-    return _crawl_result_from_engine_result(
-        _failed_result_for(job, exc, url_of=lambda j: j.url),
+    return crawl_result_from_engine_result(
+        failed_result_for(job, exc, url_of=lambda j: j.url),
         url=job.url,
     )
 
@@ -129,7 +129,7 @@ async def render_request(
         # ``by_index`` holds only the contracted CrawlResult, whatever the
         # scheduler handed back.
         if not isinstance(result, CrawlResult):
-            result = _crawl_result_from_engine_result(result, url=urls[index])
+            result = crawl_result_from_engine_result(result, url=urls[index])
         by_index[index] = result
 
     async def _call_and_capture(job: CrawlJob) -> CrawlResult:
@@ -175,7 +175,7 @@ async def render_request(
             raise worker_errors[missing[0]]
         for index in missing:
             worker_error = worker_errors.get(index)
-            by_index[index] = _terminal_crawl_result(
+            by_index[index] = terminal_crawl_result(
                 url=urls[index],
                 status="failed",
                 classification="site_error",
@@ -185,7 +185,7 @@ async def render_request(
                 # The wire-visible error must be a stable classification, never
                 # raw exception text: to_dict is pure serialization, so str(exc)
                 # would leak DNS names / paths / secrets straight into the body.
-                error=_classify_error_code(worker_error) if worker_error is not None else "unknown_error",
+                error=classify_error_code(worker_error) if worker_error is not None else "unknown_error",
             )
 
     ordered_results = [by_index[index] for index in range(len(urls))]

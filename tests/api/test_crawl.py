@@ -273,7 +273,7 @@ class TestDiscoveryAndRenderApi:
         # through the incidental route the old raising fake exploited.
         import app.api.render_endpoint as render_endpoint
         from app.constants import BROWSER_HEADLESS
-        from app.crawl.result_helpers import _crawl_result_from_exception
+        from app.crawl.result_helpers import crawl_result_from_exception
         from app.crawl.strategies.browser_pool import BrowserPoolExhaustedError
 
         class _ExhaustedWorker:
@@ -284,7 +284,7 @@ class TestDiscoveryAndRenderApi:
                 try:
                     raise BrowserPoolExhaustedError("pool exhausted in test")
                 except Exception as error:
-                    return _crawl_result_from_exception(
+                    return crawl_result_from_exception(
                         error=error,
                         url=job.url,
                         domain=job.domain,

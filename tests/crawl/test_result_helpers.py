@@ -7,9 +7,9 @@ class TestResultHelpersEdges:
     """Cover remaining branches in result_helpers.py"""
 
     def test_binary_no_text_result(self):
-        from app.crawl.result_helpers import _binary_no_text_result
+        from app.crawl.result_helpers import binary_no_text_result
 
-        result = _binary_no_text_result(
+        result = binary_no_text_result(
             original_url="http://x/file.bin",
             normalized_url="http://x/file.bin",
             final_url="http://x/file.bin",
@@ -101,9 +101,9 @@ class TestTerminalCrawlResult:
     """
 
     def test_no_payload_and_carries_error_verbatim(self):
-        from app.crawl.result_helpers import _terminal_crawl_result
+        from app.crawl.result_helpers import terminal_crawl_result
 
-        result = _terminal_crawl_result(
+        result = terminal_crawl_result(
             url="http://x/page",
             status="failed",
             classification="site_error",

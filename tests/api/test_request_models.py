@@ -781,7 +781,7 @@ class TestRequestProfileCookiesCannotBypassTheNamespaceChokepoint:
 
     The ban's stated reason is that "the cookie jar owns Cookie; a raw header
     bypasses the cookie-namespace chokepoint". A caller-supplied nested dict
-    assembled into the same header at ``_headers_for_strategy`` is that bypass,
+    assembled into the same header at ``headers_for_strategy`` is that bypass,
     reached by a different door -- and the ban cannot see it, because it only
     inspects ``headers``.
 
@@ -856,7 +856,7 @@ class TestRequestProfileCookiesCannotBypassTheNamespaceChokepoint:
 
 
 class TestRequestProfileValueTypesMatchTheHeaderMapTheyCorrupt:
-    """``_headers_for_strategy`` is annotated ``-> dict[str, str]`` and is handed a ``dict[str, Any]``.
+    """``headers_for_strategy`` is annotated ``-> dict[str, str]`` and is handed a ``dict[str, Any]``.
 
     Nothing checked the value types, so a pool entry that is not a string lands
     in the header map the HTTP client is about to serialise:

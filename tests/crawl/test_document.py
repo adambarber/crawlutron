@@ -16,13 +16,13 @@ from tests._extraction_helpers import (
     _collect_document_item_lines,
     _default_document_text_extractor,
     _document_item_range,
-    _format_extracted_document_text,
     _is_document_item_marker,
     _is_document_non_item_section,
     _join_document_paragraph_lines,
     _looks_like_document_heading,
     _next_non_empty_document_line,
     _should_join_document_paragraph,
+    format_extracted_document_text,
 )
 from tests._fetcher_factories import run_http_strategy, scripted_fetcher
 
@@ -251,53 +251,53 @@ class TestDocumentExtractionEdges:
         # (empty text) instead of buffering the whole body.
         import app.crawl.extraction as extraction_mod
 
-        original_cap = extraction_mod._EXTRACTION_DOC_MAX_INPUT_BYTES
-        extraction_mod._EXTRACTION_DOC_MAX_INPUT_BYTES = 64
+        original_cap = extraction_mod.EXTRACTION_DOC_MAX_INPUT_BYTES
+        extraction_mod.EXTRACTION_DOC_MAX_INPUT_BYTES = 64
         try:
             text = _default_document_text_extractor(base_url + "/sample_table.pdf")
         finally:
-            extraction_mod._EXTRACTION_DOC_MAX_INPUT_BYTES = original_cap
+            extraction_mod.EXTRACTION_DOC_MAX_INPUT_BYTES = original_cap
         assert text == ""
 
 
 class TestDocumentTextParserEdges:
     def test_range_action(self):
-        out = _format_extracted_document_text(
+        out = format_extracted_document_text(
             "1a - 1c Approve\n1a.\nBuild the thing\n1b.\nFix the bug\n1c.\nShip it",
             source_url="http://x/",
         )
         assert "Action: Approve" in out
 
     def test_action(self):
-        out = _format_extracted_document_text(
+        out = format_extracted_document_text(
             "2a Approve all\n2a.\nDetail line",
             source_url="http://x/",
         )
         assert "Action: Approve all" in out
 
     def test_section_title(self):
-        out = _format_extracted_document_text(
+        out = format_extracted_document_text(
             "1.\nSection Title\nBody text",
             source_url="http://x/",
         )
         assert "1. Section Title" in out
 
     def test_item_numbered_continuation(self):
-        out = _format_extracted_document_text(
+        out = format_extracted_document_text(
             "3a.\n3. Build the thing\n4. Fix it",
             source_url="http://x/",
         )
         assert "3a. Build the thing" in out
 
     def test_non_item_section_skipped(self):
-        out = _format_extracted_document_text(
+        out = format_extracted_document_text(
             "PUBLIC PARTICIPATION\nWe welcome comments",
             source_url="http://x/",
         )
         assert "PUBLIC PARTICIPATION" not in out
 
     def test_prose_merge(self):
-        out = _format_extracted_document_text(
+        out = format_extracted_document_text(
             "First sentence here.\nSecond sentence here.",
             source_url="http://x/",
         )
@@ -305,14 +305,14 @@ class TestDocumentTextParserEdges:
         assert "Second sentence here." in out
 
     def test_heading_join_skipped(self):
-        out = _format_extracted_document_text(
+        out = format_extracted_document_text(
             "INTRODUCTION\nBody continues here",
             source_url="http://x/",
         )
         assert "INTRODUCTION" in out
 
     def test_comma_join(self):
-        out = _format_extracted_document_text(
+        out = format_extracted_document_text(
             "First clause here.\n, and more detail",
             source_url="http://x/",
         )
@@ -336,7 +336,7 @@ class TestDocumentTextParserEdges:
         assert nxt == 2
 
     def test_blank_line_skipped_in_formatter(self):
-        out = _format_extracted_document_text("Intro paragraph.\n\nSecond paragraph.", source_url="http://x/")
+        out = format_extracted_document_text("Intro paragraph.\n\nSecond paragraph.", source_url="http://x/")
         assert "Intro paragraph." in out
         assert "Second paragraph." in out
 

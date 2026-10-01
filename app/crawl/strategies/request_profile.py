@@ -16,7 +16,7 @@ from app.api_models import CrawlPolicy
 from app.constants import DEFAULT_USER_AGENT, HTTP_CFFI_IMPERSONATE
 from app.crawl.credentials import apply_credentials as _apply_credentials
 from app.crawl.strategies import cookie_jar
-from app.crawl.strategies.cookie_jar import _COOKIE_NAMESPACE
+from app.crawl.strategies.cookie_jar import COOKIE_NAMESPACE
 
 
 def cookie_namespace_for(profile: Mapping[str, Any]) -> str:
@@ -47,7 +47,7 @@ def _cookie_header_for_url(profile: Mapping[str, Any], url: str) -> str:
 
     # Persistent cookies from prior responses (optionally namespaced via the
     # profile or the per-request cookie namespace contextvar).
-    namespace = cookie_namespace_for(profile) or _COOKIE_NAMESPACE.get()
+    namespace = cookie_namespace_for(profile) or COOKIE_NAMESPACE.get()
     jar_header = cookie_jar._GLOBAL_COOKIE_JAR.cookie_header_for(url, namespace=namespace)
     if jar_header:
         parts.append(jar_header)
@@ -97,7 +97,7 @@ def _store_set_cookies(
     could not legally be handed.
     """
     if namespace is None:
-        namespace = _COOKIE_NAMESPACE.get()
+        namespace = COOKIE_NAMESPACE.get()
     # A transport multidict keeps repeated header names separate, which is the
     # only reason to read Set-Cookie through it; a plain dict has nothing to
     # keep separate, so it is read as-is. httpx.Headers arrives through the
@@ -179,7 +179,7 @@ def _accept_encoding() -> str:
     return "gzip, deflate, br"
 
 
-def _headers_for_strategy(
+def headers_for_strategy(
     strategy: str,
     policy: CrawlPolicy,
     url: str,

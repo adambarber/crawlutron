@@ -183,11 +183,6 @@ DECLARED: dict[str, Declaration] = {
         "Not yet triaged.\n",
         ["test"],
     ),
-    "app.api.response_shaping._aunified_response_from_result": _d(
-        "unreviewed",
-        "Not yet triaged.\n",
-        ["test"],
-    ),
     "app.api.response_shaping._failed_unified_result": _d(
         "unreviewed",
         "Not yet triaged.\n",
@@ -240,11 +235,6 @@ DECLARED: dict[str, Declaration] = {
         ["test"],
     ),
     "app.crawl.document_text._document_item_range": _d(
-        "unreviewed",
-        "Not yet triaged.\n",
-        ["test"],
-    ),
-    "app.crawl.document_text._format_extracted_document_text": _d(
         "unreviewed",
         "Not yet triaged.\n",
         ["test"],
@@ -331,9 +321,6 @@ DECLARED: dict[str, Declaration] = {
     "app.crawl.extraction._EXTRACTION_DOC_ACQUIRE_TIMEOUT": _d(
         _CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]
     ),
-    "app.crawl.extraction._EXTRACTION_DOC_MAX_INPUT_BYTES": _d(
-        _CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]
-    ),
     "app.crawl.extraction._EXTRACTION_DOC_TIMEOUT": _d(
         _CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]
     ),
@@ -407,11 +394,6 @@ DECLARED: dict[str, Declaration] = {
         ["test"],
     ),
     "app.crawl.job_store._Expected": _d(_CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]),
-    "app.crawl.llm_format._extract_llm_metadata": _d(
-        "unreviewed",
-        "Not yet triaged.\n",
-        ["test"],
-    ),
     "app.crawl.payload_helpers._payload_policy": _d(
         "unreviewed",
         "Not yet triaged.\n",
@@ -431,52 +413,12 @@ DECLARED: dict[str, Declaration] = {
     "app.crawl.result_helpers._CLASSIFICATION_BY_EXCEPTION": _d(
         _CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]
     ),
-    "app.crawl.result_helpers._binary_no_text_result": _d(
-        "unreviewed",
-        "Not yet triaged.\n",
-        ["test"],
-    ),
-    "app.crawl.result_helpers._classify_error_code": _d(
-        "unreviewed",
-        "Not yet triaged.\n",
-        ["test"],
-    ),
-    "app.crawl.result_helpers._crawl_result_from_engine_result": _d(
-        "unreviewed",
-        "Not yet triaged.\n",
-        ["test"],
-    ),
-    "app.crawl.result_helpers._crawl_result_from_exception": _d(
-        "unreviewed",
-        "Not yet triaged.\n",
-        ["test"],
-    ),
-    "app.crawl.result_helpers._engine_result_from_exception": _d(
-        "unreviewed",
-        "Not yet triaged.\n",
-        ["test"],
-    ),
     "app.crawl.result_helpers._failed_engine_result": _d(
         "unreviewed",
         "Not yet triaged.\n",
         ["test"],
     ),
-    "app.crawl.result_helpers._failed_result_for": _d(
-        "unreviewed",
-        "Not yet triaged.\n",
-        ["test"],
-    ),
-    "app.crawl.result_helpers._make_engine_result": _d(
-        "unreviewed",
-        "Not yet triaged.\n",
-        ["test"],
-    ),
     "app.crawl.result_helpers._skipped_engine_result": _d(
-        "unreviewed",
-        "Not yet triaged.\n",
-        ["test"],
-    ),
-    "app.crawl.result_helpers._terminal_crawl_result": _d(
         "unreviewed",
         "Not yet triaged.\n",
         ["test"],
@@ -582,20 +524,12 @@ DECLARED: dict[str, Declaration] = {
         "Not yet triaged.\n",
         ["test"],
     ),
-    "app.crawl.strategies.content_cache_key._content_cache_key": _d(
-        "unreviewed",
-        "Not yet triaged.\n",
-        ["test", "app"],
-    ),
     "app.crawl.strategies.content_cache_key._effective_max_content_length": _d(
         "unreviewed",
         "Not yet triaged.\n",
         ["test", "app"],
     ),
     "app.crawl.strategies.cookie_jar._COOKIE_JAR_MAX_HOSTS": _d(
-        _CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]
-    ),
-    "app.crawl.strategies.cookie_jar._COOKIE_NAMESPACE": _d(
         _CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]
     ),
     "app.crawl.strategies.cookie_jar._GLOBAL_COOKIE_JAR": _d(
@@ -628,16 +562,6 @@ DECLARED: dict[str, Declaration] = {
         _CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]
     ),
     "app.crawl.strategies.fetchers._cffi_fetch": _d(
-        "unreviewed",
-        "Not yet triaged.\n",
-        ["test"],
-    ),
-    "app.crawl.strategies.fetchers._default_http_fetcher": _d(
-        "unreviewed",
-        "Not yet triaged.\n",
-        ["test"],
-    ),
-    "app.crawl.strategies.http._http_strategy_result": _d(
         "unreviewed",
         "Not yet triaged.\n",
         ["test"],
@@ -755,11 +679,6 @@ DECLARED: dict[str, Declaration] = {
         "Not yet triaged.\n",
         ["test"],
     ),
-    "app.crawl.strategies.request_profile._headers_for_strategy": _d(
-        "unreviewed",
-        "Not yet triaged.\n",
-        ["test", "app"],
-    ),
     "app.crawl.strategies.request_profile._select_fingerprint": _d(
         "unreviewed",
         "Not yet triaged.\n",
@@ -823,9 +742,6 @@ DECLARED: dict[str, Declaration] = {
         "Not yet triaged.\n",
         ["test"],
     ),
-    "app.resource_pressure._BROWSER_RAM_FRACTION": _d(
-        _CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]
-    ),
     "app.resource_pressure._BROWSER_TASK_RAM_BYTES": _d(
         _CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]
     ),
@@ -837,11 +753,6 @@ DECLARED: dict[str, Declaration] = {
     ),
     "app.resource_pressure._MAX_DERIVED_POOL_SIZE": _d(
         _CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]
-    ),
-    "app.resource_pressure._build_admission_policy": _d(
-        "unreviewed",
-        "Not yet triaged.\n",
-        ["test"],
     ),
     "app.scheduler.DomainScheduler._purge_expired": _d(_PRIVATE_TYPE.kind, _PRIVATE_TYPE.reason, ["test"]),
     "app.scheduler._COOLDOWN_PURGE_INTERVAL": _d(_CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]),
@@ -871,11 +782,6 @@ DECLARED: dict[str, Declaration] = {
     ),
     "app.validation._PSL": _d(_CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]),
     "app.validation._host_is_public": _d(
-        "unreviewed",
-        "Not yet triaged.\n",
-        ["test"],
-    ),
-    "app.validation._is_public_ip_value": _d(
         "unreviewed",
         "Not yet triaged.\n",
         ["test"],

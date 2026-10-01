@@ -177,7 +177,7 @@ def normalize_public_http_url(url: str, *, policy: HostPolicy) -> NormalizedUrl:
     # because this function runs per anchor: the env decision
     # is keyed on its raw value (so any change is visible on the very next
     # call) and the host verdict is a pure function of the canonical host.
-    if not _allow_private_targets() and not _host_is_public(host):
+    if not allow_private_targets() and not _host_is_public(host):
         raise ValueError("private_network_target")
 
     default_port = 80 if parsed.scheme == "http" else 443
@@ -210,7 +210,7 @@ def _strip_trailing_colon(value: str) -> str:
 _PRIVATE_TARGET_DECISION: tuple[str | None, bool] | None = None
 
 
-def _allow_private_targets() -> bool:
+def allow_private_targets() -> bool:
     """Memoized read of the private-target escape hatch (inverted default).
 
     The raw env value is the cache key, so unrecognized values keep resolving
@@ -261,13 +261,13 @@ def _host_is_public(host: str) -> bool:
     if host in PRIVATE_HOSTS:
         return False
     # A host that is not an address at all is a name, and what it resolves to
-    # is judged separately against ``_is_public_ip_value`` once the resolver
+    # is judged separately against ``is_public_ip_value`` once the resolver
     # has answered. Only a literal that lands in a rejected range is refused.
     address_class = classify(host)
     return address_class in (AddressClass.NOT_AN_ADDRESS, AddressClass.PUBLIC)
 
 
-def _is_public_ip_value(value: str) -> bool:
+def is_public_ip_value(value: str) -> bool:
     """Return whether a host string is safe for public egress.
 
     Unlike ``_host_is_public`` this is asked of a *resolved* address, so a
@@ -652,16 +652,18 @@ def safe_public_url_or_none(raw: str | None, *, policy: HostPolicy) -> Normalize
 
 __all__ = [
     "HOST_POLICY_ENTRY_POINTS",
-    "PRIVATE_HOSTS",
-    "TWO_PART_PUBLIC_SUFFIXES",
     "HostPolicy",
+    "PRIVATE_HOSTS",
     "T",
+    "TWO_PART_PUBLIC_SUFFIXES",
+    "allow_private_targets",
     "filter_js_endpoints",
     "get_env_float",
     "get_env_int",
     "get_mapping_float",
     "get_mapping_int",
     "in_range",
+    "is_public_ip_value",
     "normalize_public_http_url",
     "parse_bool_env",
     "parse_bool_value",

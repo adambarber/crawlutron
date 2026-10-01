@@ -72,14 +72,14 @@ RESULT_PRIMITIVES = (
     frozenset(
         {
             "_failed_engine_result",
-            "_make_engine_result",
-            "_engine_result_from_exception",
+            "build_engine_result",
+            "engine_result_from_exception",
             "_skipped_engine_result",
             "_terminal_engine_result",
-            "_binary_no_text_result",
-            "_crawl_result_from_exception",
-            "_crawl_result_from_engine_result",
-            "_terminal_crawl_result",
+            "binary_no_text_result",
+            "crawl_result_from_exception",
+            "crawl_result_from_engine_result",
+            "terminal_crawl_result",
         }
     )
     | RESULT_DATACLASS_NAMES
@@ -678,7 +678,7 @@ def aliased_sanctioned_func_offenders(tree: ast.AST, path: pathlib.Path) -> list
 #
 # The field's own documentation says the value must be a "stable classification"
 # (app/api/render.py: the wire-visible error must be a stable classification,
-# never raw exception text). ``_classify_error_code`` honors that -- every value
+# never raw exception text). ``classify_error_code`` honors that -- every value
 # it returns is a ``Classification`` member. The hand-written literals are the
 # escape: ``"worker_failed"`` (render.py), ``"unsupported_strategy"`` and
 # ``"browser_worker_unavailable"`` (engine.py) are emitted into ``error=`` and
@@ -715,7 +715,7 @@ def error_field_taxonomy_offenders(
             node.lineno,
             f"error={value!r} is not a Classification member, but the"
             " field is documented as carrying a stable classification code"
-            " (render.py) and _classify_error_code only returns members --"
+            " (render.py) and classify_error_code only returns members --"
             " declare it in the taxonomy or route it through the classifier",
         )
         for node, _field, value in non_member_literals(

@@ -3,7 +3,7 @@ text (DNS names, internal paths, stack detail) in the API payload.
 
 Raw detail is NEVER returned to the caller. Only a stable error code is exposed
 in ``error``/``diagnostics``, and the raw detail is logged server-side for
-debugging (see app.crawl.strategies.http._http_strategy_result).
+debugging (see app.crawl.strategies.http.http_strategy_result).
 """
 
 import json
@@ -14,9 +14,9 @@ import httpx
 
 from app.crawl.decompression import DecompressionTooLargeError
 from app.crawl.result_helpers import (
-    _classify_error_code,
-    _crawl_result_from_exception,
-    _engine_result_from_exception,
+    classify_error_code,
+    crawl_result_from_exception,
+    engine_result_from_exception,
 )
 from app.models import to_dict
 from tests._fetcher_factories import invoke_http_strategy, run_http_strategy
@@ -45,12 +45,12 @@ async def _run(exc):
 
 
 def test_classify_error_codes_map_to_stable_values():
-    assert _classify_error_code(socket.gaierror("boom")) == "dns_error"
-    assert _classify_error_code(httpx.ConnectError("x")) == "connection_error"
-    assert _classify_error_code(ValueError("bad")) == "value_error"
-    assert _classify_error_code(DecompressionTooLargeError("big")) == "payload_too_large"
+    assert classify_error_code(socket.gaierror("boom")) == "dns_error"
+    assert classify_error_code(httpx.ConnectError("x")) == "connection_error"
+    assert classify_error_code(ValueError("bad")) == "value_error"
+    assert classify_error_code(DecompressionTooLargeError("big")) == "payload_too_large"
     # Unknown exception -> generic network_error, never the raw message.
-    assert _classify_error_code(RuntimeError("secret /app/x")) == "network_error"
+    assert classify_error_code(RuntimeError("secret /app/x")) == "network_error"
 
 
 async def test_http_strategy_result_hides_raw_dns_error():
@@ -87,7 +87,7 @@ def _record_for(caplog, event):
 def test_both_failure_primitives_log_the_same_server_side_payload(caplog):
     """The redaction half of this file's contract, asserted where it lives.
 
-    ``_engine_result_from_exception`` and ``_crawl_result_from_exception`` are the
+    ``engine_result_from_exception`` and ``crawl_result_from_exception`` are the
     same operation at two layers -- an ``EngineCrawlResult`` and the render
     pipeline's ``CrawlResult`` -- and each used to spell out its own ``extra``
     dict. Nothing asserted the two agreed, so the drift was invisible from either
@@ -106,13 +106,13 @@ def test_both_failure_primitives_log_the_same_server_side_payload(caplog):
     """
     caplog.set_level(logging.WARNING)
 
-    engine = _engine_result_from_exception(
+    engine = engine_result_from_exception(
         error=RuntimeError("engine boom /app/engine"),
         original_url="https://example.com/a",
         normalized_url="https://example.com/a",
         strategy="HTTP_DECLARED_CRAWLER",
     )
-    render = _crawl_result_from_exception(
+    render = crawl_result_from_exception(
         error=RuntimeError("render boom /app/render"),
         url="https://example.com/b",
         domain="example.com",
@@ -140,7 +140,7 @@ def test_both_failure_primitives_log_the_same_server_side_payload(caplog):
         assert "/app/" not in json.dumps(to_dict(result), default=str)
 
 
-# One representative exception per branch of _classify_error_code, paired
+# One representative exception per branch of classify_error_code, paired
 # with the stable code that branch emits. Every one of these codes is stored
 # verbatim into CrawlStrategyAttempt.classification.
 _ERROR_CODE_CASES = (

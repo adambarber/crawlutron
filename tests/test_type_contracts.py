@@ -20,14 +20,14 @@ import inspect
 
 import pytest
 
-from app.crawl.strategies.fetchers import _default_http_fetcher
+from app.crawl.strategies.fetchers import default_http_fetcher
 from app.models import HttpFetcher, HttpFetchResult
 from tests.chokepoint_walks import app_python_files
 
 # There is ONE concrete fetcher. The impersonating transport is a binding of it
 # (`impersonating_fetcher`), not a second function, so the contract's parameters
 # are spelled once in the whole tree and there is no twin to keep in step.
-_CONCRETE_FETCHERS = [pytest.param(_default_http_fetcher, id="_default_http_fetcher")]
+_CONCRETE_FETCHERS = [pytest.param(default_http_fetcher, id="default_http_fetcher")]
 
 
 def _unbound_call(protocol: type, *, resolve_annotations: bool = True) -> inspect.Signature:
@@ -291,11 +291,11 @@ def test_the_contract_guard_sees_defaulting_not_just_names():
     fails if the guard stops considering defaulting.
     """
     found = _concrete_fetchers_in_app()
-    assert {name for _, name, _ in found} == {"_default_http_fetcher"}, (
+    assert {name for _, name, _ in found} == {"default_http_fetcher"}, (
         f"the sweep found {sorted(name for _, name, _ in found)}; this test asserts against "
         "the real set, so it has to be the real set"
     )
-    honest = next(node for _, name, node in found if name == "_default_http_fetcher")
+    honest = next(node for _, name, node in found if name == "default_http_fetcher")
     assert _defaulted_params(honest) == _EXPECTED_OMITTABLE, (
         f"the production fetcher defaults {sorted(_defaulted_params(honest))} but the contract "
         f"defaults {sorted(_EXPECTED_OMITTABLE)}; the clean tree must agree or this test is "
@@ -328,7 +328,7 @@ def test_the_contract_is_not_vacuous_tree_wide():
     contract, which is the duplication this design removed.
     """
     names = {funcname for _, funcname, _ in _concrete_fetchers_in_app()}
-    assert names == {"_default_http_fetcher"}, (
+    assert names == {"default_http_fetcher"}, (
         f"tree-wide fetcher sweep found {sorted(names)} -- it is no longer "
         "covering the concrete fetcher, so its green result proves nothing; a second "
         "fetcher is a second spelling of the contract"

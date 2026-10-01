@@ -162,7 +162,7 @@ class TestObservedLatencyCrossesPipelines:
     calibrated on crawl traffic alone.
 
     Both shapes are the real models, and the crawl one is built through the
-    real ``_make_engine_result`` chokepoint. A stand-in carrying a
+    real ``build_engine_result`` chokepoint. A stand-in carrying a
     ``diagnostics`` key would have passed against the old code, which is the
     whole point: the defect was the attribute a shape does not have, so the
     fixture has to be the shape itself.
@@ -186,10 +186,10 @@ class TestObservedLatencyCrossesPipelines:
 
     @staticmethod
     def _crawled_result(elapsed_ms: int):
-        from app.crawl.result_helpers import _make_engine_result
+        from app.crawl.result_helpers import build_engine_result
         from app.models import CrawlStrategyAttempt
 
-        return _make_engine_result(
+        return build_engine_result(
             original_url="https://example.com/x",
             normalized_url="https://example.com/x",
             final_url="https://example.com/x",

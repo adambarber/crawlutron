@@ -110,7 +110,7 @@ _CLASSIFICATION_BY_EXCEPTION: tuple[tuple[tuple[type[BaseException], ...], Class
 )
 
 
-def _classify_error_code(exc: BaseException) -> Classification:
+def classify_error_code(exc: BaseException) -> Classification:
     """Map an internal exception to a stable, non-leaking error code.
 
     Raw exception text can leak DNS hostnames, internal filesystem paths, or
@@ -147,8 +147,8 @@ def _classify_and_log(
     """Classify one exception, log it once, and return ``(classification, retryable)``.
 
     The shared head of both failure primitives, because they are the same
-    operation at two layers -- ``_engine_result_from_exception`` builds an
-    ``EngineCrawlResult``, ``_crawl_result_from_exception`` a ``CrawlResult`` --
+    operation at two layers -- ``engine_result_from_exception`` builds an
+    ``EngineCrawlResult``, ``crawl_result_from_exception`` a ``CrawlResult`` --
     and were each spelling out the log payload themselves. Split, the two
     ``extra`` dicts could drift: an operator grepping the failure stream would
     find ``error_detail`` on the engine path and not on the render path, and
@@ -168,7 +168,7 @@ def _classify_and_log(
     derived from the exception type at all (the per-URL wall-clock budget raises
     bare ``TimeoutError`` but classifies as ``url_budget_exceeded``).
     """
-    classification = known_classification if known_classification is not None else _classify_error_code(error)
+    classification = known_classification if known_classification is not None else classify_error_code(error)
     _logger.warning(
         event,
         extra={
@@ -180,7 +180,7 @@ def _classify_and_log(
     return classification, is_transient_classification(classification)
 
 
-def _engine_result_from_exception(
+def engine_result_from_exception(
     *,
     error: BaseException,
     original_url: str,
@@ -247,7 +247,7 @@ def _engine_result_from_exception(
     )
 
 
-def _failed_result_for(
+def failed_result_for(
     job: _JobT,
     error: BaseException,
     *,
@@ -261,13 +261,13 @@ def _failed_result_for(
     crawl pipelines route here, the render pipeline supplies its own builder.
 
     ``_CircuitBreakerOpen`` is the one exception the scheduler raises itself; it
-    reaches the same ``_engine_result_from_exception`` chokepoint so the
+    reaches the same ``engine_result_from_exception`` chokepoint so the
     ``network_error`` / ``circuit_breaker_open`` classification and the redaction
     contract stay in one place.
     """
     original_url = url_of(job)
     normalized = getattr(job, "normalized_url", None) or original_url
-    return _engine_result_from_exception(
+    return engine_result_from_exception(
         error=error,
         original_url=original_url,
         normalized_url=normalized,
@@ -275,7 +275,7 @@ def _failed_result_for(
     )
 
 
-def _terminal_crawl_result(
+def terminal_crawl_result(
     *,
     url: str,
     status: ResultStatus,
@@ -296,7 +296,7 @@ def _terminal_crawl_result(
     ``to_dict`` is pure serialization, so raw exception text (DNS names,
     filesystem paths, secrets) reached the response body. This primitive is
     the single construction site; ``error`` must be a stable classification
-    (``_classify_error_code``), never raw exception text -- which is what the
+    (``classify_error_code``), never raw exception text -- which is what the
     browser path already passed correctly.
 
     ``selected_strategy`` is the browser mode that was in play, or None when no
@@ -321,7 +321,7 @@ def _terminal_crawl_result(
     )
 
 
-def _crawl_result_from_engine_result(engine: EngineCrawlResult, *, url: str) -> CrawlResult:
+def crawl_result_from_engine_result(engine: EngineCrawlResult, *, url: str) -> CrawlResult:
     """Adapt an ``EngineCrawlResult`` into the render pipeline's ``CrawlResult``.
 
     :meth:`DomainScheduler.run` builds its worker-exception envelope as an
@@ -355,7 +355,7 @@ def _crawl_result_from_engine_result(engine: EngineCrawlResult, *, url: str) -> 
     )
 
 
-def _crawl_result_from_exception(
+def crawl_result_from_exception(
     *,
     error: BaseException,
     url: str,
@@ -373,7 +373,7 @@ def _crawl_result_from_exception(
     reads ``result.metadata`` / ``result.elapsed_ms``, which
     ``EngineCrawlResult`` equally lacks. A render worker that fails must
     therefore return the contracted ``CrawlResult`` shape itself, classified
-    through the same chokepoint as the engine path: ``_classify_error_code``
+    through the same chokepoint as the engine path: ``classify_error_code``
     owns the taxonomy, this primitive owns the redaction (raw exception text is
     logged server-side only).
 
@@ -388,7 +388,7 @@ def _crawl_result_from_exception(
         event="render_result_error",
         strategy=strategy,
     )
-    return _terminal_crawl_result(
+    return terminal_crawl_result(
         url=url,
         status="failed",
         classification=classification,
@@ -401,7 +401,7 @@ def _crawl_result_from_exception(
     )
 
 
-def _make_engine_result(
+def build_engine_result(
     *,
     original_url: str,
     normalized_url: str,
@@ -511,7 +511,7 @@ def _terminal_engine_result(result: TerminalResult, *, status: ResultStatus) -> 
         elapsed_ms=result.attempt_elapsed_ms,
         error=error,
     )
-    return _make_engine_result(
+    return build_engine_result(
         original_url=result.original_url,
         normalized_url=result.normalized_url,
         final_url=result.final_url,
@@ -558,7 +558,7 @@ def _skipped_engine_result(result: TerminalResult) -> EngineCrawlResult:
     return _terminal_engine_result(result, status="skipped")
 
 
-def _binary_no_text_result(
+def binary_no_text_result(
     *,
     original_url: str,
     normalized_url: str,
@@ -579,7 +579,7 @@ def _binary_no_text_result(
         elapsed_ms=elapsed_ms,
         error="binary_no_text",
     )
-    return _make_engine_result(
+    return build_engine_result(
         original_url=original_url,
         normalized_url=normalized_url,
         final_url=final_url,
@@ -595,4 +595,14 @@ def _binary_no_text_result(
     )
 
 
-__all__ = ["TerminalResult"]
+__all__ = [
+    "TerminalResult",
+    "binary_no_text_result",
+    "build_engine_result",
+    "classify_error_code",
+    "crawl_result_from_engine_result",
+    "crawl_result_from_exception",
+    "engine_result_from_exception",
+    "failed_result_for",
+    "terminal_crawl_result",
+]

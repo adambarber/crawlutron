@@ -22,6 +22,7 @@ from tests.chokepoint_walks import (
     nodes_of,
     offender_at,
     plain_imports,
+    relative_posix,
     resolved_expr_name,
     trees_under,
 )
@@ -517,6 +518,152 @@ PLANTED_BARE_IMPORT = (
     "import _job_harnesses as harnesses\n"
     "from _policy_factories import _policy\n"
 )
+
+
+def _own_package(module: str) -> str:
+    """The package a dotted module name belongs to.
+
+    ``app.crawl.strategies.http`` -> ``app.crawl.strategies``; a top-level module
+    like ``app.metrics`` -> ``app``. A module name is never its own package, so a
+    leaf module and its siblings share one boundary.
+
+    That last clause is why ``app.cgroup_sense`` and ``app.memory_pressure`` are
+    one package rather than two. Reading a top-level module as its own package
+    would exempt every one of the top-level modules from each other, and those
+    are exactly the reaches hardest to see -- there is no directory name to
+    suggest a boundary has been crossed.
+    """
+    head, _, _tail = module.rpartition(".")
+    return head
+
+
+def _dotted_module(path: pathlib.Path) -> str:
+    """``app/crawl/admission.py`` -> ``app.crawl.admission``.
+
+    Root-relative, because the import being judged is written root-relative and
+    a comparison between an absolute path and a dotted name never matches. The
+    failure that produces is quiet rather than loud: every top-level module looks
+    like it sits outside every other package, so the rule fires on reaches that
+    are inside the same one and a reader stops believing it.
+    """
+    return relative_posix(path).removesuffix(".py").replace("/", ".")
+
+
+def _private_leak_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
+    """A private app name imported from outside the package that defines it.
+
+    A leading underscore has two halves and a name is only honest if both are
+    respected. The conventional half is package-internal: ``_post_fetch_diagnostics``
+    is private to ``app.crawl.strategies`` and every sibling strategy may use it,
+    because no consumer outside ``strategies`` can be written ``from
+    app.crawl.strategies.http import _post_fetch_diagnostics`` and get far. The
+    half that gets broken is the one the import form defeats -- binding the name
+    into another package *does* make it reachable, and the underscore is then
+    asserting a boundary the reader cannot check.
+
+    Twenty-one names were doing this. ``DNS_EXECUTOR`` lives in
+    ``strategies.pinned_transport`` and is imported by ``api.webhooks``;
+    ``allow_private_targets`` lives in ``app.validation`` and is imported by a
+    transport strategy; ``BROWSER_RAM_FRACTION`` crosses from ``app`` into
+    ``crawl.strategies.browser_pool``. Each is a real collaboration, which is
+    precisely why the fix is to promote the name rather than to forbid the call.
+
+    The boundary is the *imported-from* module, not a map from name to definer, so
+    this reads one import and decides it. That is what lets it be a ``Rule``: a
+    detector that had to know where the name was born would need the whole corpus
+    to answer, and a proof that plants a synthetic source could not supply it --
+    the bite would pass for any implementation, since the synthetic name would be
+    absent from the real map. Comparing the two packages on the node in hand is
+    both cheaper and stricter: a re-exporting hop is judged against the hop that
+    names it, and a name laundered twice is caught on the first.
+    """
+    module = _dotted_module(path)
+    here = _own_package(module)
+    return [
+        offender_at(
+            path,
+            node,
+            f"imports '{alias.name}' from '{node.module}', which is outside the "
+            f"'{here}' package that defines it; a name another package needs is not private",
+        )
+        for node in from_imports(tree)
+        if node.module and node.module.startswith("app") and _own_package(node.module) != here
+        for alias in node.names
+        if alias.name.startswith("_") and not alias.name.startswith("__")
+    ]
+
+
+#: ``app/api/render.py``: in ``app.api``, so anything under ``app.crawl`` is outside
+#: its package. Chosen over the default synthetic proof path because that path sits
+#: in ``app`` itself, where a single underscore-prefixed import from ``app.crawl``
+#: would be a sibling reach and the bite would prove nothing.
+_RENDER_PROOF_PATH = REPO_ROOT / "app" / "api" / "render.py"
+
+#: A real sibling of ``strategies.content_pipeline``, so the private import in the
+#: clean proof resolves inside one package and must stay quiet.
+_STRATEGY_SIBLING_PROOF_PATH = REPO_ROOT / "app" / "crawl" / "strategies" / "browser_result.py"
+
+
+PRIVATE_NAME_LEAKS_PACKAGE = Rule(
+    name="a-private-app-name-is-not-importable-outside-its-package",
+    find=_private_leak_offenders,
+    summary=(
+        "a leading underscore means package-internal: promote the name if another package needs it, "
+        "rather than importing it across the boundary where the convention no longer holds"
+    ),
+    scope=lambda *, exclude: trees_under(APP_ROOT),
+    bite=lambda: Bites(
+        # Names that do NOT exist in app/. A bite planted with a live name stops
+        # biting the moment that name is promoted -- which is the fix for every
+        # offender this rule found -- so the proof silently became vacuous
+        # halfway through the migration and only a rename exposed it. A synthetic
+        # name cannot be promoted, so the proof outlives the tree it describes.
+        "from app.crawl.strategies.http import _unpromoted_strategy_result\n"
+        "from app.validation import _unpromoted_private_target_gate\n",
+        marker="which is outside the",
+        count=2,
+        at=_RENDER_PROOF_PATH,
+    ),
+    clean=lambda: (
+        # A sibling in the defining package: private, and reachable only from here.
+        # Proved at a NAMED module rather than the default proof path, because the
+        # whole content of this rule is a package comparison -- run it in a module
+        # that is not inside the boundary and the quiet is the other claim.
+        Silent(
+            "from app.crawl.strategies.content_pipeline import _unpromoted_sibling_detail\n",
+            at=_STRATEGY_SIBLING_PROOF_PATH,
+        ),
+        # Public cross-package: no underscore, so no boundary is being crossed.
+        "from app.constants import USER_AGENT_TOKEN\n",
+        # dunder spellings are not privacy, they are protocol hooks.
+        "from app.crawl.strategies.http import __all__\n",
+        # stdlib and third-party are outside the rule entirely.
+        "import httpx\nfrom pathlib import Path\n",
+    ),
+)
+
+
+def test_a_private_name_does_not_leave_its_package():
+    """No app module reaches a private name in another package.
+
+    The load-bearing half of a name that is genuinely private, and the thing a
+    reviewer reads ``from app.validation import allow_private_targets`` and
+    cannot check at a glance.
+    """
+    PRIVATE_NAME_LEAKS_PACKAGE.scan()
+
+
+def test_private_leak_detector_bites():
+    """Bites across the boundary; silent inside it, and silent on the rest.
+
+    The clean case pins all four ways the rule must not degenerate: a sibling
+    inside the defining package, a public cross-package name, a dunder spelling,
+    and imports that are not app-internal at all. Without them the rule would
+    also pass as "no imports whose name starts with an underscore anywhere",
+    which is a different and much worse rule.
+    """
+    PRIVATE_NAME_LEAKS_PACKAGE.check_bites()
+
 
 TEST_HELPERS_IMPORTED_BY_PACKAGE_PATH = Rule(
     name="test-helpers-imported-by-package-path",

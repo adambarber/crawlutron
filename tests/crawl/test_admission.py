@@ -24,15 +24,15 @@ from app.memory_pressure import (
 )
 from app.metrics import get_metrics
 from app.resource_pressure import (
-    _BROWSER_RAM_FRACTION,
     _BROWSER_TASK_RAM_BYTES,
     _DOC_TASK_RAM_BYTES,
     _HTTP_TASK_RAM_BYTES,
+    BROWSER_RAM_FRACTION,
     CpuGate,
     ResourceGate,
     TaskRamBudget,
     WeightedAdmission,
-    _build_admission_policy,
+    build_admission_policy,
     default_admission_policy,
     read_cpu_quota,
     read_cpu_usage_seconds,
@@ -741,7 +741,7 @@ async def test_max_pages_zero_bounded_at_engine():
 
 
 def _policy(limit=3 * 1024 * 1024 * 1024, pool_size=2, max_concurrent_pages=3, doc_workers=2):
-    return _build_admission_policy(
+    return build_admission_policy(
         limit,
         pool_size=pool_size,
         max_concurrent_pages=max_concurrent_pages,
@@ -776,7 +776,7 @@ class TestPolicyDerivation:
         assert p.max_browser_concurrency == 2 * 3
 
     def test_http_ceiling_capped_at_hard_max(self):
-        huge = _build_admission_policy(1024 * 1024 * 1024 * 1024, pool_size=2, max_concurrent_pages=3)
+        huge = build_admission_policy(1024 * 1024 * 1024 * 1024, pool_size=2, max_concurrent_pages=3)
         assert huge.max_http_concurrency <= 512
 
     def test_smaller_limit_yields_smaller_http_ceiling(self):
@@ -865,11 +865,11 @@ class TestBrowserTierDoesNotDoubleScale:
     def test_full_capacity_while_within_the_reserved_fraction(self):
         # Browsers using exactly the fraction derive_browser_pool_size assumed
         # is the steady state, not pressure.
-        a = WeightedAdmission(PinnedGate(mem=_BROWSER_RAM_FRACTION, cpu=0.0), _policy())
+        a = WeightedAdmission(PinnedGate(mem=BROWSER_RAM_FRACTION, cpu=0.0), _policy())
         assert a.browser_capacity() == a._p.max_browser_concurrency
 
     def test_decays_only_for_usage_beyond_the_reserved_fraction(self):
-        a = WeightedAdmission(PinnedGate(mem=_BROWSER_RAM_FRACTION + 0.2, cpu=0.0), _policy())
+        a = WeightedAdmission(PinnedGate(mem=BROWSER_RAM_FRACTION + 0.2, cpu=0.0), _policy())
         # 20 points of surplus usage out of a 50-point ramp to exhaustion -> 60%
         # of the tier still admits.
         assert a.browser_capacity() == pytest.approx(a._p.max_browser_concurrency * 0.6, abs=1)

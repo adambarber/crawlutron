@@ -181,7 +181,7 @@ async def test_browser_path_filters_malicious_next_page_url(monkeypatch):
 
 
 async def test_browser_result_carries_the_shared_builder_shape(monkeypatch):
-    """The browser path must build its result through _make_engine_result.
+    """The browser path must build its result through build_engine_result.
 
     The HTTP path routes through the shared builder; the browser path
     hand-built EngineCrawlResult, silently relying on the ``validators``

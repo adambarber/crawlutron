@@ -16,7 +16,7 @@ from app.constants import (
     BROWSER_HEADLESS,
     HTTP_DECLARED_CRAWLER,
 )
-from app.crawl.result_helpers import _classify_error_code, _engine_result_from_exception
+from app.crawl.result_helpers import classify_error_code, engine_result_from_exception
 from app.crawl.strategies.browser_pool import BrowserPoolExhaustedError
 from app.models import EngineCrawlResult
 from tests._browser_doubles import _fake_browser
@@ -39,23 +39,23 @@ def test_classifier_lives_in_result_helpers_not_a_strategy_module():
     import app.crawl.strategies.browser as browser_mod
 
     source = inspect.getsource(browser_mod)
-    assert "_classify_error_code" in source
-    assert "from app.crawl.result_helpers import _classify_error_code" in source, (
-        "browser.py must import _classify_error_code from app.crawl.result_helpers, "
+    assert "classify_error_code" in source
+    assert "from app.crawl.result_helpers import classify_error_code" in source, (
+        "browser.py must import classify_error_code from app.crawl.result_helpers, "
         "not reach across into the HTTP strategy module"
     )
 
 
 def test_pool_exhaustion_classifies_distinctly():
     """Pool exhaustion means 'not attempted, capacity unavailable' -- never network_error."""
-    assert _classify_error_code(BrowserPoolExhaustedError("none free")) == "browser_pool_exhausted"
+    assert classify_error_code(BrowserPoolExhaustedError("none free")) == "browser_pool_exhausted"
 
 
 def test_existing_taxonomy_is_preserved():
     """The move must not change any existing classification."""
-    assert _classify_error_code(httpx.ConnectTimeout("x")) == "connection_error"
-    assert _classify_error_code(ValueError("x")) == "value_error"
-    assert _classify_error_code(RuntimeError("x")) == "network_error"
+    assert classify_error_code(httpx.ConnectTimeout("x")) == "connection_error"
+    assert classify_error_code(ValueError("x")) == "value_error"
+    assert classify_error_code(RuntimeError("x")) == "network_error"
 
 
 def test_pool_exhausted_is_a_taxonomy_member():
@@ -71,7 +71,7 @@ def test_pool_exhausted_is_a_taxonomy_member():
 
 
 def test_primitive_builds_classified_failed_result():
-    result = _engine_result_from_exception(
+    result = engine_result_from_exception(
         error=httpx.ConnectTimeout("boom"),
         original_url="https://a.example/x",
         normalized_url="https://a.example/x",
@@ -87,7 +87,7 @@ def test_primitive_builds_classified_failed_result():
 def test_primitive_never_leaks_raw_exception_text():
     """Raw detail stays out of the wire-visible fields."""
     secret = "internal-host.local /etc/passwd"
-    result = _engine_result_from_exception(
+    result = engine_result_from_exception(
         error=ValueError(secret),
         original_url="https://a.example/x",
         normalized_url="https://a.example/x",
@@ -99,7 +99,7 @@ def test_primitive_never_leaks_raw_exception_text():
 
 def test_primitive_marks_pool_exhaustion_as_not_attempted():
     """Pool exhaustion is capacity, not a page failure: the URL deserves a retry."""
-    result = _engine_result_from_exception(
+    result = engine_result_from_exception(
         error=BrowserPoolExhaustedError("none free"),
         original_url="https://a.example/x",
         normalized_url="https://a.example/x",
@@ -122,7 +122,7 @@ def test_exception_envelopes_never_carry_discovered_links(error):
     builder ever fills ``discovered_links`` from partial results, that link
     source must reach the frontier BEFORE the re-queue decision; this pin
     fails the day that becomes possible so the ordering gets revisited."""
-    result = _engine_result_from_exception(
+    result = engine_result_from_exception(
         error=error,
         original_url="https://a.example/x",
         normalized_url="https://a.example/x",
@@ -132,7 +132,7 @@ def test_exception_envelopes_never_carry_discovered_links(error):
 
 
 def test_primitive_default_classification_is_network_error():
-    result = _engine_result_from_exception(
+    result = engine_result_from_exception(
         error=RuntimeError("x"),
         original_url="https://a.example/x",
         normalized_url="https://a.example/x",
@@ -167,10 +167,10 @@ class TestClassificationValueValidity:
 
 
 def _budget_item() -> dict:
-    """An engine result dict as produced by _engine_result_from_exception."""
-    from app.crawl.result_helpers import _engine_result_from_exception
+    """An engine result dict as produced by engine_result_from_exception."""
+    from app.crawl.result_helpers import engine_result_from_exception
 
-    result = _engine_result_from_exception(
+    result = engine_result_from_exception(
         error=TimeoutError("budget exhausted"),
         original_url="https://a.example/slow",
         normalized_url="https://a.example/slow",

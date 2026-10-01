@@ -181,7 +181,7 @@ def test_a_worker_always_gets_at_least_one_slot(monkeypatch):
 
 
 def _policy(limit: int) -> rp.AdmissionPolicy:
-    return rp._build_admission_policy(
+    return rp.build_admission_policy(
         limit,
         pool_size=rp.derive_browser_pool_size(limit),
         max_concurrent_pages=3,
@@ -231,7 +231,7 @@ def test_the_browser_tier_stays_inside_the_ram_budget(monkeypatch):
     by a config that looks conservative everywhere.
     """
     limit = 16 * 1024 * 1024 * 1024
-    budget = int(limit * rp._BROWSER_RAM_FRACTION)
+    budget = int(limit * rp.BROWSER_RAM_FRACTION)
     browser_bytes = rp._BROWSER_TASK_RAM_BYTES
 
     affordable = budget // browser_bytes

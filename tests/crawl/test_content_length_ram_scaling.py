@@ -1,7 +1,7 @@
 """The per-page content-length body cap must scale with real concurrency.
 
 ``_effective_max_content_length`` scales the cap down as concurrency rises,
-but ``_http_strategy_result`` never passes its concurrency, so the cap always
+but ``http_strategy_result`` never passes its concurrency, so the cap always
 falls back to the settings floor (default 4 -> 10 MiB) while real dispatch
 (recursive ramp, wide batches) runs far higher. The actual concurrency must
 be threaded from the engine's active settings to the call site.

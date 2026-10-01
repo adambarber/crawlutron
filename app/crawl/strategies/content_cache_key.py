@@ -15,7 +15,7 @@ from app.resource_pressure import worker_count
 from app.validation import get_env_int
 
 
-def _content_cache_key(
+def build_content_cache_key(
     normalized_url: str,
     strategy: str,
     base_headers: dict[str, str],
@@ -30,7 +30,7 @@ def _content_cache_key(
     without duplicating the key composition.
 
     ``base_headers`` is serialized WHOLE, and that deliberately includes the
-    per-request ``Cookie`` header set by ``_headers_for_strategy``. The
+    per-request ``Cookie`` header set by ``headers_for_strategy``. The
     comment at the call site documents the intentional EXCLUSION of the
     conditional-revalidation headers; ``Cookie`` is the opposite case -- an
     intentional INCLUSION, and a safety property rather than an optimization:

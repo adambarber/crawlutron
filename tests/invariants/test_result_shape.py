@@ -224,7 +224,7 @@ CRAWL_RESPONSE_ENVELOPE_IS_ADAPTED_BY_ONE_OWNER = Rule(
         # exempt by path, and that exemption is the whole content of the rule.
         Silent(
             "async def f(result):\n"
-            "    return await _aunified_response_from_result(result, adapt=render_result_to_unified)\n",
+            "    return await aunified_response_from_result(result, adapt=render_result_to_unified)\n",
             at=REPO_ROOT / _ENVELOPE_OWNER_MODULE,
         ),
         # The detached background runner reads the envelope LENIENTLY
@@ -553,7 +553,7 @@ def test_envelope_detector_bites():
 # render.py built the worker-failure result with ``error=str(error)`` from a
 # caught exception, and ``to_dict`` is pure serialization -- so the raw text
 # (DNS names, filesystem paths, secrets) reached the /v1/render body verbatim.
-# ``_terminal_crawl_result`` is the sanctioned construction site and takes an
+# ``terminal_crawl_result`` is the sanctioned construction site and takes an
 # already-classified error; this keeps raw text from drifting back into any
 # error= field of a wire-visible result.
 # ---------------------------------------------------------------------------
@@ -561,7 +561,7 @@ def test_envelope_detector_bites():
 _TERMINAL_RESULT_SANCTIONED = frozenset({"result_helpers.py"})
 
 
-_RESULT_ERROR_SINKS = frozenset({"CrawlResult", "_terminal_crawl_result"})
+_RESULT_ERROR_SINKS = frozenset({"CrawlResult", "terminal_crawl_result"})
 
 
 _EXCEPTION_NAMES = frozenset({"error", "exc", "exception", "err"})
@@ -594,20 +594,20 @@ def _raw_exception_error_offenders(tree: ast.AST, path: pathlib.Path) -> list[st
 NO_RAW_EXCEPTION_TEXT_IN_RESULT_ERROR_FIELD = Rule(
     name="no-raw-exception-text-in-result-error-field",
     find=_raw_exception_error_offenders,
-    summary="classify via _classify_error_code, never raw exception text",
+    summary="classify via classify_error_code, never raw exception text",
     excludes=SANCTIONED | _TERMINAL_RESULT_SANCTIONED,
     bite=lambda: (
         # ``str(exc)`` on a direct result construction, and the same through the
         # sanctioned primitive -- both sinks carry the raw text verbatim.
         Bites("def f(exc):\n    return CrawlResult(error=str(exc))\n", "raw exception text"),
-        Bites("def f(exc):\n    return _terminal_crawl_result(error=str(exc))\n", "raw exception text"),
+        Bites("def f(exc):\n    return terminal_crawl_result(error=str(exc))\n", "raw exception text"),
         # An f-string interpolating the exception is the leak in disguise.
         Bites("def f(error):\n    return CrawlResult(error=f'failed: {error}')\n", "raw exception text"),
         Bites("def f(e):\n    return CrawlResult(error=repr(e))\n", "raw exception text"),
     ),
     clean=lambda: (
         # The classified shape: an already-classified error reaches the wire.
-        "def f(exc):\n    return _terminal_crawl_result(error=_classify_error_code(exc))\n",
+        "def f(exc):\n    return terminal_crawl_result(error=classify_error_code(exc))\n",
     ),
 )
 
@@ -982,10 +982,10 @@ _EXTRACTION_ENTRY_POINTS = frozenset(
 # a different thing from a call site spelling them.
 _RESULT_BUILDERS = frozenset(
     {
-        "_binary_no_text_result",
-        "_engine_result_from_exception",
+        "binary_no_text_result",
+        "engine_result_from_exception",
         "_failed_engine_result",
-        "_make_engine_result",
+        "build_engine_result",
         "_skipped_engine_result",
         "_terminal_engine_result",
     }
@@ -1120,7 +1120,7 @@ DISCOVERED_LINK_RESULT_FIELDS_COME_FROM_THE_PIPELINE = Rule(
         # The historical shape: the block spelled at the result call.
         Bites(
             "def build(post_fetch, error):\n"
-            "    return _make_engine_result(\n"
+            "    return build_engine_result(\n"
             "        discovered_link_count=post_fetch['discovered_link_count'],\n"
             "        discovered_links=post_fetch['discovered_links'],\n"
             "        error=error,\n"
@@ -1131,7 +1131,7 @@ DISCOVERED_LINK_RESULT_FIELDS_COME_FROM_THE_PIPELINE = Rule(
     clean=lambda: (
         # The sanctioned spread is not a spelling of individual fields.
         "def build(post_fetch, error):\n"
-        "    return _make_engine_result(\n"
+        "    return build_engine_result(\n"
         "        **_discovery_result_fields(post_fetch, classification_evidence=[], error=error),\n"
         "        next_page_url=post_fetch['next_page_url'],\n"
         "    )\n",

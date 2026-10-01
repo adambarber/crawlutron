@@ -84,8 +84,8 @@ _PUBLIC_SURFACE_PROPERTY = Property(
 # chokepoint should be one declaration, not two.
 _OWNER_PUBLIC_SURFACE_RATCHET = {
     "app/crawl/admission.py": (20, 14),
-    "app/validation.py": (17, 11),
-    "app/api/response_shaping.py": (9, 8),
+    "app/validation.py": (19, 13),
+    "app/api/response_shaping.py": (10, 9),
     "app/crawl/sqlite_store.py": (9, 7),
     "app/safe_regex.py": (7, 2),
     "app/crawl/robots.py": (13, 4),
@@ -95,7 +95,7 @@ _OWNER_PUBLIC_SURFACE_RATCHET = {
     "app/crawl/render_options.py": (2, 2),
     "app/safe_url.py": (1, 1),
     "app/crawl/payload_helpers.py": (1, 1),
-    "app/crawl/result_helpers.py": (1, 0),
+    "app/crawl/result_helpers.py": (9, 8),
     "app/crawl/strategies/fetch_policy.py": (5, 5),
 }
 

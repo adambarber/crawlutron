@@ -23,7 +23,7 @@ from app.crawl.admission import (
 )
 from app.crawl.job_store import durable_page_identity
 from app.crawl.recursive_admission import RecursiveRunState, admit_recursive_batch
-from app.crawl.result_helpers import _failed_result_for
+from app.crawl.result_helpers import failed_result_for
 from app.metrics import get_metrics
 from app.models import CrawlTask, EngineCrawlResult, NormalizedUrl
 from app.resource_pressure import ResourceGate, WeightedAdmission, default_admission_policy
@@ -50,7 +50,7 @@ def _engine_envelope(job: CrawlTask, exc: BaseException) -> EngineCrawlResult:
     represented. ``CrawlTask.original_url`` is the reporting URL for this
     pipeline; the render pipeline passes its own accessor for ``CrawlJob.url``.
     """
-    return _failed_result_for(job, exc, url_of=lambda j: j.original_url)
+    return failed_result_for(job, exc, url_of=lambda j: j.original_url)
 
 
 def requeue_transient(

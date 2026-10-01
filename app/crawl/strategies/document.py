@@ -89,7 +89,7 @@ async def _afetch_document_bytes(url: str, policy: HostPolicy) -> bytes:
     buffer into memory before extraction sees it.
     """
     from app.bounded_io import read_capped_async
-    from app.crawl.extraction import _EXTRACTION_DOC_MAX_INPUT_BYTES
+    from app.crawl.extraction import EXTRACTION_DOC_MAX_INPUT_BYTES
     from app.crawl.strategies import http_client_pool, pinned_transport
 
     await http_client_pool._drain_pending_client_closes()
@@ -103,7 +103,7 @@ async def _afetch_document_bytes(url: str, policy: HostPolicy) -> bytes:
         ) as response:
             if chain.advance(response):
                 continue
-            return await read_capped_async(response.aiter_raw(), _EXTRACTION_DOC_MAX_INPUT_BYTES)
+            return await read_capped_async(response.aiter_raw(), EXTRACTION_DOC_MAX_INPUT_BYTES)
     raise AssertionError("apinned_hops raises on a body that neither returned nor advanced")
 
 

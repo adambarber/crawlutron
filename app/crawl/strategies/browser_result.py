@@ -9,7 +9,7 @@ from app.constants import (
     EXTRACTION_METHOD_DOM_TEXT,
 )
 from app.crawl.render_options import resolve_render_options
-from app.crawl.result_helpers import _make_engine_result
+from app.crawl.result_helpers import build_engine_result
 from app.crawl.strategies.body_decode import quality_score
 from app.crawl.strategies.content_pipeline import (
     _discover_after_fetch,
@@ -138,7 +138,7 @@ def _build_browser_result(
         elapsed_ms=result.elapsed_ms,
         error=result.error,
     )
-    return _make_engine_result(
+    return build_engine_result(
         original_url=original_url,
         normalized_url=normalized_url,
         final_url=result.final_url,

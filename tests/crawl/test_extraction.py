@@ -220,7 +220,7 @@ async def test_extract_document_skips_oversized_input(monkeypatch):
     import app.crawl.extraction as ex
 
     acquisitions = doc_worker_acquisitions(monkeypatch)
-    monkeypatch.setattr(ex, "_EXTRACTION_DOC_MAX_INPUT_BYTES", 100)
+    monkeypatch.setattr(ex, "EXTRACTION_DOC_MAX_INPUT_BYTES", 100)
 
     out = await asyncio.to_thread(ex.extract_document, b"x" * 101, "http://x.test/big.pdf")
     assert out.text is None and out.markdown is None

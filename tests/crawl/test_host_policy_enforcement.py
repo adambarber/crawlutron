@@ -131,7 +131,7 @@ async def test_redirect_to_policy_blocked_host_is_refused_before_fetch(monkeypat
     monkeypatch.setattr(pinned_mod, "resolve_and_pin_host", lambda url: ("93.184.216.34", ""))
 
     with pytest.raises(ValueError, match="host_denied"):
-        await fetchers_mod._default_http_fetcher(
+        await fetchers_mod.default_http_fetcher(
             "https://allowed.test/",
             {},
             30,

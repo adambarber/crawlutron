@@ -554,9 +554,9 @@ class TestStatusAgreesWithClassification:
     )
     def test_exception_chokepoint_status_matches_the_table(self, classification):
         from app.constants import status_for_classification
-        from app.crawl.result_helpers import _engine_result_from_exception
+        from app.crawl.result_helpers import engine_result_from_exception
 
-        result = _engine_result_from_exception(
+        result = engine_result_from_exception(
             error=ConnectionError("boom"),
             original_url="http://example.com/",
             normalized_url="http://example.com/",
@@ -579,9 +579,9 @@ class TestStatusAgreesWithClassification:
     def test_browser_retry_exhausted_status_matches_the_table(self):
         """The browser retry loop's terminal verdict for a navigation timeout."""
         from app.constants import status_for_classification
-        from app.crawl.result_helpers import _terminal_crawl_result
+        from app.crawl.result_helpers import terminal_crawl_result
 
-        result = _terminal_crawl_result(
+        result = terminal_crawl_result(
             url="http://example.com/",
             status="retry_exhausted",
             classification="navigation_timeout",

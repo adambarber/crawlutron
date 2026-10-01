@@ -131,7 +131,7 @@ _SELECTOR_CARRIER_DECLARANT = "__init__"
 #: caller's request, it keys one, and a key built from half the narrowing inputs
 #: is a different key. Named rather than inferred from the parameter names,
 #: because a rule that infers is a rule that stops applying when the code moves.
-_SELECTOR_KEY_BUILDER = "_content_cache_key"
+_SELECTOR_KEY_BUILDER = "build_content_cache_key"
 
 
 def _selector_contract_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
@@ -196,7 +196,7 @@ THE_SELECTOR_PAIR_IS_ONE_CONTRACT = Rule(
         "def extract_html(html, url, selectors=None) -> ExtractedContent:\n    ...\n",
         # A key builder legitimately requires both: it keys a request rather
         # than narrowing one.
-        "def _content_cache_key(url, strategy, headers, extraction, css_selector, xpath):\n    ...\n",
+        "def build_content_cache_key(url, strategy, headers, extraction, css_selector, xpath):\n    ...\n",
         # A function that takes no selector is somebody else's business.
         "def extract_document(body, url) -> ExtractedContent:\n    ...\n",
     ),

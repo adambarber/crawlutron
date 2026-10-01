@@ -14,9 +14,9 @@ from app.constants import (
     HTTP_CFFI_IMPERSONATE,
     HTTP_STRATEGIES,
 )
-from app.crawl.result_helpers import TerminalResult, _engine_result_from_exception, _failed_engine_result
+from app.crawl.result_helpers import TerminalResult, _failed_engine_result, engine_result_from_exception
 from app.crawl.strategies.browser_result import browser_strategy_result
-from app.crawl.strategies.http import _http_strategy_result
+from app.crawl.strategies.http import http_strategy_result
 from app.crawl.strategies.strategy_request import StrategyRequest
 from app.models import (
     Classification,
@@ -188,7 +188,7 @@ class _ChainRun:
     async def run_http(self, strategy: CrawlStrategyName) -> EngineCrawlResult:
         context = self.context
         fetcher = context.cffi_fetcher if strategy == HTTP_CFFI_IMPERSONATE else context.http_fetcher
-        return await _http_strategy_result(
+        return await http_strategy_result(
             request=context.request_for(strategy),
             http_fetcher=fetcher,
             cache=context.cache,
@@ -283,7 +283,7 @@ class _ChainRun:
             if strategy in BROWSER_STRATEGIES:
                 return await self.run_browser(strategy)
         except Exception as error:
-            return _engine_result_from_exception(
+            return engine_result_from_exception(
                 error=error,
                 original_url=context.original_url,
                 normalized_url=context.normalized_url,

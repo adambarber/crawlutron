@@ -11,7 +11,7 @@ import http.server
 import threading
 from contextlib import contextmanager
 
-from app.crawl.strategies.fetchers import _default_http_fetcher
+from app.crawl.strategies.fetchers import default_http_fetcher
 from app.validation import HostPolicy
 from tests._fetcher_factories import _spawn_fetch
 from tests.helpers.server import SilentHandler
@@ -82,7 +82,7 @@ async def _fetch_with_cap(port: int, path: str, cap: int):
     fixture this local has no SSRF stand-down and the loopback target is what
     the fetcher is being pointed at.
     """
-    return await _default_http_fetcher(
+    return await default_http_fetcher(
         f"http://127.0.0.1:{port}{path}",
         {},
         10,
@@ -124,11 +124,11 @@ async def test_chunked_response_without_content_length_is_capped():
 
 class TestFetchContentLengthLimit:
     def test_http_large_content(self):
-        from app.crawl.strategies.fetchers import _default_http_fetcher
+        from app.crawl.strategies.fetchers import default_http_fetcher
 
         result = _spawn_fetch(
             lambda s: asyncio.run(
-                _default_http_fetcher(
+                default_http_fetcher(
                     s.base_url + "/",
                     {},
                     10,

@@ -267,18 +267,18 @@ def test_transience_home_detector_bites():
 # the scheduler's blanket envelope and is misclassified, or in on_result mode
 # silently drops the page. Three invariants keep that from drifting back:
 #
-#   1. _engine_result_from_exception is the only place a strategy exception may
+#   1. engine_result_from_exception is the only place a strategy exception may
 #      become a result (no hand-rolled failed-result construction with a
 #      hardcoded classification outside the two legitimate config guards).
 #   2. BrowserPoolExhaustedError may only be caught by sanctioned sites
 #      (the render endpoints, which own the 503 transport response) -- never
 #      ad-hoc catch sites in the crawl path, which would re-derive retry
 #      semantics locally instead of reading the classification.
-#   3. _classify_error_code must be defined in result_helpers (neutral home),
+#   3. classify_error_code must be defined in result_helpers (neutral home),
 #      never in a strategy module; strategies reach for it, they don't own it.
 # ---------------------------------------------------------------------------
 
-# Classifications that a hand-rolled _failed_engine_result/_make_engine_result
+# Classifications that a hand-rolled _failed_engine_result/build_engine_result
 # may legitimately carry without going through the exception chokepoint:
 #   browser_crash / unsupported_strategy: the engine's config guards -- there
 #     is no exception to classify, the worker was never built
@@ -307,7 +307,7 @@ def _hand_rolled_failed_result_offenders(tree, path):
     chokepoint and the engine's two config guards (no browser worker / unknown
     strategy -- those have no exception to classify)."""
     for node in call_nodes(tree):
-        if bare_callee(node) not in ("_failed_engine_result", "_make_engine_result"):
+        if bare_callee(node) not in ("_failed_engine_result", "build_engine_result"):
             continue
         status = None
         for kw in node.keywords:
@@ -323,7 +323,7 @@ def _hand_rolled_failed_result_offenders(tree, path):
         if status == "network_error" and _has_error_field(node, "circuit_breaker_open"):
             continue
         yield offender_at(
-            path, node, f"hand-rolled classification={status!r}; route through _engine_result_from_exception"
+            path, node, f"hand-rolled classification={status!r}; route through engine_result_from_exception"
         )
 
 
@@ -332,7 +332,7 @@ HAND_ROLLED_FAILED_RESULTS_GO_THROUGH_THE_CHOKEPOINT = Rule(
     find=_hand_rolled_failed_result_offenders,
     summary=(
         "failed results with a hardcoded classification must go through "
-        "_engine_result_from_exception (the single exception->result chokepoint)"
+        "engine_result_from_exception (the single exception->result chokepoint)"
     ),
     excludes=SANCTIONED,
     bite=lambda: Bites(
@@ -340,7 +340,7 @@ HAND_ROLLED_FAILED_RESULTS_GO_THROUGH_THE_CHOKEPOINT = Rule(
         "    return _failed_engine_result(\n"
         '        classification="network_error", error="worker_exception",\n'
         "    )\n",
-        "route through _engine_result_from_exception",
+        "route through engine_result_from_exception",
     ),
     clean=lambda: (
         # browser_crash is one of the engine's config guards -- no exception to
@@ -413,14 +413,14 @@ def test_pool_exhaustion_catch_detector_bites():
 
 
 def test_classifier_lives_in_the_neutral_home():
-    """_classify_error_code must be defined in result_helpers, not re-defined
+    """classify_error_code must be defined in result_helpers, not re-defined
     in a strategy module (the old site, http.py, forced browser.py to import
     across strategies)."""
     for path, tree in app_trees(exclude=SANCTIONED | _ERROR_CHOKEPOINT_SANCTIONED):
         for node in functions(tree):
-            if node.name == "_classify_error_code":
+            if node.name == "classify_error_code":
                 raise AssertionError(
-                    offender_at(path, node, "_classify_error_code defined outside result_helpers")
+                    offender_at(path, node, "classify_error_code defined outside result_helpers")
                 )
 
 
@@ -452,11 +452,11 @@ _RESULT_PRIMITIVES = (
     # source of truth and this is its shadow, kept in sync by the
     # subsumption assert below.
     "_failed_engine_result",
-    "_make_engine_result",
-    "_engine_result_from_exception",
+    "build_engine_result",
+    "engine_result_from_exception",
     "_skipped_engine_result",
-    "_crawl_result_from_exception",
-    "_terminal_crawl_result",
+    "crawl_result_from_exception",
+    "terminal_crawl_result",
 )
 
 
@@ -525,13 +525,13 @@ CLASSIFICATIONS_PASSED_ARE_ENUM_MEMBERS = Rule(
         # terminal results through it, so an unknown literal there reaches the wire
         # through the same lenient dataclass that let url_budget_exceeded ship.
         Bites(
-            'def f():\n    return _terminal_crawl_result(classification="made_up_render_code")\n',
+            'def f():\n    return terminal_crawl_result(classification="made_up_render_code")\n',
             "CrawlClassification member",
         ),
     ),
     clean=lambda: (
         "def f(cls):\n    return _failed_engine_result(classification=cls.url_budget_exceeded)\n",
-        "def f(cls):\n    return _terminal_crawl_result(classification=cls.site_error)\n",
+        "def f(cls):\n    return terminal_crawl_result(classification=cls.site_error)\n",
     ),
 )
 
@@ -609,7 +609,7 @@ STRATEGIES_PASSED_ARE_ENUM_MEMBERS = Rule(
         # An invented member name -- exactly the shape that shipped on the browser
         # worker's failure path.
         Bites(
-            'def f():\n    return _engine_result_from_exception(strategy="BROWSER_DECLARED_CRAWLER")\n',
+            'def f():\n    return engine_result_from_exception(strategy="BROWSER_DECLARED_CRAWLER")\n',
             "CrawlStrategy member",
         ),
         # The empty string is the same lie in cheaper clothing.
@@ -623,7 +623,7 @@ STRATEGIES_PASSED_ARE_ENUM_MEMBERS = Rule(
         "def f():\n    return _failed_engine_result(strategy=None)\n",
         # A real member literal and a non-literal both pass without comment.
         'def f():\n    return _skipped_engine_result(strategy="BROWSER_HEADLESS")\n',
-        "def f(s):\n    return _crawl_result_from_exception(strategy=s)\n",
+        "def f(s):\n    return crawl_result_from_exception(strategy=s)\n",
     ),
 )
 
@@ -674,13 +674,13 @@ STATUSES_PASSED_ARE_ENUM_MEMBERS = Rule(
     ),
     excludes=SANCTIONED,
     bite=lambda: Bites(
-        'def f():\n    return _terminal_crawl_result(status="never_a_status")\n',
+        'def f():\n    return terminal_crawl_result(status="never_a_status")\n',
         "ResultStatus member",
     ),
     clean=lambda: (
-        'def f():\n    return _terminal_crawl_result(status="failed")\n',
+        'def f():\n    return terminal_crawl_result(status="failed")\n',
         # A non-literal (a variable or the caller's own status field) passes.
-        "def f(s):\n    return _make_engine_result(status=s)\n",
+        "def f(s):\n    return build_engine_result(status=s)\n",
     ),
 )
 
@@ -908,8 +908,8 @@ def test_generic_membership_subsumes_the_per_field_detectors():
 
     The historical detectors matched on a *transcribed* primitive list of six
     names (``_RESULT_PRIMITIVES`` below). Three live primitives that set
-    classification/status/strategy were never on it -- ``_binary_no_text_result``
-    (which sets all three), ``_crawl_result_from_engine_result``, and
+    classification/status/strategy were never on it -- ``binary_no_text_result``
+    (which sets all three), ``crawl_result_from_engine_result``, and
     ``_terminal_engine_result`` -- and neither were the direct dataclass
     constructions at five sites that bypass the primitives entirely. The
     derived registry has twelve entries and is closed by construction.
@@ -926,18 +926,18 @@ def test_generic_membership_subsumes_the_per_field_detectors():
     # The six-name list the per-field detectors transcribed.
     transcribed = {
         "_failed_engine_result",
-        "_make_engine_result",
-        "_engine_result_from_exception",
+        "build_engine_result",
+        "engine_result_from_exception",
         "_skipped_engine_result",
-        "_crawl_result_from_exception",
-        "_terminal_crawl_result",
+        "crawl_result_from_exception",
+        "terminal_crawl_result",
     }
     missed = RESULT_PRIMITIVES - transcribed
     assert (
         missed
         == {
-            "_binary_no_text_result",
-            "_crawl_result_from_engine_result",
+            "binary_no_text_result",
+            "crawl_result_from_engine_result",
             "_terminal_engine_result",
         }
         | RESULT_DATACLASS_NAMES
@@ -1078,7 +1078,7 @@ def test_wrong_namespace_detector_bites():
     ok = ast.parse(
         'EXTRACTION_METHOD_BINARY_NO_TEXT = "binary_no_text"\n'
         "def f(m):\n"
-        "    return _make_engine_result(extraction_method=EXTRACTION_METHOD_BINARY_NO_TEXT)\n"
+        "    return build_engine_result(extraction_method=EXTRACTION_METHOD_BINARY_NO_TEXT)\n"
     )
     assert not namespace_constant_offenders(ok, REPO_ROOT / "app" / "_synthetic.py", members=members)
     # A parameter (what a correct caller writes) is not a constant: passes.
@@ -1130,7 +1130,7 @@ def test_the_gate_sees_the_local_variable_indirection_the_ast_detectors_cannot()
 
         assert_result_fields(
             {"classification": classification},
-            where="http._http_strategy_result",
+            where="http.http_strategy_result",
             members=members,
         )
 
@@ -1154,7 +1154,7 @@ def test_the_gate_would_have_caught_the_shipped_defect():
     with pytest.raises(NonMemberValue):
         assert_result_fields(
             {"classification": "not_a_real_member"},
-            where="http._http_strategy_result",
+            where="http.http_strategy_result",
             members=members,
         )
 

@@ -25,7 +25,7 @@ from tests.rules import Bites, Rule, Trips
 # ---------------------------------------------------------------------------
 # The admission sizing weights are one value
 #
-# ``_build_admission_policy`` and ``max_http_concurrency_for`` each took the same
+# ``build_admission_policy`` and ``max_http_concurrency_for`` each took the same
 # four sizing weights as keyword-only parameters, and the duplication was
 # those two signatures rather than any logic. The weights are now one frozen
 # ``resource_pressure.TaskRamBudget`` that the caller builds and the policy
@@ -41,11 +41,11 @@ from tests.rules import Bites, Rule, Trips
 
 # The four weights, read from the dataclass rather than transcribed: a weight
 # added to TaskRamBudget is covered here the day it lands.
-_ADMISSION_POLICY = "_build_admission_policy"
+_ADMISSION_POLICY = "build_admission_policy"
 
 
 def _admission_budget_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
-    """A ``_build_admission_policy`` call carrying a sizing weight as a keyword."""
+    """A ``build_admission_policy`` call carrying a sizing weight as a keyword."""
     weights = {field.name for field in dataclasses.fields(_task_ram_budget())}
     offenders: list[str] = []
     for node in calls_to_any(tree, {_ADMISSION_POLICY}):
@@ -83,9 +83,9 @@ def _admission_weights_are_known() -> None:
 
 
 ADMISSION_WEIGHTS_ARE_KEYWORDS = (
-    "from app.resource_pressure import _build_admission_policy\n"
+    "from app.resource_pressure import build_admission_policy\n"
     "def build(limit, pool_size):\n"
-    "    return _build_admission_policy(limit, pool_size=pool_size,"
+    "    return build_admission_policy(limit, pool_size=pool_size,"
     " max_concurrent_pages=3, doc_workers=2)\n"
 )
 
@@ -99,17 +99,17 @@ ADMISSION_BUDGET_ARRIVES_AS_A_BUDGET = Rule(
     premise=_admission_weights_are_known,
     bite=lambda: Bites(ADMISSION_WEIGHTS_ARE_KEYWORDS, marker="doc_workers=2"),
     clean=lambda: (
-        "from app.resource_pressure import TaskRamBudget, _build_admission_policy\n"
+        "from app.resource_pressure import TaskRamBudget, build_admission_policy\n"
         "def build(limit, pool_size):\n"
-        "    return _build_admission_policy(limit, pool_size=pool_size,"
+        "    return build_admission_policy(limit, pool_size=pool_size,"
         " max_concurrent_pages=3, budget=TaskRamBudget(doc_workers=2))\n",
         # The computation itself is not this guard's subject.
         "from app.resource_pressure import max_http_concurrency_for\n"
         "def ceiling(limit, pool_size):\n"
         "    return max_http_concurrency_for(limit, pool_size, doc_workers=2)\n",
-        "from app.resource_pressure import _build_admission_policy\n"
+        "from app.resource_pressure import build_admission_policy\n"
         "def build(limit, pool_size):\n"
-        "    return _build_admission_policy(limit, pool_size=pool_size, max_concurrent_pages=3)\n",
+        "    return build_admission_policy(limit, pool_size=pool_size, max_concurrent_pages=3)\n",
     ),
 )
 

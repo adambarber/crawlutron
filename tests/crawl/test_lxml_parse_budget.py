@@ -5,7 +5,7 @@ through the real production paths (this file) found the codebase's own
 accounting in response_shaping's PERF TODO to be exact: trafilatura (its own
 parser, not counted here), ONE shared lxml tree in the engine's discovery
 block (tree= threading covers diagnostics/frames/forms/links), and ONE
-re-parse in _extract_llm_metadata at shaping time, across the persistence
+re-parse in extract_llm_metadata at shaping time, across the persistence
 boundary.
 
 Consolidation moved the shaping-side re-parse to its computation site:
@@ -112,7 +112,7 @@ async def test_shaping_never_reparses_engine_produced_items(parse_counter):
     import json
 
     from app.api.response_shaping import format_crawl_item
-    from app.crawl.llm_format import _extract_llm_metadata
+    from app.crawl.llm_format import extract_llm_metadata
     from app.models import to_dict
 
     result = await _run({"limits": {"max_depth": 1}}, html=META_HTML)
@@ -123,7 +123,7 @@ async def test_shaping_never_reparses_engine_produced_items(parse_counter):
     _markdown, metadata = format_crawl_item(item)
     assert parse_counter == [], "shaping rebuilt an lxml tree from the carried item"
     # Byte-for-byte the same computation site output the metadata replaced.
-    assert metadata == _extract_llm_metadata(META_HTML, "http://example.com/")
+    assert metadata == extract_llm_metadata(META_HTML, "http://example.com/")
 
 
 async def test_engine_item_without_a_tree_still_shapes_once(parse_counter):

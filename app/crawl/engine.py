@@ -30,7 +30,7 @@ from app.crawl.fetch_helpers import _fetch_and_decode
 from app.crawl.payload_helpers import _payload_policy, checked_payload_urls
 from app.crawl.policy import PolicyTier
 from app.crawl.request_pipeline import _PipelineDependencies, _PipelineState, run_crawl_request
-from app.crawl.strategies.fetchers import _default_http_fetcher, impersonating_fetcher
+from app.crawl.strategies.fetchers import default_http_fetcher, impersonating_fetcher
 from app.models import (
     CrawlWorker,
     EngineCrawlResult,
@@ -154,17 +154,17 @@ def _seed_is_fresh(url: str, lastmod: str | None, content_cache: Any, policy: Cr
     css = policy.css_selector
     xp = policy.xpath
     # Lazy import avoids a module cycle (engine <-> http).
-    from app.crawl.strategies.content_cache_key import _content_cache_key
-    from app.crawl.strategies.request_profile import _headers_for_strategy
+    from app.crawl.strategies.content_cache_key import build_content_cache_key
+    from app.crawl.strategies.request_profile import headers_for_strategy
 
     # Default to the real strategy chain: the old ["HTTP"] placeholder
     # is not a strategy, so its cache keys could never match stored entries
     # and freshness was never detected through this path.
     for strategy in policy.strategies:
-        key = _content_cache_key(
+        key = build_content_cache_key(
             url,
             strategy,
-            _headers_for_strategy(strategy, policy, url),
+            headers_for_strategy(strategy, policy, url),
             extraction,
             css,
             xp,
@@ -395,16 +395,16 @@ class _ResultSpill:
 
 
 def _set_cookie_namespace(policy: CrawlPolicy):
-    from app.crawl.strategies.cookie_jar import _COOKIE_NAMESPACE
+    from app.crawl.strategies.cookie_jar import COOKIE_NAMESPACE
     from app.crawl.strategies.request_profile import cookie_namespace_for
 
-    return _COOKIE_NAMESPACE.set(cookie_namespace_for(policy.request_profile))
+    return COOKIE_NAMESPACE.set(cookie_namespace_for(policy.request_profile))
 
 
 def _reset_cookie_namespace(token: Any) -> None:
-    from app.crawl.strategies.cookie_jar import _COOKIE_NAMESPACE
+    from app.crawl.strategies.cookie_jar import COOKIE_NAMESPACE
 
-    _COOKIE_NAMESPACE.reset(token)
+    COOKIE_NAMESPACE.reset(token)
 
 
 async def crawl_request(
@@ -433,7 +433,7 @@ async def crawl_request(
         host_policy=host_policy,
     )
     policy = _payload_policy(payload, PolicyTier.from_settings(active_settings))
-    fetcher = http_fetcher or partial(_default_http_fetcher, policy=host_policy)
+    fetcher = http_fetcher or partial(default_http_fetcher, policy=host_policy)
     # The transport preference is a BINDING of the one fetcher, not a second
     # entry point: the impersonating strategy gets the same callable with the
     # cffi transport preferred, so the contract is spelled once in the whole tree.

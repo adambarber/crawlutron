@@ -50,7 +50,7 @@ def format_crawl_item(item: dict[str, Any]) -> tuple[str | None, dict[str, Any]]
     Engine-produced items carry ``llm_metadata`` -- page
     metadata computed ONCE from the discovery tree in the strategy stage --
     and this formatter reads that plain-data dict instead of rebuilding an
-    lxml tree from the stored HTML. The reparse (``_extract_llm_metadata``)
+    lxml tree from the stored HTML. The reparse (``extract_llm_metadata``)
     stays as the honest fallback for items without a carried dict: a
     single-shot engine page (no discovery tree existed to read from) and
     any caller-built item that predates the field. Serialization audit for
@@ -68,9 +68,9 @@ def format_crawl_item(item: dict[str, Any]) -> tuple[str | None, dict[str, Any]]
         if isinstance(carried, dict) and carried:
             return markdown, dict(carried)
         if html and url:
-            from app.crawl.llm_format import _extract_llm_metadata
+            from app.crawl.llm_format import extract_llm_metadata
 
-            return markdown, _extract_llm_metadata(html, url)
+            return markdown, extract_llm_metadata(html, url)
         return markdown, {}
     text = item.get("text")
     if not text:
@@ -81,7 +81,7 @@ def format_crawl_item(item: dict[str, Any]) -> tuple[str | None, dict[str, Any]]
 async def aformat_crawl_item(item: dict[str, Any]) -> tuple[str | None, dict[str, Any]]:
     """Async :func:`format_crawl_item`: the whole formatter leaves the loop.
 
-    The fallback ``_extract_llm_metadata`` path (items without a carried
+    The fallback ``extract_llm_metadata`` path (items without a carried
     ``llm_metadata`` dict) still builds an lxml tree per item; on a batch of
     N such results the sync path parks the event loop N times. The async
     path runs the identical sync formatter in a worker thread;
@@ -133,7 +133,7 @@ def build_unified_result(item: dict[str, Any]) -> UnifiedCrawlResult:
     The unified response carries both the LLM-friendly ``markdown`` and the
     full ``diagnostics`` payload. Page metadata comes from the result's
     carried ``llm_metadata`` or, when absent, the shared
-    page-metadata extractor (``_extract_llm_metadata``) over the raw HTML.
+    page-metadata extractor (``extract_llm_metadata``) over the raw HTML.
     """
     markdown, metadata_dict = format_crawl_item(item)
     url = item.get("final_url") or item.get("normalized_url") or item.get("original_url")
@@ -436,7 +436,7 @@ async def abuild_unified_crawl_response(
     return _response_envelope(shaped, len(results), options or EnvelopeOptions())
 
 
-async def _aunified_response_from_result(
+async def aunified_response_from_result(
     result: dict[str, Any], *, adapt: Callable[[dict[str, Any]], UnifiedCrawlResult] | None = None
 ) -> UnifiedCrawlResponse:
     """The one adapter from a raw producer envelope to the unified response.
@@ -470,6 +470,7 @@ __all__ = [
     "abuild_unified_crawl_response",
     "abuild_unified_result",
     "aformat_crawl_item",
+    "aunified_response_from_result",
     "build_unified_crawl_response",
     "build_unified_result",
     "format_crawl_item",

@@ -168,7 +168,7 @@ def _discovery_result_fields(
 ) -> dict[str, Any]:
     """The result fields both strategies take from one discovery envelope.
 
-    Spread into ``_make_engine_result`` as ``**_discovery_result_fields(...)``.
+    Spread into ``build_engine_result`` as ``**_discovery_result_fields(...)``.
     The envelope's keys and the result field they feed are one decision, so it
     is written once: a discovered-links field that reached the HTTP result but
     not the browser result would be a divergence nothing else in the tree can

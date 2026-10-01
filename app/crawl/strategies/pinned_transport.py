@@ -20,15 +20,15 @@ from app.crawl.credentials import origin_of
 from app.models import HttpFetchResult
 from app.validation import (
     HostPolicy,
-    _allow_private_targets,
-    _is_public_ip_value,
+    allow_private_targets,
+    is_public_ip_value,
     normalize_public_http_url,
 )
 
 
 def _is_private_or_loopback_ip(ip: str) -> bool:
     """Return whether an address is outside the shared public-target policy."""
-    return not _is_public_ip_value(ip)
+    return not is_public_ip_value(ip)
 
 
 # Per-host DNS resolution cache. Crawling a single host thousands of times
@@ -84,7 +84,7 @@ def check_ssrf_protection(url: str) -> None:
     Set ``CRAWLUTRON_ALLOW_PRIVATE_TARGETS=1`` (or ``true``/``yes``/``on``)
     to disable for local testing.
     """
-    if _allow_private_targets():
+    if allow_private_targets():
         return
     parsed = urlparse(url)
     hostname = parsed.hostname
@@ -99,7 +99,7 @@ def check_ssrf_protection(url: str) -> None:
         # fallback in resolve_and_pin_host.
         raise ValueError(f"SSRF protection: cannot resolve hostname {hostname}") from None
     for ip in ips:
-        if not _is_public_ip_value(ip):
+        if not is_public_ip_value(ip):
             raise ValueError(
                 f"SSRF protection: hostname {hostname} resolves to private/loopback IP {ip}"
             ) from None
@@ -128,7 +128,7 @@ def resolve_and_pin_host(url: str) -> tuple[str, str]:
     hostname = parsed.hostname
     if not hostname:
         return hostname or "", hostname or ""
-    if _allow_private_targets():
+    if allow_private_targets():
         # Local-dev escape hatch: bypass resolution but connect to the REAL
         # hostname. Previously this hardcoded 127.0.0.1, which misrouted every
         # fetch/webhook to loopback and broke virtual-host routing.
@@ -144,7 +144,7 @@ def resolve_and_pin_host(url: str) -> tuple[str, str]:
         # check_ssrf_protection closes on the other side of this same lookup.
         raise ValueError(f"SSRF protection: cannot resolve hostname {hostname}") from None
     for ip in ips:
-        if _is_public_ip_value(ip):
+        if is_public_ip_value(ip):
             return hostname, ip
     # No public IP found (should have been caught above) -> fail safe
     raise ValueError(f"SSRF protection: hostname {hostname} has no public IP")
@@ -211,7 +211,7 @@ def _build_pinned_request(
 # (used for extraction and other blocking work). The pinning path resolves FRESH
 # on every call for SSRF safety, so without this the loop would stall on each
 # resolver call.
-_DNS_EXECUTOR = concurrent.futures.ThreadPoolExecutor(max_workers=32, thread_name_prefix="dns-resolve")
+DNS_EXECUTOR = concurrent.futures.ThreadPoolExecutor(max_workers=32, thread_name_prefix="dns-resolve")
 
 _P = ParamSpec("_P")
 _R = TypeVar("_R")
@@ -221,7 +221,7 @@ def _off_loop(resolve: Callable[[], Callable[_P, _R]]) -> Callable[_P, Awaitable
     """The one way to run blocking call machinery off the event loop.
 
     Two things are owned here instead of at the call sites: the *pool* and the
-    *argument list*. The pool is this module's ``_DNS_EXECUTOR``, so every
+    *argument list*. The pool is this module's ``DNS_EXECUTOR``, so every
     off-loop resolution in the process lands on the same 32 workers and the
     default executor stays free for the blocking extraction work it is sized
     for. The argument list is the builder's, carried whole by the ParamSpec
@@ -238,7 +238,7 @@ def _off_loop(resolve: Callable[[], Callable[_P, _R]]) -> Callable[_P, Awaitable
 
     async def _run(*args: _P.args, **kwargs: _P.kwargs) -> _R:
         loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(_DNS_EXECUTOR, functools.partial(resolve(), *args, **kwargs))
+        return await loop.run_in_executor(DNS_EXECUTOR, functools.partial(resolve(), *args, **kwargs))
 
     return functools.wraps(resolve())(_run)
 

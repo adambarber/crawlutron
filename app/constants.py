@@ -147,7 +147,7 @@ class CrawlClassification(StrEnum):
     # rejected the entire batch with a 500.
     url_budget_exceeded = "url_budget_exceeded"
     # Strategy-level failure codes emitted by the shared error classifier
-    # (``app.crawl.result_helpers._classify_error_code``). They are members of
+    # (``app.crawl.result_helpers.classify_error_code``). They are members of
     # the taxonomy (not internal-only strings) because they are stored verbatim
     # in ``CrawlStrategyAttempt.classification`` and this field is the strict
     # enum at response shaping: a non-member code sails through the lenient
@@ -471,9 +471,9 @@ CLASSIFICATION_STATUS_BY_LABEL: dict[str, ResultStatus] = {
     # never attempted. Same retry contract as browser_pool_exhausted above.
     "circuit_breaker_open": "failed",
     # Transport / strategy exception codes emitted by the shared classifier
-    # (``_classify_error_code``) and by the engine's unsupported-strategy
+    # (``classify_error_code``) and by the engine's unsupported-strategy
     # guard. Every one reaches the wire through the exception chokepoint
-    # (``_engine_result_from_exception`` / ``_crawl_result_from_exception``),
+    # (``engine_result_from_exception`` / ``crawl_result_from_exception``),
     # which builds a terminal *failure*, so their status is "failed" -- not
     # the "blocked" default an unlisted label takes. "blocked" is the
     # non-assertive "we were kept out" verdict; these mean the fetch itself

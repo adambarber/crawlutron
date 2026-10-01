@@ -157,7 +157,7 @@ def testresolve_and_pin_host_fails_closed_when_resolution_fails(monkeypatch):
 def testresolve_and_pin_host_escape_hatch_survives_resolution_failure(monkeypatch):
     """The local-dev escape hatch is the ONLY path that returns an unpinned host.
 
-    ``_allow_private_targets()`` exists so a developer can crawl a service on
+    ``allow_private_targets()`` exists so a developer can crawl a service on
     their own machine, which necessarily means an unresolvable-on-the-internet
     name. It is a deliberate, environment-gated bypass -- so it is pinned to the
     env var and only the env var. If a future change made this the fallback for
@@ -386,7 +386,7 @@ def test_allow_private_preserves_host_for_webhook_style_urls(monkeypatch):
 
 
 def test_shared_public_target_verdict_matches_reserved_range_corpus():
-    from app.validation import _host_is_public, _is_public_ip_value
+    from app.validation import _host_is_public, is_public_ip_value
 
     blocked = {
         "10.0.0.1": True,
@@ -409,10 +409,10 @@ def test_shared_public_target_verdict_matches_reserved_range_corpus():
     }
     public = {"8.8.8.8", "93.184.216.34", "2606:4700:4700::1111", "::ffff:8.8.8.8"}
     for address, expected_blocked in blocked.items():
-        assert _is_public_ip_value(address) is (not expected_blocked), address
+        assert is_public_ip_value(address) is (not expected_blocked), address
         assert _host_is_public(address) is (not expected_blocked), address
         assert _blocked(address) is expected_blocked, address
     for address in public:
-        assert _is_public_ip_value(address) is True, address
+        assert is_public_ip_value(address) is True, address
         assert _host_is_public(address) is True, address
         assert _blocked(address) is False, address

@@ -1,6 +1,6 @@
 """LLM metadata extraction must leave the event loop.
 
-``format_crawl_item`` runs ``_extract_llm_metadata`` (a second lxml parse)
+``format_crawl_item`` runs ``extract_llm_metadata`` (a second lxml parse)
 synchronously for every result. The async endpoint path must offload that
 parse with ``asyncio.to_thread`` via the additive async shaping API.
 """
@@ -42,13 +42,13 @@ async def test_aformat_crawl_item_offloads_metadata_parse(monkeypatch):
     calls: list[tuple[str, str]] = []
     from app.crawl import llm_format as llm_mod
 
-    real_fn = llm_mod._extract_llm_metadata
+    real_fn = llm_mod.extract_llm_metadata
 
     def spy(html, url):
         calls.append((html, url))
         return real_fn(html, url)
 
-    monkeypatch.setattr(llm_mod, "_extract_llm_metadata", spy)
+    monkeypatch.setattr(llm_mod, "extract_llm_metadata", spy)
     seen_threads: set[int] = set()
     loop_thread = asyncio.get_running_loop()
 

@@ -22,7 +22,7 @@ from app.crawl.job_store import durable_page_identity
 from app.crawl.policy import DiscoveryFlags, discovery_flags
 from app.crawl.recursive import RECURSIVE_RAMP_MAX, _spill_write, run_recursive_crawl
 from app.crawl.render_options import policy_wants_html
-from app.crawl.result_helpers import TerminalResult, _engine_result_from_exception, _skipped_engine_result
+from app.crawl.result_helpers import TerminalResult, _skipped_engine_result, engine_result_from_exception
 from app.crawl.strategy_chain import execute_crawl_chain
 from app.memory_pressure import read_memory_stats
 from app.models import CrawlTask, CrawlWorker, EngineCrawlResult, NormalizedUrl
@@ -30,7 +30,7 @@ from app.resource_pressure import (
     ResourceGate,
     TaskRamBudget,
     WeightedAdmission,
-    _build_admission_policy,
+    build_admission_policy,
     derive_browser_pool_size,
     doc_worker_count,
 )
@@ -165,7 +165,7 @@ async def _run_job(state: _PipelineState, job: CrawlTask) -> tuple[int, EngineCr
             timeout=budget,
         )
     except TimeoutError as error:
-        result = _engine_result_from_exception(
+        result = engine_result_from_exception(
             error=error,
             original_url=job.original_url,
             normalized_url=job.normalized_url,
@@ -281,7 +281,7 @@ async def _run_nonrecursive(state: _PipelineState) -> None:
             allowed_jobs,
             lambda job: _worker(state, job),
             on_result=lambda index, result: _spill_one(state, index, result),
-            failed_result=lambda job, exc: _engine_result_from_exception(
+            failed_result=lambda job, exc: engine_result_from_exception(
                 error=exc,
                 original_url=job.original_url,
                 normalized_url=job.normalized_url,
@@ -294,7 +294,7 @@ async def _run_recursive(state: _PipelineState) -> None:
     scheduler = cast("DomainScheduler", state.scheduler)
     admission = WeightedAdmission(
         state.dependencies.resource_gate,
-        _build_admission_policy(
+        build_admission_policy(
             read_memory_stats().total_bytes or 0,
             pool_size=derive_browser_pool_size(),
             max_concurrent_pages=state.settings.max_concurrent_pages,

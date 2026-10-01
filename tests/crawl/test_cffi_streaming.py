@@ -29,7 +29,7 @@ _DEFAULT_CFFI_FETCHER = impersonating_fetcher(HostPolicy.unrestricted())
 class TestCffiImpersonateStrategy:
     async def test_http_cffi_imersonate_result(self):
         from app.crawl.cache import HttpCache
-        from app.crawl.strategies.http import _http_strategy_result
+        from app.crawl.strategies.http import http_strategy_result
 
         # A real HttpFetchResult, not a local class that has the same five
         # attributes: the strategy reads a production model, so a stand-in with
@@ -41,7 +41,7 @@ class TestCffiImpersonateStrategy:
             update={"extraction": "full"}
         )
 
-        result = await _http_strategy_result(
+        result = await http_strategy_result(
             request=strategy_request("http://x/", policy, HTTP_CFFI_IMPERSONATE),
             http_fetcher=cffi_fetcher,
             cache=HttpCache(),

@@ -24,14 +24,14 @@ from app.constants import (
 from app.crawl.cache import HttpCache
 from app.crawl.content_cache import ContentCache
 from app.crawl.decompression import decompress_body as _decompress_body
-from app.crawl.document_text import _format_extracted_document_text
+from app.crawl.document_text import format_extracted_document_text
 from app.crawl.extraction import is_html
 from app.crawl.policy import discovery_flags
 from app.crawl.render_options import policy_wants_html
 from app.crawl.result_helpers import (
-    _binary_no_text_result,
-    _engine_result_from_exception,
-    _make_engine_result,
+    binary_no_text_result,
+    build_engine_result,
+    engine_result_from_exception,
 )
 from app.crawl.strategies import body_decode, content_cache_key, fetch_policy, request_profile
 from app.crawl.strategies.content_pipeline import (
@@ -102,7 +102,7 @@ class _FetchedResponse:
 
     The owner of "how this module keys a response's headers". It exists because
     that rule had three answers. ``_not_modified_result`` built its own
-    lowercased copy; ``_http_strategy_result`` built a second one; and
+    lowercased copy; ``http_strategy_result`` built a second one; and
     ``_store_http_caches`` read ``etag``/``last-modified`` off the *raw* map with
     no lowering at all, so it was the one site whose answer depended on the
     transport having already normalized. The fetchers do lowercase today
@@ -214,7 +214,7 @@ def _resolve_http_limits(ctx: _HttpStrategyContext) -> None:
     ctx.max_content_length = content_cache_key._effective_max_content_length(
         ctx.limits, ctx.global_concurrency
     )
-    ctx.base_headers = request_profile._headers_for_strategy(
+    ctx.base_headers = request_profile.headers_for_strategy(
         ctx.strategy, ctx.policy, ctx.normalized_url, profile=ctx.profile
     )
     ctx.request_headers = dict(ctx.base_headers)
@@ -229,7 +229,7 @@ async def _revalidate_content_cache(ctx: _HttpStrategyContext) -> None:
     """Serve or revalidate a disk content-cache entry when one is available."""
     if ctx.content_cache is None:
         return
-    ckey = content_cache_key._content_cache_key(
+    ckey = content_cache_key.build_content_cache_key(
         ctx.normalized_url,
         ctx.strategy,
         ctx.base_headers,
@@ -325,7 +325,7 @@ def _not_modified_result(ctx: _HttpStrategyContext, resp: _FetchedResponse) -> E
         diagnostics["cache"] = "not_modified"
     if ctx.caller_conditional:
         diagnostics["conditional"] = dict(ctx.caller_conditional)
-    return _make_engine_result(
+    return build_engine_result(
         **_response_result_fields(ctx, resp, attempt),
         status="success",
         classification="not_modified",
@@ -354,7 +354,7 @@ def _binary_result_if_needed(ctx: _HttpStrategyContext, resp: _FetchedResponse) 
         resp.body, resp.content_type, resp.final_url
     ):
         return None
-    result = _binary_no_text_result(
+    result = binary_no_text_result(
         original_url=ctx.original_url,
         normalized_url=ctx.normalized_url,
         final_url=resp.final_url,
@@ -406,7 +406,7 @@ async def _extract_http_phase(ctx: _HttpStrategyContext, resp: _FetchedResponse)
     )
     text, markdown = extracted.text, extracted.markdown
     if ctx.extraction == EXTRACTION_DOCUMENT and (resp.content_type or "").lower().startswith("text/"):
-        text = _format_extracted_document_text(text, source_url=resp.final_url)
+        text = format_extracted_document_text(text, source_url=resp.final_url)
         markdown = text
 
     return _ExtractedHttpContent(
@@ -577,7 +577,7 @@ async def _construct_http_result(
         error=error_classification,
     )
     html = extracted.html if ctx.include_html else None
-    return _make_engine_result(
+    return build_engine_result(
         **_response_result_fields(ctx, resp, attempt),
         status=status,
         classification=classification,
@@ -603,7 +603,7 @@ async def _construct_http_result(
 def _http_error_result(ctx: _HttpStrategyContext, error: Exception) -> EngineCrawlResult:
     """Build the redacted terminal result for a strategy exception."""
     elapsed_ms = int((time.monotonic() - ctx.started) * 1000)
-    return _engine_result_from_exception(
+    return engine_result_from_exception(
         error=error,
         original_url=ctx.original_url,
         normalized_url=ctx.normalized_url,
@@ -617,7 +617,7 @@ def _http_error_result(ctx: _HttpStrategyContext, error: Exception) -> EngineCra
     )
 
 
-async def _http_strategy_result(
+async def http_strategy_result(
     *,
     request: StrategyRequest,
     http_fetcher: Any,

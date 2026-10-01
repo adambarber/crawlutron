@@ -407,12 +407,12 @@ def test_error_field_taxonomy_detector_bites():
     """The hunt detector fires on the shipped shape and admits the classified one."""
     from tests.membership_gate import error_field_taxonomy_offenders
 
-    bad = ast.parse('def f():\n    return _terminal_crawl_result(url="u", error="worker_failed")\n')
+    bad = ast.parse('def f():\n    return terminal_crawl_result(url="u", error="worker_failed")\n')
     hits = error_field_taxonomy_offenders(bad, REPO_ROOT / "app" / "_synthetic.py")
     assert len(hits) == 1 and "worker_failed" in hits[0], hits
     # A member literal passes.
-    good = ast.parse('def f():\n    return _terminal_crawl_result(url="u", error="site_error")\n')
+    good = ast.parse('def f():\n    return terminal_crawl_result(url="u", error="site_error")\n')
     assert not error_field_taxonomy_offenders(good, REPO_ROOT / "app" / "_synthetic.py")
     # A classified variable is the sanctioned shape and passes.
-    var = ast.parse("def f(c):\n    return _terminal_crawl_result(url='u', error=c)\n")
+    var = ast.parse("def f(c):\n    return terminal_crawl_result(url='u', error=c)\n")
     assert not error_field_taxonomy_offenders(var, REPO_ROOT / "app" / "_synthetic.py")

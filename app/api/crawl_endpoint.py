@@ -25,7 +25,7 @@ from app.api.crawl_executor import execute_crawl
 from app.api.exceptions import http_error, validation_http_error
 from app.api.job_runner import start_tracked_task
 from app.api.main_helpers import record_crawl_completion, request_gate
-from app.api.response_shaping import _aunified_response_from_result
+from app.api.response_shaping import aunified_response_from_result
 from app.api.webhooks import validate_webhook_url_async
 from app.api_models import (
     CrawlRequest,
@@ -184,7 +184,7 @@ async def crawl(
             event="crawl_request_completed",
             logger=logger,
         )
-        response_model = await _aunified_response_from_result(result)
+        response_model = await aunified_response_from_result(result)
         try:
             await result_store.aput(result["request_id"], response_model.model_dump())
         except Exception:
