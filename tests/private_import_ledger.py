@@ -58,6 +58,7 @@ guard is what stops this becoming another hand-kept mirror of generated truth.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import Literal, NamedTuple
 
 Kind = Literal[
@@ -78,8 +79,16 @@ class Declaration(NamedTuple):
     side: tuple[Side, ...] = ()
 
 
-def _d(kind: Kind, reason: str, side: tuple[Side, ...] = ()) -> Declaration:
-    return Declaration(kind, reason, side)
+def _d(kind: Kind, reason: str, side: Sequence[Side] = ()) -> Declaration:
+    """One declaration, with ``side`` normalised to the immutable field type.
+
+    The parameter is a ``Sequence`` and the field a ``tuple`` because the table's
+    rows want to read as literals -- ``["test"]`` -- while ``Declaration.side``
+    wants to stay hashable and unmutable once built. Normalising here is what lets
+    every row be written the readable way without the annotation being a claim
+    about 158 call sites that none of them satisfies.
+    """
+    return Declaration(kind, reason, tuple(side))
 
 
 _CHOKEPOINT_STATE = _d(
