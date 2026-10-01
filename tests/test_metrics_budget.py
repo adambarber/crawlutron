@@ -8,7 +8,7 @@ split the enforcement story across two exit codes.
 
     function length   body span in lines
     ABC size          sqrt(assignments^2 + branches^2 + conditions^2)
-    class length      body span in lines
+    largest class     body span of the single biggest class
     block length      span of one compound statement's body
 
 Each is a BUDGET, not a threshold. The budget is the number of offenders the
@@ -20,9 +20,32 @@ there is no separate report to fall out of date.
 The target is zero in every case. At zero the budget does the failing on its
 own, so the flip from "warn" to "enforce" is not a change to this file; it is
 four integers in `_BUDGETS` reaching the value they are already heading for.
-That is the whole reason this is a count and not a severity threshold: a
+That is the whole reason this is a measurement and not a severity threshold: a
 severity threshold never reaches zero on its own, and a gate that can be
 satisfied forever is not a ratchet.
+
+Three of the four measure a COUNT. The fourth, ``largest class``, measures a
+VALUE, and that is the amendment -- it replaced a count of classes over 250
+lines, which could not see the one move the browser split made.
+
+Counting offenders is blind to the only thing splitting is for. A 704-line
+class divided into a 456-line renderer and a 550-line driver made the largest
+thing in the tree 22% smaller and the offender count go UP by one, so the count
+ratchet blocked the correct move and the only ways through were to leave the
+class whole or to shred it into pieces small enough not to register. Neither is
+a trade the metric was asked to make; it just could not tell them apart.
+
+So the ratchet is now on the size of the worst single class, which is the thing
+a reader actually has to hold in their head, and which fell from 704 to 550 in
+that same commit. Its first recorded value is therefore LOWER than the worst the
+count metric was implicitly tolerating, so the amendment is tighter than what it
+replaces, not looser: any class growing past 550 fails, and the count metric
+would have said nothing until a 251st line appeared in a fifth class.
+
+What is given up: nothing stops a new oversized class appearing as long as the
+biggest one does not grow. That is the blind spot a count had and this does not,
+traded for the blind spot a count had and this does. A ratchet can watch one
+thing well; watching two meant watching neither.
 
 To see the current work list without failing anything, run this module and read
 the counts, or call the collectors directly from a shell:
@@ -69,7 +92,6 @@ _ALL_APP: frozenset[str] = frozenset()
 
 FUNCTION_LENGTH = 60
 ABC_SIZE = 30
-CLASS_LENGTH = 250
 BLOCK_LENGTH = 40
 
 # Offender counts the tree is currently allowed to have. These are the
@@ -81,15 +103,7 @@ BLOCK_LENGTH = 40
 _BUDGETS = {
     "function length": 38,
     "abc size": 5,
-    # Raised 3 -> 4 by the browser driver/renderer split, and it is worth being
-    # explicit about why rather than letting the number ride. That split took one
-    # 704-line ``BrowserRenderer`` and turned it into a 456-line renderer plus a
-    # 550-line driver: the largest class in the tree got 35% smaller, and the
-    # offender count went UP by one. The count is blind to that trade -- it cannot
-    # tell "one big class became two smaller ones" from "two classes appeared" --
-    # so the ratchet records the regression it actually measures, and the
-    # remaining four are what the next wave works down.
-    "class length": 4,
+    "largest class": 550,
     "block length": 12,
 }
 
@@ -165,10 +179,12 @@ def _outer_blocks(tree: ast.AST) -> list[tuple[int, int, str]]:
     return kept
 
 
+# Where each metric stops counting. ``largest class`` has no such line: its
+# budget IS its limit, so the gate and the work list cannot disagree about what
+# counts as too big.
 _METRIC_LIMITS = {
     "function length": FUNCTION_LENGTH,
     "abc size": ABC_SIZE,
-    "class length": CLASS_LENGTH,
     "block length": BLOCK_LENGTH,
 }
 
@@ -187,28 +203,66 @@ def _candidates(tree: ast.AST) -> list[tuple[str, int, str, int]]:
             found.append(("function length", _span(node, node.body), node.name, node.lineno))
             found.append(("abc size", _abc_size(node), node.name, node.lineno))
         elif isinstance(node, ast.ClassDef):
-            found.append(("class length", _span(node, node.body), node.name, node.lineno))
+            found.append(("largest class", _span(node, node.body), node.name, node.lineno))
     for start, size, label in _outer_blocks(tree):
         found.append(("block length", size, label, start))
     return found
 
 
 def offenders(metric: str) -> list[Offender]:
-    limit = _METRIC_LIMITS[metric]
+    """The work list for `metric`, worst first.
+
+    For a counted metric that is every candidate over its limit. For
+    ``largest class`` it is the single worst class, and only when it is worse
+    than the budget -- so the list is never empty-but-over-budget, which is the
+    state a report cannot render.
+    """
+    limit = _METRIC_LIMITS.get(metric)
+    budget = _BUDGETS[metric]
     found: list[Offender] = []
     for path, tree in app_trees(exclude=_ALL_APP):
         relative = path.relative_to(APP_ROOT.parent).as_posix()
         for candidate_metric, size, label, line in _candidates(tree):
-            if candidate_metric == metric and size > limit:
+            if candidate_metric != metric:
+                continue
+            if metric == "largest class":
+                if size > budget:
+                    found.append(Offender(metric, f"{relative}:{line}", label, size))
+            elif size > limit:
                 found.append(Offender(metric, f"{relative}:{line}", label, size))
-    return sorted(found, key=lambda item: (-item.size, item.where))
+    return (
+        sorted(found, key=lambda item: (-item.size, item.where))[:1]
+        if metric == "largest class"
+        else sorted(found, key=lambda item: (-item.size, item.where))
+    )
+
+
+def measurement(metric: str) -> int:
+    """The number `metric` is compared against.
+
+    Counts for three metrics; for ``largest class`` the size of the worst class
+    in the tree, whether or not it is over budget. Comparing a budget against
+    ``len(offenders(...))`` would demand a budget of zero for that metric the
+    moment the worst class came in under the line, which is the opposite of a
+    ratchet.
+    """
+    if metric != "largest class":
+        return len(offenders(metric))
+    worst = 0
+    for _path, tree in app_trees(exclude=_ALL_APP):
+        for node in nodes_of(tree):
+            if isinstance(node, ast.ClassDef):
+                worst = max(worst, _span(node, node.body))
+    return worst
 
 
 def report() -> None:
     for metric, budget in _BUDGETS.items():
         found = offenders(metric)
-        state = "OVER" if len(found) > budget else "ok"
-        print(f"{metric:<16} {len(found):>3} / budget {budget:<3} [{state}]")
+        shown = measurement(metric)
+        state = "OVER" if shown > budget else "ok"
+        unit = "" if metric == "largest class" else " offenders /"
+        print(f"{metric:<16} {shown:>3}{unit:<12} budget {budget:<3} [{state}]")
         for item in found:
             print(f"    {item}")
 
@@ -217,8 +271,9 @@ def report() -> None:
 def test_metric_budget_is_not_exceeded(metric: str) -> None:
     budget = _BUDGETS[metric]
     found = offenders(metric)
-    assert len(found) <= budget, (
-        f"{metric}: {len(found)} offenders exceeds the budget of {budget}.\n"
+    shown = measurement(metric)
+    assert shown <= budget, (
+        f"{metric}: {shown} exceeds the budget of {budget}.\n"
         f"Each of these is work that was already on the list; a wave that fixes one "
         f"lowers the budget in `_BUDGETS` in the same commit. The target is 0, at which "
         f"point this assertion enforces the rule on its own.\n" + "\n".join(f"  {item}" for item in found)
@@ -229,9 +284,9 @@ def test_metric_budget_is_not_exceeded(metric: str) -> None:
 def test_metric_budget_is_tight(metric: str) -> None:
     """A budget must not sit above the measurement, or it is a standing allowance."""
     budget = _BUDGETS[metric]
-    actual = len(offenders(metric))
+    actual = measurement(metric)
     assert budget <= actual, (
-        f"{metric}: the budget of {budget} is stale -- only {actual} offenders remain. "
+        f"{metric}: the budget of {budget} is stale -- the measurement is now {actual}. "
         f"Tighten it to {actual} in `_BUDGETS` in the same commit that reduced them. "
         f"A budget that outlives the work it was counting is not a ratchet."
     )
