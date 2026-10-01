@@ -300,3 +300,17 @@ async def fetch_sitemap_urls(
     # happen inside put(), under its lock (no more manual popitem loop).
     _SITEMAP_CACHE.put(cache_key, (list(page_urls), root_etag, root_lm))
     return page_urls
+
+
+def reset_process_state() -> None:
+    """Drop cached sitemap documents.
+
+    The cache is process-wide and its TTL is hours, so a test that crawls a sitemap
+    once sees the same document for the rest of the session unless it clears this.
+    """
+    _SITEMAP_CACHE.clear()
+
+
+def has_process_state() -> bool:
+    """Whether any sitemap document is cached right now."""
+    return bool(_SITEMAP_CACHE)

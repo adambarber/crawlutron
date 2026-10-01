@@ -157,8 +157,8 @@ os.environ["CRAWLUTRON_CONTENT_CACHE_ENABLED"] = os.environ.get("CRAWLUTRON_CONT
 
 @pytest.fixture
 def ssrf_guard_required(monkeypatch):
-    """Mark a test that exercises ``_check_ssrf_protection`` or
-    ``_resolve_and_pin_host`` and assert that it opted OUT of the test
+    """Mark a test that exercises ``check_ssrf_protection`` or
+    ``resolve_and_pin_host`` and assert that it opted OUT of the test
     default ``CRAWLUTRON_ALLOW_PRIVATE_TARGETS=1``.
 
     The suite defaults to private-targets ON so the loopback helper server
@@ -171,7 +171,7 @@ def ssrf_guard_required(monkeypatch):
     Usage:
         def test_my_ssrf_check(monkeypatch, ssrf_guard_required):
             monkeypatch.setenv("CRAWLUTRON_ALLOW_PRIVATE_TARGETS", "0")
-            _check_ssrf_protection(...)
+            check_ssrf_protection(...)
     """
     called: list[str] = []
     from app.crawl.strategies import pinned_transport as pinned_mod
@@ -197,11 +197,11 @@ def ssrf_guard_required(monkeypatch):
 
     monkeypatch.setattr(
         pinned_mod,
-        "_check_ssrf_protection",
-        _track("check_ssrf_protection", pinned_mod._check_ssrf_protection),
+        "check_ssrf_protection",
+        _track("check_ssrf_protection", pinned_mod.check_ssrf_protection),
     )
     monkeypatch.setattr(
-        pinned_mod, "_resolve_and_pin_host", _track("resolve_and_pin_host", pinned_mod._resolve_and_pin_host)
+        pinned_mod, "resolve_and_pin_host", _track("resolve_and_pin_host", pinned_mod.resolve_and_pin_host)
     )
     yield
     # Sanity check in setup phase (not teardown) so the failure surfaces as
@@ -401,14 +401,9 @@ def _cleanup_extraction_executors():
     yield
     import asyncio
 
-    from app.crawl.extraction import _shutdown_doc_extraction_executor
+    from app.crawl.extraction import shutdown_doc_extraction_executor
 
-    asyncio.run(_shutdown_doc_extraction_executor())
-    # Also shutdown the thread pool if needed
-    from app.crawl.extraction import _EXTRACTION_EXECUTOR
-
-    if _EXTRACTION_EXECUTOR is not None:
-        _EXTRACTION_EXECUTOR.shutdown(wait=False)
+    asyncio.run(shutdown_doc_extraction_executor())
 
 
 @pytest.fixture
@@ -510,7 +505,7 @@ def _clear_sitemap_cache() -> None:
     """
     import app.crawl.fetch_helpers as fh
 
-    fh._SITEMAP_CACHE.clear()
+    fh.reset_process_state()
 
 
 def _clear_metrics() -> None:
@@ -548,31 +543,12 @@ def _clear_global_http_state() -> None:
     from app.crawl.strategies import http_client_pool as pool_mod
 
     with contextlib.suppress(Exception):
-        cookie_mod._GLOBAL_COOKIE_JAR.clear()
+        cookie_mod.reset_process_state()
     with contextlib.suppress(Exception):
-        if pool_mod._DEFAULT_HTTP_CLIENT is not None:
-            try:
-                loop = asyncio.get_event_loop()
-                if loop.is_running():
-                    # Inside an async test's loop: drop the reference so GC
-                    # reclaims the client instead of awaiting across loops.
-                    pool_mod._DEFAULT_HTTP_CLIENT = None
-                else:
-                    loop.run_until_complete(pool_mod.close_async_http_client())
-            except RuntimeError:
-                pool_mod._DEFAULT_HTTP_CLIENT = None
-    # Shared curl_cffi session: same loop-hygiene as the
-    # pooled httpx client so tests stay order-independent under asyncio.run.
-    with contextlib.suppress(Exception):
-        if pool_mod._DEFAULT_CFFI_SESSION is not None:
-            try:
-                loop = asyncio.get_event_loop()
-                if loop.is_running():
-                    pool_mod._DEFAULT_CFFI_SESSION = None
-                else:
-                    loop.run_until_complete(pool_mod.close_cffi_session())
-            except RuntimeError:
-                pool_mod._DEFAULT_CFFI_SESSION = None
+        # The pool decides per client whether it may be closed or must simply be
+        # dropped: a client owned by an already-finished loop cannot be awaited
+        # from the next one, and only the pool knows which loop owns what.
+        pool_mod.reset_process_state()
     # The real app's shutdown event is module-global and shared by every
     # ASGI test. A test that drives the real lifespan (shutdown) leaves it
     # SET; production never reuses a set event (fresh boot = fresh event),
@@ -587,16 +563,16 @@ def _clear_global_http_state() -> None:
     with contextlib.suppress(Exception):
         from app.crawl import engine as _engine_mod
 
-        _engine_mod.robots_cache.clear()
-        # Fresh shared cache + admission gate so crawl state never leaks across
-        # tests (the gate caches its CPU-quota reading and CPU sampling state).
-        _engine_mod._SHARED_HTTP_CACHE = _engine_mod.HttpCache()
-        _engine_mod._resource_gate = _engine_mod.ResourceGate()
+        # The robots cache, the shared HTTP cache and the admission gate are one
+        # crawl-lifetime unit, so the engine empties all three itself. It used to
+        # be spelled out here, one line per field, which is how a fourth field
+        # would have been missed.
+        _engine_mod.reset_process_state()
         # Drop any memoized cgroup reads so a test that asserts fresh sensing
         # (e.g. writes a new fake cgroup file) is not served a stale value.
-        from app.cgroup_sense import _invalidate_cgroup_cache
+        from app.cgroup_sense import reset_process_state
 
-        _invalidate_cgroup_cache()
+        reset_process_state()
     # DNS cache + pending client close queue + cookie namespace contextvar
     # isolation between tests. Without these a test that mutates ``_DNS_CACHE``
     # or schedules a client close would leak state into the next test.
@@ -605,16 +581,11 @@ def _clear_global_http_state() -> None:
     from app.crawl.strategies import pinned_transport as pinned_mod
 
     with contextlib.suppress(Exception):
-        pinned_mod._DNS_CACHE.clear()
-        # Drop pending-client references: we cannot await aclose from sync
-        # context, but dropping the references lets GC reclaim the sockets
-        # once the loop that owns them exits. The capped queue means the
-        # list stays small even under heavy loop churn.
-        with pool_mod._PENDING_CLIENT_CLOSE_LOCK:
-            pool_mod._PENDING_CLIENT_CLOSE.clear()
+        pinned_mod.reset_process_state()
+        pool_mod.reset_process_state()
         # Reset the per-request cookie namespace so a test that sets one does
         # not leak into a subsequent test's request context.
-        cookie_mod._COOKIE_NAMESPACE.set("")
+        cookie_mod.reset_process_state()
 
 
 # The three resets above are one concern -- "no module global survives a test"

@@ -30,6 +30,8 @@ from __future__ import annotations
 import ast
 import pathlib
 
+import pytest
+
 from tests.chokepoint_walks import (
     REPO_ROOT,
     from_imports,
@@ -112,7 +114,7 @@ PRIVATE_IMPORT_LEDGER = Rule(
         # A public name needs no ledger row -- that is the whole point of the fix.
         "from app.crawl.engine import crawl_request\n",
         # A declared lifecycle weld is allowed, and says why.
-        "from app.crawl.extraction import _shutdown_doc_extraction_executor\n",
+        "from app.crawl.extraction import shutdown_doc_extraction_executor\n",
         # A name from outside app/ is not this rule's business.
         "from tests.private_import_ledger import LEDGER\n",
         # A public name through a bound module object is the same name publicly,
@@ -242,3 +244,82 @@ def test_app_weld_rows_all_correspond_to_a_real_reach():
     assert not stale, (
         f"{len(stale)} app weld row(s) name a reach that no longer happens; delete them: {', '.join(stale)}"
     )
+
+
+# ---------------------------------------------------------------------------
+# the harness reaches through a door, not through the state object
+# ---------------------------------------------------------------------------
+
+_CONFTEST = _TESTS_DIR / "conftest.py"
+
+
+def _conftest_trees(*, exclude: frozenset[str] = frozenset()) -> tuple[tuple[pathlib.Path, ast.Module], ...]:
+    """The one tree for ``tests/conftest.py``.
+
+    ``trees_under`` rglobs, so handed a *file* it returns nothing at all -- an empty
+    scope, which is the worst result available to a gate: green while inspecting zero
+    files. That is not hypothetical. It is what the first version of this function
+    did, and the reason the rule below carries a :attr:`~tests.rules.Rule.premise` is
+    that an empty trigger set is now a construction error rather than a passing
+    property.
+    """
+    del exclude
+    tree = ast.parse(_CONFTEST.read_text(encoding="utf-8"), filename=str(_CONFTEST))
+    return ((_CONFTEST, tree),)
+
+
+def _conftest_private_offenders(tree: ast.Module, path: pathlib.Path) -> list[str]:
+    """Every private ``app`` name ``conftest.py`` reaches, with nothing exempted.
+
+    The general gate lets a declared row through. This one does not, and the
+    difference is the argument rather than the strictness. In a test, a private
+    reach says the module has no public door the test can stand on, so a declared
+    row with a reason is a fair answer to that. In the autouse fixture it is not,
+    because the fixture has no test to be near: it runs before every one of them,
+    its imports are plumbing rather than assertions, and all of its reaches are the
+    same obligation -- some module holds process-wide state, and the only way the
+    harness can currently fulfil that is to reach in and mutate it.
+
+    So a ledger row cannot rescue a reach here. A row would record "and here is
+    why the harness mutates another module's private state", which is a true
+    sentence and a useless one: every kind the ledger defines describes a reach
+    that is *legitimate*, and none of them describes this.
+    """
+    return [
+        f"{relative_posix(path)}:{lineno}: {key} is private to another module"
+        for key, lineno in sorted(_private_app_names(tree).items())
+    ]
+
+
+CONFTEST_WELDS = Rule(
+    name="the-harness-resets-module-state-through-a-public-door",
+    find=_conftest_private_offenders,
+    scope=_conftest_trees,
+    premise=lambda: None if _conftest_trees() else pytest.fail("the conftest scope resolved to no trees"),
+    summary=(
+        "the autouse fixture reaches into a module to reset process-wide state; the owner should "
+        "expose the reset, because a caller obliged to publish a reset has no other way to publish it"
+    ),
+    bite=lambda: (
+        "from app.crawl.strategies import pinned_transport as pinned_mod\n\n"
+        "pinned_mod._undeclared_probe.clear()\n",
+    ),
+    clean=lambda: (
+        # The shape this rule exists to force: ask the owner, do not touch the state.
+        "from app.crawl.strategies import pinned_transport\n\npinned_transport.reset_dns_cache()\n",
+        # A public app name is the whole point.
+        "from app.crawl.strategies import pinned_transport\n\npinned_transport.apinned_hops\n",
+        # Not an app import, so not this rule's business.
+        "import os\n\nos.environ.get('CRAWLUTRON_LOG_LEVEL')\n",
+    ),
+)
+
+CONFTEST_RULES = Registry((CONFTEST_WELDS,))
+
+
+def test_conftest_reaches_no_undeclared_private_app_name():
+    CONFTEST_RULES.check_all_clean()
+
+
+def test_conftest_weld_rule_bites():
+    CONFTEST_RULES.check_all_bite()

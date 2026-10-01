@@ -433,10 +433,18 @@ def _doc_pool_health() -> list[tuple[bool, bool, bool]]:
         ]
 
 
-async def _shutdown_doc_extraction_executor() -> None:
-    """Terminate persistent document-extraction workers (lifespan/test teardown)."""
+async def shutdown_doc_extraction_executor() -> None:
+    """Terminate every persistent extraction worker, process and thread alike.
+
+    Both pools were checked separately by the caller, which meant the caller had
+    to know there were two. The thread pool has no shutdown of its own here, so
+    asking whether it is still alive was the only way it ever got closed; a
+    second pool added later would have shipped unclosed by exactly this route.
+    """
     with _POOL_LOCK:
         _teardown_doc_pool_locked()
+    if _EXTRACTION_EXECUTOR is not None:
+        _EXTRACTION_EXECUTOR.shutdown(wait=False)
 
 
 # Wall-clock bound (seconds) for a single CSS/XPath selector evaluation.

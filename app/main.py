@@ -245,7 +245,7 @@ if FastAPI is not None:
         # Imported here, not at module scope: this pulls in the markitdown
         # extraction stack, and the deferred import is what keeps it off the
         # import path of every CLI and MCP caller that never renders a PDF.
-        from .crawl.extraction import _shutdown_doc_extraction_executor
+        from .crawl.extraction import shutdown_doc_extraction_executor
 
         async def _close_gate() -> None:
             _resource_gate.close()
@@ -267,7 +267,7 @@ if FastAPI is not None:
                 # so without this every markitdown worker (and its memory and
                 # pipes) outlived the process's own shutdown and was only reaped
                 # by the test fixture.
-                ("_shutdown_doc_extraction_executor", _shutdown_doc_extraction_executor),
+                ("shutdown_doc_extraction_executor", shutdown_doc_extraction_executor),
                 ("_resource_gate.close", _close_gate),
             )
         )

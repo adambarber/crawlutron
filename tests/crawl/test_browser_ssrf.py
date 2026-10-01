@@ -57,7 +57,7 @@ async def test_document_extractor_invokes_ssrf_check(monkeypatch):
         seen["url"] = url
         raise _GateReached
 
-    monkeypatch.setattr(http_mod, "_check_ssrf_protection", fake_check)
+    monkeypatch.setattr(http_mod, "check_ssrf_protection", fake_check)
 
     with pytest.raises(_GateReached):
         doc_mod._default_document_text_extractor("http://example.com/x.pdf", UNRESTRICTED_HOST_POLICY)
@@ -95,7 +95,7 @@ async def test_browser_pin_resolve_does_not_run_on_the_event_loop(monkeypatch):
     property. The address is canned, so this is deterministic and does no DNS.
 
     Private targets are blocked because the session-wide loopback hatch is the
-    other way this test would prove nothing: with it on, ``_resolve_and_pin_host``
+    other way this test would prove nothing: with it on, ``resolve_and_pin_host``
     returns the hostname before it resolves, the observer never fires, and the
     assertion ends up checking that nothing happened.
     """

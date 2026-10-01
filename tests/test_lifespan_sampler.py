@@ -35,7 +35,7 @@ def _spy_on_every_teardown(monkeypatch, http_closer) -> list[str]:
     monkeypatch.setattr(http_mod, "close_async_http_client", http_closer)
     monkeypatch.setattr(http_mod, "close_cffi_session", _record("cffi"))
     monkeypatch.setattr(main_mod, "close_browser_pool", _record("browser"))
-    monkeypatch.setattr(extraction_mod, "_shutdown_doc_extraction_executor", _record("doc"))
+    monkeypatch.setattr(extraction_mod, "shutdown_doc_extraction_executor", _record("doc"))
     monkeypatch.setattr(engine_mod._resource_gate, "close", lambda: ran.append("gate"))
     return ran
 

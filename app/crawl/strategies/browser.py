@@ -54,7 +54,7 @@ from app.crawl.strategies.document import _default_document_text_extractor
 from app.crawl.strategies.pinned_transport import (
     _build_pinned_request,
     _build_pinned_request_async,
-    _check_ssrf_protection,
+    check_ssrf_protection,
 )
 from app.json_safe import json_default
 from app.models import Classification, CrawlError, CrawlResult, RenderOptions, ResultStatus
@@ -129,14 +129,14 @@ def _assert_safe_final_url(final_url: str, *, policy: HostPolicy) -> None:
     content.
     """
     normalized = normalize_public_http_url(final_url, policy=policy)
-    _check_ssrf_protection(normalized)
+    check_ssrf_protection(normalized)
 
 
 def _is_ssrf_blocked(url: str, *, policy: HostPolicy) -> bool:
     """Return ``True`` if ``url`` resolves to an SSRF-unsafe target."""
     try:
         normalized = normalize_public_http_url(url, policy=policy)
-        _check_ssrf_protection(normalized)
+        check_ssrf_protection(normalized)
     except ValueError:
         return True
     return False
@@ -256,7 +256,7 @@ def _make_ssrf_websocket_handler(*, policy: HostPolicy):
 
     page.route does not intercept WebSocket upgrades; without this a hostile
     page could open a WebSocket to an internal host around the route guard.
-    Validation reuses _check_ssrf_protection with ws/wss mapped to http/https.
+    Validation reuses check_ssrf_protection with ws/wss mapped to http/https.
     """
 
     async def _ws_handler(ws):
@@ -271,7 +271,7 @@ def _make_ssrf_websocket_handler(*, policy: HostPolicy):
                 http_equivalent,
                 policy=policy,
             )
-            await asyncio.to_thread(_check_ssrf_protection, normalized)
+            await asyncio.to_thread(check_ssrf_protection, normalized)
         except Exception:
             close = getattr(ws, "close", None)
             if close is not None:
@@ -407,6 +407,20 @@ class _LockedDomainCookieStore(MutableMapping[str, str]):
 
 
 _BROWSER_COOKIES_BY_DOMAIN = _LockedDomainCookieStore(_BROWSER_COOKIES_MAX)
+
+
+def reset_process_state() -> None:
+    """Drop every cookie the renderer has accumulated for a domain.
+
+    The store is process-wide and bounded, not cleared, so a browser test that
+    renders once leaves its domain's cookies for the next test to assert against.
+    """
+    _BROWSER_COOKIES_BY_DOMAIN.clear()
+
+
+def has_process_state() -> bool:
+    """Whether any domain's cookies are held right now."""
+    return len(_BROWSER_COOKIES_BY_DOMAIN) > 0
 
 
 def _store_browser_cookies(domain: str, header: str) -> None:

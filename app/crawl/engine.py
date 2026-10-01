@@ -473,3 +473,37 @@ async def crawl_request(
         return await run_crawl_request(state)
     finally:
         _reset_cookie_namespace(_cookie_token)
+
+
+def reset_process_state() -> None:
+    """Rebuild every process-wide cache the engine shares across crawls.
+
+    Three things, reset together on purpose: the robots cache, the shared HTTP
+    cache, and the resource gate. The gate memoizes a CPU-quota reading and CPU
+    sampling state, so a test that writes a fake cgroup file after the gate has
+    sampled once is served a stale reading and concludes the gate ignores the file.
+    Dropping the cache but keeping the gate hides that; keeping both but not robots
+    serves one origin's old policy body. They are one unit of crawl lifetime, so
+    they are reset as one.
+    """
+    robots_cache.clear()
+    global _SHARED_HTTP_CACHE, _resource_gate
+    _SHARED_HTTP_CACHE = HttpCache()
+    _resource_gate = ResourceGate()
+
+
+def has_process_state() -> bool:
+    """Whether either shared cache still holds an entry.
+
+    The resource gate is reset here too but is not part of the probe, and the
+    asymmetry is deliberate rather than an omission. A fresh gate is not *empty*:
+    it is unsampled, and nothing in it records whether it has sampled, so there is
+    no predicate to ask. Inventing one -- a flag set on first read -- would add
+    state to the module in order to report on the state of a different module; the
+    memoized reading it worries about lives in ``cgroup_sense``, which is a
+    ``ProcessStateOwner`` of its own and is asked directly.
+    """
+    # ``_SHARED_HTTP_CACHE`` defines no ``__len__``, so ``bool()`` on it is a
+    # constant True -- the probe would report state after every reset and train
+    # the reader to ignore it. Read the entry mapping it already maintains.
+    return bool(robots_cache) or bool(_SHARED_HTTP_CACHE._data)

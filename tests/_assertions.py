@@ -53,7 +53,7 @@ def assert_dns_pinning_uses_first_resolution(monkeypatch, rebound_ip, public_ip=
     import socket
     from unittest.mock import patch
 
-    from app.crawl.strategies.pinned_transport import _resolve_and_pin_host
+    from app.crawl.strategies.pinned_transport import resolve_and_pin_host
 
     block_private_targets(monkeypatch)
     calls = []
@@ -65,7 +65,7 @@ def assert_dns_pinning_uses_first_resolution(monkeypatch, rebound_ip, public_ip=
         return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", (rebound_ip, 80))]
 
     with patch("socket.getaddrinfo", side_effect=fake_getaddrinfo):
-        _, ip = _resolve_and_pin_host("http://example.com/")
+        _, ip = resolve_and_pin_host("http://example.com/")
     assert ip == public_ip
     assert calls == ["example.com"]
 

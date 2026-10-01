@@ -193,8 +193,8 @@ def allow_scripted_egress(monkeypatch, ip: str = "1.2.3.4") -> None:
     """
     from app.crawl.strategies import pinned_transport as pinned_mod
 
-    monkeypatch.setattr(pinned_mod, "_check_ssrf_protection", lambda url: None)
-    monkeypatch.setattr(pinned_mod, "_resolve_and_pin_host", lambda url: (urlparse(url).hostname, ip))
+    monkeypatch.setattr(pinned_mod, "check_ssrf_protection", lambda url: None)
+    monkeypatch.setattr(pinned_mod, "resolve_and_pin_host", lambda url: (urlparse(url).hostname, ip))
 
 
 def patch_http_fetcher_transport(

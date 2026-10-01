@@ -543,3 +543,49 @@ def get_cffi_session() -> Any:
 async def close_cffi_session() -> None:
     """Close the shared curl_cffi session on service shutdown / test reset."""
     await _CFFI_SESSION_SINGLETON.shutdown()
+
+
+def _discard_if_unowned_loop(close: Callable[[], Any], slot: str) -> None:
+    """Release ``slot``'s object, closing it only when no loop owns it.
+
+    Both process-wide clients are created lazily on whichever event loop first
+    asks, and a client belonging to a loop that has already finished cannot be
+    awaited from another one. So the only safe teardown without an await is to drop
+    the reference and let the finished loop's owner reclaim it -- which is why this
+    splits on ``is_running()`` rather than always closing.
+    """
+    if globals()[slot] is None:
+        return
+    try:
+        loop = asyncio.get_event_loop()
+    except RuntimeError:
+        globals()[slot] = None
+        return
+    if loop.is_running():
+        globals()[slot] = None
+    else:
+        loop.run_until_complete(close())
+
+
+def reset_process_state() -> None:
+    """Release every process-wide object this module holds.
+
+    The two lazily-created clients and the pending-close queue are one unit: a
+    queue holding references to a client that has been released outlives the loop
+    that could have drained it, so resetting one without the others leaves a
+    state production never reaches.
+    """
+    _discard_if_unowned_loop(close_async_http_client, "_DEFAULT_HTTP_CLIENT")
+    _discard_if_unowned_loop(close_cffi_session, "_DEFAULT_CFFI_SESSION")
+    # A sync context cannot await ``aclose``, and the queue exists precisely so a
+    # request that cannot await hands the reference off. Dropping the queue lets GC
+    # reclaim the sockets once the loop that owns them exits.
+    with _PENDING_CLIENT_CLOSE_LOCK:
+        _PENDING_CLIENT_CLOSE.clear()
+
+
+def has_process_state() -> bool:
+    """Whether a lazily-created client or a queued close reference is still held."""
+    return (
+        _DEFAULT_HTTP_CLIENT is not None or _DEFAULT_CFFI_SESSION is not None or bool(_PENDING_CLIENT_CLOSE)
+    )

@@ -2,7 +2,7 @@
 
 import pytest
 
-from app.cgroup_sense import _invalidate_cgroup_cache, _read_int
+from app.cgroup_sense import _read_int, reset_process_state
 from app.memory_pressure import MemoryGate, ResourceGauge
 from app.resource_pressure import LoopLagProbe, ResourceGate
 
@@ -52,12 +52,12 @@ async def test_wait_releases_once_drained():
 def test_cgroup_read_cache_memoizes_within_ttl(tmp_path):
     p = tmp_path / "val"
     p.write_text("100")
-    _invalidate_cgroup_cache()
+    reset_process_state()
     assert _read_int(str(p)) == 100
     # Mutate on disk; within the TTL the cached value is returned.
     p.write_text("200")
     assert _read_int(str(p)) == 100
-    _invalidate_cgroup_cache()
+    reset_process_state()
     assert _read_int(str(p)) == 200
 
 
@@ -79,7 +79,7 @@ def test_leading_memory_signal_anticipates_climb(tmp_path, monkeypatch):
         return MemoryStats(total_bytes=100, used_bytes=int(v * 100))
 
     monkeypatch.setattr("app.memory_pressure.read_memory_stats", _fake_stats)
-    _invalidate_cgroup_cache()
+    reset_process_state()
 
     ratios = [gate.leading_usage_ratio() for _ in range(len(values))]
     # The leading estimate at the end should track above the raw 0.82 because

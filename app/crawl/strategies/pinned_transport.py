@@ -51,11 +51,11 @@ def _resolve_ips(hostname: str, *, use_cache: bool = True) -> list[str]:
     socket.gaierror on resolution failure.
 
     Caching avoids a blocking resolver call on every fetch in high-concurrency
-    batches. The pinning path (``_resolve_and_pin_host``) passes
+    batches. The pinning path (``resolve_and_pin_host``) passes
     ``use_cache=False`` so the connection always pins a *freshly* resolved,
     freshly re-validated public IP -- a cached pin would let a DNS rebind
     inside the TTL window bypass the SSRF check (TOCTOU). The validation-only
-    path (``_check_ssrf_protection``) may use the cache: it only needs to know
+    path (``check_ssrf_protection``) may use the cache: it only needs to know
     the host is safe to connect to, and the actual connection re-validates.
     """
     if use_cache:
@@ -78,7 +78,7 @@ def _resolve_ips(hostname: str, *, use_cache: bool = True) -> list[str]:
     return ips
 
 
-def _check_ssrf_protection(url: str) -> None:
+def check_ssrf_protection(url: str) -> None:
     """Resolve the URL hostname and abort if any IP is private/loopback.
 
     Set ``CRAWLUTRON_ALLOW_PRIVATE_TARGETS=1`` (or ``true``/``yes``/``on``)
@@ -96,7 +96,7 @@ def _check_ssrf_protection(url: str) -> None:
         # An unresolvable hostname is not a valid public target; fail closed
         # rather than silently allowing it. Previously this let unresolvable
         # hostnames bypass the private-IP block and reach loopback via the pin
-        # fallback in _resolve_and_pin_host.
+        # fallback in resolve_and_pin_host.
         raise ValueError(f"SSRF protection: cannot resolve hostname {hostname}") from None
     for ip in ips:
         if not _is_public_ip_value(ip):
@@ -105,10 +105,10 @@ def _check_ssrf_protection(url: str) -> None:
             ) from None
 
 
-def _resolve_and_pin_host(url: str) -> tuple[str, str]:
+def resolve_and_pin_host(url: str) -> tuple[str, str]:
     """Resolve the hostname once and pin the resulting IP for the connection.
 
-    Prevents DNS-rebinding (TOCTOU) SSRF: ``_check_ssrf_protection`` validates
+    Prevents DNS-rebinding (TOCTOU) SSRF: ``check_ssrf_protection`` validates
     the resolved IPs, then this helper returns the FIRST public IP so the HTTP
     client connects to that exact IP instead of re-resolving at connect time.
     The original ``Host`` header is preserved by the caller.
@@ -116,11 +116,11 @@ def _resolve_and_pin_host(url: str) -> tuple[str, str]:
     Fails closed. A hostname that cannot be resolved here raises rather than
     falling back to ``(hostname, hostname)``, which read as harmless but is not:
     it hands the HTTP client permission to resolve the name a third time, at
-    connect time, with nothing validating the answer. ``_check_ssrf_protection``
+    connect time, with nothing validating the answer. ``check_ssrf_protection``
     checked the IPs it saw and this discarded them, so an attacker able to fail
     the pin-time lookup got an unvalidated connection -- the rebinding this
     function exists to prevent, reached by breaking the pin instead of racing it.
-    ``_check_ssrf_protection`` already refuses the same condition with the same
+    ``check_ssrf_protection`` already refuses the same condition with the same
     message; this keeps the two halves of one guarantee refusing together.
     """
 
@@ -141,7 +141,7 @@ def _resolve_and_pin_host(url: str) -> tuple[str, str]:
     except socket.gaierror:
         # Fail closed. Returning the hostname here let the client resolve it again
         # at connect time with no validation applied, which is the open door
-        # _check_ssrf_protection closes on the other side of this same lookup.
+        # check_ssrf_protection closes on the other side of this same lookup.
         raise ValueError(f"SSRF protection: cannot resolve hostname {hostname}") from None
     for ip in ips:
         if _is_public_ip_value(ip):
@@ -403,3 +403,20 @@ async def apinned_hops(
                 "the walk body ended without returning a result and without "
                 "chain.advance(response) asking for another hop"
             )
+
+
+def reset_process_state() -> None:
+    """Drop every memoized DNS resolution.
+
+    The cache is process-wide with a 60s TTL, so a test that resolves a host once
+    is served the same answer for the rest of the session. Production wants the
+    memo -- a single host crawled thousands of times would otherwise pay a blocking
+    getaddrinfo per fetch -- which is exactly why the drop belongs here, named, on
+    the owner, rather than in every caller that happens to need a clean slate.
+    """
+    _DNS_CACHE.clear()
+
+
+def has_process_state() -> bool:
+    """Whether any hostname's resolution is memoized right now."""
+    return bool(_DNS_CACHE)

@@ -1,8 +1,8 @@
 """Validated-URL chokepoint: make the safe state the only representable state.
 
 SSRF defense was five functions each call site had to compose correctly
-(``normalize_public_http_url``, ``_check_ssrf_protection``,
-``_resolve_and_pin_host``, ``_assert_safe_final_url``,
+(``normalize_public_http_url``, ``check_ssrf_protection``,
+``resolve_and_pin_host``, ``_assert_safe_final_url``,
 ``validate_webhook_url``); every redirect finding was "a code path held a
 raw ``str`` URL and forgot one of the five steps."
 
@@ -46,14 +46,14 @@ class SafeUrl:
         With ``pin=True`` also resolve-and-pin the host (HTTPS delivery and
         other paths that must connect to a validated IP, not re-resolve).
         """
-        from app.crawl.strategies.pinned_transport import _check_ssrf_protection, _resolve_and_pin_host
+        from app.crawl.strategies.pinned_transport import check_ssrf_protection, resolve_and_pin_host
 
         normalized = normalize_public_http_url(url, policy=policy)
-        _check_ssrf_protection(normalized)
+        check_ssrf_protection(normalized)
         hostname = urlparse(normalized).hostname or ""
         pinned: str | None = None
         if pin:
-            _, pinned = _resolve_and_pin_host(normalized)
+            _, pinned = resolve_and_pin_host(normalized)
         return cls(raw=normalized, hostname=hostname, policy=policy, pinned_ip=pinned)
 
     def redirect_hop(self, location: str) -> SafeUrl:

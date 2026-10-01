@@ -24,9 +24,14 @@ _CGROUP_READ_TTL_SECONDS = 0.1
 _CGROUP_CACHE: dict[str, tuple[float, str | None]] = {}
 
 
-def _invalidate_cgroup_cache() -> None:
+def reset_process_state() -> None:
     """Drop all cached cgroup reads (e.g. between tests)."""
     _CGROUP_CACHE.clear()
+
+
+def has_process_state() -> bool:
+    """Whether any cgroup reading is memoized right now."""
+    return bool(_CGROUP_CACHE)
 
 
 def _read_text(path: str) -> str | None:

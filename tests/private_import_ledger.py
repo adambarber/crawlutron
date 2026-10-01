@@ -203,11 +203,6 @@ DECLARED: dict[str, Declaration] = {
         "Not yet triaged.\n",
         ["test"],
     ),
-    "app.cgroup_sense._invalidate_cgroup_cache": _d(
-        "unreviewed",
-        "Not yet triaged.\n",
-        ["test"],
-    ),
     "app.cgroup_sense._read_int": _d(
         "unreviewed",
         "Not yet triaged.\n",
@@ -290,7 +285,6 @@ DECLARED: dict[str, Declaration] = {
     "app.crawl.engine._ResultSpill": _d(_PRIVATE_TYPE.kind, _PRIVATE_TYPE.reason, ["test"]),
     "app.crawl.engine._ResultSpill._gc_stale_spills": _d(_PRIVATE_TYPE.kind, _PRIVATE_TYPE.reason, ["test"]),
     "app.crawl.engine._RobotsPathMatcher": _d(_CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]),
-    "app.crawl.engine._SHARED_HTTP_CACHE": _d(_CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]),
     "app.crawl.engine._SPILL_GC_MIN_INTERVAL_SECONDS": _d(
         _CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]
     ),
@@ -343,9 +337,6 @@ DECLARED: dict[str, Declaration] = {
     "app.crawl.extraction._EXTRACTION_DOC_TIMEOUT": _d(
         _CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]
     ),
-    "app.crawl.extraction._EXTRACTION_EXECUTOR": _d(
-        _LIFECYCLE_EXTRACTION_EXECUTOR.kind, _LIFECYCLE_EXTRACTION_EXECUTOR.reason, ["test"]
-    ),
     "app.crawl.extraction._FrameCollector": _d(
         _IMPLEMENTATION_STEP.kind, _IMPLEMENTATION_STEP.reason, ["test"]
     ),
@@ -386,11 +377,6 @@ DECLARED: dict[str, Declaration] = {
     "app.crawl.extraction._retire_doc_worker": _d(
         "unreviewed",
         "Not yet triaged.\n",
-        ["test"],
-    ),
-    "app.crawl.extraction._shutdown_doc_extraction_executor": _d(
-        _LIFECYCLE_SHUTDOWN_DOC_EXTRACTION_EXECUTOR.kind,
-        _LIFECYCLE_SHUTDOWN_DOC_EXTRACTION_EXECUTOR.reason,
         ["test"],
     ),
     "app.crawl.extraction._spawn_doc_worker": _d(
@@ -656,9 +642,6 @@ DECLARED: dict[str, Declaration] = {
         "Not yet triaged.\n",
         ["test"],
     ),
-    "app.crawl.strategies.http_client_pool._DEFAULT_CFFI_SESSION": _d(
-        _CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]
-    ),
     "app.crawl.strategies.http_client_pool._DEFAULT_HTTP_CLIENT": _d(
         _CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]
     ),
@@ -737,11 +720,6 @@ DECLARED: dict[str, Declaration] = {
     "app.crawl.strategies.pinned_transport._build_pinned_request_async": _d(
         _CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]
     ),
-    "app.crawl.strategies.pinned_transport._check_ssrf_protection": _d(
-        "unreviewed",
-        "Not yet triaged.\n",
-        ["test"],
-    ),
     "app.crawl.strategies.pinned_transport._declared_length_exceeds": _d(
         "unreviewed",
         "Not yet triaged.\n",
@@ -758,11 +736,6 @@ DECLARED: dict[str, Declaration] = {
         ["test"],
     ),
     "app.crawl.strategies.pinned_transport._redirect_target": _d(
-        "unreviewed",
-        "Not yet triaged.\n",
-        ["test"],
-    ),
-    "app.crawl.strategies.pinned_transport._resolve_and_pin_host": _d(
         "unreviewed",
         "Not yet triaged.\n",
         ["test"],

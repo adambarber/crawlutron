@@ -237,3 +237,25 @@ class CookieJar:
 
 # Module-level cookie jar for persistent cross-request cookie storage.
 _GLOBAL_COOKIE_JAR = CookieJar()
+
+
+def reset_process_state() -> None:
+    """Drop the process cookie jar and clear the per-request namespace.
+
+    One door for one piece of state, because the jar and the namespace contextvar
+    are one unit: a leftover namespace points the next request at a tenant's jar
+    that a previous test emptied, and a leftover jar outlives the namespace that
+    selected it. Resetting one without the other leaves a state that never occurs
+    in production, which is exactly the state a test then believes it found.
+    """
+    _GLOBAL_COOKIE_JAR.clear()
+    _COOKIE_NAMESPACE.set("")
+
+
+def has_process_state() -> bool:
+    """Whether the jar holds a cookie, or a request namespace is still selected."""
+    # Not ``bool(_GLOBAL_COOKIE_JAR)``: the jar defines no ``__len__`` or
+    # ``__bool__``, so every object is truthy and that expression is a constant
+    # True. A probe stuck on True certifies nothing, so this reads the jar's own
+    # cookie mapping instead of asking the jar to be honest about itself.
+    return bool(_GLOBAL_COOKIE_JAR._cookies) or _COOKIE_NAMESPACE.get() != ""

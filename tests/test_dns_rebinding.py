@@ -2,7 +2,7 @@
 
 Before the fix, the HTTP client re-resolved the hostname at connect time, so a
 second DNS response could return a private IP and bypass SSRF protection. After
-the fix, ``_resolve_and_pin_host`` resolves once and the fetcher connects to the
+the fix, ``resolve_and_pin_host`` resolves once and the fetcher connects to the
 pinned IP with the original ``Host`` header preserved.
 """
 
@@ -22,7 +22,7 @@ from tests._transport_doubles import MockResponse, scripted_transport_client
 
 
 class TestDNSRebindingProtection:
-    def test_resolve_and_pin_host_uses_first_resolution(self, monkeypatch):
+    def testresolve_and_pin_host_uses_first_resolution(self, monkeypatch):
         """Even if a second resolution would rebound to a private IP, the pinned
         IP (first resolution) is what the connection uses."""
         assert_dns_pinning_uses_first_resolution(monkeypatch, "169.254.169.254")
