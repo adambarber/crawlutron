@@ -7,10 +7,11 @@ above its insides. 43 of the 49 structural commits that moved ``app/`` also move
 ``tests/``, and that ratio is what this file exists to shrink.
 
 **A module reaching into a sibling** is worse, because it means the module
-boundary is a convention nobody is holding. ``app/crawl/strategies/http.py``
-calls five private names across three sibling modules; ``app/crawl/engine.py``
-reaches into four private classes in ``app/crawl/robots.py``. Nothing checks
-that, and nothing stops it growing.
+boundary is a convention nobody is holding. Six modules do it, thirteen reaches
+in all: ``app/crawl/engine.py`` reaches into ``app/crawl/robots.py`` for four
+private classes and two pattern helpers, and ``app/crawl/strategies/http.py``
+reaches into ``content_cache_key`` and ``request_profile``. Nothing checked that,
+and nothing stopped it growing.
 
 Both are gated the same blunt way: **the name appears here, with a kind and a
 reason, or the run is red.** A gate that weighs the merit of a reach is a
@@ -18,9 +19,10 @@ convention, and conventions decay. What the bluntness buys is that a new weld
 cannot land without somebody writing down why it is acceptable.
 
 One table, not two, because a name can be reached from both sides -- and
-``app.crawl.strategies.body_decode.decode_body`` is, by a test and by
-``http.py`` -- and one name is one declaration whichever hand reaches for it. The
-``side`` field records who reaches, not what they are allowed to.
+``app.crawl.strategies.http_client_pool._drain_pending_client_closes`` is, by a
+test and by two production modules -- and one name is one declaration whichever
+hand reaches for it. The ``side`` field records who reaches, not what they are
+allowed to.
 
 Kinds, and what each one claims:
 
