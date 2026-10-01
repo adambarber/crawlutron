@@ -20,6 +20,7 @@ from tests.chokepoint_walks import (
     offender_at,
     offenders_over_functions,
 )
+from tests.invariants._shared import app_names
 from tests.rules import Bites, Rule, Trips
 
 # ---------------------------------------------------------------------------
@@ -457,6 +458,28 @@ def test_sync_store_call_detector_bites():
 _ACTION_CHAIN = "run_action_chain"
 
 
+def _action_chain_still_exists() -> None:
+    """The premise: the rule is armed on a name the production tree must have.
+
+    The bite proves the detector fires; only this proves it has anything to fire
+    on. Those are different claims, and the gap between them is where the rule
+    spent a commit reporting green while governing nothing: the lifecycle split
+    renamed the method, the detector kept comparing against the old spelling,
+    and the bite stayed green throughout because the bite plants the name the
+    *detector* reads rather than the name the *tree* has.
+
+    A premise is the framework's slot for exactly this ("asserting the rule's
+    trigger set is non-empty"), and the tree-wide arming sweep cannot cover this
+    rule: ``run_action_chain`` is public, so it has no private spelling to go red
+    on.
+    """
+    assert _ACTION_CHAIN in app_names(), (
+        f"{_ACTION_CHAIN} is not spelled anywhere in app/, so the rule matching calls to it "
+        "matches nothing and reports green while policing no call site. Rename the key in "
+        "the detector, or drop the rule if the chain moved out of scope."
+    )
+
+
 def _action_chain_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
     """Every call that must carry the chain's deadline must carry one.
 
@@ -486,6 +509,7 @@ def _action_chain_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
 ACTION_CHAIN_ALWAYS_CARRIES_A_BUDGET = Rule(
     name="action-chain-always-carries-a-budget",
     find=_action_chain_offenders,
+    premise=_action_chain_still_exists,
     summary=(
         f"{_ACTION_CHAIN} runs without a budget, so a wedged action holds the "
         "browser pool slot for as long as it likes"

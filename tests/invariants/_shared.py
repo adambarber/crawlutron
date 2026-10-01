@@ -23,11 +23,39 @@ from tests.property_registry import Property
 __all__ = [
     "DefinitionNode",
     "FunctionNode",
+    "app_names",
     "assert_trees_clean",
     "function_defs",
     "_module_definition_index",
     "_module_name",
 ]
+
+
+def app_names() -> set[str]:
+    """Every name the app tree spells, at any depth and in any position.
+
+    Definitions alone are too narrow to answer "is this detector still aimed at
+    something real", and being too narrow there is not conservative, it is wrong:
+    ``self._memory_cache`` and ``threading._lock`` are attribute spellings that
+    exist in app/ perfectly well, and an audit calling them missing would send
+    someone to fix working detectors. So the universe is every def, class,
+    attribute, stored name and import alias -- exactly the set of spellings a
+    detector could legitimately be pointed at.
+    """
+    names: set[str] = set()
+    for path in (REPO_ROOT / "app").rglob("*.py"):
+        if "__pycache__" in path.parts:
+            continue
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+            if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
+                names.add(node.name)
+            elif isinstance(node, ast.Attribute):
+                names.add(node.attr)
+            elif isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store):
+                names.add(node.id)
+            elif isinstance(node, ast.Import | ast.ImportFrom):
+                names.update((alias.asname or alias.name).split(".")[0] for alias in node.names)
+    return names
 
 
 FunctionNode: TypeAlias = ast.FunctionDef | ast.AsyncFunctionDef
