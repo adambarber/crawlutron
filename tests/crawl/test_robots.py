@@ -23,7 +23,7 @@ from app.crawl.robots_parse import (
     parse_robots_sitemaps,
     select_robots_values,
 )
-from app.crawl.strategies.fetch_policy import _discovery_diagnostics
+from app.crawl.strategies.fetch_policy import discovery_diagnostics
 from app.settings import CrawlerSettings
 from app.validation import HostPolicy
 from tests._fetcher_factories import make_fetch, routed_fetcher
@@ -536,7 +536,7 @@ def _fake_fetcher(calls):
 
 
 async def _run_diag(calls, *, engine_robots_sitemaps):
-    return await _discovery_diagnostics(
+    return await discovery_diagnostics(
         normalized_url="https://x.test/p",
         html="<html></html>",
         policy=read_policy(

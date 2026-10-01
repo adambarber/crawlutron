@@ -56,7 +56,7 @@ def _private_app_names(tree: ast.Module) -> dict[str, int]:
     Two forms reach the same private name and the first version of this gate read
     only one of them, which left 19 welds invisible: nineteen modules the suite
     reaches through a bound module object rather than a from-import, as in
-    ``extraction_mod._quality_score``. A gate that can be walked around by
+    ``extraction_mod.quality_score``. A gate that can be walked around by
     spelling the import differently is not a gate, so both forms are resolved to
     the same ``"module.name"`` key and the ledger holds names rather than
     spellings.
@@ -175,8 +175,8 @@ def _cross_module_private_names(tree: ast.Module, path: pathlib.Path) -> dict[st
     A module reaching its own privates is ordinary -- that is what private means --
     so the owning module has to be resolved and compared rather than assumed. The
     resolved name supplies both: ``from app.crawl.strategies import body_decode``
-    binds ``body_decode``, so ``body_decode._decode_body`` resolves to
-    ``app.crawl.strategies.body_decode._decode_body``, which names the module that
+    binds ``body_decode``, so ``body_decode.decode_body`` resolves to
+    ``app.crawl.strategies.body_decode.decode_body``, which names the module that
     owns the definition and not merely the binding the caller happens to use.
     """
     here = _module_of(path)

@@ -10,7 +10,7 @@ from app.constants import (
 )
 from app.crawl.render_options import resolve_render_options
 from app.crawl.result_helpers import _make_engine_result
-from app.crawl.strategies.body_decode import _quality_score
+from app.crawl.strategies.body_decode import quality_score
 from app.crawl.strategies.content_pipeline import (
     _discover_after_fetch,
     _discovery_result_fields,
@@ -153,7 +153,7 @@ def _build_browser_result(
         text=content.text,
         markdown=content.markdown,
         extraction_method=content.extraction_method,
-        quality_score=_quality_score(result.status, result.classification, content.text, result.html, None),
+        quality_score=quality_score(result.status, result.classification, content.text, result.html, None),
         diagnostics=diagnostics,
         **_discovery_result_fields(
             post_fetch,

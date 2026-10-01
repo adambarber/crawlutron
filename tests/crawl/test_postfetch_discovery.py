@@ -144,14 +144,14 @@ def test_html_diagnostics_omit_policy_blocked_frame_and_private_form(monkeypatch
 
 
 async def test_discovery_feeds_are_policy_filtered():
-    from app.crawl.strategies.fetch_policy import _discovery_diagnostics
+    from app.crawl.strategies.fetch_policy import discovery_diagnostics
 
     html = (
         '<link rel="alternate" type="application/rss+xml" href="https://blocked.test/feed">'
         '<link rel="alternate" type="application/atom+xml" href="http://127.0.0.1/feed">'
         '<link rel="alternate" type="application/rss+xml" href="https://allowed.test/feed">'
     )
-    result = await _discovery_diagnostics(
+    result = await discovery_diagnostics(
         normalized_url="https://allowed.test/page",
         html=html,
         policy=read_policy({"discovery": {"feeds": True}}),

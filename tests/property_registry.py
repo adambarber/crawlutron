@@ -112,7 +112,7 @@ PROPERTY_REGISTRY = (
             ),
             _Suppression(
                 module="app/crawl/strategies/fetch_policy.py",
-                symbol="_discovery_diagnostics",
+                symbol="discovery_diagnostics",
                 fingerprint="robots_url",
                 reason=(
                     "This legacy diagnostics-only fallback reports discovery metadata when the engine "

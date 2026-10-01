@@ -5,7 +5,7 @@ from functools import partial
 from app.constants import EXTRACTION_FULL, HTTP_DECLARED_CRAWLER
 from app.crawl.cache import HttpCache
 from app.crawl.result_helpers import _crawl_result_from_engine_result
-from app.crawl.strategies.fetch_policy import _looks_like_binary_body
+from app.crawl.strategies.fetch_policy import looks_like_binary_body
 from app.crawl.strategies.fetchers import _default_http_fetcher
 from app.crawl.strategies.http import _http_strategy_result
 from app.models import CrawlStrategyAttempt
@@ -199,9 +199,9 @@ class TestHttpStrategy:
         assert "| Alice | Engineering | 120000 |" in (result.markdown or "")
 
     def test_looks_like_binary_body_detects_archives(self):
-        assert _looks_like_binary_body(b"PK\x03\x04", "application/octet-stream", "http://x/a.zip")
-        assert not _looks_like_binary_body(b"<html>", "text/html", "http://x/")
-        assert not _looks_like_binary_body(b"%PDF-1.4", "application/pdf", "http://x/a.pdf")
+        assert looks_like_binary_body(b"PK\x03\x04", "application/octet-stream", "http://x/a.zip")
+        assert not looks_like_binary_body(b"<html>", "text/html", "http://x/")
+        assert not looks_like_binary_body(b"%PDF-1.4", "application/pdf", "http://x/a.pdf")
 
     async def test_crawl_request_async_returns_unified_results_dict(self, base_url):
         from tests._fetcher_factories import crawl_homepage_async
@@ -258,7 +258,7 @@ async def test_recursive_crawl_drops_sitewide_lists_from_page_diagnostics(monkey
             "discovery": {"sitemap_urls": ["https://x.test/sitemap.xml"], "feeds": ["https://x.test/feed"]}
         }
 
-    monkeypatch.setattr(http_mod, "_discovery_diagnostics", fake_diag)
+    monkeypatch.setattr(http_mod, "discovery_diagnostics", fake_diag)
 
     fetcher = scripted_fetcher(status=200, ctype="text/html", body=b"<html><body>x</body></html>")
 

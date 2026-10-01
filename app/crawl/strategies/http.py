@@ -254,7 +254,7 @@ async def _revalidate_content_cache(ctx: _HttpStrategyContext) -> None:
     revalidation_headers = dict(ctx.base_headers)
     revalidation_headers.update(validator)
     revalidation_headers.update(ctx.caller_conditional)
-    ctx.response, ctx.retry_diagnostics = await fetch_policy._fetch_with_retries(
+    ctx.response, ctx.retry_diagnostics = await fetch_policy.fetch_with_retries(
         ctx.http_fetcher,
         ctx.normalized_url,
         revalidation_headers,
@@ -272,7 +272,7 @@ async def _revalidate_content_cache(ctx: _HttpStrategyContext) -> None:
 
 async def _fetch_http_phase(ctx: _HttpStrategyContext) -> tuple[Any, dict[str, Any]]:
     """Fetch a response with the strategy retry policy."""
-    return await fetch_policy._fetch_with_retries(
+    return await fetch_policy.fetch_with_retries(
         ctx.http_fetcher,
         ctx.normalized_url,
         ctx.request_headers,
@@ -350,7 +350,7 @@ async def _store_http_caches(ctx: _HttpStrategyContext, resp: _FetchedResponse) 
 
 def _binary_result_if_needed(ctx: _HttpStrategyContext, resp: _FetchedResponse) -> EngineCrawlResult | None:
     """Return the terminal no-text result for a binary response."""
-    if ctx.extraction == EXTRACTION_DOCUMENT or not fetch_policy._looks_like_binary_body(
+    if ctx.extraction == EXTRACTION_DOCUMENT or not fetch_policy.looks_like_binary_body(
         resp.body, resp.content_type, resp.final_url
     ):
         return None
@@ -391,7 +391,7 @@ async def _extract_http_phase(ctx: _HttpStrategyContext, resp: _FetchedResponse)
         decompressed = resp.body
         strategy_decompression_failed = resp.decompression_failed
 
-    body_text = body_decode._decode_body(decompressed, resp.content_type)
+    body_text = body_decode.decode_body(decompressed, resp.content_type)
     html_body = is_html(resp.content_type, body_text)
     html = body_text if html_body else None
     extracted = await _run_extraction(
@@ -418,7 +418,7 @@ async def _extract_http_phase(ctx: _HttpStrategyContext, resp: _FetchedResponse)
         markdown=markdown,
         extraction_method=extracted.extraction_method,
         strategy_decompression_failed=strategy_decompression_failed,
-        content_metrics=body_decode._content_metrics(text, html),
+        content_metrics=body_decode.content_metrics(text, html),
     )
 
 
@@ -525,12 +525,12 @@ async def _construct_http_result(
     discovery_block = any(discovery_flags(ctx.policy))
     if discovery_block:
         diagnostics.update(post_fetch["diagnostics"])
-    retry_after = fetch_policy._retry_after_seconds(resp.headers)
+    retry_after = fetch_policy.retry_after_seconds(resp.headers)
     if retry_after is not None:
         diagnostics["cooldown"] = {"retry_after_seconds": retry_after, "scope": "domain"}
     if discovery_block:
         diagnostics.update(
-            await fetch_policy._discovery_diagnostics(
+            await fetch_policy.discovery_diagnostics(
                 normalized_url=ctx.normalized_url,
                 engine_robots_sitemaps=ctx.robots_sitemaps,
                 robots_evaluated=ctx.robots_evaluated,
@@ -549,7 +549,7 @@ async def _construct_http_result(
     next_page_url = post_fetch["next_page_url"]
     diagnostics.update(_post_fetch_diagnostics(post_fetch, resp.final_url, ctx.host_policy))
 
-    quality = body_decode._quality_score(
+    quality = body_decode.quality_score(
         status,
         classification,
         extracted.text,

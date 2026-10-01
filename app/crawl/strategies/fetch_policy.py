@@ -18,7 +18,7 @@ from app.constants import DEFAULT_MAX_CONTENT_LENGTH_BYTES, DISCOVERY_BODY_MAX_B
 from app.crawl.decompression import decompress_body as _decompress_body
 from app.crawl.policy import discovery_flags
 from app.crawl.result_helpers import _classify_error_code
-from app.crawl.strategies.body_decode import _decode_body
+from app.crawl.strategies.body_decode import decode_body
 from app.models import HttpFetcher
 from app.validation import HostPolicy, public_url_or_none
 
@@ -26,7 +26,7 @@ _RETRY_BACKOFF_BASE_SECONDS = 0.25
 _RETRY_BACKOFF_CAP_SECONDS = 2.0
 
 
-def _retry_backoff_seconds(attempt: int) -> float:
+def retry_backoff_seconds(attempt: int) -> float:
     """Capped exponential gap before the retry following a failed ``attempt``.
 
     Doubles from the base and plateaus at the ceiling: one failing origin
@@ -36,7 +36,7 @@ def _retry_backoff_seconds(attempt: int) -> float:
     return min(_RETRY_BACKOFF_CAP_SECONDS, _RETRY_BACKOFF_BASE_SECONDS * (2 ** (attempt - 1)))
 
 
-def _retry_after_seconds(headers: dict[str, str]) -> int | None:
+def retry_after_seconds(headers: dict[str, str]) -> int | None:
     value = headers.get("retry-after")
     if not value:
         return None
@@ -48,7 +48,7 @@ def _retry_after_seconds(headers: dict[str, str]) -> int | None:
         return None
 
 
-async def _fetch_with_retries(
+async def fetch_with_retries(
     fetcher: HttpFetcher,
     url: str,
     headers: dict[str, str],
@@ -72,7 +72,7 @@ async def _fetch_with_retries(
             # or rate-limiting origin sees widening gaps instead of a tight
             # hammering loop. The gap is bounded so a large retry budget can
             # never park a URL beyond the per-retry ceiling.
-            await asyncio.sleep(_retry_backoff_seconds(attempt))
+            await asyncio.sleep(retry_backoff_seconds(attempt))
     # ``max_attempts`` is floored at 1 above, so every call enters the loop and
     # either returns a response or re-raises on its final attempt. This line is
     # unreachable in practice; it is stated rather than left implicit because
@@ -81,7 +81,7 @@ async def _fetch_with_retries(
     raise AssertionError("unreachable: retry loop is total")
 
 
-def _looks_like_binary_body(body: bytes, content_type: str | None, url: str) -> bool:
+def looks_like_binary_body(body: bytes, content_type: str | None, url: str) -> bool:
     normalized_content_type = (content_type or "").split(";", 1)[0].strip().lower()
     if normalized_content_type.startswith("text/") or normalized_content_type in {
         "application/json",
@@ -140,7 +140,7 @@ def _robots_diagnostics(evaluation: str, **overrides: Any) -> dict[str, Any]:
     return {**_ROBOTS_DIAGNOSTICS, "sitemaps": [], "evaluation": evaluation, **overrides}
 
 
-async def _discovery_diagnostics(
+async def discovery_diagnostics(
     *,
     normalized_url: str,
     html: str | None,
@@ -184,7 +184,7 @@ async def _discovery_diagnostics(
             if inspect.iscoroutine(robots_response):
                 robots_response = await robots_response
             robots_headers = {key.lower(): value for key, value in robots_response.headers.items()}
-            robots_text = _decode_body(
+            robots_text = decode_body(
                 _decompress_body(
                     robots_response.body,
                     robots_headers.get("content-encoding", ""),
@@ -265,4 +265,10 @@ async def _discovery_diagnostics(
     return diagnostics
 
 
-__all__ = []
+__all__ = [
+    "discovery_diagnostics",
+    "fetch_with_retries",
+    "looks_like_binary_body",
+    "retry_after_seconds",
+    "retry_backoff_seconds",
+]

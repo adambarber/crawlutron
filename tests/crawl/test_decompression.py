@@ -9,7 +9,7 @@ import pytest
 
 from app.crawl import decompression as decompression_mod
 from app.crawl.decompression import DecompressionTooLargeError, _decompress_bounded, decompress_body
-from app.crawl.strategies.body_decode import _decode_body
+from app.crawl.strategies.body_decode import decode_body
 
 _CAP = 10_000_000
 
@@ -75,16 +75,16 @@ def test_decode_body_no_longer_decompresses():
         "headers": {"content-encoding": "gzip"},
     }
     with pytest.raises(TypeError):
-        _decode_body(**with_headers)
+        decode_body(**with_headers)
 
 
 def test_decode_body_respects_charset():
     body = "<html>é</html>".encode()
-    assert "é" in _decode_body(body, "text/html; charset=utf-8")
+    assert "é" in decode_body(body, "text/html; charset=utf-8")
 
 
 def test_decode_body_handles_unknown_charset():
-    assert _decode_body(b"plain", "text/plain") == "plain"
+    assert decode_body(b"plain", "text/plain") == "plain"
 
 
 def test_brotli():
@@ -92,7 +92,7 @@ def test_brotli():
 
 
 def test_decode_body_empty_body():
-    assert _decode_body(b"", "text/html") == ""
+    assert decode_body(b"", "text/html") == ""
 
 
 def test_decompression_zlib():
@@ -108,11 +108,11 @@ def test_decompression_gzip():
 
 
 def test_http_charset_decode_error():
-    from app.crawl.strategies.body_decode import _decode_body
+    from app.crawl.strategies.body_decode import decode_body
 
     # Charset rides on the content-type only; a stray value can never
     # reach the decoder as a headers argument (the parameter is gone).
-    result = _decode_body(b"hello", "text/plain; charset=invalid_charset")
+    result = decode_body(b"hello", "text/plain; charset=invalid_charset")
     assert isinstance(result, str)
 
 
@@ -182,19 +182,19 @@ def test_encoding_tokens_are_case_and_space_insensitive():
 
 def test_decode_valid_utf8_strict():
     body = "héllo wörld".encode()
-    assert _decode_body(body, "text/html; charset=utf-8") == "héllo wörld"
+    assert decode_body(body, "text/html; charset=utf-8") == "héllo wörld"
 
 
 def test_decode_declared_latin1():
     body = "café".encode("latin-1")
-    assert _decode_body(body, "text/html; charset=latin-1") == "café"
+    assert decode_body(body, "text/html; charset=latin-1") == "café"
 
 
 def test_decode_invalid_bytes_does_not_raise():
     # Invalid UTF-8 bytes with a utf-8 declaration must still return a string
     # (via charset-normalizer or the lossy fallback), never raise.
     body = b"\xff\xfe\xc0not valid utf8"
-    out = _decode_body(body, "text/html; charset=utf-8")
+    out = decode_body(body, "text/html; charset=utf-8")
     assert isinstance(out, str)
     assert "not valid utf8" in out
 
@@ -202,7 +202,7 @@ def test_decode_invalid_bytes_does_not_raise():
 def test_decode_unknown_charset_falls_back():
     # An unknown declared charset must not raise LookupError.
     body = b"plain"
-    out = _decode_body(body, "text/html; charset=not-a-real-charset")
+    out = decode_body(body, "text/html; charset=not-a-real-charset")
     assert out == "plain"
 
 
@@ -213,7 +213,7 @@ def test_decode_handles_bytearray_and_headers():
     raw = b"compressed"
     body = gzip.compress(raw)
     decoded_bytes = decompress_body(bytearray(body), "gzip", max_output_bytes=1_000_000)
-    out = _decode_body(bytearray(decoded_bytes), "text/html")
+    out = decode_body(bytearray(decoded_bytes), "text/html")
     assert out == "compressed"
 
 

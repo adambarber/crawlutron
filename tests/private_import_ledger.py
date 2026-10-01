@@ -18,7 +18,7 @@ convention, and conventions decay. What the bluntness buys is that a new weld
 cannot land without somebody writing down why it is acceptable.
 
 One table, not two, because a name can be reached from both sides -- and
-``app.crawl.strategies.body_decode._decode_body`` is, by a test and by
+``app.crawl.strategies.body_decode.decode_body`` is, by a test and by
 ``http.py`` -- and one name is one declaration whichever hand reaches for it. The
 ``side`` field records who reaches, not what they are allowed to.
 
@@ -529,21 +529,6 @@ DECLARED: dict[str, Declaration] = {
         ["app"],
     ),
     "app.crawl.robots.robots_cache._entries": _d(_CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]),
-    "app.crawl.strategies.body_decode._content_metrics": _d(
-        "unreviewed",
-        "Not yet triaged.\n",
-        ["test", "app"],
-    ),
-    "app.crawl.strategies.body_decode._decode_body": _d(
-        "unreviewed",
-        "Not yet triaged.\n",
-        ["test", "app"],
-    ),
-    "app.crawl.strategies.body_decode._quality_score": _d(
-        "unreviewed",
-        "Not yet triaged.\n",
-        ["test", "app"],
-    ),
     "app.crawl.strategies.browser.BrowserRenderer._extract_text": _d(
         _PRIVATE_TYPE.kind, _PRIVATE_TYPE.reason, ["test"]
     ),
@@ -653,31 +638,6 @@ DECLARED: dict[str, Declaration] = {
     ),
     "app.crawl.strategies.fetch_policy._RETRY_BACKOFF_CAP_SECONDS": _d(
         _CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]
-    ),
-    "app.crawl.strategies.fetch_policy._discovery_diagnostics": _d(
-        "unreviewed",
-        "Not yet triaged.\n",
-        ["test", "app"],
-    ),
-    "app.crawl.strategies.fetch_policy._fetch_with_retries": _d(
-        "unreviewed",
-        "Not yet triaged.\n",
-        ["test", "app"],
-    ),
-    "app.crawl.strategies.fetch_policy._looks_like_binary_body": _d(
-        "unreviewed",
-        "Not yet triaged.\n",
-        ["test", "app"],
-    ),
-    "app.crawl.strategies.fetch_policy._retry_after_seconds": _d(
-        "unreviewed",
-        "Not yet triaged.\n",
-        ["test", "app"],
-    ),
-    "app.crawl.strategies.fetch_policy._retry_backoff_seconds": _d(
-        "unreviewed",
-        "Not yet triaged.\n",
-        ["test"],
     ),
     "app.crawl.strategies.fetchers._cffi_fetch": _d(
         "unreviewed",

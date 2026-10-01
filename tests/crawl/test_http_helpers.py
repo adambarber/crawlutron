@@ -37,10 +37,10 @@ from app.crawl.extraction import (
 from app.crawl.payload_helpers import _payload_urls
 from app.crawl.policy import PolicyTier, read_policy
 from app.crawl.strategies.fetch_policy import (
-    _fetch_with_retries,
-    _looks_like_binary_body,
-    _retry_after_seconds,
-    _retry_backoff_seconds,
+    fetch_with_retries,
+    looks_like_binary_body,
+    retry_after_seconds,
+    retry_backoff_seconds,
 )
 from app.crawl.strategies.http import _http_strategy_result
 from app.crawl.strategies.request_profile import (
@@ -63,9 +63,9 @@ from tests._fetcher_factories import (
 )
 from tests._http_test_helpers import (
     HTTP_CFFI_IMPERSONATE,
-    _decode_body,
-    _quality_score,
+    decode_body,
     decompress_body,
+    quality_score,
 )
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY, make_base_policy
 from tests._worker_doubles import (
@@ -140,9 +140,9 @@ class TestValidationHelpers:
                 _payload_policy(payload, tier)
 
     def test_retry_after_seconds_invalid(self) -> None:
-        assert _retry_after_seconds({"retry-after": "notanint"}) is None
-        assert _retry_after_seconds({"retry-after": "30"}) == 30
-        assert _retry_after_seconds({}) is None
+        assert retry_after_seconds({"retry-after": "notanint"}) is None
+        assert retry_after_seconds({"retry-after": "30"}) == 30
+        assert retry_after_seconds({}) is None
 
 
 class TestHeaderHelpers:
@@ -167,18 +167,18 @@ class TestHeaderHelpers:
 class TestFetchRetries:
     async def test_fetch_with_retries_reraises_after_exhaustion(self) -> None:
         with pytest.raises(ConnectionError):
-            await _fetch_with_retries(raise_fetcher, "http://x/", {}, 5, 0)
+            await fetch_with_retries(raise_fetcher, "http://x/", {}, 5, 0)
 
     def test_retry_backoff_is_exponential_and_capped(self) -> None:
         """Each retry gap doubles from the base and plateaus at the ceiling."""
         from app.crawl.strategies.fetch_policy import _RETRY_BACKOFF_CAP_SECONDS
 
-        assert _retry_backoff_seconds(1) == pytest.approx(0.25)
-        assert _retry_backoff_seconds(2) == pytest.approx(0.5)
-        assert _retry_backoff_seconds(3) == pytest.approx(1.0)
-        assert _retry_backoff_seconds(4) == pytest.approx(_RETRY_BACKOFF_CAP_SECONDS)
+        assert retry_backoff_seconds(1) == pytest.approx(0.25)
+        assert retry_backoff_seconds(2) == pytest.approx(0.5)
+        assert retry_backoff_seconds(3) == pytest.approx(1.0)
+        assert retry_backoff_seconds(4) == pytest.approx(_RETRY_BACKOFF_CAP_SECONDS)
         # Deep retry budgets never exceed the ceiling.
-        assert _retry_backoff_seconds(20) == pytest.approx(_RETRY_BACKOFF_CAP_SECONDS)
+        assert retry_backoff_seconds(20) == pytest.approx(_RETRY_BACKOFF_CAP_SECONDS)
 
     async def test_retries_wait_between_attempts(self, monkeypatch) -> None:
         """A failing fetch is retried after a bounded backoff gap, not hammered."""
@@ -202,11 +202,11 @@ class TestFetchRetries:
             return answer
 
         # A real ``HttpFetchResult``, not a bare string: this is handed to
-        # ``_fetch_with_retries`` as an ``HttpFetcher``, and a fetcher that
+        # ``fetch_with_retries`` as an ``HttpFetcher``, and a fetcher that
         # answered with something the contract does not allow proved the retry
         # loop passes its answer through -- which it does -- by asserting on a
         # shape production can never produce.
-        response, meta = await _fetch_with_retries(_flaky, "http://x/", {}, 5, 2)
+        response, meta = await fetch_with_retries(_flaky, "http://x/", {}, 5, 2)
         assert response is answer
         assert meta["attempts"] == 3
         # Gaps happen only between attempts (2 retries -> 2 waits), increasing
@@ -222,13 +222,11 @@ class TestPureParsing:
         assert _document_item_range("1a", "x") == ["1a", "x"]
 
     def test_looks_like_binary_body_branches(self) -> None:
-        assert (
-            _looks_like_binary_body(b"PK\x03\x04data", "application/octet-stream", "http://x/z.zip") is True
-        )
-        assert _looks_like_binary_body(b"PK\x03\x04data", "text/html", "http://x/") is False
-        assert _looks_like_binary_body(b"data", "application/json", "http://x/") is False
-        assert _looks_like_binary_body(b"data", "application/octet-stream", "http://x/") is True
-        assert _looks_like_binary_body(b"data", "application/pdf", "http://x/a.pdf") is False
+        assert looks_like_binary_body(b"PK\x03\x04data", "application/octet-stream", "http://x/z.zip") is True
+        assert looks_like_binary_body(b"PK\x03\x04data", "text/html", "http://x/") is False
+        assert looks_like_binary_body(b"data", "application/json", "http://x/") is False
+        assert looks_like_binary_body(b"data", "application/octet-stream", "http://x/") is True
+        assert looks_like_binary_body(b"data", "application/pdf", "http://x/a.pdf") is False
 
     def test_format_extracted_document_text_range_action(self) -> None:
         text = "1a - 1c Approve\n1a.\nBuild the thing\n1b.\nFix the bug\n1c.\nShip it"
@@ -588,7 +586,7 @@ class TestFetchHelperUtilities:
 
     def test_looks_like_binary_body_magic_without_zip_extension(self) -> None:
         # PK magic with a non-.zip URL still classifies as binary.
-        assert _looks_like_binary_body(b"PK\x03\x04data", "application/octet-stream", "http://x/file") is True
+        assert looks_like_binary_body(b"PK\x03\x04data", "application/octet-stream", "http://x/file") is True
 
     async def test_discovery_robots_success_and_malformed_crawl_delay(self) -> None:
         fetcher = routed_fetcher(
@@ -664,15 +662,15 @@ class TestFingerprintInjectionRotation:
 
 class TestQualityScore:
     def test_http_quality_score_failed(self):
-        from app.crawl.strategies.body_decode import _quality_score
+        from app.crawl.strategies.body_decode import quality_score
 
-        score = _quality_score("failed", "network_error", None, None, None)
+        score = quality_score("failed", "network_error", None, None, None)
         assert score == 0.0
 
     def test_http_quality_score_empty_text(self):
-        from app.crawl.strategies.body_decode import _quality_score
+        from app.crawl.strategies.body_decode import quality_score
 
-        score = _quality_score("success", "rendered", "", None, 200)
+        score = quality_score("success", "rendered", "", None, 200)
         assert score > 0.0
 
 
@@ -715,7 +713,7 @@ class TestFetchHelpersEdges:
         assert status_for_classification("not_modified") == "success"
 
     def test_quality_frameset_low_text(self):
-        score = _quality_score("success", "rendered", "tiny", "<frameset></frameset>", 200)
+        score = quality_score("success", "rendered", "tiny", "<frameset></frameset>", 200)
         assert score <= 0.4
 
     @pytest.mark.parametrize(
@@ -723,21 +721,21 @@ class TestFetchHelpersEdges:
     )
     def test_quality_score_reuses_precomputed_metrics(self, text, html):
         """Dup8: threading the diagnostics metrics in must not change the score."""
-        from app.crawl.strategies.body_decode import _content_metrics
+        from app.crawl.strategies.body_decode import content_metrics
 
-        metrics = _content_metrics(text, html)
-        direct = _quality_score("success", "rendered", text, html, 200)
-        threaded = _quality_score("success", "rendered", text, html, 200, content_metrics=metrics)
+        metrics = content_metrics(text, html)
+        direct = quality_score("success", "rendered", text, html, 200)
+        threaded = quality_score("success", "rendered", text, html, 200, content_metrics=metrics)
         assert threaded == direct
 
     def test_quality_score_ignores_metrics_when_not_rendered(self):
         """The early return must not read the metrics dict (None is never indexed)."""
-        assert _quality_score("failed", "network_error", None, None, None, content_metrics=None) == 0.0
+        assert quality_score("failed", "network_error", None, None, None, content_metrics=None) == 0.0
 
     def test_decode_body_gzip_content_encoding(self):
         # Decompression happens at the capped chokepoint, then decode.
         body = gzip.compress(b"hello world")
-        out = _decode_body(decompress_body(body, "gzip", max_output_bytes=1_000_000), "text/html")
+        out = decode_body(decompress_body(body, "gzip", max_output_bytes=1_000_000), "text/html")
         assert out == "hello world"
 
 

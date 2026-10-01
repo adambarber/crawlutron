@@ -21,7 +21,7 @@ except ImportError:
     _charset_from_bytes = None
 
 
-def _decode_body(body: bytes | bytearray | memoryview, content_type: str | None) -> str:
+def decode_body(body: bytes | bytearray | memoryview, content_type: str | None) -> str:
     """Decode an already-decompressed response body to text.
 
     Try the declared (or UTF-8) charset strictly first; fall back to
@@ -60,7 +60,7 @@ def _decode_body(body: bytes | bytearray | memoryview, content_type: str | None)
     return body.decode("utf-8", errors="replace")
 
 
-def _quality_score(
+def quality_score(
     status: str,
     classification: str,
     text: str | None,
@@ -97,13 +97,13 @@ def _quality_score(
     return min(score, 1.0)
 
 
-# Single compiled pattern so _content_metrics counts every tag of interest
+# Single compiled pattern so content_metrics counts every tag of interest
 # in ONE linear scan of the HTML instead of four separate re.findall/re.search
 # passes. Each group is tallied as we walk the string once.
 _CONTENT_TAG_RE = re.compile(r"<(a|iframe|frame|frameset|form)\b", re.IGNORECASE)
 
 
-def _content_metrics(text: str | None, html: str | None) -> dict[str, int | float | bool]:
+def content_metrics(text: str | None, html: str | None) -> dict[str, int | float | bool]:
     visible_text_length = len((text or "").strip())
     html_length = len((html or "").strip())
     counts = {"a": 0, "iframe": 0, "frame": 0, "frameset": 0, "form": 0}

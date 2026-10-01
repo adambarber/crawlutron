@@ -96,7 +96,7 @@ _OWNER_PUBLIC_SURFACE_RATCHET = {
     "app/safe_url.py": (1, 1),
     "app/crawl/payload_helpers.py": (1, 1),
     "app/crawl/result_helpers.py": (1, 0),
-    "app/crawl/strategies/fetch_policy.py": (0, 0),
+    "app/crawl/strategies/fetch_policy.py": (5, 5),
 }
 
 

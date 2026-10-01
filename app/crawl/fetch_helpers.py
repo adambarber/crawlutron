@@ -24,7 +24,7 @@ from app.constants import (
     SITEMAP_MAX_URLS,
 )
 from app.crawl.decompression import decompress_body as _decompress_body
-from app.crawl.strategies.body_decode import _decode_body
+from app.crawl.strategies.body_decode import decode_body
 from app.validation import HostPolicy, safe_public_url_or_none
 
 _T = TypeVar("_T")
@@ -112,7 +112,7 @@ async def _fetch_decode_discovery(
                 )
             except DecompressionTooLargeError:
                 return _Discovery(None, status, resp_headers)
-            return _Discovery(_decode_body(body, resp_headers.get("content-type")), status, resp_headers)
+            return _Discovery(decode_body(body, resp_headers.get("content-type")), status, resp_headers)
         return _Discovery(None, status, resp_headers)
     return _Discovery(None, None, None)
 

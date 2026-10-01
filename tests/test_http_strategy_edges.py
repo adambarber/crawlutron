@@ -38,10 +38,10 @@ class TestHttpStrategyEdges:
     """Cover remaining branches in http.py"""
 
     def test_charset_from_bytes_import_error(self):
-        from app.crawl.strategies.body_decode import _decode_body
+        from app.crawl.strategies.body_decode import decode_body
 
         body = b"test content"
-        result = _decode_body(body, "text/plain; charset=utf-8")
+        result = decode_body(body, "text/plain; charset=utf-8")
         assert result == "test content"
 
     async def test_close_async_http_client_error(self):
@@ -142,10 +142,10 @@ class TestHttpStrategyEdges:
         assert result.classification == "http_status_error"
 
     def test_decode_body_unicode_decode_error(self):
-        from app.crawl.strategies.body_decode import _decode_body
+        from app.crawl.strategies.body_decode import decode_body
 
         body = b"\xff\xfe"
-        result = _decode_body(body, "text/html")
+        result = decode_body(body, "text/html")
         assert isinstance(result, str)
 
     async def test_http_strategy_result_binary_classification(self):
