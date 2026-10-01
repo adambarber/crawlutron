@@ -165,8 +165,9 @@ def etag_serving(etag: str, body: bytes) -> Iterator[None]:
         EtagHandler.etag, EtagHandler.body = original
 
 
-def watch_writes(cache, monkeypatch, *, calls=None, on_write=None, fail=None):
-    """Patch ``_write_data`` so a test can watch, or fail, the cache's disk writes.
+def watch_writes(cache, *, calls=None, on_write=None, fail=None):
+    """Point the cache's ``write_data`` seam at a watcher so a test can watch,
+    or fail, the cache's disk writes.
 
     One seam, three questions: ``calls`` records the paths that reached disk (an
     oversized entry must never transiently be one), ``on_write`` observes each
@@ -175,7 +176,7 @@ def watch_writes(cache, monkeypatch, *, calls=None, on_write=None, fail=None):
     carrying a substring, so a prior entry survives to be read back. Each of
     those was its own inline closure over the same private method.
     """
-    real_write = cache._write_data
+    real_write = cache.write_data
 
     def seam(path, data):
         if calls is not None:
@@ -186,7 +187,7 @@ def watch_writes(cache, monkeypatch, *, calls=None, on_write=None, fail=None):
             raise OSError("disk full")
         real_write(path, data)
 
-    monkeypatch.setattr(cache, "_write_data", seam)
+    cache.write_data = seam
 
 
 def test_set_get_roundtrip():
@@ -547,7 +548,7 @@ async def _seeded_then_write_fails(cache, monkeypatch, body="old"):
     copy could be left asserting about a state the other never created.
     """
     await cache.aset("k", {"body": body}, ttl=60)
-    watch_writes(cache, monkeypatch, fail="new")
+    watch_writes(cache, fail="new")
 
 
 def budgeted_cache(tmp_path, *, max_total_bytes: int = 400, **settings) -> ContentCache:
@@ -634,7 +635,7 @@ class TestContentCacheByteBudget:
         cache = _make_cache(tmp_path, max_entry_bytes=200)
         written: list[str] = []
 
-        watch_writes(cache, monkeypatch, calls=written)
+        watch_writes(cache, calls=written)
         await cache.aset("big", {"body": "x" * 10_000}, ttl=60)
         assert written == []
         assert list(cache.cache_dir.iterdir()) == []
@@ -657,7 +658,7 @@ class TestContentCacheByteBudget:
         """A failed disk write must roll the index entry back so aget()
         does not keep consulting a path that does not exist."""
         cache = _make_cache(tmp_path, max_entry_bytes=10_000)
-        watch_writes(cache, monkeypatch, fail=True)
+        watch_writes(cache, fail=True)
         with pytest.raises(OSError):
             await cache.aset("k", {"body": "v"}, ttl=60)
         assert "k" not in cache._index
@@ -685,7 +686,7 @@ class TestContentCacheByteBudget:
         a failure is observable/testable at the same seam (a spy on an inline
         atomic_write_text call site is silently vacuous)."""
         cache = _make_cache(tmp_path)
-        watch_writes(cache, monkeypatch, fail=True)
+        watch_writes(cache, fail=True)
         with pytest.raises(OSError):
             cache.set("k", {"body": "v"}, ttl=60)
         assert "k" not in cache._index
@@ -738,7 +739,7 @@ class TestContentCacheByteBudget:
         total_before = cache._index_total_bytes
         assert total_before == sum(cache._index_sizes.values()) > 0
 
-        watch_writes(cache, monkeypatch, fail=True)
+        watch_writes(cache, fail=True)
         with pytest.raises(OSError):
             await cache.aset("ghost", {"body": "g" * 300}, ttl=60)
         assert "ghost" not in cache._index
@@ -752,7 +753,7 @@ class TestContentCacheByteBudget:
         await _seeded_then_write_fails(cache, monkeypatch)
         total_before = cache._index_total_bytes
         assert cache._index_sizes["k"] > 0
-        watch_writes(cache, monkeypatch, fail="new")
+        watch_writes(cache, fail="new")
         with pytest.raises(OSError):
             await cache.aset("k", {"body": "new" * 100}, ttl=60)
         assert cache._index_total_bytes == total_before
@@ -886,13 +887,11 @@ class TestContentCacheEntryLifecycle:
             # RAM mirror only keeps <1MiB, so this exercises the disk read path.
             assert await cache.aget("k1") == big
 
-    async def test_aset_writes_off_event_loop(self, monkeypatch):
+    async def test_aset_writes_off_event_loop(self):
         """The disk write (json.dumps of a large value) runs in a worker thread."""
         with scoped_cache(default_ttl=60) as cache:
             seen: dict[str, Any] = {}
-            watch_writes(
-                cache, monkeypatch, on_write=lambda path, data: seen.update(thread=threading.current_thread())
-            )
+            watch_writes(cache, on_write=lambda path, data: seen.update(thread=threading.current_thread()))
             await cache.aset("k2", "y" * 2_000_000)
         assert seen, "write never happened"
         assert seen["thread"] is not threading.current_thread()

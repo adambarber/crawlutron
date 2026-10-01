@@ -52,6 +52,7 @@ class ContentCache:
         max_entries: int = 10000,
         max_entry_bytes: int = CONTENT_CACHE_MAX_ENTRY_BYTES,
         max_total_bytes: int | None = CONTENT_CACHE_MAX_TOTAL_BYTES,
+        write_data: Callable[[Path, str], None] | None = None,
     ) -> None:
         self.cache_dir = Path(cache_dir)
         self.default_ttl = default_ttl
@@ -66,6 +67,11 @@ class ContentCache:
         # one off, which is why turning it off is a deliberate, visible
         # constructor argument rather than a default.
         self.max_total_bytes = max_total_bytes
+        # The single disk-write seam. ``write_data`` is data, not an override:
+        # a caller that needs to watch, fail or relocate writes hands over a
+        # callable, so "which writer is live" has exactly one answer and no test
+        # reaches past it to rebind a private method on a live cache.
+        self.write_data = self._write_data if write_data is None else write_data
         # Parallel byte accounting for the LRU index: entry count alone
         # cannot bound disk use when one envelope holds a multi-MB body.
         self._index_sizes: dict[str, int] = {}
@@ -388,7 +394,7 @@ class ContentCache:
                 # Refuse before any disk write: a still-valid older
                 # entry for this key is kept; TTL governs its staleness.
                 return
-            self._write_data(path, data)
+            self.write_data(path, data)
             self._commit_entry_locked(key, path, len(data))
             # Freshness metadata is known at write time; record it so later
             # cached_at_of() calls never deserialize this envelope.
@@ -430,7 +436,7 @@ class ContentCache:
                 # disk and any still-valid older entry is kept.
                 return
         try:
-            await asyncio.to_thread(self._write_data, path, data)
+            await asyncio.to_thread(self.write_data, path, data)
         except BaseException:
             # Nothing above mutated the index, byte totals, or RAM mirror before
             # this point, and atomic_write_text leaves the prior file byte-
@@ -468,8 +474,9 @@ class ContentCache:
         self._index_total_bytes += size - old_size
 
     def _write_data(self, path: Path, data: str) -> None:
-        """Persist a pre-serialized envelope: ``aset`` sizes the exact
-        bytes before writing; ``set`` keeps its synchronous inline write)."""
+        """The real writer, and the default behind ``write_data``: persist a
+        pre-serialized envelope. ``aset`` sizes the exact bytes before writing;
+        ``set`` keeps its synchronous inline write."""
         atomic_write_text(path, data)
 
     def prune(self) -> int:
