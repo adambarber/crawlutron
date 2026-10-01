@@ -122,7 +122,7 @@ def _llm_metadata_from_tree(tree: Any, url: str) -> dict[str, Any]:
     return metadata
 
 
-def _text_from_html(html: str) -> str:
+def text_from_html(html: str) -> str:
     without_scripts = re.sub(r"<script\b[^>]*>.*?</script>", " ", html, flags=re.IGNORECASE | re.DOTALL)
     without_styles = re.sub(
         r"<style\b[^>]*>.*?</style>", " ", without_scripts, flags=re.IGNORECASE | re.DOTALL

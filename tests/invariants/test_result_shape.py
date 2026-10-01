@@ -968,8 +968,8 @@ _CONTENT_PIPELINE_OWNER = frozenset({"content_pipeline.py"})
 # Import-resolved, so an alias cannot slip past the sweep.
 _EXTRACTION_ENTRY_POINTS = frozenset(
     {
-        "app.crawl.extraction._extract_document",
-        "app.crawl.extraction._extract_html",
+        "app.crawl.extraction.extract_document",
+        "app.crawl.extraction.extract_html",
         "app.crawl.extraction.extract_content",
         "app.crawl.extraction.extract_post_fetch_discovery",
         "app.crawl.extraction.normalized_extraction",
@@ -1004,12 +1004,12 @@ def _extraction_reach_past_offenders(tree: ast.AST, path: pathlib.Path) -> list[
     """Flag a use of a raw extractor outside the content pipeline.
 
     Keyed on the *name in load position* rather than on a call: the shape both
-    strategies used was an offloaded extractor, ``asyncio.to_thread(_extract_html,
+    strategies used was an offloaded extractor, ``asyncio.to_thread(extract_html,
     ...)``, where the extractor is an argument rather than a callee, and a
     call-keyed detector misses exactly that. Keyed on the use rather than the
     import because binding a name is not the duplication, dispatching on it is.
 
-    ``self._extract_html(page)`` in the browser worker is a method on the
+    ``self.extract_html(page)`` in the browser worker is a method on the
     renderer, not this function, so it resolves to a different name and is not
     an offender. A reference *within* extraction.py resolves to the bare name
     rather than the dotted one, which is how the owner of these functions is
@@ -1056,9 +1056,9 @@ EXTRACTION_IS_DISPATCHED_BY_THE_CONTENT_PIPELINE_ALONE = Rule(
         # The offloaded extractor AND the bare extractor call are two dispatch
         # shapes, so a source carrying both is worth exactly two findings.
         Bites(
-            "from app.crawl.extraction import _extract_html, normalized_extraction\n"
+            "from app.crawl.extraction import extract_html, normalized_extraction\n"
             "async def f(decoded, final_url):\n"
-            "    extracted = await asyncio.to_thread(_extract_html, decoded, final_url)\n"
+            "    extracted = await asyncio.to_thread(extract_html, decoded, final_url)\n"
             "    return normalized_extraction(extracted)\n",
             "_run_extraction",
             count=2,

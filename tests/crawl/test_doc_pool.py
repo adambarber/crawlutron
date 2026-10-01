@@ -235,7 +235,7 @@ def test_acquire_timeout_is_configured_and_bounded():
 def test_extract_document_degrades_when_no_worker_can_be_acquired(fake_pool, monkeypatch):
     """Caller-visible half: no worker means empty content, not a crash or a hang.
 
-    ``_extract_document`` used to assume acquire always succeeded; with a
+    ``extract_document`` used to assume acquire always succeeded; with a
     bounded acquire it must handle ``None`` the way it handles every other
     document failure -- empty extraction, logged.
     """
@@ -250,13 +250,13 @@ def test_extract_document_degrades_when_no_worker_can_be_acquired(fake_pool, mon
     result_box: dict[str, ExtractedContent] = {}
 
     def _call() -> None:
-        result_box["result"] = ext_mod._extract_document(b"%PDF-1.4 fake", "http://example.com/x.pdf")
+        result_box["result"] = ext_mod.extract_document(b"%PDF-1.4 fake", "http://example.com/x.pdf")
 
     thread = threading.Thread(target=_call, daemon=True)
     thread.start()
     thread.join(timeout=20)
 
-    assert not thread.is_alive(), "_extract_document wedged waiting for a worker"
+    assert not thread.is_alive(), "extract_document wedged waiting for a worker"
     result = result_box["result"]
     assert result.text is None and result.markdown is None
 
@@ -520,7 +520,7 @@ def test_doc_workers_persist_across_documents(monkeypatch):
     _use_single_worker(monkeypatch)
     try:
         for _ in range(3):
-            result = ext_mod._extract_document(b"%PDF-1.4 fake", "http://example.com/x.pdf")
+            result = ext_mod.extract_document(b"%PDF-1.4 fake", "http://example.com/x.pdf")
             assert result.markdown == "## Hello Markdown"
         assert constructions() == 1
         assert len(ext_mod._doc_pool_pids()) == 1
@@ -534,9 +534,9 @@ def test_doc_worker_pids_stable_across_tasks(monkeypatch):
 
     _use_single_worker(monkeypatch)
     try:
-        ext_mod._extract_document(b"%PDF-1.4 fake", "http://example.com/a.pdf")
+        ext_mod.extract_document(b"%PDF-1.4 fake", "http://example.com/a.pdf")
         first = ext_mod._doc_pool_pids()
-        ext_mod._extract_document(b"%PDF-1.4 fake", "http://example.com/b.pdf")
+        ext_mod.extract_document(b"%PDF-1.4 fake", "http://example.com/b.pdf")
         second = ext_mod._doc_pool_pids()
         assert first == second
         assert all(pid > 0 for pid in first)
@@ -556,7 +556,7 @@ def test_doc_timeout_kills_and_pool_recovers(monkeypatch):
 
         monkeypatch.setenv("TEST_MARKITDOWN_HANG", "1")
         started = time.monotonic()
-        result = ext_mod._extract_document(b"%PDF-1.4 fake", "http://example.com/hang.pdf")
+        result = ext_mod.extract_document(b"%PDF-1.4 fake", "http://example.com/hang.pdf")
         assert time.monotonic() - started < 5.0
         assert result.text is None and result.markdown is None
         hung_pids = ext_mod._doc_pool_pids()
@@ -565,7 +565,7 @@ def test_doc_timeout_kills_and_pool_recovers(monkeypatch):
         # Normal timeout for recovery: the respawned worker must boot (spawn
         # platforms) before the task timeout starts mattering again.
         monkeypatch.setattr(ext_mod, "_EXTRACTION_DOC_TIMEOUT", 10.0)
-        recovered = ext_mod._extract_document(b"%PDF-1.4 fake", "http://example.com/ok.pdf")
+        recovered = ext_mod.extract_document(b"%PDF-1.4 fake", "http://example.com/ok.pdf")
         assert recovered.markdown == "## Hello Markdown"
         # The hung worker was killed and its slot respawned: exactly one
         # replacement construction, pool back at one live worker.

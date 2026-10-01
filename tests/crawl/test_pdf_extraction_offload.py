@@ -41,7 +41,7 @@ async def _real_extraction(self, page, options):
     needs the REAL branch, so both stubs are re-enabled here (the shared
     builder's defaults are deliberately preserved for every other consumer).
     """
-    html = await BrowserRenderer._extract_html(self, page)
+    html = await BrowserRenderer.extract_html(self, page)
     text = await BrowserRenderer._extract_text(self, page)
     return html, text, "rendered", False
 

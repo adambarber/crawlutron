@@ -13,23 +13,23 @@ import app.crawl.extraction as extraction_mod
 from app.crawl.extraction import (
     ExtractedContent,
     Selectors,
-    _extract_document,
-    _extract_html,
-    _extract_selected,
-    _html_to_markdown,
-    _is_html,
-    _looks_like_document,
     _parse_html_tree,
-    _text_from_html,
+    extract_document,
+    extract_html,
+    extract_selected,
+    html_to_markdown,
+    is_html,
+    looks_like_document,
+    text_from_html,
 )
 from tests._assertions import set_optional_env
 from tests._extraction_helpers import (
-    _detect_pagination,
-    _extract_discovered_links,
-    _html_diagnostics,
+    detect_pagination,
     doc_worker_acquisitions,
     extract_content,
+    extract_discovered_links,
     extract_js_endpoints,
+    html_diagnostics,
 )
 from tests._policy_factories import BOOL_ENV_CASES, UNRESTRICTED_HOST_POLICY
 from tests._process_doubles import StubConn, StubProc
@@ -103,19 +103,19 @@ class TestExtractContent:
 
 class TestRoutingHelpers:
     def test_is_html(self):
-        assert _is_html("text/html", "<html></html>")
-        assert _is_html("text/html; charset=utf-8", b"<html></html>")
-        assert not _is_html("application/json", '{"a":1}')
-        assert _is_html(None, "<!doctype html><html></html>")
-        assert not _is_html(None, "plain")
+        assert is_html("text/html", "<html></html>")
+        assert is_html("text/html; charset=utf-8", b"<html></html>")
+        assert not is_html("application/json", '{"a":1}')
+        assert is_html(None, "<!doctype html><html></html>")
+        assert not is_html(None, "plain")
 
     def test_looks_like_document(self):
-        assert _looks_like_document("application/pdf", b"%PDF", "http://x/a.pdf")
-        assert _looks_like_document("application/octet-stream", b"%PDF-1.4 data", "http://x/mystery")
-        assert _looks_like_document("text/csv", b"a,b", "http://x/d.csv")
-        assert _looks_like_document("application/json", b"{}", None)
-        assert not _looks_like_document("text/html", b"<html>", "http://x/")
-        assert not _looks_like_document("text/plain", b"hi", "http://x/note.txt")
+        assert looks_like_document("application/pdf", b"%PDF", "http://x/a.pdf")
+        assert looks_like_document("application/octet-stream", b"%PDF-1.4 data", "http://x/mystery")
+        assert looks_like_document("text/csv", b"a,b", "http://x/d.csv")
+        assert looks_like_document("application/json", b"{}", None)
+        assert not looks_like_document("text/html", b"<html>", "http://x/")
+        assert not looks_like_document("text/plain", b"hi", "http://x/note.txt")
 
 
 class TestTextAndMetadata:
@@ -125,7 +125,7 @@ class TestTextAndMetadata:
             "<script>ignore_me();</script><style>.x{color:red}</style>"
             "</body></html>"
         )
-        assert _text_from_html(html) == "Hello World"
+        assert text_from_html(html) == "Hello World"
 
 
 class TestKatanaDiscovery:
@@ -175,21 +175,21 @@ class TestKatanaDiscovery:
     def test_extract_html_markdownify_fallback(self):
         # Trafilatura rejects an empty body; the markdownify fallback runs
         # (and may still yield nothing, falling through to plain-text).
-        result = _extract_html("<html><body></body></html>", None)
+        result = extract_html("<html><body></body></html>", None)
         assert isinstance(result, ExtractedContent)
         assert result.markdown is None or isinstance(result.markdown, str)
 
     def test_detect_pagination_anchor_rel_next(self):
         html = '<a rel="next" href="/page2">Next</a>'
-        assert _detect_pagination(html, "https://example.com/list") == "https://example.com/page2"
+        assert detect_pagination(html, "https://example.com/list") == "https://example.com/page2"
 
     def test_detect_pagination_link_rel_next(self):
         html = '<link rel="next" href="/p3">'
-        assert _detect_pagination(html, "https://example.com/") == "https://example.com/p3"
+        assert detect_pagination(html, "https://example.com/") == "https://example.com/p3"
 
     def test_detect_pagination_none_without_hint(self):
         html = '<a href="/page2">Next</a>'
-        assert _detect_pagination(html, "https://example.com/") is None
+        assert detect_pagination(html, "https://example.com/") is None
 
     def test_detect_pagination_drops_non_http_href(self):
         # The href is attacker-controlled HTML: a non-http(s) rel=next must not
@@ -197,12 +197,12 @@ class TestKatanaDiscovery:
         # so every consumer is covered, not just the ones that remember.
         for bad in ("javascript:alert(1)", "data:text/html,<x>", "mailto:a@b.c"):
             html = f'<a rel="next" href="{bad}">next</a>'
-            assert _detect_pagination(html, "https://example.com/list") is None
+            assert detect_pagination(html, "https://example.com/list") is None
 
     def test_detect_pagination_still_resolves_relative(self):
         # The egress filter must not break legitimate relative pagination.
         assert (
-            _detect_pagination('<a rel="next" href="/p2">n</a>', "https://example.com/list")
+            detect_pagination('<a rel="next" href="/p2">n</a>', "https://example.com/list")
             == "https://example.com/p2"
         )
 
@@ -210,7 +210,7 @@ class TestKatanaDiscovery:
         # //evil.com/x resolves against the page URL to https, so it survives
         # the scheme filter exactly like the HTTP path already allowed.
         assert (
-            _detect_pagination('<a rel="next" href="//example.com/p2">n</a>', "https://example.com/list")
+            detect_pagination('<a rel="next" href="//example.com/p2">n</a>', "https://example.com/list")
             == "https://example.com/p2"
         )
 
@@ -222,7 +222,7 @@ async def test_extract_document_skips_oversized_input(monkeypatch):
     acquisitions = doc_worker_acquisitions(monkeypatch)
     monkeypatch.setattr(ex, "_EXTRACTION_DOC_MAX_INPUT_BYTES", 100)
 
-    out = await asyncio.to_thread(ex._extract_document, b"x" * 101, "http://x.test/big.pdf")
+    out = await asyncio.to_thread(ex.extract_document, b"x" * 101, "http://x.test/big.pdf")
     assert out.text is None and out.markdown is None
     assert acquisitions == [], "a refused document still asked for a markitdown worker"
 
@@ -257,7 +257,7 @@ async def test_extract_document_kill_switch(monkeypatch):
     acquisitions = doc_worker_acquisitions(monkeypatch)
     monkeypatch.setenv("CRAWLUTRON_EXTRACTION_DOC_ENABLED", "0")
 
-    out = await asyncio.to_thread(ex._extract_document, b"tiny", None)
+    out = await asyncio.to_thread(ex.extract_document, b"tiny", None)
     assert out.text is None and out.markdown is None
     assert acquisitions == [], "a disabled extractor still asked for a markitdown worker"
 
@@ -278,7 +278,7 @@ class TestExtractionMethods:
         calls = []
 
         def fake_html(html, url, css_selector=None, xpath=None):
-            # The selector pair is part of the real `_extract_html` contract:
+            # The selector pair is part of the real `extract_html` contract:
             # `extract_content` owns the HTML branch and hands the pair down
             # rather than dispatching on it itself, so a double that did not
             # accept it would be modelling a narrower function than the one
@@ -290,8 +290,8 @@ class TestExtractionMethods:
             calls.append("document")
             return ExtractedContent("document", "document")
 
-        monkeypatch.setattr(extraction, "_extract_html", fake_html)
-        monkeypatch.setattr(extraction, "_extract_document", fake_document)
+        monkeypatch.setattr(extraction, "extract_html", fake_html)
+        monkeypatch.setattr(extraction, "extract_document", fake_document)
         result = extraction.extract_content(content, content_type, "http://example.com/")
         assert result.text == expected_text
         assert calls == ([] if expected_branch is None else [expected_branch])
@@ -305,7 +305,7 @@ class TestHtmlTreeParsing:
 class TestSelectedExtraction:
     def test_extraction_selected_with_xpath(self):
         html = "<html><body><div>Hello</div></body></html>"
-        result = _extract_selected(html, "http://x/", selectors=Selectors(xpath="//div/text()"))
+        result = extract_selected(html, "http://x/", selectors=Selectors(xpath="//div/text()"))
         assert result.text == "Hello"
         assert result.markdown == "Hello"
 
@@ -314,7 +314,7 @@ class TestLinkExtraction:
     def test_engine_parse_robots_blank_line(self):
         # Test link extraction with mixed quote styles (covers edge cases)
         html = "<html><body><a href=https://example.com/test>link</a><a href='https://example.com/page2'>link2</a></body></html>"
-        links = _extract_discovered_links(html, None)
+        links = extract_discovered_links(html, None)
         assert len(links) > 0
 
 
@@ -343,7 +343,7 @@ async def test_extract_document_timeout_is_enforced(monkeypatch):
     # Set short timeout - patch the module variable directly.
     monkeypatch.setattr(ext_mod, "_EXTRACTION_DOC_TIMEOUT", 0.01)
 
-    assert_extraction_empty(_extract_document(b"%PDF-1.4 fake", "http://example.com/x.pdf"))
+    assert_extraction_empty(extract_document(b"%PDF-1.4 fake", "http://example.com/x.pdf"))
 
     # Clean up
     monkeypatch.delenv("TEST_MARKITDOWN_HANG", raising=False)
@@ -355,7 +355,7 @@ async def test_extract_document_child_death_returns_empty(monkeypatch):
 
     monkeypatch.setenv("TEST_MARKITDOWN_DIE", "1")
     monkeypatch.setenv("CRAWLUTRON_TEST_HOOKS", "1")
-    assert_extraction_empty(_extract_document(b"%PDF-1.4 fake", "http://example.com/x.pdf"))
+    assert_extraction_empty(extract_document(b"%PDF-1.4 fake", "http://example.com/x.pdf"))
 
     # Is per worker, not process-global: the pool is persistent and sized
     # above one, so an idle worker from an earlier extraction legitimately
@@ -378,7 +378,7 @@ async def test_extract_document_output_capped_at_5mb(monkeypatch):
     # Set the cap directly
     monkeypatch.setattr(ext_mod, "_MAX_EXTRACTED_MARKDOWN", test_cap)
 
-    result = _extract_document(b"%PDF-1.4 fake", "http://example.com/x.pdf")
+    result = extract_document(b"%PDF-1.4 fake", "http://example.com/x.pdf")
     assert result.markdown is not None
     assert len(result.markdown) == test_cap
 
@@ -402,7 +402,7 @@ async def test_extract_document_normal_works():
     have to mean the same thing.
     """
     ext_mod._reset_doc_pool()
-    result = _extract_document(b"name,score\nada,10\n", "http://example.com/data.csv")
+    result = extract_document(b"name,score\nada,10\n", "http://example.com/data.csv")
 
     assert result.markdown is not None
     # "ada" only reaches the reply if markitdown really read these bytes, and
@@ -434,7 +434,7 @@ async def test_extract_document_process_pool_isolation(monkeypatch):
     monkeypatch.setenv("TEST_MARKITDOWN_HANG", "1")
     monkeypatch.setenv("CRAWLUTRON_TEST_HOOKS", "1")
 
-    result = _extract_document(b"%PDF-1.4 fake", "http://example.com/x.pdf")
+    result = extract_document(b"%PDF-1.4 fake", "http://example.com/x.pdf")
     # Should return None due to timeout (process killed).
     assert result.text is None
     assert result.markdown is None
@@ -447,10 +447,10 @@ async def test_extract_document_process_pool_normal_works(monkeypatch):
     """Normal document extraction still works with process isolation."""
     # Use normal timeout - patch the module variable directly.
     monkeypatch.setattr(ext_mod, "_EXTRACTION_DOC_TIMEOUT", 10.0)
-    from app.crawl.extraction import _extract_document
+    from app.crawl.extraction import extract_document
 
     # Don't set TEST_MARKITDOWN_HANG - normal operation.
-    result = _extract_document(b"%PDF-1.4 fake", "http://example.com/x.pdf")
+    result = extract_document(b"%PDF-1.4 fake", "http://example.com/x.pdf")
     # With fake bytes, markitdown returns something (or None for unparseable);
     # the key is it doesn't crash.
     assert isinstance(result, ext_mod.ExtractedContent)
@@ -466,7 +466,7 @@ async def test_extract_document_recovers_after_timeout(monkeypatch):
     monkeypatch.setenv("TEST_MARKITDOWN_HANG", "1")
     monkeypatch.setenv("CRAWLUTRON_TEST_HOOKS", "1")
     monkeypatch.setattr(ext_mod, "_EXTRACTION_DOC_TIMEOUT", 0.01)
-    hung = _extract_document(b"%PDF-1.4 fake", "http://example.com/hang.pdf")
+    hung = extract_document(b"%PDF-1.4 fake", "http://example.com/hang.pdf")
     assert hung.text is None
     monkeypatch.delenv("TEST_MARKITDOWN_HANG", raising=False)
 
@@ -477,7 +477,7 @@ async def test_extract_document_recovers_after_timeout(monkeypatch):
     monkeypatch.setattr(ext_mod, "_EXTRACTION_DOC_TIMEOUT", 10.0)
     monkeypatch.setenv("TEST_MARKITDOWN_OUTPUT", "## Recovered")
     monkeypatch.setenv("CRAWLUTRON_TEST_HOOKS", "1")
-    recovered = _extract_document(b"%PDF-1.4 fake", "http://example.com/ok.pdf")
+    recovered = extract_document(b"%PDF-1.4 fake", "http://example.com/ok.pdf")
     assert recovered.markdown == "## Recovered"
     monkeypatch.delenv("TEST_MARKITDOWN_OUTPUT", raising=False)
 
@@ -488,11 +488,11 @@ async def test_test_hooks_inert_without_gate(monkeypatch):
     monkeypatch.setenv("TEST_MARKITDOWN_OUTPUT", "## hijacked")
     monkeypatch.delenv("CRAWLUTRON_TEST_HOOKS", raising=False)
 
-    ungated = _extract_document(b"%PDF-1.4 fake", "http://example.com/x.pdf")
+    ungated = extract_document(b"%PDF-1.4 fake", "http://example.com/x.pdf")
     assert ungated.markdown != "## hijacked"
 
     monkeypatch.setenv("CRAWLUTRON_TEST_HOOKS", "1")
-    gated = _extract_document(b"%PDF-1.4 fake", "http://example.com/x.pdf")
+    gated = extract_document(b"%PDF-1.4 fake", "http://example.com/x.pdf")
     assert gated.markdown == "## hijacked"
 
 
@@ -517,7 +517,7 @@ def test_css_selector_slow_must_not_hang(monkeypatch, caplog):
     )
     html = "<html><body><p class='x'>hi</p></body></html>"
     with caplog.at_level(logging.WARNING, logger="app.crawl.extraction"):
-        result = _extract_selected(html, "http://example.com/", selectors=Selectors(css=".x"))
+        result = extract_selected(html, "http://example.com/", selectors=Selectors(css=".x"))
     assert result == ExtractedContent(None, None)
     assert "extraction_selector_timeout" in caplog.text, (
         "the CSS selector returned empty rather than timing out: the extraction "
@@ -528,7 +528,7 @@ def test_css_selector_slow_must_not_hang(monkeypatch, caplog):
 def test_css_selector_fast_still_works(monkeypatch):
     monkeypatch.setattr(extraction_mod, "_EXTRACTION_SELECTOR_TIMEOUT", 0.2)
     html = "<html><body><p class='x'>hi</p></body></html>"
-    result = _extract_selected(html, "http://example.com/", selectors=Selectors(css=".x"))
+    result = extract_selected(html, "http://example.com/", selectors=Selectors(css=".x"))
     assert result.text is not None
     assert "hi" in (result.text or "")
 
@@ -555,7 +555,7 @@ def test_xpath_selector_slow_must_not_hang(monkeypatch, caplog):
     monkeypatch.setattr(extraction_mod, "_parse_html_tree", lambda html: tree)
     html = "<html><body><p>x</p></body></html>"
     with caplog.at_level(logging.WARNING, logger="app.crawl.extraction"):
-        result = _extract_selected(html, "http://example.com/", selectors=Selectors(xpath="//p"))
+        result = extract_selected(html, "http://example.com/", selectors=Selectors(xpath="//p"))
     assert result == ExtractedContent(None, None)
     assert "extraction_selector_timeout" in caplog.text, (
         "the XPath expression returned empty rather than timing out: the "
@@ -566,7 +566,7 @@ def test_xpath_selector_slow_must_not_hang(monkeypatch, caplog):
 def test_xpath_selector_fast_still_works(monkeypatch):
     monkeypatch.setattr(extraction_mod, "_EXTRACTION_SELECTOR_TIMEOUT", 0.2)
     html = "<html><body><p>x</p></body></html>"
-    result = _extract_selected(html, "http://example.com/", selectors=Selectors(xpath="//p"))
+    result = extract_selected(html, "http://example.com/", selectors=Selectors(xpath="//p"))
     assert result.text is not None
     assert "x" in (result.text or "")
 
@@ -586,7 +586,7 @@ def _spy_parse(monkeypatch):
 def test_html_diagnostics_parses_once(monkeypatch):
     calls = _spy_parse(monkeypatch)
     html = "<html><body><a href='/x'>x</a><form action='/s'><input name='q'></form></body></html>"
-    extraction._html_diagnostics(
+    extraction.html_diagnostics(
         html,
         "http://example.com/",
         host_policy=UNRESTRICTED_HOST_POLICY,
@@ -602,13 +602,13 @@ def test_shared_tree_parses_once_across_passes(monkeypatch):
     )
     tree = extraction._parse_html_tree(html)
     assert calls["n"] == 1
-    extraction._html_diagnostics(
+    extraction.html_diagnostics(
         html,
         "http://example.com/",
         host_policy=UNRESTRICTED_HOST_POLICY,
         tree=tree,
     )
-    links, _, _ = extraction._extract_discovered_links(
+    links, _, _ = extraction.extract_discovered_links(
         html,
         "http://example.com/",
         host_policy=UNRESTRICTED_HOST_POLICY,
@@ -633,13 +633,13 @@ class TestExtractionEdges:
         assert result.text == "selected"
 
     def test_html_to_markdown_markdownify_success(self):
-        text, md = _html_to_markdown("<p>hello <strong>world</strong></p>")
+        text, md = html_to_markdown("<p>hello <strong>world</strong></p>")
         assert text is not None
         assert md is not None
         assert "world" in md
 
     def test_html_to_markdown_markdownify_exception(self):
-        text, md = _html_to_markdown("<p>test</p>")
+        text, md = html_to_markdown("<p>test</p>")
         assert text is not None
 
     @pytest.mark.parametrize(
@@ -653,10 +653,10 @@ class TestExtractionEdges:
         ids=["no_html", "css_no_match", "xpath_no_match", "xpath_invalid"],
     )
     def test_extract_selected_yields_nothing_when_it_matches_nothing(self, html, selectors):
-        assert _extract_selected(html, "http://e.com/", selectors=selectors) == ExtractedContent(None, None)
+        assert extract_selected(html, "http://e.com/", selectors=selectors) == ExtractedContent(None, None)
 
     def test_extract_selected_xpath_string_node(self):
-        result = _extract_selected(
+        result = extract_selected(
             "<div><span>text1</span><span>text2</span></div>",
             "http://e.com/",
             selectors=Selectors(xpath="//span/text()"),
@@ -672,13 +672,13 @@ class TestExtractionEdges:
         ids=["trafilatura", "markdownify_fallback"],
     )
     def test_extract_html_always_yields_text(self, html):
-        assert _extract_html(html, "http://e.com/").text is not None
+        assert extract_html(html, "http://e.com/").text is not None
 
     def test_extract_document_markitdown_import_error(self):
-        assert _extract_document(b"fake pdf content", "http://e.com/doc.pdf").text is not None
+        assert extract_document(b"fake pdf content", "http://e.com/doc.pdf").text is not None
 
     def test_extract_document_markitdown_exception(self):
-        result = _extract_document(b"not a pdf", "http://e.com/doc.pdf")
+        result = extract_document(b"not a pdf", "http://e.com/doc.pdf")
         assert result.text is None or isinstance(result.text, str)
 
     def test_parse_html_tree_empty(self):
@@ -694,7 +694,7 @@ class TestExtractionGaps:
         # Real HTML parsers (lxml) flatten illegally-nested anchors into
         # siblings, so both distinct hrefs are discovered as separate links
         # rather than the inner one being swallowed by the outer.
-        links, _, _ = _extract_discovered_links(
+        links, _, _ = extract_discovered_links(
             '<a href="/x">outer <a href="/y">inner</a></a>',
             "http://e.com/",
         )
@@ -703,7 +703,7 @@ class TestExtractionGaps:
         assert "http://e.com/y" in hrefs
 
     def test_duplicate_href(self):
-        links, count, _ = _extract_discovered_links(
+        links, count, _ = extract_discovered_links(
             '<a href="/x">a</a><a href="/x">b</a>',
             "http://e.com/",
         )
@@ -712,7 +712,7 @@ class TestExtractionGaps:
 
     def test_max_links_truncation(self):
         html = "".join(f'<a href="/{i}">x</a>' for i in range(5))
-        links, count, truncated = _extract_discovered_links(html, "http://e.com/", max_links=2)
+        links, count, truncated = extract_discovered_links(html, "http://e.com/", max_links=2)
         assert len(links) == 2
         assert truncated
         assert count == 5
@@ -722,7 +722,7 @@ class TestExtractionGaps:
             '<frameset><frame src="/a"></frameset>'
             '<form action="/s" method="post"><input name="q" value="1"></form>'
         )
-        diag = _html_diagnostics(html, "http://e.com/")
+        diag = html_diagnostics(html, "http://e.com/")
         assert "frames" in diag
         assert "forms" in diag
         assert diag["frames"]
@@ -746,7 +746,7 @@ class TestTrafilaturaChatterIsSuppressed:
 
     @pytest.mark.parametrize("html", ["", "<html><body></body></html>", "<div></div>"])
     def test_empty_and_fragment_html_emits_no_trafilatura_error(self, html, caplog):
-        extraction._extract_html(html, url="http://example.com/")
+        extraction.extract_html(html, url="http://example.com/")
 
         trafilatura_records = [r for r in caplog.records if r.name.startswith("trafilatura")]
         errors = [r for r in trafilatura_records if r.levelno >= logging.ERROR]
@@ -757,7 +757,7 @@ class TestTrafilaturaChatterIsSuppressed:
         )
 
     def test_real_html_still_extracts_and_logs_no_error(self, caplog):
-        out = extraction._extract_html(
+        out = extraction.extract_html(
             "<html><body><article><h1>Title</h1><p>Real body text here.</p></article></body></html>",
             url="http://example.com/",
         )
@@ -814,3 +814,40 @@ def test_selector_on_non_html_is_reported_not_silently_dropped(caplog):
     with caplog.at_level(logging.WARNING, logger="app.crawl.extraction"):
         extraction_mod.extract_content(pdf, "application/pdf", "http://example.com/doc.pdf")
     assert "extraction_selector_ignored_non_html" not in caplog.text, caplog.text
+
+
+# Issue #77. These ten are contracts in their own right -- each has a signature, a
+# docstring and tests of its own -- and none of them is reachable from outside the
+# module because they were named private. The four existing public entry points are
+# *compositions* of these, so "just call extract_content instead" is not a migration:
+# it cannot express a classifier case, and it drags a whole extraction run in to
+# assert one predicate.
+EXTRACTION_STAGE_CONTRACTS = (
+    "is_html",
+    "looks_like_document",
+    "html_to_markdown",
+    "extract_html",
+    "extract_document",
+    "detect_pagination",
+    "html_diagnostics",
+    "extract_discovered_links",
+    "forms_from",
+    "frames_from",
+)
+
+
+@pytest.mark.parametrize("name", EXTRACTION_STAGE_CONTRACTS)
+def test_extraction_stage_contracts_are_public(name):
+    """A stage contract a test can name must not be a private name."""
+    assert not name.startswith("_")
+    assert hasattr(extraction, name), f"app.crawl.extraction.{name} is not public"
+    assert name in vars(extraction), f"{name} is not defined in app.crawl.extraction"
+
+
+@pytest.mark.parametrize("name", EXTRACTION_STAGE_CONTRACTS)
+def test_extraction_stage_contracts_keep_their_signatures(name):
+    """Renaming must not change what a stage is called with or returns."""
+    import inspect
+
+    sig = inspect.signature(getattr(extraction, name))
+    assert sig.parameters, f"{name} takes no arguments, which cannot be the whole contract"

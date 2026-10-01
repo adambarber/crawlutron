@@ -1,6 +1,6 @@
 """LLM output formatting: metadata extraction and markdown edges."""
 
-from app.crawl.llm_format import _extract_llm_metadata, _text_from_html
+from app.crawl.llm_format import _extract_llm_metadata, text_from_html
 from tests._extraction_helpers import extract_content
 from tests._fetcher_factories import LLM_FORMAT_TEST_HTML
 
@@ -84,7 +84,7 @@ class TestLlmFormat:
 
     def test_text_from_html_strips_tags(self):
         html = "<html><body><script>var x=1;</script><style>body{}</style><p>Hello</p></body></html>"
-        text = _text_from_html(html)
+        text = text_from_html(html)
         assert "Hello" in text
         assert "var x" not in text
         assert "body{}" not in text

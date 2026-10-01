@@ -295,7 +295,7 @@ class TestWorkerExtractorErrorDegrades:
         assert escaped
 
     async def test_browser_renderer_extract_html_error(self):
-        result = await _bare_renderer()._extract_html(_page(content=Exception("content failed")))
+        result = await _bare_renderer().extract_html(_page(content=Exception("content failed")))
         assert result == ""
 
     async def test_browser_renderer_extract_text_error(self):

@@ -458,7 +458,7 @@ def test_host_policy_detector_accepts_fixed_extraction_boundaries():
     assert not [
         offender
         for offender in _required_host_policy_offenders(tree, path)
-        if any(name in offender for name in ("_frames_from", "_forms_from"))
+        if any(name in offender for name in ("frames_from", "forms_from"))
     ]
 
 

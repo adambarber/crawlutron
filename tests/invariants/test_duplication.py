@@ -181,7 +181,7 @@ THE_SELECTOR_PAIR_IS_ONE_CONTRACT = Rule(
     ),
     bite=lambda: (
         Bites(
-            "def _extract_html(html, url, css_selector=None, xpath=None) -> ExtractedContent:\n    ...\n",
+            "def extract_html(html, url, css_selector=None, xpath=None) -> ExtractedContent:\n    ...\n",
             "declares ['css_selector', 'xpath'] instead of carrying",
         ),
         Bites(
@@ -193,12 +193,12 @@ THE_SELECTOR_PAIR_IS_ONE_CONTRACT = Rule(
         # The carrier itself: the one place the two names are spelled.
         "class Selectors:\n    css: str | None = None\n    xpath: str | None = None\n",
         # An extractor carrying the pair as the one value.
-        "def _extract_html(html, url, selectors=None) -> ExtractedContent:\n    ...\n",
+        "def extract_html(html, url, selectors=None) -> ExtractedContent:\n    ...\n",
         # A key builder legitimately requires both: it keys a request rather
         # than narrowing one.
         "def _content_cache_key(url, strategy, headers, extraction, css_selector, xpath):\n    ...\n",
         # A function that takes no selector is somebody else's business.
-        "def _extract_document(body, url) -> ExtractedContent:\n    ...\n",
+        "def extract_document(body, url) -> ExtractedContent:\n    ...\n",
     ),
     proof_path=REPO_ROOT / "app" / "crawl" / "_synthetic.py",
 )

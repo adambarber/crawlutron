@@ -1,7 +1,7 @@
 """Sync post-fetch discovery parsing must leave the event loop.
 
-``_parse_html_tree`` / ``_html_diagnostics`` / ``_extract_discovered_links`` /
-``extract_js_endpoints`` / ``_detect_pagination`` run synchronously in both
+``_parse_html_tree`` / ``html_diagnostics`` / ``extract_discovered_links`` /
+``extract_js_endpoints`` / ``detect_pagination`` run synchronously in both
 strategy result builders. The post-fetch block must move to
 ``asyncio.to_thread``, returning plain data (no lxml tree escapes).
 """
@@ -167,7 +167,7 @@ async def test_discovery_feeds_are_policy_filtered():
 async def test_browser_path_filters_malicious_next_page_url(monkeypatch):
     """The browser result must not surface an unfiltered attacker href.
 
-    ``_detect_pagination`` resolves an ``href`` out of attacker-controlled
+    ``detect_pagination`` resolves an ``href`` out of attacker-controlled
     HTML. The HTTP builder filtered the resolved URL before use; the browser
     builder assigned it raw to both diagnostics and the result field, so a
     ``javascript:`` rel=next escaped into the response. Egress now happens at

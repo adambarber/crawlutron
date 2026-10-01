@@ -34,7 +34,7 @@ from tests.rules import Bites, Registry, Rule, Trips
 # An extractor's text is coerced to a string in exactly one place
 # ---------------------------------------------------------------------------
 
-# ``_extract_document``/``_extract_html``/``extract_content`` each had the same
+# ``extract_document``/``extract_html``/``extract_content`` each had the same
 # ``extracted.text or ""`` tail spelled at their call site. That coercion is what
 # keeps an extractor's ``None`` text from reaching a result at all, so a branch
 # that omitted it produced a None that only surfaced further downstream.

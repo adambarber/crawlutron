@@ -120,7 +120,7 @@ class TestHttpStrategy:
             assert "if-modified-since" not in lower
 
     async def test_html_diagnostics_skipped_without_discovery(self):
-        # _html_diagnostics (frames/forms via lxml parse) must be skipped
+        # html_diagnostics (frames/forms via lxml parse) must be skipped
         # when discovery is not requested, to avoid a redundant HTML parse on
         # every page of a content-only crawl.
         html = "<html><body><iframe src='/x'></iframe></body></html>"

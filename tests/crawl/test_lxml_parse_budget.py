@@ -84,7 +84,7 @@ async def test_selector_mode_adds_no_parse_inside_the_strategy(parse_counter):
     """Selector + discovery is still ONE parse inside the strategy layer.
 
     Selector extraction itself parses later (engine phase, extract_content ->
-    _extract_selected), so a selector-mode page totals two lxml parses across
+    extract_selected), so a selector-mode page totals two lxml parses across
     the pipeline -- but the strategy stage keeps its one-shared-tree
     guarantee. Ceiling, not target: consolidation may drop the total, never
     raise the per-stage count.

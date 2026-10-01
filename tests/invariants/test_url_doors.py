@@ -783,7 +783,7 @@ def test_normalize_or_none_detector_bites():
 # ---------------------------------------------------------------------------
 # Unfiltered urljoin egress doors (H class)
 #
-# _detect_pagination read an href out of attacker-controlled HTML and returned
+# detect_pagination read an href out of attacker-controlled HTML and returned
 # urljoin(final_url, href) raw. The HTTP consumer filtered it before use, the
 # browser consumer did not, so a javascript: rel=next reached the response.
 # Filtering moved to the producer; this keeps the next door from reopening.
@@ -853,7 +853,7 @@ JOINED_URLS_ARE_EGRESS_FILTERED = Rule(
     ),
     bite=lambda: (
         Bites(
-            "def _detect_pagination(html, final_url):\n    return urljoin(final_url, href)\n",
+            "def detect_pagination(html, final_url):\n    return urljoin(final_url, href)\n",
             "no egress filter",
         ),
         # A urljoin bound to a name and returned is the same leak.

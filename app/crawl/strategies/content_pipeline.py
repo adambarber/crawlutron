@@ -34,9 +34,9 @@ from app.constants import (
 )
 from app.crawl.extraction import (
     Selectors,
-    _extract_document,
-    _extract_html,
     extract_content,
+    extract_document,
+    extract_html,
     extract_post_fetch_discovery,
     normalized_extraction,
 )
@@ -97,13 +97,13 @@ async def _run_extraction(
     if extraction == EXTRACTION_DOCUMENT:
         # The document extractor is typed for bytes; a browser render has text.
         payload = content.encode("utf-8", "replace") if isinstance(content, str) else content
-        extracted = await asyncio.to_thread(_extract_document, payload, final_url)
+        extracted = await asyncio.to_thread(extract_document, payload, final_url)
         method = EXTRACTION_METHOD_DOCUMENT
     elif extraction == EXTRACTION_TRAFILATURA:
         if not html:
             # No HTML, nothing for trafilatura to read: no text, no markdown.
             return _ExtractedContent("", None, EXTRACTION_METHOD_TRAFILATURA)
-        extracted = await asyncio.to_thread(_extract_html, decoded, final_url, selectors)
+        extracted = await asyncio.to_thread(extract_html, decoded, final_url, selectors)
         method = EXTRACTION_METHOD_TRAFILATURA
     else:
         extracted = await asyncio.to_thread(extract_content, content, content_type, final_url, selectors)

@@ -25,7 +25,7 @@ from app.crawl.cache import HttpCache
 from app.crawl.content_cache import ContentCache
 from app.crawl.decompression import decompress_body as _decompress_body
 from app.crawl.document_text import _format_extracted_document_text
-from app.crawl.extraction import _is_html
+from app.crawl.extraction import is_html
 from app.crawl.policy import discovery_flags
 from app.crawl.render_options import policy_wants_html
 from app.crawl.result_helpers import (
@@ -375,7 +375,7 @@ def _binary_result_if_needed(ctx: _HttpStrategyContext, resp: _FetchedResponse) 
 async def _extract_http_phase(ctx: _HttpStrategyContext, resp: _FetchedResponse) -> _ExtractedHttpContent:
     """Decode the body, run the selected extractor, and measure content.
 
-    ``is_html`` is :func:`app.crawl.extraction._is_html`, the same predicate the
+    ``is_html`` is :func:`app.crawl.extraction.is_html`, the same predicate the
     unified funnel dispatches on, rather than a second reading of the same
     question: this copy asked "does the content type mention html, or does the
     decoded text open like a document" and extraction.py asked "the same", in
@@ -392,8 +392,8 @@ async def _extract_http_phase(ctx: _HttpStrategyContext, resp: _FetchedResponse)
         strategy_decompression_failed = resp.decompression_failed
 
     body_text = body_decode._decode_body(decompressed, resp.content_type)
-    is_html = _is_html(resp.content_type, body_text)
-    html = body_text if is_html else None
+    html_body = is_html(resp.content_type, body_text)
+    html = body_text if html_body else None
     extracted = await _run_extraction(
         extraction=ctx.extraction,
         content=decompressed,
@@ -401,8 +401,8 @@ async def _extract_http_phase(ctx: _HttpStrategyContext, resp: _FetchedResponse)
         content_type=resp.content_type,
         final_url=resp.final_url,
         policy=ctx.policy,
-        default_method=EXTRACTION_METHOD_HTTP_HTML if is_html else EXTRACTION_METHOD_HTTP_BODY,
-        html=is_html,
+        default_method=EXTRACTION_METHOD_HTTP_HTML if html_body else EXTRACTION_METHOD_HTTP_BODY,
+        html=html_body,
     )
     text, markdown = extracted.text, extracted.markdown
     if ctx.extraction == EXTRACTION_DOCUMENT and (resp.content_type or "").lower().startswith("text/"):

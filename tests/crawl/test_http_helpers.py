@@ -29,10 +29,10 @@ from app.crawl.engine import (
     crawl_request,
 )
 from app.crawl.extraction import (
-    _forms_from,
     _FrameCollector,
-    _frames_from,
     _walkable,
+    forms_from,
+    frames_from,
 )
 from app.crawl.payload_helpers import _payload_urls
 from app.crawl.policy import PolicyTier, read_policy
@@ -51,7 +51,7 @@ from app.crawl.strategies.request_profile import (
 from app.settings import CrawlerSettings
 from app.validation import HostPolicy
 from tests._assertions import assert_result_failed, assert_result_success
-from tests._extraction_helpers import _extract_discovered_links
+from tests._extraction_helpers import extract_discovered_links
 from tests._fetcher_factories import (
     make_fetch,
     ok_fetcher,
@@ -259,12 +259,12 @@ class TestPureParsing:
             None,
         )
         assert walkable is not None
-        frames = _frames_from(walkable, "http://same.example/", UNRESTRICTED_HOST_POLICY)
+        frames = frames_from(walkable, "http://same.example/", UNRESTRICTED_HOST_POLICY)
         assert len(frames) == 1
 
     def test_extract_discovered_links_skips_bad_scheme(self) -> None:
         html = '<a href="mailto:a@b.com">x</a><a href="http://other.example/p">y</a>'
-        links, count, truncated = _extract_discovered_links(html, "http://example.com/")
+        links, count, truncated = extract_discovered_links(html, "http://example.com/")
         assert len(links) == 1
 
     def test_frame_collector_ignores_frames_without_src(self) -> None:
@@ -560,13 +560,13 @@ class TestFetchHelperUtilities:
             None,
         )
         assert walkable is not None
-        forms = _forms_from(walkable, UNRESTRICTED_HOST_POLICY)
+        forms = forms_from(walkable, UNRESTRICTED_HOST_POLICY)
         assert len(forms) == 1
         tags = {c["tag"] for c in forms[0]["controls"]}
         assert {"input", "select", "textarea", "button"} <= tags
 
     def test_extract_discovered_links_skips_ftp_scheme(self) -> None:
-        links, count, truncated = _extract_discovered_links(
+        links, count, truncated = extract_discovered_links(
             "<a href='ftp://host/data'>x</a><a href='https://ok/x'>ok</a>", "http://x/"
         )
         assert all("ftp://" not in getattr(link, "url", str(link)) for link in links)
@@ -575,7 +575,7 @@ class TestFetchHelperUtilities:
     def test_extract_discovered_links_handles_unnormalizable_source_url(self) -> None:
         # Normalize_public_http_url rejects non-http source URLs; the link extractor
         # must fall back to the raw source rather than crash.
-        links, count, truncated = _extract_discovered_links(
+        links, count, truncated = extract_discovered_links(
             "<a href='https://ok.example/x'>ok</a>", "ftp://example.com/"
         )
         assert count == 1

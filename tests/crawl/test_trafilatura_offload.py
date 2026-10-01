@@ -1,12 +1,12 @@
 """Sync trafilatura extraction must leave the event loop.
 
 ``_http_strategy_result`` (strategies/http.py) and ``_browser_strategy_result``
-(engine.py) call ``_extract_html`` (trafilatura, CPU-bound) synchronously
+(engine.py) call ``extract_html`` (trafilatura, CPU-bound) synchronously
 inside async functions. Both must go through ``asyncio.to_thread`` like the
-neighboring ``_extract_document``/``extract_content`` calls already do.
+neighboring ``extract_document``/``extract_content`` calls already do.
 """
 
-from app.crawl.extraction import _extract_html
+from app.crawl.extraction import extract_html
 from tests._assertions import install_to_thread_spy
 from tests._fetcher_factories import invoke_browser_strategy, invoke_http_strategy
 from tests._policy_factories import http_strategy_policy
@@ -38,7 +38,7 @@ async def test_http_trafilatura_extraction_runs_off_loop(monkeypatch):
     )
     assert result.status == "success"
     assert result.text
-    assert "_extract_html" in seen
+    assert "extract_html" in seen
 
 
 async def test_browser_trafilatura_extraction_runs_off_loop(monkeypatch):
@@ -50,7 +50,7 @@ async def test_browser_trafilatura_extraction_runs_off_loop(monkeypatch):
     )
     assert result.status == "success"
     assert result.text
-    assert "_extract_html" in seen
+    assert "extract_html" in seen
 
 
 async def test_trafilatura_result_unchanged_by_offload(monkeypatch):
@@ -68,5 +68,5 @@ async def test_trafilatura_result_unchanged_by_offload(monkeypatch):
         resp=_resp,
         dedupe_patch=True,
     )
-    direct = _extract_html(_HTML_BODY.decode(), "http://example.com/")
+    direct = extract_html(_HTML_BODY.decode(), "http://example.com/")
     assert result.text == (direct.text or "")

@@ -11,16 +11,16 @@ from app.crawl.document_text import (
     _should_join_document_paragraph,
 )
 from app.crawl.extraction import (
-    _detect_pagination as _detect_pagination_with_policy,
-)
-from app.crawl.extraction import (
-    _extract_discovered_links as _extract_discovered_links_with_policy,
-)
-from app.crawl.extraction import (
-    _html_diagnostics as _html_diagnostics_with_policy,
+    detect_pagination as _detect_pagination_with_policy,
 )
 from app.crawl.extraction import extract_content
+from app.crawl.extraction import (
+    extract_discovered_links as _extract_discovered_links_with_policy,
+)
 from app.crawl.extraction import extract_js_endpoints as _extract_js_endpoints_with_policy
+from app.crawl.extraction import (
+    html_diagnostics as _html_diagnostics_with_policy,
+)
 from app.crawl.strategies.document import (
     _default_document_text_extractor as _default_document_text_extractor_with_policy,
 )
@@ -29,7 +29,7 @@ from app.crawl.strategies.fetchers import _default_http_fetcher as _default_http
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY
 
 
-def _html_diagnostics(html, source_url, *, policy=UNRESTRICTED_HOST_POLICY):
+def html_diagnostics(html, source_url, *, policy=UNRESTRICTED_HOST_POLICY):
     return _html_diagnostics_with_policy(html, source_url, host_policy=policy)
 
 
@@ -37,11 +37,11 @@ def extract_js_endpoints(endpoints, source_url=None, *, policy=UNRESTRICTED_HOST
     return _extract_js_endpoints_with_policy(endpoints, source_url, host_policy=policy)
 
 
-def _detect_pagination(html, final_url, *, policy=UNRESTRICTED_HOST_POLICY):
+def detect_pagination(html, final_url, *, policy=UNRESTRICTED_HOST_POLICY):
     return _detect_pagination_with_policy(html, final_url, host_policy=policy)
 
 
-def _extract_discovered_links(
+def extract_discovered_links(
     html,
     source_url,
     *,
@@ -96,12 +96,12 @@ __all__ = [
     "_collect_document_item_lines",
     "_default_document_text_extractor",
     "_default_http_fetcher",
-    "_detect_pagination",
+    "detect_pagination",
     "_document_item_range",
-    "_extract_discovered_links",
+    "extract_discovered_links",
     "_format_extracted_document_text",
     "_format_table",
-    "_html_diagnostics",
+    "html_diagnostics",
     "_is_document_item_marker",
     "_is_document_non_item_section",
     "_join_document_paragraph_lines",

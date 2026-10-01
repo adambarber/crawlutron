@@ -48,7 +48,7 @@ from trafilatura import extract as _trafilatura_extract
 # `try/except ImportError` that returned "no content" for a package that cannot
 # be absent.
 from app.crawl.job_store import durable_page_identity
-from app.crawl.llm_format import _llm_metadata_from_tree, _text_from_html
+from app.crawl.llm_format import _llm_metadata_from_tree, text_from_html
 from app.models import DiscoveredLink
 from app.resource_pressure import doc_worker_count
 from app.validation import (
@@ -533,7 +533,7 @@ def _decode(body: bytes | bytearray | str) -> str:
     return body
 
 
-def _is_html(content_type: str | None, body: bytes | str) -> bool:
+def is_html(content_type: str | None, body: bytes | str) -> bool:
     ct = (content_type or "").lower()
     if "html" in ct:
         return True
@@ -541,7 +541,7 @@ def _is_html(content_type: str | None, body: bytes | str) -> bool:
     return text.startswith("<html") or text.startswith("<!doctype html>")
 
 
-def _looks_like_document(content_type: str | None, body: bytes | str, url: str | None) -> bool:
+def looks_like_document(content_type: str | None, body: bytes | str, url: str | None) -> bool:
     ct = (content_type or "").lower()
     if "pdf" in ct:
         return True
@@ -566,7 +566,7 @@ def extract_content(
     """Extract ``(text, markdown)`` from raw content using the unified pipeline.
 
     The HTML branch hands the selector pair down rather than dispatching on it
-    here: ``_extract_html`` already routes a selector to :func:`_extract_selected`
+    here: ``extract_html`` already routes a selector to :func:`extract_selected`
     and a bare page to trafilatura, so deciding it in both places was two copies
     of one rule that could disagree about the same page.
 
@@ -583,12 +583,12 @@ def extract_content(
     # lowercases it, and on a binary/document response the two halves below
     # disagree about nothing, so evaluating it twice was a second full decode per
     # non-HTML request (a capped multi-megabyte PDF pays it twice) to learn the
-    # same thing. It was also unreadable as written: `elif not _is_html(...)` and
-    # `if _is_html(...)` below are the same question asked in opposite polarity,
+    # same thing. It was also unreadable as written: `elif not is_html(...)` and
+    # `if is_html(...)` below are the same question asked in opposite polarity,
     # and nothing in the text said they had to agree. Now there is one answer and
     # two consumers, so a report and a dispatch cannot describe different bodies.
-    is_html = _is_html(content_type, content)
-    if selectors and not is_html:
+    html_body = is_html(content_type, content)
+    if selectors and not html_body:
         logger.warning(
             "extraction_selector_ignored_non_html",
             extra={
@@ -598,32 +598,32 @@ def extract_content(
                 "url": url,
             },
         )
-    if is_html:
-        return _extract_html(_decode(content), url, selectors)
-    if _looks_like_document(content_type, content, url):
+    if html_body:
+        return extract_html(_decode(content), url, selectors)
+    if looks_like_document(content_type, content, url):
         body = (
             bytes(content)
             if isinstance(content, (bytes, bytearray, memoryview))
             else content.encode("utf-8", "replace")
         )
-        return _extract_document(body, url)
+        return extract_document(body, url)
     text = _decode(content).strip()
     return ExtractedContent(text or None, text or None)
 
 
-def _html_to_markdown(html_fragment: str) -> tuple[str | None, str | None]:
+def html_to_markdown(html_fragment: str) -> tuple[str | None, str | None]:
     """Convert a raw HTML fragment to ``(text, markdown)`` for DOM targeting."""
     try:
         md = html_to_md(html_fragment) or None
     except Exception:
         md = None
-    text = _text_from_html(html_fragment) or None
+    text = text_from_html(html_fragment) or None
     return text, md
 
 
 # The selector pair is ONE contract with three entry points: ``extract_content``
-# (every strategy's funnel), ``_extract_html`` (the trafilatura-only path) and
-# ``_extract_selected`` (the DOM-targeting engine). It used to be four spellings:
+# (every strategy's funnel), ``extract_html`` (the trafilatura-only path) and
+# ``extract_selected`` (the DOM-targeting engine). It used to be four spellings:
 # those three signatures, plus the ``{"css_selector": ..., "xpath": ...}`` mapping
 # ``content_pipeline`` built and spread into two of them. Four copies of one fact
 # with a rule elsewhere forbidding disagreement between them.
@@ -643,7 +643,7 @@ def _html_to_markdown(html_fragment: str) -> tuple[str | None, str | None]:
 # pair as parameters and quietly pass a guard that only knew the old rule.
 
 
-def _extract_selected(
+def extract_selected(
     html: str,
     source_url: str | None,
     *,
@@ -702,7 +702,7 @@ def _extract_selected(
         fragment = "\n".join(parts)
     if not fragment:
         return ExtractedContent(None, None)
-    text, md = _html_to_markdown(fragment)
+    text, md = html_to_markdown(fragment)
     return ExtractedContent(md or text, md or text)
 
 
@@ -733,7 +733,7 @@ def _suppress_trafilatura_chatter() -> _LogRestorer:
     trafilatura logs ERROR from ``trafilatura.core`` and ``trafilatura.utils``
     when the HTML is empty, a fragment, or has no main content. All three are
     normal for a crawler (a robots page, a redirect stub, an empty 200), and
-    ``_extract_html`` already falls through to markdownify and then plain
+    ``extract_html`` already falls through to markdownify and then plain
     text, so the record carries no diagnostic signal. At ERROR level across a
     ~2000-page run it produced 2239 records that crowded out real failures.
 
@@ -747,7 +747,7 @@ def _suppress_trafilatura_chatter() -> _LogRestorer:
     return _LogRestorer(prior)
 
 
-def _extract_html(
+def extract_html(
     html: str,
     url: str | None,
     selectors: Selectors | None = None,
@@ -760,7 +760,7 @@ def _extract_html(
     full-page, so the two callers cannot disagree about the same page.
     """
     if selectors:
-        return _extract_selected(html, url, selectors=selectors)
+        return extract_selected(html, url, selectors=selectors)
     try:
         with _suppress_trafilatura_chatter():
             md = _trafilatura_extract(
@@ -784,11 +784,11 @@ def _extract_html(
         except Exception:
             md = None
     if not md or not md.strip():
-        md = _text_from_html(html) or None
+        md = text_from_html(html) or None
     return ExtractedContent(md, md)
 
 
-def _extract_document(body: bytes, url: str | None) -> ExtractedContent:
+def extract_document(body: bytes, url: str | None) -> ExtractedContent:
     """Extract markdown from document bytes with a wall-clock timeout.
 
     The markitdown conversion runs on a persistent pool worker with a hard
@@ -957,7 +957,7 @@ class _FrameCollector:
             )
 
 
-def _frames_from(
+def frames_from(
     walkable: _Walkable,
     source_url: str | None,
     host_policy: HostPolicy,
@@ -999,7 +999,7 @@ def _frames_from(
 _CONTROL_TAGS = ("input", "select", "textarea", "button")
 
 
-def _forms_from(
+def forms_from(
     walkable: _Walkable,
     host_policy: HostPolicy,
 ) -> list[dict[str, Any]]:
@@ -1043,7 +1043,7 @@ def _forms_from(
     return forms
 
 
-def _html_diagnostics(
+def html_diagnostics(
     html: str | None,
     source_url: str | None,
     *,
@@ -1058,8 +1058,8 @@ def _html_diagnostics(
     walkable = _walkable(html, source_url, tree)
     if walkable is None:
         return diagnostics
-    frames = _frames_from(walkable, source_url, host_policy)
-    forms = _forms_from(walkable, host_policy)
+    frames = frames_from(walkable, source_url, host_policy)
+    forms = forms_from(walkable, host_policy)
     if frames:
         diagnostics["frames"] = frames
     if forms:
@@ -1067,7 +1067,7 @@ def _html_diagnostics(
     return diagnostics
 
 
-def _extract_discovered_links(
+def extract_discovered_links(
     html: str | None,
     source_url: str | None,
     *,
@@ -1172,10 +1172,10 @@ def extract_post_fetch_discovery(
     """
     tree = _parse_html_tree(html) if html and (include_diagnostics or include_links) else None
     diagnostics = (
-        _html_diagnostics(html, final_url, host_policy=host_policy, tree=tree) if include_diagnostics else {}
+        html_diagnostics(html, final_url, host_policy=host_policy, tree=tree) if include_diagnostics else {}
     )
     if include_links:
-        discovered_links, discovered_link_count, discovered_links_truncated = _extract_discovered_links(
+        discovered_links, discovered_link_count, discovered_links_truncated = extract_discovered_links(
             html, final_url, host_policy=host_policy, max_links=max_links, tree=tree
         )
     else:
@@ -1203,7 +1203,7 @@ def extract_post_fetch_discovery(
         "discovered_link_count": discovered_link_count,
         "discovered_links_truncated": discovered_links_truncated,
         "js_endpoints": js_endpoints,
-        "next_page_url": _detect_pagination(html, final_url, host_policy=host_policy),
+        "next_page_url": detect_pagination(html, final_url, host_policy=host_policy),
         "llm_metadata": llm_metadata,
     }
 
@@ -1269,7 +1269,7 @@ _NEXT_REL_LINK_RE = re.compile(r"<link\b[^>]*\brel=[\"']([^\"']+)[\"'][^>]*>", r
 _HREF_RE = re.compile(r"href=[\"']([^\"']+)[\"']", re.IGNORECASE)
 
 
-def _detect_pagination(
+def detect_pagination(
     html: str | None,
     final_url: str | None,
     *,

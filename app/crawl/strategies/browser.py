@@ -915,7 +915,7 @@ class BrowserRenderer(BrowserActionsMixin):
     async def _extract_with_challenge_wait(
         self, page: Any, options: RenderOptions
     ) -> tuple[str | None, str | None, Classification, bool]:
-        html = await self._extract_html(page) if options.include_html else None
+        html = await self.extract_html(page) if options.include_html else None
         text = await self._extract_text(page) if options.include_text else None
         title = await page.evaluate("() => document.title")
         classification = classify_page(html, text, title=title)
@@ -928,7 +928,7 @@ class BrowserRenderer(BrowserActionsMixin):
             # Use asyncio.sleep to avoid busy-waiting if injected sleep is patched/no-op
             await asyncio.sleep(1)
             await self._wait_for_ready_state(page)
-            next_html = await self._extract_html(page) if options.include_html else None
+            next_html = await self.extract_html(page) if options.include_html else None
             next_text = await self._extract_text(page) if options.include_text else None
             next_title = await page.evaluate("() => document.title")
             next_classification = classify_page(next_html, next_text, title=next_title)
@@ -945,7 +945,7 @@ class BrowserRenderer(BrowserActionsMixin):
                 return
             await self._async_sleep(0.1)
 
-    async def _extract_html(self, page: Any) -> str:
+    async def extract_html(self, page: Any) -> str:
         try:
             return await page.content()
         except Exception:
