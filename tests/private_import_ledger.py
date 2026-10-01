@@ -190,6 +190,26 @@ _SUBSTITUTED_CAP = _d(
 )
 
 
+_POOL_DRIVEN = _d(
+    "harness lifecycle",
+    "The doc-extraction pool's own machinery, driven by ``tests/crawl/test_doc_pool.py``.\n"
+    "That module is this pool's test: it exists to prove the acquire lock, the spawn-once\n"
+    "rule and the kill escalation, none of which the public path can reach. ``extract_content``\n"
+    "hands back a document, not a worker handle, so there is no seam above these names for a\n"
+    "test to work through instead.\n"
+    "\n"
+    "So the reach is honest and the verdict is that nothing needs promoting. What these rows\n"
+    "must not become is a public pool API: a caller that could acquire and retire workers is\n"
+    "a caller that can wedge the pool, which is the failure the lock and the escalation\n"
+    "exist to contain. The names stay private and the module keeps its own test.\n"
+    "\n"
+    "Held as `harness lifecycle` in the sense the kind already means -- the suite drives a\n"
+    "world it started and cannot reach any other way. Filed as a possible sixth kind\n"
+    '("the owner\'s own test") in #86; deferred rather than grown for three rows.\n',
+    side=("test",),
+)
+
+
 _PRIVATE_TYPE = _d(
     "private type",
     "A private class, or a private method on a public one. A private *method* is an\n"
@@ -285,7 +305,6 @@ DECLARED: dict[str, Declaration] = {
     ),
     "app.crawl.engine._ResultSpill": _d(_PRIVATE_TYPE.kind, _PRIVATE_TYPE.reason, ["test"]),
     "app.crawl.engine._ResultSpill._gc_stale_spills": _d(_PRIVATE_TYPE.kind, _PRIVATE_TYPE.reason, ["test"]),
-    "app.crawl.engine._RobotsPathMatcher": _d(_CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]),
     "app.crawl.engine._SPILL_GC_MIN_INTERVAL_SECONDS": _d(
         _CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]
     ),
@@ -312,10 +331,6 @@ DECLARED: dict[str, Declaration] = {
         ["test"],
     ),
     "app.crawl.engine._resource_gate": _d(_CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]),
-    "app.crawl.engine._robots_allows": _d(_CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]),
-    "app.crawl.engine._robots_pattern_to_regex": _d(
-        _CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]
-    ),
     "app.crawl.engine._seed_is_fresh": _d(
         "unreviewed",
         "Not yet triaged.\n",
@@ -342,55 +357,19 @@ DECLARED: dict[str, Declaration] = {
     ),
     "app.crawl.extraction._MAX_EXTRACTED_MARKDOWN": _SUBSTITUTED_CAP,
     "app.crawl.extraction._POOL_LOCK": _d(_CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]),
-    "app.crawl.extraction._acquire_doc_worker": _d(
-        "unreviewed",
-        "Not yet triaged.\n",
-        ["test"],
-    ),
+    "app.crawl.extraction._acquire_doc_worker": _POOL_DRIVEN,
     "app.crawl.extraction._configure_doc_worker_logging": _d(
         _LIFECYCLE_CONFIGURE_DOC_WORKER_LOGGING.kind, _LIFECYCLE_CONFIGURE_DOC_WORKER_LOGGING.reason, ["test"]
     ),
     "app.crawl.extraction._doc_extraction_worker_count": _SUBSTITUTED_CAP,
-    "app.crawl.extraction._doc_pool_health": _d(
-        "unreviewed",
-        "Not yet triaged.\n",
-        ["test"],
-    ),
-    "app.crawl.extraction._doc_pool_pids": _d(
-        "unreviewed",
-        "Not yet triaged.\n",
-        ["test"],
-    ),
-    "app.crawl.extraction._doc_task_hooks": _d(
-        "unreviewed",
-        "Not yet triaged.\n",
-        ["test"],
-    ),
-    "app.crawl.extraction._parse_html_tree": _d(
-        "unreviewed",
-        "Not yet triaged.\n",
-        ["test"],
-    ),
-    "app.crawl.extraction._reset_doc_pool": _d(
-        "unreviewed",
-        "Not yet triaged.\n",
-        ["test"],
-    ),
-    "app.crawl.extraction._retire_doc_worker": _d(
-        "unreviewed",
-        "Not yet triaged.\n",
-        ["test"],
-    ),
-    "app.crawl.extraction._spawn_doc_worker": _d(
-        "unreviewed",
-        "Not yet triaged.\n",
-        ["test"],
-    ),
-    "app.crawl.extraction._terminate_doc_process": _d(
-        "unreviewed",
-        "Not yet triaged.\n",
-        ["test"],
-    ),
+    "app.crawl.extraction._doc_pool_health": _POOL_DRIVEN,
+    "app.crawl.extraction._doc_pool_pids": _POOL_DRIVEN,
+    "app.crawl.extraction._doc_task_hooks": _POOL_DRIVEN,
+    "app.crawl.extraction._parse_html_tree": _SUBSTITUTED_COLLABORATOR,
+    "app.crawl.extraction._reset_doc_pool": _POOL_DRIVEN,
+    "app.crawl.extraction._retire_doc_worker": _POOL_DRIVEN,
+    "app.crawl.extraction._spawn_doc_worker": _SUBSTITUTED_COLLABORATOR,
+    "app.crawl.extraction._terminate_doc_process": _POOL_DRIVEN,
     "app.crawl.extraction._walkable": _d(_IMPLEMENTATION_STEP.kind, _IMPLEMENTATION_STEP.reason, ["test"]),
     "app.crawl.fetch_helpers._SITEMAP_CACHE": _d(_CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]),
     "app.crawl.fetch_helpers._fetch_and_decode": _d(
@@ -443,36 +422,27 @@ DECLARED: dict[str, Declaration] = {
         "Not yet triaged.\n",
         ["test"],
     ),
-    "app.crawl.robots._MatchAll": _d(
-        "unreviewed",
-        "Not yet triaged.\n",
-        ["app"],
-    ),
-    "app.crawl.robots._PrefixMatcher": _d(
-        "unreviewed",
-        "Not yet triaged.\n",
-        ["app"],
-    ),
     "app.crawl.robots._RobotsPathMatcher": _d(
-        "unreviewed",
-        "Not yet triaged.\n",
-        ["app"],
-    ),
-    "app.crawl.robots._RobotsPatternCache": _d(
-        "unreviewed",
-        "Not yet triaged.\n",
-        ["app"],
-    ),
-    "app.crawl.robots._compile_robots_pattern": _d(
-        "unreviewed",
-        "Not yet triaged.\n",
-        ["app"],
+        "private type",
+        "A private class nothing outside the module constructs -- production only ever builds a\n"
+        "matcher through _RobotsPatternCache. The suite has to construct one because the parity\n"
+        "oracle generates group compositions and feeds them in; that is the test's subject, not a\n"
+        "hole in the class's surface.\n"
+        "\n"
+        "This used to be reached through app.crawl.engine, which re-exported six robots privates\n"
+        "for no production reason at all -- the aliases were dead in engine and alive only in the\n"
+        "suite. Reaching the class where it is defined removes an alias chain rather than adding\n"
+        "a door.\n",
+        ["test"],
     ),
     "app.crawl.robots._fetch_and_decode": _SUBSTITUTED_COLLABORATOR,
     "app.crawl.robots._robots_pattern_to_regex": _d(
-        "unreviewed",
-        "Not yet triaged.\n",
-        ["app"],
+        "implementation step",
+        "Pattern-to-matcher compilation, reached to prove per-host binding and that a pathological\n"
+        "pattern stays linear. Asserting on the compiled matcher is asserting the mechanism; the\n"
+        "step stays private and the suite drives it here because the property under test -- one\n"
+        "cache slot per (host, pattern) -- has no expression through robots_allows.\n",
+        ["test"],
     ),
     "app.crawl.robots.robots_cache._entries": _d(_CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]),
     "app.crawl.sqlite_store._BUSY_TIMEOUT_MS": _SUBSTITUTED_CAP,

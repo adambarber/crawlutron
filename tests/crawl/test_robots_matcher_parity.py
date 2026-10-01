@@ -28,8 +28,7 @@ import re
 
 import pytest
 
-from app.crawl.engine import _RobotsPathMatcher
-from app.crawl.robots import robots_allows
+from app.crawl.robots import _RobotsPathMatcher, robots_allows
 
 
 def _reference_allows(rules, path: str) -> bool:

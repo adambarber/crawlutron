@@ -47,14 +47,7 @@ from app.validation import (
 logger = logging.getLogger(__name__)
 
 robots_cache = _robots_policy.robots_cache
-_RobotsPathMatcher = _robots_policy._RobotsPathMatcher
-_MatchAll = _robots_policy._MatchAll
-_PrefixMatcher = _robots_policy._PrefixMatcher
-_RobotsPatternCache = _robots_policy._RobotsPatternCache
 RobotsMatcher = _robots_policy.RobotsMatcher
-_compile_robots_pattern = _robots_policy._compile_robots_pattern
-_robots_pattern_to_regex = _robots_policy._robots_pattern_to_regex
-_robots_allows = _robots_policy.robots_allows
 load_robots_rules = _robots_policy.load_robots_rules
 cached_sitemaps = _robots_policy.cached_sitemaps
 

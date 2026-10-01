@@ -13,9 +13,9 @@ from app.bounded_ttl import BoundedTTLCache
 from app.constants import HTTP_DECLARED_CRAWLER, SERVICE_ID
 from app.crawl import engine as engine_mod
 from app.crawl.cache import HttpCache
-from app.crawl.engine import _robots_allows, _robots_pattern_to_regex, crawl_request
+from app.crawl.engine import crawl_request
 from app.crawl.policy import read_policy
-from app.crawl.robots import robots_allows, robots_origin
+from app.crawl.robots import _robots_pattern_to_regex, robots_allows, robots_origin
 from app.crawl.robots_parse import (
     iter_robots_fields,
     parse_robots_crawl_delay,
@@ -213,16 +213,16 @@ def test_agent_matching_is_case_insensitive(token):
 
 def test_wildcard_disallow_blocks_subpaths():
     rules = [(False, "/private/*")]
-    assert _robots_allows("http://x.example/private/secret", rules) is False
-    assert _robots_allows("http://x.example/public", rules) is True
+    assert robots_allows("http://x.example/private/secret", rules) is False
+    assert robots_allows("http://x.example/public", rules) is True
 
 
 def test_dollar_anchor_is_end_anchored():
     rules = [(False, "/page$")]
     # Exactly /page is disallowed...
-    assert _robots_allows("http://x.example/page", rules) is False
+    assert robots_allows("http://x.example/page", rules) is False
     # ...but /page/sub is NOT matched by the $ anchor.
-    assert _robots_allows("http://x.example/page/sub", rules) is True
+    assert robots_allows("http://x.example/page/sub", rules) is True
 
 
 def test_an_empty_disallow_is_ignored_and_does_not_override_a_sibling_rule():
@@ -234,28 +234,28 @@ def test_an_empty_disallow_is_ignored_and_does_not_override_a_sibling_rule():
     # Disallow" -- that is not a rule the RFC contains, and reading it that way
     # let this matcher allow a path the same block had just named.
     rules = [(False, "/"), (False, "")]
-    assert _robots_allows("http://x.example/anything/at/all", rules) is False
+    assert robots_allows("http://x.example/anything/at/all", rules) is False
     # With no other rule to match, nothing is found and the URI is allowed.
-    assert _robots_allows("http://x.example/anything/at/all", [(False, "")]) is True
+    assert robots_allows("http://x.example/anything/at/all", [(False, "")]) is True
 
 
 def test_longest_matching_rule_wins():
     # Allow everything by default, but disallow *.json files.
     rules = [(True, "/"), (False, "/*.json")]
-    assert _robots_allows("http://x.example/foo.json", rules) is False
-    assert _robots_allows("http://x.example/foo", rules) is True
+    assert robots_allows("http://x.example/foo.json", rules) is False
+    assert robots_allows("http://x.example/foo", rules) is True
 
 
 def test_plain_prefix_disallow_still_works():
     rules = [(False, "/private")]
-    assert _robots_allows("http://x.example/private", rules) is False
-    assert _robots_allows("http://x.example/private/sub", rules) is False
-    assert _robots_allows("http://x.example/public", rules) is True
+    assert robots_allows("http://x.example/private", rules) is False
+    assert robots_allows("http://x.example/private/sub", rules) is False
+    assert robots_allows("http://x.example/public", rules) is True
 
 
 def test_disallow_root_blocks_everything():
     rules = [(False, "/")]
-    assert _robots_allows("http://x.example/anything", rules) is False
+    assert robots_allows("http://x.example/anything", rules) is False
 
 
 def test_pathological_wildcard_rule_matches_in_linear_time():
@@ -265,8 +265,6 @@ def test_pathological_wildcard_rule_matches_in_linear_time():
     exponential backtracking (8.5s for 30 wildcards x 2000 chars). The
     matcher is linear, so doubling BOTH dimensions must stay fast.
     """
-    from app.crawl.engine import _robots_pattern_to_regex
-
     pattern = "/*a*" * 30
     matcher = _robots_pattern_to_regex("example.com", pattern)
     path = "/" + "b" * 2000 + "a"
@@ -279,8 +277,6 @@ def test_pathological_wildcard_rule_matches_in_linear_time():
 
 
 def test_pathological_pattern_match_parity_with_simple_cases():
-    from app.crawl.engine import _robots_pattern_to_regex
-
     m = _robots_pattern_to_regex("example.com", "/*a*")
     assert m.match("/aaa") is True
     assert m.match("/b") is False
@@ -315,8 +311,6 @@ def test_pattern_cache_is_bound_per_host_so_one_site_cannot_evict_another():
 def test_identical_patterns_on_different_hosts_are_isolated():
     """The same pattern string on two hosts stays two independent cache slots:
     per-host binding must not collapse distinct sites onto one entry."""
-    from app.crawl.engine import _robots_pattern_to_regex
-
     a = _robots_pattern_to_regex("a.example", "/shared/*")
     b = _robots_pattern_to_regex("b.example", "/shared/*")
 
@@ -514,7 +508,7 @@ def test_robots_allows_does_not_recompile_per_call():
     rules = [(True, "/public/*"), (False, "/admin/*"), (False, "/*.pdf")]
     with patch.object(re, "compile", wraps=re.compile) as spy:
         for _ in range(50):
-            _robots_allows("http://example.com/admin/secret", rules)
+            robots_allows("http://example.com/admin/secret", rules)
     unique_patterns = {p for _, p in rules}
     # Each unique pattern compiled at most once, not 50 times.
     assert spy.call_count <= len(unique_patterns), spy.call_count
