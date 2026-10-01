@@ -13,15 +13,7 @@ from app.crawl.strategies.document import (
     _pdf_to_markdown,
 )
 from tests._extraction_helpers import (
-    _collect_document_item_lines,
     _default_document_text_extractor,
-    _document_item_range,
-    _is_document_item_marker,
-    _is_document_non_item_section,
-    _join_document_paragraph_lines,
-    _looks_like_document_heading,
-    _next_non_empty_document_line,
-    _should_join_document_paragraph,
     format_extracted_document_text,
 )
 from tests._fetcher_factories import run_http_strategy, scripted_fetcher
@@ -305,11 +297,23 @@ class TestDocumentTextParserEdges:
         assert "Second sentence here." in out
 
     def test_heading_join_skipped(self):
+        # A heading must not absorb the paragraph under it. Asserting that the word
+        # survives proves nothing -- it survives either way -- so the assertion has to
+        # be about the record boundary between the two.
         out = format_extracted_document_text(
             "INTRODUCTION\nBody continues here",
             source_url="http://x/",
         )
-        assert "INTRODUCTION" in out
+        assert out == "INTRODUCTION\n\nBody continues here"
+
+    def test_long_sentence_is_not_a_heading_and_so_does_join(self):
+        # The other side of the same rule: all-caps-and-short is the test, so a long
+        # mixed-case sentence is prose and merges with what follows it.
+        out = format_extracted_document_text(
+            "a normal sentence that is far too long to be a heading\nand it continues here",
+            source_url="http://x/",
+        )
+        assert out == "a normal sentence that is far too long to be a heading and it continues here"
 
     def test_comma_join(self):
         out = format_extracted_document_text(
@@ -318,29 +322,65 @@ class TestDocumentTextParserEdges:
         )
         assert ", and more detail" in out
 
-    def test_helpers_direct(self):
-        assert _looks_like_document_heading("INTRODUCTION")
-        assert not (_looks_like_document_heading("a normal sentence that is far too long to be a heading"))
-        assert _is_document_item_marker("1a.")
-        assert not (_is_document_item_marker("Section"))
-        assert _is_document_non_item_section("PUBLIC PARTICIPATION")
-        assert not (_is_document_non_item_section("Normal text"))
-        assert list(_document_item_range("1a", "1c")) == ["1a", "1b", "1c"]
-        assert _next_non_empty_document_line(["", "a", "b"], 0) == 1
-        assert (_next_non_empty_document_line(["", ""], 0)) is None
-        assert _join_document_paragraph_lines("a", "b") == "a b"
-        assert _join_document_paragraph_lines("a", ", b") == "a, b"
-        assert _should_join_document_paragraph("First clause here", "and continues the work")
-        lines, nxt = _collect_document_item_lines(["Build", "4. Fix it"], 0)
-        assert lines == ["Build", "Fix it"]
-        assert nxt == 2
+    def test_all_blank_input_yields_no_records(self):
+        # The line scan runs off the end rather than stopping at a blank line, and a
+        # document that is nothing but blanks produces nothing.
+        assert format_extracted_document_text("\n\n   \n", source_url="http://x/") == ""
+
+    def test_item_marker_is_not_absorbed_as_an_item_title(self):
+        # Both title pickers have to apply the same exclusions. A bare section marker
+        # inside an item's title run, followed by the next item, is the shape that
+        # reaches the collector's marker branch -- and absorbing the marker there
+        # swallowed the sibling item whole, so it stopped being a record of its own.
+        out = format_extracted_document_text("1a.\nBuild the thing\n1.\n1b.\nShip it", source_url="http://x/")
+        assert out == "1a. Build the thing\n\n1.\n\n1b. Ship it"
+
+    def test_section_header_over_an_item_keeps_both_records(self):
+        # The neighbouring shape, for contrast: the header declines the marker as its
+        # title, so the marker becomes the sibling item's own record instead.
+        out = format_extracted_document_text("1.\n1a.\nBuild the thing", source_url="http://x/")
+        assert out == "1.\n\n1a. Build the thing"
+
+    def test_non_item_section_is_not_read_as_a_section_title(self):
+        # The item-title collector already refuses boilerplate as a title; the
+        # section-title path has to refuse it the same way, or the marker survives
+        # as a heading when reached through one path and vanishes through the other.
+        out = format_extracted_document_text("1.\nPublic Participation\nBuild it", source_url="http://x/")
+        assert out == "1.\n\nBuild it"
+
+    def test_non_item_section_dropped_and_ordinary_text_kept(self):
+        out = format_extracted_document_text(
+            "Normal text\nPUBLIC PARTICIPATION\nItem one", source_url="http://x/"
+        )
+        assert "PUBLIC PARTICIPATION" not in out
+        assert "Normal text" in out
+        assert "Item one" in out
+
+    def test_item_marker_after_a_section_header_is_not_read_as_its_title(self):
+        # "1." followed by "1a." must not collapse into a section titled "1a."; the
+        # marker stays its own record and the header keeps its title.
+        marked = format_extracted_document_text("1.\n1a.\nApprove the plan", source_url="http://x/")
+        assert marked == "1.\n\n1a. Approve the plan"
+        # The same header over an ordinary line does take it as a title, which is
+        # what makes the marker case a decision rather than a formatting accident.
+        assert (
+            format_extracted_document_text("1.\nApprove the plan", source_url="http://x/")
+            == "1. Approve the plan"
+        )
+
+    def test_numbered_continuation_inside_an_item_title_loses_its_number(self):
+        out = format_extracted_document_text("1a.\nBuild\n4. Fix it", source_url="http://x/")
+        assert out == "1a. Build Fix it"
+
+    def test_section_header_inside_an_item_title_is_absorbed_and_scanning_continues(self):
+        out = format_extracted_document_text("1a.\nBuild the thing\n1.\nNext section", source_url="http://x/")
+        assert out == "1a. Build the thing Next section"
 
     def test_blank_line_skipped_in_formatter(self):
         out = format_extracted_document_text("Intro paragraph.\n\nSecond paragraph.", source_url="http://x/")
         assert "Intro paragraph." in out
         assert "Second paragraph." in out
 
-    def test_blank_line_skipped_in_collect(self):
-        lines, nxt = _collect_document_item_lines(["Build", "", "More detail"], 0)
-        assert lines == ["Build", "More detail"]
-        assert nxt == 3
+    def test_blank_line_inside_an_item_title_is_skipped(self):
+        out = format_extracted_document_text("1a.\nBuild\n\nMore detail", source_url="http://x/")
+        assert out == "1a. Build More detail"

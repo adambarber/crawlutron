@@ -3,8 +3,9 @@
 Pure ``re``-based functions that turn scraper-extracted document text (item
 numbers, actions, headings, paragraph glue) into clean, annotation-ready text.
 Kept separate from :mod:`app.crawl.strategies.http` so the fetching code and the
-document-text shaping code do not colocate, and so these helpers are unit-
-testable in isolation.
+document-text shaping code do not colocate, and so this module has exactly one
+public name -- every step below it is reachable only through
+:func:`format_extracted_document_text`, which is what the tests drive.
 """
 
 import re
@@ -45,7 +46,7 @@ def format_extracted_document_text(text: str, *, source_url: str) -> str:
         section_match = re.match(r"^(?P<number>\d+)\.$", line)
         if section_match:
             title_index = _next_non_empty_document_line(lines, index + 1)
-            if title_index is not None and not _is_document_item_marker(lines[title_index]):
+            if title_index is not None and _is_document_section_title(lines[title_index]):
                 records.append(f"{section_match.group('number')}. {lines[title_index]}")
                 index = title_index + 1
                 continue
@@ -155,6 +156,21 @@ def _is_document_non_item_section(line: str) -> bool:
     return line.upper().startswith("PUBLIC PARTICIPATION")
 
 
+def _is_document_section_title(line: str) -> bool:
+    """Whether ``line`` may stand as the title of the record being collected.
+
+    Two scanners need this answer and each used to compute its own, with a
+    different subset of the exclusions -- so the same line could be refused as a
+    numbered section's title and absorbed as an item's, rendering an item number
+    twice. One predicate, because a rule written twice is a rule that will drift.
+
+    The exclusions are sibling item markers, which are a record's own number
+    rather than prose, and boilerplate section markers, which are a label with
+    nothing under it.
+    """
+    return not _is_document_item_marker(line) and not _is_document_non_item_section(line)
+
+
 def _collect_document_item_lines(lines: list[str], start: int) -> tuple[list[str], int]:
     title_lines: list[str] = []
     index = start
@@ -168,7 +184,7 @@ def _collect_document_item_lines(lines: list[str], start: int) -> tuple[list[str
             continue
         if re.match(r"^\d+\.$", line):
             next_index = _next_non_empty_document_line(lines, index + 1)
-            if next_index is not None and not _is_document_non_item_section(lines[next_index]):
+            if next_index is not None and _is_document_section_title(lines[next_index]):
                 title_lines.append(lines[next_index])
                 index = next_index + 1
                 continue
@@ -181,9 +197,19 @@ def _collect_document_item_lines(lines: list[str], start: int) -> tuple[list[str
 
 
 def _document_item_range(start: str, end: str) -> list[str]:
-    start_match = re.match(r"^(\d+)([a-z])$", start.lower())
-    end_match = re.match(r"^(\d+)([a-z])$", end.lower())
-    if not start_match or not end_match or start_match.group(1) != end_match.group(1):
-        return [start.lower(), end.lower()]
-    prefix = start_match.group(1)
-    return [f"{prefix}{chr(code)}" for code in range(ord(start_match.group(2)), ord(end_match.group(2)) + 1)]
+    """Item numbers covered by a range action line, e.g. ``1a`` through ``1c``.
+
+    Both halves come from the pattern that selected this line, so their
+    "digits then one letter" shape is already established and is deliberately not
+    re-checked here -- a guard against a malformed half could only ever be proved
+    by a test that fabricates the argument, which is how the two dead branches in
+    this function were being kept alive.
+
+    What can still go wrong is in the source document rather than the argument:
+    the digits disagreeing ("1a - 5a") is a typo rather than a range, and is
+    honoured literally instead of expanded across the items in between.
+    """
+    start, end = start.lower(), end.lower()
+    if start[:-1] != end[:-1]:
+        return [start, end]
+    return [f"{start[:-1]}{chr(code)}" for code in range(ord(start[-1]), ord(end[-1]) + 1)]

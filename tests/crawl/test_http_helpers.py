@@ -17,13 +17,7 @@ from app.constants import (
     status_for_classification,
 )
 from app.crawl.cache import HttpCache
-from app.crawl.document_text import (
-    _collect_document_item_lines,
-    _document_item_range,
-    _next_non_empty_document_line,
-    _should_join_document_paragraph,
-    format_extracted_document_text,
-)
+from app.crawl.document_text import format_extracted_document_text
 from app.crawl.engine import (
     _payload_policy,
     crawl_request,
@@ -215,11 +209,26 @@ class TestFetchRetries:
 
 
 class TestPureParsing:
-    def test_document_item_range_branches(self) -> None:
-        assert _document_item_range("1a", "5a") == ["1a", "5a"]
-        assert _document_item_range("1a", "1e") == ["1a", "1b", "1c", "1d", "1e"]
-        assert _document_item_range("1a", "5b") == ["1a", "5b"]
-        assert _document_item_range("1a", "x") == ["1a", "x"]
+    def test_range_action_expands_across_letters(self) -> None:
+        # "1a - 1c" covers three items, and every one of them is stamped with the
+        # action. The observable claim is per-item: each record carries the suffix.
+        out = format_extracted_document_text(
+            "1a - 1c Approve\n1a.\nAlpha\n1b.\nBeta\n1c.\nGamma",
+            source_url="http://x/",
+        )
+        assert out == (
+            "1a. Alpha [Action: Approve]\n\n1b. Beta [Action: Approve]\n\n1c. Gamma [Action: Approve]"
+        )
+
+    def test_range_with_mismatched_item_numbers_is_honoured_literally(self) -> None:
+        # "1a - 5a" is a typo in the source document rather than a range: the two
+        # halves are stamped and nothing in between is invented. 2a sits between them
+        # on purpose, so the test fails if a literal pair were expanded into 1a..5a.
+        out = format_extracted_document_text(
+            "1a - 5a Approve\n1a.\nAlpha\n2a.\nBravo\n5a.\nDelta",
+            source_url="http://x/",
+        )
+        assert out == "1a. Alpha [Action: Approve]\n\n2a. Bravo\n\n5a. Delta [Action: Approve]"
 
     def test_looks_like_binary_body_branches(self) -> None:
         assert looks_like_binary_body(b"PK\x03\x04data", "application/octet-stream", "http://x/z.zip") is True
@@ -234,16 +243,11 @@ class TestPureParsing:
         assert "Approve" in out
 
     def test_should_join_document_paragraph_heading(self) -> None:
-        # A heading line must never be joined to the next paragraph.
-        assert _should_join_document_paragraph("Section A", "some prose") is False
-
-    def test_next_non_empty_document_line_none(self) -> None:
-        assert _next_non_empty_document_line(["", ""], 0) is None
-
-    def test_collect_document_item_lines_breaks_on_section(self) -> None:
-        lines = ["Build the thing", "1.", "Next section"]
-        _, idx = _collect_document_item_lines(lines, 0)
-        assert idx == 3
+        # Kept as the negative half of the heading rule from the pure-parsing side.
+        # The heading and the prose stay two records, so the heading did not absorb
+        # what followed it.
+        out = format_extracted_document_text("Section A\nsome prose", source_url="http://x/")
+        assert out == "Section A\n\nsome prose"
 
     def test_extract_frames_skips_bad_and_dupes(self) -> None:
         html = (
@@ -579,10 +583,13 @@ class TestFetchHelperUtilities:
         assert count == 1
         assert truncated is False
 
-    def test_collect_document_item_lines_breaks_on_public_participation(self) -> None:
-        # A bare numbered marker followed by a non-item section breaks collection.
-        title_lines, next_index = _collect_document_item_lines(["1.", "Public Participation", "more"], 0)
-        assert title_lines == []
+    def test_public_participation_breaks_item_title_collection(self) -> None:
+        # A boilerplate section marker ends the title run rather than joining it, so
+        # the marker is dropped and the text after it is not mistaken for more title.
+        out = format_extracted_document_text(
+            "1a.\nBuild\nPublic Participation\nNext item", source_url="http://x/"
+        )
+        assert out == "1a. Build\n\nNext item"
 
     def test_looks_like_binary_body_magic_without_zip_extension(self) -> None:
         # PK magic with a non-.zip URL still classifies as binary.
