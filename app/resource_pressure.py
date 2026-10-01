@@ -257,13 +257,13 @@ class CpuGate(ResourceGauge):
         self._last_wall = now
         return self._ratio
 
-    def _usage_ratio(self) -> float:
+    def _read_usage(self) -> float:
         r = self._sample()
         return 0.0 if r is None else r
 
     def cpu_ratio(self) -> float:
         """Latest utilization fraction vs quota (0.0 when unbounded)."""
-        return self._usage_ratio()
+        return self.usage_ratio()
 
     def is_warm(self) -> bool:
         """Whether the gate has a real utilization sample yet.
@@ -305,6 +305,8 @@ class ResourceGate:
         sample_seconds: float = 0.25,
         cpu_budget: float | None = None,
         clock: Callable[[], float] = time.monotonic,
+        memory_ratio: Callable[[], float] | None = None,
+        cpu_ratio: Callable[[], float] | None = None,
     ):
         self.memory = MemoryGate(
             target=target_mem,
@@ -312,6 +314,7 @@ class ResourceGate:
             max_wait_seconds=max_wait_seconds,
             cgroup_root=cgroup_root,
             clock=clock,
+            usage_ratio=memory_ratio,
         )
         self.cpu = CpuGate(
             target=target_cpu,
@@ -320,6 +323,7 @@ class ResourceGate:
             cgroup_root=cgroup_root,
             sample_seconds=sample_seconds,
             cpu_budget=cpu_budget,
+            usage_ratio=cpu_ratio,
         )
         self._poll_seconds = poll_seconds
         # Event-loop lag is an independent throttle signal.
@@ -339,10 +343,10 @@ class ResourceGate:
             self._lag_probe.start()
 
     def memory_ratio(self) -> float:
-        return self.memory._usage_ratio()
+        return self.memory.usage_ratio()
 
     def cpu_ratio(self) -> float:
-        return self.cpu._usage_ratio()
+        return self.cpu.usage_ratio()
 
     def close(self) -> None:
         """Stop the optional loop-lag probe (call on shutdown)."""
@@ -365,8 +369,8 @@ class ResourceGate:
         budget = self.memory.max_wait_seconds if max_wait_seconds is None else max_wait_seconds
         deadline = self.memory.clock() + budget
         while True:
-            mem_r = self.memory._usage_ratio()
-            cpu_r = self.cpu._usage_ratio()
+            mem_r = self.memory.usage_ratio()
+            cpu_r = self.cpu.usage_ratio()
             if mem_r < self.memory.hard and cpu_r < self.cpu.hard:
                 return
             if self.memory.clock() >= deadline:

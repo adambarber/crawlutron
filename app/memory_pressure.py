@@ -82,10 +82,17 @@ class ResourceGauge:
     """Base admission gauge for one bounded resource.
 
     A gauge senses one resource's pressure as a fraction of its ceiling via
-    :meth:`_usage_ratio` (subclass-defined) and turns that single signal into
-    both the batch-scale factor and the saturation wait. Centralizing the
-    derived logic is what stops the two drifting apart -- the bug class that
-    previously let ``batch_scale_factor`` bypass ``_usage_ratio``.
+    :attr:`usage_ratio` and turns that single signal into both the batch-scale
+    factor and the saturation wait. Centralizing the derived logic is what stops
+    the two drifting apart -- the bug class that previously let
+    ``batch_scale_factor`` bypass the usage signal.
+
+    The sensor is *data*, not an overridable method: ``usage_ratio`` holds a
+    ``Callable[[], float]`` defaulting to the subclass's real reading. That is
+    the same shape as ``clock`` below it, and for the same reason -- a bound
+    that can only be demonstrated by measuring the machine cannot be tested at
+    all. Subclasses override :meth:`_read_usage` rather than :attr:`usage_ratio`,
+    so the two can never disagree about which signal is live.
     """
 
     _default_target: float
@@ -100,6 +107,7 @@ class ResourceGauge:
         max_wait_seconds: float = 30.0,
         cgroup_root: str = "/sys/fs/cgroup",
         clock: Callable[[], float] = time.monotonic,
+        usage_ratio: Callable[[], float] | None = None,
     ):
         use_default_target = target is None
         if target is None:
@@ -112,12 +120,16 @@ class ResourceGauge:
         self.max_wait_seconds = max_wait_seconds
         self.cgroup_root = cgroup_root
         self.clock = clock
+        # Assigned after _hard so an injected sensor cannot be re-derived from
+        # a target it does not control.
+        self.usage_ratio = self._read_usage if usage_ratio is None else usage_ratio
 
-    def _usage_ratio(self) -> float:
+    def _read_usage(self) -> float:
         """Current pressure as a fraction of the resource ceiling.
 
-        Subclasses override this. Return 0.0 when there is no measured ceiling
-        to defend (e.g. an unbounded cgroup) so the gate stays open.
+        The real reading, and the default behind :attr:`usage_ratio`. Subclasses
+        override this and nothing else. Return 0.0 when there is no measured
+        ceiling to defend (e.g. an unbounded cgroup) so the gate stays open.
         """
         raise NotImplementedError
 
@@ -126,8 +138,8 @@ class ResourceGauge:
         return min(0.999, target + 0.05)
 
     def batch_scale_factor(self) -> float:
-        # Both wait_while_saturated and scale read the same _usage_ratio signal.
-        return batch_scale(self._usage_ratio(), 1.0, self.target, hard=self.hard)
+        # Both wait_while_saturated and scale read the same usage_ratio signal.
+        return batch_scale(self.usage_ratio(), 1.0, self.target, hard=self.hard)
 
     async def wait_while_saturated(self, max_wait_seconds: float | None = None) -> None:
         """Block while at/above the hard ceiling; release below it.
@@ -140,7 +152,7 @@ class ResourceGauge:
         """
         budget = self.max_wait_seconds if max_wait_seconds is None else max_wait_seconds
         deadline = self.clock() + budget
-        while self._usage_ratio() >= self.hard:
+        while self.usage_ratio() >= self.hard:
             if self.clock() >= deadline:
                 return
             await asyncio.sleep(self.poll_seconds)
@@ -152,7 +164,7 @@ class ResourceGauge:
         returns 0.0. Between target and hard, returns the linear fraction
         remaining. Below target returns 1.0 (full headroom).
         """
-        usage = self._usage_ratio()
+        usage = self.usage_ratio()
         if usage >= self.hard:
             return 0.0
         if usage <= self.target:
@@ -181,7 +193,7 @@ class MemoryGate(ResourceGauge):
     # How much of a fast climb to fold into the leading estimate (capped).
     _MAX_ANTICIPATION = 0.15
 
-    def _usage_ratio(self) -> float:
+    def _read_usage(self) -> float:
         """Current trailing fraction. Pure read: never mutates slope
         state, so interleaved readiness/metrics/wait readers cannot perturb
         the dispatch estimator's slope series."""
@@ -209,7 +221,7 @@ class MemoryGate(ResourceGauge):
 
         Only used by the dispatch scale factor, never by the hard-ceiling wait.
         """
-        raw = self._usage_ratio()
+        raw = self.usage_ratio()
         self._track_slope(raw)
         if raw >= self.hard:
             return raw

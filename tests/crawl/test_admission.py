@@ -229,7 +229,7 @@ async def test_gate_blocks_above_hard_ceiling_until_usage_drains(monkeypatch, ki
     sleeps = recorder(monkeypatch)
     gate = make_gate()
     samples = iter([0.99, 0.98, 0.80])
-    monkeypatch.setattr(gate, "_usage_ratio", lambda: next(samples))
+    gate.usage_ratio = lambda: next(samples)
     await gate.wait_while_saturated(max_wait_seconds=10)
     assert len(sleeps.delays) >= 2, f"the {kind} gate returned before usage drained"
     assert sleeps.delays[-1] <= 1.0  # short polling intervals, never long ones
@@ -238,7 +238,7 @@ async def test_gate_blocks_above_hard_ceiling_until_usage_drains(monkeypatch, ki
 @pytest.mark.parametrize(("kind", "make_gate"), GATE_KINDS, ids=_GATE_KIND_IDS)
 async def test_gate_returns_immediately_under_target(monkeypatch, kind, make_gate):
     gate = make_gate()
-    monkeypatch.setattr(gate, "_usage_ratio", lambda: 0.50)
+    gate.usage_ratio = lambda: 0.50
     sleeps = recorder(monkeypatch)
     await gate.wait_while_saturated(max_wait_seconds=10)  # must not block
     assert sleeps.delays == [], f"the {kind} gate blocked while it was under target"
@@ -261,11 +261,13 @@ def _pinned_resource_gate(monkeypatch, *, cpu_ratio, memory_ratio, max_wait_seco
     and re-reads both ratios, exactly as in production.
     """
     now = [0.0]
-    gate = ResourceGate(clock=lambda: now[0])
+    gate = ResourceGate(
+        clock=lambda: now[0],
+        cpu_ratio=lambda: cpu_ratio,
+        memory_ratio=lambda: memory_ratio,
+    )
     gate.memory.max_wait_seconds = max_wait_seconds
     gate.cpu.max_wait_seconds = max_wait_seconds
-    monkeypatch.setattr(gate.cpu, "_usage_ratio", lambda: cpu_ratio)
-    monkeypatch.setattr(gate.memory, "_usage_ratio", lambda: memory_ratio)
     waited = []
     yield_to_loop = asyncio.sleep
 
@@ -312,18 +314,18 @@ async def test_resource_gate_explicit_budget_overrides_the_pinned_bound(monkeypa
 
 
 def test_resource_gate_scale_is_min_of_resources(monkeypatch):
-    gate = ResourceGate()
+    # One holder per resource: the gate reads its sensors through the public
+    # `usage_ratio` seam, so flipping a reading is writing a number, not
+    # re-patching a private method six times.
+    memory, cpu = [0.99], [0.0]
+    gate = ResourceGate(memory_ratio=lambda: memory[0], cpu_ratio=lambda: cpu[0])
     # Memory at 99% -> scale 0; CPU idle -> scale 1. Combined must be 0.
-    monkeypatch.setattr(gate.memory, "_usage_ratio", lambda: 0.99)
-    monkeypatch.setattr(gate.cpu, "_usage_ratio", lambda: 0.0)
     assert gate.batch_scale_factor() == 0.0
     # Flip: CPU saturated, memory idle -> still 0.
-    monkeypatch.setattr(gate.memory, "_usage_ratio", lambda: 0.0)
-    monkeypatch.setattr(gate.cpu, "_usage_ratio", lambda: 0.99)
+    memory[0], cpu[0] = 0.0, 0.99
     assert gate.batch_scale_factor() == 0.0
     # Both idle -> full speed.
-    monkeypatch.setattr(gate.memory, "_usage_ratio", lambda: 0.0)
-    monkeypatch.setattr(gate.cpu, "_usage_ratio", lambda: 0.0)
+    memory[0], cpu[0] = 0.0, 0.0
     assert gate.batch_scale_factor() == 1.0
 
 
@@ -447,7 +449,7 @@ async def test_engine_throttles_batches_under_pressure(monkeypatch, cpu_ratio, m
 
 
 def test_direct_reads_do_not_perturb_slope(monkeypatch):
-    """_usage_ratio() is read by readiness/metrics/waits between dispatch
+    """The usage sensor is read by readiness/metrics/waits between dispatch
     scale computations. Those reads must not mutate the slope series, or a
     single stray sample invents a climb that is not there."""
     import app.memory_pressure as mp
@@ -465,7 +467,7 @@ def test_direct_reads_do_not_perturb_slope(monkeypatch):
     gate = mp.MemoryGate(target=0.9, hard=1.0)
     assert gate.leading_usage_ratio() == 0.5
     assert gate.leading_usage_ratio() == 0.5
-    gate._usage_ratio()  # stray readiness/metrics read of a dip sample
+    gate.usage_ratio()  # stray readiness/metrics read of a dip sample
     assert gate.leading_usage_ratio() == 0.5
 
 
@@ -656,12 +658,16 @@ class TestDispatcherStrategyAwareScaling:
 class TestHttpScaleEscapesMemory:
     def test_http_scale_ignores_memory_when_cpu_headroom(self, monkeypatch):
         """CpuGate.headroom_fraction()."""
-        gate = ResourceGate(target_mem=0.85, target_cpu=0.90, cpu_budget=4.0)
         # Memory near the hard ceiling (0.89, held by browser processes); its
         # scale would be ~0.43 -- it would throttle cheap HTTP work.
-        monkeypatch.setattr(gate.memory, "_usage_ratio", lambda: 0.89)
         # CPU has ample headroom (0.20 -> headroom 1.0 > 0.5).
-        monkeypatch.setattr(gate.cpu, "_usage_ratio", lambda: 0.20)
+        gate = ResourceGate(
+            target_mem=0.85,
+            target_cpu=0.90,
+            cpu_budget=4.0,
+            memory_ratio=lambda: 0.89,
+            cpu_ratio=lambda: 0.20,
+        )
 
         http_scale = gate.http_scale_factor()
         memory_scale = gate.memory.batch_scale_factor()
@@ -674,9 +680,13 @@ class TestHttpScaleEscapesMemory:
 
     def test_http_scale_respects_tight_cpu(self, monkeypatch):
         """When CPU is itself tight, http_scale falls back to the combined gate."""
-        gate = ResourceGate(target_mem=0.85, target_cpu=0.90, cpu_budget=4.0)
-        monkeypatch.setattr(gate.memory, "_usage_ratio", lambda: 0.60)
-        monkeypatch.setattr(gate.cpu, "_usage_ratio", lambda: 0.93)  # headroom 0.4 < 0.5
+        gate = ResourceGate(
+            target_mem=0.85,
+            target_cpu=0.90,
+            cpu_budget=4.0,
+            memory_ratio=lambda: 0.60,
+            cpu_ratio=lambda: 0.93,  # headroom 0.4 < 0.5
+        )
 
         http_scale = gate.http_scale_factor()
         # Combined batch_scale = min(cpu 0.4, mem 1.0) = 0.4
@@ -684,9 +694,13 @@ class TestHttpScaleEscapesMemory:
 
     def test_http_scale_and_browser_scale_diverge(self, monkeypatch):
         """Same resources: HTTP scale (CPU-driven) exceeds the combined/browser scale."""
-        gate = ResourceGate(target_mem=0.85, target_cpu=0.90, cpu_budget=4.0)
-        monkeypatch.setattr(gate.memory, "_usage_ratio", lambda: 0.89)  # falling off
-        monkeypatch.setattr(gate.cpu, "_usage_ratio", lambda: 0.30)  # headroom > 0.5
+        gate = ResourceGate(
+            target_mem=0.85,
+            target_cpu=0.90,
+            cpu_budget=4.0,
+            memory_ratio=lambda: 0.89,  # falling off
+            cpu_ratio=lambda: 0.30,  # headroom > 0.5
+        )
 
         http_scale = gate.http_scale_factor()
         browser_scale = gate.batch_scale_factor()
