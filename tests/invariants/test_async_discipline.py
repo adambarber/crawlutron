@@ -448,18 +448,27 @@ def test_sync_store_call_detector_bites():
     STORE_CALLS_ON_THE_LOOP.check_bites()
 
 
+#: The driver's method that runs a scripted action chain. Named once and f-string
+#: into every message below: this rule keys on a method name in the production
+#: tree, and when the lifecycle split renamed it the key, the three messages and
+#: the two proof sources were left pointing at a method that no longer existed --
+#: so the rule scanned the tree, matched nothing, and reported a green that meant
+#: nothing. One constant makes the rename a one-line edit.
+_ACTION_CHAIN = "run_action_chain"
+
+
 def _action_chain_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
     """Every call that must carry the chain's deadline must carry one.
 
-    ``BrowserRenderer._run_action_chain`` takes ``budget_seconds`` as an
-    OPTIONAL argument so a test can drive the raw action executor without
-    standing up a render budget. An optional deadline is a hole exactly as
-    wide as the next caller who omits it, so the signature stays permissive and
-    this sweep carries the invariant: production always passes the budget.
+    ``BrowserDriver.run_action_chain`` takes ``budget_seconds`` as an OPTIONAL
+    argument so a test can drive the raw action executor without standing up a
+    render budget. An optional deadline is a hole exactly as wide as the next
+    caller who omits it, so the signature stays permissive and this sweep
+    carries the invariant: production always passes the budget.
     """
     offenders: list[str] = []
     for node, func in attribute_calls(tree):
-        if func.attr != "_run_action_chain":
+        if func.attr != _ACTION_CHAIN:
             continue
         if any(keyword.arg == "budget_seconds" for keyword in node.keywords):
             continue
@@ -467,7 +476,7 @@ def _action_chain_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
             offender_at(
                 path,
                 node,
-                "_run_action_chain runs without a budget, so a "
+                f"{_ACTION_CHAIN} runs without a budget, so a "
                 "wedged action holds the browser pool slot for as long as it likes",
             )
         )
@@ -478,17 +487,17 @@ ACTION_CHAIN_ALWAYS_CARRIES_A_BUDGET = Rule(
     name="action-chain-always-carries-a-budget",
     find=_action_chain_offenders,
     summary=(
-        "_run_action_chain runs without a budget, so a wedged action holds the "
+        f"{_ACTION_CHAIN} runs without a budget, so a wedged action holds the "
         "browser pool slot for as long as it likes"
     ),
     bite=lambda: Bites(
-        "async def render(self, page, actions):\n    await self._run_action_chain(page, actions)\n",
-        marker="_run_action_chain",
+        f"async def render(self, page, actions):\n    await self.{_ACTION_CHAIN}(page, actions)\n",
+        marker=_ACTION_CHAIN,
     ),
     clean=lambda: (
         "async def render(self, page, actions, budget):\n"
-        "    await self._run_action_chain(page, actions, budget_seconds=budget)\n",
-        "async def render(self):\n    await self._run_action_chain_forever()\n",
+        f"    await self.{_ACTION_CHAIN}(page, actions, budget_seconds=budget)\n",
+        f"async def render(self):\n    await self.{_ACTION_CHAIN}_forever()\n",
     ),
 )
 

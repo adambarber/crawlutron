@@ -787,7 +787,23 @@ def test_cookie_tail_detector_bites():
 _BROWSER_RELEASE_FIELDS = ("_browser_cm", "_browser", "_browser_reused")
 
 
-_BROWSER_RELEASE_OWNER = "app/crawl/strategies/browser.py"
+#: The file that owns the fields and the chokepoint today, and therefore the
+#: path the bite proof is planted at. Named separately from the sweep set below
+#: rather than picked out of it: ``Path`` hashes through the (per-process
+#: randomized) string hash, so ``next(iter(frozenset_of_paths))`` names a
+#: different file on different runs and the proof would bite at random.
+_BROWSER_RELEASE_OWNER = REPO_ROOT / "app" / "crawl" / "strategies" / "browser_driver.py"
+
+
+#: Both files, not one. The cached fields and the release chokepoint moved to
+#: the driver when the lifecycle split, so a single-path sweep pointed at the
+#: renderer reported green over a file that no longer contains any of them --
+#: a gate that enforces nothing and says nothing about having stopped. Sweeping
+#: the pair keeps the invariant whole across the split: a field reintroduced on
+#: either side is still caught by whichever file spells the clear.
+_BROWSER_RELEASE_OWNERS = frozenset(
+    {_BROWSER_RELEASE_OWNER, REPO_ROOT / "app" / "crawl" / "strategies" / "browser.py"}
+)
 
 
 _BROWSER_RELEASE_CHOKEPOINT = "_release_browser"
@@ -797,10 +813,10 @@ _BROWSER_RELEASE_CHOKEPOINT = "_release_browser"
 _BROWSER_RELEASE_EXEMPT = frozenset({"__init__"})
 
 
-def _browser_release_offenders(tree, path, *, owner, fields, chokepoint):
+def _browser_release_offenders(tree, path, *, owners, fields, chokepoint):
     # Path == Path, not path.name: comparing a str against a Path is never
     # equal, which would make the whole sweep silently yield nothing.
-    if path != owner:
+    if path not in owners:
         return
     for node in functions(tree):
         if node.name in (chokepoint, *_BROWSER_RELEASE_EXEMPT):
@@ -852,7 +868,7 @@ BROWSER_RELEASE_ONLY_THROUGH_THE_CHOKEPOINT = Rule(
     find=lambda tree, path: _browser_release_offenders(
         tree,
         path,
-        owner=_OWNER_PATH,
+        owners=_BROWSER_RELEASE_OWNERS,
         fields=_BROWSER_RELEASE_FIELDS,
         chokepoint=_BROWSER_RELEASE_CHOKEPOINT,
     ),
@@ -864,7 +880,7 @@ BROWSER_RELEASE_ONLY_THROUGH_THE_CHOKEPOINT = Rule(
     bite=lambda: Bites(
         _browser_release_source(),
         "is cleared to None in",
-        at=_OWNER_PATH,
+        at=_BROWSER_RELEASE_OWNER,
     ),
     clean=lambda: (
         # __init__ putting the fields at their initial None is not a release, and
