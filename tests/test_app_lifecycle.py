@@ -11,6 +11,32 @@ from tests._job_harnesses import post_render_with_pool
 from tests._lifespan_doubles import stub_heavy_teardown
 
 
+def _booted_app(monkeypatch, *, workers: str | None = None):
+    """The real lifespan, with the cookie jar backed by the shared store.
+
+    Two claims in this file need a *running* service rather than a built one: the
+    fleet boot and the shared database. Neither can be observed on an unstarted
+    app, and both are vacuous without cookie persistence -- the jar does not
+    exist, and a jar with no store behind it opens no file, so an assertion about
+    sharing would pass on a jar that shares nothing.
+
+    Written twice, the two setups drifted into being different, which is the only
+    reason it is worth writing once. `workers` is optional because only the fleet
+    claim is about the worker count; the shared-database claim is about the file.
+    """
+    from app import main as main_mod
+
+    if workers is not None:
+        monkeypatch.setenv("CRAWLUTRON_WORKERS", workers)
+    monkeypatch.setattr(
+        main_mod,
+        "settings",
+        dataclasses.replace(main_mod.settings, cookie_persistence_enabled=True),
+    )
+    stub_heavy_teardown(monkeypatch)
+    return service_app()
+
+
 def _database_file(store) -> Path:
     """The file a store's own connection actually opened, resolved.
 
@@ -57,17 +83,9 @@ class TestMultiWorkerInvariants:
         only this process can see is exactly what made N workers lose every
         cookie the others collected while reporting healthy.
         """
-        from app import main as main_mod
         from app.crawl.coordination_cookies import SharedCookieStore
 
-        monkeypatch.setenv("CRAWLUTRON_WORKERS", "4")
-        monkeypatch.setattr(
-            main_mod,
-            "settings",
-            dataclasses.replace(main_mod.settings, cookie_persistence_enabled=True),
-        )
-        stub_heavy_teardown(monkeypatch)
-        app = service_app()
+        app = _booted_app(monkeypatch, workers="4")
 
         async with app.router.lifespan_context(app):
             # A refusal anywhere on the startup path raises before the yield, so
@@ -105,22 +123,13 @@ class TestMultiWorkerInvariants:
         store that resolved or substituted its own file would echo the argument
         back and hide it.
         """
-        from app import main as main_mod
         from app.crawl.coordination_cookies import SharedCookieStore
         from app.crawl.coordination_counters import CoordinationCounters
         from app.crawl.strategies.cookie_jar import CookieJar
         from app.main import DATABASE_PATH, job_store, result_store
         from app.metrics import get_metrics
 
-        # The jar only exists when persistence is on, and a jar with no store
-        # behind it opens no file -- the assertion would be vacuous.
-        monkeypatch.setattr(
-            main_mod,
-            "settings",
-            dataclasses.replace(main_mod.settings, cookie_persistence_enabled=True),
-        )
-        stub_heavy_teardown(monkeypatch)
-        app = service_app()
+        app = _booted_app(monkeypatch)
 
         async with app.router.lifespan_context(app):
             jar = app.state.cookie_jar
