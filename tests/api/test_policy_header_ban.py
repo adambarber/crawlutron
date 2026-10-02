@@ -44,8 +44,15 @@ def test_banned_headers_rejected_in_any_spelling(header, spelling):
         CrawlRequest(url="http://example.com/", policy={"headers": {spelling: "x"}})
 
 
-@pytest.mark.parametrize("model_name", ["CrawlRequest", "MapRequest", "JobCreateRequest"])
-def test_the_ban_travels_with_the_shared_policy(model_name):
+@pytest.mark.parametrize(
+    ("module_name", "model_name"),
+    [
+        ("app.api_models", "CrawlRequest"),
+        ("app.models.map_request", "MapRequest"),
+        ("app.models.job_create_request", "JobCreateRequest"),
+    ],
+)
+def test_the_ban_travels_with_the_shared_policy(module_name, model_name):
     """Every model embedding CrawlPolicy inherits the ban from one site.
 
     The three crawl-shaped request models (crawl, map, jobs) all embed the
@@ -53,9 +60,9 @@ def test_the_ban_travels_with_the_shared_policy(model_name):
     ``RenderRequest`` embeds ``RenderOptionsRequest``, which has no ``headers``
     field -- it is structurally immune and correctly excluded here.
     """
-    from app import api_models
+    import importlib
 
-    model = getattr(api_models, model_name)
+    model = getattr(importlib.import_module(module_name), model_name)
     with pytest.raises(ValidationError):
         model(url="http://example.com/", policy={"headers": {"X-Forwarded-For": "1.2.3.4"}})
 
@@ -175,7 +182,9 @@ def test_hop_by_hop_headers_are_refused_through_every_model_embedding_the_policy
     """
     import pytest as _pytest  # noqa: F401  (parametrize imported at module top)
 
-    from app.api_models import CrawlRequest, JobCreateRequest, MapRequest
+    from app.api_models import CrawlRequest
+    from app.models.job_create_request import JobCreateRequest
+    from app.models.map_request import MapRequest
 
     for model, payload in (
         (CrawlRequest, {"url": "http://example.com/"}),

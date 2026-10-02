@@ -308,7 +308,8 @@ class TestRequestCollectionsAreBounded:
         on only the biggest one leaves the other two uncapped, which is the
         shape this test exists to prevent.
         """
-        from app.api_models import MapRequest, RenderRequest
+        from app.api_models import RenderRequest
+        from app.models.map_request import MapRequest
 
         too_many = [f"https://example.com/{index}" for index in range(self.MAX_URLS + 1)]
         for model in (MapRequest, RenderRequest):

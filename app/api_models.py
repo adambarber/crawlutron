@@ -150,22 +150,6 @@ class FetchValidators(BaseModel):
     ] = None
 
 
-class ContentValidators(BaseModel):
-    """Validators returned by the origin for the delivered representation.
-
-    Feed ``etag`` / ``last_modified`` back as ``if_none_match`` /
-    ``if_modified_since`` on a later request to revalidate cheaply.
-    """
-
-    etag: Annotated[
-        str | None,
-        Field(
-            description="Origin ETag for the final representation, if provided.",
-        ),
-    ] = None
-    last_modified: Annotated[str | None, Field(description="Origin Last-Modified date, if provided.")] = None
-
-
 class CrawlPolicyLimits(BaseModel):
     model_config = ConfigDict(extra="forbid")
     timeout_seconds: Annotated[
@@ -1026,48 +1010,6 @@ class CrawlRequest(_SingleUrlSourceRequest):
     ] = None
 
 
-class MapRequest(BaseModel):
-    """Site-map request: discover the URL frontier for a root URL.
-
-    Discovery (robots sitemaps + feeds + in-page links) is forced on; the caller
-    controls the fetch ``policy`` (strategies, limits, scope_regex) and the rest
-    is delegated to the shared crawl engine.
-    """
-
-    model_config = ConfigDict(extra="forbid")
-
-    url: str = Field(..., description="Root public HTTP(S) URL to map.")
-    policy: CrawlPolicy = Field(
-        default_factory=CrawlPolicy,
-        description="Optional crawl policy for the mapping crawl (strategies, limits, scope_regex). "
-        "Discovery "
-        "is always enabled.",
-    )
-
-
-class SearchRequest(BaseModel):
-    """Request body for ``POST /v1/search``.
-
-    A web-search query that returns SERP-style results (title, url,
-    description) from the configured provider. The service does not crawl
-    result URLs; callers pipe them into ``POST /v1/crawl`` themselves.
-    """
-
-    model_config = ConfigDict(extra="forbid")
-
-    query: str = Field(..., min_length=1, max_length=500, description="Web search query.")
-    limit: Annotated[
-        int | None,
-        Field(
-            ge=1,
-            le=100,
-            description="Maximum results to return. Defaults to the server setting "
-            "CRAWLUTRON_SEARCH_LIMIT_DEFAULT and is clamped to "
-            "CRAWLUTRON_SEARCH_LIMIT_MAX.",
-        ),
-    ] = None
-
-
 class RenderOptionsRequest(BaseModel):
     """Browser render options for ``/v1/render`` (all optional; server applies defaults)."""
 
@@ -1113,23 +1055,3 @@ class RenderRequest(_SingleUrlSourceRequest):
             description="Browser render options; omitted fields use server defaults.",
         ),
     ] = None
-
-
-class JobCreateRequest(BaseModel):
-    """Create a new resumable whole-site crawl job."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    root_url: str = Field(..., description="Root public HTTP(S) URL; stored canonically at crawl depth 0.")
-    policy: CrawlPolicy = Field(
-        default_factory=CrawlPolicy,
-        description="Crawl policy (strategies, limits, scope_regex, extraction).",
-    )
-
-
-class JobControlRequest(BaseModel):
-    """Control a crawl job (pause/resume/cancel)."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    action: str = Field(..., description="One of: pause, resume, cancel.")

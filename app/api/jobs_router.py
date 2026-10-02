@@ -16,11 +16,12 @@ from app.api import job_runner
 from app.api.dependencies import JobStoreDep, SettingsDep, ShutdownEventDep
 from app.api.exceptions import http_error, validation_http_error
 from app.api.main_helpers import _build_job_status
-from app.api_models import JobControlRequest, JobCreateRequest
 from app.crawl.job_store import JobStatusView
 from app.crawl.payload_helpers import checked_payload_urls
 from app.models.error_response import ErrorResponse
 from app.models.host_policy import HostPolicy
+from app.models.job_control_request import JobControlRequest
+from app.models.job_create_request import JobCreateRequest
 from app.models.job_create_response import JobCreateResponse
 from app.models.job_list_response import JobListResponse
 from app.models.job_status_response import JobStatusResponse

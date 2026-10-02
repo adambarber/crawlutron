@@ -22,7 +22,6 @@ from dataclasses import dataclass
 from typing import Any, TypeVar
 from urllib.parse import urljoin
 
-from app.api_models import ContentValidators
 from app.constants import CrawlClassification
 from app.crawl.llm_format import (
     PageMetadata as ExtractedPageMetadata,
@@ -32,6 +31,7 @@ from app.crawl.llm_format import (
 )
 from app.crawl.result_record import AnyResult, ProducerEnvelope, RenderEnvelope
 from app.models.classification_evidence import ClassificationEvidence
+from app.models.content_validators import ContentValidators
 from app.models.crawl_result import CrawlResult, CrawlStrategyAttempt
 from app.models.crawl_status import CrawlStatus
 from app.models.crawl_strategy import CrawlStrategy

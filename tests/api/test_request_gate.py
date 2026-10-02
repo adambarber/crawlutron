@@ -27,10 +27,11 @@ from app.api.crawl_endpoint import crawl
 from app.api.exceptions import error_envelope_from_detail
 from app.api.main_helpers import request_gate
 from app.api.map_endpoint import map_site
-from app.api_models import CrawlRequest, MapRequest
+from app.api_models import CrawlRequest
 from app.crawl.result_store import CrawlResultStore
 from app.health.readiness import READINESS_STATE
 from app.metrics import get_metrics
+from app.models.map_request import MapRequest
 from app.settings import CrawlerSettings
 from tests._job_harnesses import make_job_store
 

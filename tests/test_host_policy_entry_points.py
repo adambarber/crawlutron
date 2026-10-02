@@ -292,7 +292,7 @@ async def _probe_crawl_executor(monkeypatch, tmp_path):
 
 async def _probe_jobs_router(monkeypatch, tmp_path):
     from app.api import jobs_router
-    from app.api_models import JobCreateRequest
+    from app.models.job_create_request import JobCreateRequest
 
     effects = _effects()
     job_store = type(
@@ -319,7 +319,7 @@ async def _probe_jobs_router(monkeypatch, tmp_path):
 
 async def _probe_map_endpoint(monkeypatch, tmp_path):
     from app.api import map_endpoint
-    from app.api_models import MapRequest
+    from app.models.map_request import MapRequest
 
     effects = _effects()
 
