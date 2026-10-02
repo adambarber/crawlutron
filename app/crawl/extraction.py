@@ -48,10 +48,10 @@ from app.crawl.llm_format import (
 )
 from app.crawl.llm_format import _llm_metadata_from_tree, text_from_html
 from app.models.discovered_link import DiscoveredLink
+from app.models.host_policy import HostPolicy
 from app.resource_pressure import doc_worker_count
 from app.settings import CrawlerSettings
 from app.validation import (
-    HostPolicy,
     filter_js_endpoints,
     get_env_int,
     parse_bool_env,

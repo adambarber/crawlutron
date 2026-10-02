@@ -18,7 +18,8 @@ from app.crawl.robots_parse import (
     parse_robots_rules,
     parse_robots_sitemaps,
 )
-from app.validation import HostPolicy, normalize_public_http_url, safe_public_url_or_none
+from app.models.host_policy import HostPolicy
+from app.validation import normalize_public_http_url, safe_public_url_or_none
 
 ROBOTS_CACHE_MAX_ENTRIES = 2048
 ROBOTS_CACHE_TTL_SECONDS = 600.0

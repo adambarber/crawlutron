@@ -3,12 +3,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
 
+from app.models.host_policy import HostPolicy
 from app.models.render_options import RenderOptions
-
-if TYPE_CHECKING:
-    from app.validation import HostPolicy
 
 
 @dataclass(frozen=True)

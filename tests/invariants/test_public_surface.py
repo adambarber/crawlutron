@@ -94,7 +94,7 @@ _PUBLIC_SURFACE_PROPERTY = Property(
 # reachable only through the endpoint that has the matching envelope.
 _OWNER_PUBLIC_SURFACE_RATCHET = {
     "app/crawl/admission.py": (20, 14),
-    "app/validation.py": (18, 13),
+    "app/validation.py": (16, 12),
     "app/api/response_shaping.py": (11, 10),
     "app/crawl/sqlite_store.py": (9, 7),
     "app/safe_regex.py": (7, 2),

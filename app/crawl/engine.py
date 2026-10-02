@@ -34,14 +34,12 @@ from app.crawl.robots import FetchAndDecode
 from app.crawl.strategies.fetchers import default_http_fetcher, impersonating_fetcher
 from app.models.crawl_worker import CrawlWorker
 from app.models.engine_crawl_result import EngineCrawlResult
+from app.models.host_policy import HostPolicy
 from app.models.http_fetcher import HttpFetcher
 from app.models.serialization import from_wire, to_dict
 from app.resource_pressure import ResourceGate
 from app.settings import CrawlerSettings
-from app.validation import (
-    HostPolicy,
-    get_env_int,
-)
+from app.validation import get_env_int
 
 logger = logging.getLogger(__name__)
 

@@ -14,7 +14,8 @@ from typing import Any
 
 from app.api.response_shaping import frontier_link_url
 from app.crawl.result_record import ProducerEnvelope
-from app.validation import HostPolicy, safe_public_url_or_none
+from app.models.host_policy import HostPolicy
+from app.validation import safe_public_url_or_none
 
 
 def build_site_map(crawl_response: ProducerEnvelope, *, host_policy: HostPolicy) -> dict[str, Any]:

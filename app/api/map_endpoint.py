@@ -13,8 +13,8 @@ from app.api.main_helpers import record_crawl_completion, request_gate
 from app.api_models import DiscoveryConfig, MapRequest
 from app.constants import MAX_DISCOVERED_LINKS
 from app.map import build_site_map
+from app.models.host_policy import HostPolicy
 from app.settings import CrawlerSettings
-from app.validation import HostPolicy
 
 logger = logging.getLogger(__name__)
 

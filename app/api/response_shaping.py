@@ -48,8 +48,9 @@ from app.crawl.result_record import AnyResult, ProducerEnvelope, RenderEnvelope
 from app.models.crawl_result import CrawlResult, CrawlStrategyAttempt
 from app.models.discovered_link import DiscoveredLink
 from app.models.engine_crawl_result import EngineCrawlResult
+from app.models.host_policy import HostPolicy
 from app.models.taxonomy import CrawlStrategyName
-from app.validation import HostPolicy, safe_public_url_or_none
+from app.validation import safe_public_url_or_none
 
 _logger = logging.getLogger(__name__)
 

@@ -96,6 +96,9 @@ class FetcherDouble:
     ``HttpFetcher`` everywhere production asks for one -- ``app.crawl.worker``
     recognises a callable object by its ``__call__``, so the async-discipline
     check sees exactly what it saw before.
+
+    ``answer`` takes the whole request and returns a :data:`Route` unless
+    ``answer_is_response`` says otherwise; signature and cap are production's.
     """
 
     calls: list[str]
@@ -163,40 +166,6 @@ class FetcherDouble:
         return _answer(result, url)
 
 
-def fetcher_double(
-    answer,
-    calls: list[str] | None = None,
-    *,
-    record_headers: list[dict[str, str]] | None = None,
-    record_cap: list[int] | None = None,
-    answer_is_response: bool = False,
-) -> FetcherDouble:
-    """A fetcher double: the production contract, the request seam, the answer.
-
-    Every double in this module used to re-state the fetcher signature, cap
-    default included -- and the cap they stated (50 MiB) is not the one
-    production declares (``DEFAULT_MAX_CONTENT_LENGTH_BYTES``, 10 MiB), so each
-    copy asserted a contract the crawler does not have. One signature, against
-    production's own constant, is what makes a double a double instead of a
-    transcription.
-
-    ``answer(url, sent_headers, timeout, max_content_length)`` receives the whole
-    request, so a double that delegates (see :func:`tap_fetcher`) forwards it
-    untouched, and its return is read as a :data:`Route` unless
-    ``answer_is_response`` says the answer already *is* the response. The three
-    ``record_*`` lists are the observations a crawler test makes -- which URLs
-    were fetched, which headers were sent, which body cap the strategy applied
-    -- so none of them needs a second fetcher or a hand-rolled wrapper.
-    """
-    return FetcherDouble(
-        answer,
-        calls,
-        record_headers=record_headers,
-        record_cap=record_cap,
-        answer_is_response=answer_is_response,
-    )
-
-
 def site_fetcher(pages: dict[str, Any]):
     """A fetcher serving a scripted page table by path, 404 for anything else.
 
@@ -215,7 +184,7 @@ def site_fetcher(pages: dict[str, Any]):
             "ctype": ctype,
         }
 
-    return fetcher_double(answer)
+    return FetcherDouble(answer)
 
 
 async def run_scoped_crawl(scope_regex=None, *, max_depth=1, max_pages=10, pages=None):
@@ -255,9 +224,7 @@ def scripted_fetcher(*, status=200, body=b"", headers=None, ctype="text/html; ch
     included), which is what a test about a header or a content-encoding needs;
     otherwise ``ctype`` supplies the content type and nothing else is sent.
     """
-    return fetcher_double(
-        lambda url, *_: {"status": status, "body": body, "headers": headers, "ctype": ctype}
-    )
+    return FetcherDouble(lambda url, *_: {"status": status, "body": body, "headers": headers, "ctype": ctype})
 
 
 def failing_fetcher(error: BaseException | type[BaseException] | None = None, calls: list[str] | None = None):
@@ -270,7 +237,7 @@ def failing_fetcher(error: BaseException | type[BaseException] | None = None, ca
     with its own traceback; pass an instance only when the exception carries
     state a test needs to inspect (``httpx.HTTPStatusError`` and its response).
     """
-    return fetcher_double(lambda url, *_: error if error is not None else ConnectionError, calls)
+    return FetcherDouble(lambda url, *_: error if error is not None else ConnectionError, calls)
 
 
 def hanging_fetcher(calls: list[str] | None = None):
@@ -285,7 +252,7 @@ def hanging_fetcher(calls: list[str] | None = None):
     async def never(url, *_):
         await asyncio.Future()
 
-    return fetcher_double(never, calls)
+    return FetcherDouble(never, calls)
 
 
 def routed_fetcher(
@@ -329,7 +296,7 @@ def routed_fetcher(
             raise AssertionError(f"unscripted fetch: {url} (routes: {sorted(routes or {})})")
         return default
 
-    return fetcher_double(answer, calls)
+    return FetcherDouble(answer, calls)
 
 
 def sequenced_fetcher(
@@ -363,7 +330,7 @@ def sequenced_fetcher(
             index = len(steps) - 1
         return steps[index]
 
-    fetcher = fetcher_double(answer, calls)
+    fetcher = FetcherDouble(answer, calls)
     fetcher.served = lambda: state["n"]
     return fetcher
 
@@ -385,7 +352,7 @@ def request_fetcher(respond, record_headers: list[dict[str, str]] | None = None)
     ``calls`` so that "which URLs" and "what was sent" stay two different facts.
     """
     seen: list[dict[str, str]] = [] if record_headers is None else record_headers
-    return fetcher_double(lambda url, sent_headers, *_: respond(url, sent_headers), record_headers=seen)
+    return FetcherDouble(lambda url, sent_headers, *_: respond(url, sent_headers), record_headers=seen)
 
 
 def tap_fetcher(inner, calls: list[str] | None = None):
@@ -397,7 +364,7 @@ def tap_fetcher(inner, calls: list[str] | None = None):
     functions: this one owns the list, the wrapped one owns the response --
     which may be sync or async, since :func:`fetcher_double` awaits either.
     """
-    return fetcher_double(
+    return FetcherDouble(
         lambda url, sent_headers, timeout, cap: inner(url, sent_headers, timeout, cap), calls
     )
 
@@ -438,7 +405,7 @@ def concurrent_fetcher(
         finally:
             state["inflight"] -= 1
 
-    fetcher = fetcher_double(answer, calls)
+    fetcher = FetcherDouble(answer, calls)
     fetcher.peak = lambda: state["peak"]
     fetcher.inflight = lambda: state["inflight"]
     return fetcher
@@ -848,7 +815,7 @@ async def invoke_http_strategy(
     return await run_http_strategy(
         url="http://example.com/",
         policy=policy,
-        http_fetcher=fetcher_double(answer, record_cap=cap_capture, answer_is_response=True),
+        http_fetcher=FetcherDouble(answer, record_cap=cap_capture, answer_is_response=True),
         **kwargs,
     )
 
@@ -866,7 +833,7 @@ async def invoke_browser_strategy(
 
 def make_html_fetcher(calls: list[str], body: bytes = b"<html><body>page content</body></html>"):
     """A fetcher serving one HTML body for any URL, recording what it was asked for."""
-    return fetcher_double(lambda url, *_: {"status": 200, "ctype": "text/html", "body": body}, calls)
+    return FetcherDouble(lambda url, *_: {"status": 200, "ctype": "text/html", "body": body}, calls)
 
 
 async def run_default_http_fetcher(url: str, headers=None, *, pin=None):
@@ -910,7 +877,7 @@ __all__ = [
     "crawl_homepage_async",
     "crawled_result",
     "clocked_cache",
-    "fetcher_double",
+    "FetcherDouble",
     "invoke_browser_strategy",
     "invoke_http_strategy",
     "make_crawl_payload",

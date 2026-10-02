@@ -17,8 +17,8 @@ from app.crawl.engine import crawl_request
 from app.crawl.policy import read_policy
 from app.crawl.result_record import ProducerEnvelope
 from app.crawl.strategies.browser_pool import PooledBrowserWorker, get_browser_pool
+from app.models.host_policy import HostPolicy
 from app.settings import CrawlerSettings
-from app.validation import HostPolicy
 
 
 def _request_needs_browser(payload_dict: dict) -> bool:

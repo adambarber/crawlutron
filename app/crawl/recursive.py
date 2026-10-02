@@ -27,11 +27,12 @@ from app.crawl.result_helpers import failed_result_for
 from app.metrics import get_metrics
 from app.models.crawl_task import CrawlTask
 from app.models.engine_crawl_result import EngineCrawlResult
+from app.models.host_policy import HostPolicy
 from app.models.normalized_url import NormalizedUrl
 from app.resource_pressure import ResourceGate, WeightedAdmission, default_admission_policy
 from app.safe_regex import BoundedPattern
 from app.scheduler import DomainScheduler
-from app.validation import HostPolicy, registrable_domain
+from app.validation import registrable_domain
 
 # A transiently-failed URL is not a dead page: our fetch died, or capacity was
 # the problem, so the page itself is still worth having. The recursive loop

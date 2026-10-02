@@ -25,7 +25,8 @@ from app.constants import (
 )
 from app.crawl.decompression import decompress_body as _decompress_body
 from app.crawl.strategies.body_decode import decode_body
-from app.validation import HostPolicy, safe_public_url_or_none
+from app.models.host_policy import HostPolicy
+from app.validation import safe_public_url_or_none
 
 # Request headers as the discovery fetch takes them: a mapping it only ever
 # reads, or None for "send none". One declaration, because the fetch signatures

@@ -18,11 +18,11 @@ from app.crawl.admission import gather_robots_decisions
 from app.metrics import MetricsStore
 from app.models.crawl_task import CrawlTask
 from app.models.engine_crawl_result import EngineCrawlResult
+from app.models.host_policy import HostPolicy
 from app.models.normalized_url import NormalizedUrl
 from app.resource_pressure import ResourceGate, WeightedAdmission
 from app.safe_regex import BoundedPattern
 from app.scheduler import DomainScheduler
-from app.validation import HostPolicy
 
 logger = logging.getLogger(__name__)
 

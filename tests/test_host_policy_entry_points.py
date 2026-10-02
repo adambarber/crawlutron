@@ -12,7 +12,7 @@ import pytest
 from fastapi import HTTPException
 
 from app.crawl.result_store import CrawlResultStore
-from app.validation import HOST_POLICY_ENTRY_POINTS
+from app.models.host_policy import HOST_POLICY_ENTRY_POINTS
 from tests.chokepoint_walks import REPO_ROOT, app_trees, local_nodes, nodes_of, resolved_call_name
 from tests.invariants._shared import DefinitionNode, _module_definition_index
 

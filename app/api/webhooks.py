@@ -29,8 +29,9 @@ from typing import TYPE_CHECKING, Any
 import httpx
 
 from app.bounded_io import BodyTooLarge, read_capped_async
+from app.models.host_policy import HostPolicy
 from app.timeouts import Timeouts
-from app.validation import HostPolicy, get_mapping_int
+from app.validation import get_mapping_int
 
 if TYPE_CHECKING:
     from app.safe_url import SafeUrl

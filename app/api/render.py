@@ -26,10 +26,11 @@ from app.models.crawl_job import CrawlJob
 from app.models.crawl_result import CrawlResult
 from app.models.crawl_worker import CrawlWorker
 from app.models.engine_crawl_result import EngineCrawlResult
+from app.models.host_policy import HostPolicy
 from app.models.render_options import RenderOptions
 from app.scheduler import DomainScheduler
 from app.settings import CrawlerSettings
-from app.validation import HostPolicy, normalize_public_http_url, registrable_domain
+from app.validation import normalize_public_http_url, registrable_domain
 
 
 def _render_options(payload: dict[str, Any], settings: CrawlerSettings) -> RenderOptions:

@@ -12,7 +12,8 @@ from app.api_models import (
     CrawlPolicy,
 )
 from app.crawl.policy import PolicyTier, validate_wire_policy
-from app.validation import HostPolicy, normalize_public_http_url
+from app.models.host_policy import HostPolicy
+from app.validation import normalize_public_http_url
 
 
 def _validated_url(url: str, *, host_policy: HostPolicy) -> str:

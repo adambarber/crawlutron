@@ -6,13 +6,13 @@ import os
 import sys
 from collections.abc import Callable, Mapping
 from contextlib import suppress
-from dataclasses import dataclass
 from functools import lru_cache, partial
 from importlib import import_module
 from typing import Protocol, cast
 from urllib.parse import parse_qsl, urlencode, urljoin, urlparse, urlunparse
 
 from app.addresses import AddressClass, classify
+from app.models.host_policy import HostPolicy, host_policy_reason
 from app.models.normalized_url import NormalizedUrl
 
 
@@ -22,93 +22,6 @@ class _PublicSuffixDataset(Protocol):
 
 PRIVATE_HOSTS = {"localhost", "host.docker.internal"}
 TWO_PART_PUBLIC_SUFFIXES = {"co.uk", "org.uk", "ac.uk", "gov.uk", "com.au", "net.au", "org.au"}
-
-
-def _normalize_policy_host(host: str) -> str:
-    value = host.strip().lower().rstrip(".")
-    if value.startswith("[") and value.endswith("]"):
-        value = value[1:-1]
-    try:
-        return value.encode("idna").decode("ascii").lower().rstrip(".")
-    except UnicodeError:
-        return value
-
-
-def _policy_host_entry(entry: str) -> str:
-    value = entry.strip()
-    if not value:
-        return ""
-    parsed = urlparse(value if "://" in value else f"//{value}")
-    host = parsed.hostname or value.split("/", 1)[0].split(":", 1)[0]
-    if host.startswith("*."):
-        host = host[2:]
-    return _normalize_policy_host(host)
-
-
-@lru_cache(maxsize=256)
-def _policy_hosts(raw: str) -> tuple[str, ...]:
-    return tuple(entry for item in raw.split(",") if (entry := _policy_host_entry(item)))
-
-
-@dataclass(frozen=True)
-class HostPolicy:
-    allowed_hosts: tuple[str, ...]
-    denied_hosts: tuple[str, ...]
-
-    @classmethod
-    def unrestricted(cls) -> HostPolicy:
-        return cls((), ())
-
-    @classmethod
-    def from_strings(cls, allowed_hosts: str, denied_hosts: str) -> HostPolicy:
-        return cls(_policy_hosts(allowed_hosts), _policy_hosts(denied_hosts))
-
-    @classmethod
-    def from_settings(cls, settings: object) -> HostPolicy:
-        return cls.from_strings(
-            str(getattr(settings, "allowed_hosts", "") or ""),
-            str(getattr(settings, "denied_hosts", "") or ""),
-        )
-
-    def __post_init__(self) -> None:
-        object.__setattr__(
-            self,
-            "allowed_hosts",
-            tuple(_policy_host_entry(entry) for entry in self.allowed_hosts if _policy_host_entry(entry)),
-        )
-        object.__setattr__(
-            self,
-            "denied_hosts",
-            tuple(_policy_host_entry(entry) for entry in self.denied_hosts if _policy_host_entry(entry)),
-        )
-
-
-HOST_POLICY_ENTRY_POINTS = (
-    "app/api/crawl_endpoint.py:crawl",
-    "app/api/crawl_executor.py:execute_crawl",
-    "app/api/jobs_router.py:create_job",
-    "app/api/map_endpoint.py:map_site",
-    "app/api/render.py:render_request",
-    "app/api/async_crawl_runner.py:run_async_crawl",
-    "app/api/response_shaping.py:frontier_link_url",
-    "app/api/webhooks.py:post_webhook",
-    "app/api/webhooks.py:deliver_pinned_webhook",
-    "app/mcp/tools.py:_handle_crawl",
-    "app/mcp/tools.py:_handle_map",
-    "app/mcp/tools.py:_handle_render",
-    "app/mcp/tools.py:_handle_search",
-)
-
-
-def _host_policy_reason(host: str, *, policy: HostPolicy) -> str | None:
-    normalized = _normalize_policy_host(host)
-    if any(normalized == entry or normalized.endswith(f".{entry}") for entry in policy.denied_hosts):
-        return "host_denied"
-    if policy.allowed_hosts and not any(
-        normalized == entry or normalized.endswith(f".{entry}") for entry in policy.allowed_hosts
-    ):
-        return "host_not_allowed"
-    return None
 
 
 # Lazily-initialised public-suffix list. ``publicsuffixlist`` is an optional
@@ -165,9 +78,9 @@ def normalize_public_http_url(url: str, *, policy: HostPolicy) -> NormalizedUrl:
         raise ValueError("invalid_url")
 
     host = parsed.hostname.lower().rstrip(".")
-    host_policy_reason = _host_policy_reason(host, policy=policy)
-    if host_policy_reason:
-        raise ValueError(host_policy_reason)
+    reason = host_policy_reason(host, policy=policy)
+    if reason:
+        raise ValueError(reason)
     # Local dev/test escape hatch: the crawler is a localhost dev service and
     # tests run a real in-process server on loopback. Allow opting out of the
     # private-network guard via env var rather than relaxing it by default.
@@ -648,8 +561,6 @@ def safe_public_url_or_none(raw: str | None, *, policy: HostPolicy) -> Normalize
 
 
 __all__ = [
-    "HOST_POLICY_ENTRY_POINTS",
-    "HostPolicy",
     "PRIVATE_HOSTS",
     "TWO_PART_PUBLIC_SUFFIXES",
     "allow_private_targets",

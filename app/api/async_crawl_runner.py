@@ -32,8 +32,9 @@ from app.api.response_shaping import (
 )
 from app.crawl.job_store import TERMINAL_STATUSES, JobStatus
 from app.metrics import get_metrics
+from app.models.host_policy import HostPolicy
 from app.settings import CrawlerSettings
-from app.validation import HostPolicy, get_env_int
+from app.validation import get_env_int
 
 logger = logging.getLogger(__name__)
 

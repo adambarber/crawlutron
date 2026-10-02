@@ -28,7 +28,7 @@ from app.api_responses import (
 )
 from app.crawl.job_store import JobStatusView
 from app.crawl.payload_helpers import checked_payload_urls
-from app.validation import HostPolicy
+from app.models.host_policy import HostPolicy
 
 router = APIRouter(prefix="/v1/jobs", tags=["Crawler"])
 

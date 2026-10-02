@@ -15,8 +15,8 @@ from typing import TYPE_CHECKING, Any
 
 import pdfplumber
 
+from app.models.host_policy import HostPolicy
 from app.timeouts import Timeouts
-from app.validation import HostPolicy
 
 if TYPE_CHECKING:
     from app.crawl.strategies import pinned_transport
