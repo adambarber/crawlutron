@@ -26,6 +26,10 @@ Consequences worth knowing before adding to this package:
   name crossing one, and ``tests/private_import_ledger.py`` treats that as a
   violation. Helpers stay private to their own file; declarations are named for
   what they declare.
+- Wire records live here too. A pydantic response model is a projection of an
+  internal record, and keeping it outside this package is what left
+  ``DiscoveredLink`` and ``PageMetadata`` each declared twice with nothing
+  connecting the two forms.
 - A module holding exactly one declaration is named for it, modulo a trailing
   ``Error``. A module holding several is named for the family -- ``crawl_worker.py``
   holds the sync and async forms of one worker -- and both are enforced by

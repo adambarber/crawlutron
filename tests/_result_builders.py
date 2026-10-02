@@ -8,6 +8,7 @@ from app.models.crawl_job import CrawlJob
 from app.models.crawl_result import CrawlResult, CrawlStrategyAttempt
 from app.models.discovered_link import DiscoveredLink
 from app.models.engine_crawl_result import EngineCrawlResult
+from app.models.normalized_url import NormalizedUrl
 from app.models.registrable_domain import registrable_domain
 from app.models.render_options import RenderOptions
 from app.models.taxonomy import Classification, CrawlError, CrawlStrategyName
@@ -24,14 +25,14 @@ def make_job(index: int, url: str, *, options: RenderOptions | None = None):
     one. The absent baseline is ``RenderOptions()`` itself, every field at its
     default.
 
-    ``domain`` comes from ``registrable_domain``, the chokepoint production uses.
-    The ``url.split("/")[2]`` this replaced kept the port, any userinfo, and the
-    ``www.``, so a job built here could carry a domain no production job does.
+    The URL goes in as an admitted value, so the job's ``domain`` is derived by
+    the same chokepoint production uses. The ``url.split("/")[2]`` this replaced
+    kept the port, any userinfo, and the ``www.``, so a job built here could
+    carry a domain no production job does.
     """
     return CrawlJob(
         index=index,
-        url=url,
-        domain=registrable_domain(url),
+        url=NormalizedUrl(url, policy=UNRESTRICTED_HOST_POLICY),
         options=RenderOptions() if options is None else options,
         host_policy=UNRESTRICTED_HOST_POLICY,
     )

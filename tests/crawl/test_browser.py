@@ -80,7 +80,7 @@ class TestBrowserRenderer:
         # ``'coroutine' object has no attribute 'html'`` network error instead
         # of a type error at the seam.
         async def browser_worker(job):
-            return await self.renderer.render(job.url, job.options, policy=job.host_policy)
+            return await self.renderer.render(job.url.raw, job.options, policy=job.host_policy)
 
         response = await crawl_request(
             payload,

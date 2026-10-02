@@ -456,7 +456,7 @@ def _fake_browser(html=None, text="doc", metadata=None, status="success", classi
 
     def worker(job):
         return CrawlResult(
-            url=job.url,
+            url=job.url.raw,
             attempt=terminal_attempt(
                 strategy=None,
                 status=status,
@@ -464,11 +464,11 @@ def _fake_browser(html=None, text="doc", metadata=None, status="success", classi
                 elapsed_ms=1,
                 error=None,
             ),
-            final_url=job.url,
+            final_url=job.url.raw,
             html=html,
             text=text,
             attempts=1,
-            domain="x",
+            domain=job.url.site,
             metadata=metadata or {},
         )
 

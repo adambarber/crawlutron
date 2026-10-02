@@ -223,6 +223,24 @@ def engine_result_from_exception(
     )
 
 
+def _job_url_text(job: object) -> str | None:
+    """The job's own URL as TEXT, whichever record it was dispatched with.
+
+    ``CrawlJob`` holds an admitted value and ``CrawlTask`` the durable identity
+    text, so a reader reaching for one attribute gets the other record's shape.
+    That is how a failed result came to report the raw href it was dispatched
+    from under the canonical URL it never reached.
+    """
+    for attribute in ("url", "normalized_url"):
+        found = getattr(job, attribute, None)
+        if isinstance(found, str):
+            return found
+        raw = getattr(found, "raw", None)
+        if isinstance(raw, str):
+            return raw
+    return None
+
+
 def failed_result_for[JobT](
     job: JobT,
     error: BaseException,
@@ -242,7 +260,7 @@ def failed_result_for[JobT](
     contract stay in one place.
     """
     original_url = url_of(job)
-    normalized = getattr(job, "normalized_url", None) or original_url
+    normalized = _job_url_text(job) or original_url
     return engine_result_from_exception(
         error=error,
         original_url=original_url,

@@ -292,7 +292,7 @@ class TestStrategyChainGuardsRaisingStrategies:
 
         class _FlakyWorker:
             async def __call__(self, job):
-                attempts.append(job.url)
+                attempts.append(job.url.raw)
                 if len(attempts) == 1:
                     raise RuntimeError("camoufox binding vanished mid-render")
                 return _rendered(job)

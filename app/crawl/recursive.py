@@ -129,7 +129,7 @@ class _RecursiveState:
             index=self.next_index,
             original_url=link.original_url,
             normalized_url=link.normalized_url.raw,
-            domain=link.delay_domain,
+            domain=link.normalized_url.host,
         )
         self.next_index += 1
         return link.depth, task

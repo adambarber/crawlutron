@@ -72,7 +72,7 @@ class TestScheduler:
                 "the worker ran before the domain cooldown was awaited; the "
                 f"recorded sleep requests were {sleeps.delays}"
             )
-            return make_result(ran_job.url, ran_job.domain)
+            return make_result(ran_job.url.raw, ran_job.domain)
 
         # The delivery channel decides the return: with no sink, ``run`` hands
         # back the index-keyed mapping (the docstring's "otherwise" branch). The
@@ -461,7 +461,7 @@ class TestSchedulerPolicies:
             # order is observable without a real sleep.
             if job.index == 0:
                 await release_slow.wait()
-            return make_result(job.url, job.domain)
+            return make_result(job.url.raw, job.domain)
 
         async def _on_result(idx: int, _r) -> None:
             on_result_order.append(idx)
@@ -483,14 +483,16 @@ class TestSchedulerPolicies:
         sched = make_scheduler(global_limit=10, per_domain_limit=10)
 
         async def worker(job: CrawlJob) -> EngineCrawlResult:
-            return make_result(job.url, job.domain)
+            return make_result(job.url.raw, job.domain)
 
         jobs = [make_job(i, f"http://h{i}.example.com/") for i in range(4)]
         ret = await sched.run(jobs, worker, failed_result=engine_envelope)
         assert ret is not None
         # Results are keyed by job index so callers align them with their own job.
         assert sorted(ret) == [0, 1, 2, 3]
-        assert [ret[i].normalized_url for i in sorted(ret)] == [f"http://h{i}.example.com/" for i in range(4)]
+        # Canonical, not the seed text: the job's URL is an admitted value, so the
+        # trailing slash the seed carried is gone by the time it is a job member.
+        assert [ret[i].normalized_url for i in sorted(ret)] == [f"http://h{i}.example.com" for i in range(4)]
 
 
 class TestCooldownPurgeCadence:
@@ -557,7 +559,7 @@ class TestSchedulerResilience:
         async def failing_worker(job: CrawlJob) -> EngineCrawlResult:
             if job.index == 1:
                 raise RuntimeError("transient failure")
-            return make_result(job.url, job.domain)
+            return make_result(job.url.raw, job.domain)
 
         results = await scheduler.run(jobs, failing_worker, failed_result=engine_envelope)
         assert results is not None
@@ -625,7 +627,7 @@ async def test_domain_delay_does_not_block_other_domains(monkeypatch):
         if job.domain == "example.org":
             fast_started.set()
         await yield_to_loop(0)
-        return make_result(job.url, job.domain)
+        return make_result(job.url.raw, job.domain)
 
     jobs = [make_job(0, "http://slow.example.com/"), make_job(1, "http://fast.example.org/")]
     await scheduler.run(jobs, worker, failed_result=engine_envelope)
@@ -743,8 +745,8 @@ class TestSchedulerFailureAccountingIsAboutStatuses:
         # derive. See _terminal_engine_result.
         return _terminal_engine_result(
             TerminalResult(
-                original_url=job.url,
-                normalized_url=job.url,
+                original_url=job.url.raw,
+                normalized_url=job.url.raw,
                 strategy=None,
                 classification=classification,
                 # ``error`` is a taxonomy code, not an optional: production's own

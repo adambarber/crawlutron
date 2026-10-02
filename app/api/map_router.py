@@ -9,10 +9,8 @@ from app.api.map_endpoint import map_site
 from app.api_models import (
     MapRequest,
 )
-from app.api_responses import (
-    CrawlerError,
-    SiteMapResponse,
-)
+from app.models.error_response import ErrorResponse
+from app.models.site_map_response import SiteMapResponse
 
 router = APIRouter(tags=["Crawler"])
 
@@ -27,7 +25,7 @@ router = APIRouter(tags=["Crawler"])
         "the de-duplicated frontier but does not recursively enqueue it; callers own recursion, "
         "dedupe, persistence, and host-policy decisions."
     ),
-    responses={400: {"model": CrawlerError, "description": "Invalid map request."}},
+    responses={400: {"model": ErrorResponse, "description": "Invalid map request."}},
     response_model=SiteMapResponse,
 )
 async def map(

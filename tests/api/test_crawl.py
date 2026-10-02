@@ -286,7 +286,7 @@ class TestDiscoveryAndRenderApi:
                 except Exception as error:
                     return crawl_result_from_exception(
                         error=error,
-                        url=job.url,
+                        url=job.url.raw,
                         domain=job.domain,
                         strategy=BROWSER_HEADLESS,
                         elapsed_ms=0,

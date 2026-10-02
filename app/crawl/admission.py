@@ -155,7 +155,7 @@ def _candidate_stream(
         values = _link_values(link)
         if values is None:
             continue
-        normalized_raw, original, delay_host = values
+        normalized_raw, original = values
         normalized = canonical_page_identity(normalized_raw, host_policy=host_policy)
         if normalized is None or normalized in known:
             continue
@@ -165,12 +165,9 @@ def _candidate_stream(
             continue
         if scope_pattern is not None and not scope_allows(scope_pattern, normalized.raw):
             continue
-        domain = normalized.site
         yield AdmittedLink(
             original_url=original,
             normalized_url=normalized,
-            domain=domain,
-            delay_domain=delay_host or domain,
             depth=next_depth,
         )
 
@@ -179,8 +176,6 @@ def _candidate_stream(
 class AdmittedLink:
     original_url: str
     normalized_url: NormalizedUrl
-    domain: str
-    delay_domain: str
     depth: int
 
 
@@ -203,24 +198,25 @@ class AdmissionOutcome:
     duplicates_skipped: int = 0
 
 
-def _link_values(link: Any) -> tuple[str, str, str | None] | None:
+def _link_values(link: Any) -> tuple[str, str] | None:
+    """The ``(normalized text, original text)`` an extraction record carries.
+
+    The host is deliberately not read. ``DiscoveredLink.host`` is the extractor's
+    own answer, and it disagreed with the admitted URL whenever the two were
+    produced differently -- the crawl-delay key was then a host that had nothing
+    to do with the request it throttled.
+    """
     if isinstance(link, str):
-        return link, link, None
+        return link, link
     if isinstance(link, dict):
         normalized = link.get("normalized_url")
         original = link.get("url")
-        host = link.get("host")
     else:
         normalized = getattr(link, "normalized_url", None)
         original = getattr(link, "url", None)
-        host = getattr(link, "host", None)
     if not _is_url_text(normalized):
         return None
-    return (
-        str(normalized),
-        str(original) if _is_url_text(original) else str(normalized),
-        str(host) if isinstance(host, str) else None,
-    )
+    return (str(normalized), str(original) if _is_url_text(original) else str(normalized))
 
 
 async def admit_discovered_links[T](
@@ -315,7 +311,7 @@ async def admit_discovered_links[T](
             if respect_robots and robots_crawl_delay is not None:
                 delay = await robots_crawl_delay(candidate.normalized_url.raw)
             if delay is not None and delay > 0:
-                commit_crawl_delay(candidate.delay_domain, delay)
+                commit_crawl_delay(candidate.normalized_url.host, delay)
             if candidate.normalized_url.raw in reserved:
                 continue
             capacity = remaining_page_capacity(current_occupied, max_pages)

@@ -262,14 +262,12 @@ class TestAsyncCrawlJobStoreIntegration:
         from app.api_models import (
             CrawlStatus,
         )
-        from app.api_responses import (
-            UnifiedCrawlResponse,
-            UnifiedCrawlResult,
-        )
         from app.constants import (
             CrawlClassification,
         )
         from app.crawl.job_store import JobKind, JobStatus
+        from app.models.unified_crawl_response import UnifiedCrawlResponse
+        from app.models.unified_crawl_result import UnifiedCrawlResult
 
         with single_shot_job() as (store, job):
             # Simulate completion

@@ -18,11 +18,9 @@ from app.api.policy_defaults import BROWSER_FALLBACK_POLICY, DOCUMENT_EXTRACTION
 from app.api_models import (
     CrawlRequest,
 )
-from app.api_responses import (
-    CrawlerError,
-    UnifiedCrawlResponse,
-)
 from app.constants import LARGE_CRAWL_GUIDANCE
+from app.models.error_response import ErrorResponse
+from app.models.unified_crawl_response import UnifiedCrawlResponse
 
 router = APIRouter(tags=["Crawler"])
 
@@ -72,10 +70,10 @@ router = APIRouter(tags=["Crawler"])
     responses={
         200: {"model": UnifiedCrawlResponse, "description": "Successful crawl results (JSON output format)."},
         202: {
-            "model": CrawlerError,
+            "model": ErrorResponse,
             "description": "Accepted for async delivery (async_mode or webhook_url); check status_url.",
         },
-        422: {"model": CrawlerError, "description": "Invalid crawl request or unsupported output format."},
+        422: {"model": ErrorResponse, "description": "Invalid crawl request or unsupported output format."},
     },
     openapi_extra={
         "requestBody": {

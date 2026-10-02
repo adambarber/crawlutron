@@ -77,7 +77,7 @@ class TestEngineCrawlRequest:
 
         async def browser_worker(job):
             return await renderer.render(
-                job.url,
+                job.url.raw,
                 job.options,
                 policy=job.host_policy,
             )

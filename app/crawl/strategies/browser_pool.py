@@ -233,7 +233,7 @@ class PooledBrowserWorker:
         try:
             renderer = await self._pool.acquire()
             try:
-                result = await renderer.render(job.url, job.options, policy=job.host_policy)
+                result = await renderer.render(job.url.raw, job.options, policy=job.host_policy)
                 # The renderer does not know the pool's configured mode, so it
                 # leaves the slot empty; fill it here, at the one boundary that
                 # does, rather than letting the shaper guess a member. The slot
@@ -256,7 +256,7 @@ class PooledBrowserWorker:
             # with retryable=True survives to the frontier layer.
             return crawl_result_from_exception(
                 error=error,
-                url=job.url,
+                url=job.url.raw,
                 domain=job.domain,
                 strategy=strategy,
                 elapsed_ms=int((time.monotonic() - started) * 1000),

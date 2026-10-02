@@ -7,9 +7,7 @@ from fastapi import APIRouter
 from app.api_models import (
     SERVICE_IDENTITY,
 )
-from app.api_responses import (
-    DiscoveryResponse,
-)
+from app.models.discovery_response import DiscoveryResponse
 
 
 def discovery_payload() -> dict[str, Any]:

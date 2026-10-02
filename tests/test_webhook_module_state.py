@@ -84,9 +84,7 @@ def test_build_job_status_handles_single_shot_jobs(tmp_path):
     never written to.
     """
     from app.api.main_helpers import _build_job_status
-    from app.api_responses import (
-        JobStatusResponse,
-    )
+    from app.models.job_status_response import JobStatusResponse
     from tests._job_harnesses import make_job_store
 
     store = make_job_store(tmp_path)

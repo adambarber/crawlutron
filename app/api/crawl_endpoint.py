@@ -30,9 +30,6 @@ from app.api.webhooks import validate_webhook_url_async
 from app.api_models import (
     CrawlRequest,
 )
-from app.api_responses import (
-    UnifiedCrawlResponse,
-)
 from app.crawl.ids import new_request_id
 from app.crawl.job_store import TERMINAL_STATUSES, JobKind, JobStore
 from app.crawl.payload_helpers import checked_payload_urls
@@ -40,6 +37,7 @@ from app.crawl.policy import read_policy
 from app.crawl.result_store import CrawlResultStore
 from app.metrics import get_metrics
 from app.models.host_policy import HostPolicy
+from app.models.unified_crawl_response import UnifiedCrawlResponse
 from app.output_formats import serialize_results
 from app.settings import CrawlerSettings
 

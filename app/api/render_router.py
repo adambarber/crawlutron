@@ -9,11 +9,9 @@ from app.api.render_endpoint import render as render_handler
 from app.api_models import (
     RenderRequest,
 )
-from app.api_responses import (
-    CrawlerError,
-    UnifiedCrawlResponse,
-)
 from app.constants import ROUTER_MODULE_DOC
+from app.models.error_response import ErrorResponse
+from app.models.unified_crawl_response import UnifiedCrawlResponse
 
 __doc__ = f"""``/v1/render`` URL→handler mapping.
 
@@ -27,7 +25,7 @@ router = APIRouter(tags=["Crawler"])
     "/v1/render",
     summary="Render pages with the browser worker",
     description="Browser-render endpoint. Prefer POST /v1/crawl for policy-driven universal crawling.",
-    responses={400: {"model": CrawlerError, "description": "Invalid render request."}},
+    responses={400: {"model": ErrorResponse, "description": "Invalid render request."}},
     response_model=UnifiedCrawlResponse,
 )
 async def render(

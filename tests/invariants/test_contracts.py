@@ -520,7 +520,6 @@ _DOC_REFERENCE_EXCLUSIONS = {
     "CHANGELOG.md": "a record of what shipped; its citations name modules that were refactored away",
     "ADVERSARIAL_REVIEW_BROWSER_CRAWLER.md": "a dated review quoting the tree it reviewed",
     "docs/review-and-refactoring-plan.md": "stamped ARCHIVED; describes a topology that no longer exists",
-    "docs/typing-plan.md": "a snapshot audit whose file references predate a reorganisation, and says so",
 }
 _SKIP_DIRECTORIES = frozenset({".git", ".venv", "work", "node_modules", ".pytest_cache", "__pycache__"})
 
@@ -687,10 +686,9 @@ def test_live_documents_are_derived_not_enumerated():
     """The gate on the gate: coverage must equal the tree.
 
     A document added later has to arrive covered, which is the failure a
-    hand-kept list cannot catch. `docs/typing-plan.md` sat outside the
-    original nine for exactly as long as it had seven dead paths, and
-    nothing said so -- the exclusion set, not the covered set, is what a
-    human maintains now.
+    hand-kept list cannot catch. One audit sat outside the original nine for
+    exactly as long as it had seven dead paths, and nothing said so -- the
+    exclusion set, not the covered set, is what a human maintains now.
     """
     assert set(_live_documents()) | set(_DOC_REFERENCE_EXCLUSIONS) == set(_markdown_documents())
     assert not (stale := set(_DOC_REFERENCE_EXCLUSIONS) - set(_markdown_documents())), stale

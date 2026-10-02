@@ -20,15 +20,13 @@ from app.api_models import (
     JobControlRequest,
     JobCreateRequest,
 )
-from app.api_responses import (
-    CrawlerError,
-    JobCreateResponse,
-    JobListResponse,
-    JobStatusResponse,
-)
 from app.crawl.job_store import JobStatusView
 from app.crawl.payload_helpers import checked_payload_urls
+from app.models.error_response import ErrorResponse
 from app.models.host_policy import HostPolicy
+from app.models.job_create_response import JobCreateResponse
+from app.models.job_list_response import JobListResponse
+from app.models.job_status_response import JobStatusResponse
 
 router = APIRouter(prefix="/v1/jobs", tags=["Crawler"])
 
@@ -57,7 +55,7 @@ def _raise_conflict(message: str) -> NoReturn:
         "Control the job via POST /v1/jobs/{job_id}/control."
     ),
     responses={
-        422: {"model": CrawlerError, "description": "Invalid job request."},
+        422: {"model": ErrorResponse, "description": "Invalid job request."},
     },
 )
 async def create_job(
@@ -106,7 +104,7 @@ async def list_jobs(job_store: JobStoreDep) -> JobListResponse:
         "Return current status, frontier/visited/result counts, stats, and the "
         "persisted cap_truncated signal. Durable URL/depth entries remain internal."
     ),
-    responses={404: {"model": CrawlerError, "description": "Job not found."}},
+    responses={404: {"model": ErrorResponse, "description": "Job not found."}},
 )
 async def get_job(job_id: str, job_store: JobStoreDep) -> JobStatusResponse:
     row = await job_store.astatus(job_id)
@@ -129,9 +127,9 @@ async def get_job(job_id: str, job_store: JobStoreDep) -> JobStatusResponse:
         "job also cancels it."
     ),
     responses={
-        404: {"model": CrawlerError, "description": "Job not found."},
-        409: {"model": CrawlerError, "description": "Action not valid for current job state."},
-        422: {"model": CrawlerError, "description": "Invalid action."},
+        404: {"model": ErrorResponse, "description": "Job not found."},
+        409: {"model": ErrorResponse, "description": "Action not valid for current job state."},
+        422: {"model": ErrorResponse, "description": "Invalid action."},
     },
 )
 async def control_job(
@@ -169,7 +167,7 @@ async def control_job(
     summary="Cancel (if running) and delete a crawl job",
     description="Permanently remove a crawl job and its data. Deleting a running job cancels its runner task "
     "first.",
-    responses={404: {"model": CrawlerError, "description": "Job not found."}},
+    responses={404: {"model": ErrorResponse, "description": "Job not found."}},
 )
 async def delete_job(job_id: str, job_store: JobStoreDep) -> dict[str, str]:
     if job_runner.is_running(job_id):

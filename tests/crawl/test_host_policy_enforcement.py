@@ -147,7 +147,7 @@ async def test_render_request_never_invokes_worker_for_policy_blocked_host():
     rendered = _fake_browser(html="<html></html>", text="rendered")
 
     async def worker(job):
-        calls.append(job.url)
+        calls.append(job.url.raw)
         return rendered(job)
 
     from app.api.render import render_request

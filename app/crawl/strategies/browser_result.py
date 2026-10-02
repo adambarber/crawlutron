@@ -25,7 +25,7 @@ from app.models.crawl_result import CrawlStrategyAttempt
 from app.models.crawl_worker import CrawlWorker
 from app.models.engine_crawl_result import EngineCrawlResult
 from app.models.host_policy import HostPolicy
-from app.models.registrable_domain import registrable_domain
+from app.models.normalized_url import NormalizedUrl
 from app.models.render_options import RenderOptions
 from app.models.taxonomy import CrawlStrategyName
 
@@ -44,11 +44,13 @@ def _browser_options(policy: CrawlPolicy) -> RenderOptions:
     )
 
 
-def _browser_job(normalized_url: str, options: RenderOptions, host_policy: HostPolicy) -> CrawlJob:
+def _browser_job(url: str, options: RenderOptions, host_policy: HostPolicy) -> CrawlJob:
+    # The chain hands this down as TEXT because it came off the durable job
+    # record. Re-prove it here: a ``CrawlJob`` carries an admitted value, and the
+    # browser worker is the first thing that would act on it.
     return CrawlJob(
         index=0,
-        url=normalized_url,
-        domain=registrable_domain(normalized_url),
+        url=NormalizedUrl(url, policy=host_policy),
         options=options,
         host_policy=host_policy,
     )

@@ -9,9 +9,6 @@ from app.api_models import (
     CrawlExtractionMethod,
     CrawlStrategy,
 )
-from app.api_responses import (
-    AgentHintsResponse,
-)
 from app.constants import (
     CFFI_IMPERSONATE_TARGET,
     EXTRACTION_TRAFILATURA,
@@ -19,6 +16,7 @@ from app.constants import (
     LARGE_CRAWL_GUIDANCE,
     SERVICE_ID,
 )
+from app.models.agent_hints_response import AgentHintsResponse
 
 STRATEGY_DESCRIPTIONS = {
     CrawlStrategy.HTTP_DECLARED_CRAWLER: "Direct HTTP using a transparent crawler user agent and caller-approved headers.",  # noqa: E501

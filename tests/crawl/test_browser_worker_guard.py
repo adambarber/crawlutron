@@ -57,13 +57,13 @@ class TestBrowserWorkerGuard:
         the at-least-once layer can re-queue it -- not raise to the scheduler."""
         from app.crawl.strategies.browser_pool import PooledBrowserWorker
         from app.models.crawl_job import CrawlJob
+        from app.models.normalized_url import NormalizedUrl
         from app.models.render_options import RenderOptions
 
         worker = PooledBrowserWorker(ExhaustedPool())
         job = CrawlJob(
             index=0,
-            url="https://a.example/x",
-            domain="a.example",
+            url=NormalizedUrl("https://a.example/x", policy=UNRESTRICTED_HOST_POLICY),
             options=RenderOptions(timeout_seconds=1),
             host_policy=UNRESTRICTED_HOST_POLICY,
         )
@@ -131,7 +131,7 @@ class TestTransientRequeue:
         invocations: list[str] = []
 
         async def browser_worker(job):
-            invocations.append(job.url)
+            invocations.append(job.url.raw)
             return await pooled(job)
 
         payload = {

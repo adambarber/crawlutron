@@ -23,19 +23,9 @@ from typing import Any, TypeVar
 from urllib.parse import urljoin
 
 from app.api_models import (
+    ContentValidators,
     CrawlStatus,
     CrawlStrategy,
-)
-from app.api_responses import (
-    ClassificationEvidence,
-    ContentValidators,
-    PageMetadata,
-    StrategyAttempt,
-    UnifiedCrawlResponse,
-    UnifiedCrawlResult,
-)
-from app.api_responses import (
-    DiscoveredLink as WireDiscoveredLink,
 )
 from app.constants import CrawlClassification
 from app.crawl.llm_format import (
@@ -45,12 +35,18 @@ from app.crawl.llm_format import (
     extract_carried_metadata,
 )
 from app.crawl.result_record import AnyResult, ProducerEnvelope, RenderEnvelope
+from app.models.classification_evidence import ClassificationEvidence
 from app.models.crawl_result import CrawlResult, CrawlStrategyAttempt
 from app.models.discovered_link import DiscoveredLink
+from app.models.discovered_link_response import DiscoveredLinkResponse as WireDiscoveredLink
 from app.models.engine_crawl_result import EngineCrawlResult
 from app.models.host_policy import HostPolicy
 from app.models.normalized_url import NormalizedUrl
+from app.models.page_metadata import PageMetadata
+from app.models.strategy_attempt import StrategyAttempt
 from app.models.taxonomy import CrawlStrategyName
+from app.models.unified_crawl_response import UnifiedCrawlResponse
+from app.models.unified_crawl_result import UnifiedCrawlResult
 from app.validation import safe_public_url_or_none
 
 _logger = logging.getLogger(__name__)

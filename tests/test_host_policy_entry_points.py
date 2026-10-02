@@ -344,7 +344,7 @@ async def _probe_render(monkeypatch, tmp_path):
     effects = _effects()
 
     async def worker(job):
-        effects["worker"].append(job.url)
+        effects["worker"].append(job.url.raw)
         raise AssertionError("blocked render reached the worker")
 
     await _assert_refused(

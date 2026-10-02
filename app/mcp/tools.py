@@ -28,13 +28,11 @@ from app.api_models import (
     RenderRequest,
     SearchRequest,
 )
-from app.api_responses import (
-    SearchResponse,
-    SiteMapResponse,
-    UnifiedCrawlResponse,
-)
 from app.crawl.strategies.browser_pool import get_browser_pool
 from app.json_safe import json_default
+from app.models.search_response import SearchResponse
+from app.models.site_map_response import SiteMapResponse
+from app.models.unified_crawl_response import UnifiedCrawlResponse
 from app.search.endpoint import search as search_endpoint_handler
 
 logger = logging.getLogger(__name__)

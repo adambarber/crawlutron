@@ -61,8 +61,8 @@ def _failed_render_result(job: CrawlJob, exc: BaseException) -> CrawlResult:
     ``_collect`` uses so classification and redaction stay centralized.
     """
     return crawl_result_from_engine_result(
-        failed_result_for(job, exc, url_of=lambda j: j.url),
-        url=job.url,
+        failed_result_for(job, exc, url_of=lambda j: j.url.raw),
+        url=job.url.raw,
     )
 
 
@@ -90,12 +90,10 @@ async def render_request(
 
     for index, url in enumerate(urls):
         normalized = normalize_public_http_url(url, policy=host_policy)
-        domain = normalized.site
         jobs.append(
             CrawlJob(
                 index=index,
-                url=normalized.raw,
-                domain=domain,
+                url=normalized,
                 options=options,
                 host_policy=host_policy,
             )

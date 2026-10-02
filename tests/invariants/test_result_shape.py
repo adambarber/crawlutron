@@ -15,10 +15,8 @@ from typing import get_args
 
 import pytest
 
-from app.api_responses import (
-    UnifiedCrawlResponse,
-)
 from app.crawl.migrations.manifest import LEGACY_COLUMNS, StoreSchema
+from app.models.unified_crawl_response import UnifiedCrawlResponse
 from tests.chokepoint_walks import (
     REPO_ROOT,
     SANCTIONED,
@@ -627,8 +625,8 @@ def test_raw_exception_error_detector_bites():
 # --- A wire model may not silently drop a domain model's field ---------------
 #
 # app/models/taxonomy.py holds the internal dataclasses and the pydantic response models
-# are the ones in app/api_responses.py (app/api_models.py is the caller-supplied
-# side). `DiscoveredLink` is declared in both, with the same seven
+# are the ones under app/models/ (app/api_models.py is the caller-supplied
+# side). `DiscoveredLink` was declared in both -- the wire twin is now
 # field names, and *nothing* connects the two: response_shaping converts
 # generically by attribute, and a strict pydantic response model DROPS any key
 # it does not declare. So adding a field to the dataclass and forgetting the
@@ -644,12 +642,26 @@ def test_raw_exception_error_detector_bites():
 _DOMAIN_MODEL_MODULE = "app/models/taxonomy.py"
 
 
-# The pydantic RESPONSE models, which moved to their own module when the wire
-# surface was split by direction. This constant is the only thing that had to
-# change, and it is a module path rather than a list of class names on purpose:
-# the rule below is written over whatever pair exists, so the split did not
-# require a second edit here or any new class name to be listed.
-_WIRE_MODEL_MODULE = "app/api_responses.py"
+# The pydantic RESPONSE models. They moved out of app/api_models.py and then out
+# of app/api_responses.py, and now live one per file under app/models/, so the
+# wire side is a derived set rather than a path: the rule below is written over
+# whatever pair exists, and deriving the set means a record added tomorrow is
+# covered without a second edit here.
+_WIRE_MODEL_DIR = "app/models"
+
+
+def _wire_tree() -> ast.Module:
+    """Every response model in the package, merged into one comparable tree.
+
+    The rule pairs a domain record with a wire model by class NAME, so merging
+    the declarations loses nothing the rule reads; only the module each came from
+    does, which is what the failure text below names instead.
+    """
+    merged = ast.Module(body=[], type_ignores=[])
+    for path in sorted(REPO_ROOT.glob(f"{_WIRE_MODEL_DIR}/*.py")):
+        merged.body.extend(ast.parse(path.read_text(encoding="utf-8")).body)
+    return merged
+
 
 # The domain side is not one module: a record is a declared key set wherever it
 # is declared. PageMetadata's producer lives with the extractor, not with the
@@ -752,13 +764,12 @@ def _wire_mirror_drift(domain_tree: ast.Module, wire_tree: ast.Module) -> list[s
 def test_wire_models_mirror_every_domain_field():
     """A domain field cannot disappear between the dataclass and the response model."""
     domain_path, domain_tree = file_tree(_DOMAIN_MODEL_MODULE)
-    wire_path, wire_tree = file_tree(_WIRE_MODEL_MODULE)
-    drifted = _wire_mirror_drift(domain_tree, wire_tree)
+    drifted = _wire_mirror_drift(domain_tree, _wire_tree())
     assert not drifted, (
         f"A pydantic response model DROPS every key it does not declare, so a field added to "
-        f"a domain dataclass in {domain_path.name} without a twin in {wire_path.name} does not "
-        f"fail loudly -- it quietly stops existing on the wire. Keep the pair in step, or give "
-        f"them separate names and a deliberate converter: " + "; ".join(drifted)
+        f"a domain dataclass in {domain_path.name} without a twin under {_WIRE_MODEL_DIR}/ does "
+        f"not fail loudly -- it quietly stops existing on the wire. Keep the pair in step, or "
+        f"give them separate names and a deliberate converter: " + "; ".join(drifted)
     )
 
 
@@ -812,17 +823,17 @@ def test_page_metadata_fields_are_produced_by_the_extraction_record():
     fields, which is what a consumer would need anyway.
     """
     domain_path, domain_tree = file_tree(_PRODUCER_RECORD_MODULE)
-    wire_path, wire_tree = file_tree(_WIRE_MODEL_MODULE)
+    wire_tree = _wire_tree()
     assert _paired_names(domain_tree, wire_tree), (
-        f"No declared record in {domain_path.name} shares a name with a response model in "
-        f"{wire_path.name}, so this rule compares nothing and passes. That is the failure this "
-        f"rule exists to catch: PageMetadata's producer was an undeclared dict, which left the "
-        f"pair absent rather than equal. Declare the extractor's output as a record that keeps "
-        f"the wire model's name."
+        f"No declared record in {domain_path.name} shares a name with a response model under "
+        f"{_WIRE_MODEL_DIR}/, so this rule compares nothing and passes. That is the failure "
+        f"this rule exists to catch: PageMetadata's producer was an undeclared dict, which left "
+        f"the pair absent rather than equal. Declare the extractor's output as a record that "
+        f"keeps the wire model's name."
     )
     drifted = _wire_mirror_drift(domain_tree, wire_tree)
     assert not drifted, (
-        f"The extractor's record and {wire_path.name} disagree about PageMetadata's key set. "
+        f"The extractor's record and the response models under {_WIRE_MODEL_DIR}/ disagree about "
         f"A field declared on the wire and filled by nothing is always None on the wire -- a "
         f"promise the model cannot keep -- so delete it or teach {domain_path.name} to fill it. A "
         f"field the extractor fills and the model does not declare is dropped at the splat. "
@@ -906,7 +917,7 @@ def _undeclared_advertised_keys(
 ) -> list[str]:
     """Advertised payload keys the response model does not declare."""
     model = next((n for n in wire_tree.body if isinstance(n, ast.ClassDef) and n.name == model_name), None)
-    assert model is not None, f"{model_name} not found in {_WIRE_MODEL_MODULE}"
+    assert model is not None, f"{model_name} not found under {_WIRE_MODEL_DIR}/"
     declared = set(_declared_fields(model))
     return [
         f"advertised key {key!r} is dropped by {model_name}"
@@ -920,8 +931,7 @@ def test_every_advertised_payload_key_is_declared_on_its_response_model(
 ):
     """An advertised key that the response model does not declare is dropped on the wire."""
     _, payload_tree = file_tree(payload_module)
-    _, wire_tree = file_tree(_WIRE_MODEL_MODULE)
-    dropped = _undeclared_advertised_keys(payload_tree, wire_tree, function_name, model_name)
+    dropped = _undeclared_advertised_keys(payload_tree, _wire_tree(), function_name, model_name)
     assert not dropped, (
         f"{function_name} advertises keys that {model_name} does not declare, and "
         f"response_model={model_name} silently filters every undeclared key -- so they reach "

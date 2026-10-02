@@ -19,14 +19,12 @@ from app.api.response_shaping import arender_response_from_result
 from app.api_models import (
     RenderRequest,
 )
-from app.api_responses import (
-    UnifiedCrawlResponse,
-)
 from app.crawl.strategies.browser_pool import (
     BrowserPoolExhaustedError,
     PooledBrowserWorker,
     get_browser_pool,
 )
+from app.models.unified_crawl_response import UnifiedCrawlResponse
 from app.settings import CrawlerSettings
 
 logger = logging.getLogger(__name__)

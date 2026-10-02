@@ -29,13 +29,15 @@ _EnvelopeJob = TypeVar("_EnvelopeJob", CrawlJob, CrawlTask)
 
 
 def _job_url(job: CrawlJob | CrawlTask) -> str:
-    """The reporting URL, whichever of the two job shapes carries it.
+    """The reporting URL as TEXT, whichever of the two job shapes carries it.
 
     ``ScheduledJob`` deliberately has no URL member: the two shapes name it
     differently, so reading it is the pipeline boundary's job, not the
-    scheduler's.
+    scheduler's. A ``CrawlJob`` holds the admitted value rather than a string.
     """
-    return job.original_url if isinstance(job, CrawlTask) else job.url
+    if isinstance(job, CrawlTask):
+        return job.original_url
+    return job.url.raw
 
 
 # The three knobs a scheduling test always wants and no scheduling test ever

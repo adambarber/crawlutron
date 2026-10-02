@@ -4,16 +4,19 @@ Both set silently ignored url; neither failed downstream in _payload_urls.
 Fail fast at the model boundary instead.
 """
 
+import importlib
 import inspect
+import pkgutil
 import textwrap
 import typing
+from types import ModuleType
 
 import httpx
 import pytest
 from httpx import AsyncClient
 from pydantic import BaseModel, ValidationError
 
-from app import api_models, api_responses
+from app import api_models
 from app.api_models import MAX_BROWSER_ACTIONS, CrawlRequest, CrawlStrategy, RenderRequest
 from app.constants import (
     ACTIONS_REQUIRING_SELECTOR,
@@ -79,20 +82,24 @@ _BOUND_REQUEST_BODIES = (
 )
 
 
-#: Both wire-model modules. The output half of the split moved to
-#: ``app.api_responses``, and a walk that only looks at ``app.api_models`` no
-#: longer sees a single response model -- which is what the response-side tests
-#: below were written to cover. The set is a list of modules rather than a list
-#: of class names so a model is covered the day it is written, and a module
-#: added to the split is covered by editing one line.
-_WIRE_MODEL_MODULES = (api_models, api_responses)
+#: Both wire-model homes. The output half moved out of ``app.api_models`` and now
+#: lives in ``app.models``, one record per file, so a walk that only reads
+#: ``app.api_models`` sees no response model at all -- which is what the
+#: response-side tests below were written to cover. The set is derived from the
+#: package so a model is covered the day its file is written.
+def _wire_model_modules() -> tuple[ModuleType, ...]:
+    package = importlib.import_module("app.models")
+    return (
+        api_models,
+        *(importlib.import_module(f"app.models.{m.name}") for m in pkgutil.iter_modules(package.__path__)),
+    )
 
 
 def _declared_models() -> dict[str, type[BaseModel]]:
-    """Every request/response model the wire layer declares, across both modules."""
+    """Every request/response model the wire layer declares, across both homes."""
     return {
         name: obj
-        for module in _WIRE_MODEL_MODULES
+        for module in _wire_model_modules()
         for name, obj in vars(module).items()
         if inspect.isclass(obj)
         and issubclass(obj, BaseModel)

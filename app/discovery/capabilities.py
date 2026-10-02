@@ -10,9 +10,6 @@ from app.api_models import (
     CrawlExtractionMethod,
     CrawlStrategy,
 )
-from app.api_responses import (
-    CapabilitiesResponse,
-)
 from app.constants import (
     DEFAULT_CHALLENGE_WAIT_SECONDS,
     DEFAULT_MAX_DISCOVERED_LINKS,
@@ -20,6 +17,7 @@ from app.constants import (
     LARGE_CRAWL_GUIDANCE,
     CrawlClassification,
 )
+from app.models.capabilities_response import CapabilitiesResponse
 from app.search import active_search_provider_name, configured_search_providers
 from app.settings import CrawlerSettings
 

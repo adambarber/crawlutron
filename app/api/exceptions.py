@@ -1,4 +1,4 @@
-"""Exception handlers that normalize all errors to the ``CrawlerError`` shape.
+"""Exception handlers that normalize all errors to the ``ErrorResponse`` shape.
 
 Extracted from ``app/main.py`` so the FastAPI app factory stays thin.
 """
@@ -75,7 +75,7 @@ def browser_pool_unavailable(message: str | None = None) -> HTTPException:
 
 
 async def validation_exception_handler(request: Request, exc: Exception) -> JSONResponse:
-    """Standardize on the ``CrawlerError`` shape and strip pydantic internals.
+    """Standardize on the ``ErrorResponse`` shape and strip pydantic internals.
 
     The parameter is typed ``Exception`` (Starlette's handler contract is
     contravariant: a handler registered for a base type must accept any

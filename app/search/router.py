@@ -8,11 +8,9 @@ from app.api.dependencies import get_settings
 from app.api_models import (
     SearchRequest,
 )
-from app.api_responses import (
-    CrawlerError,
-    SearchResponse,
-)
 from app.constants import ROUTER_MODULE_DOC
+from app.models.error_response import ErrorResponse
+from app.models.search_response import SearchResponse
 from app.search.endpoint import search as search_handler
 
 __doc__ = f"""``/v1/search`` URL→handler mapping.
@@ -37,9 +35,9 @@ router = APIRouter(tags=["Search"])
     ),
     responses={
         200: {"model": SearchResponse, "description": "Search results (JSON)."},
-        422: {"model": CrawlerError, "description": "Invalid search request."},
-        502: {"model": CrawlerError, "description": "The search provider returned an error."},
-        503: {"model": CrawlerError, "description": "The selected search provider is not configured."},
+        422: {"model": ErrorResponse, "description": "Invalid search request."},
+        502: {"model": ErrorResponse, "description": "The search provider returned an error."},
+        503: {"model": ErrorResponse, "description": "The selected search provider is not configured."},
     },
 )
 async def search(
