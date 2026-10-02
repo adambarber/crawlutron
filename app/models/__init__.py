@@ -26,7 +26,14 @@ Consequences worth knowing before adding to this package:
   name crossing one, and ``tests/private_import_ledger.py`` treats that as a
   violation. Helpers stay private to their own file; declarations are named for
   what they declare.
-- Two files may not hold the same declaration, and ``tests/invariants/
-  test_public_surface.py`` enforces that a module here is named for the type it
-  holds.
+- A module holding exactly one declaration is named for it, modulo a trailing
+  ``Error``. A module holding several is named for the family -- ``crawl_worker.py``
+  holds the sync and async forms of one worker -- and both are enforced by
+  ``tests/invariants/test_public_surface.py``: one declaration in two files fails
+  as its own offence, because that is the drift this split was for and nothing
+  else here would notice it.
+- Nothing may be re-exported from this file, and
+  ``test_models_package_reexports_nothing`` is why the docstring is the only thing
+  here: an import would make a type findable from anywhere, which is the thing the
+  one-home rule exists to prevent.
 """
