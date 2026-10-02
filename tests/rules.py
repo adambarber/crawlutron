@@ -224,7 +224,9 @@ class Rule:
     skip: frozenset[str] = frozenset()
     kwargs_for: Callable[[str], dict[str, object]] | None = None
     proof_path: pathlib.Path = _SYNTHETIC
-    scope: Callable[[frozenset[str]], Sequence[tuple[pathlib.Path, ast.Module]]] | None = None
+    #: What a detector may legitimately inspect is passed as ``(*, exclude)``, so the
+    #: ``...`` is load-bearing: a positional reading rejected every scope in the tree.
+    scope: Callable[..., Iterable[tuple[pathlib.Path, ast.Module]]] | None = None
 
     def __post_init__(self) -> None:
         self._require_a_path_halved_proof()
@@ -243,7 +245,7 @@ class Rule:
         caller can answer. What a caller CAN state is which path it proved, and that
         is the fact worth holding them to.
         """
-        placed = {proof.at for proof in self.proofs() if getattr(proof, "at", None)}
+        placed = {proof.at for proof in self.proofs() if not isinstance(proof, str) and proof.at}
         if not placed:
             return
         elsewhere = {self._where(item) for item in self._clean_items() if isinstance(item, Silent)}
@@ -263,8 +265,15 @@ class Rule:
         call site, because the two call sites -- :meth:`scan` and the registry's
         combined sweep -- are exactly where a scope would be honoured by one and
         dropped by the other.
+
+        The tuple is built here rather than trusted from the scope, because a
+        scope is free to return a generator and the reason this is a tuple at
+        all is the snapshot: a caller that holds one re-reads the same trees
+        even if the files move underneath it. Converting at this boundary is
+        what makes that true for every scope instead of the ones that happen to
+        cooperate.
         """
-        return (self.scope or app_trees)(exclude=self.excludes)
+        return tuple((self.scope or app_trees)(exclude=self.excludes))
 
     def _run(self, tree: ast.Module, path: pathlib.Path) -> list[str]:
         """Apply the rule's per-module parameters, then the detector."""
@@ -337,7 +346,7 @@ class Rule:
         """
         return tuple(item for item in self._clean_items() if isinstance(item, str))
 
-    def _clean_items(self) -> tuple:
+    def _clean_items(self) -> tuple[str | Silent | Bites | Trips, ...]:
         """``clean``'s declared items. It is a thunk, so it is called here.
 
         Flattened once so both consumers -- the lookalike half and the
