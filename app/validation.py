@@ -3,35 +3,15 @@ from __future__ import annotations
 import logging
 import math
 import os
-import sys
 from collections.abc import Callable, Mapping
-from contextlib import suppress
 from functools import lru_cache, partial
-from importlib import import_module
-from typing import Protocol, cast
 from urllib.parse import parse_qsl, urlencode, urljoin, urlparse, urlunparse
 
 from app.addresses import AddressClass, classify
 from app.models.host_policy import HostPolicy, host_policy_reason
 from app.models.normalized_url import NormalizedUrl
 
-
-class _PublicSuffixDataset(Protocol):
-    def privatesuffix(self, domain: str) -> str | None: ...
-
-
 PRIVATE_HOSTS = {"localhost", "host.docker.internal"}
-TWO_PART_PUBLIC_SUFFIXES = {"co.uk", "org.uk", "ac.uk", "gov.uk", "com.au", "net.au", "org.au"}
-
-
-# Lazily-initialised public-suffix list. ``publicsuffixlist`` is an optional
-# dependency, and importing it (and building the table) is only worth paying
-# for when a URL actually needs its suffix resolved. ``_PSL_UNSET`` is the
-# sentinel that keeps "never attempted" distinct from "attempted and
-# unavailable" -- the accessor must keep trying in the first case and must
-# never re-attempt in the second, so a plain ``None`` cannot serve both.
-_PSL_UNSET = None
-_PSL: _PublicSuffixDataset | None = _PSL_UNSET
 
 # Attribution/tracking query parameters that carry no content-identity
 # information. Dropping them lets URLs that differ only by UTM/tracking tags
@@ -430,53 +410,6 @@ get_env_int = partial(get_mapping_int, os.environ)
 get_env_float = partial(get_mapping_float, os.environ)
 
 
-def _public_suffix_list():
-    """Lazily load the real public-suffix dataset, None when absent.
-
-    The publicsuffixlist package ships a snapshot .dat (no runtime network).
-    Cached on first use; any failure falls back to the heuristic below so
-    the service never fails to import or gate without the dataset.
-    """
-    global _PSL
-    # Read through the module object (not the bare name) so a caller that
-    # deletes the module attribute -- the test seam for "dataset was never
-    # loaded" -- is treated as uninitialised rather than raising NameError.
-    if getattr(sys.modules[__name__], "_PSL", _PSL_UNSET) is not _PSL_UNSET:
-        return _PSL
-    try:
-        _PSL = cast(_PublicSuffixDataset, import_module("publicsuffixlist").PublicSuffixList())
-    except Exception:
-        _PSL = None
-    return _PSL
-
-
-def _heuristic_registrable_domain(host: str) -> str:
-    """Fallback used only when the PSL dataset is unavailable."""
-    labels = host.split(".")
-    if len(labels) <= 2:
-        return host
-    suffix = ".".join(labels[-2:])
-    if suffix in TWO_PART_PUBLIC_SUFFIXES and len(labels) >= 3:
-        return ".".join(labels[-3:])
-    return ".".join(labels[-2:])
-
-
-def registrable_domain(url: str) -> str:
-    parsed = urlparse(url)
-    host = (parsed.hostname or url).lower().rstrip(".")
-    try:
-        ascii_host = host.encode("idna").decode("ascii")
-    except Exception:
-        ascii_host = host
-    psl = _public_suffix_list()
-    if psl is not None:
-        with suppress(Exception):
-            registrable = psl.privatesuffix(ascii_host)
-            if registrable:
-                return registrable
-    return _heuristic_registrable_domain(host)
-
-
 def public_url_or_none(
     raw: str | None,
     *,
@@ -562,7 +495,6 @@ def safe_public_url_or_none(raw: str | None, *, policy: HostPolicy) -> Normalize
 
 __all__ = [
     "PRIVATE_HOSTS",
-    "TWO_PART_PUBLIC_SUFFIXES",
     "allow_private_targets",
     "filter_js_endpoints",
     "get_env_float",
@@ -575,6 +507,5 @@ __all__ = [
     "parse_bool_env",
     "parse_bool_value",
     "public_url_or_none",
-    "registrable_domain",
     "safe_public_url_or_none",
 ]

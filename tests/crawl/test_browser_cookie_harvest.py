@@ -12,7 +12,7 @@ from contextlib import contextmanager
 from app.crawl.strategies import browser as browser_mod
 from app.crawl.strategies.browser import BrowserRenderer
 from app.crawl.strategies.browser_driver import BrowserDriver
-from app.validation import registrable_domain
+from app.models.registrable_domain import registrable_domain
 from tests._browser_doubles import BrowserFakePage, FakeBrowserDriver, ScriptedPage, build_pinned_renderer
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY
 

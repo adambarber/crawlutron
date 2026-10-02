@@ -25,9 +25,9 @@ from app.models.crawl_result import CrawlStrategyAttempt
 from app.models.crawl_worker import CrawlWorker
 from app.models.engine_crawl_result import EngineCrawlResult
 from app.models.host_policy import HostPolicy
+from app.models.registrable_domain import registrable_domain
 from app.models.render_options import RenderOptions
 from app.models.taxonomy import CrawlStrategyName
-from app.validation import registrable_domain
 
 
 def _browser_options(policy: CrawlPolicy) -> RenderOptions:

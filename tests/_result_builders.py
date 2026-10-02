@@ -8,9 +8,10 @@ from app.models.crawl_job import CrawlJob
 from app.models.crawl_result import CrawlResult, CrawlStrategyAttempt
 from app.models.discovered_link import DiscoveredLink
 from app.models.engine_crawl_result import EngineCrawlResult
+from app.models.registrable_domain import registrable_domain
 from app.models.render_options import RenderOptions
 from app.models.taxonomy import Classification, CrawlError, CrawlStrategyName
-from app.validation import registrable_domain, safe_public_url_or_none
+from app.validation import safe_public_url_or_none
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY
 
 

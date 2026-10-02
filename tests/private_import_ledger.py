@@ -597,6 +597,7 @@ DECLARED: dict[str, Declaration] = {
         "Not yet triaged.\n",
         ["test"],
     ),
+    "app.models.registrable_domain._PSL": _d(_CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]),
     "app.output_formats._default": _d(
         "unreviewed",
         "Not yet triaged.\n",
@@ -644,7 +645,6 @@ DECLARED: dict[str, Declaration] = {
         "Not yet triaged.\n",
         ["test"],
     ),
-    "app.validation._PSL": _d(_CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]),
     "app.validation._host_is_public": _d(
         "unreviewed",
         "Not yet triaged.\n",

@@ -21,9 +21,10 @@ from app.crawl.scope_match import scope_allows
 from app.crawl.strategies.fetchers import default_http_fetcher
 from app.models.host_policy import HostPolicy
 from app.models.normalized_url import NormalizedUrl
+from app.models.registrable_domain import registrable_domain
 from app.safe_regex import BoundedPattern, UnsafePattern, compile_untrusted
 from app.scheduler import DomainScheduler
-from app.validation import registrable_domain, safe_public_url_or_none
+from app.validation import safe_public_url_or_none
 
 _logger = logging.getLogger(__name__)
 

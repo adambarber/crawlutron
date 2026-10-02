@@ -124,25 +124,23 @@ class TestPolicyValidation:
         # absent (import safety), even though correctness needs the PSL.
         import sys
 
-        import app.validation as validation
+        import app.models.registrable_domain as suffix_module
 
-        # NOTE: the loader caches into module-global _PSL (including the
-        # failed None). monkeypatch.delattr cannot restore a never-existing
-        # attribute, so save/restore explicitly -- otherwise the cached None
-        # poisons every later PSL test in the session (order-dependent).
-        had_psl = "_PSL" in vars(validation)
-        old_psl = vars(validation).get("_PSL")
+        # NOTE: the loader caches the failed None and monkeypatch cannot restore a
+        # never-existing attribute, so save/restore or the cache poisons later tests.
+        had_psl = "_PSL" in vars(suffix_module)
+        old_psl = vars(suffix_module).get("_PSL")
         try:
             monkeypatch.setitem(sys.modules, "publicsuffixlist", None)
             if had_psl:
-                monkeypatch.delattr(validation, "_PSL")
-            assert validation.registrable_domain("https://a.b.example.co.uk/x") == "example.co.uk"
-            assert validation.registrable_domain("https://a.b.c.example.com/x") == "example.com"
+                monkeypatch.delattr(suffix_module, "_PSL")
+            assert registrable_domain("https://a.b.example.co.uk/x") == "example.co.uk"
+            assert registrable_domain("https://a.b.c.example.com/x") == "example.com"
         finally:
             if had_psl:
-                validation._PSL = old_psl
+                suffix_module._PSL = old_psl
             else:
-                vars(validation).pop("_PSL", None)
+                vars(suffix_module).pop("_PSL", None)
 
 
 class TestPublicUrlOrNone:

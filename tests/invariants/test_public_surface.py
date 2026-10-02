@@ -94,7 +94,7 @@ _PUBLIC_SURFACE_PROPERTY = Property(
 # reachable only through the endpoint that has the matching envelope.
 _OWNER_PUBLIC_SURFACE_RATCHET = {
     "app/crawl/admission.py": (20, 14),
-    "app/validation.py": (16, 12),
+    "app/validation.py": (14, 11),
     "app/api/response_shaping.py": (11, 10),
     "app/crawl/sqlite_store.py": (9, 7),
     "app/safe_regex.py": (7, 2),
@@ -313,13 +313,17 @@ def _models_home_offenders(root: pathlib.Path = _MODELS_ROOT) -> list[str]:
         if path.name == "__init__.py":
             continue
         declared_types = _declared_types(ast.parse(path.read_text(encoding="utf-8")))
-        sole = len(declared_types) == 1 and path.name not in _MODELS_CONCERN_MODULES
-        for declared in sorted(declared_types):
+        # A private class is not a name a reader goes looking up, for the same reason
+        # a module constant is not; only public declarations pick the module's name.
+        public_types = {name for name in declared_types if not name.startswith("_")}
+        sole = len(public_types) == 1 and path.name not in _MODELS_CONCERN_MODULES
+        for declared in sorted(public_types):
             if sole and _home_module(declared) != path.name:
                 offenders.append(
                     f"{declared} lives in {path.name}; a reader looking up {declared} opens"
                     f" {_home_module(declared)}"
                 )
+        for declared in sorted(declared_types):
             if declared in homes:
                 offenders.append(f"{declared} is declared in both {homes[declared]} and {path.name}")
             homes[declared] = path.name
