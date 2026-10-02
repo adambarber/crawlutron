@@ -3,14 +3,13 @@
 import asyncio
 import threading
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from pydantic import ValidationError
 
-import app.crawl.strategies.browser as browser_mod
 from app.api_models import CrawlPolicy
-from app.crawl.strategies.browser import BrowserRenderer, _make_ssrf_route_handler
+from app.crawl.strategies.browser import BrowserRenderer, make_ssrf_route_handler
 from app.crawl.strategies.browser_driver import BrowserDriver
 from tests._browser_doubles import (
     BrowserFakePage,
@@ -63,7 +62,6 @@ async def test_ssrf_route_handler_pins_safe_subresource(monkeypatch):
     """Safe subresource requests should be pinned to validated IP and continued
     with the pinned URL and original Host header."""
     route = await run_route_with_pinner(
-        monkeypatch,
         "http://example.com/path",
         pinned=("http://1.2.3.4:80/path", {"Host": "example.com"}),
     )
@@ -76,7 +74,6 @@ async def test_ssrf_route_handler_pins_safe_subresource(monkeypatch):
 async def test_ssrf_route_handler_aborts_unsafe_subresource(monkeypatch):
     """Unsafe subresource requests (resolving to private IP) should be aborted."""
     route = await run_route_with_pinner(
-        monkeypatch,
         "http://127.0.0.1:9/",
         raises=ValueError("SSRF protection: hostname resolves to private IP"),
     )
@@ -84,10 +81,10 @@ async def test_ssrf_route_handler_aborts_unsafe_subresource(monkeypatch):
     assert route.decision == "abort"
 
 
-async def test_ssrf_route_handler_runs_build_pinned_request_in_thread_pool(monkeypatch):
-    """The route handler should run _build_pinned_request via asyncio.to_thread
+async def test_ssrf_route_handler_runs_build_pinned_request_in_thread_pool():
+    """The route handler should run build_pinned_request via asyncio.to_thread
     to avoid blocking the event loop with synchronous DNS lookups."""
-    route, ran_off_loop = await run_blocking_document_route(monkeypatch, browser_mod)
+    route, ran_off_loop = await run_blocking_document_route()
 
     assert_continued(route, url="http://1.2.3.4:80/")
     assert ran_off_loop
@@ -96,8 +93,7 @@ async def test_ssrf_route_handler_runs_build_pinned_request_in_thread_pool(monke
 async def test_ssrf_route_handler_concurrent_pinning_dont_block(monkeypatch):
     """Multiple concurrent pinning operations must not block each other."""
     resolver = _BlockingResolver(parties=5, timeout=HANG_GUARD_SECONDS)
-    monkeypatch.setattr(browser_mod, "_build_pinned_request", resolver.build)
-    handler = _make_ssrf_route_handler(policy=UNRESTRICTED_HOST_POLICY)
+    handler = make_ssrf_route_handler(policy=UNRESTRICTED_HOST_POLICY, pin=resolver.build)
 
     routes = [FakeRoute() for _ in range(5)]
     await asyncio.gather(
@@ -117,12 +113,11 @@ async def test_ssrf_route_handler_concurrent_pinning_dont_block(monkeypatch):
 
 async def test_ssrf_route_handler_fails_closed_on_unexpected_errors(monkeypatch):
     """Non-ValueError resolver failures (DNS timeout etc.) must abort, not pass."""
-    handler = _make_ssrf_route_handler(policy=UNRESTRICTED_HOST_POLICY)
 
     def boom(url, headers, *, policy):
         raise TimeoutError("dns lookup timed out")
 
-    monkeypatch.setattr(browser_mod, "_build_pinned_request", boom)
+    handler = make_ssrf_route_handler(policy=UNRESTRICTED_HOST_POLICY, pin=boom)
 
     route = FakeRoute()
     await handler(route, FakeRequest("http://example.com/", "document"))
@@ -140,11 +135,11 @@ async def test_ssrf_route_handler_allows_non_network_schemes():
 
 async def test_ws_guard_closes_internal_targets(monkeypatch):
     """WebSocket upgrades to private hosts are closed; public ones pass."""
-    from app.crawl.strategies.browser import _make_ssrf_websocket_handler
+    from app.crawl.strategies.browser import make_ssrf_websocket_handler
     from tests._assertions import block_private_targets
 
     block_private_targets(monkeypatch)
-    handler = _make_ssrf_websocket_handler(policy=UNRESTRICTED_HOST_POLICY)
+    handler = make_ssrf_websocket_handler(policy=UNRESTRICTED_HOST_POLICY)
 
     class Ws:
         def __init__(self, url):
@@ -209,19 +204,17 @@ async def test_image_blocked_by_default_unless_screenshot():
 
     # Screenshot explicitly requested -> continue (renders need images/fonts)
     route = FakeRoute()
-    with patch.object(browser_mod, "_build_pinned_request", return_value=("http://1.2.3.4/", {})):
-        await ssrf_route_handler(include_screenshot=True)(
-            route, FakeRequest("https://x.test/logo.png", "image")
-        )
+    await ssrf_route_handler(
+        include_screenshot=True, pin=lambda url, headers, *, policy: ("http://1.2.3.4/", {})
+    )(route, FakeRequest("https://x.test/logo.png", "image"))
     assert route.decision == "continue"
 
 
 async def test_document_always_continues_with_pinned_url():
     route = FakeRoute()
-    with patch.object(
-        browser_mod, "_build_pinned_request", return_value=("http://1.2.3.4/", {"Host": "x.test"})
-    ):
-        await ssrf_route_handler()(route, FakeRequest("http://x.test/page", "document"))
+    await ssrf_route_handler(pin=lambda url, headers, *, policy: ("http://1.2.3.4/", {"Host": "x.test"}))(
+        route, FakeRequest("http://x.test/page", "document")
+    )
     assert route.decision == "continue"
     assert route.actions[-1][1]["url"] == "http://1.2.3.4/"
 

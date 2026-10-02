@@ -3,6 +3,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Any, Protocol
 
+from app.constants import ResultStatus
 from app.crawl.strategies.browser import BrowserRenderer
 from app.crawl.strategies.browser_pool import (
     BROWSER_POOL_ACQUIRE_TIMEOUT_SECONDS,
@@ -327,6 +328,17 @@ async def _never_pdf(url):
     return False
 
 
+def _always_success(classification: str) -> ResultStatus:
+    """Every page these renderers fetch classifies as rendered.
+
+    The real resolver maps a classification to the status the result carries; a
+    test about the render rather than the taxonomy would otherwise re-derive that
+    mapping, and a literal is the whole of what it needs.
+    """
+    del classification
+    return "success"
+
+
 def build_pinned_renderer(page, monkeypatch=None, **overrides):
     """A renderer whose page work is a fake driver and whose output is fixed.
 
@@ -341,12 +353,9 @@ def build_pinned_renderer(page, monkeypatch=None, **overrides):
         driver=overrides.pop("driver", None) or FakeBrowserDriver(page),
         extract=overrides.pop("extract", _static_extraction),
         looks_like_pdf=overrides.pop("looks_like_pdf", _never_pdf),
+        status_for=overrides.pop("status_for", _always_success),
         **overrides,
     )
-    if monkeypatch is not None:
-        from app.crawl.strategies import browser as browser_module
-
-        monkeypatch.setattr(browser_module, "status_for_classification", lambda c: "success")
     return renderer
 
 
@@ -361,7 +370,7 @@ PINNED_PUBLIC_IP = ("http://1.2.3.4:80/", {"Host": "example.com"})
 def stub_pinned_request(pinned: tuple[str, dict[str, str]] = PINNED_PUBLIC_IP):
     """A stand-in for the off-loop pin entry, shaped like the real binding.
 
-    ``_build_pinned_request_async`` is a binding produced by ``_off_loop``, not a
+    ``build_pinned_request_async`` is a binding produced by ``_off_loop``, not a
     ``def``, so an arrangement that replaces it has to supply a coroutine function
     or the call site stops being awaitable. Returning one built here -- rather
     than a ``lambda`` at each site -- is what lets the rendered-URL tests keep
@@ -383,11 +392,9 @@ def pinned_page_renderer(monkeypatch, page=None, *, pinned=PINNED_PUBLIC_IP):
     different one -- one that never returns from ``goto``, one that landed on
     loopback -- in which case it passes its own.
     """
-    import app.crawl.strategies.browser as browser_mod
 
     page = BrowserFakePage() if page is None else page
-    renderer = build_pinned_renderer(page, monkeypatch)
-    monkeypatch.setattr(browser_mod, "_build_pinned_request_async", stub_pinned_request(pinned))
+    renderer = build_pinned_renderer(page, pin=stub_pinned_request(pinned))
     return page, renderer
 
 
@@ -481,21 +488,23 @@ __all__ = [
 ]
 
 
-def ssrf_route_handler(resource_mode=None, *, include_screenshot: bool = False):
+def ssrf_route_handler(resource_mode=None, *, include_screenshot: bool = False, pin=None):
     """The production SSRF route handler, over the unrestricted test policy.
 
     The policy argument is the only difference between this and calling
-    ``_make_ssrf_route_handler`` directly, and it is the difference that keeps
+    ``make_ssrf_route_handler`` directly, and it is the difference that keeps
     these tests about the blocklist rather than about the guard: a test that
     wants the guard's own verdict builds its own handler and calls it directly.
     """
-    from app.crawl.strategies.browser import _make_ssrf_route_handler
+    from app.crawl.strategies.browser import make_ssrf_route_handler
+    from app.crawl.strategies.pinned_transport import build_pinned_request
     from tests._policy_factories import UNRESTRICTED_HOST_POLICY
 
-    return _make_ssrf_route_handler(
+    return make_ssrf_route_handler(
         resource_mode,
         include_screenshot=include_screenshot,
         policy=UNRESTRICTED_HOST_POLICY,
+        pin=pin or build_pinned_request,
     )
 
 
@@ -534,11 +543,11 @@ async def assert_route_decision(
         assert route.decision == decision, f"expected {decision} for {url}, got {route.decision}"
 
 
-async def run_route_with_pinner(monkeypatch, url, *, pinned=None, raises=None, resource_type="document"):
-    """Run the SSRF route handler over one request with ``_build_pinned_request`` stubbed.
+async def run_route_with_pinner(url, *, pinned=None, raises=None, resource_type="document"):
+    """Run the SSRF route handler over one request with a stubbed pin rule.
 
     The pinner is a seam the handler reaches through ``asyncio.to_thread``, so a
-    test about the guard's *verdict* replaces it rather than resolving a real
+    test about the guard's *verdict* substitutes it rather than resolving a real
     host. ``pinned`` is what the stub returns and ``raises`` is what it raises
     instead; supplying neither pins to the request's own URL with no header
     overrides, which is the shape the https/no-Host-override case needs.
@@ -548,8 +557,6 @@ async def run_route_with_pinner(monkeypatch, url, *, pinned=None, raises=None, r
     and because a helper that returned only the verdict would force every caller
     to re-derive the route object to assert the rest.
     """
-    import app.crawl.strategies.browser as browser_mod
-
     if raises is not None:
 
         def pin(url, headers, *, policy):
@@ -561,9 +568,8 @@ async def run_route_with_pinner(monkeypatch, url, *, pinned=None, raises=None, r
         def pin(url, headers, *, policy):
             return outcome
 
-    monkeypatch.setattr(browser_mod, "_build_pinned_request", pin)
     route = FakeRoute()
-    await ssrf_route_handler()(route, FakeRequest(url, resource_type))
+    await ssrf_route_handler(pin=pin)(route, FakeRequest(url, resource_type))
     return route
 
 
@@ -648,15 +654,22 @@ def response_handler_double(url: str, payload=None, error=None):
     return collected, handler, FakeResponse()
 
 
-async def run_blocking_document_route(monkeypatch, browser_module):
+async def run_blocking_document_route():
+    """Drive one document route through the handler and report the resolver thread.
+
+    The pin records the thread it ran on, which is the property: a synchronous
+    resolve that runs inline stalls every other crawl in the process for the length
+    of a DNS lookup.
+    """
     import threading
 
-    from app.crawl.strategies.browser import _make_ssrf_route_handler
+    from app.crawl.strategies.browser import make_ssrf_route_handler
     from tests._policy_factories import UNRESTRICTED_HOST_POLICY
 
     thread_ids: list[int] = []
-    monkeypatch.setattr(browser_module, "_build_pinned_request", blocking_pinned_request(thread_ids))
-    handler = _make_ssrf_route_handler(policy=UNRESTRICTED_HOST_POLICY)
+    handler = make_ssrf_route_handler(
+        policy=UNRESTRICTED_HOST_POLICY, pin=blocking_pinned_request(thread_ids)
+    )
     route = FakeRoute()
     await handler(route, FakeRequest("http://example.com/", "document"))
     ran_off_loop = bool(thread_ids and thread_ids[0] != threading.main_thread().ident)

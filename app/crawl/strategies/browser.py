@@ -44,8 +44,8 @@ from app.crawl.result_helpers import classify_error_code, terminal_crawl_result
 from app.crawl.strategies.browser_driver import BrowserDriver, async_sleep
 from app.crawl.strategies.document import _default_document_text_extractor
 from app.crawl.strategies.pinned_transport import (
-    _build_pinned_request,
-    _build_pinned_request_async,
+    build_pinned_request,
+    build_pinned_request_async,
     check_ssrf_protection,
 )
 from app.json_safe import json_default
@@ -63,7 +63,12 @@ from app.validation import (
 logger = logging.getLogger(__name__)
 
 
-async def _resolve_browser_target(url: str, *, policy: HostPolicy) -> tuple[str, dict[str, str]]:
+async def resolve_browser_target(
+    url: str,
+    *,
+    policy: HostPolicy,
+    pin: Callable[..., Awaitable[tuple[str, dict[str, str]]]],
+) -> tuple[str, dict[str, str]]:
     """SSRF-check + IP-pin ``url`` for browser navigation.
 
     Returns ``(pinned_url, extra_http_headers)``. The browser is told to connect
@@ -72,11 +77,14 @@ async def _resolve_browser_target(url: str, *, policy: HostPolicy) -> tuple[str,
 
     Async because pinning resolves DNS, and a render is not the only thing on the
     loop: called synchronously this ran ``socket.getaddrinfo`` inline, so every
-    other in-flight crawl waited out the resolver once per rendered page. The
-    off-loop entry is the one derived from the pin rule, so this cannot acquire a
-    second, subtly different way of pinning.
+    other in-flight crawl waited out the resolver once per rendered page.
+
+    ``pin`` is a required argument, not a keyword with a default. It is the rule
+    that decides whether this crawl may reach the URL at all, so a caller that
+    forgot to pass one would silently fall back to a weaker rule; the type is
+    declared here rather than imported so the dependency is visible at the call.
     """
-    pinned_url, request_headers = await _build_pinned_request_async(url, {}, policy=policy)
+    pinned_url, request_headers = await pin(url, {}, policy=policy)
     host = request_headers.get("Host")
     return pinned_url, ({"Host": host} if host else {})
 
@@ -113,11 +121,12 @@ def _is_ssrf_blocked(url: str, *, policy: HostPolicy) -> bool:
 _REDUCED_BLOCK_RESOURCE_TYPES = frozenset({"image", "font", "media"})
 
 
-def _make_ssrf_route_handler(
+def make_ssrf_route_handler(
     resource_mode: str | None = None,
     *,
     include_screenshot: bool = False,
     policy: HostPolicy,
+    pin: Callable[..., tuple[str, dict[str, str]]],
 ):
     """Playwright route handler that aborts requests to SSRF-unsafe hosts.
 
@@ -187,7 +196,7 @@ def _make_ssrf_route_handler(
                 pinned_url, host_headers = request.url, {}
             else:
                 pinned_url, host_headers = await asyncio.to_thread(
-                    _build_pinned_request,
+                    pin,
                     request.url,
                     {},
                     policy=policy,
@@ -211,7 +220,7 @@ def _make_ssrf_route_handler(
     return _handler
 
 
-def _make_ssrf_websocket_handler(*, policy: HostPolicy):
+def make_ssrf_websocket_handler(*, policy: HostPolicy):
     """Playwright websocket-route handler blocking SSRF-unsafe WS targets.
 
     page.route does not intercept WebSocket upgrades; without this a hostile
@@ -407,6 +416,9 @@ class BrowserRenderer:
         warmup_urls: list[str] | None = None,
         settings: CrawlerSettings | None = None,
         driver: BrowserDriver | None = None,
+        pin: Callable[..., Awaitable[tuple[str, dict[str, str]]]] | None = None,
+        pin_sync: Callable[..., tuple[str, dict[str, str]]] | None = None,
+        status_for: Callable[[str], ResultStatus] | None = None,
     ) -> None:
         self._sleep = sleep
         # Prefer the passed policy limit, then the centralized settings field,
@@ -430,18 +442,18 @@ class BrowserRenderer:
         self._extract = extract or self.extract_with_challenge_wait
         self._looks_like = looks_like_pdf or self._looks_like_pdf
         self._warmup_urls = warmup_urls if warmup_urls is not None else self._warmup_urls_from_env()
+        # The two SSRF pin rules the renderer navigates through, and the
+        # classifier the failure path reports against. All three decide something
+        # the render cannot recover from if it is wrong, so a test steers them by
+        # argument rather than by patching this module.
+        self._pin = pin or build_pinned_request_async
+        self._pin_sync = pin_sync or build_pinned_request
+        self._status_for = status_for or status_for_classification
         # The browser and every step done to a page live in the driver, which
         # also owns the recycle bound, the scroll/harvest knobs, and the
         # storage_state allowlist. A test substitutes the driver, not methods
         # on this class -- see app/crawl/strategies/browser_driver.py.
-        self._driver = (
-            driver
-            if driver is not None
-            else BrowserDriver(
-                sleep=sleep,
-                settings=settings,
-            )
-        )
+        self._driver = driver if driver is not None else BrowserDriver(sleep=sleep, settings=settings)
         # Cap concurrent page renders: N simultaneous requests each open a tab,
         # which otherwise crashes/OOMs the browser under burst load.
         _concurrent_pages = (
@@ -578,7 +590,7 @@ class BrowserRenderer:
         # SSRF protection: validate + IP-pin the target so the browser
         # connects to a single resolved IP (DNS-rebinding safe) while preserving
         # the original Host header. Raises ValueError if the target is unsafe.
-        pinned_url, goto_headers = await _resolve_browser_target(url, policy=policy)
+        pinned_url, goto_headers = await resolve_browser_target(url, policy=policy, pin=self._pin)
 
         started = time.monotonic()
 
@@ -587,13 +599,14 @@ class BrowserRenderer:
         # resolves to an SSRF-unsafe host before the browser connects.
         await page.route(
             "**/*",
-            _make_ssrf_route_handler(
+            make_ssrf_route_handler(
                 (options.browser_profile or {}).get("resource_mode"),
                 include_screenshot=bool((options.browser_profile or {}).get("include_screenshot")),
                 policy=policy,
+                pin=self._pin_sync,
             ),
         )
-        ws_guard = _make_ssrf_websocket_handler(policy=policy)
+        ws_guard = make_ssrf_websocket_handler(policy=policy)
         ws_router = getattr(page, "route_websocket", None)
         if ws_router is None:
             logger.warning("websocket_interception_unsupported")
@@ -671,7 +684,7 @@ class BrowserRenderer:
                 classification = classify_page(html, text, title=title)
                 extraction_method = "pdf_text"
 
-            status = status_for_classification(classification)
+            status = self._status_for(classification)
 
             metadata: dict[str, Any] = {
                 "title": await page.evaluate("() => document.title"),

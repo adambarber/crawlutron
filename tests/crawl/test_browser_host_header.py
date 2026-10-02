@@ -22,7 +22,7 @@ async def test_route_continue_omits_empty_headers(monkeypatch):
     # in Playwright; the kwarg must be omitted when there are no overrides.
     # https URL kept, no Host override -- supplying neither `pinned` nor
     # `raises` is that shape.
-    route = await run_route_with_pinner(monkeypatch, "https://example.com/app.js", resource_type="script")
+    route = await run_route_with_pinner("https://example.com/app.js", resource_type="script")
     assert route.decision == "continue"
     assert route.continued_headers is ROUTE_ARG_UNSET
 
@@ -30,7 +30,6 @@ async def test_route_continue_omits_empty_headers(monkeypatch):
 async def test_route_continue_passes_host_override(monkeypatch):
     # The http pinned-IP hop still carries its Host override.
     route = await run_route_with_pinner(
-        monkeypatch,
         "http://example.com/app.js",
         pinned=("http://1.2.3.4:80/app.js", {"Host": "example.com"}),
         resource_type="script",

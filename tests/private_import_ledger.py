@@ -437,24 +437,7 @@ DECLARED: dict[str, Declaration] = {
         "Not yet triaged.\n",
         ["test"],
     ),
-    "app.crawl.strategies.browser._build_pinned_request": _SUBSTITUTED_COLLABORATOR,
-    "app.crawl.strategies.browser._build_pinned_request_async": _SUBSTITUTED_COLLABORATOR,
     "app.crawl.strategies.browser._is_ssrf_blocked": _d(
-        "unreviewed",
-        "Not yet triaged.\n",
-        ["test"],
-    ),
-    "app.crawl.strategies.browser._make_ssrf_route_handler": _d(
-        "unreviewed",
-        "Not yet triaged.\n",
-        ["test"],
-    ),
-    "app.crawl.strategies.browser._make_ssrf_websocket_handler": _d(
-        "unreviewed",
-        "Not yet triaged.\n",
-        ["test"],
-    ),
-    "app.crawl.strategies.browser._resolve_browser_target": _d(
         "unreviewed",
         "Not yet triaged.\n",
         ["test"],

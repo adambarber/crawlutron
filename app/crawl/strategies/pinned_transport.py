@@ -184,7 +184,7 @@ def _http_413(url: str, final_url: str, started: float) -> HttpFetchResult:
     )
 
 
-def _build_pinned_request(
+def build_pinned_request(
     url: str,
     headers: dict[str, str],
     *,
@@ -272,12 +272,12 @@ def _off_loop(resolve: Callable[[], Callable[_P, _R]]) -> Callable[_P, Awaitable
 # DERIVED from the rule rather than hand-written beside it. :func:`_off_loop`
 # keeps the builder's whole parameter list, so this binding has no signature of
 # its own to spell, and an off-loop pinned request is constructible exactly one
-# way: on this module's pool, with the arguments :func:`_build_pinned_request`
+# way: on this module's pool, with the arguments :func:`build_pinned_request`
 # declares. It used to be a second ``async def`` that restated that list beside
 # the builder -- two spellings of the pin rule that were free to disagree, and
 # the one rule in this module a caller could get subtly wrong without any test
 # noticing.
-_build_pinned_request_async = _off_loop(lambda: _build_pinned_request)
+build_pinned_request_async = _off_loop(lambda: build_pinned_request)
 
 
 _MAX_REDIRECT_HOPS = 5
@@ -302,7 +302,7 @@ def _redirect_target(
 
     Returns ``(new_url, updated_headers)`` when the response is an in-budget
     redirect, else ``None`` (terminal response). The caller must re-run
-    ``_build_pinned_request`` for ``new_url`` so every hop re-validates against
+    ``build_pinned_request`` for ``new_url`` so every hop re-validates against
     the SSRF blocklist and re-pins DNS. Sensitive headers (Cookie,
     Authorization) are stripped when crossing an origin boundary.
 
@@ -431,7 +431,7 @@ async def apinned_hops(
     apart, and it is the count only ``advance`` increments, so a body that
     forgets to advance cannot silently keep the walk going: it ends here.
     """
-    chain = _RedirectChain(url, headers, policy=policy, pin=pin or _build_pinned_request)
+    chain = _RedirectChain(url, headers, policy=policy, pin=pin or build_pinned_request)
     while True:
         pinned_url, hop_headers = await chain.pin()
         served_hops = chain.hops

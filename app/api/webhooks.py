@@ -177,7 +177,7 @@ async def validate_webhook_url_async(webhook_url: str, *, host_policy: HostPolic
     so running validation inline stalls the event loop whenever a
     caller-chosen webhook hostname has a slow or blackholed resolver. Crawl
     targets already offload the identical resolution off-thread via
-    ``_build_pinned_request_async``; this reuses that same dedicated
+    ``build_pinned_request_async``; this reuses that same dedicated
     ``dns-resolve`` pool rather than inventing a second offload mechanism.
     Every caller of ``validate_webhook_url`` is already async, so they route
     here instead.

@@ -271,7 +271,7 @@ def test_scope_matcher_has_exactly_one_definition():
 def test_no_pinned_url_leaks_into_final_url():
     """A pinned fetch must never surface str(response.url) as final_url.
 
-    _build_pinned_request_async rewrites a plain-HTTP host to its resolved IP
+    build_pinned_request_async rewrites a plain-HTTP host to its resolved IP
     so httpx reports the IP; surfacing it in final_url leaks topology and
     keys the cookie jar by IP. The fetchers must use current_url instead.
     Tree-wide: any module may grow a fetcher, so the final_url sink is
@@ -465,7 +465,7 @@ def _optional_host_policy_offenders(tree, path):
         one-directional and an implementation may accept more than the contract
         asks for. The fetcher contract guard now covers that one specifically
         (see test_type_contracts).
-      * ``pinned_transport._build_pinned_request_async`` with the same default
+      * ``pinned_transport.build_pinned_request_async`` with the same default
         -- no Protocol covers that pair, and every AST invariant in this file
         passed. This rule is what closes it.
 

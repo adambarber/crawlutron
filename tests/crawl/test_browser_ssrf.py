@@ -3,15 +3,15 @@ import threading
 
 import pytest
 
-import app.crawl.strategies.browser as browser_mod
 import app.crawl.strategies.document as doc_mod
 import app.crawl.strategies.pinned_transport as http_mod
 from app.crawl.strategies.browser import (
     _assert_safe_final_url,
     _is_ssrf_blocked,
-    _make_ssrf_route_handler,
-    _resolve_browser_target,
+    make_ssrf_route_handler,
+    resolve_browser_target,
 )
+from app.crawl.strategies.pinned_transport import build_pinned_request, build_pinned_request_async
 from tests._assertions import block_private_targets
 from tests._browser_doubles import (
     FakeRequest,
@@ -69,14 +69,11 @@ async def test_document_extractor_invokes_ssrf_check(monkeypatch):
 # --------------------------------------------------------------------------
 
 
-async def test_resolve_browser_target_pins_ip_and_preserves_host(monkeypatch):
-    monkeypatch.setattr(
-        browser_mod,
-        "_build_pinned_request_async",
-        stub_pinned_request(("http://1.2.3.4:80/path", {"Host": "example.com"})),
-    )
-    pinned_url, headers = await _resolve_browser_target(
-        "http://example.com/path", policy=UNRESTRICTED_HOST_POLICY
+async def test_resolve_browser_target_pins_ip_and_preserves_host():
+    pinned_url, headers = await resolve_browser_target(
+        "http://example.com/path",
+        policy=UNRESTRICTED_HOST_POLICY,
+        pin=stub_pinned_request(("http://1.2.3.4:80/path", {"Host": "example.com"})),
     )
     assert pinned_url == "http://1.2.3.4:80/path"
     assert headers == {"Host": "example.com"}
@@ -109,7 +106,11 @@ async def test_browser_pin_resolve_does_not_run_on_the_event_loop(monkeypatch):
 
     monkeypatch.setattr(socket, "getaddrinfo", _getaddrinfo)
 
-    await _resolve_browser_target("http://example.com/path", policy=UNRESTRICTED_HOST_POLICY)
+    await resolve_browser_target(
+        "http://example.com/path",
+        policy=UNRESTRICTED_HOST_POLICY,
+        pin=build_pinned_request_async,
+    )
 
     assert resolving_threads, "no resolver call was observed, so the invariant was not exercised"
     assert all(ident != loop_thread for ident in resolving_threads), (
@@ -165,7 +166,7 @@ async def test_is_ssrf_blocked_classifies_targets(monkeypatch):
 
 async def test_ssrf_route_handler_aborts_unsafe_and_continues_safe(monkeypatch):
     monkeypatch.setenv("CRAWLUTRON_ALLOW_PRIVATE_TARGETS", "0")
-    handler = _make_ssrf_route_handler(policy=UNRESTRICTED_HOST_POLICY)
+    handler = make_ssrf_route_handler(policy=UNRESTRICTED_HOST_POLICY, pin=build_pinned_request)
 
     bad = FakeRoute()
     await handler(bad, FakeRequest("http://127.0.0.1:9/", "document"))

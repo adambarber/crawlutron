@@ -2,6 +2,7 @@
 
 import ast
 import inspect
+import re
 
 import pytest
 
@@ -106,11 +107,16 @@ def test_the_status_resolver_is_defined_once_not_per_strategy():
         "BrowserRenderer reintroduced a per-instance status resolver"
     )
 
-    # The call sites must route through the shared name, not a local copy.
+    # The call sites must route through the shared name, not a local copy. The
+    # browser binds it once in the renderer's constructor rather than calling it
+    # inline, so what proves "routed through the shared table" there is the import.
     for module in (http_mod, browser_mod):
         source = inspect.getsource(module)
-        assert "status_for_classification(" in source, (
+        assert "status_for_classification" in source, (
             f"{module.__name__} no longer resolves classifications through the shared app.constants table"
+        )
+        assert not re.search(r"def\s+\w*status_for\w*\s*\(", source), (
+            f"{module.__name__} defined its own status resolver instead of importing one"
         )
 
 
