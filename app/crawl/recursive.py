@@ -61,7 +61,7 @@ def requeue_transient(
     *,
     depth: int,
     frontier: deque[tuple[int, CrawlTask]],
-    attempts: dict[NormalizedUrl, int],
+    attempts: dict[str, int],
 ) -> bool:
     """Re-queue a transiently-failed task to the frontier tail, up to the cap.
 
@@ -122,13 +122,13 @@ class _RecursiveState:
     next_index: int
     ramp: float
     page_count: int = 0
-    transient_requeues: dict[NormalizedUrl, int] = field(default_factory=dict)
+    transient_requeues: dict[str, int] = field(default_factory=dict)
 
     def make_admitted_task(self, link: AdmittedLink) -> tuple[int, CrawlTask]:
         task = CrawlTask(
             index=self.next_index,
             original_url=link.original_url,
-            normalized_url=link.normalized_url,
+            normalized_url=link.normalized_url.raw,
             domain=link.delay_domain,
         )
         self.next_index += 1
@@ -144,14 +144,14 @@ async def _seed_recursive_frontier(
     if not run.seed_sitemaps:
         return
     for seed in await run.sitemap_seeds():
-        identity = durable_page_identity(seed, run.host_policy)
+        identity = durable_page_identity(seed.raw, run.host_policy)
         if identity in seed_identities:
             continue
         seed_identities.add(identity)
         task = CrawlTask(
             index=state.next_index,
-            original_url=seed,
-            normalized_url=NormalizedUrl(identity),
+            original_url=seed.raw,
+            normalized_url=identity,
             domain=registrable_domain(identity),
         )
         frontier.append((0, task))

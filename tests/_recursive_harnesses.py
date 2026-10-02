@@ -39,7 +39,7 @@ from typing import Any, NamedTuple
 
 from app.crawl.recursive import run_recursive_crawl
 from app.models.crawl_task import CrawlTask
-from tests._policy_factories import UNRESTRICTED_HOST_POLICY, normalized
+from tests._policy_factories import UNRESTRICTED_HOST_POLICY, canonical
 from tests._result_builders import Spill, make_engine_result
 from tests._scheduler_doubles import FakeScheduler
 
@@ -95,7 +95,7 @@ class RecursiveRun(NamedTuple):
 def make_crawl_task(index: int, host: str) -> CrawlTask:
     """A seed task for ``http://<host>/page<index>``."""
     url = f"http://{host}/page{index}"
-    return CrawlTask(index=index, original_url=url, normalized_url=normalized(url), domain=host)
+    return CrawlTask(index=index, original_url=url, normalized_url=canonical(url), domain=host)
 
 
 async def drive_recursive_crawl(

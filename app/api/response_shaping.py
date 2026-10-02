@@ -49,6 +49,7 @@ from app.models.crawl_result import CrawlResult, CrawlStrategyAttempt
 from app.models.discovered_link import DiscoveredLink
 from app.models.engine_crawl_result import EngineCrawlResult
 from app.models.host_policy import HostPolicy
+from app.models.normalized_url import NormalizedUrl
 from app.models.taxonomy import CrawlStrategyName
 from app.validation import safe_public_url_or_none
 
@@ -307,11 +308,12 @@ def frontier_link_url(
         normalized = link.get("normalized_url")
     else:
         normalized = getattr(link, "normalized_url", None)
-    if not isinstance(normalized, str) or not normalized:
+    if not isinstance(normalized, (str, NormalizedUrl)) or not normalized:
         return None
-    candidate = urljoin(resolve_against, normalized) if resolve_against else normalized
+    raw = str(normalized)
+    candidate = urljoin(resolve_against, raw) if resolve_against else raw
     validated = safe_public_url_or_none(candidate, policy=policy)
-    return str(validated) if validated is not None else None
+    return None if validated is None else validated.raw
 
 
 @dataclass(frozen=True, slots=True)

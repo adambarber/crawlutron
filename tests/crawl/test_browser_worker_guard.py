@@ -8,7 +8,7 @@ from app.constants import BROWSER_HEADLESS
 from app.crawl.strategies.browser import BrowserRenderer
 from app.crawl.strategies.browser_pool import BrowserPool, BrowserPoolExhaustedError
 from tests._assertions import assert_result_failed
-from tests._policy_factories import UNRESTRICTED_HOST_POLICY, crawl_policy, normalized
+from tests._policy_factories import UNRESTRICTED_HOST_POLICY, canonical, crawl_policy
 
 
 class ExhaustedPool(BrowserPool):
@@ -92,7 +92,7 @@ class TestTransientRequeue:
         task = CrawlTask(
             index=0,
             original_url="http://a.example/x",
-            normalized_url=normalized("http://a.example/x"),
+            normalized_url=canonical("http://a.example/x"),
             domain="a.example",
         )
         frontier: deque[tuple[int, CrawlTask]] = deque()

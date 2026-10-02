@@ -518,7 +518,13 @@ async def test_render_probe_fails_when_policy_enforcement_is_removed(monkeypatch
     from app.crawl import payload_helpers
 
     def allow(url, *, policy):
-        return url
+        # The VALUE shape render reads ``.raw``/``.site`` off, with the host
+        # check removed -- a bare string is no longer a stand-in for an admitted
+        # URL, so the double has to admit the denied host rather than skip it.
+        from app.models.host_policy import HostPolicy
+        from app.models.normalized_url import NormalizedUrl
+
+        return NormalizedUrl(url, policy=HostPolicy.unrestricted())
 
     monkeypatch.setattr(payload_helpers, "normalize_public_http_url", allow)
     monkeypatch.setattr(render, "normalize_public_http_url", allow)

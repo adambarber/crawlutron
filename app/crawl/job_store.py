@@ -26,7 +26,7 @@ from app.crawl.policy import PolicyLike, PolicyTier, read_policy
 from app.crawl.policy import stored_policy as _stored_policy
 from app.crawl.sqlite_store import connect_store, process_lock, store_lock_key
 from app.models.host_policy import HostPolicy
-from app.models.normalized_url import normalize_public_http_url
+from app.models.normalized_url import NormalizedUrl, normalize_public_http_url
 from app.validation import safe_public_url_or_none
 
 logger = logging.getLogger(__name__)
@@ -96,7 +96,7 @@ def _canonical_cached(url: str, host_policy: HostPolicy) -> str:
     return str(safe_public_url_or_none(url, policy=host_policy) or url)
 
 
-def durable_page_identity(url: str, host_policy: HostPolicy) -> str:
+def durable_page_identity(url: str | NormalizedUrl, host_policy: HostPolicy) -> str:
     """Canonical page identity for ``url``, or the raw value when it has none.
 
     THE definition of the key a URL occupies in ``visited``, ``in_flight`` and
@@ -113,6 +113,12 @@ def durable_page_identity(url: str, host_policy: HostPolicy) -> str:
     read in none. A caller that genuinely needs a ``NormalizedUrl`` converts at
     the model boundary, where the model makes it ask.
 
+    The parameter accepts an already-admitted ``NormalizedUrl`` as well as raw
+    text because this is the one function whose entire job is "given URL text,
+    produce the key": it is reached from persisted collections and from both
+    record shapes, and a chokepoint that refuses half its callers is a
+    chokepoint callers learn to route around.
+
     Memoized: the job store re-reads the same durable collections on every loop
     iteration, and re-deriving identity for every stored URL on every read made
     a 20k-entry job cost ~0.23s per load and stalled the event loop with it. The
@@ -121,8 +127,8 @@ def durable_page_identity(url: str, host_policy: HostPolicy) -> str:
     with the uncached result.
     """
     if not url:
-        return url
-    return _canonical_cached(url, host_policy)
+        return ""
+    return _canonical_cached(str(url), host_policy)
 
 
 # A persisted row is ``json.loads`` of a TEXT column, so its collections are

@@ -189,7 +189,7 @@ class TestSitemapCandidateBuilderUsesTheCanonicalOrigin:
         from app.validation import HostPolicy
 
         canonical = normalize_public_http_url(root_url, policy=HostPolicy.unrestricted())
-        parts = urlsplit(canonical)
+        parts = urlsplit(canonical.raw)
         expected = f"{parts.scheme}://{parts.netloc}/sitemap.xml"
 
         actual = await self._sitemap_url_for(root_url)

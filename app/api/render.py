@@ -28,7 +28,6 @@ from app.models.crawl_worker import CrawlWorker
 from app.models.engine_crawl_result import EngineCrawlResult
 from app.models.host_policy import HostPolicy
 from app.models.normalized_url import normalize_public_http_url
-from app.models.registrable_domain import registrable_domain
 from app.models.render_options import RenderOptions
 from app.scheduler import DomainScheduler
 from app.settings import CrawlerSettings
@@ -91,11 +90,11 @@ async def render_request(
 
     for index, url in enumerate(urls):
         normalized = normalize_public_http_url(url, policy=host_policy)
-        domain = registrable_domain(normalized)
+        domain = normalized.site
         jobs.append(
             CrawlJob(
                 index=index,
-                url=normalized,
+                url=normalized.raw,
                 domain=domain,
                 options=options,
                 host_policy=host_policy,

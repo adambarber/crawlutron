@@ -1010,7 +1010,7 @@ class TestRequeueOvercommitContract:
 
         assert outcome.cap_blocked == 1, "the cap refused the second link"
         assert outcome.cap_overcommitted == 0, "a refusal is not an overcommit"
-        assert frontier == ["https://example.test/one"]
+        assert [url.raw for url in frontier] == ["https://example.test/one"]
 
 
 async def _allowed() -> bool:
@@ -1048,7 +1048,7 @@ async def test_discovered_link_delay_commits_in_order_and_breaks_at_cap():
 
     assert outcome.accepted == 1
     assert outcome.cap_blocked == 1
-    assert frontier == ["https://example.test/first"]
+    assert [url.raw for url in frontier] == ["https://example.test/first"]
     assert [event for event in events if event[0] == "delay"] == [
         ("delay", "https://example.test/first"),
         ("delay", "https://example.test/over-cap"),
@@ -1075,7 +1075,10 @@ async def test_duplicate_canonical_spellings_do_not_consume_capacity():
     )
 
     assert outcome.accepted == 2
-    assert frontier == ["https://example.test/child", "https://example.test/other"]
+    assert [url.raw for url in frontier] == [
+        "https://example.test/child",
+        "https://example.test/other",
+    ]
     assert outcome.cap_blocked == 1
 
 

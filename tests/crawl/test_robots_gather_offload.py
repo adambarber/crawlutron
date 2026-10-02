@@ -12,7 +12,7 @@ from contextlib import asynccontextmanager
 from app.api_models import CrawlPolicy
 from app.crawl.admission import RobotsGate
 from app.models.discovered_link import DiscoveredLink
-from tests._policy_factories import UNRESTRICTED_HOST_POLICY, normalized
+from tests._policy_factories import UNRESTRICTED_HOST_POLICY, canonical
 from tests._recursive_harnesses import drive_recursive_crawl
 from tests._recursive_harnesses import make_crawl_task as _make_job
 from tests._result_builders import make_engine_result
@@ -104,7 +104,7 @@ async def test_recursive_link_robots_checks_run_concurrently():
     links = [
         DiscoveredLink(
             url=f"http://link{i}.example/",
-            normalized_url=normalized(f"http://link{i}.example/"),
+            normalized_url=canonical(f"http://link{i}.example/"),
             text="",
             rel=[],
             source_url="http://seed.example/",

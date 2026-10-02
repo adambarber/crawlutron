@@ -22,17 +22,17 @@ class TestPolicyValidation:
             normalize_public_http_url("http://127.0.0.1/x")
 
     def test_trailing_colon_path(self):
-        assert normalize_public_http_url("https://example.com/seg:") == "https://example.com/seg"
+        assert normalize_public_http_url("https://example.com/seg:").raw == "https://example.com/seg"
 
     def test_host_allow_list_restricts_targets(self):
         policy = HostPolicy.from_strings("example.com", "")
-        assert normalize_public_http_url("https://Example.com:8443/page", policy=policy)
+        assert normalize_public_http_url("https://Example.com:8443/page", policy=policy).raw
         assert_url_refused("https://other.test/page", policy, "host_not_allowed")
         assert_url_refused("https://notexample.com/page", policy, "host_not_allowed")
 
     def test_host_deny_list_refuses_targets(self):
         policy = HostPolicy.from_strings("", "blocked.test")
-        assert normalize_public_http_url("https://allowed.test/page", policy=policy)
+        assert normalize_public_http_url("https://allowed.test/page", policy=policy).raw
         assert_url_refused("https://Blocked.test:443/page", policy, "host_denied")
 
     def test_host_deny_precedes_allow(self):
@@ -57,7 +57,7 @@ class TestPolicyValidation:
             }
         )
         policy = HostPolicy.from_settings(settings)
-        assert normalize_public_http_url("https://allowed.test/page", policy=policy)
+        assert normalize_public_http_url("https://allowed.test/page", policy=policy).raw
         assert_url_refused("https://other.test/page", policy, "host_not_allowed")
         assert_url_refused("https://blocked.test/page", policy, "host_denied")
 
@@ -83,7 +83,7 @@ class TestPolicyValidation:
     def test_private_network_normal_domain_passed_through(self, monkeypatch):
         monkeypatch.setenv("CRAWLUTRON_ALLOW_PRIVATE_TARGETS", "0")
         out = normalize_public_http_url("http://example.com/x")
-        assert out == "http://example.com/x"
+        assert out.raw == "http://example.com/x"
 
     def test_registrable_domain_two_part_suffix(self):
         assert registrable_domain("https://a.b.example.co.uk/x") == "example.co.uk"
@@ -101,7 +101,7 @@ class TestPolicyValidation:
     def test_public_integer_literal_allowed(self, monkeypatch):
         # Numeric but public (1.1.1.1) stays reachable.
         monkeypatch.setenv("CRAWLUTRON_ALLOW_PRIVATE_TARGETS", "0")
-        assert normalize_public_http_url("http://16843009/") == "http://16843009"
+        assert normalize_public_http_url("http://16843009/").raw == "http://16843009"
 
     def test_wrapping_integer_to_loopback_blocked(self, monkeypatch):
         # Oversized integers wrap mod 2**32 on resolvers: this one lands on

@@ -32,7 +32,6 @@ from app.models.crawl_worker import CrawlWorker
 from app.models.engine_crawl_result import EngineCrawlResult
 from app.models.host_policy import HostPolicy
 from app.models.normalized_url import NormalizedUrl, normalize_public_http_url
-from app.models.registrable_domain import registrable_domain
 from app.resource_pressure import (
     ResourceGate,
     TaskRamBudget,
@@ -91,14 +90,14 @@ def _build_jobs(state: _PipelineState) -> list[CrawlTask]:
     for index, original_url in enumerate(state.urls):
         try:
             normalized_url = normalize_public_http_url(original_url, policy=state.host_policy)
-            domain = registrable_domain(normalized_url)
+            domain = normalized_url.site
         except ValueError as error:
             raise ValueError(f"invalid_url: {error}") from error
         jobs.append(
             CrawlTask(
                 index=index,
                 original_url=original_url,
-                normalized_url=normalized_url,
+                normalized_url=normalized_url.raw,
                 domain=domain,
             )
         )
@@ -232,7 +231,7 @@ async def _seeds_for_job(state: _PipelineState, job: CrawlTask) -> list[Normaliz
     stale = (
         await asyncio.to_thread(
             state.dependencies.stale_seeds,
-            candidates,
+            [(url.raw, lastmod) for url, lastmod in candidates],
             state.content_cache,
             state.policy,
         )

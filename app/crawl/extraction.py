@@ -831,13 +831,13 @@ def extract_discovered_links(
             normalized_url = safe_public_url_or_none(urljoin(source_url, href), policy=host_policy)
         except ValueError:
             continue
-        if not normalized_url or normalized_url in seen:
+        if not normalized_url or normalized_url.raw in seen:
             continue
-        seen.add(normalized_url)
+        seen.add(normalized_url.raw)
         total_count += 1
         if len(links) >= max_links:
             continue
-        parsed = urlparse(normalized_url)
+        parsed = urlparse(normalized_url.raw)
         text = re.sub(r"\s+", " ", unescape("".join(el.itertext()))).strip()
         # ``urlparse().hostname`` is None for schemes without a host
         # (``mailto:``, ``javascript:``). An unparseable host has no same-host
@@ -847,7 +847,7 @@ def extract_discovered_links(
         links.append(
             DiscoveredLink(
                 url=href,
-                normalized_url=normalized_url,
+                normalized_url=normalized_url.raw,
                 text=text,
                 rel=str(attrs.get("rel", "")).split(),
                 source_url=source_url,

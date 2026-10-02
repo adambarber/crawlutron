@@ -17,30 +17,27 @@ normalize_public_http_url = partial(_normalize_public_http_url, policy=_HOST_POL
 filter_js_endpoints = partial(_filter_js_endpoints, policy=_HOST_POLICY)
 
 
+def canonical(url: str) -> str:
+    """The canonical TEXT of an admitted URL: the value carries its wire form on ``.raw``."""
+    return normalize_public_http_url(url).raw
+
+
 class TestDeepUrlNormalization:
     def test_sorts_query_params_and_strips_default_port_and_fragment(self):
-        assert (
-            normalize_public_http_url("https://example.com:443/b/?b=2&a=1#frag")
-            == "https://example.com/b?a=1&b=2"
-        )
+        assert canonical("https://example.com:443/b/?b=2&a=1#frag") == "https://example.com/b?a=1&b=2"
 
     def test_http_default_port_stripped(self):
-        assert (
-            normalize_public_http_url("http://example.com:80/path/?z=1&a=2")
-            == "http://example.com/path?a=2&z=1"
-        )
+        assert canonical("http://example.com:80/path/?z=1&a=2") == "http://example.com/path?a=2&z=1"
 
     def test_preserves_non_default_port(self):
-        assert normalize_public_http_url("https://example.com:8443/path") == "https://example.com:8443/path"
+        assert canonical("https://example.com:8443/path") == "https://example.com:8443/path"
 
     def test_trailing_slash_and_fragment_removed(self):
-        assert normalize_public_http_url("https://example.com/") == "https://example.com"
-        assert normalize_public_http_url("https://example.com/page/#section") == "https://example.com/page"
+        assert canonical("https://example.com/") == "https://example.com"
+        assert canonical("https://example.com/page/#section") == "https://example.com/page"
 
     def test_duplicate_keys_kept_and_sorted(self):
-        assert (
-            normalize_public_http_url("https://example.com/?b=2&a=1&a=0") == "https://example.com?a=0&a=1&b=2"
-        )
+        assert canonical("https://example.com/?b=2&a=1&a=0") == "https://example.com?a=0&a=1&b=2"
 
 
 class TestNormalizationGuardMemoization:
@@ -85,7 +82,8 @@ class TestNormalizationGuardMemoization:
         env_after_first = counts["env"]
         ip_after_first = counts["ip"]
         second = validation.normalize_public_http_url(self.URL, policy=_HOST_POLICY)
-        assert second == first == "https://memo-t2-9e16c.test/path?a=1&b=2"
+        assert second == first
+        assert first.raw == "https://memo-t2-9e16c.test/path?a=1&b=2"
         # The guard really ran on the first call, then nothing re-ran on the second.
         assert env_after_first >= 1
         assert ip_after_first >= 1
@@ -102,7 +100,7 @@ class TestNormalizationGuardMemoization:
             validation.normalize_public_http_url("http://localhost/x", policy=_HOST_POLICY)
         monkeypatch.setenv("CRAWLUTRON_ALLOW_PRIVATE_TARGETS", "true")
         assert (
-            validation.normalize_public_http_url("http://localhost/x", policy=_HOST_POLICY)
+            validation.normalize_public_http_url("http://localhost/x", policy=_HOST_POLICY).raw
             == "http://localhost/x"
         )
 

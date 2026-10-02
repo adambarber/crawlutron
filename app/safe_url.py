@@ -50,12 +50,12 @@ class SafeUrl:
         from app.crawl.strategies.pinned_transport import check_ssrf_protection, resolve_and_pin_host
 
         normalized = normalize_public_http_url(url, policy=policy)
-        check_ssrf_protection(normalized)
-        hostname = urlparse(normalized).hostname or ""
+        check_ssrf_protection(normalized.raw)
+        hostname = urlparse(normalized.raw).hostname or ""
         pinned: str | None = None
         if pin:
-            _, pinned = resolve_and_pin_host(normalized)
-        return cls(raw=normalized, hostname=hostname, policy=policy, pinned_ip=pinned)
+            _, pinned = resolve_and_pin_host(normalized.raw)
+        return cls(raw=normalized.raw, hostname=hostname, policy=policy, pinned_ip=pinned)
 
     def redirect_hop(self, location: str) -> SafeUrl:
         """Follow one redirect: resolve against this URL, re-validate, return new SafeUrl.

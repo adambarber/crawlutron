@@ -26,37 +26,35 @@ from app.constants import HTTP_DECLARED_CRAWLER
 from app.crawl.admission import admit_discovered_links
 from app.crawl.job_store import JobStore
 from app.crawl.policy import PolicyTier, read_policy
-from app.models.normalized_url import NormalizedUrl, normalize_public_http_url
+from app.models.normalized_url import normalize_public_http_url
 from app.settings import CrawlerSettings
 from app.validation import HostPolicy
 
 UNRESTRICTED_HOST_POLICY = HostPolicy.unrestricted()
 
 
-def normalized(url: str) -> NormalizedUrl:
-    """The canonical form production would actually hold for ``url``.
+def canonical(url: str) -> str:
+    """The canonical TEXT production would hold for ``url``.
 
-    ``NormalizedUrl`` is a ``NewType``, so it is a claim, not a wrapper: the
-    production comment at its construction site says everything upstream is raw
-    input and everything downstream that names this shape is typed. A test that
-    spells ``normalized_url="http://a/"`` is asserting a state production cannot
-    reach -- normalization strips that trailing slash, so the real task field
-    reads ``http://a`` -- and the tests were green only because nothing checked
-    the claim.
+    A test that spells ``normalized_url="http://a/"`` is asserting a state
+    production cannot reach -- normalization strips that trailing slash, so the
+    real task field reads ``http://a`` -- and those tests were green only
+    because nothing checked the claim.
 
     Going through the production normalizer rather than trimming the slash here
-    is the whole point. A hand-rolled version of the canonical rules would be a
+    is the whole point: a hand-rolled version of the canonical rules would be a
     second copy that passes every test while production changes underneath it,
-    which is the failure mode ``UNRESTRICTED_HOST_POLICY`` next to this exists to
+    which is the failure mode ``UNRESTRICTED_HOST_POLICY`` above exists to
     prevent. It also costs nothing: the private-target guard is skipped outright
     while the suite-wide loopback fixture is in force, so no DNS happens for
     fixture hostnames.
 
-    Lives here rather than in a URL module because it is unusable without the
-    policy above: an unrestricted policy is what lets a fixture name a host like
-    ``a`` at all.
+    Returns text rather than the ``NormalizedUrl`` value, because every caller
+    stores it in a field declared ``str`` -- a position that crosses a boundary
+    (the job store, the spill file, the wire). The admission positions that want
+    the value construct it themselves, where the policy is in hand.
     """
-    return normalize_public_http_url(url, policy=UNRESTRICTED_HOST_POLICY)
+    return normalize_public_http_url(url, policy=UNRESTRICTED_HOST_POLICY).raw
 
 
 BOOL_ENV_CASES = (

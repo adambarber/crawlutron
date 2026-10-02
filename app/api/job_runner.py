@@ -272,7 +272,7 @@ async def _pace_delayed_batch(
                 CrawlTask(
                     index=index,
                     original_url=entry.url,
-                    normalized_url=identity,
+                    normalized_url=identity.raw,
                     domain=host,
                 )
             )

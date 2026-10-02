@@ -97,14 +97,14 @@ def _assert_safe_final_url(final_url: str, *, policy: HostPolicy) -> None:
     content.
     """
     normalized = normalize_public_http_url(final_url, policy=policy)
-    check_ssrf_protection(normalized)
+    check_ssrf_protection(normalized.raw)
 
 
 def _is_ssrf_blocked(url: str, *, policy: HostPolicy) -> bool:
     """Return ``True`` if ``url`` resolves to an SSRF-unsafe target."""
     try:
         normalized = normalize_public_http_url(url, policy=policy)
-        check_ssrf_protection(normalized)
+        check_ssrf_protection(normalized.raw)
     except ValueError:
         return True
     return False
@@ -240,7 +240,7 @@ def make_ssrf_websocket_handler(*, policy: HostPolicy):
                 http_equivalent,
                 policy=policy,
             )
-            await asyncio.to_thread(check_ssrf_protection, normalized)
+            await asyncio.to_thread(check_ssrf_protection, normalized.raw)
         except Exception:
             close = getattr(ws, "close", None)
             if close is not None:

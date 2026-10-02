@@ -13,7 +13,7 @@ from app.constants import BROWSER_HEADLESS
 from app.models.crawl_task import CrawlTask
 from app.models.discovered_link import DiscoveredLink
 from app.scheduler import DomainScheduler
-from tests._policy_factories import normalized
+from tests._policy_factories import canonical
 from tests._recursive_harnesses import ContentionFreeGate, drive_recursive_crawl, make_crawl_task
 from tests._result_builders import engine_result, make_engine_result
 
@@ -23,7 +23,7 @@ from tests._result_builders import engine_result, make_engine_result
 # received was a state the engine cannot produce, and every assertion below was
 # pinned to it. Naming both makes the distinction something a test can see.
 _ROOT = "http://a/"
-_ROOT_CANONICAL = normalized(_ROOT)
+_ROOT_CANONICAL = canonical(_ROOT)
 
 
 def _task(url: str, *, index: int = 0) -> CrawlTask:
@@ -37,7 +37,7 @@ def _task(url: str, *, index: int = 0) -> CrawlTask:
     return CrawlTask(
         index=index,
         original_url=url,
-        normalized_url=normalized(url),
+        normalized_url=canonical(url),
         domain=urlsplit(url).hostname or "",
     )
 
@@ -45,7 +45,7 @@ def _task(url: str, *, index: int = 0) -> CrawlTask:
 def _link(url: str) -> DiscoveredLink:
     return DiscoveredLink(
         url=url,
-        normalized_url=normalized(url),
+        normalized_url=canonical(url),
         text="",
         rel=[],
         source_url="http://a/",
@@ -292,7 +292,7 @@ def _tiered_job(index: int, host: str) -> CrawlTask:
     return CrawlTask(
         index=index,
         original_url=f"http://{host}/",
-        normalized_url=normalized(f"http://{host}/"),
+        normalized_url=canonical(f"http://{host}/"),
         domain=host,
     )
 

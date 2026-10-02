@@ -1,26 +1,23 @@
-"""The canonical form of a URL that has crossed the normalizer.
+"""The canonical form of a URL that has crossed admission.
 
-A ``NewType`` over ``str``: erased at runtime -- spill JSON, cache keys, and the
-wire keep plain strings -- but mypy rejects putting a raw request/sitemap/crawl
-string into a normalized-URL position unless it has crossed
-``normalize_public_http_url``. That is the whole point of the nominal wrapper: it
-is the one place the tree can say "this string has been admitted", and every
-position that admits a URL for queueing can say so in its own signature.
+Constructing a ``NormalizedUrl`` IS the admission decision: the constructor
+validates the scheme and the host against the policy and the egress guard,
+canonicalizes the string, and derives the host and the registrable site. There is
+no other way to build one, so every position that admits a URL for queueing can
+say ``NormalizedUrl`` in its own signature and mean it.
 
-The normalizer lives here rather than in ``app/validation.py`` because a URL's
-identity -- which host it is, which site it belongs to, what its canonical
-string is -- is one fact with three answers, and it belongs beside the type that
-carries it.
+The three answers a URL carries -- its canonical string, its host, its site --
+are read off the value rather than recomputed at each use. The string itself
+stays available as ``raw`` for the wire, cache keys and spill JSON, which is the
+one place a URL becomes text again.
 """
 
 from __future__ import annotations
 
-from typing import NewType
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
 from app.models.host_policy import HostPolicy, host_egress_reason, host_policy_reason
-
-NormalizedUrl = NewType("NormalizedUrl", str)
+from app.models.registrable_domain import registrable_domain
 
 #: Attribution/tracking query parameters that carry no content-identity
 #: information. Dropping them lets URLs that differ only by UTM/tracking tags
@@ -54,16 +51,8 @@ def _strip_trailing_colon(value: str) -> str:
     return value[:-1] if value.endswith(":") else value
 
 
-def normalize_public_http_url(url: str, *, policy: HostPolicy) -> NormalizedUrl:
-    """Canonicalize a public HTTP(S) URL into a single normalized form.
-
-    This is the single source of truth for what a normalized URL is across the
-    service: it is used for the crawl target URL and for every discovered link.
-    Canonicalization lowercases the scheme and host, drops default ports
-    (``:80`` for http, ``:443`` for https), removes the fragment, strips a
-    trailing slash from the path (so ``https://example.gov/`` and
-    ``https://example.gov`` are identical), and re-encodes the query string.
-    """
+def _canonical_parts(url: str, *, policy: HostPolicy) -> tuple[str, str, str]:
+    """The canonical string, its host and its site, or raise with the refusal reason."""
     parsed = urlparse(url)
     if parsed.scheme not in {"http", "https"}:
         raise ValueError("unsupported_scheme")
@@ -90,9 +79,57 @@ def normalize_public_http_url(url: str, *, policy: HostPolicy) -> NormalizedUrl:
         pairs = [(k, v) for (k, v) in parse_qsl(query, keep_blank_values=True) if not _is_tracking_param(k)]
         pairs.sort()
         query = urlencode(pairs, doseq=True)
-    # The construction point of the type: everything upstream is raw
-    # input; everything downstream that names this shape is typed.
-    return NormalizedUrl(urlunparse((parsed.scheme, netloc, path, parsed.params, query, "")))
+    canonical = urlunparse((parsed.scheme, netloc, path, parsed.params, query, ""))
+    return canonical, host, registrable_domain(canonical)
+
+
+class NormalizedUrl:
+    """An admitted URL: canonical, and carrying its host and its site.
+
+    Immutable and compared by canonical string, so it can key a map or a cache
+    the way the bare string used to. ``raw`` is the one explicit place a URL
+    turns back into text.
+    """
+
+    __slots__ = ("_host", "_raw", "_site")
+
+    def __init__(self, raw: str, *, policy: HostPolicy) -> None:
+        self._raw, self._host, self._site = _canonical_parts(raw, policy=policy)
+
+    @property
+    def raw(self) -> str:
+        """The canonical string: the wire form, the cache key, the spill field."""
+        return self._raw
+
+    @property
+    def host(self) -> str:
+        """The canonical host, which is what the scheduler's per-host gates key on."""
+        return self._host
+
+    @property
+    def site(self) -> str:
+        """The registrable domain, which is what the scheduler's per-site gates key on."""
+        return self._site
+
+    def __str__(self) -> str:
+        return self._raw
+
+    def __repr__(self) -> str:
+        return f"NormalizedUrl({self._raw!r})"
+
+    def __eq__(self, other: object) -> bool:
+        return isinstance(other, NormalizedUrl) and other._raw == self._raw
+
+    def __hash__(self) -> int:
+        return hash(self._raw)
+
+
+def normalize_public_http_url(url: str, *, policy: HostPolicy) -> NormalizedUrl:
+    """Canonicalize a public HTTP(S) URL into a single normalized form.
+
+    Thin alias for the constructor, kept only while callers migrate.
+    """
+    return NormalizedUrl(url, policy=policy)
 
 
 __all__ = ["NormalizedUrl", "normalize_public_http_url"]

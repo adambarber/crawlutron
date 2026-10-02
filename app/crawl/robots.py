@@ -37,7 +37,7 @@ _inflight: dict[tuple[str, HostPolicy], asyncio.Task[RobotsRules]] = {}
 
 def robots_origin(url: str, *, policy: HostPolicy) -> str:
     normalized = normalize_public_http_url(url, policy=policy)
-    parsed = urlparse(normalized)
+    parsed = urlparse(normalized.raw)
     return f"{parsed.scheme.lower()}://{parsed.netloc.lower()}"
 
 

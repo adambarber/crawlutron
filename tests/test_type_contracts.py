@@ -401,58 +401,83 @@ def test_the_contract_is_not_vacuous_tree_wide():
     )
 
 
-class TestNormalizedUrlSeedType:
-    """Seeds and crawl tasks flow as a typed value, not a bare str.
+class TestNormalizedUrlIsAValueNotAString:
+    """A URL that has crossed admission is a VALUE, and text is something it lends.
 
-    The request URL enters as a bare string, but once it passes through
-    ``normalize_public_http_url`` -- the single source of truth for what a
-    normalized URL is -- the value carries the ``NormalizedUrl`` type
-    through ``CrawlTask.normalized_url`` and the sitemap-seed pipeline.
-    The type is a ``NewType`` over ``str``: erased at runtime (spills,
-    cache keys, and the wire stay plain JSON strings), but mypy refuses
-    to let an unnormalized string take a normalized-URL position without
-    crossing the normalizer first.
+    ``NormalizedUrl`` used to be a ``NewType`` over ``str``, which meant the type
+    was a comment: every position that said ``NormalizedUrl`` still accepted
+    concatenation, ``startswith``, and membership in a ``set[str]`` unchecked, so
+    the checker had no opinion about a URL that had never been admitted. It is
+    now a frozen value carrying its canonical string, its host and its site, and
+    the constructor is the admission decision -- there is no way to hold one
+    without having proved the host.
+
+    Two positions therefore carry TEXT rather than the value, and this class pins
+    both, because the difference is the whole point: ``AdmittedLink`` is the door
+    the scheduler queues from, and a wire record is rebuilt from spill JSON.
     """
 
-    def test_normalized_url_is_a_newtype_over_str(self):
+    def test_the_type_is_a_value_not_a_newtype_over_str(self):
         from app.models.normalized_url import NormalizedUrl
 
-        # Read through the class ``__dict__`` rather than as an attribute.
-        #
-        # ``__supertype__`` is a real attribute ``typing.NewType`` attaches to
-        # the class it builds at runtime, and it is what this test is about. mypy
-        # models ``NewType`` as a function returning a class and does not declare
-        # the attribute on that class, so ``NormalizedUrl.__supertype__`` is an
-        # attr-defined error against a value that is demonstrably there -- a
-        # limitation in mypy's model of ``NewType``, not a defect in the code or
-        # the assertion. ``vars()`` asks the same question the attribute access
-        # would, and answers it at runtime.
-        assert vars(NormalizedUrl)["__supertype__"] is str
+        # The attribute a ``NewType`` carries at runtime is what a reader looks
+        # for first; its absence is the design. Reading it through ``vars()``
+        # rather than as an attribute, because mypy does not declare
+        # ``__supertype__`` on the class it builds.
+        assert "__supertype__" not in vars(NormalizedUrl)
+        assert not issubclass(NormalizedUrl, str)
 
-    def test_crawl_task_normalized_url_field_is_typed(self):
+    def test_the_admission_boundary_is_typed_as_the_value(self):
+        from typing import get_type_hints
+
+        from app.crawl.admission import AdmittedLink
+        from app.models.normalized_url import NormalizedUrl
+
+        assert get_type_hints(AdmittedLink)["normalized_url"] is NormalizedUrl
+
+    def test_wire_and_queue_records_carry_text(self):
         from typing import get_type_hints
 
         from app.models.crawl_task import CrawlTask
+        from app.models.discovered_link import DiscoveredLink
+
+        # Both cross a boundary: ``DiscoveredLink`` is rebuilt from the spill
+        # file, and ``CrawlTask`` is persisted. A value has no JSON form, so
+        # pretending otherwise here is what made the spill raise.
+        assert get_type_hints(DiscoveredLink)["normalized_url"] is str
+        assert get_type_hints(CrawlTask)["normalized_url"] is str
+
+    def test_the_constructor_is_the_admission_decision(self, monkeypatch):
+        from app.models.host_policy import HostPolicy
         from app.models.normalized_url import NormalizedUrl
 
-        assert get_type_hints(CrawlTask)["normalized_url"] is NormalizedUrl
+        monkeypatch.setenv("CRAWLUTRON_ALLOW_PRIVATE_TARGETS", "0")
+        policy = HostPolicy.unrestricted()
+        # A host the policy refuses has no value: there is no way to hold an
+        # unadmitted URL in this type at all.
+        with pytest.raises(ValueError, match="private_network_target"):
+            NormalizedUrl("http://localhost/x", policy=policy)
+        with pytest.raises(ValueError, match="unsupported_scheme"):
+            NormalizedUrl("file:///etc/passwd", policy=policy)
 
-    def test_normalizer_returns_the_typed_value(self):
-        import typing
+    def test_host_and_site_are_derived_once_at_construction(self):
+        from app.models.host_policy import HostPolicy
+        from app.models.normalized_url import NormalizedUrl
 
-        from app.models.normalized_url import NormalizedUrl, normalize_public_http_url
+        value = NormalizedUrl("https://Deep.Sub.Example.co.uk:443/p/", policy=HostPolicy.unrestricted())
+        # The three answers a URL carries, read off the value rather than
+        # recomputed at each use -- which is what the scheduler's per-host and
+        # per-site gates key on, and why they cannot disagree with each other.
+        assert value.raw == "https://deep.sub.example.co.uk/p"
+        assert value.host == "deep.sub.example.co.uk"
+        assert value.site == "example.co.uk"
 
-        hints = typing.get_type_hints(normalize_public_http_url)
-        assert hints["return"] is NormalizedUrl
+    def test_equal_canonical_strings_are_equal_values(self):
+        from app.models.host_policy import HostPolicy
+        from app.models.normalized_url import NormalizedUrl
 
-    def test_typed_value_is_runtime_plain_str(self):
-        """Typing must not change runtime shape (JSON/spill compatibility)."""
-        from app.models.normalized_url import normalize_public_http_url
-        from app.validation import HostPolicy
-
-        normalized = normalize_public_http_url(
-            "HTTP://Example.COM:80/a/#frag",
-            policy=HostPolicy.unrestricted(),
-        )
-        assert type(normalized) is str
-        assert normalized == "http://example.com/a"
+        policy = HostPolicy.unrestricted()
+        one = NormalizedUrl("https://example.com:443/a/?utm_source=x", policy=policy)
+        two = NormalizedUrl("https://example.com/a", policy=policy)
+        assert one == two
+        assert len({one, two}) == 1

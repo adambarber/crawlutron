@@ -21,7 +21,7 @@ from tests._fetcher_factories import (
     routed_fetcher,
     scripted_fetcher,
 )
-from tests._policy_factories import UNRESTRICTED_HOST_POLICY, crawl_policy, normalized
+from tests._policy_factories import UNRESTRICTED_HOST_POLICY, canonical, crawl_policy
 from tests._result_builders import _link, engine_result
 
 
@@ -437,7 +437,7 @@ def test_build_site_map_handles_dataclass_links():
 
     link = DiscoveredLink(
         url="https://r/page",
-        normalized_url=normalized("https://r/page"),
+        normalized_url=canonical("https://r/page"),
         text="",
         rel=[],
         source_url="https://r/",

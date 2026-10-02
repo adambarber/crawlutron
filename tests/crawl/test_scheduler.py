@@ -11,7 +11,7 @@ from app.models.crawl_task import CrawlTask
 from app.models.engine_crawl_result import EngineCrawlResult
 from app.models.taxonomy import Classification
 from app.scheduler import _COOLDOWN_PURGE_INTERVAL, DomainScheduler, jittered_delay
-from tests._policy_factories import normalized
+from tests._policy_factories import canonical
 from tests._result_builders import make_job, make_result
 from tests._scheduler_doubles import (
     FailingSink,
@@ -259,7 +259,7 @@ class TestCircuitBreakerSpillsOnResult:
         job = CrawlTask(
             index=0,
             original_url="http://example.com/",
-            normalized_url=normalized("http://example.com/"),
+            normalized_url=canonical("http://example.com/"),
             domain="example.com",
         )
         # The bug raises TypeError inside gather with return_exceptions=True,
