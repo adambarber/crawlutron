@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import socket
 
-import app.crawl.strategies.pinned_transport as http_mod
 from tests._assertions import block_private_targets
 from tests._browser_doubles import (
     ROUTE_ARG_UNSET,
@@ -55,7 +54,6 @@ async def test_https_subresource_reuses_the_dns_lookup(monkeypatch) -> None:
     """HTTPS validation is served by the shared TTL'd resolver: one lookup per
     host, not one uncached resolve per subresource."""
     block_private_targets(monkeypatch)
-    http_mod._DNS_CACHE.clear()
     lookups: list[str] = []
     real_getaddrinfo = socket.getaddrinfo
 
@@ -75,19 +73,26 @@ async def test_http_subresource_still_connects_to_the_fresh_pinned_ip(monkeypatc
     with the original hostname preserved, and the resolve stays uncached so a
     DNS rebind inside the cache TTL cannot slip past the check."""
     block_private_targets(monkeypatch)
-    resolves: list[bool] = []
-    real_resolve = http_mod._resolve_ips
+    lookups: list[str] = []
+    real_getaddrinfo = socket.getaddrinfo
 
-    def recording(host, *, use_cache=True):
-        resolves.append(use_cache)
-        return real_resolve(host, use_cache=use_cache)
+    def counting(host, *args, **kwargs):
+        lookups.append(host)
+        return real_getaddrinfo(host, *args, **kwargs)
 
-    monkeypatch.setattr(http_mod, "_resolve_ips", recording)
+    monkeypatch.setattr(socket, "getaddrinfo", counting)
     handler = ssrf_route_handler()
     route = FakeRoute()
     await handler(route, FakeRequest("http://1.2.3.4/x", "document"))
     assert route.decision == "continue"
     assert route.continued_url == "http://1.2.3.4/x"
     assert route.continued_headers == {"Host": "1.2.3.4"}
-    # The pin governs the connection, so its resolve is still uncached.
-    assert resolves and not all(resolves), f"pin resolve went through the cache: {resolves}"
+    # The pin governs the connection, so each request resolves again rather
+    # than reusing a cached IP: a rebind inside the cache TTL cannot slip past
+    # a connection that never looked. HTTPS is the case that does share, and the
+    # test above is what says so.
+    lookups_after_first = len(lookups)
+    await handler(FakeRoute(), FakeRequest("http://1.2.3.4/y", "document"))
+    assert len(lookups) > lookups_after_first, (
+        f"the second pin reused the first resolve instead of resolving again: {lookups}"
+    )

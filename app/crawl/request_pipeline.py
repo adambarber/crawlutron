@@ -23,6 +23,7 @@ from app.crawl.policy import DiscoveryFlags, discovery_flags
 from app.crawl.recursive import RECURSIVE_RAMP_MAX, _spill_write, run_recursive_crawl
 from app.crawl.render_options import policy_wants_html
 from app.crawl.result_helpers import TerminalResult, _skipped_engine_result, engine_result_from_exception
+from app.crawl.robots import FetchAndDecode
 from app.crawl.strategy_chain import execute_crawl_chain
 from app.memory_pressure import read_memory_stats
 from app.models import CrawlTask, CrawlWorker, EngineCrawlResult, NormalizedUrl
@@ -46,8 +47,7 @@ class _PipelineDependencies:
     make_spill: Callable[[str | None], Any]
     compile_scope_regex_safe: Callable[[str | None], BoundedPattern | None]
     stale_seeds: Callable[[Iterable[tuple[str, str | None]], Any, CrawlPolicy], set[str]]
-    fetch_and_decode: Callable[..., Any]
-    default_fetch_and_decode: Callable[..., Any]
+    fetch_and_decode: FetchAndDecode | None
     shared_http_cache: HttpCache
     resource_gate: ResourceGate
 
@@ -181,11 +181,7 @@ async def _load_robots(state: _PipelineState, target_url: str):
         robots_policy.robots_origin(target_url, policy=state.host_policy),
         state.fetcher,
         state.policy.limits.timeout_seconds,
-        fetch_and_decode=(
-            state.dependencies.fetch_and_decode
-            if state.dependencies.fetch_and_decode is not state.dependencies.default_fetch_and_decode
-            else None
-        ),
+        fetch_and_decode=state.dependencies.fetch_and_decode,
         policy=state.host_policy,
     )
 

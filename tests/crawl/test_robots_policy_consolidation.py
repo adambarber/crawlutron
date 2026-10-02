@@ -10,6 +10,7 @@ from app.crawl.engine import crawl_request
 from app.crawl.robots import (
     ROBOTS_CACHE_TTL_SECONDS,
     ROBOTS_FAILURE_TTL_SECONDS,
+    FetchAndDecode,
     load_robots_rules,
     robots_cache,
 )
@@ -22,20 +23,19 @@ def _policy(*, respect_robots: bool = True) -> dict:
     return crawl_policy(limits={"respect_robots": respect_robots})
 
 
-def _gate() -> RobotsGate:
+def _gate(fetch_and_decode: FetchAndDecode | None = None) -> RobotsGate:
     """A gate over default settings and no host policy.
 
     The consolidation tests all read one policy through two very different
-    paths, so the gate is built once here: the three arguments were restated at
-    every call site, and a test that changed one of them stopped being about
-    the robots cache at all.
+    paths, so the gate is built once here: the arguments were restated at every
+    call site, and a test that changed one of them stopped being about the
+    robots cache at all.
     """
-    return RobotsGate(CrawlPolicy(), HostPolicy.unrestricted())
+    return RobotsGate(CrawlPolicy(), HostPolicy.unrestricted(), fetch_and_decode)
 
 
 async def test_job_fetch_populates_cache_seen_by_engine():
     robots_cache.clear()
-    gate = _gate()
     fetch_calls = 0
 
     async def decode(fetcher, url, headers, timeout_seconds):
@@ -46,15 +46,7 @@ async def test_job_fetch_populates_cache_seen_by_engine():
             200,
         )
 
-    import app.crawl.admission as admission
-
-    original = admission._fetch_and_decode
-    admission._fetch_and_decode = decode
-    try:
-        assert await gate.allows("https://shared.test/public") is True
-    finally:
-        admission._fetch_and_decode = original
-
+    assert await _gate(decode).allows("https://shared.test/public") is True
     page_calls: list[str] = []
     result = await crawl_request(
         {"url": "https://shared.test/public", "policy": _policy()},
@@ -80,22 +72,13 @@ async def test_engine_fetch_populates_cache_seen_by_job_path():
     assert result["results"][0]["status"] == "success"
     assert sum(url.endswith("/robots.txt") for url in engine_calls) == 1
 
-    gate = _gate()
-
     async def unexpected_decode(*args):
         raise AssertionError("job path fetched a cached robots policy")
 
-    import app.crawl.admission as admission
-
-    original = admission._fetch_and_decode
-    admission._fetch_and_decode = unexpected_decode
-    try:
-        assert await gate.allows("https://reverse.test/public") is True
-    finally:
-        admission._fetch_and_decode = original
+    assert await _gate(unexpected_decode).allows("https://reverse.test/public") is True
 
 
-async def test_engine_and_job_single_flight_each_collapse_same_origin_misses(monkeypatch):
+async def test_engine_and_job_single_flight_each_collapse_same_origin_misses():
     robots_cache.clear()
     calls = 0
 
@@ -105,14 +88,12 @@ async def test_engine_and_job_single_flight_each_collapse_same_origin_misses(mon
         await asyncio.sleep(0.01)
         return "User-agent: *\nDisallow:\n", 200
 
-    import app.crawl.engine as engine
-
-    monkeypatch.setattr(engine, "_fetch_and_decode", decode)
     await asyncio.gather(
         *(
             crawl_request(
                 {"url": f"https://flight.test/page-{index}", "policy": _policy()},
                 http_fetcher=make_html_fetcher([]),
+                fetch_and_decode=decode,
             )
             for index in range(5)
         )
@@ -121,18 +102,16 @@ async def test_engine_and_job_single_flight_each_collapse_same_origin_misses(mon
 
     robots_cache.clear()
     calls = 0
-    gate = _gate()
-    import app.crawl.admission as admission
-
-    monkeypatch.setattr(admission, "_fetch_and_decode", decode)
     assert (
-        await asyncio.gather(*(gate.allows(f"https://flight.test/job-{index}") for index in range(5)))
+        await asyncio.gather(
+            *(_gate(decode).allows(f"https://flight.test/job-{index}") for index in range(5))
+        )
         == [True] * 5
     )
     assert calls == 1
 
 
-async def test_owner_preserves_404_and_5xx_ttl_semantics(monkeypatch):
+async def test_owner_preserves_404_and_5xx_ttl_semantics():
     import time
 
     import app.crawl.robots as owner
@@ -146,20 +125,25 @@ async def test_owner_preserves_404_and_5xx_ttl_semantics(monkeypatch):
         calls += 1
         return None, next(statuses)
 
-    monkeypatch.setattr(owner, "_fetch_and_decode", decode)
     policy = HostPolicy.unrestricted()
-    missing = await load_robots_rules("https://missing.test", object(), 5, policy=policy)
+    missing = await load_robots_rules(
+        "https://missing.test", object(), 5, fetch_and_decode=decode, policy=policy
+    )
     missing_again = await load_robots_rules(
         "https://missing.test",
         object(),
         5,
+        fetch_and_decode=decode,
         policy=policy,
     )
-    failure = await load_robots_rules("https://failure.test", object(), 5, policy=policy)
+    failure = await load_robots_rules(
+        "https://failure.test", object(), 5, fetch_and_decode=decode, policy=policy
+    )
     failure_again = await load_robots_rules(
         "https://failure.test",
         object(),
         5,
+        fetch_and_decode=decode,
         policy=policy,
     )
     assert missing == ([], [], None)

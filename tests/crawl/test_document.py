@@ -1,5 +1,6 @@
 """Document model: text parsing, bytearray paths and document-level extraction edges."""
 
+import socket
 from pathlib import Path
 from typing import NamedTuple
 from urllib.parse import urlparse
@@ -78,14 +79,21 @@ class TestDocumentRedirectSsrf:
     PINNED_IP = "93.184.216.1"
 
     def _install_fakes(self, monkeypatch, pdf_bytes, redirects):
-        import socket
         from urllib.parse import urlparse
 
         import app.crawl.strategies.http_client_pool as pool_mod
-        import app.crawl.strategies.pinned_transport as http_strategy
         from tests._transport_doubles import MockResponse, dispatching_transport_client
 
-        def fake_resolve_ips(hostname, *, use_cache=True):
+        table = {"evil.test": "169.254.169.254"}
+
+        def fake_getaddrinfo(hostname, port, *args, **kwargs):
+            """The DNS table for this scenario, one level below the module.
+
+            Stubbing the resolver rather than the module's ``_resolve_ips`` keeps
+            the cache policy under test: the pinning path resolves fresh, so
+            ``conftest`` clearing the cache between tests is enough for a stub
+            here to be the whole of DNS.
+            """
             if ":" in hostname:
                 return []
             if hostname in (self.PINNED_IP, "169.254.169.254"):
@@ -95,11 +103,9 @@ class TestDocumentRedirectSsrf:
                 # is what makes the logical-vs-connection URL split
                 # observable.
                 raise socket.gaierror(8, "nodename nor servname provided")
-            if hostname == "evil.test":
-                return ["169.254.169.254"]
-            return [self.PINNED_IP]
+            return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", (table.get(hostname, self.PINNED_IP), port))]
 
-        monkeypatch.setattr(http_strategy, "_resolve_ips", fake_resolve_ips)
+        monkeypatch.setattr(socket, "getaddrinfo", fake_getaddrinfo)
         monkeypatch.setenv("CRAWLUTRON_ALLOW_PRIVATE_TARGETS", "0")
 
         fetched: list[str] = []  # logical host names from the Host header

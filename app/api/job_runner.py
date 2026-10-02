@@ -57,6 +57,7 @@ from app.crawl.job_store import (
     normalize_job_state,
 )
 from app.crawl.policy import read_policy
+from app.crawl.robots import FetchAndDecode
 from app.models import Classification, CrawlResult, CrawlTask
 
 logger = logging.getLogger(__name__)
@@ -306,6 +307,7 @@ async def _run_job(
     job_store: JobStore,
     settings: Any,
     shutdown_event: asyncio.Event,
+    fetch_and_decode: FetchAndDecode | None = None,
 ) -> None:
     """Whole-site engine loop for one job. Runs until terminal/paused/cancel."""
     job = await job_store.aload(job_id)
@@ -317,7 +319,7 @@ async def _run_job(
     await job_store.asave(job)
 
     try:
-        context = JobAdmissionContext.create(job.policy, job.tier, settings)
+        context = JobAdmissionContext.create(job.policy, job.tier, settings, fetch_and_decode)
         if context.max_depth > 0 and context.seed_sitemaps:
             await _seed_job_sitemaps(job, context)
             await job_store.asave(job)

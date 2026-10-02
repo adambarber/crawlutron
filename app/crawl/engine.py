@@ -26,10 +26,10 @@ from app.crawl import robots as _robots_policy
 from app.crawl.admission import compile_scope_pattern
 from app.crawl.cache import HttpCache
 from app.crawl.content_cache import ContentCache
-from app.crawl.fetch_helpers import _fetch_and_decode
 from app.crawl.payload_helpers import _payload_policy, checked_payload_urls
 from app.crawl.policy import PolicyTier
 from app.crawl.request_pipeline import _PipelineDependencies, _PipelineState, run_crawl_request
+from app.crawl.robots import FetchAndDecode
 from app.crawl.strategies.fetchers import default_http_fetcher, impersonating_fetcher
 from app.models import (
     CrawlWorker,
@@ -52,8 +52,6 @@ load_robots_rules = _robots_policy.load_robots_rules
 cached_sitemaps = _robots_policy.cached_sitemaps
 
 _resource_gate = ResourceGate()
-
-_DEFAULT_FETCH_AND_DECODE = _fetch_and_decode
 
 # Shared conditional cache so repeated crawls can leverage 304 responses.
 _SHARED_HTTP_CACHE = HttpCache()
@@ -413,6 +411,7 @@ async def crawl_request(
     webhook_url: str | None = None,
     shutdown_event: asyncio.Event | None = None,
     spill_path: str | None = None,
+    fetch_and_decode: FetchAndDecode | None = None,
 ) -> dict[str, Any]:
     active_settings = settings or CrawlerSettings.from_mapping()
     host_policy = HostPolicy.from_settings(active_settings)
@@ -457,8 +456,7 @@ async def crawl_request(
                 make_spill=_ResultSpill,
                 compile_scope_regex_safe=compile_scope_pattern,
                 stale_seeds=_stale_seeds,
-                fetch_and_decode=_fetch_and_decode,
-                default_fetch_and_decode=_DEFAULT_FETCH_AND_DECODE,
+                fetch_and_decode=fetch_and_decode,
                 shared_http_cache=_SHARED_HTTP_CACHE,
                 resource_gate=_resource_gate,
             ),

@@ -1,6 +1,6 @@
 """Fetch helpers: the shared discovery fetch+decompress+decode core.
 
-``_fetch_and_decode`` (robots gating in the engine) and ``_fetch_text``
+``fetch_and_decode`` (robots gating in the engine) and ``_fetch_text``
 (sitemap fan-out) each used to hand-roll the same fetch -> await ->
 lowercase headers -> capped decompress -> decode sequence. That core now
 lives in one place (``_fetch_decode_discovery``); these tests pin both call
@@ -11,7 +11,7 @@ import gzip
 from dataclasses import dataclass, field
 
 from app.constants import DISCOVERY_BODY_MAX_BYTES
-from app.crawl.fetch_helpers import _fetch_and_decode, _fetch_decode_discovery, _fetch_text
+from app.crawl.fetch_helpers import _fetch_decode_discovery, _fetch_text, fetch_and_decode
 
 
 class _FakeResp:
@@ -131,19 +131,19 @@ class TestFetchAndDecodeContract:
 
     async def test_two_hundred_returns_body_and_status(self):
         fetcher = _fetcher(_FakeResp(200, {"content-type": "text/plain"}, b"User-agent: *"))
-        assert await _fetch_and_decode(fetcher, "http://e.com/robots.txt", {}, 5) == ("User-agent: *", 200)
+        assert await fetch_and_decode(fetcher, "http://e.com/robots.txt", {}, 5) == ("User-agent: *", 200)
 
     async def test_missing_document_returns_none_with_status(self):
         fetcher = _fetcher(_FakeResp(404, {}, b""))
-        assert await _fetch_and_decode(fetcher, "http://e.com/robots.txt", {}, 5) == (None, 404)
+        assert await fetch_and_decode(fetcher, "http://e.com/robots.txt", {}, 5) == (None, 404)
 
     async def test_transport_failure_returns_none_none(self):
         fetcher = _raising_fetcher(ConnectionError("boom"))
-        assert await _fetch_and_decode(fetcher, "http://e.com/robots.txt", {}, 5) == (None, None)
+        assert await fetch_and_decode(fetcher, "http://e.com/robots.txt", {}, 5) == (None, None)
 
     async def test_decompression_cap_returns_none_with_status(self):
         fetcher = _fetcher(_FakeResp(200, {"content-encoding": "gzip"}, _gzip_bomb()))
-        assert await _fetch_and_decode(fetcher, "http://e.com/robots.txt", {}, 5) == (None, 200)
+        assert await fetch_and_decode(fetcher, "http://e.com/robots.txt", {}, 5) == (None, 200)
 
 
 class TestFetchTextContract:

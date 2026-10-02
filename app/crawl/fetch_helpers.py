@@ -117,7 +117,7 @@ async def _fetch_decode_discovery(
     return _Discovery(None, None, None)
 
 
-async def _fetch_and_decode(
+async def fetch_and_decode(
     fetcher: Any,
     url: str,
     headers: _RequestHeaders,

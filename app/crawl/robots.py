@@ -11,7 +11,8 @@ from typing import Any, TypeAlias
 from urllib.parse import urljoin, urlparse
 
 from app.bounded_ttl import BoundedTTLCache
-from app.crawl.fetch_helpers import _fetch_and_decode, _single_flight
+from app.crawl.fetch_helpers import _single_flight
+from app.crawl.fetch_helpers import fetch_and_decode as default_fetch_and_decode
 from app.crawl.robots_parse import (
     parse_robots_crawl_delay,
     parse_robots_rules,
@@ -86,7 +87,7 @@ async def load_robots_rules(
     cached = robots_cache.get(cache_key)
     if cached is not None:
         return cached
-    decode = _fetch_and_decode if fetch_and_decode is None else fetch_and_decode
+    decode = default_fetch_and_decode if fetch_and_decode is None else fetch_and_decode
     return await _single_flight(
         _inflight,
         cache_key,

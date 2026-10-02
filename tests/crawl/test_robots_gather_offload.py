@@ -236,8 +236,7 @@ async def test_cold_robots_gate_coalesces_same_origin_fetches(monkeypatch):
         await asyncio.sleep(0.01)
         return "User-agent: *\nDisallow:\n", 200
 
-    monkeypatch.setattr("app.crawl.admission._fetch_and_decode", fetch_robots)
-    gate = RobotsGate(CrawlPolicy(), UNRESTRICTED_HOST_POLICY)
+    gate = RobotsGate(CrawlPolicy(), UNRESTRICTED_HOST_POLICY, fetch_robots)
     decisions = await asyncio.gather(
         *(gate.allows(f"https://example.test/page-{index}") for index in range(5))
     )

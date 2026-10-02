@@ -26,6 +26,7 @@ import pytest
 
 from app.api import job_runner
 from app.crawl.job_store import JobStatus
+from app.crawl.robots_parse import parse_robots_rules
 from tests._job_harnesses import (
     ScriptedExecute,
     _create_api_job,
@@ -47,6 +48,23 @@ from tests._result_builders import _canned_result, _scripted_result_map
 ADMITTED = "https://example.test/included"
 ADMISSION_ROOT = "https://example.test/root"
 ADMITTED_ONLY_SCOPE = r"^https://example\.test/included$"
+
+
+def _rules_from(fetch_robots):
+    """``load_robots_rules`` over a decode rule, dropping the caching and policy
+    arguments the gate supplies.
+
+    Only the rules are this test's precondition; the origin, the fetcher and the
+    policy the gate binds are its own business, and restating them here would make
+    the arrangement look like the production one when it is not.
+    """
+
+    async def load(origin, fetcher, timeout_seconds, *, policy, fetch_and_decode=None):
+        body, status = await fetch_robots(fetcher, f"{origin}/robots.txt", {}, timeout_seconds)
+        del status
+        return parse_robots_rules(body or ""), [], None
+
+    return load
 
 
 def assert_pair_crawled_once(finished, engine, root: str, child: str) -> None:
@@ -159,7 +177,12 @@ class TestWholeSiteAdmissionContract:
         async def fetch_robots(fetcher, url, headers, timeout_seconds):
             return "User-agent: *\nDisallow: /blocked\n", 200
 
-        monkeypatch.setattr("app.crawl.admission._fetch_and_decode", fetch_robots)
+        # The public loader, not the private decode rule: this test drives the
+        # whole job through the API, so the gate is built inside
+        # JobAdmissionContext.create and the decode rule is not a thing the test
+        # holds. Patching the loader says the same thing about the same gate and
+        # names something the module actually publishes.
+        monkeypatch.setattr("app.crawl.admission.load_robots_rules", _rules_from(fetch_robots))
         policy = self._policy(1, 2)
         policy["limits"]["respect_robots"] = True
         await self._admitted(

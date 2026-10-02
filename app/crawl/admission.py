@@ -13,18 +13,16 @@ from urllib.parse import urljoin, urlsplit
 
 from app.api_models import CrawlExtractionMethod, CrawlPolicy
 from app.constants import is_analytics_host, is_document_url
-from app.crawl.fetch_helpers import _fetch_and_decode, fetch_sitemap_urls
+from app.crawl.fetch_helpers import fetch_sitemap_urls
 from app.crawl.job_store import FrontierEntry, durable_page_identity, job_max_pages
 from app.crawl.policy import PolicyTier, discovery_flags, read_policy
-from app.crawl.robots import load_robots_rules, robots_allows, robots_origin
+from app.crawl.robots import FetchAndDecode, load_robots_rules, robots_allows, robots_origin
 from app.crawl.scope_match import scope_allows
 from app.crawl.strategies.fetchers import default_http_fetcher
 from app.models import NormalizedUrl
 from app.safe_regex import BoundedPattern, UnsafePattern, compile_untrusted
 from app.scheduler import DomainScheduler
 from app.validation import HostPolicy, registrable_domain, safe_public_url_or_none
-
-_DEFAULT_FETCH_AND_DECODE = _fetch_and_decode
 
 _logger = logging.getLogger(__name__)
 
@@ -334,18 +332,22 @@ async def admit_discovered_links(
 
 
 class RobotsGate:
-    def __init__(self, policy: CrawlPolicy, host_policy: HostPolicy) -> None:
+    def __init__(
+        self,
+        policy: CrawlPolicy,
+        host_policy: HostPolicy,
+        fetch_and_decode: FetchAndDecode | None = None,
+    ) -> None:
         self._host_policy = host_policy
         self._timeout_seconds = policy.limits.timeout_seconds
+        self._fetch_and_decode = fetch_and_decode
 
     async def _rules(self, url: str) -> tuple[list[tuple[bool, str]], float | None]:
         rules, _sitemaps, delay = await load_robots_rules(
             robots_origin(url, policy=self._host_policy),
             partial(default_http_fetcher, policy=self._host_policy),
             self._timeout_seconds,
-            fetch_and_decode=(
-                _fetch_and_decode if _fetch_and_decode is not _DEFAULT_FETCH_AND_DECODE else None
-            ),
+            fetch_and_decode=self._fetch_and_decode,
             policy=self._host_policy,
         )
         return rules, delay
@@ -379,7 +381,13 @@ class JobAdmissionContext:
         self.delayed_hosts.add(domain.lower())
 
     @classmethod
-    def create(cls, policy: Any, tier: PolicyTier, settings: Any) -> JobAdmissionContext:
+    def create(
+        cls,
+        policy: Any,
+        tier: PolicyTier,
+        settings: Any,
+        fetch_and_decode: FetchAndDecode | None = None,
+    ) -> JobAdmissionContext:
         """The admission gate's own view of a policy.
 
         ``tier`` and ``settings`` are separate because they answer different
@@ -391,7 +399,7 @@ class JobAdmissionContext:
         normalized = read_policy(policy, tier)
         limits = normalized.limits
         host_policy = HostPolicy.from_settings(settings)
-        robots = RobotsGate(normalized, host_policy)
+        robots = RobotsGate(normalized, host_policy, fetch_and_decode)
         scheduler = DomainScheduler(
             global_limit=max(1, int(getattr(settings, "global_concurrency", 4))),
             per_domain_limit=max(1, int(getattr(settings, "per_domain_concurrency", 2))),

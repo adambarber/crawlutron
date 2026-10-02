@@ -279,11 +279,6 @@ DECLARED: dict[str, Declaration] = {
         "Not yet triaged.\n",
         ["test"],
     ),
-    "app.crawl.admission._fetch_and_decode": _d(
-        "unreviewed",
-        "Not yet triaged.\n",
-        ["test"],
-    ),
     "app.crawl.admission._frontier_identity": _d(
         "unreviewed",
         "Not yet triaged.\n",
@@ -309,7 +304,6 @@ DECLARED: dict[str, Declaration] = {
         _CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]
     ),
     "app.crawl.engine._SPILL_PREFIX": _d(_CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]),
-    "app.crawl.engine._fetch_and_decode": _SUBSTITUTED_COLLABORATOR,
     "app.crawl.engine._get_shared_content_cache": _d(
         "unreviewed",
         "Not yet triaged.\n",
@@ -348,11 +342,6 @@ DECLARED: dict[str, Declaration] = {
     ),
     "app.crawl.extraction._walkable": _d(_IMPLEMENTATION_STEP.kind, _IMPLEMENTATION_STEP.reason, ["test"]),
     "app.crawl.fetch_helpers._SITEMAP_CACHE": _d(_CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]),
-    "app.crawl.fetch_helpers._fetch_and_decode": _d(
-        "unreviewed",
-        "Not yet triaged.\n",
-        ["test"],
-    ),
     "app.crawl.fetch_helpers._fetch_decode_discovery": _d(
         "unreviewed",
         "Not yet triaged.\n",
@@ -411,7 +400,6 @@ DECLARED: dict[str, Declaration] = {
         "a door.\n",
         ["test"],
     ),
-    "app.crawl.robots._fetch_and_decode": _SUBSTITUTED_COLLABORATOR,
     "app.crawl.robots._robots_pattern_to_regex": _d(
         "implementation step",
         "Pattern-to-matcher compilation, reached to prove per-host binding and that a pathological\n"
