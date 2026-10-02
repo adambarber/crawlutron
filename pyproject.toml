@@ -7,7 +7,7 @@ name = "crawlutron"
 version = "0.3.0"
 description = "Policy-driven, self-hosted web crawler and content-extraction service built around FastAPI"
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 license = { text = "MIT" }
 authors = [
     { name = "crawlutron maintainers" },
@@ -115,7 +115,7 @@ packages = ["app"]
 
 [tool.ruff]
 line-length = 110
-target-version = "py311"
+target-version = "py312"
 
 [tool.ruff.lint]
 preview = true

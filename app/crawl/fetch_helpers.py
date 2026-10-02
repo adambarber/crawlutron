@@ -10,7 +10,7 @@ import asyncio
 import contextlib
 import inspect
 from collections.abc import Awaitable, Callable, Mapping
-from typing import Any, NamedTuple, TypeAlias, TypeVar
+from typing import Any, NamedTuple
 from urllib.parse import urljoin
 
 from app.bounded_ttl import BoundedTTLCache
@@ -27,16 +27,13 @@ from app.crawl.decompression import decompress_body as _decompress_body
 from app.crawl.strategies.body_decode import decode_body
 from app.validation import HostPolicy, safe_public_url_or_none
 
-_T = TypeVar("_T")
-_K = TypeVar("_K")
-
 # Request headers as the discovery fetch takes them: a mapping it only ever
 # reads, or None for "send none". One declaration, because the fetch signatures
 # and the fetcher contract both spell it -- while they each spelled
 # ``dict[str, str]`` on their own, the sitemap path had to write
 # ``cond_headers or {}`` at its call site to satisfy the core, which is the rule
 # the core now owns.
-_RequestHeaders: TypeAlias = Mapping[str, str] | None
+type _RequestHeaders = Mapping[str, str] | None
 
 
 # Discovery bodies (robots.txt / sitemap.xml) are attacker-influenced; cap their
@@ -134,21 +131,21 @@ async def fetch_and_decode(
     return resp.text, resp.status
 
 
-async def _single_flight(
-    inflight: dict[_K, asyncio.Task[_T]],
-    key: _K,
-    factory: Callable[[], Awaitable[_T]],
-) -> _T:
+async def _single_flight[K, T](
+    inflight: dict[K, asyncio.Task[T]],
+    key: K,
+    factory: Callable[[], Awaitable[T]],
+) -> T:
     task = inflight.get(key)
     if task is None:
 
-        async def run() -> _T:
+        async def run() -> T:
             return await factory()
 
         task = asyncio.create_task(run())
         inflight[key] = task
 
-        def discard(done: asyncio.Task[_T]) -> None:
+        def discard(done: asyncio.Task[T]) -> None:
             if inflight.get(key) is done:
                 inflight.pop(key, None)
 

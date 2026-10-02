@@ -190,7 +190,9 @@ _EXTRACTION_SELECTOR_SENTINEL = _SelectorTimedOut()
 _SelectorResult = TypeVar("_SelectorResult")
 
 
-def _eval_selector(fn: Callable[[], _SelectorResult], timeout: float) -> _SelectorResult | _SelectorTimedOut:
+def _eval_selector[SelectorResult](
+    fn: Callable[[], SelectorResult], timeout: float
+) -> SelectorResult | _SelectorTimedOut:
     """Run a selector evaluation in a worker thread so it cannot hang a request.
 
     Returns the callable's result, or ``_EXTRACTION_SELECTOR_SENTINEL`` if it

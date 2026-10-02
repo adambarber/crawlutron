@@ -216,7 +216,7 @@ def _link_values(link: Any) -> tuple[str, str, str | None] | None:
     )
 
 
-async def admit_discovered_links(
+async def admit_discovered_links[T](
     links: Iterable[Any],
     *,
     source_depth: int,

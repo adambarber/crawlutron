@@ -959,8 +959,7 @@ def test_result_construction_enforces_membership_at_the_dataclass():
     """
     from dataclasses import asdict
 
-    from app.models.crawl_result import CrawlResult
-    from app.models.crawl_strategy_attempt import CrawlStrategyAttempt
+    from app.models.crawl_result import CrawlResult, CrawlStrategyAttempt
     from app.models.engine_crawl_result import EngineCrawlResult
     from tests._result_builders import engine_result
 

@@ -2,8 +2,7 @@ from typing import Any
 
 from app.constants import HTTP_DECLARED_CRAWLER
 from app.models.crawl_job import CrawlJob
-from app.models.crawl_result import CrawlResult
-from app.models.crawl_strategy_attempt import CrawlStrategyAttempt
+from app.models.crawl_result import CrawlResult, CrawlStrategyAttempt
 from app.models.discovered_link import DiscoveredLink
 from app.models.engine_crawl_result import EngineCrawlResult
 from app.models.render_options import RenderOptions

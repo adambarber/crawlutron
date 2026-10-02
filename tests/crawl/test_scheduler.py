@@ -190,7 +190,7 @@ class TestObservedLatencyCrossesPipelines:
     @staticmethod
     def _crawled_result(elapsed_ms: int):
         from app.crawl.result_helpers import build_engine_result
-        from app.models.crawl_strategy_attempt import CrawlStrategyAttempt
+        from app.models.crawl_result import CrawlStrategyAttempt
 
         return build_engine_result(
             original_url="https://example.com/x",

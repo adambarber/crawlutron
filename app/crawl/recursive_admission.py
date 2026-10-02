@@ -7,7 +7,7 @@ from collections import deque
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
 from itertools import islice
-from typing import Any, NamedTuple, Protocol, TypeAlias
+from typing import Any, NamedTuple, Protocol
 
 from app.constants import (
     BROWSER_STRATEGIES,
@@ -29,7 +29,7 @@ logger = logging.getLogger(__name__)
 # One admitted item as it flows down the pipeline: (depth, task). Named once so
 # every stage boundary states the item shape by reference instead of re-spelling
 # ``tuple[int, CrawlTask]`` in each signature and each local annotation.
-_Admitted: TypeAlias = tuple[int, CrawlTask]
+type _Admitted = tuple[int, CrawlTask]
 
 
 class _BatchState(Protocol):

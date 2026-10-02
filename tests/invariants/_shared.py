@@ -15,7 +15,6 @@ import ast
 import pathlib
 from collections.abc import Callable, Iterable
 from pathlib import Path
-from typing import TypeAlias
 
 from tests.chokepoint_walks import REPO_ROOT, app_trees, relative_posix, resolved_call_name
 from tests.property_registry import Property
@@ -58,7 +57,7 @@ def app_names() -> set[str]:
     return names
 
 
-FunctionNode: TypeAlias = ast.FunctionDef | ast.AsyncFunctionDef
+type FunctionNode = ast.FunctionDef | ast.AsyncFunctionDef
 
 
 def function_defs(tree: ast.AST) -> list[FunctionNode]:
@@ -302,7 +301,7 @@ def _module_name(path: pathlib.Path) -> str:
 #: back -- so the index said ``ast.AST`` and each consumer had to re-assert the
 #: shape the index had already guaranteed. Naming the three keeps the guarantee
 #: where it is established.
-DefinitionNode: TypeAlias = ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef
+type DefinitionNode = ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef
 
 
 def _module_definition_index(

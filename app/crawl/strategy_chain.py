@@ -18,7 +18,7 @@ from app.crawl.result_helpers import TerminalResult, _failed_engine_result, engi
 from app.crawl.strategies.browser_result import browser_strategy_result
 from app.crawl.strategies.http import http_strategy_result
 from app.crawl.strategies.strategy_request import StrategyRequest
-from app.models.crawl_strategy_attempt import CrawlStrategyAttempt
+from app.models.crawl_result import CrawlStrategyAttempt
 from app.models.crawl_worker import CrawlWorker
 from app.models.engine_crawl_result import EngineCrawlResult
 from app.models.http_fetcher import HttpFetcher

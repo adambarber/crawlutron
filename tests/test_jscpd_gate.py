@@ -960,3 +960,67 @@ def test_every_sanctioned_pair_names_a_guard_that_exists_and_pins_its_fragment()
             f"{pair['id']} names a guard that is not there"
         )
         assert len(pair["fragment_sha256"]) == 64, f"{pair['id']} has no content pin"
+
+
+def test_a_fragment_of_imports_alone_is_a_shared_vocabulary_not_a_clone() -> None:
+    """Two modules importing the same names is the one identical text that cannot drift.
+
+    Python resolves each module's own namespace, so there is no third module that
+    could hold these imports for both, no chokepoint to extract, and no rule for
+    the two lists to disagree about. At the enforced floor four such lines clear
+    the threshold, so a package whose records each import their own taxonomy
+    reported clones forever -- the one shape of duplication that carrying no
+    information about where a chokepoint is missing.
+    """
+    imports = """from app.constants import ResultStatus
+from app.models.crawl_job import CrawlJob
+from app.models.crawl_result import CrawlResult
+from app.models.crawl_worker import CrawlWorker
+"""
+    assert gate._is_dependency_declaration(imports)
+
+
+def test_one_line_of_code_between_two_import_runs_keeps_the_pair_under_judgement() -> None:
+    """The filter admits a fragment only when EVERY line is an import.
+
+    The duplication this gate exists to find begins at the first line of real
+    code, so a fragment that mixes an import run with a body is exactly the
+    case that must stay visible -- including when the body is only a signature.
+    """
+    fragment = """from app.constants import ResultStatus
+from app.models.crawl_result import CrawlResult
+
+
+def build(status: ResultStatus) -> CrawlResult:
+    return CrawlResult(status=status)
+"""
+    assert not gate._is_dependency_declaration(fragment)
+
+
+def test_a_parenthesised_import_is_still_a_declaration() -> None:
+    """A wrapped import is one declaration spread over lines, not several.
+
+    Reading each physical line separately would see ``Classification,`` -- which
+    matches no import form -- and drop a fragment that is nothing but imports,
+    reinstating the noise the filter exists to remove.
+    """
+    fragment = """from app.models.taxonomy import (
+    Classification,
+    CrawlError,
+    CrawlStrategyName,
+)
+"""
+    assert gate._is_dependency_declaration(fragment)
+
+
+def test_prose_repeated_in_two_docstrings_is_still_a_clone() -> None:
+    """The same argument written twice is duplication, and the filter must not excuse it.
+
+    Two docstrings stating the same reasoning have two homes that can disagree,
+    which is precisely what a one-home rule exists to prevent.
+    """
+    fragment = '''"""Two functions rather than one with a cast inside the loop."""
+    """
+    return value
+'''
+    assert not gate._is_dependency_declaration(fragment)

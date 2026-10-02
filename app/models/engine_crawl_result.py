@@ -15,7 +15,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from app.constants import ResultStatus
-from app.models.crawl_strategy_attempt import CrawlStrategyAttempt
+from app.models.crawl_result import CrawlStrategyAttempt
 from app.models.discovered_link import DiscoveredLink
 from app.models.literal_checked import LiteralChecked
 from app.models.taxonomy import Classification, CrawlError, CrawlStrategyName

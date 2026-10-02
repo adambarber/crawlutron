@@ -103,7 +103,7 @@ def _to_jsonable_impl(value: Any, seen: set[int]) -> Any:
     return value
 
 
-def from_wire(cls: type[_ResultT], payload: Mapping[str, Any]) -> _ResultT:
+def from_wire[ResultT: Any](cls: type[ResultT], payload: Mapping[str, Any]) -> ResultT:
     """Rebuild a result dataclass from the record :func:`to_dict` wrote.
 
     The inverse half of ONE declaration, described in this module's preamble.
@@ -118,7 +118,7 @@ def from_wire(cls: type[_ResultT], payload: Mapping[str, Any]) -> _ResultT:
     # than a gap in the contract: pyright cannot call a value whose type is a
     # TypeVar bound to the class parameter. What comes back IS `cls`, built from
     # its own fields, with ``__post_init__`` having already validated them.
-    return cast(_ResultT, _rebuild_dataclass(cls, payload))
+    return cast(ResultT, _rebuild_dataclass(cls, payload))
 
 
 def _rebuild_value(annotation: Any, value: Any) -> Any:
@@ -152,9 +152,7 @@ def _rebuild_dataclass(cls: Any, payload: Mapping[str, Any]) -> Any:
     :func:`from_wire` is the typed door; this is what it calls, and the recursive
     arm calls back into here because ``is_dataclass`` narrows to a class object
     without a type argument, which no generic class-parameter signature accepts.
-    Two functions rather than one with a cast inside the loop: the unchecked
-    width is confined to the body that cannot be typed, and the signature a
-    caller reads is the one that carries the contract.
+    The argument for the split is in this module's preamble.
     """
     annotations = get_type_hints(cls)
     values: dict[str, Any] = {}

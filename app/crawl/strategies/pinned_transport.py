@@ -12,7 +12,7 @@ import functools
 import socket
 import time
 from collections.abc import AsyncIterator, Awaitable, Callable
-from typing import Any, ParamSpec, Protocol, TypeVar
+from typing import Any, Protocol
 from urllib.parse import urljoin, urlparse
 
 from app.bounded_ttl import BoundedTTLCache
@@ -235,11 +235,8 @@ class PinRule(Protocol):
 # resolver call.
 DNS_EXECUTOR = concurrent.futures.ThreadPoolExecutor(max_workers=32, thread_name_prefix="dns-resolve")
 
-_P = ParamSpec("_P")
-_R = TypeVar("_R")
 
-
-def _off_loop(resolve: Callable[[], Callable[_P, _R]]) -> Callable[_P, Awaitable[_R]]:
+def _off_loop[**P, R](resolve: Callable[[], Callable[P, R]]) -> Callable[P, Awaitable[R]]:
     """The one way to run blocking call machinery off the event loop.
 
     Two things are owned here instead of at the call sites: the *pool* and the
@@ -258,7 +255,7 @@ def _off_loop(resolve: Callable[[], Callable[_P, _R]]) -> Callable[_P, Awaitable
     every later call.
     """
 
-    async def _run(*args: _P.args, **kwargs: _P.kwargs) -> _R:
+    async def _run(*args: P.args, **kwargs: P.kwargs) -> R:
         loop = asyncio.get_running_loop()
         return await loop.run_in_executor(DNS_EXECUTOR, functools.partial(resolve(), *args, **kwargs))
 

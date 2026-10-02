@@ -93,7 +93,7 @@ def _profile_float(profile: dict[str, Any], key: str, default: float, ceiling: f
 _Knob = TypeVar("_Knob", int, float)
 
 
-def _clamp_knob(value: _Knob, ceiling: _Knob | None) -> _Knob:
+def _clamp_knob[Knob: (int, float)](value: Knob, ceiling: Knob | None) -> Knob:
     """Hold a knob at its ceiling when it has one, and pass it through when it does not."""
     return value if ceiling is None else min(value, ceiling)
 

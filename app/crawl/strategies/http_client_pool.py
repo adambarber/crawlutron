@@ -109,7 +109,7 @@ class _LoopBound(Protocol):
     _bound_loop: asyncio.AbstractEventLoop | None
 
 
-def _bind_to_running_loop(client: T) -> T:
+def _bind_to_running_loop[T](client: T) -> T:
     """Stamp a freshly built pooled client with the loop it was built on.
 
     The single place that writes ``_bound_loop``. It was four: two builders, each

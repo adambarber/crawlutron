@@ -7,7 +7,7 @@ import re
 import threading
 from collections import OrderedDict
 from collections.abc import Awaitable, Callable
-from typing import Any, TypeAlias
+from typing import Any
 from urllib.parse import urljoin, urlparse
 
 from app.bounded_ttl import BoundedTTLCache
@@ -23,7 +23,7 @@ from app.validation import HostPolicy, normalize_public_http_url, safe_public_ur
 ROBOTS_CACHE_MAX_ENTRIES = 2048
 ROBOTS_CACHE_TTL_SECONDS = 600.0
 ROBOTS_FAILURE_TTL_SECONDS = 60.0
-RobotsRules: TypeAlias = tuple[list[tuple[bool, str]], list[str], float | None]
+type RobotsRules = tuple[list[tuple[bool, str]], list[str], float | None]
 FetchAndDecode = Callable[[Any, str, dict[str, str], int], Awaitable[tuple[str | None, int | None]]]
 
 robots_cache: BoundedTTLCache[tuple[str, HostPolicy], RobotsRules] = BoundedTTLCache(
@@ -157,7 +157,7 @@ class _PrefixMatcher:
 
 ROBOTS_PATTERN_CACHE_PER_HOST = 1024
 ROBOTS_PATTERN_CACHE_MAX_HOSTS = 1024
-RobotsMatcher: TypeAlias = re.Pattern[str] | _RobotsPathMatcher | _MatchAll | _PrefixMatcher
+type RobotsMatcher = re.Pattern[str] | _RobotsPathMatcher | _MatchAll | _PrefixMatcher
 
 
 class _RobotsPatternCache:

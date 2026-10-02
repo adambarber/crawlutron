@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 import pytest
 
 from app.constants import HTTP_DECLARED_CRAWLER
-from app.models.crawl_strategy_attempt import CrawlStrategyAttempt
+from app.models.crawl_result import CrawlStrategyAttempt
 from app.models.discovered_link import DiscoveredLink
 from app.models.engine_crawl_result import EngineCrawlResult
 from app.models.serialization import from_wire, to_dict

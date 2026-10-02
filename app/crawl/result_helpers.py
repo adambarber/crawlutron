@@ -18,8 +18,7 @@ from app.constants import (
 from app.crawl.decompression import DecompressionError, DecompressionTooLargeError
 from app.crawl.scheduler_exceptions import _CircuitBreakerOpen
 from app.models.browser_pool_exhausted import BrowserPoolExhaustedError
-from app.models.crawl_result import CrawlResult
-from app.models.crawl_strategy_attempt import CrawlStrategyAttempt
+from app.models.crawl_result import CrawlResult, CrawlStrategyAttempt
 from app.models.engine_crawl_result import EngineCrawlResult
 from app.models.taxonomy import Classification, CrawlError, CrawlStrategyName
 
@@ -246,11 +245,11 @@ def engine_result_from_exception(
     )
 
 
-def failed_result_for(
-    job: _JobT,
+def failed_result_for[JobT](
+    job: JobT,
     error: BaseException,
     *,
-    url_of: Callable[[_JobT], str],
+    url_of: Callable[[JobT], str],
 ) -> EngineCrawlResult:
     """Build the terminal ``EngineCrawlResult`` for a job the scheduler skipped.
 

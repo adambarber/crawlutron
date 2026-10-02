@@ -973,7 +973,7 @@ class _UrlSource(Protocol):
 _UrlSourceT = TypeVar("_UrlSourceT", bound=_UrlSource)
 
 
-def _require_exactly_one_url_source(model: _UrlSourceT) -> _UrlSourceT:
+def _require_exactly_one_url_source[UrlSourceT: _UrlSource](model: UrlSourceT) -> UrlSourceT:
     """Shared url/urls contract for crawl and render requests.
 
     Both set silently ignored ``url``; neither failed late in

@@ -546,6 +546,42 @@ def jscpd_report(
         return None
 
 
+_IMPORT_LINE = re.compile(r"^(?:import|from)\s")
+
+
+def _is_dependency_declaration(fragment: str) -> bool:
+    """True when a fragment is nothing but import statements.
+
+    Two modules that both import the same four names produce byte-identical
+    text, and no third module can hold those imports for them -- Python resolves
+    each module's own namespace. So a fragment of this shape cannot drift from
+    its twin, cannot be extracted into a chokepoint, and cannot be a defect. It
+    is the one place in a codebase where identical text means identical intent
+    rather than a second copy of a decision, which is exactly what this gate
+    exists to find. At the configured floor four of these lines clear the
+    threshold, so a package where every record module imports its own taxonomy
+    reports clones forever.
+
+    A fragment qualifies only if EVERY logical line is an import: one line of
+    real code between two import runs is enough to keep the pair under
+    judgement, because that is where the duplication the gate wants to see
+    begins.
+    """
+    logical: list[str] = []
+    open_parens = 0
+    for line in fragment.splitlines():
+        stripped = line.strip()
+        # A line inside an open paren continues the statement above it, so it is
+        # not a statement of its own and must not be judged as one.
+        continuation = open_parens > 0
+        open_parens += line.count("(") - line.count(")")
+        if not stripped or stripped.startswith("#"):
+            continue
+        if not continuation:
+            logical.append(stripped)
+    return bool(logical) and open_parens == 0 and all(_IMPORT_LINE.match(line) for line in logical)
+
+
 def _footprint(duplicate: dict[str, Any]) -> int:
     return min(
         int(duplicate["firstFile"]["end"]) - int(duplicate["firstFile"]["start"]) + 1,
@@ -565,6 +601,13 @@ def _run(args: argparse.Namespace) -> int:
     spans: dict[tuple[str, str], int] = {}
     totals: dict[str, dict[str, int]] = {}
     sources = 0
+    # Counted, not silently dropped: a filter that hides its own hits is
+    # indistinguishable from a filter that hides too much. The lines are
+    # subtracted from the duplication statistic too, because jscpd counted them
+    # and leaving them in would hold the percentage over the threshold for
+    # fragments this pass has already judged.
+    declarations = 0
+    declaration_lines = 0
     for tree, roots in TREE_ROOTS.items():
         for root in roots:
             report = _scan(root, floor, args)
@@ -585,11 +628,17 @@ def _run(args: argparse.Namespace) -> int:
             tree_totals["duplicatedLines"] += int(statistics["duplicatedLines"])
             tree_totals["sources"] += found_sources
             for duplicate in report["duplicates"]:
+                if _is_dependency_declaration(str(duplicate.get("fragment", ""))):
+                    declarations += 1
+                    declaration_lines += _footprint(duplicate)
+                    continue
                 fragment_hash = _fragment_hash(duplicate)
                 key = (tree, fragment_hash)
                 observed.setdefault(key, set()).add(_pair_id(duplicate, root))
                 spans.setdefault(key, _footprint(duplicate))
                 tree_totals["pairs"] += 1
+            tree_totals["duplicatedLines"] -= declaration_lines
+            declaration_lines = 0
 
     # The cross-tree pass runs after the per-root ones and deliberately does NOT
     # fold its source count into `sources`: it reads the same files a second
@@ -606,6 +655,9 @@ def _run(args: argparse.Namespace) -> int:
         return 1
     cross_totals = {"lines": 0, "duplicatedLines": 0, "pairs": 0, "sources": cross_sources}
     for duplicate in cross["duplicates"]:
+        if _is_dependency_declaration(str(duplicate.get("fragment", ""))):
+            declarations += 1
+            continue
         # Only pairs that SPAN two roots are this pass's business. A pair inside
         # one tree was already scored above against the same floor, and reporting
         # it twice would charge one clone against two expectations.
@@ -689,6 +741,14 @@ def _run(args: argparse.Namespace) -> int:
                 file=sys.stderr,
             )
         return 1
+
+    if declarations:
+        print(
+            f"jscpd {args.profile}: skipped {declarations} fragment(s) that are nothing but "
+            f"import statements. Two modules importing the same names is a shared vocabulary, "
+            f"not a second copy of a decision; :func:`_is_dependency_declaration` says why.",
+            file=sys.stderr,
+        )
 
     for tree, tree_totals in totals.items():
         sanctioned_lines = sum(spans[key] for key in expected if key[0] == tree)

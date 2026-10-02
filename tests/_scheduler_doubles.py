@@ -67,7 +67,7 @@ def trip_circuit(scheduler: DomainScheduler, domain: str, *, failures: int | Non
         scheduler.record_failure(domain)
 
 
-async def ok_worker(job: _EnvelopeJob) -> EngineCrawlResult:
+async def ok_worker[EnvelopeJob: (CrawlJob, CrawlTask)](job: EnvelopeJob) -> EngineCrawlResult:
     """A worker that succeeds, returning a real ``SchedulerResult``.
 
     A stand-in that returned a bare ``"ok"`` would not be one: the scheduler
@@ -79,7 +79,9 @@ async def ok_worker(job: _EnvelopeJob) -> EngineCrawlResult:
     return make_result(_job_url(job), job.domain)
 
 
-def engine_envelope(job: _EnvelopeJob, error: BaseException) -> EngineCrawlResult:
+def engine_envelope[EnvelopeJob: (CrawlJob, CrawlTask)](
+    job: EnvelopeJob, error: BaseException
+) -> EngineCrawlResult:
     """The crawl pipeline's real failure envelope.
 
     Routes through the production ``failed_result_for`` chokepoint rather than

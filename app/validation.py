@@ -9,7 +9,7 @@ from contextlib import suppress
 from dataclasses import dataclass
 from functools import lru_cache, partial
 from importlib import import_module
-from typing import Protocol, TypeVar, cast
+from typing import Protocol, cast
 from urllib.parse import parse_qsl, urlencode, urljoin, urlparse, urlunparse
 
 from app.addresses import AddressClass, classify
@@ -297,15 +297,12 @@ def _clamp(value, lo, hi):
     return value
 
 
-T = TypeVar("T", int, float)
-
-
 def _finite_or_none(value: float) -> float | None:
     """A finite float, or None when the parsed value cannot be honored."""
     return value if math.isfinite(value) else None
 
 
-def in_range(lo: T, hi: T) -> Callable[[T], T | None]:
+def in_range[T: (int, float)](lo: T, hi: T) -> Callable[[T], T | None]:
     """A validator that refuses a value outside ``[lo, hi]`` instead of clamping it.
 
     ``_mapping_number``'s own ``lo``/``hi`` clamp, which is right for a tuning
@@ -325,7 +322,7 @@ def in_range(lo: T, hi: T) -> Callable[[T], T | None]:
     return within
 
 
-def _mapping_number(
+def _mapping_number[T: (int, float)](
     mapping: Mapping[str, str],
     name: str,
     fallback: T,
@@ -654,7 +651,6 @@ __all__ = [
     "HOST_POLICY_ENTRY_POINTS",
     "HostPolicy",
     "PRIVATE_HOSTS",
-    "T",
     "TWO_PART_PUBLIC_SUFFIXES",
     "allow_private_targets",
     "filter_js_endpoints",

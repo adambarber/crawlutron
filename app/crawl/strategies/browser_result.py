@@ -21,7 +21,7 @@ from app.crawl.strategies.content_pipeline import (
 from app.crawl.strategies.strategy_request import StrategyRequest
 from app.crawl.worker import call_worker
 from app.models.crawl_job import CrawlJob
-from app.models.crawl_strategy_attempt import CrawlStrategyAttempt
+from app.models.crawl_result import CrawlStrategyAttempt
 from app.models.crawl_worker import CrawlWorker
 from app.models.engine_crawl_result import EngineCrawlResult
 from app.models.render_options import RenderOptions

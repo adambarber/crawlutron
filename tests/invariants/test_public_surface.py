@@ -92,7 +92,7 @@ _PUBLIC_SURFACE_PROPERTY = Property(
 # reachable only through the endpoint that has the matching envelope.
 _OWNER_PUBLIC_SURFACE_RATCHET = {
     "app/crawl/admission.py": (20, 14),
-    "app/validation.py": (19, 13),
+    "app/validation.py": (18, 13),
     "app/api/response_shaping.py": (11, 10),
     "app/crawl/sqlite_store.py": (9, 7),
     "app/safe_regex.py": (7, 2),
@@ -120,6 +120,12 @@ def _owned_public_symbols(tree: ast.Module) -> set[str]:
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
             if not node.name.startswith("_"):
                 public.add(node.name)
+        elif isinstance(node, ast.TypeAlias):
+            # ``type X = ...`` (PEP 695) is a declaration of X at module level, and
+            # is what replaced ``X: TypeAlias = ...``. It moved to its own AST node
+            # in 3.12, so the floor raising made this branch load-bearing.
+            if not node.name.id.startswith("_"):
+                public.add(node.name.id)
         elif isinstance(node, (ast.Assign, ast.AnnAssign)):
             targets = assignment_targets(node)
             public.update(

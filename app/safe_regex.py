@@ -13,11 +13,9 @@ class as curl_cffi under fast_sleeps).
 
 from __future__ import annotations
 
-from typing import TypeAlias
-
 import regex
 
-BoundedPattern: TypeAlias = regex.Pattern[str]
+type BoundedPattern = regex.Pattern[str]
 DEFAULT_MATCH_TIMEOUT_SECONDS = 0.5
 
 

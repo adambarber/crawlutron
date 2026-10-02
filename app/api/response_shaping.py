@@ -45,8 +45,7 @@ from app.crawl.llm_format import (
     extract_carried_metadata,
 )
 from app.crawl.result_record import AnyResult, ProducerEnvelope, RenderEnvelope
-from app.models.crawl_result import CrawlResult
-from app.models.crawl_strategy_attempt import CrawlStrategyAttempt
+from app.models.crawl_result import CrawlResult, CrawlStrategyAttempt
 from app.models.discovered_link import DiscoveredLink
 from app.models.engine_crawl_result import EngineCrawlResult
 from app.models.taxonomy import CrawlStrategyName
@@ -381,10 +380,10 @@ def build_unified_crawl_response(
     )
 
 
-def _shape_all(
-    results: Sequence[_ResultT],
+def _shape_all[ResultT: AnyResult](
+    results: Sequence[ResultT],
     *,
-    adapt: Callable[[_ResultT], UnifiedCrawlResult],
+    adapt: Callable[[ResultT], UnifiedCrawlResult],
 ) -> list[UnifiedCrawlResult]:
     """Shape a whole batch in one pass (the worker-thread side of
     :func:`abuild_unified_crawl_response`).
@@ -473,11 +472,11 @@ def _failed_unified_result(item: Any) -> UnifiedCrawlResult:
     )
 
 
-async def abuild_unified_crawl_response(
-    results: Sequence[_ResultT],
+async def abuild_unified_crawl_response[ResultT: AnyResult](
+    results: Sequence[ResultT],
     *,
     options: EnvelopeOptions | None = None,
-    adapt: Callable[[_ResultT], UnifiedCrawlResult],
+    adapt: Callable[[ResultT], UnifiedCrawlResult],
 ) -> UnifiedCrawlResponse:
     """Async :func:`build_unified_crawl_response` for use inside async endpoints.
 

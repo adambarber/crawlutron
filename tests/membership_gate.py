@@ -43,7 +43,7 @@ import ast
 import pathlib
 import typing
 from collections.abc import Iterator
-from typing import Any, TypeAlias
+from typing import Any
 
 from tests.chokepoint_walks import (
     attribute_calls,
@@ -183,7 +183,7 @@ def _primitive_keyword_calls(
 #: Literal field nobody has listed is a gap in the model rather than a silent
 #: hole in the sweep -- which is why both field detectors name this type instead
 #: of repeating ``dict[str, set[str]]`` in their signatures.
-FieldMembers: TypeAlias = dict[str, set[str]]
+type FieldMembers = dict[str, set[str]]
 
 
 def _named_primitive_keyword_calls(

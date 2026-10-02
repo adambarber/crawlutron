@@ -16,13 +16,9 @@ from __future__ import annotations
 import threading
 import time
 from collections import OrderedDict
-from typing import Generic, TypeVar
-
-K = TypeVar("K")
-V = TypeVar("V")
 
 
-class BoundedTTLCache(Generic[K, V]):
+class BoundedTTLCache[K, V]:
     """Locked + TTL + LRU-bounded in one audited place."""
 
     def __init__(self, max_entries: int, ttl: float, *, clock=time.monotonic) -> None:
