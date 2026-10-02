@@ -367,6 +367,14 @@ class JobStatusResponse(BaseModel):
     job_id: str
     root_url: str
     status: str
+    kind: Annotated[
+        str,
+        Field(
+            description="Job kind: whole_site resumes from its persisted frontier; single_shot "
+            "does not. They differ in whether a crash leaves the job recoverable, so "
+            "neither can be inferred from the other.",
+        ),
+    ]
     created_at: float
     updated_at: float
     frontier_size: int

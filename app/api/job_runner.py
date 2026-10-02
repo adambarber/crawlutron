@@ -134,7 +134,7 @@ def reset_job_runner() -> None:
     reset_execute_crawl()
 
 
-def _is_resumable_kind(kind: str | None) -> bool:
+def _is_resumable_kind(kind: str) -> bool:
     """Whether a job of this kind can be resumed from its persisted frontier.
 
     One definition, read by both recovery seams, because the two used to
@@ -145,8 +145,15 @@ def _is_resumable_kind(kind: str | None) -> bool:
     that is otherwise authoritative.
 
     A seam that cannot resume must not rewind. It has to retire the row.
+
+    ``kind`` is a ``str`` and never an absent one. It was ``str | None`` with
+    ``None`` treated as resumable, which is the fail-open half of the shipped bug
+    the status view documents: a projection that stopped selecting the key made
+    every job look whole-site. The SQL coalesces the column to ``'whole_site'``
+    for rows written before it existed, so no branch here can produce a null kind
+    and the case is gone rather than handled.
     """
-    return kind in (None, JobKind.WHOLE_SITE.value)
+    return kind == JobKind.WHOLE_SITE.value
 
 
 async def recover_orphaned_running_jobs(job_store: JobStore) -> int:
@@ -161,7 +168,7 @@ async def recover_orphaned_running_jobs(job_store: JobStore) -> int:
             # while this is still the only place that knows the service has
             # given up on it. Rewinding it instead would hand the next startup
             # a row it has already decided to skip.
-            retired = JobStatus.PENDING if _is_resumable_kind(summary.get("kind")) else JobStatus.FAILED
+            retired = JobStatus.PENDING if _is_resumable_kind(summary["kind"]) else JobStatus.FAILED
             # Control-plane CAS: retires the row without rewriting its data;
             # save() no longer carries status anyway.
             if await job_store.aset_status(summary["job_id"], retired, expected=JobStatus.RUNNING):
@@ -187,7 +194,7 @@ async def recover_and_start_pending_jobs(
     for summary in await job_store.alist_jobs():
         if summary.get("status") != JobStatus.PENDING.value:
             continue
-        if not _is_resumable_kind(summary.get("kind")):
+        if not _is_resumable_kind(summary["kind"]):
             continue
         job = await job_store.aload(summary["job_id"])
         if job is None:

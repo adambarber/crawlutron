@@ -17,7 +17,7 @@ from dataclasses import asdict, dataclass, field
 from enum import StrEnum
 from functools import lru_cache
 from pathlib import Path
-from typing import Any
+from typing import Any, TypedDict
 
 from app.api_models import CrawlPolicy
 from app.crawl.ids import new_job_id
@@ -491,7 +491,39 @@ _JOB_STATUS_PROJECTION = """
 """
 
 
-def _status_row(row: sqlite3.Row, visited: int, results: int) -> dict[str, Any]:
+class JobStatusView(TypedDict):
+    """The status view: one record, one declared shape, every key mandatory.
+
+    This is the type the defect lived in. The view was ``dict[str, Any]``, which
+    is a type that says nothing, so a key the producer omitted and a key the
+    consumer read were both unchecked -- and ``JobStatusResponse(**view)`` into a
+    model declaring ``extra="ignore"`` dropped whatever the model did not declare
+    without a word. ``kind`` was selected here on purpose, read by both recovery
+    seams, and had never reached a single response body.
+
+    Declaring it closes that in both directions, and the compiler is what closes
+    it: pyright reports ``Unable to match unpacked TypedDict argument to
+    parameters`` the moment the view and the response model disagree about a key,
+    so neither side can drift alone. Removing ``kind`` from the projection is now
+    a build failure at ``_status_row`` rather than a ``None`` that every
+    recovery read treated as whole-site.
+    """
+
+    job_id: str
+    root_url: str
+    status: str
+    kind: str
+    created_at: float
+    updated_at: float
+    frontier_size: int
+    visited_size: int
+    results_count: int
+    cap_truncated: bool
+    stats: dict[str, int]
+    error: str | None
+
+
+def _status_row(row: sqlite3.Row, visited: int, results: int) -> JobStatusView:
     """Shape one projected row into the status view the API returns.
 
     ``frontier_size`` and ``cap_truncated`` are NULL when the row has no
@@ -503,7 +535,9 @@ def _status_row(row: sqlite3.Row, visited: int, results: int) -> dict[str, Any]:
     every summary answered ``None``, every job looked whole-site, and the
     startup scan's kind check filtered nothing. A caller reading a key that the
     projection never selected is a missing column, not a defensive default.
-    ``COALESCE`` covers rows written before the column existed.
+    ``COALESCE`` covers rows written before the column existed, which is why
+    ``kind`` is ``str`` here and not ``str | None``: the SQL has no branch that
+    can produce a null one.
     """
     return {
         "job_id": row["job_id"],
@@ -828,10 +862,10 @@ class JobStore:
     async def adelete(self, job_id: str) -> bool:
         return await asyncio.to_thread(self.delete, job_id)
 
-    async def alist_jobs(self) -> list[dict[str, Any]]:
+    async def alist_jobs(self) -> list[JobStatusView]:
         return await asyncio.to_thread(self.list_jobs)
 
-    async def astatus(self, job_id: str) -> dict[str, Any] | None:
+    async def astatus(self, job_id: str) -> JobStatusView | None:
         return await asyncio.to_thread(self.status_row, job_id)
 
     async def aexists(self, job_id: str) -> bool:
@@ -919,14 +953,14 @@ class JobStore:
             self._conn.commit()
         return cur.rowcount > 0
 
-    def list_jobs(self) -> list[dict[str, Any]]:
+    def list_jobs(self) -> list[JobStatusView]:
         """Every job's status view, newest first."""
         with self._lock:
             counts = self._accumulators.counts_by_job()
             rows = self._conn.execute(_JOB_STATUS_PROJECTION + " ORDER BY created_at DESC").fetchall()
         return [_status_row(r, *counts.get(r["job_id"], (0, 0))) for r in rows]
 
-    def status_row(self, job_id: str) -> dict[str, Any] | None:
+    def status_row(self, job_id: str) -> JobStatusView | None:
         """The status view for one job, or None if there is no such job.
 
         Deliberately not :meth:`load`. The response exposes counts, and loading

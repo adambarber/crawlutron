@@ -8,7 +8,7 @@ JobStore operations.
 
 from __future__ import annotations
 
-from typing import Any, NoReturn, cast
+from typing import NoReturn, cast
 
 from fastapi import APIRouter
 
@@ -26,6 +26,7 @@ from app.api_responses import (
     JobListResponse,
     JobStatusResponse,
 )
+from app.crawl.job_store import JobStatusView
 from app.crawl.payload_helpers import checked_payload_urls
 from app.validation import HostPolicy
 
@@ -79,7 +80,7 @@ async def create_job(
     row = await job_store.astatus(job.job_id)
     # Non-None by construction -- `acreate` wrote it moments ago on the same
     # store -- so this narrows for the type checker rather than guarding.
-    row = cast("dict[str, Any]", row)
+    row = cast("JobStatusView", row)
     return JobCreateResponse(
         job_id=row["job_id"],
         status=row["status"],
@@ -159,7 +160,7 @@ async def control_job(
         _raise_conflict(f"Action '{action}' is not valid for the job's current state.")
     row = await job_store.astatus(job_id)
     # `aexists` above established the row, and the control path only reads it.
-    row = cast("dict[str, Any]", row)
+    row = cast("JobStatusView", row)
     return _build_job_status(row)
 
 

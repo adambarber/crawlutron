@@ -685,6 +685,47 @@ class TestWholeSiteRedirectedUrlResolution:
         assert frontier_url in finished.visited, finished.visited
 
 
+class TestStatusResponseShape:
+    """The job status response is a projection of the status view, not a subset of it.
+
+    The store persists a job's kind, the status projection selects it, and the two
+    recovery seams read it back out of that same view. It was nevertheless absent
+    from every status response the API returned: ``_build_job_status`` handed the
+    view to the model with a ``**`` splat, and the model declares ``extra="ignore"``,
+    so a key it did not declare was dropped without a word. No test asserted the
+    response carried it, so no test could fail.
+
+    Asserted here through the HTTP surface rather than against the model, because
+    the client is what was being told something untrue.
+    """
+
+    async def test_status_response_carries_the_job_kind(self, client):
+        job_id = await _create_api_job(
+            client,
+            GRAPH_ROOT,
+            ScriptedExecute(results=_root_child_results()),
+        )
+
+        response = await client.get(f"/v1/jobs/{job_id}")
+
+        assert response.status_code == 200, response.text
+        assert response.json()["kind"] == "whole_site"
+
+    async def test_single_shot_status_response_carries_its_own_kind(self, client, job_store):
+        """The kind must come from the row, not from a per-endpoint constant.
+
+        Both kinds read the same projection, so a response that hard-coded one
+        would satisfy the whole-site case above while lying to every single-shot
+        caller -- which is the half that decides resumption.
+        """
+        job_store.create_single_shot("shot-1", GRAPH_ROOT, CrawlPolicy())
+
+        response = await client.get("/v1/jobs/shot-1")
+
+        assert response.status_code == 200, response.text
+        assert response.json()["kind"] == "single_shot"
+
+
 class TestJobStateWaitContract:
     """The wait itself is the contract, so it is pinned like one.
 

@@ -17,18 +17,25 @@ from app.api.exceptions import validation_http_error
 from app.api_responses import (
     JobStatusResponse,
 )
+from app.crawl.job_store import JobStatusView
 from app.health.readiness import READINESS_STATE as readiness_state
 from app.metrics import get_metrics
 
 
-def _build_job_status(row: dict[str, Any]) -> JobStatusResponse:
+def _build_job_status(view: JobStatusView) -> JobStatusResponse:
     """Build a JobStatusResponse from a store status view.
 
     Takes the view rather than a ``CrawlJobState`` so the counts come from the
     store's projection instead of ``len()`` over the page history: that was
     what made polling a job's status cost as much as reading its whole crawl.
+
+    The ``**`` splat is the chokepoint that makes the view and this model one
+    record rather than two hand-kept lists, and it is safe only because the view
+    is a declared ``TypedDict``: pyright reports a key the model does not declare,
+    which is the defect this replaced -- ``kind`` was selected by the projection
+    and dropped here, for every response the API has ever returned.
     """
-    return JobStatusResponse(**row)
+    return JobStatusResponse(**view)
 
 
 def record_crawl_completion(
