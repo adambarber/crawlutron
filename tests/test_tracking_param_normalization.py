@@ -2,8 +2,8 @@
 
 from functools import partial
 
+from app.models.normalized_url import normalize_public_http_url as _normalize_public_http_url
 from app.validation import HostPolicy
-from app.validation import normalize_public_http_url as _normalize_public_http_url
 
 normalize_public_http_url = partial(
     _normalize_public_http_url,

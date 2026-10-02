@@ -440,15 +440,15 @@ class TestNormalizedUrlSeedType:
     def test_normalizer_returns_the_typed_value(self):
         import typing
 
-        from app.models.normalized_url import NormalizedUrl
-        from app.validation import normalize_public_http_url
+        from app.models.normalized_url import NormalizedUrl, normalize_public_http_url
 
         hints = typing.get_type_hints(normalize_public_http_url)
         assert hints["return"] is NormalizedUrl
 
     def test_typed_value_is_runtime_plain_str(self):
         """Typing must not change runtime shape (JSON/spill compatibility)."""
-        from app.validation import HostPolicy, normalize_public_http_url
+        from app.models.normalized_url import normalize_public_http_url
+        from app.validation import HostPolicy
 
         normalized = normalize_public_http_url(
             "HTTP://Example.COM:80/a/#frag",

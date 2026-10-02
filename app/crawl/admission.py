@@ -593,7 +593,7 @@ async def fetch_job_sitemap_candidates(root_url: str, context: JobAdmissionConte
     a sitemap origin before any fetcher saw it. Routing through the declared
     chokepoint makes this path agree with every other URL the service handles.
     """
-    from app.validation import normalize_public_http_url
+    from app.models.normalized_url import normalize_public_http_url
 
     try:
         canonical_root = normalize_public_http_url(root_url, policy=context.host_policy)

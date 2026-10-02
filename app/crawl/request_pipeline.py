@@ -31,7 +31,7 @@ from app.models.crawl_task import CrawlTask
 from app.models.crawl_worker import CrawlWorker
 from app.models.engine_crawl_result import EngineCrawlResult
 from app.models.host_policy import HostPolicy
-from app.models.normalized_url import NormalizedUrl
+from app.models.normalized_url import NormalizedUrl, normalize_public_http_url
 from app.models.registrable_domain import registrable_domain
 from app.resource_pressure import (
     ResourceGate,
@@ -44,7 +44,6 @@ from app.resource_pressure import (
 from app.safe_regex import BoundedPattern
 from app.scheduler import DomainScheduler
 from app.settings import CrawlerSettings
-from app.validation import normalize_public_http_url
 
 
 @dataclass(frozen=True)

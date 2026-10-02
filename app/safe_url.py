@@ -22,7 +22,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from urllib.parse import urljoin, urlparse
 
-from app.validation import HostPolicy, normalize_public_http_url
+from app.models.normalized_url import normalize_public_http_url
+from app.validation import HostPolicy
 
 
 @dataclass(frozen=True)

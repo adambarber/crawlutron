@@ -8,8 +8,9 @@ import pytest
 
 import app.crawl.strategies.pinned_transport as http_mod
 from app.crawl.strategies.pinned_transport import check_ssrf_protection, resolve_and_pin_host
+from app.models.normalized_url import normalize_public_http_url
 from app.safe_url import SafeUrl
-from app.validation import HostPolicy, normalize_public_http_url
+from app.validation import HostPolicy
 from tests._assertions import (
     assert_dns_pinning_uses_first_resolution,
     block_private_targets,

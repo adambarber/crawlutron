@@ -185,7 +185,8 @@ class TestSitemapCandidateBuilderUsesTheCanonicalOrigin:
     async def test_the_origin_is_canonical_regardless_of_how_the_root_was_spelled(self, root_url):
         from urllib.parse import urlsplit
 
-        from app.validation import HostPolicy, normalize_public_http_url
+        from app.models.normalized_url import normalize_public_http_url
+        from app.validation import HostPolicy
 
         canonical = normalize_public_http_url(root_url, policy=HostPolicy.unrestricted())
         parts = urlsplit(canonical)

@@ -53,12 +53,12 @@ from app.env import get_env_float, get_env_int
 from app.json_safe import json_default
 from app.models.crawl_result import CrawlResult
 from app.models.host_policy import HostPolicy
+from app.models.normalized_url import normalize_public_http_url
 from app.models.registrable_domain import registrable_domain
 from app.models.render_options import RenderOptions
 from app.models.taxonomy import Classification, CrawlError
 from app.safe_url import SafeUrl
 from app.settings import CrawlerSettings
-from app.validation import normalize_public_http_url
 
 logger = logging.getLogger(__name__)
 

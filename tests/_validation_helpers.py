@@ -1,6 +1,6 @@
 from app.env import get_env_int
+from app.models.normalized_url import normalize_public_http_url as _normalize_public_http_url
 from app.models.registrable_domain import registrable_domain
-from app.validation import normalize_public_http_url as _normalize_public_http_url
 from app.validation import public_url_or_none as _public_url_or_none
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY
 
@@ -24,7 +24,7 @@ def assert_url_refused(url: str, policy, reason: str) -> None:
     """
     import pytest
 
-    from app.validation import normalize_public_http_url as normalize
+    from app.models.normalized_url import normalize_public_http_url as normalize
 
     with pytest.raises(ValueError, match=reason):
         normalize(url, policy=policy)

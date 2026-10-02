@@ -94,11 +94,11 @@ _PUBLIC_SURFACE_PROPERTY = Property(
 # reachable only through the endpoint that has the matching envelope.
 _OWNER_PUBLIC_SURFACE_RATCHET = {
     "app/crawl/admission.py": (20, 14),
-    # RAISED to (14, 11) then LOWERED to (7, 6) then (5, 5): HostPolicy and
-    # registrable_domain moved to app/models, then the env family moved to app/env.py,
-    # then the egress verdict moved to app/models/host_policy.py. What is left here is
-    # URL policy and the public-URL helpers.
-    "app/validation.py": (5, 5),
+    # RAISED to (14, 11) then LOWERED to (7, 6), (5, 5), then (4, 4): HostPolicy and
+    # registrable_domain moved to app/models, then the env family to app/env.py, then the
+    # egress verdict to app/models/host_policy.py, then the normalizer to
+    # app/models/normalized_url.py. What is left here is the public-URL helpers.
+    "app/validation.py": (4, 4),
     "app/env.py": (7, 5),
     "app/api/response_shaping.py": (11, 10),
     "app/crawl/sqlite_store.py": (9, 7),

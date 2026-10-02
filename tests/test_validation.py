@@ -4,14 +4,12 @@ from functools import partial
 
 import pytest
 
+from app.models.normalized_url import normalize_public_http_url as _normalize_public_http_url
 from app.validation import (
     HostPolicy,
 )
 from app.validation import (
     filter_js_endpoints as _filter_js_endpoints,
-)
-from app.validation import (
-    normalize_public_http_url as _normalize_public_http_url,
 )
 
 _HOST_POLICY = HostPolicy.unrestricted()

@@ -19,7 +19,8 @@ from app.bounded_ttl import BoundedTTLCache
 from app.crawl.credentials import origin_of
 from app.models.host_policy import HostPolicy, allow_private_targets
 from app.models.http_fetch_result import HttpFetchResult
-from app.validation import is_public_ip_value, normalize_public_http_url
+from app.models.normalized_url import normalize_public_http_url
+from app.validation import is_public_ip_value
 
 
 def _is_private_or_loopback_ip(ip: str) -> bool:

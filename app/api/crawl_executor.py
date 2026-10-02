@@ -67,7 +67,7 @@ async def execute_crawl(
     host_policy = HostPolicy.from_settings(active_settings)
     target_url = payload_dict.get("url")
     if isinstance(target_url, str):
-        from app.validation import normalize_public_http_url
+        from app.models.normalized_url import normalize_public_http_url
 
         try:
             normalize_public_http_url(target_url, policy=host_policy)
