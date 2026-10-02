@@ -1,4 +1,3 @@
-import ast
 import asyncio
 import contextlib
 import functools
@@ -151,30 +150,6 @@ def install_to_thread_spy(monkeypatch):
 
     monkeypatch.setattr(asyncio, "to_thread", spy)
     return seen
-
-
-def read_main_source() -> str:
-    """The source of ``app.main``, imported inside the call.
-
-    Two lifecycle suites need to assert on how main.py is written rather than on
-    what it returns, and the import has to stay inside the function: ``app.main``
-    is heavy, and the middleware suite has no other use for it. It was written
-    out in both, so a change to what the read should see (a decorator, a
-    re-export) was two edits and one of them would have been missed.
-    """
-    from app import main as main_mod
-
-    return inspect.getsource(main_mod)
-
-
-def extract_function_body(source: str, name: str) -> str:
-    tree = ast.parse(source)
-    for node in ast.walk(tree):
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == name:
-            segment = ast.get_source_segment(source, node)
-            if segment is not None:
-                return segment
-    raise AssertionError(f"Could not find function {name}")
 
 
 def provider_results(*items) -> str:

@@ -226,6 +226,13 @@ class MetricsStore:
         """Count wall-clock seconds dispatch waited for a saturated resource."""
         self._add(_PAUSE_SECONDS, seconds)
 
+    @property
+    def counters(self) -> CoordinationCounters | None:
+        """The shared storage backing these counters, or None before the
+        lifespan binds it. A reader in another worker only sees these totals
+        once this is a store rather than this process's own dict."""
+        return self._counters
+
     def bind_counters(self, counters: CoordinationCounters) -> None:
         """Attach shared storage mid-life, and import any counters already there.
 

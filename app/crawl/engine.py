@@ -412,6 +412,7 @@ async def crawl_request(
     shutdown_event: asyncio.Event | None = None,
     spill_path: str | None = None,
     fetch_and_decode: FetchAndDecode | None = None,
+    resource_gate: ResourceGate | None = None,
 ) -> dict[str, Any]:
     active_settings = settings or CrawlerSettings.from_mapping()
     host_policy = HostPolicy.from_settings(active_settings)
@@ -458,7 +459,7 @@ async def crawl_request(
                 stale_seeds=_stale_seeds,
                 fetch_and_decode=fetch_and_decode,
                 shared_http_cache=_SHARED_HTTP_CACHE,
-                resource_gate=_resource_gate,
+                resource_gate=resource_gate if resource_gate is not None else _resource_gate,
             ),
         )
         return await run_crawl_request(state)

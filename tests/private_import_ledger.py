@@ -248,7 +248,6 @@ DECLARED: dict[str, Declaration] = {
         "Not yet triaged.\n",
         ["test"],
     ),
-    "app.api.middleware._MAX_REQUEST_BODY_BYTES": _SUBSTITUTED_CAP,
     "app.api.render._render_options": _d(
         "unreviewed",
         "Not yet triaged.\n",
@@ -455,9 +454,6 @@ DECLARED: dict[str, Declaration] = {
     "app.crawl.strategies.cookie_jar._GLOBAL_COOKIE_JAR": _d(
         _CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test", "app"]
     ),
-    "app.crawl.strategies.cookie_jar._GLOBAL_COOKIE_JAR._store": _d(
-        _CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]
-    ),
     "app.crawl.strategies.document._default_document_text_extractor": _d(
         "unreviewed",
         "Not yet triaged.\n",
@@ -632,11 +628,9 @@ DECLARED: dict[str, Declaration] = {
     "app.resource_pressure._HTTP_TASK_RAM_BYTES": _d(
         _CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]
     ),
-    "app.resource_pressure._LOOP_LAG_PROBE_ENABLED": _SUBSTITUTED_CAP,
     "app.resource_pressure._MAX_DERIVED_POOL_SIZE": _d(
         _CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]
     ),
-    "app.scheduler.DomainScheduler._purge_expired": _d(_PRIVATE_TYPE.kind, _PRIVATE_TYPE.reason, ["test"]),
     "app.scheduler._COOLDOWN_PURGE_INTERVAL": _d(_CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]),
     "app.scheduler._MAX_COOLDOWN_WAIT": _d(_CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]),
     "app.scheduler._STATUS_ACCOUNTING": _d(_CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]),

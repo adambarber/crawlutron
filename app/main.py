@@ -208,6 +208,10 @@ if FastAPI is not None:
             jar = CookieJar(SharedCookieStore(DATABASE_PATH))
             jar.import_file_into(settings.cookie_jar_path)
             cookie_jar_module._GLOBAL_COOKIE_JAR = jar
+            # Published for the same reason as ``shutdown_event`` below: what the
+            # process is actually using is otherwise answerable only by reaching
+            # for the module global the lifespan just assigned.
+            _app.state.cookie_jar = jar
         # /metrics must report the service, not this worker. Counters go to the
         # same shared store as the cookies; the two resource gauges stay
         # process-local because they read a cgroup every worker shares and

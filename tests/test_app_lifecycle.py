@@ -3,11 +3,25 @@
 import asyncio
 import dataclasses
 import inspect
+from pathlib import Path
 
 from tests._app_factory import service_app
-from tests._assertions import assert_pool_unavailable, read_main_source
+from tests._assertions import assert_pool_unavailable
 from tests._job_harnesses import post_render_with_pool
 from tests._lifespan_doubles import stub_heavy_teardown
+
+
+def _database_file(store) -> Path:
+    """The file a store's own connection actually opened, resolved.
+
+    Read from SQLite rather than from the constructor argument: a store that
+    resolved, split, or substituted the path would report the argument back
+    verbatim and hide it.
+    """
+    conn = store.conn if hasattr(store, "conn") else store._conn
+    row = conn.execute("PRAGMA database_list").fetchone()
+    assert row[1] == "main", row
+    return Path(row[2]).resolve()
 
 
 class TestMultiWorkerInvariants:
@@ -45,7 +59,6 @@ class TestMultiWorkerInvariants:
         """
         from app import main as main_mod
         from app.crawl.coordination_cookies import SharedCookieStore
-        from app.crawl.strategies import cookie_jar as cookie_jar_module
 
         monkeypatch.setenv("CRAWLUTRON_WORKERS", "4")
         monkeypatch.setattr(
@@ -60,7 +73,7 @@ class TestMultiWorkerInvariants:
             # A refusal anywhere on the startup path raises before the yield, so
             # being inside the block is the boot assertion. The store the jar
             # landed on is the multi-worker claim itself.
-            assert isinstance(cookie_jar_module._GLOBAL_COOKIE_JAR._store, SharedCookieStore)
+            assert isinstance(app.state.cookie_jar.store, SharedCookieStore)
 
     def test_the_worker_count_reaches_the_production_budget_wiring(self, monkeypatch):
         """The division has to be where the pools are built, not only in the helpers.
@@ -78,27 +91,56 @@ class TestMultiWorkerInvariants:
         source = inspect.getsource(request_pipeline)
         assert "derive_browser_pool_size()" in source
 
-    def test_every_store_shares_the_one_database_path(self):
+    async def test_every_store_shares_the_one_database_path(self, monkeypatch):
         """The stores must share one file, or the sharing is only nominal.
 
         The cookie jar and the metrics counters each hold a connection. If
         either were pointed at its own path -- which is what the
         single-database decision exists to prevent -- both would pass their own
         tests and the fleet would still not see shared state.
-        """
-        from app.main import DATABASE_PATH
 
-        assert DATABASE_PATH.endswith("/crawler.db")
-        source = read_main_source()
-        # The constructors, not the module-level bindings: ``job_store`` is a
-        # name the module assigns, and a token of ``job_store(`` would have
-        # passed against a helper that no longer exists and failed against the
-        # assignment that does.
-        for ctor in ("JobStore(", "CrawlResultStore(", "CoordinationCounters(", "SharedCookieStore("):
-            assert ctor in source, ctor
-            line = next(ln for ln in source.splitlines() if ctor in ln)
-            assert "DATABASE_PATH" in line or ctor not in source.split(line)[1][:40], ctor
-        assert "coordination_db_path" not in source
+        Every store is read off the running app, including the two the lifespan
+        builds internally, and the path is taken from each live connection's
+        ``PRAGMA database_list`` rather than from the constructor argument: a
+        store that resolved or substituted its own file would echo the argument
+        back and hide it.
+        """
+        from app import main as main_mod
+        from app.crawl.coordination_cookies import SharedCookieStore
+        from app.crawl.coordination_counters import CoordinationCounters
+        from app.crawl.strategies.cookie_jar import CookieJar
+        from app.main import DATABASE_PATH, job_store, result_store
+        from app.metrics import get_metrics
+
+        # The jar only exists when persistence is on, and a jar with no store
+        # behind it opens no file -- the assertion would be vacuous.
+        monkeypatch.setattr(
+            main_mod,
+            "settings",
+            dataclasses.replace(main_mod.settings, cookie_persistence_enabled=True),
+        )
+        stub_heavy_teardown(monkeypatch)
+        app = service_app()
+
+        async with app.router.lifespan_context(app):
+            jar = app.state.cookie_jar
+            counters = get_metrics().counters
+
+        assert isinstance(jar, CookieJar)
+        assert isinstance(jar.store, SharedCookieStore)
+        assert isinstance(counters, CoordinationCounters)
+
+        opened = {
+            "job_store": _database_file(job_store),
+            "result_store": _database_file(result_store),
+            "cookie_jar": _database_file(jar.store),
+            "counters": _database_file(counters),
+        }
+
+        expected = Path(DATABASE_PATH).resolve()
+        assert expected.name == "crawler.db", DATABASE_PATH
+        for name, path in opened.items():
+            assert path == expected, f"{name} opened {path}, not {expected}"
 
 
 class TestAppLifecycleEdges:
@@ -149,15 +191,18 @@ class TestAppLifecycleEdges:
 
 
 class TestLifespanContextManager:
-    def test_lifespan_is_direct_contextmanager(self):
-        """The FastAPI lifespan must be a direct contextmanager, not ``_lifespan(None)``."""
-        src = read_main_source()
-        # The old pattern was: lifespan=_lifespan(None) with def _lifespan(app: FastAPI)
-        assert "lifespan=_lifespan(None)" not in src
-        # The new pattern: a directly-decorated async context manager.
-        assert "@asynccontextmanager" in src
-        assert "async def _lifespan(_app: FastAPI)" in src
-        assert "lifespan=_lifespan" in src
+    async def test_lifespan_is_handed_the_app_it_is_managing(self):
+        """The lifespan publishes onto the app it was given.
+
+        This is what the ``lifespan=_lifespan(None)`` shape broke: the shutdown
+        event is written to ``_app.state``, so a lifespan handed ``None`` raises
+        at startup and the app never serves. Asserting on the decorator would
+        only restate how the fix was written.
+        """
+        from app.main import app
+
+        async with app.router.lifespan_context(app):
+            assert isinstance(app.state.shutdown_event, asyncio.Event)
 
 
 class TestShutdownEventBelongsToOneLifespanRun:

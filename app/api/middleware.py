@@ -23,21 +23,21 @@ from fastapi.responses import JSONResponse
 
 from app.api.exceptions import error_envelope
 
-_MAX_REQUEST_BODY_BYTES = 16 * 1024 * 1024
+MAX_REQUEST_BODY_BYTES = 16 * 1024 * 1024
 
 
-async def limit_request_body(request: Request, call_next):
-    """ASGI middleware: cap request bodies at ``_MAX_REQUEST_BODY_BYTES``."""
+async def limit_request_body(request: Request, call_next, *, max_bytes: int = MAX_REQUEST_BODY_BYTES):
+    """ASGI middleware: cap request bodies at ``max_bytes``."""
     content_length = request.headers.get("content-length")
     if content_length:
         try:
-            if int(content_length) > _MAX_REQUEST_BODY_BYTES:
+            if int(content_length) > max_bytes:
                 return JSONResponse(
                     status_code=413,
                     content=error_envelope(
                         "request_too_large",
                         "Request body exceeds the maximum allowed size",
-                        {"max_bytes": _MAX_REQUEST_BODY_BYTES},
+                        {"max_bytes": max_bytes},
                     ),
                 )
         except ValueError:
@@ -63,7 +63,7 @@ async def limit_request_body(request: Request, call_next):
         body = message.get("body", b"") or b""
         if not body:
             return message
-        remaining = _MAX_REQUEST_BODY_BYTES - bytes_delivered
+        remaining = max_bytes - bytes_delivered
         if remaining <= 0:
             truncated = True
             return {**message, "body": b"", "more_body": False}
@@ -80,4 +80,4 @@ async def limit_request_body(request: Request, call_next):
     return response
 
 
-__all__ = ["_MAX_REQUEST_BODY_BYTES", "limit_request_body"]
+__all__ = ["MAX_REQUEST_BODY_BYTES", "limit_request_body"]

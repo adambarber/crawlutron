@@ -257,7 +257,7 @@ class DomainScheduler:
         self._sets_since_purge += 1
         if self._sets_since_purge >= _COOLDOWN_PURGE_INTERVAL:
             self._sets_since_purge = 0
-            self._purge_expired()
+            self.purge_expired()
 
     def _record_result_health(self, domain: str, result: SchedulerResult) -> None:
         """Apply a result's domain-health verdict. See _STATUS_ACCOUNTING.
@@ -378,7 +378,7 @@ class DomainScheduler:
             clamped = min(float(seconds), _MAX_COOLDOWN_WAIT)
             self._domain_min_delay[domain] = max(self._domain_min_delay.get(domain, 0.0), clamped)
 
-    def _purge_expired(self) -> None:
+    def purge_expired(self) -> None:
         """Drop cooldown and circuit-breaker entries that have already elapsed."""
         now = time.time()
         self._domain_cooldowns = {d: exp for d, exp in self._domain_cooldowns.items() if exp > now}
@@ -409,7 +409,7 @@ class DomainScheduler:
         mapping; the caller decides how to represent them.
         """
         # Purge stale state up front so dicts cannot grow without bound.
-        self._purge_expired()
+        self.purge_expired()
         global_gate = asyncio.Semaphore(self._global_limit)
         domain_gates: dict[str, asyncio.Semaphore] = defaultdict(
             lambda: asyncio.Semaphore(self._per_domain_limit),

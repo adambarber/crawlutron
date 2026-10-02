@@ -61,11 +61,11 @@ The test suite was grown alongside the adversarial reviews; the following
 suites cover the specific attack classes the security posture is designed
 to defeat:
 
-- **Truncation and drain** (`tests/test_body_size_middleware.py`,
-  `tests/test_body_cap_state_machine.py`) — chunked handling,
-  `Connection: close` on a truncated request, per-chunk trailers and headers,
-  body-size drain after truncation, and the rule that no further bytes are
-  admitted once a chunk trips the cap.
+- **Truncation and drain** (`tests/test_body_cap_state_machine.py`) — chunked
+  handling, `Connection: close` on a truncated request, per-chunk trailers and
+  headers, body-size drain after truncation, the rule that no further bytes are
+  admitted once a chunk trips the cap, and the 413 the shipped app returns on a
+  body over the cap.
 - **File-descriptor ownership** (`tests/test_spill_stream.py`,
   `tests/invariants/test_ownership.py`) — `_ResultSpill` deletes the file it
   owns and leaves the one it borrowed.

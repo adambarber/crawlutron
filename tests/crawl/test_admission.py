@@ -419,15 +419,12 @@ async def _crawl_under_pressure(monkeypatch, *, cpu_ratio, memory_ratio):
 
     Returns the (envelope, waits) pair: the combined ResourceGate is
     exercised with only the pinned resource driving the throttle, and the
-    engine is handed the pinned gate through the module attribute it reads.
+    engine is handed the pinned gate as the collaborator it takes.
     """
-    import app.crawl.engine as engine_mod
-
     gate, waits = _pinned_resource_gate(monkeypatch, cpu_ratio=cpu_ratio, memory_ratio=memory_ratio)
-    monkeypatch.setattr(engine_mod, "_resource_gate", gate)
 
     pages = site_linking_to("/a")
-    return await crawled_results(pages, limits=LINKED_PAIR_LIMITS), waits
+    return await crawled_results(pages, limits=LINKED_PAIR_LIMITS, resource_gate=gate), waits
 
 
 @pytest.mark.parametrize(

@@ -40,7 +40,7 @@ _DEFAULT_CPU_BUDGET = None
 # admission. Disabled by default so test suites and minimal deployments pay no
 # background-task cost; enable with CRAWLUTRON_LOOP_LAG_PROBE=1 in the
 # container. When disabled the probe reports zero lag and the gate is unaffected.
-_LOOP_LAG_PROBE_ENABLED = parse_bool_env("CRAWLUTRON_LOOP_LAG_PROBE", default=False)
+LOOP_LAG_PROBE_ENABLED = parse_bool_env("CRAWLUTRON_LOOP_LAG_PROBE", default=False)
 _LOOP_LAG_SAMPLE_INTERVAL = 0.05
 _LOOP_LAG_OK_THRESHOLD = 0.05  # below this lag (s) -> full speed
 _LOOP_LAG_HARD_THRESHOLD = 0.30  # at/above this lag (s) -> full throttle
@@ -307,6 +307,7 @@ class ResourceGate:
         clock: Callable[[], float] = time.monotonic,
         memory_ratio: Callable[[], float] | None = None,
         cpu_ratio: Callable[[], float] | None = None,
+        lag_probe_enabled: bool = LOOP_LAG_PROBE_ENABLED,
     ):
         self.memory = MemoryGate(
             target=target_mem,
@@ -329,8 +330,11 @@ class ResourceGate:
         # Event-loop lag is an independent throttle signal.
         # The probe is opt-in (CRAWLUTRON_LOOP_LAG_PROBE) so tests
         # and minimal deployments do not pay for a background task; when off it
-        # reports zero lag and leaves the gate untouched.
+        # reports zero lag and leaves the gate untouched. Injected rather than
+        # read from the module global so a test can enable it without rebinding
+        # a name the rest of the tree also reads.
         self._lag_probe = LoopLagProbe()
+        self._lag_probe_enabled = lag_probe_enabled
 
     def start_lag_probe(self) -> None:
         """Start the loop-lag sampler on the running loop.
@@ -339,7 +343,7 @@ class ResourceGate:
         constructed at import time with no running loop, so an __init__-time
         start silently never schedules and lag reads 0.0 forever. Idempotent.
         """
-        if _LOOP_LAG_PROBE_ENABLED:
+        if self._lag_probe_enabled:
             self._lag_probe.start()
 
     def memory_ratio(self) -> float:

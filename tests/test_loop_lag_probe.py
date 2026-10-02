@@ -28,20 +28,18 @@ def test_loop_lag_probe_flag_accepts_shared_bool_spellings(monkeypatch):
     for value in (" true ", "yes", "1"):
         monkeypatch.setenv("CRAWLUTRON_LOOP_LAG_PROBE", value)
         module = importlib.reload(rp)
-        assert module._LOOP_LAG_PROBE_ENABLED is True
+        assert module.LOOP_LAG_PROBE_ENABLED is True
     monkeypatch.delenv("CRAWLUTRON_LOOP_LAG_PROBE")
     importlib.reload(rp)
 
 
-def test_gate_construction_never_starts_probe(monkeypatch):
-    monkeypatch.setattr(rp, "_LOOP_LAG_PROBE_ENABLED", True)
-    gate = ResourceGate()
+def test_gate_construction_never_starts_probe():
+    gate = ResourceGate(lag_probe_enabled=True)
     assert gate._lag_probe._task is None
 
 
-async def test_gate_probe_starts_explicitly_on_running_loop(monkeypatch):
-    monkeypatch.setattr(rp, "_LOOP_LAG_PROBE_ENABLED", True)
-    gate = ResourceGate()
+async def test_gate_probe_starts_explicitly_on_running_loop():
+    gate = ResourceGate(lag_probe_enabled=True)
     gate.start_lag_probe()
     try:
         task = gate._lag_probe._task

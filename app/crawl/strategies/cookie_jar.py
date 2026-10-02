@@ -84,6 +84,14 @@ class CookieJar:
         # so existing single-tenant callers see no change.
         self._lock = threading.Lock()
 
+    @property
+    def store(self) -> SharedCookieStore | None:
+        """The shared table this jar reads and writes, or None when it is
+        process-local. Which of the two a jar is decides whether a cookie set by
+        one worker is visible to another, so it is answerable without reaching
+        into the instance."""
+        return self._store
+
     @staticmethod
     def _ns_key(namespace: str, host: str) -> tuple[str, str]:
         return (namespace or "", host)

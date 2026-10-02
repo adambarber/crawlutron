@@ -523,6 +523,7 @@ async def crawled_results(
     spill_path: str | None = None,
     content_cache: Any = None,
     calls: list[str] | None = None,
+    resource_gate: Any = None,
 ) -> dict[str, Any]:
     """Run a recursive crawl over scripted ``pages`` and return the API response.
 
@@ -547,6 +548,7 @@ async def crawled_results(
         cache=HttpCache(),
         spill_path=spill_path,
         content_cache=content_cache,
+        resource_gate=resource_gate,
     )
 
 

@@ -488,13 +488,13 @@ class TestSchedulerPolicies:
 class TestCooldownPurgeCadence:
     def test_purge_is_amortized_not_per_rate_limited_result(self, monkeypatch):
         calls = {"n": 0}
-        real_purge = DomainScheduler._purge_expired
+        real_purge = DomainScheduler.purge_expired
 
         def counting_purge(self):
             calls["n"] += 1
             real_purge(self)
 
-        monkeypatch.setattr(DomainScheduler, "_purge_expired", counting_purge)
+        monkeypatch.setattr(DomainScheduler, "purge_expired", counting_purge)
         scheduler = make_scheduler()
         for i in range(250):
             scheduler.set_domain_cooldown(f"d{i}.test", 5.0)
@@ -535,7 +535,7 @@ def test_run_still_purges_up_front():
     scheduler._domain_cooldowns["stale.test"] = 0.0  # already expired
     assert "stale.test" in scheduler._domain_cooldowns
     # The up-front purge fires before any job runs.
-    scheduler._purge_expired()
+    scheduler.purge_expired()
     assert "stale.test" not in scheduler._domain_cooldowns
 
 

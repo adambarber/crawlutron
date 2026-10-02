@@ -12,20 +12,36 @@ import pytest
 from starlette.requests import Request
 from starlette.responses import Response
 
-import app.api.middleware as middleware
-from app.api.middleware import limit_request_body
+from app.api.middleware import MAX_REQUEST_BODY_BYTES, limit_request_body
 
 CAP = 10
 
 
-def _make_request(messages: list):
+def _make_request(messages: list, headers: list | None = None):
     """A Request whose receive() pops the scripted ASGI message list."""
 
     async def receive():
         return messages.pop(0)
 
-    scope = {"type": "http", "method": "POST", "path": "/", "headers": [], "query_string": b""}
+    scope = {
+        "type": "http",
+        "method": "POST",
+        "path": "/",
+        "headers": headers or [],
+        "query_string": b"",
+    }
     return Request(scope, receive=receive)
+
+
+def _one_chunk(body: bytes = b"", headers: list | None = None) -> Request:
+    return _make_request(
+        [{"type": "http.request", "body": body, "more_body": False}],
+        headers=headers,
+    )
+
+
+async def _pass_through(request):
+    return Response("")
 
 
 async def _read_body_and_probe(request) -> bytes:
@@ -43,8 +59,7 @@ async def _read_body_and_probe(request) -> bytes:
 
 
 @pytest.fixture()
-def small_cap(monkeypatch):
-    monkeypatch.setattr(middleware, "_MAX_REQUEST_BODY_BYTES", CAP)
+def small_cap():
     return CAP
 
 
@@ -65,7 +80,7 @@ async def test_no_bytes_admitted_after_truncating_final_chunk(small_cap):
         seen["body"] = await _read_body_and_probe(req)
         return Response("")
 
-    await limit_request_body(request, call_next)
+    await limit_request_body(request, call_next, max_bytes=small_cap)
 
     assert len(seen["body"]) == small_cap, len(seen["body"])
     assert seen["body"] == b"AAAA" + b"B" * (small_cap - 4)
@@ -93,7 +108,7 @@ async def test_drain_still_empties_the_client_stream(small_cap):
         seen["body"] = bytes(body)
         return Response("")
 
-    response = await limit_request_body(request, call_next)
+    response = await limit_request_body(request, call_next, max_bytes=small_cap)
 
     assert len(seen["body"]) == small_cap
     assert response.headers["Connection"] == "close"
@@ -101,3 +116,112 @@ async def test_drain_still_empties_the_client_stream(small_cap):
     assert messages == [], "undrained client chunks remain"
     # ...but handed the app nothing past the cap.
     assert seen["body"] == b"A" * small_cap
+
+
+async def test_declared_body_over_the_cap_is_refused_before_the_app_sees_it():
+    """A declared body over the cap costs nothing: the request never reaches the
+    app and no receive is spent on a body that will be turned away."""
+    request = _one_chunk(b"", headers=[(b"content-length", b"4096")])
+    called = []
+
+    async def call_next(req):
+        called.append(req)
+        return Response("")
+
+    response = await limit_request_body(request, call_next, max_bytes=CAP)
+
+    assert response.status_code == 413
+    assert not called, "the app was invoked for a body already refused"
+
+
+@pytest.mark.parametrize("declared", [CAP, CAP - 1], ids=["at", "under"])
+async def test_declared_body_within_the_cap_is_admitted(declared):
+    """The pre-check rejects only what it says it rejects: a declared body at
+    exactly the cap is not 'over' it."""
+    request = _one_chunk(headers=[(b"content-length", str(declared).encode())])
+    response = await limit_request_body(request, _pass_through, max_bytes=CAP)
+    assert response.status_code == 200
+
+
+async def test_refusal_reports_the_cap_it_enforced():
+    """The 413 tells the client the limit it breached, or it is not actionable."""
+    import json
+
+    request = _one_chunk(headers=[(b"content-length", b"4096")])
+    response = await limit_request_body(request, _pass_through, max_bytes=CAP)
+    assert json.loads(bytes(response.body)) == {
+        "code": "request_too_large",
+        "message": "Request body exceeds the maximum allowed size",
+        "details": {"max_bytes": CAP},
+    }
+
+
+async def test_unparsable_content_length_falls_through_to_the_wrapper():
+    """A malformed CL header cannot be compared to a cap, and refusing on it
+    would let a header decide. The wrapper is the enforcement, so the request
+    proceeds and is truncated there instead."""
+    request = _make_request(
+        [
+            {"type": "http.request", "body": b"Z" * 40, "more_body": False},
+            {"type": "http.request", "body": b"", "more_body": False},
+        ],
+        headers=[(b"content-length", b"not-a-number")],
+    )
+    seen = {}
+
+    async def call_next(req):
+        seen["body"] = await _read_body_and_probe(req)
+        return Response("")
+
+    response = await limit_request_body(request, call_next, max_bytes=CAP)
+
+    assert response.status_code == 200
+    assert len(seen["body"]) == CAP
+
+
+async def test_truncation_preserves_the_chunks_own_keys():
+    """A chunk's metadata is forwarded verbatim; only its body is cut. A wrapper
+    that rebuilt the message would drop the keys a streaming reader needs."""
+    request = _make_request(
+        [{"type": "http.request", "body": b"A" * 40, "more_body": False, "trailer": "x-checksum"}]
+    )
+    seen = {}
+
+    async def call_next(req):
+        seen["message"] = await req.receive()
+        return Response("")
+
+    await limit_request_body(request, call_next, max_bytes=CAP)
+
+    assert seen["message"]["trailer"] == "x-checksum"
+    assert seen["message"]["more_body"] is False
+
+
+def test_default_cap_is_sixteen_mib():
+    """The cap the app runs with, which no test here passes explicitly."""
+    assert MAX_REQUEST_BODY_BYTES == 16 * 1024 * 1024
+
+
+async def test_cap_is_enforced_on_the_app_that_serves_traffic():
+    """Registration is what makes the cap real. A middleware nothing installs is
+    a function that reads well and enforces nothing, and no unit test of it
+    would ever say so -- so this drives the shipped app over its own stack."""
+    from httpx import ASGITransport, AsyncClient
+
+    from app.main import app
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as http:
+        oversized = await http.post(
+            "/v1/jobs",
+            content=b"x" * (MAX_REQUEST_BODY_BYTES + 1),
+            headers={"content-type": "application/json"},
+        )
+        within = await http.post(
+            "/v1/jobs",
+            content=b"{}",
+            headers={"content-type": "application/json"},
+        )
+
+    assert oversized.status_code == 413, oversized.status_code
+    # Not a 413 for every request: a cap that refuses everything is not a cap.
+    assert within.status_code != 413, within.status_code
