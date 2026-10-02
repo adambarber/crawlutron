@@ -75,7 +75,18 @@ import pytest
 from scripts.ast_scopes import is_scope_opener
 from scripts.executables import GIT, require_executable
 from scripts.jscpd_sweep import COMPOUND_NODES
-from tests.chokepoint_walks import APP_ROOT, app_trees, nodes_of
+from tests._ratchet import (
+    budget_is_tight,
+    budget_not_exceeded,
+    collection_is_deterministic,
+    collector_sees_the_whole_tree,
+    definition_counts,
+    walk,
+)
+from tests._ratchet import (
+    report as ratchet_report,
+)
+from tests.chokepoint_walks import app_trees, nodes_of
 
 # Every collector in this file reads the same app tree, and they are called
 # once per metric per test that reads a number: the budget test reads both
@@ -195,23 +206,25 @@ _METRIC_LIMITS = {
 }
 
 
-def _candidates(tree: ast.AST) -> list[tuple[str, int, str, int]]:
-    """Every (metric, size, label, line) this tree offers, over-limit or not.
+def _candidates(tree: ast.AST) -> list[tuple[str, int, tuple[int, str]]]:
+    """Every (metric, line, (size, label)) this tree offers, over-limit or not.
 
     Measuring first and filtering once keeps the per-node cases to a single
     expression each, instead of a repeated collect-and-append per metric. The
     line travels with the candidate because method names repeat -- every class
-    in the tree has an `__init__` -- so a name is not an identity.
+    in the tree has an `__init__` -- so a name is not an identity. The size and
+    label are paired because `walk` owns the position and what remains to carry
+    is the measurement itself.
     """
-    found: list[tuple[str, int, str, int]] = []
+    found: list[tuple[str, int, tuple[int, str]]] = []
     for node in nodes_of(tree):
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            found.append(("function length", _span(node, node.body), node.name, node.lineno))
-            found.append(("abc size", _abc_size(node), node.name, node.lineno))
+            found.append(("function length", node.lineno, (_span(node, node.body), node.name)))
+            found.append(("abc size", node.lineno, (_abc_size(node), node.name)))
         elif isinstance(node, ast.ClassDef):
-            found.append(("largest class", _span(node, node.body), node.name, node.lineno))
+            found.append(("largest class", node.lineno, (_span(node, node.body), node.name)))
     for start, size, label in _outer_blocks(tree):
-        found.append(("block length", size, label, start))
+        found.append(("block length", start, (size, label)))
     return found
 
 
@@ -226,21 +239,14 @@ def offenders(metric: str) -> list[Offender]:
     limit = _METRIC_LIMITS.get(metric)
     budget = _BUDGETS[metric]
     found: list[Offender] = []
-    for path, tree in app_trees(exclude=_ALL_APP):
-        relative = path.relative_to(APP_ROOT.parent).as_posix()
-        for candidate_metric, size, label, line in _candidates(tree):
-            if candidate_metric != metric:
-                continue
-            if metric == "largest class":
-                if size > budget:
-                    found.append(Offender(metric, f"{relative}:{line}", label, size))
-            elif size > limit:
-                found.append(Offender(metric, f"{relative}:{line}", label, size))
-    return (
-        sorted(found, key=lambda item: (-item.size, item.where))[:1]
-        if metric == "largest class"
-        else sorted(found, key=lambda item: (-item.size, item.where))
-    )
+    for candidate_metric, where, detail in walk(_candidates):
+        if candidate_metric != metric:
+            continue
+        size, label = detail
+        if size > (budget if metric == "largest class" else limit):
+            found.append(Offender(metric, where, label, size))
+    found.sort(key=lambda item: (-item.size, item.where))
+    return found[:1] if metric == "largest class" else found
 
 
 def measurement(metric: str) -> int:
@@ -263,76 +269,34 @@ def measurement(metric: str) -> int:
 
 
 def report() -> None:
-    for metric, budget in _BUDGETS.items():
-        found = offenders(metric)
-        shown = measurement(metric)
-        state = "OVER" if shown > budget else "ok"
-        unit = "" if metric == "largest class" else " offenders /"
-        print(f"{metric:<16} {shown:>3}{unit:<12} budget {budget:<3} [{state}]")
-        for item in found:
-            print(f"    {item}")
-
-
-@pytest.mark.parametrize("metric", sorted(_BUDGETS))
-def test_metric_budget_is_not_exceeded(metric: str) -> None:
-    budget = _BUDGETS[metric]
-    found = offenders(metric)
-    shown = measurement(metric)
-    assert shown <= budget, (
-        f"{metric}: {shown} exceeds the budget of {budget}.\n"
-        f"Each of these is work that was already on the list; a wave that fixes one "
-        f"lowers the budget in `_BUDGETS` in the same commit. The target is no "
-        f"offenders, at which point this assertion enforces the rule on its own.\n"
-        + "\n".join(f"  {item}" for item in found)
+    ratchet_report(
+        _BUDGETS,
+        (measurement, offenders),
+        lambda metric, shown, budget: (
+            f"{metric:<16} {shown:>3}{'' if metric == 'largest class' else ' offenders /':<12}"
+            f" budget {budget:<3} [{'OVER' if shown > budget else 'ok'}]"
+        ),
     )
 
 
-@pytest.mark.parametrize("metric", sorted(_BUDGETS))
-def test_metric_budget_is_tight(metric: str) -> None:
-    """A budget must not sit above the measurement, or it is a standing allowance."""
-    budget = _BUDGETS[metric]
-    actual = measurement(metric)
-    assert budget <= actual, (
-        f"{metric}: the budget of {budget} is stale -- the measurement is now {actual}. "
-        f"Tighten it to {actual} in `_BUDGETS` in the same commit that reduced them. "
-        f"A budget that outlives the work it was counting is not a ratchet."
-    )
+_REMEDY = (
+    "Each of these is work that was already on the list; a wave that fixes one "
+    "lowers the budget in `_BUDGETS` in the same commit. The target is no "
+    "offenders, at which point this assertion enforces the rule on its own."
+)
+
+test_budget_is_not_exceeded = budget_not_exceeded(
+    _BUDGETS, (measurement, offenders), subject="metrics", remedy=_REMEDY
+)
+test_budget_is_tight = budget_is_tight(_BUDGETS, (measurement, offenders), subject="metrics")
+test_collection_is_deterministic = collection_is_deterministic(
+    _BUDGETS, (measurement, offenders), subject="metrics"
+)
 
 
-def test_metric_collectors_see_the_whole_tree() -> None:
-    """The gate is only worth what it scans.
-
-    An empty scan and a whole-tree scan both report zero offenders, so a broken
-    collector would otherwise turn this module into four permanently-passing
-    tests. This pins that the walkers reach real code rather than proving it by
-    counting offenders, which is the mistake the zero-observation proof in
-    `tests/invariants/` already made once.
-    """
-    total = sum(1 for _ in APP_ROOT.rglob("*.py"))
-    assert total > 50, f"expected a real app tree, found {total} files"
-
-    functions = 0
-    classes = 0
-    for _path, tree in app_trees(exclude=_ALL_APP):
-        for node in nodes_of(tree):
-            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                functions += 1
-            elif isinstance(node, ast.ClassDef):
-                classes += 1
-    assert functions > 500, f"function walk reached only {functions} definitions"
-    assert classes > 50, f"class walk reached only {classes} definitions"
-
-
-def test_metric_collection_is_deterministic() -> None:
-    """The numbers in the budgets came from somewhere; make that somewhere checkable."""
-    for metric in _BUDGETS:
-        assert offenders(metric) == offenders(metric), f"{metric} collection is not deterministic"
-        # Both ratchet assertions read `measurement`, so that is the number the
-        # budget is actually compared against. Checking determinism only on
-        # `offenders` left the compared value unchecked -- vacuously so for
-        # `largest class`, whose offender list is empty while nothing is over
-        # budget, which is the state the tree is in today.
-        assert measurement(metric) == measurement(metric), f"{metric} measurement is not deterministic"
+test_collector_sees_the_whole_tree = collector_sees_the_whole_tree(
+    definition_counts, {"function": 500, "class": 50}, subject="metrics"
+)
 
 
 def _git(root: Path, *args: str) -> subprocess.CompletedProcess[str]:
