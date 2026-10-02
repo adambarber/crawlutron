@@ -193,12 +193,14 @@ repos:
         stages: [pre-commit]
 
       # Type gate: catches the stringly-typed-identity class statically, and is
-      # the same command CI runs.
+      # the same command CI runs. No path argument: `mypy.ini`'s `files` is the
+      # scope, and this hook restating it as `mypy app` is how a second checker
+      # scope silently grew without the hook's gate covering it.
       - id: mypy
         name: mypy
         entry: >-
           bash -c 'for d in "$(git rev-parse --show-toplevel)/docker/browser-crawler" "$(git rev-parse --show-toplevel)"; do [ -x "$d/scripts/gate" ] && exec bash "$d/scripts/gate" "$@"; done; echo "scripts/gate not found in either layout" >&2; exit 1' gate
-          .venv/bin/python -m mypy app
+          .venv/bin/python -m mypy
         language: system
         files: *service_trigger
         pass_filenames: false

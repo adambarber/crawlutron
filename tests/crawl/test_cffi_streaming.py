@@ -14,6 +14,7 @@ import app.crawl.strategies.http_client_pool as http_mod
 from app.constants import HTTP_CFFI_IMPERSONATE
 from app.crawl.strategies.fetchers import impersonating_fetcher
 from app.validation import HostPolicy
+from tests._fetch_outcome import FetchFailed
 from tests._fetcher_factories import scripted_fetcher, strategy_request
 from tests._policy_factories import make_base_policy
 from tests._timing_harnesses import await_until
@@ -300,14 +301,14 @@ def test_cffi_stream_timeout_honored_on_stalled_body(monkeypatch) -> None:
         server.shutdown()
         server.server_close()
 
-    if outcome.ok:
-        # cffi returned; it must NOT be a 200-with-body (the stalled body
-        # must surface as 413/timeout mapping, not a successful fetch).
-        assert outcome.status != 200, "stalled body reported as a 200 success"
-    else:
+    if isinstance(outcome, FetchFailed):
         # Any transport-error class is contract-fine (ReadError, Timeout,
         # ConnectionError...): the point is a bounded failure, not a hang.
         assert outcome.error, outcome
+    else:
+        # cffi returned; it must NOT be a 200-with-body (the stalled body
+        # must surface as 413/timeout mapping, not a successful fetch).
+        assert outcome.status_code != 200, "stalled body reported as a 200 success"
 
     # The load-bearing assertion. Both arms above are satisfiable by a server
     # that died before serving, which is exactly what this handler used to do:

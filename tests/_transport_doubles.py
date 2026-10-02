@@ -18,8 +18,10 @@ the GIL under the suite's zero-second sleep patch and wedges the whole pytest
 process, so the genuine fetcher runs in a spawned interpreter with a hard join
 (see the ``real_cffi`` marker and ``conftest.stub_cffi_fetcher``).
 :func:`real_cffi_fetch_outcome` owns that arrangement -- the child, the queue,
-the join, the terminate -- and a test states only the outcome it is about: a
-status code, or the class of the transport failure that ended the fetch.
+the join, the terminate -- and a test states only the outcome it is about. What
+comes back is the production :class:`HttpFetchResult` or a ``FetchFailed``
+naming the class of the transport failure that ended the fetch; see
+``tests/_fetch_outcome.py``.
 
 "Spawned" is a decision this module makes, not a platform default it inherits.
 The default start method is ``fork`` on Linux and ``spawn`` on macOS, and a fork
@@ -34,35 +36,48 @@ isolation is a property of the harness rather than of the kernel it runs on.
 """
 
 import multiprocessing
-from collections.abc import Sequence
-from typing import Any
+from collections.abc import Awaitable, Callable, Sequence
+from multiprocessing.process import BaseProcess
+from multiprocessing.queues import Queue
 from urllib.parse import urlparse
 
 import httpx
 import pytest
 
 from app.constants import DEFAULT_MAX_CONTENT_LENGTH_BYTES
+from app.models.http_fetch_result import HttpFetchResult
+from tests._fetch_outcome import FetchFailed, FetchOutcome
 
 _ISOLATED = multiprocessing.get_context("spawn")
 
 
-def isolated_queue() -> Any:
+def isolated_queue() -> "Queue[FetchOutcome]":
     """A queue from the same context as :func:`isolated_process`.
 
     The two must agree: a queue created by the default context and handed to a
     spawned process is the kind of pairing that works until it does not.
+
+    Its element type is the report both spawned reporters put on it, so this is
+    the one declaration of what crosses that boundary. It was ``Any``, which is
+    what let two reporters grow two shapes and a reader grow a convention for
+    telling them apart.
     """
     return _ISOLATED.Queue()
 
 
-def isolated_process(target: Any, args: tuple[Any, ...]) -> multiprocessing.Process:
+def isolated_process(target: Callable[..., None], args: Sequence[object] = ()) -> BaseProcess:
     """A child process that inherits nothing from this test process.
 
     Named rather than inlined because the start method is the whole point: a
     default ``multiprocessing.Process`` is isolated on macOS and a fork on Linux,
     so a test written against it is a test that passes on the author's machine.
+
+    ``BaseProcess`` rather than ``multiprocessing.Process``: the spawn context
+    builds ``SpawnProcess``, a sibling and not a subclass of the name this used
+    to declare, so the annotation claimed a class the factory never returns.
+    Nothing checked that while the checker's scope was ``app``.
     """
-    return _ISOLATED.Process(target=target, args=args)
+    return _ISOLATED.Process(target=target, args=tuple(args))
 
 
 class _ScriptedBody(httpx.AsyncByteStream):
@@ -96,7 +111,7 @@ class MockResponse(httpx.Response):
         super().__init__(status_code, headers=headers, stream=_ScriptedBody(content))
 
 
-def _recording_hook(sink: list):
+def _recording_hook[T: httpx.Request | httpx.Response](sink: list[T]) -> Callable[[T], Awaitable[None]]:
     """An httpx event hook that appends every event to `sink`.
 
     A coroutine function because httpx *awaits* the result; a hook that returns
@@ -220,36 +235,11 @@ def patch_http_fetcher_transport(
     return client
 
 
-class CffiFetchOutcome:
-    """What the genuine fetcher did in its own interpreter.
-
-    Either a status code (``ok``) or the class name of the transport failure
-    that ended the fetch. The two are one value rather than a tuple with a
-    "which slot is real" convention, so a test cannot read the wrong one.
-    """
-
-    __slots__ = ("detail", "error", "ok", "status")
-
-    def __init__(
-        self, *, ok: bool, status: int | None = None, error: str | None = None, detail: str = ""
-    ) -> None:
-        self.ok = ok
-        self.status = status
-        self.error = error
-        self.detail = detail
-
-    def __repr__(self) -> str:
-        if self.ok:
-            return f"CffiFetchOutcome(ok, status={self.status})"
-        return f"CffiFetchOutcome(err, error={self.error!r}, detail={self.detail!r})"
-
-
-def _genuine_cffi_outcome(url: str, timeout_seconds: int, max_content_length: int) -> CffiFetchOutcome:
+def _genuine_cffi_outcome(url: str, timeout_seconds: int, max_content_length: int) -> FetchOutcome:
     """Fetch `url` with the real fetcher, right here, and classify the result.
 
-    A transport failure is contract-fine and a hang is not: any exception the
-    real curl_cffi raises ends the fetch in bounded time, so the class name is
-    recorded rather than re-raised and the caller decides what it meant.
+    Returns the production result or a :class:`FetchFailed` naming what ended it;
+    see ``tests/_fetch_outcome.py`` for why the boundary needs the second arm.
     """
     import asyncio
 
@@ -265,23 +255,24 @@ def _genuine_cffi_outcome(url: str, timeout_seconds: int, max_content_length: in
         )
 
     try:
-        fetched = asyncio.run(_fetch())
+        return asyncio.run(_fetch())
     except Exception as failure:
-        return CffiFetchOutcome(ok=False, error=type(failure).__name__, detail=str(failure)[:120])
-    return CffiFetchOutcome(ok=True, status=fetched.status_code)
+        return FetchFailed(error=type(failure).__name__, detail=str(failure)[:120])
 
 
-def _outcome_worker(url: str, timeout_seconds: int, max_content_length: int, out_queue: Any) -> None:
+def outcome_worker(
+    url: str, timeout_seconds: int, max_content_length: int, out_queue: Queue[FetchOutcome]
+) -> None:
     """Subprocess body: hand the parent one outcome and exit.
 
     Module-level because a spawn target has to be importable in the child, and
-    separate from :func:`_genuine_cffi_outcome` so that classification -- which
-    the parent asserts on -- is decided in the same interpreter as the fetch.
+    separate from the classification so that it -- which the parent asserts on --
+    is decided in the same interpreter as the fetch.
     """
     out_queue.put(_genuine_cffi_outcome(url, timeout_seconds, max_content_length))
 
 
-def join_or_kill(worker, join_timeout: float, what: str) -> None:
+def join_or_kill(worker: BaseProcess, join_timeout: float, what: str) -> None:
     """Wait ``join_timeout`` for ``worker``; kill it and fail if it is still running.
 
     The guard every spawned-interpreter test needs, and the part that goes wrong
@@ -306,7 +297,7 @@ def real_cffi_fetch_outcome(
     timeout_seconds: int = 10,
     max_content_length: int = DEFAULT_MAX_CONTENT_LENGTH_BYTES,
     join_timeout: float = 10.0,
-) -> CffiFetchOutcome:
+) -> FetchOutcome:
     """Run the genuine curl_cffi fetcher against `url` in a spawned interpreter.
 
     The child inherits this process's environment, so a loopback target needs
@@ -320,7 +311,7 @@ def real_cffi_fetch_outcome(
     re-spelled per test.
     """
     out_queue = isolated_queue()
-    worker = isolated_process(_outcome_worker, (url, timeout_seconds, max_content_length, out_queue))
+    worker = isolated_process(outcome_worker, (url, timeout_seconds, max_content_length, out_queue))
     worker.start()
     join_or_kill(worker, join_timeout, f"the genuine cffi fetcher on {url}")
     if worker.exitcode != 0:
@@ -331,12 +322,15 @@ def real_cffi_fetch_outcome(
 
 
 __all__ = [
-    "CffiFetchOutcome",
+    "FetchOutcome",
+    "HttpFetchResult",
     "isolated_process",
     "isolated_queue",
+    "join_or_kill",
     "MockResponse",
     "allow_scripted_egress",
     "dispatching_transport_client",
+    "outcome_worker",
     "patch_http_fetcher_transport",
     "real_cffi_fetch_outcome",
     "ScriptedClient",

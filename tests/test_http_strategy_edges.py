@@ -1,37 +1,18 @@
-import multiprocessing
-import os
-
 import httpx
 import pytest
 
 from app.crawl.policy import PolicyTier, read_policy, validate_wire_policy
+from app.models.http_fetch_result import HttpFetchResult
 from tests._fetcher_factories import failing_fetcher, request_fetcher, run_http_strategy, scripted_fetcher
 from tests._policy_factories import http_strategy_policy
-from tests._transport_doubles import isolated_process, isolated_queue, join_or_kill
+from tests._transport_doubles import (
+    isolated_process,
+    isolated_queue,
+    join_or_kill,
+    outcome_worker,
+    real_cffi_fetch_outcome,
+)
 from tests.helpers.server import _Handler, spawn_threaded_server
-
-
-def _cffi_smoke_worker(url: str, out_queue: multiprocessing.Queue) -> None:
-    """Subprocess body for the cffi smoke test (must be module-level to pickle)."""
-    import asyncio
-
-    os.environ["CRAWLUTRON_ALLOW_PRIVATE_TARGETS"] = "1"
-
-    from app.crawl.strategies.fetchers import impersonating_fetcher
-    from app.validation import HostPolicy
-
-    # `impersonating_fetcher` is the factory the engine binds for the
-    # impersonating strategy, so calling the factory is what makes this a test
-    # of the shipped transport preference rather than of a second entry point.
-    try:
-        policy = HostPolicy.unrestricted()
-        # No ``policy=`` here: the factory already bound it, and re-passing it
-        # was reaching for a keyword the bound fetcher's declared ``HttpFetcher``
-        # type does not carry -- the binding is what this call is testing.
-        result = asyncio.run(impersonating_fetcher(policy)(url, {}, 10, 50 * 1024 * 1024))
-        out_queue.put(("ok", result.status_code))
-    except Exception as error:
-        out_queue.put(("err", type(error).__name__, str(error)[:160]))
 
 
 class TestHttpStrategyEdges:
@@ -63,9 +44,10 @@ class TestHttpStrategyEdges:
     def test_impersonating_fetcher_response(self):
         """real_cffi subprocess: a normal fetch returns the served 200.
 
-        In-process real cffi is banned: under fast_sleeps the
-        curl watchdog busy-spins the GIL and wedges the pytest process, so
-        the fetch runs in an isolated interpreter with a hard join.
+        In-process real cffi is banned because the curl watchdog busy-spins the
+        GIL under the suite's sleep patch; ``tests/_transport_doubles.py`` owns
+        the arrangement and says why. What is asserted here is that the report
+        arriving on the queue is the production result.
 
         The isolation is the load-bearing part, and it has to be asked for. A
         default ``multiprocessing.Process`` forks on Linux, and a forked child
@@ -74,11 +56,16 @@ class TestHttpStrategyEdges:
         "curl_cffi stubbed in tests" -- on CI only, having passed on the macOS
         where the same default spawns. ``isolated_process`` names the start
         method so the test means the same thing on both.
+
+        This drove its own reporter, which put a ``("ok", 200)`` tuple on the
+        queue; the harness reporter beside it put a record with an ``ok`` flag.
+        Both were ways of not saying what came back, and the reader had to be
+        told which slot was real. It uses the harness reporter now.
         """
         server = spawn_threaded_server(_Handler)
         url = f"http://127.0.0.1:{server.server_port}/"
         out_queue = isolated_queue()
-        worker = isolated_process(_cffi_smoke_worker, (url, out_queue))
+        worker = isolated_process(outcome_worker, (url, 10, 50 * 1024 * 1024, out_queue))
         try:
             worker.start()
             join_or_kill(worker, 10.0, "the cffi fetcher on a normal response")
@@ -88,12 +75,38 @@ class TestHttpStrategyEdges:
 
         assert worker.exitcode == 0, f"worker crashed: exitcode={worker.exitcode}"
         assert not out_queue.empty(), "worker produced no result"
-        # The error branch reports three values, so unpacking positionally turned
-        # a real failure into "too many values to unpack" and hid the reason the
-        # subprocess died. Read the outcome first and name the rest.
-        outcome, *detail = out_queue.get()
-        assert outcome == "ok", f"cffi fetch failed in the subprocess: {detail}"
-        assert detail == [200], detail
+        outcome = out_queue.get()
+        assert isinstance(outcome, HttpFetchResult), f"cffi fetch failed in the subprocess: {outcome}"
+        assert outcome.status_code == 200
+
+    def test_the_isolated_fetch_reports_the_result_rather_than_its_status(self, monkeypatch):
+        """A served page, fetched by the real fetcher in its own interpreter.
+
+        What comes back has to BE the production result. It used to be a
+        re-encoding of one -- an ``ok`` flag beside a ``status`` int -- and a
+        re-encoding cannot say which operator produced it: the httpx fallback
+        runs after the impersonated attempt precisely when there was none, so
+        the same integer means both. It also permitted states no producer ever
+        meant, ok-with-no-status and not-ok-with-a-status, which is what a hand-
+        written union of primitives always permits.
+
+        Asserting on a field the old record did not carry is the point: a status
+        proves nothing about the result the fetcher actually produced.
+
+        In-process real cffi is banned because the curl watchdog busy-spins the
+        GIL under the suite's sleep patch; ``tests/_transport_doubles.py`` owns
+        the arrangement and says why.
+        """
+        monkeypatch.setenv("CRAWLUTRON_ALLOW_PRIVATE_TARGETS", "1")
+        server = spawn_threaded_server(_Handler)
+        url = f"http://127.0.0.1:{server.server_port}/"
+        try:
+            outcome = real_cffi_fetch_outcome(url, join_timeout=10.0)
+        finally:
+            server.shutdown()
+            server.server_close()
+
+        assert outcome.final_url.startswith(url), f"cffi fetch produced {outcome!r}"
 
     async def test_http_strategy_result_httpx_request_error(self):
         from app.crawl.cache import HttpCache
