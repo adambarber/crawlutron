@@ -35,8 +35,6 @@ from tests.chokepoint_walks import (
     parent_map,
     resolved_call_name,
 )
-from tests.invariants._shared import assert_property_detector_bites
-from tests.property_registry import Property
 from tests.rules import Bites, Rule
 
 _HOST_POLICY_VALIDATORS = frozenset(
@@ -356,6 +354,25 @@ URL_RETURNING_HELPERS_REQUIRE_HOST_POLICY = Rule(
             "class JobStore:\n    def canonical_root(self, root_url):\n        return str(root_url)\n",
             "returns URLs without required HostPolicy",
         ),
+        Bites(
+            "from urllib.parse import urljoin\ndef resolve(root, path):\n    return urljoin(root, path)\n",
+            "returns URLs without required HostPolicy",
+        ),
+        Bites(
+            "def emit(url, *, policy: HostPolicy):\n    return url\n",
+            "returns URLs without required HostPolicy",
+        ),
+        Bites(
+            "from app.validation import public_url_or_none\n"
+            "def resolve(url, *, policy: HostPolicy):\n"
+            "    validator = public_url_or_none\n"
+            "    return validator(url)\n",
+            "returns URLs without required HostPolicy",
+        ),
+        Bites(
+            "from urllib.parse import urlunsplit\ndef rebuild(parts):\n    return urlunsplit(parts)\n",
+            "returns URLs without required HostPolicy",
+        ),
     ),
     clean=lambda: (
         "from app.validation import public_url_or_none\n"
@@ -367,75 +384,27 @@ URL_RETURNING_HELPERS_REQUIRE_HOST_POLICY = Rule(
         "        self._host_policy = host_policy\n"
         "    def canonical_root(self, root_url):\n"
         "        return str(public_url_or_none(root_url, policy=self._host_policy))\n",
+        "from urllib.parse import urljoin\n"
+        "from app.validation import public_url_or_none\n"
+        "def resolve(root, path, *, policy: HostPolicy):\n"
+        "    return public_url_or_none(urljoin(root, path), policy=policy)\n",
+        "class Client:\n"
+        "    policy: HostPolicy\n"
+        "    def emit(self, url):\n"
+        "        return public_url_or_none(url, policy=self.policy)\n",
+        "from app.validation import public_url_or_none as validate\n"
+        "def resolve(url, *, policy: HostPolicy):\n"
+        "    return validate(url, policy=policy)\n",
+        "from urllib.parse import urlunsplit\n"
+        "from app.validation import public_url_or_none\n"
+        "def rebuild(parts, *, policy: HostPolicy):\n"
+        "    return public_url_or_none(urlunsplit(parts), policy=policy)\n",
     ),
 )
 
 
 def test_required_host_policy_detector_bites():
     URL_RETURNING_HELPERS_REQUIRE_HOST_POLICY.check_bites()
-
-
-_HOST_POLICY_PROPERTY = Property(
-    name="host-policy",
-    owner_module="app/validation.py",
-    owner_symbols=("_host_policy_reason",),
-    definition_site="app/validation.py:_host_policy_reason",
-    fingerprints=("host_policy_validation",),
-    reason="Every URL boundary must apply the host policy before forwarding a URL.",
-)
-
-
-def test_host_policy_detector_property_bites():
-    assert_property_detector_bites(
-        _HOST_POLICY_PROPERTY,
-        lambda tree, path, _prop: _required_host_policy_offenders(tree, path),
-        caught={
-            "dotted urljoin import": (
-                "from urllib.parse import urljoin\ndef f(root, path):\n    return urljoin(root, path)\n",
-                1,
-            ),
-            "annotation without policy use": (
-                "def f(url, *, policy: HostPolicy):\n    return url\n",
-                1,
-            ),
-            "callable indirection without policy": (
-                "from app.validation import public_url_or_none\n"
-                "def f(url, *, policy: HostPolicy):\n"
-                "    validator = public_url_or_none\n"
-                "    return validator(url)\n",
-                1,
-            ),
-            "dotted urlunsplit import": (
-                "from urllib.parse import urlunsplit\ndef f(parts):\n    return urlunsplit(parts)\n",
-                1,
-            ),
-        },
-        quiet={
-            "dotted urljoin validated": (
-                "from urllib.parse import urljoin\n"
-                "from app.validation import public_url_or_none\n"
-                "def f(root, path, *, policy: HostPolicy):\n"
-                "    return public_url_or_none(urljoin(root, path), policy=policy)\n"
-            ),
-            "annotation replaced by policy use": (
-                "class Client:\n"
-                "    policy: HostPolicy\n"
-                "    def emit(self, url):\n"
-                "        return public_url_or_none(url, policy=self.policy)\n"
-            ),
-            "callable indirection with policy": (
-                "from app.validation import public_url_or_none as validate\n"
-                "def f(url, *, policy: HostPolicy):\n"
-                "    return validate(url, policy=policy)\n"
-            ),
-            "dotted urlunsplit validated": (
-                "from urllib.parse import urlunsplit\n"
-                "from app.validation import public_url_or_none\n"
-                "def f(parts, *, policy: HostPolicy):\n"
-                "    return public_url_or_none(urlunsplit(parts), policy=policy)\n"
-            ),
-        },
-    )
 
 
 def test_required_host_policy_detector_covers_new_url_helper_shapes():

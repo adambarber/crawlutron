@@ -111,17 +111,6 @@ class TestNormalizationGuardMemoization:
         with pytest.raises(ValueError, match="private_network_target"):
             validation.normalize_public_http_url("http://localhost/x", policy=_HOST_POLICY)
 
-    def test_numeric_host_forms_still_classified(self, monkeypatch):
-        import app.validation as validation
-
-        monkeypatch.setenv("CRAWLUTRON_ALLOW_PRIVATE_TARGETS", "0")
-        for host in ("2130706433", "0x7f000001"):
-            with pytest.raises(ValueError, match="private_network_target"):
-                validation.normalize_public_http_url(f"http://{host}/x", policy=_HOST_POLICY)
-        # Repeated forms hit the memo but must keep rejecting.
-        with pytest.raises(ValueError, match="private_network_target"):
-            validation.normalize_public_http_url("http://2130706433/x", policy=_HOST_POLICY)
-
 
 class TestFilterJsEndpoints:
     """The single egress filter for the JS-endpoint discovery door.

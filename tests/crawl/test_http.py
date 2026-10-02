@@ -232,10 +232,6 @@ class TestHttpStrategy:
         assert "discovery" not in r1.diagnostics
         # Content-only crawl: link extraction skipped entirely
         assert r1.discovered_link_count == 0
-        # Next_page_url is always computed (standard field, proven by
-        # test_http_strategy_extracts_html_markdown_and_links); it must not be
-        # gated behind discovery.
-        assert r1.next_page_url is None or isinstance(r1.next_page_url, str)
         # Discovery requested -> js_endpoints extracted; the (remote)
         # sitemap/feed discovery is performed, so the robots diagnostics block
         # is populated (proving the gated function ran for this crawl).

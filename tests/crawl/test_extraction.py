@@ -183,7 +183,6 @@ class TestKatanaDiscovery:
         # (and may still yield nothing, falling through to plain-text).
         result = extract_html("<html><body></body></html>", None)
         assert isinstance(result, ExtractedContent)
-        assert result.markdown is None or isinstance(result.markdown, str)
 
     def test_detect_pagination_anchor_rel_next(self):
         html = '<a rel="next" href="/page2">Next</a>'
@@ -719,7 +718,7 @@ class TestExtractionEdges:
 
     def test_extract_document_markitdown_exception(self):
         result = extract_document(b"not a pdf", "http://e.com/doc.pdf")
-        assert result.text is None or isinstance(result.text, str)
+        assert isinstance(result, ExtractedContent)
 
     def test_parse_html_tree_empty(self):
         assert parse_html_tree("") is None
