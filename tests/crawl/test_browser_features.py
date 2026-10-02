@@ -12,7 +12,7 @@ with nothing red.
 import base64
 
 from app.crawl.strategies.browser_driver import BrowserDriver
-from app.models import RenderOptions
+from app.models.render_options import RenderOptions
 from tests._browser_doubles import BrowserFakeContextManager, ScriptedPage, scripted_renderer
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY
 

@@ -1096,7 +1096,7 @@ CYCLE_GUARD_IS_CONSULTED_IN_EXACTLY_ONE_PLACE = Rule(
     name="cycle-guard-is-consulted-in-exactly-one-place",
     find=_cycle_guard_offenders,
     summary=(
-        "app/models.py consults the cycle guard in one function; a call from "
+        "app/models/taxonomy.py consults the cycle guard in one function; a call from "
         "an arm re-inlines the 'descend, give up if already on the path' pair it "
         "was deduped away from, so route every arm through the owner"
     ),
@@ -1117,7 +1117,7 @@ CYCLE_GUARD_IS_CONSULTED_IN_EXACTLY_ONE_PLACE = Rule(
 
 
 def test_the_cycle_guard_is_applied_in_exactly_one_place():
-    """app/models.py consults the cycle guard in one function, not once per container arm."""
+    """app/models/taxonomy.py consults the cycle guard in one function, not once per container arm."""
     CYCLE_GUARD_IS_CONSULTED_IN_EXACTLY_ONE_PLACE.scan()
 
 

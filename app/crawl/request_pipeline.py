@@ -27,7 +27,10 @@ from app.crawl.result_record import ProducerEnvelope
 from app.crawl.robots import FetchAndDecode
 from app.crawl.strategy_chain import execute_crawl_chain
 from app.memory_pressure import read_memory_stats
-from app.models import CrawlTask, CrawlWorker, EngineCrawlResult, NormalizedUrl
+from app.models.crawl_task import CrawlTask
+from app.models.crawl_worker import CrawlWorker
+from app.models.engine_crawl_result import EngineCrawlResult
+from app.models.normalized_url import NormalizedUrl
 from app.resource_pressure import (
     ResourceGate,
     TaskRamBudget,

@@ -1,17 +1,13 @@
 from typing import Any
 
 from app.constants import HTTP_DECLARED_CRAWLER
-from app.models import (
-    Classification,
-    CrawlError,
-    CrawlJob,
-    CrawlResult,
-    CrawlStrategyAttempt,
-    CrawlStrategyName,
-    DiscoveredLink,
-    EngineCrawlResult,
-    RenderOptions,
-)
+from app.models.crawl_job import CrawlJob
+from app.models.crawl_result import CrawlResult
+from app.models.crawl_strategy_attempt import CrawlStrategyAttempt
+from app.models.discovered_link import DiscoveredLink
+from app.models.engine_crawl_result import EngineCrawlResult
+from app.models.render_options import RenderOptions
+from app.models.taxonomy import Classification, CrawlError, CrawlStrategyName
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY
 
 
@@ -48,7 +44,7 @@ def engine_result(url: str, classification: Classification, **overrides: Any):
     it named; and ``discovered_link_count`` comes from ``discovered_links``.
     """
     from app.constants import status_for_classification
-    from app.models import EngineCrawlResult
+    from app.models.engine_crawl_result import EngineCrawlResult
 
     if "discovered_link_count" in overrides:
         raise TypeError("discovered_link_count is derived from discovered_links; pass only the links")

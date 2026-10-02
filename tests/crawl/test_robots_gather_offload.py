@@ -11,7 +11,7 @@ from contextlib import asynccontextmanager
 
 from app.api_models import CrawlPolicy
 from app.crawl.admission import RobotsGate
-from app.models import DiscoveredLink
+from app.models.discovered_link import DiscoveredLink
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY, normalized
 from tests._recursive_harnesses import drive_recursive_crawl
 from tests._recursive_harnesses import make_crawl_task as _make_job

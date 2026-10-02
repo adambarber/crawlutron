@@ -8,13 +8,10 @@ from dataclasses import dataclass, field
 import pytest
 
 from app.constants import HTTP_DECLARED_CRAWLER
-from app.models import (
-    CrawlStrategyAttempt,
-    DiscoveredLink,
-    EngineCrawlResult,
-    from_wire,
-    to_dict,
-)
+from app.models.crawl_strategy_attempt import CrawlStrategyAttempt
+from app.models.discovered_link import DiscoveredLink
+from app.models.engine_crawl_result import EngineCrawlResult
+from app.models.serialization import from_wire, to_dict
 from tests._result_builders import _link, engine_result
 
 
@@ -175,7 +172,7 @@ def test_an_absent_field_that_has_a_default_keeps_that_default():
 def test_a_taxonomy_value_outside_the_literals_is_refused():
     """The rebuild keeps the taxonomy check its construction already had.
 
-    ``_LiteralChecked`` runs on ``__post_init__``, so rebuilding through the real
+    ``LiteralChecked`` runs on ``__post_init__``, so rebuilding through the real
     constructor validates ``status``/``classification``/``error`` for free. The
     case worth pinning is the one JSON can produce and a dataclass cannot: a
     status string from a spill line that no producer emits.

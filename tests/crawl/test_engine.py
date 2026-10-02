@@ -11,7 +11,8 @@ from app.constants import BROWSER_HEADLESS, EXTRACTION_DOCUMENT, EXTRACTION_TRAF
 from app.crawl.engine import _payload_policy
 from app.crawl.policy import PolicyTier, read_policy
 from app.crawl.strategies.browser import BrowserRenderer
-from app.models import CrawlResult, to_dict
+from app.models.crawl_result import CrawlResult
+from app.models.serialization import to_dict
 from app.scheduler import DomainScheduler
 from tests._assertions import browser_available
 from tests._browser_doubles import _fake_browser

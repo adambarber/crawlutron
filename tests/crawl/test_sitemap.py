@@ -422,7 +422,7 @@ def test_build_site_map_aggregates_and_dedupes():
 
 
 def test_build_site_map_handles_dataclass_links():
-    from app.models import DiscoveredLink
+    from app.models.discovered_link import DiscoveredLink
 
     link = DiscoveredLink(
         url="https://r/page",

@@ -47,7 +47,7 @@ from app.crawl.llm_format import (
     PageMetadata as ExtractedPageMetadata,
 )
 from app.crawl.llm_format import _llm_metadata_from_tree, text_from_html
-from app.models import DiscoveredLink
+from app.models.discovered_link import DiscoveredLink
 from app.resource_pressure import doc_worker_count
 from app.settings import CrawlerSettings
 from app.validation import (

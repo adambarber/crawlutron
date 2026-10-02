@@ -19,7 +19,7 @@ from app.crawl.decompression import decompress_body as _decompress_body
 from app.crawl.policy import discovery_flags
 from app.crawl.result_helpers import classify_error_code
 from app.crawl.strategies.body_decode import decode_body
-from app.models import HttpFetcher
+from app.models.http_fetcher import HttpFetcher
 from app.validation import HostPolicy, public_url_or_none
 
 _RETRY_BACKOFF_BASE_SECONDS = 0.25

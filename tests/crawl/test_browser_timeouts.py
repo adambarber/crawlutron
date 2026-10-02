@@ -12,7 +12,7 @@ import asyncio
 import pytest
 
 from app.crawl.strategies.browser_driver import MAX_ACTION_WAIT_SECONDS, BrowserDriver
-from app.models import RenderOptions
+from app.models.render_options import RenderOptions
 from tests._browser_doubles import BrowserFakePage, pinned_page_renderer
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY
 

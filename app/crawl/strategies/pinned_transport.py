@@ -17,7 +17,7 @@ from urllib.parse import urljoin, urlparse
 
 from app.bounded_ttl import BoundedTTLCache
 from app.crawl.credentials import origin_of
-from app.models import HttpFetchResult
+from app.models.http_fetch_result import HttpFetchResult
 from app.validation import (
     HostPolicy,
     allow_private_targets,

@@ -8,7 +8,7 @@ from app.crawl.result_helpers import crawl_result_from_engine_result
 from app.crawl.strategies.fetch_policy import looks_like_binary_body
 from app.crawl.strategies.fetchers import default_http_fetcher
 from app.crawl.strategies.http import http_strategy_result
-from app.models import CrawlStrategyAttempt
+from app.models.crawl_strategy_attempt import CrawlStrategyAttempt
 from app.validation import HostPolicy
 from tests._assertions import assert_result_success
 from tests._fetcher_factories import (

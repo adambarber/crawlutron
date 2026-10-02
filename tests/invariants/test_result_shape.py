@@ -626,7 +626,7 @@ def test_raw_exception_error_detector_bites():
 
 # --- A wire model may not silently drop a domain model's field ---------------
 #
-# app/models.py holds the internal dataclasses and the pydantic response models
+# app/models/taxonomy.py holds the internal dataclasses and the pydantic response models
 # are the ones in app/api_responses.py (app/api_models.py is the caller-supplied
 # side). `DiscoveredLink` is declared in both, with the same seven
 # field names, and *nothing* connects the two: response_shaping converts
@@ -641,7 +641,7 @@ def test_raw_exception_error_detector_bites():
 # Written as a rule over whatever pair exists rather than a hardcoded name, so
 # the next twin is covered without a second edit here.
 
-_DOMAIN_MODEL_MODULE = "app/models.py"
+_DOMAIN_MODEL_MODULE = "app/models/taxonomy.py"
 
 
 # The pydantic RESPONSE models, which moved to their own module when the wire
@@ -653,7 +653,7 @@ _WIRE_MODEL_MODULE = "app/api_responses.py"
 
 # The domain side is not one module: a record is a declared key set wherever it
 # is declared. PageMetadata's producer lives with the extractor, not with the
-# internal dataclasses, and reading only app/models.py made the pair invisible --
+# internal dataclasses, and reading only app/models/taxonomy.py made the pair invisible --
 # which is how three wire fields survived with no producer. The rule pairs by
 # class NAME, so the producer record deliberately carries the same name as the
 # wire model it must agree with: the name is how the rule finds the pair, and a
@@ -1286,7 +1286,7 @@ def _taxonomy_members(enum: type[StrEnum]) -> set[str]:
     return {member.value for member in enum}
 
 
-def _literal_members(alias: object) -> set[str]:
+def literal_members(alias: object) -> set[str]:
     return set(get_args(alias))
 
 
@@ -1312,12 +1312,12 @@ def test_the_internal_and_wire_taxonomies_name_the_same_members():
     """
     from app.api_models import CrawlStatus, CrawlStrategy
     from app.constants import CrawlClassification, ResultStatus
-    from app.models import Classification, CrawlStrategyName
+    from app.models.taxonomy import Classification, CrawlStrategyName
 
     for axis, internal, wire in (
-        ("status", _literal_members(ResultStatus), _taxonomy_members(CrawlStatus)),
-        ("classification", _literal_members(Classification), _taxonomy_members(CrawlClassification)),
-        ("strategy", _literal_members(CrawlStrategyName), _taxonomy_members(CrawlStrategy)),
+        ("status", literal_members(ResultStatus), _taxonomy_members(CrawlStatus)),
+        ("classification", literal_members(Classification), _taxonomy_members(CrawlClassification)),
+        ("strategy", literal_members(CrawlStrategyName), _taxonomy_members(CrawlStrategy)),
     ):
         assert internal == wire, (
             f"the {axis} taxonomies disagree: "

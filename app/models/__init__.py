@@ -1,0 +1,32 @@
+"""Every type this app declares, one concept per file.
+
+The rule this package exists to enforce is that a declaration has exactly one
+home, and that the home is findable from the name alone.
+
+One concept per file, so ``EngineCrawlResult`` is in ``engine_crawl_result.py``
+and there is nowhere else to look. Not one *class* per file: ``taxonomy.py``
+holds the classification vocabulary because those declarations mutually
+reference each other and splitting them would put a name in a file that cannot
+be read without the file it is defined in. The unit is the thing a reader looks
+up, not the syntactic node.
+
+NOTHING IS RE-EXPORTED HERE, and that is the load-bearing decision. An
+``__init__.py`` that listed every type would make ``from app.models import
+EngineCrawlResult`` work from anywhere -- and would therefore let a type live in
+the wrong file while still importing cleanly, which is exactly the drift the
+typing program was opened to remove. It would also be a hand-maintained list
+mirroring what the tree contains, which is a declaration that goes stale the
+moment anyone adds a file and forgets a line. Every import names its file:
+
+    from app.models.engine_crawl_result import EngineCrawlResult
+
+Consequences worth knowing before adding to this package:
+
+- Names here are PUBLIC. A declaration crossing a package boundary is a private
+  name crossing one, and ``tests/private_import_ledger.py`` treats that as a
+  violation. Helpers stay private to their own file; declarations are named for
+  what they declare.
+- Two files may not hold the same declaration, and ``tests/invariants/
+  test_public_surface.py`` enforces that a module here is named for the type it
+  holds.
+"""

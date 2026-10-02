@@ -6,7 +6,9 @@ import asyncio
 import inspect
 from typing import TypeGuard, overload
 
-from app.models import AsyncCrawlWorker, CrawlJob, CrawlResult, CrawlWorker, SyncCrawlWorker
+from app.models.crawl_job import CrawlJob
+from app.models.crawl_result import CrawlResult
+from app.models.crawl_worker import AsyncCrawlWorker, CrawlWorker, SyncCrawlWorker
 
 
 def _is_sync_worker(worker: CrawlWorker) -> TypeGuard[SyncCrawlWorker]:

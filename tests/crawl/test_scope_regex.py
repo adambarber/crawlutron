@@ -8,7 +8,7 @@ refuse to compile pathological patterns and bound the number of links scanned.
 import contextlib
 
 from app.crawl.admission import compile_scope_pattern as compile_scope_pattern
-from app.models import EngineCrawlResult
+from app.models.engine_crawl_result import EngineCrawlResult
 
 
 def _make_result(urls):

@@ -45,13 +45,11 @@ from app.crawl.llm_format import (
     extract_carried_metadata,
 )
 from app.crawl.result_record import AnyResult, ProducerEnvelope, RenderEnvelope
-from app.models import (
-    CrawlResult,
-    CrawlStrategyAttempt,
-    CrawlStrategyName,
-    DiscoveredLink,
-    EngineCrawlResult,
-)
+from app.models.crawl_result import CrawlResult
+from app.models.crawl_strategy_attempt import CrawlStrategyAttempt
+from app.models.discovered_link import DiscoveredLink
+from app.models.engine_crawl_result import EngineCrawlResult
+from app.models.taxonomy import CrawlStrategyName
 from app.validation import HostPolicy, safe_public_url_or_none
 
 _logger = logging.getLogger(__name__)

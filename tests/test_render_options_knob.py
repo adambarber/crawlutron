@@ -28,7 +28,7 @@ was a fourth restatement of a property two other tests own.
 import pytest
 from pydantic import ValidationError
 
-from app.models import RenderOptions
+from app.models.render_options import RenderOptions
 
 
 class TestWaitUntilKnobRemoved:

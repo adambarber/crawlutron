@@ -13,7 +13,8 @@ from app.crawl.content_cache import ContentCache
 from app.crawl.engine import crawl_request
 from app.crawl.policy import CrawlPolicy, read_policy
 from app.crawl.strategies.strategy_request import StrategyRequest
-from app.models import CrawlStrategyName, HttpFetchResult
+from app.models.http_fetch_result import HttpFetchResult
+from app.models.taxonomy import CrawlStrategyName
 from app.validation import HostPolicy
 from tests._browser_doubles import _fake_browser
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY

@@ -29,7 +29,8 @@ from app.constants import (
     CrawlClassification,
     status_for_classification,
 )
-from app.models import CrawlResult, EngineCrawlResult
+from app.models.crawl_result import CrawlResult
+from app.models.engine_crawl_result import EngineCrawlResult
 from tests._result_builders import engine_result
 
 SEEDS = range(12)

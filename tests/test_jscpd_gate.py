@@ -950,7 +950,7 @@ def test_every_sanctioned_pair_names_a_guard_that_exists_and_pins_its_fragment()
         "build, not a pair to allow. This baseline used to hold two such pairs -- the "
         "HttpFetcher/HttpFetchContract twin signature and the extraction.py selector pair -- and "
         "the first is now one declaration, with the bound keywords checked where each production "
-        "fetcher declares them instead of spelled a second time in app/models.py. See "
+        "fetcher declares them instead of spelled a second time in app/models/taxonomy.py. See "
         "app/crawl/extraction.py Selectors for the one that remains."
     )
     for pair in gate._expected_pairs():

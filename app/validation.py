@@ -13,7 +13,7 @@ from typing import Protocol, TypeVar, cast
 from urllib.parse import parse_qsl, urlencode, urljoin, urlparse, urlunparse
 
 from app.addresses import AddressClass, classify
-from app.models import NormalizedUrl
+from app.models.normalized_url import NormalizedUrl
 
 
 class _PublicSuffixDataset(Protocol):

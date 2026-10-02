@@ -60,7 +60,10 @@ from app.crawl.job_store import (
 from app.crawl.policy import read_policy
 from app.crawl.result_record import ProducerEnvelope
 from app.crawl.robots import FetchAndDecode
-from app.models import Classification, CrawlResult, CrawlTask, EngineCrawlResult
+from app.models.crawl_result import CrawlResult
+from app.models.crawl_task import CrawlTask
+from app.models.engine_crawl_result import EngineCrawlResult
+from app.models.taxonomy import Classification
 
 logger = logging.getLogger(__name__)
 

@@ -21,7 +21,8 @@ import inspect
 import pytest
 
 from app.crawl.strategies.fetchers import default_http_fetcher
-from app.models import HttpFetcher, HttpFetchResult
+from app.models.http_fetch_result import HttpFetchResult
+from app.models.http_fetcher import HttpFetcher
 from tests.chokepoint_walks import (
     app_python_files,
     calls_named_leaf,
@@ -252,7 +253,7 @@ def test_http_fetcher_contract_holds_tree_wide():
     ``HttpFetcher`` is the one declaration of the call shape, and a production
     fetcher adds a keyword-only ``policy`` and an ``impersonate`` keyword to it.
     Those two facts are typed in this file, next to the check that enforces them,
-    rather than spelled as a second Protocol in ``app/models.py`` -- which is what
+    rather than spelled as a second Protocol in ``app/models/taxonomy.py`` -- which is what
     they used to be, and which is how the same four positional parameters came to
     be written twice. This check is the only thing standing between the two
     spellings now that there is one: if a parameter is added to a fetcher and not
@@ -414,7 +415,7 @@ class TestNormalizedUrlSeedType:
     """
 
     def test_normalized_url_is_a_newtype_over_str(self):
-        from app.models import NormalizedUrl
+        from app.models.normalized_url import NormalizedUrl
 
         # Read through the class ``__dict__`` rather than as an attribute.
         #
@@ -431,14 +432,15 @@ class TestNormalizedUrlSeedType:
     def test_crawl_task_normalized_url_field_is_typed(self):
         from typing import get_type_hints
 
-        from app.models import CrawlTask, NormalizedUrl
+        from app.models.crawl_task import CrawlTask
+        from app.models.normalized_url import NormalizedUrl
 
         assert get_type_hints(CrawlTask)["normalized_url"] is NormalizedUrl
 
     def test_normalizer_returns_the_typed_value(self):
         import typing
 
-        from app.models import NormalizedUrl
+        from app.models.normalized_url import NormalizedUrl
         from app.validation import normalize_public_http_url
 
         hints = typing.get_type_hints(normalize_public_http_url)

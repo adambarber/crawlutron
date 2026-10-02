@@ -592,13 +592,6 @@ DECLARED: dict[str, Declaration] = {
         "Not yet triaged.\n",
         ["test"],
     ),
-    "app.models._LITERAL_FIELDS": _d(_CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]),
-    "app.models._LiteralChecked": _d(_PRIVATE_TYPE.kind, _PRIVATE_TYPE.reason, ["test"]),
-    "app.models._literal_members": _d(
-        "unreviewed",
-        "Not yet triaged.\n",
-        ["test"],
-    ),
     "app.output_formats._csv_neutralize": _d(
         "unreviewed",
         "Not yet triaged.\n",

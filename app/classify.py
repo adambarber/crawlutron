@@ -4,7 +4,7 @@ import re
 from typing import Any, Final
 
 from app.bounded_io import truncate_html_input
-from app.models import Classification, as_classification
+from app.models.taxonomy import Classification, as_classification
 
 # Declared as Final[Classification] rather than returned as bare literals. A
 # string literal in return position widens to `str`, which is how a function

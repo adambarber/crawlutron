@@ -102,23 +102,24 @@ def literal_typed_field_members() -> FieldMembers:
     list *is* the models, which is what keeps a new field covered instead of
     remembered.
 
-    Membership comes from ``models._literal_members`` rather than
+    Membership comes from ``app.models.taxonomy.literal_members`` rather than
     ``typing.get_args``, and the filter is "has members" rather than "origin is
     ``Literal``", because a taxonomy alias is allowed to be composed. ``error``
     is ``Classification | PIPELINE_ONLY_CRAWL_ERRORS`` and ``strategy`` is
     ``CrawlStrategyName | None``; under the old filter both have a Union origin,
     so both were skipped -- not reported, just absent, which is the shape of
-    defect this module exists to prevent. ``_literal_members`` is total over
+    defect this module exists to prevent. ``literal_members`` is total over
     compositions, so a field is covered by virtue of declaring members at all.
     """
-    from app import models
+    from app.models import taxonomy
+    from tests.model_index import resolve_declared_type
 
     out: dict[str, set[str]] = {}
     for class_name in RESULT_DATACLASS_NAMES:
-        cls = getattr(models, class_name)
+        cls = resolve_declared_type(class_name)
         hints = typing.get_type_hints(cls)
         for field_name in cls.__dataclass_fields__:
-            members = models._literal_members(hints.get(field_name))
+            members = taxonomy.literal_members(hints.get(field_name))
             if not members:
                 continue
             out.setdefault(field_name, set()).update(members)

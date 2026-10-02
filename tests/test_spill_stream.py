@@ -7,7 +7,7 @@ import os
 import time
 
 from app.crawl.engine import _ResultSpill
-from app.models import to_dict
+from app.models.serialization import to_dict
 from tests._result_builders import engine_result
 
 

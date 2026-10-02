@@ -692,7 +692,7 @@ class TestClassifyHtmlComments:
 
 
 def test_wire_classification_literal_matches_the_enum():
-    """The ``Classification`` Literal in app.models is a hand-maintained second
+    """The ``Classification`` Literal in app/models/taxonomy.py is a hand-maintained second
     copy of the enum.
 
     url_budget_exceeded shipped as an enum member missing from the Literal, and
@@ -703,10 +703,10 @@ def test_wire_classification_literal_matches_the_enum():
     """
     import typing
 
-    from app import models
     from app.constants import CrawlClassification
+    from app.models.taxonomy import Classification
 
-    args = typing.get_args(models.Classification)
+    args = typing.get_args(Classification)
     enum_values = {m.value for m in CrawlClassification}
     literal_values = set(args)
 

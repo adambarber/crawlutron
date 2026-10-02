@@ -9,8 +9,8 @@ from collections.abc import Awaitable, Callable
 from secrets import SystemRandom
 from typing import Protocol, TypeVar
 
+from .constants import ResultStatus
 from .crawl.scheduler_exceptions import _CircuitBreakerOpen
-from .models import ResultStatus
 
 logger = logging.getLogger(__name__)
 

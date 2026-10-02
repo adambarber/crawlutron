@@ -56,7 +56,8 @@ class TestBrowserWorkerGuard:
         """A worker whose pool is exhausted must return a classified result so
         the at-least-once layer can re-queue it -- not raise to the scheduler."""
         from app.crawl.strategies.browser_pool import PooledBrowserWorker
-        from app.models import CrawlJob, RenderOptions
+        from app.models.crawl_job import CrawlJob
+        from app.models.render_options import RenderOptions
 
         worker = PooledBrowserWorker(ExhaustedPool())
         job = CrawlJob(
@@ -86,7 +87,7 @@ class TestTransientRequeue:
         recursive loop must re-queue it at the frontier tail under a per-job
         cap so a permanently oversubscribed crawl degrades instead of spinning."""
         from app.crawl.recursive import MAX_TRANSIENT_REQUEUES, requeue_transient
-        from app.models import CrawlTask
+        from app.models.crawl_task import CrawlTask
 
         task = CrawlTask(
             index=0,

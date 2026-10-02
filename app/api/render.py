@@ -22,13 +22,11 @@ from app.crawl.result_helpers import (
 )
 from app.crawl.result_record import RenderEnvelope
 from app.crawl.worker import call_worker
-from app.models import (
-    CrawlJob,
-    CrawlResult,
-    CrawlWorker,
-    EngineCrawlResult,
-    RenderOptions,
-)
+from app.models.crawl_job import CrawlJob
+from app.models.crawl_result import CrawlResult
+from app.models.crawl_worker import CrawlWorker
+from app.models.engine_crawl_result import EngineCrawlResult
+from app.models.render_options import RenderOptions
 from app.scheduler import DomainScheduler
 from app.settings import CrawlerSettings
 from app.validation import HostPolicy, normalize_public_http_url, registrable_domain

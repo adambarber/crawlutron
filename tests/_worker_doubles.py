@@ -16,7 +16,9 @@ from typing import cast
 import pytest
 
 from app.crawl.worker import call_worker
-from app.models import CrawlJob, CrawlResult, SyncCrawlWorker
+from app.models.crawl_job import CrawlJob
+from app.models.crawl_result import CrawlResult
+from app.models.crawl_worker import SyncCrawlWorker
 from tests._result_builders import crawl_result, make_job
 
 WORKER_URL = "http://worker.test/page"

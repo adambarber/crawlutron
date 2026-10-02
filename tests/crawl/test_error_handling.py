@@ -18,7 +18,7 @@ from app.constants import (
 )
 from app.crawl.result_helpers import classify_error_code, engine_result_from_exception
 from app.crawl.strategies.browser_pool import BrowserPoolExhaustedError
-from app.models import EngineCrawlResult
+from app.models.engine_crawl_result import EngineCrawlResult
 from tests._browser_doubles import _fake_browser
 from tests._fetcher_factories import failing_fetcher, raise_fetcher, run_chain
 from tests._worker_doubles import (

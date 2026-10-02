@@ -41,7 +41,7 @@ from app.crawl.extraction import (
     normalized_extraction,
 )
 from app.crawl.policy import discovery_flags
-from app.models import CrawlError
+from app.models.taxonomy import CrawlError
 from app.validation import HostPolicy, filter_js_endpoints
 
 

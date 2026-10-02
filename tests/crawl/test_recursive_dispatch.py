@@ -10,7 +10,8 @@ from urllib.parse import urlsplit
 import pytest
 
 from app.constants import BROWSER_HEADLESS
-from app.models import CrawlTask, DiscoveredLink
+from app.models.crawl_task import CrawlTask
+from app.models.discovered_link import DiscoveredLink
 from app.scheduler import DomainScheduler
 from tests._policy_factories import normalized
 from tests._recursive_harnesses import ContentionFreeGate, drive_recursive_crawl, make_crawl_task

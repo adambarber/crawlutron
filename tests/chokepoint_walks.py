@@ -1100,7 +1100,7 @@ def real_members(type_name: str) -> frozenset[str]:
     Two spellings, and the split is the load-bearing part rather than a
     convenience. A ``str``-Enum contributes its values, because a caller writes
     ``CrawlStrategy.HTTP_DECLARED_CRAWLER`` and the wire carries ``.value``. A
-    ``Literal`` alias goes through ``app.models._literal_members`` rather than
+    ``Literal`` alias goes through ``app.models.taxonomy.literal_members`` rather than
     ``typing.get_args``, because that one is total over a union -- which is what
     lets a taxonomy be *defined* as a union of two others instead of restating
     one of them, and ``get_args`` would hand back the nested aliases instead of
@@ -1110,14 +1110,17 @@ def real_members(type_name: str) -> frozenset[str]:
     silently resolved to the empty set would approve every literal, which is the
     failure this function exists to make impossible.
     """
-    from app import api_models, constants, models
+    from app import api_models, constants
+    from app.models import taxonomy
 
-    for module in (models, api_models, constants):
+    for module in (taxonomy, api_models, constants):
         owner = getattr(module, type_name, None)
         if owner is not None:
             break
     else:
-        raise LookupError(f"{type_name} is not a taxonomy on app.models/app.api_models/app.constants")
+        raise LookupError(
+            f"{type_name} is not a taxonomy on app.models.taxonomy/app.api_models/app.constants"
+        )
     if hasattr(owner, "__members__"):
         return frozenset(member.value for member in owner)
-    return models._literal_members(owner)
+    return taxonomy.literal_members(owner)

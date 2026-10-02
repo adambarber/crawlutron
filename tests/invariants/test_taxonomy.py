@@ -661,7 +661,7 @@ def _non_member_status_offenders(tree: ast.AST, path: pathlib.Path, *, members=N
         members=members,
         label="status",
         type_name="ResultStatus",
-        advice=("add it to the Literal (app/models.py) or derive it from an existing member"),
+        advice=("add it to the Literal (app/models/taxonomy.py) or derive it from an existing member"),
     )
 
 
@@ -777,7 +777,7 @@ def test_crawl_strategy_name_members_match_constants():
     from typing import get_args
 
     from app import constants
-    from app.models import CrawlStrategyName
+    from app.models.taxonomy import CrawlStrategyName
 
     declared = {
         constants.HTTP_DECLARED_CRAWLER,
@@ -798,7 +798,7 @@ def test_classification_literal_covers_the_enum_exactly():
     which is the gap this whole taxonomy chain is built to close: a member added
     to the enum and emitted by a classifier passes every membership sweep (they
     check the enum direction), and then
-    ``_check_literal_fields`` rejects the whole batch at construction because the
+    ``check_literal_fields`` rejects the whole batch at construction because the
     Literal never heard of it. The reverse -- a Literal member with no enum
     member -- reaches the strict enum at response shaping and takes the batch
     down there instead.
@@ -809,13 +809,13 @@ def test_classification_literal_covers_the_enum_exactly():
     from typing import get_args
 
     from app.constants import CrawlClassification
-    from app.models import Classification
+    from app.models.taxonomy import Classification
 
     declared = set(get_args(Classification))
     enum = {member.value for member in CrawlClassification}
     assert enum - declared == set(), (
         "every CrawlClassification member needs a Classification Literal member:"
-        f" missing {sorted(enum - declared)} (app/models.py)"
+        f" missing {sorted(enum - declared)} (app/models/taxonomy.py)"
     )
     assert declared - enum == set(), (
         "a Classification member with no CrawlClassification member is downgraded"
@@ -827,17 +827,17 @@ def test_crawl_error_is_the_pipeline_additions_over_classification():
     """The pipeline-only codes are a real split, not a second copy of the taxonomy.
 
     ``CrawlError`` is defined as the union of ``Classification`` and
-    ``PIPELINE_ONLY_CRAWL_ERRORS`` (app/models.py), so its membership is derived
+    ``PIPELINE_ONLY_CRAWL_ERRORS`` (app/models/taxonomy.py), so its membership is derived
     and cannot drift. What a union cannot check is whether the split is still
     meaningful: a code listed as a pipeline condition while also being a
     classification says a page outcome is a pipeline condition, and a pipeline
     condition deleted silently narrows the ``error`` field for callers who key on
     it as a stable code.
     """
-    from app.models import PIPELINE_ONLY_CRAWL_ERRORS, Classification, _literal_members
+    from app.models.taxonomy import PIPELINE_ONLY_CRAWL_ERRORS, Classification, literal_members
 
-    pipeline_only = _literal_members(PIPELINE_ONLY_CRAWL_ERRORS)
-    classification = _literal_members(Classification)
+    pipeline_only = literal_members(PIPELINE_ONLY_CRAWL_ERRORS)
+    classification = literal_members(Classification)
     assert pipeline_only == {
         "robots_txt_disallowed",
         "browser_worker_unavailable",
@@ -857,7 +857,7 @@ def test_crawl_error_is_the_pipeline_additions_over_classification():
 # url_budget_exceeded, strategy after BROWSER_DECLARED_CRAWLER, status after
 # the terminal-result widening. Each is a list nobody extends, so the class
 # re-emerged at every field not on the list. The replacement is one generic
-# sweep: the (dataclass, field, Literal) triples are read from app.models at
+# sweep: the (dataclass, field, Literal) triples are read from app/models at
 # test time, so a field added to a result dataclass tomorrow is covered the day
 # it lands rather than the day someone remembers to name it.
 #
@@ -959,11 +959,9 @@ def test_result_construction_enforces_membership_at_the_dataclass():
     """
     from dataclasses import asdict
 
-    from app.models import (
-        CrawlResult,
-        CrawlStrategyAttempt,
-        EngineCrawlResult,
-    )
+    from app.models.crawl_result import CrawlResult
+    from app.models.crawl_strategy_attempt import CrawlStrategyAttempt
+    from app.models.engine_crawl_result import EngineCrawlResult
     from tests._result_builders import engine_result
 
     # The all-member baseline, named once and DERIVED rather than restated. Every
@@ -1162,11 +1160,11 @@ def test_the_gate_would_have_caught_the_shipped_defect():
 # ---------------------------------------------------------------------------
 # The construction check has exactly one owner
 #
-# ``_check_literal_fields`` is a module-level function and the result dataclasses
+# ``check_literal_fields`` is a module-level function and the result dataclasses
 # each had to reach it through their own ``__post_init__``. That trampoline was
 # the second thing to keep in sync: the check is one function, but a result
 # dataclass added tomorrow would validate nothing while reading exactly like the
-# ones that do. It is now inherited from ``models._LiteralChecked``, so the check
+# ones that do. It is now inherited from ``models.LiteralChecked``, so the check
 # is part of the class rather than something it remembers to ask for -- and
 # "inherited" is a claim the tree can check, which is what these two do:
 # a caller of the check outside the owner is a second copy of it, and a result
@@ -1175,13 +1173,13 @@ def test_the_gate_would_have_caught_the_shipped_defect():
 
 
 def _literal_check_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
-    """Any call to ``_check_literal_fields`` outside its one owning ``__post_init__``."""
+    """Any call to ``check_literal_fields`` outside its one owning ``__post_init__``."""
     offenders: list[str] = []
     for node in call_nodes(tree):
-        if resolved_call_name(tree, node) != "app.models._check_literal_fields":
+        if resolved_call_name(tree, node) != "app.models.literal_checked.check_literal_fields":
             continue
         owner = _enclosing_class(tree, node)
-        if owner is not None and owner.name == "_LiteralChecked":
+        if owner is not None and owner.name == "LiteralChecked":
             continue
         offenders.append(offender_at(path, node, "literal-check-called-outside-its-owner"))
     return offenders
@@ -1215,33 +1213,34 @@ THE_LITERAL_FIELD_CHECK_IS_CALLED_BY_ONE_OWNER = Rule(
     name="the-literal-field-check-is-called-by-one-owner",
     find=_literal_check_offenders,
     summary=(
-        "_check_literal_fields is called outside models._LiteralChecked, so the"
+        "check_literal_fields is called outside models.LiteralChecked, so the"
         " construction-time taxonomy check exists in more than one place"
     ),
     excludes=SANCTIONED,
     bite=lambda: Bites(
-        "from app.models import _check_literal_fields\n"
+        "from app.models.literal_checked import check_literal_fields\n"
         "@dataclass(frozen=True)\n"
         "class CrawlResult:\n"
         "    status: str\n"
         "    def __post_init__(self) -> None:\n"
-        "        _check_literal_fields(self)\n",
+        "        check_literal_fields(self)\n",
         "literal-check-called-outside-its-owner",
     ),
     clean=lambda: (
         # The class that is allowed to call it: the owning base class itself.
-        "from app.models import _check_literal_fields\n"
-        "class _LiteralChecked:\n"
+        "from app.models.literal_checked import check_literal_fields\n"
+        "class LiteralChecked:\n"
         "    def __post_init__(self) -> None:\n"
-        "        _check_literal_fields(self)\n",
+        "        check_literal_fields(self)\n",
         # A module that never mentions the check is nobody else's business.
-        "from app.models import CrawlResult\ndef build() -> CrawlResult:\n    return CrawlResult()\n",
+        "from app.models.crawl_result import CrawlResult\n"
+        "def build() -> CrawlResult:\n    return CrawlResult()\n",
     ),
 )
 
 
 def test_the_literal_field_check_is_called_by_one_owner():
-    """One caller for ``_check_literal_fields``, and it is the owning base class.
+    """One caller for ``check_literal_fields``, and it is the owning base class.
 
     A second caller is a second place the construction check can be re-spelled,
     which is the shape this consolidation removed: the check was one function
@@ -1267,48 +1266,50 @@ def test_every_taxonomy_literal_dataclass_inherits_the_construction_check():
 
     The half of the property the owner guard cannot see: an *omission* rather
     than a duplicate. Which dataclasses qualify is derived from the taxonomy's
-    own declaration -- ``models._LITERAL_FIELDS`` for the field names and
-    ``models._literal_members`` for whether the annotation is really a taxonomy
-    alias -- and the classes are enumerated from the module that declares them,
-    so a result dataclass added tomorrow is covered the day it lands and nothing
-    here is a hand-kept class list. A field merely *named* like a taxonomy field
-    but annotated ``str`` is not one of these and is not reported.
+    own declaration -- ``LITERAL_FIELDS`` for the field names and
+    ``literal_members`` for whether the annotation is really a taxonomy alias --
+    and the classes are enumerated by walking ``app/models``, so a result
+    dataclass added tomorrow is covered the day it lands and nothing here is a
+    hand-kept class list. A field merely *named* like a taxonomy field but
+    annotated ``str`` is not one of these and is not reported.
 
-    The taxonomy aliases live in this module by construction: ``Classification``,
-    ``CrawlError`` and ``CrawlStrategyName`` are declared here, and
-    ``ResultStatus`` is the one member set imported from ``app.constants``. A
-    dataclass in another module that carries such a field is not covered here,
-    which is why the owner guard above is tree-wide and this one is not: that
-    guard is what catches a check re-spelled anywhere, and this one is what
-    catches a class in the taxonomy's own home that forgot to ask for it.
+    Splitting the declarations into one file per type used to narrow this: it
+    could only see the classes that shared a module with the aliases, and the
+    docstring said so and called the owner guard above the tree-wide half. The
+    package made that gap disappear -- the aliases and the dataclasses now share
+    a HOME rather than a file -- so this guard is the whole property and the
+    caveat it used to carry is what makes it worth keeping the enumeration
+    derived: ``model_index`` finds every declared class by walking the package.
     """
     import typing
     from dataclasses import is_dataclass
 
-    from app import models
+    from app.models.literal_checked import LITERAL_FIELDS, LiteralChecked
+    from app.models.taxonomy import literal_members
+    from tests.model_index import declared_types
 
     checked: dict[str, list[str]] = {}
-    for name, cls in sorted(vars(models).items()):
+    for name, cls in sorted(declared_types().items()):
         if not (isinstance(cls, type) and is_dataclass(cls)):
             continue
         # Field names first: a dataclass with no taxonomy-named field cannot be
         # one of these, and asking for its resolved hints would evaluate a
         # TYPE_CHECKING-only annotation (CrawlJob's HostPolicy) for nothing.
-        named = [field for field in cls.__dataclass_fields__ if field in models._LITERAL_FIELDS]
+        named = [field for field in cls.__dataclass_fields__ if field in LITERAL_FIELDS]
         if not named:
             continue
         hints = typing.get_type_hints(cls)
-        fields = [field for field in named if models._literal_members(hints.get(field))]
+        fields = [field for field in named if literal_members(hints.get(field))]
         if not fields:
             continue
         checked[name] = fields
-        assert issubclass(cls, models._LiteralChecked), (
+        assert issubclass(cls, LiteralChecked), (
             f"{name} declares the taxonomy Literal field(s) {sorted(fields)} but no"
-            " construction check; inherit models._LiteralChecked so a non-member is"
+            " construction check; inherit LiteralChecked so a non-member is"
             " rejected when the value is built rather than at the wire"
         )
     assert checked, (
         "no taxonomy Literal field was enumerated, so the sweep is a no-op:"
-        f" _LITERAL_FIELDS={sorted(models._LITERAL_FIELDS)}"
+        f" LITERAL_FIELDS={sorted(LITERAL_FIELDS)}"
     )
     assert set(checked) == {"CrawlResult", "CrawlStrategyAttempt", "EngineCrawlResult"}, sorted(checked)

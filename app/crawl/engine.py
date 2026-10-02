@@ -32,13 +32,10 @@ from app.crawl.request_pipeline import _PipelineDependencies, _PipelineState, ru
 from app.crawl.result_record import ProducerEnvelope
 from app.crawl.robots import FetchAndDecode
 from app.crawl.strategies.fetchers import default_http_fetcher, impersonating_fetcher
-from app.models import (
-    CrawlWorker,
-    EngineCrawlResult,
-    HttpFetcher,
-    from_wire,
-    to_dict,
-)
+from app.models.crawl_worker import CrawlWorker
+from app.models.engine_crawl_result import EngineCrawlResult
+from app.models.http_fetcher import HttpFetcher
+from app.models.serialization import from_wire, to_dict
 from app.resource_pressure import ResourceGate
 from app.settings import CrawlerSettings
 from app.validation import (

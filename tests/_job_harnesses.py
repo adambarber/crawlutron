@@ -45,7 +45,7 @@ from app.api_models import CrawlPolicy
 from app.crawl.job_store import CrawlJobState, FrontierEntry, JobStatus, JobStore
 from app.crawl.job_store import _Expected as _Expected
 from app.crawl.policy import PolicyTier
-from app.models import EngineCrawlResult
+from app.models.engine_crawl_result import EngineCrawlResult
 from app.validation import HostPolicy
 from tests._policy_factories import job_store
 from tests._result_builders import _canned_result

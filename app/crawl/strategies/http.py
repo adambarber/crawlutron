@@ -41,13 +41,10 @@ from app.crawl.strategies.content_pipeline import (
     _run_extraction,
 )
 from app.crawl.strategies.strategy_request import StrategyRequest
-from app.models import (
-    Classification,
-    CrawlStrategyAttempt,
-    CrawlStrategyName,
-    EngineCrawlResult,
-    HttpFetchResult,
-)
+from app.models.crawl_strategy_attempt import CrawlStrategyAttempt
+from app.models.engine_crawl_result import EngineCrawlResult
+from app.models.http_fetch_result import HttpFetchResult
+from app.models.taxonomy import Classification, CrawlStrategyName
 from app.validation import HostPolicy
 
 

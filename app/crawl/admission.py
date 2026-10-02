@@ -19,7 +19,7 @@ from app.crawl.policy import PolicyTier, discovery_flags, read_policy
 from app.crawl.robots import FetchAndDecode, load_robots_rules, robots_allows, robots_origin
 from app.crawl.scope_match import scope_allows
 from app.crawl.strategies.fetchers import default_http_fetcher
-from app.models import NormalizedUrl
+from app.models.normalized_url import NormalizedUrl
 from app.safe_regex import BoundedPattern, UnsafePattern, compile_untrusted
 from app.scheduler import DomainScheduler
 from app.validation import HostPolicy, registrable_domain, safe_public_url_or_none

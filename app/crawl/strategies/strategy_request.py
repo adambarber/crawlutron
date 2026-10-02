@@ -9,7 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from app.api_models import CrawlPolicy
-from app.models import CrawlStrategyName
+from app.models.taxonomy import CrawlStrategyName
 from app.validation import HostPolicy
 
 

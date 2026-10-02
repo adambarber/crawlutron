@@ -25,7 +25,9 @@ from app.crawl.job_store import durable_page_identity
 from app.crawl.recursive_admission import RecursiveRunState, admit_recursive_batch
 from app.crawl.result_helpers import failed_result_for
 from app.metrics import get_metrics
-from app.models import CrawlTask, EngineCrawlResult, NormalizedUrl
+from app.models.crawl_task import CrawlTask
+from app.models.engine_crawl_result import EngineCrawlResult
+from app.models.normalized_url import NormalizedUrl
 from app.resource_pressure import ResourceGate, WeightedAdmission, default_admission_policy
 from app.safe_regex import BoundedPattern
 from app.scheduler import DomainScheduler

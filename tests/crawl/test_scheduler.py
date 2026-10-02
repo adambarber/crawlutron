@@ -6,7 +6,10 @@ import time
 import pytest
 
 from app.crawl.result_helpers import TerminalResult
-from app.models import Classification, CrawlJob, CrawlTask, EngineCrawlResult
+from app.models.crawl_job import CrawlJob
+from app.models.crawl_task import CrawlTask
+from app.models.engine_crawl_result import EngineCrawlResult
+from app.models.taxonomy import Classification
 from app.scheduler import _COOLDOWN_PURGE_INTERVAL, DomainScheduler, jittered_delay
 from tests._policy_factories import normalized
 from tests._result_builders import make_job, make_result
@@ -170,7 +173,7 @@ class TestObservedLatencyCrossesPipelines:
 
     @staticmethod
     def _rendered_result(elapsed_ms: int):
-        from app.models import CrawlResult
+        from app.models.crawl_result import CrawlResult
 
         return CrawlResult(
             url="https://example.com/x",
@@ -187,7 +190,7 @@ class TestObservedLatencyCrossesPipelines:
     @staticmethod
     def _crawled_result(elapsed_ms: int):
         from app.crawl.result_helpers import build_engine_result
-        from app.models import CrawlStrategyAttempt
+        from app.models.crawl_strategy_attempt import CrawlStrategyAttempt
 
         return build_engine_result(
             original_url="https://example.com/x",

@@ -15,7 +15,9 @@ from typing import Any
 from app.constants import BROWSER_HEADED_WARMED, BROWSER_HEADLESS
 from app.crawl.result_helpers import crawl_result_from_exception
 from app.crawl.strategies.browser import BrowserRenderer
-from app.models import BrowserPoolExhaustedError, CrawlResult, CrawlStrategyName
+from app.models.browser_pool_exhausted import BrowserPoolExhaustedError
+from app.models.crawl_result import CrawlResult
+from app.models.taxonomy import CrawlStrategyName
 from app.resource_pressure import (
     BROWSER_RAM_FRACTION,
 )

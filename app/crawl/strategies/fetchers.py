@@ -20,7 +20,8 @@ from app.crawl.decompression import DecompressionError, DecompressionTooLargeErr
 from app.crawl.decompression import decompress_body as _decompress_body
 from app.crawl.strategies import http_client_pool, pinned_transport
 from app.crawl.strategies.request_profile import _store_set_cookies, _TransportHeaders
-from app.models import HttpFetcher, HttpFetchResult
+from app.models.http_fetch_result import HttpFetchResult
+from app.models.http_fetcher import HttpFetcher
 from app.timeouts import Timeouts
 from app.validation import HostPolicy
 

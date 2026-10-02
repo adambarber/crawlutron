@@ -26,7 +26,7 @@ from app.constants import HTTP_DECLARED_CRAWLER
 from app.crawl.admission import admit_discovered_links
 from app.crawl.job_store import JobStore
 from app.crawl.policy import PolicyTier, read_policy
-from app.models import NormalizedUrl
+from app.models.normalized_url import NormalizedUrl
 from app.settings import CrawlerSettings
 from app.validation import HostPolicy, normalize_public_http_url
 

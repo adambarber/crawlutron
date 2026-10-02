@@ -35,6 +35,7 @@ from app.classify import classify_page
 from app.constants import (
     DEFAULT_CHALLENGE_WAIT_SECONDS,
     DEFAULT_MAX_CONCURRENT_PAGES,
+    ResultStatus,
     status_for_classification,
 )
 from app.constants import (
@@ -49,7 +50,9 @@ from app.crawl.strategies.pinned_transport import (
     check_ssrf_protection,
 )
 from app.json_safe import json_default
-from app.models import Classification, CrawlError, CrawlResult, RenderOptions, ResultStatus
+from app.models.crawl_result import CrawlResult
+from app.models.render_options import RenderOptions
+from app.models.taxonomy import Classification, CrawlError
 from app.safe_url import SafeUrl
 from app.settings import CrawlerSettings
 from app.validation import (

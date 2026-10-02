@@ -33,7 +33,7 @@ from collections.abc import Mapping
 from typing import Any
 
 from app.api_models import CrawlPolicy
-from app.models import RenderOptions
+from app.models.render_options import RenderOptions
 
 
 def _pick(request: Mapping[str, Any] | None, defaults: Mapping[str, Any], key: str) -> Any:

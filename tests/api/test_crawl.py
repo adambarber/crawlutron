@@ -353,7 +353,7 @@ class TestDiscoveryAndRenderApi:
         before it reaches the assertion.
         """
         from app.crawl.strategies.browser_pool import BrowserPool
-        from app.models import CrawlResult
+        from app.models.crawl_result import CrawlResult
 
         class _FakeRenderer:
             async def render(self, url, options):
