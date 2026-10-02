@@ -1,13 +1,102 @@
 """LLM-friendly metadata extraction from HTML."""
 
+from __future__ import annotations
+
 import contextlib
 import json
 import re
 from html import unescape
-from typing import Any
+from typing import Any, TypedDict, cast, get_args, get_type_hints
 
 from app.bounded_io import truncate_html_input
 
+
+class PageMetadata(TypedDict, total=False):
+    """What the extractor can fill, named to match ``api_responses.PageMetadata``.
+
+    ``total=False`` because the extractor sets a key only when the page
+    actually carries it: a page with no ``og:image`` has no ``og_image``. The
+    key SET is therefore fixed even though the presence of any one key is not.
+
+    The same name as the wire model is load-bearing, not cosmetic. The mirror
+    invariant in ``tests/invariants/test_result_shape.py`` pairs a declared
+    record with a wire model by class name, so matching names is what puts this
+    pair in front of it; a differently-named record would simply not be
+    compared, which is how three wire fields survived with no producer.
+
+    ``json_ld`` is genuinely open -- one parsed JSON-LD block is an arbitrary
+    object, a list of them is an arbitrary list -- so it stays ``dict | list``
+    rather than pretending to a shape the document chooses.
+    """
+
+    source_url: str
+    title: str
+    description: str
+    language: str
+    og_title: str
+    og_description: str
+    og_image: str
+    og_url: str
+    og_type: str
+    og_site_name: str
+    twitter_card: str
+    twitter_title: str
+    twitter_description: str
+    twitter_image: str
+    canonical_url: str
+    favicon: str
+    json_ld: dict | list
+
+
+#: Every field's declared type, read from the record rather than transcribed, so
+#: a field added there is admitted here without a second edit. A bare ``str`` has
+#: no union members -- ``get_args(str)`` is empty and the hint IS the type -- so
+#: the bare case is kept whole and only ``None`` is stripped from a union,
+#: because ``total=False`` means absence is legal and admitting ``None`` would
+#: make every check pass.
+_FIELD_TYPES: dict[str, type | tuple[type, ...]] = {}
+for _field, _hint in get_type_hints(PageMetadata).items():
+    _members = get_args(_hint)
+    if not _members:
+        _FIELD_TYPES[_field] = _hint
+        continue
+    _live = tuple(arg for arg in _members if arg is not type(None))
+    _FIELD_TYPES[_field] = _live[0] if len(_live) == 1 else _live
+
+
+def extract_carried_metadata(value: Any) -> PageMetadata:
+    """The one place unproven page metadata becomes :class:`PageMetadata`.
+
+    ``llm_metadata`` arrives from the engine spill, which is JSON: untyped,
+    mutable, and possibly written by a different build than the one reading it.
+    It is also arbitrary-shaped, so it is admitted field by field rather than
+    rejected whole -- a payload with four good fields and one junk one is worth
+    answering. A key that is not a declared field, or whose value does not match
+    the declared type, is dropped; everything else survives.
+
+    This is the checkpoint the type system cannot be for us. ``metadata[mapped]
+    = value`` is unchecked, and a dict read back from JSON is exactly the thing
+    the annotations describe without being, so once :func:`format_crawl_item`
+    claims to return :class:`PageMetadata`, this is the only line standing
+    between the claim and the truth.
+    """
+    if not isinstance(value, dict):
+        return {}
+    admitted = {
+        key: item
+        for key, item in value.items()
+        if (expected := _FIELD_TYPES.get(key)) is not None and isinstance(item, expected)
+    }
+    return cast(PageMetadata, admitted)
+
+
+#: HTML ``meta`` name/property -> the field it fills, as literal strings.
+#: These values ARE keys of :class:`PageMetadata`, but a TypedDict's key set is
+#: not expressible as a value type, so ``metadata[mapped] = value`` below is
+#: NOT checked by pyright -- renaming a value to a non-key passes the build
+#: cleanly. It is checked instead by ``test_page_metadata_fields_are_produced_by_the_extraction_record``,
+#: which reads this map's values and this record's keys off the tree and compares
+#: them. Both halves are read, neither is transcribed, so the two cannot drift.
 _META_MAP = {
     "description": "description",
     "og:title": "og_title",
@@ -30,7 +119,7 @@ _META_MAP = {
 # the reason THIS parse needs one.
 
 
-def extract_llm_metadata(html: str, url: str) -> dict[str, Any]:
+def extract_llm_metadata(html: str, url: str) -> PageMetadata:
     """Extract Page metadata from HTML meta tags.
 
     # Parse the HTML once with lxml and read every field (title, meta
@@ -47,7 +136,7 @@ def extract_llm_metadata(html: str, url: str) -> dict[str, Any]:
     paths in sync through :func:`_llm_metadata_from_tree` -- it is the only
     reader of a parsed tree.
     """
-    metadata: dict[str, Any] = {"source_url": url}
+    metadata: PageMetadata = {"source_url": url}
     html = truncate_html_input(html)
     # Lazy import avoids a circular import: extraction.py imports this module
     # at module level, so this direction must stay lazy.
@@ -59,7 +148,7 @@ def extract_llm_metadata(html: str, url: str) -> dict[str, Any]:
     return _llm_metadata_from_tree(tree, url)
 
 
-def _llm_metadata_from_tree(tree: Any, url: str) -> dict[str, Any]:
+def _llm_metadata_from_tree(tree: Any, url: str) -> PageMetadata:
     """Read the page-metadata fields from an ALREADY-parsed lxml tree.
 
     Shared by the fallback parse above and the engine's discovery stage, so
@@ -67,7 +156,7 @@ def _llm_metadata_from_tree(tree: Any, url: str) -> dict[str, Any]:
     into two different metadata dialects. Returns plain JSON data only --
     the tree itself never escapes the caller.
     """
-    metadata: dict[str, Any] = {"source_url": url}
+    metadata: PageMetadata = {"source_url": url}
 
     # title
     title = tree.findtext(".//title")
@@ -129,3 +218,11 @@ def text_from_html(html: str) -> str:
     )
     text = re.sub(r"<[^>]+>", " ", without_styles)
     return re.sub(r"\s+", " ", unescape(text)).strip()
+
+
+__all__ = [
+    "PageMetadata",
+    "extract_carried_metadata",
+    "extract_llm_metadata",
+    "text_from_html",
+]

@@ -43,6 +43,9 @@ from trafilatura import extract as _trafilatura_extract
 # be absent.
 from app.crawl.doc_pool import DocExtractionPool, doc_task_hooks
 from app.crawl.job_store import durable_page_identity
+from app.crawl.llm_format import (
+    PageMetadata as ExtractedPageMetadata,
+)
 from app.crawl.llm_format import _llm_metadata_from_tree, text_from_html
 from app.models import DiscoveredLink
 from app.resource_pressure import doc_worker_count
@@ -924,7 +927,7 @@ def extract_post_fetch_discovery(
     # "no tree existed", and shaping falls back to its own single parse;
     # a non-empty dict is authoritative and crosses the persistence
     # boundary as plain JSON (the tree itself never leaves this function).
-    llm_metadata: dict[str, Any] = {}
+    llm_metadata: ExtractedPageMetadata = {}
     if include_metadata and tree is not None and final_url:
         llm_metadata = _llm_metadata_from_tree(tree, final_url)
     return {

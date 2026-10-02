@@ -39,11 +39,11 @@ without doing either is not.
 set with a typed value IS the declaration of an open key set -- it is the honest
 description of a header map, and there is no set of keys to declare.
 
-What is given up, stated plainly: a budget at 235 does not stop the 236th. It
-stops the population growing, names the work list in the failure message, and
-makes every narrowing a commit that lowers the number. The way to zero is
-mechanical and already demonstrated -- declare the record, and let the compiler
-reject every key the declaration and its consumers disagree about.
+What is given up, stated plainly: a budget does not stop the value that would
+exceed it. It stops the population growing, names the work list in the failure
+message, and makes every narrowing a commit that lowers the number. The way to
+zero is mechanical and already demonstrated -- declare the record, and let the
+compiler reject every key the declaration and its consumers disagree about.
 
 To see the work list without failing anything:
 
@@ -71,7 +71,7 @@ from tests.chokepoint_walks import nodes_of
 
 _METRIC = "undeclared record"
 
-_BUDGETS = {_METRIC: 235}
+_BUDGETS = {_METRIC: 229}
 
 # A record is anything whose key set a caller might depend on. `dict[str, str]`
 # is deliberately absent as a FORM: it appears in the tree dozens of times and is

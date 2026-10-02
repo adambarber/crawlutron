@@ -32,13 +32,19 @@ from app.api_responses import (
     UnifiedCrawlResult,
 )
 from app.constants import CrawlClassification
+from app.crawl.llm_format import (
+    PageMetadata as ExtractedPageMetadata,
+)
+from app.crawl.llm_format import (
+    extract_carried_metadata,
+)
 from app.validation import HostPolicy, safe_public_url_or_none
 
 _logger = logging.getLogger(__name__)
 
 
-def format_crawl_item(item: dict[str, Any]) -> tuple[str | None, dict[str, Any]]:
-    """Unified output formatter: produce ``(markdown, metadata_dict)`` for any result.
+def format_crawl_item(item: dict[str, Any]) -> tuple[str | None, ExtractedPageMetadata]:
+    """Unified output formatter: produce ``(markdown, metadata)`` for any result.
 
     Every access strategy (HTTP, browser, document/PDF, Trafilatura) funnels through
     this single path. The ``markdown`` field is populated by the unified extraction
@@ -66,7 +72,7 @@ def format_crawl_item(item: dict[str, Any]) -> tuple[str | None, dict[str, Any]]
     markdown = item.get("markdown")
     if markdown:
         if isinstance(carried, dict) and carried:
-            return markdown, dict(carried)
+            return markdown, extract_carried_metadata(carried)
         if html and url:
             from app.crawl.llm_format import extract_llm_metadata
 
@@ -78,7 +84,7 @@ def format_crawl_item(item: dict[str, Any]) -> tuple[str | None, dict[str, Any]]
     return text, {}
 
 
-async def aformat_crawl_item(item: dict[str, Any]) -> tuple[str | None, dict[str, Any]]:
+async def aformat_crawl_item(item: dict[str, Any]) -> tuple[str | None, ExtractedPageMetadata]:
     """Async :func:`format_crawl_item`: the whole formatter leaves the loop.
 
     The fallback ``extract_llm_metadata`` path (items without a carried
@@ -135,11 +141,9 @@ def build_unified_result(item: dict[str, Any]) -> UnifiedCrawlResult:
     carried ``llm_metadata`` or, when absent, the shared
     page-metadata extractor (``extract_llm_metadata``) over the raw HTML.
     """
-    markdown, metadata_dict = format_crawl_item(item)
+    markdown, extracted = format_crawl_item(item)
     url = item.get("final_url") or item.get("normalized_url") or item.get("original_url")
-    metadata = PageMetadata(
-        **{key: value for key, value in metadata_dict.items() if key in PageMetadata.model_fields}
-    )
+    metadata = PageMetadata(**extracted)
     if metadata.source_url is None:
         metadata.source_url = url
     return UnifiedCrawlResult(

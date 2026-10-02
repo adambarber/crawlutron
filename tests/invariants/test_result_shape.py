@@ -649,6 +649,16 @@ _DOMAIN_MODEL_MODULE = "app/models.py"
 # require a second edit here or any new class name to be listed.
 _WIRE_MODEL_MODULE = "app/api_responses.py"
 
+# The domain side is not one module: a record is a declared key set wherever it
+# is declared. PageMetadata's producer lives with the extractor, not with the
+# internal dataclasses, and reading only app/models.py made the pair invisible --
+# which is how three wire fields survived with no producer. The rule pairs by
+# class NAME, so the producer record deliberately carries the same name as the
+# wire model it must agree with: the name is how the rule finds the pair, and a
+# reader seeing one name in two modules reads the contract rather than two
+# unrelated things.
+_PRODUCER_RECORD_MODULE = "app/crawl/llm_format.py"
+
 
 def _is_dataclass(node: ast.ClassDef) -> bool:
     """True for a ``@dataclass`` class, bare or parameterised."""
@@ -657,6 +667,48 @@ def _is_dataclass(node: ast.ClassDef) -> bool:
         or (isinstance(d, ast.Call) and getattr(d.func, "id", None) == "dataclass")
         for d in node.decorator_list
     )
+
+
+def _is_record(node: ast.ClassDef) -> bool:
+    """True for a class that DECLARES its key set: a dataclass or a TypedDict.
+
+    Both spell the same contract -- a closed set of named fields -- so the mirror
+    rule reads both. The TypedDict half is what let an extractor's output be
+    checked against its response model at all; before it, the extractor returned
+    ``dict[str, Any]``, which declares nothing, and the pair simply did not
+    exist to be compared.
+    """
+    return _is_dataclass(node) or any(
+        isinstance(base, ast.Name)
+        and base.id in ("TypedDict", "NotRequired")
+        or isinstance(base, ast.Subscript)
+        and isinstance(base.value, ast.Name)
+        and base.value.id in ("TypedDict", "Required", "NotRequired")
+        for base in node.bases
+    )
+
+
+def _find_class(tree: ast.Module, name: str) -> ast.ClassDef:
+    found = [n for n in tree.body if isinstance(n, ast.ClassDef) and n.name == name]
+    assert found, f"{name} is not declared in this module"
+    return found[0]
+
+
+def _declaring_classes(tree: ast.Module) -> set[str]:
+    return {n.name for n in tree.body if isinstance(n, ast.ClassDef) and _is_record(n)}
+
+
+def _paired_names(domain_tree: ast.Module, wire_tree: ast.Module) -> set[str]:
+    """Class names this rule would actually compare, one per side.
+
+    Exists so the no-op check below asks the rule's own question rather than a
+    restatement of it. It once compared "is a record here" against "is a record
+    there", which on the wire side is a pydantic model and never a record -- so
+    the guard could never pass and would have needed to be deleted to be fixed.
+    """
+    domain = _declaring_classes(domain_tree)
+    wire = {n.name for n in wire_tree.body if isinstance(n, ast.ClassDef) and _is_pydantic_model(n)}
+    return domain & wire
 
 
 def _is_pydantic_model(node: ast.ClassDef) -> bool:
@@ -678,7 +730,7 @@ def _declared_fields(node: ast.ClassDef) -> list[str]:
 
 def _wire_mirror_drift(domain_tree: ast.Module, wire_tree: ast.Module) -> list[str]:
     """Field names that differ between a domain dataclass and its wire model."""
-    domain = {n.name: n for n in domain_tree.body if isinstance(n, ast.ClassDef) and _is_dataclass(n)}
+    domain = {n.name: n for n in domain_tree.body if isinstance(n, ast.ClassDef) and _is_record(n)}
     wire = {n.name: n for n in wire_tree.body if isinstance(n, ast.ClassDef) and _is_pydantic_model(n)}
     drifted: list[str] = []
     for name in sorted(domain.keys() & wire.keys()):
@@ -740,6 +792,109 @@ def test_wire_mirror_detector_bites():
         ast.parse("@dataclass\nclass Link:\n    url: str\n"),
         ast.parse("class Other(BaseModel):\n    url: str\n    host: str\n"),
     )
+
+
+def test_page_metadata_fields_are_produced_by_the_extraction_record():
+    """Every ``PageMetadata`` field must be one the extractor can actually fill.
+
+    The sibling mirror rule above pairs a domain *dataclass* with a wire model.
+    PageMetadata's producer was a plain ``dict[str, Any]``, so it was in neither
+    half of that pair and the whole record was unguarded: three fields were
+    declared on the wire that no extractor had ever produced, and every consumer
+    reading one got a default forever. That is a promise the model cannot keep,
+    and nothing in the tree said so.
+
+    Declaring the extractor's output as a record puts it in the pair, so this is
+    the same rule reading a second kind of declaration -- ``total=False``
+    TypedDict rather than a dataclass -- and the fix is to delete the unfillable
+    fields, which is what a consumer would need anyway.
+    """
+    domain_path, domain_tree = file_tree(_PRODUCER_RECORD_MODULE)
+    wire_path, wire_tree = file_tree(_WIRE_MODEL_MODULE)
+    assert _paired_names(domain_tree, wire_tree), (
+        f"No declared record in {domain_path.name} shares a name with a response model in "
+        f"{wire_path.name}, so this rule compares nothing and passes. That is the failure this "
+        f"rule exists to catch: PageMetadata's producer was an undeclared dict, which left the "
+        f"pair absent rather than equal. Declare the extractor's output as a record that keeps "
+        f"the wire model's name."
+    )
+    drifted = _wire_mirror_drift(domain_tree, wire_tree)
+    unmapped = _meta_map_targets_without_a_field(domain_tree)
+    assert not drifted and not unmapped, (
+        f"The extractor's record and {wire_path.name} disagree about PageMetadata's key set. "
+        f"A field declared on the wire and filled by nothing is always None on the wire -- a "
+        f"promise the model cannot keep -- so delete it or teach {domain_path.name} to fill it. A "
+        f"field the extractor fills and the model does not declare is dropped at the splat. "
+        f"Each defect names itself: " + "; ".join(drifted + unmapped)
+    )
+
+
+def _meta_map_targets_without_a_field(domain_tree: ast.Module) -> list[str]:
+    """``_META_MAP`` values that name no field of the extractor record.
+
+    The one check in this file the type system cannot do. ``metadata[mapped] =
+    value`` with ``mapped: str`` is not checked against a TypedDict, so a meta
+    tag renamed to a field that does not exist builds cleanly and silently stops
+    being extracted while the wire model still promises the field -- the exact
+    shape of the bug that started this, one level down.
+    """
+    record = _find_class(domain_tree, "PageMetadata")
+    fields = set(_declared_fields(record))
+    maps = [
+        node
+        for node in ast.walk(domain_tree)
+        if isinstance(node, ast.Assign)
+        and any(isinstance(t, ast.Name) and t.id == "_META_MAP" for t in node.targets)
+    ]
+    targets = [
+        value.value
+        for mapping in maps
+        for value in ast.walk(mapping.value)
+        if isinstance(value, ast.Dict)
+        for key, value in zip(mapping.value.keys, mapping.value.values, strict=True)
+    ]
+    return [
+        f"PageMetadata.{target} is extracted by _META_MAP but is not a field of the record"
+        for target in targets
+        if isinstance(target, str) and target not in fields
+    ]
+
+
+def test_producer_record_detector_bites():
+    """The mirror rule reads a TypedDict exactly as it reads a dataclass."""
+    record = ast.parse("class PageMetadata(TypedDict, total=False):\n    title: str\n    favicon: str\n")
+    assert not _wire_mirror_drift(
+        record, ast.parse("class PageMetadata(BaseModel):\n    title: str\n    favicon: str\n")
+    )
+
+    # A field the extractor fills and the model does not declare is dropped at the splat.
+    drifted = _wire_mirror_drift(record, ast.parse("class PageMetadata(BaseModel):\n    title: str\n"))
+    assert drifted == ["PageMetadata.favicon exists internally and is dropped on the wire"], drifted
+
+    # ...and the reverse is a wire field that is always None, which is the defect
+    # this record was declared to find.
+    drifted = _wire_mirror_drift(
+        ast.parse("class PageMetadata(TypedDict):\n    title: str\n"),
+        ast.parse("class PageMetadata(BaseModel):\n    title: str\n    favicon: str\n"),
+    )
+    assert drifted == ["PageMetadata.favicon is declared on the wire and nowhere internally"], drifted
+
+
+def test_meta_map_target_detector_bites():
+    """A _META_MAP value naming no field is reported; the real map is clean."""
+    real = ast.parse(
+        "class PageMetadata(TypedDict, total=False):\n    og_title: str\n"
+        "_META_MAP = {'og:title': 'og_title'}\n"
+    )
+    assert not _meta_map_targets_without_a_field(real)
+
+    typo = ast.parse(
+        "class PageMetadata(TypedDict, total=False):\n    og_title: str\n"
+        "_META_MAP = {'og:title': 'og_typoe'}\n"
+    )
+    assert _meta_map_targets_without_a_field(typo) == [
+        "PageMetadata.og_typoe is extracted by _META_MAP but is not a field of the record"
+    ]
 
 
 # --- An advertised payload key may not be dropped by its response model -------

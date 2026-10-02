@@ -149,9 +149,6 @@ class PageMetadata(BaseModel):
     twitter_image: str | None = None
     canonical_url: str | None = None
     favicon: str | None = None
-    status_code: int | None = None
-    content_type: str | None = None
-    scrape_id: str | None = None
     source_url: str | None = None
     json_ld: dict | list | None = None
 
