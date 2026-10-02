@@ -581,7 +581,7 @@ class _PerDomainDelayScheduler(DomainScheduler):
     """Fixed delays that differ per domain (adaptive throttling off)."""
 
     def current_delay(self, domain: str) -> float:
-        return 0.4 if domain == "slow.example.com" else 0.0
+        return 0.4 if domain == "example.com" else 0.0
 
 
 async def test_domain_delay_does_not_block_other_domains(monkeypatch):
@@ -595,6 +595,9 @@ async def test_domain_delay_does_not_block_other_domains(monkeypatch):
     the two orderings are then distinguishable without any timing at all -- if
     the delay held the only global slot the fast worker could never start, the
     handshake could never be satisfied, and the wait fails naming exactly that.
+
+    The hosts must be registrable-distinct: ``domain`` is the registrable
+    domain, so two ``example.com`` hosts are one domain sharing one delay.
     """
     scheduler = make_scheduler(_PerDomainDelayScheduler, adaptive=False)
     fast_started = asyncio.Event()
@@ -612,22 +615,22 @@ async def test_domain_delay_does_not_block_other_domains(monkeypatch):
             try:
                 await asyncio.wait_for(fast_started.wait(), 2.0)
             except TimeoutError:
-                starved.append("fast.example.com")
+                starved.append("fast.example.org")
             return
         await yield_to_loop(0)
 
     monkeypatch.setattr(asyncio, "sleep", _sleep)
 
     async def worker(job):
-        if job.domain == "fast.example.com":
+        if job.domain == "example.org":
             fast_started.set()
         await yield_to_loop(0)
         return make_result(job.url, job.domain)
 
-    jobs = [make_job(0, "http://slow.example.com/"), make_job(1, "http://fast.example.com/")]
+    jobs = [make_job(0, "http://slow.example.com/"), make_job(1, "http://fast.example.org/")]
     await scheduler.run(jobs, worker, failed_result=engine_envelope)
     assert not starved, (
-        "fast.example.com could not run until slow.example.com's per-domain delay "
+        "fast.example.org could not run until slow.example.com's per-domain delay "
         "finished: the delay is being awaited while holding a GLOBAL concurrency "
         "slot, so it burns that slot on pure waiting and starves every other domain"
     )

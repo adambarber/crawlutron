@@ -10,7 +10,7 @@ from app.models.discovered_link import DiscoveredLink
 from app.models.engine_crawl_result import EngineCrawlResult
 from app.models.render_options import RenderOptions
 from app.models.taxonomy import Classification, CrawlError, CrawlStrategyName
-from app.validation import safe_public_url_or_none
+from app.validation import registrable_domain, safe_public_url_or_none
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY
 
 
@@ -22,11 +22,15 @@ def make_job(index: int, url: str, *, options: RenderOptions | None = None):
     value the job could hold -- it only went unnoticed because no test rendered
     one. The absent baseline is ``RenderOptions()`` itself, every field at its
     default.
+
+    ``domain`` comes from ``registrable_domain``, the chokepoint production uses.
+    The ``url.split("/")[2]`` this replaced kept the port, any userinfo, and the
+    ``www.``, so a job built here could carry a domain no production job does.
     """
     return CrawlJob(
         index=index,
         url=url,
-        domain=url.split("/")[2],
+        domain=registrable_domain(url),
         options=RenderOptions() if options is None else options,
         host_policy=UNRESTRICTED_HOST_POLICY,
     )
@@ -200,7 +204,7 @@ def crawl_result(url: str, domain: str | None = None) -> CrawlResult:
         html="ok",
         text="ok",
         attempts=1,
-        domain=domain if domain is not None else url.split("/")[2],
+        domain=domain if domain is not None else registrable_domain(url),
     )
 
 
