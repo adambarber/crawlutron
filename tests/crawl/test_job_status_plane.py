@@ -10,9 +10,10 @@ atomic compare-and-set on the row itself.
 """
 
 import ast
+import asyncio
 
 from app.crawl.job_store import CrawlJobState, JobStatus, JobStore
-from tests._job_harnesses import frontier, loaded_job, make_job_store
+from tests._job_harnesses import frontier, loaded_job, make_job_store, run_to_terminal
 from tests.chokepoint_walks import app_trees, nodes_of, offender
 
 
@@ -68,14 +69,27 @@ class TestStatusPlane:
         assert row.status is JobStatus.PAUSED, "data save resurrected the runner's stale status"
         assert row.visited == {"https://a.example"}  # data plane still flows
 
-    def test_terminal_claim_respects_a_concurrent_cancel(self, tmp_path):
-        """Runner finishes the last batch and claims COMPLETED, but the user
-        cancelled first: the CAS refuses and CANCELLED stands."""
+    async def test_terminal_claim_respects_a_concurrent_cancel(self, tmp_path):
+        """A cancelled job is settled, and nothing may claim otherwise.
+
+        Runner finishes the last batch and claims COMPLETED, but the user
+        cancelled first: the CAS refuses and CANCELLED stands. A reader asking
+        "has this job finished?" gets that answer back too. It used not to: the
+        harness restated the store's terminal set from memory and omitted
+        CANCELLED, so such a reader waited out the thirty-second hang guard and
+        then failed an assertion the row had already satisfied -- the cost paid
+        by whichever test happened to cancel mid-assertion. The store and the
+        cancel are production; only the waiting is under test. The bound on the
+        wait is what keeps that test cheap while it is red.
+        """
         store = _store(tmp_path)
         _running_job(store)
         assert store.set_status("j1", JobStatus.CANCELLED, expected=JobStatus.RUNNING) is True
         assert store.set_status("j1", JobStatus.COMPLETED, expected=JobStatus.RUNNING) is False
         assert loaded_job(store, "j1").status is JobStatus.CANCELLED
+
+        settled = await asyncio.wait_for(run_to_terminal(store, "j1"), timeout=5)
+        assert settled.status is JobStatus.CANCELLED
 
 
 def _status_assignment_offenders() -> list[str]:

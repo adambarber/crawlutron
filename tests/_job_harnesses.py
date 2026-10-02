@@ -42,7 +42,7 @@ from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 
 from app.api_models import CrawlPolicy
-from app.crawl.job_store import CrawlJobState, FrontierEntry, JobStatus, JobStore
+from app.crawl.job_store import TERMINAL_STATUSES, CrawlJobState, FrontierEntry, JobStatus, JobStore
 from app.crawl.job_store import _Expected as _Expected
 from app.crawl.policy import PolicyTier
 from app.models.engine_crawl_result import EngineCrawlResult
@@ -63,11 +63,20 @@ from tests._result_builders import _canned_result
 #: being written to by anything.
 STORE_HANG_GUARD_SECONDS = 30.0
 
-#: Statuses that mean the runner is finished. Only for these may a wait join the
-#: runner task: a mid-run wait (``{"running"}``, ``{"paused"}``) is asking about
-#: a job that is deliberately NOT finished, and joining it would wait for the
-#: very thing the test is about to interrupt.
-_TERMINAL_STATUSES = frozenset({JobStatus.COMPLETED.value, JobStatus.FAILED.value})
+#: The statuses a job settles in, as the store spells them. Derived from the
+#: store's own set rather than restated here: "has this job finished?" is a
+#: question every status reader asks, and a second hand-written answer is how
+#: this one drifted in the first place. It used to omit CANCELLED, which cost a
+#: cancelled job the thirty-second hang guard and then an assertion it had
+#: already satisfied.
+_SETTLED_STATUSES = frozenset(status.value for status in TERMINAL_STATUSES)
+
+#: The subset of those a wait may *join the runner task* for. Strictly smaller
+#: than settled, and the difference is load-bearing: joining a cancelled job
+#: waits for the very thing the test is about to interrupt. This answers "may I
+#: join?" and nothing else -- the previous name claimed to answer "is it done?"
+#: while excluding CANCELLED, which is how one set came to serve two questions.
+_JOINABLE_STATUSES = _SETTLED_STATUSES - {JobStatus.CANCELLED.value}
 
 
 class _StatusBus:
@@ -436,7 +445,7 @@ async def _wait_status(job_store, job_id: str, statuses: Collection[str]) -> str
         job_store,
         job_id,
         lambda row: row.status.value in statuses,
-        join_task=bool(statuses) and frozenset(statuses) <= _TERMINAL_STATUSES,
+        join_task=bool(statuses) and frozenset(statuses) <= _JOINABLE_STATUSES,
     )
     return job.status.value
 
@@ -504,7 +513,7 @@ async def run_to_terminal(job_store, job_id: str) -> Any:
     writes, and handing back a row that disagrees with the state the wait
     confirmed would be a lie the caller cannot detect.
     """
-    status = await _wait_status(job_store, job_id, _TERMINAL_STATUSES)
+    status = await _wait_status(job_store, job_id, _SETTLED_STATUSES)
     finished = job_store.load(job_id)
     assert finished is not None, f"job {job_id} reported {status} with no row"
     assert finished.status.value == status, (
