@@ -63,21 +63,33 @@ def engine_result(
     a context-varying classification legitimately takes a status other than the
     table default, and the record's own ``__post_init__`` is what rejects a pair
     that disagrees with the taxonomy.
+
+    One attempt, never none: ``build_engine_result`` is the only place an
+    ``EngineCrawlResult`` exists and it always records one, so ``[]`` was a shape
+    no runtime result has -- and nothing type-checks emptiness, so it survived.
     """
     from app.constants import status_for_classification
-    from app.models.engine_crawl_result import EngineCrawlResult
 
     if "discovered_link_count" in overrides:
         raise TypeError("discovered_link_count is derived from discovered_links; pass only the links")
     links = list(overrides.pop("discovered_links", []))
+    derived = status_for_classification(classification) if status is None else status
     absent = EngineCrawlResult(
         original_url=url,
         normalized_url=url,
         final_url=None,
-        status=status_for_classification(classification) if status is None else status,
+        status=derived,
         classification=classification,
         selected_strategy=None,
-        attempted_strategies=[],
+        attempted_strategies=[
+            terminal_attempt(
+                strategy=None,
+                status=derived,
+                classification=classification,
+                elapsed_ms=0,
+                error=None,
+            )
+        ],
         http_status=None,
         headers={},
         content_type=None,
