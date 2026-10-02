@@ -1,6 +1,7 @@
 """Sitemap discovery: seed batches, last-modified freshness, conditional fetch and fanout bounds."""
 
 import asyncio
+from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
 from functools import partial
 
@@ -8,6 +9,7 @@ from app.crawl.content_cache import ContentCache
 from app.crawl.engine import _parse_lastmod, _seed_is_fresh, _stale_seeds
 from app.crawl.fetch_helpers import _SITEMAP_CACHE, fetch_sitemap_urls
 from app.crawl.policy import read_policy
+from app.crawl.result_record import ProducerEnvelope
 from app.crawl.strategies.content_cache_key import build_content_cache_key
 from app.crawl.strategies.request_profile import headers_for_strategy
 from app.map import build_site_map
@@ -54,7 +56,7 @@ async def test_304_reuses_cached_urls_without_reparsing():
             return _resp(304, etag="v1")  # not modified
         return _resp(200, "<x></x>", etag="v1")
 
-    fetcher = request_fetcher(respond, calls=sent)
+    fetcher = request_fetcher(respond, record_headers=sent)
 
     out = await fetch_sitemap_urls(
         fetcher,
@@ -369,7 +371,13 @@ class TestSeedingIsOffLoop:
         assert fresh_url not in fetched
 
 
-def _crawl_response(original_url, links=(), *, sitemaps=(), feeds=()):
+def _crawl_response(
+    original_url: str,
+    links: Sequence[str] = (),
+    *,
+    sitemaps: Sequence[str] = (),
+    feeds: Sequence[str] = (),
+) -> ProducerEnvelope:
     """The one result shape ``build_site_map`` reads, from the pieces a test varies.
 
     Every site-map test is about what the aggregation *does* with the URLs -- dedupe
@@ -380,6 +388,9 @@ def _crawl_response(original_url, links=(), *, sitemaps=(), feeds=()):
     no longer declares.
     """
     return {
+        "request_id": "sitemap-test",
+        "submitted_count": 1,
+        "policy_schema_version": "test",
         "results": [
             engine_result(
                 original_url,
@@ -391,7 +402,7 @@ def _crawl_response(original_url, links=(), *, sitemaps=(), feeds=()):
                 },
                 discovered_links=[_link(link, original_url) for link in links],
             )
-        ]
+        ],
     }
 
 
@@ -433,7 +444,10 @@ def test_build_site_map_handles_dataclass_links():
         host="r",
         is_same_host=True,
     )
-    crawl_response = {
+    crawl_response: ProducerEnvelope = {
+        "request_id": "sitemap-test",
+        "submitted_count": 1,
+        "policy_schema_version": "test",
         "results": [
             engine_result(
                 "http://r/",
@@ -441,7 +455,7 @@ def test_build_site_map_handles_dataclass_links():
                 final_url="http://r/",
                 discovered_links=[link],
             )
-        ]
+        ],
     }
     m = build_site_map(crawl_response, host_policy=UNRESTRICTED_HOST_POLICY)
     assert m["links"] == ["https://r/page"]
@@ -449,7 +463,13 @@ def test_build_site_map_handles_dataclass_links():
 
 
 def test_build_site_map_empty():
-    m = build_site_map({"results": []}, host_policy=UNRESTRICTED_HOST_POLICY)
+    empty: ProducerEnvelope = {
+        "request_id": "sitemap-test",
+        "submitted_count": 0,
+        "policy_schema_version": "test",
+        "results": [],
+    }
+    m = build_site_map(empty, host_policy=UNRESTRICTED_HOST_POLICY)
     assert m["url"] is None
     assert m["all_urls"] == []
 

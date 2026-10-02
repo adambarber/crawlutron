@@ -44,8 +44,10 @@ from httpx import ASGITransport, AsyncClient
 from app.api_models import CrawlPolicy
 from app.crawl.job_store import TERMINAL_STATUSES, CrawlJobState, FrontierEntry, JobStatus, JobStore
 from app.crawl.job_store import _Expected as _Expected
-from app.crawl.policy import PolicyTier
+from app.crawl.policy import PolicyLike, PolicyTier
+from app.crawl.result_record import ProducerEnvelope
 from app.models.engine_crawl_result import EngineCrawlResult
+from app.models.taxonomy import Classification
 from app.validation import HostPolicy
 from tests._policy_factories import job_store
 from tests._result_builders import _canned_result
@@ -277,8 +279,9 @@ async def _execution_urls(payload_dict, hang: asyncio.Event | None):
     return payload_dict.get("urls") or [payload_dict.get("url")]
 
 
-def _execution_payload(results: list[EngineCrawlResult], submitted_count: int) -> dict:
+def _execution_payload(results: list[EngineCrawlResult], submitted_count: int) -> ProducerEnvelope:
     return {
+        "request_id": "test",
         "results": results,
         "submitted_count": submitted_count,
         "policy_schema_version": "test",
@@ -319,7 +322,7 @@ class ScriptedExecute:
         # validates its own taxonomy, and "rendered" is one -- so the default
         # used to be a status the engine never emits, invisible while the
         # double produced an unvalidated dict.
-        self._default = "rendered" if scripts is not None else "site_error"
+        self._default: Classification = "rendered" if scripts is not None else "site_error"
         self._hang = hang
         self.attempts: dict[str, int] = {}
 
@@ -459,7 +462,7 @@ async def _wait_until(job_store, job_id: str, predicate):
     return await _wait_for(job_store, job_id, predicate, join_task=False)
 
 
-def _execution_policy(policy: dict | None) -> dict:
+def _execution_policy(policy: PolicyLike | None) -> PolicyLike:
     effective = dict(policy or {})
     limits = dict(effective.get("limits") or {})
     limits.setdefault("max_depth", 1)
@@ -472,7 +475,7 @@ def _execution_policy(policy: dict | None) -> dict:
     return effective
 
 
-async def _create_api_job(client, root_url: str, execute, policy: dict | None = None):
+async def _create_api_job(client, root_url: str, execute, policy: PolicyLike | None = None):
     from app.api import job_runner
 
     job_runner.install_execute_crawl(execute)
@@ -484,7 +487,7 @@ async def _create_api_job(client, root_url: str, execute, policy: dict | None = 
 def _seed_job(
     job_store,
     root_url: str,
-    policy: dict | None = None,
+    policy: PolicyLike | None = None,
     *,
     frontier: list[str] | None = None,
     in_flight: list[str] | None = None,
@@ -523,7 +526,7 @@ async def run_to_terminal(job_store, job_id: str) -> Any:
     return finished
 
 
-async def run_api_job(client, job_store, root_url: str, execute, policy: dict | None = None):
+async def run_api_job(client, job_store, root_url: str, execute, policy: PolicyLike | None = None):
     """Create a job through the API and drive it to terminal; return the row."""
     return await run_to_terminal(job_store, await _create_api_job(client, root_url, execute, policy))
 
@@ -533,7 +536,7 @@ async def run_scripted_api_job(
     job_store,
     root_url: str,
     results: list[EngineCrawlResult],
-    policy: dict | None = None,
+    policy: PolicyLike | None = None,
 ):
     """``run_api_job`` for the common case: a scripted engine over canned results.
 
@@ -582,7 +585,7 @@ async def run_seeded_job(job, job_store, execute):
 async def run_seeded_scripted_job(
     job_store,
     root_url: str,
-    policy: dict,
+    policy: PolicyLike,
     execute,
     on_seeded: Callable[[Any, Any], None] | None = None,
     **seed: Any,
@@ -606,7 +609,7 @@ async def run_seeded_scripted_job(
     )
 
 
-def recording_execute(execute, captured: list[dict]):
+def recording_execute(execute, captured: list[ProducerEnvelope]):
     """Wrap a scripted engine, recording every payload dict it was handed.
 
     The engine call is the only place the runner's assembled batch is visible
@@ -621,7 +624,7 @@ def recording_execute(execute, captured: list[dict]):
     return _execute
 
 
-def job_limits(max_depth: int = 2, max_pages: int = 0, **extra) -> dict:
+def job_limits(max_depth: int = 2, max_pages: int = 0, **extra) -> PolicyLike:
     """A whole-site job policy carrying nothing but its limits.
 
     The runner tests all state the same shape -- a policy that is a ``limits``
@@ -727,7 +730,7 @@ __all__ = [
 ]
 
 
-async def post_api_job(client, root_url: str, policy: dict | None = None):
+async def post_api_job(client, root_url: str, policy: PolicyLike | None = None):
     return await client.post("/v1/jobs", json={"root_url": root_url, "policy": _execution_policy(policy)})
 
 

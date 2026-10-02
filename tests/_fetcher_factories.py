@@ -165,10 +165,10 @@ class FetcherDouble:
 
 def fetcher_double(
     answer,
-    calls: list | None = None,
+    calls: list[str] | None = None,
     *,
-    record_headers: list | None = None,
-    record_cap: list | None = None,
+    record_headers: list[dict[str, str]] | None = None,
+    record_cap: list[int] | None = None,
     answer_is_response: bool = False,
 ) -> FetcherDouble:
     """A fetcher double: the production contract, the request seam, the answer.
@@ -260,7 +260,7 @@ def scripted_fetcher(*, status=200, body=b"", headers=None, ctype="text/html; ch
     )
 
 
-def failing_fetcher(error: BaseException | type[BaseException] | None = None, calls: list | None = None):
+def failing_fetcher(error: BaseException | type[BaseException] | None = None, calls: list[str] | None = None):
     """A fetcher that raises instead of responding, optionally recording URLs.
 
     ``calls`` turns this into a recorder, so a test that asserts the engine
@@ -273,7 +273,7 @@ def failing_fetcher(error: BaseException | type[BaseException] | None = None, ca
     return fetcher_double(lambda url, *_: error if error is not None else ConnectionError, calls)
 
 
-def hanging_fetcher(calls: list | None = None):
+def hanging_fetcher(calls: list[str] | None = None):
     """A fetcher that never returns, so only the caller's deadline ends it.
 
     The tarpit, for a poisoned URL whose fetch has to time out. It awaits a
@@ -290,7 +290,7 @@ def hanging_fetcher(calls: list | None = None):
 
 def routed_fetcher(
     routes: dict[str, Route] | None = None,
-    calls: list | None = None,
+    calls: list[str] | None = None,
     *,
     default: Route = (404, b"<html></html>", "text/html"),
     missing="default",
@@ -334,7 +334,7 @@ def routed_fetcher(
 
 def sequenced_fetcher(
     steps: list[Route],
-    calls: list | None = None,
+    calls: list[str] | None = None,
     *,
     repeat_last: bool = True,
 ):
@@ -368,7 +368,7 @@ def sequenced_fetcher(
     return fetcher
 
 
-def request_fetcher(respond, calls: list | None = None):
+def request_fetcher(respond, record_headers: list[dict[str, str]] | None = None):
     """A fetcher whose answer is computed from ``(url, headers)``.
 
     The conditional-request seam: what a sitemap or page fetch returns depends
@@ -384,11 +384,11 @@ def request_fetcher(respond, calls: list | None = None):
     log, which is what this seam is for -- and it is its own member rather than
     ``calls`` so that "which URLs" and "what was sent" stay two different facts.
     """
-    seen: list[dict[str, str]] = [] if calls is None else calls
+    seen: list[dict[str, str]] = [] if record_headers is None else record_headers
     return fetcher_double(lambda url, sent_headers, *_: respond(url, sent_headers), record_headers=seen)
 
 
-def tap_fetcher(inner, calls: list | None = None):
+def tap_fetcher(inner, calls: list[str] | None = None):
     """Wrap another fetcher, recording the URLs that reach it.
 
     For a test whose subject is a *real* fetcher (the default HTTP fetcher, a
@@ -404,7 +404,7 @@ def tap_fetcher(inner, calls: list | None = None):
 
 def concurrent_fetcher(
     respond,
-    calls: list | None = None,
+    calls: list[str] | None = None,
     *,
     yield_times: int = 1,
 ):
@@ -473,9 +473,9 @@ def build_payload(
     url: str | None = None,
     urls: list[str] | None = None,
     strategies: list[str] | None = None,
-    limits: dict | None = None,
+    limits: dict[str, Any] | None = None,
     **extra,
-) -> dict:
+) -> dict[str, Any]:
     payload: dict[str, Any] = {}
     if url:
         payload["url"] = url
@@ -562,7 +562,11 @@ async def crawled_urls(pages: dict[str, Any], **kwargs: Any) -> list[str]:
     only asserts membership wraps this in ``set()``.
     """
     out = await crawled_results(pages, **kwargs)
-    return [r.normalized_url for r in out["results"]]
+    # A result whose URL never normalized was not crawled to a URL, so it is not
+    # one of these. Projecting it as `str | None` would push that possibility onto
+    # every caller, and a caller comparing a `str | None` to a canonical URL is
+    # the comparison that quietly stops meaning anything.
+    return [r.normalized_url for r in out["results"] if r.normalized_url is not None]
 
 
 def site_linking_to(*paths: str, bodies: dict[str, str] | None = None) -> dict[str, Any]:
@@ -639,7 +643,7 @@ async def crawled_result(
     return (await crawl_request(payload, **kwargs))["results"][0]
 
 
-async def run_crawl_async(payload: dict, *, cache=None, browser_worker=None) -> ProducerEnvelope:
+async def run_crawl_async(payload: dict[str, Any], *, cache=None, browser_worker=None) -> ProducerEnvelope:
     if cache is None:
         cache = HttpCache()
     return await crawl_request(payload, browser_worker=browser_worker, cache=cache)
@@ -649,7 +653,7 @@ async def crawl_homepage_async(
     base_url: str,
     *,
     strategies: list[str] | None = None,
-    limits: dict | None = None,
+    limits: dict[str, Any] | None = None,
     cache=None,
     browser_worker=None,
 ) -> ProducerEnvelope:
