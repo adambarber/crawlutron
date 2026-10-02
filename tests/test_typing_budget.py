@@ -71,7 +71,7 @@ from tests.chokepoint_walks import nodes_of
 
 _METRIC = "undeclared record"
 
-_BUDGETS = {_METRIC: 212}
+_BUDGETS = {_METRIC: 210}
 
 # A record is anything whose key set a caller might depend on. `dict[str, str]`
 # is deliberately absent as a FORM: it appears in the tree dozens of times and is

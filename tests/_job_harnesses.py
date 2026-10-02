@@ -277,7 +277,7 @@ async def _execution_urls(payload_dict, hang: asyncio.Event | None):
     return payload_dict.get("urls") or [payload_dict.get("url")]
 
 
-def _execution_payload(results: list[dict], submitted_count: int) -> dict:
+def _execution_payload(results: list[EngineCrawlResult], submitted_count: int) -> dict:
     return {
         "results": results,
         "submitted_count": submitted_count,
@@ -319,14 +319,14 @@ class ScriptedExecute:
         # validates its own taxonomy, and "rendered" is one -- so the default
         # used to be a status the engine never emits, invisible while the
         # double produced an unvalidated dict.
-        self._default = "success" if scripts is not None else "failed"
+        self._default = "rendered" if scripts is not None else "site_error"
         self._hang = hang
         self.attempts: dict[str, int] = {}
 
     def _entry(self, url: str) -> EngineCrawlResult:
         sequence = self._scripts.get(url)
         if sequence is None:
-            return _canned_result(url, status=self._default)
+            return _canned_result(url, classification=self._default)
         return sequence.pop(0) if len(sequence) > 1 else sequence[0]
 
     async def __call__(self, payload_dict, *, settings, shutdown_event):
@@ -532,7 +532,7 @@ async def run_scripted_api_job(
     client,
     job_store,
     root_url: str,
-    results: list[dict],
+    results: list[EngineCrawlResult],
     policy: dict | None = None,
 ):
     """``run_api_job`` for the common case: a scripted engine over canned results.

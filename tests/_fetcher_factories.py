@@ -12,7 +12,9 @@ from app.crawl.cache import HttpCache
 from app.crawl.content_cache import ContentCache
 from app.crawl.engine import crawl_request
 from app.crawl.policy import CrawlPolicy, read_policy
+from app.crawl.result_record import ProducerEnvelope
 from app.crawl.strategies.strategy_request import StrategyRequest
+from app.models.engine_crawl_result import EngineCrawlResult
 from app.models.http_fetch_result import HttpFetchResult
 from app.models.taxonomy import CrawlStrategyName
 from app.validation import HostPolicy
@@ -525,7 +527,7 @@ async def crawled_results(
     content_cache: Any = None,
     calls: list[str] | None = None,
     resource_gate: Any = None,
-) -> dict[str, Any]:
+) -> ProducerEnvelope:
     """Run a recursive crawl over scripted ``pages`` and return the API response.
 
     The one way a test should invoke ``crawl_request`` against a scripted site.
@@ -607,7 +609,7 @@ async def crawled_result(
     cache: Any = None,
     content_cache: Any = None,
     **payload_kwargs: Any,
-) -> dict[str, Any]:
+) -> EngineCrawlResult:
     """The one result a real ``crawl_request`` returns for ``url``.
 
     The single-URL sibling of :func:`crawled_results`, and the same argument:
@@ -637,7 +639,7 @@ async def crawled_result(
     return (await crawl_request(payload, **kwargs))["results"][0]
 
 
-async def run_crawl_async(payload: dict, *, cache=None, browser_worker=None) -> dict:
+async def run_crawl_async(payload: dict, *, cache=None, browser_worker=None) -> ProducerEnvelope:
     if cache is None:
         cache = HttpCache()
     return await crawl_request(payload, browser_worker=browser_worker, cache=cache)
@@ -650,7 +652,7 @@ async def crawl_homepage_async(
     limits: dict | None = None,
     cache=None,
     browser_worker=None,
-) -> dict:
+) -> ProducerEnvelope:
     payload = build_payload(
         url=f"{base_url}/",
         strategies=strategies if strategies is not None else [HTTP_DECLARED_CRAWLER],

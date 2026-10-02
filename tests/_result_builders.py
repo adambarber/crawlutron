@@ -1,6 +1,8 @@
+from dataclasses import replace
 from typing import Any
+from urllib.parse import urljoin, urlparse
 
-from app.constants import HTTP_DECLARED_CRAWLER
+from app.constants import HTTP_DECLARED_CRAWLER, ResultStatus
 from app.crawl.result_helpers import terminal_attempt
 from app.models.crawl_job import CrawlJob
 from app.models.crawl_result import CrawlResult, CrawlStrategyAttempt
@@ -8,6 +10,7 @@ from app.models.discovered_link import DiscoveredLink
 from app.models.engine_crawl_result import EngineCrawlResult
 from app.models.render_options import RenderOptions
 from app.models.taxonomy import Classification, CrawlError, CrawlStrategyName
+from app.validation import safe_public_url_or_none
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY
 
 
@@ -29,19 +32,37 @@ def make_job(index: int, url: str, *, options: RenderOptions | None = None):
     )
 
 
-def engine_result(url: str, classification: Classification, **overrides: Any):
-    """An ``EngineCrawlResult`` for `url`: every optional field absent, plus `overrides`.
+def engine_result(
+    url: str,
+    classification: Classification,
+    *,
+    status: ResultStatus | None = None,
+    **overrides: Any,
+):
+    """An ``EngineCrawlResult`` for `url`: every optional field absent, plus `overrides``.
 
     The absent baseline is what a result that never got a response looks like --
-    no status, no body, no strategy, zero quality, no links. A test that needs a
-    success restates that shape, because those fields ARE the difference between
-    the two, and spelling them per test is how they drift.
+    no body, no strategy, zero quality, no links. A test that needs a success
+    restates that shape, because those fields ARE the difference between the two,
+    and spelling them per test is how they drift.
+
+    The baseline is named as arguments rather than assembled in a ``dict`` and
+    splatted. A splat through ``dict[str, Any]`` erases the field names from the
+    type checker, so a required field added to the record, or one of these
+    fourteen renamed or retyped, would fail here at runtime and nowhere before --
+    which is why a field this table never mentioned was constructible for months.
+    Every field the record declares a default for is left out and takes the
+    record's own: a second copy of those defaults is a second thing to keep in
+    step, and the copy is what drifts.
 
     Two things are derived rather than accepted, because each is a property of
     something else and two arguments that must agree should not both be the
-    caller's: ``status`` comes from the production ``status_for_classification``
-    mapping, so a test cannot assert a status that contradicts the classification
-    it named; and ``discovered_link_count`` comes from ``discovered_links``.
+    caller's. ``discovered_link_count`` comes from ``discovered_links``, always.
+    ``status`` comes from the production ``status_for_classification`` mapping
+    unless a caller names one, which :func:`_failed_result` does deliberately:
+    a context-varying classification legitimately takes a status other than the
+    table default, and the record's own ``__post_init__`` is what rejects a pair
+    that disagrees with the taxonomy.
     """
     from app.constants import status_for_classification
     from app.models.engine_crawl_result import EngineCrawlResult
@@ -49,28 +70,26 @@ def engine_result(url: str, classification: Classification, **overrides: Any):
     if "discovered_link_count" in overrides:
         raise TypeError("discovered_link_count is derived from discovered_links; pass only the links")
     links = list(overrides.pop("discovered_links", []))
-    fields: dict[str, Any] = {
-        "original_url": url,
-        "normalized_url": url,
-        "final_url": None,
-        "status": status_for_classification(classification),
-        "classification": classification,
-        "selected_strategy": None,
-        "attempted_strategies": [],
-        "http_status": None,
-        "headers": {},
-        "content_type": None,
-        "html": None,
-        "text": None,
-        "markdown": None,
-        "extraction_method": None,
-        "quality_score": 0.0,
-        "discovered_link_count": len(links),
-        "discovered_links": links,
-        "error": None,
-    }
-    fields.update(overrides)
-    return EngineCrawlResult(**fields)
+    absent = EngineCrawlResult(
+        original_url=url,
+        normalized_url=url,
+        final_url=None,
+        status=status_for_classification(classification) if status is None else status,
+        classification=classification,
+        selected_strategy=None,
+        attempted_strategies=[],
+        http_status=None,
+        headers={},
+        content_type=None,
+        html=None,
+        text=None,
+        extraction_method=None,
+        quality_score=0.0,
+        discovered_links=links,
+        discovered_link_count=len(links),
+        error=None,
+    )
+    return replace(absent, **overrides) if overrides else absent
 
 
 def skipped_result(
@@ -109,7 +128,7 @@ def _successful_engine_result(
     attempted_strategies: list[CrawlStrategyAttempt],
     text: str,
     markdown: str | None = None,
-    links: list[dict] | None = None,
+    links: list[str] | None = None,
 ):
     return engine_result(
         url,
@@ -194,42 +213,63 @@ def _link(url: str, source_url: str, *, normalized: str | None = None) -> Discov
     A dataclass rather than the dict ``to_dict`` used to produce: the runner
     under test now reads engine results as results, and a double that hands it
     a dict would be testing the old wire shape instead of the behavior.
+
+    The four steps are ``extract_discovered_links``' own, because this is the
+    same record and a double that skips them is not a looser producer -- it is
+    one that reports links the real producer never emits. It resolved nothing,
+    so every relative href raised instead of joining; it reached past
+    ``safe_public_url_or_none``, the chokepoint every egress door is routed
+    through, to the raising normalizer beside it; it read ``host`` off a string
+    split rather than the parsed URL; and it answered ``is_same_host`` with a
+    constant, so a cross-host link claimed to be same-host and nothing checked.
     """
-    target = normalized if normalized is not None else url
+    target = normalized if normalized is not None else urljoin(source_url, url)
+    resolved = safe_public_url_or_none(target, policy=UNRESTRICTED_HOST_POLICY)
+    if resolved is None:
+        raise ValueError(f"not a public link target, the producer would drop it: {target}")
+    host = urlparse(str(resolved)).hostname or ""
+    source_host = urlparse(source_url).hostname or ""
     return DiscoveredLink(
         url=url,
-        normalized_url=target,
+        normalized_url=resolved,
         text="",
         rel=[],
         source_url=source_url,
-        host=target.split("//", 1)[-1].split("/", 1)[0],
-        is_same_host=True,
+        host=host,
+        is_same_host=host.lower() == source_host.lower(),
     )
 
 
 def _canned_result(
     url: str,
     *,
-    status: str = "success",
+    classification: Classification = "rendered",
+    status: ResultStatus | None = None,
     links: list[str] | None = None,
     raw_links: list[DiscoveredLink] | None = None,
-    classification: str | None = None,
 ) -> EngineCrawlResult:
     """An ``EngineCrawlResult`` for `url`, through the one builder the suite uses.
 
     Every field the batch tests read is real, so a runner bug that misreads a
     result cannot hide behind a double whose shape the runner never sees.
+
+    ``classification`` is the axis a caller names and ``status`` follows from it,
+    which is the direction production derives them in. Naming a status instead
+    used to mean handing over a classification too, invented by a ternary here:
+    a second copy of the taxonomy table, keyed the other way round, and one that
+    could not have been wrong loudly -- it agreed with production until the
+    taxonomy moved and this table did not.
     """
     return engine_result(
         url,
-        classification or ("rendered" if status == "success" else "site_error"),
+        classification,
         status=status,
         final_url=url,
         discovered_links=[_link(link, url) for link in links or []] + (raw_links or []),
     )
 
 
-def _failed_result(url: str, classification: str) -> EngineCrawlResult:
+def _failed_result(url: str, classification: Classification) -> EngineCrawlResult:
     """A page that failed for a named reason.
 
     The status/classification pair is the shape every requeue test drives with,
@@ -240,7 +280,7 @@ def _failed_result(url: str, classification: str) -> EngineCrawlResult:
 
 
 def _flaky(
-    url: str, *classifications: str, lands_on: EngineCrawlResult | None = None
+    url: str, *classifications: Classification, lands_on: EngineCrawlResult | None = None
 ) -> dict[str, list[EngineCrawlResult]]:
     """A page that fails with each of these classifications in turn.
 
@@ -275,7 +315,7 @@ def _root_child_results(root: str = GRAPH_ROOT, child: str = GRAPH_CHILD) -> lis
     return [_canned_result(root, links=[child]), _canned_result(child)]
 
 
-def _root_fans_out(root: str, *children: str) -> list[dict]:
+def _root_fans_out(root: str, *children: str) -> list[EngineCrawlResult]:
     """A root that discovers every one of ``children``, each of them a leaf.
 
     The three-page shape most discovery tests want: one expansion, N leaves, a
