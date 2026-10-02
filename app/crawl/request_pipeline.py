@@ -326,7 +326,7 @@ async def _run_recursive(state: _PipelineState) -> None:
 
 
 async def _response(state: _PipelineState) -> ProducerEnvelope:
-    response: dict[str, Any] = {
+    response: ProducerEnvelope = {
         "request_id": new_request_id(),
         "submitted_count": len(state.urls),
         "policy_schema_version": POLICY_SCHEMA_VERSION,
@@ -334,7 +334,7 @@ async def _response(state: _PipelineState) -> ProducerEnvelope:
     }
     if state.webhook_url is not None:
         response["webhook_url"] = state.webhook_url
-    return cast(ProducerEnvelope, response)
+    return response
 
 
 async def _run(state: _PipelineState) -> ProducerEnvelope:

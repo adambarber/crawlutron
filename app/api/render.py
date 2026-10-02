@@ -8,7 +8,7 @@ deleted; existing callers import from ``app.api.render``.
 from __future__ import annotations
 
 import time
-from typing import Any, cast
+from typing import Any
 
 from app.api_models import POLICY_SCHEMA_VERSION
 from app.crawl.ids import new_request_id
@@ -187,7 +187,7 @@ async def render_request(
             )
 
     ordered_results = [by_index[index] for index in range(len(urls))]
-    response: dict[str, Any] = {
+    response: RenderEnvelope = {
         "request_id": new_request_id(),
         "submitted_count": len(urls),
         # The producer envelope carries the same key the engine's crawl
@@ -202,7 +202,7 @@ async def render_request(
         # exactly once, by the class it is.
         "results": list(ordered_results),
     }
-    return cast(RenderEnvelope, response)
+    return response
 
 
 __all__ = ["_render_options", "render_request"]
