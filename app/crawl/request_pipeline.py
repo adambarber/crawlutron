@@ -23,6 +23,7 @@ from app.crawl.policy import DiscoveryFlags, discovery_flags
 from app.crawl.recursive import RECURSIVE_RAMP_MAX, _spill_write, run_recursive_crawl
 from app.crawl.render_options import policy_wants_html
 from app.crawl.result_helpers import TerminalResult, _skipped_engine_result, engine_result_from_exception
+from app.crawl.result_record import ProducerEnvelope
 from app.crawl.robots import FetchAndDecode
 from app.crawl.strategy_chain import execute_crawl_chain
 from app.memory_pressure import read_memory_stats
@@ -321,7 +322,7 @@ async def _run_recursive(state: _PipelineState) -> None:
     )
 
 
-async def _response(state: _PipelineState) -> dict[str, Any]:
+async def _response(state: _PipelineState) -> ProducerEnvelope:
     response: dict[str, Any] = {
         "request_id": new_request_id(),
         "submitted_count": len(state.urls),
@@ -330,10 +331,10 @@ async def _response(state: _PipelineState) -> dict[str, Any]:
     }
     if state.webhook_url is not None:
         response["webhook_url"] = state.webhook_url
-    return response
+    return cast(ProducerEnvelope, response)
 
 
-async def _run(state: _PipelineState) -> dict[str, Any]:
+async def _run(state: _PipelineState) -> ProducerEnvelope:
     state.jobs = _build_jobs(state)
     state.scheduler = _build_scheduler(state)
     state.validators_by_url = _build_validators(state)
@@ -355,7 +356,7 @@ async def _run(state: _PipelineState) -> dict[str, Any]:
     return response
 
 
-async def run_crawl_request(state: _PipelineState) -> dict[str, Any]:
+async def run_crawl_request(state: _PipelineState) -> ProducerEnvelope:
     return await _run(state)
 
 

@@ -27,6 +27,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections.abc import Awaitable, Callable, Coroutine, Sequence
+from dataclasses import replace
 from typing import Any
 from urllib.parse import urlparse
 
@@ -57,8 +58,9 @@ from app.crawl.job_store import (
     normalize_job_state,
 )
 from app.crawl.policy import read_policy
+from app.crawl.result_record import ProducerEnvelope
 from app.crawl.robots import FetchAndDecode
-from app.models import Classification, CrawlResult, CrawlTask
+from app.models import Classification, CrawlResult, CrawlTask, EngineCrawlResult
 
 logger = logging.getLogger(__name__)
 
@@ -66,7 +68,7 @@ logger = logging.getLogger(__name__)
 # same way the webhook runner bounds whole-crawl memory.
 BATCH_SIZE = 8
 
-ExecuteCrawl = Callable[..., Awaitable[dict[str, Any]]]
+ExecuteCrawl = Callable[..., Awaitable[ProducerEnvelope]]
 _execute_crawl: ExecuteCrawl = _real_execute_crawl
 
 
@@ -356,7 +358,7 @@ async def _run_job(
                 settings=settings,
                 shutdown_event=shutdown_event,
             )
-            items = result.get("results", [])
+            items = result["results"]
             job = await job_store.aload(job_id)
             if job is None:
                 return
@@ -369,20 +371,19 @@ async def _run_job(
             # a redirect steal another entry's slot: with batch [a, b] where `a`
             # redirects to `b/`, the redirect result claimed b's identity first
             # and b's real result was never recorded.
-            resolved: dict[str, dict[str, Any]] = {}
-            for item in items:
-                original = item.get("original_url")
-                if isinstance(original, str) and original:
+            resolved: dict[str, EngineCrawlResult] = {}
+            for produced in items:
+                if produced.original_url:
                     resolved.setdefault(
-                        durable_page_identity(original, context.host_policy),
-                        item,
+                        durable_page_identity(produced.original_url, context.host_policy),
+                        produced,
                     )
-            for item in items:
-                for key in (item.get("final_url"), item.get("normalized_url")):
-                    if not isinstance(key, str) or not key:
+            for produced in items:
+                for key in (produced.final_url, produced.normalized_url):
+                    if not key:
                         continue
                     identity = durable_page_identity(key, context.host_policy)
-                    resolved.setdefault(identity, item)
+                    resolved.setdefault(identity, produced)
 
             failed = 0
             for entry in batch:
@@ -396,9 +397,9 @@ async def _run_job(
                 item = resolved.get(identity)
                 if item is None:
                     outcome = "transient"
-                elif item.get("status") != "failed":
+                elif item.status != "failed":
                     outcome = "success"
-                elif is_transient_classification(item.get("classification")):
+                elif is_transient_classification(item.classification):
                     outcome = "transient"
                 else:
                     outcome = "terminal_failed"
@@ -426,13 +427,18 @@ async def _run_job(
                     # (its docstring says it mirrors this runner's semantics,
                     # which is the coupling that let the two drift), so the
                     # runner uses it rather than inventing a second shape.
-                    job.results.append(
-                        _failed_unified_result({"normalized_url": identity, "original_url": url}).model_dump()
-                    )
+                    # The page's own identity, not a two-key dict: the
+                    # degradation reads attributes, so a dict arrived there as an
+                    # envelope with no URL -- the exact "results cannot account
+                    # for the page" gap this branch exists to close.
+                    job.results.append(_failed_unified_result(url).model_dump())
                     failed += 1
                     continue
                 if outcome == "transient":
-                    item = {**item, "status": "failed", "error": "retries_exhausted"}
+                    # The frozen dataclass's own constructor-for-substitute, so
+                    # the overridden fields are named and checked rather than
+                    # merged into an untyped dict on the way through.
+                    item = replace(item, status="failed", error="retries_exhausted")
                 try:
                     unified = await abuild_unified_result(item)
                 except Exception:
@@ -443,11 +449,11 @@ async def _run_job(
                     # paths now agree instead of one producing nothing.
                     unified = _failed_unified_result(item)
                 job.results.append(unified.model_dump())
-                if item.get("status") == "failed":
+                if item.status == "failed":
                     failed += 1
                 admitted = await admit_job_links(
                     job,
-                    item.get("discovered_links") or [],
+                    item.discovered_links,
                     source_depth=entry.depth,
                     context=context,
                 )

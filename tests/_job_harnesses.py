@@ -45,6 +45,7 @@ from app.api_models import CrawlPolicy
 from app.crawl.job_store import CrawlJobState, FrontierEntry, JobStatus, JobStore
 from app.crawl.job_store import _Expected as _Expected
 from app.crawl.policy import PolicyTier
+from app.models import EngineCrawlResult
 from app.validation import HostPolicy
 from tests._policy_factories import job_store
 from tests._result_builders import _canned_result
@@ -297,21 +298,23 @@ class ScriptedExecute:
 
     def __init__(
         self,
-        scripts: dict[str, list[dict]] | None = None,
+        scripts: dict[str, list[EngineCrawlResult]] | None = None,
         *,
-        results: list[dict] | None = None,
+        results: list[EngineCrawlResult] | None = None,
         hang: asyncio.Event | None = None,
     ):
         if (scripts is None) == (results is None):
             raise AssertionError("ScriptedExecute takes exactly one of scripts= or results=")
-        self._scripts = (
-            dict(scripts) if scripts is not None else {r["original_url"]: [r] for r in results or []}
-        )
-        self._default = "rendered" if scripts is not None else "failed"
+        self._scripts = dict(scripts) if scripts is not None else {r.original_url: [r] for r in results or []}
+        # A real ``ResultStatus``, not a classification: the result record
+        # validates its own taxonomy, and "rendered" is one -- so the default
+        # used to be a status the engine never emits, invisible while the
+        # double produced an unvalidated dict.
+        self._default = "success" if scripts is not None else "failed"
         self._hang = hang
         self.attempts: dict[str, int] = {}
 
-    def _entry(self, url: str) -> dict:
+    def _entry(self, url: str) -> EngineCrawlResult:
         sequence = self._scripts.get(url)
         if sequence is None:
             return _canned_result(url, status=self._default)

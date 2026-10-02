@@ -54,6 +54,7 @@ from tests._result_builders import (
     _root_child_results,
     _root_fans_out,
     _small_link_graph_results,
+    engine_result,
 )
 from tests._timing_harnesses import await_until
 
@@ -360,12 +361,12 @@ class TestWholeSiteJobExecution:
         async def _execute(payload_dict, *, settings, shutdown_event):
             return {
                 "results": [
-                    {
-                        "normalized_url": GRAPH_ROOT,
-                        "final_url": GRAPH_ROOT,
-                        "status": "failed",
-                        "classification": "site_error",
-                    }
+                    engine_result(
+                        GRAPH_ROOT,
+                        "site_error",
+                        status="failed",
+                        final_url=GRAPH_ROOT,
+                    )
                 ],
                 "submitted_count": 1,
                 "policy_schema_version": "test",
@@ -654,19 +655,16 @@ class TestWholeSiteRedirectedUrlResolution:
             # URL is the ORIGINAL (pre-redirect) one.
             return {
                 "results": [
-                    {
-                        "original_url": frontier_url,
-                        "normalized_url": frontier_url,
-                        "final_url": final_url,
-                        "status": "success",
-                        "classification": "rendered",
-                        "selected_strategy": "HTTP_DECLARED_CRAWLER",
-                        "text": "page content",
-                        "markdown": "page content",
-                        "html": "<html><body>page content</body></html>",
-                        "extraction_method": "http_html",
-                        "quality_score": 1.0,
-                    }
+                    engine_result(
+                        frontier_url,
+                        "rendered",
+                        final_url=final_url,
+                        text="page content",
+                        markdown="page content",
+                        html="<html><body>page content</body></html>",
+                        extraction_method="http_html",
+                        quality_score=1.0,
+                    )
                 ]
             }
 

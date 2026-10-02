@@ -29,12 +29,14 @@ from app.crawl.content_cache import ContentCache
 from app.crawl.payload_helpers import _payload_policy, checked_payload_urls
 from app.crawl.policy import PolicyTier
 from app.crawl.request_pipeline import _PipelineDependencies, _PipelineState, run_crawl_request
+from app.crawl.result_record import ProducerEnvelope
 from app.crawl.robots import FetchAndDecode
 from app.crawl.strategies.fetchers import default_http_fetcher, impersonating_fetcher
 from app.models import (
     CrawlWorker,
     EngineCrawlResult,
     HttpFetcher,
+    from_wire,
     to_dict,
 )
 from app.resource_pressure import ResourceGate
@@ -346,7 +348,7 @@ class _ResultSpill:
             self._fh.write(line + "\n")
             self.count += 1
 
-    def load_ordered(self) -> list[dict[str, Any]]:
+    def load_ordered(self) -> list[EngineCrawlResult]:
         """Reassemble all spilled results in submission order.
 
         Single pass: each parsed payload is placed directly into its index
@@ -357,16 +359,24 @@ class _ResultSpill:
         only offloads the file scan and the per-line parse off the event loop).
         Streaming consumers are the documented escape hatch if the full-set
         materialization ever becomes a constraint.
+
+        Each line is rebuilt through :func:`app.models.from_wire`, so the spill
+        hands back real :class:`EngineCrawlResult` objects rather than raw dicts
+        that every consumer then had to read by key against a hand-declared
+        shape. That is what removed the second spelling of a result's key set:
+        the class is the declaration, ``to_dict`` and ``from_wire`` are the two
+        directions derived from it, and a field the serializer stopped writing
+        raises here instead of arriving on the wire as an absent value.
         """
         self._fh.flush()
-        slots: dict[int, dict[str, Any]] = {}
+        slots: dict[int, EngineCrawlResult] = {}
         with open(self.path, encoding="utf-8") as fh:
             for line in fh:
                 line = line.strip()
                 if not line:
                     continue
                 entry = json.loads(line)
-                slots[entry["i"]] = entry["r"]
+                slots[entry["i"]] = from_wire(EngineCrawlResult, entry["r"])
         return [slots[key] for key in sorted(slots)]
 
     def close(self) -> None:
@@ -413,7 +423,7 @@ async def crawl_request(
     spill_path: str | None = None,
     fetch_and_decode: FetchAndDecode | None = None,
     resource_gate: ResourceGate | None = None,
-) -> dict[str, Any]:
+) -> ProducerEnvelope:
     active_settings = settings or CrawlerSettings.from_mapping()
     host_policy = HostPolicy.from_settings(active_settings)
     # The batch cap is enforced by the same gate the async endpoint uses

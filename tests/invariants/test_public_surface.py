@@ -82,10 +82,18 @@ _PUBLIC_SURFACE_PROPERTY = Property(
 # restated parameter list past the clone gate, which is the gate correctly
 # catching a signature that was maintained in two places. Two faces of one
 # chokepoint should be one declaration, not two.
+# One adapter per producer shape, which is what took response_shaping from
+# (10, 9) to (11, 10): the crawl pipeline's envelope carries engine results and
+# the render worker's carries browser results, so the adapter that reads an
+# envelope has to be told which record it is shaping. One function taking both
+# would have to accept either record AND a matching callable, and the only way
+# to write that is a cast -- the `Any`-on-both-sides pairing the result records
+# exist to remove. Two adapters, one shared `_envelope_options`, and each one
+# reachable only through the endpoint that has the matching envelope.
 _OWNER_PUBLIC_SURFACE_RATCHET = {
     "app/crawl/admission.py": (20, 14),
     "app/validation.py": (19, 13),
-    "app/api/response_shaping.py": (10, 9),
+    "app/api/response_shaping.py": (11, 10),
     "app/crawl/sqlite_store.py": (9, 7),
     "app/safe_regex.py": (7, 2),
     "app/crawl/robots.py": (13, 4),

@@ -222,7 +222,7 @@ async def run_scoped_crawl(scope_regex=None, *, max_depth=1, max_pages=10, pages
         "policy": {"limits": {"max_depth": max_depth, "max_pages": max_pages}, "scope_regex": scope_regex},
     }
     out = await crawl_request(payload, http_fetcher=site_fetcher(pages), cache=HttpCache())
-    return {r["normalized_url"] for r in out["results"]}
+    return {r.normalized_url for r in out["results"]}
 
 
 def ok_fetcher(url, sent_headers, timeout, max_content_length=DEFAULT_MAX_CONTENT_LENGTH_BYTES):
@@ -559,7 +559,7 @@ async def crawled_urls(pages: dict[str, Any], **kwargs: Any) -> list[str]:
     only asserts membership wraps this in ``set()``.
     """
     out = await crawled_results(pages, **kwargs)
-    return [r["normalized_url"] for r in out["results"]]
+    return [r.normalized_url for r in out["results"]]
 
 
 def site_linking_to(*paths: str, bodies: dict[str, str] | None = None) -> dict[str, Any]:

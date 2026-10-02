@@ -9,7 +9,6 @@ import logging
 import time
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
-from typing import Any
 
 from fastapi import HTTPException
 
@@ -18,6 +17,7 @@ from app.api_responses import (
     JobStatusResponse,
 )
 from app.crawl.job_store import JobStatusView
+from app.crawl.result_record import ProducerEnvelope
 from app.health.readiness import READINESS_STATE as readiness_state
 from app.metrics import get_metrics
 
@@ -39,7 +39,7 @@ def _build_job_status(view: JobStatusView) -> JobStatusResponse:
 
 
 def record_crawl_completion(
-    result: dict[str, Any],
+    result: ProducerEnvelope,
     started: float,
     *,
     event: str,

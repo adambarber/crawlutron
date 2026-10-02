@@ -21,8 +21,21 @@ what two worker processes hold, which is how the counter store's own tests
 prove the same property.
 """
 
+from app.constants import HTTP_DECLARED_CRAWLER
 from app.crawl.coordination_counters import CoordinationCounters
 from app.metrics import MetricsStore
+from tests._result_builders import engine_result
+
+
+def _observe_one_success(metrics: MetricsStore) -> None:
+    """One successful result recorded against `metrics`.
+
+    Named because five tests in this file need exactly this and the call itself
+    is a declared record now -- ``results`` is a sequence of engine results, so
+    spelling the same two-line call five times is five chances for one of them to
+    drift into a dict and test nothing.
+    """
+    metrics.observe_crawl(results=[engine_result("http://example.com/a", "rendered")])
 
 
 def _two_workers(path):
@@ -35,8 +48,8 @@ def test_counters_are_summed_across_workers(tmp_path):
     """The defect, stated as a test."""
     first, second = _two_workers(tmp_path / "coordination.db")
 
-    first.observe_crawl(results=[{"status": "success", "classification": "html"}])
-    second.observe_crawl(results=[{"status": "success", "classification": "html"}])
+    _observe_one_success(first)
+    _observe_one_success(second)
 
     # Each worker alone saw one result; the endpoint must report two.
     assert "crawler_crawl_results_total 2.0" in first.as_prometheus()
@@ -62,10 +75,13 @@ def test_labelled_series_are_summed_not_overwritten(tmp_path):
     contribution, which is the same lost-update shape the cookie jar had.
     """
     first, second = _two_workers(tmp_path / "coordination.db")
-    first.observe_crawl(results=[{"status": "success", "selected_strategy": "http"}])
-    second.observe_crawl(results=[{"status": "success", "selected_strategy": "http"}])
+    named = engine_result("http://example.com/a", "rendered", selected_strategy=HTTP_DECLARED_CRAWLER)
+    first.observe_crawl(results=[named])
+    second.observe_crawl(results=[named])
 
-    assert 'crawler_strategy_results_total{strategy="http"} 2.0' in first.as_prometheus()
+    assert (
+        f'crawler_strategy_results_total{{strategy="{HTTP_DECLARED_CRAWLER}"}} 2.0' in first.as_prometheus()
+    )
 
 
 def test_gauges_are_reported_per_worker_and_never_summed(tmp_path):
@@ -91,7 +107,7 @@ def test_a_worker_with_no_shared_store_still_reports_its_own_counters():
     one process's, which is the whole service in the deployment that ships.
     """
     metrics = MetricsStore()
-    metrics.observe_crawl(results=[{"status": "success"}])
+    metrics.observe_crawl(results=[engine_result("http://example.com/a", "rendered")])
 
     assert "crawler_crawl_results_total 1.0" in metrics.as_prometheus()
 
@@ -103,8 +119,8 @@ def test_reset_clears_the_shared_store_not_just_local_fields(tmp_path):
     after an incident and expects the endpoint to agree.
     """
     first, second = _two_workers(tmp_path / "coordination.db")
-    first.observe_crawl(results=[{"status": "success"}])
-    second.observe_crawl(results=[{"status": "success"}])
+    _observe_one_success(first)
+    _observe_one_success(second)
 
     first.reset()
 

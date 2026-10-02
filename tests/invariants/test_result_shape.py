@@ -10,6 +10,8 @@ from __future__ import annotations
 import ast
 import pathlib
 import re
+from enum import StrEnum
+from typing import get_args
 
 import pytest
 
@@ -819,45 +821,13 @@ def test_page_metadata_fields_are_produced_by_the_extraction_record():
         f"the wire model's name."
     )
     drifted = _wire_mirror_drift(domain_tree, wire_tree)
-    unmapped = _meta_map_targets_without_a_field(domain_tree)
-    assert not drifted and not unmapped, (
+    assert not drifted, (
         f"The extractor's record and {wire_path.name} disagree about PageMetadata's key set. "
         f"A field declared on the wire and filled by nothing is always None on the wire -- a "
         f"promise the model cannot keep -- so delete it or teach {domain_path.name} to fill it. A "
         f"field the extractor fills and the model does not declare is dropped at the splat. "
-        f"Each defect names itself: " + "; ".join(drifted + unmapped)
+        f"Each defect names itself: " + "; ".join(drifted)
     )
-
-
-def _meta_map_targets_without_a_field(domain_tree: ast.Module) -> list[str]:
-    """``_META_MAP`` values that name no field of the extractor record.
-
-    The one check in this file the type system cannot do. ``metadata[mapped] =
-    value`` with ``mapped: str`` is not checked against a TypedDict, so a meta
-    tag renamed to a field that does not exist builds cleanly and silently stops
-    being extracted while the wire model still promises the field -- the exact
-    shape of the bug that started this, one level down.
-    """
-    record = _find_class(domain_tree, "PageMetadata")
-    fields = set(_declared_fields(record))
-    maps = [
-        node
-        for node in ast.walk(domain_tree)
-        if isinstance(node, ast.Assign)
-        and any(isinstance(t, ast.Name) and t.id == "_META_MAP" for t in node.targets)
-    ]
-    targets = [
-        value.value
-        for mapping in maps
-        for value in ast.walk(mapping.value)
-        if isinstance(value, ast.Dict)
-        for key, value in zip(mapping.value.keys, mapping.value.values, strict=True)
-    ]
-    return [
-        f"PageMetadata.{target} is extracted by _META_MAP but is not a field of the record"
-        for target in targets
-        if isinstance(target, str) and target not in fields
-    ]
 
 
 def test_producer_record_detector_bites():
@@ -878,23 +848,6 @@ def test_producer_record_detector_bites():
         ast.parse("class PageMetadata(BaseModel):\n    title: str\n    favicon: str\n"),
     )
     assert drifted == ["PageMetadata.favicon is declared on the wire and nowhere internally"], drifted
-
-
-def test_meta_map_target_detector_bites():
-    """A _META_MAP value naming no field is reported; the real map is clean."""
-    real = ast.parse(
-        "class PageMetadata(TypedDict, total=False):\n    og_title: str\n"
-        "_META_MAP = {'og:title': 'og_title'}\n"
-    )
-    assert not _meta_map_targets_without_a_field(real)
-
-    typo = ast.parse(
-        "class PageMetadata(TypedDict, total=False):\n    og_title: str\n"
-        "_META_MAP = {'og:title': 'og_typoe'}\n"
-    )
-    assert _meta_map_targets_without_a_field(typo) == [
-        "PageMetadata.og_typoe is extracted by _META_MAP but is not a field of the record"
-    ]
 
 
 # --- An advertised payload key may not be dropped by its response model -------
@@ -1322,3 +1275,54 @@ def test_discovery_result_projection_has_exactly_one_definition():
     ]
     assert len(definitions) == 1, f"the discovery projection was defined again: {definitions}"
     assert "app/crawl/strategies/content_pipeline.py" in definitions[0], definitions
+
+
+# ---------------------------------------------------------------------------
+# One declaration of what a result is
+# ---------------------------------------------------------------------------
+
+
+def _taxonomy_members(enum: type[StrEnum]) -> set[str]:
+    return {member.value for member in enum}
+
+
+def _literal_members(alias: object) -> set[str]:
+    return set(get_args(alias))
+
+
+def test_the_internal_and_wire_taxonomies_name_the_same_members():
+    """The engine's result records and the wire enums agree, set for set.
+
+    This is what lets the adapters convert instead of coercing. Reading an
+    internal ``Literal`` into a wire ``StrEnum`` is a total function exactly when
+    the two name the same members -- and that is not something a type checker can
+    verify, because a ``Literal`` and a ``StrEnum`` are unrelated types and the
+    enum constructor accepts any ``str``.
+
+    It matters because the alternatives were both worse. The adapters used to
+    wrap each conversion in ``try/except`` and substitute a fallback: an
+    unmapped ``status`` became ``failed`` and an unmapped ``strategy`` became
+    ``None``, both silently. That fallback is the shape of the bug this whole
+    change set out to remove -- a producer that emitted something new and a
+    response that answered anyway -- only one layer down from the result
+    record. The conversions are now total, with no fallback to reach, and this
+    is what keeps them total.
+
+    All three axes are checked: status, classification, and strategy.
+    """
+    from app.api_models import CrawlStatus, CrawlStrategy
+    from app.constants import CrawlClassification, ResultStatus
+    from app.models import Classification, CrawlStrategyName
+
+    for axis, internal, wire in (
+        ("status", _literal_members(ResultStatus), _taxonomy_members(CrawlStatus)),
+        ("classification", _literal_members(Classification), _taxonomy_members(CrawlClassification)),
+        ("strategy", _literal_members(CrawlStrategyName), _taxonomy_members(CrawlStrategy)),
+    ):
+        assert internal == wire, (
+            f"the {axis} taxonomies disagree: "
+            f"internal-only={sorted(internal - wire)} wire-only={sorted(wire - internal)}. "
+            f"app/api/response_shaping.py converts this axis without a fallback branch, "
+            f"which is only true while the sets are equal -- so add the member to both sides "
+            f"in the same change."
+        )

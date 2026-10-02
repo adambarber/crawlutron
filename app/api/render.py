@@ -8,7 +8,7 @@ deleted; existing callers import from ``app.api.render``.
 from __future__ import annotations
 
 import time
-from typing import Any
+from typing import Any, cast
 
 from app.api_models import POLICY_SCHEMA_VERSION
 from app.crawl.ids import new_request_id
@@ -20,6 +20,7 @@ from app.crawl.result_helpers import (
     failed_result_for,
     terminal_crawl_result,
 )
+from app.crawl.result_record import RenderEnvelope
 from app.crawl.worker import call_worker
 from app.models import (
     CrawlJob,
@@ -27,7 +28,6 @@ from app.models import (
     CrawlWorker,
     EngineCrawlResult,
     RenderOptions,
-    to_dict,
 )
 from app.scheduler import DomainScheduler
 from app.settings import CrawlerSettings
@@ -72,7 +72,7 @@ async def render_request(
     *,
     settings: CrawlerSettings | None = None,
     worker: CrawlWorker,
-) -> dict[str, Any]:
+) -> RenderEnvelope:
     """Run a /v1/render-shaped request through the per-domain scheduler."""
     active_settings = settings or CrawlerSettings.from_mapping()
     host_policy = HostPolicy.from_settings(active_settings)
@@ -183,13 +183,13 @@ async def render_request(
                 elapsed_ms=int((time.monotonic() - started) * 1000),
                 domain="",
                 # The wire-visible error must be a stable classification, never
-                # raw exception text: to_dict is pure serialization, so str(exc)
-                # would leak DNS names / paths / secrets straight into the body.
+                # raw exception text: str(exc) would leak DNS names / paths /
+                # secrets straight into the body.
                 error=classify_error_code(worker_error) if worker_error is not None else "unknown_error",
             )
 
     ordered_results = [by_index[index] for index in range(len(urls))]
-    return {
+    response: dict[str, Any] = {
         "request_id": new_request_id(),
         "submitted_count": len(urls),
         # The producer envelope carries the same key the engine's crawl
@@ -198,8 +198,13 @@ async def render_request(
         # the endpoint instead, which is a second place a version could be
         # updated and a silent one (an unpassed field is dropped by the model).
         "policy_schema_version": POLICY_SCHEMA_VERSION,
-        "results": [to_dict(result) for result in ordered_results],
+        # The worker's own objects, not a serialization of them: /v1/render
+        # never crosses a disk, so there is nothing here that needs to be
+        # a dict, and handing the record through keeps its key set declared
+        # exactly once, by the class it is.
+        "results": list(ordered_results),
     }
+    return cast(RenderEnvelope, response)
 
 
 __all__ = ["_render_options", "render_request"]

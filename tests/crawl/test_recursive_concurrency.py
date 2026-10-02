@@ -54,7 +54,7 @@ async def test_recursive_crawl_fetches_links_concurrently():
     response = await crawl_request(payload, settings=settings, http_fetcher=fetcher)
 
     assert response["submitted_count"] == 1
-    statuses = [r["status"] for r in response["results"]]
+    statuses = [r.status for r in response["results"]]
     assert all(s == "success" for s in statuses), statuses
     # 1 seed + 5 discovered leaf pages all crawled.
     assert len(response["results"]) == 6

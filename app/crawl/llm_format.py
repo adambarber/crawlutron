@@ -90,28 +90,6 @@ def extract_carried_metadata(value: Any) -> PageMetadata:
     return cast(PageMetadata, admitted)
 
 
-#: HTML ``meta`` name/property -> the field it fills, as literal strings.
-#: These values ARE keys of :class:`PageMetadata`, but a TypedDict's key set is
-#: not expressible as a value type, so ``metadata[mapped] = value`` below is
-#: NOT checked by pyright -- renaming a value to a non-key passes the build
-#: cleanly. It is checked instead by ``test_page_metadata_fields_are_produced_by_the_extraction_record``,
-#: which reads this map's values and this record's keys off the tree and compares
-#: them. Both halves are read, neither is transcribed, so the two cannot drift.
-_META_MAP = {
-    "description": "description",
-    "og:title": "og_title",
-    "og:description": "og_description",
-    "og:image": "og_image",
-    "og:url": "og_url",
-    "og:type": "og_type",
-    "og:site_name": "og_site_name",
-    "twitter:card": "twitter_card",
-    "twitter:title": "twitter_title",
-    "twitter:description": "twitter_description",
-    "twitter:image": "twitter_image",
-}
-
-
 # Cap the HTML passed to lxml parsing for metadata extraction. lxml builds a
 # full DOM tree; a 50 MB body can balloon to ~200 MB+ of RAM during parsing.
 # Anything above a few MB is almost certainly above the practical meta-tag
@@ -157,23 +135,12 @@ def _llm_metadata_from_tree(tree: Any, url: str) -> PageMetadata:
     the tree itself never escapes the caller.
     """
     metadata: PageMetadata = {"source_url": url}
+    _carry_meta_tags(metadata, tree)
 
     # title
     title = tree.findtext(".//title")
     if title:
         metadata["title"] = re.sub(r"\s+", " ", title).strip()
-
-    # meta tags (name / property -> content)
-    for el in tree.iter("meta"):
-        name = (el.get("name") or el.get("property") or "").lower().strip()
-        if not name:
-            continue
-        value = (el.get("content") or "").strip()
-        if not value:
-            continue
-        mapped = _META_MAP.get(name)
-        if mapped:
-            metadata[mapped] = value
 
     # JSON-LD structured data
     parsed_json_ld: list[Any] = []
@@ -209,6 +176,55 @@ def _llm_metadata_from_tree(tree: Any, url: str) -> PageMetadata:
         metadata["language"] = tree.get("lang").strip()
 
     return metadata
+
+
+def _carry_meta_tags(metadata: PageMetadata, tree: Any) -> None:
+    """Carry the ``<meta>`` tags that name a declared field into `metadata`.
+
+    One literal-key assignment per HTML meta name rather than a rename table
+    applied with a computed key. Every type checker this project runs rejects a
+    computed key into a TypedDict -- mypy calls it "expected TypedDict key to be
+    string literal", and pyright types the target as one field's type -- so the
+    table made the destination field unverifiable, and a table that renames
+    ``og:title`` to ``og_title`` had to be held in step with the record by a
+    separate detector. Spelling the pairs out here costs that table and gives
+    back a checked destination: a mistyped field name is a build failure rather
+    than a value that silently never reaches the wire. It is also the whole
+    list, so an HTML name no case lists is simply not carried.
+    """
+    # meta tags (name / property -> content)
+    for el in tree.iter("meta"):
+        name = (el.get("name") or el.get("property") or "").lower().strip()
+        if not name:
+            continue
+        value = (el.get("content") or "").strip()
+        if not value:
+            continue
+        match name:
+            case "description":
+                metadata["description"] = value
+            case "og:title":
+                metadata["og_title"] = value
+            case "og:description":
+                metadata["og_description"] = value
+            case "og:image":
+                metadata["og_image"] = value
+            case "og:url":
+                metadata["og_url"] = value
+            case "og:type":
+                metadata["og_type"] = value
+            case "og:site_name":
+                metadata["og_site_name"] = value
+            case "twitter:card":
+                metadata["twitter_card"] = value
+            case "twitter:title":
+                metadata["twitter_title"] = value
+            case "twitter:description":
+                metadata["twitter_description"] = value
+            case "twitter:image":
+                metadata["twitter_image"] = value
+
+    return None
 
 
 def text_from_html(html: str) -> str:

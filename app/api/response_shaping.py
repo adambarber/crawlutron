@@ -17,19 +17,25 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, TypeVar
 from urllib.parse import urljoin
 
 from app.api_models import (
     CrawlStatus,
+    CrawlStrategy,
 )
 from app.api_responses import (
+    ClassificationEvidence,
+    ContentValidators,
     PageMetadata,
     StrategyAttempt,
     UnifiedCrawlResponse,
     UnifiedCrawlResult,
+)
+from app.api_responses import (
+    DiscoveredLink as WireDiscoveredLink,
 )
 from app.constants import CrawlClassification
 from app.crawl.llm_format import (
@@ -38,12 +44,25 @@ from app.crawl.llm_format import (
 from app.crawl.llm_format import (
     extract_carried_metadata,
 )
+from app.crawl.result_record import AnyResult, ProducerEnvelope, RenderEnvelope
+from app.models import (
+    CrawlResult,
+    CrawlStrategyAttempt,
+    CrawlStrategyName,
+    DiscoveredLink,
+    EngineCrawlResult,
+)
 from app.validation import HostPolicy, safe_public_url_or_none
 
 _logger = logging.getLogger(__name__)
 
+#: The batch shaper is generic over the result shape it is handed so that
+#: ``adapt`` and ``results`` agree: a caller cannot pass browser results with a
+#: engine adapter, which was expressible before and did nothing when it was.
+_ResultT = TypeVar("_ResultT", bound=AnyResult)
 
-def format_crawl_item(item: dict[str, Any]) -> tuple[str | None, ExtractedPageMetadata]:
+
+def format_crawl_item(item: EngineCrawlResult) -> tuple[str | None, ExtractedPageMetadata]:
     """Unified output formatter: produce ``(markdown, metadata)`` for any result.
 
     Every access strategy (HTTP, browser, document/PDF, Trafilatura) funnels through
@@ -66,10 +85,10 @@ def format_crawl_item(item: dict[str, Any]) -> tuple[str | None, ExtractedPageMe
     frontier carry ZERO new keys -- the metadata replaced its computation
     site, never the wire shape.
     """
-    carried = item.get("llm_metadata")
-    url = item.get("final_url") or item.get("normalized_url") or item.get("original_url")
-    html = item.get("html")
-    markdown = item.get("markdown")
+    carried = item.llm_metadata
+    url = item.final_url or item.normalized_url or item.original_url
+    html = item.html
+    markdown = item.markdown
     if markdown:
         if isinstance(carried, dict) and carried:
             return markdown, extract_carried_metadata(carried)
@@ -78,13 +97,13 @@ def format_crawl_item(item: dict[str, Any]) -> tuple[str | None, ExtractedPageMe
 
             return markdown, extract_llm_metadata(html, url)
         return markdown, {}
-    text = item.get("text")
+    text = item.text
     if not text:
         return None, {}
     return text, {}
 
 
-async def aformat_crawl_item(item: dict[str, Any]) -> tuple[str | None, ExtractedPageMetadata]:
+async def aformat_crawl_item(item: EngineCrawlResult) -> tuple[str | None, ExtractedPageMetadata]:
     """Async :func:`format_crawl_item`: the whole formatter leaves the loop.
 
     The fallback ``extract_llm_metadata`` path (items without a carried
@@ -97,43 +116,56 @@ async def aformat_crawl_item(item: dict[str, Any]) -> tuple[str | None, Extracte
     return await asyncio.to_thread(format_crawl_item, item)
 
 
-async def abuild_unified_result(item: dict[str, Any]) -> UnifiedCrawlResult:
+async def abuild_unified_result(item: EngineCrawlResult) -> UnifiedCrawlResult:
     """Async :func:`build_unified_result` (whole mapping off the event loop)."""
     return await asyncio.to_thread(build_unified_result, item)
 
 
-def _coerce_status(value: Any) -> CrawlStatus:
-    """Read a per-URL status from an engine-result dict into the wire enum.
+def _coerce_strategy(value: CrawlStrategyName | None) -> CrawlStrategy | None:
+    """The internal strategy literal as the wire enum, or None when none ran.
 
-    The engine's internal ``EngineCrawlResult.status`` is a ``ResultStatus``
-    literal and the spill round-trips it as a bare string; the wire model is
-    the strict enum. A value outside the taxonomy is "failed", not a
-    validation error -- the batch-shaping guard already degrades a malformed
-    item to a terminal failure, so reaching this with an unknown member means
-    the caller built a result the service itself never emits.
+    No fallback branch, and that is the point: the internal and wire strategy
+    taxonomies are the same set, which
+    ``test_the_internal_and_wire_taxonomies_name_the_same_members`` asserts
+    rather than assumes. The old ``except ValueError -> None`` existed to cover
+    a member one vocabulary had and the other did not, and it hid exactly that:
+    an unmapped strategy silently became "no strategy attempted" on the wire.
     """
-    try:
-        return CrawlStatus(value)
-    except ValueError:
-        return CrawlStatus.failed
+    return CrawlStrategy(value) if value is not None else None
 
 
-def _coerce_classification(value: Any) -> CrawlClassification:
-    """Read a per-URL classification from an engine-result dict into the wire enum.
+def _attempt_models(attempts: list[CrawlStrategyAttempt]) -> list[StrategyAttempt]:
+    """The per-strategy attempt models, built from the dataclass's own attributes.
 
-    Mirrors :func:`_coerce_status`: the engine emits only taxonomy members, so
-    a value that is not one means a malformed item, and "site_error" keeps the
-    (status, classification) pair consistent (its status-table entry is
-    "failed") rather than pairing an arbitrary classification with the failed
-    status.
+    ``from_attributes`` rather than a dict: the attempt is a declared record
+    already, and asking pydantic to read it by attribute is what keeps this a
+    conversion the checker can see instead of a coercion performed on the way
+    into a constructor.
     """
-    try:
-        return CrawlClassification(value)
-    except ValueError:
-        return CrawlClassification.site_error
+    return [StrategyAttempt.model_validate(attempt, from_attributes=True) for attempt in attempts]
 
 
-def build_unified_result(item: dict[str, Any]) -> UnifiedCrawlResult:
+def _link_models(links: list[DiscoveredLink]) -> list[WireDiscoveredLink]:
+    """The discovered-link models. See :func:`_attempt_models`."""
+    return [WireDiscoveredLink.model_validate(link, from_attributes=True) for link in links]
+
+
+def _evidence_models(evidence: list[dict[str, Any]]) -> list[ClassificationEvidence]:
+    """The classification-evidence models.
+
+    The one conversion still taking a raw dict, because the producer still
+    builds evidence as plain JSON rather than as a declared record. It is the
+    last such site in this module and the honest place to point a future wave.
+    """
+    return [ClassificationEvidence.model_validate(item) for item in evidence]
+
+
+def _validator_model(validators: dict[str, str]) -> ContentValidators | None:
+    """The origin-validator model, or None when the origin supplied none."""
+    return ContentValidators.model_validate(validators) if validators else None
+
+
+def build_unified_result(item: EngineCrawlResult) -> UnifiedCrawlResult:
     """Map an internal engine result into the unified API response model.
 
     The unified response carries both the LLM-friendly ``markdown`` and the
@@ -142,35 +174,41 @@ def build_unified_result(item: dict[str, Any]) -> UnifiedCrawlResult:
     page-metadata extractor (``extract_llm_metadata``) over the raw HTML.
     """
     markdown, extracted = format_crawl_item(item)
-    url = item.get("final_url") or item.get("normalized_url") or item.get("original_url")
+    url = item.final_url or item.normalized_url or item.original_url
     metadata = PageMetadata(**extracted)
     if metadata.source_url is None:
         metadata.source_url = url
     return UnifiedCrawlResult(
-        original_url=item["original_url"],
-        normalized_url=item.get("normalized_url"),
-        final_url=item.get("final_url"),
-        status=_coerce_status(item["status"]),
-        classification=_coerce_classification(item["classification"]),
-        selected_strategy=item.get("selected_strategy"),
-        attempted_strategies=item.get("attempted_strategies", []),
-        error=item.get("error"),
+        original_url=item.original_url,
+        normalized_url=item.normalized_url,
+        final_url=item.final_url,
+        # No fallback branch on any of these three: the internal and wire
+        # taxonomies are the same set, asserted by
+        # test_the_internal_and_wire_taxonomies_name_the_same_members, and the
+        # engine result's own constructor already refused a value outside its
+        # declared Literal. A conversion that cannot fail needs no story about
+        # what it does when it does.
+        status=CrawlStatus(item.status),
+        classification=CrawlClassification(item.classification),
+        selected_strategy=_coerce_strategy(item.selected_strategy),
+        attempted_strategies=_attempt_models(item.attempted_strategies),
+        error=item.error,
         markdown=markdown,
         metadata=metadata,
-        html=item.get("html"),
-        text=item.get("text"),
-        quality_score=item.get("quality_score", 0.0),
-        classification_evidence=item.get("classification_evidence", []),
-        http_status=item.get("http_status"),
-        headers=item.get("headers", {}),
-        content_type=item.get("content_type"),
-        extraction_method=item.get("extraction_method"),
-        diagnostics=item.get("diagnostics", {}),
-        discovered_link_count=item.get("discovered_link_count", 0),
-        discovered_links_truncated=item.get("discovered_links_truncated", False),
-        discovered_links=item.get("discovered_links", []),
-        next_page_url=item.get("next_page_url"),
-        validators=item.get("validators") or None,
+        html=item.html,
+        text=item.text,
+        quality_score=item.quality_score,
+        classification_evidence=_evidence_models(item.classification_evidence),
+        http_status=item.http_status,
+        headers=item.headers,
+        content_type=item.content_type,
+        extraction_method=item.extraction_method,
+        diagnostics=item.diagnostics,
+        discovered_link_count=item.discovered_link_count,
+        discovered_links_truncated=item.discovered_links_truncated,
+        discovered_links=_link_models(item.discovered_links),
+        next_page_url=item.next_page_url,
+        validators=_validator_model(item.validators),
     )
 
 
@@ -202,7 +240,7 @@ def _render_diagnostics(metadata: Mapping[str, Any]) -> dict[str, Any]:
     return diagnostics
 
 
-def render_result_to_unified(item: dict[str, Any]) -> UnifiedCrawlResult:
+def render_result_to_unified(item: CrawlResult) -> UnifiedCrawlResult:
     """Adapt a browser ``CrawlResult`` into the unified result model.
 
     Returns the model rather than a dict shaped like one. Every field of
@@ -213,14 +251,14 @@ def render_result_to_unified(item: dict[str, Any]) -> UnifiedCrawlResult:
     endpoint genuinely has nothing to say about are left at their defaults
     rather than transcribed here.
     """
-    metadata = item.get("metadata") or {}
-    status = _coerce_status(item["status"])
-    classification = _coerce_classification(item["classification"])
-    selected_strategy = item.get("selected_strategy")
+    metadata = item.metadata
+    status = CrawlStatus(item.status)
+    classification = CrawlClassification(item.classification)
+    selected_strategy = _coerce_strategy(item.selected_strategy)
     return UnifiedCrawlResult(
-        original_url=item["url"],
-        normalized_url=item["url"],
-        final_url=item.get("final_url"),
+        original_url=item.url,
+        normalized_url=item.url,
+        final_url=item.final_url,
         status=status,
         classification=classification,
         selected_strategy=selected_strategy,
@@ -231,15 +269,15 @@ def render_result_to_unified(item: dict[str, Any]) -> UnifiedCrawlResult:
                 classification=classification,
                 http_status=None,
                 content_type=None,
-                elapsed_ms=int(item.get("elapsed_ms", 0)),
-                error=item.get("error"),
+                elapsed_ms=item.elapsed_ms,
+                error=item.error,
             )
         ],
-        error=item.get("error"),
-        metadata=PageMetadata(title=metadata.get("title"), source_url=item["url"]),
-        html=item.get("html"),
-        text=item.get("text"),
-        quality_score=1.0 if item["status"] == "success" else 0.0,
+        error=item.error,
+        metadata=PageMetadata(title=metadata.get("title"), source_url=item.url),
+        html=item.html,
+        text=item.text,
+        quality_score=1.0 if item.status == "success" else 0.0,
         extraction_method=metadata.get("extraction_method"),
         diagnostics=_render_diagnostics(metadata),
         # The browser worker surfaces no origin validators. The field is typed
@@ -330,7 +368,7 @@ def _response_envelope(
 
 
 def build_unified_crawl_response(
-    results: list[dict[str, Any]],
+    results: list[EngineCrawlResult],
     *,
     options: EnvelopeOptions | None = None,
 ) -> UnifiedCrawlResponse:
@@ -340,11 +378,15 @@ def build_unified_crawl_response(
     loop; both hand their options to :func:`_response_envelope`, so the response
     they build is decided in one place.
     """
-    return _response_envelope(_shape_all(results), len(results), options or EnvelopeOptions())
+    return _response_envelope(
+        _shape_all(results, adapt=build_unified_result), len(results), options or EnvelopeOptions()
+    )
 
 
 def _shape_all(
-    results: list[dict[str, Any]], *, adapt: Callable[[dict[str, Any]], UnifiedCrawlResult] | None = None
+    results: Sequence[_ResultT],
+    *,
+    adapt: Callable[[_ResultT], UnifiedCrawlResult],
 ) -> list[UnifiedCrawlResult]:
     """Shape a whole batch in one pass (the worker-thread side of
     :func:`abuild_unified_crawl_response`).
@@ -354,10 +396,13 @@ def _shape_all(
     endpoint must hold the same contract. The guard lives here rather than
     at each caller so the two paths cannot drift apart again.
 
-    ``adapt`` is the optional per-item transform a pipeline applies before the
+    ``adapt`` is the per-item transform a pipeline applies before the
     unified shaping (``/v1/render`` maps its browser-result dicts through
-    :func:`render_result_to_unified`). It is typed as a transform INTO the
-    model rather than into a dict-shaped one, so an adapter cannot return a
+    :func:`render_result_to_unified`). It is REQUIRED rather than defaulting to
+    the engine adapter: a default would pick a shape for the caller, and the
+    caller's shape is the one thing here that cannot be inferred -- ``/v1/crawl``
+    and ``/v1/render`` hold different records. It is typed as a transform INTO
+    the model rather than into a dict-shaped one, so an adapter cannot return a
     partial item for ``build_unified_result`` to reinterpret -- that round trip
     through a dict is where a required field could be omitted without any
     checker noticing. It runs INSIDE the same per-item guard,
@@ -369,7 +414,7 @@ def _shape_all(
     shaped: list[UnifiedCrawlResult] = []
     for item in results:
         try:
-            shaped.append(adapt(item) if adapt is not None else build_unified_result(item))
+            shaped.append(adapt(item))
         except Exception:
             # Log loudly: the original bug was a bare except that swallowed
             # the exception, degraded the item to site_error, and left no
@@ -389,20 +434,31 @@ def _failed_unified_result(item: Any) -> UnifiedCrawlResult:
     Fields that require no interpretation are carried through so the caller
     still sees which URL failed.
 
-    This is the batch's last line of defense, so ``item`` is not trusted to
-    be a dict: the guard already proved the per-item path raises, and a
-    non-mapping item (``None``, a scalar, a mapping whose ``get`` itself
-    explodes) must not turn the fallback into a second exception that
-    escapes the guard and 500s the whole batch. Item reads are best-effort:
-    whatever the item cannot answer degrades to the honest empty value.
+    This is the batch's last line of defense, and it deliberately stays the one
+    place in this module typed ``Any``: the guard above exists because the
+    per-item path CAN raise, so whatever arrived is by definition not the record
+    this module otherwise works in. Reading it is therefore best-effort by
+    attribute with a default -- ``getattr`` rather than ``.get`` because the
+    items are dataclasses now -- and whatever the item cannot answer degrades to
+    the honest empty value instead of raising a second exception out of the
+    guard and 500ing the whole batch.
     """
-    peeked: dict[str, Any] = {}
-    try:
-        peeked = {
-            key: item.get(key) for key in ("normalized_url", "original_url", "url", "final_url", "error")
-        }
-    except Exception:
-        _logger.debug("unshapable item refused even best-effort field reads", exc_info=True)
+    if isinstance(item, str):
+        # A page the batch never answered. There is no result to peek at, so the
+        # URL is the whole of what is known -- and it has to be passed as the
+        # page's identity, not as a two-key dict: this function reads attributes,
+        # so a dict arrived here as an envelope with no URL at all, which is the
+        # gap this branch exists to close.
+        peeked: dict[str, Any] = {"normalized_url": item, "original_url": item}
+    else:
+        peeked = {}
+        try:
+            peeked = {
+                key: getattr(item, key, None)
+                for key in ("normalized_url", "original_url", "url", "final_url", "error")
+            }
+        except Exception:
+            _logger.debug("unshapable item refused even best-effort field reads", exc_info=True)
     url = peeked.get("normalized_url") or peeked.get("original_url") or peeked.get("url") or ""
     return UnifiedCrawlResult(
         original_url=peeked.get("original_url") or peeked.get("url") or url,
@@ -420,10 +476,10 @@ def _failed_unified_result(item: Any) -> UnifiedCrawlResult:
 
 
 async def abuild_unified_crawl_response(
-    results: list[dict[str, Any]],
+    results: Sequence[_ResultT],
     *,
     options: EnvelopeOptions | None = None,
-    adapt: Callable[[dict[str, Any]], UnifiedCrawlResult] | None = None,
+    adapt: Callable[[_ResultT], UnifiedCrawlResult],
 ) -> UnifiedCrawlResponse:
     """Async :func:`build_unified_crawl_response` for use inside async endpoints.
 
@@ -440,32 +496,58 @@ async def abuild_unified_crawl_response(
     return _response_envelope(shaped, len(results), options or EnvelopeOptions())
 
 
-async def aunified_response_from_result(
-    result: dict[str, Any], *, adapt: Callable[[dict[str, Any]], UnifiedCrawlResult] | None = None
-) -> UnifiedCrawlResponse:
-    """The one adapter from a raw producer envelope to the unified response.
+def _envelope_options(result: ProducerEnvelope | RenderEnvelope) -> EnvelopeOptions:
+    """The three scalar keys, read once for both endpoints.
 
-    Both wire endpoints (``/v1/crawl`` and ``/v1/render``) read their envelope
-    here, so an envelope field is passed once and cannot reach one path while
-    being forgotten on the other. That mistake is silent by construction --
+    This is the whole reason the two adapters below exist as one pair rather
+    than two hand-written field lists: an envelope field added here reaches both
+    endpoints, and ``UnifiedCrawlResponse`` drops an unpassed field rather than
+    raising, which is how one shipped missing from a single endpoint.
+    """
+    return EnvelopeOptions(
+        request_id=result["request_id"],
+        submitted_count=result["submitted_count"],
+        policy_schema_version=result["policy_schema_version"],
+    )
+
+
+async def aunified_response_from_result(result: ProducerEnvelope) -> UnifiedCrawlResponse:
+    """The one adapter from a crawl producer's envelope to the unified response.
+
+    Both wire endpoints read their envelope through this module, so an envelope
+    field is passed once and cannot reach one path while being forgotten on the
+    other. That mistake is silent by construction --
     ``UnifiedCrawlResponse`` drops an unpassed field rather than raising -- and
     a response field has already shipped missing from one endpoint and been
     caught only by curling the live endpoint.
 
-    ``adapt`` is the per-item transform a producer needs (render maps its
-    browser-result dicts through :func:`render_result_to_unified`); it runs
-    inside ``_shape_all``'s per-item guard either way, so a result dict the
-    adapter cannot read degrades to a terminal failure for that item instead of
-    500ing the response.
+    Paired with :func:`arender_response_from_result`, which is the same adapter
+    for the other producer. Two functions rather than one overloaded on the
+    envelope, because the envelope's ``results`` element type IS the adapter's
+    input type: a single signature would have to accept either record and a
+    matching callable, which is exactly the ``Any``-on-both-sides pairing the
+    records exist to remove. Each body is its own call to
+    :func:`abuild_unified_crawl_response` and they share
+    :func:`_envelope_options`.
     """
     return await abuild_unified_crawl_response(
-        result.get("results", []),
-        options=EnvelopeOptions(
-            request_id=result["request_id"],
-            submitted_count=result["submitted_count"],
-            policy_schema_version=result["policy_schema_version"],
-        ),
-        adapt=adapt,
+        result["results"],
+        options=_envelope_options(result),
+        adapt=build_unified_result,
+    )
+
+
+async def arender_response_from_result(result: RenderEnvelope) -> UnifiedCrawlResponse:
+    """:func:`aunified_response_from_result` for the render producer's envelope.
+
+    Same one-adapter-per-shape decision, same shared options builder, and the
+    per-item guard in ``_shape_all`` still degrades one unshapable result to a
+    terminal failure rather than 500ing the response.
+    """
+    return await abuild_unified_crawl_response(
+        result["results"],
+        options=_envelope_options(result),
+        adapt=render_result_to_unified,
     )
 
 
@@ -474,6 +556,7 @@ __all__ = [
     "abuild_unified_crawl_response",
     "abuild_unified_result",
     "aformat_crawl_item",
+    "arender_response_from_result",
     "aunified_response_from_result",
     "build_unified_crawl_response",
     "build_unified_result",

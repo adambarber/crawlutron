@@ -1,9 +1,21 @@
 from __future__ import annotations
 
 import types
-from collections.abc import Awaitable, Callable
-from dataclasses import dataclass, field, fields, is_dataclass
-from typing import TYPE_CHECKING, Any, Literal, NewType, Protocol, Union, get_args, get_origin
+from collections.abc import Awaitable, Callable, Mapping
+from dataclasses import MISSING, dataclass, field, fields, is_dataclass
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Literal,
+    NewType,
+    Protocol,
+    TypeVar,
+    Union,
+    cast,
+    get_args,
+    get_origin,
+    get_type_hints,
+)
 
 from app.constants import ResultStatus
 
@@ -463,7 +475,7 @@ class HttpFetcher(Protocol):
     ) -> HttpFetchResult: ...
 
 
-def to_dict(result: Any) -> dict[str, Any]:
+def to_dict(result: EngineCrawlResult | CrawlResult) -> dict[str, Any]:
     """Return a JSON-serializable dict for any frozen-dataclass crawl result.
 
     Unlike ``dataclasses.asdict``, this does NOT ``deepcopy`` leaf values. The
@@ -472,8 +484,91 @@ def to_dict(result: Any) -> dict[str, Any]:
     ``DiscoveredLink``) are converted to dicts -- so the output stays
     JSON-serializable without paying asdict's full recursive deep-copy cost on
     every field of every result in a large batch.
+
+    Note what is NOT here: ``elapsed_ms`` is a property on
+    :class:`EngineCrawlResult`, and ``dataclasses.fields()`` -- which the walk
+    below follows -- does not include properties, so the engine's spill carries
+    no elapsed time. :func:`from_wire` has the same blind spot, which is why it
+    is derived rather than written twice: both directions read the one
+    declaration of what a result is.
     """
     return _to_jsonable(result)
+
+
+_ResultT = TypeVar("_ResultT", bound=Any)
+
+
+def _rebuild_value(annotation: Any, value: Any) -> Any:
+    """One value from a serialized record, put back to its declared shape.
+
+    Only structure is rebuilt: a nested dataclass becomes a dataclass again, and
+    a list of them becomes a list of dataclasses. Scalars, ``dict[str, str]``
+    payloads and open ``dict[str, Any]`` blocks are already the values their
+    annotations declare, so they pass through untouched. Taxonomy members are
+    deliberately NOT checked here -- the real constructor does that in
+    ``_LiteralChecked.__post_init__``, so this adds no second spelling of the
+    validation.
+    """
+    if is_dataclass(annotation):
+        return _rebuild_dataclass(annotation, value) if isinstance(value, Mapping) else value
+    origin = get_origin(annotation)
+    if origin is list and isinstance(value, list):
+        args = get_args(annotation)
+        (item,) = args if len(args) == 1 else (Any,)
+        return [_rebuild_value(item, element) for element in value]
+    if origin in (Union, types.UnionType) and value is not None:
+        members = [member for member in get_args(annotation) if member is not type(None)]
+        if len(members) == 1:
+            return _rebuild_value(members[0], value)
+    return value
+
+
+def _rebuild_dataclass(cls: Any, payload: Mapping[str, Any]) -> Any:
+    """The walk itself, untyped because the recursion cannot be.
+
+    ``from_wire`` is the typed door; this is what it calls, and the recursive
+    arm calls back into here because ``is_dataclass`` narrows to a class object
+    without a type argument, which no generic class-parameter signature accepts.
+    Two functions rather than one with a cast inside the loop: the unchecked
+    width is confined to the body that cannot be typed, and the signature a
+    caller reads is the one that carries the contract.
+    """
+    annotations = get_type_hints(cls)
+    values: dict[str, Any] = {}
+    for declared in fields(cls):
+        if declared.name not in payload:
+            if declared.default is MISSING and declared.default_factory is MISSING:
+                raise TypeError(
+                    f"{cls.__name__} requires {declared.name!r}, which the serialized record "
+                    f"does not carry; the record was not written by to_dict for this class"
+                )
+            continue
+        values[declared.name] = _rebuild_value(annotations.get(declared.name), payload[declared.name])
+    return cls(**values)
+
+
+def from_wire(cls: type[_ResultT], payload: Mapping[str, Any]) -> _ResultT:
+    """Rebuild a result dataclass from the record :func:`to_dict` wrote.
+
+    The inverse half of ONE declaration. A result's key set is spelled by its
+    dataclass and nowhere else: :func:`_rebuild_dataclass` walks that same
+    class's field annotations, so a field renamed, added or dropped moves both
+    directions at once. The spelling this replaced was a ``TypedDict`` mirroring
+    every field, which was a second copy of the key set that nothing but a
+    detector held in step -- and a consumer indexing into it got no build failure
+    when the two disagreed.
+
+    Absence is asymmetric on purpose. :func:`to_dict` writes every field, so a
+    field missing from the payload means the writer was not the serializer; a
+    defaulted field can answer that with its own default, and a required one
+    cannot, so it raises. That is what turns a producer that stopped writing a
+    field into a loud failure here rather than a response quietly missing it.
+    """
+    # The one cast in this module, and it is a limitation of the checker rather
+    # than a gap in the contract: pyright cannot call a value whose type is a
+    # TypeVar bound to the class parameter. What comes back IS `cls`, built from
+    # its own fields, with ``__post_init__`` having already validated them.
+    return cast(_ResultT, _rebuild_dataclass(cls, payload))
 
 
 def _to_jsonable(value: Any) -> Any:

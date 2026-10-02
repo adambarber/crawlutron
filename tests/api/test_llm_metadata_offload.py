@@ -15,26 +15,33 @@ from app.api.response_shaping import (
     abuild_unified_result,
     aformat_crawl_item,
     build_unified_crawl_response,
+    build_unified_result,
 )
+from app.models import EngineCrawlResult
 from tests._assertions import install_to_thread_spy
+from tests._result_builders import engine_result
 
 
-def _html_item(i: int = 0) -> dict:
+def _html_item(i: int = 0) -> EngineCrawlResult:
+    """A real engine result carrying the HTML and markdown this suite parses.
+
+    A dict here would not have been a shorthand: the formatter reads declared
+    attributes, so a dict made the offload test pass through the ``except``
+    arm rather than the parse it claims to measure.
+    """
     html = (
         f"<html><head><title>Page {i}</title>"
         '<meta name="description" content="desc here">'
         "</head><body><p>Body text here</p></body></html>"
     )
-    return {
-        "original_url": f"http://example.com/{i}",
-        "normalized_url": f"http://example.com/{i}",
-        "final_url": f"http://example.com/{i}",
-        "status": "success",
-        "classification": "rendered",
-        "html": html,
-        "markdown": "# Body text here",
-        "text": "Body text here",
-    }
+    return engine_result(
+        f"http://example.com/{i}",
+        "rendered",
+        html=html,
+        markdown="# Body text here",
+        text="Body text here",
+        final_url=f"http://example.com/{i}",
+    )
 
 
 async def test_aformat_crawl_item_offloads_metadata_parse(monkeypatch):
@@ -94,7 +101,7 @@ async def test_abuild_unified_crawl_response_matches_sync():
         items, options=EnvelopeOptions(request_id="r", policy_schema_version="v")
     )
     async_ = await abuild_unified_crawl_response(
-        items, options=EnvelopeOptions(request_id="r", policy_schema_version="v")
+        items, adapt=build_unified_result, options=EnvelopeOptions(request_id="r", policy_schema_version="v")
     )
     assert async_.model_dump() == sync.model_dump()
 
@@ -114,7 +121,7 @@ async def test_sync_and_async_envelope_builders_agree_on_the_submitted_count(sub
         items, options=EnvelopeOptions(request_id="r", submitted_count=submitted)
     )
     async_ = await abuild_unified_crawl_response(
-        items, options=EnvelopeOptions(request_id="r", submitted_count=submitted)
+        items, adapt=build_unified_result, options=EnvelopeOptions(request_id="r", submitted_count=submitted)
     )
     assert async_.model_dump() == sync.model_dump()
     # None means "the caller could not say", which the wire answers as the
@@ -130,8 +137,22 @@ async def test_abuild_unified_result_single_item_matches_sync():
     assert (await abuild_unified_result(item)).model_dump() == build_unified_result(item).model_dump()
 
 
+async def _empty_batch_response(monkeypatch=None):
+    """The empty batch, through the same door both empty-batch tests use.
+
+    One helper so the two tests below cannot drift into asserting different
+    things about the same call: one pins the response, one pins the offload
+    count, and a rewritten call would silently change what the other proves.
+    """
+    if monkeypatch is not None:
+        install_to_thread_spy(monkeypatch)
+    return await abuild_unified_crawl_response(
+        [], adapt=build_unified_result, options=EnvelopeOptions(request_id="r")
+    )
+
+
 async def test_async_response_empty_results():
-    resp = await abuild_unified_crawl_response([], options=EnvelopeOptions(request_id="r"))
+    resp = await _empty_batch_response()
     assert resp.results == []
     assert resp.request_id == "r"
 
@@ -147,7 +168,7 @@ async def test_abuild_unified_crawl_response_batches_into_one_offload(monkeypatc
     items = [_html_item(i) for i in range(4)]
     offloaded = install_to_thread_spy(monkeypatch)
     resp = await abuild_unified_crawl_response(
-        items, options=EnvelopeOptions(request_id="r", policy_schema_version="v")
+        items, adapt=build_unified_result, options=EnvelopeOptions(request_id="r", policy_schema_version="v")
     )
     assert len(resp.results) == len(items)
     assert len(offloaded) == 1, f"expected one batched offload, got {len(offloaded)}"
@@ -156,6 +177,6 @@ async def test_abuild_unified_crawl_response_batches_into_one_offload(monkeypatc
 async def test_abuild_batches_offload_for_empty_results(monkeypatch):
     """An empty batch offloads nothing and still answers the empty response."""
     offloaded = install_to_thread_spy(monkeypatch)
-    resp = await abuild_unified_crawl_response([], options=EnvelopeOptions(request_id="r"))
+    resp = await _empty_batch_response()
     assert resp.results == []
     assert len(offloaded) <= 1, f"empty batch must not fan out: {len(offloaded)}"

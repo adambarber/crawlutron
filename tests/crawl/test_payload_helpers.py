@@ -135,8 +135,8 @@ class TestMaxContentLengthBytesActuallyEnforced:
             settings=settings,
         )
         item = result["results"][0]
-        assert item["status"] == "failed"
-        assert item["http_status"] == 413
+        assert item.status == "failed"
+        assert item.http_status == 413
 
 
 class TestPayloadHelpersEdges:

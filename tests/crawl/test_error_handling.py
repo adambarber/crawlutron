@@ -6,7 +6,7 @@ distinct, re-queueable classification rather than a generic network failure.
 """
 
 import inspect
-from dataclasses import asdict
+from dataclasses import asdict, replace
 
 import httpx
 import pytest
@@ -178,18 +178,10 @@ def _budget_item() -> dict:
         known_classification="url_budget_exceeded",
         extra_diagnostics={"url_budget_seconds": 30},
     )
-    return {
-        "original_url": "https://a.example/slow",
-        "normalized_url": "https://a.example/slow",
-        "final_url": "https://a.example/slow",
-        "status": "failed",
-        "classification": result.classification,
-        "selected_strategy": None,
-        "attempted_strategies": [asdict(attempt) for attempt in result.attempted_strategies],
-        "error": result.error,
-        "http_status": None,
-        "headers": {},
-    }
+    # The engine result itself, not a dict re-typed from it: this builder used
+    # to spell the record a second time, which is the same drift this whole
+    # change removed, in the test that asserts the degradation.
+    return result
 
 
 class TestCallWorkerExecutesOnce:
@@ -229,19 +221,25 @@ class TestShapeAllGuardsPerItem:
         from app.api.response_shaping import (
             EnvelopeOptions,
             abuild_unified_crawl_response,
+            build_unified_result,
         )
 
         good = _budget_item()
-        bad = {**good, "status": "not-a-real-status"}
-        # The item is NOT unshapable: `_coerce_status` reads a value outside the
-        # taxonomy as `failed` rather than raising, on purpose. This test used to
-        # assert that shaping raised, via a `raise AssertionError` that the
-        # `except Exception: pass` on the next line swallowed -- so it verified
-        # nothing, and would have kept passing if shaping had broken. The
-        # degradation is asserted below, against the real response.
+        bad = replace(good, classification_evidence=[{"detail": object()}])
+        # The bad item is a real result whose OPEN payload the wire model
+        # rejects, so shaping genuinely raises on it. It used to be a dict with
+        # an out-of-taxonomy status, back when `_coerce_status` read one as
+        # `failed` instead of raising -- which this test also once hid, by
+        # asserting through a `raise AssertionError` that the `except
+        # Exception: pass` on the next line swallowed. A record cannot carry an
+        # out-of-taxonomy status at all now; the guard's job moved to the field
+        # that is still unvalidated, and the degradation is asserted below
+        # against the real response.
 
         response = await abuild_unified_crawl_response(
-            [good, bad], options=EnvelopeOptions(request_id="r", submitted_count=2)
+            [good, bad],
+            adapt=build_unified_result,
+            options=EnvelopeOptions(request_id="r", submitted_count=2),
         )
         assert len(response.results) == 2
         assert response.results[0].classification == "url_budget_exceeded"

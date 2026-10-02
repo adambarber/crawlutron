@@ -258,11 +258,6 @@ DECLARED: dict[str, Declaration] = {
         "Not yet triaged.\n",
         ["test"],
     ),
-    "app.api.response_shaping._shape_all": _d(
-        "unreviewed",
-        "Not yet triaged.\n",
-        ["test"],
-    ),
     "app.api.webhooks._max_webhook_size": _d(
         "unreviewed",
         "Not yet triaged.\n",

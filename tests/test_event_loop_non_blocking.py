@@ -453,7 +453,7 @@ class TestSpillAssemblyOffTheEventLoop:
             f"the event loop made {observed[0]} heartbeat ticks while the spilled results were read back"
         )
         assert len(out["results"]) == 1
-        assert out["results"][0]["original_url"] == "http://example.com/"
+        assert out["results"][0].original_url == "http://example.com/"
 
     def test_read_of_superseded_bytes_does_not_enter_the_mirror(self, monkeypatch, tmp_path) -> None:
         """The envelope read runs off the lock, so only a read that still

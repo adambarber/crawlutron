@@ -13,10 +13,11 @@ from __future__ import annotations
 from typing import Any
 
 from app.api.response_shaping import frontier_link_url
+from app.crawl.result_record import ProducerEnvelope
 from app.validation import HostPolicy, safe_public_url_or_none
 
 
-def build_site_map(crawl_response: dict[str, Any], *, host_policy: HostPolicy) -> dict[str, Any]:
+def build_site_map(crawl_response: ProducerEnvelope, *, host_policy: HostPolicy) -> dict[str, Any]:
     """Aggregate discovered URLs from a crawl response into a site map.
 
     Returns a dict with:
@@ -29,13 +30,13 @@ def build_site_map(crawl_response: dict[str, Any], *, host_policy: HostPolicy) -
 
     The function is pure and defensive about the link shape (dict or dataclass).
     """
-    results = crawl_response.get("results") or []
-    result: dict[str, Any] = results[0] if results else {}
-    diagnostics = result.get("diagnostics") or {}
+    results = crawl_response["results"]
+    result = results[0] if results else None
+    diagnostics = result.diagnostics if result is not None else {}
     robots = diagnostics.get("robots") or {}
     discovery = diagnostics.get("discovery") or {}
 
-    root_url = result.get("final_url") or result.get("original_url") or ""
+    root_url = (result.final_url or result.original_url) if result is not None else ""
 
     def _normalize(u: str | None) -> str | None:
         """Canonicalize every emitted URL (sorts query params, strips
@@ -51,7 +52,7 @@ def build_site_map(crawl_response: dict[str, Any], *, host_policy: HostPolicy) -
         return str(normalized) if normalized is not None else None
 
     links: list[str] = []
-    for link in result.get("discovered_links", []) or []:
+    for link in result.discovered_links if result is not None else ():
         url = _normalize(
             frontier_link_url(
                 link,
@@ -86,7 +87,7 @@ def build_site_map(crawl_response: dict[str, Any], *, host_policy: HostPolicy) -
             all_urls.append(u)
 
     return {
-        "url": result.get("final_url") or result.get("original_url"),
+        "url": root_url or None,
         "links": sorted(set(links)),
         "sitemaps": sorted(set(sitemaps + sitemap_urls)),
         "feeds": sorted(set(feeds)),

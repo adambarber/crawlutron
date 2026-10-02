@@ -22,6 +22,8 @@ These tests pin the lxml counts as CEILINGS; a new call site or a
 duplicated parse inside a stage fails here rather than in a perf profile.
 """
 
+from dataclasses import replace
+
 import pytest
 
 from tests._fetcher_factories import run_http_strategy, scripted_fetcher
@@ -101,7 +103,7 @@ async def test_engine_computes_metadata_once_from_the_discovery_tree(parse_budge
 
 
 async def test_shaping_never_reparses_engine_produced_items(parse_budget):
-    """The shaping ceiling for engine items went 1 -> 0: it reads the dict."""
+    """The shaping ceiling for engine items went 1 -> 0: it reads the record."""
     import json
 
     from app.api.response_shaping import format_crawl_item
@@ -109,9 +111,11 @@ async def test_shaping_never_reparses_engine_produced_items(parse_budget):
     from app.models import to_dict
 
     result = await _run({"limits": {"max_depth": 1}}, html=META_HTML)
-    item = to_dict(result) | {"markdown": result.markdown or "# hello"}
-    # The carried payload crosses the persistence boundary as plain JSON.
-    json.dumps(item)
+    item = replace(result, markdown=result.markdown or "# hello")
+    # The carried payload still has to survive the persistence boundary as plain
+    # JSON -- that is what the spill writes, and this is the assertion that the
+    # carried block is serializable at all.
+    json.dumps(to_dict(item))
     parse_budget.mark()
     _markdown, metadata = format_crawl_item(item)
     assert parse_budget.parses == 0, "shaping rebuilt an lxml tree from the carried item"
@@ -127,11 +131,10 @@ async def test_engine_item_without_a_tree_still_shapes_once(parse_budget):
     budget (test_single_shot_parses_no_tree), so the fallback stays.
     """
     from app.api.response_shaping import format_crawl_item
-    from app.models import to_dict
 
     result = await _run({}, html=META_HTML)
     assert result.llm_metadata is None  # no tree existed to read from
-    item = to_dict(result) | {"markdown": "# hello"}
+    item = replace(result, markdown="# hello")
     parse_budget.mark()
     _markdown, metadata = format_crawl_item(item)
     assert parse_budget.parses == 1
@@ -141,10 +144,9 @@ async def test_engine_item_without_a_tree_still_shapes_once(parse_budget):
 async def test_carried_metadata_never_reaches_the_wire():
     """The wire shape is unchanged: llm_metadata is an internal field."""
     from app.api.response_shaping import build_unified_result
-    from app.models import to_dict
 
     result = await _run({"limits": {"max_depth": 1}}, html=META_HTML)
-    unified = build_unified_result(to_dict(result))
+    unified = build_unified_result(result)
     dumped = unified.model_dump()
     assert "llm_metadata" not in dumped
     # ...and its metadata is the SAME wire surface the old reparse produced.

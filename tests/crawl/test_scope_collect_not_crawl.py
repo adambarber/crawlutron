@@ -63,8 +63,8 @@ def _recorded_discovered(out: dict, root_url: str = "http://example.com") -> set
     URL, and a comprehension that keeps whole records instead of URLs, which
     passes for every host and fails for exactly one.
     """
-    root = next(r for r in out["results"] if r["normalized_url"] == root_url)
-    return {d["normalized_url"] for d in root["discovered_links"]}
+    root = next(r for r in out["results"] if r.normalized_url == root_url)
+    return {d.normalized_url for d in root.discovered_links}
 
 
 async def test_scope_records_out_of_scope_links_but_never_fetches_them():
@@ -82,7 +82,7 @@ async def test_scope_records_out_of_scope_links_but_never_fetches_them():
         limits={"max_depth": 1, "max_pages": 10},
         scope_regex=r"^https?://example\.com(/|$)",
     )
-    crawled = {r["normalized_url"] for r in out["results"]}
+    crawled = {r.normalized_url for r in out["results"]}
     # expansion stayed in scope...
     assert crawled == {"http://example.com", "http://example.com/keep/x"}
     # ...and instagram was never fetched
@@ -103,7 +103,7 @@ async def test_skip_list_hosts_recorded_but_never_enqueued():
         "/local": (200, "<html>l</html>", "text/html"),
     }
     out, fetched = await _crawl_example_site(pages)
-    crawled = {r["normalized_url"] for r in out["results"]}
+    crawled = {r.normalized_url for r in out["results"]}
     assert crawled == {"http://example.com", "http://example.com/local"}
     assert not any("pinterest.com" in u or "x.com/" in u for u in fetched), fetched
     recorded = _recorded_discovered(out)
@@ -115,7 +115,7 @@ async def test_document_urls_recorded_but_not_fetched_by_default():
     # PDFs/CSVs/etc yield no HTML links: record their URLs when advertised,
     # but never spend bandwidth downloading them during URL discovery.
     out, fetched = await _crawl_example_site(_doc_pages())
-    crawled = {r["normalized_url"] for r in out["results"]}
+    crawled = {r.normalized_url for r in out["results"]}
     assert crawled == {"http://example.com", "http://example.com/local"}
     assert not any(u.endswith(".pdf") for u in fetched)
     assert "http://example.com/reports/2024-minutes.pdf" in _recorded_discovered(out)
@@ -127,7 +127,7 @@ async def test_document_urls_fetched_when_extraction_document_requested():
         {**_doc_pages(), "/reports/2024-minutes.pdf": (200, "%PDF-1.4 minutes", "application/pdf")},
         extraction="document",
     )
-    crawled = {r["normalized_url"] for r in out["results"]}
+    crawled = {r.normalized_url for r in out["results"]}
     assert "http://example.com/reports/2024-minutes.pdf" in crawled
 
 

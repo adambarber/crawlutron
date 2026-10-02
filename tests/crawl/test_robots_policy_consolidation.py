@@ -52,7 +52,7 @@ async def test_job_fetch_populates_cache_seen_by_engine():
         {"url": "https://shared.test/public", "policy": _policy()},
         http_fetcher=make_html_fetcher(page_calls),
     )
-    assert result["results"][0]["status"] == "success"
+    assert result["results"][0].status == "success"
     assert fetch_calls == 1
     assert robots_cache.get(("https://shared.test", HostPolicy.unrestricted())) == (
         [(False, "/private")],
@@ -69,7 +69,7 @@ async def test_engine_fetch_populates_cache_seen_by_job_path():
         {"url": "https://reverse.test/public", "policy": _policy()},
         http_fetcher=make_html_fetcher(engine_calls),
     )
-    assert result["results"][0]["status"] == "success"
+    assert result["results"][0].status == "success"
     assert sum(url.endswith("/robots.txt") for url in engine_calls) == 1
 
     async def unexpected_decode(*args):
@@ -170,8 +170,8 @@ async def test_respect_false_does_not_fetch_robots_even_when_discovery_requests_
         },
         http_fetcher=make_html_fetcher(calls),
     )
-    assert result["results"][0]["status"] == "success"
-    robots_diagnostics = result["results"][0]["diagnostics"]["robots"]
+    assert result["results"][0].status == "success"
+    robots_diagnostics = result["results"][0].diagnostics["robots"]
     assert robots_diagnostics["evaluation"] == "disabled"
     assert robots_diagnostics["reused_from_engine"] is False
     assert robots_diagnostics["sitemaps"] == []

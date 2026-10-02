@@ -25,7 +25,11 @@ from typing import Any
 
 from app.api.crawl_executor import execute_crawl
 from app.api.job_runner import arecord_terminal_failure
-from app.api.response_shaping import EnvelopeOptions, abuild_unified_crawl_response
+from app.api.response_shaping import (
+    EnvelopeOptions,
+    abuild_unified_crawl_response,
+    build_unified_result,
+)
 from app.crawl.job_store import TERMINAL_STATUSES, JobStatus
 from app.metrics import get_metrics
 from app.settings import CrawlerSettings
@@ -121,6 +125,7 @@ async def run_async_crawl(
             get_metrics().observe_crawl(results=result.get("results", []))
             response_model = await abuild_unified_crawl_response(
                 result.get("results", []),
+                adapt=build_unified_result,
                 options=EnvelopeOptions(
                     request_id=request_id,
                     submitted_count=result.get("submitted_count"),
@@ -217,7 +222,9 @@ async def run_async_crawl(
             with contextlib.suppress(Exception):
                 error_payload = (
                     await abuild_unified_crawl_response(
-                        [], options=EnvelopeOptions(request_id=request_id, success=False)
+                        [],
+                        options=EnvelopeOptions(request_id=request_id, success=False),
+                        adapt=build_unified_result,
                     )
                 ).model_dump()
                 from app.api.webhooks import post_webhook

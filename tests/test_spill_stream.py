@@ -7,6 +7,19 @@ import os
 import time
 
 from app.crawl.engine import _ResultSpill
+from app.models import to_dict
+from tests._result_builders import engine_result
+
+
+def _spilled(index: int) -> str:
+    """One real spill line: ``to_dict`` of a real result, under ``_ResultSpill``.
+
+    The spill's contract is that what ``write`` serialized comes back equal, and
+    ``load_ordered`` rebuilds through ``from_wire``. A toy payload cannot
+    exercise that -- it failed the rebuild rather than testing the ordering --
+    so the line is built from the production pair.
+    """
+    return json.dumps({"i": index, "r": to_dict(engine_result(f"https://spill.test/{index}", "rendered"))})
 
 
 class TestLoadOrderedContract:
@@ -16,9 +29,11 @@ class TestLoadOrderedContract:
         spill = _ResultSpill()
         try:
             for i in (5, 0, 3, 1, 4, 2):
-                spill._fh.write(json.dumps({"i": i, "r": {"n": i}}) + "\n")
+                spill._fh.write(_spilled(i) + "\n")
             spill.count = 6
-            assert spill.load_ordered() == [{"n": i} for i in range(6)]
+            assert [r.original_url for r in spill.load_ordered()] == [
+                f"https://spill.test/{i}" for i in range(6)
+            ]
         finally:
             spill.close()
 
@@ -26,10 +41,14 @@ class TestLoadOrderedContract:
         spill = _ResultSpill()
         try:
             for i in (0, 2, 9):
-                spill._fh.write(json.dumps({"i": i, "r": {"n": i}}) + "\n")
+                spill._fh.write(_spilled(i) + "\n")
             spill.count = 3
             out = spill.load_ordered()
-            assert [r["n"] for r in out] == [0, 2, 9]
+            assert [r.original_url for r in out] == [
+                "https://spill.test/0",
+                "https://spill.test/2",
+                "https://spill.test/9",
+            ]
         finally:
             spill.close()
 
@@ -151,13 +170,13 @@ class TestGcNeverUnlinksASpillStillInUse:
     def test_a_live_spill_survives_a_sweep_that_would_otherwise_collect_it(self):
         spill = _ResultSpill()
         try:
-            spill._fh.write(json.dumps({"i": 0, "r": {"n": 0}}) + "\n")
+            spill._fh.write(_spilled(0) + "\n")
             self._age(spill.path, 7200)
 
             spill._gc_stale_spills(1.0)
 
             assert os.path.exists(spill.path), "GC unlinked a spill still in use"
-            assert spill.load_ordered() == [{"n": 0}]
+            assert [r.original_url for r in spill.load_ordered()] == ["https://spill.test/0"]
         finally:
             spill.close()
 
@@ -168,7 +187,7 @@ class TestGcNeverUnlinksASpillStillInUse:
         # Close() unlinks an owned spill, so recreate one to stand in for a
         # spill abandoned by a worker that died without closing it.
         with open(path, "w", encoding="utf-8") as handle:
-            handle.write('{"i":0,"r":{}}\n')
+            handle.write('{"i":0}\n')
         self._age(path, 7200)
         try:
             _ResultSpill()._gc_stale_spills(1.0)
@@ -181,10 +200,10 @@ class TestGcNeverUnlinksASpillStillInUse:
         live = _ResultSpill()
         abandoned = _ResultSpill()
         live_path, abandoned_path = live.path, abandoned.path
-        live._fh.write(json.dumps({"i": 0, "r": {"n": 0}}) + "\n")
+        live._fh.write(_spilled(0) + "\n")
         abandoned.close()
         with open(abandoned_path, "w", encoding="utf-8") as handle:
-            handle.write('{"i":0,"r":{}}\n')
+            handle.write('{"i":0}\n')
         self._age(live_path, 7200)
         self._age(abandoned_path, 7200)
         try:
@@ -213,7 +232,7 @@ class TestGcNeverUnlinksASpillStillInUse:
         path = seed.path
         seed.close()
         with open(path, "w", encoding="utf-8") as handle:
-            handle.write('{"i":0,"r":{}}\n')
+            handle.write('{"i":0}\n')
         foreign = open(path, "r+", encoding="utf-8")
         try:
             fcntl.flock(foreign.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)

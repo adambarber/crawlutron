@@ -11,10 +11,11 @@ shape, and the tree-wide guards in ``tests/invariants/test_result_shape.py`` kee
 that way. These tests pin the two properties that made the move worth making.
 """
 
-from app.api.response_shaping import aunified_response_from_result, render_result_to_unified
+from app.api.response_shaping import arender_response_from_result, aunified_response_from_result
 from app.api_models import POLICY_SCHEMA_VERSION
 from tests._browser_doubles import _fake_browser
 from tests._render_producer import render_stub_request
+from tests._result_builders import engine_result
 
 #: The engine's envelope, which is the shape the crawl producer emits.
 CRAWL_ENVELOPE = {
@@ -22,8 +23,8 @@ CRAWL_ENVELOPE = {
     "submitted_count": 2,
     "policy_schema_version": "v-engine",
     "results": [
-        {"original_url": "http://example.com/a", "status": "success", "classification": "rendered"},
-        {"original_url": "http://example.com/b", "status": "failed", "classification": "not_found"},
+        engine_result("http://example.com/a", "rendered"),
+        engine_result("http://example.com/b", "not_found"),
     ],
 }
 
@@ -48,7 +49,7 @@ async def test_render_producer_stamps_the_envelope_the_adapter_reads():
 async def test_the_owner_reports_each_producers_own_version():
     """One adapter, two producers: the version on the wire is the one the
     producer stamped, for render and for crawl alike."""
-    rendered = await aunified_response_from_result(await _render_envelope(), adapt=render_result_to_unified)
+    rendered = await arender_response_from_result(await _render_envelope())
     assert rendered.policy_schema_version == POLICY_SCHEMA_VERSION
     assert rendered.submitted_count == 1
 
@@ -91,7 +92,7 @@ async def test_no_browser_metadata_key_is_dropped_between_worker_and_wire():
         {"url": "http://127.0.0.1:1/x"},
         worker=_fake_browser(metadata={key: f"v-{key}" for key in _BROWSER_METADATA_KEYS}),
     )
-    item = (await aunified_response_from_result(envelope, adapt=render_result_to_unified)).results[0]
+    item = (await arender_response_from_result(envelope)).results[0]
 
     populated = {key for key, value in item.metadata.model_dump().items() if value is not None}
     surfaced = set(item.diagnostics) | populated

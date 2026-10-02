@@ -40,4 +40,4 @@ class TestHttpBodyHandling:
             {"url": base_url + "/", "policy": {"strategies": ["HTTP_CFFI_IMPERSONATE"]}},
             cache=HttpCache(),
         )
-        assert result["results"][0]["status"] == "success"
+        assert result["results"][0].status == "success"

@@ -15,7 +15,7 @@ from fastapi import HTTPException
 from app.api.exceptions import browser_pool_unavailable, http_error
 from app.api.main_helpers import request_gate
 from app.api.render import render_request
-from app.api.response_shaping import aunified_response_from_result, render_result_to_unified
+from app.api.response_shaping import arender_response_from_result
 from app.api_models import (
     RenderRequest,
 )
@@ -68,10 +68,11 @@ async def render(payload: RenderRequest, settings: CrawlerSettings) -> UnifiedCr
             extra={"url_count": len(result.get("results", []))},
         )
         # The render results go through the SAME per-item shape guard
-        # /v1/crawl uses (``render_result_to_unified`` reaches it as the
-        # adaptation step), so a result dict the adapter cannot read degrades
+        # /v1/crawl uses (``arender_response_from_result`` passes
+        # ``render_result_to_unified`` as the adaptation step), so a result the
+        # adapter cannot read degrades
         # to a terminal failure for that item instead of 500ing the response.
-        return await aunified_response_from_result(result, adapt=render_result_to_unified)
+        return await arender_response_from_result(result)
 
 
 __all__ = ["render"]

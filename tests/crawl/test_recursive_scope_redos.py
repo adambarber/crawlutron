@@ -60,7 +60,7 @@ async def test_recursive_scope_regex_timeout_fails_closed(monkeypatch):
     pages = site_linking_to("/a", "/b")
     out = await crawled_results(pages, limits=LINKED_PAIR_LIMITS, policy={"scope_regex": r"^/keep/"})
     assert calls["n"] > 0, "bounded match never invoked"
-    urls = {r["normalized_url"] for r in out["results"]}
+    urls = {r.normalized_url for r in out["results"]}
     assert "http://example.com" in urls
     assert "http://example.com/a" not in urls
     assert "http://example.com/b" not in urls

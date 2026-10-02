@@ -438,7 +438,7 @@ async def test_engine_throttles_batches_under_pressure(monkeypatch, cpu_ratio, m
     exercised; the other resource is pinned idle so only the named one drives
     the throttle."""
     out, waits = await _crawl_under_pressure(monkeypatch, cpu_ratio=cpu_ratio, memory_ratio=memory_ratio)
-    assert {r["normalized_url"] for r in out["results"]} == {
+    assert {r.normalized_url for r in out["results"]} == {
         "http://example.com",
         "http://example.com/a",
     }

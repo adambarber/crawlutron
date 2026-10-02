@@ -119,14 +119,14 @@ async def test_engine_routes_validators_by_url():
         "validators": {"http://example.com/etagged": {"if_none_match": '"v9"'}},
     }
     response = await crawl_request(payload2, http_fetcher=make_fetcher())
-    results = {r["normalized_url"]: r for r in response["results"]}
+    results = {r.normalized_url: r for r in response["results"]}
     assert len(results) == 2
     # Plain URL fetched fully (no conditional header).
     assert "If-None-Match" not in seen_headers["/plain"]
     # Etagged URL revalidated conditionally -> 304 -> not_modified.
     assert seen_headers["/etagged"]["If-None-Match"] == '"v9"'
-    plain_status = [r for u, r in results.items() if u.endswith("/plain")][0]
-    assert plain_status["status"] == "success"
+    plain = [r for u, r in results.items() if u.endswith("/plain")][0]
+    assert plain.status == "success"
 
 
 async def test_real_server_conditional_roundtrip(base_url):
@@ -136,9 +136,9 @@ async def test_real_server_conditional_roundtrip(base_url):
     url = f"{base_url}/with_etag"
     first = await run_crawl_async({"url": url})
     r1 = first["results"][0]
-    assert r1["status"] == "success"
-    assert r1["validators"]["etag"], r1.get("validators")
-    etag = r1["validators"]["etag"]
+    assert r1.status == "success"
+    assert r1.validators["etag"], r1.validators
+    etag = r1.validators["etag"]
 
     second = await run_crawl_async(
         {
@@ -147,9 +147,9 @@ async def test_real_server_conditional_roundtrip(base_url):
         }
     )
     r2 = second["results"][0]
-    assert r2["status"] == "success"
-    assert r2["classification"] == "not_modified"
-    assert r2["http_status"] == 304
+    assert r2.status == "success"
+    assert r2.classification == "not_modified"
+    assert r2.http_status == 304
 
 
 def test_validators_conflict_with_policy_headers_rejected():

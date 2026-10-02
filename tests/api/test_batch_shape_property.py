@@ -1,6 +1,6 @@
 """Batch-shape resilience property.
 
-``_shape_all`` reshapes each item inside a per-item guard so one poison item
+The response builders reshape each item inside a per-item guard so one poison item
 cannot 500 the batch. The original defect had two halves: a bare except
 swallowed the exception with NO logging, and a healthy item could end up
 silently reclassified to ``site_error``. These property-style tests pin the
@@ -13,17 +13,24 @@ declared taxonomy members, and every poison degradation is logged.
 from __future__ import annotations
 
 import random
+from dataclasses import replace
 from typing import Any
 
 from app.api.response_shaping import (
     EnvelopeOptions,
-    _shape_all,
     abuild_unified_crawl_response,
     build_unified_crawl_response,
+    build_unified_result,
     render_result_to_unified,
 )
 from app.api_models import CrawlStatus
-from app.constants import CrawlClassification, status_for_classification
+from app.constants import (
+    HTTP_DECLARED_CRAWLER,
+    CrawlClassification,
+    status_for_classification,
+)
+from app.models import CrawlResult, EngineCrawlResult
+from tests._result_builders import engine_result
 
 SEEDS = range(12)
 BATCH_MIN, BATCH_MAX = 1, 12
@@ -42,7 +49,7 @@ HEALTHY_CLASSIFICATIONS = (
     "robots_disallowed",
 )
 
-POISON_KINDS = ("missing_keys", "wrong_types", "boom_mapping", "none", "scalar")
+POISON_KINDS = ("not_a_result", "boom_mapping", "bad_evidence", "bad_validators", "none", "scalar")
 
 
 class _BoomMapping(dict):
@@ -52,55 +59,70 @@ class _BoomMapping(dict):
         raise RuntimeError("model_dump exploded")
 
 
-def _healthy(index: int, classification: str) -> dict[str, Any]:
-    status = CrawlStatus(status_for_classification(classification))
+def _healthy(index: int, classification: str) -> EngineCrawlResult:
+    """A real engine result: what the pipeline actually hands the shaper.
+
+    Built through the record rather than spelled as a dict, because the dict form
+    was only ever admissible while the shaper read untyped keys. The property
+    below is still meaningful here -- it is now about what can go wrong AT the
+    shaping boundary, not about a shape no producer can emit.
+    """
     url = f"https://ok.example/page{index}"
-    item: dict[str, Any] = {
-        "original_url": url,
-        "normalized_url": url,
-        "final_url": url,
-        "status": status.value,
-        "classification": classification,
-        "selected_strategy": "HTTP_DECLARED_CRAWLER",
-        "attempted_strategies": [],
-        "error": None if status is CrawlStatus.success else "deterministic failure",
-        "http_status": 200,
-        "headers": {},
-        "text": f"body {index}",
-    }
-    if status is CrawlStatus.success:
-        item["markdown"] = f"# Page {index}"
-        item["html"] = f"<html><head><title>Page {index}</title></head><body>hi</body></html>"
-    return item
+    success = status_for_classification(classification) == "success"
+    return engine_result(
+        url,
+        classification,
+        final_url=url,
+        selected_strategy=HTTP_DECLARED_CRAWLER,
+        # A declared CrawlError member, not a free-form string: the record
+        # refuses an error outside its own Literal, which is a check the dict
+        # form never got and this property never asked for.
+        error=None if success else classification,
+        http_status=200,
+        text=f"body {index}",
+        markdown=f"# Page {index}" if success else None,
+        html=f"<html><head><title>Page {index}</title></head><body>hi</body></html>" if success else None,
+    )
 
 
-def _healthy_render(index: int) -> dict[str, Any]:
-    """A browser ``CrawlResult`` dict: the shape /v1/render feeds ``adapt``."""
+def _healthy_render(index: int) -> CrawlResult:
+    """A real browser ``CrawlResult``: the record /v1/render feeds ``adapt``."""
     url = f"https://ok.example/render{index}"
-    return {
-        "url": url,
-        "final_url": url,
-        "status": "success",
-        "classification": "rendered",
-        "elapsed_ms": 25,
-        "error": None,
-        "html": f"<html><head><title>R{index}</title></head><body>x</body></html>",
-        "text": "x",
-        "metadata": {"title": f"R{index}", "browser_reused": True},
-    }
+    return CrawlResult(
+        url=url,
+        status="success",
+        classification="rendered",
+        final_url=url,
+        html=f"<html><head><title>R{index}</title></head><body>x</body></html>",
+        text="x",
+        attempts=1,
+        elapsed_ms=25,
+        domain="ok.example",
+        metadata={"title": f"R{index}", "browser_reused": True},
+    )
 
 
 def _poison(kind: str, index: int) -> Any:
-    if kind == "missing_keys":
+    """Something the per-item guard has to absorb.
+
+    The set shrank when results became records, and that shrinkage IS the
+    finding: ``missing_keys`` and ``wrong_types`` are no longer constructible,
+    because a field the producer stops writing now fails its constructor and a
+    field of the wrong type is refused before shaping sees it. What survives is
+    what the shaper itself can still be handed wrongly -- an object that is not a
+    result at all, one that explodes on the first attribute read, and two records
+    whose OPEN payloads (``classification_evidence``, ``validators``) carry
+    values the wire models reject. Those are still ``dict[str, Any]`` by
+    declaration, which is why they are still reachable.
+    """
+    if kind == "not_a_result":
         return {}
-    if kind == "wrong_types":
-        bad = _healthy(index, "rendered")
-        bad["headers"] = "not-a-dict"
-        bad["attempted_strategies"] = "not-a-list"
-        bad["discovered_links"] = 5
-        return bad
     if kind == "boom_mapping":
         return _BoomMapping()
+    if kind == "bad_evidence":
+        return replace(_healthy(index, "rendered"), classification_evidence=[{"detail": 42}])
+    if kind == "bad_validators":
+        return replace(_healthy(index, "rendered"), validators={"etag": {"not": "a string"}})
     if kind == "none":
         return None
     return 42
@@ -153,9 +175,9 @@ def _check_shaped(shaped: list[Any], expected: list[tuple[str, str] | None]) -> 
 
 
 class TestBatchShapeProperty:
-    """The randomized batch survives _shape_all with its healthy items intact."""
+    """The randomized batch survives shaping with its healthy items intact."""
 
-    def test_every_seed_survives_shape_all(self):
+    def test_every_seed_survives_shaping(self):
         seen_kinds: set[str] = set()
         seen_healthy = 0
         for seed in SEEDS:
@@ -163,7 +185,7 @@ class TestBatchShapeProperty:
             batch, expected, kinds = _random_batch(rng)
             seen_kinds.update(kind for kind in kinds if kind is not None)
             seen_healthy += sum(1 for kind in kinds if kind is None)
-            shaped = _shape_all(batch)
+            shaped = build_unified_crawl_response(batch).results
             _check_shaped(shaped, expected)
         # The sweep is only meaningful if every poison strategy actually ran.
         assert seen_kinds == set(POISON_KINDS), f"poison strategies never exercised: {seen_kinds}"
@@ -182,7 +204,7 @@ class TestBatchShapeProperty:
             rng = random.Random(2000 + seed)
             batch, expected, _ = _random_batch(rng)
             response = await abuild_unified_crawl_response(
-                batch, options=EnvelopeOptions(request_id=f"r{seed}")
+                batch, adapt=build_unified_result, options=EnvelopeOptions(request_id=f"r{seed}")
             )
             _check_shaped(response.results, expected)
 
@@ -199,8 +221,8 @@ class TestBatchShapeProperty:
                 else:
                     batch.append(_poison(rng.choice(POISON_KINDS), index))
                     expected.append(None)
-            shaped = _shape_all(batch, adapt=render_result_to_unified)
-            _check_shaped(shaped, expected)
+            shaped = await abuild_unified_crawl_response(batch, adapt=render_result_to_unified)
+            _check_shaped(shaped.results, expected)
             response = await abuild_unified_crawl_response(
                 batch, adapt=render_result_to_unified, options=EnvelopeOptions(request_id=f"a{seed}")
             )
@@ -219,7 +241,7 @@ class TestPoisonDegradesLoudly:
             _BoomMapping(),
         ]
         with caplog.at_level("WARNING", logger="app.api.response_shaping"):
-            _shape_all(batch)
+            build_unified_crawl_response(batch)
         warnings = [r for r in caplog.records if r.name == "app.api.response_shaping"]
         assert len(warnings) == 4, (
             "one warning per poison item, none for healthy ones — the silent "
@@ -235,7 +257,9 @@ class TestPoisonDegradesLoudly:
         # is what "malformed" means here. A ``None`` item degrades through the
         # same ``except`` and to the same marker, but it is not an item the
         # signature admits, so the probe stays inside the contract it is pinning.
-        shaped = _shape_all([{}])
+        shaped = build_unified_crawl_response([{}]).results
         assert shaped[0].error == "result_shaping_failed"
-        shaped_url = _shape_all([{"original_url": "https://x.example/a", "status": None}])
+        # The fallback is best-effort by attribute, so a real result still
+        # reports which URL failed rather than degrading to an empty one.
+        shaped_url = build_unified_crawl_response([engine_result("https://x.example/a", "rendered")]).results
         assert shaped_url[0].original_url == "https://x.example/a"

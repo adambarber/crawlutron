@@ -209,7 +209,7 @@ class TestHttpStrategy:
         response = await crawl_homepage_async(base_url)
         assert response["submitted_count"] == 1
         assert len(response["results"]) == 1
-        assert "Example Org" in response["results"][0]["markdown"]
+        assert "Example Org" in response["results"][0].markdown
 
     async def test_js_endpoints_and_sitemap_discovery_gated_without_discovery(self):
         # The heavier discovery-only extras -- JS-endpoint extraction and the

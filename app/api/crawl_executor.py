@@ -15,6 +15,7 @@ from app.api.exceptions import browser_pool_unavailable
 from app.constants import BROWSER_STRATEGIES
 from app.crawl.engine import crawl_request
 from app.crawl.policy import read_policy
+from app.crawl.result_record import ProducerEnvelope
 from app.crawl.strategies.browser_pool import PooledBrowserWorker, get_browser_pool
 from app.settings import CrawlerSettings
 from app.validation import HostPolicy
@@ -50,7 +51,7 @@ async def execute_crawl(
     settings,
     shutdown_event: asyncio.Event | None,
     urls: list[str] | None = None,
-) -> dict[str, Any]:
+) -> ProducerEnvelope:
     """Run a crawl shared by ``/v1/crawl`` and ``/v1/map``.
 
     URL pre-validation: an invalid URL surfaces as a 422 (via the caller's

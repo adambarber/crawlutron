@@ -5,7 +5,17 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field
 
-from app.models import to_dict
+import pytest
+
+from app.constants import HTTP_DECLARED_CRAWLER
+from app.models import (
+    CrawlStrategyAttempt,
+    DiscoveredLink,
+    EngineCrawlResult,
+    from_wire,
+    to_dict,
+)
+from tests._result_builders import _link, engine_result
 
 
 @dataclass(frozen=True)
@@ -89,3 +99,89 @@ def test_to_dict_breaks_a_cyclic_sequence_graph():
 
     d = to_dict({"items": items})
     assert d == {"items": [None]}
+
+
+# ---------------------------------------------------------------------------
+# from_wire: the derived inverse, so a result's key set is spelled ONCE
+# ---------------------------------------------------------------------------
+
+
+def test_a_result_survives_the_serialization_round_trip_unchanged():
+    """Every field, including the nested records, comes back equal.
+
+    ``from_wire`` is the inverse of ``to_dict`` and is derived from the same
+    field annotations, so the pair is one declaration of a result's key set
+    rather than two spellings a detector has to hold in step. The nested
+    assertions are the load-bearing half: a rebuild that returned the raw dicts
+    would pass an equality check on the outer object and leave every consumer
+    reading attributes off a dict.
+    """
+    result = engine_result(
+        "https://example.test/a",
+        "rendered",
+        attempted_strategies=[
+            CrawlStrategyAttempt(
+                strategy=HTTP_DECLARED_CRAWLER,
+                status="success",
+                classification="rendered",
+                http_status=200,
+                content_type="text/html",
+                elapsed_ms=12,
+                error=None,
+            )
+        ],
+        discovered_links=[_link("https://example.test/b", "https://example.test/a")],
+        llm_metadata={"title": "T"},
+        validators={"etag": "W/1"},
+    )
+
+    restored = from_wire(EngineCrawlResult, to_dict(result))
+
+    assert restored == result
+    assert isinstance(restored.attempted_strategies[0], CrawlStrategyAttempt)
+    assert isinstance(restored.discovered_links[0], DiscoveredLink)
+
+
+def test_a_field_the_record_stopped_writing_is_a_construction_error():
+    """Drift fails loudly instead of arriving on the wire as an absent value.
+
+    The defect this record exists to prevent: a renamed or dropped field read
+    as its default, so a response went out missing something no test asserted.
+    A required field absent from the payload has to raise, which is what turns
+    that class of drift into a build-time signal at the spill rather than a
+    silent hole.
+    """
+    payload = to_dict(engine_result("https://example.test/a", "rendered"))
+    del payload["original_url"]
+
+    with pytest.raises(TypeError, match="original_url"):
+        from_wire(EngineCrawlResult, payload)
+
+
+def test_an_absent_field_that_has_a_default_keeps_that_default():
+    """Defaults are not a licence to skip required fields.
+
+    The asymmetry is deliberate: ``to_dict`` always writes every field, so an
+    absent one means a producer that is not the serializer, and only the
+    defaulted fields can answer that safely. A payload missing ``markdown``
+    therefore builds, and one missing ``original_url`` does not.
+    """
+    payload = to_dict(engine_result("https://example.test/a", "rendered"))
+    del payload["markdown"]
+
+    assert from_wire(EngineCrawlResult, payload).markdown is None
+
+
+def test_a_taxonomy_value_outside_the_literals_is_refused():
+    """The rebuild keeps the taxonomy check its construction already had.
+
+    ``_LiteralChecked`` runs on ``__post_init__``, so rebuilding through the real
+    constructor validates ``status``/``classification``/``error`` for free. The
+    case worth pinning is the one JSON can produce and a dataclass cannot: a
+    status string from a spill line that no producer emits.
+    """
+    payload = to_dict(engine_result("https://example.test/a", "rendered"))
+    payload["status"] = "not-a-real-status"
+
+    with pytest.raises(ValueError):
+        from_wire(EngineCrawlResult, payload)

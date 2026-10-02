@@ -22,7 +22,10 @@ keeps unit tests and offline debugging from needing a database.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from collections.abc import Sequence
+from typing import TYPE_CHECKING
+
+from app.models import EngineCrawlResult
 
 if TYPE_CHECKING:
     from app.crawl.coordination_counters import CoordinationCounters
@@ -175,7 +178,7 @@ class MetricsStore:
         self,
         *,
         accepted: bool = False,
-        results: list[dict[str, Any]] | None = None,
+        results: Sequence[EngineCrawlResult] | None = None,
         elapsed_ms: float = 0.0,
         errors: int = 0,
     ) -> None:
@@ -185,14 +188,14 @@ class MetricsStore:
         if results:
             self._add(_CRAWL_RESULTS, len(results))
             for result in results:
-                if result.get("status") == "success":
+                if result.status == "success":
                     self._add(_CRAWL_SUCCESS, 1)
                 else:
                     self._add(_CRAWL_FAILURE, 1)
-                classification = result.get("classification")
+                classification = result.classification
                 if classification:
                     self._add(_CLASSIFICATION_PREFIX + str(classification), 1)
-                strategy = result.get("selected_strategy")
+                strategy = result.selected_strategy
                 if strategy:
                     self._add(_STRATEGY_PREFIX + str(strategy), 1)
         self._add(_CRAWL_ELAPSED, elapsed_ms)

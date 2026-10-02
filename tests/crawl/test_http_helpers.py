@@ -535,7 +535,7 @@ class TestCrawlRequest:
         )
         assert fetched == ["http://example.com/a"]
         assert result["submitted_count"] == 1
-        assert result["results"][0]["status"] == "success"
+        assert result["results"][0].status == "success"
 
     async def test_invalid_url_raises(self) -> None:
         payload = {"url": "not a url", "policy": {"strategies": [HTTP_DECLARED_CRAWLER]}}
@@ -546,7 +546,7 @@ class TestCrawlRequest:
         payload = {"url": "http://example.com/", "policy": {"strategies": [HTTP_DECLARED_CRAWLER]}}
         result = await crawl_request(payload, http_fetcher=ok_fetcher, browser_worker=None)
         assert result["submitted_count"] == 1
-        assert result["results"][0]["status"] == "success"
+        assert result["results"][0].status == "success"
 
 
 class TestFetchHelperUtilities:

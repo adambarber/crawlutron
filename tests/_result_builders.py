@@ -8,6 +8,8 @@ from app.models import (
     CrawlResult,
     CrawlStrategyAttempt,
     CrawlStrategyName,
+    DiscoveredLink,
+    EngineCrawlResult,
     RenderOptions,
 )
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY
@@ -186,16 +188,23 @@ class Spill:
         return [self.writes[i] for i in sorted(self.writes)]
 
 
-def _link(url: str, source_url: str, *, normalized: str | None = None) -> dict:
-    return {
-        "url": url,
-        "normalized_url": normalized if normalized is not None else url,
-        "text": "",
-        "rel": [],
-        "source_url": source_url,
-        "host": (normalized or url).split("//", 1)[-1].split("/", 1)[0],
-        "is_same_host": True,
-    }
+def _link(url: str, source_url: str, *, normalized: str | None = None) -> DiscoveredLink:
+    """A discovered link as the record the engine carries.
+
+    A dataclass rather than the dict ``to_dict`` used to produce: the runner
+    under test now reads engine results as results, and a double that hands it
+    a dict would be testing the old wire shape instead of the behavior.
+    """
+    target = normalized if normalized is not None else url
+    return DiscoveredLink(
+        url=url,
+        normalized_url=target,
+        text="",
+        rel=[],
+        source_url=source_url,
+        host=target.split("//", 1)[-1].split("/", 1)[0],
+        is_same_host=True,
+    )
 
 
 def _canned_result(
@@ -203,20 +212,24 @@ def _canned_result(
     *,
     status: str = "success",
     links: list[str] | None = None,
-    raw_links: list[dict] | None = None,
+    raw_links: list[DiscoveredLink] | None = None,
     classification: str | None = None,
-) -> dict:
-    return {
-        "original_url": url,
-        "normalized_url": url,
-        "final_url": url,
-        "status": status,
-        "classification": classification or ("rendered" if status == "success" else "site_error"),
-        "discovered_links": [_link(link, url) for link in links or []] + (raw_links or []),
-    }
+) -> EngineCrawlResult:
+    """An ``EngineCrawlResult`` for `url`, through the one builder the suite uses.
+
+    Every field the batch tests read is real, so a runner bug that misreads a
+    result cannot hide behind a double whose shape the runner never sees.
+    """
+    return engine_result(
+        url,
+        classification or ("rendered" if status == "success" else "site_error"),
+        status=status,
+        final_url=url,
+        discovered_links=[_link(link, url) for link in links or []] + (raw_links or []),
+    )
 
 
-def _failed_result(url: str, classification: str) -> dict:
+def _failed_result(url: str, classification: str) -> EngineCrawlResult:
     """A page that failed for a named reason.
 
     The status/classification pair is the shape every requeue test drives with,
@@ -226,7 +239,9 @@ def _failed_result(url: str, classification: str) -> dict:
     return _canned_result(url, status="failed", classification=classification)
 
 
-def _flaky(url: str, *classifications: str, lands_on: dict | None = None) -> dict[str, list[dict]]:
+def _flaky(
+    url: str, *classifications: str, lands_on: EngineCrawlResult | None = None
+) -> dict[str, list[EngineCrawlResult]]:
     """A page that fails with each of these classifications in turn.
 
     ``lands_on`` is what the final attempt returns; without it the engine keeps
@@ -240,7 +255,9 @@ def _flaky(url: str, *classifications: str, lands_on: dict | None = None) -> dic
     return {url: entries}
 
 
-def _scripted_result_map(urls, *, links: dict[str, list[str]] | None = None) -> dict[str, list[dict]]:
+def _scripted_result_map(
+    urls, *, links: dict[str, list[str]] | None = None
+) -> dict[str, list[EngineCrawlResult]]:
     link_map = links or {}
     return {url: [_canned_result(url, links=link_map.get(url, []))] for url in urls}
 
@@ -249,7 +266,7 @@ GRAPH_ROOT = "http://example.test/a"
 GRAPH_CHILD = "http://example.test/b"
 
 
-def _root_child_results(root: str = GRAPH_ROOT, child: str = GRAPH_CHILD) -> list[dict]:
+def _root_child_results(root: str = GRAPH_ROOT, child: str = GRAPH_CHILD) -> list[EngineCrawlResult]:
     """The two-page graph: root discovers child, child is a leaf.
 
     The smallest graph that still exercises discovery, and the one most of the
@@ -268,7 +285,7 @@ def _root_fans_out(root: str, *children: str) -> list[dict]:
     return [_canned_result(root, links=list(children)), *(_canned_result(c) for c in children)]
 
 
-def _small_link_graph_results() -> list[dict]:
+def _small_link_graph_results() -> list[EngineCrawlResult]:
     """The four-page fixture graph, and the URLs it is made of.
 
     The URLs are named here rather than inlined at each test because the graph

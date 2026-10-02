@@ -20,6 +20,7 @@ from tests._fetcher_factories import (
     scripted_fetcher,
 )
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY, crawl_policy, normalized
+from tests._result_builders import _link, engine_result
 
 
 def _resp(status, body="", etag=None, last_modified=None, ctype="application/xml"):
@@ -380,15 +381,16 @@ def _crawl_response(original_url, links=(), *, sitemaps=(), feeds=()):
     """
     return {
         "results": [
-            {
-                "original_url": original_url,
-                "final_url": original_url,
-                "diagnostics": {
+            engine_result(
+                original_url,
+                "rendered",
+                final_url=original_url,
+                diagnostics={
                     "robots": {"sitemaps": list(sitemaps)},
                     "discovery": {"sitemap_urls": list(sitemaps), "feeds": list(feeds)},
                 },
-                "discovered_links": [{"url": link, "normalized_url": link} for link in links],
-            }
+                discovered_links=[_link(link, original_url) for link in links],
+            )
         ]
     }
 
@@ -431,7 +433,16 @@ def test_build_site_map_handles_dataclass_links():
         host="r",
         is_same_host=True,
     )
-    crawl_response = {"results": [{"final_url": "http://r/", "discovered_links": [link], "diagnostics": {}}]}
+    crawl_response = {
+        "results": [
+            engine_result(
+                "http://r/",
+                "rendered",
+                final_url="http://r/",
+                discovered_links=[link],
+            )
+        ]
+    }
     m = build_site_map(crawl_response, host_policy=UNRESTRICTED_HOST_POLICY)
     assert m["links"] == ["https://r/page"]
     assert m["all_urls"] == ["https://r/page"]

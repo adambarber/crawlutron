@@ -45,18 +45,18 @@ class TestEngineCrawlRequest:
         from tests._fetcher_factories import crawl_homepage_async
 
         response = await crawl_homepage_async(base_url)
-        assert "Example Org" in response["results"][0]["markdown"]
+        assert "Example Org" in response["results"][0].markdown
 
     async def test_crawl_request_conditional_cache_304(self, base_url):
         url = f"{base_url}/with_etag"
         result = await crawled_result(url, max_discovered_links=10, cache=cache_with_etag(url))
-        assert result["classification"] == "not_modified"
-        assert result["http_status"] == 304
+        assert result.classification == "not_modified"
+        assert result.http_status == 304
 
     async def test_crawl_request_browser_strategy_without_worker_is_browser_crash(self, base_url):
         result = await crawled_result(f"{base_url}/", strategies=[BROWSER_HEADLESS], max_discovered_links=10)
-        assert result["status"] == "failed"
-        assert result["classification"] == "browser_crash"
+        assert result.status == "failed"
+        assert result.classification == "browser_crash"
 
     @pytest.mark.browser
     @pytest.mark.skipif(not browser_available(), reason="no usable browser binary (camoufox/playwright)")
@@ -177,8 +177,8 @@ class TestEngineChainEdges:
             policy={"strategies": [BROWSER_HEADLESS], "extraction": EXTRACTION_DOCUMENT},
             browser_worker=_fake_browser(html="<html><body>doc table</body></html>"),
         )
-        assert result["status"] == "success"
-        assert "doc table" in result["markdown"] or ""
+        assert result.status == "success"
+        assert "doc table" in result.markdown or ""
 
     async def test_browser_strategy_trafilatura_extraction(self, base_url):
         result = await crawled_result(
@@ -186,7 +186,7 @@ class TestEngineChainEdges:
             policy={"strategies": [BROWSER_HEADLESS], "extraction": EXTRACTION_TRAFILATURA},
             browser_worker=_fake_browser(html="<html><body>trafilatura body</body></html>"),
         )
-        assert "trafilatura body" in result["markdown"] or ""
+        assert "trafilatura body" in result.markdown or ""
 
     async def test_browser_strategy_no_content(self, base_url):
         result = await crawled_result(
@@ -194,7 +194,7 @@ class TestEngineChainEdges:
             policy={"strategies": [BROWSER_HEADLESS]},
             browser_worker=_fake_browser(html=None, text=None),
         )
-        assert (result["markdown"]) is None
+        assert (result.markdown) is None
 
     async def test_browser_strategy_surfaces_xhr_and_screenshot(self, base_url):
         result = await crawled_result(
@@ -205,7 +205,7 @@ class TestEngineChainEdges:
                 metadata={"intercepted_xhr": [{"url": "u", "payload": {}}], "screenshot": "BASE64IMG"},
             ),
         )
-        diag = result["diagnostics"]
+        diag = result.diagnostics
         assert "intercepted_xhr" in diag
         assert "screenshot" in diag
 
@@ -234,11 +234,11 @@ class TestEngineChainEdges:
             },
             http_fetcher=hanging_fetcher(),
         )
-        assert result["status"] == "failed"
+        assert result.status == "failed"
         # The budget's classification is precise (url_budget_exceeded), not the
         # generic network_error tail the old hand-built result hard-coded.
-        assert result["classification"] == "url_budget_exceeded"
-        assert result["error"] == "url_budget_exceeded"
+        assert result.classification == "url_budget_exceeded"
+        assert result.error == "url_budget_exceeded"
 
     async def test_rate_limited_sets_domain_cooldown(self):
         fetcher = scripted_fetcher(
@@ -303,8 +303,8 @@ class TestEngineChainEdges:
                 status=200, ctype="text/html", body=b"<html><body>some page content</body></html>"
             ),
         )
-        assert result["html"] is None
-        assert result["markdown"]
+        assert result.html is None
+        assert result.markdown
 
 
 class TestEngineScopeEdges:

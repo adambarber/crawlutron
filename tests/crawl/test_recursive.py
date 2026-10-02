@@ -23,9 +23,9 @@ def _assert_memory_stripped(out) -> None:
     """
     assert out["results"], "the crawl returned nothing, so nothing was stripped"
     for result in out["results"]:
-        assert result["html"] is None
-        assert result["text"] is None
-        assert result["markdown"] is not None
+        assert result.html is None
+        assert result.text is None
+        assert result.markdown is not None
 
 
 class TestRecursiveCrawl:
@@ -33,7 +33,7 @@ class TestRecursiveCrawl:
         pages = site_linking_to("/a", "/b")
         out = await crawled_results(pages, limits=LINKED_PAIR_LIMITS)
         assert out["submitted_count"] == 1
-        urls = {r["normalized_url"] for r in out["results"]}
+        urls = {r.normalized_url for r in out["results"]}
         assert "http://example.com" in urls
         assert "http://example.com/a" in urls
         assert "http://example.com/b" in urls
@@ -97,8 +97,8 @@ class TestRecursiveCrawl:
             pages, url="http://example.com/seed", limits={"max_depth": 0, "respect_robots": True}
         )
         result = out["results"][0]
-        assert result["classification"] == "robots_disallowed"
-        assert result["status"] == "skipped"
+        assert result.classification == "robots_disallowed"
+        assert result.status == "skipped"
 
     async def test_sitemap_seeding(self):
         pages = {
@@ -139,7 +139,7 @@ class TestRecursiveCrawlServer:
             },
         }
         response = await run_crawl_async(payload)
-        urls = {r["normalized_url"] for r in response["results"]}
+        urls = {r.normalized_url for r in response["results"]}
         assert base_url in urls
         assert base_url + "/page2" in urls
 

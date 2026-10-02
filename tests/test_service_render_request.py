@@ -13,7 +13,7 @@ class TestServiceRenderRequest:
             {"url": "http://127.0.0.1:1/x", "options": {"include_html": True}},
         )
         assert out["submitted_count"] == 1
-        assert out["results"][0]["status"] == "success"
+        assert out["results"][0].status == "success"
 
     async def test_render_request_disallowed_url_is_not_accepted(self):
         with pytest.raises(ValueError, match="invalid_url"):
@@ -24,7 +24,7 @@ class TestServiceRenderRequest:
         out = await render_stub_request({"urls": ["http://127.0.0.1:1/x", "http://127.0.0.1:1/x"]})
         assert out["submitted_count"] == 1
         assert len(out["results"]) == 1
-        assert out["results"][0]["status"] == "success"
+        assert out["results"][0].status == "success"
 
     async def test_render_request_batch_exceeded(self):
         with pytest.raises(ValueError):
@@ -46,7 +46,7 @@ class TestServiceRenderRequest:
             raise RuntimeError(f"boom: {secret}")
 
         out = await render_stub_request({"url": "http://127.0.0.1:1/x"}, worker=worker)
-        error = out["results"][0]["error"]
+        error = out["results"][0].error
         assert secret not in error, f"raw exception text leaked into the response: {error!r}"
         # RuntimeError classifies to the stable network_error code.
         assert error == "network_error"

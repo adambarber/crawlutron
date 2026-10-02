@@ -378,7 +378,7 @@ async def test_purge_handles_production_shaped_entries():
             settings=CrawlerSettings.from_mapping(),
             http_fetcher=fetcher,
         )
-        assert result["results"][0]["status"] == "success"
+        assert result["results"][0].status == "success"
         assert len(em.robots_cache) <= ROBOTS_CACHE_MAX_ENTRIES
     finally:
         em.robots_cache.clear()
@@ -482,19 +482,19 @@ async def _crawl_page(host: str, fetcher):
 class TestRobotsFailClosed:
     async def test_robots_5xx_disallows(self):
         item = await _crawl_page("robots-fail.test", _make_fetcher(500))
-        assert item["classification"] == "robots_disallowed"
-        assert item["status"] != "success"
+        assert item.classification == "robots_disallowed"
+        assert item.status != "success"
 
     async def test_robots_404_allows(self):
         item = await _crawl_page("robots-absent.test", _make_fetcher(404))
-        assert item["status"] == "success"
+        assert item.status == "success"
 
     async def test_group_selection_uses_product_token(self):
         # "github" appears in the full User-Agent URL but not in the product
         # token: the github group must not apply to us; the * group allows.
         body = "User-agent: github\nDisallow: /\nUser-agent: *\nAllow: /\n"
         item = await _crawl_page("robots-token.test", _make_fetcher(200, body))
-        assert item["status"] == "success"
+        assert item.status == "success"
 
 
 def test_robots_pattern_to_regex_is_cached():
