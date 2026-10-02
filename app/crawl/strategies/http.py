@@ -12,7 +12,7 @@ import time
 from dataclasses import dataclass, field, replace
 from typing import Any
 
-from app.api_models import CrawlExtractionMethod, CrawlPolicy, CrawlPolicyLimits
+from app.api_models import CrawlPolicy, CrawlPolicyLimits
 from app.classify import classify_page_with_evidence
 from app.constants import (
     EXTRACTION_DOCUMENT,
@@ -41,6 +41,7 @@ from app.crawl.strategies.content_pipeline import (
     _run_extraction,
 )
 from app.crawl.strategies.strategy_request import StrategyRequest
+from app.models.crawl_extraction_method import CrawlExtractionMethod
 from app.models.crawl_result import CrawlStrategyAttempt
 from app.models.engine_crawl_result import EngineCrawlResult
 from app.models.host_policy import HostPolicy

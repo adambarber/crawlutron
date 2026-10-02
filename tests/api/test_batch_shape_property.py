@@ -23,7 +23,6 @@ from app.api.response_shaping import (
     build_unified_result,
     render_result_to_unified,
 )
-from app.api_models import CrawlStatus
 from app.constants import (
     HTTP_DECLARED_CRAWLER,
     CrawlClassification,
@@ -31,6 +30,7 @@ from app.constants import (
 )
 from app.crawl.result_helpers import terminal_attempt
 from app.models.crawl_result import CrawlResult
+from app.models.crawl_status import CrawlStatus
 from app.models.engine_crawl_result import EngineCrawlResult
 from tests._result_builders import engine_result
 

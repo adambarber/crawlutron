@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-from app.api_models import CrawlStrategy
 from app.constants import (
     BROWSER_HEADLESS,
     HTTP_CFFI_IMPERSONATE,
     HTTP_DECLARED_CRAWLER,
 )
 from app.crawl.strategy_chain import _starting_strategies
+from app.models.crawl_strategy import CrawlStrategy
 from app.scheduler import DomainScheduler
 
 # The policy ladder as the enum members `_starting_strategies` validates, not as

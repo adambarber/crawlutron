@@ -6,9 +6,7 @@ from fastapi import APIRouter, Depends
 
 from app.api.dependencies import get_settings, get_shutdown_event
 from app.api.map_endpoint import map_site
-from app.api_models import (
-    MapRequest,
-)
+from app.api_models import MapRequest
 from app.models.error_response import ErrorResponse
 from app.models.site_map_response import SiteMapResponse
 

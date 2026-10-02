@@ -5,9 +5,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends
 
 from app.api.dependencies import get_settings
-from app.api_models import (
-    SearchRequest,
-)
+from app.api_models import SearchRequest
 from app.constants import ROUTER_MODULE_DOC
 from app.models.error_response import ErrorResponse
 from app.models.search_response import SearchResponse

@@ -4,9 +4,11 @@ from typing import Annotated, Any
 
 from pydantic import BaseModel, Field
 
-from app.api_models import ContentValidators, CrawlStatus, CrawlStrategy
+from app.api_models import ContentValidators
 from app.constants import CrawlClassification
 from app.models.classification_evidence import ClassificationEvidence
+from app.models.crawl_status import CrawlStatus
+from app.models.crawl_strategy import CrawlStrategy
 from app.models.discovered_link_response import DiscoveredLinkResponse
 from app.models.page_metadata import PageMetadata
 from app.models.strategy_attempt import StrategyAttempt

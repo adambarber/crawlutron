@@ -4,7 +4,8 @@ from typing import Any
 
 from pydantic import BaseModel
 
-from app.api_models import CrawlExtractionMethod, CrawlStrategy
+from app.models.crawl_extraction_method import CrawlExtractionMethod
+from app.models.crawl_strategy import CrawlStrategy
 
 
 class AgentHintsResponse(BaseModel):

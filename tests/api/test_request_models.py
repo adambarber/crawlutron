@@ -17,13 +17,14 @@ from httpx import AsyncClient
 from pydantic import BaseModel, ValidationError
 
 from app import api_models
-from app.api_models import MAX_BROWSER_ACTIONS, CrawlRequest, CrawlStrategy, RenderRequest
+from app.api_models import MAX_BROWSER_ACTIONS, CrawlRequest, RenderRequest
 from app.constants import (
     ACTIONS_REQUIRING_SELECTOR,
     ALLOWED_BROWSER_ACTION_TYPES,
     BROWSER_ACTION_TYPES,
     BROWSER_PROFILE_KEYS,
 )
+from app.models.crawl_strategy import CrawlStrategy
 from tests._app_factory import service_app
 from tests.chokepoint_walks import APP_ROOT
 

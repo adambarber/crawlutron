@@ -4,9 +4,7 @@ from typing import Any
 
 from fastapi import APIRouter
 
-from app.api_models import (
-    SERVICE_IDENTITY,
-)
+from app.api_models import SERVICE_IDENTITY
 from app.models.discovery_response import DiscoveryResponse
 
 

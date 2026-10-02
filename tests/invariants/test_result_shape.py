@@ -1321,8 +1321,9 @@ def test_the_internal_and_wire_taxonomies_name_the_same_members():
 
     All three axes are checked: status, classification, and strategy.
     """
-    from app.api_models import CrawlStatus, CrawlStrategy
     from app.constants import CrawlClassification, ResultStatus
+    from app.models.crawl_status import CrawlStatus
+    from app.models.crawl_strategy import CrawlStrategy
     from app.models.taxonomy import Classification, CrawlStrategyName
 
     for axis, internal, wire in (

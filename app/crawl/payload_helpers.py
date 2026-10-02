@@ -8,9 +8,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from app.api_models import (
-    CrawlPolicy,
-)
+from app.api_models import CrawlPolicy
 from app.crawl.policy import PolicyTier, validate_wire_policy
 from app.models.host_policy import HostPolicy
 from app.models.normalized_url import normalize_public_http_url

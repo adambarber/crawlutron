@@ -6,9 +6,7 @@ import logging
 import time
 
 from app.api.exceptions import http_error
-from app.api_models import (
-    SearchRequest,
-)
+from app.api_models import SearchRequest
 from app.health.readiness import READINESS_STATE as readiness_state
 from app.metrics import get_metrics
 from app.models.search_response import SearchResponse

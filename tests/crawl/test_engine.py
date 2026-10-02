@@ -99,11 +99,11 @@ def test_seed_freshness_uses_real_default_strategies():
     """Without an explicit strategies list, freshness must probe the
     real default chain -- not the placeholder ["HTTP"], whose cache keys
     can never match anything actually stored."""
-    from app.api_models import CrawlExtractionMethod
     from app.constants import HTTP_DECLARED_CRAWLER
     from app.crawl.engine import _parse_lastmod, _seed_is_fresh
     from app.crawl.strategies.content_cache_key import build_content_cache_key
     from app.crawl.strategies.request_profile import headers_for_strategy
+    from app.models.crawl_extraction_method import CrawlExtractionMethod
 
     url = "http://seed-fresh.test/page"
     # Normalized shape but no strategies key: the default must apply.

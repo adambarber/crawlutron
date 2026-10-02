@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from enum import StrEnum
 from typing import Annotated, Any, ClassVar, Final, Literal, Protocol, TypeVar
 from urllib.parse import urlsplit
 
@@ -8,19 +7,11 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 from app.constants import (
     # When pyright handles pydantic v2's Field/validator overloads without help.
-    BROWSER_HEADED_WARMED,
-    BROWSER_HEADLESS,
     DEFAULT_CHALLENGE_WAIT_SECONDS,
     DEFAULT_HTTP_TIMEOUT_SECONDS,
     DEFAULT_MAX_DISCOVERED_LINKS,
     DEFAULT_MAX_RETRIES,
     DEFAULT_TOTAL_URL_BUDGET_SECONDS,
-    EXTRACTION_DOCUMENT,
-    EXTRACTION_DOM,
-    EXTRACTION_FULL,
-    EXTRACTION_TRAFILATURA,
-    HTTP_CFFI_IMPERSONATE,
-    HTTP_DECLARED_CRAWLER,
     MAX_CONTENT_LENGTH_BYTES,
     MAX_DISCOVERED_LINKS,
     MAX_HTTP_TIMEOUT_SECONDS,
@@ -31,6 +22,8 @@ from app.constants import (
     SERVICE_ID,
     SERVICE_VERSION,
 )
+from app.models.crawl_extraction_method import CrawlExtractionMethod
+from app.models.crawl_strategy import CrawlStrategy
 
 #: The output formats a request may name, imported from the module that has to
 #: dispatch on them rather than restated. The field description ("One of: json
@@ -86,47 +79,6 @@ SERVICE_IDENTITY: Final[dict[str, str]] = {
     "version": SERVICE_VERSION,
     "policy_schema_version": POLICY_SCHEMA_VERSION,
 }
-
-
-class CrawlStrategy(StrEnum):
-    """Fetch execution strategies, tried in fallback order.
-
-    These describe *how* to retrieve bytes for a URL. How those bytes are
-    parsed into text/markdown is a separate concern handled by
-    :class:`CrawlExtractionMethod` (the ``extraction`` policy field), which is
-    orthogonal to the fetch strategy.
-    """
-
-    HTTP_DECLARED_CRAWLER = HTTP_DECLARED_CRAWLER
-    HTTP_CFFI_IMPERSONATE = HTTP_CFFI_IMPERSONATE
-    BROWSER_HEADLESS = BROWSER_HEADLESS
-    BROWSER_HEADED_WARMED = BROWSER_HEADED_WARMED
-
-
-class CrawlExtractionMethod(StrEnum):
-    """Output/parsing pipeline applied to content a fetch strategy retrieves.
-
-    Extraction is orthogonal to the fetch strategy: any fetch strategy may be
-    paired with any extraction method. ``FULL`` is the default unified
-    pipeline (trafilatura HTML main text, markitdown for documents, plain-text
-    passthrough). ``TRAFILATURA`` forces HTML main-text extraction only.
-    ``DOCUMENT`` forces markitdown document extraction for PDFs and other
-    non-HTML bodies.
-    """
-
-    FULL = EXTRACTION_FULL
-    TRAFILATURA = EXTRACTION_TRAFILATURA
-    DOCUMENT = EXTRACTION_DOCUMENT
-    DOM = EXTRACTION_DOM
-
-
-class CrawlStatus(StrEnum):
-    success = "success"
-    blocked = "blocked"
-    disallowed = "disallowed"
-    retry_exhausted = "retry_exhausted"
-    failed = "failed"
-    skipped = "skipped"
 
 
 class DiscoveryConfig(BaseModel):

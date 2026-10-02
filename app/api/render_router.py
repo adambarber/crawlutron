@@ -6,9 +6,7 @@ from fastapi import APIRouter, Depends
 
 from app.api.dependencies import get_settings
 from app.api.render_endpoint import render as render_handler
-from app.api_models import (
-    RenderRequest,
-)
+from app.api_models import RenderRequest
 from app.constants import ROUTER_MODULE_DOC
 from app.models.error_response import ErrorResponse
 from app.models.unified_crawl_response import UnifiedCrawlResponse
