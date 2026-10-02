@@ -22,12 +22,12 @@ from dataclasses import dataclass
 from typing import Any
 
 from app.cgroup_sense import _read_int, _read_text
+from app.env import get_env_float, get_env_int, parse_bool_env
 from app.memory_pressure import (
     MemoryGate,
     ResourceGauge,
     read_memory_stats,
 )
-from app.validation import get_env_float, get_env_int, parse_bool_env
 
 # Self-managed, no operator knob (mirrors app/memory_pressure.py): the gate
 # rides at TARGET and pauses at HARD against the cgroup quota it discovers.

@@ -46,7 +46,7 @@ from app.constants import (
     DEFAULT_LAZY_SCROLL_STEPS,
     DEFAULT_MAX_BROWSER_RENDERS,
 )
-from app.validation import get_env_int, parse_bool_value
+from app.env import get_env_int, parse_bool_value
 
 if TYPE_CHECKING:
     from app.settings import CrawlerSettings

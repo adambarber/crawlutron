@@ -47,17 +47,12 @@ from app.crawl.llm_format import (
     PageMetadata as ExtractedPageMetadata,
 )
 from app.crawl.llm_format import _llm_metadata_from_tree, text_from_html
+from app.env import get_env_int, parse_bool_env
 from app.models.discovered_link import DiscoveredLink
 from app.models.host_policy import HostPolicy
 from app.resource_pressure import doc_worker_count
 from app.settings import CrawlerSettings
-from app.validation import (
-    filter_js_endpoints,
-    get_env_int,
-    parse_bool_env,
-    public_url_or_none,
-    safe_public_url_or_none,
-)
+from app.validation import filter_js_endpoints, public_url_or_none, safe_public_url_or_none
 
 logger = logging.getLogger(__name__)
 

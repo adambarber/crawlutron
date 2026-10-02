@@ -27,7 +27,7 @@ from contextlib import suppress
 
 from markitdown import MarkItDown
 
-from app.validation import parse_bool_env
+from app.env import parse_bool_env
 
 logger = logging.getLogger(__name__)
 

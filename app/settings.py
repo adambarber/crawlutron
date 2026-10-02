@@ -20,9 +20,9 @@ from app.constants import (
     MAX_HTTP_TIMEOUT_SECONDS,
     MAX_RETRIES,
 )
+from app.env import get_mapping_float, get_mapping_int, in_range, parse_bool_value
 from app.memory_pressure import read_memory_stats
 from app.resource_pressure import derive_browser_pool_size, max_http_concurrency_for
-from app.validation import get_mapping_float, get_mapping_int, in_range, parse_bool_value
 
 # Connection-pool sizing: bind the HTTP pool to the SAME RAM-derived HTTP
 # concurrency the weighted admission allows, so the two can never diverge as RAM

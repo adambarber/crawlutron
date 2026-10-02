@@ -11,8 +11,8 @@ import json
 from app.api_models import CrawlPolicyLimits
 from app.constants import DEFAULT_MAX_CONTENT_LENGTH_BYTES
 from app.crawl.content_cache import ContentCache
+from app.env import get_env_int
 from app.resource_pressure import worker_count
-from app.validation import get_env_int
 
 
 def build_content_cache_key(

@@ -6,8 +6,8 @@ from dataclasses import dataclass
 from unittest.mock import patch
 
 import app.settings as settings_mod
+from app.env import parse_bool_value
 from app.settings import CrawlerSettings
-from app.validation import parse_bool_value
 
 
 def test_parallelism_defaults():

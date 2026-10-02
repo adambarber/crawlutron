@@ -42,9 +42,9 @@ PROPERTY_REGISTRY = (
     ),
     Property(
         name="bool-env",
-        owner_module="app/validation.py",
+        owner_module="app/env.py",
         owner_symbols=("parse_bool_value",),
-        definition_site="app/validation.py:parse_bool_value",
+        definition_site="app/env.py:parse_bool_value",
         fingerprints=("bool_literal_set",),
         reason="Environment boolean spelling is one policy across settings and feature gates.",
     ),

@@ -25,7 +25,7 @@ from app.crawl.extraction import (
     shutdown_doc_extraction_executor,
     text_from_html,
 )
-from app.validation import parse_bool_env
+from app.env import parse_bool_env
 from tests._assertions import set_optional_env
 from tests._extraction_helpers import (
     detect_pagination,

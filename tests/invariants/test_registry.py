@@ -810,7 +810,7 @@ def _duplicate_def_nodes(tree: ast.AST) -> list[ast.FunctionDef]:
 def test_property_registry_rejects_duplicate_owner_count():
     prop = _property("bool-env")
     tree = ast.parse(DUPLICATE_DEF_SOURCE)
-    definitions = {"parse_bool_value": [("app/validation.py", node) for node in _duplicate_def_nodes(tree)]}
+    definitions = {"parse_bool_value": [("app/env.py", node) for node in _duplicate_def_nodes(tree)]}
     assert _property_owner_failures((prop,), definitions) == ["parse_bool_value=2"]
 
 
@@ -832,7 +832,7 @@ def test_property_registry_rejects_deleted_fingerprint():
 def test_property_owner_duplicate_is_not_sanctioned():
     prop = _property("bool-env")
     tree = ast.parse(DUPLICATE_DEF_SOURCE)
-    path = REPO_ROOT / "app" / "validation.py"
+    path = REPO_ROOT / "app" / "env.py"
     owner_ids = _owner_definition_ids(tree, path, prop)
     duplicate = _duplicate_def_nodes(tree)[1]
     assert len(owner_ids) == 1

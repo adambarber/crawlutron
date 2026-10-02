@@ -19,8 +19,8 @@ from app.constants import (
     MAX_RETRIES,
 )
 from app.crawl.policy import PolicyTier, read_policy, validate_wire_policy
+from app.env import get_env_float, get_env_int, parse_bool_env
 from app.settings import CrawlerSettings
-from app.validation import get_env_float, get_env_int, parse_bool_env
 
 
 class TestGetEnvInt:

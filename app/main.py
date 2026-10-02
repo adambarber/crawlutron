@@ -14,9 +14,9 @@ from typing import TYPE_CHECKING
 # integration layer.
 from app.addresses import is_loopback_bind
 from app.crawl.policy import PolicyTier
+from app.env import get_env_float, get_env_int
 from app.logging_config import configure_service_logging
 from app.models.host_policy import HostPolicy
-from app.validation import get_env_float, get_env_int
 
 from .constants import SERVICE_ID, SERVICE_VERSION
 from .crawl.job_store import JobStore

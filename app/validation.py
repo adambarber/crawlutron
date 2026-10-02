@@ -1,13 +1,12 @@
 from __future__ import annotations
 
 import logging
-import math
 import os
-from collections.abc import Callable, Mapping
-from functools import lru_cache, partial
+from functools import lru_cache
 from urllib.parse import parse_qsl, urlencode, urljoin, urlparse, urlunparse
 
 from app.addresses import AddressClass, classify
+from app.env import parse_bool_env
 from app.models.host_policy import HostPolicy, host_policy_reason
 from app.models.normalized_url import NormalizedUrl
 
@@ -169,247 +168,6 @@ def is_public_ip_value(value: str) -> bool:
     return classify(value) is AddressClass.PUBLIC
 
 
-def parse_bool_env(name: str, default: bool = False) -> bool:
-    """Read an env var and return a boolean, warning on unrecognized values.
-
-    Truthy values: ``1``, ``true``, ``yes``, ``on``; falsy: ``0``/``false``/
-    ``no``/``off`` (case-insensitive). Surrounding whitespace is ignored.
-    Garbage logs a warning naming the variable and returns ``default``.
-    Centralized so every SSRF /
-    feature-flag check agrees on what "on" means.
-    """
-    return parse_bool_value(os.environ.get(name), default, env_name=name)
-
-
-def _clamp(value, lo, hi):
-    """Bound ``value`` to ``[lo, hi]`` when the bounds are provided."""
-    if lo is not None and value < lo:
-        return lo
-    if hi is not None and value > hi:
-        return hi
-    return value
-
-
-def _finite_or_none(value: float) -> float | None:
-    """A finite float, or None when the parsed value cannot be honored."""
-    return value if math.isfinite(value) else None
-
-
-def in_range[T: (int, float)](lo: T, hi: T) -> Callable[[T], T | None]:
-    """A validator that refuses a value outside ``[lo, hi]`` instead of clamping it.
-
-    ``_mapping_number``'s own ``lo``/``hi`` clamp, which is right for a tuning
-    knob and wrong for a value that is part of a contract: a deployment whose
-    ``DEFAULT_MAX_RETRIES`` asks for 9 and silently gets 5 cannot tell anyone,
-    and the code that clamped is a chokepoint, so the whole deployment is
-    affected. Fed to ``validate=`` this warns and returns the fallback, so the
-    misconfiguration is visible at startup instead of at request time.
-
-    The clamp stays for the caller's own fallback value; this guards only what
-    the environment said.
-    """
-
-    def within(value: T) -> T | None:
-        return value if lo <= value <= hi else None
-
-    return within
-
-
-def _mapping_number[T: (int, float)](
-    mapping: Mapping[str, str],
-    name: str,
-    fallback: T,
-    *,
-    parse: Callable[[str], T],
-    invalid_event: str,
-    validate: Callable[[T], T | None] | None = None,
-    validate_event: str | None = None,
-    lo: T | None = None,
-    hi: T | None = None,
-) -> T:
-    """The one never-raise numeric env read shared by the int and float faces.
-
-    Both public readers differed only in the parse callable, the warning event
-    and the float-only finiteness check. Restating that body per type is how
-    the two faces drifted, so the shape lives here once and each face supplies
-    only what genuinely differs.
-    """
-    raw = mapping.get(name)
-    if raw is None:
-        return fallback
-    try:
-        value = parse(str(raw).strip())
-    except (TypeError, ValueError, OverflowError):
-        logging.getLogger(__name__).warning(
-            invalid_event, extra={"env_name": name, "env_value": raw, "fallback": fallback}
-        )
-        return fallback
-    if validate is not None and validate_event is not None:
-        checked = validate(value)
-        if checked is None:
-            logging.getLogger(__name__).warning(
-                validate_event, extra={"env_name": name, "env_value": raw, "fallback": fallback}
-            )
-            return fallback
-        value = checked
-    return _clamp(value, lo, hi)
-
-
-def get_mapping_int(
-    mapping: Mapping[str, str],
-    name: str,
-    # The set a config default can actually be, not `int`. A default arrives
-    # from a settings mapping or an environment string, so it is a number, a
-    # string, or nothing -- and an unparseable one is a documented input, which
-    # is why `_as_int_default` is unannotated and enumerates the junk it absorbs
-    # (None, "abc", inf, nan). `int` said the opposite of the body and of the
-    # docstring three lines below. Coercion stays total in the body, so a
-    # wrongly-typed default is still absorbed rather than raised; this says what
-    # the edge promises, not that it is defensively unreachable.
-    default: int | float | str | None,
-    *,
-    lo: int | None = None,
-    hi: int | None = None,
-    validate: Callable[[int], int | None] | None = None,
-    validate_event: str | None = None,
-) -> int:
-    """Read an integer from a mapping, or from the environment; never crash,
-    always return an int.
-
-    Both faces are ONE function: :func:`get_env_int` is this function bound
-    to ``os.environ``. The mapping form is the real ``def`` because
-    ``CrawlerSettings.from_mapping`` reads a mapping (os.environ in prod, a
-    dict in tests), and the env form used to be a second copy of this
-    signature -- a second place to forget an option, where forgetting is
-    silent. (Adding ``validate``/``validate_event`` here is what exposed that
-    restatement: the duplication gate caught the parameter list twice.)
-
-    Hardened against every class of bad input: the
-    chokepoint must make the mistake unrepresentable. A typo'd env var or
-    an un-coercible/non-numeric *default* falls back to a bounded int, and
-    the result is always clamped to ``[lo, hi]`` when bounds are given. A
-    string default like ``"0.5"`` can no longer leak a ``str`` into
-    downstream arithmetic.
-
-    ``validate``/``validate_event`` exist here for the same reason they exist on
-    the float face: they are the way a value that is part of a contract gets
-    REJECTED (warned, and replaced by the fallback) rather than clamped into a
-    different number. The int face could not say that before, so every
-    out-of-range integer setting was rewritten in silence.
-    """
-    return _mapping_number(
-        mapping,
-        name,
-        _clamp(_as_int_default(default, name=name), lo, hi),
-        parse=int,
-        invalid_event="invalid_int_env",
-        lo=lo,
-        hi=hi,
-        validate=validate,
-        validate_event=validate_event,
-    )
-
-
-def get_mapping_float(
-    mapping: Mapping[str, str],
-    name: str,
-    # The same real set as the int face, for the same reason.
-    default: int | float | str | None,
-    *,
-    lo: float | None = None,
-    hi: float | None = None,
-) -> float:
-    """Read a float from a mapping, or from the environment; never crash,
-    always a finite float.
-
-    Both faces are ONE function: :func:`get_env_float` is this function bound
-    to ``os.environ``, for the reason given on the int face above.
-
-    Rejects non-finite values (``inf``/``nan``) from BOTH the default and the
-    environment: ``float("inf")`` parses cleanly but ``int(limit * inf)``
-    overflows at import, so the value is treated as garbage and the bounded
-    fallback is returned instead.
-    """
-    return _mapping_number(
-        mapping,
-        name,
-        _clamp(_as_float_default(default, name=name), lo, hi),
-        parse=float,
-        invalid_event="invalid_float_env",
-        validate=_finite_or_none,
-        validate_event="non_finite_float_env",
-        lo=lo,
-        hi=hi,
-    )
-
-
-def parse_bool_value(raw: str | None, default: bool, *, env_name: str) -> bool:
-    """Parse a boolean env value; warn (never silently flip) on garbage.
-
-    Unset/empty -> ``default``. Recognized truthy: 1/true/yes/on; falsy:
-    0/false/no/off (case-insensitive). Surrounding whitespace is ignored.
-    Anything else logs a warning naming the variable and returns ``default``
-    -- so a typo can no longer silently
-    fail a policy open (``RESPECT_ROBOTS=ture`` keeps robots respected).
-    """
-    if raw is None or not raw.strip():
-        return default
-    lowered = raw.strip().lower()
-    if lowered in {"1", "true", "yes", "on"}:
-        return True
-    if lowered in {"0", "false", "no", "off"}:
-        return False
-    logging.getLogger(__name__).warning(
-        "invalid_bool_env for %s: %r (using default %r)",
-        env_name,
-        raw,
-        default,
-        extra={"env_name": env_name, "env_value": raw, "fallback": default},
-    )
-    return default
-
-
-def _as_int_default(value, *, name) -> int:
-    """Coerce a caller-supplied default to a finite int; never raise.
-
-    Accepts int/float/int-like str; anything else (None, "abc", inf, nan)
-    logs and yields 0 rather than leaking a non-numeric default that would
-    turn later arithmetic (``limit // default``) into a crash or a
-    string-repetition blow-up.
-    """
-    try:
-        if isinstance(value, float) and not math.isfinite(value):
-            raise ValueError(value)
-        return int(value)
-    except (TypeError, ValueError, OverflowError):
-        logging.getLogger(__name__).warning("invalid_env_default", extra={"env_name": name, "fallback": 0})
-        return 0
-
-
-def _as_float_default(value, *, name) -> float:
-    """Coerce a caller-supplied default to a finite float; never raise."""
-    try:
-        result = float(value)
-    except (TypeError, ValueError, OverflowError):
-        logging.getLogger(__name__).warning("invalid_env_default", extra={"env_name": name, "fallback": 0.0})
-        return 0.0
-    if not math.isfinite(result):
-        logging.getLogger(__name__).warning(
-            "non_finite_env_default", extra={"env_name": name, "fallback": 0.0}
-        )
-        return 0.0
-    return result
-
-
-# The env faces are the mapping faces bound to this process's environment,
-# not a second copy of their signatures. An alias is the whole point: the cost
-# is that `get_env_int.__doc__` is the mapping face's docstring (which is
-# where the contract now lives anyway), and the win is that a new option is
-# added in one place. It was two, and the second copy was already stale.
-get_env_int = partial(get_mapping_int, os.environ)
-get_env_float = partial(get_mapping_float, os.environ)
-
-
 def public_url_or_none(
     raw: str | None,
     *,
@@ -497,15 +255,8 @@ __all__ = [
     "PRIVATE_HOSTS",
     "allow_private_targets",
     "filter_js_endpoints",
-    "get_env_float",
-    "get_env_int",
-    "get_mapping_float",
-    "get_mapping_int",
-    "in_range",
     "is_public_ip_value",
     "normalize_public_http_url",
-    "parse_bool_env",
-    "parse_bool_value",
     "public_url_or_none",
     "safe_public_url_or_none",
 ]
