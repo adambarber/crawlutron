@@ -51,9 +51,9 @@ def extract_llm_metadata(html: str, url: str) -> dict[str, Any]:
     html = truncate_html_input(html)
     # Lazy import avoids a circular import: extraction.py imports this module
     # at module level, so this direction must stay lazy.
-    from app.crawl.extraction import _parse_html_tree
+    from app.crawl.extraction import parse_html_tree
 
-    tree = _parse_html_tree(html)
+    tree = parse_html_tree(html)
     if tree is None:
         return metadata
     return _llm_metadata_from_tree(tree, url)

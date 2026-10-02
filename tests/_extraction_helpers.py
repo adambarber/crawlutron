@@ -58,7 +58,7 @@ def _default_document_text_extractor(url, policy=UNRESTRICTED_HOST_POLICY):
 def doc_worker_acquisitions(monkeypatch):
     """Record every call to the production worker-acquisition chokepoint.
 
-    ``_acquire_doc_worker`` is the one production decision that can fork a
+    ``DOC_POOL.acquire`` is the one production decision that can fork a
     markitdown worker, so a test that must prove a document was refused BEFORE
     any worker existed is watching exactly the right seam. Patching
     ``multiprocessing.Process`` instead proved the same thing the long way and
@@ -73,11 +73,11 @@ def doc_worker_acquisitions(monkeypatch):
     """
     acquisitions: list[bool] = []
 
-    def spy() -> None:
+    def spy(timeout) -> None:
         acquisitions.append(True)
         return None
 
-    monkeypatch.setattr(_extraction_module, "_acquire_doc_worker", spy)
+    monkeypatch.setattr(_extraction_module.DOC_POOL, "acquire", spy)
     return acquisitions
 
 

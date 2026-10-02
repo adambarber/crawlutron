@@ -136,12 +136,6 @@ _LIFECYCLE_SHUTDOWN_DOC_EXTRACTION_EXECUTOR = _d(
     "cannot ask a public seam to stop a pool it did not create.\n",
 )
 
-_LIFECYCLE_CONFIGURE_DOC_WORKER_LOGGING = _d(
-    "harness lifecycle",
-    "Configures logging inside spawned doc workers. Asserted directly because the\n"
-    "configuration is the contract and it is not reachable from a return value.\n",
-)
-
 _LIFECYCLE_DRAIN_PENDING_CLIENT_CLOSES = _d(
     "harness lifecycle",
     "Draining superseded client closes is shutdown work, and shutdown work is owned by\n"
@@ -349,26 +343,9 @@ DECLARED: dict[str, Declaration] = {
     ),
     "app.crawl.engine.robots_cache._entries": _d(_CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]),
     "app.crawl.engine.robots_cache._lock": _d(_CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]),
-    "app.crawl.extraction._DOC_POOL": _d(_CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]),
-    "app.crawl.extraction._DocWorker": _d(_PRIVATE_TYPE.kind, _PRIVATE_TYPE.reason, ["test"]),
     "app.crawl.extraction._FrameCollector": _d(
         _IMPLEMENTATION_STEP.kind, _IMPLEMENTATION_STEP.reason, ["test"]
     ),
-    "app.crawl.extraction._MAX_EXTRACTED_MARKDOWN": _SUBSTITUTED_CAP,
-    "app.crawl.extraction._POOL_LOCK": _d(_CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]),
-    "app.crawl.extraction._acquire_doc_worker": _OWNED_POOL_MACHINERY,
-    "app.crawl.extraction._configure_doc_worker_logging": _d(
-        _LIFECYCLE_CONFIGURE_DOC_WORKER_LOGGING.kind, _LIFECYCLE_CONFIGURE_DOC_WORKER_LOGGING.reason, ["test"]
-    ),
-    "app.crawl.extraction._doc_extraction_worker_count": _SUBSTITUTED_CAP,
-    "app.crawl.extraction._doc_pool_health": _OWNED_POOL_MACHINERY,
-    "app.crawl.extraction._doc_pool_pids": _OWNED_POOL_MACHINERY,
-    "app.crawl.extraction._doc_task_hooks": _OWNED_POOL_MACHINERY,
-    "app.crawl.extraction._parse_html_tree": _IMPLEMENTATION_STEP,
-    "app.crawl.extraction._reset_doc_pool": _OWNED_POOL_MACHINERY,
-    "app.crawl.extraction._retire_doc_worker": _OWNED_POOL_MACHINERY,
-    "app.crawl.extraction._spawn_doc_worker": _SUBSTITUTED_COLLABORATOR,
-    "app.crawl.extraction._terminate_doc_process": _OWNED_POOL_MACHINERY,
     "app.crawl.extraction._walkable": _d(_IMPLEMENTATION_STEP.kind, _IMPLEMENTATION_STEP.reason, ["test"]),
     "app.crawl.fetch_helpers._SITEMAP_CACHE": _d(_CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]),
     "app.crawl.fetch_helpers._fetch_and_decode": _d(

@@ -1,6 +1,6 @@
 """Sync post-fetch discovery parsing must leave the event loop.
 
-``_parse_html_tree`` / ``html_diagnostics`` / ``extract_discovered_links`` /
+``parse_html_tree`` / ``html_diagnostics`` / ``extract_discovered_links`` /
 ``extract_js_endpoints`` / ``detect_pagination`` run synchronously in both
 strategy result builders. The post-fetch block must move to
 ``asyncio.to_thread``, returning plain data (no lxml tree escapes).

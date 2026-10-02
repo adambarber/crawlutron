@@ -807,6 +807,11 @@ DEFAULT_EXTRACTION_DOC_TIMEOUT: float = 10.0
 DEFAULT_EXTRACTION_SELECTOR_TIMEOUT: float = 2.0
 DEFAULT_EXTRACTION_DOC_ACQUIRE_TIMEOUT: float = 90.0
 
+# The largest markdown a single document may contribute, in characters. One
+# pathological or adversarial file otherwise costs the whole downstream budget:
+# every link, every content-hash and every SQLite row is sized by it.
+DEFAULT_EXTRACTION_MAX_MARKDOWN: int = 5 * 1024 * 1024
+
 # Browser pool: number of persistent browser instances to keep warm PER WORKER.
 # Each browser uses ~300MB (200MB binary + ~100MB WebExtensions).
 # With 4 uvicorn workers, default 1 per worker = 4 browsers total (~1.2GB,

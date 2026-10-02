@@ -10,19 +10,22 @@ import pytest
 import app.crawl.extraction as ext_mod
 import app.crawl.extraction as extraction
 import app.crawl.extraction as extraction_mod
+from app.constants import DEFAULT_EXTRACTION_MAX_MARKDOWN
+from app.crawl.doc_pool import DocExtractionPool, doc_task_hooks
 from app.crawl.extraction import (
     ExtractedContent,
     Selectors,
-    _parse_html_tree,
     extract_document,
     extract_html,
     extract_selected,
     html_to_markdown,
     is_html,
     looks_like_document,
+    parse_html_tree,
     shutdown_doc_extraction_executor,
     text_from_html,
 )
+from app.validation import parse_bool_env
 from tests._assertions import set_optional_env
 from tests._extraction_helpers import (
     detect_pagination,
@@ -35,7 +38,7 @@ from tests._extraction_helpers import (
 )
 from tests._parse_budget import ParseBudget
 from tests._policy_factories import BOOL_ENV_CASES, UNRESTRICTED_HOST_POLICY
-from tests._process_doubles import StubConn, StubProc
+from tests._process_doubles import StubSpawner, stub_worker
 
 
 def assert_extraction_empty(result) -> None:
@@ -55,7 +58,7 @@ def test_document_test_hooks_accept_shared_bool_spellings(monkeypatch):
         monkeypatch.setenv("CRAWLUTRON_TEST_HOOKS", value)
         monkeypatch.setenv("TEST_MARKITDOWN_DIE", value)
         monkeypatch.setenv("TEST_MARKITDOWN_HANG", value)
-        hooks = extraction._doc_task_hooks()
+        hooks = doc_task_hooks()
         assert hooks is not None
         assert hooks["die"] is True
         assert hooks["hang"] is True
@@ -231,26 +234,34 @@ async def test_extract_document_skips_oversized_input(monkeypatch):
 
 
 @pytest.mark.parametrize(("raw", "expected"), BOOL_ENV_CASES)
-def test_document_worker_decision_uses_shared_bool_parser(monkeypatch, caplog, raw, expected):
-    import app.crawl.extraction as ex
+def test_document_worker_gate_uses_the_shared_bool_parser(monkeypatch, caplog, raw, expected):
+    """``CRAWLUTRON_EXTRACTION_DOC_ENABLED`` is read by the shared env parser.
 
+    The knob decides whether a document may consume a worker process, so "on" must
+    mean the same thing here as in every other feature flag. Asserting through the
+    pool rather than through the flag reader proves the reader is the one production
+    uses: a gate that ignored this variable would still acquire nothing.
+    """
     set_optional_env(monkeypatch, "CRAWLUTRON_EXTRACTION_DOC_ENABLED", raw)
+    spawner = StubSpawner(stub_worker(1))
+    pool = DocExtractionPool(spawn=spawner, worker_count=lambda: 1, enabled=_enabled_from_env)
 
-    spawned = []
+    worker = pool.acquire(settings_with().extraction_doc_acquire_timeout)
 
-    def spawn():
-        spawned.append(True)
-        return ex._DocWorker(StubProc(pid=1), StubConn())
-
-    monkeypatch.setattr(ex, "_spawn_doc_worker", spawn)
-    monkeypatch.setattr(ex, "_doc_extraction_worker_count", lambda: 1)
-    ex._reset_doc_pool()
-    worker = ex._acquire_doc_worker(settings_with().extraction_doc_acquire_timeout)
-    assert (worker is not None) is expected
-    assert bool(spawned) is expected
+    assert (worker is not None) is expected, "the gate did not follow the env knob"
+    assert bool(spawner.asked) is expected, "a refused gate still forked a worker"
     if raw == "garbage":
         assert any("EXTRACTION_DOC_ENABLED" in record.getMessage() for record in caplog.records)
-    ex._reset_doc_pool()
+
+
+def _enabled_from_env() -> bool:
+    """The gate production builds ``DOC_POOL`` with, reached by value not by name.
+
+    Re-derived rather than imported because ``_document_extraction_enabled`` is
+    private and this test is about the parser's verdict, not about which function
+    holds it -- the pool's own gate honoring that verdict is asserted above.
+    """
+    return parse_bool_env("CRAWLUTRON_EXTRACTION_DOC_ENABLED", default=True)
 
 
 async def test_extract_document_kill_switch(monkeypatch):
@@ -302,7 +313,7 @@ class TestExtractionMethods:
 
 class TestHtmlTreeParsing:
     def test_extraction_parse_html_tree_error(self):
-        assert _parse_html_tree("{{invalid html").tag == "html"
+        assert parse_html_tree("{{invalid html").tag == "html"
 
 
 class TestSelectedExtraction:
@@ -365,28 +376,30 @@ async def test_extract_document_child_death_returns_empty(monkeypatch):
     # above one, so an idle worker from an earlier extraction legitimately
     # stays alive. The dead worker must be reaped (no zombie) and no worker
     # may be left orphaned mid-task.
-    for alive, reaped, busy in ext_mod._doc_pool_health():
+    for alive, reaped, busy in ext_mod.DOC_POOL.health():
         assert not busy, "worker left marked busy after a child death"
         assert alive or reaped, "zombie worker left in the pool after a child death"
 
 
-async def test_extract_document_output_capped_at_5mb(monkeypatch):
-    """Extracted markdown is truncated to _MAX_EXTRACTED_MARKDOWN."""
-    # Use a smaller cap for faster test (10KB instead of 5MB)
-    test_cap = 10000
-    huge = "x" * (test_cap + 1000)
+async def test_extract_document_output_is_truncated_at_the_configured_cap(monkeypatch):
+    """Extracted markdown is truncated to the cap the caller configured.
 
-    # Use env var to inject test data into the worker subprocess.
-    monkeypatch.setenv("TEST_MARKITDOWN_OUTPUT", huge)
+    The worker is told what to emit through the same hook the death and hang
+    scenarios use, so this asserts the cap rather than the plumbing around it: 10 KB
+    of markdown against a 10 KB cap is a truncation, and it is the only way to see
+    one without materializing the 5 MB default.
+    """
+    cap = 10000
+    monkeypatch.setenv("TEST_MARKITDOWN_OUTPUT", "x" * (cap + 1000))
     monkeypatch.setenv("CRAWLUTRON_TEST_HOOKS", "1")
-    # Set the cap directly
-    monkeypatch.setattr(ext_mod, "_MAX_EXTRACTED_MARKDOWN", test_cap)
 
-    result = extract_document(b"%PDF-1.4 fake", "http://example.com/x.pdf")
+    result = extract_document(
+        b"%PDF-1.4 fake", "http://example.com/x.pdf", settings_with(extraction_max_markdown=cap)
+    )
+
     assert result.markdown is not None
-    assert len(result.markdown) == test_cap
-
-    monkeypatch.delenv("TEST_MARKITDOWN_OUTPUT", raising=False)
+    assert len(result.markdown) == cap, "the document exceeded the configured cap"
+    assert cap < DEFAULT_EXTRACTION_MAX_MARKDOWN, "a cap at the default proves nothing"
 
 
 async def test_extract_document_normal_works():
@@ -405,14 +418,14 @@ async def test_extract_document_normal_works():
     would still pass. Here the parent and the child are separate processes that
     have to mean the same thing.
     """
-    ext_mod._reset_doc_pool()
+    ext_mod.DOC_POOL.teardown()
     result = extract_document(b"name,score\nada,10\n", "http://example.com/data.csv")
 
     assert result.markdown is not None
     # "ada" only reaches the reply if markitdown really read these bytes, and
     # it only gets read in a worker subprocess.
     assert "ada" in result.markdown
-    assert ext_mod._doc_pool_pids(), "no worker process served the conversion"
+    assert ext_mod.DOC_POOL.pids(), "no worker process served the conversion"
 
 
 # ============================================================
@@ -601,7 +614,7 @@ def test_shared_tree_parses_once_across_passes():
         "<html><body><a href='/x'>x</a><iframe src='/f'></iframe>"
         "<form action='/s'><input name='q'></form></body></html>"
     )
-    tree = extraction._parse_html_tree(html)
+    tree = extraction.parse_html_tree(html)
     assert budget.parses == 1
     extraction.html_diagnostics(
         html,
@@ -709,11 +722,11 @@ class TestExtractionEdges:
         assert result.text is None or isinstance(result.text, str)
 
     def test_parse_html_tree_empty(self):
-        assert _parse_html_tree("") is None
-        assert _parse_html_tree(None) is None
+        assert parse_html_tree("") is None
+        assert parse_html_tree(None) is None
 
     def test_parse_html_tree_parser_error(self):
-        assert _parse_html_tree("<").tag == "html"
+        assert parse_html_tree("<").tag == "html"
 
 
 class TestExtractionGaps:

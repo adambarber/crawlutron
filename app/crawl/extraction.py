@@ -18,15 +18,10 @@ forms), Katana-inspired JS endpoint discovery, and auto-pagination detection.
 from __future__ import annotations
 
 import concurrent.futures
-import io
 import logging
-import multiprocessing
-import os
 import re
 import threading
-import time
 from collections.abc import Callable
-from contextlib import suppress
 from dataclasses import dataclass
 from html import unescape
 from typing import Any, Literal, NamedTuple, TypeVar
@@ -35,7 +30,6 @@ from urllib.parse import urljoin, urlparse
 from lxml import etree
 from lxml.etree import ParserError
 from markdownify import markdownify as html_to_md
-from markitdown import MarkItDown
 from trafilatura import extract as _trafilatura_extract
 
 # Lxml does not mark re-exports, so importing a name that IS present at runtime is
@@ -47,6 +41,7 @@ from trafilatura import extract as _trafilatura_extract
 # dependency: the two function-local imports these replace each carried a
 # `try/except ImportError` that returned "no content" for a package that cannot
 # be absent.
+from app.crawl.doc_pool import DocExtractionPool, doc_task_hooks
 from app.crawl.job_store import durable_page_identity
 from app.crawl.llm_format import _llm_metadata_from_tree, text_from_html
 from app.models import DiscoveredLink
@@ -105,7 +100,7 @@ _EXTRACTION_EXECUTOR: concurrent.futures.ThreadPoolExecutor | None = None
 
 
 def _extraction_executor() -> concurrent.futures.ThreadPoolExecutor:
-    """The shared pool, created on first use. Caller must hold ``_POOL_LOCK``.
+    """The shared pool, created on first use.
 
     Every worker is idle before this returns: a pool handed out while a
     shutdown is in flight is a pool whose ``submit`` may land after it was
@@ -119,347 +114,25 @@ def _extraction_executor() -> concurrent.futures.ThreadPoolExecutor:
     return _EXTRACTION_EXECUTOR
 
 
-# Default 2 keeps memory bounded: each worker loads markitdown + parsers and the
-# production container runs with a 3g mem limit (compose pins `mem_limit: 3g`).
-# Raise via CRAWLUTRON_EXTRACTION_DOC_WORKERS when more PDF/Office
-# throughput is needed and the memory budget allows it.
-_DEFAULT_DOC_WORKERS = 2
-
-
-# The count lives in app.resource_pressure (the module admission reserves RAM
-# in) so the spawned pool can never drift from the reservation. Kept as a thin
-# delegation for call-site readability inside this module.
-def _doc_extraction_worker_count() -> int:
-    """Configured concurrency for markitdown extraction (process pool size)."""
-    return doc_worker_count()
-
-
 # Document extraction (markitdown) runs in a PERSISTENT pool of worker
-# processes. Each worker imports markitdown once (it
-# stays in the worker's sys.modules) and serves many documents, amortizing
-# the spawn + import cost of the old spawn-per-document design. Timeout-kill
-# semantics are kept per task: a worker that exceeds the document deadline
-# (settings.extraction_doc_timeout) -- or dies mid-task -- is terminated and
-# reaped immediately, and its slot is respawned on the next acquisition, so a
-# pathological document can neither block the pool nor linger as a zombie.
-# Sized by doc_worker_count() (app.resource_pressure -- the single home for the
-# count) so memory stays within the container ceiling. Defined after the
-# worker-count helper above.
-
-# The start method is named, never inherited from the platform. The default is
-# `fork` on Linux and `spawn` on macOS, and a forked extraction worker is a copy
-# of the whole crawler: the running event loop, every open socket, the HTTP
-# cache, and any lock another thread held at fork time -- held for good, since
-# the thread that owned it does not exist in the child. This worker does nothing
-# but CPU-bound markitdown over a pipe, so a clean interpreter is both safer and
-# no more costly, and the persistent pool above already exists to amortize the
-# spawn cost that naming it does not remove.
-#
-# It is also why the pool is honest about its own environment. A forked child
-# freezes the parent's env at fork time, so a long-lived worker predating a
-# setting never observed it -- which is how the timeout suite passed on macOS
-# and failed on the same assertion on Linux, with no change to the code under
-# test. Every process object handed to the child comes from this one context:
-# a pipe from the default context and a process from another is not a pairing
-# that works.
-_DOC_WORKER_CONTEXT = multiprocessing.get_context("spawn")
-
-
-class _DocWorker:
-    """One persistent markitdown worker: process + parent end of its task pipe."""
-
-    __slots__ = ("proc", "conn", "busy", "retired")
-
-    def __init__(self, proc, conn) -> None:
-        self.proc = proc
-        self.conn = conn
-        self.busy = False
-        # True once the worker has been terminated. Termination is only
-        # best-effort, so a retired process can still report ``is_alive()``;
-        # "alive" is therefore not proof of "usable", and this flag -- not the
-        # process state -- is what keeps a retired worker out of circulation.
-        self.retired = False
-
-
-_POOL_LOCK = threading.Condition(threading.Lock())
-_DOC_POOL: list[_DocWorker] | None = None
-
-
-def _test_hooks_enabled() -> bool:
-    """Single gate for the TEST_MARKITDOWN_* child-process hooks.
-
-    The hooks exist so tests can simulate child death/hang/output without
-    real parsers, but a stray env var must never alter production behavior:
-    they only fire when the operator explicitly exports
-    CRAWLUTRON_TEST_HOOKS=1 alongside the per-hook flag.
-    """
-    return parse_bool_env("CRAWLUTRON_TEST_HOOKS", default=False)
-
-
-def _doc_task_hooks() -> dict | None:
-    """Snapshot the hermetic TEST_MARKITDOWN_* seam for one task (parent-side).
-
-    Workers are persistent: they would otherwise observe the env from their
-    spawn moment, not the caller's current test flags. The parent (which
-    always sees current env) snapshots the gated hooks per call and ships
-    them with the task; the worker honors the message, never its own env.
-    Returns None in production (gate off) so a stray test flag can never
-    alter real behavior.
-    """
-    if not _test_hooks_enabled():
-        return None
-    return {
-        "die": parse_bool_env("TEST_MARKITDOWN_DIE", default=False),
-        "hang": parse_bool_env("TEST_MARKITDOWN_HANG", default=False),
-        "output": os.environ.get("TEST_MARKITDOWN_OUTPUT"),
-    }
-
-
-def _configure_doc_worker_logging() -> None:
-    """Quiet expected parser chatter in the document worker.
-
-    The worker is a bare child process with no service logging, so without this
-    pdfminer logs a WARNING per font whose descriptor lacks a usable FontBBox
-    (common on real-world municipal PDFs). The text that parsed still extracts,
-    so the warning carries no signal; drop it at the source and keep ERROR+
-    visible.
-    """
-    logging.getLogger("pdfminer").setLevel(logging.ERROR)
-
-
-def _doc_worker_main(conn) -> None:
-    """Persistent worker entry: serve markitdown tasks until killed or orphaned.
-
-    Each task arrives as ``(body, hooks)``; hooks come from the parent's
-    per-call snapshot (never the worker's spawn-time env). A ``die`` hook
-    exits without sending (a worker segfaulting on hostile input).
-    """
-    try:
-        _configure_doc_worker_logging()
-        while True:
-            try:
-                body, hooks = conn.recv()
-            except (EOFError, OSError):
-                return
-            if hooks is not None:
-                if hooks.get("die"):
-                    with suppress(Exception):
-                        conn.close()
-                    os._exit(1)
-                if hooks.get("hang"):
-                    time.sleep(10)  # Longer than any test timeout
-                if hooks.get("output") is not None:
-                    with suppress(Exception):
-                        conn.send(("ok", hooks["output"]))
-                    continue
-            try:
-                md = _markitdown_extract(body)
-                conn.send(("ok", md))
-            except Exception:
-                with suppress(Exception):
-                    conn.send(("err", None))
-    finally:
-        with suppress(Exception):
-            conn.close()
-
-
-# Grace period for a document worker to honor SIGTERM before we escalate.
-_DOC_TERMINATE_GRACE_SECONDS = 5.0
-
-
-def _terminate_doc_process(proc) -> None:
-    """Terminate a runaway document-extraction process and reap it.
-
-    SIGTERM is not sufficient on its own: a worker wedged in an
-    uninterruptible native conversion (or one whose library installed a signal
-    handler) absorbs it and keeps running, holding its pipe, its memory and its
-    pool slot for the life of the service. Escalate to SIGKILL, and join after
-    the kill so the reaped child cannot linger as a zombie.
-    """
-    with suppress(Exception):
-        proc.terminate()
-    with suppress(Exception):
-        proc.join(timeout=_DOC_TERMINATE_GRACE_SECONDS)
-    with suppress(Exception):
-        if proc.is_alive():
-            proc.kill()
-            proc.join(timeout=_DOC_TERMINATE_GRACE_SECONDS)
-
-
-def _markitdown_extract(body: bytes) -> str | None:
-    """Convert document bytes with markitdown (worker-side real path only).
-
-    Test hooks are NOT read here: the parent snapshots them per task and the
-    worker honors the shipped message, so persistent workers never observe
-    stale env.
-    """
-    res = MarkItDown().convert_stream(io.BytesIO(body))
-    return res.text_content if res is not None else None
-
-
-def _spawn_doc_worker() -> _DocWorker:
-    """Start one persistent worker and return its parent-side handle."""
-    parent_conn, child_conn = _DOC_WORKER_CONTEXT.Pipe(duplex=True)
-    proc = _DOC_WORKER_CONTEXT.Process(target=_doc_worker_main, args=(child_conn,), daemon=True)
-    proc.start()
-    child_conn.close()  # parent keeps only its end of the pipe
-    return _DocWorker(proc, parent_conn)
-
-
-def _retire_doc_worker(worker: _DocWorker) -> None:
-    """Terminate and reap one worker, leaving its (dead) slot for respawn.
-
-    Respawn is deliberately lazy (next acquisition): the bounds suite
-    requires zero live children immediately after a timeout/child-death,
-    and a dead-idle slot costs nothing until the next document arrives.
-
-    The retired mark is set first, before anything slow, because retirement is
-    not always performed under ``_POOL_LOCK``: without it, the lazy window
-    between "terminated" and "respawned" would let an acquisition hand a doomed
-    worker straight back to the next caller.
-    """
-    worker.retired = True
-    _terminate_doc_process(worker.proc)
-    with suppress(Exception):
-        worker.conn.close()
-
-
-def _teardown_doc_pool_locked() -> None:
-    """Terminate every pooled worker. Caller must hold ``_POOL_LOCK``."""
-    global _DOC_POOL
-    pool, _DOC_POOL = _DOC_POOL, None
-    for worker in pool or []:
-        _retire_doc_worker(worker)
+# processes; the pool and its machinery live in app.crawl.doc_pool. This module
+# owns the extraction pipeline, and holds one process-lifetime pool built from
+# the environment. Sized by doc_worker_count() (app.resource_pressure -- the
+# single home for the count) so memory stays within the container ceiling.
 
 
 def _document_extraction_enabled() -> bool:
     return parse_bool_env("CRAWLUTRON_EXTRACTION_DOC_ENABLED", default=True)
 
 
-def _acquire_doc_worker(acquire_timeout: float) -> _DocWorker | None:
-    """Take an idle pool worker, spawning on demand up to the configured size.
-
-    The pool starts empty and grows only as concurrent demand requires: a
-    test doing one extraction owns exactly one worker, so the historical
-    zero-live-children-after-death invariant still holds. Dead idle slots
-    (retired after a timeout/child-death) are respawned in place here, so
-    normal acquisitions never observe them. Retired slots are never handed
-    out, alive-report or not.
-
-    Returns ``None`` when no worker became available within
-    ``settings.extraction_doc_acquire_timeout``. Callers must treat that as "document
-    extraction unavailable for this document" (the same degradation as a
-    per-task timeout): the alternative used to be waiting with no deadline, so
-    one busy flag that its holder never cleared -- an exception escaping
-    between acquisition and the releasing ``finally`` -- wedged every later
-    document extraction in the process.
-    """
-    global _DOC_POOL
-    if not _document_extraction_enabled():
-        return None
-    # Dead slots discovered here are replaced under the lock but TERMINATED
-    # after it: the slot swap is instant, while the kill-escalation a
-    # retirement runs can take ~10s (SIGTERM -> join(5) -> SIGKILL -> join(5)).
-    # Running that under _POOL_LOCK would block every other acquisition and
-    # every release for the whole window. A replaced slot is unreachable from
-    # the pool the instant it is swapped out, so deferring only its teardown is
-    # safe; the list is drained in the finally below, before this returns.
-    dead_slots: list[_DocWorker] = []
-    try:
-        with _POOL_LOCK:
-            if _DOC_POOL is None:
-                _DOC_POOL = []
-            # Reap retired slots before the scans. A retired slot has been
-            # terminated and can never be handed out again (the handout scan
-            # requires ``not retired``), so it must not keep occupying a pool
-            # entry. The respawn scan below only replaces a slot whose process
-            # is dead, which leaves a retired-but-still-``is_alive()`` slot
-            # (SIGKILL could not reap it -- pathological) skipped by BOTH scans
-            # and stranded in the pool forever: it held a PID while the size
-            # budget grew around it, and ``len(_DOC_POOL)`` drifted permanently
-            # above the usable count. Removing every retired slot here keeps the
-            # pool and the budget consistent; the termination and the process
-            # reap already ran when the slot was retired, so nothing live is
-            # dropped. Re-running this on every loop iteration also catches a
-            # slot retired by another thread while this acquirer waited.
-            _DOC_POOL = [each for each in _DOC_POOL if not each.retired]
-            want = _doc_extraction_worker_count()
-            # The budget starts once the lock is actually held. A caller queued
-            # behind a slow in-lock operation would otherwise pay that wait out
-            # of a budget it never consumed, and could give up on a pool that
-            # had a free slot the whole time it was blocked.
-            # A healthy pool releases a worker when its own task hits the
-            # document deadline, so a full round of the pool is already generous;
-            # this bound exists for the unhealthy case, where a busy flag is never
-            # cleared and an unbounded wait would take the whole pool down with it.
-            deadline = time.monotonic() + acquire_timeout
-            while True:
-                for worker in _DOC_POOL:
-                    if not worker.busy and not worker.retired and worker.proc.is_alive():
-                        worker.busy = True
-                        return worker
-                for index, worker in enumerate(_DOC_POOL):
-                    if not worker.busy and not worker.proc.is_alive():
-                        fresh = _spawn_doc_worker()
-                        fresh.busy = True
-                        _DOC_POOL[index] = fresh
-                        dead_slots.append(worker)
-                        return fresh
-                # Retired slots were reaped above, so this is the live usable
-                # set; when it is short of the configured size the pool grows by
-                # one rather than degrading to "no worker" -- the failure mode
-                # the reaped zombie slot used to cause (a slot nothing could
-                # recover shrinking the pool permanently).
-                usable = sum(1 for each in _DOC_POOL if not each.retired)
-                if usable < want:
-                    fresh = _spawn_doc_worker()
-                    fresh.busy = True
-                    _DOC_POOL.append(fresh)
-                    return fresh
-                remaining = deadline - time.monotonic()
-                if remaining <= 0:
-                    logger.warning(
-                        "extraction_document_pool_unavailable",
-                        extra={"slots": len(_DOC_POOL), "workers": want},
-                    )
-                    return None
-                # Still a condition wait, not a poll loop: a release notifies and
-                # wakes immediately. The bounded re-check exists only so a stuck
-                # busy flag (nothing will ever notify) expires on its own.
-                _POOL_LOCK.wait(timeout=min(remaining, _DOC_ACQUIRE_RECHECK_SECONDS))
-    finally:
-        # Teardown of any slot swapped out above, now that _POOL_LOCK is free.
-        # ``_retire_doc_worker`` marks retired, terminates and reaps; this path
-        # keeps the same retirement code as the timeout/child-death call sites.
-        for worker in dead_slots:
-            _retire_doc_worker(worker)
-
-
-def _reset_doc_pool() -> None:
-    """Tear down the pool so the next extraction rebuilds it (tests only)."""
-    with _POOL_LOCK:
-        _teardown_doc_pool_locked()
-
-
-def _doc_pool_pids() -> list[int]:
-    """Live worker PIDs (tests only: proves persistence, not spawn-per-task)."""
-    with _POOL_LOCK:
-        return [worker.proc.pid for worker in _DOC_POOL or [] if worker.proc.pid]
-
-
-def _doc_pool_health() -> list[tuple[bool, bool, bool]]:
-    """Per-worker ``(alive, reaped, busy)`` snapshot (tests only).
-
-    The pool is persistent and sized above one, so idle workers legitimately
-    stay alive across calls; the recoverable-failure contract is per worker,
-    not process-global: a worker that died must be reaped (exitcode set, not a
-    zombie) and no worker may be left marked busy mid-task.
-    """
-    with _POOL_LOCK:
-        return [
-            (worker.proc.is_alive(), worker.proc.exitcode is not None, worker.busy)
-            for worker in _DOC_POOL or []
-        ]
+# The production pool: real workers, the configured count, the environment's
+# opt-out. Every knob the pool has is a constructor argument rather than a
+# module name, so a caller that needs a different arrangement builds its own
+# pool instead of reaching into another module's state.
+DOC_POOL = DocExtractionPool(
+    worker_count=doc_worker_count,
+    enabled=_document_extraction_enabled,
+)
 
 
 async def shutdown_doc_extraction_executor() -> None:
@@ -470,10 +143,9 @@ async def shutdown_doc_extraction_executor() -> None:
     asking whether it is still alive was the only way it ever got closed; a
     second pool added later would have shipped unclosed by exactly this route.
     """
-    with _POOL_LOCK:
-        _teardown_doc_pool_locked()
-        global _EXTRACTION_EXECUTOR
-        executor, _EXTRACTION_EXECUTOR = _EXTRACTION_EXECUTOR, None
+    DOC_POOL.teardown()
+    global _EXTRACTION_EXECUTOR
+    executor, _EXTRACTION_EXECUTOR = _EXTRACTION_EXECUTOR, None
     if executor is not None:
         executor.shutdown(wait=False)
 
@@ -483,10 +155,6 @@ async def shutdown_doc_extraction_executor() -> None:
 # is where they get their env mapping and their operators. They used to sit here
 # as module constants read once at import, which made a deadline no caller could
 # construct and put fourteen private patch sites in the suite for three numbers.
-#
-# Re-check interval for a waiting acquirer (the escape hatch for "nothing will
-# ever notify"); releases still wake waiters immediately via notify_all.
-_DOC_ACQUIRE_RECHECK_SECONDS = 1.0
 
 # #mem-guard: a markitdown worker process shares the container cgroup; an
 # unbounded document can balloon it past the memory ceiling. Cap the input
@@ -494,7 +162,6 @@ _DOC_ACQUIRE_RECHECK_SECONDS = 1.0
 EXTRACTION_DOC_MAX_INPUT_BYTES = get_env_int("CRAWLUTRON_EXTRACTION_DOC_MAX_BYTES", 20 * 1024 * 1024, lo=1)
 
 # Maximum extracted markdown size (chars) to prevent unbounded output.
-_MAX_EXTRACTED_MARKDOWN = 5 * 1024 * 1024  # 5 MB
 
 
 class _SelectorTimedOut:
@@ -717,7 +384,7 @@ def extract_selected(
         fragment = "\n".join(str(tag) for tag in selected)
     elif selectors.xpath:
         xpath = selectors.xpath
-        tree = tree if tree is not None else _parse_html_tree(html)
+        tree = tree if tree is not None else parse_html_tree(html)
         if tree is None:
             return ExtractedContent(None, None)
         try:
@@ -853,24 +520,24 @@ def extract_document(
     # as a zombie, and its slot is respawned on the
     # next acquisition. Pool size bounds concurrent processes so memory
     # stays within the container ceiling.
-    worker = _acquire_doc_worker(active.extraction_doc_acquire_timeout)
+    worker = DOC_POOL.acquire(active.extraction_doc_acquire_timeout)
     if worker is None:
         # No slot within the acquire budget: degrade this document like every
         # other document failure instead of wedging the request.
         return ExtractedContent(None, None)
     try:
         try:
-            worker.conn.send((body, _doc_task_hooks()))
+            worker.conn.send((body, doc_task_hooks()))
         except (EOFError, OSError):
             # Send raced a worker death: reap the slot and report empty.
             logger.warning("extraction_document_child_died")
-            _retire_doc_worker(worker)
+            DOC_POOL.retire(worker)
             return ExtractedContent(None, None)
         try:
             ready = worker.conn.poll(active.extraction_doc_timeout)
         except (EOFError, OSError):
             logger.warning("extraction_document_child_died")
-            _retire_doc_worker(worker)
+            DOC_POOL.retire(worker)
             return ExtractedContent(None, None)
         md = None
         if ready:
@@ -882,28 +549,24 @@ def extract_document(
                 # raises. Graceful empty extraction, not an unhandled
                 # error -- and retire the slot on every death path.
                 logger.warning("extraction_document_child_died")
-                _retire_doc_worker(worker)
+                DOC_POOL.retire(worker)
                 return ExtractedContent(None, None)
         else:
             logger.warning("extraction_document_timeout")
-            _retire_doc_worker(worker)
+            DOC_POOL.retire(worker)
             return ExtractedContent(None, None)
     finally:
-        with _POOL_LOCK:
-            # The worker may have been retired mid-task (timeout/child death).
-            # Clearing busy is still correct: ``retired``, not ``busy``, is what
-            # keeps a terminated worker out of circulation, and the notify lets
-            # waiters reach the slot's lazy respawn instead of sitting on it.
-            worker.busy = False
-            _POOL_LOCK.notify_all()
+        DOC_POOL.release(worker)
 
     if not md or not md.strip():
         return ExtractedContent(None, None)
 
-    # Cap output size.
-    if len(md) > _MAX_EXTRACTED_MARKDOWN:
-        md = md[:_MAX_EXTRACTED_MARKDOWN]
-        logger.warning("extraction_document_truncated", extra={"max_chars": _MAX_EXTRACTED_MARKDOWN})
+    # Cap output size. Settings carry the cap so a caller bounding one document
+    # states the bound instead of rewriting this module's constant.
+    cap = active.extraction_max_markdown
+    if len(md) > cap:
+        md = md[:cap]
+        logger.warning("extraction_document_truncated", extra={"max_chars": cap})
     return ExtractedContent(md, md)
 
 
@@ -934,7 +597,7 @@ def parse_count() -> int:
         return _parse_tally
 
 
-def _parse_html_tree(html: str | None):
+def parse_html_tree(html: str | None):
     """Parse HTML once with lxml and return the root element.
 
     All discovery passes (anchors, frames, forms) and the XPath selector path
@@ -958,7 +621,7 @@ def _parse_html_tree(html: str | None):
 
 
 def _diagnostic_tree(html: str | None, tree: Any | None) -> Any | None:
-    return tree if tree is not None else (_parse_html_tree(html) if html else None)
+    return tree if tree is not None else (parse_html_tree(html) if html else None)
 
 
 def _diagnostic_inputs(html: str | None, tree: Any | None) -> Any | None:
@@ -1147,7 +810,7 @@ def extract_discovered_links(
     norm_source = durable_page_identity(source_url, host_policy)
     source_host = (urlparse(norm_source).hostname or "").lower()
     if tree is None:
-        tree = _parse_html_tree(html)
+        tree = parse_html_tree(html)
     if tree is None:
         return [], 0, False
     # Single pass: normalize/dedupe inline instead of materializing an
@@ -1237,7 +900,7 @@ def extract_post_fetch_discovery(
     ``javascript:`` rel=next escaped into the response. Filtering at the
     producer covers every consumer.
     """
-    tree = _parse_html_tree(html) if html and (include_diagnostics or include_links) else None
+    tree = parse_html_tree(html) if html and (include_diagnostics or include_links) else None
     diagnostics = (
         html_diagnostics(html, final_url, host_policy=host_policy, tree=tree) if include_diagnostics else {}
     )

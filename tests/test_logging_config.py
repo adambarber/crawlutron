@@ -116,12 +116,12 @@ def test_uvicorn_loggers_route_through_the_service_sink():
 
 def test_doc_worker_suppresses_pdfminer_chatter():
     """The doc worker drops pdfminer's expected per-font WARNINGs at the source."""
-    from app.crawl.extraction import _configure_doc_worker_logging
+    from app.crawl.doc_pool import configure_doc_worker_logging
 
     pdfminer = logging.getLogger("pdfminer")
     saved_level = pdfminer.level
     try:
-        _configure_doc_worker_logging()
+        configure_doc_worker_logging()
         assert pdfminer.level == logging.ERROR
     finally:
         pdfminer.setLevel(saved_level)

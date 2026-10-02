@@ -568,10 +568,12 @@ def test_async_crawl_semaphore_loop_binding_detector_bites():
 
 # --- 4d: the doc pool reaps retired slots on every acquisition ---------------
 
-_DOC_POOL_NAME = "_DOC_POOL"
+# Scoped to the class that owns doc workers, not to the bare method name:
+# ``acquire`` is a common name for taking a resource out of a pool, and three
+# unrelated modules define one that has no retired slots to reap.
+_DOC_POOL_CLASS = "DocExtractionPool"
 
-
-_DOC_POOL_ACQUIRER = "_acquire_doc_worker"
+_DOC_POOL_ACQUIRER = "acquire"
 
 
 def _has_retired_attr(node: ast.AST) -> bool:
@@ -579,7 +581,7 @@ def _has_retired_attr(node: ast.AST) -> bool:
 
 
 def _reaps_retired(value: ast.AST) -> bool:
-    """A ``_DOC_POOL = [... for each... if not each.retired]`` style rebuild.
+    """A ``self._slots = [... for each... if not each.retired]`` style rebuild.
 
     ``not each.retired`` parses as a ``UnaryOp(Not,...)`` and an explicit
     comparison as a ``Compare``; both shapes are admitted.
@@ -599,34 +601,30 @@ def _reaps_retired(value: ast.AST) -> bool:
 
 
 def _rebuilds_pool_without_retired(node: ast.AST) -> bool:
-    """Does ``node`` assign ``_DOC_POOL`` from a list comp filtering ``retired``?"""
+    """Does ``node`` assign ``self._slots`` from a list comp filtering ``retired``?"""
     return any(
         isinstance(child, ast.Assign)
-        and any(isinstance(target, ast.Name) and target.id == _DOC_POOL_NAME for target in child.targets)
+        and any(isinstance(target, ast.Attribute) and target.attr == "_slots" for target in child.targets)
         and _reaps_retired(child.value)
         for child in nodes_of(node)
     )
 
 
 def _doc_pool_reap_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
-    """``_acquire_doc_worker`` must rebuild the pool without retired slots.
-
-    A retired slot has been terminated and can never be handed out, so it
-    must not keep occupying a pool entry. The respawn scan only replaces a slot
-    whose process is dead, which leaves a retired-but-still-``is_alive()`` slot
-    skipped by both scans and stranded in the pool forever -- the entry count
-    drifted permanently above the usable count. Removing the reap filter is the
-    regression; this detector fails the suite when it goes.
-    """
+    """Flag ``acquire`` that never rebuilds the pool without retired slots."""
     return [
         offender_at(
             path,
             node,
-            f"{_DOC_POOL_ACQUIRER} no longer reaps retired slots; a "
+            f"{_DOC_POOL_CLASS}.{_DOC_POOL_ACQUIRER} no longer reaps retired slots; a "
             f"retired-but-alive slot would strand in the pool and inflate the size budget",
         )
-        for node in functions(tree)
-        if node.name == _DOC_POOL_ACQUIRER and not _rebuilds_pool_without_retired(node)
+        for cls in (each for each in nodes_of(tree) if isinstance(each, ast.ClassDef))
+        if cls.name == _DOC_POOL_CLASS
+        for node in cls.body
+        if isinstance(node, ast.FunctionDef)
+        and node.name == _DOC_POOL_ACQUIRER
+        and not _rebuilds_pool_without_retired(node)
     ]
 
 
@@ -636,35 +634,35 @@ DOC_POOL_ACQUIRER_REAPS_RETIRED_SLOTS = Rule(
     summary=(
         "A retired slot can never be handed out, so leaving one in the pool "
         "strands it forever and inflates the pool-size budget; rebuild the pool "
-        "without retired entries in _acquire_doc_worker"
+        "without retired entries in DocExtractionPool.acquire"
     ),
     bite=lambda: (
-        # The acquirer without the reap filter: the regression the detector hunts.
         Bites(
-            "def _acquire_doc_worker():\n"
-            "    with _POOL_LOCK:\n"
-            "        want = _doc_extraction_worker_count()\n"
-            "        while True:\n"
-            "            for worker in _DOC_POOL:\n"
-            "                if not worker.busy:\n"
-            "                    return worker\n",
+            "class DocExtractionPool:\n"
+            "    def acquire(self):\n"
+            "        with self._lock:\n"
+            "            want = self._worker_count()\n"
+            "            while True:\n"
+            "                for worker in self._slots:\n"
+            "                    if not worker.busy:\n"
+            "                        return worker\n",
             "no longer reaps retired slots",
         ),
-        # A pool rebuild that filters on something else is not the reap.
         Bites(
-            "def _acquire_doc_worker():\n"
-            "    with _POOL_LOCK:\n"
-            "        _DOC_POOL = [each for each in _DOC_POOL if not each.busy]\n"
-            "        return _DOC_POOL[0]\n",
+            "class DocExtractionPool:\n"
+            "    def acquire(self):\n"
+            "        with self._lock:\n"
+            "            self._slots = [each for each in self._slots if not each.busy]\n"
+            "            return self._slots[0]\n",
             "no longer reaps retired slots",
         ),
     ),
     clean=lambda: (
-        # The real filter satisfies it.
-        "def _acquire_doc_worker():\n"
-        "    with _POOL_LOCK:\n"
-        "        _DOC_POOL = [each for each in _DOC_POOL if not each.retired]\n"
-        "        return _DOC_POOL[0]\n",
+        "class DocExtractionPool:\n"
+        "    def acquire(self):\n"
+        "        with self._lock:\n"
+        "            self._slots = [each for each in self._slots if not each.retired]\n"
+        "            return self._slots[0]\n",
     ),
 )
 

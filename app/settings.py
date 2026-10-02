@@ -10,6 +10,7 @@ from app.constants import (
     DEFAULT_COOKIE_HARVEST_TIMEOUT_SECONDS,
     DEFAULT_EXTRACTION_DOC_ACQUIRE_TIMEOUT,
     DEFAULT_EXTRACTION_DOC_TIMEOUT,
+    DEFAULT_EXTRACTION_MAX_MARKDOWN,
     DEFAULT_EXTRACTION_SELECTOR_TIMEOUT,
     DEFAULT_LAZY_SCROLL_DELAY_SECONDS,
     DEFAULT_LAZY_SCROLL_STEPS,
@@ -120,6 +121,7 @@ class CrawlerSettings:
     extraction_doc_timeout: float = DEFAULT_EXTRACTION_DOC_TIMEOUT
     extraction_selector_timeout: float = DEFAULT_EXTRACTION_SELECTOR_TIMEOUT
     extraction_doc_acquire_timeout: float = DEFAULT_EXTRACTION_DOC_ACQUIRE_TIMEOUT
+    extraction_max_markdown: int = DEFAULT_EXTRACTION_MAX_MARKDOWN
     # Web search provider configuration (POST /v1/search). ``search_provider``
     # selects the backend: "auto" (default) picks the first configured keyed
     # provider in priority order (tavily -> brave -> serper) and falls back to
@@ -279,6 +281,9 @@ class CrawlerSettings:
                 "CRAWLUTRON_EXTRACTION_DOC_ACQUIRE_TIMEOUT",
                 cls.extraction_doc_acquire_timeout,
                 lo=0.0,
+            ),
+            extraction_max_markdown=get_mapping_int(
+                source, "CRAWLUTRON_EXTRACTION_MAX_MARKDOWN", cls.extraction_max_markdown, lo=1
             ),
             search_provider=source.get("CRAWLUTRON_SEARCH_PROVIDER", cls.search_provider),
             tavily_api_key=source.get("CRAWLUTRON_TAVILY_API_KEY", cls.tavily_api_key),

@@ -10,6 +10,8 @@ freezing its own idea of what ``exitcode`` should be.
 
 from typing import Any
 
+from app.crawl.doc_pool import DocExtractionPool, DocWorker
+
 
 class StubProc:
     """A ``multiprocessing.Process`` stand-in with signal semantics.
@@ -82,6 +84,17 @@ def stub_proc(pid: int = 4242, *, responds_to_sigterm: bool = True, alive: bool 
     return StubProc(pid, responds_to_sigterm, alive)
 
 
+def stub_worker(pid: int, responds_to_sigterm: bool = True) -> DocWorker:
+    """An idle :class:`DocWorker` over :class:`StubProc` and :class:`StubConn`.
+
+    Shared because three modules need the same pairing, and a second copy of it
+    would be a second idea of what a worker awaiting hand-out looks like.
+    """
+    worker = DocWorker(StubProc(pid, responds_to_sigterm), StubConn())
+    worker.busy = False
+    return worker
+
+
 def unkillable_doc_worker(pid: int = 1111) -> Any:
     """A retired-but-still-``is_alive()`` pool slot nothing can reclaim.
 
@@ -90,19 +103,60 @@ def unkillable_doc_worker(pid: int = 1111) -> Any:
     The pool must skip such a slot rather than let it hold a list slot and a PID
     forever.
     """
-    import app.crawl.extraction as ext_mod
-
-    zombie = ext_mod._DocWorker(StubProc(pid, responds_to_sigterm=False), StubConn())
+    zombie = DocWorker(StubProc(pid, responds_to_sigterm=False), StubConn())
     zombie.retired = True
     zombie.busy = False
     return zombie
 
 
-def install_unkillable_doc_worker() -> Any:
-    """:func:`unkillable_doc_worker`, seeded into the pool as its only slot."""
+class StubSpawner:
+    """A pool ``spawn`` that hands out known workers and records that it asked.
+
+    Asserting only that a handed-out worker is the expected one would pass on a
+    pool that grew its slot some other way, so the record is asserted too: it is
+    empty until the pool actually asks, and ``clear()`` retires a seeding so the
+    record speaks only about what the test's own acquisition did.
+    """
+
+    def __init__(self, *workers: DocWorker) -> None:
+        self._queue = list(workers)
+        self._last: DocWorker | None = None
+        self.asked: list[DocWorker] = []
+
+    def __call__(self) -> DocWorker:
+        """The next queued worker, or the last one handed out once the queue runs dry.
+
+        Repeating rather than raising is what a pool that grows one slot at a time
+        needs: a second spawn in the same test is a respawn of the same slot, and
+        a double that raised would be asserting a fact about the test rather than
+        about the pool.
+        """
+        worker = self._queue.pop(0) if self._queue else self._last
+        assert worker is not None, "a spawn with nothing queued and nothing handed out"
+        self._last = worker
+        self.asked.append(worker)
+        return worker
+
+    def hand_out(self, *workers: DocWorker) -> None:
+        """Queue more workers for a later spawn."""
+        self._queue.extend(workers)
+
+
+def install_unkillable_doc_worker() -> tuple[DocWorker, DocExtractionPool, StubSpawner]:
+    """:func:`unkillable_doc_worker`, seeded into the pool as its only slot.
+
+    The pool is grown to hold the worker through a real acquisition, so the
+    seeded pool was arrived at the way production arrives at one. The spawner
+    comes back so a test can queue the workers the pool should grow into once it
+    has reaped the slot nothing can reclaim.
+    """
     import app.crawl.extraction as ext_mod
 
     zombie = unkillable_doc_worker()
-    with ext_mod._POOL_LOCK:
-        ext_mod._DOC_POOL = [zombie]
-    return zombie
+    spawner = StubSpawner(zombie)
+    pool = DocExtractionPool(spawn=spawner, worker_count=lambda: 1, enabled=lambda: True)
+    pool.acquire(0.1)
+    pool.release(zombie)
+    spawner.asked.clear()
+    ext_mod.DOC_POOL = pool
+    return zombie, pool, spawner
