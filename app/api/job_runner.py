@@ -58,6 +58,7 @@ from app.crawl.job_store import (
     normalize_job_state,
 )
 from app.crawl.policy import read_policy
+from app.crawl.result_helpers import terminal_attempt
 from app.crawl.result_record import ProducerEnvelope
 from app.crawl.robots import FetchAndDecode
 from app.models.crawl_result import CrawlResult
@@ -288,13 +289,17 @@ async def _pace_delayed_batch(
         classification: Classification = "rendered"
         return CrawlResult(
             url=job.original_url,
-            status=status_for_classification(classification),
-            classification=classification,
+            attempt=terminal_attempt(
+                strategy=None,
+                status=status_for_classification(classification),
+                classification=classification,
+                elapsed_ms=0,
+                error=None,
+            ),
             final_url=job.original_url,
             html=None,
             text=None,
             attempts=0,
-            elapsed_ms=0,
             domain=job.domain,
         )
 

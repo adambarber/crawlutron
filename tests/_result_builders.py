@@ -1,6 +1,7 @@
 from typing import Any
 
 from app.constants import HTTP_DECLARED_CRAWLER
+from app.crawl.result_helpers import terminal_attempt
 from app.models.crawl_job import CrawlJob
 from app.models.crawl_result import CrawlResult, CrawlStrategyAttempt
 from app.models.discovered_link import DiscoveredLink
@@ -157,13 +158,17 @@ def crawl_result(url: str, domain: str | None = None) -> CrawlResult:
     """
     return CrawlResult(
         url=url,
-        status="success",
-        classification="rendered",
+        attempt=terminal_attempt(
+            strategy=None,
+            status="success",
+            classification="rendered",
+            elapsed_ms=0,
+            error=None,
+        ),
         final_url=url,
         html="ok",
         text="ok",
         attempts=1,
-        elapsed_ms=0,
         domain=domain if domain is not None else url.split("/")[2],
     )
 

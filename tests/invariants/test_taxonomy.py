@@ -986,13 +986,18 @@ def test_result_construction_enforces_membership_at_the_dataclass():
     # makes the override splat below splat.
     member_crawl_result = CrawlResult(
         url="http://a/",
-        status="success",
-        classification="rendered",
+        attempt=CrawlStrategyAttempt(
+            strategy="BROWSER_HEADLESS",
+            status="success",
+            classification="rendered",
+            http_status=200,
+            content_type=None,
+            elapsed_ms=0,
+        ),
         final_url=None,
         html=None,
         text=None,
         attempts=1,
-        elapsed_ms=0,
         domain="example.com",
     )
     member_crawl_result_fields = asdict(member_crawl_result)
@@ -1019,15 +1024,11 @@ def test_result_construction_enforces_membership_at_the_dataclass():
         with pytest.raises(ValueError, match=f".{field}="):
             EngineCrawlResult(**{**member_engine_result, field: invented})
     # CrawlError axis: a stable code outside the declared taxonomy is rejected.
+    # The axis lives on the attempt the result holds, so that is where the
+    # override is spelled -- reaching for a top-level `error=` would be a
+    # constructor argument this record does not have.
     with pytest.raises(ValueError, match=r"\.error="):
-        CrawlResult(
-            **{
-                **member_crawl_result_fields,
-                "status": "failed",
-                "classification": "network_error",
-                "error": "worker_failed",
-            }
-        )
+        CrawlStrategyAttempt(**{**member_crawl_result_fields["attempt"], "error": "worker_failed"})
 
 
 # ===========================================================================
@@ -1311,4 +1312,10 @@ def test_every_taxonomy_literal_dataclass_inherits_the_construction_check():
         "no taxonomy Literal field was enumerated, so the sweep is a no-op:"
         f" LITERAL_FIELDS={sorted(LITERAL_FIELDS)}"
     )
-    assert set(checked) == {"CrawlResult", "CrawlStrategyAttempt", "EngineCrawlResult"}, sorted(checked)
+    # CrawlResult is deliberately ABSENT. It no longer declares a taxonomy
+    # Literal of its own: the render result holds the attempt it was rendered
+    # by, and status/classification/error/selected_strategy are properties
+    # reaching into it, so the record that declares those axes and the record
+    # that checks them are the same object. Naming CrawlResult here would be
+    # asserting a field it no longer has.
+    assert set(checked) == {"CrawlStrategyAttempt", "EngineCrawlResult"}, sorted(checked)

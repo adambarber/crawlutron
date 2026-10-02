@@ -19,7 +19,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from app.constants import ResultStatus
+from app.constants import ResultStatus, status_agrees_with_classification
 from app.models.taxonomy import (
     Classification,
     CrawlError,
@@ -64,8 +64,36 @@ def check_literal_fields(obj: Any) -> None:
             )
 
 
+def check_taxonomy_agreement(obj: Any) -> None:
+    """Reject a ``(status, classification)`` pair the taxonomy does not allow.
+
+    :func:`check_literal_fields` knows each field independently, so it accepts a
+    ``status`` that is a real member beside a ``classification`` whose agreed
+    status is a different one. Both axes are free parameters of every result
+    constructor, which is exactly the shape that lets the wire assert one status
+    while the taxonomy re-derives another for the same label. Raising here makes
+    the disagreeing pair unrepresentable rather than merely undesirable, and it
+    does so for every record that carries both axes, whether or not a
+    construction chokepoint remembered to check.
+
+    Records without both fields are left alone: a worker envelope that never got
+    as far as an outcome carries neither.
+    """
+    values = obj.__dict__
+    classification = values.get("classification")
+    status = values.get("status")
+    if classification is None or status is None:
+        return
+    if not status_agrees_with_classification(classification, status):
+        raise ValueError(
+            f"{type(obj).__name__}: status {status!r} disagrees with the taxonomy status for "
+            f"classification {classification!r}"
+        )
+
+
 class LiteralChecked:
     """Base for a dataclass whose fields carry taxonomy ``Literal`` annotations."""
 
     def __post_init__(self) -> None:
         check_literal_fields(self)
+        check_taxonomy_agreement(self)

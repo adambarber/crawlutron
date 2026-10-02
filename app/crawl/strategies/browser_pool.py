@@ -236,9 +236,11 @@ class PooledBrowserWorker:
                 result = await renderer.render(job.url, job.options, policy=job.host_policy)
                 # The renderer does not know the pool's configured mode, so it
                 # leaves the slot empty; fill it here, at the one boundary that
-                # does, rather than letting the shaper guess a member.
-                if result.selected_strategy is None:
-                    result = replace(result, selected_strategy=strategy)
+                # does, rather than letting the shaper guess a member. The slot
+                # is on the attempt the result holds, which is the only place a
+                # strategy is recorded now.
+                if result.attempt.strategy is None:
+                    result = replace(result, attempt=replace(result.attempt, strategy=strategy))
                 return result
             finally:
                 self._pool.release(renderer)

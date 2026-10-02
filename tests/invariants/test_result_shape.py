@@ -972,7 +972,7 @@ def test_advertised_payload_detector_bites():
 # property -- which is what the browser strategy does. Naming both is how the
 # property gets lost.
 
-_RESULT_CONSTRUCTORS = frozenset({"CrawlResult", "EngineCrawlResult"})
+_RESULT_CONSTRUCTORS = frozenset({"CrawlStrategyAttempt", "EngineCrawlResult"})
 
 
 _RESULT_CHOKEPOINT_MODULE = "app/crawl/result_helpers.py"
@@ -1007,7 +1007,8 @@ RESULTS_DERIVE_THEIR_STATUS_FROM_THE_TAXONOMY = Rule(
     excludes=SANCTIONED,
     bite=lambda: (
         Bites(
-            'CrawlResult(url=u, status="success", classification="rendered")\n',
+            'CrawlStrategyAttempt(strategy="BROWSER_HEADLESS", status="success",'
+            ' classification="rendered")\n',
             "hand-written",
         ),
         Bites(
@@ -1016,25 +1017,25 @@ RESULTS_DERIVE_THEIR_STATUS_FROM_THE_TAXONOMY = Rule(
         ),
         # A qualified call is the same construction.
         Bites(
-            'models.CrawlResult(url=u, status="failed", classification="blocked")\n',
+            'models.EngineCrawlResult(url=u, status="failed", classification="blocked")\n',
             "hand-written",
         ),
         # And the chokepoint exemption is keyed on the module, not on a name: a
         # spelled pair anywhere else still fires even under the same function name.
         Bites(
-            'def make():\n    return CrawlResult(url=u, status="failed", classification="blocked")\n',
+            "def make():\n    return EngineCrawlResult(url=u, status='failed', classification='blocked')\n",
             "hand-written",
         ),
     ),
     clean=lambda: (
         # Derived, not spelled -- what the browser strategy does.
-        "CrawlResult(url=u, status=status, classification=classification)\n",
-        "CrawlResult(url=u, status=status_for_classification(label), classification=label)\n",
+        "CrawlStrategyAttempt(strategy=s, status=status, classification=classification)\n",
+        "CrawlStrategyAttempt(strategy=s, status=status_for_classification(label), classification=label)\n",
         # One axis spelled and one derived still cannot disagree silently.
-        'CrawlResult(url=u, status="failed", classification=label)\n',
+        'CrawlStrategyAttempt(strategy=s, status="failed", classification=label)\n',
         # The same spelled pair inside the chokepoint module is the definition.
         Silent(
-            'CrawlResult(url=u, status="failed", classification=label)\n',
+            "CrawlStrategyAttempt(strategy=s, status='failed', classification=label)\n",
             at=REPO_ROOT / _RESULT_CHOKEPOINT_MODULE,
         ),
     ),
@@ -1042,7 +1043,7 @@ RESULTS_DERIVE_THEIR_STATUS_FROM_THE_TAXONOMY = Rule(
 
 
 def test_results_derive_their_status_from_the_taxonomy():
-    """No result outside the chokepoint spells both taxonomy axes as literals."""
+    """No record outside the chokepoint spells both taxonomy axes as literals."""
     RESULTS_DERIVE_THEIR_STATUS_FROM_THE_TAXONOMY.scan()
 
 

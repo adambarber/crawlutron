@@ -29,6 +29,7 @@ from app.constants import (
     CrawlClassification,
     status_for_classification,
 )
+from app.crawl.result_helpers import terminal_attempt
 from app.models.crawl_result import CrawlResult
 from app.models.engine_crawl_result import EngineCrawlResult
 from tests._result_builders import engine_result
@@ -91,13 +92,17 @@ def _healthy_render(index: int) -> CrawlResult:
     url = f"https://ok.example/render{index}"
     return CrawlResult(
         url=url,
-        status="success",
-        classification="rendered",
+        attempt=terminal_attempt(
+            strategy=None,
+            status="success",
+            classification="rendered",
+            elapsed_ms=25,
+            error=None,
+        ),
         final_url=url,
         html=f"<html><head><title>R{index}</title></head><body>x</body></html>",
         text="x",
         attempts=1,
-        elapsed_ms=25,
         domain="ok.example",
         metadata={"title": f"R{index}", "browser_reused": True},
     )

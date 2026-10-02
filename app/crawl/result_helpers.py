@@ -10,11 +10,7 @@ from typing import Any, TypeVar
 
 import httpx
 
-from app.constants import (
-    ResultStatus,
-    is_transient_classification,
-    status_agrees_with_classification,
-)
+from app.constants import ResultStatus, is_transient_classification
 from app.crawl.decompression import DecompressionError, DecompressionTooLargeError
 from app.crawl.scheduler_exceptions import _CircuitBreakerOpen
 from app.models.browser_pool_exhausted import BrowserPoolExhaustedError
@@ -26,24 +22,6 @@ _JobT = TypeVar("_JobT")
 
 
 _logger = logging.getLogger(__name__)
-
-
-def _enforce_status_classification(classification: Classification, status: ResultStatus) -> None:
-    """Reject a ``(classification, status)`` pair the taxonomy does not allow.
-
-    The terminal-result primitives take both axes as free parameters, which is
-    exactly the shape that lets the wire assert one status while
-    ``status_for_classification`` re-derives another for the same label. This
-    check at the construction chokepoint makes the disagreeing pair
-    unrepresentable instead of merely undesirable: it passes when the status is
-    the table default for the classification or one of the documented
-    context-dependent statuses, and raises otherwise, so the two axes can never
-    silently drift apart again.
-    """
-    if not status_agrees_with_classification(classification, status):
-        raise ValueError(
-            f"status {status!r} disagrees with the taxonomy status for classification {classification!r}"
-        )
 
 
 # The exception -> classification table, in precedence order: the first row
@@ -298,24 +276,52 @@ def terminal_crawl_result(
     browser path already passed correctly.
 
     ``selected_strategy`` is the browser mode that was in play, or None when no
-    browser produced the result (a policy refusal, a pool that never handed out
-    a renderer): the render shaper carries it to the wire instead of inventing
+    browser produced the result (a policy refusal, a pool that never handed out a
+    renderer): the render shaper carries it to the wire instead of inventing
     a member.
     """
-    _enforce_status_classification(classification, status)
     return CrawlResult(
         url=url,
-        status=status,
-        classification=classification,
+        attempt=terminal_attempt(
+            strategy=selected_strategy,
+            status=status,
+            classification=classification,
+            elapsed_ms=elapsed_ms,
+            error=error,
+        ),
         final_url=None,
         html=None,
         text=None,
         attempts=attempts,
-        elapsed_ms=elapsed_ms,
         domain=domain,
-        error=error,
         metadata=metadata or {},
-        selected_strategy=selected_strategy,
+    )
+
+
+def terminal_attempt(
+    *,
+    strategy: CrawlStrategyName | None,
+    status: ResultStatus,
+    classification: Classification,
+    elapsed_ms: int,
+    error: CrawlError | None,
+) -> CrawlStrategyAttempt:
+    """The attempt a terminal result reports: no HTTP status, no body, no content type.
+
+    Public because a result built outside this module needs the same attempt --
+    the render endpoint's paced-task result and the browser strategy's own
+    success path both have axes, timings and an error to place, and building one
+    by hand at each site is how they would drift apart from the pair this
+    primitive is checked against.
+    """
+    return CrawlStrategyAttempt(
+        strategy=strategy,
+        status=status,
+        classification=classification,
+        http_status=None,
+        content_type=None,
+        elapsed_ms=elapsed_ms,
+        error=error,
     )
 
 
@@ -340,15 +346,18 @@ def crawl_result_from_engine_result(engine: EngineCrawlResult, *, url: str) -> C
     elapsed_ms = int(engine.attempted_strategies[0].elapsed_ms) if engine.attempted_strategies else 0
     return CrawlResult(
         url=url,
-        status=engine.status,
-        classification=engine.classification,
+        attempt=terminal_attempt(
+            strategy=engine.selected_strategy,
+            status=engine.status,
+            classification=engine.classification,
+            elapsed_ms=elapsed_ms,
+            error=engine.error,
+        ),
         final_url=engine.final_url,
         html=engine.html,
         text=engine.text,
         attempts=len(engine.attempted_strategies),
-        elapsed_ms=elapsed_ms,
         domain="",
-        error=engine.error,
         metadata=engine.diagnostics or {},
     )
 
@@ -438,7 +447,6 @@ def build_engine_result(
         diagnostics = {}
     if discovered_links is None:
         discovered_links = []
-    _enforce_status_classification(classification, status)
     return EngineCrawlResult(
         original_url=original_url,
         normalized_url=normalized_url,
@@ -602,5 +610,6 @@ __all__ = [
     "crawl_result_from_exception",
     "engine_result_from_exception",
     "failed_result_for",
+    "terminal_attempt",
     "terminal_crawl_result",
 ]

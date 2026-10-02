@@ -41,7 +41,7 @@ from app.constants import (
 from app.constants import (
     is_analytics_host as _is_analytics_url,
 )
-from app.crawl.result_helpers import classify_error_code, terminal_crawl_result
+from app.crawl.result_helpers import classify_error_code, terminal_attempt, terminal_crawl_result
 from app.crawl.strategies.browser_driver import BrowserDriver, async_sleep
 from app.crawl.strategies.document import _default_document_text_extractor
 from app.crawl.strategies.pinned_transport import (
@@ -710,13 +710,17 @@ class BrowserRenderer:
 
             return CrawlResult(
                 url=url,
-                status=status,
-                classification=classification,
+                attempt=terminal_attempt(
+                    strategy=None,
+                    status=status,
+                    classification=classification,
+                    elapsed_ms=int((time.monotonic() - started) * 1000),
+                    error=None,
+                ),
                 final_url=final_url,
                 html=html,
                 text=text,
                 attempts=1,
-                elapsed_ms=int((time.monotonic() - started) * 1000),
                 domain=registrable_domain(url),
                 metadata=metadata,
             )

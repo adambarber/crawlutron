@@ -352,6 +352,7 @@ class TestDiscoveryAndRenderApi:
         key the adapter emits but the wire model does not declare is dropped
         before it reaches the assertion.
         """
+        from app.crawl.result_helpers import terminal_attempt
         from app.crawl.strategies.browser_pool import BrowserPool
         from app.models.crawl_result import CrawlResult
 
@@ -361,13 +362,17 @@ class TestDiscoveryAndRenderApi:
                 # it returns a result without one -- the worker fills the slot.
                 return CrawlResult(
                     url=url,
-                    status="success",
-                    classification="rendered",
+                    attempt=terminal_attempt(
+                        strategy=None,
+                        status="success",
+                        classification="rendered",
+                        elapsed_ms=1,
+                        error=None,
+                    ),
                     final_url=url,
                     html="<html></html>",
                     text="t",
                     attempts=1,
-                    elapsed_ms=1,
                     domain="127.0.0.1",
                     metadata={"extraction_method": "browser"},
                 )

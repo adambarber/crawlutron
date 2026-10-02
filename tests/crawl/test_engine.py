@@ -10,6 +10,7 @@ from app.api_models import CrawlPolicy, CrawlPolicyLimits
 from app.constants import BROWSER_HEADLESS, EXTRACTION_DOCUMENT, EXTRACTION_TRAFILATURA, HTTP_DECLARED_CRAWLER
 from app.crawl.engine import _payload_policy
 from app.crawl.policy import PolicyTier, read_policy
+from app.crawl.result_helpers import terminal_attempt
 from app.crawl.strategies.browser import BrowserRenderer
 from app.models.crawl_result import CrawlResult
 from app.models.serialization import to_dict
@@ -151,13 +152,17 @@ class TestEngineChainEdges:
         d = to_dict(
             CrawlResult(
                 url="http://x/",
-                status="success",
-                classification="rendered",
+                attempt=terminal_attempt(
+                    strategy=None,
+                    status="success",
+                    classification="rendered",
+                    elapsed_ms=1,
+                    error=None,
+                ),
                 final_url="http://x/",
                 html=None,
                 text="t",
                 attempts=1,
-                elapsed_ms=1,
                 domain="x",
                 metadata={},
             )

@@ -308,10 +308,16 @@ def _not_modified_result(ctx: _HttpStrategyContext, resp: _FetchedResponse) -> E
         return None
 
     elapsed_ms = int((time.monotonic() - ctx.started) * 1000)
+    # The label is spelled once and the status is asked for, so the attempt and
+    # the result that carries it cannot disagree about it -- correct today, and
+    # still correct the day the taxonomy moves ``not_modified`` off "success",
+    # with nothing in the suite able to see a spelled pair that had done so.
+    classification: Classification = "not_modified"
+    status = status_for_classification(classification)
     attempt = CrawlStrategyAttempt(
         strategy=ctx.strategy,
-        status="success",
-        classification="not_modified",
+        status=status,
+        classification=classification,
         http_status=304,
         content_type=None,
         elapsed_ms=elapsed_ms,
@@ -324,8 +330,8 @@ def _not_modified_result(ctx: _HttpStrategyContext, resp: _FetchedResponse) -> E
         diagnostics["conditional"] = dict(ctx.caller_conditional)
     return build_engine_result(
         **_response_result_fields(ctx, resp, attempt),
-        status="success",
-        classification="not_modified",
+        status=status,
+        classification=classification,
         selected_strategy=ctx.strategy,
         http_status=304,
         diagnostics=diagnostics,
