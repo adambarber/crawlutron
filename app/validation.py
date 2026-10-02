@@ -1,16 +1,10 @@
 from __future__ import annotations
 
-import logging
-import os
-from functools import lru_cache
 from urllib.parse import parse_qsl, urlencode, urljoin, urlparse, urlunparse
 
 from app.addresses import AddressClass, classify
-from app.env import parse_bool_env
-from app.models.host_policy import HostPolicy, host_policy_reason
+from app.models.host_policy import HostPolicy, host_egress_reason, host_policy_reason
 from app.models.normalized_url import NormalizedUrl
-
-PRIVATE_HOSTS = {"localhost", "host.docker.internal"}
 
 # Attribution/tracking query parameters that carry no content-identity
 # information. Dropping them lets URLs that differ only by UTM/tracking tags
@@ -57,20 +51,9 @@ def normalize_public_http_url(url: str, *, policy: HostPolicy) -> NormalizedUrl:
         raise ValueError("invalid_url")
 
     host = parsed.hostname.lower().rstrip(".")
-    reason = host_policy_reason(host, policy=policy)
+    reason = host_policy_reason(host, policy=policy) or host_egress_reason(host)
     if reason:
         raise ValueError(reason)
-    # Local dev/test escape hatch: the crawler is a localhost dev service and
-    # tests run a real in-process server on loopback. Allow opting out of the
-    # private-network guard via env var rather than relaxing it by default.
-    # Inverted-by-default: any value not explicitly recognized as truthy keeps
-    # the SSRF guard ON, using the shared ``parse_bool_value`` policy so every
-    # path agrees on what counts as "on". Both layers below are memoized
-    # because this function runs per anchor: the env decision
-    # is keyed on its raw value (so any change is visible on the very next
-    # call) and the host verdict is a pure function of the canonical host.
-    if not allow_private_targets() and not _host_is_public(host):
-        raise ValueError("private_network_target")
 
     default_port = 80 if parsed.scheme == "http" else 443
     port = parsed.port
@@ -96,74 +79,12 @@ def _strip_trailing_colon(value: str) -> str:
     return value[:-1] if value.endswith(":") else value
 
 
-# (raw env value, parsed decision) for CRAWLUTRON_ALLOW_PRIVATE_TARGETS.
-# Value-keyed, not time-keyed: an env change (including a test monkeypatch)
-# takes effect on the very next call; an unchanged value skips the parse.
-_PRIVATE_TARGET_DECISION: tuple[str | None, bool] | None = None
-
-
-def allow_private_targets() -> bool:
-    """Memoized read of the private-target escape hatch (inverted default).
-
-    The raw env value is the cache key, so unrecognized values keep resolving
-    to ``False`` (guard ON) through the same ``parse_bool_env`` chokepoint and
-    every distinct value change is honored immediately.
-    """
-    global _PRIVATE_TARGET_DECISION
-    raw = os.environ.get("CRAWLUTRON_ALLOW_PRIVATE_TARGETS")
-    cached = _PRIVATE_TARGET_DECISION
-    if cached is not None and cached[0] == raw:
-        return cached[1]
-    decision = parse_bool_env("CRAWLUTRON_ALLOW_PRIVATE_TARGETS", default=False)
-    _PRIVATE_TARGET_DECISION = (raw, decision)
-    if decision:
-        # Warned at the decision, not at each call site: this runs on the
-        # per-fetch SSRF path, so a warning here would be a log flood. The memo
-        # makes it once per distinct env value, so a deployment that sets the
-        # variable logs exactly once and a test that re-sets it still sees it.
-        logging.getLogger(__name__).warning(
-            "SSRF private-target guard DISABLED by CRAWLUTRON_ALLOW_PRIVATE_TARGETS=%r: "
-            "caller-supplied URLs may now reach private, loopback, and link-local "
-            "addresses, including cloud metadata endpoints. Unset it, or set it to 0, "
-            "outside local development.",
-            raw,
-            extra={"env_name": "CRAWLUTRON_ALLOW_PRIVATE_TARGETS", "env_value": raw},
-        )
-    return decision
-
-
-def _reset_guard_memo() -> None:
-    """Drop the memoized env decision (tests that count parse calls only).
-
-    Host verdicts are a pure function of the host and never go stale, so the
-    verdict memo deliberately is not touched here.
-    """
-    global _PRIVATE_TARGET_DECISION
-    _PRIVATE_TARGET_DECISION = None
-
-
-@lru_cache(maxsize=8192)
-def _host_is_public(host: str) -> bool:
-    """SSRF verdict for one canonical host (bounded memo, pure function).
-
-    Deterministic for a given host and independent of the env hatch (only
-    consulted while the guard is ON), so cache entries never go stale. The
-    bound keeps attacker-influenced host floods from growing memory.
-    """
-    if host in PRIVATE_HOSTS:
-        return False
-    # A host that is not an address at all is a name, and what it resolves to
-    # is judged separately against ``is_public_ip_value`` once the resolver
-    # has answered. Only a literal that lands in a rejected range is refused.
-    address_class = classify(host)
-    return address_class in (AddressClass.NOT_AN_ADDRESS, AddressClass.PUBLIC)
-
-
 def is_public_ip_value(value: str) -> bool:
     """Return whether a host string is safe for public egress.
 
-    Unlike ``_host_is_public`` this is asked of a *resolved* address, so a
-    string that is not an address at all is not public here.
+    Unlike ``app.models.host_policy._host_is_public`` this is asked of a
+    *resolved* address, so a string that is not an address at all is not public
+    here.
     """
     return classify(value) is AddressClass.PUBLIC
 
@@ -252,8 +173,6 @@ def safe_public_url_or_none(raw: str | None, *, policy: HostPolicy) -> Normalize
 
 
 __all__ = [
-    "PRIVATE_HOSTS",
-    "allow_private_targets",
     "filter_js_endpoints",
     "is_public_ip_value",
     "normalize_public_http_url",

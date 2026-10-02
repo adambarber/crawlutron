@@ -53,13 +53,13 @@ class TestNormalizationGuardMemoization:
     URL = "https://MEMO-T2-9E16C.TEST:443/path/?b=2&utm_source=x&a=1#frag"
 
     def _spy(self, monkeypatch):
-        import app.validation as validation
+        import app.models.host_policy as host_policy
 
         counts = {"env": 0, "ip": 0}
 
-        validation._reset_guard_memo()
-        real_bool = validation.parse_bool_env
-        real_classify = validation.classify
+        host_policy.reset_private_target_memo()
+        real_bool = host_policy.parse_bool_env
+        real_classify = host_policy.classify
 
         def counting_bool(name, default=False):
             counts["env"] += 1
@@ -69,13 +69,13 @@ class TestNormalizationGuardMemoization:
             counts["ip"] += 1
             return real_classify(host)
 
-        monkeypatch.setattr(validation, "parse_bool_env", counting_bool)
+        monkeypatch.setattr(host_policy, "parse_bool_env", counting_bool)
         # Spy on the classification primitive rather than on ``ipaddress``.
         # Which module performs the parse is a placement decision; what these
         # tests claim is that the verdict is computed once and never
         # recomputed, and the classifier call is the boundary at which that
         # work is observable.
-        monkeypatch.setattr(validation, "classify", counting_classify)
+        monkeypatch.setattr(host_policy, "classify", counting_classify)
         return counts
 
     def test_repeat_call_reuses_env_decision_and_host_verdict(self, monkeypatch):

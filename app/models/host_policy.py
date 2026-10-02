@@ -2,9 +2,14 @@
 
 from __future__ import annotations
 
+import logging
+import os
 from dataclasses import dataclass
 from functools import lru_cache
 from urllib.parse import urlparse
+
+from app.addresses import AddressClass, classify
+from app.env import parse_bool_env
 
 
 def _normalize_policy_host(host: str) -> str:
@@ -95,4 +100,89 @@ def host_policy_reason(host: str, *, policy: HostPolicy) -> str | None:
     return None
 
 
-__all__ = ["HOST_POLICY_ENTRY_POINTS", "HostPolicy", "host_policy_reason"]
+#: Hosts that name this machine rather than a site on the internet.
+_PRIVATE_HOSTS = frozenset({"localhost", "host.docker.internal"})
+
+#: (raw env value, parsed decision) for CRAWLUTRON_ALLOW_PRIVATE_TARGETS.
+#: Value-keyed, not time-keyed: an env change, including a test monkeypatch,
+#: takes effect on the very next call; an unchanged value skips the parse.
+_PRIVATE_TARGET_DECISION: tuple[str | None, bool] | None = None
+
+
+def allow_private_targets() -> bool:
+    """Memoized read of the private-target escape hatch (inverted default).
+
+    The raw env value is the cache key, so unrecognized values keep resolving to
+    ``False`` (guard ON) through the shared ``parse_bool_env`` chokepoint and
+    every distinct value change is honored immediately.
+    """
+    global _PRIVATE_TARGET_DECISION
+    raw = os.environ.get("CRAWLUTRON_ALLOW_PRIVATE_TARGETS")
+    cached = _PRIVATE_TARGET_DECISION
+    if cached is not None and cached[0] == raw:
+        return cached[1]
+    decision = parse_bool_env("CRAWLUTRON_ALLOW_PRIVATE_TARGETS", default=False)
+    _PRIVATE_TARGET_DECISION = (raw, decision)
+    if decision:
+        # Warned at the decision, not at each call site: this runs on the
+        # per-fetch SSRF path, so a warning here would be a log flood. The memo
+        # makes it once per distinct env value.
+        logging.getLogger(__name__).warning(
+            "SSRF private-target guard DISABLED by CRAWLUTRON_ALLOW_PRIVATE_TARGETS=%r: "
+            "caller-supplied URLs may now reach private, loopback, and link-local "
+            "addresses, including cloud metadata endpoints. Unset it, or set it to 0, "
+            "outside local development.",
+            raw,
+            extra={"env_name": "CRAWLUTRON_ALLOW_PRIVATE_TARGETS", "env_value": raw},
+        )
+    return decision
+
+
+def reset_private_target_memo() -> None:
+    """Drop the memoized env decision (tests that count parse calls only).
+
+    Host verdicts are a pure function of the host and never go stale, so the
+    verdict memo deliberately is not touched here.
+    """
+    global _PRIVATE_TARGET_DECISION
+    _PRIVATE_TARGET_DECISION = None
+
+
+@lru_cache(maxsize=8192)
+def _host_is_public(host: str) -> bool:
+    """SSRF verdict for one canonical host (bounded memo, pure function).
+
+    Deterministic for a given host and independent of the env hatch (only
+    consulted while the guard is ON), so cache entries never go stale. The bound
+    keeps attacker-influenced host floods from growing memory.
+    """
+    if host in _PRIVATE_HOSTS:
+        return False
+    # A host that is not an address at all is a name, and what it resolves to is
+    # judged separately against ``is_public_ip_value`` once the resolver has
+    # answered. Only a literal that lands in a rejected range is refused.
+    return classify(host) in (AddressClass.NOT_AN_ADDRESS, AddressClass.PUBLIC)
+
+
+def host_egress_reason(host: str) -> str | None:
+    """Why this host may not be reached, or None when the SSRF guard admits it.
+
+    Deliberately not folded into ``host_policy_reason``: that one answers "is
+    this host on the list", this one answers "can we leave the machine for it".
+    Merging them would change the meaning of every existing caller, and the list
+    is consulted first so a host that is both unlisted and private still answers
+    ``host_not_allowed``.
+    """
+    if allow_private_targets() or _host_is_public(host):
+        return None
+    return "private_network_target"
+
+
+__all__ = [
+    "HOST_POLICY_ENTRY_POINTS",
+    "HostPolicy",
+    "allow_private_targets",
+    "host_egress_reason",
+    "host_policy_reason",
+    "reset_private_target_memo",
+]

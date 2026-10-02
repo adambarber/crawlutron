@@ -563,8 +563,8 @@ def _private_leak_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
 
     Twenty-one names were doing this. ``DNS_EXECUTOR`` lives in
     ``strategies.pinned_transport`` and is imported by ``api.webhooks``;
-    ``allow_private_targets`` lives in ``app.validation`` and is imported by a
-    transport strategy; ``BROWSER_RAM_FRACTION`` crosses from ``app`` into
+    ``allow_private_targets`` lives in ``app.models.host_policy`` and is imported
+    by a transport strategy; ``BROWSER_RAM_FRACTION`` crosses from ``app`` into
     ``crawl.strategies.browser_pool``. Each is a real collaboration, which is
     precisely why the fix is to promote the name rather than to forbid the call.
 
@@ -647,7 +647,7 @@ def test_a_private_name_does_not_leave_its_package():
     """No app module reaches a private name in another package.
 
     The load-bearing half of a name that is genuinely private, and the thing a
-    reviewer reads ``from app.validation import allow_private_targets`` and
+    reviewer reads ``from app.models.host_policy import allow_private_targets`` and
     cannot check at a glance.
     """
     PRIVATE_NAME_LEAKS_PACKAGE.scan()

@@ -385,8 +385,14 @@ def test_allow_private_preserves_host_for_webhook_style_urls(monkeypatch):
     assert pinned != "127.0.0.1"
 
 
-def test_shared_public_target_verdict_matches_reserved_range_corpus():
-    from app.validation import _host_is_public, is_public_ip_value
+def test_shared_public_target_verdict_matches_reserved_range_corpus(monkeypatch):
+    from app.models.host_policy import host_egress_reason, reset_private_target_memo
+    from app.validation import is_public_ip_value
+
+    # The corpus claim is about the host verdict, so the escape hatch must be
+    # off: with it on, host_egress_reason admits everything by design.
+    monkeypatch.setenv("CRAWLUTRON_ALLOW_PRIVATE_TARGETS", "0")
+    reset_private_target_memo()
 
     blocked = {
         "10.0.0.1": True,
@@ -410,9 +416,9 @@ def test_shared_public_target_verdict_matches_reserved_range_corpus():
     public = {"8.8.8.8", "93.184.216.34", "2606:4700:4700::1111", "::ffff:8.8.8.8"}
     for address, expected_blocked in blocked.items():
         assert is_public_ip_value(address) is (not expected_blocked), address
-        assert _host_is_public(address) is (not expected_blocked), address
+        assert (host_egress_reason(address) is None) is (not expected_blocked), address
         assert _blocked(address) is expected_blocked, address
     for address in public:
         assert is_public_ip_value(address) is True, address
-        assert _host_is_public(address) is True, address
+        assert host_egress_reason(address) is None, address
         assert _blocked(address) is False, address

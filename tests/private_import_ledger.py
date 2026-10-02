@@ -645,14 +645,4 @@ DECLARED: dict[str, Declaration] = {
         "Not yet triaged.\n",
         ["test"],
     ),
-    "app.validation._host_is_public": _d(
-        "unreviewed",
-        "Not yet triaged.\n",
-        ["test"],
-    ),
-    "app.validation._reset_guard_memo": _d(
-        "unreviewed",
-        "Not yet triaged.\n",
-        ["test"],
-    ),
 }
