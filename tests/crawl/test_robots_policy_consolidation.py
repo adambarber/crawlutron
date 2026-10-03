@@ -4,7 +4,6 @@ import asyncio
 
 import pytest
 
-from app.api_models import CrawlPolicy
 from app.crawl.admission import RobotsGate
 from app.crawl.engine import crawl_request
 from app.crawl.robots import (
@@ -14,6 +13,7 @@ from app.crawl.robots import (
     load_robots_rules,
     robots_cache,
 )
+from app.models.crawl_policy import CrawlPolicy
 from app.validation import HostPolicy
 from tests._fetcher_factories import make_html_fetcher
 from tests._policy_factories import crawl_policy

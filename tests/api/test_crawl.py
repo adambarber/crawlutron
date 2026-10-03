@@ -8,8 +8,8 @@ import pytest
 from fastapi import Request
 from fastapi.exceptions import RequestValidationError
 
-from app.api_models import CrawlPolicy
 from app.constants import HTTP_DECLARED_CRAWLER
+from app.models.crawl_policy import CrawlPolicy
 from tests._assertions import (
     accepted_crawl,
     assert_pool_unavailable,

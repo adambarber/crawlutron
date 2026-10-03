@@ -157,9 +157,9 @@ class TestSitemapCandidateBuilderUsesTheCanonicalOrigin:
             seen.append(sitemap_url)
             return set()
 
-        from app.api_models import CrawlPolicy
         from app.crawl.admission import JobAdmissionContext
         from app.crawl.policy import PolicyTier
+        from app.models.crawl_policy import CrawlPolicy
         from app.settings import CrawlerSettings
 
         context = JobAdmissionContext.create(

@@ -246,7 +246,7 @@ async def _probe_crawl_endpoint(monkeypatch, tmp_path):
     import asyncio
 
     from app.api.crawl_endpoint import crawl
-    from app.api_models import CrawlRequest
+    from app.models.crawl_request import CrawlRequest
 
     effects = _effects()
     job_store = type(

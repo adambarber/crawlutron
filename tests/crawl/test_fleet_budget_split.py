@@ -128,8 +128,8 @@ def test_the_content_length_budget_is_split_across_workers(monkeypatch):
     is not divided and is what binds when the budget is generous; the RAM budget
     is a fleet aggregate, so it is divided and is what binds when it is not.
     """
-    from app.api_models import CrawlPolicyLimits
     from app.crawl.strategies import content_cache_key as cck
+    from app.models.crawl_policy_limits import CrawlPolicyLimits
 
     budget = 16 * 1024 * 1024
     monkeypatch.setattr(cck, "_RAM_SAFETY_BYTES", budget)
@@ -155,8 +155,8 @@ def test_an_explicit_content_cap_is_not_divided(monkeypatch):
     explicit cap is a single page the caller already bounded. Scaling it by the
     worker count would silently shrink a policy the operator wrote on purpose.
     """
-    from app.api_models import CrawlPolicyLimits
     from app.crawl.strategies import content_cache_key as cck
+    from app.models.crawl_policy_limits import CrawlPolicyLimits
 
     explicit = CrawlPolicyLimits(max_content_length_bytes=5 * 1024 * 1024)
 

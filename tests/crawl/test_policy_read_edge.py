@@ -23,7 +23,6 @@ from typing import Any
 import pytest
 from pydantic import ValidationError
 
-from app.api_models import CrawlPolicy, CrawlPolicyLimits
 from app.crawl import policy as policy_module
 from app.crawl.policy import (
     _ERROR_CODE_BY_FIELD,
@@ -33,6 +32,8 @@ from app.crawl.policy import (
     stored_policy,
     validate_wire_policy,
 )
+from app.models.crawl_policy import CrawlPolicy
+from app.models.crawl_policy_limits import CrawlPolicyLimits
 from app.settings import CrawlerSettings
 
 # A field the model will reject on its own, used wherever a test needs "this row

@@ -25,7 +25,6 @@ import asyncio
 from dataclasses import dataclass
 from typing import Any
 
-from app.api_models import CrawlPolicy
 from app.constants import (
     EXTRACTION_DOCUMENT,
     EXTRACTION_METHOD_DOCUMENT,
@@ -42,6 +41,7 @@ from app.crawl.extraction import (
 )
 from app.crawl.policy import discovery_flags
 from app.models.crawl_extraction_method import CrawlExtractionMethod
+from app.models.crawl_policy import CrawlPolicy
 from app.models.host_policy import HostPolicy
 from app.models.taxonomy import CrawlError
 from app.validation import filter_js_endpoints

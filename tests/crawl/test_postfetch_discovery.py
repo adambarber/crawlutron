@@ -10,9 +10,9 @@ import asyncio
 
 from lxml import etree
 
-from app.api_models import CrawlPolicy
 from app.crawl.extraction import extract_post_fetch_discovery
 from app.crawl.policy import read_policy
+from app.models.crawl_policy import CrawlPolicy
 from app.validation import HostPolicy
 from tests._assertions import install_to_thread_spy
 from tests._fetcher_factories import invoke_browser_strategy, invoke_http_strategy, make_fetch

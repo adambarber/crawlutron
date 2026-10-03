@@ -21,7 +21,6 @@ from datetime import UTC, datetime
 from functools import partial
 from typing import Any, cast
 
-from app.api_models import CrawlPolicy
 from app.crawl import robots as _robots_policy
 from app.crawl.admission import compile_scope_pattern
 from app.crawl.cache import HttpCache
@@ -33,6 +32,7 @@ from app.crawl.result_record import ProducerEnvelope
 from app.crawl.robots import FetchAndDecode
 from app.crawl.strategies.fetchers import default_http_fetcher, impersonating_fetcher
 from app.env import get_env_int
+from app.models.crawl_policy import CrawlPolicy
 from app.models.crawl_worker import CrawlWorker
 from app.models.engine_crawl_result import EngineCrawlResult
 from app.models.host_policy import HostPolicy

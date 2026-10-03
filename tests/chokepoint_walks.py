@@ -49,11 +49,31 @@ import tokenize
 import weakref
 from collections.abc import Callable, Container, Iterable, Iterator
 from functools import cache, lru_cache
+from types import ModuleType
 
 TESTS_DIR = pathlib.Path(__file__).resolve().parent
 REPO_ROOT = TESTS_DIR.parent
 APP_ROOT = REPO_ROOT / "app"
 STRATEGIES_DIR = APP_ROOT / "crawl" / "strategies"
+
+
+@lru_cache(maxsize=1)
+def _model_modules() -> tuple[ModuleType, ...]:
+    """Every module in ``app.models``, derived rather than enumerated.
+
+    A vocabulary that lives in one of these files is found by reading the file it
+    lives in. Naming the candidate modules instead meant the list went stale every
+    time a record moved, and a stale list resolves a taxonomy to nothing -- which
+    approves every literal rather than failing.
+    """
+    import importlib
+    import pkgutil
+
+    package = importlib.import_module("app.models")
+    return tuple(
+        importlib.import_module(f"app.models.{info.name}") for info in pkgutil.iter_modules(package.__path__)
+    )
+
 
 # app/safe_regex.py is the sanctioned regex wrapper (stdlib `re` for
 # literals; the third-party `regex` engine for bounded execution). It owns
@@ -1110,17 +1130,15 @@ def real_members(type_name: str) -> frozenset[str]:
     silently resolved to the empty set would approve every literal, which is the
     failure this function exists to make impossible.
     """
-    from app import api_models, constants
+    from app import constants
     from app.models import taxonomy
 
-    for module in (taxonomy, api_models, constants):
+    for module in (taxonomy, *_model_modules(), constants):
         owner = getattr(module, type_name, None)
         if owner is not None:
             break
     else:
-        raise LookupError(
-            f"{type_name} is not a taxonomy on app.models.taxonomy/app.api_models/app.constants"
-        )
+        raise LookupError(f"{type_name} is not a taxonomy anywhere in app/models or app.constants")
     if hasattr(owner, "__members__"):
         return frozenset(member.value for member in owner)
     return taxonomy.literal_members(owner)

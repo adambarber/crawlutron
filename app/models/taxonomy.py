@@ -54,7 +54,7 @@ Classification = Literal[
     # app/constants.py) so it survives the strict enum at response shaping.
     "url_budget_exceeded",
     # Fetch-failure codes the HTTP strategy's error classifier emits; they are
-    # CrawlClassification members (see app.api_models) so they survive the
+    # CrawlClassification members (see app.models.taxonomy) so they survive the
     # strict enum field at response shaping.
     "payload_too_large",
     "too_many_redirects",

@@ -22,9 +22,9 @@ from httpx import ASGITransport, AsyncClient
 
 from app.api import dependencies, job_runner, jobs_router
 from app.api.dependencies import get_job_store, get_settings, get_shutdown_event
-from app.api_models import CrawlPolicy
 from app.crawl.job_store import FrontierEntry, JobStatus
 from app.crawl.policy import read_policy
+from app.models.crawl_policy import CrawlPolicy
 from app.settings import CrawlerSettings
 from tests._job_harnesses import (
     ScriptedExecute,

@@ -34,7 +34,8 @@ from typing import TYPE_CHECKING, Any, NamedTuple
 
 from pydantic import ValidationError
 
-from app.api_models import CrawlPolicy, CrawlPolicyLimits
+from app.models.crawl_policy import CrawlPolicy
+from app.models.crawl_policy_limits import CrawlPolicyLimits
 
 if TYPE_CHECKING:  # pragma: no cover - import cycle guard
     from app.settings import CrawlerSettings

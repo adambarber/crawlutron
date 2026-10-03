@@ -12,7 +12,7 @@ that way. These tests pin the two properties that made the move worth making.
 """
 
 from app.api.response_shaping import arender_response_from_result, aunified_response_from_result
-from app.api_models import POLICY_SCHEMA_VERSION
+from app.models.crawl_policy import POLICY_SCHEMA_VERSION
 from tests._browser_doubles import _fake_browser
 from tests._render_producer import render_stub_request
 from tests._result_builders import engine_result

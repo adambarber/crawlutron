@@ -6,7 +6,6 @@ from collections.abc import Iterable
 from dataclasses import dataclass, replace
 from typing import Any, cast, get_args
 
-from app.api_models import CrawlPolicy
 from app.constants import (
     BROWSER_BLOCKED_CLASSIFICATIONS,
     BROWSER_STRATEGIES,
@@ -18,6 +17,7 @@ from app.crawl.result_helpers import TerminalResult, _failed_engine_result, engi
 from app.crawl.strategies.browser_result import browser_strategy_result
 from app.crawl.strategies.http import http_strategy_result
 from app.crawl.strategies.strategy_request import StrategyRequest
+from app.models.crawl_policy import CrawlPolicy
 from app.models.crawl_result import CrawlStrategyAttempt
 from app.models.crawl_strategy import CrawlStrategy
 from app.models.crawl_worker import CrawlWorker

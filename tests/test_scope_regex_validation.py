@@ -9,7 +9,7 @@ silently drop the filter. Pins the fix for the dead `result is None` branch.
 import pytest
 from pydantic import ValidationError
 
-from app.api_models import CrawlPolicy
+from app.models.crawl_policy import CrawlPolicy
 
 
 def test_overlong_scope_regex_raises_validation_error():

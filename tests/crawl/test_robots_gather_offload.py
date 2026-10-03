@@ -9,8 +9,8 @@ contract: overlapping checks must be observable via an in-flight counter.
 import asyncio
 from contextlib import asynccontextmanager
 
-from app.api_models import CrawlPolicy
 from app.crawl.admission import RobotsGate
+from app.models.crawl_policy import CrawlPolicy
 from app.models.discovered_link import DiscoveredLink
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY, canonical
 from tests._recursive_harnesses import drive_recursive_crawl

@@ -21,11 +21,11 @@ the production read edge answered a different question than the test's did.
 import pathlib
 from typing import Any
 
-from app.api_models import CrawlPolicy
 from app.constants import HTTP_DECLARED_CRAWLER
 from app.crawl.admission import admit_discovered_links
 from app.crawl.job_store import JobStore
 from app.crawl.policy import PolicyTier, read_policy
+from app.models.crawl_policy import CrawlPolicy
 from app.models.normalized_url import normalize_public_http_url
 from app.settings import CrawlerSettings
 from app.validation import HostPolicy

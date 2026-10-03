@@ -13,10 +13,11 @@ by the chokepoint that already scrubs cookies.
 
 import pytest
 
-from app.api_models import CrawlPolicy, Credential
 from app.crawl.payload_helpers import _payload_policy
 from app.crawl.policy import PolicyTier, read_policy
 from app.crawl.strategies.request_profile import _apply_credentials
+from app.models.crawl_policy import CrawlPolicy
+from app.models.credential import Credential
 from app.validation import HostPolicy
 
 #: The settings a payload-policy test runs against: the defaults with nothing

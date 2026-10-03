@@ -9,7 +9,6 @@ from pathlib import Path
 
 import pytest
 
-from app.api_models import CrawlPolicy
 from app.crawl.coordination_cookies import SharedCookieStore
 from app.crawl.coordination_counters import CoordinationCounters
 from app.crawl.job_store import CrawlJobState, JobStatus, JobStore
@@ -27,6 +26,7 @@ from app.crawl.migrations import (
 )
 from app.crawl.migrations.runner import LegacySchemaMismatch
 from app.crawl.result_store import CrawlResultStore
+from app.models.crawl_policy import CrawlPolicy
 from tests._policy_factories import job_store
 
 _BOOKKEEPING_TABLES = {"_yoyo_log", "_yoyo_migration", "_yoyo_version", "yoyo_lock"}

@@ -423,7 +423,7 @@ with `422`.
 │   │   ├── protocol.py   # JSON-RPC helpers + request-metadata validation
 │   │   ├── tools.py      # search/crawl/map/render tool registry
 │   │   └── server.py / router.py
-│   ├── classify.py / constants.py / models.py / api_models.py / validation.py
+│   ├── classify.py / constants.py / models/ / validation.py
 │   ├── scheduler.py / settings.py / metrics.py / output_formats.py / logging_config.py
 │   └── ...
 ├── tests/                # Behavior tests (no mocks; real HTTP + real Camoufox)

@@ -1,6 +1,6 @@
 """Single source of truth for policy/strategy/extraction magic strings.
 
-These literals are consumed by ``app.api_models``,
+These literals are consumed by ``app.models``,
 ``app.discovery`` and the test suite so that spelling drift (or a stray
 non-ASCII look-alike character) cannot desynchronize comparisons. Always
 import the constant instead of typing the string literal.
@@ -679,9 +679,9 @@ def status_agrees_with_classification(classification: str, status: str) -> bool:
 # Crawl policy limit defaults and hard caps.
 #
 # Single source of truth for the numeric limits that previously lived as bare
-# literals / inline os.environ reads across api_models, payload_helpers,
+# literals / inline os.environ reads across app/models, payload_helpers,
 # http.py, main.py, discovery/* and browser.py. Change a limit HERE, not in N
-# places. The api_models pydantic Fields reference these so the advertised
+# places. The pydantic Fields in app/models reference these so the advertised
 # contract (``/v1/capabilities``) and the runtime defaults cannot drift.
 # ---------------------------------------------------------------------------
 # Discovered links returned per selected page.

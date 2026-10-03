@@ -6,12 +6,13 @@ from typing import Any
 
 import pytest
 
-from app.api_models import CrawlPolicy, CrawlPolicyLimits
 from app.constants import BROWSER_HEADLESS, EXTRACTION_DOCUMENT, EXTRACTION_TRAFILATURA, HTTP_DECLARED_CRAWLER
 from app.crawl.engine import _payload_policy
 from app.crawl.policy import PolicyTier, read_policy
 from app.crawl.result_helpers import terminal_attempt
 from app.crawl.strategies.browser import BrowserRenderer
+from app.models.crawl_policy import CrawlPolicy
+from app.models.crawl_policy_limits import CrawlPolicyLimits
 from app.models.crawl_result import CrawlResult
 from app.models.serialization import to_dict
 from app.scheduler import DomainScheduler

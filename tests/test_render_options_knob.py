@@ -36,7 +36,7 @@ class TestWaitUntilKnobRemoved:
         assert "wait_until" not in RenderOptions.__dataclass_fields__
 
     def test_render_request_refuses_wait_until_by_name(self):
-        from app.api_models import RenderRequest
+        from app.models.render_request import RenderRequest
 
         with pytest.raises(ValidationError) as exc:
             RenderRequest(url="http://example.com/", wait_until="load")

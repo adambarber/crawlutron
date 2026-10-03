@@ -1,0 +1,39 @@
+"""Browser render options for /v1/render (all optional; server applies defaults)."""
+
+from __future__ import annotations
+
+from typing import Annotated
+
+from pydantic import BaseModel, ConfigDict, Field
+
+
+class RenderOptionsRequest(BaseModel):
+    """Browser render options for ``/v1/render`` (all optional; server applies defaults)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    timeout_seconds: Annotated[
+        int | None,
+        Field(
+            description="Per-render navigation timeout in seconds.",
+        ),
+    ] = None
+    max_retries: Annotated[
+        int | None,
+        Field(
+            description="Maximum retries for a transient render failure.",
+        ),
+    ] = None
+    respect_robots: Annotated[
+        bool | None,
+        Field(
+            description="Whether to honor robots.txt for the render target.",
+        ),
+    ] = None
+    include_html: Annotated[bool | None, Field(description="Include the rendered HTML in the result.")] = None
+    include_text: Annotated[
+        bool | None,
+        Field(
+            description="Include extracted visible text in the result.",
+        ),
+    ] = None

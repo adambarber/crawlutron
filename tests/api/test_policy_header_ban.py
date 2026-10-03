@@ -38,7 +38,7 @@ BANNED = (
 @pytest.mark.parametrize("header", BANNED)
 @pytest.mark.parametrize("spelling", ["Cookie", "COOKIE", "cookie ", "cookie"])
 def test_banned_headers_rejected_in_any_spelling(header, spelling):
-    from app.api_models import CrawlRequest
+    from app.models.crawl_request import CrawlRequest
 
     with pytest.raises(ValidationError):
         CrawlRequest(url="http://example.com/", policy={"headers": {spelling: "x"}})
@@ -47,7 +47,7 @@ def test_banned_headers_rejected_in_any_spelling(header, spelling):
 @pytest.mark.parametrize(
     ("module_name", "model_name"),
     [
-        ("app.api_models", "CrawlRequest"),
+        ("app.models.crawl_request", "CrawlRequest"),
         ("app.models.map_request", "MapRequest"),
         ("app.models.job_create_request", "JobCreateRequest"),
     ],
@@ -73,7 +73,7 @@ def test_render_request_has_no_header_smuggling_surface():
     If a ``headers`` field is ever added to RenderOptionsRequest, this fails
     and forces the ban to cover it -- immunity must be re-earned, not assumed.
     """
-    from app.api_models import RenderOptionsRequest
+    from app.models.render_options_request import RenderOptionsRequest
 
     assert "headers" not in RenderOptionsRequest.model_fields
 
@@ -86,14 +86,14 @@ def test_authorization_stays_allowed_until_the_credentials_field_lands():
     caller's only credentialed-crawl option without a replacement is the
     workaround-forcing move this test exists to catch in review.
     """
-    from app.api_models import CrawlRequest
+    from app.models.crawl_request import CrawlRequest
 
     request = CrawlRequest(url="http://example.com/", policy={"headers": {"Authorization": "Bearer t"}})
     assert request.policy.headers == {"Authorization": "Bearer t"}
 
 
 def test_benign_headers_are_unaffected():
-    from app.api_models import CrawlRequest
+    from app.models.crawl_request import CrawlRequest
 
     headers = {
         "Accept": "text/html",
@@ -107,7 +107,7 @@ def test_benign_headers_are_unaffected():
 
 def test_conditional_headers_keep_their_specific_reason():
     """The reason survives the consolidation: conditionals point at validators."""
-    from app.api_models import CrawlRequest
+    from app.models.crawl_request import CrawlRequest
 
     with pytest.raises(ValidationError, match="validators"):
         CrawlRequest(url="http://example.com/", policy={"headers": {"If-None-Match": '"v1"'}})
@@ -138,7 +138,7 @@ def test_framing_headers_rejected_at_the_policy_chokepoint(header):
     whole point of this chokepoint is that the refusal names the header and says
     why, so the caller can act on it.
     """
-    from app.api_models import CrawlPolicy
+    from app.models.crawl_policy import CrawlPolicy
 
     with pytest.raises(ValidationError):
         CrawlPolicy(headers={header: "whatever"})
@@ -152,7 +152,7 @@ def test_framing_refusal_names_the_header_and_the_reason(header):
     forty headers to bisect, and the reason string is what turns the refusal
     into an explanation rather than a dead end.
     """
-    from app.api_models import CrawlPolicy
+    from app.models.crawl_policy import CrawlPolicy
 
     with pytest.raises(ValidationError) as exc:
         CrawlPolicy(headers={header: "whatever"})
@@ -168,7 +168,7 @@ def test_a_smuggling_attempt_is_refused_whole():
     cases above already prove each header is refused -- what is new here is
     that pairing them does not produce a differently-shaped outcome.
     """
-    from app.api_models import CrawlPolicy
+    from app.models.crawl_policy import CrawlPolicy
 
     with pytest.raises(ValidationError):
         CrawlPolicy(headers={"content-length": "10", "transfer-encoding": "chunked"})
@@ -182,7 +182,7 @@ def test_hop_by_hop_headers_are_refused_through_every_model_embedding_the_policy
     """
     import pytest as _pytest  # noqa: F401  (parametrize imported at module top)
 
-    from app.api_models import CrawlRequest
+    from app.models.crawl_request import CrawlRequest
     from app.models.job_create_request import JobCreateRequest
     from app.models.map_request import MapRequest
 

@@ -5,9 +5,9 @@ from typing import Any
 import pytest
 from pydantic import ValidationError
 
-from app.api_models import CrawlPolicy
 from app.crawl.payload_helpers import _payload_policy
 from app.crawl.policy import PolicyTier
+from app.models.crawl_policy import CrawlPolicy
 from app.settings import CrawlerSettings
 
 
@@ -69,8 +69,8 @@ class TestPayloadPolicyCarriesAdvertisedLimits:
     def test_max_content_length_above_ceiling_is_a_validation_error(self):
         # The pydantic boundary must 422 oversized caps (le= on the model).
 
-        from app.api_models import CrawlPolicyLimits
         from app.constants import MAX_CONTENT_LENGTH_BYTES
+        from app.models.crawl_policy_limits import CrawlPolicyLimits
 
         with pytest.raises(ValidationError):
             CrawlPolicyLimits(max_content_length_bytes=MAX_CONTENT_LENGTH_BYTES + 1)
@@ -94,7 +94,7 @@ class TestPydanticDefaultPreservesRamScaling:
     """
 
     def test_default_request_omits_the_cap(self):
-        from app.api_models import CrawlRequest
+        from app.models.crawl_request import CrawlRequest
 
         request = CrawlRequest(url="https://example.com/")
         payload = request.model_dump(exclude_none=True)
@@ -102,7 +102,8 @@ class TestPydanticDefaultPreservesRamScaling:
         assert "max_content_length_bytes" not in dumped_limits
 
     def test_explicit_cap_still_flows(self):
-        from app.api_models import CrawlPolicyLimits, CrawlRequest
+        from app.models.crawl_policy_limits import CrawlPolicyLimits
+        from app.models.crawl_request import CrawlRequest
 
         request = CrawlRequest(
             url="https://example.com/",

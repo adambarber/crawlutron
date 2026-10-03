@@ -16,15 +16,16 @@ import pytest
 from httpx import AsyncClient
 from pydantic import BaseModel, ValidationError
 
-from app import api_models
-from app.api_models import MAX_BROWSER_ACTIONS, CrawlRequest, RenderRequest
 from app.constants import (
     ACTIONS_REQUIRING_SELECTOR,
     ALLOWED_BROWSER_ACTION_TYPES,
     BROWSER_ACTION_TYPES,
     BROWSER_PROFILE_KEYS,
 )
+from app.models.crawl_policy import MAX_BROWSER_ACTIONS
+from app.models.crawl_request import CrawlRequest
 from app.models.crawl_strategy import CrawlStrategy
+from app.models.render_request import RenderRequest
 from tests._app_factory import service_app
 from tests.chokepoint_walks import APP_ROOT
 
@@ -83,17 +84,14 @@ _BOUND_REQUEST_BODIES = (
 )
 
 
-#: Both wire-model homes. The output half moved out of ``app.api_models`` and now
-#: lives in ``app.models``, one record per file, so a walk that only reads
-#: ``app.api_models`` sees no response model at all -- which is what the
-#: response-side tests below were written to cover. The set is derived from the
-#: package so a model is covered the day its file is written.
+#: Both wire-model homes now live in ``app.models``, one record per file, so a
+#: walk that read only the request models would see no response model at all --
+#: which is what the response-side tests below were written to cover. Derived from
+#: the package, so a model is covered the day its file is written.
 def _wire_model_modules() -> tuple[ModuleType, ...]:
     package = importlib.import_module("app.models")
-    return (
-        api_models,
-        *(importlib.import_module(f"app.models.{m.name}") for m in pkgutil.iter_modules(package.__path__)),
-    )
+    names = (m.name for m in pkgutil.iter_modules(package.__path__))
+    return tuple(importlib.import_module(f"app.models.{name}") for name in names)
 
 
 def _declared_models() -> dict[str, type[BaseModel]]:
@@ -294,7 +292,7 @@ class TestRequestCollectionsAreBounded:
     MAX_HEADERS = 64
 
     def test_url_lists_are_capped(self):
-        from app.api_models import CrawlRequest
+        from app.models.crawl_request import CrawlRequest
 
         at_ceiling = {"urls": [f"https://example.com/{index}" for index in range(self.MAX_URLS)]}
         assert len(CrawlRequest(**at_ceiling).urls or []) == self.MAX_URLS
@@ -308,8 +306,8 @@ class TestRequestCollectionsAreBounded:
         on only the biggest one leaves the other two uncapped, which is the
         shape this test exists to prevent.
         """
-        from app.api_models import RenderRequest
         from app.models.map_request import MapRequest
+        from app.models.render_request import RenderRequest
 
         too_many = [f"https://example.com/{index}" for index in range(self.MAX_URLS + 1)]
         for model in (MapRequest, RenderRequest):
@@ -317,7 +315,7 @@ class TestRequestCollectionsAreBounded:
                 model(urls=too_many)
 
     def test_validator_maps_are_capped(self):
-        from app.api_models import CrawlRequest
+        from app.models.crawl_request import CrawlRequest
 
         at_ceiling = {f"https://example.com/{i}": {"if_none_match": "x"} for i in range(self.MAX_VALIDATORS)}
         # A url source is required alongside it -- unrelated to the cap, but the
@@ -331,7 +329,7 @@ class TestRequestCollectionsAreBounded:
             CrawlRequest(url="https://example.com/0", validators=over)
 
     def test_header_maps_are_capped(self):
-        from app.api_models import CrawlPolicy
+        from app.models.crawl_policy import CrawlPolicy
 
         at_ceiling = {f"x-custom-{i}": "v" for i in range(self.MAX_HEADERS)}
         assert len(CrawlPolicy(headers=at_ceiling).headers) == self.MAX_HEADERS
@@ -341,7 +339,7 @@ class TestRequestCollectionsAreBounded:
 
     def test_the_credential_ceiling_still_holds(self):
         """Pins the pre-existing cap so the siblings are not capped BELOW it by accident."""
-        from app.api_models import CrawlPolicy
+        from app.models.crawl_policy import CrawlPolicy
 
         at_ceiling = {f"https://h{i}.example": {"kind": "bearer", "token": "t"} for i in range(32)}
         assert len(CrawlPolicy(credentials=at_ceiling).credentials) == 32
@@ -374,7 +372,7 @@ class TestOutputFormatIsTheDocumentedSet:
         """
         from typing import get_args
 
-        from app.api_models import CrawlRequest
+        from app.models.crawl_request import CrawlRequest
 
         args = get_args(CrawlRequest.model_fields["output_format"].annotation)
         enforced = {value for arg in args for value in get_args(arg) if isinstance(value, str)}
@@ -382,19 +380,19 @@ class TestOutputFormatIsTheDocumentedSet:
 
     @pytest.mark.parametrize("value", DOCUMENTED)
     def test_each_documented_value_validates(self, value):
-        from app.api_models import CrawlRequest
+        from app.models.crawl_request import CrawlRequest
 
         assert CrawlRequest(url="https://example.com/", output_format=value).output_format == value
 
     def test_absent_still_means_the_default(self):
-        from app.api_models import CrawlRequest
+        from app.models.crawl_request import CrawlRequest
 
         assert CrawlRequest(url="https://example.com/").output_format is None
         assert CrawlRequest(url="https://example.com/", output_format=None).output_format is None
 
     @pytest.mark.parametrize("typo", ["jsonlines", "JSON", "csv2", "md", "yaml", ""])
     def test_a_value_outside_the_set_is_refused(self, typo):
-        from app.api_models import CrawlRequest
+        from app.models.crawl_request import CrawlRequest
 
         with pytest.raises(ValidationError):
             CrawlRequest(url="https://example.com/", output_format=typo)
@@ -406,7 +404,7 @@ class TestOutputFormatIsTheDocumentedSet:
         API derives its error code from where pydantic points -- so a bare
         "invalid request" would name nothing the caller can act on.
         """
-        from app.api_models import CrawlRequest
+        from app.models.crawl_request import CrawlRequest
 
         with pytest.raises(ValidationError) as exc:
             CrawlRequest(url="https://example.com/", output_format="jsonlines")
@@ -440,21 +438,21 @@ class TestBrowserProfileVocabularyIsClosed:
 
     @pytest.mark.parametrize("action_type", ALLOWED)
     def test_each_allowed_action_validates(self, action_type):
-        from app.api_models import CrawlPolicy
+        from app.models.crawl_policy import CrawlPolicy
 
         profile = CrawlPolicy(browser_profile={"actions": [{"type": action_type, "selector": "#x"}]})
         assert profile.browser_profile["actions"][0]["type"] == action_type
 
     def test_execute_js_stays_refused_with_its_reasoning_intact(self):
         """The RCE refusal must survive, and must still be about execute_js."""
-        from app.api_models import CrawlPolicy
+        from app.models.crawl_policy import CrawlPolicy
 
         with pytest.raises(ValidationError, match="execute_js"):
             CrawlPolicy(browser_profile={"actions": [{"type": "execute_js", "value": "fetch('x')"}]})
 
     @pytest.mark.parametrize("typo", ["clik", "Execute_JS", "fill_text", "", "CLICK_ALL"])
     def test_an_unrecognised_action_type_is_refused(self, typo):
-        from app.api_models import CrawlPolicy
+        from app.models.crawl_policy import CrawlPolicy
 
         with pytest.raises(ValidationError) as exc:
             CrawlPolicy(browser_profile={"actions": [{"type": typo, "selector": "#x"}]})
@@ -467,7 +465,7 @@ class TestBrowserProfileVocabularyIsClosed:
         The message must list the accepted types, so a caller can correct the
         call without reading this service's source.
         """
-        from app.api_models import CrawlPolicy
+        from app.models.crawl_policy import CrawlPolicy
 
         with pytest.raises(ValidationError) as exc:
             CrawlPolicy(browser_profile={"actions": [{"type": "clik"}]})
@@ -481,7 +479,7 @@ class TestBrowserProfileVocabularyIsClosed:
         Rejecting ``CLICK`` while ``click`` passes would refuse something the
         consumer handles. The rule is the vocabulary, not the spelling.
         """
-        from app.api_models import CrawlPolicy
+        from app.models.crawl_policy import CrawlPolicy
 
         assert CrawlPolicy(browser_profile={"actions": [{"type": "CLICK", "selector": "#x"}]})
 
@@ -495,7 +493,7 @@ class TestBrowserProfileVocabularyIsClosed:
         prevent. Deriving the parameters from the constant means a key added to
         it has to earn a reader, and one removed cannot keep a test alive.
         """
-        from app.api_models import CrawlPolicy
+        from app.models.crawl_policy import CrawlPolicy
 
         value: object = [] if key == "actions" else "desktop"
         assert CrawlPolicy(browser_profile={key: value}).browser_profile[key] == value
@@ -535,7 +533,7 @@ class TestBrowserProfileVocabularyIsClosed:
     @pytest.mark.parametrize("typo", ["viewports", "resourceMode", "user_agent_family", "exec_js"])
     def test_an_unknown_profile_key_is_refused(self, typo):
         """A misspelled profile key is inert, so it must not pass silently."""
-        from app.api_models import CrawlPolicy
+        from app.models.crawl_policy import CrawlPolicy
 
         with pytest.raises(ValidationError):
             CrawlPolicy(browser_profile={typo: "x"})
@@ -564,27 +562,27 @@ class TestBrowserProfileActionsAreWellFormed:
 
     def test_actions_must_be_a_list(self):
         """A non-list is a caller mistake to report, not a crash to propagate."""
-        from app.api_models import CrawlPolicy
+        from app.models.crawl_policy import CrawlPolicy
 
         with pytest.raises(ValidationError):
             CrawlPolicy(browser_profile={"actions": 5})
 
     def test_a_bare_string_is_not_a_list_of_actions(self):
-        from app.api_models import CrawlPolicy
+        from app.models.crawl_policy import CrawlPolicy
 
         with pytest.raises(ValidationError):
             CrawlPolicy(browser_profile={"actions": "click"})
 
     @pytest.mark.parametrize("action_type", sorted(ACTIONS_REQUIRING_SELECTOR))
     def test_an_action_that_names_a_target_must_carry_one(self, action_type):
-        from app.api_models import CrawlPolicy
+        from app.models.crawl_policy import CrawlPolicy
 
         with pytest.raises(ValidationError):
             CrawlPolicy(browser_profile={"actions": [{"type": action_type}]})
 
     @pytest.mark.parametrize("action_type", sorted(ALLOWED_BROWSER_ACTION_TYPES - ACTIONS_REQUIRING_SELECTOR))
     def test_an_action_needing_no_target_still_validates(self, action_type):
-        from app.api_models import CrawlPolicy
+        from app.models.crawl_policy import CrawlPolicy
 
         assert CrawlPolicy(browser_profile={"actions": [{"type": action_type}]})
 
@@ -596,7 +594,7 @@ class TestBrowserProfileActionsAreWellFormed:
         hand the model a 200,000-element action list, which is the same shape as
         the unbounded ``urls`` collection the ceiling above already refuses.
         """
-        from app.api_models import CrawlPolicy
+        from app.models.crawl_policy import CrawlPolicy
 
         one = {"type": "click", "selector": "#a"}
         assert CrawlPolicy(browser_profile={"actions": [one] * MAX_BROWSER_ACTIONS})
@@ -725,14 +723,14 @@ class TestRequestProfileVocabularyIsClosed:
     )
 
     def test_an_unknown_key_is_refused(self):
-        from app.api_models import CrawlPolicy
+        from app.models.crawl_policy import CrawlPolicy
 
         with pytest.raises(ValidationError, match="request_profile keys not permitted"):
             CrawlPolicy(request_profile={"totally_bogus": 1})
 
     def test_a_misspelled_key_is_refused_rather_than_ignored(self):
         """The failure this exists for: a typo that reports success and does nothing."""
-        from app.api_models import CrawlPolicy
+        from app.models.crawl_policy import CrawlPolicy
 
         for typo in ("cookie_jarr", "fingerprint_rotatoin", "accept_language"):
             with pytest.raises(ValidationError, match="request_profile keys not permitted"):
@@ -745,7 +743,7 @@ class TestRequestProfileVocabularyIsClosed:
         closed vocabulary with zero readers. This asserts the property for the
         request profile so the same class cannot reappear.
         """
-        from app.api_models import CrawlPolicy
+        from app.models.crawl_policy import CrawlPolicy
 
         field = CrawlPolicy.model_fields["request_profile"]
         # ``.get`` rather than ``getattr(..., "keys")``: a dict's own ``keys``
@@ -764,7 +762,7 @@ class TestRequestProfileVocabularyIsClosed:
         description against the table, so a key could be advertised and inert at
         the same time.
         """
-        from app.api_models import CrawlPolicy
+        from app.models.crawl_policy import CrawlPolicy
 
         field = CrawlPolicy.model_fields["request_profile"]
         description = field.description or ""
@@ -807,7 +805,7 @@ class TestRequestProfileCookiesCannotBypassTheNamespaceChokepoint:
     MAX_COOKIE_PAIRS = 32
 
     def _profile(self, cookies: dict):
-        from app.api_models import CrawlPolicy
+        from app.models.crawl_policy import CrawlPolicy
 
         return CrawlPolicy(
             request_profile={"cookie_jar": "per_host", "cookie_namespace": "t1", "cookies": cookies}
@@ -849,7 +847,7 @@ class TestRequestProfileCookiesCannotBypassTheNamespaceChokepoint:
         a tenant key rather than a boundary. There is no value to refusing here
         that a caller could act on.
         """
-        from app.api_models import CrawlPolicy
+        from app.models.crawl_policy import CrawlPolicy
 
         profile = CrawlPolicy(
             request_profile={"cookie_jar": "per_host", "cookies": {"e.example": {"a": "1"}}}
@@ -858,7 +856,7 @@ class TestRequestProfileCookiesCannotBypassTheNamespaceChokepoint:
 
     def test_a_namespace_is_itself_bounded(self):
         """A namespace is a dict key in a process-wide jar, so it is a size knob too."""
-        from app.api_models import CrawlPolicy
+        from app.models.crawl_policy import CrawlPolicy
 
         with pytest.raises(ValidationError, match="cookie_namespace"):
             CrawlPolicy(request_profile={"cookie_namespace": "t" * 500})
@@ -884,7 +882,7 @@ class TestRequestProfileValueTypesMatchTheHeaderMapTheyCorrupt:
         splitting them produced two tests with a duplicated body and no way to
         add a third key without a third copy.
         """
-        from app.api_models import CrawlPolicy
+        from app.models.crawl_policy import CrawlPolicy
 
         for key in ("user_agents", "accept_languages"):
             for bad in ({"a_string": "Mozilla"}, {"an_entry": [{"x": 1}]}, {"a_none_entry": [None]}):
@@ -892,13 +890,13 @@ class TestRequestProfileValueTypesMatchTheHeaderMapTheyCorrupt:
                     CrawlPolicy(request_profile={key: bad})
 
     def test_a_pool_at_the_ceiling_is_accepted(self):
-        from app.api_models import CrawlPolicy
+        from app.models.crawl_policy import CrawlPolicy
 
         pool = [f"agent-{index}" for index in range(64)]
         assert len(CrawlPolicy(request_profile={"user_agents": pool}).request_profile["user_agents"]) == 64
 
     def test_an_over_sized_pool_is_refused(self):
-        from app.api_models import CrawlPolicy
+        from app.models.crawl_policy import CrawlPolicy
 
         with pytest.raises(ValidationError, match="at most"):
             CrawlPolicy(request_profile={"user_agents": [f"agent-{i}" for i in range(65)]})
@@ -906,7 +904,7 @@ class TestRequestProfileValueTypesMatchTheHeaderMapTheyCorrupt:
     def test_the_seed_and_family_must_be_strings(self):
         """``fingerprint_seed`` is interpolated into a hash and ``user_agent_family``
         is read with ``str()``, so a dict reaches the hash instead of a string."""
-        from app.api_models import CrawlPolicy
+        from app.models.crawl_policy import CrawlPolicy
 
         for key in ("fingerprint_seed", "user_agent_family", "cookie_jar", "fingerprint_rotation"):
             with pytest.raises(ValidationError, match=key):
@@ -934,23 +932,30 @@ class TestBrowserActionKeysAreClosed:
     #: The keys the action chain reads, per ``browser_driver.py``.
     READ_KEYS = frozenset({"selector", "timeout", "seconds", "value"})
 
-    def test_an_unknown_action_key_is_refused(self):
-        from app.api_models import CrawlPolicy
+    @pytest.mark.parametrize(
+        "action",
+        [
+            pytest.param({"type": "click", "selector": "#x", "url": "http://e/"}, id="stray-url"),
+            pytest.param({"type": "fill", "selector": "#q", "val": "hi"}, id="misspelled-value"),
+            pytest.param(
+                {"type": "wait", "selector": "#x", "timeout": 1000, "wait_for": "#y"}, id="stray-wait-for"
+            ),
+        ],
+    )
+    def test_a_key_the_chain_does_not_read_is_refused(self, action):
+        """``val`` for ``value`` is the reported case: the action then does nothing.
+
+        One test over the table rather than one test per spelling, because the
+        two reported cases are the same defect -- a key the consumer never reads
+        -- and a second copy of the assertion is a second place to forget one.
+        """
+        from app.models.crawl_policy import CrawlPolicy
 
         with pytest.raises(ValidationError, match="action keys not permitted"):
-            CrawlPolicy(
-                browser_profile={"actions": [{"type": "click", "selector": "#x", "url": "http://e/"}]}
-            )
-
-    def test_a_misspelled_action_key_is_refused_rather_than_ignored(self):
-        """``val`` for ``value`` is the reported case: the action then does nothing."""
-        from app.api_models import CrawlPolicy
-
-        with pytest.raises(ValidationError, match="action keys not permitted"):
-            CrawlPolicy(browser_profile={"actions": [{"type": "fill", "selector": "#q", "val": "hi"}]})
+            CrawlPolicy(browser_profile={"actions": [action]})
 
     def test_a_permitted_action_still_validates(self):
-        from app.api_models import CrawlPolicy
+        from app.models.crawl_policy import CrawlPolicy
 
         for action in (
             {"type": "click", "selector": "#x"},
@@ -1025,25 +1030,25 @@ class TestCallerKnobsBehindClosedKeysAreCeilinged:
     MAX_SCREENSHOT_SELECTORS = 16
 
     def test_scroll_steps_over_the_ceiling_are_refused(self):
-        from app.api_models import CrawlPolicy
+        from app.models.crawl_policy import CrawlPolicy
 
         with pytest.raises(ValidationError, match="lazy_scroll_steps"):
             CrawlPolicy(browser_profile={"lazy_scroll_steps": 10**12})
 
     def test_a_scroll_delay_over_the_ceiling_is_refused(self):
-        from app.api_models import CrawlPolicy
+        from app.models.crawl_policy import CrawlPolicy
 
         with pytest.raises(ValidationError, match="lazy_scroll_delay_seconds"):
             CrawlPolicy(browser_profile={"lazy_scroll_delay_seconds": 3600.0})
 
     def test_a_cookie_harvest_timeout_over_the_ceiling_is_refused(self):
-        from app.api_models import CrawlPolicy
+        from app.models.crawl_policy import CrawlPolicy
 
         with pytest.raises(ValidationError, match="cookie_harvest_timeout_seconds"):
             CrawlPolicy(browser_profile={"cookie_harvest_timeout_seconds": 10**9})
 
     def test_too_many_screenshot_selectors_are_refused(self):
-        from app.api_models import CrawlPolicy
+        from app.models.crawl_policy import CrawlPolicy
 
         over = [f"#{index}" for index in range(self.MAX_SCREENSHOT_SELECTORS + 1)]
         with pytest.raises(ValidationError, match="screenshot_selectors"):
@@ -1051,7 +1056,7 @@ class TestCallerKnobsBehindClosedKeysAreCeilinged:
 
     def test_a_value_at_each_ceiling_is_accepted(self):
         """The ceilings are the boundary, not a lower bound the caller cannot reach."""
-        from app.api_models import CrawlPolicy
+        from app.models.crawl_policy import CrawlPolicy
 
         policy = CrawlPolicy(
             browser_profile={
@@ -1127,13 +1132,13 @@ class TestStrategyLadderIsBounded:
     MAX_STRATEGIES = 16
 
     def test_a_ladder_at_the_ceiling_is_accepted(self):
-        from app.api_models import CrawlPolicy
+        from app.models.crawl_policy import CrawlPolicy
 
         ladder = [CrawlStrategy.HTTP_DECLARED_CRAWLER] * self.MAX_STRATEGIES
         assert len(CrawlPolicy(strategies=ladder).strategies) == self.MAX_STRATEGIES
 
     def test_a_ladder_over_the_ceiling_is_refused(self):
-        from app.api_models import CrawlPolicy
+        from app.models.crawl_policy import CrawlPolicy
 
         over = [CrawlStrategy.HTTP_DECLARED_CRAWLER] * (self.MAX_STRATEGIES + 1)
         with pytest.raises(ValidationError, match="at most"):
@@ -1141,7 +1146,7 @@ class TestStrategyLadderIsBounded:
 
     def test_an_empty_ladder_is_still_refused(self):
         """The lower bound is unchanged: an empty ladder has no strategy to run."""
-        from app.api_models import CrawlPolicy
+        from app.models.crawl_policy import CrawlPolicy
 
         with pytest.raises(ValidationError):
             CrawlPolicy(strategies=[])
@@ -1152,7 +1157,7 @@ class TestStrategyLadderIsBounded:
         Pins the distinction the ceiling rests on, so a later reader does not
         "fix" this by deduping and break cookie replay.
         """
-        from app.api_models import CrawlPolicy
+        from app.models.crawl_policy import CrawlPolicy
 
         repeated = [
             CrawlStrategy.BROWSER_HEADLESS,

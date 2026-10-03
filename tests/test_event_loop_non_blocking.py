@@ -19,10 +19,10 @@ import pytest
 
 import app.crawl.content_cache as cc
 from app.api.job_runner import _run_job
-from app.api_models import CrawlPolicy
 from app.crawl.content_cache import ContentCache
 from app.crawl.engine import _ResultSpill
 from app.crawl.job_store import JobStatus
+from app.models.crawl_policy import CrawlPolicy
 from tests._fetcher_factories import crawled_results
 from tests._job_harnesses import loaded_job, make_job_store
 from tests._timing_harnesses import HANG_GUARD_SECONDS

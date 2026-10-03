@@ -11,7 +11,6 @@ from functools import partial
 from typing import Any, TypeVar
 from urllib.parse import urljoin, urlsplit
 
-from app.api_models import CrawlPolicy
 from app.constants import is_analytics_host, is_document_url
 from app.crawl.fetch_helpers import fetch_sitemap_urls
 from app.crawl.job_store import FrontierEntry, durable_page_identity, job_max_pages
@@ -20,6 +19,7 @@ from app.crawl.robots import FetchAndDecode, load_robots_rules, robots_allows, r
 from app.crawl.scope_match import scope_allows
 from app.crawl.strategies.fetchers import default_http_fetcher
 from app.models.crawl_extraction_method import CrawlExtractionMethod
+from app.models.crawl_policy import CrawlPolicy
 from app.models.host_policy import HostPolicy
 from app.models.normalized_url import NormalizedUrl
 from app.safe_regex import BoundedPattern, UnsafePattern, compile_untrusted

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.api_models import CrawlPolicy
+from app.models.crawl_policy import CrawlPolicy
 
 
 class MapRequest(BaseModel):

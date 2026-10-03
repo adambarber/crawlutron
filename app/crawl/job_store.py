@@ -19,12 +19,12 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any, TypedDict
 
-from app.api_models import CrawlPolicy
 from app.crawl.ids import new_job_id
 from app.crawl.migrations import StoreSchema
 from app.crawl.policy import PolicyLike, PolicyTier, read_policy
 from app.crawl.policy import stored_policy as _stored_policy
 from app.crawl.sqlite_store import connect_store, process_lock, store_lock_key
+from app.models.crawl_policy import CrawlPolicy
 from app.models.host_policy import HostPolicy
 from app.models.normalized_url import NormalizedUrl, normalize_public_http_url
 from app.validation import safe_public_url_or_none

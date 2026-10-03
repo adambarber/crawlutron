@@ -21,8 +21,8 @@ from contextlib import contextmanager
 
 import pytest
 
-from app.api_models import CrawlPolicy
 from app.crawl.job_store import CrawlJobState, JobStore
+from app.models.crawl_policy import CrawlPolicy
 from tests._job_harnesses import make_crawled_job_store, make_job_store
 
 _BODY = "x" * 2000

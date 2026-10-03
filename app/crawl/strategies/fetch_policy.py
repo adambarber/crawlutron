@@ -13,12 +13,12 @@ import re
 from typing import Any
 from urllib.parse import urljoin, urlparse
 
-from app.api_models import CrawlPolicy
 from app.constants import DEFAULT_MAX_CONTENT_LENGTH_BYTES, DISCOVERY_BODY_MAX_BYTES
 from app.crawl.decompression import decompress_body as _decompress_body
 from app.crawl.policy import discovery_flags
 from app.crawl.result_helpers import classify_error_code
 from app.crawl.strategies.body_decode import decode_body
+from app.models.crawl_policy import CrawlPolicy
 from app.models.host_policy import HostPolicy
 from app.models.http_fetcher import HttpFetcher
 from app.validation import public_url_or_none

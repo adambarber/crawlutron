@@ -6,9 +6,9 @@ from fastapi import APIRouter, Depends
 
 from app.api.dependencies import get_settings
 from app.api.render_endpoint import render as render_handler
-from app.api_models import RenderRequest
 from app.constants import ROUTER_MODULE_DOC
 from app.models.error_response import ErrorResponse
+from app.models.render_request import RenderRequest
 from app.models.unified_crawl_response import UnifiedCrawlResponse
 
 __doc__ = f"""``/v1/render`` URL→handler mapping.

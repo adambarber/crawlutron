@@ -8,9 +8,9 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from pydantic import ValidationError
 
-from app.api_models import CrawlPolicy
 from app.crawl.strategies.browser import BrowserRenderer, make_ssrf_route_handler
 from app.crawl.strategies.browser_driver import BrowserDriver
+from app.models.crawl_policy import CrawlPolicy
 from tests._browser_doubles import (
     BrowserFakePage,
     FakeRequest,

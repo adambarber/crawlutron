@@ -8,7 +8,6 @@ from dataclasses import dataclass, field, replace
 from typing import Any, cast
 from urllib.parse import urljoin, urlparse
 
-from app.api_models import POLICY_SCHEMA_VERSION, CrawlPolicy
 from app.constants import (
     ENGINE_BATCH_CONCURRENCY_MULTIPLIER,
 )
@@ -28,6 +27,7 @@ from app.crawl.robots import FetchAndDecode
 from app.crawl.strategy_chain import execute_crawl_chain
 from app.memory_pressure import read_memory_stats
 from app.models.crawl_extraction_method import CrawlExtractionMethod
+from app.models.crawl_policy import POLICY_SCHEMA_VERSION, CrawlPolicy
 from app.models.crawl_task import CrawlTask
 from app.models.crawl_worker import CrawlWorker
 from app.models.engine_crawl_result import EngineCrawlResult

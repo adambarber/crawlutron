@@ -10,7 +10,6 @@ from __future__ import annotations
 import time
 from typing import Any
 
-from app.api_models import POLICY_SCHEMA_VERSION
 from app.crawl.ids import new_request_id
 from app.crawl.payload_helpers import checked_payload_urls
 from app.crawl.render_options import resolve_render_options
@@ -23,6 +22,7 @@ from app.crawl.result_helpers import (
 from app.crawl.result_record import RenderEnvelope
 from app.crawl.worker import call_worker
 from app.models.crawl_job import CrawlJob
+from app.models.crawl_policy import POLICY_SCHEMA_VERSION
 from app.models.crawl_result import CrawlResult
 from app.models.crawl_worker import CrawlWorker
 from app.models.engine_crawl_result import EngineCrawlResult

@@ -14,7 +14,7 @@ import ast
 import pathlib
 
 from app.api import webhooks as wm
-from app.api_models import CrawlPolicy
+from app.models.crawl_policy import CrawlPolicy
 from tests.chokepoint_walks import nodes_of
 
 ISLAND_NAMES = (

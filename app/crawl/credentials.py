@@ -24,7 +24,7 @@ import base64
 from collections.abc import Mapping
 from urllib.parse import urlsplit
 
-from app.api_models import Credential
+from app.models.credential import Credential
 
 __all__ = ["apply_credentials", "authorization_value", "origin_of"]
 

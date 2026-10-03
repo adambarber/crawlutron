@@ -32,7 +32,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
-from app.api_models import CrawlPolicy
+from app.models.crawl_policy import CrawlPolicy
 from app.models.render_options import RenderOptions
 
 

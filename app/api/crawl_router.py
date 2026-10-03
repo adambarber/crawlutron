@@ -15,8 +15,8 @@ from app.api.crawl_endpoint import crawl as crawl_handler
 from app.api.crawl_endpoint import get_crawl_result as get_crawl_result_handler
 from app.api.dependencies import get_job_store, get_result_store, get_settings, get_shutdown_event
 from app.api.policy_defaults import BROWSER_FALLBACK_POLICY, DOCUMENT_EXTRACTION_POLICY
-from app.api_models import CrawlRequest
 from app.constants import LARGE_CRAWL_GUIDANCE
+from app.models.crawl_request import CrawlRequest
 from app.models.error_response import ErrorResponse
 from app.models.unified_crawl_response import UnifiedCrawlResponse
 

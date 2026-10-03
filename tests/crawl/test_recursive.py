@@ -57,8 +57,8 @@ class TestRecursiveCrawl:
         substitution, deleting it would not fail here; the loop would just
         quietly receive 0 and crawl nothing.
         """
-        from app.api_models import CrawlPolicy as PolicyModel
         from app.crawl.policy import validate_wire_policy
+        from app.models.crawl_policy import CrawlPolicy as PolicyModel
 
         assert PolicyModel.model_fields["limits"].annotation.model_fields["max_pages"].default == 0, (
             "the model default is the 'unbounded' sentinel this edge substitutes"

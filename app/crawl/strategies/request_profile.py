@@ -12,11 +12,11 @@ from collections.abc import Iterable, Mapping
 from typing import Any, Protocol, runtime_checkable
 from urllib.parse import urlparse
 
-from app.api_models import CrawlPolicy
 from app.constants import DEFAULT_USER_AGENT, HTTP_CFFI_IMPERSONATE
 from app.crawl.credentials import apply_credentials as _apply_credentials
 from app.crawl.strategies import cookie_jar
 from app.crawl.strategies.cookie_jar import COOKIE_NAMESPACE
+from app.models.crawl_policy import CrawlPolicy
 
 
 def cookie_namespace_for(profile: Mapping[str, Any]) -> str:
