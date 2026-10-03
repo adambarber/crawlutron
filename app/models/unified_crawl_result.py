@@ -10,7 +10,7 @@ from app.models.content_validators import ContentValidators
 from app.models.crawl_status import CrawlStatus
 from app.models.crawl_strategy import CrawlStrategy
 from app.models.discovered_link_response import DiscoveredLinkResponse
-from app.models.page_metadata import PageMetadata
+from app.models.page_metadata_response import PageMetadataResponse
 from app.models.strategy_attempt import StrategyAttempt
 
 
@@ -49,8 +49,9 @@ class UnifiedCrawlResult(BaseModel):
             description="Cleaned page content in Markdown format for LLM consumption.",
         ),
     ] = None
-    metadata: PageMetadata = Field(
-        default_factory=PageMetadata, description="Extracted OpenGraph, Twitter, and JSON-LD metadata."
+    metadata: PageMetadataResponse = Field(
+        default_factory=PageMetadataResponse,
+        description="Extracted OpenGraph, Twitter, and JSON-LD metadata.",
     )
     # 4. Raw Data & Evidence (For debugging & non-LLM pipelines)
     html: Annotated[

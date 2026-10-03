@@ -6,47 +6,10 @@ import contextlib
 import json
 import re
 from html import unescape
-from typing import Any, TypedDict, cast, get_args, get_type_hints
+from typing import Any, cast, get_args, get_type_hints
 
 from app.bounded_io import truncate_html_input
-
-
-class PageMetadata(TypedDict, total=False):
-    """What the extractor can fill, named to match ``api_responses.PageMetadata``.
-
-    ``total=False`` because the extractor sets a key only when the page
-    actually carries it: a page with no ``og:image`` has no ``og_image``. The
-    key SET is therefore fixed even though the presence of any one key is not.
-
-    The same name as the wire model is load-bearing, not cosmetic. The mirror
-    invariant in ``tests/invariants/test_result_shape.py`` pairs a declared
-    record with a wire model by class name, so matching names is what puts this
-    pair in front of it; a differently-named record would simply not be
-    compared, which is how three wire fields survived with no producer.
-
-    ``json_ld`` is genuinely open -- one parsed JSON-LD block is an arbitrary
-    object, a list of them is an arbitrary list -- so it stays ``dict | list``
-    rather than pretending to a shape the document chooses.
-    """
-
-    source_url: str
-    title: str
-    description: str
-    language: str
-    og_title: str
-    og_description: str
-    og_image: str
-    og_url: str
-    og_type: str
-    og_site_name: str
-    twitter_card: str
-    twitter_title: str
-    twitter_description: str
-    twitter_image: str
-    canonical_url: str
-    favicon: str
-    json_ld: dict | list
-
+from app.models.page_metadata import PageMetadata
 
 #: Every field's declared type, read from the record rather than transcribed, so
 #: a field added there is admitted here without a second edit. A bare ``str`` has

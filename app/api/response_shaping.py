@@ -40,7 +40,7 @@ from app.models.discovered_link_response import DiscoveredLinkResponse as WireDi
 from app.models.engine_crawl_result import EngineCrawlResult
 from app.models.host_policy import HostPolicy
 from app.models.normalized_url import NormalizedUrl
-from app.models.page_metadata import PageMetadata
+from app.models.page_metadata_response import PageMetadataResponse
 from app.models.strategy_attempt import StrategyAttempt
 from app.models.taxonomy import CrawlStrategyName
 from app.models.unified_crawl_response import UnifiedCrawlResponse
@@ -168,7 +168,7 @@ def build_unified_result(item: EngineCrawlResult) -> UnifiedCrawlResult:
     """
     markdown, extracted = format_crawl_item(item)
     url = item.final_url or item.normalized_url or item.original_url
-    metadata = PageMetadata(**extracted)
+    metadata = PageMetadataResponse(**extracted)
     if metadata.source_url is None:
         metadata.source_url = url
     return UnifiedCrawlResult(
@@ -267,7 +267,7 @@ def render_result_to_unified(item: CrawlResult) -> UnifiedCrawlResult:
             )
         ],
         error=item.error,
-        metadata=PageMetadata(title=metadata.get("title"), source_url=item.url),
+        metadata=PageMetadataResponse(title=metadata.get("title"), source_url=item.url),
         html=item.html,
         text=item.text,
         quality_score=1.0 if item.status == "success" else 0.0,

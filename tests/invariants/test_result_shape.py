@@ -638,40 +638,49 @@ def test_raw_exception_error_detector_bites():
 #
 # Written as a rule over whatever pair exists rather than a hardcoded name, so
 # the next twin is covered without a second edit here.
-
-_DOMAIN_MODEL_MODULE = "app/models/taxonomy.py"
-
-
-# The pydantic RESPONSE models. They moved out of app/api_models.py and then out
-# of app/api_responses.py, and now live one per file under app/models/, so the
-# wire side is a derived set rather than a path: the rule below is written over
-# whatever pair exists, and deriving the set means a record added tomorrow is
-# covered without a second edit here.
+#
+# The pair is found by MODULE STEM, not by class name. Class-name equality
+# worked only while both halves shared a name, and the package moved on from
+# that: `DiscoveredLink` and `DiscoveredLinkResponse` are the same record, and
+# intersecting their names finds nothing -- so a field added to one and not the
+# other was invisible. The stems are the one link that survives two names being
+# named for different things, and they cost no declaration to maintain.
+#
+# Not every record has a projection, and requiring one would be wrong: the 19
+# internal records without a twin are internal precisely because the wire never
+# sees them. So the rule compares the pairs that exist rather than demanding a
+# twin per record -- which also means the pair count is a gate in itself.
 _WIRE_MODEL_DIR = "app/models"
 
 
-def _wire_tree() -> ast.Module:
-    """Every response model in the package, merged into one comparable tree.
+def _stem_pairs(package: str) -> dict[str, tuple[pathlib.Path, ast.ClassDef, ast.ClassDef]]:
+    """``stem -> (owner module, owner record, projection)`` for every pair that exists.
 
-    The rule pairs a domain record with a wire model by class NAME, so merging
-    the declarations loses nothing the rule reads; only the module each came from
-    does, which is what the failure text below names instead.
+    The owner is ``<stem>.py`` and the projection ``<stem>_response.py``; both live
+    in the package, so the pairing is derived from file names that the one-home
+    rule already forces to be findable.
     """
-    merged = ast.Module(body=[], type_ignores=[])
-    for path in sorted(REPO_ROOT.glob(f"{_WIRE_MODEL_DIR}/*.py")):
-        merged.body.extend(ast.parse(path.read_text(encoding="utf-8")).body)
-    return merged
-
-
-# The domain side is not one module: a record is a declared key set wherever it
-# is declared. PageMetadata's producer lives with the extractor, not with the
-# internal dataclasses, and reading only app/models/taxonomy.py made the pair invisible --
-# which is how three wire fields survived with no producer. The rule pairs by
-# class NAME, so the producer record deliberately carries the same name as the
-# wire model it must agree with: the name is how the rule finds the pair, and a
-# reader seeing one name in two modules reads the contract rather than two
-# unrelated things.
-_PRODUCER_RECORD_MODULE = "app/crawl/llm_format.py"
+    root = REPO_ROOT / package
+    pairs: dict[str, tuple[pathlib.Path, ast.ClassDef, ast.ClassDef]] = {}
+    for owner_path in sorted(root.glob("*.py")):
+        if owner_path.name == "__init__.py":
+            continue
+        twin = root / f"{owner_path.stem}_response.py"
+        if not twin.exists():
+            continue
+        owners = [
+            n
+            for n in ast.parse(owner_path.read_text(encoding="utf-8")).body
+            if isinstance(n, ast.ClassDef) and _is_record(n) and not _is_pydantic_model(n)
+        ]
+        twins = [
+            n
+            for n in ast.parse(twin.read_text(encoding="utf-8")).body
+            if isinstance(n, ast.ClassDef) and _is_pydantic_model(n)
+        ]
+        if len(owners) == 1 and len(twins) == 1:
+            pairs[owner_path.stem] = (owner_path, owners[0], twins[0])
+    return pairs
 
 
 def _is_dataclass(node: ast.ClassDef) -> bool:
@@ -702,29 +711,6 @@ def _is_record(node: ast.ClassDef) -> bool:
     )
 
 
-def _find_class(tree: ast.Module, name: str) -> ast.ClassDef:
-    found = [n for n in tree.body if isinstance(n, ast.ClassDef) and n.name == name]
-    assert found, f"{name} is not declared in this module"
-    return found[0]
-
-
-def _declaring_classes(tree: ast.Module) -> set[str]:
-    return {n.name for n in tree.body if isinstance(n, ast.ClassDef) and _is_record(n)}
-
-
-def _paired_names(domain_tree: ast.Module, wire_tree: ast.Module) -> set[str]:
-    """Class names this rule would actually compare, one per side.
-
-    Exists so the no-op check below asks the rule's own question rather than a
-    restatement of it. It once compared "is a record here" against "is a record
-    there", which on the wire side is a pydantic model and never a record -- so
-    the guard could never pass and would have needed to be deleted to be fixed.
-    """
-    domain = _declaring_classes(domain_tree)
-    wire = {n.name for n in wire_tree.body if isinstance(n, ast.ClassDef) and _is_pydantic_model(n)}
-    return domain & wire
-
-
 def _is_pydantic_model(node: ast.ClassDef) -> bool:
     """True for a class deriving from ``BaseModel``, directly or subscripted."""
     return any(
@@ -742,14 +728,23 @@ def _declared_fields(node: ast.ClassDef) -> list[str]:
     ]
 
 
-def _wire_mirror_drift(domain_tree: ast.Module, wire_tree: ast.Module) -> list[str]:
-    """Field names that differ between a domain dataclass and its wire model."""
-    domain = {n.name: n for n in domain_tree.body if isinstance(n, ast.ClassDef) and _is_record(n)}
-    wire = {n.name: n for n in wire_tree.body if isinstance(n, ast.ClassDef) and _is_pydantic_model(n)}
+def _wire_tree() -> ast.Module:
+    """Every response model in the package, merged into one comparable tree."""
+    merged = ast.Module(body=[], type_ignores=[])
+    for path in sorted(REPO_ROOT.glob(f"{_WIRE_MODEL_DIR}/*.py")):
+        merged.body.extend(ast.parse(path.read_text(encoding="utf-8")).body)
+    return merged
+
+
+def _wire_mirror_drift(
+    pairs: dict[str, tuple[pathlib.Path, ast.ClassDef, ast.ClassDef]],
+) -> list[str]:
+    """Field names that differ between each owner record and its wire projection."""
     drifted: list[str] = []
-    for name in sorted(domain.keys() & wire.keys()):
-        internal = set(_declared_fields(domain[name]))
-        external = set(_declared_fields(wire[name]))
+    for _stem, (_path, owner, projection) in sorted(pairs.items()):
+        name = owner.name
+        internal = set(_declared_fields(owner))
+        external = set(_declared_fields(projection))
         drifted.extend(
             f"{name}.{field_name} exists internally and is dropped on the wire"
             for field_name in sorted(internal - external)
@@ -761,104 +756,93 @@ def _wire_mirror_drift(domain_tree: ast.Module, wire_tree: ast.Module) -> list[s
     return drifted
 
 
+def _synthetic_pair(
+    owner_src: str, projection_src: str
+) -> dict[str, tuple[pathlib.Path, ast.ClassDef, ast.ClassDef]]:
+    """A one-entry pair built from source text, for proofs that plant both halves."""
+
+    def one(src: str) -> ast.ClassDef:
+        return next(n for n in ast.parse(src).body if isinstance(n, ast.ClassDef))
+
+    return {"synthetic": (pathlib.Path("synthetic.py"), one(owner_src), one(projection_src))}
+
+
 def test_wire_models_mirror_every_domain_field():
-    """A domain field cannot disappear between the dataclass and the response model."""
-    domain_path, domain_tree = file_tree(_DOMAIN_MODEL_MODULE)
-    drifted = _wire_mirror_drift(domain_tree, _wire_tree())
+    """A field cannot disappear between an owner record and its wire projection.
+
+    Both directions break a promise the wire cannot keep. A field the owner fills
+    and the projection does not declare stops existing at the splat; a field
+    declared on the wire and filled by nothing is ``None`` forever -- which is the
+    defect PageMetadata's producer was declared to find when it was a bare
+    ``dict[str, Any]``: undeclared, and so in neither half of any pair.
+
+    The pair comes from module stems, not class names, so a record whose two
+    halves are named for different things is still compared. That is what this
+    rule used to get wrong -- it intersected class names, so ``DiscoveredLink``
+    and ``DiscoveredLinkResponse`` were never compared by anything.
+    """
+    pairs = _stem_pairs(_WIRE_MODEL_DIR)
+    assert pairs, (
+        f"No record under {_WIRE_MODEL_DIR}/ has a {chr(95)}response.py projection, so this rule "
+        f"compares nothing and passes. That is the failure it exists to catch: pairs are found by "
+        f"file name, so a rename that breaks the naming silently empties the rule rather than "
+        f"failing it."
+    )
+    drifted = _wire_mirror_drift(pairs)
     assert not drifted, (
-        f"A pydantic response model DROPS every key it does not declare, so a field added to "
-        f"a domain dataclass in {domain_path.name} without a twin under {_WIRE_MODEL_DIR}/ does "
-        f"not fail loudly -- it quietly stops existing on the wire. Keep the pair in step, or "
-        f"give them separate names and a deliberate converter: " + "; ".join(drifted)
+        "A pydantic projection DROPS every key it does not declare, so a field added to an owner "
+        "record without a matching field on its projection does not fail loudly -- it quietly "
+        "stops existing on the wire. Keep the pair in step: " + "; ".join(drifted)
     )
 
 
 def test_wire_mirror_detector_bites():
     """A dropped field and a wire-only field both fire; an exact pair stays clean."""
-    domain = ast.parse("@dataclass(frozen=True)\nclass Link:\n    url: str\n    host: str\n    depth: int\n")
-    matching = ast.parse(
-        "from pydantic import BaseModel\nclass Link(BaseModel):\n"
-        "    url: str\n    host: str\n    depth: int\n"
+    owner = "@dataclass(frozen=True)\nclass Link:\n    url: str\n    host: str\n    depth: int\n"
+    assert not _wire_mirror_drift(
+        _synthetic_pair(
+            owner,
+            "from pydantic import BaseModel\nclass LinkResponse(BaseModel):\n"
+            "    url: str\n    host: str\n    depth: int\n",
+        )
     )
-    assert not _wire_mirror_drift(domain, matching)
 
-    drifted = _wire_mirror_drift(domain, ast.parse("class Link(BaseModel):\n    url: str\n    host: str\n"))
+    drifted = _wire_mirror_drift(
+        _synthetic_pair(owner, "class LinkResponse(BaseModel):\n    url: str\n    host: str\n")
+    )
     assert len(drifted) == 1, drifted
     assert "Link.depth" in drifted[0] and "dropped on the wire" in drifted[0], drifted
 
     drifted = _wire_mirror_drift(
-        domain,
-        ast.parse("class Link(BaseModel):\n    url: str\n    host: str\n    depth: int\n    score: float\n"),
+        _synthetic_pair(
+            owner,
+            "class LinkResponse(BaseModel):\n    url: str\n    host: str\n    depth: int\n    score: float\n",
+        )
     )
     assert len(drifted) == 1, drifted
     assert "Link.score" in drifted[0] and "nowhere internally" in drifted[0], drifted
 
-    # A bare @dataclass and a subscripted BaseModel[str] base are the same two
-    # decorators spelled the other way round; both must still be matched.
+    # A bare @dataclass, a subscripted BaseModel[str] base and a total=False
+    # TypedDict are three spellings of "declares a key set"; all must be matched.
     assert _wire_mirror_drift(
-        ast.parse("@dataclass\nclass Link:\n    url: str\n    host: str\n    depth: int\n"),
-        ast.parse("class Link(BaseModel[str]):\n    url: str\n    host: str\n"),
+        _synthetic_pair(
+            "@dataclass\nclass Link:\n    url: str\n    host: str\n    depth: int\n",
+            "class LinkResponse(BaseModel[str]):\n    url: str\n    host: str\n",
+        )
     )
-    # An unrelated name on both sides is not a pair -- a wire-only model and a
-    # domain-only dataclass must not be reported against each other.
     assert not _wire_mirror_drift(
-        ast.parse("@dataclass\nclass Link:\n    url: str\n"),
-        ast.parse("class Other(BaseModel):\n    url: str\n    host: str\n"),
+        _synthetic_pair(
+            "class Link(TypedDict, total=False):\n    title: str\n    favicon: str\n",
+            "class LinkResponse(BaseModel):\n    title: str\n    favicon: str\n",
+        )
     )
-
-
-def test_page_metadata_fields_are_produced_by_the_extraction_record():
-    """Every ``PageMetadata`` field must be one the extractor can actually fill.
-
-    The sibling mirror rule above pairs a domain *dataclass* with a wire model.
-    PageMetadata's producer was a plain ``dict[str, Any]``, so it was in neither
-    half of that pair and the whole record was unguarded: three fields were
-    declared on the wire that no extractor had ever produced, and every consumer
-    reading one got a default forever. That is a promise the model cannot keep,
-    and nothing in the tree said so.
-
-    Declaring the extractor's output as a record puts it in the pair, so this is
-    the same rule reading a second kind of declaration -- ``total=False``
-    TypedDict rather than a dataclass -- and the fix is to delete the unfillable
-    fields, which is what a consumer would need anyway.
-    """
-    domain_path, domain_tree = file_tree(_PRODUCER_RECORD_MODULE)
-    wire_tree = _wire_tree()
-    assert _paired_names(domain_tree, wire_tree), (
-        f"No declared record in {domain_path.name} shares a name with a response model under "
-        f"{_WIRE_MODEL_DIR}/, so this rule compares nothing and passes. That is the failure "
-        f"this rule exists to catch: PageMetadata's producer was an undeclared dict, which left "
-        f"the pair absent rather than equal. Declare the extractor's output as a record that "
-        f"keeps the wire model's name."
-    )
-    drifted = _wire_mirror_drift(domain_tree, wire_tree)
-    assert not drifted, (
-        f"The extractor's record and the response models under {_WIRE_MODEL_DIR}/ disagree about "
-        f"A field declared on the wire and filled by nothing is always None on the wire -- a "
-        f"promise the model cannot keep -- so delete it or teach {domain_path.name} to fill it. A "
-        f"field the extractor fills and the model does not declare is dropped at the splat. "
-        f"Each defect names itself: " + "; ".join(drifted)
-    )
-
-
-def test_producer_record_detector_bites():
-    """The mirror rule reads a TypedDict exactly as it reads a dataclass."""
-    record = ast.parse("class PageMetadata(TypedDict, total=False):\n    title: str\n    favicon: str\n")
-    assert not _wire_mirror_drift(
-        record, ast.parse("class PageMetadata(BaseModel):\n    title: str\n    favicon: str\n")
-    )
-
-    # A field the extractor fills and the model does not declare is dropped at the splat.
-    drifted = _wire_mirror_drift(record, ast.parse("class PageMetadata(BaseModel):\n    title: str\n"))
-    assert drifted == ["PageMetadata.favicon exists internally and is dropped on the wire"], drifted
-
-    # ...and the reverse is a wire field that is always None, which is the defect
-    # this record was declared to find.
     drifted = _wire_mirror_drift(
-        ast.parse("class PageMetadata(TypedDict):\n    title: str\n"),
-        ast.parse("class PageMetadata(BaseModel):\n    title: str\n    favicon: str\n"),
+        _synthetic_pair(
+            "class Link(TypedDict):\n    title: str\n",
+            "class LinkResponse(BaseModel):\n    title: str\n    favicon: str\n",
+        )
     )
-    assert drifted == ["PageMetadata.favicon is declared on the wire and nowhere internally"], drifted
+    assert drifted == ["Link.favicon is declared on the wire and nowhere internally"], drifted
 
 
 # --- An advertised payload key may not be dropped by its response model -------
