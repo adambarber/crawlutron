@@ -543,6 +543,15 @@ def _clear_global_http_state() -> None:
     with contextlib.suppress(Exception):
         cookie_mod.reset_process_state()
     with contextlib.suppress(Exception):
+        # The renderer's per-domain cookie store is module-global and bounded, not
+        # cleared, so a test that harvests once leaves its domain's cookies for the
+        # next test to assert against. It used to be undone per test with
+        # monkeypatch.setitem, which only worked while the store was a
+        # MutableMapping; the reset door is the one place process state is dropped.
+        from app.crawl.strategies import browser as browser_mod
+
+        browser_mod.reset_process_state()
+    with contextlib.suppress(Exception):
         # The pool decides per client whether it may be closed or must simply be
         # dropped: a client owned by an already-finished loop cannot be awaited
         # from the next one, and only the pool knows which loop owns what.

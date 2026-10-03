@@ -21,14 +21,11 @@ from collections import OrderedDict
 from collections.abc import (
     Awaitable,
     Callable,
-    Iterable,
-    Iterator,
-    MutableMapping,
 )
 from typing import TYPE_CHECKING, Any, Literal
 
 if TYPE_CHECKING:
-    from _typeshed import SupportsKeysAndGetItem
+    pass
 
 
 from app.classify import classify_page
@@ -262,24 +259,20 @@ def make_ssrf_websocket_handler(*, policy: HostPolicy):
 _BROWSER_COOKIES_MAX = 500
 
 
-class _LockedDomainCookieStore(MutableMapping[str, str]):
+class _LockedDomainCookieStore:
     """LRU cookie store whose every read and mutation is internally guarded.
 
     The store is module-global and genuinely concurrent: the render path writes
     harvested cookies while the crawl engine reads them for the cffi
-    cookie-bootstrap retry, from different tasks and threads. It used to be a
-    bare ``OrderedDict``, and the *read* path mutated it (``get`` then
-    ``move_to_end``): a concurrent write past the cap could evict the key in
-    between and make the touch raise ``KeyError`` on a live request.
+    cookie-bootstrap retry, from different tasks and threads. Every operation
+    acquires ``_lock`` for its whole duration, so an unsynchronized access is
+    not a state a caller can construct and the eviction cannot interleave with a
+    read.
 
-    The mapping is private and every operation acquires ``_lock`` for its whole
-    duration, so an unsynchronized access is not a state a caller can construct
-    -- the eviction can no longer interleave with a read.
-
-    Behaves as a read/write mapping (``len``, ``iter``, ``dict()``, ``pop``,
-    ``update``, ``clear``) for tests and teardown helpers; production traffic
-    goes through :func:`_store_browser_cookies` /
-    :func:`get_browser_cookies_for`, which own the LRU policy.
+    It implements no container protocol. It used to subclass
+    ``MutableMapping``, and ten of its thirteen methods existed to honour that
+    promise to callers outside ``app/`` -- no production path reached any of
+    them, and ``no-unclaimed-container-protocol`` now holds that line.
     """
 
     __slots__ = ("_data", "_lock", "_max_entries")
@@ -290,8 +283,6 @@ class _LockedDomainCookieStore(MutableMapping[str, str]):
         self._data: OrderedDict[str, str] = OrderedDict()
         self._lock = threading.Lock()
         self._max_entries = max_entries
-
-    # -- production surface -------------------------------------------------
 
     def store(self, domain: str, header: str) -> None:
         """Record a harvested cookie header, evicting LRU entries past the cap.
@@ -319,60 +310,13 @@ class _LockedDomainCookieStore(MutableMapping[str, str]):
                 self._data.move_to_end(domain)
             return value
 
-    # -- mapping primitives (each one guarded) ------------------------------
-
-    def __getitem__(self, domain: str) -> str:
-        with self._lock:
-            return self._data[domain]
-
-    def __setitem__(self, domain: str, header: str) -> None:
-        with self._lock:
-            self._data[domain] = header
-
-    def __delitem__(self, domain: str) -> None:
-        with self._lock:
-            del self._data[domain]
-
-    def __iter__(self) -> Iterator[str]:
-        with self._lock:
-            return iter(list(self._data))
-
-    def __len__(self) -> int:
-        with self._lock:
-            return len(self._data)
-
-    def __contains__(self, domain: object) -> bool:
-        with self._lock:
-            return domain in self._data
-
-    # ``MutableMapping`` derives these from the primitives above, which would
-    # take the lock once per step; single-acquisition versions keep a snapshot
-    # helper (test teardown, reset paths) from observing a half-applied op.
-
-    def pop(self, domain: str, *default: Any) -> Any:
-        with self._lock:
-            return self._data.pop(domain, *default)
-
     def clear(self) -> None:
         with self._lock:
             self._data.clear()
 
-    def update(
-        self,
-        other: SupportsKeysAndGetItem[str, str] | Iterable[tuple[str, str]] = (),
-        /,
-        **kwargs: str,
-    ) -> None:
-        merged = dict(other)
-        if kwargs:
-            merged.update(kwargs)
+    def __len__(self) -> int:
         with self._lock:
-            for domain, header in merged.items():
-                self._data[domain] = header
-
-    def __repr__(self) -> str:
-        with self._lock:
-            return f"{type(self).__name__}({dict(self._data)!r})"
+            return len(self._data)
 
 
 _BROWSER_COOKIES_BY_DOMAIN = _LockedDomainCookieStore(_BROWSER_COOKIES_MAX)

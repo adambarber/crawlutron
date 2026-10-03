@@ -38,19 +38,16 @@ def isolated_browser_cookies(url: str):
     ``_BROWSER_COOKIES_BY_DOMAIN`` is process-global and keyed by registrable
     domain, so a test that harvests or refuses to harvest against
     ``http://harvest-race.test/page`` is reading and writing state that outlives
-    it. The pop/else-restore dance was written out per test, and the ``else``
-    branch is exactly the part that goes missing: a test that pops the slot and
-    never puts it back leaves a real crawler's cookies deleted.
+    it. Detachment used to pop one key and put it back, and the restore was the
+    part that went missing; the store offers no per-key removal (nothing in
+    production wanted one), so the slot is detached by emptying the whole store.
     """
     domain = registrable_domain(url)
-    old = browser_mod._BROWSER_COOKIES_BY_DOMAIN.pop(domain, None)
+    browser_mod.reset_process_state()
     try:
         yield domain
     finally:
-        if old is None:
-            browser_mod._BROWSER_COOKIES_BY_DOMAIN.pop(domain, None)
-        else:
-            browser_mod._BROWSER_COOKIES_BY_DOMAIN[domain] = old
+        browser_mod.reset_process_state()
 
 
 class TestCookieHarvestCompletes:
