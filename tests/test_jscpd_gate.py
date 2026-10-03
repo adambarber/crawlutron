@@ -1013,6 +1013,24 @@ def test_a_parenthesised_import_is_still_a_declaration() -> None:
     assert gate._is_dependency_declaration(fragment)
 
 
+def test_a_fragment_ending_inside_an_open_import_is_still_a_declaration() -> None:
+    """A run that happens to be cut where the paren opens is still all imports.
+
+    jscpd reports the matched line range, so a fragment can end on the opening
+    line of a wrapped import. Judging that by its paren balance asked a question
+    about where the report stopped rather than about what the text says, and the
+    two test modules that open their shared harness import the same way reported
+    a clone of nothing but declarations.
+    """
+    fragment = """from app.crawl.job_store import FrontierEntry, JobStatus
+from app.crawl.policy import read_policy
+from app.models.crawl_policy import CrawlPolicy
+from app.settings import CrawlerSettings
+from tests._job_harnesses import (
+"""
+    assert gate._is_dependency_declaration(fragment)
+
+
 def test_prose_repeated_in_two_docstrings_is_still_a_clone() -> None:
     """The same argument written twice is duplication, and the filter must not excuse it.
 

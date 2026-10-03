@@ -565,7 +565,14 @@ def _is_dependency_declaration(fragment: str) -> bool:
     A fragment qualifies only if EVERY logical line is an import: one line of
     real code between two import runs is enough to keep the pair under
     judgement, because that is where the duplication the gate wants to see
-    begins.
+    begins. The fragment is NOT required to end with balanced parens. jscpd
+    reports a line range, so a run that happens to be cut on the opening line of
+    a wrapped import is still nothing but declarations, and asking whether the
+    report stopped mid-statement is a question about where jscpd stopped rather
+    than about what the text says. A continuation line inherits the
+    classification of the statement it continues, so an unclosed tail stays an
+    import; a fragment made ONLY of continuation lines has no statement to judge
+    and stays visible, which is the safe direction.
     """
     logical: list[str] = []
     open_parens = 0
@@ -579,7 +586,7 @@ def _is_dependency_declaration(fragment: str) -> bool:
             continue
         if not continuation:
             logical.append(stripped)
-    return bool(logical) and open_parens == 0 and all(_IMPORT_LINE.match(line) for line in logical)
+    return bool(logical) and all(_IMPORT_LINE.match(line) for line in logical)
 
 
 def _footprint(duplicate: dict[str, Any]) -> int:
