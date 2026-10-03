@@ -5,6 +5,23 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed
+- **An app class may no longer promise a container interface nobody asked for.**
+  `_LockedDomainCookieStore` subclassed `MutableMapping[str, str]`, and ten of
+  its thirteen methods existed only to honour that promise: `__getitem__`,
+  `__setitem__`, `__delitem__`, `__iter__`, `__len__`, `__contains__`, `pop`,
+  `update`, `__repr__`, `clear`. No production path reached any of them —
+  production went through `store`, `touch_get`, `clear` and `len`, and that is
+  all the class now declares. The surface existed so four test files could seed
+  and restore a process global, which is a scaffold, not a contract.
+  `no-unclaimed-container-protocol` holds the line: an `app/` class may inherit
+  a container protocol only when an app-side signature names it in a type
+  position. Mention is not enough — the offender's own instantiation named it,
+  and counting that is exactly what let the ten methods read as claimed. The
+  browser renderer's cookie store is now dropped by the `conftest` process-state
+  door between tests, the way the cookie jar, the client pool and the robots
+  cache already were.
+
 ### Added
 - **A page's durable identity is one function, and a gate holds it there.**
   `visited`, `in_flight` and `frontier` all key on page identity, so they have

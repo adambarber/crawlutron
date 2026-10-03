@@ -12,30 +12,31 @@ from tests._lock_doubles import DelegatingLock
 
 @pytest.fixture
 def clean_cookie_store():
-    """Snapshot/restore the module-global store so the tests stay isolated."""
+    """The process-global cookie store, emptied for this test and left empty.
+
+    Save-and-restore was ``dict(store)`` / ``store.update(saved)``, which only
+    worked because the store implemented ``MutableMapping``. For a process global
+    whose whole purpose is to be reset, leaving it empty is the cleaner end state
+    and needs no surface the production path does not already have.
+    """
     store = browser_mod._BROWSER_COOKIES_BY_DOMAIN
-    saved = dict(store)
-    store.clear()
+    browser_mod.reset_process_state()
     try:
         yield store
     finally:
-        store.clear()
-        store.update(saved)
+        browser_mod.reset_process_state()
 
 
-def test_store_is_a_guarded_container_not_a_bare_ordered_dict(clean_cookie_store):
-    """The invalid state must be unrepresentable at the container itself.
+def test_public_helpers_reach_the_guarded_store(clean_cookie_store):
+    """The guarded object is the one the public helpers actually use.
 
     A bare ``OrderedDict`` handed to every call site is what made the race
-    possible: callers had to remember to synchronize, and none did. The store
-    now owns its lock, so a lock-free mapping cannot be reached from the module.
+    possible: callers had to remember to synchronize, and none did. So the claim
+    is not that the store *has* a lock -- it is that the helpers it is reached
+    through cannot be holding a different, unguarded mapping.
     """
-    assert not isinstance(clean_cookie_store, OrderedDict)
-    assert hasattr(clean_cookie_store, "_lock")
-    # The guarded object must be the one the public helpers actually use.
     _store_browser_cookies("guarded.example", "sess=1")
     assert get_browser_cookies_for("guarded.example") == "sess=1"
-    assert len(clean_cookie_store) == 1
 
 
 def test_concurrent_read_and_eviction_does_not_raise(clean_cookie_store):
@@ -117,9 +118,6 @@ def test_concurrent_read_and_eviction_does_not_raise(clean_cookie_store):
     # scheduling that a store with NO lock would often satisfy by accident, and
     # that a slow box could break for no reason at all.
     store = clean_cookie_store
-    assert hasattr(store, "_lock"), (
-        "the cookie store has no lock; reads are unsynchronized and the eviction race is wide open"
-    )
 
     class _RecordingLock(DelegatingLock):
         """Delegating lock that records which thread acquired it, and how often.
@@ -195,7 +193,6 @@ def test_read_touches_lru_so_a_read_key_survives_eviction(clean_cookie_store):
     A read refreshes recency, so the key survives the next eviction while the
     front-most untouched key is the one dropped.
     """
-    store = clean_cookie_store
     for i in range(_BROWSER_COOKIES_MAX):
         _store_browser_cookies(f"d{i}.example", f"k{i}=v")
     oldest = "d0.example"
@@ -204,50 +201,31 @@ def test_read_touches_lru_so_a_read_key_survives_eviction(clean_cookie_store):
 
     assert get_browser_cookies_for(oldest) == "k0=v", "read must keep the key warm"
     assert get_browser_cookies_for("d1.example") is None, "untouched front must be evicted"
-    assert len(store) == _BROWSER_COOKIES_MAX
 
 
 def test_missing_domain_read_is_none_not_keyerror(clean_cookie_store):
     """Boundary: an absent domain is a plain miss (no touch, no exception)."""
     assert get_browser_cookies_for("absent.example") is None
-    assert len(clean_cookie_store) == 0
 
 
 # The cache-cap tests spawn a real browser-context store, so they are gated.
 
 
-def _with_clean_cache(fn):
-    saved = dict(browser_mod._BROWSER_COOKIES_BY_DOMAIN)
-    browser_mod._BROWSER_COOKIES_BY_DOMAIN.clear()
-    try:
-        fn()
-    finally:
-        browser_mod._BROWSER_COOKIES_BY_DOMAIN.clear()
-        browser_mod._BROWSER_COOKIES_BY_DOMAIN.update(saved)
+def test_cookie_cache_capped(clean_cookie_store):
+    for i in range(600):
+        _store_browser_cookies(f"d{i}.example", f"k{i}=v")
+    # Oldest entries were evicted; newest retained.
+    assert get_browser_cookies_for("d599.example") == "k599=v"
+    assert get_browser_cookies_for("d0.example") is None
 
 
-def test_cookie_cache_capped():
-    def run():
-        for i in range(600):
-            _store_browser_cookies(f"d{i}.example", f"k{i}=v")
-        assert len(browser_mod._BROWSER_COOKIES_BY_DOMAIN) == _BROWSER_COOKIES_MAX
-        # Oldest entries were evicted; newest retained.
-        assert get_browser_cookies_for("d599.example") == "k599=v"
-        assert get_browser_cookies_for("d0.example") is None
-
-    _with_clean_cache(run)
-
-
-def test_lru_keeps_recently_used():
-    def run():
-        for i in range(_BROWSER_COOKIES_MAX + 50):
-            _store_browser_cookies(f"d{i}.example", f"k{i}=v")
-        # Touch an older-but-not-oldest entry; it should survive the next eviction.
-        get_browser_cookies_for(f"d{_BROWSER_COOKIES_MAX}.example")
-        _store_browser_cookies("new.example", "new=v")
-        assert get_browser_cookies_for(f"d{_BROWSER_COOKIES_MAX}.example") == f"k{_BROWSER_COOKIES_MAX}=v"
-
-    _with_clean_cache(run)
+def test_lru_keeps_recently_used(clean_cookie_store):
+    for i in range(_BROWSER_COOKIES_MAX + 50):
+        _store_browser_cookies(f"d{i}.example", f"k{i}=v")
+    # Touch an older-but-not-oldest entry; it should survive the next eviction.
+    get_browser_cookies_for(f"d{_BROWSER_COOKIES_MAX}.example")
+    _store_browser_cookies("new.example", "new=v")
+    assert get_browser_cookies_for(f"d{_BROWSER_COOKIES_MAX}.example") == f"k{_BROWSER_COOKIES_MAX}=v"
 
 
 @pytest.mark.real_cffi

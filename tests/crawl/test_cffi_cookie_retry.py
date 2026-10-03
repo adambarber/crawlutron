@@ -11,10 +11,10 @@ from tests.crawl._chain_policies import chain_policy
 _rendered = _fake_browser(html="<html>rendered</html>", text="rendered")
 
 
-async def test_browser_cookies_replayed_through_cffi(monkeypatch):
+async def test_browser_cookies_replayed_through_cffi():
     from app.crawl.strategies import browser as bmod
 
-    monkeypatch.setitem(bmod._BROWSER_COOKIES_BY_DOMAIN, "example.com", "incap_ses=abc; visid=def")
+    bmod._store_browser_cookies("example.com", "incap_ses=abc; visid=def")
 
     calls = []
 
