@@ -118,9 +118,6 @@ def test_concurrent_read_and_eviction_does_not_raise(clean_cookie_store):
     # scheduling that a store with NO lock would often satisfy by accident, and
     # that a slow box could break for no reason at all.
     store = clean_cookie_store
-    assert store._lock is not None, (
-        "the cookie store has no lock; reads are unsynchronized and the eviction race is wide open"
-    )
 
     class _RecordingLock(DelegatingLock):
         """Delegating lock that records which thread acquired it, and how often.

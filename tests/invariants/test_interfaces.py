@@ -38,12 +38,31 @@ _CONTAINER_PROTOCOL_BASES = frozenset(
 
 
 def _base_class_name(base: ast.expr) -> str | None:
-    """The bare name behind a base, whether written plain or subscripted."""
+    """The trailing name behind a base, however it was written.
+
+    ``Foo``, ``mod.Foo`` and ``Foo[int]`` all name ``Foo``; only the dotted and
+    subscripted forms were unreadable, and ``app/logging_config.py`` already
+    writes bases that way.
+    """
     if isinstance(base, ast.Name):
         return base.id
-    if isinstance(base, ast.Subscript) and isinstance(base.value, ast.Name):
-        return base.value.id
+    if isinstance(base, ast.Attribute):
+        return base.attr
+    if isinstance(base, ast.Subscript):
+        return _base_class_name(base.value)
     return None
+
+
+def _container_aliases(tree: ast.Module) -> frozenset[str]:
+    """Local names that an import aliased onto a container protocol."""
+    aliases: set[str] = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.ImportFrom):
+            continue
+        for alias in node.names:
+            if alias.asname and alias.name in _CONTAINER_PROTOCOL_BASES:
+                aliases.add(alias.asname)
+    return frozenset(aliases)
 
 
 def _type_position_names(tree: ast.Module) -> frozenset[str]:
@@ -114,11 +133,12 @@ def _container_protocol_offenders(tree: ast.Module, path: Path) -> list[str]:
     declaration in the same file annotates is claimed, not orphaned.
     """
     announced = _app_announced_names() | _type_position_names(tree)
+    container_names = _CONTAINER_PROTOCOL_BASES | _container_aliases(tree)
     offenders: list[str] = []
     for node in ast.walk(tree):
         if not isinstance(node, ast.ClassDef):
             continue
-        container = sorted({_base_class_name(base) for base in node.bases} & _CONTAINER_PROTOCOL_BASES)
+        container = sorted({_base_class_name(base) for base in node.bases} & container_names)
         if not container or node.name in announced:
             continue
         offenders.append(
@@ -152,6 +172,20 @@ NO_UNCLAIMED_CONTAINER_PROTOCOL = Rule(
         Bites(
             "from collections import OrderedDict\n\n"
             "class _SyntheticSlots(OrderedDict[str, str]):\n    pass\n",
+            "no app/ signature names it",
+        ),
+        Bites(
+            "import collections.abc\n\n"
+            "class _SyntheticQualified(collections.abc.MutableMapping[str, str]):\n"
+            "    def __getitem__(self, key):\n"
+            "        raise KeyError(key)\n",
+            "no app/ signature names it",
+        ),
+        Bites(
+            "from collections.abc import MutableMapping as _Renamed\n\n"
+            "class _SyntheticAliased(_Renamed[str, str]):\n"
+            "    def __getitem__(self, key):\n"
+            "        raise KeyError(key)\n",
             "no app/ signature names it",
         ),
     ),
