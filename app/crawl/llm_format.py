@@ -9,6 +9,7 @@ from html import unescape
 from typing import Any, cast, get_args, get_type_hints
 
 from app.bounded_io import truncate_html_input
+from app.models.normalized_url import NormalizedUrl
 from app.models.page_metadata import PageMetadata
 
 #: Every field's declared type, read from the record rather than transcribed, so
@@ -60,7 +61,7 @@ def extract_carried_metadata(value: Any) -> PageMetadata:
 # the reason THIS parse needs one.
 
 
-def extract_llm_metadata(html: str, url: str) -> PageMetadata:
+def extract_llm_metadata(html: str, url: NormalizedUrl | None) -> PageMetadata:
     """Extract Page metadata from HTML meta tags.
 
     # Parse the HTML once with lxml and read every field (title, meta
@@ -77,7 +78,8 @@ def extract_llm_metadata(html: str, url: str) -> PageMetadata:
     paths in sync through :func:`_llm_metadata_from_tree` -- it is the only
     reader of a parsed tree.
     """
-    metadata: PageMetadata = {"source_url": url}
+    source = url.raw if url is not None else ""
+    metadata: PageMetadata = {"source_url": source}
     html = truncate_html_input(html)
     # Lazy import avoids a circular import: extraction.py imports this module
     # at module level, so this direction must stay lazy.
@@ -89,7 +91,7 @@ def extract_llm_metadata(html: str, url: str) -> PageMetadata:
     return _llm_metadata_from_tree(tree, url)
 
 
-def _llm_metadata_from_tree(tree: Any, url: str) -> PageMetadata:
+def _llm_metadata_from_tree(tree: Any, url: NormalizedUrl | None) -> PageMetadata:
     """Read the page-metadata fields from an ALREADY-parsed lxml tree.
 
     Shared by the fallback parse above and the engine's discovery stage, so
@@ -97,7 +99,8 @@ def _llm_metadata_from_tree(tree: Any, url: str) -> PageMetadata:
     into two different metadata dialects. Returns plain JSON data only --
     the tree itself never escapes the caller.
     """
-    metadata: PageMetadata = {"source_url": url}
+    source = url.raw if url is not None else ""
+    metadata: PageMetadata = {"source_url": source}
     _carry_meta_tags(metadata, tree)
 
     # title

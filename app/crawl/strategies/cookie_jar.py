@@ -11,9 +11,9 @@ import os
 import threading
 from collections import OrderedDict
 from typing import TYPE_CHECKING
-from urllib.parse import urlparse
 
 from app.crawl.coordination_cookies import DEFAULT_MAX_HOSTS
+from app.models.normalized_url import NormalizedUrl
 
 if TYPE_CHECKING:
     from app.crawl.coordination_cookies import SharedCookieStore
@@ -111,7 +111,7 @@ class CookieJar:
         while len(self._cookies) > _COOKIE_JAR_MAX_HOSTS:
             self._cookies.popitem(last=False)
 
-    def add_cookie_header(self, url: str, set_cookie_header: str, *, namespace: str = "") -> None:
+    def add_cookie_header(self, url: NormalizedUrl, set_cookie_header: str, *, namespace: str = "") -> None:
         """Parse a ``Set-Cookie`` header and store the cookie for the URL's domain.
 
         ``namespace`` isolates cookies between concurrent callers (e.g. per
@@ -119,7 +119,7 @@ class CookieJar:
         """
         from http.cookies import SimpleCookie
 
-        host = (urlparse(url).hostname or "").lower()
+        host = url.host
         jar = SimpleCookie()
         try:
             jar.load(set_cookie_header)
@@ -137,13 +137,13 @@ class CookieJar:
             target.update(parsed)
             self._touch(ns_key)
 
-    def cookie_header_for(self, url: str, *, namespace: str = "") -> str:
+    def cookie_header_for(self, url: NormalizedUrl, *, namespace: str = "") -> str:
         """Return a ``Cookie`` header string for the given URL's domain.
 
         ``namespace`` mirrors :meth:`add_cookie_header`. Empty namespace is
         the shared default and preserves single-tenant behavior.
         """
-        host = (urlparse(url).hostname or "").lower()
+        host = url.host
         ns_key = self._ns_key(namespace, host)
         if self._store is not None:
             domain_cookies = self._store.get(ns_key[0], ns_key[1])

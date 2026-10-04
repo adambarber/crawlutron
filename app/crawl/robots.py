@@ -8,7 +8,6 @@ import threading
 from collections import OrderedDict
 from collections.abc import Awaitable, Callable
 from typing import Any
-from urllib.parse import urljoin, urlparse
 
 from app.bounded_ttl import BoundedTTLCache
 from app.crawl.fetch_helpers import _single_flight
@@ -19,14 +18,14 @@ from app.crawl.robots_parse import (
     parse_robots_sitemaps,
 )
 from app.models.host_policy import HostPolicy
-from app.models.normalized_url import normalize_public_http_url
-from app.validation import safe_public_url_or_none
+from app.models.http_fetcher import HttpFetcher
+from app.models.normalized_url import NormalizedUrl
 
 ROBOTS_CACHE_MAX_ENTRIES = 2048
 ROBOTS_CACHE_TTL_SECONDS = 600.0
 ROBOTS_FAILURE_TTL_SECONDS = 60.0
 type RobotsRules = tuple[list[tuple[bool, str]], list[str], float | None]
-FetchAndDecode = Callable[[Any, str, dict[str, str], int], Awaitable[tuple[str | None, int | None]]]
+FetchAndDecode = Callable[[HttpFetcher, NormalizedUrl, dict[str, str], int], Awaitable[tuple[str | None, int | None]]]
 
 robots_cache: BoundedTTLCache[tuple[str, HostPolicy], RobotsRules] = BoundedTTLCache(
     max_entries=ROBOTS_CACHE_MAX_ENTRIES,
@@ -35,33 +34,27 @@ robots_cache: BoundedTTLCache[tuple[str, HostPolicy], RobotsRules] = BoundedTTLC
 _inflight: dict[tuple[str, HostPolicy], asyncio.Task[RobotsRules]] = {}
 
 
-def robots_origin(url: str, *, policy: HostPolicy) -> str:
-    normalized = normalize_public_http_url(url, policy=policy)
-    parsed = urlparse(normalized.raw)
-    return f"{parsed.scheme.lower()}://{parsed.netloc.lower()}"
-
-
 async def _load_uncached(
-    origin: str,
-    fetcher: Any,
+    target: NormalizedUrl,
+    fetcher: HttpFetcher,
     timeout_seconds: int,
     fetch_and_decode: FetchAndDecode,
     policy: HostPolicy,
 ) -> RobotsRules:
-    body, status = await fetch_and_decode(
-        fetcher,
-        urljoin(origin, "/robots.txt"),
-        {},
-        timeout_seconds,
+    # ``resolve`` is the urljoin-and-admit pair, so the robots document's URL
+    # is an admitted value by construction. None -- a same-origin absolute
+    # path on an admitted page, so unreachable -- falls through to the
+    # failure arm below and fails closed like any unfetchable robots.txt.
+    robots_url = target.resolve("/robots.txt")
+    body, status = (
+        (None, None)
+        if robots_url is None
+        else await fetch_and_decode(fetcher, robots_url, {}, timeout_seconds)
     )
     if status == 200 and body is not None:
         value: RobotsRules = (
             parse_robots_rules(body),
-            [
-                loc
-                for loc in parse_robots_sitemaps(body)
-                if safe_public_url_or_none(urljoin(origin, loc), policy=policy) is not None
-            ],
+            [loc for loc in parse_robots_sitemaps(body) if target.resolve(loc) is not None],
             parse_robots_crawl_delay(body),
         )
         ttl = ROBOTS_CACHE_TTL_SECONDS
@@ -71,21 +64,24 @@ async def _load_uncached(
     else:
         value = ([(False, "/")], [], None)
         ttl = ROBOTS_FAILURE_TTL_SECONDS
-    robots_cache.put((origin, policy), value, ttl=ttl)
+    robots_cache.put((target.origin, policy), value, ttl=ttl)
     return value
 
 
 async def load_robots_rules(
-    origin: str,
-    fetcher: Any,
+    target: NormalizedUrl,
+    fetcher: HttpFetcher,
     timeout_seconds: int,
     *,
     fetch_and_decode: FetchAndDecode | None = None,
     policy: HostPolicy,
 ) -> RobotsRules:
-    """Load one origin's robots policy through the process-wide cache."""
-    canonical_origin = robots_origin(origin, policy=policy)
-    cache_key = (canonical_origin, policy)
+    """Load one origin's robots policy through the process-wide cache.
+
+    The page is the value the caller already holds; the origin the rules are
+    scoped to -- and the text the cache is keyed by -- is derived, not passed.
+    """
+    cache_key = (target.origin, policy)
     cached = robots_cache.get(cache_key)
     if cached is not None:
         return cached
@@ -93,13 +89,12 @@ async def load_robots_rules(
     return await _single_flight(
         _inflight,
         cache_key,
-        lambda: _load_uncached(canonical_origin, fetcher, timeout_seconds, decode, policy),
+        lambda: _load_uncached(target, fetcher, timeout_seconds, decode, policy),
     )
 
 
-def cached_sitemaps(origin: str, *, policy: HostPolicy) -> list[str] | None:
-    canonical_origin = robots_origin(origin, policy=policy)
-    cached = robots_cache.get((canonical_origin, policy))
+def cached_sitemaps(target: NormalizedUrl, *, policy: HostPolicy) -> list[str] | None:
+    cached = robots_cache.get((target.origin, policy))
     return None if cached is None else list(cached[1])
 
 
@@ -205,12 +200,11 @@ def _robots_pattern_to_regex(host: str, pattern: str) -> RobotsMatcher:
     return _robots_pattern_cache.get(host, pattern)
 
 
-def robots_allows(target_url: str, rules: list[tuple[bool, str]]) -> bool:
-    parsed = urlparse(target_url)
-    path = parsed.path or "/"
-    if parsed.query:
-        path = f"{path}?{parsed.query}"
-    host = parsed.hostname or ""
+def robots_allows(target_url: NormalizedUrl, rules: list[tuple[bool, str]]) -> bool:
+    path = target_url.path or "/"
+    if target_url.query:
+        path = f"{path}?{target_url.query}"
+    host = target_url.host
     # No allow-all shortcut for the empty `Disallow:` form. RFC 9309 2.2.2 makes
     # an empty value a rule to IGNORE, not a verdict, so it is skipped with the
     # other unmatched patterns below like any rule that cannot apply. Scanning
@@ -247,5 +241,4 @@ __all__ = [
     "load_robots_rules",
     "robots_allows",
     "robots_cache",
-    "robots_origin",
 ]

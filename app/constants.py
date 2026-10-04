@@ -492,7 +492,7 @@ CLASSIFICATION_STATUS_BY_LABEL: dict[str, ResultStatus] = {
     # which says "we chose not to fetch" rather than "we could not", and keeps
     # the URL out of the failed-bookkeeping a "failed" status would feed.
     "robots_disallowed": "skipped",
-    # Policy refusals from ``normalize_public_http_url`` (unsupported scheme,
+    # Policy refusals from ``NormalizedUrl`` admission (unsupported scheme,
     # non-public target, malformed URL), surfaced by the render endpoint as a
     # caller-visible refusal. Never a page verdict of any kind.
     "invalid_url": "disallowed",

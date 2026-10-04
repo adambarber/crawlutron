@@ -15,7 +15,7 @@ from app.models.discovered_link import DiscoveredLink
 from app.scheduler import DomainScheduler
 from tests._policy_factories import canonical
 from tests._recursive_harnesses import ContentionFreeGate, drive_recursive_crawl, make_crawl_task
-from tests._result_builders import engine_result, make_engine_result
+from tests._result_builders import _admit, engine_result, make_engine_result
 
 # The root seed as written, and the value the engine actually holds for it.
 # These are not the same string: normalization strips that trailing slash. The
@@ -37,7 +37,7 @@ def _task(url: str, *, index: int = 0) -> CrawlTask:
     return CrawlTask(
         index=index,
         original_url=url,
-        normalized_url=canonical(url),
+        normalized_url=_admit(canonical(url)),
         domain=urlsplit(url).hostname or "",
     )
 
@@ -45,10 +45,10 @@ def _task(url: str, *, index: int = 0) -> CrawlTask:
 def _link(url: str) -> DiscoveredLink:
     return DiscoveredLink(
         url=url,
-        normalized_url=canonical(url),
+        normalized_url=_admit(canonical(url)),
         text="",
         rel=[],
-        source_url="http://a/",
+        source_url=_admit("http://a/"),
         host="a",
         is_same_host=True,
     )
@@ -106,7 +106,7 @@ def _expanding_worker():
     """
 
     async def worker(job):
-        links = [_link("http://a/1"), _link("http://a/2")] if job.normalized_url == _ROOT_CANONICAL else []
+        links = [_link("http://a/1"), _link("http://a/2")] if job.normalized_url == _admit(_ROOT_CANONICAL) else []
         return make_engine_result(job.normalized_url, links)
 
     return worker
@@ -178,7 +178,7 @@ async def test_dispatches_single_page_and_consults_gate():
 
 async def test_expands_frontier_from_discovered_links():
     def _links_for(url):
-        return [_link("http://a/1"), _link("http://a/2")] if url == _ROOT_CANONICAL else []
+        return [_link("http://a/1"), _link("http://a/2")] if url == _admit(_ROOT_CANONICAL) else []
 
     async def worker(job):
         return make_engine_result(job.normalized_url, _links_for(job.normalized_url))
@@ -188,9 +188,9 @@ async def test_expands_frontier_from_discovered_links():
     # root + /1 + /2
     assert len(spill.writes) == 3
     assert set(spill.writes[i].normalized_url for i in sorted(spill.writes)) == {
-        _ROOT_CANONICAL,
-        "http://a/1",
-        "http://a/2",
+        _admit(_ROOT_CANONICAL),
+        _admit("http://a/1"),
+        _admit("http://a/2"),
     }
 
 
@@ -244,16 +244,16 @@ async def test_robots_disallows_discovered_link_silently():
 
     async def worker(job):
         seen.append(job.normalized_url)
-        links = [_link("http://a/blocked")] if job.normalized_url == _ROOT_CANONICAL else []
+        links = [_link("http://a/blocked")] if job.normalized_url == _admit(_ROOT_CANONICAL) else []
         return make_engine_result(job.normalized_url, links)
 
     async def allows(url):
-        return url != "http://a/blocked"
+        return url.raw != "http://a/blocked"
 
     jobs = [_task(_ROOT)]
     spill, _, _ = await _run(jobs, worker, robots_allows=allows, respect_robots=True)
-    assert seen == [_ROOT_CANONICAL]  # the blocked link was never crawled
-    assert set(spill.writes[i].normalized_url for i in spill.writes) == {_ROOT_CANONICAL}
+    assert seen == [_admit(_ROOT_CANONICAL)]  # the blocked link was never crawled
+    assert set(spill.writes[i].normalized_url for i in spill.writes) == {_admit(_ROOT_CANONICAL)}
 
 
 async def test_robots_disallows_initial_job_as_skip(recording_worker):
@@ -261,12 +261,12 @@ async def test_robots_disallows_initial_job_as_skip(recording_worker):
     seen, worker = recording_worker
 
     async def allows(url):
-        return url != "http://a/blocked"
+        return url.raw != "http://a/blocked"
 
     jobs = [_task("http://a/blocked")]
     spill, _, _ = await _run(jobs, worker, robots_allows=allows, respect_robots=True)
     assert seen == []  # worker never invoked
-    assert set(spill.writes[i].normalized_url for i in spill.writes) == {"http://a/blocked"}
+    assert set(spill.writes[i].normalized_url for i in spill.writes) == {_admit("http://a/blocked")}
 
 
 # ---------------------------------------------------------------------------
@@ -292,7 +292,7 @@ def _tiered_job(index: int, host: str) -> CrawlTask:
     return CrawlTask(
         index=index,
         original_url=f"http://{host}/",
-        normalized_url=canonical(f"http://{host}/"),
+        normalized_url=_admit(canonical(f"http://{host}/")),
         domain=host,
     )
 
@@ -362,7 +362,7 @@ async def test_pool_exhaustion_requeue_does_not_consume_a_max_pages_slot():
     total_attempts = 1 + MAX_TRANSIENT_REQUEUES
 
     async def worker(job):
-        if job.normalized_url == "http://a/seed":
+        if job.normalized_url == _admit("http://a/seed"):
             return engine_result(
                 job.normalized_url,
                 "browser_pool_exhausted",
@@ -390,5 +390,5 @@ async def test_pool_exhaustion_requeue_does_not_consume_a_max_pages_slot():
     # The real page must have been crawled despite the retry budget: it is
     # discovered only when the seed's permanent failure is finally recorded,
     # which happens at the tail of the loop.
-    assert statuses.get("http://a/real") == "success", statuses
-    assert statuses.get("http://a/seed") == "failed", statuses
+    assert statuses.get(_admit("http://a/real")) == "success", statuses
+    assert statuses.get(_admit("http://a/seed")) == "failed", statuses

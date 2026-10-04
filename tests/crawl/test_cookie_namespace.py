@@ -9,6 +9,7 @@ namespace contextvar is set per ``crawl_request`` from
 from app.crawl.strategies.cookie_jar import COOKIE_NAMESPACE, CookieJar
 from app.crawl.strategies.request_profile import cookie_namespace_for
 from tests._cookie_helpers import cookie_file, read_cookie_file
+from tests._result_builders import _admit
 
 TENANT_A = "tenant_a"
 TENANT_B = "tenant_b"
@@ -24,48 +25,48 @@ def two_tenant_jar() -> CookieJar:
     that only ever held one cookie.
     """
     jar = CookieJar()
-    jar.add_cookie_header("http://x.example/", "a=1", namespace=TENANT_A)
-    jar.add_cookie_header("http://x.example/", "b=2", namespace=TENANT_B)
+    jar.add_cookie_header(_admit("http://x.example/"), "a=1", namespace=TENANT_A)
+    jar.add_cookie_header(_admit("http://x.example/"), "b=2", namespace=TENANT_B)
     return jar
 
 
 def test_namespace_isolation_prevents_cross_tenant_leak():
     jar = two_tenant_jar()
     # Neither tenant sees the other's cookie
-    assert jar.cookie_header_for("http://x.example/", namespace=TENANT_A) == "a=1"
-    assert jar.cookie_header_for("http://x.example/", namespace=TENANT_B) == "b=2"
+    assert jar.cookie_header_for(_admit("http://x.example/"), namespace=TENANT_A) == "a=1"
+    assert jar.cookie_header_for(_admit("http://x.example/"), namespace=TENANT_B) == "b=2"
     # Default namespace still empty
-    assert jar.cookie_header_for("http://x.example/") == ""
+    assert jar.cookie_header_for(_admit("http://x.example/")) == ""
 
 
 def test_empty_namespace_uses_legacy_shared_slot():
     jar = CookieJar()
-    jar.add_cookie_header("http://x.example/p", "k=v; Path=/", namespace="")
+    jar.add_cookie_header(_admit("http://x.example/p"), "k=v; Path=/", namespace="")
     # Same call without explicit namespace still sees it (legacy behavior)
-    assert jar.cookie_header_for("http://x.example/p", namespace="") == "k=v"
-    assert jar.cookie_header_for("http://x.example/p") == "k=v"
+    assert jar.cookie_header_for(_admit("http://x.example/p"), namespace="") == "k=v"
+    assert jar.cookie_header_for(_admit("http://x.example/p")) == "k=v"
 
 
 def test_clear_with_namespace_only_clears_that_namespace():
     jar = two_tenant_jar()
     jar.clear(namespace=TENANT_A)
-    assert jar.cookie_header_for("http://x.example/", namespace=TENANT_A) == ""
-    assert jar.cookie_header_for("http://x.example/", namespace=TENANT_B) == "b=2"
+    assert jar.cookie_header_for(_admit("http://x.example/"), namespace=TENANT_A) == ""
+    assert jar.cookie_header_for(_admit("http://x.example/"), namespace=TENANT_B) == "b=2"
 
 
 def test_clear_without_namespace_clears_everything():
     jar = two_tenant_jar()
     jar.clear()
-    assert jar.cookie_header_for("http://x.example/", namespace=TENANT_A) == ""
-    assert jar.cookie_header_for("http://x.example/", namespace=TENANT_B) == ""
+    assert jar.cookie_header_for(_admit("http://x.example/"), namespace=TENANT_A) == ""
+    assert jar.cookie_header_for(_admit("http://x.example/"), namespace=TENANT_B) == ""
 
 
 def test_save_and_load_roundtrip_uses_legacy_namespace():
     """Persisted cookies live in the shared namespace; per-namespace cookies
     are intentionally not persisted so each caller can manage them itself."""
     jar = CookieJar()
-    jar.add_cookie_header("http://shared.example/", "sess=abc", namespace="")
-    jar.add_cookie_header("http://shared.example/", "sess=other", namespace="tenant_b")
+    jar.add_cookie_header(_admit("http://shared.example/"), "sess=abc", namespace="")
+    jar.add_cookie_header(_admit("http://shared.example/"), "sess=other", namespace="tenant_b")
     with cookie_file(jar, "ck_ns_roundtrip.json") as target:
         # Only the legacy (empty-namespace) entry is persisted.
         persisted = read_cookie_file(target)
@@ -73,8 +74,8 @@ def test_save_and_load_roundtrip_uses_legacy_namespace():
         assert persisted["shared.example"] == {"sess": "abc"}
         # Roundtrip preserves the legacy namespace slot.
         loaded = CookieJar.import_from_file(target)
-        assert loaded.cookie_header_for("http://shared.example/") == "sess=abc"
-        assert loaded.cookie_header_for("http://shared.example/", namespace="tenant_b") == ""
+        assert loaded.cookie_header_for(_admit("http://shared.example/")) == "sess=abc"
+        assert loaded.cookie_header_for(_admit("http://shared.example/"), namespace="tenant_b") == ""
 
 
 def test_cookie_namespace_for_helper_reads_profile():

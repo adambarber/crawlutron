@@ -29,6 +29,13 @@ import re
 import pytest
 
 from app.crawl.robots import _RobotsPathMatcher, robots_allows
+from app.models.normalized_url import NormalizedUrl
+from tests._policy_factories import UNRESTRICTED_HOST_POLICY
+
+
+def _url(text: str):
+    """Admission for the one URL the oracle drives: production takes the value."""
+    return NormalizedUrl(text, policy=UNRESTRICTED_HOST_POLICY)
 
 
 def _reference_allows(rules, path: str) -> bool:
@@ -74,8 +81,13 @@ def test_group_evaluation_matches_the_rfc_oracle_on_generated_compositions(seed:
             if rng.random() < 0.2:
                 rules.append((is_allow, ""))
             rules.append((is_allow, pattern))
-        path = "/" + "".join(rng.choice(["a", "b", "/"]) for _ in range(rng.randint(0, 3)))
-        url = f"http://x.example{path}"
+        generated = "/" + "".join(rng.choice(["a", "b", "/"]) for _ in range(rng.randint(0, 3)))
+        # The oracle judges the matcher, so both must read the same text: the
+        # ADMITTED path. Judging the raw generated string instead would fold
+        # the normalizer's path rewrites (/b// -> /b) into the parity claim,
+        # which this suite is not about.
+        url = _url(f"http://x.example{generated}")
+        path = url.path or "/"
 
         expected = _reference_allows(rules, path)
         assert robots_allows(url, rules) is expected, (rules, path, expected)

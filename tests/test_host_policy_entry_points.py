@@ -18,13 +18,14 @@ from tests.invariants._shared import DefinitionNode, _module_definition_index
 
 _DECISION_NAMES = frozenset(
     {
+        # The constructor is the admission chokepoint since the value object
+        # took over from the egress helpers: calling it IS the decision.
+        "NormalizedUrl",
         "_validated_url",
+        "admit_or_none",
         "canonical_page_identity",
         "checked_payload_urls",
         "filter_js_endpoints",
-        "normalize_public_http_url",
-        "public_url_or_none",
-        "safe_public_url_or_none",
         "validate_webhook_url",
         "validate_webhook_url_async",
         "_parse_pinned_off_loop",
@@ -160,9 +161,10 @@ def test_host_policy_discovery_rejects_undeclared_entry_point():
         (
             REPO_ROOT / "app/api/_undeclared_entry.py",
             ast.parse(
-                "from app.validation import HostPolicy, public_url_or_none\n"
+                "from app.models.host_policy import HostPolicy\n"
+                "from app.models.normalized_url import admit_or_none\n"
                 "def undeclared_entry(url, *, policy: HostPolicy):\n"
-                "    return public_url_or_none(url, policy=policy)\n"
+                "    return admit_or_none(url, policy=policy)\n"
             ),
         ),
     )
@@ -526,7 +528,7 @@ async def test_render_probe_fails_when_policy_enforcement_is_removed(monkeypatch
 
         return NormalizedUrl(url, policy=HostPolicy.unrestricted())
 
-    monkeypatch.setattr(payload_helpers, "normalize_public_http_url", allow)
-    monkeypatch.setattr(render, "normalize_public_http_url", allow)
+    monkeypatch.setattr(payload_helpers, "NormalizedUrl", allow)
+    monkeypatch.setattr(render, "NormalizedUrl", allow)
     with pytest.raises(AssertionError):
         await _probe_render(monkeypatch, tmp_path)

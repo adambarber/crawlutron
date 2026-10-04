@@ -9,36 +9,31 @@ from collections.abc import Awaitable, Callable, Iterable, MutableSequence
 from dataclasses import dataclass, field
 from functools import partial
 from typing import Any, TypeVar
-from urllib.parse import urljoin, urlsplit
+from urllib.parse import urljoin
 
 from app.constants import is_analytics_host, is_document_url
 from app.crawl.fetch_helpers import fetch_sitemap_urls
-from app.crawl.job_store import FrontierEntry, durable_page_identity, job_max_pages
+from app.crawl.job_store import FrontierEntry, job_max_pages
 from app.crawl.policy import PolicyTier, discovery_flags, read_policy
-from app.crawl.robots import FetchAndDecode, load_robots_rules, robots_allows, robots_origin
+from app.crawl.robots import FetchAndDecode, load_robots_rules, robots_allows
 from app.crawl.scope_match import scope_allows
 from app.crawl.strategies.fetchers import default_http_fetcher
 from app.models.crawl_extraction_method import CrawlExtractionMethod
 from app.models.crawl_policy import CrawlPolicy
 from app.models.host_policy import HostPolicy
-from app.models.normalized_url import NormalizedUrl
+from app.models.normalized_url import NormalizedUrl, admit_or_none
 from app.safe_regex import BoundedPattern, UnsafePattern, compile_untrusted
 from app.scheduler import DomainScheduler
-from app.validation import safe_public_url_or_none
 
 _logger = logging.getLogger(__name__)
 
-RobotsAllows = Callable[[str], Awaitable[bool]]
-RobotsCrawlDelay = Callable[[str], Awaitable[float | None]]
+RobotsAllows = Callable[[NormalizedUrl], Awaitable[bool]]
+RobotsCrawlDelay = Callable[[NormalizedUrl], Awaitable[float | None]]
 CommitCrawlDelay = Callable[[str, float], None]
 T = TypeVar("T")
 
 _MAX_SCOPE_PATTERN_LEN = 256
 _ROBOTS_ADMISSION_CHUNK_SIZE = 16
-
-
-def canonical_page_identity(url: str, *, host_policy: HostPolicy) -> NormalizedUrl | None:
-    return safe_public_url_or_none(url, policy=host_policy)
 
 
 def remaining_page_capacity(admitted_count: int, max_pages: int) -> int | None:
@@ -85,11 +80,11 @@ def compile_scope_pattern(scope_regex: Any) -> BoundedPattern | None:
 
 
 async def gather_robots_decisions(
-    urls: list[str],
+    urls: list[NormalizedUrl],
     robots_allows: RobotsAllows,
     robots_crawl_delay: RobotsCrawlDelay | None = None,
 ) -> list[tuple[bool, float | None]]:
-    async def check(url: str) -> tuple[bool, float | None]:
+    async def check(url: NormalizedUrl) -> tuple[bool, float | None]:
         allowed = await robots_allows(url)
         delay = await robots_crawl_delay(url) if allowed and robots_crawl_delay is not None else None
         return allowed, delay
@@ -104,7 +99,7 @@ async def gather_robots_decisions(
     return decisions
 
 
-async def _gather_robots_allowed(urls: list[str], robots_allows: RobotsAllows) -> list[bool]:
+async def _gather_robots_allowed(urls: list[NormalizedUrl], robots_allows: RobotsAllows) -> list[bool]:
     return list(await asyncio.gather(*(robots_allows(url) for url in urls)))
 
 
@@ -113,10 +108,10 @@ def _is_url_text(value: Any) -> bool:
     return isinstance(value, (str, NormalizedUrl)) and bool(value)
 
 
-def _frontier_identity(value: Any, *, host_policy: HostPolicy) -> str | None:
+def _frontier_identity(value: Any, *, host_policy: HostPolicy) -> NormalizedUrl | None:
     raw_url: Any
     if isinstance(value, FrontierEntry):
-        raw_url = value.url
+        return value.url
     elif isinstance(value, tuple) and len(value) > 1:
         raw_url = getattr(value[1], "normalized_url", None)
         if not _is_url_text(raw_url) and isinstance(value[0], str):
@@ -129,6 +124,8 @@ def _frontier_identity(value: Any, *, host_policy: HostPolicy) -> str | None:
         raw_url = getattr(value, "normalized_url", None)
     if not _is_url_text(raw_url):
         return None
+    if isinstance(raw_url, NormalizedUrl):
+        return raw_url
     raw_url = str(raw_url)
     # A refused target gets no identity. The owner returns None for both refusal
     # reasons -- private_network_target and host_not_allowed -- and the raw
@@ -137,17 +134,15 @@ def _frontier_identity(value: Any, *, host_policy: HostPolicy) -> str | None:
     # helpers here (``_candidate_stream``, ``normalize_sitemap_candidates``) both
     # drop on None; this one used to hand the raw string back, which made it the
     # only place in the module where a refusal and an acceptance looked alike.
-    identity = canonical_page_identity(raw_url, host_policy=host_policy)
-    if identity is None:
-        return None
-    return str(identity)
+    identity = admit_or_none(raw_url, policy=host_policy)
+    return identity
 
 
 def _candidate_stream(
     links: Iterable[Any],
     *,
     next_depth: int,
-    known: set[str],
+    known: set[NormalizedUrl],
     scope_pattern: BoundedPattern | None,
     want_document_bodies: bool,
     host_policy: HostPolicy,
@@ -157,7 +152,7 @@ def _candidate_stream(
         if values is None:
             continue
         normalized_raw, original = values
-        normalized = canonical_page_identity(normalized_raw, host_policy=host_policy)
+        normalized = admit_or_none(normalized_raw, policy=host_policy)
         if normalized is None or normalized in known:
             continue
         if is_analytics_host(normalized.raw):
@@ -226,7 +221,7 @@ async def admit_discovered_links[T](
     source_depth: int,
     max_depth: int,
     max_pages: int,
-    known: set[str],
+    known: set[NormalizedUrl],
     frontier: MutableSequence[T],
     make_entry: Callable[[AdmittedLink], T],
     scope_pattern: BoundedPattern | None,
@@ -242,12 +237,7 @@ async def admit_discovered_links[T](
     if source_depth >= max_depth:
         return AdmissionOutcome()
     next_depth = source_depth + 1
-    normalized_known = {
-        durable_page_identity(url, host_policy) for url in known if isinstance(url, str) and url
-    }
-    known.clear()
-    known.update(normalized_known)
-    reserved = set(known)
+    reserved: set[NormalizedUrl] = set(known)
     for value in frontier:
         identity = _frontier_identity(value, host_policy=host_policy)
         if identity is not None:
@@ -286,13 +276,13 @@ async def admit_discovered_links[T](
         # commit for a page that will never be crawled.
         if reserved:
             before = len(chunk)
-            chunk = [candidate for candidate in chunk if candidate.normalized_url.raw not in reserved]
+            chunk = [candidate for candidate in chunk if candidate.normalized_url not in reserved]
             duplicates_skipped += before - len(chunk)
             if not chunk:
                 continue
         if respect_robots:
             allowed_values = await _gather_robots_allowed(
-                [candidate.normalized_url.raw for candidate in chunk], robots_allows
+                [candidate.normalized_url for candidate in chunk], robots_allows
             )
         else:
             allowed_values = [True] * len(chunk)
@@ -302,7 +292,7 @@ async def admit_discovered_links[T](
                 continue
             # `reserved` can grow inside this loop (an accepted candidate is
             # reserved), so two aliases within one chunk are caught here too.
-            if candidate.normalized_url.raw in reserved:
+            if candidate.normalized_url in reserved:
                 duplicates_skipped += 1
                 continue
             delay = None
@@ -310,10 +300,10 @@ async def admit_discovered_links[T](
             # it must not run, or a crawl that explicitly disabled robots still
             # fetched /robots.txt to learn a delay it never asked to honor.
             if respect_robots and robots_crawl_delay is not None:
-                delay = await robots_crawl_delay(candidate.normalized_url.raw)
+                delay = await robots_crawl_delay(candidate.normalized_url)
             if delay is not None and delay > 0:
                 commit_crawl_delay(candidate.normalized_url.host, delay)
-            if candidate.normalized_url.raw in reserved:
+            if candidate.normalized_url in reserved:
                 continue
             capacity = remaining_page_capacity(current_occupied, max_pages)
             if capacity is not None and capacity <= 0:
@@ -323,9 +313,9 @@ async def admit_discovered_links[T](
             entry = make_entry(candidate)
             frontier.append(entry)
             accepted += 1
-            reserved.add(candidate.normalized_url.raw)
+            reserved.add(candidate.normalized_url)
             if reserve_admitted:
-                known.add(candidate.normalized_url.raw)
+                known.add(candidate.normalized_url)
             current_occupied += 1
     return AdmissionOutcome(
         accepted=accepted,
@@ -346,9 +336,9 @@ class RobotsGate:
         self._timeout_seconds = policy.limits.timeout_seconds
         self._fetch_and_decode = fetch_and_decode
 
-    async def _rules(self, url: str) -> tuple[list[tuple[bool, str]], float | None]:
+    async def _rules(self, url: NormalizedUrl) -> tuple[list[tuple[bool, str]], float | None]:
         rules, _sitemaps, delay = await load_robots_rules(
-            robots_origin(url, policy=self._host_policy),
+            url,
             partial(default_http_fetcher, policy=self._host_policy),
             self._timeout_seconds,
             fetch_and_decode=self._fetch_and_decode,
@@ -356,11 +346,11 @@ class RobotsGate:
         )
         return rules, delay
 
-    async def allows(self, url: str) -> bool:
+    async def allows(self, url: NormalizedUrl) -> bool:
         rules, _delay = await self._rules(url)
         return robots_allows(url, rules)
 
-    async def crawl_delay(self, url: str) -> float | None:
+    async def crawl_delay(self, url: NormalizedUrl) -> float | None:
         _rules, delay = await self._rules(url)
         return delay
 
@@ -430,7 +420,7 @@ class JobAdmissionContext:
         )
 
 
-def admitted_page_identities(job: Any, *, host_policy: HostPolicy) -> set[str]:
+def admitted_page_identities(job: Any, *, host_policy: HostPolicy) -> set[NormalizedUrl]:
     """Union of canonical identities already admitted across the job's state.
 
     No normalization pass: entries are canonical by construction (ingress and
@@ -438,11 +428,15 @@ def admitted_page_identities(job: Any, *, host_policy: HostPolicy) -> set[str]:
     storage boundary. Re-scanning the whole job here put a per-URL
     canonicalization pass on every batch's hot path.
     """
-    identities: set[str] = set()
+    identities: set[NormalizedUrl] = set()
     values = set(job.visited) | {entry.url for entry in job.in_flight} | {entry.url for entry in job.frontier}
     for value in values:
-        if isinstance(value, str) and value:
-            identities.add(durable_page_identity(value, host_policy))
+        if isinstance(value, NormalizedUrl):
+            identities.add(value)
+        elif isinstance(value, str) and value:
+            admitted = admit_or_none(value, policy=host_policy)
+            if admitted is not None:
+                identities.add(admitted)
     return identities
 
 
@@ -453,14 +447,14 @@ def normalize_sitemap_candidates(
     host_policy: HostPolicy,
 ) -> list[tuple[NormalizedUrl, str | None]]:
     candidates: list[tuple[NormalizedUrl, str | None]] = []
-    seen: set[str] = set()
+    seen: set[NormalizedUrl] = set()
     for loc, lastmod in found:
-        normalized = canonical_page_identity(loc, host_policy=host_policy)
+        normalized = admit_or_none(loc, policy=host_policy)
         if normalized is None or normalized in seen:
             continue
         if scope_pattern is not None and not scope_allows(scope_pattern, normalized.raw):
             continue
-        seen.add(str(normalized))
+        seen.add(normalized)
         candidates.append((normalized, lastmod))
     return candidates
 
@@ -516,7 +510,7 @@ async def admit_job_links(
         max_pages=context.max_pages,
         known=known,
         frontier=job.frontier,
-        make_entry=lambda link: FrontierEntry(url=link.normalized_url.raw, depth=link.depth),
+        make_entry=lambda link: FrontierEntry(url=link.normalized_url, depth=link.depth),
         scope_pattern=context.scope_pattern,
         want_document_bodies=context.want_document_bodies,
         respect_robots=context.respect_robots,
@@ -533,8 +527,8 @@ async def admit_job_links(
 
 def _requeue_page_identities(
     job: Any,
-    known: set[str],
-    candidates: Iterable[tuple[str, int]],
+    known: set[NormalizedUrl],
+    candidates: Iterable[tuple[NormalizedUrl, int]],
 ) -> tuple[list[FrontierEntry], int]:
     """Re-admit already-admitted identities, counting how far past the cap they go.
 
@@ -576,7 +570,7 @@ def requeue_admitted_pages(
     accepted_entries, overcommitted = _requeue_page_identities(
         job,
         known,
-        ((durable_page_identity(entry.url, context.host_policy), entry.depth) for entry in entries),
+        ((entry.url, entry.depth) for entry in entries),
     )
     job.frontier.extend(accepted_entries)
     if overcommitted:
@@ -587,7 +581,7 @@ def requeue_admitted_pages(
 async def fetch_job_sitemap_candidates(root_url: str, context: JobAdmissionContext) -> list[str]:
     """Sitemap candidates for a job root, or none if the root is not crawlable.
 
-    The origin is taken from ``normalize_public_http_url`` rather than rebuilt
+    The origin is taken from the admitted ``NormalizedUrl`` rather than rebuilt
     here. This used to call ``urlparse`` and reassemble ``scheme://netloc``
     itself, which kept host case, kept a default port and kept a trailing dot --
     so the same job root produced a different sitemap URL depending on which
@@ -595,21 +589,22 @@ async def fetch_job_sitemap_candidates(root_url: str, context: JobAdmissionConte
     a sitemap origin before any fetcher saw it. Routing through the declared
     chokepoint makes this path agree with every other URL the service handles.
     """
-    from app.models.normalized_url import normalize_public_http_url
+    from app.models.normalized_url import NormalizedUrl
 
     try:
-        canonical_root = normalize_public_http_url(root_url, policy=context.host_policy)
+        canonical_root = NormalizedUrl(root_url, policy=context.host_policy)
     except ValueError:
         return []
-    canonical = urlsplit(canonical_root.raw)
-    sitemap_url = f"{canonical.scheme}://{canonical.netloc}/sitemap.xml"
+    sitemap_url = admit_or_none(f"{canonical_root.origin}/sitemap.xml", policy=context.host_policy)
+    if sitemap_url is None:
+        return []
     found = await fetch_sitemap_urls(
         partial(default_http_fetcher, policy=context.host_policy),
         sitemap_url,
         context.timeout_seconds,
         host_policy=context.host_policy,
     )
-    return sorted({urljoin(sitemap_url, url) for url, _lastmod in found if isinstance(url, str)})
+    return sorted({urljoin(sitemap_url.raw, url) for url, _lastmod in found if isinstance(url, str)})
 
 
 __all__ = [
@@ -624,7 +619,6 @@ __all__ = [
     "admit_discovered_links",
     "admit_job_links",
     "admitted_page_identities",
-    "canonical_page_identity",
     "compile_scope_pattern",
     "fetch_job_sitemap_candidates",
     "gather_robots_decisions",

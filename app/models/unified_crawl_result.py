@@ -10,6 +10,7 @@ from app.models.content_validators import ContentValidators
 from app.models.crawl_status import CrawlStatus
 from app.models.crawl_strategy import CrawlStrategy
 from app.models.discovered_link_response import DiscoveredLinkResponse
+from app.models.normalized_url import NormalizedUrl
 from app.models.page_metadata_response import PageMetadataResponse
 from app.models.strategy_attempt import StrategyAttempt
 
@@ -18,13 +19,13 @@ class UnifiedCrawlResult(BaseModel):
     # 1. Identity & Routing
     original_url: str = Field(description="Caller-provided URL before normalization.")
     normalized_url: Annotated[
-        str | None,
+        NormalizedUrl | None,
         Field(
             description="Public normalized URL used for execution.",
         ),
     ] = None
     final_url: Annotated[
-        str | None,
+        NormalizedUrl | None,
         Field(
             description="Final URL after redirects or browser navigation.",
         ),
@@ -93,7 +94,10 @@ class UnifiedCrawlResult(BaseModel):
     discovered_link_count: Annotated[int, Field(ge=0)] = 0
     discovered_links_truncated: bool = False
     discovered_links: list[DiscoveredLinkResponse] = Field(default_factory=list)
-    next_page_url: Annotated[str | None, Field(description="Auto-detected pagination URL, if found.")] = None
+    next_page_url: Annotated[
+        NormalizedUrl | None,
+        Field(description="Auto-detected pagination URL, if found."),
+    ] = None
     validators: Annotated[
         ContentValidators | None,
         Field(

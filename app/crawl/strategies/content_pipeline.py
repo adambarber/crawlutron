@@ -43,6 +43,7 @@ from app.crawl.policy import discovery_flags
 from app.models.crawl_extraction_method import CrawlExtractionMethod
 from app.models.crawl_policy import CrawlPolicy
 from app.models.host_policy import HostPolicy
+from app.models.normalized_url import NormalizedUrl
 from app.models.taxonomy import CrawlError
 from app.validation import filter_js_endpoints
 
@@ -67,7 +68,7 @@ async def _run_extraction(
     content: str | bytes,
     decoded: str,
     content_type: str | None,
-    final_url: str,
+    final_url: NormalizedUrl | None,
     policy: CrawlPolicy,
     default_method: str,
     html: bool,
@@ -117,8 +118,8 @@ async def _run_extraction(
 async def _discover_after_fetch(
     *,
     html: str | None,
-    final_url: str,
-    js_base_url: str | None,
+    final_url: NormalizedUrl | None,
+    js_base_url: NormalizedUrl | None,
     status: str,
     policy: CrawlPolicy,
     host_policy: HostPolicy,
@@ -190,7 +191,7 @@ def _discovery_result_fields(
 
 def _post_fetch_diagnostics(
     post_fetch: dict[str, Any],
-    final_url: str,
+    final_url: NormalizedUrl | None,
     host_policy: HostPolicy,
 ) -> dict[str, Any]:
     """The diagnostics every strategy takes from one discovery envelope.
@@ -204,7 +205,9 @@ def _post_fetch_diagnostics(
     """
     diagnostics: dict[str, Any] = {}
     if post_fetch["next_page_url"]:
-        diagnostics["next_page_url"] = post_fetch["next_page_url"]
+        # The envelope holds the admitted value; the diagnostics dict is a JSON
+        # payload, so the wire projection happens here and nowhere else.
+        diagnostics["next_page_url"] = post_fetch["next_page_url"].raw
     diagnostics["js_endpoints"] = filter_js_endpoints(
         post_fetch["js_endpoints"],
         resolve_against=final_url,

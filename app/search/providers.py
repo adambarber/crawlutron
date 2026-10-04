@@ -8,7 +8,7 @@ first provider whose credentials are configured; an explicitly selected
 provider whose key is missing raises :class:`SearchProviderUnavailable` so
 the endpoint can surface an actionable 503 instead of a silent failure.
 
-Every result URL is run through :func:`app.validation.normalize_public_http_url`
+Every result URL is admitted through :class:`app.models.normalized_url.NormalizedUrl`
 before it is returned: callers are expected to pipe search results straight
 into ``/v1/crawl``, so the same SSRF hygiene that guards crawling applies
 here. Loopback/private targets are dropped, never advertised.
@@ -26,8 +26,9 @@ from lxml import html as lxml_html
 
 from app.bounded_io import BodyTooLarge, read_capped_async
 from app.crawl.strategies.http_client_pool import get_async_http_client
+from app.models.normalized_url import admit_or_none
 from app.timeouts import Timeouts
-from app.validation import HostPolicy, safe_public_url_or_none
+from app.validation import HostPolicy
 
 logger = logging.getLogger(__name__)
 
@@ -122,7 +123,7 @@ def _normalize_url(raw: str, *, policy: HostPolicy) -> str | None:
     a result that points at loopback or a private network is not a public URL
     a caller can legally crawl, so it is not advertised.
     """
-    normalized = safe_public_url_or_none(raw, policy=policy)
+    normalized = admit_or_none(raw, policy=policy)
     return str(normalized) if normalized is not None else None
 
 

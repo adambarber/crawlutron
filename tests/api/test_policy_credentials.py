@@ -19,6 +19,7 @@ from app.crawl.strategies.request_profile import _apply_credentials
 from app.models.crawl_policy import CrawlPolicy
 from app.models.credential import Credential
 from app.validation import HostPolicy
+from tests._result_builders import _admit
 
 #: The settings a payload-policy test runs against: the defaults with nothing
 #: overridden. A module constant rather than a factory because it is immutable
@@ -60,18 +61,18 @@ class TestApplyCredentials:
     def test_matching_origin_gets_authorization(self):
         import base64
 
-        headers = _apply_credentials({}, "https://private.example/page", self._credentials())
+        headers = _apply_credentials({}, _admit("https://private.example/page"), self._credentials())
         assert headers["Authorization"] == "Bearer tok"
         # Basic credentials canonicalize into the standard header value.
-        headers = _apply_credentials({}, "http://legacy.example:8080/x", self._credentials())
+        headers = _apply_credentials({}, _admit("http://legacy.example:8080/x"), self._credentials())
         expected = base64.b64encode(b"u:p").decode()
         assert headers["Authorization"] == f"Basic {expected}"
 
     def test_other_origins_get_nothing(self):
-        headers = _apply_credentials({"X": "1"}, "https://elsewhere.example/page", self._credentials())
+        headers = _apply_credentials({"X": "1"}, _admit("https://elsewhere.example/page"), self._credentials())
         assert headers == {"X": "1"}
         # Default-port and case variants of the REQUEST url match the same origin.
-        headers = _apply_credentials({}, "https://PRIVATE.example:443/page", self._credentials())
+        headers = _apply_credentials({}, _admit("https://PRIVATE.example:443/page"), self._credentials())
         assert headers["Authorization"] == "Bearer tok"
 
     def test_scrubbed_on_cross_host_redirect_by_the_existing_chokepoint(self):
@@ -105,11 +106,11 @@ class TestApplyCredentials:
             "credentials": self._credentials(),
         }
         scoped = headers_for_strategy(
-            "http_declared_crawler", read_policy(policy), "https://private.example/docs"
+            "http_declared_crawler", read_policy(policy), _admit("https://private.example/docs")
         )
         assert scoped["Authorization"] == "Bearer tok"
         plain = headers_for_strategy(
-            "http_declared_crawler", read_policy(policy), "https://public.example/docs"
+            "http_declared_crawler", read_policy(policy), _admit("https://public.example/docs")
         )
         assert "Authorization" not in plain
 

@@ -11,7 +11,6 @@ import contextlib
 import inspect
 import re
 from typing import Any
-from urllib.parse import urljoin, urlparse
 
 from app.constants import DEFAULT_MAX_CONTENT_LENGTH_BYTES, DISCOVERY_BODY_MAX_BYTES
 from app.crawl.decompression import decompress_body as _decompress_body
@@ -21,7 +20,7 @@ from app.crawl.strategies.body_decode import decode_body
 from app.models.crawl_policy import CrawlPolicy
 from app.models.host_policy import HostPolicy
 from app.models.http_fetcher import HttpFetcher
-from app.validation import public_url_or_none
+from app.models.normalized_url import NormalizedUrl
 
 _RETRY_BACKOFF_BASE_SECONDS = 0.25
 _RETRY_BACKOFF_CAP_SECONDS = 2.0
@@ -51,7 +50,7 @@ def retry_after_seconds(headers: dict[str, str]) -> int | None:
 
 async def fetch_with_retries(
     fetcher: HttpFetcher,
-    url: str,
+    url: NormalizedUrl,
     headers: dict[str, str],
     timeout_seconds: int,
     max_retries: int,
@@ -82,7 +81,8 @@ async def fetch_with_retries(
     raise AssertionError("unreachable: retry loop is total")
 
 
-def looks_like_binary_body(body: bytes, content_type: str | None, url: str) -> bool:
+def looks_like_binary_body(body: bytes, content_type: str | None, url: NormalizedUrl) -> bool:
+    url_text = url.raw
     normalized_content_type = (content_type or "").split(";", 1)[0].strip().lower()
     if normalized_content_type.startswith("text/") or normalized_content_type in {
         "application/json",
@@ -92,7 +92,7 @@ def looks_like_binary_body(body: bytes, content_type: str | None, url: str) -> b
         return False
     if "html" in normalized_content_type or "pdf" in normalized_content_type:
         return False
-    lower_url = url.split("?", 1)[0].lower()
+    lower_url = url_text.split("?", 1)[0].lower()
     if lower_url.endswith((".zip", ".gz", ".tgz", ".7z", ".rar", ".xlsx", ".docx")):
         return True
     if body.startswith((b"PK\x03\x04", b"PK\x05\x06", b"\x1f\x8b")):
@@ -128,7 +128,7 @@ def _robots_diagnostics(evaluation: str, **overrides: Any) -> dict[str, Any]:
     fetched it), or ``evaluated`` (fetched here, possibly unsuccessfully) -- and
     ``overrides`` carries what this branch knows.
 
-    Every URL in the result was resolved through ``public_url_or_none`` with the
+    Every URL in the result was resolved through ``NormalizedUrl.resolve`` with the
     request's host policy *before* it got here; this function resolves nothing,
     so it is a packer and not a URL egress door, and it deliberately does not take
     a ``HostPolicy`` to look like one. The alternative -- a signature naming a
@@ -143,7 +143,7 @@ def _robots_diagnostics(evaluation: str, **overrides: Any) -> dict[str, Any]:
 
 async def discovery_diagnostics(
     *,
-    normalized_url: str,
+    normalized_url: NormalizedUrl,
     html: str | None,
     policy: CrawlPolicy,
     host_policy: HostPolicy,
@@ -155,11 +155,8 @@ async def discovery_diagnostics(
     flags = discovery_flags(policy)
     limits = policy.limits
     diagnostics: dict[str, Any] = {}
-    safe_source = public_url_or_none(normalized_url, policy=host_policy)
-    if safe_source is None:
-        return diagnostics
-    parsed = urlparse(safe_source)
-    origin = f"{parsed.scheme}://{parsed.netloc}"
+    safe_source = normalized_url
+    origin = safe_source.origin
     robots_sitemaps: list[str] = []
     if not robots_evaluated:
         diagnostics["robots"] = _robots_diagnostics("disabled")
@@ -169,19 +166,23 @@ async def discovery_diagnostics(
         # network a second time. An empty list is a valid signal (robots
         # fetched, no Sitemap lines) and still means "do not re-fetch".
         robots_sitemaps = [
-            safe_url
+            admitted.raw
             for entry in engine_robots_sitemaps
-            if (safe_url := public_url_or_none(entry, resolve_against=safe_source, policy=host_policy))
+            if (admitted := safe_source.resolve(entry)) is not None
         ]
         diagnostics["robots"] = _robots_diagnostics(
             "cached", sitemaps=robots_sitemaps, reused_from_engine=True
         )
     elif flags.robots:
-        robots_url = public_url_or_none(urljoin(origin, "/robots.txt"), policy=host_policy)
+        robots_url = safe_source.resolve("/robots.txt")
         if robots_url is None:
             return diagnostics
         try:
-            robots_response = http_fetcher(robots_url, headers, limits.timeout_seconds)
+            # The same sync-double tolerance the fetch_helpers chokepoint
+            # quarantines: the honest type is the coroutine, a sync double
+            # returns the result directly, and this local is where the seam
+            # says so.
+            robots_response: Any = http_fetcher(robots_url, headers, limits.timeout_seconds)
             if inspect.iscoroutine(robots_response):
                 robots_response = await robots_response
             robots_headers = {key.lower(): value for key, value in robots_response.headers.items()}
@@ -202,29 +203,28 @@ async def discovery_diagnostics(
                     except ValueError:
                         crawl_delay = None
                 elif key.strip().lower() == "sitemap":
-                    safe_sitemap = public_url_or_none(
-                        value.strip(),
-                        resolve_against=safe_source,
-                        policy=host_policy,
-                    )
+                    safe_sitemap = safe_source.resolve(value.strip())
                     if safe_sitemap is not None:
-                        robots_sitemaps.append(safe_sitemap)
+                        robots_sitemaps.append(safe_sitemap.raw)
             diagnostics["robots"] = _robots_diagnostics(
                 "evaluated",
-                url=robots_url,
+                url=robots_url.raw,
                 crawl_delay_seconds=crawl_delay,
                 sitemaps=robots_sitemaps,
             )
         except Exception as error:
             diagnostics["robots"] = _robots_diagnostics(
-                "evaluated", url=robots_url, error=classify_error_code(error)
+                "evaluated", url=robots_url.raw, error=classify_error_code(error)
             )
     sitemap_urls: list[str] = []
     if flags.sitemaps:
         candidate_sitemaps = robots_sitemaps or ["/sitemap.xml"]
         from app.crawl.fetch_helpers import fetch_sitemap_urls
 
-        for sitemap_url in (urljoin(origin, entry) for entry in candidate_sitemaps):
+        admitted_sitemaps = (
+            safe_source.resolve(entry) for entry in candidate_sitemaps
+        )
+        for sitemap_url in (a for a in admitted_sitemaps if a is not None):
             with contextlib.suppress(Exception):
                 # Recursively resolves sitemap indexes down to (loc, lastmod) pairs.
                 found_locs = await fetch_sitemap_urls(
@@ -234,16 +234,12 @@ async def discovery_diagnostics(
                     host_policy=host_policy,
                 )
                 for loc, lastmod in found_locs:
-                    safe_loc = public_url_or_none(
-                        loc,
-                        resolve_against=sitemap_url,
-                        policy=host_policy,
-                    )
+                    safe_loc = sitemap_url.resolve(loc)
                     if safe_loc is None:
                         continue
-                    sitemap_urls.append(safe_loc)
+                    sitemap_urls.append(safe_loc.raw)
                     if lastmod:
-                        diagnostics.setdefault("sitemap_lastmod", {})[safe_loc] = lastmod
+                        diagnostics.setdefault("sitemap_lastmod", {})[safe_loc.raw] = lastmod
     feeds: list[str] = []
     if flags.feeds:
         for match in re.finditer(
@@ -254,13 +250,9 @@ async def discovery_diagnostics(
                 continue
             href_match = re.search(r"href=['\"]([^'\"]+)['\"]", tag, flags=re.IGNORECASE)
             if href_match:
-                feed = public_url_or_none(
-                    href_match.group(1),
-                    resolve_against=safe_source,
-                    policy=host_policy,
-                )
+                feed = safe_source.resolve(href_match.group(1))
                 if feed is not None:
-                    feeds.append(feed)
+                    feeds.append(feed.raw)
     if sitemap_urls or feeds:
         diagnostics["discovery"] = {"sitemap_urls": sitemap_urls, "feeds": feeds}
     return diagnostics

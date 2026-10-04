@@ -24,6 +24,7 @@ from app.models.crawl_worker import CrawlWorker
 from app.models.engine_crawl_result import EngineCrawlResult
 from app.models.host_policy import HostPolicy
 from app.models.http_fetcher import HttpFetcher
+from app.models.normalized_url import NormalizedUrl
 from app.models.registrable_domain import registrable_domain
 from app.models.taxonomy import Classification, CrawlError, CrawlStrategyName
 from app.scheduler import DomainScheduler
@@ -34,7 +35,7 @@ BLOCKED_CLASSIFICATIONS = HTTP_BLOCKED_CLASSIFICATIONS | BROWSER_BLOCKED_CLASSIF
 @dataclass(frozen=True)
 class _ChainContext:
     original_url: str
-    normalized_url: str
+    normalized_url: NormalizedUrl
     policy: CrawlPolicy
     http_fetcher: HttpFetcher
     cffi_fetcher: HttpFetcher
@@ -303,7 +304,7 @@ def _is_usable(result: EngineCrawlResult) -> bool:
 async def execute_crawl_chain(
     *,
     original_url: str,
-    normalized_url: str,
+    normalized_url: NormalizedUrl,
     policy: CrawlPolicy,
     http_fetcher: HttpFetcher,
     cffi_fetcher: HttpFetcher,

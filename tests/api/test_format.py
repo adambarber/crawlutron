@@ -24,7 +24,7 @@ class TestFormatCrawlItemUnified:
         assert markdown is not None
         assert "Body text here" in markdown
         assert metadata.get("title") == "T"
-        assert metadata.get("source_url") == "http://example.com/"
+        assert metadata.get("source_url") == "http://example.com"
 
     def test_text_only_result_falls_back_to_extracted_text(self) -> None:
         item = engine_result(

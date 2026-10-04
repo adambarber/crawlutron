@@ -26,7 +26,7 @@ from app.crawl.admission import admit_discovered_links
 from app.crawl.job_store import JobStore
 from app.crawl.policy import PolicyTier, read_policy
 from app.models.crawl_policy import CrawlPolicy
-from app.models.normalized_url import normalize_public_http_url
+from app.models.normalized_url import NormalizedUrl
 from app.settings import CrawlerSettings
 from app.validation import HostPolicy
 
@@ -54,7 +54,7 @@ def canonical(url: str) -> str:
     (the job store, the spill file, the wire). The admission positions that want
     the value construct it themselves, where the policy is in hand.
     """
-    return normalize_public_http_url(url, policy=UNRESTRICTED_HOST_POLICY).raw
+    return NormalizedUrl(url, policy=UNRESTRICTED_HOST_POLICY).raw
 
 
 BOOL_ENV_CASES = (

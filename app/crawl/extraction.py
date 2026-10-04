@@ -25,7 +25,6 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from html import unescape
 from typing import Any, Literal, NamedTuple, TypeVar
-from urllib.parse import urljoin, urlparse
 
 from lxml import etree
 from lxml.etree import ParserError
@@ -42,7 +41,6 @@ from trafilatura import extract as _trafilatura_extract
 # `try/except ImportError` that returned "no content" for a package that cannot
 # be absent.
 from app.crawl.doc_pool import DocExtractionPool, doc_task_hooks
-from app.crawl.job_store import durable_page_identity
 from app.crawl.llm_format import (
     PageMetadata as ExtractedPageMetadata,
 )
@@ -50,9 +48,10 @@ from app.crawl.llm_format import _llm_metadata_from_tree, text_from_html
 from app.env import get_env_int, parse_bool_env
 from app.models.discovered_link import DiscoveredLink
 from app.models.host_policy import HostPolicy
+from app.models.normalized_url import NormalizedUrl, admit_or_none
 from app.resource_pressure import doc_worker_count
 from app.settings import CrawlerSettings
-from app.validation import filter_js_endpoints, public_url_or_none, safe_public_url_or_none
+from app.validation import filter_js_endpoints
 
 logger = logging.getLogger(__name__)
 
@@ -237,13 +236,13 @@ def is_html(content_type: str | None, body: bytes | str) -> bool:
     return text.startswith("<html") or text.startswith("<!doctype html>")
 
 
-def looks_like_document(content_type: str | None, body: bytes | str, url: str | None) -> bool:
+def looks_like_document(content_type: str | None, body: bytes | str, url: NormalizedUrl | None) -> bool:
     ct = (content_type or "").lower()
     if "pdf" in ct:
         return True
     if "html" in ct:
         return False
-    lower_url = (url or "").split("?")[0].lower()
+    lower_url = (url.raw if url is not None else "").split("?")[0].lower()
     if any(lower_url.endswith(ext) for ext in _DOC_EXTENSIONS):
         return True
     if isinstance(body, bytes) and body.startswith(_PDF_MAGIC):
@@ -256,7 +255,7 @@ def looks_like_document(content_type: str | None, body: bytes | str, url: str | 
 def extract_content(
     content: bytes | str,
     content_type: str | None,
-    url: str | None,
+    url: NormalizedUrl | None,
     selectors: Selectors | None = None,
 ) -> ExtractedContent:
     """Extract ``(text, markdown)`` from raw content using the unified pipeline.
@@ -291,7 +290,7 @@ def extract_content(
                 "css_selector": selectors.css,
                 "xpath": selectors.xpath,
                 "content_type": content_type,
-                "url": url,
+                "url": url.raw if url is not None else None,
             },
         )
     if html_body:
@@ -341,7 +340,7 @@ def html_to_markdown(html_fragment: str) -> tuple[str | None, str | None]:
 
 def extract_selected(
     html: str,
-    source_url: str | None,
+    source_url: NormalizedUrl | None,
     *,
     selectors: Selectors | None = None,
     settings: CrawlerSettings | None = None,
@@ -455,7 +454,7 @@ def _suppress_trafilatura_chatter() -> _LogRestorer:
 
 def extract_html(
     html: str,
-    url: str | None,
+    url: NormalizedUrl | None,
     selectors: Selectors | None = None,
 ) -> ExtractedContent:
     """The single owner of the HTML selector dispatch, for both callers.
@@ -471,7 +470,7 @@ def extract_html(
         with _suppress_trafilatura_chatter():
             md = _trafilatura_extract(
                 html,
-                url=url,
+                url=url.raw if url is not None else None,
                 output_format="markdown",
                 favor_recall=True,
                 include_comments=False,
@@ -495,7 +494,7 @@ def extract_html(
 
 
 def extract_document(
-    body: bytes, url: str | None, settings: CrawlerSettings | None = None
+    body: bytes, url: NormalizedUrl | None, settings: CrawlerSettings | None = None
 ) -> ExtractedContent:
     """Extract markdown from document bytes with a wall-clock timeout.
 
@@ -632,11 +631,11 @@ def _diagnostic_inputs(html: str | None, tree: Any | None) -> Any | None:
 class _Walkable:
     """A source URL and the tree to walk, both known good."""
 
-    source_url: str
+    source_url: NormalizedUrl
     tree: Any
 
 
-def _walkable(html: str | None, source_url: str | None, tree: Any | None) -> _Walkable | None:
+def _walkable(html: str | None, source_url: NormalizedUrl | None, tree: Any | None) -> _Walkable | None:
     """What a diagnostic extractor needs before it can look at anything, or ``None``.
 
     Three facts, and each one is a precondition the extractors all share: there is
@@ -660,9 +659,8 @@ def _walkable(html: str | None, source_url: str | None, tree: Any | None) -> _Wa
 class _FrameCollector:
     """Back-compat collector: parse once with lxml and collect frame/iframe srcs."""
 
-    def __init__(self, source_url: str, *, host_policy: HostPolicy) -> None:
+    def __init__(self, source_url: NormalizedUrl) -> None:
         self.source_url = source_url
-        self.host_policy = host_policy
         self.frames: list[dict[str, str]] = []
 
     def feed(self, html: str) -> None:
@@ -671,16 +669,12 @@ class _FrameCollector:
             return
         for el in tree.iter("frame", "iframe"):
             src = (el.get("src") or "").strip()
-            normalized = public_url_or_none(
-                src,
-                resolve_against=self.source_url,
-                policy=self.host_policy,
-            )
+            normalized = self.source_url.resolve(src)
             if normalized is None:
                 continue
             self.frames.append(
                 {
-                    "url": normalized,
+                    "url": normalized.raw,
                     "name": el.get("name") or "",
                     "title": el.get("title") or "",
                 }
@@ -689,36 +683,35 @@ class _FrameCollector:
 
 def frames_from(
     walkable: _Walkable,
-    source_url: str | None,
-    host_policy: HostPolicy,
+    source_url: NormalizedUrl | None,
 ) -> list[dict[str, Any]]:
-    source_host = (urlparse(walkable.source_url).hostname or "").lower()
+    """Frame/iframe diagnostics, admitted through the source URL's own policy.
+
+    ``resolve`` on the source value is the filter: a frame the job's policy
+    refuses is dropped here, and there is no second policy parameter to pass
+    a different answer to.
+    """
+    source_host = walkable.source_url.host
     frames: list[dict[str, Any]] = []
-    seen: set[str] = set()
+    seen: set[NormalizedUrl] = set()
     for el in walkable.tree.iter("frame", "iframe"):
         src = (el.get("src") or "").strip()
         if not src:
             continue
-        normalized_url = public_url_or_none(
-            urljoin(walkable.source_url, src),
-            policy=host_policy,
-        )
+        normalized_url = walkable.source_url.resolve(src)
         if normalized_url is None:
             continue
-        parsed = urlparse(normalized_url)
         if normalized_url in seen:
             continue
         seen.add(normalized_url)
-        # Resolved once: hostname is Optional, and asking twice is how one field
-        # ends up disagreeing with the other.
-        frame_host = (parsed.hostname or "").lower()
+        frame_host = normalized_url.host
         frames.append(
             {
-                "url": normalized_url,
-                "normalized_url": normalized_url,
+                "url": normalized_url.raw,
+                "normalized_url": normalized_url.raw,
                 "name": el.get("name") or "",
                 "title": el.get("title") or "",
-                "source_url": source_url,
+                "source_url": source_url.raw if source_url is not None else None,
                 "host": frame_host,
                 "is_same_host": bool(frame_host) and frame_host == source_host,
             }
@@ -731,16 +724,12 @@ _CONTROL_TAGS = ("input", "select", "textarea", "button")
 
 def forms_from(
     walkable: _Walkable,
-    host_policy: HostPolicy,
 ) -> list[dict[str, Any]]:
     forms: list[dict[str, Any]] = []
     for form_el in walkable.tree.iter("form"):
         attrs = {key.lower(): value for key, value in form_el.attrib.items()}
         action = unescape(str(attrs.get("action", "")).strip())
-        normalized_action = public_url_or_none(
-            urljoin(walkable.source_url, action) if action else walkable.source_url,
-            policy=host_policy,
-        )
+        normalized_action = walkable.source_url.resolve(action or walkable.source_url.raw)
         if normalized_action is None:
             continue
         controls: list[dict[str, str]] = []
@@ -762,8 +751,8 @@ def forms_from(
         forms.append(
             {
                 "method": (attrs.get("method") or "GET").upper(),
-                "action": normalized_action,
-                "normalized_action": normalized_action,
+                "action": normalized_action.raw,
+                "normalized_action": normalized_action.raw,
                 "target": attrs.get("target", ""),
                 "name": attrs.get("name", ""),
                 "id": attrs.get("id", ""),
@@ -775,9 +764,8 @@ def forms_from(
 
 def html_diagnostics(
     html: str | None,
-    source_url: str | None,
+    source_url: NormalizedUrl | None,
     *,
-    host_policy: HostPolicy,
     tree: Any | None = None,
 ) -> dict[str, Any]:
     diagnostics: dict[str, Any] = {}
@@ -788,8 +776,8 @@ def html_diagnostics(
     walkable = _walkable(html, source_url, tree)
     if walkable is None:
         return diagnostics
-    frames = frames_from(walkable, source_url, host_policy)
-    forms = forms_from(walkable, host_policy)
+    frames = frames_from(walkable, source_url)
+    forms = forms_from(walkable)
     if frames:
         diagnostics["frames"] = frames
     if forms:
@@ -799,16 +787,14 @@ def html_diagnostics(
 
 def extract_discovered_links(
     html: str | None,
-    source_url: str | None,
+    source_url: NormalizedUrl | None,
     *,
-    host_policy: HostPolicy,
     max_links: int = 250,
     tree: Any | None = None,
 ) -> tuple[list[Any], int, bool]:
     if not html or not source_url:
         return [], 0, False
-    norm_source = durable_page_identity(source_url, host_policy)
-    source_host = (urlparse(norm_source).hostname or "").lower()
+    source_host = source_url.host
     if tree is None:
         tree = parse_html_tree(html)
     if tree is None:
@@ -816,7 +802,7 @@ def extract_discovered_links(
     # Single pass: normalize/dedupe inline instead of materializing an
     # intermediate per-anchor dict list (memory on link-heavy pages).
     links: list[Any] = []
-    seen: set[str] = set()
+    seen: set[NormalizedUrl] = set()
     total_count = 0
     for el in tree.iter("a"):
         # Skip anchors nested inside another anchor to avoid double counting.
@@ -827,27 +813,19 @@ def extract_discovered_links(
         href = unescape(str(attrs.get("href", "")).strip())
         if not href or href.startswith(("#", "mailto:", "tel:", "javascript:")):
             continue
-        try:
-            normalized_url = safe_public_url_or_none(urljoin(source_url, href), policy=host_policy)
-        except ValueError:
+        normalized_url = source_url.resolve(href)
+        if normalized_url is None or normalized_url in seen:
             continue
-        if not normalized_url or normalized_url.raw in seen:
-            continue
-        seen.add(normalized_url.raw)
+        seen.add(normalized_url)
         total_count += 1
         if len(links) >= max_links:
             continue
-        parsed = urlparse(normalized_url.raw)
         text = re.sub(r"\s+", " ", unescape("".join(el.itertext()))).strip()
-        # ``urlparse().hostname`` is None for schemes without a host
-        # (``mailto:``, ``javascript:``). An unparseable host has no same-host
-        # comparison: record it empty and let the caller filter, instead of
-        # ``.lower()`` on a None that would drop the whole link batch.
-        host = parsed.hostname or ""
+        host = normalized_url.host
         links.append(
             DiscoveredLink(
                 url=href,
-                normalized_url=normalized_url.raw,
+                normalized_url=normalized_url,
                 text=text,
                 rel=str(attrs.get("rel", "")).split(),
                 source_url=source_url,
@@ -877,9 +855,9 @@ def normalized_extraction(extracted: ExtractedContent) -> tuple[str, str | None]
 
 def extract_post_fetch_discovery(
     html: str | None,
-    final_url: str | None,
+    final_url: NormalizedUrl | None,
     *,
-    js_base_url: str | None = None,
+    js_base_url: NormalizedUrl | None = None,
     max_links: int = 250,
     include_diagnostics: bool = False,
     include_links: bool = False,
@@ -902,11 +880,11 @@ def extract_post_fetch_discovery(
     """
     tree = parse_html_tree(html) if html and (include_diagnostics or include_links) else None
     diagnostics = (
-        html_diagnostics(html, final_url, host_policy=host_policy, tree=tree) if include_diagnostics else {}
+        html_diagnostics(html, final_url, tree=tree) if include_diagnostics else {}
     )
     if include_links:
         discovered_links, discovered_link_count, discovered_links_truncated = extract_discovered_links(
-            html, final_url, host_policy=host_policy, max_links=max_links, tree=tree
+            html, final_url, max_links=max_links, tree=tree
         )
     else:
         discovered_links, discovered_link_count, discovered_links_truncated = [], 0, False
@@ -933,7 +911,7 @@ def extract_post_fetch_discovery(
         "discovered_link_count": discovered_link_count,
         "discovered_links_truncated": discovered_links_truncated,
         "js_endpoints": js_endpoints,
-        "next_page_url": detect_pagination(html, final_url, host_policy=host_policy),
+        "next_page_url": detect_pagination(html, final_url),
         "llm_metadata": llm_metadata,
     }
 
@@ -955,7 +933,7 @@ _XHR_OPEN_RE = re.compile(
 
 def extract_js_endpoints(
     html: str | None,
-    source_url: str | None = None,
+    source_url: NormalizedUrl | None = None,
     *,
     host_policy: HostPolicy,
 ) -> list[dict[str, str]]:
@@ -979,7 +957,7 @@ def extract_js_endpoints(
             endpoint = match.group(1).strip()
             if not endpoint:
                 continue
-            resolved = urljoin(source_url, endpoint) if source_url else endpoint
+            resolved = str(source_url.resolve(endpoint) or endpoint) if source_url else endpoint
             if resolved in seen:
                 continue
             seen.add(resolved)
@@ -989,7 +967,7 @@ def extract_js_endpoints(
             endpoint
             for endpoint in endpoints
             if not endpoint["url"].lower().startswith(("http://", "https://"))
-            or public_url_or_none(endpoint["url"], policy=host_policy) is not None
+            or admit_or_none(endpoint["url"], policy=host_policy) is not None
         ]
     return filter_js_endpoints(endpoints, resolve_against=source_url, policy=host_policy)
 
@@ -1001,10 +979,8 @@ _HREF_RE = re.compile(r"href=[\"']([^\"']+)[\"']", re.IGNORECASE)
 
 def detect_pagination(
     html: str | None,
-    final_url: str | None,
-    *,
-    host_policy: HostPolicy,
-) -> str | None:
+    final_url: NormalizedUrl | None,
+) -> NormalizedUrl | None:
     """Auto-detect the next-page URL via ``rel="next"`` hints.
 
     Checks both ``<a rel="next" href="...">`` and
@@ -1012,7 +988,7 @@ def detect_pagination(
     final page URL. Returns ``None`` when no pagination hint is present.
 
     The href is attacker-controlled HTML, so the resolved URL leaves the
-    service through the egress filter (``public_url_or_none``) HERE rather
+    service through the egress filter (the value's own ``resolve``) HERE rather
     than at each call site: a non-http(s) target (``javascript:``, ``data:``)
     becomes ``None``, and a consumer that forgot to filter cannot leak it.
     """
@@ -1025,9 +1001,5 @@ def detect_pagination(
                 continue
             href_match = _HREF_RE.search(tag.group(0))
             if href_match:
-                return public_url_or_none(
-                    href_match.group(1).strip(),
-                    resolve_against=final_url,
-                    policy=host_policy,
-                )
+                return final_url.resolve(href_match.group(1).strip())
     return None

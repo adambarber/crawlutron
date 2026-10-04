@@ -8,10 +8,12 @@ import app.crawl.strategies.http_client_pool as pool_mod
 import app.crawl.strategies.pinned_transport as pinned_mod
 from app.crawl.engine import crawl_request
 from app.crawl.extraction import extract_post_fetch_discovery
+from app.models.normalized_url import NormalizedUrl
 from app.settings import CrawlerSettings
 from app.validation import HostPolicy
 from tests._browser_doubles import _fake_browser
 from tests._fetcher_factories import make_html_fetcher, routed_fetcher
+from tests._result_builders import _admit
 
 
 def _settings(*, allowed: str = "", denied: str = "") -> CrawlerSettings:
@@ -82,7 +84,7 @@ async def test_sitemap_blocked_host_is_refused_before_page_fetch():
     )
 
     crawled = {result.normalized_url for result in response["results"]}
-    assert "https://allowed.test/keep" in crawled
+    assert _admit("https://allowed.test/keep") in crawled
     assert not any(url.startswith("https://blocked.test/") for url in calls)
 
 
@@ -130,12 +132,13 @@ async def test_redirect_to_policy_blocked_host_is_refused_before_fetch(monkeypat
     monkeypatch.setattr(pinned_mod, "check_ssrf_protection", lambda url: None)
     monkeypatch.setattr(pinned_mod, "resolve_and_pin_host", lambda url: ("93.184.216.34", ""))
 
+    policy = HostPolicy.from_strings("allowed.test", "blocked.test")
     with pytest.raises(ValueError, match="host_denied"):
         await fetchers_mod.default_http_fetcher(
-            "https://allowed.test/",
+            NormalizedUrl("https://allowed.test/", policy=policy),
             {},
             30,
-            policy=HostPolicy.from_strings("allowed.test", "blocked.test"),
+            policy=policy,
         )
 
     assert [url for url, _follow in client.calls] == ["https://allowed.test"]
@@ -169,7 +172,7 @@ def test_js_endpoint_extraction_filters_private_targets_on_real_discovery_path(m
 
     discovered = extract_post_fetch_discovery(
         html,
-        "https://allowed.test/page",
+        _admit("https://allowed.test/page"),
         include_js_endpoints=True,
         host_policy=policy,
     )

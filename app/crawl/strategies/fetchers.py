@@ -23,11 +23,12 @@ from app.crawl.strategies.request_profile import _store_set_cookies, _TransportH
 from app.models.host_policy import HostPolicy
 from app.models.http_fetch_result import HttpFetchResult
 from app.models.http_fetcher import HttpFetcher
+from app.models.normalized_url import NormalizedUrl
 from app.timeouts import Timeouts
 
 
 async def default_http_fetcher(
-    url: str,
+    url: NormalizedUrl,
     headers: dict[str, str],
     timeout_seconds: int,
     max_content_length: int = DEFAULT_MAX_CONTENT_LENGTH_BYTES,
@@ -76,7 +77,7 @@ async def default_http_fetcher(
     started = time.monotonic()
     timeout = Timeouts.for_request(timeout_seconds).as_httpx()
     async for chain, pinned_url, hop_headers in pinned_transport.apinned_hops(
-        url, headers, policy=policy, pin=pin
+        url.raw, headers, policy=policy, pin=pin
     ):
         # Follow_redirects=False: we follow manually so each hop is SSRF-checked.
         async with client.stream(
@@ -84,7 +85,7 @@ async def default_http_fetcher(
         ) as response:
             content_length = response.headers.get("content-length")
             if pinned_transport._declared_length_exceeds(content_length, max_content_length):
-                return pinned_transport._http_413(url, chain.url, started)
+                return pinned_transport._http_413(url, NormalizedUrl(chain.url, policy=policy), started)
             status_code = response.status_code
             if chain.advance(response):
                 continue
@@ -100,8 +101,8 @@ async def default_http_fetcher(
             async for chunk in response.aiter_raw():
                 raw.extend(chunk)
                 if len(raw) > max_content_length:
-                    return pinned_transport._http_413(url, chain.url, started)
-            final_url = chain.url
+                    return pinned_transport._http_413(url, NormalizedUrl(chain.url, policy=policy), started)
+            final_url = NormalizedUrl(chain.url, policy=policy)
             response_headers = response.headers
         elapsed_ms = int((time.monotonic() - started) * 1000)
         return _finish_fetch(
@@ -112,15 +113,15 @@ async def default_http_fetcher(
             response_headers=response_headers,
             max_content_length=max_content_length,
             elapsed_ms=elapsed_ms,
-            too_large=functools.partial(pinned_transport._http_413, url, chain.url, started),
+            too_large=functools.partial(pinned_transport._http_413, url, final_url, started),
         )
     raise AssertionError("apinned_hops raises on a body that neither returned nor advanced")
 
 
 def _finish_fetch(
     *,
-    url: str,
-    final_url: str,
+    url: NormalizedUrl,
+    final_url: NormalizedUrl,
     status_code: int,
     raw: bytes | bytearray,
     response_headers: _TransportHeaders,
@@ -160,7 +161,7 @@ def _finish_fetch(
         )
     except DecompressionTooLargeError:
         return too_large()
-    _store_set_cookies(final_url or url, response_headers)
+    _store_set_cookies(final_url, response_headers)
     headers = {key.lower(): value for key, value in response_headers.items()}
     # Already decompressed above; drop the header to avoid a second pass.
     headers.pop("content-encoding", None)
@@ -175,7 +176,7 @@ def _finish_fetch(
 
 
 async def _cffi_fetch(
-    url: str,
+    url: NormalizedUrl,
     headers: dict[str, str],
     timeout_seconds: int,
     max_content_length: int,
@@ -206,7 +207,7 @@ async def _cffi_fetch(
     try:
         started = time.monotonic()
         async for chain, pinned_url, hop_headers in pinned_transport.apinned_hops(
-            url, headers, policy=policy, pin=pin
+            url.raw, headers, policy=policy, pin=pin
         ):
             try:
                 response = await client.get(
@@ -223,8 +224,9 @@ async def _cffi_fetch(
             content_length = response.headers.get("content-length")
             if pinned_transport._declared_length_exceeds(content_length, max_content_length):
                 await response.aclose()  # release the curl handle
+                elapsed_ms = int((time.monotonic() - started) * 1000)
                 return _cffi_too_large_result(
-                    url, chain.url, response, int((time.monotonic() - started) * 1000)
+                    url, NormalizedUrl(chain.url, policy=policy), response, elapsed_ms
                 )
             status_code = response.status_code
             if chain.advance(response):
@@ -288,7 +290,9 @@ async def _cffi_fetch(
                         # Mid-stream abandon: a 413 out of the loop is still an
                         # abandon, and the producer may be a hostile drip --
                         # never wait on it. The finally releases the handle.
-                        return _cffi_too_large_result(url, chain.url, response, elapsed_ms)
+                        return _cffi_too_large_result(
+                            url, NormalizedUrl(chain.url, policy=policy), response, elapsed_ms
+                        )
             finally:
                 if not stream_completed:
                     _release_stream_noblock(response)
@@ -302,13 +306,19 @@ async def _cffi_fetch(
             # headers and persist cookies via the shared tail.
             return _finish_fetch(
                 url=url,
-                final_url=chain.url,
+                final_url=NormalizedUrl(chain.url, policy=policy),
                 status_code=status_code,
                 raw=bytes(raw),
                 response_headers=response.headers,
                 max_content_length=max_content_length,
                 elapsed_ms=elapsed_ms,
-                too_large=functools.partial(_cffi_too_large_result, url, chain.url, response, elapsed_ms),
+                too_large=functools.partial(
+                    _cffi_too_large_result,
+                    url,
+                    NormalizedUrl(chain.url, policy=policy),
+                    response,
+                    elapsed_ms,
+                ),
             )
         raise AssertionError("apinned_hops raises on a body that neither returned nor advanced")
     except DecompressionError:
@@ -332,7 +342,9 @@ def impersonating_fetcher(policy: HostPolicy) -> HttpFetcher:
     return functools.partial(default_http_fetcher, policy=policy, impersonate=True)
 
 
-def _cffi_too_large_result(url: str, current_url: str, response: Any, elapsed_ms: int) -> HttpFetchResult:
+def _cffi_too_large_result(
+    url: NormalizedUrl, current_url: NormalizedUrl, response: Any, elapsed_ms: int
+) -> HttpFetchResult:
     return HttpFetchResult(
         url=url,
         final_url=current_url,

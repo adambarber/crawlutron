@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import asyncio
 import functools
+import json
 import inspect
 
 import pytest
@@ -344,7 +345,7 @@ class TestSingleShotResultStoreStaysOffTheLoop:
         await _off_loop(result_store.put, "req-1", _stored_response("req-1"))
 
         response = await get_crawl_result("req-1", loop_guard_store, result_store)
-        assert response.request_id == "req-1"
+        assert json.loads(response.body)["request_id"] == "req-1"
 
     async def test_a_pending_single_shot_read_stays_off_the_loop(self, loop_guard_store, result_store):
         from app.api.crawl_endpoint import get_crawl_result
@@ -460,7 +461,7 @@ class TestStatusEndpointAnswersOnlyForTerminalJobs:
         await _off_loop(result_store.put, "req-7", _stored_response("req-7"))
 
         response = await get_crawl_result("req-7", loop_guard_store, result_store)
-        assert response.request_id == "req-7"
+        assert json.loads(response.body)["request_id"] == "req-7"
 
     async def test_the_same_job_answers_200_once_it_is_completed(self, loop_guard_store, result_store):
         """The complement: the fix must not make a finished job unreadable."""
@@ -471,7 +472,7 @@ class TestStatusEndpointAnswersOnlyForTerminalJobs:
         await _off_loop(loop_guard_store.set_status, "req-4", JobStatus.COMPLETED, expected=JobStatus.RUNNING)
 
         response = await get_crawl_result("req-4", loop_guard_store, result_store)
-        assert response.request_id == "req-4"
+        assert json.loads(response.body)["request_id"] == "req-4"
 
 
 async def _await_terminal_status(store: JobStore, job_id: str) -> str:

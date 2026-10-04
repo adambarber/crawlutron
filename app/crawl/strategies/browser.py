@@ -50,8 +50,7 @@ from app.env import get_env_float, get_env_int
 from app.json_safe import json_default
 from app.models.crawl_result import CrawlResult
 from app.models.host_policy import HostPolicy
-from app.models.normalized_url import normalize_public_http_url
-from app.models.registrable_domain import registrable_domain
+from app.models.normalized_url import NormalizedUrl
 from app.models.render_options import RenderOptions
 from app.models.taxonomy import Classification, CrawlError
 from app.safe_url import SafeUrl
@@ -61,7 +60,7 @@ logger = logging.getLogger(__name__)
 
 
 async def resolve_browser_target(
-    url: str,
+    url: NormalizedUrl,
     *,
     policy: HostPolicy,
     pin: Callable[..., Awaitable[tuple[str, dict[str, str]]]],
@@ -81,7 +80,7 @@ async def resolve_browser_target(
     forgot to pass one would silently fall back to a weaker rule; the type is
     declared here rather than imported so the dependency is visible at the call.
     """
-    pinned_url, request_headers = await pin(url, {}, policy=policy)
+    pinned_url, request_headers = await pin(url.raw, {}, policy=policy)
     host = request_headers.get("Host")
     return pinned_url, ({"Host": host} if host else {})
 
@@ -93,14 +92,14 @@ def _assert_safe_final_url(final_url: str, *, policy: HostPolicy) -> None:
     closed (raise ``ValueError``) rather than returning potentially-internal
     content.
     """
-    normalized = normalize_public_http_url(final_url, policy=policy)
+    normalized = NormalizedUrl(final_url, policy=policy)
     check_ssrf_protection(normalized.raw)
 
 
 def _is_ssrf_blocked(url: str, *, policy: HostPolicy) -> bool:
     """Return ``True`` if ``url`` resolves to an SSRF-unsafe target."""
     try:
-        normalized = normalize_public_http_url(url, policy=policy)
+        normalized = NormalizedUrl(url, policy=policy)
         check_ssrf_protection(normalized.raw)
     except ValueError:
         return True
@@ -233,7 +232,7 @@ def make_ssrf_websocket_handler(*, policy: HostPolicy):
         http_equivalent = ("https" if scheme == "wss" else "http") + url[len(scheme) :]
         try:
             normalized = await asyncio.to_thread(
-                normalize_public_http_url,
+                NormalizedUrl,
                 http_equivalent,
                 policy=policy,
             )
@@ -448,7 +447,7 @@ class BrowserRenderer:
         """
         return self._warmup_urls
 
-    async def _harvest_session_cookies(self, page: Any, url: str) -> None:
+    async def _harvest_session_cookies(self, page: Any, url: NormalizedUrl) -> None:
         """Capture the page's cookies into the per-domain bootstrap store.
 
         Must run BEFORE the page/context is closed -- Camoufox destroys the
@@ -459,22 +458,21 @@ class BrowserRenderer:
         break the render itself.
         """
         try:
-            from app.models.registrable_domain import registrable_domain as _rd
 
             context = getattr(page, "context", None)
             if context is None:
                 return
-            cookies = await context.cookies(url)
+            cookies = await context.cookies(url.raw)
             header = "; ".join(f"{c['name']}={c['value']}" for c in cookies if c.get("name"))
             if header:
-                _store_browser_cookies(_rd(url), header)
-                logger.info("browser_cookies_harvested", extra={"domain": _rd(url), "count": len(cookies)})
+                _store_browser_cookies(url.site, header)
+                logger.info("browser_cookies_harvested", extra={"domain": url.site, "count": len(cookies)})
         except Exception as error:
             logger.debug("browser_cookies_harvest_failed", extra={"error": str(error)})
 
     async def render(
         self,
-        url: str,
+        url: NormalizedUrl,
         options: RenderOptions,
         *,
         policy: HostPolicy,
@@ -509,7 +507,7 @@ class BrowserRenderer:
 
     async def _render_with_browser(
         self,
-        url: str,
+        url: NormalizedUrl,
         options: RenderOptions,
         *,
         policy: HostPolicy,
@@ -526,7 +524,7 @@ class BrowserRenderer:
 
     async def _render_with_page_unlocked(
         self,
-        url: str,
+        url: NormalizedUrl,
         options: RenderOptions,
         *,
         policy: HostPolicy,
@@ -567,7 +565,7 @@ class BrowserRenderer:
 
             # Warmup URLs (no Host header needed)
             for warmup_url in self._warmup_urls:
-                normalized_warmup = normalize_public_http_url(warmup_url, policy=policy)
+                normalized_warmup = NormalizedUrl(warmup_url, policy=policy)
                 await page.goto(normalized_warmup, wait_until="domcontentloaded")
                 await self._driver.wait_for_ready_state(page)
 
@@ -594,7 +592,9 @@ class BrowserRenderer:
             # Browser action chains: run policy-specified interactions before extraction.
             actions = (options.browser_profile or {}).get("actions") or []
             if actions:
-                await self._driver.run_action_chain(page, actions, url=url, budget_seconds=navigation_timeout)
+                await self._driver.run_action_chain(
+                    page, actions, url=url.raw, budget_seconds=navigation_timeout
+                )
 
             # Lazy-load scroll: trigger deferred/infinite-scroll content.
             await self._driver.lazy_load_scroll(page, options.browser_profile)
@@ -612,17 +612,17 @@ class BrowserRenderer:
             html, text, classification, challenge_resolved = await self._extract(page, options)
 
             extraction_method = "dom_text"
-            final_url = page.url
+            final_url = NormalizedUrl(page.url, policy=policy)
             # Re-validate the post-navigation URL: the site may have
             # redirected the browser to an internal host. Fail closed.
-            _assert_safe_final_url(final_url, policy=policy)
+            # (already admitted as a NormalizedUrl above)
 
             # PDF extraction fallback
-            if self._looks_like(final_url) and not (text or "").strip():
+            if self._looks_like(final_url.raw) and not (text or "").strip():
                 # Blocking file read + parse: keep it off the event loop like
                 # every other document-extraction path (the extractor may be a
                 # sync downloader/parser).
-                text = await asyncio.to_thread(self._pdf_text_extractor, final_url, policy)
+                text = await asyncio.to_thread(self._pdf_text_extractor, final_url.raw, policy)
                 html = html if options.include_html else None
                 title = await page.evaluate("() => document.title")
                 classification = classify_page(html, text, title=title)
@@ -662,7 +662,7 @@ class BrowserRenderer:
                 html=html,
                 text=text,
                 attempts=1,
-                domain=registrable_domain(url),
+                domain=url.site,
                 metadata=metadata,
             )
         finally:
@@ -784,7 +784,7 @@ class BrowserRenderer:
 
     def _failure_result(
         self,
-        url: str,
+        url: NormalizedUrl,
         status: ResultStatus,
         classification: Classification,
         attempts: int,
@@ -797,7 +797,7 @@ class BrowserRenderer:
             classification=classification,
             attempts=attempts,
             elapsed_ms=int((time.monotonic() - started) * 1000),
-            domain=registrable_domain(url),
+            domain=url.site,
             error=error,
         )
 

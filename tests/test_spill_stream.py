@@ -8,6 +8,7 @@ import time
 
 from app.crawl.engine import _ResultSpill
 from app.models.serialization import to_dict
+from tests._policy_factories import UNRESTRICTED_HOST_POLICY
 from tests._result_builders import engine_result
 
 
@@ -31,7 +32,7 @@ class TestLoadOrderedContract:
             for i in (5, 0, 3, 1, 4, 2):
                 spill._fh.write(_spilled(i) + "\n")
             spill.count = 6
-            assert [r.original_url for r in spill.load_ordered()] == [
+            assert [r.original_url for r in spill.load_ordered(policy=UNRESTRICTED_HOST_POLICY)] == [
                 f"https://spill.test/{i}" for i in range(6)
             ]
         finally:
@@ -43,7 +44,7 @@ class TestLoadOrderedContract:
             for i in (0, 2, 9):
                 spill._fh.write(_spilled(i) + "\n")
             spill.count = 3
-            out = spill.load_ordered()
+            out = spill.load_ordered(policy=UNRESTRICTED_HOST_POLICY)
             assert [r.original_url for r in out] == [
                 "https://spill.test/0",
                 "https://spill.test/2",
@@ -55,7 +56,7 @@ class TestLoadOrderedContract:
     def test_empty_spill_returns_empty_list(self):
         spill = _ResultSpill()
         try:
-            assert spill.load_ordered() == []
+            assert spill.load_ordered(policy=UNRESTRICTED_HOST_POLICY) == []
         finally:
             spill.close()
 
@@ -176,7 +177,7 @@ class TestGcNeverUnlinksASpillStillInUse:
             spill._gc_stale_spills(1.0)
 
             assert os.path.exists(spill.path), "GC unlinked a spill still in use"
-            assert [r.original_url for r in spill.load_ordered()] == ["https://spill.test/0"]
+            assert [r.original_url for r in spill.load_ordered(policy=UNRESTRICTED_HOST_POLICY)] == ["https://spill.test/0"]
         finally:
             spill.close()
 

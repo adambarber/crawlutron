@@ -29,7 +29,6 @@ import logging
 from collections.abc import Awaitable, Callable, Coroutine, Sequence
 from dataclasses import replace
 from typing import Any
-from urllib.parse import urlparse
 
 from app.api.crawl_executor import execute_crawl as _real_execute_crawl
 from app.api.response_shaping import _failed_unified_result, abuild_unified_result
@@ -41,7 +40,6 @@ from app.constants import (
 from app.crawl.admission import (
     JobAdmissionContext,
     admit_job_links,
-    canonical_page_identity,
     fetch_job_sitemap_candidates,
     job_max_pages,
     record_cap_overcommitted,
@@ -54,7 +52,6 @@ from app.crawl.job_store import (
     JobKind,
     JobStatus,
     JobStore,
-    durable_page_identity,
     normalize_job_state,
 )
 from app.crawl.policy import read_policy
@@ -64,6 +61,7 @@ from app.crawl.robots import FetchAndDecode
 from app.models.crawl_result import CrawlResult
 from app.models.crawl_task import CrawlTask
 from app.models.engine_crawl_result import EngineCrawlResult
+from app.models.normalized_url import NormalizedUrl, admit_or_none
 from app.models.taxonomy import Classification
 
 logger = logging.getLogger(__name__)
@@ -214,10 +212,7 @@ def _pop_frontier(job: Any) -> list[FrontierEntry]:
     normalize_job_state(job)
     max_pages = job_max_pages(job.policy, job.tier)
     if job.in_flight:
-        fixed = {
-            durable_page_identity(url, job.host_policy)
-            for url in set(job.visited) | {entry.url for entry in job.in_flight}
-        }
+        fixed = set(job.visited) | {entry.url for entry in job.in_flight}
         if max_pages > 0 and len(fixed) > max_pages:
             record_cap_overcommitted(job)
         return list(job.in_flight[:BATCH_SIZE])
@@ -244,7 +239,10 @@ def _job_engine_payload(job: Any, batch: Sequence[FrontierEntry]) -> dict[str, A
     The runner owns the durable frontier; the engine is a single-page fetcher per
     batch. Two owners of one property was the defect, so engine recursion is off.
     """
-    urls = [entry.url for entry in batch]
+    # The payload is the engine's wire shape, and text is what that shape's
+    # ``urls`` carry: the entry's URL is an admitted value by construction, so
+    # the projection is the identity of the page, not a re-validation.
+    urls = [entry.url.raw for entry in batch]
     policy = read_policy(job.policy, job.tier)
     # Model_copy is safe here specifically because max_depth=0 is a value the
     # model declares and this line is ours, not a caller's: a single engine
@@ -265,14 +263,13 @@ async def _pace_delayed_batch(
 ) -> None:
     tasks: list[CrawlTask] = []
     for index, entry in enumerate(batch):
-        host = (urlparse(entry.url).hostname or "").lower()
-        identity = canonical_page_identity(entry.url, host_policy=context.host_policy)
-        if host in context.delayed_hosts and identity is not None:
+        host = entry.url.host.lower()
+        if host in context.delayed_hosts:
             tasks.append(
                 CrawlTask(
                     index=index,
-                    original_url=entry.url,
-                    normalized_url=identity.raw,
+                    original_url=entry.url.raw,
+                    normalized_url=entry.url,
                     domain=host,
                 )
             )
@@ -288,7 +285,7 @@ async def _pace_delayed_batch(
         # the same one-line change that keeps it true.
         classification: Classification = "rendered"
         return CrawlResult(
-            url=job.original_url,
+            url=job.normalized_url,
             attempt=terminal_attempt(
                 strategy=None,
                 status=status_for_classification(classification),
@@ -296,7 +293,7 @@ async def _pace_delayed_batch(
                 elapsed_ms=0,
                 error=None,
             ),
-            final_url=job.original_url,
+            final_url=job.normalized_url,
             html=None,
             text=None,
             attempts=0,
@@ -379,28 +376,23 @@ async def _run_job(
             # a redirect steal another entry's slot: with batch [a, b] where `a`
             # redirects to `b/`, the redirect result claimed b's identity first
             # and b's real result was never recorded.
-            resolved: dict[str, EngineCrawlResult] = {}
+            resolved: dict[NormalizedUrl, EngineCrawlResult] = {}
             for produced in items:
-                if produced.original_url:
-                    resolved.setdefault(
-                        durable_page_identity(produced.original_url, context.host_policy),
-                        produced,
-                    )
+                admitted_original = admit_or_none(produced.original_url, policy=job.host_policy)
+                if admitted_original is not None:
+                    resolved.setdefault(admitted_original, produced)
             for produced in items:
                 for key in (produced.final_url, produced.normalized_url):
-                    if not key:
-                        continue
-                    identity = durable_page_identity(key, context.host_policy)
-                    resolved.setdefault(identity, produced)
+                    if key is not None:
+                        resolved.setdefault(key, produced)
 
             failed = 0
             for entry in batch:
-                url = entry.url
-                identity = durable_page_identity(url, context.host_policy)
+                identity = entry.url
                 job.in_flight = [
                     pending
                     for pending in job.in_flight
-                    if durable_page_identity(pending.url, context.host_policy) != identity
+                    if pending.url != identity
                 ]
                 item = resolved.get(identity)
                 if item is None:
@@ -435,11 +427,12 @@ async def _run_job(
                     # (its docstring says it mirrors this runner's semantics,
                     # which is the coupling that let the two drift), so the
                     # runner uses it rather than inventing a second shape.
-                    # The page's own identity, not a two-key dict: the
-                    # degradation reads attributes, so a dict arrived there as an
-                    # envelope with no URL -- the exact "results cannot account
-                    # for the page" gap this branch exists to close.
-                    job.results.append(_failed_unified_result(url).model_dump())
+                    # The page's own identity as the admitted value, not its
+                    # text or a two-key dict: the degradation reads attributes,
+                    # so a dict arrived there as an envelope with no URL -- and
+                    # the text form would force the envelope to drop the
+                    # identity, since the wire has no policy to re-admit with.
+                    job.results.append(_failed_unified_result(identity).model_dump())
                     failed += 1
                     continue
                 if outcome == "transient":

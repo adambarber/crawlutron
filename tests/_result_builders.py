@@ -8,11 +8,10 @@ from app.models.crawl_job import CrawlJob
 from app.models.crawl_result import CrawlResult, CrawlStrategyAttempt
 from app.models.discovered_link import DiscoveredLink
 from app.models.engine_crawl_result import EngineCrawlResult
-from app.models.normalized_url import NormalizedUrl
+from app.models.normalized_url import NormalizedUrl, admit_or_none
 from app.models.registrable_domain import registrable_domain
 from app.models.render_options import RenderOptions
 from app.models.taxonomy import Classification, CrawlError, CrawlStrategyName
-from app.validation import safe_public_url_or_none
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY
 
 
@@ -32,10 +31,32 @@ def make_job(index: int, url: str, *, options: RenderOptions | None = None):
     """
     return CrawlJob(
         index=index,
-        url=NormalizedUrl(url, policy=UNRESTRICTED_HOST_POLICY),
+        url=_admit(url),
         options=RenderOptions() if options is None else options,
         host_policy=UNRESTRICTED_HOST_POLICY,
     )
+
+
+def _text(url: str | NormalizedUrl) -> str:
+    """Text form of a URL argument: a value's identity, or text as given.
+
+    For fields declared as submission text (``original_url``) and for helpers
+    that operate on text (``urljoin``), when the funnel's callers hand the
+    value in.
+    """
+    return url.raw if isinstance(url, NormalizedUrl) else url
+
+
+def _admit(url: str | NormalizedUrl) -> NormalizedUrl:
+    """Submission text or an already-admitted value in, value out.
+
+    The funnel's one admission seam: production seams hand the funnel values
+    (job URLs, engine results), while tests still name submission text, so
+    both are legal here and only the text pays for admission.
+    """
+    if isinstance(url, NormalizedUrl):
+        return url
+    return NormalizedUrl(url, policy=UNRESTRICTED_HOST_POLICY)
 
 
 def engine_result(
@@ -79,11 +100,16 @@ def engine_result(
     if "discovered_link_count" in overrides:
         raise TypeError("discovered_link_count is derived from discovered_links; pass only the links")
     links = list(overrides.pop("discovered_links", []))
+    # ``normalized_url``/``final_url`` are the record's value fields; callers
+    # still name submission text, so admission lives here at the one builder
+    # rather than at every call site. None means "derive from ``url``".
+    normalized_text = overrides.pop("normalized_url", None)
+    final_url_text = overrides.pop("final_url", None)
     derived = status_for_classification(classification) if status is None else status
     absent = EngineCrawlResult(
-        original_url=url,
-        normalized_url=url,
-        final_url=None,
+        original_url=_text(url),
+        normalized_url=_admit(normalized_text if normalized_text is not None else url),
+        final_url=_admit(final_url_text) if final_url_text is not None else None,
         status=derived,
         classification=classification,
         selected_strategy=None,
@@ -132,7 +158,7 @@ def skipped_result(
     return _skipped_engine_result(
         TerminalResult(
             original_url=url,
-            normalized_url=normalized_url or url,
+            normalized_url=_admit(normalized_url or url),
             strategy=strategy,
             classification=classification,
             error=error,
@@ -194,7 +220,7 @@ def crawl_result(url: str, domain: str | None = None) -> CrawlResult:
     ``CrawlResult`` at all.
     """
     return CrawlResult(
-        url=url,
+        url=_admit(url),
         attempt=terminal_attempt(
             strategy=None,
             status="success",
@@ -202,7 +228,7 @@ def crawl_result(url: str, domain: str | None = None) -> CrawlResult:
             elapsed_ms=0,
             error=None,
         ),
-        final_url=url,
+        final_url=_admit(url),
         html="ok",
         text="ok",
         attempts=1,
@@ -236,25 +262,27 @@ def _link(url: str, source_url: str, *, normalized: str | None = None) -> Discov
     same record and a double that skips them is not a looser producer -- it is
     one that reports links the real producer never emits. It resolved nothing,
     so every relative href raised instead of joining; it reached past
-    ``safe_public_url_or_none``, the chokepoint every egress door is routed
-    through, to the raising normalizer beside it; it read ``host`` off a string
-    split rather than the parsed URL; and it answered ``is_same_host`` with a
-    constant, so a cross-host link claimed to be same-host and nothing checked.
+    ``admit_or_none``, the admission chokepoint every egress door is routed
+    through, to the raising constructor beside it; it read ``host`` off a string
+    split rather than the admitted value; and it answered ``is_same_host`` with
+    a constant, so a cross-host link claimed to be same-host and nothing
+    checked.
     """
-    target = normalized if normalized is not None else urljoin(source_url, url)
-    resolved = safe_public_url_or_none(target, policy=UNRESTRICTED_HOST_POLICY)
+    target = normalized if normalized is not None else urljoin(_text(source_url), url)
+    resolved = admit_or_none(target, policy=UNRESTRICTED_HOST_POLICY)
     if resolved is None:
         raise ValueError(f"not a public link target, the producer would drop it: {target}")
-    host = urlparse(str(resolved)).hostname or ""
-    source_host = urlparse(source_url).hostname or ""
+    source = admit_or_none(source_url, policy=UNRESTRICTED_HOST_POLICY)
+    if source is None:
+        raise ValueError(f"the source page must be an admitted URL: {source_url}")
     return DiscoveredLink(
         url=url,
         normalized_url=resolved,
         text="",
         rel=[],
-        source_url=source_url,
-        host=host,
-        is_same_host=host.lower() == source_host.lower(),
+        source_url=source,
+        host=resolved.host,
+        is_same_host=resolved.host == source.host,
     )
 
 

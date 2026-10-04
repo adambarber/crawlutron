@@ -434,9 +434,9 @@ class TestSpillAssemblyOffTheEventLoop:
         observed: list[int] = [-1]  # loop progress seen by the blocking read-back
         real_load = _ResultSpill.load_ordered
 
-        def slow_load(self):
+        def slow_load(self, *, policy):
             observed[0] = liveness.wait_for_progress()
-            return real_load(self)
+            return real_load(self, policy=policy)
 
         monkeypatch.setattr(_ResultSpill, "load_ordered", slow_load)
 

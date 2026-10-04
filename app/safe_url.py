@@ -1,7 +1,7 @@
 """Validated-URL chokepoint: make the safe state the only representable state.
 
 SSRF defense was five functions each call site had to compose correctly
-(``normalize_public_http_url``, ``check_ssrf_protection``,
+(admission via ``NormalizedUrl``, ``check_ssrf_protection``,
 ``resolve_and_pin_host``, ``_assert_safe_final_url``,
 ``validate_webhook_url``); every redirect finding was "a code path held a
 raw ``str`` URL and forgot one of the five steps."
@@ -22,7 +22,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from urllib.parse import urljoin, urlparse
 
-from app.models.normalized_url import normalize_public_http_url
+from app.models.normalized_url import NormalizedUrl
 from app.validation import HostPolicy
 
 
@@ -30,7 +30,7 @@ from app.validation import HostPolicy
 class SafeUrl:
     """A URL that has passed normalization + SSRF validation.
 
-    ``raw`` is the normalized URL (post ``normalize_public_http_url``).
+    ``raw`` is the admitted URL text (post ``NormalizedUrl`` admission).
     ``pinned_ip`` is set only when parsed with ``pin=True``: the exact IP
     the connection must use (DNS-rebinding guard).
     """
@@ -49,7 +49,7 @@ class SafeUrl:
         """
         from app.crawl.strategies.pinned_transport import check_ssrf_protection, resolve_and_pin_host
 
-        normalized = normalize_public_http_url(url, policy=policy)
+        normalized = NormalizedUrl(url, policy=policy)
         check_ssrf_protection(normalized.raw)
         hostname = urlparse(normalized.raw).hostname or ""
         pinned: str | None = None

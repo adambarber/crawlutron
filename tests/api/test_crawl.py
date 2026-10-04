@@ -357,7 +357,7 @@ class TestDiscoveryAndRenderApi:
         from app.models.crawl_result import CrawlResult
 
         class _FakeRenderer:
-            async def render(self, url, options):
+            async def render(self, url, options, *, policy=None):
                 # The real renderer does not know the pool's configured mode, so
                 # it returns a result without one -- the worker fills the slot.
                 return CrawlResult(

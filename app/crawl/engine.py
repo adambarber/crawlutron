@@ -37,6 +37,7 @@ from app.models.crawl_worker import CrawlWorker
 from app.models.engine_crawl_result import EngineCrawlResult
 from app.models.host_policy import HostPolicy
 from app.models.http_fetcher import HttpFetcher
+from app.models.normalized_url import NormalizedUrl
 from app.models.serialization import from_wire, to_dict
 from app.resource_pressure import ResourceGate
 from app.settings import CrawlerSettings
@@ -128,7 +129,7 @@ def _parse_lastmod(lastmod: str | None) -> float | None:
     return ts
 
 
-def _seed_is_fresh(url: str, lastmod: str | None, content_cache: Any, policy: CrawlPolicy) -> bool:
+def _seed_is_fresh(url: NormalizedUrl, lastmod: str | None, content_cache: Any, policy: CrawlPolicy) -> bool:
     """True if ``url`` is cached and the sitemap ``lastmod`` is not newer than
     our cache timestamp, i.e. our cached copy is fresh and the crawl can skip
     re-fetching it.
@@ -164,10 +165,10 @@ def _seed_is_fresh(url: str, lastmod: str | None, content_cache: Any, policy: Cr
 
 
 def _stale_seeds(
-    candidates: Iterable[tuple[str, str | None]],
+    candidates: Iterable[tuple[NormalizedUrl, str | None]],
     content_cache: Any,
     policy: CrawlPolicy,
-) -> set[str]:
+) -> set[NormalizedUrl]:
     """Batch the sitemap freshness filter (call from a worker thread).
 
     Each verdict reads and parses the candidate's envelope from disk, so a big
@@ -343,7 +344,7 @@ class _ResultSpill:
             self._fh.write(line + "\n")
             self.count += 1
 
-    def load_ordered(self) -> list[EngineCrawlResult]:
+    def load_ordered(self, *, policy: HostPolicy) -> list[EngineCrawlResult]:
         """Reassemble all spilled results in submission order.
 
         Single pass: each parsed payload is placed directly into its index
@@ -371,7 +372,7 @@ class _ResultSpill:
                 if not line:
                     continue
                 entry = json.loads(line)
-                slots[entry["i"]] = from_wire(EngineCrawlResult, entry["r"])
+                slots[entry["i"]] = from_wire(EngineCrawlResult, entry["r"], policy=policy)
         return [slots[key] for key in sorted(slots)]
 
     def close(self) -> None:

@@ -44,13 +44,10 @@ def _browser_options(policy: CrawlPolicy) -> RenderOptions:
     )
 
 
-def _browser_job(url: str, options: RenderOptions, host_policy: HostPolicy) -> CrawlJob:
-    # The chain hands this down as TEXT because it came off the durable job
-    # record. Re-prove it here: a ``CrawlJob`` carries an admitted value, and the
-    # browser worker is the first thing that would act on it.
+def _browser_job(url: NormalizedUrl, options: RenderOptions, host_policy: HostPolicy) -> CrawlJob:
     return CrawlJob(
         index=0,
-        url=NormalizedUrl(url, policy=host_policy),
+        url=url,
         options=options,
         host_policy=host_policy,
     )
@@ -123,7 +120,7 @@ def _browser_diagnostics(
 def _build_browser_result(
     *,
     original_url: str,
-    normalized_url: str,
+    normalized_url: NormalizedUrl,
     strategy: CrawlStrategyName,
     result: Any,
     content: _ExtractedContent,

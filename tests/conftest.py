@@ -414,9 +414,10 @@ def recording_worker():
     that drops the ``seen.append`` turns the assertion into a vacuous truth
     over an empty list.
     """
+    from app.models.normalized_url import NormalizedUrl
     from tests._result_builders import make_engine_result
 
-    seen: list[str] = []
+    seen: list[NormalizedUrl] = []
 
     async def worker(job):
         seen.append(job.normalized_url)

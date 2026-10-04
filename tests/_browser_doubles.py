@@ -406,10 +406,11 @@ async def render_pinned(monkeypatch, url: str = "http://example.com/"):
     """
     from app.models.render_options import RenderOptions
     from tests._policy_factories import UNRESTRICTED_HOST_POLICY
+    from tests._result_builders import _admit
 
     page, renderer = pinned_page_renderer(monkeypatch)
     result = await renderer._render_with_browser(
-        url,
+        _admit(url),
         RenderOptions(browser_profile={}),
         policy=UNRESTRICTED_HOST_POLICY,
     )
@@ -456,7 +457,7 @@ def _fake_browser(html=None, text="doc", metadata=None, status="success", classi
 
     def worker(job):
         return CrawlResult(
-            url=job.url.raw,
+            url=job.url,
             attempt=terminal_attempt(
                 strategy=None,
                 status=status,
@@ -464,7 +465,7 @@ def _fake_browser(html=None, text="doc", metadata=None, status="success", classi
                 elapsed_ms=1,
                 error=None,
             ),
-            final_url=job.url.raw,
+            final_url=job.url,
             html=html,
             text=text,
             attempts=1,
@@ -621,9 +622,10 @@ async def render_bare(renderer, url: str = "http://example.com/"):
     """
     from app.models.render_options import RenderOptions
     from tests._policy_factories import UNRESTRICTED_HOST_POLICY
+    from tests._result_builders import _admit
 
     return await renderer._render_with_browser(
-        url, RenderOptions(browser_profile={}), policy=UNRESTRICTED_HOST_POLICY
+        _admit(url), RenderOptions(browser_profile={}), policy=UNRESTRICTED_HOST_POLICY
     )
 
 

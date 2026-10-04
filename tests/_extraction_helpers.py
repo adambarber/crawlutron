@@ -22,30 +22,28 @@ from app.settings import CrawlerSettings
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY
 
 
-def html_diagnostics(html, source_url, *, policy=UNRESTRICTED_HOST_POLICY):
-    return _html_diagnostics_with_policy(html, source_url, host_policy=policy)
+def html_diagnostics(html, source_url):
+    return _html_diagnostics_with_policy(html, source_url)
 
 
 def extract_js_endpoints(endpoints, source_url=None, *, policy=UNRESTRICTED_HOST_POLICY):
     return _extract_js_endpoints_with_policy(endpoints, source_url, host_policy=policy)
 
 
-def detect_pagination(html, final_url, *, policy=UNRESTRICTED_HOST_POLICY):
-    return _detect_pagination_with_policy(html, final_url, host_policy=policy)
+def detect_pagination(html, final_url):
+    return _detect_pagination_with_policy(html, final_url)
 
 
 def extract_discovered_links(
     html,
     source_url,
     *,
-    host_policy=UNRESTRICTED_HOST_POLICY,
     max_links=250,
     tree=None,
 ):
     return _extract_discovered_links_with_policy(
         html,
         source_url,
-        host_policy=host_policy,
         max_links=max_links,
         tree=tree,
     )

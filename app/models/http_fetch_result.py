@@ -4,11 +4,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from app.models.normalized_url import NormalizedUrl
+
 
 @dataclass(frozen=True)
 class HttpFetchResult:
-    url: str
-    final_url: str
+    url: NormalizedUrl
+    final_url: NormalizedUrl
     status_code: int
     headers: dict[str, str]
     body: bytes

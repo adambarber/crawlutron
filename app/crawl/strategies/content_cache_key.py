@@ -12,11 +12,12 @@ from app.constants import DEFAULT_MAX_CONTENT_LENGTH_BYTES
 from app.crawl.content_cache import ContentCache
 from app.env import get_env_int
 from app.models.crawl_policy_limits import CrawlPolicyLimits
+from app.models.normalized_url import NormalizedUrl
 from app.resource_pressure import worker_count
 
 
 def build_content_cache_key(
-    normalized_url: str,
+    normalized_url: NormalizedUrl,
     strategy: str,
     base_headers: dict[str, str],
     extraction: str | None,
@@ -40,9 +41,12 @@ def build_content_cache_key(
     cache poisoning). The cookie header participates in the key exactly so that
     differing credentials can never share a cache entry.
     """
+    # ``.raw`` is the admitted value's wire identity -- and the exact text the
+    # pre-flip key was built from, so every entry already on disk stays
+    # addressable after the object flip.
     return ContentCache.make_key(
         "http",
-        normalized_url,
+        normalized_url.raw,
         strategy,
         json.dumps(sorted(base_headers.items()), separators=(",", ":")),
         extraction,

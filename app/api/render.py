@@ -8,6 +8,7 @@ deleted; existing callers import from ``app.api.render``.
 from __future__ import annotations
 
 import time
+from dataclasses import replace
 from typing import Any
 
 from app.crawl.ids import new_request_id
@@ -27,7 +28,7 @@ from app.models.crawl_result import CrawlResult
 from app.models.crawl_worker import CrawlWorker
 from app.models.engine_crawl_result import EngineCrawlResult
 from app.models.host_policy import HostPolicy
-from app.models.normalized_url import normalize_public_http_url
+from app.models.normalized_url import NormalizedUrl
 from app.models.render_options import RenderOptions
 from app.scheduler import DomainScheduler
 from app.settings import CrawlerSettings
@@ -50,7 +51,7 @@ def _render_options(payload: dict[str, Any], settings: CrawlerSettings) -> Rende
     )
 
 
-def _failed_render_result(job: CrawlJob, exc: BaseException) -> CrawlResult:
+def _failed_render_result(job: CrawlJob, exc: BaseException, *, submitted_url: str) -> CrawlResult:
     """Render-pipeline failure envelope for the domain scheduler.
 
     ``DomainScheduler.run`` is generic over the result shape a pipeline uses, so
@@ -61,8 +62,8 @@ def _failed_render_result(job: CrawlJob, exc: BaseException) -> CrawlResult:
     ``_collect`` uses so classification and redaction stay centralized.
     """
     return crawl_result_from_engine_result(
-        failed_result_for(job, exc, url_of=lambda j: j.url.raw),
-        url=job.url.raw,
+        failed_result_for(job, exc, url_of=lambda _job: submitted_url),
+        url=job.url,
     )
 
 
@@ -78,18 +79,23 @@ async def render_request(
     # The single shared batch gate (app.crawl.payload_helpers.checked_payload_urls):
     # this route used to hand-roll the same cap against max_batch_size with a
     # different failure shape, so the two gates could drift.
-    urls = checked_payload_urls(
-        payload,
-        active_settings.max_batch_size,
-        host_policy=host_policy,
+    # The submitted texts are kept beside their admitted values: the wire's
+    # ``original_url`` echoes the caller's text, not the canonical form.
+    submitted = list(
+        checked_payload_urls(
+            payload,
+            active_settings.max_batch_size,
+            host_policy=host_policy,
+        )
     )
+    urls = [NormalizedUrl(u, policy=host_policy) for u in submitted]
 
     options = _render_options(payload, active_settings)
     started = time.monotonic()
     jobs: list[CrawlJob] = []
 
     for index, url in enumerate(urls):
-        normalized = normalize_public_http_url(url, policy=host_policy)
+        normalized = url
         jobs.append(
             CrawlJob(
                 index=index,
@@ -148,7 +154,9 @@ async def render_request(
             jobs,
             _call_and_capture,
             on_result=_collect,
-            failed_result=_failed_render_result,
+            failed_result=lambda job, exc: _failed_render_result(
+                job, exc, submitted_url=submitted[job.index]
+            ),
         )
 
     # Pool exhaustion is a capacity condition, not a per-URL page failure.
@@ -185,7 +193,15 @@ async def render_request(
                 error=classify_error_code(worker_error) if worker_error is not None else "unknown_error",
             )
 
-    ordered_results = [by_index[index] for index in range(len(urls))]
+    ordered_results = [
+        # The funnel: every result gets the caller's submitted text as its
+        # ``original_url`` here, whatever shape produced it (worker result,
+        # converted engine envelope, missing-slot terminal). The wire field
+        # means "Caller-provided URL before normalization" on both doors; this
+        # stamp is where the render door makes that true.
+        replace(by_index[index], original_url=submitted[index])
+        for index in range(len(urls))
+    ]
     response: RenderEnvelope = {
         "request_id": new_request_id(),
         "submitted_count": len(urls),

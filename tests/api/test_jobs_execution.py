@@ -48,6 +48,7 @@ from tests._job_harnesses import (
 from tests._result_builders import (
     GRAPH_CHILD,
     GRAPH_ROOT,
+    _admit,
     _canned_result,
     _flaky,
     _link,
@@ -138,7 +139,7 @@ class TestCrashRecovery:
         # root popped (frontier empty), recorded as in_flight, nothing visited, RUNNING.
         job = job_store.create(GRAPH_ROOT, CrawlPolicy())
         job.frontier = []
-        job.in_flight = [GRAPH_ROOT]
+        job.in_flight = [FrontierEntry(url=_admit(GRAPH_ROOT), depth=0)]
         job_store.save(job)
         job_store.set_status(job.job_id, JobStatus.RUNNING, expected=JobStatus.PENDING)
 
@@ -149,7 +150,7 @@ class TestCrashRecovery:
         assert await _wait_status(job_store, job.job_id, {"completed", "failed"}) == "completed"
 
         job = job_store.load(job.job_id)
-        assert job.visited == {GRAPH_ROOT}, "in-flight batch was dropped, not re-crawled"
+        assert job.visited == {_admit(GRAPH_ROOT)}, "in-flight batch was dropped, not re-crawled"
         assert job.in_flight == []
         assert job.stats["total_crawled"] == 1
 
@@ -167,7 +168,7 @@ class TestCrashRecovery:
             running=True,
         )
         assert finished.status == JobStatus.COMPLETED
-        assert finished.visited == {root}
+        assert finished.visited == {_admit(root)}
         assert engine.attempts == {root: 1}
         assert finished.frontier == []
         assert finished.stats["total_discovered"] == 0
@@ -176,7 +177,7 @@ class TestCrashRecovery:
         # A healthy run must not leave a stale in_flight that would double-crawl on a
         # later resume: the batch is cleared in the same save that records its results.
         job = await run_scripted_api_job(client, job_store, GRAPH_ROOT, results=_root_child_results())
-        assert job.visited == {GRAPH_ROOT, GRAPH_CHILD}
+        assert job.visited == {_admit(GRAPH_ROOT), _admit(GRAPH_CHILD)}
         assert job.in_flight == []
 
     @pytest.mark.parametrize(
@@ -241,8 +242,8 @@ class TestWholeSiteJobExecution:
 
         job = job_store.create(root, limits())
         batch = [
-            FrontierEntry(url=root, depth=0),
-            FrontierEntry(url=GRAPH_CHILD, depth=1),
+            FrontierEntry(url=_admit(GRAPH_ROOT), depth=0),
+            FrontierEntry(url=_admit(GRAPH_CHILD), depth=1),
         ]
 
         payload = job_runner._job_engine_payload(job, batch)
@@ -406,7 +407,7 @@ class TestWholeSiteJobExecution:
         await _wait_status(job_store, job_id, {"completed", "failed"})
         job = job_store.load(job_id)
         assert job.stats["total_crawled"] == 3
-        assert job.visited == {GRAPH_ROOT, GRAPH_CHILD, "http://example.test/c"}
+        assert job.visited == {_admit(GRAPH_ROOT), _admit(GRAPH_CHILD), _admit("http://example.test/c")}
 
 
 class TestTransientFailureRequeue:
@@ -427,7 +428,7 @@ class TestTransientFailureRequeue:
         # retried and the single committed outcome is the eventual success.
         assert job.status == JobStatus.COMPLETED
         assert engine.attempts[root] == 3
-        assert job.visited == {root}
+        assert job.visited == {_admit(root)}
         assert len(job.results) == 1
         assert job.results[0]["status"] == "success"
         assert job.stats["total_crawled"] == 1
@@ -441,7 +442,7 @@ class TestTransientFailureRequeue:
         # once), then recorded as a terminal failure so the whole-site job can end.
         assert job.status == JobStatus.COMPLETED
         assert engine.attempts[root] == self._CAP
-        assert job.visited == {root}
+        assert job.visited == {_admit(root)}
         assert len(job.results) == 1
         assert job.results[0]["status"] == "failed"
         assert job.results[0]["error"] == "retries_exhausted"
@@ -474,7 +475,7 @@ class TestTransientFailureRequeue:
         # "Page is gone" is an answer, not a transient blip: recorded once, not retried.
         assert job.status == JobStatus.COMPLETED
         assert engine.attempts[root] == 1
-        assert job.visited == {root}
+        assert job.visited == {_admit(root)}
         assert job.results[0]["status"] == "failed"
         assert job.results[0]["classification"] == "not_found"
         assert job.stats["total_failed"] == 1
@@ -507,7 +508,7 @@ class TestTransientFailureRequeue:
         assert await _wait_status(job_store, job_id, {"completed", "failed"}) == "completed"
 
         job = job_store.load(job_id)
-        assert "https://ok.test/abs" in job.visited
+        assert _admit("https://ok.test/abs") in job.visited
         assert "/rel" not in job.visited
         assert all("/rel" not in batch for batch in crawled)
 
@@ -680,7 +681,7 @@ class TestWholeSiteRedirectedUrlResolution:
         assert finished.results[0]["status"] == "success", finished.results[0]
         assert finished.stats.get("total_failed", 0) == 0, finished.stats
         # And the frontier URL must be committed visited (not re-crawled).
-        assert frontier_url in finished.visited, finished.visited
+        assert _admit(frontier_url) in finished.visited, finished.visited
 
 
 class TestStatusResponseShape:
@@ -825,7 +826,7 @@ class TestJobControlOverRunner:
         assert resume_resp.status_code == 200
         await _wait_status(job_store, job_id, {"completed"})
         job = job_store.load(job_id)
-        assert job.visited == {GRAPH_ROOT, GRAPH_CHILD, "http://example.test/c"}
+        assert job.visited == {_admit(GRAPH_ROOT), _admit(GRAPH_CHILD), _admit("http://example.test/c")}
 
     async def test_cancel_persists_terminal_state(self, client, job_store):
         job_id, release = await self._blocked(client, job_store, _root_child_results())
@@ -837,7 +838,7 @@ class TestJobControlOverRunner:
         # The in-flight batch is recorded before the runner honours the flip.
         job = await _wait_until(job_store, job_id, lambda j: j.stats.get("total_crawled", 0) >= 1)
         assert job.status.value == "cancelled"
-        assert job.visited == {GRAPH_ROOT}
+        assert job.visited == {_admit(GRAPH_ROOT)}
 
     async def test_unknown_action_rejected(self, client, job_store):
         resp = await post_api_job(client, GRAPH_ROOT)
@@ -928,7 +929,7 @@ class TestEveryVisitedUrlHasAnEnvelope:
             # this time the engine answers with nothing for it -- the shape that
             # used to produce an unnameable gap in the job's results.
             urls = await _execution_urls(payload_dict, None)
-            answered = [u for u in urls if not u.endswith("/gone")]
+            answered = [u for u in urls if not u.raw.endswith("/gone")]
             results = [_canned_result(u, links=["http://example.test/gone"]) for u in answered]
             return _execution_payload(results, len(urls))
 

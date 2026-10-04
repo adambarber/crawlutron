@@ -245,10 +245,11 @@ def _genuine_cffi_outcome(url: str, timeout_seconds: int, max_content_length: in
 
     from app.crawl.strategies.fetchers import impersonating_fetcher
     from app.validation import HostPolicy
+    from tests._result_builders import _admit
 
     async def _fetch():
         return await impersonating_fetcher(HostPolicy.unrestricted())(
-            url,
+            _admit(url),
             {},
             timeout_seconds,
             max_content_length,

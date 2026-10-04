@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import asyncio
+import functools
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field, replace
 from typing import Any, cast
-from urllib.parse import urljoin, urlparse
+from urllib.parse import urljoin
 
 from app.constants import (
     ENGINE_BATCH_CONCURRENCY_MULTIPLIER,
@@ -17,7 +18,6 @@ from app.crawl.cache import HttpCache
 from app.crawl.content_cache import ContentCache
 from app.crawl.fetch_helpers import fetch_sitemap_urls
 from app.crawl.ids import new_request_id
-from app.crawl.job_store import durable_page_identity
 from app.crawl.policy import DiscoveryFlags, discovery_flags
 from app.crawl.recursive import RECURSIVE_RAMP_MAX, _spill_write, run_recursive_crawl
 from app.crawl.render_options import policy_wants_html
@@ -32,7 +32,7 @@ from app.models.crawl_task import CrawlTask
 from app.models.crawl_worker import CrawlWorker
 from app.models.engine_crawl_result import EngineCrawlResult
 from app.models.host_policy import HostPolicy
-from app.models.normalized_url import NormalizedUrl, normalize_public_http_url
+from app.models.normalized_url import NormalizedUrl, admit_or_none
 from app.resource_pressure import (
     ResourceGate,
     TaskRamBudget,
@@ -51,7 +51,7 @@ class _PipelineDependencies:
     get_content_cache: Callable[[], ContentCache]
     make_spill: Callable[[str | None], Any]
     compile_scope_regex_safe: Callable[[str | None], BoundedPattern | None]
-    stale_seeds: Callable[[Iterable[tuple[str, str | None]], Any, CrawlPolicy], set[str]]
+    stale_seeds: Callable[[Iterable[tuple[NormalizedUrl, str | None]], Any, CrawlPolicy], set[NormalizedUrl]]
     fetch_and_decode: FetchAndDecode | None
     shared_http_cache: HttpCache
     resource_gate: ResourceGate
@@ -75,7 +75,7 @@ class _PipelineState:
     dependencies: _PipelineDependencies
     jobs: list[CrawlTask] = field(default_factory=list)
     scheduler: DomainScheduler | None = None
-    validators_by_url: dict[str, dict[str, str]] = field(default_factory=dict)
+    validators_by_url: dict[NormalizedUrl, dict[str, str]] = field(default_factory=dict)
     max_depth: int = 0
     max_pages: int = 0
     respect_robots: bool = False
@@ -90,7 +90,7 @@ def _build_jobs(state: _PipelineState) -> list[CrawlTask]:
     jobs: list[CrawlTask] = []
     for index, original_url in enumerate(state.urls):
         try:
-            normalized_url = normalize_public_http_url(original_url, policy=state.host_policy)
+            normalized_url = NormalizedUrl(original_url, policy=state.host_policy)
             domain = normalized_url.site
         except ValueError as error:
             raise ValueError(f"invalid_url: {error}") from error
@@ -98,7 +98,7 @@ def _build_jobs(state: _PipelineState) -> list[CrawlTask]:
             CrawlTask(
                 index=index,
                 original_url=original_url,
-                normalized_url=normalized_url.raw,
+                normalized_url=normalized_url,
                 domain=domain,
             )
         )
@@ -119,9 +119,12 @@ def _build_scheduler(state: _PipelineState) -> DomainScheduler:
     )
 
 
-def _build_validators(state: _PipelineState) -> dict[str, dict[str, str]]:
-    validators_by_url: dict[str, dict[str, str]] = {}
+def _build_validators(state: _PipelineState) -> dict[NormalizedUrl, dict[str, str]]:
+    validators_by_url: dict[NormalizedUrl, dict[str, str]] = {}
     for url, values in (state.payload.get("validators") or {}).items():
+        admitted = admit_or_none(url, policy=state.host_policy)
+        if admitted is None:
+            continue
         entry = {
             "if_none_match": values.get("if_none_match"),
             "if_modified_since": values.get("if_modified_since"),
@@ -129,13 +132,12 @@ def _build_validators(state: _PipelineState) -> dict[str, dict[str, str]]:
         entry = {key: value for key, value in entry.items() if value}
         if not entry:
             continue
-        validators_by_url[url] = entry
-        validators_by_url.setdefault(durable_page_identity(url, state.host_policy), entry)
+        validators_by_url[admitted] = entry
     return validators_by_url
 
 
 def _validators_for(state: _PipelineState, job: CrawlTask) -> dict[str, str] | None:
-    return state.validators_by_url.get(job.normalized_url) or state.validators_by_url.get(job.original_url)
+    return state.validators_by_url.get(job.normalized_url)
 
 
 async def _run_job(state: _PipelineState, job: CrawlTask) -> tuple[int, EngineCrawlResult]:
@@ -143,7 +145,7 @@ async def _run_job(state: _PipelineState, job: CrawlTask) -> tuple[int, EngineCr
         []
         if not state.respect_robots
         else robots_policy.cached_sitemaps(
-            f"{urlparse(job.normalized_url).scheme}://{urlparse(job.normalized_url).netloc}",
+            job.normalized_url,
             policy=state.host_policy,
         )
     )
@@ -181,9 +183,9 @@ async def _run_job(state: _PipelineState, job: CrawlTask) -> tuple[int, EngineCr
     return job.index, result
 
 
-async def _load_robots(state: _PipelineState, target_url: str):
+async def _load_robots(state: _PipelineState, target_url: NormalizedUrl):
     return await robots_policy.load_robots_rules(
-        robots_policy.robots_origin(target_url, policy=state.host_policy),
+        target_url,
         state.fetcher,
         state.policy.limits.timeout_seconds,
         fetch_and_decode=state.dependencies.fetch_and_decode,
@@ -191,12 +193,12 @@ async def _load_robots(state: _PipelineState, target_url: str):
     )
 
 
-async def _robots_allows(state: _PipelineState, target_url: str) -> bool:
+async def _robots_allows(state: _PipelineState, target_url: NormalizedUrl) -> bool:
     rules, _sitemaps, _delay = await _load_robots(state, target_url)
     return robots_policy.robots_allows(target_url, rules)
 
 
-async def _robots_delay(state: _PipelineState, target_url: str) -> float | None:
+async def _robots_delay(state: _PipelineState, target_url: NormalizedUrl) -> float | None:
     _rules, _sitemaps, delay = await _load_robots(state, target_url)
     return delay
 
@@ -215,9 +217,11 @@ def _robots_disallowed(state: _PipelineState, job: CrawlTask) -> EngineCrawlResu
 
 
 async def _seeds_for_job(state: _PipelineState, job: CrawlTask) -> list[NormalizedUrl]:
-    parsed = urlparse(job.normalized_url)
-    origin = f"{parsed.scheme}://{parsed.netloc}"
-    sitemap_url = urljoin(origin, "/sitemap.xml")
+    sitemap_url = admit_or_none(
+        f"{job.normalized_url.origin}/sitemap.xml", policy=state.host_policy
+    )
+    if sitemap_url is None:
+        return []
     found = await fetch_sitemap_urls(
         state.fetcher,
         sitemap_url,
@@ -225,14 +229,14 @@ async def _seeds_for_job(state: _PipelineState, job: CrawlTask) -> list[Normaliz
         host_policy=state.host_policy,
     )
     candidates = normalize_sitemap_candidates(
-        ((urljoin(sitemap_url, loc), lastmod) for loc, lastmod in found),
+        ((urljoin(sitemap_url.raw, loc), lastmod) for loc, lastmod in found),
         scope_pattern=state.scope_pattern,
         host_policy=state.host_policy,
     )
     stale = (
         await asyncio.to_thread(
             state.dependencies.stale_seeds,
-            [(url.raw, lastmod) for url, lastmod in candidates],
+            candidates,
             state.content_cache,
             state.policy,
         )
@@ -331,7 +335,9 @@ async def _response(state: _PipelineState) -> ProducerEnvelope:
         "request_id": new_request_id(),
         "submitted_count": len(state.urls),
         "policy_schema_version": POLICY_SCHEMA_VERSION,
-        "results": await asyncio.to_thread(state.spill.load_ordered),
+        "results": await asyncio.to_thread(
+            functools.partial(state.spill.load_ordered, policy=state.host_policy)
+        ),
     }
     if state.webhook_url is not None:
         response["webhook_url"] = state.webhook_url

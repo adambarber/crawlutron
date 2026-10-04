@@ -11,7 +11,6 @@ import contextlib
 import inspect
 from collections.abc import Awaitable, Callable, Mapping
 from typing import Any, NamedTuple
-from urllib.parse import urljoin
 
 from app.bounded_ttl import BoundedTTLCache
 from app.constants import (
@@ -26,7 +25,9 @@ from app.constants import (
 from app.crawl.decompression import decompress_body as _decompress_body
 from app.crawl.strategies.body_decode import decode_body
 from app.models.host_policy import HostPolicy
-from app.validation import safe_public_url_or_none
+from app.models.http_fetcher import HttpFetcher
+from app.models.http_fetch_result import HttpFetchResult
+from app.models.normalized_url import NormalizedUrl
 
 # Request headers as the discovery fetch takes them: a mapping it only ever
 # reads, or None for "send none". One declaration, because the fetch signatures
@@ -74,9 +75,34 @@ class _Discovery(NamedTuple):
         return self.status == 304
 
 
+async def _call_fetcher(
+    fetcher: HttpFetcher,
+    url: NormalizedUrl,
+    headers: _RequestHeaders,
+    timeout_seconds: int,
+) -> HttpFetchResult:
+    """Invoke the fetcher, tolerating the sync fetcher doubles the suite passes.
+
+    The production protocol is async, so the honest type of a conforming
+    fetcher's return is the coroutine; a sync double returns the result
+    directly, which is not that type, and the one ``Any`` below is where the
+    seam's tolerance for it lives -- stated once, here, instead of as an
+    untyped ``fetcher`` parameter at every call site the seam used to have.
+    When the doubles go async-native, this helper is the single deletion
+    point (along with the strategy seam's inline copy in fetch_policy).
+    """
+    # ``_RequestHeaders`` promises a mapping the fetch only reads; the
+    # protocol promises a dict. The copy is the whole bridge between the two.
+    sent = {} if headers is None else dict(headers)
+    resp: Any = fetcher(url, sent, timeout_seconds)
+    if inspect.iscoroutine(resp):
+        resp = await resp
+    return resp
+
+
 async def _fetch_decode_discovery(
-    fetcher: Any,
-    url: str,
+    fetcher: HttpFetcher,
+    url: NormalizedUrl,
     headers: _RequestHeaders,
     timeout_seconds: int,
 ) -> _Discovery:
@@ -96,9 +122,7 @@ async def _fetch_decode_discovery(
     from app.crawl.decompression import DecompressionTooLargeError
 
     with contextlib.suppress(Exception):
-        resp = fetcher(url, headers or {}, timeout_seconds)
-        if inspect.iscoroutine(resp):
-            resp = await resp
+        resp = await _call_fetcher(fetcher, url, headers or {}, timeout_seconds)
         status = resp.status_code
         resp_headers = {key.lower(): value for key, value in resp.headers.items()}
         if status == 200:
@@ -116,8 +140,8 @@ async def _fetch_decode_discovery(
 
 
 async def fetch_and_decode(
-    fetcher: Any,
-    url: str,
+    fetcher: HttpFetcher,
+    url: NormalizedUrl,
     headers: _RequestHeaders,
     timeout_seconds: int,
 ) -> tuple[str | None, int | None]:
@@ -155,8 +179,8 @@ async def _single_flight[K, T](
 
 
 async def _fetch_text(
-    fetcher: Any,
-    url: str,
+    fetcher: HttpFetcher,
+    url: NormalizedUrl,
     cond_headers: dict[str, str] | None,
     timeout_seconds: int,
 ) -> tuple[str | None, str | None, str | None, bool]:
@@ -188,8 +212,8 @@ _SITEMAP_CACHE: BoundedTTLCache[tuple[str, HostPolicy], tuple[list, str | None, 
 
 
 async def fetch_sitemap_urls(
-    fetcher: Any,
-    sitemap_url: str,
+    fetcher: HttpFetcher,
+    sitemap_url: NormalizedUrl,
     timeout_seconds: int,
     *,
     max_depth: int = SITEMAP_MAX_DEPTH,
@@ -216,14 +240,10 @@ async def fetch_sitemap_urls(
 
     loc_pattern = _re.compile(r"<loc>\s*([^<\s]+)\s*</loc>", _re.IGNORECASE)
     lastmod_re = _re.compile(r"<lastmod>\s*([^<]+)\s*</lastmod>", _re.IGNORECASE)
-    visited: set[str] = set()
+    visited: set[NormalizedUrl] = set()
     page_urls: set[tuple[str, str | None]] = set()
 
-    async def recurse(current_url: str, depth: int, cond_headers: dict[str, str] | None = None):
-        normalized_url = safe_public_url_or_none(current_url, policy=host_policy)
-        if normalized_url is None:
-            return None, None
-        current_url = str(normalized_url)
+    async def recurse(current_url: NormalizedUrl, depth: int, cond_headers: dict[str, str] | None = None):
         etag: str | None = None
         last_modified: str | None = None
         if depth > max_depth or current_url in visited or len(page_urls) >= max_urls:
@@ -236,7 +256,7 @@ async def fetch_sitemap_urls(
             # 304: reuse the previously resolved URLs for this exact URL.
             # get_stale (not get): the entry must be PRESENT, not fresh --
             # the origin just confirmed the last-known set is still valid.
-            prev = _SITEMAP_CACHE.get_stale((current_url, host_policy))
+            prev = _SITEMAP_CACHE.get_stale((current_url.raw, host_policy))
             if prev:
                 page_urls.update(prev[0])
             return etag, last_modified
@@ -248,13 +268,17 @@ async def fetch_sitemap_urls(
             # needed to reach max_urls, and fetch them in capped chunks so a
             # hostile index with tens of thousands of children cannot spawn
             # a task (and a fetch) per child.
-            children = [c for c in locs if c not in visited]
+            children = locs
             children = children[: max(0, max_urls - len(page_urls))]
             for offset in range(0, len(children), SITEMAP_INDEX_FANOUT):
                 if len(page_urls) >= max_urls:
                     break
                 chunk = children[offset : offset + SITEMAP_INDEX_FANOUT]
-                pending = [asyncio.create_task(recurse(child, depth + 1)) for child in chunk]
+                pending = []
+                for child in chunk:
+                    admitted = current_url.resolve(child)
+                    if admitted is not None and admitted not in visited:
+                        pending.append(asyncio.create_task(recurse(admitted, depth + 1)))
                 if pending:
                     # Stragglers are cancelled so one slow server cannot gate
                     # the entire resolution.
@@ -271,11 +295,12 @@ async def fetch_sitemap_urls(
         for idx, (pos, loc) in enumerate(loc_items):
             next_pos = loc_items[idx + 1][0] if idx + 1 < len(loc_items) else len(text)
             lastmod = next((val for lpos, val in lastmod_items if pos < lpos < next_pos), None)
-            if safe_public_url_or_none(urljoin(current_url, loc), policy=host_policy) is not None:
-                page_urls.add((loc, lastmod))
+            admitted = current_url.resolve(loc)
+            if admitted is not None:
+                page_urls.add((admitted.raw, lastmod))
         return etag, last_modified
 
-    cache_key = (sitemap_url, host_policy)
+    cache_key = (sitemap_url.raw, host_policy)
     cached = _SITEMAP_CACHE.get(cache_key)
     if cached is not None:
         # Fresh: serve directly (get() already LRU-touched).

@@ -19,7 +19,7 @@ from app.bounded_ttl import BoundedTTLCache
 from app.crawl.credentials import origin_of
 from app.models.host_policy import HostPolicy, allow_private_targets
 from app.models.http_fetch_result import HttpFetchResult
-from app.models.normalized_url import normalize_public_http_url
+from app.models.normalized_url import NormalizedUrl
 from app.validation import is_public_ip_value
 
 
@@ -164,7 +164,7 @@ def _declared_length_exceeds(header_value: str | None, limit: int) -> bool:
     return declared > limit
 
 
-def _http_413(url: str, final_url: str, started: float) -> HttpFetchResult:
+def _http_413(url: NormalizedUrl, final_url: NormalizedUrl, started: float) -> HttpFetchResult:
     """Standard 413 (payload too large) result for size/cap violations.
 
     Takes the logical ``final_url`` (never ``current_url``): for a
@@ -310,7 +310,7 @@ def _redirect_target(
     """
     if status_code not in _REDIRECT_STATUSES or not location or hops >= _MAX_REDIRECT_HOPS:
         return None
-    new_url = str(normalize_public_http_url(urljoin(current_url, location), policy=policy))
+    new_url = str(NormalizedUrl(urljoin(current_url, location), policy=policy))
     if _crosses_origin(new_url, current_url):
         request_headers = {k: v for k, v in request_headers.items() if k.lower() not in _CREDENTIAL_HEADERS}
     return new_url, request_headers
@@ -320,14 +320,13 @@ def _crosses_origin(new_url: str, current_url: str) -> bool:
     """Whether a redirect hop leaves the origin, per ``credentials.origin_of``.
 
     Falls back to treating the hop as a boundary when either side cannot be
-    canonicalised. ``normalize_public_http_url`` has already rejected the
-    non-HTTP schemes and userinfo that ``origin_of`` refuses, so this is
-    defensive -- and it fails toward stripping, since a header we keep is
+    canonicalised. Admission has already rejected the non-HTTP schemes and
+    userinfo that ``origin_of`` refuses, so this is defensive -- and it fails toward stripping, since a header we keep is
     unrecoverable and a header we drop only costs a re-login.
     """
     try:
         return origin_of(new_url) != origin_of(current_url)
-    except ValueError:  # pragma: no cover - normalize_public_http_url precedes this
+    except ValueError:  # pragma: no cover - admission precedes this
         return True
 
 

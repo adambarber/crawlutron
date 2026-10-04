@@ -22,6 +22,7 @@ from tests._browser_doubles import (
     stub_pinned_request,
 )
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY
+from tests._result_builders import _admit
 
 # --------------------------------------------------------------------------
 # document.py: SSRF gate on urlopen
@@ -71,7 +72,7 @@ async def test_document_extractor_invokes_ssrf_check(monkeypatch):
 
 async def test_resolve_browser_target_pins_ip_and_preserves_host():
     pinned_url, headers = await resolve_browser_target(
-        "http://example.com/path",
+        _admit("http://example.com/path"),
         policy=UNRESTRICTED_HOST_POLICY,
         pin=stub_pinned_request(("http://1.2.3.4:80/path", {"Host": "example.com"})),
     )
@@ -107,7 +108,7 @@ async def test_browser_pin_resolve_does_not_run_on_the_event_loop(monkeypatch):
     monkeypatch.setattr(socket, "getaddrinfo", _getaddrinfo)
 
     await resolve_browser_target(
-        "http://example.com/path",
+        _admit("http://example.com/path"),
         policy=UNRESTRICTED_HOST_POLICY,
         pin=build_pinned_request_async,
     )

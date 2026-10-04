@@ -47,13 +47,14 @@ from app.models.crawl_result import CrawlStrategyAttempt
 from app.models.engine_crawl_result import EngineCrawlResult
 from app.models.host_policy import HostPolicy
 from app.models.http_fetch_result import HttpFetchResult
+from app.models.normalized_url import NormalizedUrl
 from app.models.taxonomy import Classification, CrawlStrategyName
 
 
 @dataclass
 class _HttpStrategyContext:
     original_url: str
-    normalized_url: str
+    normalized_url: NormalizedUrl
     strategy: CrawlStrategyName
     policy: CrawlPolicy
     host_policy: HostPolicy

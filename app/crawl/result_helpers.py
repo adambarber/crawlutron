@@ -16,6 +16,7 @@ from app.crawl.scheduler_exceptions import _CircuitBreakerOpen
 from app.models.browser_pool_exhausted import BrowserPoolExhaustedError
 from app.models.crawl_result import CrawlResult, CrawlStrategyAttempt
 from app.models.engine_crawl_result import EngineCrawlResult
+from app.models.normalized_url import NormalizedUrl
 from app.models.taxonomy import Classification, CrawlError, CrawlStrategyName
 
 _JobT = TypeVar("_JobT")
@@ -160,7 +161,7 @@ def engine_result_from_exception(
     *,
     error: BaseException,
     original_url: str,
-    normalized_url: str,
+    normalized_url: NormalizedUrl,
     strategy: CrawlStrategyName | None,
     elapsed_ms: int | None = None,
     extra_diagnostics: dict | None = None,
@@ -223,21 +224,17 @@ def engine_result_from_exception(
     )
 
 
-def _job_url_text(job: object) -> str | None:
-    """The job's own URL as TEXT, whichever record it was dispatched with.
+def _job_url_value(job: object) -> NormalizedUrl | None:
+    """The job's own URL as an admitted value, whichever record it was dispatched with.
 
-    ``CrawlJob`` holds an admitted value and ``CrawlTask`` the durable identity
-    text, so a reader reaching for one attribute gets the other record's shape.
-    That is how a failed result came to report the raw href it was dispatched
-    from under the canonical URL it never reached.
+    ``CrawlJob`` holds it as ``url``, ``CrawlTask`` as ``normalized_url``: same
+    thing, two names. A reader reaching for one attribute gets the other
+    record's shape, so the two read sites name this once.
     """
     for attribute in ("url", "normalized_url"):
         found = getattr(job, attribute, None)
-        if isinstance(found, str):
+        if isinstance(found, NormalizedUrl):
             return found
-        raw = getattr(found, "raw", None)
-        if isinstance(raw, str):
-            return raw
     return None
 
 
@@ -260,7 +257,9 @@ def failed_result_for[JobT](
     contract stay in one place.
     """
     original_url = url_of(job)
-    normalized = _job_url_text(job) or original_url
+    normalized = _job_url_value(job)
+    if normalized is None:
+        raise TypeError(f"{type(job).__name__} carries no NormalizedUrl")
     return engine_result_from_exception(
         error=error,
         original_url=original_url,
@@ -271,7 +270,7 @@ def failed_result_for[JobT](
 
 def terminal_crawl_result(
     *,
-    url: str,
+    url: NormalizedUrl,
     status: ResultStatus,
     classification: Classification,
     attempts: int,
@@ -343,7 +342,7 @@ def terminal_attempt(
     )
 
 
-def crawl_result_from_engine_result(engine: EngineCrawlResult, *, url: str) -> CrawlResult:
+def crawl_result_from_engine_result(engine: EngineCrawlResult, *, url: NormalizedUrl) -> CrawlResult:
     """Adapt an ``EngineCrawlResult`` into the render pipeline's ``CrawlResult``.
 
     :meth:`DomainScheduler.run` builds its worker-exception envelope as an
@@ -364,6 +363,9 @@ def crawl_result_from_engine_result(engine: EngineCrawlResult, *, url: str) -> C
     elapsed_ms = int(engine.attempted_strategies[0].elapsed_ms) if engine.attempted_strategies else 0
     return CrawlResult(
         url=url,
+        # The engine record carries the submission text under the same name;
+        # the render funnel restamps it from its own request texts.
+        original_url=engine.original_url,
         attempt=terminal_attempt(
             strategy=engine.selected_strategy,
             status=engine.status,
@@ -383,7 +385,7 @@ def crawl_result_from_engine_result(engine: EngineCrawlResult, *, url: str) -> C
 def crawl_result_from_exception(
     *,
     error: BaseException,
-    url: str,
+    url: NormalizedUrl,
     domain: str,
     strategy: CrawlStrategyName | None,
     elapsed_ms: int,
@@ -429,8 +431,8 @@ def crawl_result_from_exception(
 def build_engine_result(
     *,
     original_url: str,
-    normalized_url: str,
-    final_url: str | None,
+    normalized_url: NormalizedUrl,
+    final_url: NormalizedUrl | None,
     status: ResultStatus,
     classification: Classification,
     attempt: CrawlStrategyAttempt,
@@ -449,7 +451,7 @@ def build_engine_result(
     discovered_link_count: int = 0,
     discovered_links_truncated: bool = False,
     discovered_links: list | None = None,
-    next_page_url: str | None = None,
+    next_page_url: NormalizedUrl | None = None,
     validators: dict[str, str] | None = None,
     llm_metadata: dict[str, Any] | None = None,
 ) -> EngineCrawlResult:
@@ -506,13 +508,13 @@ class TerminalResult:
     """
 
     original_url: str
-    normalized_url: str
+    normalized_url: NormalizedUrl
     strategy: CrawlStrategyName | None
     classification: Classification
     error: CrawlError
     diagnostics: dict | None = None
     http_status: int | None = None
-    final_url: str | None = None
+    final_url: NormalizedUrl | None = None
     attempt_elapsed_ms: int = 0
 
 
@@ -585,8 +587,8 @@ def _skipped_engine_result(result: TerminalResult) -> EngineCrawlResult:
 def binary_no_text_result(
     *,
     original_url: str,
-    normalized_url: str,
-    final_url: str | None,
+    normalized_url: NormalizedUrl,
+    final_url: NormalizedUrl | None,
     strategy: CrawlStrategyName | None,
     http_status: int | None,
     headers: dict[str, str],

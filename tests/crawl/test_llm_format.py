@@ -2,13 +2,14 @@
 
 from app.crawl.llm_format import extract_llm_metadata, text_from_html
 from tests._extraction_helpers import extract_content
+from tests._result_builders import _admit
 from tests._fetcher_factories import LLM_FORMAT_TEST_HTML
 from tests._parse_budget import ParseBudget
 
 
 class TestPageMetadata:
     def test_extracts_title_and_meta(self):
-        meta = extract_llm_metadata(LLM_FORMAT_TEST_HTML, "https://example.com")
+        meta = extract_llm_metadata(LLM_FORMAT_TEST_HTML, _admit("https://example.com"))
         assert meta["title"] == "Test Page"
         assert meta["description"] == "A test page"
         assert meta["og_title"] == "OG Title"
@@ -16,7 +17,7 @@ class TestPageMetadata:
         assert meta["source_url"] == "https://example.com"
 
     def test_handles_empty(self):
-        assert extract_llm_metadata("", "https://example.com") == {"source_url": "https://example.com"}
+        assert extract_llm_metadata("", _admit("https://example.com")) == {"source_url": "https://example.com"}
 
 
 class TestJsonLdExtraction:
@@ -26,7 +27,7 @@ class TestJsonLdExtraction:
             '<script type="application/ld+json">{"@context":"https://schema.org","name":"Test"}</script>'
             "</head><body><p>Body</p></body></html>"
         )
-        meta = extract_llm_metadata(html, "https://example.com")
+        meta = extract_llm_metadata(html, _admit("https://example.com"))
         assert meta.get("json_ld") is not None
         assert meta["json_ld"]["name"] == "Test"
         assert meta["json_ld"]["@context"] == "https://schema.org"
@@ -36,12 +37,12 @@ class TestJsonLdExtraction:
             '<script type="application/ld+json">{"@type":"A"}</script>'
             '<script type="application/ld+json">{"@type":"B"}</script>'
         )
-        meta = extract_llm_metadata(html, "https://example.com")
+        meta = extract_llm_metadata(html, _admit("https://example.com"))
         assert isinstance(meta["json_ld"], list)
         assert len(meta["json_ld"]) == 2
 
     def test_json_ld_absent_when_no_script(self):
-        meta = extract_llm_metadata("<html><body>x</body></html>", "https://example.com")
+        meta = extract_llm_metadata("<html><body>x</body></html>", _admit("https://example.com"))
         assert "json_ld" not in meta
 
     def test_single_parse_per_html(self):
@@ -55,7 +56,7 @@ class TestJsonLdExtraction:
             '<script type="application/ld+json">{"@type":"WebSite"}</script>'
             "</head><body><p>x</p></body></html>"
         )
-        meta = extract_llm_metadata(html, "https://example.com")
+        meta = extract_llm_metadata(html, _admit("https://example.com"))
         # Title, meta, JSON-LD, canonical, favicon, language all read from
         # ONE lxml parse instead of 8+ independent regex scans.
         assert budget.parses == 1
@@ -66,12 +67,12 @@ class TestJsonLdExtraction:
 
 class TestLlmFormat:
     def test_extract_llm_metadata_handles_empty(self):
-        meta = extract_llm_metadata("", "https://example.com")
+        meta = extract_llm_metadata("", _admit("https://example.com"))
         assert meta == {"source_url": "https://example.com"}
 
     def test_extract_content_html_returns_markdown(self):
         html = "<html><body><main>Content here</main></body></html>"
-        result = extract_content(html, "text/html", "https://example.com")
+        result = extract_content(html, "text/html", _admit("https://example.com"))
         assert "Content here" in (result.markdown or "")
 
     def test_text_from_html_strips_tags(self):
@@ -86,12 +87,12 @@ class TestLlmFormatEdges:
     def test_malformed_json_ld_is_ignored(self):
         md = extract_llm_metadata(
             '<script type="application/ld+json">{not valid json</script>',
-            "http://x/",
+            _admit("http://x/"),
         )
         assert "json_ld" not in md
 
     def test_canonical_and_favicon(self):
         html = '<link rel="canonical" href="https://canon.example/"><link rel="icon" href="/fav.ico">'
-        md = extract_llm_metadata(html, "http://x/")
+        md = extract_llm_metadata(html, _admit("http://x/"))
         assert md["canonical_url"] == "https://canon.example/"
         assert md["favicon"] == "/fav.ico"

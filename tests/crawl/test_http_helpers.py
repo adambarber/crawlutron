@@ -62,6 +62,12 @@ from tests._http_test_helpers import (
     quality_score,
 )
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY, make_base_policy
+from app.models.normalized_url import NormalizedUrl
+
+
+def _url(text: str) -> NormalizedUrl:
+    """Admission helper: every URL seam in this module takes the value."""
+    return NormalizedUrl(text, policy=UNRESTRICTED_HOST_POLICY)
 from tests._worker_doubles import (
     assert_coroutine_worker_is_awaited_directly,
     assert_sync_worker_runs_once_in_a_thread,
@@ -93,7 +99,7 @@ class TestValidationHelpers:
         ]
 
     def test_payload_urls_dedupes_by_canonical_page_identity(self) -> None:
-        # ``normalize_public_http_url`` already treats fragment / trailing-slash /
+        # ``NormalizedUrl`` admission already treats fragment / trailing-slash /
         # tracking-param / param-order variants as the SAME page. The batch chokepoint
         # must dedup on that identity, not the raw string -- otherwise a request
         # carrying both ``.../x`` and ``.../x/?utm_source=tw`` crawls one page twice.
@@ -142,18 +148,18 @@ class TestValidationHelpers:
 class TestHeaderHelpers:
     def test_mobile_safari_user_agent(self) -> None:
         policy = {"request_profile": {"user_agent_family": "mobile_safari"}, "headers": {}}
-        headers = headers_for_strategy(HTTP_DECLARED_CRAWLER, read_policy(policy), "http://x/")
+        headers = headers_for_strategy(HTTP_DECLARED_CRAWLER, read_policy(policy), _url("http://x/"))
         assert "iPhone" in headers["User-Agent"]
 
     def test_configured_user_agent_overrides_identity(self, monkeypatch) -> None:
         monkeypatch.setenv("CRAWLUTRON_USER_AGENT", "crawler-test/1")
-        headers = headers_for_strategy(HTTP_DECLARED_CRAWLER, read_policy({"headers": {}}), "http://x/")
+        headers = headers_for_strategy(HTTP_DECLARED_CRAWLER, read_policy({"headers": {}}), _url("http://x/"))
         assert headers["User-Agent"] == "crawler-test/1"
 
     def test_cookie_header_invalid_structures(self) -> None:
-        assert _cookie_header_for_url({"cookie_jar": "per_host", "cookies": "notdict"}, "http://host/") == ""
+        assert _cookie_header_for_url({"cookie_jar": "per_host", "cookies": "notdict"}, _url("http://host/")) == ""
         assert (
-            _cookie_header_for_url({"cookie_jar": "per_host", "cookies": {"host": "notdict"}}, "http://host/")
+            _cookie_header_for_url({"cookie_jar": "per_host", "cookies": {"host": "notdict"}}, _url("http://host/"))
             == ""
         )
 
@@ -231,11 +237,11 @@ class TestPureParsing:
         assert out == "1a. Alpha [Action: Approve]\n\n2a. Bravo\n\n5a. Delta [Action: Approve]"
 
     def test_looks_like_binary_body_branches(self) -> None:
-        assert looks_like_binary_body(b"PK\x03\x04data", "application/octet-stream", "http://x/z.zip") is True
-        assert looks_like_binary_body(b"PK\x03\x04data", "text/html", "http://x/") is False
-        assert looks_like_binary_body(b"data", "application/json", "http://x/") is False
-        assert looks_like_binary_body(b"data", "application/octet-stream", "http://x/") is True
-        assert looks_like_binary_body(b"data", "application/pdf", "http://x/a.pdf") is False
+        assert looks_like_binary_body(b"PK\x03\x04data", "application/octet-stream", _url("http://x/z.zip")) is True
+        assert looks_like_binary_body(b"PK\x03\x04data", "text/html", _url("http://x/")) is False
+        assert looks_like_binary_body(b"data", "application/json", _url("http://x/")) is False
+        assert looks_like_binary_body(b"data", "application/octet-stream", _url("http://x/")) is True
+        assert looks_like_binary_body(b"data", "application/pdf", _url("http://x/a.pdf")) is False
 
     def test_format_extracted_document_text_range_action(self) -> None:
         text = "1a - 1c Approve\n1a.\nBuild the thing\n1b.\nFix the bug\n1c.\nShip it"
@@ -257,23 +263,20 @@ class TestPureParsing:
         )
         walkable = _walkable(
             html,
-            "http://same.example/",
+            _url("http://same.example/"),
             None,
         )
         assert walkable is not None
-        frames = frames_from(walkable, "http://same.example/", UNRESTRICTED_HOST_POLICY)
+        frames = frames_from(walkable, _url("http://same.example/"))
         assert len(frames) == 1
 
     def test_extract_discovered_links_skips_bad_scheme(self) -> None:
         html = '<a href="mailto:a@b.com">x</a><a href="http://other.example/p">y</a>'
-        links, count, truncated = extract_discovered_links(html, "http://example.com/")
+        links, count, truncated = extract_discovered_links(html, _url("http://example.com/"))
         assert len(links) == 1
 
     def test_frame_collector_ignores_frames_without_src(self) -> None:
-        collector = _FrameCollector(
-            "http://x/",
-            host_policy=UNRESTRICTED_HOST_POLICY,
-        )
+        collector = _FrameCollector(_url("http://x/"))
         collector.feed('<frame></frame><iframe src="http://x/f"></iframe>')
         assert len(collector.frames) == 1
 
@@ -558,30 +561,21 @@ class TestFetchHelperUtilities:
             "<textarea name='t'>hi</textarea>"
             "<button name='b' value='go'>Go</button>"
             "</form>",
-            "http://x/",
+            _url("http://x/"),
             None,
         )
         assert walkable is not None
-        forms = forms_from(walkable, UNRESTRICTED_HOST_POLICY)
+        forms = forms_from(walkable)
         assert len(forms) == 1
         tags = {c["tag"] for c in forms[0]["controls"]}
         assert {"input", "select", "textarea", "button"} <= tags
 
     def test_extract_discovered_links_skips_ftp_scheme(self) -> None:
         links, count, truncated = extract_discovered_links(
-            "<a href='ftp://host/data'>x</a><a href='https://ok/x'>ok</a>", "http://x/"
+            "<a href='ftp://host/data'>x</a><a href='https://ok/x'>ok</a>", _url("http://x/")
         )
         assert all("ftp://" not in getattr(link, "url", str(link)) for link in links)
         assert any("https://ok/x" in getattr(link, "url", str(link)) for link in links)
-
-    def test_extract_discovered_links_handles_unnormalizable_source_url(self) -> None:
-        # Normalize_public_http_url rejects non-http source URLs; the link extractor
-        # must fall back to the raw source rather than crash.
-        links, count, truncated = extract_discovered_links(
-            "<a href='https://ok.example/x'>ok</a>", "ftp://example.com/"
-        )
-        assert count == 1
-        assert truncated is False
 
     def test_public_participation_breaks_item_title_collection(self) -> None:
         # A boilerplate section marker ends the title run rather than joining it, so
@@ -593,7 +587,7 @@ class TestFetchHelperUtilities:
 
     def test_looks_like_binary_body_magic_without_zip_extension(self) -> None:
         # PK magic with a non-.zip URL still classifies as binary.
-        assert looks_like_binary_body(b"PK\x03\x04data", "application/octet-stream", "http://x/file") is True
+        assert looks_like_binary_body(b"PK\x03\x04data", "application/octet-stream", _url("http://x/file")) is True
 
     async def test_discovery_robots_success_and_malformed_crawl_delay(self) -> None:
         fetcher = routed_fetcher(
@@ -622,17 +616,17 @@ class TestFingerprintInjectionRotation:
         profile = {"user_agents": ["UA-A", "UA-B", "UA-C"]}
         # Use more hosts than pool size so rotation is clearly visible.
         hosts = [f"{c}.com" for c in "abcdef"]
-        seen = {d: _select_fingerprint(profile, d).get("user_agent") for d in hosts}
+        seen = {d: _select_fingerprint(profile, _url(f"http://{d}/")).get("user_agent") for d in hosts}
         # Rotation: different hosts get a variety of UAs (not all identical)
         assert len(set(seen.values())) > 1
         # Stability: same host -> same UA across calls (keeps content-cache key stable)
-        assert _select_fingerprint(profile, "a.com")["user_agent"] == seen["a.com"]
-        assert _select_fingerprint(profile, "a.com")["user_agent"] == seen["a.com"]
+        assert _select_fingerprint(profile, _url("http://a.com/"))["user_agent"] == seen["a.com"]
+        assert _select_fingerprint(profile, _url("http://a.com/"))["user_agent"] == seen["a.com"]
 
     def test_fingerprint_rotation_changes_accept_language_per_domain(self):
         base = {"request_profile": {"fingerprint_rotation": True}, "headers": {}}
         langs = {
-            d: headers_for_strategy("HTTP_DECLARED_CRAWLER", read_policy(base), f"http://{d}/")[
+            d: headers_for_strategy("HTTP_DECLARED_CRAWLER", read_policy(base), _url(f"http://{d}/"))[
                 "Accept-Language"
             ]
             for d in ("a.com", "b.com", "c.com", "d.com", "e.com")
@@ -640,7 +634,7 @@ class TestFingerprintInjectionRotation:
         # Across 5 distinct hosts the built-in pool (size 5) yields variety
         assert len(set(langs.values())) > 1
         # Same host is stable
-        again = headers_for_strategy("HTTP_DECLARED_CRAWLER", read_policy(base), "http://a.com/")[
+        again = headers_for_strategy("HTTP_DECLARED_CRAWLER", read_policy(base), _url("http://a.com/"))[
             "Accept-Language"
         ]
         assert again == langs["a.com"]
@@ -649,21 +643,21 @@ class TestFingerprintInjectionRotation:
         headers = headers_for_strategy(
             "HTTP_DECLARED_CRAWLER",
             read_policy({"request_profile": {}, "headers": {}}),
-            "http://x/",
+            _url("http://x/"),
         )
         assert headers["Accept-Language"] == "en-US,en;q=0.9"
         assert "Mozilla" not in headers["User-Agent"]
 
     def test_fingerprint_injected_user_agent_lands_in_headers(self):
         profile = {"request_profile": {"user_agents": ["Rotated-UA-1", "Rotated-UA-2"]}, "headers": {}}
-        h1 = headers_for_strategy("HTTP_DECLARED_CRAWLER", read_policy(profile), "http://a.com/")
-        h2 = headers_for_strategy("HTTP_DECLARED_CRAWLER", read_policy(profile), "http://b.com/")
+        h1 = headers_for_strategy("HTTP_DECLARED_CRAWLER", read_policy(profile), _url("http://a.com/"))
+        h2 = headers_for_strategy("HTTP_DECLARED_CRAWLER", read_policy(profile), _url("http://b.com/"))
         assert h1["User-Agent"] == "Rotated-UA-1"
         assert h2["User-Agent"] == "Rotated-UA-2"
 
     def test_explicit_headers_still_override_fingerprint(self):
         profile = {"request_profile": {"user_agents": ["Rotated-UA-1"]}, "headers": {"User-Agent": "forced"}}
-        h = headers_for_strategy("HTTP_DECLARED_CRAWLER", read_policy(profile), "http://a.com/")
+        h = headers_for_strategy("HTTP_DECLARED_CRAWLER", read_policy(profile), _url("http://a.com/"))
         assert h["User-Agent"] == "forced"
 
 
@@ -686,7 +680,7 @@ class TestFetchHelpersEdges:
         assert (
             _cookie_header_for_url(
                 {"cookie_jar": "per_host", "cookies": {"e.com": {"a": "1"}}},
-                "http://e.com/",
+                _url("http://e.com/"),
             )
             == "a=1"
         )
@@ -695,7 +689,7 @@ class TestFetchHelpersEdges:
         headers = headers_for_strategy(
             HTTP_CFFI_IMPERSONATE,
             read_policy({"request_profile": {}, "headers": {}}),
-            "http://e.com/",
+            _url("http://e.com/"),
         )
         assert "User-Agent" in headers
         # Firefox identity (matching the firefox135 impersonation) sends no
@@ -712,7 +706,7 @@ class TestFetchHelpersEdges:
                     "headers": {},
                 }
             ),
-            "http://e.com/",
+            _url("http://e.com/"),
         )
         assert headers.get("Cookie") == "a=1"
 
@@ -763,7 +757,7 @@ class TestAcceptEncodingAdvertisesOnlyWhatWeCanDecode:
     """
 
     def test_br_is_advertised(self):
-        headers = headers_for_strategy(HTTP_DECLARED_CRAWLER, read_policy({"headers": {}}), "http://e.com/")
+        headers = headers_for_strategy(HTTP_DECLARED_CRAWLER, read_policy({"headers": {}}), _url("http://e.com/"))
         assert "br" in headers["Accept-Encoding"]
 
     def test_every_advertised_encoding_is_always_decodable(self):
@@ -788,6 +782,6 @@ class TestAcceptEncodingAdvertisesOnlyWhatWeCanDecode:
         # nothing outside the decoder set, so a future token cannot slip in.
         from app.crawl.decompression import _DECODABLE_ENCODINGS
 
-        headers = headers_for_strategy(HTTP_DECLARED_CRAWLER, read_policy({"headers": {}}), "http://e.com/")
+        headers = headers_for_strategy(HTTP_DECLARED_CRAWLER, read_policy({"headers": {}}), _url("http://e.com/"))
         advertised = {token.strip() for token in headers["Accept-Encoding"].split(",")}
         assert advertised <= _DECODABLE_ENCODINGS

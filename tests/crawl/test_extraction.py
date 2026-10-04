@@ -27,6 +27,14 @@ from app.crawl.extraction import (
 )
 from app.env import parse_bool_env
 from tests._assertions import set_optional_env
+
+
+def _url(text: str):
+    """Admission helper: every extraction seam takes the admitted value."""
+    from tests._policy_factories import UNRESTRICTED_HOST_POLICY
+    from app.models.normalized_url import NormalizedUrl
+
+    return NormalizedUrl(text, policy=UNRESTRICTED_HOST_POLICY)
 from tests._extraction_helpers import (
     detect_pagination,
     doc_worker_acquisitions,
@@ -67,42 +75,42 @@ def test_document_test_hooks_accept_shared_bool_spellings(monkeypatch):
 class TestExtractContent:
     def test_html_uses_trafilatura_markdown(self):
         html = "<html><body><main>Main content here</main></body></html>"
-        result = extract_content(html, "text/html", "http://example.com/")
+        result = extract_content(html, "text/html", _url("http://example.com/"))
         assert isinstance(result, ExtractedContent)
         assert "Main content here" in (result.markdown or "")
         assert result.text == result.markdown
 
     def test_pdf_routes_to_markitdown_fallback(self):
-        result = extract_content(b"%PDF-1.7 fake bytes", "application/pdf", "http://x/a.pdf")
+        result = extract_content(b"%PDF-1.7 fake bytes", "application/pdf", _url("http://x/a.pdf"))
         assert result.text == "%PDF-1.7 fake bytes"
 
     def test_csv_routes_to_markitdown_table(self):
         body = b"name,age\nAlice,30\nBob,25"
-        result = extract_content(body, "text/csv", "http://x/data.csv")
+        result = extract_content(body, "text/csv", _url("http://x/data.csv"))
         assert "Alice" in (result.text or "")
         assert "|" in (result.markdown or "")
 
     def test_json_passes_through_markitdown(self):
         body = b'{"a":1,"b":[2,3]}'
-        result = extract_content(body, "application/json", "http://x/d.json")
+        result = extract_content(body, "application/json", _url("http://x/d.json"))
         assert '"a":1' in (result.text or "")
 
     def test_plain_text_passes_through(self):
-        result = extract_content("just some plain text", "text/plain", "http://x/note.txt")
+        result = extract_content("just some plain text", "text/plain", _url("http://x/note.txt"))
         assert result.text == "just some plain text"
         assert result.markdown == "just some plain text"
 
     def test_doctype_without_content_type_routes_to_html(self):
         html = "<!doctype html><html><body>x</body></html>"
-        result = extract_content(html, None, "http://x/")
+        result = extract_content(html, None, _url("http://x/"))
         assert "x" in (result.markdown or "")
 
     def test_unrecognized_binary_passes_through_as_text(self):
-        result = extract_content(b"\x00\x01binary", "application/octet-stream", "http://x/bin")
+        result = extract_content(b"\x00\x01binary", "application/octet-stream", _url("http://x/bin"))
         assert result.text is not None
 
     def test_empty_or_unparseable_document_yields_no_content(self):
-        result = extract_content(b"", "application/pdf", "http://x/e.pdf")
+        result = extract_content(b"", "application/pdf", _url("http://x/e.pdf"))
         assert result.text is None
         assert result.markdown is None
 
@@ -116,12 +124,12 @@ class TestRoutingHelpers:
         assert not is_html(None, "plain")
 
     def test_looks_like_document(self):
-        assert looks_like_document("application/pdf", b"%PDF", "http://x/a.pdf")
-        assert looks_like_document("application/octet-stream", b"%PDF-1.4 data", "http://x/mystery")
-        assert looks_like_document("text/csv", b"a,b", "http://x/d.csv")
+        assert looks_like_document("application/pdf", b"%PDF", _url("http://x/a.pdf"))
+        assert looks_like_document("application/octet-stream", b"%PDF-1.4 data", _url("http://x/mystery"))
+        assert looks_like_document("text/csv", b"a,b", _url("http://x/d.csv"))
         assert looks_like_document("application/json", b"{}", None)
-        assert not looks_like_document("text/html", b"<html>", "http://x/")
-        assert not looks_like_document("text/plain", b"hi", "http://x/note.txt")
+        assert not looks_like_document("text/html", b"<html>", _url("http://x/"))
+        assert not looks_like_document("text/plain", b"hi", _url("http://x/note.txt"))
 
 
 class TestTextAndMetadata:
@@ -153,12 +161,12 @@ class TestKatanaDiscovery:
 
     def test_extract_js_endpoints_resolves_against_source(self):
         html = 'fetch("/api/x"); axios.get("/y")'
-        endpoints = extract_js_endpoints(html, "http://e.com/page")
+        endpoints = extract_js_endpoints(html, _url("http://e.com/page"))
         assert endpoints == [{"url": "http://e.com/api/x"}, {"url": "http://e.com/y"}]
 
     def test_extract_js_endpoints_dedupes_resolved(self):
         html = 'fetch("/api/x"); fetch("/api/x")'
-        endpoints = extract_js_endpoints(html, "http://e.com/")
+        endpoints = extract_js_endpoints(html, _url("http://e.com/"))
         assert endpoints == [{"url": "http://e.com/api/x"}]
 
     def test_extract_js_endpoints_unresolved_without_source(self):
@@ -175,7 +183,7 @@ class TestKatanaDiscovery:
 
     def test_extract_js_endpoints_skips_empty_endpoint(self):
         # A regex match with an empty/whitespace endpoint is skipped.
-        endpoints = extract_js_endpoints('<script>fetch(" ")</script>', "http://e.com/")
+        endpoints = extract_js_endpoints('<script>fetch(" ")</script>', _url("http://e.com/"))
         assert endpoints == []
 
     def test_extract_html_markdownify_fallback(self):
@@ -186,15 +194,15 @@ class TestKatanaDiscovery:
 
     def test_detect_pagination_anchor_rel_next(self):
         html = '<a rel="next" href="/page2">Next</a>'
-        assert detect_pagination(html, "https://example.com/list") == "https://example.com/page2"
+        assert detect_pagination(html, _url("https://example.com/list")) == _url("https://example.com/page2")
 
     def test_detect_pagination_link_rel_next(self):
         html = '<link rel="next" href="/p3">'
-        assert detect_pagination(html, "https://example.com/") == "https://example.com/p3"
+        assert detect_pagination(html, _url("https://example.com/")) == _url("https://example.com/p3")
 
     def test_detect_pagination_none_without_hint(self):
         html = '<a href="/page2">Next</a>'
-        assert detect_pagination(html, "https://example.com/") is None
+        assert detect_pagination(html, _url("https://example.com/")) is None
 
     def test_detect_pagination_drops_non_http_href(self):
         # The href is attacker-controlled HTML: a non-http(s) rel=next must not
@@ -202,21 +210,21 @@ class TestKatanaDiscovery:
         # so every consumer is covered, not just the ones that remember.
         for bad in ("javascript:alert(1)", "data:text/html,<x>", "mailto:a@b.c"):
             html = f'<a rel="next" href="{bad}">next</a>'
-            assert detect_pagination(html, "https://example.com/list") is None
+            assert detect_pagination(html, _url("https://example.com/list")) is None
 
     def test_detect_pagination_still_resolves_relative(self):
         # The egress filter must not break legitimate relative pagination.
         assert (
-            detect_pagination('<a rel="next" href="/p2">n</a>', "https://example.com/list")
-            == "https://example.com/p2"
+            detect_pagination('<a rel="next" href="/p2">n</a>', _url("https://example.com/list"))
+            == _url("https://example.com/p2")
         )
 
     def test_detect_pagination_protocol_relative_resolves(self):
         # //evil.com/x resolves against the page URL to https, so it survives
         # the scheme filter exactly like the HTTP path already allowed.
         assert (
-            detect_pagination('<a rel="next" href="//example.com/p2">n</a>', "https://example.com/list")
-            == "https://example.com/p2"
+            detect_pagination('<a rel="next" href="//example.com/p2">n</a>', _url("https://example.com/list"))
+            == _url("https://example.com/p2")
         )
 
 
@@ -305,7 +313,7 @@ class TestExtractionMethods:
 
         monkeypatch.setattr(extraction, "extract_html", fake_html)
         monkeypatch.setattr(extraction, "extract_document", fake_document)
-        result = extraction.extract_content(content, content_type, "http://example.com/")
+        result = extraction.extract_content(content, content_type, _url("http://example.com/"))
         assert result.text == expected_text
         assert calls == ([] if expected_branch is None else [expected_branch])
 
@@ -591,7 +599,7 @@ def test_xpath_selector_slow_must_not_hang(caplog):
 
 def test_xpath_selector_fast_still_works():
     html = "<html><body><p>x</p></body></html>"
-    result = extract_selected(html, "http://example.com/", selectors=Selectors(xpath="//p"))
+    result = extract_selected(html, _url("http://example.com/"), selectors=Selectors(xpath="//p"))
     assert result.text is not None
     assert "x" in (result.text or "")
 
@@ -599,11 +607,7 @@ def test_xpath_selector_fast_still_works():
 def test_html_diagnostics_parses_once():
     budget = ParseBudget()
     html = "<html><body><a href='/x'>x</a><form action='/s'><input name='q'></form></body></html>"
-    extraction.html_diagnostics(
-        html,
-        "http://example.com/",
-        host_policy=UNRESTRICTED_HOST_POLICY,
-    )
+    extraction.html_diagnostics(html, _url("http://example.com/"))
     assert budget.parses == 1
 
 
@@ -615,18 +619,8 @@ def test_shared_tree_parses_once_across_passes():
     )
     tree = extraction.parse_html_tree(html)
     assert budget.parses == 1
-    extraction.html_diagnostics(
-        html,
-        "http://example.com/",
-        host_policy=UNRESTRICTED_HOST_POLICY,
-        tree=tree,
-    )
-    links, _, _ = extraction.extract_discovered_links(
-        html,
-        "http://example.com/",
-        host_policy=UNRESTRICTED_HOST_POLICY,
-        tree=tree,
-    )
+    extraction.html_diagnostics(html, _url("http://example.com/"), tree=tree)
+    links, _, _ = extraction.extract_discovered_links(html, _url("http://example.com/"), tree=tree)
     # Frames, forms, and links all reused the single pre-parsed tree.
     assert budget.parses == 1
     assert links
@@ -642,7 +636,7 @@ class TestExtractionEdges:
     )
     def test_extract_content_selects_the_targeted_subtree(self, selectors):
         html = '<div class="target">selected</div><div>ignored</div>'
-        result = extract_content(html.encode(), "text/html", "http://e.com/", selectors=selectors)
+        result = extract_content(html.encode(), "text/html", _url("http://e.com/"), selectors=selectors)
         assert result.text == "selected"
 
     def test_extraction_still_works_after_a_shutdown(self):
@@ -735,23 +729,23 @@ class TestExtractionGaps:
         # rather than the inner one being swallowed by the outer.
         links, _, _ = extract_discovered_links(
             '<a href="/x">outer <a href="/y">inner</a></a>',
-            "http://e.com/",
+            _url("http://e.com/"),
         )
-        hrefs = {entry.normalized_url for entry in links}
+        hrefs = {entry.normalized_url.raw for entry in links}
         assert "http://e.com/x" in hrefs
         assert "http://e.com/y" in hrefs
 
     def test_duplicate_href(self):
         links, count, _ = extract_discovered_links(
             '<a href="/x">a</a><a href="/x">b</a>',
-            "http://e.com/",
+            _url("http://e.com/"),
         )
         assert len(links) == 1
         assert count == 1
 
     def test_max_links_truncation(self):
         html = "".join(f'<a href="/{i}">x</a>' for i in range(5))
-        links, count, truncated = extract_discovered_links(html, "http://e.com/", max_links=2)
+        links, count, truncated = extract_discovered_links(html, _url("http://e.com/"), max_links=2)
         assert len(links) == 2
         assert truncated
         assert count == 5
@@ -761,7 +755,7 @@ class TestExtractionGaps:
             '<frameset><frame src="/a"></frameset>'
             '<form action="/s" method="post"><input name="q" value="1"></form>'
         )
-        diag = html_diagnostics(html, "http://e.com/")
+        diag = html_diagnostics(html, _url("http://e.com/"))
         assert "frames" in diag
         assert "forms" in diag
         assert diag["frames"]
@@ -785,7 +779,7 @@ class TestTrafilaturaChatterIsSuppressed:
 
     @pytest.mark.parametrize("html", ["", "<html><body></body></html>", "<div></div>"])
     def test_empty_and_fragment_html_emits_no_trafilatura_error(self, html, caplog):
-        extraction.extract_html(html, url="http://example.com/")
+        extraction.extract_html(html, url=_url("http://example.com/"))
 
         trafilatura_records = [r for r in caplog.records if r.name.startswith("trafilatura")]
         errors = [r for r in trafilatura_records if r.levelno >= logging.ERROR]
@@ -798,7 +792,7 @@ class TestTrafilaturaChatterIsSuppressed:
     def test_real_html_still_extracts_and_logs_no_error(self, caplog):
         out = extraction.extract_html(
             "<html><body><article><h1>Title</h1><p>Real body text here.</p></article></body></html>",
-            url="http://example.com/",
+            url=_url("http://example.com/"),
         )
         assert out.text and "Real body text" in out.text
         errors = [
@@ -826,7 +820,7 @@ def test_selector_on_non_html_is_reported_not_silently_dropped(caplog):
     pdf = b"%PDF-1.7\n1 0 obj\n<< /Type /Catalog >>\nendobj\ntrailer\n%%EOF\n"
     with caplog.at_level(logging.WARNING, logger="app.crawl.extraction"):
         result = extraction_mod.extract_content(
-            pdf, "application/pdf", "http://example.com/doc.pdf", selectors=Selectors(css="#agenda")
+            pdf, "application/pdf", _url("http://example.com/doc.pdf"), selectors=Selectors(css="#agenda")
         )
     assert "extraction_selector_ignored_non_html" in caplog.text, (
         "a selector supplied for a PDF was dropped with no warning; the caller "
@@ -851,7 +845,7 @@ def test_selector_on_non_html_is_reported_not_silently_dropped(caplog):
     # No selector, no warning: the common path must stay quiet.
     caplog.clear()
     with caplog.at_level(logging.WARNING, logger="app.crawl.extraction"):
-        extraction_mod.extract_content(pdf, "application/pdf", "http://example.com/doc.pdf")
+        extraction_mod.extract_content(pdf, "application/pdf", _url("http://example.com/doc.pdf"))
     assert "extraction_selector_ignored_non_html" not in caplog.text, caplog.text
 
 

@@ -40,6 +40,7 @@ from __future__ import annotations
 from typing import Protocol
 
 from app.models.http_fetch_result import HttpFetchResult
+from app.models.normalized_url import NormalizedUrl
 
 
 class HttpFetcher(Protocol):
@@ -61,7 +62,7 @@ class HttpFetcher(Protocol):
 
     async def __call__(
         self,
-        url: str,
+        url: NormalizedUrl,
         headers: dict[str, str],
         timeout_seconds: int,
         max_content_length: int = ...,

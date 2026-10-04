@@ -34,6 +34,7 @@ from tests.chokepoint_walks import (
 # (`impersonating_fetcher`), not a second function, so the contract's parameters
 # are spelled once in the whole tree and there is no twin to keep in step.
 _CONCRETE_FETCHERS = [pytest.param(default_http_fetcher, id="default_http_fetcher")]
+from tests._result_builders import _admit, _link
 
 
 def _unbound_call(protocol: type, *, resolve_annotations: bool = True) -> inspect.Signature:
@@ -190,9 +191,11 @@ def test_http_fetcher_alias_carries_the_documented_argument_types():
     """The alias is the documented contract, so its argument types must be the
     (url, headers, timeout_seconds, max_content_length) tuple the concrete
     fetchers accept -- not the three-parameter shape it drifted to."""
+    from app.models.normalized_url import NormalizedUrl
+
     alias = _http_fetcher_alias_signature()
     assert [param.annotation for param in _parameters_of_kind(alias, _POSITIONAL)] == [
-        str,
+        NormalizedUrl,
         dict[str, str],
         int,
         int,
@@ -242,6 +245,13 @@ def _concrete_fetchers_in_app() -> list[tuple[str, str, ast.AsyncFunctionDef]]:
                 continue
             returns = node.returns
             if not (isinstance(returns, ast.Name) and returns.id == "HttpFetchResult"):
+                continue
+            # A function whose first parameter IS a fetcher is a dispatcher,
+            # not a fetcher: it invokes the callable it was handed, so the
+            # engine cannot bind it by name as a fetcher implementation.
+            first_args = [*node.args.posonlyargs, *node.args.args]
+            first = first_args[0].annotation if first_args else None
+            if isinstance(first, ast.Name) and first.id == "HttpFetcher":
                 continue
             found.append((path.name, node.name, node))
     return found
@@ -412,9 +422,12 @@ class TestNormalizedUrlIsAValueNotAString:
     the constructor is the admission decision -- there is no way to hold one
     without having proved the host.
 
-    Two positions therefore carry TEXT rather than the value, and this class pins
-    both, because the difference is the whole point: ``AdmittedLink`` is the door
-    the scheduler queues from, and a wire record is rebuilt from spill JSON.
+    The records that survive a round trip therefore carry the value in their
+    FIELDS and lend text only at the wire edge: ``to_dict`` projects every URL
+    to ``.raw`` and ``from_wire`` re-admits it under the caller's policy, so
+    spill JSON never holds a value object and a stored URL never re-enters the
+    process unadmitted. The queue door (``AdmittedLink``) holds the value for
+    the same reason -- it is the boundary the scheduler queues from.
     """
 
     def test_the_type_is_a_value_not_a_newtype_over_str(self):
@@ -435,17 +448,30 @@ class TestNormalizedUrlIsAValueNotAString:
 
         assert get_type_hints(AdmittedLink)["normalized_url"] is NormalizedUrl
 
-    def test_wire_and_queue_records_carry_text(self):
+    def test_records_carry_the_value_and_the_wire_carries_text(self):
         from typing import get_type_hints
 
         from app.models.crawl_task import CrawlTask
         from app.models.discovered_link import DiscoveredLink
+        from app.models.normalized_url import NormalizedUrl
+        from app.models.serialization import to_dict
 
         # Both cross a boundary: ``DiscoveredLink`` is rebuilt from the spill
-        # file, and ``CrawlTask`` is persisted. A value has no JSON form, so
-        # pretending otherwise here is what made the spill raise.
-        assert get_type_hints(DiscoveredLink)["normalized_url"] is str
-        assert get_type_hints(CrawlTask)["normalized_url"] is str
+        # file, and ``CrawlTask`` is persisted. The FIELD holds the admitted
+        # value; ``to_dict`` is the edge that lends it text, and asserting the
+        # projection (not just the annotation) is what proves the round trip
+        # can actually be written.
+        assert get_type_hints(DiscoveredLink)["normalized_url"] is NormalizedUrl
+        assert get_type_hints(CrawlTask)["normalized_url"] is NormalizedUrl
+        task = CrawlTask(
+            index=0,
+            original_url="http://a.test/x",
+            normalized_url=_admit("http://a.test/x"),
+            domain="a.test",
+        )
+        link = _link("http://a.test/x", "http://a.test/")
+        assert isinstance(to_dict(task)["normalized_url"], str)
+        assert isinstance(to_dict(link)["normalized_url"], str)
 
     def test_the_constructor_is_the_admission_decision(self, monkeypatch):
         from app.models.host_policy import HostPolicy

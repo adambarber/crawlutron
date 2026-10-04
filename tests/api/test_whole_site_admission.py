@@ -38,7 +38,7 @@ from tests._job_harnesses import (
     run_seeded_scripted_job,
     write_row_policy,
 )
-from tests._result_builders import _canned_result, _scripted_result_map
+from tests._result_builders import _admit, _canned_result, _scripted_result_map
 
 #: The one link every admission test here expects to survive, and the root it is
 #: discovered from. Named because three tests spelled the URL and three spelled
@@ -76,7 +76,7 @@ def assert_pair_crawled_once(finished, engine, root: str, child: str) -> None:
     asserts the same triple.
     """
     assert engine.attempts == {root: 1, child: 1}
-    assert finished.visited == {root, child}
+    assert finished.visited == {_admit(root), _admit(child)}
     assert len(finished.results) == 2
 
 
@@ -140,7 +140,7 @@ class TestWholeSiteAdmissionContract:
         job = await run_api_job(client, job_store, root, engine, policy)
         assert engine.attempts == {root: 1, **{url: 1 for url in admitted}}
         assert job.stats["total_discovered"] == len(admitted)
-        assert job.visited == {root, *admitted}
+        assert job.visited == {_admit(root), *(_admit(u) for u in admitted)}
         return job
 
     async def test_depth_zero_does_not_expand(self, client, job_store):
@@ -198,7 +198,7 @@ class TestWholeSiteAdmissionContract:
             job_store, root, self._policy(1, 2), engine, frontier=[root, second, third]
         )
         assert engine.attempts == {root: 1, second: 1}
-        assert finished.visited == {"https://example.test/root", "https://example.test/second"}
+        assert finished.visited == {_admit("https://example.test/root"), _admit("https://example.test/second")}
         assert finished.frontier == []
         assert finished.stats["cap_truncated"] == 1
 
@@ -216,7 +216,7 @@ class TestWholeSiteAdmissionContract:
             running=True,
         )
         assert engine.attempts == {first: 1, second: 1}
-        assert finished.visited == {"https://example.test/first", "https://example.test/second"}
+        assert finished.visited == {_admit("https://example.test/first"), _admit("https://example.test/second")}
         assert finished.stats["cap_overcommitted"] == 1
 
     async def test_canonical_root_alias_counts_once(self, client, job_store):
@@ -224,7 +224,7 @@ class TestWholeSiteAdmissionContract:
         self_alias = "https://example.test/"
         job = await self._admission_scenario(client, job_store, root, [self_alias], self._policy(1, 2))
 
-        assert job.visited == {root}
+        assert job.visited == {_admit(root)}
         assert len(job.results) == 1
 
     async def test_cap_truncation_is_exposed_by_job_api(self, client, job_store):
@@ -257,7 +257,7 @@ class TestWholeSiteAdmissionContract:
             on_seeded=_corrupt_policy,
         )
         assert finished.status == JobStatus.COMPLETED
-        assert finished.visited == {"https://example.test/root"}
+        assert finished.visited == {_admit("https://example.test/root")}
 
     async def test_job_seeds_sitemap_pages_through_shared_admission(self, client, job_store, monkeypatch):
         root = "https://example.test/root"
@@ -321,7 +321,7 @@ class TestWholeSiteAdmissionContract:
         )
 
         assert committed == [("example.test", 3.0)]
-        assert job.visited == {root, child}
+        assert job.visited == {_admit(root), _admit(child)}
 
     async def test_in_flight_batch_discovering_each_other_does_not_double_crawl(self, job_store):
         root = "https://example.test/root"
@@ -339,7 +339,7 @@ class TestWholeSiteAdmissionContract:
             job_store, root, self._policy(1, 2), engine, frontier=[root, root_alias, child]
         )
         assert engine.attempts == {root: 1, child: 1}
-        assert finished.visited == {root, child}
+        assert finished.visited == {_admit(root), _admit(child)}
         assert finished.stats["cap_truncated"] == 0
 
     async def test_chunked_in_flight_recovery_never_loses_admitted_urls(self, job_store):
@@ -349,7 +349,7 @@ class TestWholeSiteAdmissionContract:
             job_store, urls[0], self._policy(1, 2), engine, frontier=[], in_flight=urls, running=True
         )
         assert engine.attempts == {url: 1 for url in urls}
-        assert finished.visited == set(urls)
+        assert finished.visited == {_admit(u) for u in urls}
         assert finished.in_flight == []
         assert finished.stats["cap_overcommitted"] == 1
 
@@ -418,5 +418,5 @@ class TestWholeSiteAdmissionContract:
         )
 
         assert job.stats["total_discovered"] == 2
-        assert job.visited == {root, child, other}
+        assert job.visited == {_admit(root), _admit(child), _admit(other)}
         assert len(job.results) == 3

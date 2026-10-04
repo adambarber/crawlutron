@@ -8,7 +8,7 @@ import pytest
 
 import app.crawl.strategies.pinned_transport as http_mod
 from app.crawl.strategies.pinned_transport import check_ssrf_protection, resolve_and_pin_host
-from app.models.normalized_url import normalize_public_http_url
+from app.models.normalized_url import NormalizedUrl
 from app.safe_url import SafeUrl
 from app.validation import HostPolicy
 from tests._assertions import (
@@ -129,13 +129,13 @@ def _unresolvable_host(monkeypatch, *, allow_private: str = "0") -> None:
     monkeypatch.setenv("CRAWLUTRON_ALLOW_PRIVATE_TARGETS", allow_private)
 
 
-def testcheck_ssrf_protection_blocks_unresolvable_host(monkeypatch):
+def test_check_ssrf_protection_blocks_unresolvable_host(monkeypatch):
     _unresolvable_host(monkeypatch)
     with pytest.raises(ValueError):
         http_mod.check_ssrf_protection("http://nonexistent.invalid/")
 
 
-def testresolve_and_pin_host_fails_closed_when_resolution_fails(monkeypatch):
+def test_resolve_and_pin_host_fails_closed_when_resolution_fails(monkeypatch):
     """An unresolvable host must be refused, not handed back for re-resolution.
 
     Returning ``(hostname, hostname)`` here does not merely avoid loopback: it
@@ -155,7 +155,7 @@ def testresolve_and_pin_host_fails_closed_when_resolution_fails(monkeypatch):
         http_mod.resolve_and_pin_host("http://nonexistent.invalid/")
 
 
-def testresolve_and_pin_host_escape_hatch_survives_resolution_failure(monkeypatch):
+def test_resolve_and_pin_host_escape_hatch_survives_resolution_failure(monkeypatch):
     """The local-dev escape hatch is the ONLY path that returns an unpinned host.
 
     ``allow_private_targets()`` exists so a developer can crawl a service on
@@ -204,28 +204,28 @@ def test_safe_url_parse_surfaces_unresolvable_host_as_an_ssrf_refusal(monkeypatc
 
 
 class TestSSRFProtection:
-    def testcheck_ssrf_protection_blocks_private_targets(self, monkeypatch):
+    def test_check_ssrf_protection_blocks_private_targets(self, monkeypatch):
         block_private_targets(monkeypatch)
         for target in ["http://localhost:8080/", "http://127.0.0.1:8080/", "http://192.168.1.1:8080/"]:
             with pytest.raises(ValueError):
                 check_ssrf_protection(target)
 
-    def testcheck_ssrf_protection_allows_public_ip(self, monkeypatch):
+    def test_check_ssrf_protection_allows_public_ip(self, monkeypatch):
         # Should not raise for a public IP.
         with host_resolves_to(monkeypatch, "8.8.8.8"):
             check_ssrf_protection("http://8.8.8.8:8080/")
 
-    def testresolve_and_pin_host_pins_first_public_ip(self, monkeypatch):
+    def test_resolve_and_pin_host_pins_first_public_ip(self, monkeypatch):
         with host_resolves_to(monkeypatch, "1.2.3.4"):
             hostname, ip = resolve_and_pin_host("http://example.com:8080/")
         assert hostname == "example.com"
         assert ip == "1.2.3.4"
 
-    def test_normalize_public_http_url_blocks_private(self, monkeypatch):
+    def test_admission_blocks_private_targets(self, monkeypatch):
         block_private_targets(monkeypatch)
         for target in ["http://localhost:8080/", "http://127.0.0.1:8080/", "http://10.0.0.1:8080/"]:
             with pytest.raises(ValueError, match="private"):
-                normalize_public_http_url(target, policy=HostPolicy.unrestricted())
+                NormalizedUrl(target, policy=HostPolicy.unrestricted())
 
     def test_hostname_resolved_only_once(self, monkeypatch):
         """The SSRF check must resolve the hostname exactly once.
@@ -269,21 +269,26 @@ class TestFrontierIdentityRefusesRejectedTargets:
 
         assert _frontier_identity(target, host_policy=HostPolicy.unrestricted()) is None
 
-    def test_every_entry_shape_is_covered(self, monkeypatch):
-        """The refusal must not depend on which shape the value arrived in.
+    def test_every_raw_text_shape_is_covered(self, monkeypatch):
+        """The refusal must not depend on which shape the raw text arrived in.
 
-        ``_frontier_identity`` accepts a bare string, a ``FrontierEntry``, a
-        ``(key, entry)`` tuple, a dict and any object with ``normalized_url``.
-        A guard that only pins the string case leaves the other four open.
+        ``_frontier_identity`` accepts a bare string, a dict and any object
+        with ``normalized_url`` -- the three shapes that can still carry
+        unadmitted text. A guard that only pins the string case leaves the
+        other two open.
+
+        ``FrontierEntry`` (and the ``(key, entry)`` tuples wrapping it) is not
+        in this list: its ``url`` is an admitted value by construction -- the
+        storage read edge refuses bad rows before an entry can hold one -- so
+        an entry carrying a rejected target is unconstructable through
+        production paths and this helper takes its identity definitionally.
         """
         block_private_targets(monkeypatch)
         from app.crawl.admission import _frontier_identity
-        from app.crawl.job_store import FrontierEntry
 
         target = "http://169.254.169.254/latest/meta-data/"
         policy = HostPolicy.unrestricted()
-        entry = FrontierEntry(url=target, depth=1)
-        shapes = [target, {"url": target}, entry, ("k", entry), type("S", (), {"normalized_url": target})()]
+        shapes = [target, {"url": target}, type("S", (), {"normalized_url": target})()]
         for shape in shapes:
             label = type(shape).__name__
             assert _frontier_identity(shape, host_policy=policy) is None, (
@@ -313,7 +318,11 @@ class TestFrontierIdentityRefusesRejectedTargets:
         from app.crawl.admission import _frontier_identity
 
         got = _frontier_identity("https://example.gov/page/", host_policy=HostPolicy.unrestricted())
-        assert got == "https://example.gov/page", f"a public target lost its identity: {got!r}"
+        # The identity is the admitted value, and its text is the page's
+        # durable identity.
+        assert got is not None and got.raw == "https://example.gov/page", (
+            f"a public target lost its identity: {got!r}"
+        )
 
 
 class TestSsrfDnsPinning:

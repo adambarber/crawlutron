@@ -23,6 +23,7 @@ _default_http_fetcher_with_policy = partial(
     default_http_fetcher,
     policy=HostPolicy.unrestricted(),
 )
+from tests._result_builders import _admit
 
 
 def http_policy(**overrides):
@@ -112,7 +113,7 @@ class TestHttpStrategy:
             cache=cache,
             content_cache=None,
         )
-        robot_calls = [h for u, h in recorded if u.endswith("/robots.txt")]
+        robot_calls = [h for u, h in recorded if u.raw.endswith("/robots.txt")]
         assert robot_calls, "discovery never fetched robots.txt"
         for headers in robot_calls:
             lower = {k.lower() for k in headers}
@@ -146,7 +147,7 @@ class TestHttpStrategy:
         assert "Example Org" in (result.markdown or "")
         assert result.discovered_link_count == 0
         assert result.discovered_links == []
-        assert result.next_page_url == f"{base_url}/page2"
+        assert result.next_page_url == _admit(f"{base_url}/page2")
         assert result.http_status == 200
 
     async def test_http_strategy_404_classified_not_found(self, base_url):
@@ -167,7 +168,7 @@ class TestHttpStrategy:
     async def test_http_conditional_cache_returns_not_modified_on_304(self, base_url):
         url = f"{base_url}/with_etag"
         cache = HttpCache()
-        cache.store(url, {"etag": "v1"})
+        cache.store(_admit(url), {"etag": "v1"})
         result = await _run(
             url=url,
             cache=cache,
@@ -199,9 +200,9 @@ class TestHttpStrategy:
         assert "| Alice | Engineering | 120000 |" in (result.markdown or "")
 
     def test_looks_like_binary_body_detects_archives(self):
-        assert looks_like_binary_body(b"PK\x03\x04", "application/octet-stream", "http://x/a.zip")
-        assert not looks_like_binary_body(b"<html>", "text/html", "http://x/")
-        assert not looks_like_binary_body(b"%PDF-1.4", "application/pdf", "http://x/a.pdf")
+        assert looks_like_binary_body(b"PK\x03\x04", "application/octet-stream", _admit("http://x/a.zip"))
+        assert not looks_like_binary_body(b"<html>", "text/html", _admit("http://x/"))
+        assert not looks_like_binary_body(b"%PDF-1.4", "application/pdf", _admit("http://x/a.pdf"))
 
     async def test_crawl_request_async_returns_unified_results_dict(self, base_url):
         from tests._fetcher_factories import crawl_homepage_async

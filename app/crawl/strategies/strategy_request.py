@@ -10,6 +10,7 @@ from dataclasses import dataclass
 
 from app.models.crawl_policy import CrawlPolicy
 from app.models.host_policy import HostPolicy
+from app.models.normalized_url import NormalizedUrl
 from app.models.taxonomy import CrawlStrategyName
 
 
@@ -29,7 +30,7 @@ class StrategyRequest:
     """
 
     original_url: str
-    normalized_url: str
+    normalized_url: NormalizedUrl
     strategy: CrawlStrategyName
     policy: CrawlPolicy
     host_policy: HostPolicy

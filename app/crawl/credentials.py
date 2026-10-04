@@ -25,6 +25,7 @@ from collections.abc import Mapping
 from urllib.parse import urlsplit
 
 from app.models.credential import Credential
+from app.models.normalized_url import NormalizedUrl
 
 __all__ = ["apply_credentials", "authorization_value", "origin_of"]
 
@@ -68,7 +69,7 @@ def authorization_value(credential: Credential) -> str:
 
 def apply_credentials(
     headers: dict[str, str],
-    url: str,
+    url: NormalizedUrl,
     credentials: Mapping[str, Credential],
 ) -> dict[str, str]:
     """Attach the Authorization header iff ``url``'s origin holds one.
@@ -79,10 +80,7 @@ def apply_credentials(
     """
     if not credentials:
         return headers
-    try:
-        origin = origin_of(url)
-    except ValueError:
-        return headers
+    origin = url.origin
     credential = credentials.get(origin)
     if credential is not None:
         headers["Authorization"] = authorization_value(credential)

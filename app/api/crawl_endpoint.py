@@ -18,6 +18,9 @@ import time
 from collections.abc import Awaitable
 from typing import Any
 
+from fastapi.responses import JSONResponse
+from starlette.responses import Response
+
 from fastapi import HTTPException, Request
 from fastapi.responses import JSONResponse, Response
 
@@ -198,7 +201,7 @@ async def get_crawl_result(
     request_id: str,
     job_store,
     result_store,
-) -> UnifiedCrawlResponse:
+) -> Response:
     """Retrieve a completed crawl response by request_id.
 
     Answers 200 only for a job in a terminal state. A job that has written its
@@ -226,10 +229,18 @@ async def get_crawl_result(
             {"status": job.status.value},
         )
     stored = await result_store.aget(request_id)
+    # A replay is bytes, not values. The stored payload is the response
+    # model's own dump -- the documented wire shape itself -- so serving it
+    # directly answers the request byte-for-byte. Rebuilding models from it
+    # would re-validate URL fields, and admission is the constructor's job
+    # with a policy the cache does not own: the value discipline governs
+    # ingress (crawl results entering the response), not the replay of an
+    # already-shaped record.
     if stored is not None:
-        return UnifiedCrawlResponse(**stored)
+        return JSONResponse(content=stored)
     if job is not None and job.kind == JobKind.SINGLE_SHOT and job.results:
-        return UnifiedCrawlResponse(**job.results[0])
+        # Same wire payload, written by the runner to the job's results.
+        return JSONResponse(content=job.results[0])
     raise http_error(404, "not_found", f"Unknown or expired request_id: {request_id}")
 
 

@@ -18,14 +18,15 @@ from app.constants import ResultStatus
 from app.models.crawl_result import CrawlStrategyAttempt
 from app.models.discovered_link import DiscoveredLink
 from app.models.literal_checked import LiteralChecked
+from app.models.normalized_url import NormalizedUrl
 from app.models.taxonomy import Classification, CrawlError, CrawlStrategyName
 
 
 @dataclass(frozen=True)
 class EngineCrawlResult(LiteralChecked):
     original_url: str
-    normalized_url: str | None
-    final_url: str | None
+    normalized_url: NormalizedUrl | None
+    final_url: NormalizedUrl | None
     status: ResultStatus
     classification: Classification
     selected_strategy: CrawlStrategyName | None
@@ -44,7 +45,7 @@ class EngineCrawlResult(LiteralChecked):
     discovered_links: list[DiscoveredLink] = field(default_factory=list)
     error: CrawlError | None = None
     markdown: str | None = None
-    next_page_url: str | None = None
+    next_page_url: NormalizedUrl | None = None
     # Origin validators for the delivered representation ("etag"/"last_modified").
     # Empty when the origin supplied none; surfaced so callers can revalidate
     # conditionally on later requests (freshness monitoring).

@@ -12,7 +12,7 @@ from app.models.engine_crawl_result import EngineCrawlResult
 from app.models.taxonomy import Classification
 from app.scheduler import _COOLDOWN_PURGE_INTERVAL, DomainScheduler, jittered_delay
 from tests._policy_factories import canonical
-from tests._result_builders import make_job, make_result
+from tests._result_builders import _admit, make_job, make_result
 from tests._scheduler_doubles import (
     FailingSink,
     engine_envelope,
@@ -61,6 +61,12 @@ class TestScheduler:
         remaining window, and that ask is the behaviour under test. The
         worker's own assertion pins the ordering -- it fails if the cooldown
         branch is skipped, or if the cooldown is ever moved behind the worker.
+
+        The 90%-of-window floor (0.27 of 0.3) is not the whole window on
+        purpose: the remaining window shrinks by whatever the test itself
+        spends between ``set_domain_cooldown`` and ``run`` -- admitting the
+        job's URL, building the scheduler's gates -- so an exact-0.29 floor
+        flakes on a loaded box while saying nothing more about the scheduler.
         """
         sleeps = recorder(monkeypatch)
         scheduler = make_scheduler(delay_seconds=0.05)
@@ -68,7 +74,7 @@ class TestScheduler:
         job = make_job(0, "http://example.com/")
 
         async def worker(ran_job: CrawlJob) -> EngineCrawlResult:
-            assert sleeps.requests_over(0.29), (
+            assert sleeps.requests_over(0.27), (
                 "the worker ran before the domain cooldown was awaited; the "
                 f"recorded sleep requests were {sleeps.delays}"
             )
@@ -80,7 +86,7 @@ class TestScheduler:
         results = await scheduler.run([job], worker, failed_result=engine_envelope)
         assert results is not None
         assert results[0].status == "success"
-        assert sleeps.requests_over(0.29), (
+        assert sleeps.requests_over(0.27), (
             f"no cooldown sleep was requested at all (requests: {sleeps.delays})"
         )
 
@@ -93,7 +99,7 @@ class TestScheduler:
         # with its own job regardless of completion order.
         assert sorted(results) == [0, 1, 2]
         assert [results[i].normalized_url for i in sorted(results)] == [
-            f"http://example.com/{i}" for i in range(3)
+            _admit(f"http://example.com/{i}") for i in range(3)
         ]
 
     async def test_delay_applied_between_same_domain_jobs(self, monkeypatch):
@@ -259,7 +265,7 @@ class TestCircuitBreakerSpillsOnResult:
         job = CrawlTask(
             index=0,
             original_url="http://example.com/",
-            normalized_url=canonical("http://example.com/"),
+            normalized_url=_admit(canonical("http://example.com/")),
             domain="example.com",
         )
         # The bug raises TypeError inside gather with return_exceptions=True,
@@ -492,7 +498,7 @@ class TestSchedulerPolicies:
         assert sorted(ret) == [0, 1, 2, 3]
         # Canonical, not the seed text: the job's URL is an admitted value, so the
         # trailing slash the seed carried is gone by the time it is a job member.
-        assert [ret[i].normalized_url for i in sorted(ret)] == [f"http://h{i}.example.com" for i in range(4)]
+        assert [ret[i].normalized_url for i in sorted(ret)] == [_admit(f"http://h{i}.example.com") for i in range(4)]
 
 
 class TestCooldownPurgeCadence:
@@ -571,11 +577,11 @@ class TestSchedulerResilience:
         assert len(results) == 3, results
         assert results[1].status == "failed"
         assert results[1].classification == "network_error"
-        assert results[1].normalized_url == "http://example.com/1"
+        assert results[1].normalized_url == _admit("http://example.com/1")
         assert all(r.status == "success" for i, r in results.items() if i != 1)
         assert {r.normalized_url for i, r in results.items() if i != 1} == {
-            "http://example.com/0",
-            "http://example.com/2",
+            _admit("http://example.com/0"),
+            _admit("http://example.com/2"),
         }
 
 

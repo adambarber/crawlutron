@@ -14,6 +14,7 @@ import app.crawl.strategies.http_client_pool as http_mod
 from app.constants import HTTP_CFFI_IMPERSONATE
 from app.crawl.strategies.fetchers import impersonating_fetcher
 from app.validation import HostPolicy
+from tests._result_builders import _admit
 from tests._fetch_outcome import FetchFailed
 from tests._fetcher_factories import scripted_fetcher, strategy_request
 from tests._policy_factories import make_base_policy
@@ -60,7 +61,7 @@ class TestCffiFetcherLiveFetch:
 
         server = spawn_server()
         try:
-            result = await _DEFAULT_CFFI_FETCHER(server.base_url + "/", {}, 10)
+            result = await _DEFAULT_CFFI_FETCHER(_admit(server.base_url + "/"), {}, 10)
             assert result.status_code == 200
         finally:
             server.stop()
@@ -171,7 +172,7 @@ async def test_request_exception_from_the_queue_releases_the_handle(
         stub_builder, monkeypatch, [b"partial", RequestException("boom")]
     )
 
-    result = await _DEFAULT_CFFI_FETCHER(url, {}, 5, 4096)
+    result = await _DEFAULT_CFFI_FETCHER(_admit(url), {}, 5, 4096)
 
     assert result.status_code == 200, "the documented httpx fallback must still serve"
     # Served by the local server, so this is the fallback and not the scripted cffi
@@ -194,7 +195,7 @@ async def test_cancellation_of_the_queue_wait_releases_the_handle(stub_builder, 
         stub_builder, monkeypatch, [b"first"]
     )  # then the producer wedges
 
-    fetch = asyncio.create_task(_DEFAULT_CFFI_FETCHER(URL, {}, 5, 4096))
+    fetch = asyncio.create_task(_DEFAULT_CFFI_FETCHER(_admit(URL), {}, 5, 4096))
     await await_until(
         lambda: bool(session.gets) and response.queue.drained,
         "the cffi fetch never reached the streaming queue wait",
@@ -217,7 +218,7 @@ async def test_cap_exceeded_and_still_releases_exactly_once(stub_builder, monkey
     """
     response, _session, released = _scripted_stream(stub_builder, monkeypatch, [b"x" * 100] * 5)
 
-    result = await _DEFAULT_CFFI_FETCHER(URL, {}, 5, 50)
+    result = await _DEFAULT_CFFI_FETCHER(_admit(URL), {}, 5, 50)
 
     assert result.status_code == 413
     assert len(released) == 1, f"expected one release, got {len(released)}"
@@ -234,7 +235,7 @@ async def test_clean_stream_end_awaits_the_close_and_never_abandons(stub_builder
         stub_builder, monkeypatch, [b"<html>ok</html>", STREAM_END]
     )
 
-    result = await _DEFAULT_CFFI_FETCHER(URL, {}, 5, 4096)
+    result = await _DEFAULT_CFFI_FETCHER(_admit(URL), {}, 5, 4096)
 
     assert result.status_code == 200
     assert released == [], "a completed stream must be closed, not abandoned"
@@ -398,7 +399,7 @@ async def _capped_fetch(monkeypatch, body_size: int):
     something else.
     """
     _patch_client(monkeypatch, b"x" * body_size)
-    return await _DEFAULT_CFFI_FETCHER("http://example.test/page", {}, 10, 64)
+    return await _DEFAULT_CFFI_FETCHER(_admit("http://example.test/page"), {}, 10, 64)
 
 
 class TestCffiStreamingCap:
@@ -426,7 +427,7 @@ class TestCffiStreamingCap:
 async def _fetch_twice(base_url):
 
     async def one():
-        return await _DEFAULT_CFFI_FETCHER(base_url + "/", {}, 10, 1024 * 1024)
+        return await _DEFAULT_CFFI_FETCHER(_admit(base_url + "/"), {}, 10, 1024 * 1024)
 
     r1 = await one()
     r2 = await one()
@@ -499,7 +500,7 @@ async def test_cffi_missing_falls_back_to_httpx(monkeypatch, counting_server):
     monkeypatch.setitem(sys.modules, "curl_cffi.requests", None)
     url = f"http://127.0.0.1:{counting_server.server_port}/"
     try:
-        resp = await _DEFAULT_CFFI_FETCHER(url, {}, 5, 1024)
+        resp = await _DEFAULT_CFFI_FETCHER(_admit(url), {}, 5, 1024)
     finally:
         await http_mod.close_cffi_session()
     assert resp.status_code == 200

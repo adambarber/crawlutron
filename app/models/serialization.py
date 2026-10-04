@@ -22,6 +22,8 @@ from typing import Any, TypeVar, Union, cast, get_args, get_origin, get_type_hin
 
 from app.models.crawl_result import CrawlResult
 from app.models.engine_crawl_result import EngineCrawlResult
+from app.models.host_policy import HostPolicy
+from app.models.normalized_url import NormalizedUrl
 
 _ResultT = TypeVar("_ResultT", bound=Any)
 
@@ -86,6 +88,8 @@ def _to_jsonable_impl(value: Any, seen: set[int]) -> Any:
     # new one. Primitives skip it: they cannot cycle, and small strings may be
     # interned and share an id across the tree, so flagging them would truncate
     # valid results.
+    if isinstance(value, NormalizedUrl):
+        return value.raw
     if is_dataclass(value) and not isinstance(value, type):
         return _build_guarded(
             value,
@@ -103,8 +107,13 @@ def _to_jsonable_impl(value: Any, seen: set[int]) -> Any:
     return value
 
 
-def from_wire[ResultT: Any](cls: type[ResultT], payload: Mapping[str, Any]) -> ResultT:
+def from_wire[ResultT: Any](cls: type[ResultT], payload: Mapping[str, Any], *, policy: HostPolicy) -> ResultT:
     """Rebuild a result dataclass from the record :func:`to_dict` wrote.
+
+    policy`` re-admits every ``NormalizedUrl`` the record carries: a spill row
+    is the canonical string it wrote, and rebuilding re-runs the constructor,
+    so a result written under one SSRF posture cannot come back under another.
+    That makes the read a consistency check rather than a blind trust of the file.
 
     The inverse half of ONE declaration, described in this module's preamble.
 
@@ -118,10 +127,10 @@ def from_wire[ResultT: Any](cls: type[ResultT], payload: Mapping[str, Any]) -> R
     # than a gap in the contract: pyright cannot call a value whose type is a
     # TypeVar bound to the class parameter. What comes back IS `cls`, built from
     # its own fields, with ``__post_init__`` having already validated them.
-    return cast(ResultT, _rebuild_dataclass(cls, payload))
+    return cast(ResultT, _rebuild_dataclass(cls, payload, policy=policy))
 
 
-def _rebuild_value(annotation: Any, value: Any) -> Any:
+def _rebuild_value(annotation: Any, value: Any, *, policy: HostPolicy) -> Any:
     """One value from a serialized record, put back to its declared shape.
 
     Only structure is rebuilt: a nested dataclass becomes a dataclass again, and
@@ -132,21 +141,23 @@ def _rebuild_value(annotation: Any, value: Any) -> Any:
     ``LiteralChecked.__post_init__``, so this adds no second spelling of the
     validation.
     """
+    if annotation is NormalizedUrl:
+        return NormalizedUrl(value, policy=policy)
     if is_dataclass(annotation):
-        return _rebuild_dataclass(annotation, value) if isinstance(value, Mapping) else value
+        return _rebuild_dataclass(annotation, value, policy=policy) if isinstance(value, Mapping) else value
     origin = get_origin(annotation)
     if origin is list and isinstance(value, list):
         args = get_args(annotation)
         (item,) = args if len(args) == 1 else (Any,)
-        return [_rebuild_value(item, element) for element in value]
+        return [_rebuild_value(item, element, policy=policy) for element in value]
     if origin in (Union, types.UnionType) and value is not None:
         members = [member for member in get_args(annotation) if member is not type(None)]
         if len(members) == 1:
-            return _rebuild_value(members[0], value)
+            return _rebuild_value(members[0], value, policy=policy)
     return value
 
 
-def _rebuild_dataclass(cls: Any, payload: Mapping[str, Any]) -> Any:
+def _rebuild_dataclass(cls: Any, payload: Mapping[str, Any], *, policy: HostPolicy) -> Any:
     """The walk itself, untyped because the recursion cannot be.
 
     :func:`from_wire` is the typed door; this is what it calls, and the recursive
@@ -164,5 +175,7 @@ def _rebuild_dataclass(cls: Any, payload: Mapping[str, Any]) -> Any:
                     f"does not carry; the record was not written by to_dict for this class"
                 )
             continue
-        values[declared.name] = _rebuild_value(annotations.get(declared.name), payload[declared.name])
+        values[declared.name] = _rebuild_value(
+            annotations.get(declared.name), payload[declared.name], policy=policy
+        )
     return cls(**values)

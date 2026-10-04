@@ -34,7 +34,7 @@ type _Admitted = tuple[int, CrawlTask]
 
 class _BatchState(Protocol):
     frontier: deque[tuple[int, CrawlTask]]
-    visited: set[str]
+    visited: set[NormalizedUrl]
     ramp: float
     page_count: int
 
@@ -59,8 +59,8 @@ class RecursiveRunState:
 
     scheduler: DomainScheduler
     worker: Callable[[CrawlTask], Awaitable[EngineCrawlResult]]
-    robots_allows: Callable[[str], Awaitable[bool]]
-    robots_crawl_delay: Callable[[str], Awaitable[float | None]] | None
+    robots_allows: Callable[[NormalizedUrl], Awaitable[bool]]
+    robots_crawl_delay: Callable[[NormalizedUrl], Awaitable[float | None]] | None
     robots_disallowed: Callable[[CrawlTask], EngineCrawlResult]
     sitemap_seeds: Callable[[], Awaitable[list[NormalizedUrl]]]
     spill: Any
@@ -226,13 +226,13 @@ async def _resource_admitted_batch(ctx: _BatchContext) -> list[_Admitted]:
 async def _robots_admitted_batch(ctx: _BatchContext, batch: list[_Admitted]) -> list[_Admitted]:
     run, state = ctx.run, ctx.state
     pending: list[_Admitted] = []
-    seen_in_batch: set[str] = set()
+    seen_in_batch: set[NormalizedUrl] = set()
     for depth, job in batch:
         if job.normalized_url in state.visited or job.normalized_url in seen_in_batch:
             continue
         seen_in_batch.add(job.normalized_url)
         pending.append((depth, job))
-    urls: list[str] = [job.normalized_url for _, job in pending]
+    urls: list[NormalizedUrl] = [job.normalized_url for _, job in pending]
     decisions = (
         await gather_robots_decisions(urls, run.robots_allows, run.robots_crawl_delay)
         if run.respect_robots

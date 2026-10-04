@@ -13,10 +13,12 @@ from lxml import etree
 from app.crawl.extraction import extract_post_fetch_discovery
 from app.crawl.policy import read_policy
 from app.models.crawl_policy import CrawlPolicy
+from app.models.normalized_url import NormalizedUrl
 from app.validation import HostPolicy
 from tests._assertions import install_to_thread_spy
 from tests._fetcher_factories import invoke_browser_strategy, invoke_http_strategy, make_fetch
 from tests._policy_factories import http_strategy_policy
+from tests._result_builders import _admit
 
 HTML = (
     "<html><head><title>T</title></head><body>"
@@ -44,7 +46,9 @@ def _page_resp(url):
 #: What the post-fetch block finds in ``HTML``, stated once. Both strategy
 #: builders run that block and hand back the same discoveries, so the
 #: expectation belongs with the page rather than with either path through it.
-EXPECTED_LINKS = frozenset({"http://example.com/p1", "http://example.com/p2", "http://example.com/next"})
+EXPECTED_LINKS = frozenset(
+    _admit(url) for url in ("http://example.com/p1", "http://example.com/p2", "http://example.com/next")
+)
 EXPECTED_JS_ENDPOINTS = [{"url": "http://example.com/api/data"}]
 NEXT_PAGE_URL = "http://example.com/next"
 
@@ -75,7 +79,7 @@ def assert_extracted_discovery(result) -> None:
     assert result.discovered_link_count == len(EXPECTED_LINKS)
     assert {link.normalized_url for link in result.discovered_links} == EXPECTED_LINKS
     assert result.diagnostics["js_endpoints"] == EXPECTED_JS_ENDPOINTS
-    assert result.next_page_url == NEXT_PAGE_URL
+    assert result.next_page_url == _admit(NEXT_PAGE_URL)
 
 
 async def test_http_post_fetch_block_runs_off_loop(monkeypatch):
@@ -108,8 +112,8 @@ async def test_no_lxml_tree_escapes_to_loop(monkeypatch):
     out = await asyncio.to_thread(
         ext_mod.extract_post_fetch_discovery,
         HTML,
-        "http://example.com/",
-        js_base_url="http://example.com/",
+        _admit("http://example.com/"),
+        js_base_url=_admit("http://example.com/"),
         max_links=10,
         include_diagnostics=True,
         include_links=True,
@@ -128,17 +132,22 @@ async def test_no_lxml_tree_escapes_to_loop(monkeypatch):
 
     assert not _has_element(out)
     assert out["discovered_link_count"] == 3
-    assert out["next_page_url"] == "http://example.com/next"
+    assert out["next_page_url"] == _admit("http://example.com/next")
 
 
 def test_html_diagnostics_omit_policy_blocked_frame_and_private_form(monkeypatch):
     monkeypatch.setenv("CRAWLUTRON_ALLOW_PRIVATE_TARGETS", "0")
     html = '<iframe src="https://blocked.test/frame"></iframe><form action="http://127.0.0.1/admin"></form>'
+    # The source carries the policy under test: its own ``resolve`` is the
+    # filter, so admitting it under an unrestricted policy would defeat the
+    # very contract this test pins.
+    policy = HostPolicy.from_strings("allowed.test", "blocked.test")
+    source = NormalizedUrl("https://allowed.test/page", policy=policy)
     result = extract_post_fetch_discovery(
         html,
-        "https://allowed.test/page",
+        source,
         include_diagnostics=True,
-        host_policy=HostPolicy.from_strings("allowed.test", "blocked.test"),
+        host_policy=policy,
     )
     assert result["diagnostics"] == {}
 
@@ -151,8 +160,12 @@ async def test_discovery_feeds_are_policy_filtered():
         '<link rel="alternate" type="application/atom+xml" href="http://127.0.0.1/feed">'
         '<link rel="alternate" type="application/rss+xml" href="https://allowed.test/feed">'
     )
+    # The page value carries the job policy: its own ``resolve`` is what keeps
+    # the blocked-host and private feeds out of the answer.
     result = await discovery_diagnostics(
-        normalized_url="https://allowed.test/page",
+        normalized_url=NormalizedUrl(
+            "https://allowed.test/page", policy=HostPolicy.from_strings("allowed.test", "blocked.test")
+        ),
         html=html,
         policy=read_policy({"discovery": {"feeds": True}}),
         host_policy=HostPolicy.from_strings("allowed.test", "blocked.test"),

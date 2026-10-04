@@ -63,8 +63,8 @@ def _recorded_discovered(out: dict, root_url: str = "http://example.com") -> set
     URL, and a comprehension that keeps whole records instead of URLs, which
     passes for every host and fails for exactly one.
     """
-    root = next(r for r in out["results"] if r.normalized_url == root_url)
-    return {d.normalized_url for d in root.discovered_links}
+    root = next(r for r in out["results"] if r.normalized_url.raw == root_url)
+    return {d.normalized_url.raw for d in root.discovered_links}
 
 
 async def test_scope_records_out_of_scope_links_but_never_fetches_them():
@@ -82,7 +82,7 @@ async def test_scope_records_out_of_scope_links_but_never_fetches_them():
         limits={"max_depth": 1, "max_pages": 10},
         scope_regex=r"^https?://example\.com(/|$)",
     )
-    crawled = {r.normalized_url for r in out["results"]}
+    crawled = {r.normalized_url.raw for r in out["results"]}
     # expansion stayed in scope...
     assert crawled == {"http://example.com", "http://example.com/keep/x"}
     # ...and instagram was never fetched
@@ -103,7 +103,7 @@ async def test_skip_list_hosts_recorded_but_never_enqueued():
         "/local": (200, "<html>l</html>", "text/html"),
     }
     out, fetched = await _crawl_example_site(pages)
-    crawled = {r.normalized_url for r in out["results"]}
+    crawled = {r.normalized_url.raw for r in out["results"]}
     assert crawled == {"http://example.com", "http://example.com/local"}
     assert not any("pinterest.com" in u or "x.com/" in u for u in fetched), fetched
     recorded = _recorded_discovered(out)
@@ -115,7 +115,7 @@ async def test_document_urls_recorded_but_not_fetched_by_default():
     # PDFs/CSVs/etc yield no HTML links: record their URLs when advertised,
     # but never spend bandwidth downloading them during URL discovery.
     out, fetched = await _crawl_example_site(_doc_pages())
-    crawled = {r.normalized_url for r in out["results"]}
+    crawled = {r.normalized_url.raw for r in out["results"]}
     assert crawled == {"http://example.com", "http://example.com/local"}
     assert not any(u.endswith(".pdf") for u in fetched)
     assert "http://example.com/reports/2024-minutes.pdf" in _recorded_discovered(out)
@@ -127,7 +127,7 @@ async def test_document_urls_fetched_when_extraction_document_requested():
         {**_doc_pages(), "/reports/2024-minutes.pdf": (200, "%PDF-1.4 minutes", "application/pdf")},
         extraction="document",
     )
-    crawled = {r.normalized_url for r in out["results"]}
+    crawled = {r.normalized_url.raw for r in out["results"]}
     assert "http://example.com/reports/2024-minutes.pdf" in crawled
 
 
@@ -135,8 +135,8 @@ class TestSitemapCandidateBuilderUsesTheCanonicalOrigin:
     """``fetch_job_sitemap_candidates`` re-derived the origin by hand.
 
     It called ``urlparse`` and rebuilt ``scheme://netloc`` itself instead of
-    going through ``normalize_public_http_url``, the function whose docstring
-    says it is the single source of truth for what a normalized URL is. The
+    going through ``NormalizedUrl``, the value whose constructor is the
+    single source of truth for what a normalized URL is. The
     hand-built form keeps a default port, keeps host case, and keeps a trailing
     dot -- so the same job root produced a different sitemap URL depending on
     which spelling the caller happened to store. The policy is also never
@@ -154,7 +154,7 @@ class TestSitemapCandidateBuilderUsesTheCanonicalOrigin:
         seen: list[str] = []
 
         async def _capture(_fetcher, sitemap_url, _timeout, **_kwargs):
-            seen.append(sitemap_url)
+            seen.append(sitemap_url.raw)
             return set()
 
         from app.crawl.admission import JobAdmissionContext
@@ -183,14 +183,11 @@ class TestSitemapCandidateBuilderUsesTheCanonicalOrigin:
         ],
     )
     async def test_the_origin_is_canonical_regardless_of_how_the_root_was_spelled(self, root_url):
-        from urllib.parse import urlsplit
+        from app.models.host_policy import HostPolicy
+        from app.models.normalized_url import NormalizedUrl
 
-        from app.models.normalized_url import normalize_public_http_url
-        from app.validation import HostPolicy
-
-        canonical = normalize_public_http_url(root_url, policy=HostPolicy.unrestricted())
-        parts = urlsplit(canonical.raw)
-        expected = f"{parts.scheme}://{parts.netloc}/sitemap.xml"
+        canonical = NormalizedUrl(root_url, policy=HostPolicy.unrestricted())
+        expected = f"{canonical.origin}/sitemap.xml"
 
         actual = await self._sitemap_url_for(root_url)
         assert actual == expected, f"{root_url!r} -> {actual!r}, canonicalizer says {expected!r}"

@@ -1,20 +1,16 @@
 from app.env import get_env_int
-from app.models.normalized_url import normalize_public_http_url as _normalize_public_http_url
+from app.models.normalized_url import NormalizedUrl, admit_or_none as _admit_or_none
 from app.models.registrable_domain import registrable_domain
-from app.validation import public_url_or_none as _public_url_or_none
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY
 
 
-def normalize_public_http_url(url, *, policy=UNRESTRICTED_HOST_POLICY):
-    return _normalize_public_http_url(url, policy=policy)
-
-
-def public_url_or_none(raw, *, resolve_against=None, policy=UNRESTRICTED_HOST_POLICY):
-    return _public_url_or_none(raw, resolve_against=resolve_against, policy=policy)
+def admit_or_none(candidate, *, policy=UNRESTRICTED_HOST_POLICY):
+    """Production admission with the test default policy pre-bound."""
+    return _admit_or_none(candidate, policy=policy)
 
 
 def assert_url_refused(url: str, policy, reason: str) -> None:
-    """``normalize_public_http_url`` must reject `url` for exactly `reason`.
+    """``NormalizedUrl`` admission must reject `url` for exactly `reason`.
 
     The rejection and the reason are one assertion. Stated as a bare
     ``pytest.raises(ValueError)``, the reason is the part that goes missing: a URL
@@ -24,17 +20,14 @@ def assert_url_refused(url: str, policy, reason: str) -> None:
     """
     import pytest
 
-    from app.models.normalized_url import normalize_public_http_url as normalize
-
     with pytest.raises(ValueError, match=reason):
-        normalize(url, policy=policy)
+        NormalizedUrl(url, policy=policy)
 
 
 __all__ = [
     "UNRESTRICTED_HOST_POLICY",
+    "admit_or_none",
     "assert_url_refused",
     "get_env_int",
-    "normalize_public_http_url",
-    "public_url_or_none",
     "registrable_domain",
 ]

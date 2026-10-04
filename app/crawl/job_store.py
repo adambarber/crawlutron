@@ -15,7 +15,6 @@ import time
 from collections.abc import Iterable
 from dataclasses import asdict, dataclass, field
 from enum import StrEnum
-from functools import lru_cache
 from pathlib import Path
 from typing import Any, TypedDict
 
@@ -26,8 +25,7 @@ from app.crawl.policy import stored_policy as _stored_policy
 from app.crawl.sqlite_store import connect_store, process_lock, store_lock_key
 from app.models.crawl_policy import CrawlPolicy
 from app.models.host_policy import HostPolicy
-from app.models.normalized_url import NormalizedUrl, normalize_public_http_url
-from app.validation import safe_public_url_or_none
+from app.models.normalized_url import NormalizedUrl, admit_or_none
 
 logger = logging.getLogger(__name__)
 
@@ -77,58 +75,11 @@ TERMINAL_STATUSES = frozenset({JobStatus.COMPLETED, JobStatus.FAILED, JobStatus.
 class FrontierEntry:
     """One canonical URL and its admitted crawl depth."""
 
-    url: str
+    url: NormalizedUrl
     depth: int
 
     def to_dict(self) -> dict[str, Any]:
-        return {"url": self.url, "depth": self.depth}
-
-
-# Cap on memoized canonical-identity entries. The job store re-reads the same
-# durable URL set on every loop iteration; the cap keeps a very large crawl's
-# working set bounded while covering the repeated reads that made the old
-# per-read re-derivation expensive.
-_CANONICAL_CACHE_MAX = 50_000
-
-
-@lru_cache(maxsize=_CANONICAL_CACHE_MAX)
-def _canonical_cached(url: str, host_policy: HostPolicy) -> str:
-    return str(safe_public_url_or_none(url, policy=host_policy) or url)
-
-
-def durable_page_identity(url: str | NormalizedUrl, host_policy: HostPolicy) -> str:
-    """Canonical page identity for ``url``, or the raw value when it has none.
-
-    THE definition of the key a URL occupies in ``visited``, ``in_flight`` and
-    ``frontier``. Those three collections have to agree with each other, so the
-    identity is one function rather than the same rule written at each call
-    site; ``tests/invariants/test_page_identity.py`` holds the line.
-
-    The return type is ``str``, and deliberately NOT ``NormalizedUrl``: when
-    ``url`` has no canonical form -- it failed the SSRF policy, or it is not a
-    URL -- the raw value comes back unchanged, and a type that claims otherwise
-    is a claim this function cannot keep. The old spelling inferred that claim
-    from ``canonical_page_identity``'s ``NormalizedUrl | None`` return combined
-    with an ``or url`` at each call site, so it was made eleven times over and
-    read in none. A caller that genuinely needs a ``NormalizedUrl`` converts at
-    the model boundary, where the model makes it ask.
-
-    The parameter accepts an already-admitted ``NormalizedUrl`` as well as raw
-    text because this is the one function whose entire job is "given URL text,
-    produce the key": it is reached from persisted collections and from both
-    record shapes, and a chokepoint that refuses half its callers is a
-    chokepoint callers learn to route around.
-
-    Memoized: the job store re-reads the same durable collections on every loop
-    iteration, and re-deriving identity for every stored URL on every read made
-    a 20k-entry job cost ~0.23s per load and stalled the event loop with it. The
-    mapping is a pure function of the URL and the process's SSRF posture (which
-    is itself resolved once per process), so a bounded cache cannot disagree
-    with the uncached result.
-    """
-    if not url:
-        return ""
-    return _canonical_cached(str(url), host_policy)
+        return {"url": self.url.raw, "depth": self.depth}
 
 
 # A persisted row is ``json.loads`` of a TEXT column, so its collections are
@@ -177,7 +128,7 @@ def _entry_payload(entry: Any) -> Any:
 def normalize_frontier(
     values: _PersistedJSON,
     *,
-    root_url: str,
+    root_url: str | NormalizedUrl | None,
     policy: CrawlPolicy,
     host_policy: HostPolicy,
 ) -> list[FrontierEntry]:
@@ -190,21 +141,33 @@ def normalize_frontier(
     SQL write, a migration, an older writer) and then the read path skips
     normalization on a row that needs it; migration 0002 dropped the column,
     which is why the flag could not be trusted. The cost is bounded by the
-    canonicalization memo in :func:`durable_page_identity`.
+    read-edge admission on the load pass.
     """
     if not isinstance(values, (list, tuple)):
         return []
-    canonical_root = durable_page_identity(root_url, host_policy)
+    canonical_root = (
+        root_url
+        if isinstance(root_url, NormalizedUrl)
+        else admit_or_none(root_url, policy=host_policy)
+    )
     legacy_depth = policy.limits.max_depth
-    entries: dict[str, FrontierEntry] = {}
-    order: list[str] = []
+    entries: dict[NormalizedUrl, FrontierEntry] = {}
+    order: list[NormalizedUrl] = []
     for value in values:
         raw_url: object
         depth: object
         if isinstance(value, FrontierEntry):
-            raw_url = value.url
-            depth = value.depth
-        elif isinstance(value, dict):
+            entry = value
+            entry_depth = 0 if entry.url == canonical_root else _entry_depth(entry.depth, legacy_depth)
+            entry = FrontierEntry(url=entry.url, depth=entry_depth)
+            previous = entries.get(entry.url)
+            if previous is None:
+                entries[entry.url] = entry
+                order.append(entry.url)
+            elif entry_depth < previous.depth:
+                entries[entry.url] = entry
+            continue
+        if isinstance(value, dict):
             raw_url = value.get("url")
             depth = value.get("depth", legacy_depth)
         else:
@@ -212,7 +175,9 @@ def normalize_frontier(
             depth = legacy_depth
         if not isinstance(raw_url, str) or not raw_url:
             continue
-        url = durable_page_identity(raw_url, host_policy)
+        url = admit_or_none(raw_url, policy=host_policy)
+        if url is None:
+            continue
         entry_depth = 0 if url == canonical_root else _entry_depth(depth, legacy_depth)
         entry = FrontierEntry(url=url, depth=entry_depth)
         previous = entries.get(url)
@@ -232,8 +197,7 @@ def normalize_job_collections(
     frontier: _PersistedJSON,
     in_flight: _PersistedJSON,
     host_policy: HostPolicy,
-) -> tuple[set[str], list[FrontierEntry], list[FrontierEntry]]:
-    canonical_root = durable_page_identity(root_url, host_policy)
+) -> tuple[set[NormalizedUrl], list[FrontierEntry], list[FrontierEntry]]:
     if isinstance(visited, str):
         visited_values = [visited]
     elif isinstance(visited, Iterable):
@@ -243,18 +207,31 @@ def normalize_job_collections(
         # worth raising: the job loses its visited history, and the frontier
         # below still bounds what it will fetch.
         visited_values = []
-    normalized_visited = {
-        durable_page_identity(url, host_policy) for url in visited_values if isinstance(url, str) and url
-    }
+    # Visited elements arrive both ways: ``from_json`` admits its list before
+    # this pass, while raw rows still carry bare text. An admitted value keeps
+    # its identity by construction; text must pass admission. A str-only guard
+    # here silently wiped every admitted value on load -- a completed job
+    # reloaded as never-crawled.
+    normalized_visited: set[NormalizedUrl] = set()
+    for url in visited_values:
+        if isinstance(url, NormalizedUrl):
+            normalized_visited.add(url)
+            continue
+        if isinstance(url, str) and url:
+            admitted = admit_or_none(url, policy=host_policy)
+            if admitted is not None:
+                normalized_visited.add(admitted)
+    # normalize_frontier admits the root text itself; the str here is the
+    # row's durable identity, not a live URL value.
     normalized_frontier = normalize_frontier(
         frontier,
-        root_url=canonical_root,
+        root_url=root_url,
         policy=policy,
         host_policy=host_policy,
     )
     normalized_in_flight = normalize_frontier(
         in_flight,
-        root_url=canonical_root,
+        root_url=root_url,
         policy=policy,
         host_policy=host_policy,
     )
@@ -322,9 +299,9 @@ class CrawlJobState:
     status: JobStatus = JobStatus.PENDING
     # Whole-site fields (used when kind == WHOLE_SITE)
     frontier: list[FrontierEntry] = field(default_factory=list)
-    visited: set[str] = field(default_factory=set)
+    visited: set[NormalizedUrl] = field(default_factory=set)
     in_flight: list[FrontierEntry] = field(default_factory=list)
-    transient_retries: dict[str, int] = field(default_factory=dict)  # url -> transient retry count
+    transient_retries: dict[NormalizedUrl, int] = field(default_factory=dict)  # admitted url -> retry count
     # Single-shot fields (used when kind == SINGLE_SHOT)
     # root_url holds the first URL (or "" for batch); results holds completed crawl results
     results: list[dict[str, Any]] = field(default_factory=list)  # Completed results
@@ -347,7 +324,7 @@ class CrawlJobState:
         Normalizes first, so the serialized form carries canonical page identity
         (the read boundary enforces it too, but a writer that emits an alias
         makes every reader pay for it). This is affordable only because
-        canonicalization is memoized in :func:`durable_page_identity`: the same
+        admission happens once on the read edge:
         durable URL set is re-serialized on every job loop iteration.
         """
         normalize_job_state(self)
@@ -356,7 +333,8 @@ class CrawlJobState:
         data.pop("tier", None)
         data["frontier"] = [_entry_payload(entry) for entry in self.frontier]
         data["in_flight"] = [_entry_payload(entry) for entry in self.in_flight]
-        data["visited"] = sorted(self.visited)
+        data["visited"] = sorted(url.raw for url in self.visited)
+        data["transient_retries"] = _retries_payload(self.transient_retries)
         data["stats"] = _normalized_stats(self.stats)
         data["status"] = self.status.value
         data["kind"] = self.kind.value
@@ -371,7 +349,6 @@ class CrawlJobState:
         here, so a row written by any writer -- including one that put
         non-canonical URLs inside well-formed records -- cannot reintroduce a
         second identity for a page. The cost is bounded by the canonicalization
-        memo in :func:`durable_page_identity` rather than by skipping the work.
 
         This used to branch on a persisted ``canonicalized`` column, read from
         a local that was hardcoded ``False`` -- the column is gone (migration
@@ -383,23 +360,29 @@ class CrawlJobState:
         kind = data.get("kind", JobKind.WHOLE_SITE.value)
         policy = read_policy(data.get("policy"), tier)
         root_url = str(data.get("root_url") or "")
-        root_url = durable_page_identity(root_url, host_policy)
+        admitted_root = admit_or_none(root_url, policy=host_policy)
+        root_url = admitted_root.raw if admitted_root is not None else ""
         visited_raw = data.get("visited", [])
         if isinstance(visited_raw, list):
             visited = {
-                durable_page_identity(url, host_policy) for url in visited_raw if isinstance(url, str) and url
-            }
+            admitted
+            for url in visited_raw
+            if isinstance(url, str) and url
+            for admitted in (admit_or_none(url, policy=host_policy),)
+            if admitted is not None
+        }
         else:
             visited = set()
         transient_raw = data.get("transient_retries", {})
-        transient_retries: dict[str, int] = {}
+        transient_retries: dict[NormalizedUrl, int] = {}
         if isinstance(transient_raw, dict):
             for url, attempts in transient_raw.items():
                 if not isinstance(url, str):
                     continue
                 try:
-                    key = durable_page_identity(url, host_policy)
-                    transient_retries[key] = max(0, int(attempts))
+                    key = admit_or_none(url, policy=host_policy)
+                    if key is not None:
+                        transient_retries[key] = max(0, int(attempts))
                 except (TypeError, ValueError):
                     continue
         job = cls(
@@ -439,7 +422,8 @@ class CrawlJobState:
 
 
 def normalize_job_state(job: CrawlJobState) -> CrawlJobState:
-    root_url = durable_page_identity(job.root_url, job.host_policy)
+    admitted_root = admit_or_none(job.root_url, policy=job.host_policy)
+    root_url = admitted_root.raw if admitted_root is not None else ""
     policy = read_policy(job.policy, job.tier)
     visited, frontier, in_flight = normalize_job_collections(
         root_url=root_url,
@@ -449,16 +433,13 @@ def normalize_job_state(job: CrawlJobState) -> CrawlJobState:
         in_flight=job.in_flight,
         host_policy=job.host_policy,
     )
-    transient_retries: dict[str, int] = {}
+    transient_retries: dict[NormalizedUrl, int] = {}
     for url, attempts in job.transient_retries.items():
-        if not isinstance(url, str) or not url:
-            continue
         try:
             value = max(0, int(attempts))
         except (TypeError, ValueError):
             continue
-        identity = durable_page_identity(url, job.host_policy)
-        transient_retries[identity] = max(transient_retries.get(identity, 0), value)
+        transient_retries[url] = max(transient_retries.get(url, 0), value)
     job.root_url = root_url
     job.policy = _stored_policy(policy)
     job.visited = visited
@@ -567,6 +548,12 @@ def _json(value) -> str:
     return json.dumps(value, separators=(",", ":"), default=_json_default)
 
 
+
+def _retries_payload(retries: dict[NormalizedUrl, int]) -> dict[str, int]:
+    """Wire keys for the retry counter: the persisted column is text-keyed."""
+    return {url.raw: attempts for url, attempts in retries.items()}
+
+
 def _job_row_params(job: CrawlJobState) -> tuple:
     """The live-state columns of the job row, in ``_UPSERT_JOB_ROW_SQL`` order.
 
@@ -586,7 +573,7 @@ def _job_row_params(job: CrawlJobState) -> tuple:
         job.error,
         _json(job.stats),
         _json([_entry_payload(entry) for entry in job.in_flight]),
-        _json(job.transient_retries),
+        _json(_retries_payload(job.transient_retries)),
     )
 
 
@@ -717,7 +704,7 @@ class JobAccumulators:
             return
         self._conn.executemany(
             'INSERT OR IGNORE INTO "crawl_job_visited" (job_id, url) VALUES (?, ?)',
-            ((job_id, url) for url in visited),
+            ((job_id, url.raw) for url in visited),
         )
 
 
@@ -820,12 +807,12 @@ class JobStore:
     def create(self, root_url: str, policy: PolicyLike) -> CrawlJobState:
         """Create a new whole-site crawl job with initial frontier containing root_url."""
         # Full UUID hex (32 chars) to avoid brute-forceable short IDs.
-        canonical_root = str(normalize_public_http_url(root_url, policy=self._host_policy))
+        canonical_root = NormalizedUrl(root_url, policy=self._host_policy)
         return _create_job(
             self,
             new_job_id(),
             JobKind.WHOLE_SITE,
-            canonical_root,
+            canonical_root.raw,
             read_policy(policy, self.tier),
             frontier=[FrontierEntry(url=canonical_root, depth=0)],
         )
@@ -836,7 +823,7 @@ class JobStore:
             self,
             job_id,
             JobKind.SINGLE_SHOT,
-            str(normalize_public_http_url(root_url, policy=self._host_policy)),
+            str(NormalizedUrl(root_url, policy=self._host_policy)),
             read_policy(policy, self.tier),
         )
 

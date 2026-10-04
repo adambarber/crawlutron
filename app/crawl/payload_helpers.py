@@ -11,12 +11,12 @@ from typing import Any
 from app.crawl.policy import PolicyTier, validate_wire_policy
 from app.models.crawl_policy import CrawlPolicy
 from app.models.host_policy import HostPolicy
-from app.models.normalized_url import normalize_public_http_url
+from app.models.normalized_url import NormalizedUrl
 
 
 def _validated_url(url: str, *, host_policy: HostPolicy) -> str:
     try:
-        return str(normalize_public_http_url(url, policy=host_policy))
+        return str(NormalizedUrl(url, policy=host_policy))
     except ValueError as error:
         reason = str(error)
         if reason in {"unsupported_scheme", "invalid_url"}:
@@ -27,7 +27,7 @@ def _validated_url(url: str, *, host_policy: HostPolicy) -> str:
 def _payload_urls(payload: dict[str, Any], *, host_policy: HostPolicy) -> list[str]:
     """Extract the request URL batch, collapsing duplicates by page identity.
 
-    ``normalize_public_http_url`` is the single source of truth for what counts
+    ``NormalizedUrl`` is the single source of truth for what counts
     as the "same page" (fragment / trailing-slash / tracking-param / param-order
     variants all canonicalize identically), so dedup here must key on that
     canonical form -- not the raw string. Identical pages crawl once; the first

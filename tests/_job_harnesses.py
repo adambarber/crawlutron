@@ -49,8 +49,9 @@ from app.models.crawl_policy import CrawlPolicy
 from app.models.engine_crawl_result import EngineCrawlResult
 from app.models.taxonomy import Classification
 from app.validation import HostPolicy
-from tests._policy_factories import job_store
-from tests._result_builders import _canned_result
+from app.models.normalized_url import NormalizedUrl
+from tests._policy_factories import UNRESTRICTED_HOST_POLICY, job_store
+from tests._result_builders import _admit, _canned_result
 
 #: Hang guard for the store waits. Deliberately NOT ``HANG_GUARD_SECONDS``: that
 #: one guards waits for a task the SAME loop has already scheduled, and such a
@@ -209,7 +210,7 @@ def frontier(urls: list[str], depth: int = 0) -> list[FrontierEntry]:
     a URL and becomes an ``AttributeError``. Built through the real dataclass so
     the fixture says what the field holds.
     """
-    return [FrontierEntry(url=url, depth=depth) for url in urls]
+    return [FrontierEntry(url=_admit(url), depth=depth) for url in urls]
 
 
 @contextmanager
@@ -251,10 +252,14 @@ def make_crawled_job_store(tmpdir: str, pages: int) -> tuple[JobStore, CrawlJobS
     costs. Both need a non-empty accumulator, and building one the same way
     twice is a clone rather than a coincidence.
     """
+    from tests._result_builders import _admit
+
     store = make_job_store(tmpdir)
     job = store.create("http://example.test/a", CrawlPolicy())
-    job.visited = {f"http://example.test/p/{i}" for i in range(pages)}
-    job.results = [{"url": url, "status": "success"} for url in job.visited]
+    # Visited holds admitted values now; results stay the persisted wire
+    # dicts the store actually keeps, naming each page by its raw identity.
+    job.visited = {_admit(f"http://example.test/p/{i}") for i in range(pages)}
+    job.results = [{"url": url.raw, "status": "success"} for url in job.visited]
     store.save(job)
     return store, job
 
@@ -276,7 +281,11 @@ async def run_job_control_test(
 async def _execution_urls(payload_dict, hang: asyncio.Event | None):
     if hang is not None and not hang.is_set():
         await hang.wait()
-    return payload_dict.get("urls") or [payload_dict.get("url")]
+    # The payload is the engine's wire shape, so its URLs are text; the real
+    # seam admits them before any result is built, and the double must cross
+    # the same boundary or it is recording a shape production never sends.
+    urls = payload_dict.get("urls") or [payload_dict.get("url")]
+    return [_admit(url) for url in urls]
 
 
 def _execution_payload(results: list[EngineCrawlResult], submitted_count: int) -> ProducerEnvelope:
@@ -317,7 +326,14 @@ class ScriptedExecute:
     ):
         if (scripts is None) == (results is None):
             raise AssertionError("ScriptedExecute takes exactly one of scripts= or results=")
-        self._scripts = dict(scripts) if scripts is not None else {r.original_url: [r] for r in results or []}
+        # Keys are URL identities: caller-spelled text is admitted here (so a
+        # key like "http://example.test" matches its canonical identity), and
+        # results-mode keys are the funnel's projected originals, which are
+        # canonical by construction. Lookup keys arrive as values.
+        if scripts is not None:
+            self._scripts = {_admit(url).raw: list(seq) for url, seq in scripts.items()}
+        else:
+            self._scripts = {r.original_url: [r] for r in results or []}
         # A real ``ResultStatus``, not a classification: the result record
         # validates its own taxonomy, and "rendered" is one -- so the default
         # used to be a status the engine never emits, invisible while the
@@ -326,8 +342,8 @@ class ScriptedExecute:
         self._hang = hang
         self.attempts: dict[str, int] = {}
 
-    def _entry(self, url: str) -> EngineCrawlResult:
-        sequence = self._scripts.get(url)
+    def _entry(self, url: NormalizedUrl) -> EngineCrawlResult:
+        sequence = self._scripts.get(url.raw)
         if sequence is None:
             return _canned_result(url, classification=self._default)
         return sequence.pop(0) if len(sequence) > 1 else sequence[0]
@@ -335,7 +351,7 @@ class ScriptedExecute:
     async def __call__(self, payload_dict, *, settings, shutdown_event):
         urls = await _execution_urls(payload_dict, self._hang)
         for url in urls:
-            self.attempts[url] = self.attempts.get(url, 0) + 1
+            self.attempts[url.raw] = self.attempts.get(url.raw, 0) + 1
         return _execution_payload([self._entry(url) for url in urls], len(urls))
 
 
@@ -496,9 +512,9 @@ def _seed_job(
 ):
     job = job_store.create(root_url, policy if policy is not None else {})
     if frontier is not None:
-        job.frontier = list(frontier)
+        job.frontier = [FrontierEntry(url=_admit(url), depth=0) for url in frontier]
     if in_flight is not None:
-        job.in_flight = list(in_flight)
+        job.in_flight = [FrontierEntry(url=_admit(url), depth=0) for url in in_flight]
     job_store.save(job)
     if running:
         job_store.set_status(job.job_id, JobStatus.RUNNING, expected=JobStatus.PENDING)
@@ -663,9 +679,13 @@ def assert_settled(
     """
     assert job.status == JobStatus.COMPLETED, f"job ended {job.status}"
     assert not job.frontier, f"frontier left queued: {job.frontier}"
-    assert set(job.in_flight) == set(in_flight), f"in-flight left uncommitted: {job.in_flight}"
-    assert set(job.visited) == set(visited), (
-        f"visited {sorted(set(job.visited) ^ set(visited))} differs from what the job kept"
+    admitted_in_flight = {_admit(url) for url in in_flight}
+    admitted_visited = {_admit(url) for url in visited}
+    assert {entry.url for entry in job.in_flight} == admitted_in_flight, (
+        f"in-flight left uncommitted: {job.in_flight}"
+    )
+    assert set(job.visited) == admitted_visited, (
+        f"visited {set(job.visited) ^ admitted_visited} differs from what the job kept"
     )
     if discovered is not None:
         assert job.stats["total_discovered"] == discovered, f"discovered {job.stats['total_discovered']}"

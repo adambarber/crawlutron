@@ -247,7 +247,7 @@ class TestAsyncCrawlJobStoreIntegration:
             assert job.job_id == "test-id"
             assert job.kind == JobKind.SINGLE_SHOT
             # Roots are stored in canonical page-identity form:
-            # normalize_public_http_url is the single source of truth for page
+            # NormalizedUrl admission is the single source of truth for page
             # identity, so the submitted trailing slash is normalized away.
             # Storing the raw spelling is what let one page occupy two
             # frontier/visited identities (cap underfill, duplicate crawl).
@@ -269,10 +269,12 @@ class TestAsyncCrawlJobStoreIntegration:
 
         with single_shot_job() as (store, job):
             # Simulate completion
+            from tests._result_builders import _admit
+
             result = UnifiedCrawlResult(
                 original_url="http://example.com/",
-                normalized_url="http://example.com/",
-                final_url="http://example.com/",
+                normalized_url=_admit("http://example.com/"),
+                final_url=_admit("http://example.com/"),
                 status=CrawlStatus.success,
                 classification=CrawlClassification.rendered,
                 selected_strategy="HTTP_DECLARED_CRAWLER",

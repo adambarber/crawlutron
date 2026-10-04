@@ -4,22 +4,18 @@ from functools import partial
 
 import pytest
 
-from app.models.normalized_url import normalize_public_http_url as _normalize_public_http_url
-from app.validation import (
-    HostPolicy,
-)
-from app.validation import (
-    filter_js_endpoints as _filter_js_endpoints,
-)
+from app.models.host_policy import HostPolicy
+from app.models.normalized_url import NormalizedUrl
+from app.validation import filter_js_endpoints as _filter_js_endpoints
 
 _HOST_POLICY = HostPolicy.unrestricted()
-normalize_public_http_url = partial(_normalize_public_http_url, policy=_HOST_POLICY)
+admit = partial(NormalizedUrl, policy=_HOST_POLICY)
 filter_js_endpoints = partial(_filter_js_endpoints, policy=_HOST_POLICY)
 
 
 def canonical(url: str) -> str:
     """The canonical TEXT of an admitted URL: the value carries its wire form on ``.raw``."""
-    return normalize_public_http_url(url).raw
+    return admit(url).raw
 
 
 class TestDeepUrlNormalization:
@@ -74,14 +70,12 @@ class TestNormalizationGuardMemoization:
         return counts
 
     def test_repeat_call_reuses_env_decision_and_host_verdict(self, monkeypatch):
-        import app.validation as validation
-
         monkeypatch.setenv("CRAWLUTRON_ALLOW_PRIVATE_TARGETS", "0")
         counts = self._spy(monkeypatch)
-        first = validation.normalize_public_http_url(self.URL, policy=_HOST_POLICY)
+        first = admit(self.URL)
         env_after_first = counts["env"]
         ip_after_first = counts["ip"]
-        second = validation.normalize_public_http_url(self.URL, policy=_HOST_POLICY)
+        second = admit(self.URL)
         assert second == first
         assert first.raw == "https://memo-t2-9e16c.test/path?a=1&b=2"
         # The guard really ran on the first call, then nothing re-ran on the second.
@@ -93,23 +87,16 @@ class TestNormalizationGuardMemoization:
         assert counts["ip"] == ip_after_first
 
     def test_env_flip_between_calls_still_visible(self, monkeypatch):
-        import app.validation as validation
-
         monkeypatch.setenv("CRAWLUTRON_ALLOW_PRIVATE_TARGETS", "false")
         with pytest.raises(ValueError, match="private_network_target"):
-            validation.normalize_public_http_url("http://localhost/x", policy=_HOST_POLICY)
+            admit("http://localhost/x")
         monkeypatch.setenv("CRAWLUTRON_ALLOW_PRIVATE_TARGETS", "true")
-        assert (
-            validation.normalize_public_http_url("http://localhost/x", policy=_HOST_POLICY).raw
-            == "http://localhost/x"
-        )
+        assert admit("http://localhost/x").raw == "http://localhost/x"
 
     def test_unrecognized_env_value_keeps_guard_on(self, monkeypatch):
-        import app.validation as validation
-
         monkeypatch.setenv("CRAWLUTRON_ALLOW_PRIVATE_TARGETS", "affirmative")
         with pytest.raises(ValueError, match="private_network_target"):
-            validation.normalize_public_http_url("http://localhost/x", policy=_HOST_POLICY)
+            admit("http://localhost/x")
 
 
 class TestFilterJsEndpoints:
@@ -124,11 +111,13 @@ class TestFilterJsEndpoints:
         assert filter_js_endpoints([{"url": "javascript:alert(1)"}, {"url": "data:x"}]) == []
 
     def test_resolves_relative_endpoint(self):
-        out = filter_js_endpoints([{"url": "/api/x"}], resolve_against="http://e.com/page")
+        base = NormalizedUrl("http://e.com/page", policy=_HOST_POLICY)
+        out = filter_js_endpoints([{"url": "/api/x"}], resolve_against=base)
         assert out == [{"url": "http://e.com/api/x"}]
 
     def test_preserves_extra_endpoint_fields(self):
-        out = filter_js_endpoints([{"url": "/api/x", "method": "POST"}], resolve_against="http://e.com/")
+        base = NormalizedUrl("http://e.com/", policy=_HOST_POLICY)
+        out = filter_js_endpoints([{"url": "/api/x", "method": "POST"}], resolve_against=base)
         assert out == [{"url": "http://e.com/api/x", "method": "POST"}]
 
     def test_relative_endpoint_without_base_is_dropped(self):

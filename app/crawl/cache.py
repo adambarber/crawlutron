@@ -27,6 +27,8 @@ import threading
 import time
 from collections.abc import Callable
 
+from app.models.normalized_url import NormalizedUrl
+
 _DEFAULT_TTL_SECONDS = 3600.0
 _MAX_ENTRIES = 100_000
 
@@ -47,7 +49,7 @@ class HttpCache:
         self._lock = threading.Lock()
         # url -> (etag, last_modified, expires_at); OrderedDict insertion order
         # gives FIFO eviction for the LRU bound.
-        self._data: dict[str, tuple[str | None, str | None, float]] = {}
+        self._data: dict[NormalizedUrl, tuple[str | None, str | None, float]] = {}
         self._closed = False
 
     def _purge_expired(self, now: float) -> None:
@@ -70,7 +72,7 @@ class HttpCache:
             for url in list(itertools.islice(self._data, over)):
                 self._data.pop(url, None)
 
-    def get(self, url: str) -> tuple[str | None, str | None]:
+    def get(self, url: NormalizedUrl) -> tuple[str | None, str | None]:
         now = self._clock()
         with self._lock:
             entry = self._data.get(url)
@@ -82,7 +84,7 @@ class HttpCache:
                 return None, None
             return etag, last_modified
 
-    def store(self, url: str, headers: dict[str, str]) -> None:
+    def store(self, url: NormalizedUrl, headers: dict[str, str]) -> None:
         """Record conditional-request metadata for ``url`` from response ``headers``.
 
         ``etag`` and ``last-modified`` are extracted (case-insensitively) from
@@ -100,7 +102,7 @@ class HttpCache:
             self._data[url] = (etag, last_modified, expires)
             self._evict_if_needed()
 
-    def conditional_headers(self, url: str) -> dict[str, str]:
+    def conditional_headers(self, url: NormalizedUrl) -> dict[str, str]:
         etag, last_modified = self.get(url)
         headers: dict[str, str] = {}
         if etag:

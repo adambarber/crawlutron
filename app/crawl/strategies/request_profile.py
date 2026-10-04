@@ -10,13 +10,13 @@ import hashlib
 import os
 from collections.abc import Iterable, Mapping
 from typing import Any, Protocol, runtime_checkable
-from urllib.parse import urlparse
 
 from app.constants import DEFAULT_USER_AGENT, HTTP_CFFI_IMPERSONATE
 from app.crawl.credentials import apply_credentials as _apply_credentials
 from app.crawl.strategies import cookie_jar
 from app.crawl.strategies.cookie_jar import COOKIE_NAMESPACE
 from app.models.crawl_policy import CrawlPolicy
+from app.models.normalized_url import NormalizedUrl
 
 
 def cookie_namespace_for(profile: Mapping[str, Any]) -> str:
@@ -32,9 +32,9 @@ def cookie_namespace_for(profile: Mapping[str, Any]) -> str:
     return str(value).strip() if isinstance(value, str) else ""
 
 
-def _cookie_header_for_url(profile: Mapping[str, Any], url: str) -> str:
+def _cookie_header_for_url(profile: Mapping[str, Any], url: NormalizedUrl) -> str:
     """Build a Cookie header from policy cookies and the persistent jar."""
-    host = (urlparse(url).hostname or "").lower()
+    host = url.host
     parts: list[str] = []
 
     # Static policy cookies
@@ -78,7 +78,7 @@ class _TransportHeaders(Protocol):
 
 
 def _store_set_cookies(
-    url: str,
+    url: NormalizedUrl,
     response_headers: _TransportHeaders | dict[str, str],
     *,
     namespace: str | None = None,
@@ -129,11 +129,6 @@ _BUILTIN_ACCEPT_LANGUAGES = [
 ]
 
 
-def _domain_seed(url: str) -> str:
-    """Hostname used as the rotation seed (stable; avoids normalization side effects)."""
-    return urlparse(url).hostname or ""
-
-
 def _rotating_index(profile: Mapping[str, Any], domain: str, pool_size: int) -> int:
     """Deterministic per-host pool index so repeated crawls of the same host keep a
     stable fingerprint (the disk content-cache key stays consistent) while different
@@ -142,11 +137,12 @@ def _rotating_index(profile: Mapping[str, Any], domain: str, pool_size: int) -> 
     return int(hashlib.sha256(seed).hexdigest(), 16) % pool_size
 
 
-def _select_fingerprint(profile: Mapping[str, Any], domain: str) -> dict[str, str]:
+def _select_fingerprint(profile: Mapping[str, Any], url: NormalizedUrl) -> dict[str, str]:
     """Select fingerprint signals for a host. Rotation is deterministic per host.
     Explicit ``user_agents``/``accept_languages`` pools are preferred; ``fingerprint_rotation``
     falls back to built-in pools. Anchored on the host so it is complementary to Camoufox
     and curl_cffi TLS impersonation rather than conflicting with them."""
+    domain = url.host
     out: dict[str, str] = {}
     ua_pool = list(profile.get("user_agents") or [])
     if not ua_pool and profile.get("fingerprint_rotation"):
@@ -182,7 +178,7 @@ def _accept_encoding() -> str:
 def headers_for_strategy(
     strategy: str,
     policy: CrawlPolicy,
-    url: str,
+    url: NormalizedUrl,
     *,
     profile: Mapping[str, Any] | None = None,
 ) -> dict[str, str]:
@@ -200,7 +196,7 @@ def headers_for_strategy(
     is_browser_like = strategy == HTTP_CFFI_IMPERSONATE or user_agent_family == "desktop_chrome"
     # Fingerprint injection/rotation: deterministic per-host selection so a single
     # crawl rotates fingerprints across hosts while staying stable per host.
-    fp = _select_fingerprint(resolved_profile, _domain_seed(url))
+    fp = _select_fingerprint(resolved_profile, url)
     if "user_agent" in fp:
         headers["User-Agent"] = fp["user_agent"]
         is_browser_like = is_browser_like or "Mozilla" in fp["user_agent"]

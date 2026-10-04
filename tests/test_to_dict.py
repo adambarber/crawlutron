@@ -12,6 +12,7 @@ from app.models.crawl_result import CrawlStrategyAttempt
 from app.models.discovered_link import DiscoveredLink
 from app.models.engine_crawl_result import EngineCrawlResult
 from app.models.serialization import from_wire, to_dict
+from tests._policy_factories import UNRESTRICTED_HOST_POLICY
 from tests._result_builders import _link, engine_result
 
 
@@ -132,7 +133,7 @@ def test_a_result_survives_the_serialization_round_trip_unchanged():
         validators={"etag": "W/1"},
     )
 
-    restored = from_wire(EngineCrawlResult, to_dict(result))
+    restored = from_wire(EngineCrawlResult, to_dict(result), policy=UNRESTRICTED_HOST_POLICY)
 
     assert restored == result
     assert isinstance(restored.attempted_strategies[0], CrawlStrategyAttempt)
@@ -152,7 +153,7 @@ def test_a_field_the_record_stopped_writing_is_a_construction_error():
     del payload["original_url"]
 
     with pytest.raises(TypeError, match="original_url"):
-        from_wire(EngineCrawlResult, payload)
+        from_wire(EngineCrawlResult, payload, policy=UNRESTRICTED_HOST_POLICY)
 
 
 def test_an_absent_field_that_has_a_default_keeps_that_default():
@@ -166,7 +167,7 @@ def test_an_absent_field_that_has_a_default_keeps_that_default():
     payload = to_dict(engine_result("https://example.test/a", "rendered"))
     del payload["markdown"]
 
-    assert from_wire(EngineCrawlResult, payload).markdown is None
+    assert from_wire(EngineCrawlResult, payload, policy=UNRESTRICTED_HOST_POLICY).markdown is None
 
 
 def test_a_taxonomy_value_outside_the_literals_is_refused():
@@ -181,4 +182,4 @@ def test_a_taxonomy_value_outside_the_literals_is_refused():
     payload["status"] = "not-a-real-status"
 
     with pytest.raises(ValueError):
-        from_wire(EngineCrawlResult, payload)
+        from_wire(EngineCrawlResult, payload, policy=UNRESTRICTED_HOST_POLICY)

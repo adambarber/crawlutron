@@ -15,9 +15,10 @@ from app.crawl.policy import CrawlPolicy, read_policy
 from app.crawl.result_record import ProducerEnvelope
 from app.crawl.strategies.strategy_request import StrategyRequest
 from app.models.engine_crawl_result import EngineCrawlResult
+from app.models.host_policy import HostPolicy
 from app.models.http_fetch_result import HttpFetchResult
+from app.models.normalized_url import NormalizedUrl
 from app.models.taxonomy import CrawlStrategyName
-from app.validation import HostPolicy
 from tests._browser_doubles import _fake_browser
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY
 
@@ -32,6 +33,15 @@ SCOPE_KEEP_DROP_PAGES = {
 }
 
 
+def _admit(url: "str | NormalizedUrl") -> NormalizedUrl:
+    """The fetch result's URL fields hold the admitted value, so a test that
+    spells a URL as text -- which is every call site, because the payload side
+    of a crawl is text -- has it admitted here rather than at each site."""
+    if isinstance(url, NormalizedUrl):
+        return url
+    return NormalizedUrl(url, policy=UNRESTRICTED_HOST_POLICY)
+
+
 def make_fetch(
     status=200,
     body=b"<html><body>hello</body></html>",
@@ -42,8 +52,8 @@ def make_fetch(
     decompression_failed=False,
 ):
     return HttpFetchResult(
-        url=url,
-        final_url=final_url,
+        url=_admit(url),
+        final_url=_admit(final_url),
         status_code=status,
         headers={"content-type": ctype} if headers is None else headers,
         body=body,
@@ -65,7 +75,7 @@ def make_fetch(
 Route = Any
 
 
-def _answer(spec: Route, url: str) -> HttpFetchResult:
+def _answer(spec: Route, url: NormalizedUrl) -> HttpFetchResult:
     """The route spec as a real ``HttpFetchResult``.
 
     ``HttpFetchResult`` rather than nothing: every branch that returns one here
@@ -133,7 +143,7 @@ class FetcherDouble:
 
     async def __call__(
         self,
-        url: str,
+        url: NormalizedUrl,
         sent_headers: dict[str, str],
         timeout: int,
         max_content_length: int = DEFAULT_MAX_CONTENT_LENGTH_BYTES,
@@ -146,7 +156,9 @@ class FetcherDouble:
         shaped like one. Declaring it here rather than ``Any`` is what lets a
         caller of a fetcher double know what it got.
         """
-        self.calls.append(url)
+        # ``calls`` speaks text: it is what tests assert membership in, and the
+        # wire form of the value is the text the request was made to.
+        self.calls.append(url.raw)
         self.headers.append(dict(sent_headers))
         if self._record_cap is not None:
             self._record_cap.append(max_content_length)
@@ -173,8 +185,8 @@ def site_fetcher(pages: dict[str, Any]):
     reason, so an unscripted path is a 404 rather than a default page.
     """
 
-    def answer(url, *_):
-        entry = pages.get(urlparse(url).path or "/")
+    def answer(url: NormalizedUrl, *_):
+        entry = pages.get(url.path or "/")
         if entry is None:
             return {"status": 404, "body": b"<html></html>", "ctype": "text/html"}
         status, body, ctype = entry
@@ -194,7 +206,7 @@ async def run_scoped_crawl(scope_regex=None, *, max_depth=1, max_pages=10, pages
         "policy": {"limits": {"max_depth": max_depth, "max_pages": max_pages}, "scope_regex": scope_regex},
     }
     out = await crawl_request(payload, http_fetcher=site_fetcher(pages), cache=HttpCache())
-    return {r.normalized_url for r in out["results"]}
+    return {r.normalized_url.raw for r in out["results"]}
 
 
 def ok_fetcher(url, sent_headers, timeout, max_content_length=DEFAULT_MAX_CONTENT_LENGTH_BYTES):
@@ -286,9 +298,9 @@ def routed_fetcher(
     body it did not arrange is a test that passes for the wrong reason.
     """
 
-    def answer(url, sent_headers, *_):
+    def answer(url: NormalizedUrl, sent_headers, *_):
         for fragment, spec in (routes or {}).items():
-            if fragment in url:
+            if fragment in url.raw:
                 if on_route is not None:
                     on_route(url, sent_headers)
                 return spec
@@ -533,7 +545,7 @@ async def crawled_urls(pages: dict[str, Any], **kwargs: Any) -> list[str]:
     # one of these. Projecting it as `str | None` would push that possibility onto
     # every caller, and a caller comparing a `str | None` to a canonical URL is
     # the comparison that quietly stops meaning anything.
-    return [r.normalized_url for r in out["results"] if r.normalized_url is not None]
+    return [r.normalized_url.raw for r in out["results"] if r.normalized_url is not None]
 
 
 def site_linking_to(*paths: str, bodies: dict[str, str] | None = None) -> dict[str, Any]:
@@ -671,7 +683,7 @@ async def run_chain(
         scheduler = DomainScheduler(global_limit=1, per_domain_limit=1, delay_seconds=0.0)
     return await execute_crawl_chain(
         original_url=url,
-        normalized_url=url,
+        normalized_url=NormalizedUrl(url, policy=UNRESTRICTED_HOST_POLICY),
         policy=read_policy(policy),
         http_fetcher=fetcher,
         cffi_fetcher=fetcher if cffi_fetcher is None else cffi_fetcher,
@@ -752,7 +764,7 @@ def strategy_request(
     """
     return StrategyRequest(
         original_url=url,
-        normalized_url=url,
+        normalized_url=NormalizedUrl(url, policy=UNRESTRICTED_HOST_POLICY),
         strategy=strategy,
         policy=read_policy(policy),
         host_policy=HostPolicy.unrestricted(),
@@ -844,10 +856,13 @@ async def run_default_http_fetcher(url: str, headers=None, *, pin=None):
     a real resolver, and the fetcher is where that choice belongs.
     """
     from app.crawl.strategies.fetchers import default_http_fetcher
-    from app.validation import HostPolicy
 
     return await default_http_fetcher(
-        url, {} if headers is None else headers, 30, policy=HostPolicy.unrestricted(), pin=pin
+        NormalizedUrl(url, policy=UNRESTRICTED_HOST_POLICY),
+        {} if headers is None else headers,
+        30,
+        policy=UNRESTRICTED_HOST_POLICY,
+        pin=pin,
     )
 
 

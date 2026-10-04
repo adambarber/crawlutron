@@ -2,37 +2,34 @@
 
 import pytest
 
-from app.validation import HostPolicy
-from tests._validation_helpers import (
-    assert_url_refused,
-    normalize_public_http_url,
-    public_url_or_none,
-    registrable_domain,
-)
+from app.models.host_policy import HostPolicy
+from app.models.normalized_url import NormalizedUrl
+from tests._policy_factories import UNRESTRICTED_HOST_POLICY
+from tests._validation_helpers import admit_or_none, assert_url_refused, registrable_domain
 
 
 class TestPolicyValidation:
     def test_unsupported_scheme(self):
         with pytest.raises(ValueError):
-            normalize_public_http_url("ftp://example.com/")
+            NormalizedUrl("ftp://example.com/", policy=UNRESTRICTED_HOST_POLICY)
 
     def test_private_network_blocked(self, monkeypatch):
         monkeypatch.setenv("CRAWLUTRON_ALLOW_PRIVATE_TARGETS", "0")
         with pytest.raises(ValueError):
-            normalize_public_http_url("http://127.0.0.1/x")
+            NormalizedUrl("http://127.0.0.1/x", policy=UNRESTRICTED_HOST_POLICY)
 
     def test_trailing_colon_path(self):
-        assert normalize_public_http_url("https://example.com/seg:").raw == "https://example.com/seg"
+        assert NormalizedUrl("https://example.com/seg:", policy=UNRESTRICTED_HOST_POLICY).raw == "https://example.com/seg"
 
     def test_host_allow_list_restricts_targets(self):
         policy = HostPolicy.from_strings("example.com", "")
-        assert normalize_public_http_url("https://Example.com:8443/page", policy=policy).raw
+        assert NormalizedUrl("https://Example.com:8443/page", policy=policy).raw
         assert_url_refused("https://other.test/page", policy, "host_not_allowed")
         assert_url_refused("https://notexample.com/page", policy, "host_not_allowed")
 
     def test_host_deny_list_refuses_targets(self):
         policy = HostPolicy.from_strings("", "blocked.test")
-        assert normalize_public_http_url("https://allowed.test/page", policy=policy).raw
+        assert NormalizedUrl("https://allowed.test/page", policy=policy).raw
         assert_url_refused("https://Blocked.test:443/page", policy, "host_denied")
 
     def test_host_deny_precedes_allow(self):
@@ -41,7 +38,7 @@ class TestPolicyValidation:
 
     def test_host_policy_normalizes_case_port_and_idna(self):
         policy = HostPolicy.from_strings("BÜCHER.Example:9443", "")
-        assert normalize_public_http_url(
+        assert NormalizedUrl(
             "https://XN--BCHER-KVA.example:8443/page",
             policy=policy,
         )
@@ -57,7 +54,7 @@ class TestPolicyValidation:
             }
         )
         policy = HostPolicy.from_settings(settings)
-        assert normalize_public_http_url("https://allowed.test/page", policy=policy).raw
+        assert NormalizedUrl("https://allowed.test/page", policy=policy).raw
         assert_url_refused("https://other.test/page", policy, "host_not_allowed")
         assert_url_refused("https://blocked.test/page", policy, "host_denied")
 
@@ -73,16 +70,16 @@ class TestPolicyValidation:
 
     def test_invalid_url_no_host(self):
         with pytest.raises(ValueError):
-            normalize_public_http_url("http:///path")
+            NormalizedUrl("http:///path", policy=UNRESTRICTED_HOST_POLICY)
 
     def test_private_network_localhost_blocked(self, monkeypatch):
         monkeypatch.setenv("CRAWLUTRON_ALLOW_PRIVATE_TARGETS", "0")
         with pytest.raises(ValueError):
-            normalize_public_http_url("http://localhost/x")
+            NormalizedUrl("http://localhost/x", policy=UNRESTRICTED_HOST_POLICY)
 
     def test_private_network_normal_domain_passed_through(self, monkeypatch):
         monkeypatch.setenv("CRAWLUTRON_ALLOW_PRIVATE_TARGETS", "0")
-        out = normalize_public_http_url("http://example.com/x")
+        out = NormalizedUrl("http://example.com/x", policy=UNRESTRICTED_HOST_POLICY)
         assert out.raw == "http://example.com/x"
 
     def test_registrable_domain_two_part_suffix(self):
@@ -92,23 +89,23 @@ class TestPolicyValidation:
         # Resolvers read bare integers/hex as IPv4; layer 1 must too.
         monkeypatch.setenv("CRAWLUTRON_ALLOW_PRIVATE_TARGETS", "0")
         with pytest.raises(ValueError):
-            normalize_public_http_url("http://2130706433/")  # 127.0.0.1
+            NormalizedUrl("http://2130706433/", policy=UNRESTRICTED_HOST_POLICY)  # 127.0.0.1
         with pytest.raises(ValueError):
-            normalize_public_http_url("http://0x7f000001/")  # 127.0.0.1
+            NormalizedUrl("http://0x7f000001/", policy=UNRESTRICTED_HOST_POLICY)  # 127.0.0.1
         with pytest.raises(ValueError):
-            normalize_public_http_url("http://127.1/")  # 127.0.0.1
+            NormalizedUrl("http://127.1/", policy=UNRESTRICTED_HOST_POLICY)  # 127.0.0.1
 
     def test_public_integer_literal_allowed(self, monkeypatch):
         # Numeric but public (1.1.1.1) stays reachable.
         monkeypatch.setenv("CRAWLUTRON_ALLOW_PRIVATE_TARGETS", "0")
-        assert normalize_public_http_url("http://16843009/").raw == "http://16843009"
+        assert NormalizedUrl("http://16843009/", policy=UNRESTRICTED_HOST_POLICY).raw == "http://16843009"
 
     def test_wrapping_integer_to_loopback_blocked(self, monkeypatch):
         # Oversized integers wrap mod 2**32 on resolvers: this one lands on
         # 127.0.0.1 and must be rejected, not passed through as a hostname.
         monkeypatch.setenv("CRAWLUTRON_ALLOW_PRIVATE_TARGETS", "0")
         with pytest.raises(ValueError):
-            normalize_public_http_url("http://6425673729/")
+            NormalizedUrl("http://6425673729/", policy=UNRESTRICTED_HOST_POLICY)
 
     def test_registrable_domain_multi_level_suffixes(self):
         # The hand-rolled 7-entry suffix set collapsed every unlisted
@@ -143,35 +140,32 @@ class TestPolicyValidation:
                 vars(suffix_module).pop("_PSL", None)
 
 
-class TestPublicUrlOrNone:
+class TestResolveEgress:
     """Egress filter: resolve-then-strict-accept (js_endpoints/next-page)."""
 
     def test_relative_resolves_against_source(self):
-        assert (
-            public_url_or_none("/api/x", resolve_against="https://example.gov/p")
-            == "https://example.gov/api/x"
-        )
+        base = NormalizedUrl("https://example.gov/p", policy=UNRESTRICTED_HOST_POLICY)
+        assert base.resolve("/api/x").raw == "https://example.gov/api/x"
 
     def test_protocol_relative_resolves_then_accepts(self):
-        assert (
-            public_url_or_none("//cdn.example.gov/x", resolve_against="https://example.gov/p")
-            == "https://cdn.example.gov/x"
-        )
+        base = NormalizedUrl("https://example.gov/p", policy=UNRESTRICTED_HOST_POLICY)
+        assert base.resolve("//cdn.example.gov/x").raw == "https://cdn.example.gov/x"
 
-    def test_absolute_http_url_passes_without_base(self):
-        assert public_url_or_none("https://example.gov/a") == "https://example.gov/a"
+    def test_absolute_http_url_admits_without_base(self):
+        assert admit_or_none("https://example.gov/a").raw == "https://example.gov/a"
 
-    def test_unresolvable_relative_is_none(self):
-        assert public_url_or_none("/api/x") is None
+    def test_unresolvable_relative_without_base_is_none(self):
+        assert admit_or_none("/api/x") is None
 
     def test_non_http_schemes_are_none(self):
-        assert public_url_or_none("javascript:alert(1)", resolve_against="https://example.gov/") is None
-        assert public_url_or_none("data:text/html,x", resolve_against="https://example.gov/") is None
-        assert public_url_or_none("ftp://example.gov/x") is None
+        base = NormalizedUrl("https://example.gov/", policy=UNRESTRICTED_HOST_POLICY)
+        assert base.resolve("javascript:alert(1)") is None
+        assert base.resolve("data:text/html,x") is None
+        assert admit_or_none("ftp://example.gov/x") is None
 
     def test_empty_is_none(self):
-        assert public_url_or_none("") is None
-        assert public_url_or_none("   ") is None
+        assert admit_or_none("") is None
+        assert admit_or_none("   ") is None
 
 
 async def test_crawl_request_applies_settings_host_policy():

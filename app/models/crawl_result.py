@@ -24,6 +24,7 @@ from typing import Any
 
 from app.constants import ResultStatus
 from app.models.literal_checked import LiteralChecked
+from app.models.normalized_url import NormalizedUrl
 from app.models.taxonomy import Classification, CrawlError, CrawlStrategyName
 
 
@@ -44,14 +45,19 @@ class CrawlStrategyAttempt(LiteralChecked):
 
 @dataclass(frozen=True)
 class CrawlResult(LiteralChecked):
-    url: str
+    url: NormalizedUrl
     attempt: CrawlStrategyAttempt
-    final_url: str | None
+    final_url: NormalizedUrl | None
     html: str | None
     text: str | None
     attempts: int
     domain: str
     metadata: dict[str, Any] = field(default_factory=dict)
+    # The caller's submitted text, as the engine record carries it under the
+    # same name. None until the render pipeline's receive funnel stamps it;
+    # results built outside a request funnel keep None and their consumers
+    # fall back to the page's canonical text.
+    original_url: str | None = None
 
     @property
     def status(self) -> ResultStatus:

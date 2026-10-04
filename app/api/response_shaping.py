@@ -39,13 +39,12 @@ from app.models.discovered_link import DiscoveredLink
 from app.models.discovered_link_response import DiscoveredLinkResponse as WireDiscoveredLink
 from app.models.engine_crawl_result import EngineCrawlResult
 from app.models.host_policy import HostPolicy
-from app.models.normalized_url import NormalizedUrl
+from app.models.normalized_url import NormalizedUrl, admit_or_none
 from app.models.page_metadata_response import PageMetadataResponse
 from app.models.strategy_attempt import StrategyAttempt
 from app.models.taxonomy import CrawlStrategyName
 from app.models.unified_crawl_response import UnifiedCrawlResponse
 from app.models.unified_crawl_result import UnifiedCrawlResult
-from app.validation import safe_public_url_or_none
 
 _logger = logging.getLogger(__name__)
 
@@ -79,13 +78,13 @@ def format_crawl_item(item: EngineCrawlResult) -> tuple[str | None, ExtractedPag
     site, never the wire shape.
     """
     carried = item.llm_metadata
-    url = item.final_url or item.normalized_url or item.original_url
+    url = item.final_url or item.normalized_url
     html = item.html
     markdown = item.markdown
     if markdown:
         if isinstance(carried, dict) and carried:
             return markdown, extract_carried_metadata(carried)
-        if html and url:
+        if html and url is not None:
             from app.crawl.llm_format import extract_llm_metadata
 
             return markdown, extract_llm_metadata(html, url)
@@ -167,10 +166,10 @@ def build_unified_result(item: EngineCrawlResult) -> UnifiedCrawlResult:
     page-metadata extractor (``extract_llm_metadata``) over the raw HTML.
     """
     markdown, extracted = format_crawl_item(item)
-    url = item.final_url or item.normalized_url or item.original_url
+    url = item.final_url or item.normalized_url
     metadata = PageMetadataResponse(**extracted)
     if metadata.source_url is None:
-        metadata.source_url = url
+        metadata.source_url = url.raw if url is not None else item.original_url
     return UnifiedCrawlResult(
         original_url=item.original_url,
         normalized_url=item.normalized_url,
@@ -249,7 +248,11 @@ def render_result_to_unified(item: CrawlResult) -> UnifiedCrawlResult:
     classification = CrawlClassification(item.classification)
     selected_strategy = _coerce_strategy(item.selected_strategy)
     return UnifiedCrawlResult(
-        original_url=item.url,
+        # The render pipeline's funnel stamps every request-produced result
+        # with the caller's submitted text, so the wire key means the same
+        # thing here as it does at the crawl door. Results built outside a
+        # request funnel keep None and fall back to the page's canonical text.
+        original_url=item.original_url if item.original_url is not None else item.url.raw,
         normalized_url=item.url,
         final_url=item.final_url,
         status=status,
@@ -267,7 +270,7 @@ def render_result_to_unified(item: CrawlResult) -> UnifiedCrawlResult:
             )
         ],
         error=item.error,
-        metadata=PageMetadataResponse(title=metadata.get("title"), source_url=item.url),
+        metadata=PageMetadataResponse(title=metadata.get("title"), source_url=item.url.raw),
         html=item.html,
         text=item.text,
         quality_score=1.0 if item.status == "success" else 0.0,
@@ -286,8 +289,8 @@ def frontier_link_url(
     link: Any,
     *,
     policy: HostPolicy,
-    resolve_against: str | None = None,
-) -> str | None:
+    resolve_against: NormalizedUrl | None = None,
+) -> NormalizedUrl | None:
     """The only link field eligible for frontier/visited use: the validated URL.
 
     Extraction can legitimately emit a raw ``url`` href (``/rel``, ``#frag``,
@@ -302,12 +305,12 @@ def frontier_link_url(
         normalized = link.get("normalized_url")
     else:
         normalized = getattr(link, "normalized_url", None)
-    if not isinstance(normalized, (str, NormalizedUrl)) or not normalized:
+    if isinstance(normalized, NormalizedUrl):
+        return normalized
+    if not isinstance(normalized, str) or not normalized:
         return None
-    raw = str(normalized)
-    candidate = urljoin(resolve_against, raw) if resolve_against else raw
-    validated = safe_public_url_or_none(candidate, policy=policy)
-    return None if validated is None else validated.raw
+    candidate = urljoin(resolve_against.raw, normalized) if resolve_against else normalized
+    return admit_or_none(candidate, policy=policy)
 
 
 @dataclass(frozen=True, slots=True)
@@ -437,13 +440,19 @@ def _failed_unified_result(item: Any) -> UnifiedCrawlResult:
     the honest empty value instead of raising a second exception out of the
     guard and 500ing the whole batch.
     """
-    if isinstance(item, str):
-        # A page the batch never answered. There is no result to peek at, so the
-        # URL is the whole of what is known -- and it has to be passed as the
-        # page's identity, not as a two-key dict: this function reads attributes,
-        # so a dict arrived here as an envelope with no URL at all, which is the
-        # gap this branch exists to close.
-        peeked: dict[str, Any] = {"normalized_url": item, "original_url": item}
+    if isinstance(item, NormalizedUrl):
+        # A page the batch never answered, whose identity the runner still
+        # holds as an admitted value. The value is passed as the identity --
+        # not its text and not a two-key dict: this function reads attributes,
+        # so a dict arrived here as an envelope with no URL at all, which is
+        # the gap this branch exists to close.
+        peeked: dict[str, Any] = {"normalized_url": item}
+    elif isinstance(item, str):
+        # Text-only means no admitted identity exists: the submission text is
+        # the whole of what is known. The value fields stay None -- admitting
+        # the text here would need a policy the wire does not have, and a
+        # guessed admission is exactly the hole the value class exists to close.
+        peeked = {"original_url": item}
     else:
         peeked = {}
         try:
@@ -453,11 +462,27 @@ def _failed_unified_result(item: Any) -> UnifiedCrawlResult:
             }
         except Exception:
             _logger.debug("unshapable item refused even best-effort field reads", exc_info=True)
-    url = peeked.get("normalized_url") or peeked.get("original_url") or peeked.get("url") or ""
+
+    def _value(key: str) -> NormalizedUrl | None:
+        """Best-effort read of a value field: a value, or honestly nothing."""
+        candidate = peeked.get(key)
+        return candidate if isinstance(candidate, NormalizedUrl) else None
+
+    def _text(*keys: str) -> str:
+        """Best-effort read of a text field: text, a value's identity, or empty."""
+        for key in keys:
+            candidate = peeked.get(key)
+            if isinstance(candidate, NormalizedUrl):
+                return candidate.raw
+            if isinstance(candidate, str) and candidate:
+                return candidate
+        return ""
+
+    normalized = _value("normalized_url")
     return UnifiedCrawlResult(
-        original_url=peeked.get("original_url") or peeked.get("url") or url,
-        normalized_url=url,
-        final_url=peeked.get("final_url"),
+        original_url=_text("original_url", "url") or (normalized.raw if normalized is not None else ""),
+        normalized_url=normalized,
+        final_url=_value("final_url"),
         status=CrawlStatus.failed,
         # Site_error is a FAILED_CLASSIFICATIONS member, so its status-table
         # entry is "failed" -- this keeps (status, classification) consistent

@@ -21,7 +21,6 @@ from app.crawl.admission import (
     AdmittedLink,
     admit_discovered_links,
 )
-from app.crawl.job_store import durable_page_identity
 from app.crawl.recursive_admission import RecursiveRunState, admit_recursive_batch
 from app.crawl.result_helpers import failed_result_for
 from app.metrics import get_metrics
@@ -29,7 +28,6 @@ from app.models.crawl_task import CrawlTask
 from app.models.engine_crawl_result import EngineCrawlResult
 from app.models.host_policy import HostPolicy
 from app.models.normalized_url import NormalizedUrl
-from app.models.registrable_domain import registrable_domain
 from app.resource_pressure import ResourceGate, WeightedAdmission, default_admission_policy
 from app.safe_regex import BoundedPattern
 from app.scheduler import DomainScheduler
@@ -75,10 +73,10 @@ def requeue_transient(
     bound, so the cap cannot be sidestepped by a caller re-queueing for its own
     reason.
     """
-    count = attempts.get(task.normalized_url, 0)
+    count = attempts.get(task.normalized_url.raw, 0)
     if count >= MAX_TRANSIENT_REQUEUES:
         return False
-    attempts[task.normalized_url] = count + 1
+    attempts[task.normalized_url.raw] = count + 1
     # Depth stays unchanged: a retry is not a deeper crawl, and re-queueing at
     # the tail preserves BFS order so an oversubscribed crawl does not starve
     # the rest of the batch.
@@ -118,7 +116,7 @@ async def _spill_write(spill: Any, index: int, result: Any) -> None:
 @dataclass
 class _RecursiveState:
     frontier: deque[tuple[int, CrawlTask]]
-    visited: set[str]
+    visited: set[NormalizedUrl]
     next_index: int
     ramp: float
     page_count: int = 0
@@ -128,7 +126,7 @@ class _RecursiveState:
         task = CrawlTask(
             index=self.next_index,
             original_url=link.original_url,
-            normalized_url=link.normalized_url.raw,
+            normalized_url=link.normalized_url,
             domain=link.normalized_url.host,
         )
         self.next_index += 1
@@ -139,20 +137,19 @@ async def _seed_recursive_frontier(
     run: RecursiveRunState,
     state: _RecursiveState,
     frontier: deque[tuple[int, CrawlTask]],
-    seed_identities: set[str],
+    seed_identities: set[NormalizedUrl],
 ) -> None:
     if not run.seed_sitemaps:
         return
     for seed in await run.sitemap_seeds():
-        identity = durable_page_identity(seed.raw, run.host_policy)
-        if identity in seed_identities:
+        if seed in seed_identities:
             continue
-        seed_identities.add(identity)
+        seed_identities.add(seed)
         task = CrawlTask(
             index=state.next_index,
             original_url=seed.raw,
-            normalized_url=identity,
-            domain=registrable_domain(identity),
+            normalized_url=seed,
+            domain=seed.site,
         )
         frontier.append((0, task))
         state.next_index += 1
@@ -244,7 +241,7 @@ async def _start_recursive_state(
         next_index=len(jobs),
         ramp=float(run.global_concurrency),
     )
-    seed_identities: set[str] = {durable_page_identity(job.normalized_url, run.host_policy) for job in jobs}
+    seed_identities: set[NormalizedUrl] = {job.normalized_url for job in jobs}
     await _seed_recursive_frontier(run, state, state.frontier, seed_identities)
     return state
 
@@ -254,8 +251,8 @@ async def run_recursive_crawl(
     jobs: list[CrawlTask],
     scheduler: DomainScheduler,
     worker: Callable[[CrawlTask], Awaitable[EngineCrawlResult]],
-    robots_allows: Callable[[str], Awaitable[bool]],
-    robots_crawl_delay: Callable[[str], Awaitable[float | None]] | None = None,
+    robots_allows: Callable[[NormalizedUrl], Awaitable[bool]],
+    robots_crawl_delay: Callable[[NormalizedUrl], Awaitable[float | None]] | None = None,
     robots_disallowed: Callable[[CrawlTask], EngineCrawlResult],
     sitemap_seeds: Callable[[], Awaitable[list[NormalizedUrl]]],
     spill: Any,

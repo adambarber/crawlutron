@@ -11,7 +11,7 @@ from app.constants import (
     HTTP_DECLARED_CRAWLER,
 )
 from app.crawl.admission import requeue_admitted_pages
-from app.crawl.job_store import FrontierEntry, durable_page_identity
+from app.crawl.job_store import FrontierEntry
 from app.crawl.payload_helpers import _payload_policy
 from app.crawl.policy import PolicyTier
 from app.crawl.recursive_admission import _batch_is_http_heavy
@@ -37,9 +37,16 @@ from app.resource_pressure import (
     read_cpu_quota,
     read_cpu_usage_seconds,
 )
-from app.validation import HostPolicy
+from app.models.host_policy import HostPolicy
+from app.models.normalized_url import NormalizedUrl
 from tests._fetcher_factories import LINKED_PAIR_LIMITS, crawled_results, site_linking_to
-from tests._policy_factories import admit
+from tests._policy_factories import UNRESTRICTED_HOST_POLICY, admit
+
+
+def _url(text: str) -> NormalizedUrl:
+    """One admission per test file: frontier entries hold the value, and its
+    ``.raw`` is the canonical identity the frontier is asserted by."""
+    return NormalizedUrl(text, policy=UNRESTRICTED_HOST_POLICY)
 from tests._recursive_harnesses import drive_recursive_crawl, make_crawl_task
 from tests._scheduler_doubles import FakeScheduler as _Scheduler
 from tests._timing_harnesses import recorder
@@ -438,7 +445,8 @@ async def test_engine_throttles_batches_under_pressure(monkeypatch, cpu_ratio, m
     exercised; the other resource is pinned idle so only the named one drives
     the throttle."""
     out, waits = await _crawl_under_pressure(monkeypatch, cpu_ratio=cpu_ratio, memory_ratio=memory_ratio)
-    assert {r.normalized_url for r in out["results"]} == {
+    # Engine results carry the value object; identity is its ``.raw`` text.
+    assert {r.normalized_url.raw for r in out["results"]} == {
         "http://example.com",
         "http://example.com/a",
     }
@@ -959,7 +967,7 @@ class TestRequeueOvercommitContract:
 
         outcome = requeue_admitted_pages(
             job,
-            [FrontierEntry(url="https://c.test/", depth=1)],
+            [FrontierEntry(url=_url("https://c.test/"), depth=1)],
             _requeue_context(),
         )
 
@@ -969,8 +977,7 @@ class TestRequeueOvercommitContract:
         # because that is what the frontier holds -- asserting the literal would
         # make this test fail for a normalization improvement and pass for a
         # dedupe regression.
-        policy = HostPolicy.unrestricted()
-        assert [entry.url for entry in job.frontier] == [durable_page_identity("https://c.test/", policy)]
+        assert [entry.url.raw for entry in job.frontier] == ["https://c.test"]
         assert outcome.accepted == 1
         assert outcome.cap_overcommitted == 1
         assert outcome.cap_blocked == 0, "admitting past the cap is not a refusal"
@@ -981,7 +988,7 @@ class TestRequeueOvercommitContract:
 
         outcome = requeue_admitted_pages(
             job,
-            [FrontierEntry(url="https://b.test/", depth=1)],
+            [FrontierEntry(url=_url("https://b.test/"), depth=1)],
             _requeue_context(),
         )
 
@@ -998,7 +1005,7 @@ class TestRequeueOvercommitContract:
         and overcommit are opposites, each belongs to exactly one path, and a
         caller can tell them apart by which number is non-zero.
         """
-        frontier: list[str] = []
+        frontier: list[NormalizedUrl] = []
         outcome = await admit(
             ["https://example.test/one", "https://example.test/two"],
             frontier=frontier,
@@ -1025,18 +1032,18 @@ async def test_discovered_link_delay_commits_in_order_and_breaks_at_cap():
         "https://example.test/not-processed",
     ]
 
-    async def allows(url: str) -> bool:
-        events.append(("robots", url))
+    async def allows(url: NormalizedUrl) -> bool:
+        events.append(("robots", url.raw))
         return True
 
-    async def crawl_delay(url: str) -> float:
-        events.append(("delay", url))
+    async def crawl_delay(url: NormalizedUrl) -> float:
+        events.append(("delay", url.raw))
         return 1.5
 
     def commit(domain: str, delay: float) -> None:
         events.append(("commit", domain, delay))
 
-    frontier: list[str] = []
+    frontier: list[NormalizedUrl] = []
     outcome = await admit(
         links,
         frontier=frontier,
@@ -1061,7 +1068,7 @@ async def test_discovered_link_delay_commits_in_order_and_breaks_at_cap():
 
 
 async def test_duplicate_canonical_spellings_do_not_consume_capacity():
-    frontier: list[str] = []
+    frontier: list[NormalizedUrl] = []
     outcome = await admit(
         [
             "https://example.test/child?utm_source=one",
@@ -1085,16 +1092,16 @@ async def test_duplicate_canonical_spellings_do_not_consume_capacity():
 async def test_admission_robots_work_stops_at_remaining_capacity():
     calls: list[str] = []
 
-    async def allows(url: str) -> bool:
-        calls.append(url)
+    async def allows(url: NormalizedUrl) -> bool:
+        calls.append(url.raw)
         return True
 
-    frontier: list[str] = []
+    frontier: list[NormalizedUrl] = []
     outcome = await admit(
         [f"https://example.test/page-{index}" for index in range(100)],
         frontier=frontier,
         max_pages=1,
-        known={"https://example.test/root"},
+        known={_url("https://example.test/root")},
         robots_allows=allows,
         robots_crawl_delay=_no_crawl_delay,
         occupied=1,
