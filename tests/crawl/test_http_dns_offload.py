@@ -8,6 +8,7 @@ import pytest
 
 from app.crawl.strategies import pinned_transport
 from app.crawl.strategies.fetchers import default_http_fetcher
+from app.models.normalized_url import NormalizedUrl
 from app.validation import HostPolicy
 
 
@@ -44,7 +45,7 @@ async def test_http_fetcher_offloads_the_pin_rule_to_thread():
     # that difference is what makes this test about offloading at all.
     with pytest.raises(httpx.ConnectError):
         await default_http_fetcher(
-            "http://example.com/",
+            NormalizedUrl("http://example.com/", policy=HostPolicy.unrestricted()),
             {},
             timeout_seconds=2,
             policy=HostPolicy.unrestricted(),

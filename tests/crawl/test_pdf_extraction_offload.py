@@ -11,11 +11,14 @@ recorded as offloaded.
 """
 
 from app.crawl.strategies.browser import BrowserRenderer, RenderOptions
+from app.models.normalized_url import NormalizedUrl
 from tests._assertions import install_to_thread_spy
 from tests._browser_doubles import BrowserFakePage, build_pinned_renderer
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY
 
 _PDF_URL = "http://93.184.216.34/doc.pdf"  # public IP literal: passes the final-URL SSRF re-check
+# The admitted form of the fixture URL: the render body's seam is value-native.
+_PDF_VALUE = NormalizedUrl(_PDF_URL, policy=UNRESTRICTED_HOST_POLICY)
 
 
 class _PdfPage(BrowserFakePage):
@@ -61,13 +64,15 @@ async def _render_pdf(monkeypatch):
     renderer = _build_pdf_renderer(monkeypatch, page)
 
     def blocking_pdf_extractor(url: str, policy) -> str:
+        # The extractor seam takes the projected text: it is a sync downloader
+        # whose input is a URL string, not the value object.
         assert url == _PDF_URL
         assert policy == UNRESTRICTED_HOST_POLICY
         return "extracted pdf text"
 
     renderer._pdf_text_extractor = blocking_pdf_extractor
     return await renderer._render_with_page_unlocked(
-        _PDF_URL,
+        _PDF_VALUE,
         RenderOptions(include_text=True),
         policy=UNRESTRICTED_HOST_POLICY,
     )

@@ -19,6 +19,8 @@ from app.constants import (
 from app.crawl.result_helpers import classify_error_code, engine_result_from_exception
 from app.crawl.strategies.browser_pool import BrowserPoolExhaustedError
 from app.models.engine_crawl_result import EngineCrawlResult
+from app.models.host_policy import HostPolicy
+from app.models.normalized_url import NormalizedUrl
 from tests._browser_doubles import _fake_browser
 from tests._fetcher_factories import failing_fetcher, raise_fetcher, run_chain
 from tests._worker_doubles import (
@@ -173,7 +175,7 @@ def _budget_item() -> dict:
     result = engine_result_from_exception(
         error=TimeoutError("budget exhausted"),
         original_url="https://a.example/slow",
-        normalized_url="https://a.example/slow",
+        normalized_url=NormalizedUrl("https://a.example/slow", policy=HostPolicy.unrestricted()),
         strategy="HTTP_DECLARED_CRAWLER",
         known_classification="url_budget_exceeded",
         extra_diagnostics={"url_budget_seconds": 30},

@@ -10,6 +10,7 @@ FastAPI machinery.
 from __future__ import annotations
 
 from fastapi import APIRouter, Body, Depends, Request
+from fastapi.responses import Response
 
 from app.api.crawl_endpoint import crawl as crawl_handler
 from app.api.crawl_endpoint import get_crawl_result as get_crawl_result_handler
@@ -126,6 +127,7 @@ async def crawl(
 
 @router.get(
     "/v1/crawl/{request_id}",
+    response_model=UnifiedCrawlResponse,
     summary="Retrieve a completed crawl response",
     description=(
         "Return the stored UnifiedCrawlResponse for a previously completed "
@@ -139,7 +141,10 @@ async def get_crawl_result(
     request_id: str,
     job_store=Depends(get_job_store),
     result_store=Depends(get_result_store),
-) -> UnifiedCrawlResponse:
+) -> Response:
+    # The handler replays the stored response model's own bytes (see its
+    # docstring), so the wire schema is documented via response_model while
+    # the honest runtime return is the replayed Response.
     return await get_crawl_result_handler(request_id, job_store=job_store, result_store=result_store)
 
 

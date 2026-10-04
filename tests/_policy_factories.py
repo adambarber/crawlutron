@@ -33,8 +33,8 @@ from app.validation import HostPolicy
 UNRESTRICTED_HOST_POLICY = HostPolicy.unrestricted()
 
 
-def canonical(url: str) -> str:
-    """The canonical TEXT production would hold for ``url``.
+def canonical(url: str) -> NormalizedUrl:
+    """The admitted value production would hold for ``url``.
 
     A test that spells ``normalized_url="http://a/"`` is asserting a state
     production cannot reach -- normalization strips that trailing slash, so the
@@ -44,17 +44,16 @@ def canonical(url: str) -> str:
     Going through the production normalizer rather than trimming the slash here
     is the whole point: a hand-rolled version of the canonical rules would be a
     second copy that passes every test while production changes underneath it,
-    which is the failure mode ``UNRESTRICTED_HOST_POLICY`` above exists to
+    the failure mode ``UNRESTRICTED_HOST_POLICY`` above exists to
     prevent. It also costs nothing: the private-target guard is skipped outright
     while the suite-wide loopback fixture is in force, so no DNS happens for
     fixture hostnames.
 
-    Returns text rather than the ``NormalizedUrl`` value, because every caller
-    stores it in a field declared ``str`` -- a position that crosses a boundary
-    (the job store, the spill file, the wire). The admission positions that want
-    the value construct it themselves, where the policy is in hand.
+    Returns the ``NormalizedUrl`` value, because the record fields that carry
+    it are value-typed; the few text comparisons project ``.raw`` where a wire
+    or storage boundary is what the assertion is about.
     """
-    return NormalizedUrl(url, policy=UNRESTRICTED_HOST_POLICY).raw
+    return NormalizedUrl(url, policy=UNRESTRICTED_HOST_POLICY)
 
 
 BOOL_ENV_CASES = (

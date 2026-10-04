@@ -59,7 +59,7 @@ def requeue_transient(
     *,
     depth: int,
     frontier: deque[tuple[int, CrawlTask]],
-    attempts: dict[str, int],
+    attempts: dict[NormalizedUrl, int],
 ) -> bool:
     """Re-queue a transiently-failed task to the frontier tail, up to the cap.
 
@@ -73,10 +73,10 @@ def requeue_transient(
     bound, so the cap cannot be sidestepped by a caller re-queueing for its own
     reason.
     """
-    count = attempts.get(task.normalized_url.raw, 0)
+    count = attempts.get(task.normalized_url, 0)
     if count >= MAX_TRANSIENT_REQUEUES:
         return False
-    attempts[task.normalized_url.raw] = count + 1
+    attempts[task.normalized_url] = count + 1
     # Depth stays unchanged: a retry is not a deeper crawl, and re-queueing at
     # the tail preserves BFS order so an oversubscribed crawl does not starve
     # the rest of the batch.
@@ -120,7 +120,7 @@ class _RecursiveState:
     next_index: int
     ramp: float
     page_count: int = 0
-    transient_requeues: dict[str, int] = field(default_factory=dict)
+    transient_requeues: dict[NormalizedUrl, int] = field(default_factory=dict)
 
     def make_admitted_task(self, link: AdmittedLink) -> tuple[int, CrawlTask]:
         task = CrawlTask(

@@ -2,6 +2,7 @@
 
 from app.crawl.strategies.browser import BrowserRenderer
 from app.crawl.strategies.browser_driver import BrowserDriver
+from app.models.normalized_url import NormalizedUrl
 from app.models.render_options import RenderOptions
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY
 
@@ -26,7 +27,7 @@ async def _retry_exhausted(browser_factory, *, max_retries: int = 1):
         sleep=lambda _s: None,
     )
     result = await renderer.render(
-        "http://example.com/",
+        NormalizedUrl("http://example.com/", policy=UNRESTRICTED_HOST_POLICY),
         RenderOptions(max_retries=max_retries),
         policy=UNRESTRICTED_HOST_POLICY,
     )

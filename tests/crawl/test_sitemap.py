@@ -430,7 +430,7 @@ def test_build_site_map_aggregates_and_dedupes():
     )
     m = build_site_map(crawl_response, host_policy=UNRESTRICTED_HOST_POLICY)
     # canonical(): the root's admitted raw, not the submission text.
-    assert m["url"] == canonical("http://x.example/")
+    assert m["url"] == canonical("http://x.example/").raw
     assert m["links"] == ["http://x.example/a", "http://x.example/b"]
     assert "http://x.example/sitemap.xml" in m["sitemaps"]
     assert "http://x.example/sitemap2.xml" in m["sitemaps"]

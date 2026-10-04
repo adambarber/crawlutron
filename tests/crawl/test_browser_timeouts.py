@@ -14,6 +14,7 @@ import pytest
 from app.crawl.strategies.browser_driver import MAX_ACTION_WAIT_SECONDS, BrowserDriver
 from app.models.render_options import RenderOptions
 from tests._browser_doubles import BrowserFakePage, pinned_page_renderer
+from app.models.normalized_url import NormalizedUrl
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY
 
 
@@ -81,7 +82,7 @@ class TestNavigationTimeout:
         options = RenderOptions(timeout_seconds=1, max_retries=0)
         result = await asyncio.wait_for(
             renderer.render(
-                "http://example.com/",
+                NormalizedUrl("http://example.com/", policy=UNRESTRICTED_HOST_POLICY),
                 options,
                 policy=UNRESTRICTED_HOST_POLICY,
             ),

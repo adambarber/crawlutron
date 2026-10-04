@@ -12,9 +12,13 @@ from contextlib import contextmanager
 from app.crawl.strategies import browser as browser_mod
 from app.crawl.strategies.browser import BrowserRenderer
 from app.crawl.strategies.browser_driver import BrowserDriver
-from app.models.registrable_domain import registrable_domain
+from app.models.normalized_url import NormalizedUrl
 from tests._browser_doubles import BrowserFakePage, FakeBrowserDriver, ScriptedPage, build_pinned_renderer
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY
+
+
+def _admit(url: str) -> NormalizedUrl:
+    return NormalizedUrl(url, policy=UNRESTRICTED_HOST_POLICY)
 
 
 def _page_with_context():
@@ -32,7 +36,7 @@ class _FakeContext:
 
 
 @contextmanager
-def isolated_browser_cookies(url: str):
+def isolated_browser_cookies(url: NormalizedUrl):
     """Detach the module-global cookie slot for ``url``'s domain, then restore it.
 
     ``_BROWSER_COOKIES_BY_DOMAIN`` is process-global and keyed by registrable
@@ -42,7 +46,7 @@ def isolated_browser_cookies(url: str):
     part that went missing; the store offers no per-key removal (nothing in
     production wanted one), so the slot is detached by emptying the whole store.
     """
-    domain = registrable_domain(url)
+    domain = url.site
     browser_mod.reset_process_state()
     try:
         yield domain
@@ -52,7 +56,7 @@ def isolated_browser_cookies(url: str):
 
 class TestCookieHarvestCompletes:
     async def test_harvest_visible_to_immediate_retry(self):
-        url = "http://harvest-race.test/page"
+        url = _admit("http://harvest-race.test/page")
         with isolated_browser_cookies(url) as domain:
             renderer = BrowserRenderer()
             await renderer._harvest_session_cookies(_page_with_context(), url)
@@ -79,7 +83,7 @@ class TestHarvestWaitBounded:
     async def test_render_finally_harvest_timeout(self, monkeypatch):
         from app.crawl.strategies.browser import RenderOptions
 
-        url = "http://example.com/page"
+        url = _admit("http://example.com/page")
         with isolated_browser_cookies(url) as domain:
             page = BrowserFakePage(context=_WedgedContext())
             close_calls: list[bool] = []

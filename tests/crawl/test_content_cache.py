@@ -20,6 +20,7 @@ from app.constants import HTTP_DECLARED_CRAWLER
 from app.crawl.cache import HttpCache
 from app.crawl.content_cache import ContentCache
 from app.crawl.strategies.fetchers import default_http_fetcher
+from app.models.normalized_url import NormalizedUrl
 from app.validation import HostPolicy
 from tests._fetcher_factories import (
     clocked_cache,
@@ -289,7 +290,9 @@ async def test_http_strategy_result_uses_content_cache(base_url, tmp_path):
     first = await run()
     second = await run()
     assert first.status == "success" and second.status == "success"
-    assert fetched == [f"{base_url}/"]  # the cache prevented the second real fetch
+    assert fetched == [
+        NormalizedUrl(f"{base_url}/", policy=HostPolicy.unrestricted()).raw
+    ]  # the cache prevented the second real fetch
 
 
 async def test_content_cache_revalidates_etagged_url(etag_server, tmp_path):

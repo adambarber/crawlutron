@@ -7,6 +7,8 @@ neighboring ``extract_document``/``extract_content`` calls already do.
 """
 
 from app.crawl.extraction import extract_html
+from app.models.normalized_url import NormalizedUrl
+from app.models.host_policy import HostPolicy
 from tests._assertions import install_to_thread_spy
 from tests._fetcher_factories import invoke_browser_strategy, invoke_http_strategy
 from tests._policy_factories import http_strategy_policy
@@ -68,5 +70,7 @@ async def test_trafilatura_result_unchanged_by_offload(monkeypatch):
         resp=_resp,
         dedupe_patch=True,
     )
-    direct = extract_html(_HTML_BODY.decode(), "http://example.com/")
+    direct = extract_html(
+        _HTML_BODY.decode(), NormalizedUrl("http://example.com/", policy=HostPolicy.unrestricted())
+    )
     assert result.text == (direct.text or "")

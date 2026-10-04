@@ -4,6 +4,8 @@ from app.addresses import AddressClass, classify
 from app.models.host_policy import HostPolicy
 from app.models.normalized_url import NormalizedUrl, admit_or_none
 
+__all__ = ["filter_js_endpoints", "is_public_ip_value"]
+
 
 def is_public_ip_value(value: str) -> bool:
     """Return whether a host string is safe for public egress.

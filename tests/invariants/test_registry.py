@@ -473,7 +473,7 @@ def _call_leaf_names(tree: ast.AST, node: ast.AST):
 _STRING_CONSTRUCTOR_METHODS = frozenset({"format", "join"})
 
 
-_URL_CONSTRUCTOR_METHODS = frozenset({"urljoin", "urlunsplit"})
+_URL_CONSTRUCTOR_METHODS = frozenset({"resolve"})
 
 
 # How a line-oriented robots file gets torn into lines. A hand-rolled scanner

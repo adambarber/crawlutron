@@ -113,7 +113,7 @@ async def test_recursive_link_robots_checks_run_concurrently():
             normalized_url=canonical(f"http://link{i}.example/"),
             text="",
             rel=[],
-            source_url="http://seed.example/",
+            source_url=canonical("http://seed.example/"),
             host=f"link{i}.example",
             is_same_host=False,
         )
@@ -122,7 +122,7 @@ async def test_recursive_link_robots_checks_run_concurrently():
     jobs = [_make_job(0, "seed.example")]
 
     async def worker(job):
-        if job.normalized_url == "http://seed.example/page0":
+        if job.normalized_url == canonical("http://seed.example/page0"):
             return make_engine_result(job.normalized_url, links=links)
         return make_engine_result(job.normalized_url)
 
@@ -231,7 +231,7 @@ async def test_recursive_batch_duplicate_url_crawled_once(recording_worker):
     seen, worker = recording_worker
 
     await _drive(jobs, worker, allows, crawl_delay)
-    assert seen == ["http://dup.example/page0"]
+    assert seen == [canonical("http://dup.example/page0")]
     assert state["calls"] == 1
 
 

@@ -183,11 +183,17 @@ def _serialize_response(resp: Any) -> dict[str, Any]:
     }
 
 
-def _rebuild_response(data: dict[str, Any]) -> HttpFetchResult:
-    """Reconstruct a response object from a cached envelope."""
+def _rebuild_response(data: dict[str, Any], ctx: _HttpStrategyContext) -> HttpFetchResult:
+    """Reconstruct a response object from a cached envelope.
+
+    The envelope is this module's own dump: URL fields were serialized as
+    raw text, so the rebuild re-admits them under the strategy's host policy
+    -- the same re-admission a redirect hop performs -- rather than feeding
+    text into value-typed fields.
+    """
     return HttpFetchResult(
-        url=data.get("final_url", ""),
-        final_url=data["final_url"],
+        url=ctx.normalized_url,
+        final_url=NormalizedUrl(data["final_url"], policy=ctx.host_policy),
         status_code=data["status_code"],
         headers=data["headers"],
         body=base64.b64decode(data["body_b64"]),
@@ -246,7 +252,7 @@ async def _revalidate_content_cache(ctx: _HttpStrategyContext) -> None:
     if not validator and ctx.caller_conditional:
         validator = dict(ctx.caller_conditional)
     if not validator:
-        ctx.response = _rebuild_response(cached)
+        ctx.response = _rebuild_response(cached, ctx)
         ctx.content_hit = True
         ctx.retry_diagnostics = {"attempts": 0, "transient_errors": [], "content_cache": "hit"}
         return
@@ -263,7 +269,7 @@ async def _revalidate_content_cache(ctx: _HttpStrategyContext) -> None:
         ctx.max_content_length,
     )
     if ctx.response.status_code == 304:
-        ctx.response = _rebuild_response(cached)
+        ctx.response = _rebuild_response(cached, ctx)
         ctx.retry_diagnostics = {**ctx.retry_diagnostics, "content_cache": "hit_revalidated"}
         ctx.revalidated_304 = True
     else:

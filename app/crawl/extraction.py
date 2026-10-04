@@ -957,7 +957,17 @@ def extract_js_endpoints(
             endpoint = match.group(1).strip()
             if not endpoint:
                 continue
-            resolved = str(source_url.resolve(endpoint) or endpoint) if source_url else endpoint
+            if source_url is None:
+                # No base to resolve against: keep the raw scrape. The
+                # absolute-only filter below still admits or drops it.
+                resolved = endpoint
+            else:
+                admitted = source_url.resolve(endpoint)
+                # A refused endpoint can never survive the egress filter
+                # downstream; dropping it here keeps raw text out of the list.
+                if admitted is None:
+                    continue
+                resolved = admitted.raw
             if resolved in seen:
                 continue
             seen.add(resolved)

@@ -153,19 +153,21 @@ def normalize_frontier(
     legacy_depth = policy.limits.max_depth
     entries: dict[NormalizedUrl, FrontierEntry] = {}
     order: list[NormalizedUrl] = []
+
+    def _keep_shallowest(url: NormalizedUrl, entry_depth: int) -> None:
+        """First sighting keeps its slot; a later shallower one replaces it."""
+        previous = entries.get(url)
+        if previous is None:
+            entries[url] = FrontierEntry(url=url, depth=entry_depth)
+            order.append(url)
+        elif entry_depth < previous.depth:
+            entries[url] = FrontierEntry(url=url, depth=entry_depth)
+
     for value in values:
-        raw_url: object
-        depth: object
         if isinstance(value, FrontierEntry):
             entry = value
             entry_depth = 0 if entry.url == canonical_root else _entry_depth(entry.depth, legacy_depth)
-            entry = FrontierEntry(url=entry.url, depth=entry_depth)
-            previous = entries.get(entry.url)
-            if previous is None:
-                entries[entry.url] = entry
-                order.append(entry.url)
-            elif entry_depth < previous.depth:
-                entries[entry.url] = entry
+            _keep_shallowest(entry.url, entry_depth)
             continue
         if isinstance(value, dict):
             raw_url = value.get("url")
@@ -179,14 +181,36 @@ def normalize_frontier(
         if url is None:
             continue
         entry_depth = 0 if url == canonical_root else _entry_depth(depth, legacy_depth)
-        entry = FrontierEntry(url=url, depth=entry_depth)
-        previous = entries.get(url)
-        if previous is None:
-            entries[url] = entry
-            order.append(url)
-        elif entry_depth < previous.depth:
-            entries[url] = entry
+        _keep_shallowest(url, entry_depth)
     return [entries[url] for url in order]
+
+
+def _normalize_visited(visited: _PersistedJSON, *, host_policy: HostPolicy) -> set[NormalizedUrl]:
+    """Coerce a persisted visited column to admitted values, keeping only what admits.
+
+    Visited elements arrive both ways: ``from_json`` admits its list before
+    this pass, while raw rows still carry bare text. An admitted value keeps
+    its identity by construction; text must pass admission. A str-only guard
+    here silently wiped every admitted value on load -- a completed job
+    reloaded as never-crawled. A persisted column that is not a sequence of
+    URLs is not a crash worth raising: the job loses its visited history, and
+    the frontier still bounds what it will fetch.
+    """
+    if isinstance(visited, str):
+        visited_values: list[object] = [visited]
+    elif isinstance(visited, Iterable):
+        visited_values = list(visited)
+    else:
+        visited_values = []
+    normalized: set[NormalizedUrl] = set()
+    for url in visited_values:
+        if isinstance(url, NormalizedUrl):
+            normalized.add(url)
+        elif isinstance(url, str) and url:
+            admitted = admit_or_none(url, policy=host_policy)
+            if admitted is not None:
+                normalized.add(admitted)
+    return normalized
 
 
 def normalize_job_collections(
@@ -198,29 +222,7 @@ def normalize_job_collections(
     in_flight: _PersistedJSON,
     host_policy: HostPolicy,
 ) -> tuple[set[NormalizedUrl], list[FrontierEntry], list[FrontierEntry]]:
-    if isinstance(visited, str):
-        visited_values = [visited]
-    elif isinstance(visited, Iterable):
-        visited_values = list(visited)
-    else:
-        # A persisted column that is not a sequence of URLs is not a crash
-        # worth raising: the job loses its visited history, and the frontier
-        # below still bounds what it will fetch.
-        visited_values = []
-    # Visited elements arrive both ways: ``from_json`` admits its list before
-    # this pass, while raw rows still carry bare text. An admitted value keeps
-    # its identity by construction; text must pass admission. A str-only guard
-    # here silently wiped every admitted value on load -- a completed job
-    # reloaded as never-crawled.
-    normalized_visited: set[NormalizedUrl] = set()
-    for url in visited_values:
-        if isinstance(url, NormalizedUrl):
-            normalized_visited.add(url)
-            continue
-        if isinstance(url, str) and url:
-            admitted = admit_or_none(url, policy=host_policy)
-            if admitted is not None:
-                normalized_visited.add(admitted)
+    normalized_visited = _normalize_visited(visited, host_policy=host_policy)
     # normalize_frontier admits the root text itself; the str here is the
     # row's durable identity, not a live URL value.
     normalized_frontier = normalize_frontier(

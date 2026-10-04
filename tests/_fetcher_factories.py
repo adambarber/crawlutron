@@ -364,7 +364,9 @@ def request_fetcher(respond, record_headers: list[dict[str, str]] | None = None)
     ``calls`` so that "which URLs" and "what was sent" stay two different facts.
     """
     seen: list[dict[str, str]] = [] if record_headers is None else record_headers
-    return FetcherDouble(lambda url, sent_headers, *_: respond(url, sent_headers), record_headers=seen)
+    # ``respond`` computes over the request's URL text; the value is projected
+    # here so every ``respond`` stays text-native.
+    return FetcherDouble(lambda url, sent_headers, *_: respond(url.raw, sent_headers), record_headers=seen)
 
 
 def tap_fetcher(inner, calls: list[str] | None = None):
@@ -578,7 +580,9 @@ def cache_with_etag(url: str, etag: str = "v1") -> HttpCache:
     keyed by and the cache object one decision instead of three.
     """
     cache = HttpCache()
-    cache.store(url, {"etag": etag})
+    # Value-keyed cache: admit under the same policy the harness admits
+    # request URLs with, or the conditional GET silently misses.
+    cache.store(_admit(url), {"etag": etag})
     return cache
 
 

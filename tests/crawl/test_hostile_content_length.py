@@ -9,6 +9,7 @@ fetch and turn one crafted response into that URL's failure.
 
 from app.crawl.strategies.fetchers import default_http_fetcher
 from app.crawl.strategies.pinned_transport import _declared_length_exceeds
+from app.models.normalized_url import NormalizedUrl
 from app.validation import HostPolicy
 from tests._transport_doubles import MockResponse, patch_http_fetcher_transport
 
@@ -28,7 +29,7 @@ async def _fetch_behind_declared_length(monkeypatch, declared: str):
         allow_ssrf_bypass=True,
     )
     return await default_http_fetcher(
-        "http://example.com/",
+        NormalizedUrl("http://example.com/", policy=HostPolicy.unrestricted()),
         {},
         30,
         1000,

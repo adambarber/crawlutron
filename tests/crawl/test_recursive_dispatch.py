@@ -37,7 +37,7 @@ def _task(url: str, *, index: int = 0) -> CrawlTask:
     return CrawlTask(
         index=index,
         original_url=url,
-        normalized_url=_admit(canonical(url)),
+        normalized_url=canonical(url),
         domain=urlsplit(url).hostname or "",
     )
 
@@ -45,7 +45,7 @@ def _task(url: str, *, index: int = 0) -> CrawlTask:
 def _link(url: str) -> DiscoveredLink:
     return DiscoveredLink(
         url=url,
-        normalized_url=_admit(canonical(url)),
+        normalized_url=canonical(url),
         text="",
         rel=[],
         source_url=_admit("http://a/"),
@@ -292,7 +292,7 @@ def _tiered_job(index: int, host: str) -> CrawlTask:
     return CrawlTask(
         index=index,
         original_url=f"http://{host}/",
-        normalized_url=_admit(canonical(f"http://{host}/")),
+        normalized_url=canonical(f"http://{host}/"),
         domain=host,
     )
 

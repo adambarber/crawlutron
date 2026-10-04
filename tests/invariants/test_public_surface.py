@@ -93,17 +93,20 @@ _PUBLIC_SURFACE_PROPERTY = Property(
 # exist to remove. Two adapters, one shared `_envelope_options`, and each one
 # reachable only through the endpoint that has the matching envelope.
 _OWNER_PUBLIC_SURFACE_RATCHET = {
-    "app/crawl/admission.py": (20, 14),
-    # RAISED to (14, 11) then LOWERED to (7, 6), (5, 5), then (4, 4): HostPolicy and
-    # registrable_domain moved to app/models, then the env family to app/env.py, then the
-    # egress verdict to app/models/host_policy.py, then the normalizer to
-    # app/models/normalized_url.py. What is left here is the public-URL helpers.
-    "app/validation.py": (4, 4),
+    "app/crawl/admission.py": (19, 13),
+    # RAISED to (14, 11) then LOWERED to (7, 6), (5, 5), (4, 4), then (2, 2):
+    # HostPolicy and registrable_domain moved to app/models, then the env family
+    # to app/env.py, then the egress verdict to app/models/host_policy.py, then
+    # the normalizer to app/models/normalized_url.py. The NormalizedUrl
+    # convergence then retired the public_url_or_none family outright, leaving
+    # only the two facts that are still validation's to own: the resolved-address
+    # publicness predicate and the JS-endpoint egress filter.
+    "app/validation.py": (2, 2),
     "app/env.py": (7, 5),
     "app/api/response_shaping.py": (11, 10),
     "app/crawl/sqlite_store.py": (9, 7),
     "app/safe_regex.py": (7, 2),
-    "app/crawl/robots.py": (13, 4),
+    "app/crawl/robots.py": (12, 3),
     "app/bounded_io.py": (4, 2),
     "app/crawl/decompression.py": (3, 1),
     "app/crawl/credentials.py": (3, 3),

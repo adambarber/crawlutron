@@ -12,6 +12,7 @@ import threading
 from contextlib import contextmanager
 
 from app.crawl.strategies.fetchers import default_http_fetcher
+from app.models.normalized_url import NormalizedUrl
 from app.validation import HostPolicy
 from tests._fetcher_factories import _spawn_fetch
 from tests.helpers.server import SilentHandler
@@ -83,7 +84,7 @@ async def _fetch_with_cap(port: int, path: str, cap: int):
     the fetcher is being pointed at.
     """
     return await default_http_fetcher(
-        f"http://127.0.0.1:{port}{path}",
+        NormalizedUrl(f"http://127.0.0.1:{port}{path}", policy=HostPolicy.unrestricted()),
         {},
         10,
         cap,
@@ -129,7 +130,7 @@ class TestFetchContentLengthLimit:
         result = _spawn_fetch(
             lambda s: asyncio.run(
                 default_http_fetcher(
-                    s.base_url + "/",
+                    NormalizedUrl(s.base_url + "/", policy=HostPolicy.unrestricted()),
                     {},
                     10,
                     1,

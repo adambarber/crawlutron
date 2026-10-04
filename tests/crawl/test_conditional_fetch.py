@@ -12,6 +12,8 @@ from pydantic import ValidationError
 
 from app.crawl.engine import crawl_request
 from app.models.crawl_request import CrawlRequest
+from app.models.host_policy import HostPolicy
+from app.models.normalized_url import NormalizedUrl
 from tests._fetcher_factories import request_fetcher, run_http_strategy, scripted_fetcher
 from tests._policy_factories import http_strategy_policy
 
@@ -125,7 +127,7 @@ async def test_engine_routes_validators_by_url():
     assert "If-None-Match" not in seen_headers["/plain"]
     # Etagged URL revalidated conditionally -> 304 -> not_modified.
     assert seen_headers["/etagged"]["If-None-Match"] == '"v9"'
-    plain = [r for u, r in results.items() if u.endswith("/plain")][0]
+    plain = [r for u, r in results.items() if u.raw.endswith("/plain")][0]
     assert plain.status == "success"
 
 
@@ -237,7 +239,11 @@ class TestNotModifiedResponse:
         )
 
         cache = HttpCache()
-        cache.store("http://example.com/", {"etag": "v1"})
+        # The cache is value-keyed: seed it with the admitted value the
+        # strategy will read under, or the conditional GET silently misses.
+        cache.store(
+            NormalizedUrl("http://example.com/", policy=HostPolicy.unrestricted()), {"etag": "v1"}
+        )
         result = await run_http_strategy(
             url="http://example.com/",
             policy=http_strategy_policy(),

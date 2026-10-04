@@ -39,14 +39,18 @@ from tests.rules import Bites, Rule
 
 _HOST_POLICY_VALIDATORS = frozenset(
     {
-        "canonical_page_identity",
+        "admit_or_none",
         "filter_js_endpoints",
-        "normalize_public_http_url",
-        "public_url_or_none",
-        "safe_public_url_or_none",
+        "NormalizedUrl",
         "_validated_url",
     }
 )
+
+#: Method calls that admit under the receiver's OWN embedded policy, so no
+#: policy argument appears at the call site. ``NormalizedUrl.resolve`` is the
+#: one such door on URL values in this tree (``Path.resolve`` hits the same
+#: leaf but its result is type-invalid as a URL, so it cannot launder one).
+_HOST_POLICY_SELF_VALIDATED_CALLS = frozenset({"resolve"})
 
 
 _HOST_POLICY_URL_CALLS = frozenset({"urljoin", "urlunsplit", "urlparse", "urlsplit", "geturl"})
@@ -143,6 +147,8 @@ def _host_policy_empty_guards(function: ast.AST) -> set[int]:
 
 
 def _host_policy_call_is_validated(tree: ast.AST, node: ast.Call, policy_names: set[str]) -> bool:
+    if resolved_call_name(tree, node).rsplit(".", 1)[-1].lower() in _HOST_POLICY_SELF_VALIDATED_CALLS:
+        return True
     if not _is_policy_call(tree, node, _HOST_POLICY_VALIDATORS):
         return False
     return any(
@@ -178,7 +184,11 @@ def _host_policy_expression_state(
     if isinstance(node, ast.Constant):
         return isinstance(node.value, str) and node.value.lower().startswith(("http://", "https://")), False
     if isinstance(node, ast.Attribute) and _reads_url_field(node.value, node.attr, url_names):
-        return True, False
+        # Reading a URL field (``.raw`` included) off a name the walk already
+        # knows is policy-validated is the sanctioned text projection: the
+        # value was admitted before the text was taken, so the text is clean.
+        receiver_validated = isinstance(node.value, ast.Name) and node.value.id in validated_names
+        return True, receiver_validated
     if (
         isinstance(node, ast.Subscript)
         and isinstance(node.slice, ast.Constant)
@@ -205,6 +215,18 @@ def _host_policy_expression_state(
                 is_validated for _, is_validated in child_states
             )
         return False, False
+    if isinstance(node, (ast.IfExp, ast.BoolOp)):
+        # A ternary is only as safe as its unsafe branch, and so is ``a or b``:
+        # URL-shaped if any branch is, validated only when EVERY URL-shaped
+        # branch is. A non-URL branch (``... else None``) is neutral, not a
+        # bypass -- it cannot carry a URL at all.
+        branches = (node.body, node.orelse) if isinstance(node, ast.IfExp) else tuple(node.values)
+        states = [
+            _host_policy_expression_state(tree, branch, url_names, validated_names, policy_names)
+            for branch in branches
+        ]
+        is_url = any(url for url, _ in states)
+        return is_url, all(valid or not url for url, valid in states)
     if isinstance(node, ast.Dict):
         dict_states = [
             _host_policy_expression_state(tree, value, url_names, validated_names, policy_names)
@@ -363,9 +385,9 @@ URL_RETURNING_HELPERS_REQUIRE_HOST_POLICY = Rule(
             "returns URLs without required HostPolicy",
         ),
         Bites(
-            "from app.validation import public_url_or_none\n"
+            "from app.models.normalized_url import admit_or_none\n"
             "def resolve(url, *, policy: HostPolicy):\n"
-            "    validator = public_url_or_none\n"
+            "    validator = admit_or_none\n"
             "    return validator(url)\n",
             "returns URLs without required HostPolicy",
         ),

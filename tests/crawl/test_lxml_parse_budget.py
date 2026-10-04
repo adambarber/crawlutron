@@ -26,6 +26,8 @@ from dataclasses import replace
 
 import pytest
 
+from app.models.host_policy import HostPolicy
+from app.models.normalized_url import NormalizedUrl
 from tests._fetcher_factories import run_http_strategy, scripted_fetcher
 from tests._parse_budget import ParseBudget
 
@@ -120,7 +122,9 @@ async def test_shaping_never_reparses_engine_produced_items(parse_budget):
     _markdown, metadata = format_crawl_item(item)
     assert parse_budget.parses == 0, "shaping rebuilt an lxml tree from the carried item"
     # Byte-for-byte the same computation site output the metadata replaced.
-    assert metadata == extract_llm_metadata(META_HTML, "http://example.com/")
+    assert metadata == extract_llm_metadata(
+        META_HTML, NormalizedUrl("http://example.com/", policy=HostPolicy.unrestricted())
+    )
 
 
 async def test_engine_item_without_a_tree_still_shapes_once(parse_budget):
@@ -151,4 +155,4 @@ async def test_carried_metadata_never_reaches_the_wire():
     assert "llm_metadata" not in dumped
     # ...and its metadata is the SAME wire surface the old reparse produced.
     assert dumped["metadata"]["title"] == "Meta T"
-    assert dumped["metadata"]["source_url"] == "http://example.com/"
+    assert dumped["metadata"]["source_url"] == "http://example.com"

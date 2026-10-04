@@ -2,7 +2,9 @@ import httpx
 import pytest
 
 from app.crawl.policy import PolicyTier, read_policy, validate_wire_policy
+from app.models.host_policy import HostPolicy
 from app.models.http_fetch_result import HttpFetchResult
+from app.models.normalized_url import NormalizedUrl
 from tests._fetcher_factories import failing_fetcher, request_fetcher, run_http_strategy, scripted_fetcher
 from tests._policy_factories import http_strategy_policy
 from tests._transport_doubles import (
@@ -106,7 +108,9 @@ class TestHttpStrategyEdges:
             server.shutdown()
             server.server_close()
 
-        assert outcome.final_url.startswith(url), f"cffi fetch produced {outcome!r}"
+        assert outcome.final_url.raw.startswith(
+            NormalizedUrl(url, policy=HostPolicy.unrestricted()).raw
+        ), f"cffi fetch produced {outcome!r}"
 
     async def test_http_strategy_result_httpx_request_error(self):
         from app.crawl.cache import HttpCache

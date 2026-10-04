@@ -4,9 +4,10 @@ import pytest
 
 from app.crawl.cache import HttpCache
 from app.crawl.engine import crawl_request
+from app.models.normalized_url import NormalizedUrl
 from tests._extraction_helpers import default_http_fetcher
 from tests._fetcher_factories import run_http_strategy
-from tests._policy_factories import _policy
+from tests._policy_factories import UNRESTRICTED_HOST_POLICY, _policy
 
 
 class TestHttpBodyHandling:
@@ -19,7 +20,7 @@ class TestHttpBodyHandling:
             cache=cache,
         )
         assert out.status == "success"
-        etag, last_modified = cache.get(base_url + "/with_lastmod")
+        etag, last_modified = cache.get(NormalizedUrl(base_url + "/with_lastmod", policy=UNRESTRICTED_HOST_POLICY))
         assert (last_modified) is not None
 
     async def test_rate_limit_cooldown(self, base_url):

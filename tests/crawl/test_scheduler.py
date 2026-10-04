@@ -265,7 +265,7 @@ class TestCircuitBreakerSpillsOnResult:
         job = CrawlTask(
             index=0,
             original_url="http://example.com/",
-            normalized_url=_admit(canonical("http://example.com/")),
+            normalized_url=canonical("http://example.com/"),
             domain="example.com",
         )
         # The bug raises TypeError inside gather with return_exceptions=True,

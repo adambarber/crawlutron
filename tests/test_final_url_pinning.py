@@ -14,6 +14,7 @@ from unittest.mock import patch
 
 from app.crawl.strategies import http_client_pool as pool_mod
 from app.crawl.strategies.fetchers import default_http_fetcher
+from app.models.normalized_url import NormalizedUrl
 from app.validation import HostPolicy
 
 
@@ -45,7 +46,7 @@ def test_final_url_uses_hostname_not_pinned_ip():
         gc.return_value.stream.return_value = fake
         result = asyncio.run(
             default_http_fetcher(
-                "http://example.com/page",
+                NormalizedUrl("http://example.com/page", policy=HostPolicy.unrestricted()),
                 {},
                 5,
                 1_000_000,
@@ -53,5 +54,5 @@ def test_final_url_uses_hostname_not_pinned_ip():
                 pin=lambda url, headers, *, policy: (pinned, {"Host": "example.com"}),
             )
         )
-    assert result.final_url == "http://example.com/page"
-    assert "93.184.216.34" not in result.final_url
+    assert result.final_url.raw == "http://example.com/page"
+    assert "93.184.216.34" not in result.final_url.raw

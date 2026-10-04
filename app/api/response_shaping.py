@@ -424,21 +424,16 @@ def _shape_all[ResultT: AnyResult](
     return shaped
 
 
-def _failed_unified_result(item: Any) -> UnifiedCrawlResult:
-    """A shape failure becomes a terminal failure for that item, not the batch.
+def _peek_failed_fields(item: Any) -> dict[str, Any]:
+    """Best-effort field reads off whatever arrived at the batch's last guard.
 
-    Mirrors the job runner's semantics (``failed += 1`` on a dropped item).
-    Fields that require no interpretation are carried through so the caller
-    still sees which URL failed.
-
-    This is the batch's last line of defense, and it deliberately stays the one
-    place in this module typed ``Any``: the guard above exists because the
-    per-item path CAN raise, so whatever arrived is by definition not the record
-    this module otherwise works in. Reading it is therefore best-effort by
-    attribute with a default -- ``getattr`` rather than ``.get`` because the
-    items are dataclasses now -- and whatever the item cannot answer degrades to
-    the honest empty value instead of raising a second exception out of the
-    guard and 500ing the whole batch.
+    This is deliberately typed ``Any``: the guard above exists because the
+    per-item path CAN raise, so whatever arrived is by definition not the
+    record this module otherwise works in. Reading it is therefore best-effort
+    by attribute with a default -- ``getattr`` rather than ``.get`` because
+    the items are dataclasses now -- and whatever the item cannot answer
+    degrades to the honest empty value instead of raising a second exception
+    out of the guard and 500ing the whole batch.
     """
     if isinstance(item, NormalizedUrl):
         # A page the batch never answered, whose identity the runner still
@@ -446,22 +441,31 @@ def _failed_unified_result(item: Any) -> UnifiedCrawlResult:
         # not its text and not a two-key dict: this function reads attributes,
         # so a dict arrived here as an envelope with no URL at all, which is
         # the gap this branch exists to close.
-        peeked: dict[str, Any] = {"normalized_url": item}
-    elif isinstance(item, str):
+        return {"normalized_url": item}
+    if isinstance(item, str):
         # Text-only means no admitted identity exists: the submission text is
         # the whole of what is known. The value fields stay None -- admitting
         # the text here would need a policy the wire does not have, and a
         # guessed admission is exactly the hole the value class exists to close.
-        peeked = {"original_url": item}
-    else:
-        peeked = {}
-        try:
-            peeked = {
-                key: getattr(item, key, None)
-                for key in ("normalized_url", "original_url", "url", "final_url", "error")
-            }
-        except Exception:
-            _logger.debug("unshapable item refused even best-effort field reads", exc_info=True)
+        return {"original_url": item}
+    try:
+        return {
+            key: getattr(item, key, None)
+            for key in ("normalized_url", "original_url", "url", "final_url", "error")
+        }
+    except Exception:
+        _logger.debug("unshapable item refused even best-effort field reads", exc_info=True)
+        return {}
+
+
+def _failed_unified_result(item: Any) -> UnifiedCrawlResult:
+    """A shape failure becomes a terminal failure for that item, not the batch.
+
+    Mirrors the job runner's semantics (``failed += 1`` on a dropped item).
+    Fields that require no interpretation are carried through so the caller
+    still sees which URL failed.
+    """
+    peeked = _peek_failed_fields(item)
 
     def _value(key: str) -> NormalizedUrl | None:
         """Best-effort read of a value field: a value, or honestly nothing."""

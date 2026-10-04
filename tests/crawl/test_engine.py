@@ -19,6 +19,7 @@ from app.scheduler import DomainScheduler
 from tests._assertions import browser_available
 from tests._browser_doubles import _fake_browser
 from tests._fetcher_factories import (
+    _admit,
     cache_with_etag,
     crawled_result,
     hanging_fetcher,
@@ -106,7 +107,7 @@ def test_seed_freshness_uses_real_default_strategies():
     from app.crawl.strategies.request_profile import headers_for_strategy
     from app.models.crawl_extraction_method import CrawlExtractionMethod
 
-    url = "http://seed-fresh.test/page"
+    url = _admit("http://seed-fresh.test/page")
     # Normalized shape but no strategies key: the default must apply.
     policy: dict[str, Any] = {"headers": {}, "request_profile": {}}
     expected_key = build_content_cache_key(
