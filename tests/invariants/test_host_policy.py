@@ -364,7 +364,7 @@ URL_RETURNING_HELPERS_REQUIRE_HOST_POLICY = Rule(
     ),
     bite=lambda: (
         Bites(
-            "def normalize_public_http_url(url, *, policy=None):\n    return url\n",
+            "def normalize_url(url, *, policy=None):\n    return url\n",
             "returns URLs without required HostPolicy",
         ),
         Bites(
@@ -397,30 +397,30 @@ URL_RETURNING_HELPERS_REQUIRE_HOST_POLICY = Rule(
         ),
     ),
     clean=lambda: (
-        "from app.validation import public_url_or_none\n"
-        "def normalize_public_http_url(url, *, policy: HostPolicy):\n"
-        "    return public_url_or_none(url, policy=policy)\n",
-        "from app.validation import public_url_or_none\n"
+        "from app.models.normalized_url import admit_or_none\n"
+        "def validated(url, *, policy: HostPolicy):\n"
+        "    return admit_or_none(url, policy=policy)\n",
+        "from app.models.normalized_url import admit_or_none\n"
         "class JobStore:\n"
         "    def __init__(self, host_policy):\n"
         "        self._host_policy = host_policy\n"
         "    def canonical_root(self, root_url):\n"
-        "        return str(public_url_or_none(root_url, policy=self._host_policy))\n",
+        "        return str(admit_or_none(root_url, policy=self._host_policy))\n",
         "from urllib.parse import urljoin\n"
-        "from app.validation import public_url_or_none\n"
+        "from app.models.normalized_url import admit_or_none\n"
         "def resolve(root, path, *, policy: HostPolicy):\n"
-        "    return public_url_or_none(urljoin(root, path), policy=policy)\n",
+        "    return admit_or_none(urljoin(root, path), policy=policy)\n",
         "class Client:\n"
         "    policy: HostPolicy\n"
         "    def emit(self, url):\n"
-        "        return public_url_or_none(url, policy=self.policy)\n",
-        "from app.validation import public_url_or_none as validate\n"
+        "        return admit_or_none(url, policy=self.policy)\n",
+        "from app.models.normalized_url import admit_or_none as validate\n"
         "def resolve(url, *, policy: HostPolicy):\n"
         "    return validate(url, policy=policy)\n",
         "from urllib.parse import urlunsplit\n"
-        "from app.validation import public_url_or_none\n"
+        "from app.models.normalized_url import admit_or_none\n"
         "def rebuild(parts, *, policy: HostPolicy):\n"
-        "    return public_url_or_none(urlunsplit(parts), policy=policy)\n",
+        "    return admit_or_none(urlunsplit(parts), policy=policy)\n",
     ),
 )
 

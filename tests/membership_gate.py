@@ -514,7 +514,7 @@ def swallowing_test_double_offenders(tree: ast.AST, path: pathlib.Path) -> list[
 # first and the pattern check applies to it.
 #
 # The same class affects the sanctioned *chokepoint* functions
-# (decompress_body, public_url_or_none, ...): ``from x import decompress_body
+# (decompress_body, admit_or_none, ...): ``from x import decompress_body
 # as dec`` then ``dec(...)`` is invisible to a detector that matches on the
 # literal import name. Resolving the import binding closes both at once, which
 # is why this is one mechanism rather than two.

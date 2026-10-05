@@ -23,7 +23,6 @@ _DECISION_NAMES = frozenset(
         "NormalizedUrl",
         "_validated_url",
         "admit_or_none",
-        "canonical_page_identity",
         "checked_payload_urls",
         "filter_js_endpoints",
         "validate_webhook_url",

@@ -107,14 +107,14 @@ def test_redirect_hops_detector_bites():
     REDIRECT_HOPS_GO_THROUGH_SAFEURL_REDIRECT_HOP.check_bites()
 
 
-_CANONICALIZER = frozenset({"normalize_public_http_url"})
+_CANONICALIZER = frozenset({"NormalizedUrl", "_validated_url", "admit_or_none"})
 
 
 def _raw_batch_dedup_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
     """Flag ``dict.fromkeys`` batch dedup that keys on raw values.
 
     The url-batch dedup at ``_payload_urls`` must collapse duplicates by
-    canonical page identity (``normalize_public_http_url``) -- not the raw
+    admitted page identity (``NormalizedUrl`` admission) -- not the raw
     string -- or a request carrying both ``.../x`` and ``.../x/?utm_source=tw``
     crawls one page twice. Every ordered-dedup via ``dict.fromkeys`` must sit
     inside a function that also routes through the canonicalizer, so a new
@@ -148,12 +148,12 @@ def _raw_batch_dedup_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
     return offenders
 
 
-BATCH_DEDUP_KEYS_ON_CANONICAL_PAGE_IDENTITY = Rule(
-    name="batch-dedup-keys-on-canonical-page-identity",
+BATCH_DEDUP_KEYS_ON_ADMITTED_IDENTITY = Rule(
+    name="batch-dedup-keys-on-admitted-identity",
     find=_raw_batch_dedup_offenders,
     summary=(
-        "The url-batch dedup must collapse duplicates by canonical page identity "
-        "(normalize_public_http_url), not the raw string, or a request carrying "
+        "The url-batch dedup must collapse duplicates by admitted page identity "
+        "(NormalizedUrl admission), not the raw string, or a request carrying "
         "both .../x and .../x/?utm_source=tw crawls one page twice"
     ),
     bite=lambda: Bites(
@@ -162,19 +162,19 @@ BATCH_DEDUP_KEYS_ON_CANONICAL_PAGE_IDENTITY = Rule(
     ),
     clean=lambda: (
         "def _payload_urls(payload):\n"
-        "    return [u for u in payload['urls'] if normalize_public_http_url(u) not in seen]\n",
+        "    return [u for u in dict.fromkeys(payload['urls']) if _validated_url(u)]\n",
     ),
 )
 
 
-def test_batch_dedup_keys_on_canonical_page_identity():
-    """URL-batch dedup must collapse by ``normalize_public_http_url``, never raw strings."""
-    BATCH_DEDUP_KEYS_ON_CANONICAL_PAGE_IDENTITY.scan()
+def test_batch_dedup_keys_on_admitted_identity():
+    """URL-batch dedup must collapse by admitted identity, never raw strings."""
+    BATCH_DEDUP_KEYS_ON_ADMITTED_IDENTITY.scan()
 
 
 def test_batch_dedup_detector_bites():
     """A raw dict.fromkeys batch dedup fires; the canonicalized form stays clean."""
-    BATCH_DEDUP_KEYS_ON_CANONICAL_PAGE_IDENTITY.check_bites()
+    BATCH_DEDUP_KEYS_ON_ADMITTED_IDENTITY.check_bites()
 
 
 def _bare_body_reads(tree: ast.AST, path: pathlib.Path) -> list[str]:
@@ -691,27 +691,21 @@ def test_resolved_call_name_handles_getattr_alias_and_static_name():
 # ---------------------------------------------------------------------------
 # Normalize-or-None chokepoint
 #
-# The same three-line wrapper -- try normalize_public_http_url(x) except
-# ValueError: return None -- was hand-rolled in three modules (search
-# providers, map, batch dedupe). Each is a URL egress door that must apply
-# the SSRF private-target policy; a new call site that skips the wrapper
-# silently drops the policy for its door.
+# The same three-line wrapper -- try NormalizedUrl(x, policy=...) except
+# ValueError: return None -- is admit_or_none's whole body. A re-inlined copy
+# at an egress door re-derives the discard policy locally; use the wrapper so
+# every door discards refused URLs the same way.
 # ---------------------------------------------------------------------------
 
-_NORMALIZE_OR_NONE_OFFENDERS = frozenset(
-    {"normalize_public_http_url", "public_url_or_none", "safe_public_url_or_none"}
-)
-
-
 def _normalize_or_none_offenders(tree, path):
-    """A try/except ValueError around the normalizer outside the chokepoint."""
+    """A try/except ValueError around the constructor outside the chokepoint."""
     for node in try_blocks(tree):
         body_names = {
             getattr(n.func, "id", None) or getattr(n.func, "attr", None)
             for n in nodes_of(node)
             if isinstance(n, ast.Call)
         }
-        if "normalize_public_http_url" not in body_names:
+        if "NormalizedUrl" not in body_names:
             continue
         for handler in node.handlers:
             if not (isinstance(handler.type, ast.Name) and handler.type.id == "ValueError"):
@@ -744,8 +738,8 @@ def _normalize_or_none_offenders(tree, path):
                 yield offender_at(
                     path,
                     node,
-                    "normalize_public_http_url + except ValueError "
-                    "re-inlined; use app.validation.safe_public_url_or_none",
+                    "NormalizedUrl(...) + except ValueError "
+                    "re-inlined; use app.models.normalized_url.admit_or_none",
                 )
 
 
@@ -753,21 +747,21 @@ NORMALIZE_OR_NONE_IS_NOT_REINLINED = Rule(
     name="normalize-or-none-is-not-reinlined",
     find=_normalize_or_none_offenders,
     summary=(
-        "The same three-line try/except ValueError wrapper around a normalizer was "
-        "hand-rolled in three modules, each silently dropping the SSRF policy for "
-        "its door; use app.validation.safe_public_url_or_none instead"
+        "A hand-rolled try/except ValueError around the NormalizedUrl constructor "
+        "re-derives the discard policy at one egress door; admit_or_none is the "
+        "one wrapper every door must share"
     ),
     # The chokepoint's own definition is the sanctioned site.
-    scope=lambda *, exclude: app_trees(exclude=frozenset({"validation.py"})),
+    scope=lambda *, exclude: app_trees(exclude=frozenset({"normalized_url.py"})),
     bite=lambda: Bites(
-        "def f(u):\n"
+        "def f(u, p):\n"
         "    try:\n"
-        "        return normalize_public_http_url(u)\n"
+        "        return NormalizedUrl(u, policy=p)\n"
         "    except ValueError:\n"
         "        return None\n",
-        "safe_public_url_or_none",
+        "admit_or_none",
     ),
-    clean=lambda: ("def f(u):\n    return safe_public_url_or_none(u)\n",),
+    clean=lambda: ("def f(u, p):\n    return admit_or_none(u, policy=p)\n",),
 )
 
 
@@ -789,7 +783,7 @@ def test_normalize_or_none_detector_bites():
 # Filtering moved to the producer; this keeps the next door from reopening.
 # ---------------------------------------------------------------------------
 
-_EGRESS_FILTERS = frozenset({"public_url_or_none", "safe_public_url_or_none"})
+_EGRESS_FILTERS = frozenset({"admit_or_none", "resolve"})
 
 
 def _is_urljoin_call(node: ast.expr) -> bool:
@@ -849,7 +843,7 @@ JOINED_URLS_ARE_EGRESS_FILTERED = Rule(
     summary=(
         "A URL resolved out of untrusted text becomes an egress door as soon as a "
         "caller trusts it, so the join and the filter belong together; filter "
-        "joined URLs through public_url_or_none"
+        "joined URLs through NormalizedUrl.resolve / admit_or_none"
     ),
     bite=lambda: (
         Bites(
@@ -863,7 +857,7 @@ JOINED_URLS_ARE_EGRESS_FILTERED = Rule(
         ),
     ),
     clean=lambda: (
-        "def f(href, final_url):\n    return public_url_or_none(href, resolve_against=final_url)\n",
+        "def f(base, href):\n    return base.resolve(href)\n",
         # Safe_url.py composes urljoin inside SafeUrl.parse / redirect_hop, so the
         # join is sanctioned there and must fire at every other module.
         Silent(
@@ -1061,7 +1055,6 @@ _FILTER_NAMES = {
     "app.constants.is_analytics_host": "is_analytics_host",
     "app.constants.is_document_url": "is_document_url",
     "app.crawl.scope_match.scope_allows": "scope_allows",
-    "app.validation.normalize_public_http_url": "normalize_public_http_url",
 }
 
 
@@ -1071,7 +1064,6 @@ def _imported_filter_names(tree: ast.Module) -> dict[str, str]:
         if isinstance(node, ast.ImportFrom) and node.module in {
             "app.constants",
             "app.crawl.scope_match",
-            "app.validation",
         }:
             for imported in node.names:
                 canonical = f"{node.module}.{imported.name}"

@@ -92,7 +92,7 @@ class TestValidationHelpers:
             "http://y/",
         ]
 
-    def test_payload_urls_dedupes_by_canonical_page_identity(self) -> None:
+    def test_payload_urls_dedupes_on_admitted_identity(self) -> None:
         # ``NormalizedUrl`` admission already treats fragment / trailing-slash /
         # tracking-param / param-order variants as the SAME page. The batch chokepoint
         # must dedup on that identity, not the raw string -- otherwise a request

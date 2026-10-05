@@ -210,7 +210,7 @@ class Rule:
         half and the other would go unwatched.
     :param summary: one line naming the property, used in failure text. Prefer the
         property sentence to the mechanism: "every URL egress door applies the
-        refusal" tells a reader what is wrong, "calls safe_public_url_or_none"
+        refusal" tells a reader what is wrong, "calls admit_or_none"
         tells them how it was decided.
     """
 

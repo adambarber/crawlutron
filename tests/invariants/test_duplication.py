@@ -624,7 +624,7 @@ def test_asdict_rebuild_detector_bites():
 #
 # ``filter_js_endpoints`` is the single place a scraped JS endpoint survives or
 # is dropped. Both call sites used to carry the inline comprehension
-# (``{**endpoint, "url": clean} for ... if (clean := public_url_or_none(...))
+# (``{**endpoint, "url": clean.raw} for ... if (clean := admit_or_none(...))
 # is not None``) -- the shape that silently disappears the moment a consumer is
 # added in a hurry. This pins the comprehension to the chokepoint itself.
 # ---------------------------------------------------------------------------
@@ -664,9 +664,9 @@ _JS_EGRESS_ELSEWHERE = REPO_ROOT / "app" / "crawl" / "content_cache.py"
 _JS_ENDPOINTS_VALIDATION_SOURCE = (
     "def filter_js_endpoints(endpoints, *, resolve_against=None, policy=None):\n"
     "    return [\n"
-    "        {**endpoint, 'url': clean}\n"
+    "        {**endpoint, 'url': clean.raw}\n"
     "        for endpoint in endpoints\n"
-    "        if (clean := public_url_or_none(endpoint)) is not None\n"
+        "        if (clean := admit_or_none(endpoint)) is not None\n"
     "    ]\n"
 )
 
@@ -680,7 +680,7 @@ JS_ENDPOINTS_FILTER_IS_NOT_REINLINED = Rule(
         Bites(
             "def f(endpoints, base):\n"
             '    return [{**e, "url": c} for e in endpoints\n'
-            '           if (c := public_url_or_none(e["url"])) is not None]\n',
+        '           if (c := admit_or_none(e["url"])) is not None]\n',
             "filter_js_endpoints",
         ),
         # The detector genuinely matches the chokepoint's OWN comprehension too:

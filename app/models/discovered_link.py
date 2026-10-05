@@ -10,8 +10,7 @@ from app.models.normalized_url import NormalizedUrl
 @dataclass(frozen=True)
 class DiscoveredLink:
     url: str
-    # The frontier/visited-eligible form of this link. Built by
-    # ``canonical_page_identity`` at extraction, so the value IS admitted.
+    # The frontier/visited-eligible form of this link, admitted at extraction.
     normalized_url: NormalizedUrl
     text: str
     rel: list[str]
