@@ -1,6 +1,6 @@
 from dataclasses import replace
 from typing import Any
-from urllib.parse import urljoin, urlparse
+from urllib.parse import urljoin
 
 from app.constants import HTTP_DECLARED_CRAWLER, ResultStatus
 from app.crawl.result_helpers import terminal_attempt
@@ -12,7 +12,7 @@ from app.models.normalized_url import NormalizedUrl, admit_or_none
 from app.models.registrable_domain import registrable_domain
 from app.models.render_options import RenderOptions
 from app.models.taxonomy import Classification, CrawlError, CrawlStrategyName
-from tests._policy_factories import UNRESTRICTED_HOST_POLICY
+from tests._policy_factories import UNRESTRICTED_HOST_POLICY, canonical
 
 
 def make_job(index: int, url: str, *, options: RenderOptions | None = None):
@@ -31,7 +31,7 @@ def make_job(index: int, url: str, *, options: RenderOptions | None = None):
     """
     return CrawlJob(
         index=index,
-        url=_admit(url),
+        url=canonical(url),
         options=RenderOptions() if options is None else options,
         host_policy=UNRESTRICTED_HOST_POLICY,
     )
@@ -45,18 +45,6 @@ def _text(url: str | NormalizedUrl) -> str:
     value in.
     """
     return url.raw if isinstance(url, NormalizedUrl) else url
-
-
-def _admit(url: str | NormalizedUrl) -> NormalizedUrl:
-    """Submission text or an already-admitted value in, value out.
-
-    The funnel's one admission seam: production seams hand the funnel values
-    (job URLs, engine results), while tests still name submission text, so
-    both are legal here and only the text pays for admission.
-    """
-    if isinstance(url, NormalizedUrl):
-        return url
-    return NormalizedUrl(url, policy=UNRESTRICTED_HOST_POLICY)
 
 
 def engine_result(
@@ -108,8 +96,8 @@ def engine_result(
     derived = status_for_classification(classification) if status is None else status
     absent = EngineCrawlResult(
         original_url=_text(url),
-        normalized_url=_admit(normalized_text if normalized_text is not None else url),
-        final_url=_admit(final_url_text) if final_url_text is not None else None,
+        normalized_url=canonical(normalized_text if normalized_text is not None else url),
+        final_url=canonical(final_url_text) if final_url_text is not None else None,
         status=derived,
         classification=classification,
         selected_strategy=None,
@@ -158,7 +146,7 @@ def skipped_result(
     return _skipped_engine_result(
         TerminalResult(
             original_url=url,
-            normalized_url=_admit(normalized_url or url),
+            normalized_url=canonical(normalized_url or url),
             strategy=strategy,
             classification=classification,
             error=error,
@@ -220,7 +208,7 @@ def crawl_result(url: str, domain: str | None = None) -> CrawlResult:
     ``CrawlResult`` at all.
     """
     return CrawlResult(
-        url=_admit(url),
+        url=canonical(url),
         attempt=terminal_attempt(
             strategy=None,
             status="success",
@@ -228,7 +216,7 @@ def crawl_result(url: str, domain: str | None = None) -> CrawlResult:
             elapsed_ms=0,
             error=None,
         ),
-        final_url=_admit(url),
+        final_url=canonical(url),
         html="ok",
         text="ok",
         attempts=1,

@@ -12,7 +12,7 @@ from app.models.engine_crawl_result import EngineCrawlResult
 from app.models.taxonomy import Classification
 from app.scheduler import _COOLDOWN_PURGE_INTERVAL, DomainScheduler, jittered_delay
 from tests._policy_factories import canonical
-from tests._result_builders import _admit, make_job, make_result
+from tests._result_builders import make_job, make_result
 from tests._scheduler_doubles import (
     FailingSink,
     engine_envelope,
@@ -99,7 +99,7 @@ class TestScheduler:
         # with its own job regardless of completion order.
         assert sorted(results) == [0, 1, 2]
         assert [results[i].normalized_url for i in sorted(results)] == [
-            _admit(f"http://example.com/{i}") for i in range(3)
+            canonical(f"http://example.com/{i}") for i in range(3)
         ]
 
     async def test_delay_applied_between_same_domain_jobs(self, monkeypatch):
@@ -498,7 +498,9 @@ class TestSchedulerPolicies:
         assert sorted(ret) == [0, 1, 2, 3]
         # Canonical, not the seed text: the job's URL is an admitted value, so the
         # trailing slash the seed carried is gone by the time it is a job member.
-        assert [ret[i].normalized_url for i in sorted(ret)] == [_admit(f"http://h{i}.example.com") for i in range(4)]
+        assert [ret[i].normalized_url for i in sorted(ret)] == [
+            canonical(f"http://h{i}.example.com") for i in range(4)
+        ]
 
 
 class TestCooldownPurgeCadence:
@@ -577,11 +579,11 @@ class TestSchedulerResilience:
         assert len(results) == 3, results
         assert results[1].status == "failed"
         assert results[1].classification == "network_error"
-        assert results[1].normalized_url == _admit("http://example.com/1")
+        assert results[1].normalized_url == canonical("http://example.com/1")
         assert all(r.status == "success" for i, r in results.items() if i != 1)
         assert {r.normalized_url for i, r in results.items() if i != 1} == {
-            _admit("http://example.com/0"),
-            _admit("http://example.com/2"),
+            canonical("http://example.com/0"),
+            canonical("http://example.com/2"),
         }
 
 

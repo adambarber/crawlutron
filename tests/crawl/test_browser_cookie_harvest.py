@@ -14,11 +14,7 @@ from app.crawl.strategies.browser import BrowserRenderer
 from app.crawl.strategies.browser_driver import BrowserDriver
 from app.models.normalized_url import NormalizedUrl
 from tests._browser_doubles import BrowserFakePage, FakeBrowserDriver, ScriptedPage, build_pinned_renderer
-from tests._policy_factories import UNRESTRICTED_HOST_POLICY
-
-
-def _admit(url: str) -> NormalizedUrl:
-    return NormalizedUrl(url, policy=UNRESTRICTED_HOST_POLICY)
+from tests._policy_factories import UNRESTRICTED_HOST_POLICY, canonical
 
 
 def _page_with_context():
@@ -56,7 +52,7 @@ def isolated_browser_cookies(url: NormalizedUrl):
 
 class TestCookieHarvestCompletes:
     async def test_harvest_visible_to_immediate_retry(self):
-        url = _admit("http://harvest-race.test/page")
+        url = canonical("http://harvest-race.test/page")
         with isolated_browser_cookies(url) as domain:
             renderer = BrowserRenderer()
             await renderer._harvest_session_cookies(_page_with_context(), url)
@@ -83,7 +79,7 @@ class TestHarvestWaitBounded:
     async def test_render_finally_harvest_timeout(self, monkeypatch):
         from app.crawl.strategies.browser import RenderOptions
 
-        url = _admit("http://example.com/page")
+        url = canonical("http://example.com/page")
         with isolated_browser_cookies(url) as domain:
             page = BrowserFakePage(context=_WedgedContext())
             close_calls: list[bool] = []

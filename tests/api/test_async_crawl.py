@@ -269,12 +269,12 @@ class TestAsyncCrawlJobStoreIntegration:
 
         with single_shot_job() as (store, job):
             # Simulate completion
-            from tests._result_builders import _admit
+            from tests._policy_factories import canonical
 
             result = UnifiedCrawlResult(
                 original_url="http://example.com/",
-                normalized_url=_admit("http://example.com/"),
-                final_url=_admit("http://example.com/"),
+                normalized_url=canonical("http://example.com/"),
+                final_url=canonical("http://example.com/"),
                 status=CrawlStatus.success,
                 classification=CrawlClassification.rendered,
                 selected_strategy="HTTP_DECLARED_CRAWLER",

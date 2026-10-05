@@ -24,7 +24,7 @@ import pytest
 from app.crawl.job_store import CrawlJobState, JobStore
 from app.models.crawl_policy import CrawlPolicy
 from tests._job_harnesses import make_crawled_job_store, make_job_store
-from tests._result_builders import _admit
+from tests._policy_factories import canonical
 
 _BODY = "x" * 2000
 
@@ -147,7 +147,7 @@ def _job_with_pages(store: JobStore, count: int) -> CrawlJobState:
     for i in range(count):
         url = f"https://example.com/p{i}"
         job.results.append({"url": url, "status": "success", "body": _BODY})
-        job.visited.add(_admit(url))
+        job.visited.add(canonical(url))
     store.save(job)
     return job
 

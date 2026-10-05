@@ -122,9 +122,8 @@ def test_admitted_raw_is_the_durable_identity():
     site free of inline fallbacks but changes what identity means would pass
     the gate and silently re-key every stored collection.
     """
-    from tests._policy_factories import UNRESTRICTED_HOST_POLICY
-
     from app.models.normalized_url import NormalizedUrl
+    from tests._policy_factories import UNRESTRICTED_HOST_POLICY
 
     # The canonical public form, with the noise the normalizer strips
     # (default port, empty path, fragment) removed, IS the stored identity.

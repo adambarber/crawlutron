@@ -23,6 +23,8 @@ from app.memory_pressure import (
     read_memory_stats,
 )
 from app.metrics import get_metrics
+from app.models.host_policy import HostPolicy
+from app.models.normalized_url import NormalizedUrl
 from app.resource_pressure import (
     _BROWSER_TASK_RAM_BYTES,
     _DOC_TASK_RAM_BYTES,
@@ -37,16 +39,8 @@ from app.resource_pressure import (
     read_cpu_quota,
     read_cpu_usage_seconds,
 )
-from app.models.host_policy import HostPolicy
-from app.models.normalized_url import NormalizedUrl
 from tests._fetcher_factories import LINKED_PAIR_LIMITS, crawled_results, site_linking_to
-from tests._policy_factories import UNRESTRICTED_HOST_POLICY, admit
-
-
-def _url(text: str) -> NormalizedUrl:
-    """One admission per test file: frontier entries hold the value, and its
-    ``.raw`` is the canonical identity the frontier is asserted by."""
-    return NormalizedUrl(text, policy=UNRESTRICTED_HOST_POLICY)
+from tests._policy_factories import admit, canonical
 from tests._recursive_harnesses import drive_recursive_crawl, make_crawl_task
 from tests._scheduler_doubles import FakeScheduler as _Scheduler
 from tests._timing_harnesses import recorder
@@ -967,7 +961,7 @@ class TestRequeueOvercommitContract:
 
         outcome = requeue_admitted_pages(
             job,
-            [FrontierEntry(url=_url("https://c.test/"), depth=1)],
+            [FrontierEntry(url=canonical("https://c.test/"), depth=1)],
             _requeue_context(),
         )
 
@@ -988,7 +982,7 @@ class TestRequeueOvercommitContract:
 
         outcome = requeue_admitted_pages(
             job,
-            [FrontierEntry(url=_url("https://b.test/"), depth=1)],
+            [FrontierEntry(url=canonical("https://b.test/"), depth=1)],
             _requeue_context(),
         )
 
@@ -1101,7 +1095,7 @@ async def test_admission_robots_work_stops_at_remaining_capacity():
         [f"https://example.test/page-{index}" for index in range(100)],
         frontier=frontier,
         max_pages=1,
-        known={_url("https://example.test/root")},
+        known={canonical("https://example.test/root")},
         robots_allows=allows,
         robots_crawl_delay=_no_crawl_delay,
         occupied=1,

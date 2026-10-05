@@ -56,7 +56,7 @@ async def test_crawl_request_threads_active_concurrency_to_fetcher():
     seen: list[int] = []
 
     async def fetcher(url, headers, timeout, max_content_length=0):
-        if url.endswith("/robots.txt"):
+        if url.path == "/robots.txt":
 
             class RobotsResp:
                 status_code = 404

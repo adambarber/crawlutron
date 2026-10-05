@@ -5,8 +5,6 @@ time, bypassing DomainScheduler entirely (no global/per-domain concurrency,
 no rate limiting).
 """
 
-from urllib.parse import urlparse
-
 from app.crawl.engine import crawl_request
 from app.settings import CrawlerSettings
 from tests._fetcher_factories import concurrent_fetcher
@@ -32,7 +30,7 @@ async def test_recursive_crawl_fetches_links_concurrently():
     """
 
     def respond(url, headers):
-        path = urlparse(url).path or "/"
+        path = url.path or "/"
         return (200, _page_html(path), "text/html")
 
     # The harness owns the overlap counter and the scheduling point that makes

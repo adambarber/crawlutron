@@ -11,17 +11,11 @@ from contextlib import asynccontextmanager
 
 from app.crawl.admission import RobotsGate
 from app.models.crawl_policy import CrawlPolicy
-from app.models.normalized_url import NormalizedUrl
 from app.models.discovered_link import DiscoveredLink
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY, canonical
 from tests._recursive_harnesses import drive_recursive_crawl
 from tests._recursive_harnesses import make_crawl_task as _make_job
 from tests._result_builders import make_engine_result
-
-
-def _url(text: str) -> NormalizedUrl:
-    """Admission helper: every robots seam in this module takes the value."""
-    return NormalizedUrl(text, policy=UNRESTRICTED_HOST_POLICY)
 
 
 @asynccontextmanager
@@ -196,7 +190,7 @@ async def test_gather_preserves_order_and_skips_delay_when_disallowed():
         return 1.5
 
     out = await gather_robots_decisions(
-        [_url(text) for text in ("http://a.example/", "http://b.example/", "http://c.example/")],
+        [canonical(text) for text in ("http://a.example/", "http://b.example/", "http://c.example/")],
         allows,
         crawl_delay,
     )
@@ -246,7 +240,7 @@ async def test_cold_robots_gate_coalesces_same_origin_fetches(monkeypatch):
 
     gate = RobotsGate(CrawlPolicy(), UNRESTRICTED_HOST_POLICY, fetch_robots)
     decisions = await asyncio.gather(
-        *(gate.allows(_url(f"https://example.test/page-{index}")) for index in range(5))
+        *(gate.allows(canonical(f"https://example.test/page-{index}")) for index in range(5))
     )
 
     assert decisions == [True] * 5

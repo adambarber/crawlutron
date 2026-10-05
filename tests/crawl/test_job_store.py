@@ -11,8 +11,7 @@ from app.crawl.policy import read_policy
 from app.models.crawl_policy import CrawlPolicy
 from app.settings import CrawlerSettings
 from tests._job_harnesses import frontier, loaded_job, make_job_store, raw_job_row, write_row_policy
-from tests._result_builders import _admit
-from tests._policy_factories import UNRESTRICTED_HOST_POLICY, deployment_tier, job_store
+from tests._policy_factories import UNRESTRICTED_HOST_POLICY, canonical, deployment_tier, job_store
 
 
 def test_jobstore_create_and_load(job_store):
@@ -21,7 +20,7 @@ def test_jobstore_create_and_load(job_store):
     assert job.job_id
     assert job.root_url == "http://example.com"
     assert job.status == JobStatus.PENDING
-    assert job.frontier == [FrontierEntry(url=_admit("http://example.com"), depth=0)]
+    assert job.frontier == [FrontierEntry(url=canonical("http://example.com"), depth=0)]
     assert job.visited == set()
 
     loaded = job_store.load(job.job_id)
@@ -35,15 +34,15 @@ def test_jobstore_create_and_load(job_store):
 def test_jobstore_save_updates_state(job_store):
     job = job_store.create("http://example.com/", CrawlPolicy())
     job.frontier = frontier(["http://example.com/page2"])
-    job.visited = {_admit("http://example.com/")}
+    job.visited = {canonical("http://example.com/")}
     job.results = [{"url": "http://example.com/", "status": "success"}]
     job.stats = {"total_discovered": 2, "total_crawled": 1, "total_failed": 0}
     job_store.save(job)
 
     loaded = job_store.load(job.job_id)
     # DATA plane flows through save...
-    assert loaded.frontier == [FrontierEntry(url=_admit("http://example.com/page2"), depth=0)]
-    assert loaded.visited == {_admit("http://example.com")}
+    assert loaded.frontier == [FrontierEntry(url=canonical("http://example.com/page2"), depth=0)]
+    assert loaded.visited == {canonical("http://example.com")}
     assert len(loaded.results) == 1
     assert loaded.stats["total_crawled"] == 1
     # ...but the STATUS plane moves only via set_status ().
@@ -85,7 +84,7 @@ def test_crawljobstate_serialization():
         policy={"strategies": ["HTTP_DECLARED_CRAWLER"]},
         status=JobStatus.RUNNING,
         frontier=frontier(["http://example.com/a", "http://example.com/b"]),
-        visited={_admit("http://example.com/")},
+        visited={canonical("http://example.com/")},
         results=[{"url": "http://example.com/", "status": "success"}],
         stats={"total_discovered": 3, "total_crawled": 1, "total_failed": 0},
     )
@@ -99,10 +98,10 @@ def test_crawljobstate_serialization():
     assert loaded.job_id == "test123"
     assert loaded.status == JobStatus.RUNNING
     assert loaded.frontier == [
-        FrontierEntry(url=_admit("http://example.com/a"), depth=0),
-        FrontierEntry(url=_admit("http://example.com/b"), depth=0),
+        FrontierEntry(url=canonical("http://example.com/a"), depth=0),
+        FrontierEntry(url=canonical("http://example.com/b"), depth=0),
     ]
-    assert loaded.visited == {_admit("http://example.com")}
+    assert loaded.visited == {canonical("http://example.com")}
     assert len(loaded.results) == 1
 
 
@@ -296,8 +295,8 @@ def test_legacy_string_collections_load_with_depth_and_single_identity(tmp_path)
 
     assert loaded.frontier == []
     assert loaded.in_flight == [
-        FrontierEntry(url=_admit("https://example.test/root"), depth=0),
-        FrontierEntry(url=_admit("https://example.test/child"), depth=2),
+        FrontierEntry(url=canonical("https://example.test/root"), depth=0),
+        FrontierEntry(url=canonical("https://example.test/child"), depth=2),
     ]
 
 
@@ -307,7 +306,7 @@ def test_create_canonicalizes_root_and_initial_frontier(tmp_path):
     loaded = loaded_job(store, job.job_id)
 
     assert loaded.root_url == "https://example.test"
-    assert loaded.frontier == [FrontierEntry(url=_admit("https://example.test"), depth=0)]
+    assert loaded.frontier == [FrontierEntry(url=canonical("https://example.test"), depth=0)]
 
 
 def test_load_resolves_unreadable_policy_to_the_declared_defaults(tmp_path):
@@ -359,8 +358,8 @@ def test_normalize_frontier_keeps_shallowest_duplicate_depth(tmp_path):
     store = make_job_store(tmp_path)
     job = store.create("https://example.test/root", {"limits": {"max_depth": 4}})
     job.frontier = [
-        FrontierEntry(_admit("https://example.test/child"), 4),
-        FrontierEntry(_admit("https://example.test/child?utm_source=test"), 1),
+        FrontierEntry(canonical("https://example.test/child"), 4),
+        FrontierEntry(canonical("https://example.test/child?utm_source=test"), 1),
     ]
     job_store_data = job.to_json()
 
@@ -368,7 +367,7 @@ def test_normalize_frontier_keeps_shallowest_duplicate_depth(tmp_path):
         job_store_data, host_policy=UNRESTRICTED_HOST_POLICY, tier=deployment_tier()
     )
 
-    assert loaded.frontier == [FrontierEntry(_admit("https://example.test/child"), 1)]
+    assert loaded.frontier == [FrontierEntry(canonical("https://example.test/child"), 1)]
 
 
 def test_cross_list_duplicate_keeps_shallowest_depth():
@@ -387,4 +386,4 @@ def test_cross_list_duplicate_keeps_shallowest_depth():
     )
 
     assert loaded.frontier == []
-    assert loaded.in_flight == [FrontierEntry(_admit("https://example.test/child"), 1)]
+    assert loaded.in_flight == [FrontierEntry(canonical("https://example.test/child"), 1)]

@@ -14,6 +14,7 @@ import asyncio
 
 from app.crawl.job_store import CrawlJobState, JobStatus, JobStore
 from tests._job_harnesses import frontier, loaded_job, make_job_store, run_to_terminal
+from tests._policy_factories import canonical
 from tests.chokepoint_walks import app_trees, nodes_of, offender
 
 
@@ -62,12 +63,12 @@ class TestStatusPlane:
         # Handler pauses while the runner is inside the engine call.
         assert store.set_status("j1", JobStatus.PAUSED, expected=JobStatus.RUNNING) is True
         # Runner resumes: commits the batch's data from the stale snapshot.
-        snapshot.visited.add("https://a.example/")
+        snapshot.visited.add(canonical("https://a.example/"))
         snapshot.frontier = []
         store.save(snapshot)
         row = loaded_job(store, "j1")
         assert row.status is JobStatus.PAUSED, "data save resurrected the runner's stale status"
-        assert row.visited == {"https://a.example"}  # data plane still flows
+        assert row.visited == {canonical("https://a.example")}  # data plane still flows
 
     async def test_terminal_claim_respects_a_concurrent_cancel(self, tmp_path):
         """A cancelled job is settled, and nothing may claim otherwise.

@@ -16,6 +16,7 @@ from tests._fetcher_factories import (
     run_scoped_crawl,
     site_linking_to,
 )
+from tests._policy_factories import canonical
 
 CATASTROPHIC = "(a+)+$"
 
@@ -61,9 +62,9 @@ async def test_recursive_scope_regex_timeout_fails_closed(monkeypatch):
     out = await crawled_results(pages, limits=LINKED_PAIR_LIMITS, policy={"scope_regex": r"^/keep/"})
     assert calls["n"] > 0, "bounded match never invoked"
     urls = {r.normalized_url for r in out["results"]}
-    assert "http://example.com" in urls
-    assert "http://example.com/a" not in urls
-    assert "http://example.com/b" not in urls
+    assert canonical("http://example.com") in urls
+    assert canonical("http://example.com/a") not in urls
+    assert canonical("http://example.com/b") not in urls
 
 
 async def test_recursive_scope_regex_still_filters_with_valid_pattern(monkeypatch):

@@ -23,6 +23,8 @@ import pytest
 from app.crawl.strategies.fetchers import default_http_fetcher
 from app.models.http_fetch_result import HttpFetchResult
 from app.models.http_fetcher import HttpFetcher
+from tests._policy_factories import canonical
+from tests._result_builders import _link
 from tests.chokepoint_walks import (
     app_python_files,
     calls_named_leaf,
@@ -34,7 +36,6 @@ from tests.chokepoint_walks import (
 # (`impersonating_fetcher`), not a second function, so the contract's parameters
 # are spelled once in the whole tree and there is no twin to keep in step.
 _CONCRETE_FETCHERS = [pytest.param(default_http_fetcher, id="default_http_fetcher")]
-from tests._result_builders import _admit, _link
 
 
 def _unbound_call(protocol: type, *, resolve_annotations: bool = True) -> inspect.Signature:
@@ -466,7 +467,7 @@ class TestNormalizedUrlIsAValueNotAString:
         task = CrawlTask(
             index=0,
             original_url="http://a.test/x",
-            normalized_url=_admit("http://a.test/x"),
+            normalized_url=canonical("http://a.test/x"),
             domain="a.test",
         )
         link = _link("http://a.test/x", "http://a.test/")

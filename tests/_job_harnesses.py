@@ -47,11 +47,11 @@ from app.crawl.policy import PolicyLike, PolicyTier
 from app.crawl.result_record import ProducerEnvelope
 from app.models.crawl_policy import CrawlPolicy
 from app.models.engine_crawl_result import EngineCrawlResult
+from app.models.normalized_url import NormalizedUrl
 from app.models.taxonomy import Classification
 from app.validation import HostPolicy
-from app.models.normalized_url import NormalizedUrl
-from tests._policy_factories import UNRESTRICTED_HOST_POLICY, job_store
-from tests._result_builders import _admit, _canned_result
+from tests._policy_factories import canonical, job_store
+from tests._result_builders import _canned_result
 
 #: Hang guard for the store waits. Deliberately NOT ``HANG_GUARD_SECONDS``: that
 #: one guards waits for a task the SAME loop has already scheduled, and such a
@@ -210,7 +210,7 @@ def frontier(urls: list[str], depth: int = 0) -> list[FrontierEntry]:
     a URL and becomes an ``AttributeError``. Built through the real dataclass so
     the fixture says what the field holds.
     """
-    return [FrontierEntry(url=_admit(url), depth=depth) for url in urls]
+    return [FrontierEntry(url=canonical(url), depth=depth) for url in urls]
 
 
 @contextmanager
@@ -252,13 +252,13 @@ def make_crawled_job_store(tmpdir: str, pages: int) -> tuple[JobStore, CrawlJobS
     costs. Both need a non-empty accumulator, and building one the same way
     twice is a clone rather than a coincidence.
     """
-    from tests._result_builders import _admit
+    from tests._policy_factories import canonical
 
     store = make_job_store(tmpdir)
     job = store.create("http://example.test/a", CrawlPolicy())
     # Visited holds admitted values now; results stay the persisted wire
     # dicts the store actually keeps, naming each page by its raw identity.
-    job.visited = {_admit(f"http://example.test/p/{i}") for i in range(pages)}
+    job.visited = {canonical(f"http://example.test/p/{i}") for i in range(pages)}
     job.results = [{"url": url.raw, "status": "success"} for url in job.visited]
     store.save(job)
     return store, job
@@ -285,7 +285,7 @@ async def _execution_urls(payload_dict, hang: asyncio.Event | None):
     # seam admits them before any result is built, and the double must cross
     # the same boundary or it is recording a shape production never sends.
     urls = payload_dict.get("urls") or [payload_dict.get("url")]
-    return [_admit(url) for url in urls]
+    return [canonical(url) for url in urls]
 
 
 def _execution_payload(results: list[EngineCrawlResult], submitted_count: int) -> ProducerEnvelope:
@@ -331,7 +331,7 @@ class ScriptedExecute:
         # results-mode keys are the funnel's projected originals, which are
         # canonical by construction. Lookup keys arrive as values.
         if scripts is not None:
-            self._scripts = {_admit(url).raw: list(seq) for url, seq in scripts.items()}
+            self._scripts = {canonical(url).raw: list(seq) for url, seq in scripts.items()}
         else:
             self._scripts = {r.original_url: [r] for r in results or []}
         # A real ``ResultStatus``, not a classification: the result record
@@ -512,9 +512,9 @@ def _seed_job(
 ):
     job = job_store.create(root_url, policy if policy is not None else {})
     if frontier is not None:
-        job.frontier = [FrontierEntry(url=_admit(url), depth=0) for url in frontier]
+        job.frontier = [FrontierEntry(url=canonical(url), depth=0) for url in frontier]
     if in_flight is not None:
-        job.in_flight = [FrontierEntry(url=_admit(url), depth=0) for url in in_flight]
+        job.in_flight = [FrontierEntry(url=canonical(url), depth=0) for url in in_flight]
     job_store.save(job)
     if running:
         job_store.set_status(job.job_id, JobStatus.RUNNING, expected=JobStatus.PENDING)
@@ -679,8 +679,8 @@ def assert_settled(
     """
     assert job.status == JobStatus.COMPLETED, f"job ended {job.status}"
     assert not job.frontier, f"frontier left queued: {job.frontier}"
-    admitted_in_flight = {_admit(url) for url in in_flight}
-    admitted_visited = {_admit(url) for url in visited}
+    admitted_in_flight = {canonical(url) for url in in_flight}
+    admitted_visited = {canonical(url) for url in visited}
     assert {entry.url for entry in job.in_flight} == admitted_in_flight, (
         f"in-flight left uncommitted: {job.in_flight}"
     )

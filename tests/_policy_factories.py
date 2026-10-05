@@ -33,7 +33,7 @@ from app.validation import HostPolicy
 UNRESTRICTED_HOST_POLICY = HostPolicy.unrestricted()
 
 
-def canonical(url: str) -> NormalizedUrl:
+def canonical(url: "str | NormalizedUrl") -> NormalizedUrl:
     """The admitted value production would hold for ``url``.
 
     A test that spells ``normalized_url="http://a/"`` is asserting a state
@@ -49,10 +49,17 @@ def canonical(url: str) -> NormalizedUrl:
     while the suite-wide loopback fixture is in force, so no DNS happens for
     fixture hostnames.
 
+    An already-admitted value passes through untouched: production seams hand
+    tests values, and re-admitting would assert nothing the constructor has not
+    already guaranteed. This is the suite's ONE admission seam; the per-module
+    ``_admit`` copies it replaced each drifted on their own.
+
     Returns the ``NormalizedUrl`` value, because the record fields that carry
     it are value-typed; the few text comparisons project ``.raw`` where a wire
     or storage boundary is what the assertion is about.
     """
+    if isinstance(url, NormalizedUrl):
+        return url
     return NormalizedUrl(url, policy=UNRESTRICTED_HOST_POLICY)
 
 

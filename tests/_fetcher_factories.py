@@ -20,7 +20,7 @@ from app.models.http_fetch_result import HttpFetchResult
 from app.models.normalized_url import NormalizedUrl
 from app.models.taxonomy import CrawlStrategyName
 from tests._browser_doubles import _fake_browser
-from tests._policy_factories import UNRESTRICTED_HOST_POLICY
+from tests._policy_factories import UNRESTRICTED_HOST_POLICY, canonical
 
 SCOPE_KEEP_DROP_PAGES = {
     "/": (
@@ -33,15 +33,6 @@ SCOPE_KEEP_DROP_PAGES = {
 }
 
 
-def _admit(url: "str | NormalizedUrl") -> NormalizedUrl:
-    """The fetch result's URL fields hold the admitted value, so a test that
-    spells a URL as text -- which is every call site, because the payload side
-    of a crawl is text -- has it admitted here rather than at each site."""
-    if isinstance(url, NormalizedUrl):
-        return url
-    return NormalizedUrl(url, policy=UNRESTRICTED_HOST_POLICY)
-
-
 def make_fetch(
     status=200,
     body=b"<html><body>hello</body></html>",
@@ -52,8 +43,8 @@ def make_fetch(
     decompression_failed=False,
 ):
     return HttpFetchResult(
-        url=_admit(url),
-        final_url=_admit(final_url),
+        url=canonical(url),
+        final_url=canonical(final_url),
         status_code=status,
         headers={"content-type": ctype} if headers is None else headers,
         body=body,
@@ -155,6 +146,12 @@ class FetcherDouble:
         ``answer_is_response`` arm hands back the caller's own object, which is
         shaped like one. Declaring it here rather than ``Any`` is what lets a
         caller of a fetcher double know what it got.
+
+        The answer callback receives the admitted ``NormalizedUrl`` as its
+        first argument -- this is the one place that contract lives, so every
+        factory's ``respond`` reads ``url.path`` / ``url.site`` / ``url.raw``
+        and never ``urlparse(url)``; a respond written against text is
+        responding to a request production never made.
         """
         # ``calls`` speaks text: it is what tests assert membership in, and the
         # wire form of the value is the text the request was made to.
@@ -364,9 +361,7 @@ def request_fetcher(respond, record_headers: list[dict[str, str]] | None = None)
     ``calls`` so that "which URLs" and "what was sent" stay two different facts.
     """
     seen: list[dict[str, str]] = [] if record_headers is None else record_headers
-    # ``respond`` computes over the request's URL text; the value is projected
-    # here so every ``respond`` stays text-native.
-    return FetcherDouble(lambda url, sent_headers, *_: respond(url.raw, sent_headers), record_headers=seen)
+    return FetcherDouble(lambda url, sent_headers, *_: respond(url, sent_headers), record_headers=seen)
 
 
 def tap_fetcher(inner, calls: list[str] | None = None):
@@ -582,7 +577,7 @@ def cache_with_etag(url: str, etag: str = "v1") -> HttpCache:
     cache = HttpCache()
     # Value-keyed cache: admit under the same policy the harness admits
     # request URLs with, or the conditional GET silently misses.
-    cache.store(_admit(url), {"etag": etag})
+    cache.store(canonical(url), {"etag": etag})
     return cache
 
 
@@ -687,7 +682,7 @@ async def run_chain(
         scheduler = DomainScheduler(global_limit=1, per_domain_limit=1, delay_seconds=0.0)
     return await execute_crawl_chain(
         original_url=url,
-        normalized_url=NormalizedUrl(url, policy=UNRESTRICTED_HOST_POLICY),
+        normalized_url=canonical(url),
         policy=read_policy(policy),
         http_fetcher=fetcher,
         cffi_fetcher=fetcher if cffi_fetcher is None else cffi_fetcher,
@@ -768,7 +763,7 @@ def strategy_request(
     """
     return StrategyRequest(
         original_url=url,
-        normalized_url=NormalizedUrl(url, policy=UNRESTRICTED_HOST_POLICY),
+        normalized_url=canonical(url),
         strategy=strategy,
         policy=read_policy(policy),
         host_policy=HostPolicy.unrestricted(),
@@ -862,7 +857,7 @@ async def run_default_http_fetcher(url: str, headers=None, *, pin=None):
     from app.crawl.strategies.fetchers import default_http_fetcher
 
     return await default_http_fetcher(
-        NormalizedUrl(url, policy=UNRESTRICTED_HOST_POLICY),
+        canonical(url),
         {} if headers is None else headers,
         30,
         policy=UNRESTRICTED_HOST_POLICY,

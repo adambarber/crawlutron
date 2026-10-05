@@ -118,10 +118,10 @@ def _reuse_renderer():
 
 async def _render(renderer, path: str = "/"):
     """One render at the empty browser profile, which is what these tests mean."""
-    from tests._result_builders import _admit
+    from tests._policy_factories import canonical
 
     return await renderer.render(
-        _admit(f"http://example.com{path}"),
+        canonical(f"http://example.com{path}"),
         RenderOptions(browser_profile={}),
         policy=UNRESTRICTED_HOST_POLICY,
     )

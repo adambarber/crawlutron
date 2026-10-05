@@ -405,12 +405,11 @@ async def render_pinned(monkeypatch, url: str = "http://example.com/"):
     arrangement -- a pinned renderer, and the call into it -- are stated once.
     """
     from app.models.render_options import RenderOptions
-    from tests._policy_factories import UNRESTRICTED_HOST_POLICY
-    from tests._result_builders import _admit
+    from tests._policy_factories import UNRESTRICTED_HOST_POLICY, canonical
 
     page, renderer = pinned_page_renderer(monkeypatch)
     result = await renderer._render_with_browser(
-        _admit(url),
+        canonical(url),
         RenderOptions(browser_profile={}),
         policy=UNRESTRICTED_HOST_POLICY,
     )
@@ -621,11 +620,10 @@ async def render_bare(renderer, url: str = "http://example.com/"):
     adds to it, so those two are the same in every one of these calls.
     """
     from app.models.render_options import RenderOptions
-    from tests._policy_factories import UNRESTRICTED_HOST_POLICY
-    from tests._result_builders import _admit
+    from tests._policy_factories import UNRESTRICTED_HOST_POLICY, canonical
 
     return await renderer._render_with_browser(
-        _admit(url), RenderOptions(browser_profile={}), policy=UNRESTRICTED_HOST_POLICY
+        canonical(url), RenderOptions(browser_profile={}), policy=UNRESTRICTED_HOST_POLICY
     )
 
 

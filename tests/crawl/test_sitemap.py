@@ -21,14 +21,8 @@ from tests._fetcher_factories import (
     routed_fetcher,
     scripted_fetcher,
 )
-from app.models.normalized_url import NormalizedUrl
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY, canonical, crawl_policy
 from tests._result_builders import _link, engine_result
-
-
-def _url(text: str) -> NormalizedUrl:
-    """Admit once per literal: every production seam in this suite takes the value."""
-    return NormalizedUrl(text, policy=UNRESTRICTED_HOST_POLICY)
 
 
 def _resp(status, body="", etag=None, last_modified=None, ctype="application/xml"):
@@ -47,7 +41,7 @@ def _resp(status, body="", etag=None, last_modified=None, ctype="application/xml
 
 
 async def test_304_reuses_cached_urls_without_reparsing():
-    url = _url("http://x.test/sitemap.xml")
+    url = canonical("http://x.test/sitemap.xml")
     # Seed an EXPIRED cache entry (forces a re-fetch attempt).
     # Seed an EXPIRED entry (negative ttl) through the chokepoint seam.
     _SITEMAP_CACHE.put(
@@ -81,7 +75,7 @@ async def test_304_reuses_cached_urls_without_reparsing():
 
 
 async def test_etag_captured_and_stored_on_200():
-    url = _url("http://x.test/sitemap.xml")
+    url = canonical("http://x.test/sitemap.xml")
     _SITEMAP_CACHE.discard((url.raw, UNRESTRICTED_HOST_POLICY))
     xml = """<?xml version="1.0"?>
     <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
@@ -136,7 +130,7 @@ def _child_xml(i: int) -> str:
 
 class TestSitemapFanoutBound:
     async def test_child_scheduling_capped_by_remaining_need(self, monkeypatch):
-        url = _url("http://fanout.test/sitemap.xml")
+        url = canonical("http://fanout.test/sitemap.xml")
         _SITEMAP_CACHE.discard((url.raw, UNRESTRICTED_HOST_POLICY))
         index_body = _index_xml(200)
         child_fetches = 0
@@ -195,7 +189,7 @@ async def test_extracts_lastmod_per_loc():
     </urlset>"""
     urls = await fetch_sitemap_urls(
         _sitemap_fetcher(xml),
-        _url("http://x.test/sitemap.xml"),
+        canonical("http://x.test/sitemap.xml"),
         10,
         host_policy=UNRESTRICTED_HOST_POLICY,
     )
@@ -223,7 +217,7 @@ async def test_index_children_recurse_without_lastmod():
 
     urls = await fetch_sitemap_urls(
         fetcher,
-        _url("http://x.test/sitemap.xml"),
+        canonical("http://x.test/sitemap.xml"),
         10,
         host_policy=UNRESTRICTED_HOST_POLICY,
     )
@@ -261,7 +255,7 @@ def _cache_with_fresh(tmp_path, url, lastmod, policy):
     """
     cache = ContentCache(str(tmp_path), clock=lambda: 1_700_000_000.0)
     strategy = list(policy.strategies) or ["HTTP_DECLARED_CRAWLER"]
-    target = _url(url)
+    target = canonical(url)
     key = build_content_cache_key(
         target,
         strategy[0],
@@ -275,7 +269,7 @@ def _cache_with_fresh(tmp_path, url, lastmod, policy):
 
 
 def test_seed_is_fresh(tmp_path):
-    url = _url("http://example.com/page")
+    url = canonical("http://example.com/page")
     cache = _cache_with_fresh(tmp_path, url.raw, "2020-01-01T00:00:00Z", _policy())
 
     # Sitemap older than our cache -> cached copy is fresh -> skip
@@ -285,12 +279,12 @@ def test_seed_is_fresh(tmp_path):
     # No lastmod -> fetch
     assert _seed_is_fresh(url, None, cache, _policy()) is False
     # Not cached at all -> fetch
-    not_cached = _url("http://example.com/other")
+    not_cached = canonical("http://example.com/other")
     assert _seed_is_fresh(not_cached, "2020-01-01T00:00:00Z", cache, _policy()) is False
 
 
 def test_seed_is_fresh_requires_cache():
-    assert _seed_is_fresh(_url("http://example.com/x"), "2020-01-01T00:00:00Z", None, _policy()) is False
+    assert _seed_is_fresh(canonical("http://example.com/x"), "2020-01-01T00:00:00Z", None, _policy()) is False
 
 
 _CRAWL_URL = "http://seed-batch.test/"
@@ -314,7 +308,7 @@ class TestStaleSeedBatch:
         policy = _POLICY_SEED_BATCH()
 
         stale_set = _stale_seeds(
-            [(_url(fresh), "2020-01-01T00:00:00Z"), (_url(stale), "2025-01-01T00:00:00Z")],
+            [(canonical(fresh), "2020-01-01T00:00:00Z"), (canonical(stale), "2025-01-01T00:00:00Z")],
             cache,
             read_policy(policy),
         )
@@ -331,7 +325,7 @@ class TestStaleSeedBatch:
         # the resolve chokepoint drops it at extraction, reported as skipped.
         # Fail-open is still proven by the never-cached candidate below.
         stale_set = _stale_seeds(
-            [(_url("http://seed-batch.test/never-cached"), "2020-01-01")],
+            [(canonical("http://seed-batch.test/never-cached"), "2020-01-01")],
             cache,
             read_policy(policy),
         )
@@ -449,10 +443,10 @@ def test_build_site_map_handles_dataclass_links():
 
     link = DiscoveredLink(
         url="https://r/page",
-        normalized_url=_url("https://r/page"),
+        normalized_url=canonical("https://r/page"),
         text="",
         rel=[],
-        source_url=_url("https://r/"),
+        source_url=canonical("https://r/"),
         host="r",
         is_same_host=True,
     )
@@ -546,4 +540,7 @@ def test_far_future_lastmod_never_skips_a_cached_seed():
         def cached_at_of(self, key):
             raise AssertionError("far-future lastmod must short-circuit before any disk read")
 
-    assert _seed_is_fresh(_url("http://x.test/p"), _iso_offset(86400 * 30), _Cache(), read_policy({})) is False
+    assert (
+        _seed_is_fresh(canonical("http://x.test/p"), _iso_offset(86400 * 30), _Cache(), read_policy({}))
+        is False
+    )

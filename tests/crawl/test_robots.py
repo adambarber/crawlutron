@@ -24,17 +24,12 @@ from app.crawl.robots_parse import (
     select_robots_values,
 )
 from app.crawl.strategies.fetch_policy import discovery_diagnostics
-from app.settings import CrawlerSettings
 from app.models.host_policy import HostPolicy
 from app.models.normalized_url import NormalizedUrl
+from app.settings import CrawlerSettings
 from tests._fetcher_factories import make_fetch, routed_fetcher
-from tests._policy_factories import UNRESTRICTED_HOST_POLICY, crawl_policy
+from tests._policy_factories import UNRESTRICTED_HOST_POLICY, canonical, crawl_policy
 from tests._timing_harnesses import cpu_seconds
-
-
-def _url(text: str) -> NormalizedUrl:
-    """Admit once per literal: the rule-matching corpus passes the value."""
-    return NormalizedUrl(text, policy=UNRESTRICTED_HOST_POLICY)
 
 
 def robots_entry_key(origin: str) -> tuple[str, HostPolicy]:
@@ -221,16 +216,16 @@ def test_agent_matching_is_case_insensitive(token):
 
 def test_wildcard_disallow_blocks_subpaths():
     rules = [(False, "/private/*")]
-    assert robots_allows(_url("http://x.example/private/secret"), rules) is False
-    assert robots_allows(_url("http://x.example/public"), rules) is True
+    assert robots_allows(canonical("http://x.example/private/secret"), rules) is False
+    assert robots_allows(canonical("http://x.example/public"), rules) is True
 
 
 def test_dollar_anchor_is_end_anchored():
     rules = [(False, "/page$")]
     # Exactly /page is disallowed...
-    assert robots_allows(_url("http://x.example/page"), rules) is False
+    assert robots_allows(canonical("http://x.example/page"), rules) is False
     # ...but /page/sub is NOT matched by the $ anchor.
-    assert robots_allows(_url("http://x.example/page/sub"), rules) is True
+    assert robots_allows(canonical("http://x.example/page/sub"), rules) is True
 
 
 def test_an_empty_disallow_is_ignored_and_does_not_override_a_sibling_rule():
@@ -242,28 +237,28 @@ def test_an_empty_disallow_is_ignored_and_does_not_override_a_sibling_rule():
     # Disallow" -- that is not a rule the RFC contains, and reading it that way
     # let this matcher allow a path the same block had just named.
     rules = [(False, "/"), (False, "")]
-    assert robots_allows(_url("http://x.example/anything/at/all"), rules) is False
+    assert robots_allows(canonical("http://x.example/anything/at/all"), rules) is False
     # With no other rule to match, nothing is found and the URI is allowed.
-    assert robots_allows(_url("http://x.example/anything/at/all"), [(False, "")]) is True
+    assert robots_allows(canonical("http://x.example/anything/at/all"), [(False, "")]) is True
 
 
 def test_longest_matching_rule_wins():
     # Allow everything by default, but disallow *.json files.
     rules = [(True, "/"), (False, "/*.json")]
-    assert robots_allows(_url("http://x.example/foo.json"), rules) is False
-    assert robots_allows(_url("http://x.example/foo"), rules) is True
+    assert robots_allows(canonical("http://x.example/foo.json"), rules) is False
+    assert robots_allows(canonical("http://x.example/foo"), rules) is True
 
 
 def test_plain_prefix_disallow_still_works():
     rules = [(False, "/private")]
-    assert robots_allows(_url("http://x.example/private"), rules) is False
-    assert robots_allows(_url("http://x.example/private/sub"), rules) is False
-    assert robots_allows(_url("http://x.example/public"), rules) is True
+    assert robots_allows(canonical("http://x.example/private"), rules) is False
+    assert robots_allows(canonical("http://x.example/private/sub"), rules) is False
+    assert robots_allows(canonical("http://x.example/public"), rules) is True
 
 
 def test_disallow_root_blocks_everything():
     rules = [(False, "/")]
-    assert robots_allows(_url("http://x.example/anything"), rules) is False
+    assert robots_allows(canonical("http://x.example/anything"), rules) is False
 
 
 def test_pathological_wildcard_rule_matches_in_linear_time():
@@ -516,7 +511,7 @@ def test_robots_allows_does_not_recompile_per_call():
     rules = [(True, "/public/*"), (False, "/admin/*"), (False, "/*.pdf")]
     with patch.object(re, "compile", wraps=re.compile) as spy:
         for _ in range(50):
-            robots_allows(_url("http://example.com/admin/secret"), rules)
+            robots_allows(canonical("http://example.com/admin/secret"), rules)
     unique_patterns = {p for _, p in rules}
     # Each unique pattern compiled at most once, not 50 times.
     assert spy.call_count <= len(unique_patterns), spy.call_count
@@ -539,7 +534,7 @@ def _fake_fetcher(calls):
 
 async def _run_diag(calls, *, engine_robots_sitemaps):
     return await discovery_diagnostics(
-        normalized_url=_url("https://x.test/p"),
+        normalized_url=canonical("https://x.test/p"),
         html="<html></html>",
         policy=read_policy(
             {"discovery": {"robots": True, "sitemaps": True}, "limits": {"timeout_seconds": 10}}
@@ -591,8 +586,8 @@ class TestEmptyDisallowDoesNotEraseItsGroup:
             "User-agent: *\nDisallow:\nDisallow: /private\n", token=HTTP_DECLARED_CRAWLER
         )
         assert both == [(False, ""), (False, "/private")]
-        assert robots_allows(_url("https://example.com/private/secret"), both) is False
-        assert robots_allows(_url("https://example.com/public"), both) is True
+        assert robots_allows(canonical("https://example.com/private/secret"), both) is False
+        assert robots_allows(canonical("https://example.com/public"), both) is True
 
     def test_a_group_whose_only_rule_is_the_empty_disallow_allows_everything(self):
         """The form keeps the meaning it has on its own.
@@ -603,12 +598,12 @@ class TestEmptyDisallowDoesNotEraseItsGroup:
         """
         only_empty = parse_robots_rules("User-agent: *\nDisallow:\n", token=HTTP_DECLARED_CRAWLER)
         assert only_empty == [(False, "")]
-        assert robots_allows(_url("https://example.com/private/secret"), only_empty) is True
+        assert robots_allows(canonical("https://example.com/private/secret"), only_empty) is True
 
     def test_an_allow_still_beats_a_longer_disallow_in_the_same_group(self):
         both = parse_robots_rules(
             "User-agent: *\nDisallow:\nDisallow: /private\nAllow: /private/ok\n",
             token=HTTP_DECLARED_CRAWLER,
         )
-        assert robots_allows(_url("https://example.com/private/ok"), both) is True
-        assert robots_allows(_url("https://example.com/private/other"), both) is False
+        assert robots_allows(canonical("https://example.com/private/ok"), both) is True
+        assert robots_allows(canonical("https://example.com/private/other"), both) is False

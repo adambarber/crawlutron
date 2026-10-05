@@ -13,7 +13,7 @@ from app.settings import CrawlerSettings
 from app.validation import HostPolicy
 from tests._browser_doubles import _fake_browser
 from tests._fetcher_factories import make_html_fetcher, routed_fetcher
-from tests._result_builders import _admit
+from tests._policy_factories import canonical
 
 
 def _settings(*, allowed: str = "", denied: str = "") -> CrawlerSettings:
@@ -84,7 +84,7 @@ async def test_sitemap_blocked_host_is_refused_before_page_fetch():
     )
 
     crawled = {result.normalized_url for result in response["results"]}
-    assert _admit("https://allowed.test/keep") in crawled
+    assert canonical("https://allowed.test/keep") in crawled
     assert not any(url.startswith("https://blocked.test/") for url in calls)
 
 
@@ -172,7 +172,7 @@ def test_js_endpoint_extraction_filters_private_targets_on_real_discovery_path(m
 
     discovered = extract_post_fetch_discovery(
         html,
-        _admit("https://allowed.test/page"),
+        canonical("https://allowed.test/page"),
         include_js_endpoints=True,
         host_policy=policy,
     )

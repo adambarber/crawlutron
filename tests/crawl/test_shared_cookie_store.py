@@ -21,7 +21,7 @@ import pytest
 
 from app.crawl.coordination_cookies import SharedCookieStore
 from app.crawl.strategies.cookie_jar import CookieJar
-from tests._result_builders import _admit
+from tests._policy_factories import canonical
 
 
 @pytest.fixture
@@ -56,9 +56,9 @@ def test_a_sibling_worker_s_cookie_is_visible(store_path):
     """The property a per-process jar cannot provide."""
     first, second = _two_workers(store_path)
 
-    first.add_cookie_header(_admit("http://example.com/"), "session=abc; Path=/")
+    first.add_cookie_header(canonical("http://example.com/"), "session=abc; Path=/")
 
-    assert second.cookie_header_for(_admit("http://example.com/")) == "session=abc"
+    assert second.cookie_header_for(canonical("http://example.com/")) == "session=abc"
 
 
 def test_concurrent_writes_to_one_host_merge_rather_than_clobber(store_path):
@@ -69,10 +69,10 @@ def test_concurrent_writes_to_one_host_merge_rather_than_clobber(store_path):
     """
     first, second = _two_workers(store_path)
 
-    first.add_cookie_header(_admit("http://example.com/"), "session=abc; Path=/")
-    second.add_cookie_header(_admit("http://example.com/"), "pref=dark; Path=/")
+    first.add_cookie_header(canonical("http://example.com/"), "session=abc; Path=/")
+    second.add_cookie_header(canonical("http://example.com/"), "pref=dark; Path=/")
 
-    header = first.cookie_header_for(_admit("http://example.com/"))
+    header = first.cookie_header_for(canonical("http://example.com/"))
     assert "session=abc" in header
     assert "pref=dark" in header
 
@@ -85,23 +85,23 @@ def test_namespaces_stay_isolated_in_shared_storage(store_path):
     """
     jar = _worker_jar(store_path)
 
-    jar.add_cookie_header(_admit("http://example.com/"), "a=1; Path=/", namespace="tenant-a")
-    jar.add_cookie_header(_admit("http://example.com/"), "b=2; Path=/", namespace="tenant-b")
+    jar.add_cookie_header(canonical("http://example.com/"), "a=1; Path=/", namespace="tenant-a")
+    jar.add_cookie_header(canonical("http://example.com/"), "b=2; Path=/", namespace="tenant-b")
 
-    assert jar.cookie_header_for(_admit("http://example.com/"), namespace="tenant-a") == "a=1"
-    assert jar.cookie_header_for(_admit("http://example.com/"), namespace="tenant-b") == "b=2"
+    assert jar.cookie_header_for(canonical("http://example.com/"), namespace="tenant-a") == "a=1"
+    assert jar.cookie_header_for(canonical("http://example.com/"), namespace="tenant-b") == "b=2"
     # The legacy shared namespace must not see either tenant's cookies.
-    assert jar.cookie_header_for(_admit("http://example.com/")) == ""
+    assert jar.cookie_header_for(canonical("http://example.com/")) == ""
 
 
 def test_clear_in_one_worker_is_seen_by_another(store_path):
     """A clear that only reached its own process would replay revoked cookies."""
     first, second = _two_workers(store_path)
-    first.add_cookie_header(_admit("http://example.com/"), "session=abc; Path=/")
+    first.add_cookie_header(canonical("http://example.com/"), "session=abc; Path=/")
 
     first.clear()
 
-    assert second.cookie_header_for(_admit("http://example.com/")) == ""
+    assert second.cookie_header_for(canonical("http://example.com/")) == ""
 
 
 def test_export_captures_what_a_sibling_wrote(store_path, tmp_path):
@@ -111,13 +111,13 @@ def test_export_captures_what_a_sibling_wrote(store_path, tmp_path):
     the whole file to itself and drops everything the others held.
     """
     first, second = _two_workers(store_path)
-    first.add_cookie_header(_admit("http://example.com/"), "a=1; Path=/")
-    second.add_cookie_header(_admit("http://other.com/"), "b=2; Path=/")
+    first.add_cookie_header(canonical("http://example.com/"), "a=1; Path=/")
+    second.add_cookie_header(canonical("http://other.com/"), "b=2; Path=/")
 
     target = tmp_path / "export.json"
     first.export_to_file(str(target))
 
-    assert CookieJar.import_from_file(str(target)).cookie_header_for(_admit("http://other.com/")) == "b=2"
+    assert CookieJar.import_from_file(str(target)).cookie_header_for(canonical("http://other.com/")) == "b=2"
 
 
 def test_a_worker_holding_no_store_keeps_the_in_memory_behavior():
@@ -129,9 +129,9 @@ def test_a_worker_holding_no_store_keeps_the_in_memory_behavior():
     """
     jar = CookieJar()
 
-    jar.add_cookie_header(_admit("http://example.com/"), "session=abc; Path=/")
+    jar.add_cookie_header(canonical("http://example.com/"), "session=abc; Path=/")
 
-    assert jar.cookie_header_for(_admit("http://example.com/")) == "session=abc"
+    assert jar.cookie_header_for(canonical("http://example.com/")) == "session=abc"
 
 
 def test_store_rejects_a_hostile_namespace_as_data(tmp_path):

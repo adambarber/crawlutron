@@ -40,7 +40,7 @@ from typing import Any, NamedTuple
 from app.crawl.recursive import run_recursive_crawl
 from app.models.crawl_task import CrawlTask
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY, canonical
-from tests._result_builders import Spill, _admit, make_engine_result
+from tests._result_builders import Spill, make_engine_result
 from tests._scheduler_doubles import FakeScheduler
 
 __all__ = ["ContentionFreeGate", "RecursiveRun", "drive_recursive_crawl", "make_crawl_task"]

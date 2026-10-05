@@ -15,14 +15,8 @@ from app.crawl.robots import (
 )
 from app.models.crawl_policy import CrawlPolicy
 from app.models.host_policy import HostPolicy
-from app.models.normalized_url import NormalizedUrl
 from tests._fetcher_factories import make_html_fetcher
-from tests._policy_factories import UNRESTRICTED_HOST_POLICY, crawl_policy
-
-
-def _url(text: str) -> NormalizedUrl:
-    """One admission per test file: the gate and loader take the value."""
-    return NormalizedUrl(text, policy=UNRESTRICTED_HOST_POLICY)
+from tests._policy_factories import canonical, crawl_policy
 
 
 def _policy(*, respect_robots: bool = True) -> dict:
@@ -52,7 +46,7 @@ async def test_job_fetch_populates_cache_seen_by_engine():
             200,
         )
 
-    assert await _gate(decode).allows(_url("https://shared.test/public")) is True
+    assert await _gate(decode).allows(canonical("https://shared.test/public")) is True
     page_calls: list[str] = []
     result = await crawl_request(
         {"url": "https://shared.test/public", "policy": _policy()},
@@ -81,7 +75,7 @@ async def test_engine_fetch_populates_cache_seen_by_job_path():
     async def unexpected_decode(*args):
         raise AssertionError("job path fetched a cached robots policy")
 
-    assert await _gate(unexpected_decode).allows(_url("https://reverse.test/public")) is True
+    assert await _gate(unexpected_decode).allows(canonical("https://reverse.test/public")) is True
 
 
 async def test_engine_and_job_single_flight_each_collapse_same_origin_misses():
@@ -110,7 +104,7 @@ async def test_engine_and_job_single_flight_each_collapse_same_origin_misses():
     calls = 0
     assert (
         await asyncio.gather(
-            *(_gate(decode).allows(_url(f"https://flight.test/job-{index}")) for index in range(5))
+            *(_gate(decode).allows(canonical(f"https://flight.test/job-{index}")) for index in range(5))
         )
         == [True] * 5
     )
@@ -133,16 +127,16 @@ async def test_owner_preserves_404_and_5xx_ttl_semantics():
 
     policy = HostPolicy.unrestricted()
     missing = await load_robots_rules(
-        _url("https://missing.test"), object(), 5, fetch_and_decode=decode, policy=policy
+        canonical("https://missing.test"), object(), 5, fetch_and_decode=decode, policy=policy
     )
     missing_again = await load_robots_rules(
-        _url("https://missing.test"), object(), 5, fetch_and_decode=decode, policy=policy
+        canonical("https://missing.test"), object(), 5, fetch_and_decode=decode, policy=policy
     )
     failure = await load_robots_rules(
-        _url("https://failure.test"), object(), 5, fetch_and_decode=decode, policy=policy
+        canonical("https://failure.test"), object(), 5, fetch_and_decode=decode, policy=policy
     )
     failure_again = await load_robots_rules(
-        _url("https://failure.test"), object(), 5, fetch_and_decode=decode, policy=policy
+        canonical("https://failure.test"), object(), 5, fetch_and_decode=decode, policy=policy
     )
     assert missing == ([], [], None)
     assert missing_again == ([], [], None)

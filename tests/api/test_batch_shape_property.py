@@ -32,7 +32,8 @@ from app.crawl.result_helpers import terminal_attempt
 from app.models.crawl_result import CrawlResult
 from app.models.crawl_status import CrawlStatus
 from app.models.engine_crawl_result import EngineCrawlResult
-from tests._result_builders import _admit, engine_result
+from tests._policy_factories import canonical
+from tests._result_builders import engine_result
 
 SEEDS = range(12)
 BATCH_MIN, BATCH_MAX = 1, 12
@@ -89,7 +90,7 @@ def _healthy(index: int, classification: str) -> EngineCrawlResult:
 
 def _healthy_render(index: int) -> CrawlResult:
     """A real browser ``CrawlResult``: the record /v1/render feeds ``adapt``."""
-    url = _admit(f"https://ok.example/render{index}")
+    url = canonical(f"https://ok.example/render{index}")
     return CrawlResult(
         url=url,
         attempt=terminal_attempt(

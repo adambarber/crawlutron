@@ -7,8 +7,8 @@ neighboring ``extract_document``/``extract_content`` calls already do.
 """
 
 from app.crawl.extraction import extract_html
-from app.models.normalized_url import NormalizedUrl
 from app.models.host_policy import HostPolicy
+from app.models.normalized_url import NormalizedUrl
 from tests._assertions import install_to_thread_spy
 from tests._fetcher_factories import invoke_browser_strategy, invoke_http_strategy
 from tests._policy_factories import http_strategy_policy

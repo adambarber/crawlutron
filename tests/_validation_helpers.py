@@ -1,5 +1,6 @@
 from app.env import get_env_int
-from app.models.normalized_url import NormalizedUrl, admit_or_none as _admit_or_none
+from app.models.normalized_url import NormalizedUrl
+from app.models.normalized_url import admit_or_none as _admit_or_none
 from app.models.registrable_domain import registrable_domain
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY
 

@@ -102,11 +102,9 @@ async def test_engine_routes_validators_by_url():
     """Batch request: validators apply only to the matching URL."""
     seen_headers: dict[str, dict] = {}
 
-    from urllib.parse import urlparse
-
     def make_fetcher():
         def respond(url, headers):
-            path = urlparse(url).path or "/"
+            path = url.path or "/"
             seen_headers[path] = dict(headers)
             revalidated = path == "/etagged" and headers.get("If-None-Match") == '"v9"'
             if revalidated:

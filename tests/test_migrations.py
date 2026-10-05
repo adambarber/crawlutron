@@ -27,7 +27,7 @@ from app.crawl.migrations import (
 from app.crawl.migrations.runner import LegacySchemaMismatch
 from app.crawl.result_store import CrawlResultStore
 from app.models.crawl_policy import CrawlPolicy
-from tests._policy_factories import job_store
+from tests._policy_factories import canonical, job_store
 
 _BOOKKEEPING_TABLES = {"_yoyo_log", "_yoyo_migration", "_yoyo_version", "yoyo_lock"}
 
@@ -204,9 +204,9 @@ def test_legacy_job_database_is_stamped_without_losing_rows_or_columns(tmp_path)
     assert loaded is not None
     assert loaded.root_url == "https://legacy.example"
     assert loaded.status is JobStatus.PAUSED
-    assert loaded.visited == {"https://legacy.example"}
+    assert loaded.visited == {canonical("https://legacy.example")}
     assert loaded.results == [{"url": "https://legacy.example/page", "status": "success"}]
-    assert loaded.transient_retries == {"https://legacy.example": 1}
+    assert loaded.transient_retries == {canonical("https://legacy.example"): 1}
     conn = sqlite3.connect(db_path)
     assert schema_drift(conn, CURRENT_SCHEMAS[StoreSchema.CRAWL_JOBS]) == ()
     assert _column_names(conn, "crawl_jobs") == _manifest_columns(StoreSchema.CRAWL_JOBS)

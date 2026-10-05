@@ -4,8 +4,8 @@ from app.crawl.strategies import cookie_jar
 from app.crawl.strategies.cookie_jar import CookieJar
 from app.crawl.strategies.request_profile import _store_set_cookies
 from tests._fetcher_factories import run_default_http_fetcher
+from tests._policy_factories import canonical
 from tests._transport_doubles import MockResponse, patch_http_fetcher_transport
-from tests._result_builders import _admit
 
 SENSITIVE_HEADERS = {"Cookie": "session=secret123", "Authorization": "Bearer token456"}
 
@@ -132,7 +132,7 @@ async def test_http_fetcher_persists_every_set_cookie_header():
         server.shutdown()
         server.server_close()
 
-    cookie_header = jar.cookie_header_for(_admit(url))
+    cookie_header = jar.cookie_header_for(canonical(url))
     assert "session=abc" in cookie_header, cookie_header
     assert "csrf=xyz" in cookie_header, cookie_header
 
@@ -151,10 +151,10 @@ def test_store_set_cookies_handles_multiple_set_cookie_headers():
     jar = cookie_jar._GLOBAL_COOKIE_JAR
 
     headers = _TransportHeadersDouble()
-    _store_set_cookies(_admit("http://example.com/"), headers)
+    _store_set_cookies(canonical("http://example.com/"), headers)
 
     assert headers.get_list_calls == ["set-cookie"]
-    cookie_header = jar.cookie_header_for(_admit("http://example.com/"))
+    cookie_header = jar.cookie_header_for(canonical("http://example.com/"))
     assert "session=abc" in cookie_header
     assert "csrf=xyz" in cookie_header
 
@@ -168,14 +168,14 @@ def test_cookiejar_add_cookie_header_parses_each_cookie_separately():
     jar = CookieJar()
 
     # BAD: comma-joined (what old code would pass)
-    jar.add_cookie_header(_admit("http://example.com/"), "session=abc, csrf=xyz; Path=/")
-    bad_result = jar.cookie_header_for(_admit("http://example.com/"))
+    jar.add_cookie_header(canonical("http://example.com/"), "session=abc, csrf=xyz; Path=/")
+    bad_result = jar.cookie_header_for(canonical("http://example.com/"))
     assert "abc," in bad_result  # Trailing comma - CORRUPTED
 
     # GOOD: call separately for each cookie
     jar2 = CookieJar()
-    jar2.add_cookie_header(_admit("http://example.com/"), "session=abc; Path=/")
-    jar2.add_cookie_header(_admit("http://example.com/"), "csrf=xyz; Path=/")
-    good_result = jar2.cookie_header_for(_admit("http://example.com/"))
+    jar2.add_cookie_header(canonical("http://example.com/"), "session=abc; Path=/")
+    jar2.add_cookie_header(canonical("http://example.com/"), "csrf=xyz; Path=/")
+    good_result = jar2.cookie_header_for(canonical("http://example.com/"))
     assert "session=abc" in good_result and "abc," not in good_result
     assert "csrf=xyz" in good_result

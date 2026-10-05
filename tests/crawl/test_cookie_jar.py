@@ -14,8 +14,8 @@ from unittest.mock import patch
 
 from app.crawl.strategies.cookie_jar import CookieJar
 from tests._cookie_helpers import cookie_file, read_cookie_file
+from tests._policy_factories import canonical
 from tests._thread_fanout import run_thread_fanout
-from tests._result_builders import _admit
 
 
 def test_cookie_jar_is_locked():
@@ -25,7 +25,7 @@ def test_cookie_jar_is_locked():
 
 def test_save_to_file_is_atomic_on_failure():
     jar = CookieJar()
-    jar.add_cookie_header(_admit("http://x.example/p"), "sess=abc; Path=/")
+    jar.add_cookie_header(canonical("http://x.example/p"), "sess=abc; Path=/")
     target = os.path.join(tempfile.gettempdir(), "ck_atomic_test.json")
     with open(target, "w", encoding="utf-8") as f:
         f.write('{"old": true}')
@@ -51,7 +51,7 @@ def test_save_to_file_is_atomic_on_failure():
 
 def test_save_to_file_persists_and_no_temp_leftovers():
     jar = CookieJar()
-    jar.add_cookie_header(_admit("http://x.example/p"), "sess=abc; Path=/")
+    jar.add_cookie_header(canonical("http://x.example/p"), "sess=abc; Path=/")
     with cookie_file(jar, "ck_persist_test.json") as target:
         assert read_cookie_file(target) == {"x.example": {"sess": "abc"}}
     # No leftover.tmp files in the directory. Checked after the context exits
@@ -63,7 +63,7 @@ def test_save_to_file_persists_and_no_temp_leftovers():
 
 def test_concurrent_cookie_writes_do_not_raise():
     jar = CookieJar()
-    url = _admit("http://x.example/p")
+    url = canonical("http://x.example/p")
 
     def worker(thread_id: int) -> None:
         for i in range(50):
@@ -91,7 +91,7 @@ def _jar_with_hosts(count: int):
     """
     jar = CookieJar()
     for i in range(count):
-        jar.add_cookie_header(_admit(f"http://host{i}.example/"), f"k=v{i}; Path=/")
+        jar.add_cookie_header(canonical(f"http://host{i}.example/"), f"k=v{i}; Path=/")
     return jar
 
 
@@ -102,7 +102,7 @@ def test_cookie_jar_evicts_oldest_host_past_cap():
     jar = _jar_with_hosts(cap + 5)
     assert len(jar._cookies) == cap
     newest = cap + 4
-    assert jar.cookie_header_for(_admit(f"http://host{newest}.example/")) == f"k=v{newest}"
+    assert jar.cookie_header_for(canonical(f"http://host{newest}.example/")) == f"k=v{newest}"
 
 
 def test_cookie_jar_read_refreshes_host_recency():
@@ -110,9 +110,9 @@ def test_cookie_jar_read_refreshes_host_recency():
     the next eviction instead of the oldest-unread slot."""
     cap = _cookie_jar_max_hosts()
     jar = _jar_with_hosts(cap)
-    assert jar.cookie_header_for(_admit("http://host0.example/")) == "k=v0"
-    jar.add_cookie_header(_admit("http://fresh.example/"), "k=fresh; Path=/")
-    assert jar.cookie_header_for(_admit("http://host0.example/")) == "k=v0"
+    assert jar.cookie_header_for(canonical("http://host0.example/")) == "k=v0"
+    jar.add_cookie_header(canonical("http://fresh.example/"), "k=fresh; Path=/")
+    assert jar.cookie_header_for(canonical("http://host0.example/")) == "k=v0"
     assert len(jar._cookies) == cap
 
 
@@ -124,7 +124,7 @@ class TestCookieJarHeaderHandling:
         # a string, not a mapping: an empty ``{}`` was only "not a string" for as
         # long as the jar did not read it, and a jar that started reading it
         # would have been handed a dict.
-        _GLOBAL_COOKIE_JAR.add_cookie_header(_admit("http://x.example/"), "http://example.com/")
+        _GLOBAL_COOKIE_JAR.add_cookie_header(canonical("http://x.example/"), "http://example.com/")
 
 
 class _RecordingResponse:
