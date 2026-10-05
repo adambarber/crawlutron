@@ -81,7 +81,7 @@ def _canonical_parts(url: str, *, policy: HostPolicy) -> tuple[str, str, str, st
         pairs.sort()
         query = urlencode(pairs, doseq=True)
     canonical = urlunparse((scheme, netloc, path, parsed.params, query, ""))
-    return canonical, scheme, host, registrable_domain(canonical), port, path, query
+    return canonical, scheme, host, registrable_domain(host), port, path, query
 
 
 class NormalizedUrl:

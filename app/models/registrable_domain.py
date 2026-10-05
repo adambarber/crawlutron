@@ -6,7 +6,6 @@ import sys
 from contextlib import suppress
 from importlib import import_module
 from typing import Protocol, cast
-from urllib.parse import urlparse
 
 TWO_PART_PUBLIC_SUFFIXES = {"co.uk", "org.uk", "ac.uk", "gov.uk", "com.au", "net.au", "org.au"}
 
@@ -49,10 +48,9 @@ def _heuristic_registrable_domain(host: str) -> str:
     return ".".join(labels[-2:])
 
 
-def registrable_domain(url: str) -> str:
-    """The registrable site a URL belongs to, or its host when there is no site."""
-    parsed = urlparse(url)
-    host = (parsed.hostname or url).lower().rstrip(".")
+def registrable_domain(host: str) -> str:
+    """The registrable site a host belongs to, or the host itself when there is no site."""
+    host = host.lower().rstrip(".")
     try:
         ascii_host = host.encode("idna").decode("ascii")
     except Exception:

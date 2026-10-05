@@ -65,8 +65,8 @@ class TestPolicyValidation:
         )
 
     def test_registrable_domain(self):
-        assert registrable_domain("https://a.b.c.example.com/x") == "example.com"
-        assert registrable_domain("https://example.com/x") == "example.com"
+        assert registrable_domain("a.b.c.example.com") == "example.com"
+        assert registrable_domain("example.com") == "example.com"
 
     def test_invalid_url_no_host(self):
         with pytest.raises(ValueError):
@@ -83,7 +83,7 @@ class TestPolicyValidation:
         assert out.raw == "http://example.com/x"
 
     def test_registrable_domain_two_part_suffix(self):
-        assert registrable_domain("https://a.b.example.co.uk/x") == "example.co.uk"
+        assert registrable_domain("a.b.example.co.uk") == "example.co.uk"
 
     def test_integer_ip_literal_blocked(self, monkeypatch):
         # Resolvers read bare integers/hex as IPv4; layer 1 must too.
@@ -111,10 +111,10 @@ class TestPolicyValidation:
         # The hand-rolled 7-entry suffix set collapsed every unlisted
         # two-part suffix to itself (a.co.jp and b.co.jp both -> co.jp),
         # sharing gates across unrelated sites. The real PSL keeps them distinct.
-        assert registrable_domain("https://a.co.jp/x") == "a.co.jp"
-        assert registrable_domain("https://b.co.jp/x") == "b.co.jp"
-        assert registrable_domain("https://www.example.com.br/x") == "example.com.br"
-        assert registrable_domain("https://shop.example.gov.in/x") == "example.gov.in"
+        assert registrable_domain("a.co.jp") == "a.co.jp"
+        assert registrable_domain("b.co.jp") == "b.co.jp"
+        assert registrable_domain("www.example.com.br") == "example.com.br"
+        assert registrable_domain("shop.example.gov.in") == "example.gov.in"
 
     def test_registrable_domain_falls_back_without_dataset(self, monkeypatch):
         # The heuristic fallback must keep working when the dataset is
@@ -131,8 +131,8 @@ class TestPolicyValidation:
             monkeypatch.setitem(sys.modules, "publicsuffixlist", None)
             if had_psl:
                 monkeypatch.delattr(suffix_module, "_PSL")
-            assert registrable_domain("https://a.b.example.co.uk/x") == "example.co.uk"
-            assert registrable_domain("https://a.b.c.example.com/x") == "example.com"
+            assert registrable_domain("a.b.example.co.uk") == "example.co.uk"
+            assert registrable_domain("a.b.c.example.com") == "example.com"
         finally:
             if had_psl:
                 suffix_module._PSL = old_psl
