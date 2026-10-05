@@ -48,14 +48,14 @@ def _follows_itself(seen: list[httpx.Response]) -> bool:
 
 def _allow_every_host():
     """A pin that rewrites nothing, so the loop's own hop budget is what ends it."""
-    return lambda url, headers, *, policy: (url, dict(headers))
+    return lambda url, headers: (url.raw, dict(headers))
 
 
-def _reject_loopback(url, headers, *, policy):
+def _reject_loopback(url, headers):
     """A pin that refuses an internal target, the way the real one does."""
-    if "127.0.0.1" in url:
-        raise ValueError(f"SSRF: blocked target {url}")
-    return url, dict(headers)
+    if "127.0.0.1" in url.raw:
+        raise ValueError(f"SSRF: blocked target {url.raw}")
+    return url.raw, dict(headers)
 
 
 async def test_redirect_to_unsafe_loopback_is_not_followed(monkeypatch):

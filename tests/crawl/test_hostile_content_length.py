@@ -33,7 +33,6 @@ async def _fetch_behind_declared_length(monkeypatch, declared: str):
         {},
         30,
         1000,
-        policy=HostPolicy.unrestricted(),
     )
 
 

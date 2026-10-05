@@ -860,7 +860,6 @@ async def run_default_http_fetcher(url: str, headers=None, *, pin=None):
         canonical(url),
         {} if headers is None else headers,
         30,
-        policy=UNRESTRICTED_HOST_POLICY,
         pin=pin,
     )
 

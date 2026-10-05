@@ -209,7 +209,7 @@ def allow_scripted_egress(monkeypatch, ip: str = "1.2.3.4") -> None:
     from app.crawl.strategies import pinned_transport as pinned_mod
 
     monkeypatch.setattr(pinned_mod, "check_ssrf_protection", lambda url: None)
-    monkeypatch.setattr(pinned_mod, "resolve_and_pin_host", lambda url: (urlparse(url).hostname, ip))
+    monkeypatch.setattr(pinned_mod, "resolve_and_pin_host", lambda url: (url.host, ip))
 
 
 def patch_http_fetcher_transport(
@@ -248,7 +248,7 @@ def _genuine_cffi_outcome(url: str, timeout_seconds: int, max_content_length: in
     from tests._policy_factories import canonical
 
     async def _fetch():
-        return await impersonating_fetcher(HostPolicy.unrestricted())(
+        return await impersonating_fetcher()(
             canonical(url),
             {},
             timeout_seconds,

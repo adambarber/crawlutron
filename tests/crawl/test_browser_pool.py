@@ -277,10 +277,7 @@ class TestWorkerExtractorErrorDegrades:
         assert_released()
 
     def test_browser_renderer_pdf_text_extractor_error(self):
-        text = _bare_renderer().pdf_text_extractor(
-            "http://127.0.0.1:1/nonexistent.pdf",
-            UNRESTRICTED_HOST_POLICY,
-        )
+        text = _bare_renderer().pdf_text_extractor(canonical("http://127.0.0.1:1/nonexistent.pdf"))
         assert text == ""
 
     async def test_driver_capture_element_screenshots_error(self):

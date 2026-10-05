@@ -43,8 +43,8 @@ class _BlockingResolver:
         self.barrier = threading.Barrier(parties, timeout=timeout)
         self.broken: list[str] = []
 
-    def build(self, url, headers, *, policy):
-        del url, headers, policy
+    def build(self, url, headers):
+        del url, headers
         try:
             self.barrier.wait()
         except threading.BrokenBarrierError:
@@ -114,7 +114,7 @@ async def test_ssrf_route_handler_concurrent_pinning_dont_block(monkeypatch):
 async def test_ssrf_route_handler_fails_closed_on_unexpected_errors(monkeypatch):
     """Non-ValueError resolver failures (DNS timeout etc.) must abort, not pass."""
 
-    def boom(url, headers, *, policy):
+    def boom(url, headers):
         raise TimeoutError("dns lookup timed out")
 
     handler = make_ssrf_route_handler(policy=UNRESTRICTED_HOST_POLICY, pin=boom)

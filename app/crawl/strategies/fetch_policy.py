@@ -156,7 +156,6 @@ async def discovery_diagnostics(
     limits = policy.limits
     diagnostics: dict[str, Any] = {}
     safe_source = normalized_url
-    origin = safe_source.origin
     robots_sitemaps: list[str] = []
     if not robots_evaluated:
         diagnostics["robots"] = _robots_diagnostics("disabled")
@@ -234,12 +233,9 @@ async def discovery_diagnostics(
                     host_policy=host_policy,
                 )
                 for loc, lastmod in found_locs:
-                    safe_loc = sitemap_url.resolve(loc)
-                    if safe_loc is None:
-                        continue
-                    sitemap_urls.append(safe_loc.raw)
+                    sitemap_urls.append(loc.raw)
                     if lastmod:
-                        diagnostics.setdefault("sitemap_lastmod", {})[safe_loc.raw] = lastmod
+                        diagnostics.setdefault("sitemap_lastmod", {})[loc.raw] = lastmod
     feeds: list[str] = []
     if flags.feeds:
         for match in re.finditer(

@@ -61,15 +61,14 @@ def scoped_cache(**settings) -> Iterator[ContentCache]:
 def etag_case(tmp_path, etag_server):
     """``(url, policy, fetcher, cache, content_cache)`` for the etag server's URL.
 
-    The real fetcher against the real local server, with the unrestricted policy
-    pinned and a tap over it. Only the wiring is test-owned; nothing here
-    answers HTTP.
+    The real fetcher against the real local server, with a tap over it.
+    Only the wiring is test-owned; nothing here answers HTTP.
     """
     port = etag_server.server_address[1]
     return (
         f"http://127.0.0.1:{port}/",
         {"strategies": [HTTP_DECLARED_CRAWLER], "extraction": "full", "headers": {}},
-        tap_fetcher(partial(default_http_fetcher, policy=HostPolicy.unrestricted())),
+        tap_fetcher(default_http_fetcher),
         HttpCache(),
         ContentCache(tmp_path),
     )
@@ -262,8 +261,7 @@ def real_fetcher(calls: list[str] | None = None):
     Every integration below is about what the *real* transport did, so the
     fetcher is production's own; only the observation is test-owned.
     """
-    fetcher = partial(default_http_fetcher, policy=HostPolicy.unrestricted())
-    return fetcher if calls is None else tap_fetcher(fetcher, calls)
+    return default_http_fetcher if calls is None else tap_fetcher(default_http_fetcher, calls)
 
 
 async def test_cache_short_circuits_real_fetch(counting_server, tmp_path):

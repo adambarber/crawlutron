@@ -7,7 +7,6 @@ import functools
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field, replace
 from typing import Any, cast
-from urllib.parse import urljoin
 
 from app.constants import (
     ENGINE_BATCH_CONCURRENCY_MULTIPLIER,
@@ -229,9 +228,8 @@ async def _seeds_for_job(state: _PipelineState, job: CrawlTask) -> list[Normaliz
         host_policy=state.host_policy,
     )
     candidates = normalize_sitemap_candidates(
-        ((urljoin(sitemap_url.raw, loc), lastmod) for loc, lastmod in found),
+        found,
         scope_pattern=state.scope_pattern,
-        host_policy=state.host_policy,
     )
     stale = (
         await asyncio.to_thread(

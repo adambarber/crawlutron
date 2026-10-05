@@ -12,7 +12,7 @@ from app.crawl.strategies.browser import (
     resolve_browser_target,
 )
 from app.crawl.strategies.pinned_transport import build_pinned_request, build_pinned_request_async
-from tests._assertions import block_private_targets
+from tests._assertions import block_private_targets, host_resolves_to
 from tests._browser_doubles import (
     FakeRequest,
     FakeRoute,
@@ -31,37 +31,47 @@ from tests._policy_factories import UNRESTRICTED_HOST_POLICY, canonical
 async def test_document_extractor_blocks_internal_url(monkeypatch):
     # The document fetch must refuse a loopback target, and refuse it
     # loudly -- a refused target is not the same outcome as an empty PDF.
+    # The refusal is inherited at admission: the extractor's input is an
+    # admitted value, so a refused target can never degrade to empty text.
     monkeypatch.setenv("CRAWLUTRON_ALLOW_PRIVATE_TARGETS", "0")
     with pytest.raises(ValueError):
-        doc_mod._default_document_text_extractor("http://127.0.0.1:9/secret.pdf", UNRESTRICTED_HOST_POLICY)
-
-
-class _GateReached(Exception):
-    """Stands in for the SSRF gate to end the walk at the gate itself."""
+        doc_mod._default_document_text_extractor(canonical("http://127.0.0.1:9/secret.pdf"))
 
 
 async def test_document_extractor_invokes_ssrf_check(monkeypatch):
-    """The extractor must run the shared SSRF gate before it opens a socket.
+    """The document fetch must gate the URL before any socket opens.
 
-    The stub raises rather than returning, which is what keeps the test off the
-    network: without a stubbed transport, proving the gate was reached would mean
-    depending on a real connection to example.com to assert something about a
-    local hook. That the sentinel escapes rather than degrading to empty text is
-    itself the property -- it is the same fail-closed ordering as
-    ``test_document_extractor_blocks_internal_url``, here on the *reachable*
-    path.
+    The gate is the fetch walk's first pin: ``_default_document_text_extractor``
+    fetches through ``apinned_hops``, and the walk pins before anything
+    connects. A scripted client keeps the test off the network while the
+    recording gate proves the property: a hand-rolled loop that skipped the
+    pin would reach the client with no gate entry, and a gate entry carrying a
+    different URL would mean the fetch was not the one that was checked.
+
+    The extractor's own contract swallows every fetch failure into empty
+    text, so the gate entry -- not an escaping sentinel -- is the observable.
     """
+    from unittest.mock import patch
+
+    from tests._transport_doubles import MockResponse, scripted_transport_client
+
     seen = {}
 
     def fake_check(url):
         seen["url"] = url
-        raise _GateReached
 
     monkeypatch.setattr(http_mod, "check_ssrf_protection", fake_check)
-
-    with pytest.raises(_GateReached):
-        doc_mod._default_document_text_extractor("http://example.com/x.pdf", UNRESTRICTED_HOST_POLICY)
-    assert seen.get("url") == "http://example.com/x.pdf"
+    with (
+        host_resolves_to(monkeypatch, "93.184.216.34"),
+        patch(
+            "app.crawl.strategies.http_client_pool.get_async_http_client",
+            return_value=scripted_transport_client(
+                [MockResponse(200, {"content-type": "application/pdf"}, b"")]
+            ),
+        ),
+    ):
+        doc_mod._default_document_text_extractor(canonical("http://example.com/x.pdf"))
+    assert seen.get("url") == canonical("http://example.com/x.pdf")
 
 
 # --------------------------------------------------------------------------
@@ -72,7 +82,6 @@ async def test_document_extractor_invokes_ssrf_check(monkeypatch):
 async def test_resolve_browser_target_pins_ip_and_preserves_host():
     pinned_url, headers = await resolve_browser_target(
         canonical("http://example.com/path"),
-        policy=UNRESTRICTED_HOST_POLICY,
         pin=stub_pinned_request(("http://1.2.3.4:80/path", {"Host": "example.com"})),
     )
     assert pinned_url == "http://1.2.3.4:80/path"
@@ -108,7 +117,6 @@ async def test_browser_pin_resolve_does_not_run_on_the_event_loop(monkeypatch):
 
     await resolve_browser_target(
         canonical("http://example.com/path"),
-        policy=UNRESTRICTED_HOST_POLICY,
         pin=build_pinned_request_async,
     )
 

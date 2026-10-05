@@ -63,8 +63,10 @@ def assert_dns_pinning_uses_first_resolution(monkeypatch, rebound_ip, public_ip=
             return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", (public_ip, 80))]
         return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", (rebound_ip, 80))]
 
+    from tests._policy_factories import canonical
+
     with patch("socket.getaddrinfo", side_effect=fake_getaddrinfo):
-        _, ip = resolve_and_pin_host("http://example.com/")
+        _, ip = resolve_and_pin_host(canonical("http://example.com/"))
     assert ip == public_ip
     assert calls == ["example.com"]
 

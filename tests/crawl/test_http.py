@@ -1,7 +1,5 @@
 """HTTP fetch strategy behavior against a real local server (no mocks)."""
 
-from functools import partial
-
 from app.constants import EXTRACTION_FULL, HTTP_DECLARED_CRAWLER
 from app.crawl.cache import HttpCache
 from app.crawl.result_helpers import crawl_result_from_engine_result
@@ -9,7 +7,6 @@ from app.crawl.strategies.fetch_policy import looks_like_binary_body
 from app.crawl.strategies.fetchers import default_http_fetcher
 from app.crawl.strategies.http import http_strategy_result
 from app.models.crawl_result import CrawlStrategyAttempt
-from app.validation import HostPolicy
 from tests._assertions import assert_result_success
 from tests._fetcher_factories import (
     request_fetcher,
@@ -19,11 +16,6 @@ from tests._fetcher_factories import (
     strategy_request,
 )
 from tests._policy_factories import canonical
-
-_default_http_fetcher_with_policy = partial(
-    default_http_fetcher,
-    policy=HostPolicy.unrestricted(),
-)
 
 
 def http_policy(**overrides):
@@ -51,7 +43,7 @@ async def _run(
     url,
     strategy=HTTP_DECLARED_CRAWLER,
     policy: dict | None = None,
-    http_fetcher=_default_http_fetcher_with_policy,
+    http_fetcher=default_http_fetcher,
     **kwargs,
 ):
     """Drive the real ``http_strategy_result`` for one page.

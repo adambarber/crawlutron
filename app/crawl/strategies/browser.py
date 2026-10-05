@@ -53,7 +53,6 @@ from app.models.host_policy import HostPolicy
 from app.models.normalized_url import NormalizedUrl
 from app.models.render_options import RenderOptions
 from app.models.taxonomy import Classification, CrawlError
-from app.safe_url import SafeUrl
 from app.settings import CrawlerSettings
 
 logger = logging.getLogger(__name__)
@@ -62,17 +61,17 @@ logger = logging.getLogger(__name__)
 async def resolve_browser_target(
     url: NormalizedUrl,
     *,
-    policy: HostPolicy,
     pin: Callable[..., Awaitable[tuple[str, dict[str, str]]]],
 ) -> tuple[str, dict[str, str]]:
     """SSRF-check + IP-pin ``url`` for browser navigation.
 
     Returns ``(pinned_url, extra_http_headers)``. The browser is told to connect
     to the single resolved IP (preventing DNS-rebinding) while preserving the
-    original ``Host`` header. Raises ``ValueError`` if the target is unsafe.
+    original ``Host`` header. Raises ``ValueError`` if the target is unsafe --
+    the value's own policy decides whether the target is reachable at all.
 
-    Async because pinning resolves DNS, and a render is not the only thing on the
-    loop: called synchronously this ran ``socket.getaddrinfo`` inline, so every
+    Async because pinning resolves DNS, and a render is not the only thing on
+    the loop: called synchronously this ran ``socket.getaddrinfo`` inline, so every
     other in-flight crawl waited out the resolver once per rendered page.
 
     ``pin`` is a required argument, not a keyword with a default. It is the rule
@@ -80,7 +79,7 @@ async def resolve_browser_target(
     forgot to pass one would silently fall back to a weaker rule; the type is
     declared here rather than imported so the dependency is visible at the call.
     """
-    pinned_url, request_headers = await pin(url.raw, {}, policy=policy)
+    pinned_url, request_headers = await pin(url, {})
     host = request_headers.get("Host")
     return pinned_url, ({"Host": host} if host else {})
 
@@ -93,14 +92,14 @@ def _assert_safe_final_url(final_url: str, *, policy: HostPolicy) -> None:
     content.
     """
     normalized = NormalizedUrl(final_url, policy=policy)
-    check_ssrf_protection(normalized.raw)
+    check_ssrf_protection(normalized)
 
 
 def _is_ssrf_blocked(url: str, *, policy: HostPolicy) -> bool:
     """Return ``True`` if ``url`` resolves to an SSRF-unsafe target."""
     try:
         normalized = NormalizedUrl(url, policy=policy)
-        check_ssrf_protection(normalized.raw)
+        check_ssrf_protection(normalized)
     except ValueError:
         return True
     return False
@@ -138,17 +137,17 @@ def make_ssrf_route_handler(
     Plain-HTTP requests keep the FRESH (uncached) pinned IP, which governs the
     actual connection: a rebind inside the resolver cache TTL must not slip
     onto the wire. HTTPS requests are validated through the
-    same cached check the websocket handler uses: ``SafeUrl.connect`` keeps
-    the original hostname there (real certificates carry no IP address SAN,
-    so a pin would only break SNI/cert verification), making an uncached pin
-    resolve per subresource pure cost with no security gain. HTTPS stays
+    same cached check the websocket handler uses: ``build_pinned_request``
+    keeps the original hostname there (real certificates carry no IP address
+    SAN, so a pin would only break SNI/cert verification), making an uncached
+    pin resolve per subresource pure cost with no security gain. HTTPS stays
     blocklist-checked before the browser connects.
     """
 
     async def _handler(route, request):
         # Re-validate and pin the IP for this specific subresource request
-        # to prevent DNS-rebinding TOCTOU. _build_pinned_request
-        # raises ValueError if the target resolves to a private/loopback IP,
+        # to prevent DNS-rebinding TOCTOU. The pin rule raises ValueError if
+        # the target resolves to a private/loopback IP,
         # and returns (pinned_url, {Host: original_hostname}) so we can
         # force the browser to connect to the validated IP while preserving
         # the Host header (virtual-host routing).
@@ -172,30 +171,31 @@ def make_ssrf_route_handler(
             await route.abort()
             return
         try:
+            # The browser-observed request URL is one of the tree's live text
+            # boundaries: admitted here, once, inline -- admission does no
+            # DNS -- so both branches below hand the pin rule and the cached
+            # blocklist check a value, not text. A ValueError from either is
+            # the same "unsafe target" verdict the try/except below aborts on.
+            admitted = NormalizedUrl(request.url, policy=policy)
             # Annotated once, ahead of both branches: the https branch assigns
             # an empty literal, which mypy cannot widen to the dict type the
-            # http branch's _build_pinned_request returns.
+            # http branch's pin rule returns.
             host_headers: dict[str, str]
             if request_scheme == "https":
-                # The pinned IP is discarded for https (SafeUrl.connect keeps
+                # The pinned IP is discarded for https (the pin rule keeps
                 # the original hostname so TLS SNI and certificate validation
                 # work -- real certs carry no IP SAN), so the pin resolve is
                 # discarded work here. Validate through the cached, TTL'd
                 # check instead: one resolver round trip per host, not one
                 # uncached resolve per subresource. The check still fails
                 # closed on private/loopback/resolved-internal targets.
-                await asyncio.to_thread(
-                    SafeUrl.parse,
-                    request.url,
-                    policy=policy,
-                )
+                await asyncio.to_thread(check_ssrf_protection, admitted)
                 pinned_url, host_headers = request.url, {}
             else:
                 pinned_url, host_headers = await asyncio.to_thread(
                     pin,
-                    request.url,
+                    admitted,
                     {},
-                    policy=policy,
                 )
         except Exception:
             # Fail closed: DNS timeout, resolver errors, anything unexpected ->
@@ -236,7 +236,7 @@ def make_ssrf_websocket_handler(*, policy: HostPolicy):
                 http_equivalent,
                 policy=policy,
             )
-            await asyncio.to_thread(check_ssrf_protection, normalized.raw)
+            await asyncio.to_thread(check_ssrf_protection, normalized)
         except Exception:
             close = getattr(ws, "close", None)
             if close is not None:
@@ -350,7 +350,7 @@ class BrowserRenderer:
         *,
         sleep: Callable[[float], None] = time.sleep,
         challenge_wait_seconds: float | None = None,
-        pdf_text_extractor: Callable[[str, HostPolicy], str] | None = None,
+        pdf_text_extractor: Callable[[NormalizedUrl], str] | None = None,
         extract: Callable[
             [Any, RenderOptions], Awaitable[tuple[str | None, str | None, Classification, bool]]
         ]
@@ -416,7 +416,7 @@ class BrowserRenderer:
         await async_sleep(self._sleep, seconds)
 
     @property
-    def pdf_text_extractor(self) -> Callable[[str, HostPolicy], str]:
+    def pdf_text_extractor(self) -> Callable[[NormalizedUrl], str]:
         """The collaborator that turns a PDF URL into text.
 
         Public because it is an injection point: a caller that supplied one, or a
@@ -532,7 +532,7 @@ class BrowserRenderer:
         # SSRF protection: validate + IP-pin the target so the browser
         # connects to a single resolved IP (DNS-rebinding safe) while preserving
         # the original Host header. Raises ValueError if the target is unsafe.
-        pinned_url, goto_headers = await resolve_browser_target(url, policy=policy, pin=self._pin)
+        pinned_url, goto_headers = await resolve_browser_target(url, pin=self._pin)
 
         started = time.monotonic()
 
@@ -563,10 +563,11 @@ class BrowserRenderer:
             intercepted_xhr: list[dict[str, Any]] = []
             page.on("response", self.make_response_handler(intercepted_xhr))
 
-            # Warmup URLs (no Host header needed)
+            # Warmup URLs (no Host header needed). The driver's goto takes
+            # text -- .raw projects at that external-API edge.
             for warmup_url in self._warmup_urls:
                 normalized_warmup = NormalizedUrl(warmup_url, policy=policy)
-                await page.goto(normalized_warmup, wait_until="domcontentloaded")
+                await page.goto(normalized_warmup.raw, wait_until="domcontentloaded")
                 await self._driver.wait_for_ready_state(page)
 
             # Navigate to target URL: set Host header for pinned IP navigation.
@@ -622,7 +623,7 @@ class BrowserRenderer:
                 # Blocking file read + parse: keep it off the event loop like
                 # every other document-extraction path (the extractor may be a
                 # sync downloader/parser).
-                text = await asyncio.to_thread(self._pdf_text_extractor, final_url.raw, policy)
+                text = await asyncio.to_thread(self._pdf_text_extractor, final_url)
                 html = html if options.include_html else None
                 title = await page.evaluate("() => document.title")
                 classification = classify_page(html, text, title=title)

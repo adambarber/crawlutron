@@ -16,6 +16,7 @@ from unittest.mock import patch
 import pytest
 
 from app.crawl.strategies import pinned_transport as http_mod
+from tests._policy_factories import canonical
 from tests._thread_fanout import run_thread_fanout
 
 
@@ -36,8 +37,8 @@ def test_ssrf_check_caches_within_ttl(monkeypatch):
     calls, fake = _counting_resolver()
     http_mod._DNS_CACHE.clear()
     with patch("socket.getaddrinfo", side_effect=fake):
-        http_mod.check_ssrf_protection(f"http://{host}/p")
-        http_mod.check_ssrf_protection(f"http://{host}/q")
+        http_mod.check_ssrf_protection(canonical(f"http://{host}/p"))
+        http_mod.check_ssrf_protection(canonical(f"http://{host}/q"))
     # second call served from cache -> getaddrinfo called exactly once
     assert calls["n"] == 1, calls
 
@@ -48,8 +49,8 @@ def test_resolve_pin_host_resolves_fresh_each_call(monkeypatch):
     calls, fake = _counting_resolver()
     http_mod._DNS_CACHE.clear()
     with patch("socket.getaddrinfo", side_effect=fake):
-        h1, ip1 = http_mod.resolve_and_pin_host(f"http://{host}/p")
-        h2, ip2 = http_mod.resolve_and_pin_host(f"http://{host}/q")
+        h1, ip1 = http_mod.resolve_and_pin_host(canonical(f"http://{host}/p"))
+        h2, ip2 = http_mod.resolve_and_pin_host(canonical(f"http://{host}/q"))
     # pin path is intentionally NOT cached (security): resolves each call
     assert calls["n"] == 2, calls
     assert ip1 == ip2 == "8.8.8.8"
@@ -66,7 +67,7 @@ def test_ssrf_check_uses_cache_and_still_blocks_private(monkeypatch):
         # The reason matters as much as the type: this has to be the private-address
         # refusal, not any incidental ValueError the parse could raise.
         with pytest.raises(ValueError, match="resolves to private/loopback IP"):
-            http_mod.check_ssrf_protection(f"http://{host}/")
+            http_mod.check_ssrf_protection(canonical(f"http://{host}/"))
 
 
 class TestDnsCacheLocking:

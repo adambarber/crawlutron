@@ -1,6 +1,6 @@
 """Shared AST-walk helpers for the chokepoint invariant (drift) tests.
 
-Each safety chokepoint -- safe_regex, bounded_io, BoundedTTLCache, SafeUrl,
+Each safety chokepoint -- safe_regex, bounded_io, BoundedTTLCache,
 env parsing -- is guarded by an invariant test that walks app/*.py, parses
 every module, and flags a banned pattern. The file walk, the parse loop, the
 safe_regex.py exemption, and the offender-label format are the same across

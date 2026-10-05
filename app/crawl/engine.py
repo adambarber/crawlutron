@@ -18,7 +18,6 @@ import tempfile
 import time
 from collections.abc import Iterable
 from datetime import UTC, datetime
-from functools import partial
 from typing import Any, cast
 
 from app.crawl import robots as _robots_policy
@@ -432,11 +431,11 @@ async def crawl_request(
         host_policy=host_policy,
     )
     policy = _payload_policy(payload, PolicyTier.from_settings(active_settings))
-    fetcher = http_fetcher or partial(default_http_fetcher, policy=host_policy)
+    fetcher = http_fetcher or default_http_fetcher
     # The transport preference is a BINDING of the one fetcher, not a second
     # entry point: the impersonating strategy gets the same callable with the
     # cffi transport preferred, so the contract is spelled once in the whole tree.
-    cffi = cffi_fetcher or impersonating_fetcher(host_policy)
+    cffi = cffi_fetcher or impersonating_fetcher()
     shutdown_event = shutdown_event or asyncio.Event()
     # Bind the cookie namespace for the lifetime of this crawl so concurrent
     # multi-tenant calls cannot leak cookies through the shared

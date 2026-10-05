@@ -8,8 +8,7 @@ import pytest
 
 from app.crawl.strategies import pinned_transport
 from app.crawl.strategies.fetchers import default_http_fetcher
-from app.models.normalized_url import NormalizedUrl
-from app.validation import HostPolicy
+from tests._policy_factories import canonical
 
 
 def _thread_recording_spy(seen: dict, *, dead_port: bool = True):
@@ -26,9 +25,9 @@ def _thread_recording_spy(seen: dict, *, dead_port: bool = True):
     so it must be checkable with a rule that is not the module's own.
     """
 
-    def spy(url, headers, *, policy):
+    def spy(url, headers):
         seen["thread"] = threading.current_thread()
-        return ("http://127.0.0.1:9/" if dead_port else url), dict(headers)
+        return (("http://127.0.0.1:9/" if dead_port else url.raw), dict(headers))
 
     return spy
 
@@ -45,10 +44,9 @@ async def test_http_fetcher_offloads_the_pin_rule_to_thread():
     # that difference is what makes this test about offloading at all.
     with pytest.raises(httpx.ConnectError):
         await default_http_fetcher(
-            NormalizedUrl("http://example.com/", policy=HostPolicy.unrestricted()),
+            canonical("http://example.com/"),
             {},
             timeout_seconds=2,
-            policy=HostPolicy.unrestricted(),
             pin=_thread_recording_spy(seen),
         )
 
@@ -72,9 +70,8 @@ async def test_pinned_hop_offloads_the_pin_rule_to_thread():
     seen: dict = {}
 
     walk = pinned_transport.apinned_hops(
-        "http://example.com/",
+        canonical("http://example.com/"),
         {},
-        policy=HostPolicy.unrestricted(),
         pin=_thread_recording_spy(seen, dead_port=False),
     )
     chain, pinned_url, hop_headers = await anext(walk)
@@ -82,6 +79,6 @@ async def test_pinned_hop_offloads_the_pin_rule_to_thread():
     assert seen, "the pin rule was never invoked"
     assert seen["thread"] is not threading.current_thread()
     assert seen["thread"].name.startswith("dns-resolve")
-    assert pinned_url == "http://example.com/"
+    assert pinned_url == "http://example.com"
     assert hop_headers == {}
-    assert chain.url == "http://example.com/"
+    assert chain.url == canonical("http://example.com/")

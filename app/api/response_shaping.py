@@ -20,7 +20,6 @@ import logging
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, TypeVar
-from urllib.parse import urljoin
 
 from app.constants import CrawlClassification
 from app.crawl.llm_format import (
@@ -294,7 +293,7 @@ def frontier_link_url(
     """The only link field eligible for frontier/visited use: the validated URL.
 
     Extraction can legitimately emit a raw ``url`` href (``/rel``, ``#frag``,
-    scheme-relative) alongside the SafeUrl-policy-validated ``normalized_url``.
+    scheme-relative) alongside the policy-validated ``normalized_url``.
     Frontier and visited sets are keyed on absolute, validated URLs, so the raw
     ``url`` must never enter them. A link without a usable ``normalized_url``
     (or a non-link string) yields None: unqueue-able, not a raw-href fallback.
@@ -309,8 +308,9 @@ def frontier_link_url(
         return normalized
     if not isinstance(normalized, str) or not normalized:
         return None
-    candidate = urljoin(resolve_against.raw, normalized) if resolve_against else normalized
-    return admit_or_none(candidate, policy=policy)
+    if resolve_against is None:
+        return admit_or_none(normalized, policy=policy)
+    return resolve_against.resolve(normalized)
 
 
 @dataclass(frozen=True, slots=True)

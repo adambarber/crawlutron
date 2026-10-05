@@ -312,7 +312,7 @@ def stub_cffi_fetcher(request, monkeypatch):
     # that binding: replacing it makes impersonation unavailable while leaving the
     # plain-httpx fetcher real, which is the distinction the old second entry
     # point used to give for free.
-    monkeypatch.setattr(fetchers_module, "impersonating_fetcher", lambda policy: _stub_cffi_fetcher)
+    monkeypatch.setattr(fetchers_module, "impersonating_fetcher", lambda: _stub_cffi_fetcher)
 
 
 @pytest.fixture(scope="session")

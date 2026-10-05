@@ -86,14 +86,13 @@ class TestApplyCredentials:
         assert "authorization" in _CREDENTIAL_HEADERS
         headers = {"Authorization": "Bearer tok"}
         result = _redirect_target(
-            "https://private.example/a",
+            canonical("https://private.example/a"),
             headers,
             302,
             "https://other.test/a",
             0,
-            policy=HostPolicy.unrestricted(),
         )
-        assert result == ("https://other.test/a", {})
+        assert result == (canonical("https://other.test/a"), {})
         _, forwarded = result
         assert "Authorization" not in forwarded
 

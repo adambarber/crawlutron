@@ -7,9 +7,7 @@ import logging
 import re
 from collections.abc import Awaitable, Callable, Iterable, MutableSequence
 from dataclasses import dataclass, field
-from functools import partial
 from typing import Any, TypeVar
-from urllib.parse import urljoin
 
 from app.constants import is_analytics_host, is_document_url
 from app.crawl.fetch_helpers import fetch_sitemap_urls
@@ -339,7 +337,7 @@ class RobotsGate:
     async def _rules(self, url: NormalizedUrl) -> tuple[list[tuple[bool, str]], float | None]:
         rules, _sitemaps, delay = await load_robots_rules(
             url,
-            partial(default_http_fetcher, policy=self._host_policy),
+            default_http_fetcher,
             self._timeout_seconds,
             fetch_and_decode=self._fetch_and_decode,
             policy=self._host_policy,
@@ -441,21 +439,26 @@ def admitted_page_identities(job: Any, *, host_policy: HostPolicy) -> set[Normal
 
 
 def normalize_sitemap_candidates(
-    found: Iterable[tuple[str, str | None]],
+    found: Iterable[tuple[NormalizedUrl, str | None]],
     *,
     scope_pattern: BoundedPattern | None,
-    host_policy: HostPolicy,
 ) -> list[tuple[NormalizedUrl, str | None]]:
+    """Dedupe and scope-filter already-admitted sitemap seed candidates.
+
+    The pairs arrive as admitted values -- resolved at the one place that knew
+    their base, ``fetch_sitemap_urls`` -- so this funnel only dedupes and applies
+    the job's scope pattern; there is no admission step left to re-spell, and a
+    candidate refused by policy never reaches this far.
+    """
     candidates: list[tuple[NormalizedUrl, str | None]] = []
     seen: set[NormalizedUrl] = set()
     for loc, lastmod in found:
-        normalized = admit_or_none(loc, policy=host_policy)
-        if normalized is None or normalized in seen:
+        if loc in seen:
             continue
-        if scope_pattern is not None and not scope_allows(scope_pattern, normalized.raw):
+        if scope_pattern is not None and not scope_allows(scope_pattern, loc.raw):
             continue
-        seen.add(normalized)
-        candidates.append((normalized, lastmod))
+        seen.add(loc)
+        candidates.append((loc, lastmod))
     return candidates
 
 
@@ -589,8 +592,6 @@ async def fetch_job_sitemap_candidates(root_url: str, context: JobAdmissionConte
     a sitemap origin before any fetcher saw it. Routing through the declared
     chokepoint makes this path agree with every other URL the service handles.
     """
-    from app.models.normalized_url import NormalizedUrl
-
     try:
         canonical_root = NormalizedUrl(root_url, policy=context.host_policy)
     except ValueError:
@@ -599,12 +600,12 @@ async def fetch_job_sitemap_candidates(root_url: str, context: JobAdmissionConte
     if sitemap_url is None:
         return []
     found = await fetch_sitemap_urls(
-        partial(default_http_fetcher, policy=context.host_policy),
+        default_http_fetcher,
         sitemap_url,
         context.timeout_seconds,
         host_policy=context.host_policy,
     )
-    return sorted({urljoin(sitemap_url.raw, url) for url, _lastmod in found if isinstance(url, str)})
+    return sorted({loc.raw for loc, _lastmod in found})
 
 
 __all__ = [

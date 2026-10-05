@@ -18,9 +18,6 @@ import time
 from collections.abc import Awaitable
 from typing import Any
 
-from fastapi.responses import JSONResponse
-from starlette.responses import Response
-
 from fastapi import HTTPException, Request
 from fastapi.responses import JSONResponse, Response
 
@@ -38,7 +35,6 @@ from app.crawl.result_store import CrawlResultStore
 from app.metrics import get_metrics
 from app.models.crawl_request import CrawlRequest
 from app.models.host_policy import HostPolicy
-from app.models.unified_crawl_response import UnifiedCrawlResponse
 from app.output_formats import serialize_results
 from app.settings import CrawlerSettings
 

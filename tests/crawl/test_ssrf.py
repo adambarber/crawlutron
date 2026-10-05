@@ -9,13 +9,13 @@ import pytest
 import app.crawl.strategies.pinned_transport as http_mod
 from app.crawl.strategies.pinned_transport import check_ssrf_protection, resolve_and_pin_host
 from app.models.normalized_url import NormalizedUrl
-from app.safe_url import SafeUrl
 from app.validation import HostPolicy
 from tests._assertions import (
     assert_dns_pinning_uses_first_resolution,
     block_private_targets,
     host_resolves_to,
 )
+from tests._policy_factories import canonical
 
 
 def _blocked(ip):
@@ -132,7 +132,7 @@ def _unresolvable_host(monkeypatch, *, allow_private: str = "0") -> None:
 def test_check_ssrf_protection_blocks_unresolvable_host(monkeypatch):
     _unresolvable_host(monkeypatch)
     with pytest.raises(ValueError):
-        http_mod.check_ssrf_protection("http://nonexistent.invalid/")
+        http_mod.check_ssrf_protection(canonical("http://nonexistent.invalid/"))
 
 
 def test_resolve_and_pin_host_fails_closed_when_resolution_fails(monkeypatch):
@@ -152,7 +152,7 @@ def test_resolve_and_pin_host_fails_closed_when_resolution_fails(monkeypatch):
     """
     _unresolvable_host(monkeypatch)
     with pytest.raises(ValueError, match="cannot resolve hostname"):
-        http_mod.resolve_and_pin_host("http://nonexistent.invalid/")
+        http_mod.resolve_and_pin_host(canonical("http://nonexistent.invalid/"))
 
 
 def test_resolve_and_pin_host_escape_hatch_survives_resolution_failure(monkeypatch):
@@ -166,7 +166,7 @@ def test_resolve_and_pin_host_escape_hatch_survives_resolution_failure(monkeypat
     quietly became the default.
     """
     _unresolvable_host(monkeypatch, allow_private="1")
-    hostname, pinned_ip = http_mod.resolve_and_pin_host("http://service.local/")
+    hostname, pinned_ip = http_mod.resolve_and_pin_host(canonical("http://service.local/"))
     assert (hostname, pinned_ip) == ("service.local", "service.local")
 
 
@@ -179,14 +179,16 @@ async def test_pinned_hop_never_targets_loopback_for_unresolvable(monkeypatch):
     _unresolvable_host(monkeypatch)
     with pytest.raises(ValueError):
         await anext(
-            http_mod.apinned_hops("http://nonexistent.invalid/", {}, policy=HostPolicy.unrestricted())
+            http_mod.apinned_hops(
+                canonical("http://nonexistent.invalid/"), {}, pin=http_mod.build_pinned_request
+            )
         )
 
 
-def test_safe_url_parse_surfaces_unresolvable_host_as_an_ssrf_refusal(monkeypatch):
+def test_pinned_builder_surfaces_unresolvable_host_as_an_ssrf_refusal(monkeypatch):
     """The caller-visible contract: an unresolvable host is refused, not crashed on.
 
-    ``SafeUrl.parse(pin=True)`` is the public entry point every pinned fetch goes
+    ``build_pinned_request`` is the public entry point every pinned fetch goes
     through, and it is the thing a caller actually catches. Pinning ``resolve_and_pin_host``
     fixed the low-level helper; this pins that the refusal reaches the caller as the
     ordinary ValueError it has always been -- the same refusal
@@ -195,29 +197,31 @@ def test_safe_url_parse_surfaces_unresolvable_host_as_an_ssrf_refusal(monkeypatc
 
     The assertion is deliberately on the message, not merely the type: a bare
     ``pytest.raises(ValueError)`` would also pass if an unrelated ValueError were
-    raised from somewhere else in the parse, which is what a silent regression
+    raised from somewhere else in the builder, which is what a silent regression
     here would look like.
     """
     _unresolvable_host(monkeypatch)
     with pytest.raises(ValueError, match="SSRF protection: cannot resolve hostname"):
-        SafeUrl.parse("http://nonexistent.invalid/", policy=HostPolicy.unrestricted(), pin=True)
+        http_mod.build_pinned_request(canonical("http://nonexistent.invalid/"), {})
 
 
 class TestSSRFProtection:
-    def test_check_ssrf_protection_blocks_private_targets(self, monkeypatch):
-        block_private_targets(monkeypatch)
-        for target in ["http://localhost:8080/", "http://127.0.0.1:8080/", "http://192.168.1.1:8080/"]:
-            with pytest.raises(ValueError):
-                check_ssrf_protection(target)
+    @pytest.mark.parametrize("private_ip", ["127.0.0.1", "192.168.1.1"])
+    def test_check_ssrf_protection_blocks_private_targets(self, monkeypatch, private_ip):
+        # The live hazard shape: an admitted public NAME whose DNS answer is
+        # private. A literal private IP never gets this far -- the constructor
+        # refuses it -- so the check's own refusal is observable on resolution.
+        with host_resolves_to(monkeypatch, private_ip), pytest.raises(ValueError):
+            check_ssrf_protection(canonical("http://example.com/"))
 
     def test_check_ssrf_protection_allows_public_ip(self, monkeypatch):
         # Should not raise for a public IP.
         with host_resolves_to(monkeypatch, "8.8.8.8"):
-            check_ssrf_protection("http://8.8.8.8:8080/")
+            check_ssrf_protection(canonical("http://8.8.8.8:8080/"))
 
     def test_resolve_and_pin_host_pins_first_public_ip(self, monkeypatch):
         with host_resolves_to(monkeypatch, "1.2.3.4"):
-            hostname, ip = resolve_and_pin_host("http://example.com:8080/")
+            hostname, ip = resolve_and_pin_host(canonical("http://example.com:8080/"))
         assert hostname == "example.com"
         assert ip == "1.2.3.4"
 
@@ -238,7 +242,7 @@ class TestSSRFProtection:
 
         _DNS_CACHE.clear()
         with host_resolves_to(monkeypatch, "8.8.8.8") as resolved:
-            check_ssrf_protection("http://example.com:8080/")
+            check_ssrf_protection(canonical("http://example.com:8080/"))
         assert resolved == ["example.com"]
 
 
@@ -251,8 +255,9 @@ class TestFrontierIdentityRefusesRejectedTargets:
     admission: the cloud-metadata address, a loopback port and a host outside an
     allow-list all came back with non-``None`` identities, so they were
     persisted, scheduled and reported as accepted (202) before the engine ever
-    validated them. The sibling helper ``normalize_sitemap_candidates`` drops the
-    same inputs, which is why the behaviour is a divergence and not a policy.
+    validated them. Every other admission boundary drops the same inputs -- the
+    sitemap fetch admits each ``<loc>`` where it reads it -- so falling back to
+    a raw identity here would be a divergence, not a policy.
     """
 
     REJECTED = [
@@ -328,7 +333,7 @@ class TestFrontierIdentityRefusesRejectedTargets:
 class TestSsrfDnsPinning:
     def test_resolves_once_and_pins_ip(self, monkeypatch):
         with host_resolves_to(monkeypatch, "93.184.216.34") as resolved:
-            hostname, ip = resolve_and_pin_host("http://example.com/")
+            hostname, ip = resolve_and_pin_host(canonical("http://example.com/"))
         assert hostname == "example.com"
         assert ip == "93.184.216.34"
         assert resolved == ["example.com"], "hostname should be resolved exactly once"
@@ -338,12 +343,12 @@ class TestSsrfDnsPinning:
 
     def test_private_resolution_raises(self, monkeypatch):
         with host_resolves_to(monkeypatch, "127.0.0.1"), pytest.raises(ValueError):
-            resolve_and_pin_host("http://example.com/")
+            resolve_and_pin_host(canonical("http://example.com/"))
 
-    def test_localhost_blocked_by_default(self, monkeypatch):
+    def test_loopback_resolution_blocked_by_default(self, monkeypatch):
         block_private_targets(monkeypatch)
-        with pytest.raises(ValueError):
-            check_ssrf_protection("http://localhost:8080/")
+        with host_resolves_to(monkeypatch, "127.0.0.1"), pytest.raises(ValueError):
+            check_ssrf_protection(canonical("http://example.com/"))
 
 
 def test_ssrf_fixture_passes_when_opted_out(monkeypatch, ssrf_guard_required):
@@ -352,7 +357,7 @@ def test_ssrf_fixture_passes_when_opted_out(monkeypatch, ssrf_guard_required):
     # Call the real helper; it will fail to resolve but the call itself
     # counts as "exercised", which is what the fixture checks.
     with contextlib.suppress(Exception):
-        http_mod.check_ssrf_protection("http://example.invalid/")
+        http_mod.check_ssrf_protection(canonical("http://example.invalid/"))
 
 
 def test_ssrf_fixture_fails_when_opt_out_missing(monkeypatch, ssrf_guard_required):
@@ -366,7 +371,7 @@ def test_ssrf_fixture_fails_when_opt_out_missing(monkeypatch, ssrf_guard_require
     monkeypatch.delenv("CRAWLUTRON_ALLOW_PRIVATE_TARGETS", raising=False)
     os.environ["CRAWLUTRON_ALLOW_PRIVATE_TARGETS"] = "1"
     with pytest.raises(pytest.fail.Exception, match="SSRF guard"):
-        http_mod.check_ssrf_protection("http://example.invalid/")
+        http_mod.check_ssrf_protection(canonical("http://example.invalid/"))
 
 
 # Note: a test that requests ``ssrf_guard_required`` but never touches
@@ -378,7 +383,7 @@ def test_ssrf_fixture_fails_when_opt_out_missing(monkeypatch, ssrf_guard_require
 
 def test_allow_private_returns_original_hostname_not_loopback(monkeypatch):
     monkeypatch.setenv("CRAWLUTRON_ALLOW_PRIVATE_TARGETS", "1")
-    hostname, pinned = resolve_and_pin_host("http://example.com/")
+    hostname, pinned = resolve_and_pin_host(canonical("http://example.com/"))
     assert hostname == "example.com"
     # Must connect to the requested host, not hardcoded loopback.
     assert pinned == "example.com"
@@ -389,7 +394,7 @@ def test_allow_private_preserves_host_for_webhook_style_urls(monkeypatch):
     # A non-loopback host under local dev mode stays as-is (so webhooks and
     # fetches to the real hostname are not misrouted to 127.0.0.1).
     monkeypatch.setenv("CRAWLUTRON_ALLOW_PRIVATE_TARGETS", "1")
-    hostname, pinned = resolve_and_pin_host("https://hooks.svc.local/path")
+    hostname, pinned = resolve_and_pin_host(canonical("https://hooks.svc.local/path"))
     assert hostname == "hooks.svc.local"
     assert pinned == "hooks.svc.local"
     assert pinned != "127.0.0.1"

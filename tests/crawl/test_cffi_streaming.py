@@ -24,7 +24,7 @@ from tests.helpers.server import SilentHandler, spawn_threaded_server
 # The impersonating transport, bound once for this module. It used to be a local
 # wrapper function called from nine places, each re-deciding that "the cffi
 # fetcher" meant the impersonating binding -- the same value spelled nine times.
-_DEFAULT_CFFI_FETCHER = impersonating_fetcher(HostPolicy.unrestricted())
+_DEFAULT_CFFI_FETCHER = impersonating_fetcher()
 
 
 class TestCffiImpersonateStrategy:

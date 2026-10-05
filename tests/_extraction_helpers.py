@@ -2,28 +2,20 @@ from dataclasses import replace
 
 import app.crawl.extraction as _extraction_module
 from app.crawl.document_text import format_extracted_document_text
-from app.crawl.extraction import (
-    detect_pagination as _detect_pagination_with_policy,
-)
+from app.crawl.extraction import detect_pagination as _production_detect_pagination
 from app.crawl.extraction import extract_content
-from app.crawl.extraction import (
-    extract_discovered_links as _extract_discovered_links_with_policy,
-)
+from app.crawl.extraction import extract_discovered_links as _production_extract_discovered_links
 from app.crawl.extraction import extract_js_endpoints as _extract_js_endpoints_with_policy
-from app.crawl.extraction import (
-    html_diagnostics as _html_diagnostics_with_policy,
-)
-from app.crawl.strategies.document import (
-    _default_document_text_extractor as _default_document_text_extractor_with_policy,
-)
+from app.crawl.extraction import html_diagnostics as _production_html_diagnostics
+from app.crawl.strategies.document import _default_document_text_extractor as _production_document_extractor
 from app.crawl.strategies.document import _format_table
-from app.crawl.strategies.fetchers import default_http_fetcher as _default_http_fetcher_with_policy
+from app.crawl.strategies.fetchers import default_http_fetcher as _production_default_http_fetcher
 from app.settings import CrawlerSettings
-from tests._policy_factories import UNRESTRICTED_HOST_POLICY
+from tests._policy_factories import UNRESTRICTED_HOST_POLICY, canonical
 
 
 def html_diagnostics(html, source_url):
-    return _html_diagnostics_with_policy(html, source_url)
+    return _production_html_diagnostics(html, source_url)
 
 
 def extract_js_endpoints(endpoints, source_url=None, *, policy=UNRESTRICTED_HOST_POLICY):
@@ -31,7 +23,7 @@ def extract_js_endpoints(endpoints, source_url=None, *, policy=UNRESTRICTED_HOST
 
 
 def detect_pagination(html, final_url):
-    return _detect_pagination_with_policy(html, final_url)
+    return _production_detect_pagination(html, final_url)
 
 
 def extract_discovered_links(
@@ -41,7 +33,7 @@ def extract_discovered_links(
     max_links=250,
     tree=None,
 ):
-    return _extract_discovered_links_with_policy(
+    return _production_extract_discovered_links(
         html,
         source_url,
         max_links=max_links,
@@ -49,8 +41,8 @@ def extract_discovered_links(
     )
 
 
-def _default_document_text_extractor(url, policy=UNRESTRICTED_HOST_POLICY):
-    return _default_document_text_extractor_with_policy(url, policy)
+def _default_document_text_extractor(url):
+    return _production_document_extractor(canonical(url))
 
 
 def doc_worker_acquisitions(monkeypatch):
@@ -79,8 +71,8 @@ def doc_worker_acquisitions(monkeypatch):
     return acquisitions
 
 
-async def default_http_fetcher(*args, policy=UNRESTRICTED_HOST_POLICY, **kwargs):
-    return await _default_http_fetcher_with_policy(*args, policy=policy, **kwargs)
+async def default_http_fetcher(*args, **kwargs):
+    return await _production_default_http_fetcher(*args, **kwargs)
 
 
 __all__ = [

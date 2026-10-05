@@ -27,7 +27,6 @@ _DECISION_NAMES = frozenset(
         "filter_js_endpoints",
         "validate_webhook_url",
         "validate_webhook_url_async",
-        "_parse_pinned_off_loop",
     }
 )
 _MODULE_PREFIXES = ("app.api.", "app.mcp.")
@@ -112,7 +111,7 @@ def discover_host_policy_entry_points(
     pending = [
         name
         for name in index
-        if name.rsplit(".", 1)[-1] in _DECISION_NAMES or name.endswith(".SafeUrl.parse")
+        if name.rsplit(".", 1)[-1] in _DECISION_NAMES
     ]
     while pending:
         name = pending.pop()

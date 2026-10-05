@@ -152,7 +152,7 @@ def _build_async_client(settings: CrawlerSettings | None = None) -> httpx.AsyncC
         http2=True,
         # Providers are operator-configured endpoints; any redirect must be
         # treated as suspicious rather than silently followed (no per-hop
-        # SafeUrl re-validation on this client). The crawl fetcher does its
+        # re-validation on this client). The crawl fetcher does its
         # own manual hops and never relies on this flag.
         follow_redirects=False,
         timeout=Timeouts.defaults().as_httpx(),

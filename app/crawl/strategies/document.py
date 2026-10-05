@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING, Any
 
 import pdfplumber
 
-from app.models.host_policy import HostPolicy
+from app.models.normalized_url import NormalizedUrl
 from app.timeouts import Timeouts
 
 if TYPE_CHECKING:
@@ -76,7 +76,7 @@ def _extract_pdf_bytes_to_markdown(pdf_bytes: bytes) -> str:
 
 
 async def _afetch_document_bytes(
-    url: str, policy: HostPolicy, pin: pinned_transport.PinRule | None = None
+    url: NormalizedUrl, pin: pinned_transport.PinRule | None = None
 ) -> bytes:
     """Fetch a document's bytes over the shared pinned transport.
 
@@ -101,7 +101,7 @@ async def _afetch_document_bytes(
     client = http_client_pool.get_async_http_client()
     timeout = Timeouts.defaults().as_httpx()
     async for chain, pinned_url, hop_headers in pinned_transport.apinned_hops(
-        url, {}, policy=policy, pin=pin
+        url, {}, pin=pin
     ):
         # Follow_redirects=False: the chain below is the redirect loop, so httpx
         # following one too would connect to a target nobody re-validated.
@@ -114,34 +114,27 @@ async def _afetch_document_bytes(
     raise AssertionError("apinned_hops raises on a body that neither returned nor advanced")
 
 
-def _default_document_text_extractor(url: str, policy: HostPolicy) -> str:
+def _default_document_text_extractor(url: NormalizedUrl) -> str:
     """Default document text extractor: fetch the URL and extract Markdown.
 
     Used by the browser strategy for ``.pdf`` final URLs. Injectable via
     ``BrowserRenderer(pdf_text_extractor=...)`` for tests.
 
-    SSRF is now inherited rather than reimplemented: the fetch goes
-    through :func:`pinned_transport.apinned_hops`, the same walk every other
-    fetch uses, so the initial URL and every redirect hop are re-validated
-    against the SSRF blocklist and re-pinned to a resolved IP before anything
-    connects.
+    SSRF is inherited rather than reimplemented, twice over: the URL arrives
+    already admitted (a caller's ``NormalizedUrl`` construction already
+    refused an unsafe target loudly, before this function can turn it into
+    empty text), and the fetch goes through
+    :func:`pinned_transport.apinned_hops`, the same walk every other fetch
+    uses, so every redirect hop is re-validated against the SSRF blocklist
+    and re-pinned to a resolved IP before anything connects.
 
-    The other half is the loud failure, and it is a separate obligation from
-    the per-hop check: an unsafe *initial* URL raises here rather than degrading
-    to empty text, so a caller can tell "this target was refused" from "this
-    document had no text". The pre-flight below is that obligation. It pins for
-    the same reason the fetch walk does -- an unpinned parse is the rebinding
-    window, and ``test_safe_url_parse_always_pins`` holds every call site to
-    that. Its result is discarded, so the walk re-parses; that resolve is served
-    from the resolver cache the pinning rule already owns.
+    The loud failure is therefore the caller's constructor call, and it is a
+    separate obligation from the per-hop check: a refused target raises at
+    admission rather than degrading to empty text, so a caller can tell "this
+    target was refused" from "this document had no text". The old pre-flight
+    ``SafeUrl.parse`` pin duplicated the walk's first resolve; that duplicate
+    retired with ``SafeUrl``.
     """
-    from app.safe_url import SafeUrl
-
-    # Before the try on purpose: a refused target is not a fetch failure, and
-    # the bare except below would otherwise turn a security verdict into an
-    # empty string indistinguishable from a PDF that simply had no text.
-    SafeUrl.parse(url, policy=policy, pin=True)
-
     try:
         # The loop is owned on a private thread rather than with a bare
         # ``asyncio.run``, because the one production caller already runs this
@@ -151,7 +144,7 @@ def _default_document_text_extractor(url: str, policy: HostPolicy) -> str:
         # ``RuntimeError`` from nesting loops would surface as a silently empty
         # PDF rather than as the bug it is.
         with ThreadPoolExecutor(max_workers=1) as pool:
-            pdf_bytes = pool.submit(asyncio.run, _afetch_document_bytes(url, policy)).result()
+            pdf_bytes = pool.submit(asyncio.run, _afetch_document_bytes(url)).result()
     except Exception:  # fetch failure yields empty text
         return ""
     try:

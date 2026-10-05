@@ -111,7 +111,6 @@ _OWNER_PUBLIC_SURFACE_RATCHET = {
     "app/crawl/decompression.py": (3, 1),
     "app/crawl/credentials.py": (3, 3),
     "app/crawl/render_options.py": (2, 2),
-    "app/safe_url.py": (1, 1),
     "app/crawl/payload_helpers.py": (1, 1),
     # RAISED to (10, 9): terminal_attempt became public when CrawlResult stopped
     # copying four axes out of the attempt it holds. Three call sites outside

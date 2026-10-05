@@ -7,7 +7,6 @@ import re
 import threading
 from collections import OrderedDict
 from collections.abc import Awaitable, Callable
-from typing import Any
 
 from app.bounded_ttl import BoundedTTLCache
 from app.crawl.fetch_helpers import _single_flight
@@ -25,7 +24,9 @@ ROBOTS_CACHE_MAX_ENTRIES = 2048
 ROBOTS_CACHE_TTL_SECONDS = 600.0
 ROBOTS_FAILURE_TTL_SECONDS = 60.0
 type RobotsRules = tuple[list[tuple[bool, str]], list[str], float | None]
-FetchAndDecode = Callable[[HttpFetcher, NormalizedUrl, dict[str, str], int], Awaitable[tuple[str | None, int | None]]]
+FetchAndDecode = Callable[
+    [HttpFetcher, NormalizedUrl, dict[str, str], int], Awaitable[tuple[str | None, int | None]]
+]
 
 robots_cache: BoundedTTLCache[tuple[str, HostPolicy], RobotsRules] = BoundedTTLCache(
     max_entries=ROBOTS_CACHE_MAX_ENTRIES,

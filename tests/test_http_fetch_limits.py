@@ -88,7 +88,6 @@ async def _fetch_with_cap(port: int, path: str, cap: int):
         {},
         10,
         cap,
-        policy=HostPolicy.unrestricted(),
     )
 
 
@@ -134,7 +133,6 @@ class TestFetchContentLengthLimit:
                     {},
                     10,
                     1,
-                    policy=HostPolicy.unrestricted(),
                 )
             )
         )

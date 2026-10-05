@@ -550,7 +550,6 @@ def _json(value) -> str:
     return json.dumps(value, separators=(",", ":"), default=_json_default)
 
 
-
 def _retries_payload(retries: dict[NormalizedUrl, int]) -> dict[str, int]:
     """Wire keys for the retry counter: the persisted column is text-keyed."""
     return {url.raw: attempts for url, attempts in retries.items()}

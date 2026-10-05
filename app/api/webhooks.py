@@ -7,8 +7,9 @@ endpoint handlers easier to read and lets integration tests target the
 helpers directly.
 
 The one delivery funnel is :func:`post_webhook`: it validates, size-caps,
-and delegates to :func:`deliver_pinned_webhook`, which re-parses through
-``SafeUrl`` to close the TOCTOU between validation and delivery. Nothing else
+and delegates to :func:`deliver_pinned_webhook`, which re-admits and re-pins
+through the one rule the fetchers use (``build_pinned_request``) to close the
+TOCTOU between validation and delivery. Nothing else
 in ``app/`` may POST to a webhook URL or compose a crawl with a delivery --
 the crawl-plus-deliver story lives solely in
 :mod:`app.api.async_crawl_runner`, and the response payload is always built by
@@ -19,22 +20,19 @@ reinstiate a drift-prone construction path).
 
 from __future__ import annotations
 
-import asyncio
 import functools
 import json
 import logging
 import os
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 import httpx
 
 from app.bounded_io import BodyTooLarge, read_capped_async
 from app.env import get_mapping_int
 from app.models.host_policy import HostPolicy
+from app.models.normalized_url import NormalizedUrl
 from app.timeouts import Timeouts
-
-if TYPE_CHECKING:
-    from app.safe_url import SafeUrl
 
 logger = logging.getLogger(__name__)
 
@@ -47,7 +45,7 @@ async def deliver_pinned_webhook(
 ) -> None:
     """POST ``payload_bytes`` to ``webhook_url`` with DNS-rebinding safety.
 
-    The pin policy lives in ``SafeUrl.connect()`` (plain HTTP connects to the
+    The pin policy lives in ``build_pinned_request()`` (plain HTTP connects to the
     validated IP with the original ``Host`` header; HTTPS keeps the hostname
     because certs carry no IP SANs -- the residual rebinding window there is
     the same posture the fetcher accepts: pre-connect check + CA validation).
@@ -60,14 +58,16 @@ async def deliver_pinned_webhook(
     Consolidated from ``run_and_deliver_webhook`` so the ``post_webhook``
     path shares the same TOCTOU-safe delivery code.
     """
-    # Re-parse through the chokepoint (normalize + check + pin in one place)
-    # rather than reimplementing urlparse/check/pin inline -- the manual
-    # composition is exactly the shape that produced the redirect findings.
-    # validate_webhook_url already ran at the edge; parsing again here closes
-    # the TOCTOU between validation and delivery. The parse runs off the event
-    # loop; see _parse_pinned_off_loop.
-    safe = await _parse_pinned_off_loop(webhook_url, host_policy=host_policy)
-    connect_url, connect_headers = safe.connect()
+    # Re-admit and re-pin through the one rule (admission + DNS check + pin,
+    # composed in one place) rather than reimplementing urlparse/check/pin
+    # inline -- the manual composition is exactly the shape that produced the
+    # redirect findings. validate_webhook_url already ran at the edge; running
+    # the rule again here closes the TOCTOU between validation and delivery.
+    from app.crawl.strategies.pinned_transport import build_pinned_request_async
+
+    connect_url, connect_headers = await build_pinned_request_async(
+        NormalizedUrl(webhook_url, policy=host_policy), {}
+    )
     request_headers = {"Content-Type": "application/json", **connect_headers}
     # A fresh client per delivery is deliberate: the security
     # posture REQUIRES a per-delivery parse+resolve+pin (line above; the
@@ -162,19 +162,20 @@ def validate_webhook_url(webhook_url: str, *, host_policy: HostPolicy) -> None:
     address, protecting against attacker-controlled DNS that returns an
     internal IP (DNS-rebinding class of SSRF).
 
-    Implemented on the SafeUrl chokepoint: normalize (scheme/hostname/
-    private-name rules) + DNS check in one place. Raises ValueError if
-    unsafe; returns None when the URL is safe to deliver to.
+    Implemented on the one pin rule, :func:`build_pinned_request`: admission
+    (scheme/hostname/private-name rules, via ``NormalizedUrl`` construction)
+    + DNS check + resolve-and-pin, composed in one place. Raises ValueError
+    if unsafe; returns None when the URL is safe to deliver to.
     """
-    from app.safe_url import SafeUrl
+    from app.crawl.strategies.pinned_transport import build_pinned_request
 
-    SafeUrl.parse(webhook_url, policy=host_policy, pin=True)
+    build_pinned_request(NormalizedUrl(webhook_url, policy=host_policy), {})
 
 
 async def validate_webhook_url_async(webhook_url: str, *, host_policy: HostPolicy) -> None:
     """Off-event-loop twin of :func:`validate_webhook_url`.
 
-    ``SafeUrl.parse(pin=True)`` calls the synchronous ``socket.getaddrinfo``,
+    ``build_pinned_request`` calls the synchronous ``socket.getaddrinfo``,
     so running validation inline stalls the event loop whenever a
     caller-chosen webhook hostname has a slow or blackholed resolver. Crawl
     targets already offload the identical resolution off-thread via
@@ -183,37 +184,9 @@ async def validate_webhook_url_async(webhook_url: str, *, host_policy: HostPolic
     Every caller of ``validate_webhook_url`` is already async, so they route
     here instead.
     """
-    from app.crawl.strategies.pinned_transport import DNS_EXECUTOR
+    from app.crawl.strategies.pinned_transport import build_pinned_request_async
 
-    loop = asyncio.get_running_loop()
-    await loop.run_in_executor(
-        DNS_EXECUTOR,
-        functools.partial(validate_webhook_url, webhook_url, host_policy=host_policy),
-    )
-
-
-async def _parse_pinned_off_loop(webhook_url: str, *, host_policy: HostPolicy) -> SafeUrl:
-    """Off-event-loop ``SafeUrl.parse(webhook_url, pin=True)``.
-
-    The delivery path re-parses through the chokepoint to close the TOCTOU
-    between validation and delivery, and that parse is the SAME synchronous
-    ``getaddrinfo`` the validation twin offloads in Running it inline would
-    stall the whole FastAPI loop on every webhook delivery -- the validation
-    path was offloaded and this one was missed -- so it reuses the ONE
-    ``dns-resolve`` pool rather than a second offload mechanism. Both the
-    validation and the delivery parse route through here or through
-    :func:`validate_webhook_url_async`; there is no third resolution path.
-    """
-    import functools
-
-    from app.crawl.strategies.pinned_transport import DNS_EXECUTOR
-    from app.safe_url import SafeUrl
-
-    loop = asyncio.get_running_loop()
-    return await loop.run_in_executor(
-        DNS_EXECUTOR,
-        functools.partial(SafeUrl.parse, webhook_url, policy=host_policy, pin=True),
-    )
+    await build_pinned_request_async(NormalizedUrl(webhook_url, policy=host_policy), {})
 
 
 __all__ = [

@@ -157,17 +157,18 @@ class TestAsyncCrawlTerminalCasControlsWhatIsPublished:
 
 
 class TestWebhookValidationRunsOffLoop:
-    """``validate_webhook_url`` calls ``SafeUrl.parse(pin=True)`` ->
-    synchronous ``socket.getaddrinfo`` on the event loop. A caller-chosen
-    webhook hostname with a slow/blackholed resolver therefore stalls the
-    whole FastAPI loop. Crawl targets already offload the identical resolution
-    via ``_build_pinned_request_async`` (a dedicated dns-resolve thread pool);
-    webhook validation must reuse that off-thread path, not a second one.
+    """``validate_webhook_url`` admits the webhook URL and pins it, and
+    pinning means ``socket.getaddrinfo``. A caller-chosen webhook hostname
+    with a slow/blackholed resolver therefore stalls the whole FastAPI loop
+    when the pin runs on it. Crawl targets already offload the identical
+    resolution via ``build_pinned_request_async`` (a dedicated dns-resolve
+    thread pool); webhook validation must reuse that off-thread path, not a
+    second one.
 
-    The delivery-path twin: ``deliver_pinned_webhook`` re-parses through
-    the same chokepoint to close the validation->delivery TOCTOU, and that
-    parse ran inline too -- offloading validation while leaving delivery on the
-    loop would still stall every webhook callback.
+    The delivery-path twin: ``deliver_pinned_webhook`` re-pins through
+    the same builder to close the validation->delivery TOCTOU, and that
+    pin ran inline too -- offloading validation while leaving delivery on
+    the loop would still stall every webhook callback.
     """
 
     async def test_post_webhook_validates_off_the_event_loop(self, monkeypatch):
@@ -196,20 +197,20 @@ class TestWebhookValidationRunsOffLoop:
             )
 
     async def test_deliver_pinned_webhook_parses_off_the_event_loop(self, monkeypatch):
-        """The delivery parse must also leave the event loop.
+        """The delivery pin must also leave the event loop.
 
         Unlike the validation test above, delivery is NOT mocked away: the
         whole point is that ``deliver_pinned_webhook`` itself reaches
-        ``SafeUrl.parse(pin=True)``. Only the network POST is stubbed, so a
-        parse left inline resolves on the loop thread and this fails.
+        ``build_pinned_request_async``. Only the network POST is stubbed, so a
+        pin left inline resolves on the loop thread and this fails.
         """
         from app.api.webhooks import deliver_pinned_webhook
 
         block_private_targets(monkeypatch)
         resolver_threads = _spy_resolver_threads(monkeypatch)
 
-        # Stage only the HTTP answer: SafeUrl.parse + connect() must still run,
-        # and connect() is pure (no I/O), so no network call is attempted. The
+        # Stage only the HTTP answer: the pin must still run,
+        # and pinning is pure (no I/O), so no network call is attempted. The
         # client is a real httpx.AsyncClient over a scripted transport, so the
         # delivery POST, the streaming read and the close are all real.
         delivered = record_webhook_delivery(monkeypatch)

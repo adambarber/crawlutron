@@ -32,80 +32,7 @@ from tests.invariants._shared import (
     _SCOPE_PATTERN_LENGTH_BOUND,
     function_defs,
 )
-from tests.rules import Bites, Rule, Silent
-
-# --- SafeUrl chokepoint (final review) ------------------------------------
-
-# A hand-rolled redirect hop is the "forgot one of the five steps" class SafeUrl
-# exists to kill. The dangerous *shape* -- in a SINGLE function -- is: test a
-# 3xx status, build the next URL with a raw urljoin, and never go through the
-# chokepoint (redirect_hop) or the sanctioned pinned helper (_redirect_target).
-# Link/robots/sitemap urljoin normalization never co-occurs with a 3xx test in
-# the same function, so it is not a false positive -- and this runs over the
-# whole tree, not a hand-picked file list.
-_REDIRECT_STATUSES = {301, 302, 303, 307, 308}
-
-
-_REDIRECT_HOP_SANCTIONED = {"redirect_hop", "_redirect_target"}
-
-
-def _functions_with(tree: ast.AST) -> list[ast.AST]:
-    return [n for n in nodes_of(tree) if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Module))]
-
-
-def _uses_redirect_status(node: ast.AST) -> bool:
-    """True if the function tests a concrete redirect status constant."""
-    return any(isinstance(sub, ast.Constant) and sub.value in _REDIRECT_STATUSES for sub in nodes_of(node))
-
-
-def _hand_rolled_redirect_hops(tree: ast.AST, path: pathlib.Path) -> list[str]:
-    offenders: list[str] = []
-    for func in functions(tree):
-        has_urljoin = any(
-            isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id == "urljoin"
-            for n in nodes_of(func)
-        )
-        if not has_urljoin or not _uses_redirect_status(func):
-            continue
-        uses_chokepoint = any(
-            isinstance(n, ast.Attribute)
-            and n.attr in _REDIRECT_HOP_SANCTIONED
-            or isinstance(n, ast.Name)
-            and n.id in _REDIRECT_HOP_SANCTIONED
-            for n in nodes_of(func)
-        )
-        if not uses_chokepoint:
-            offenders.append(offender_at(path, func, f"{func.name}()"))
-    return offenders
-
-
-REDIRECT_HOPS_GO_THROUGH_SAFEURL_REDIRECT_HOP = Rule(
-    name="redirect-hops-go-through-safeurl-redirect-hop",
-    find=_hand_rolled_redirect_hops,
-    summary=(
-        "A hand-rolled redirect hop is the 'forgot one of the five steps' class "
-        "SafeUrl exists to kill; use SafeUrl.redirect_hop (or the pinned fetch "
-        "helper) rather than a raw urljoin combined with a 3xx status test"
-    ),
-    excludes=SANCTIONED | {"safe_url.py"},
-    bite=lambda: Bites(
-        "def hop(location, base):\n    if code in (301, 302):\n        return urljoin(base, location)\n",
-        "hop()",
-    ),
-    clean=lambda: ("def link(href, base):\n    return SafeUrl.redirect_hop(href, base)\n",),
-)
-
-
-def test_no_hand_rolled_redirect_hops():
-    """Redirect hops anywhere go through SafeUrl.redirect_hop (or the pinned
-    fetch helper), never a raw urljoin combined with a 3xx status test."""
-    REDIRECT_HOPS_GO_THROUGH_SAFEURL_REDIRECT_HOP.scan()
-
-
-def test_redirect_hops_detector_bites():
-    """A urljoin that tests a redirect status and skips the chokepoint fires."""
-    REDIRECT_HOPS_GO_THROUGH_SAFEURL_REDIRECT_HOP.check_bites()
-
+from tests.rules import Bites, Rule
 
 _CANONICALIZER = frozenset({"NormalizedUrl", "_validated_url", "admit_or_none"})
 
@@ -308,67 +235,19 @@ def _is_response_url(node: ast.expr) -> bool:
     )
 
 
-def _unpinned_safe_url_parses(tree, path):
-    """Every SafeUrl.parse fetch consumer must pass an explicit ``pin=``.
-
-    An unpinned parse is the rebinding window: validation resolves one IP,
-    then ``connect`` re-resolves at open time and a hostile DNS can swap the
-    answer. Forcing an explicit pin at every call site makes "forgot to pin"
-    impossible to merge; safe_url.py itself is exempt (redirect_hop passes a
-    computed pin preference, and the classmethod defines the parameter).
-    """
-    offenders = []
-    for node in nodes_of(tree):
-        if not (
-            isinstance(node, ast.Call)
-            and isinstance(node.func, ast.Attribute)
-            and node.func.attr == "parse"
-            and isinstance(node.func.value, ast.Name)
-            and node.func.value.id == "SafeUrl"
-        ):
-            continue
-        if not any(kw.arg == "pin" for kw in node.keywords):
-            offenders.append(offender_at(path, node, "SafeUrl.parse(...) must pass pin=True"))
-    return offenders
-
-
-SAFE_URL_PARSE_ALWAYS_PINS = Rule(
-    name="safe-url-parse-always-pins",
-    find=_unpinned_safe_url_parses,
-    summary=(
-        "An unpinned SafeUrl.parse is the DNS-rebinding window: validation resolves "
-        "one IP and connect re-resolves at open time, so every call site must pass "
-        "an explicit pin=True"
-    ),
-    excludes=SANCTIONED | {"safe_url.py"},
-    bite=lambda: Bites(
-        "def f(url):\n    return SafeUrl.parse(url)\n",
-        "must pass pin=True",
-    ),
-    clean=lambda: ("def f(url):\n    return SafeUrl.parse(url, pin=True)\n",),
-)
-
-
-def test_safe_url_parse_always_pins():
-    SAFE_URL_PARSE_ALWAYS_PINS.scan()
-
-
-def test_safe_url_parse_detector_bites():
-    """A parse without an explicit pin fires; the pinned form stays clean."""
-    SAFE_URL_PARSE_ALWAYS_PINS.check_bites()
-
-
 def test_no_inline_pinned_url_composition():
     """The pinned connect URL -- IP literal, IPv6 bracketing, port, and Host
-    header composition -- is SafeUrl.connect()'s job alone.
+    header composition -- is ``build_pinned_request``'s job alone.
 
     Three divergent copies of that composition had already drifted into the
-    tree (safe_url, http fetcher, webhook builder); the copies disagreed on
-    Host-port handling and all lacked IPv6 bracketing. An f-string
-    that mentions pinned_ip outside app/safe_url.py re-opens that drift.
+    tree (the retired ``SafeUrl.connect``, the http fetcher, the webhook
+    builder); the copies disagreed on Host-port handling and all lacked IPv6
+    bracketing, which is why the composition lives in exactly one function.
+    An f-string that mentions a pinned IP outside ``pinned_transport.py``
+    re-opens that drift.
     """
     offenders: list[str] = []
-    for path, tree in app_trees(exclude=frozenset({"safe_url.py", "safe_regex.py"})):
+    for path, tree in app_trees(exclude=frozenset({"pinned_transport.py", "safe_regex.py"})):
         for node in f_strings(tree):
             for value in node.values:
                 if isinstance(value, ast.Constant) and isinstance(value.value, str):
@@ -384,7 +263,9 @@ def test_no_inline_pinned_url_composition():
                         and "pinned" in expr.id.lower()
                     ):
                         offenders.append(offender_at(path, node, f"f-string interpolates {expr.id}"))
-    assert not offenders, "compose pinned URLs via SafeUrl.connect(), never inline:\n" + "\n".join(offenders)
+    assert not offenders, (
+        "compose pinned URLs via build_pinned_request(), never inline:\n" + "\n".join(offenders)
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -802,12 +683,7 @@ def _unfiltered_urljoin_return_offenders(tree: ast.AST, path: pathlib.Path) -> l
     A URL resolved out of untrusted text is an egress door as soon as a caller
     trusts it, so the join and the filter belong together; the browser path
     proved that "every consumer remembers to filter" does not scale.
-    ``app/safe_url.py`` composes ``urljoin`` inside the sanctioned
-    ``SafeUrl.parse``/``redirect_hop`` path, so it is exempt by file, matching
-    the other chokepoint-module exemptions.
     """
-    if path.name == "safe_url.py":
-        return []
     offenders: list[str] = []
     for func in functions(tree):
         joined: set[str] = set()
@@ -858,12 +734,6 @@ JOINED_URLS_ARE_EGRESS_FILTERED = Rule(
     ),
     clean=lambda: (
         "def f(base, href):\n    return base.resolve(href)\n",
-        # Safe_url.py composes urljoin inside SafeUrl.parse / redirect_hop, so the
-        # join is sanctioned there and must fire at every other module.
-        Silent(
-            "def hop(self, location):\n    return SafeUrl.parse(urljoin(self.raw, location), pin=True)\n",
-            at=REPO_ROOT / "app" / "safe_url.py",
-        ),
     ),
 )
 

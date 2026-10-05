@@ -99,7 +99,7 @@ def _is_policy_call(tree: ast.AST, node: ast.Call, policy_names: frozenset[str])
     way to consult the policy, find nothing wrong, and report clean.
     """
     name = resolved_call_name(tree, node)
-    return name.rsplit(".", 1)[-1].lower() in policy_names or name.endswith(".SafeUrl.parse")
+    return name.rsplit(".", 1)[-1].lower() in policy_names
 
 
 def _host_policy_value(node: ast.AST | None, policy_names: set[str]) -> bool:
@@ -277,8 +277,20 @@ def _url_return_shapes(function: ast.AST, tree: ast.AST) -> bool:
         return False
     arguments = (*function.args.posonlyargs, *function.args.args, *function.args.kwonlyargs)
     url_names = {argument.arg for argument in arguments if _url_parameter_name(argument.arg)}
+    # A parameter annotated ``NormalizedUrl`` arrives admitted: the value
+    # object's constructor is the sole validation chokepoint, so the policy
+    # was applied at the caller before this function was entered. The walk
+    # gives such a parameter the same "validated" verdict it gives a value
+    # admitted inside the body, so ``.raw``/``.host``/... reads off it count
+    # as the sanctioned text projection instead of an unvalidated URL.
+    admitted = {
+        argument.arg
+        for argument in arguments
+        if isinstance(argument.annotation, ast.Name) and argument.annotation.id == "NormalizedUrl"
+    }
+    url_names |= admitted
+    validated_names: set[str] = set(admitted)
     policy_names = _host_policy_scope_names(tree, function)
-    validated_names: set[str] = set()
     nodes = local_subtree(function)
     changed = True
     while changed:
@@ -368,7 +380,7 @@ URL_RETURNING_HELPERS_REQUIRE_HOST_POLICY = Rule(
             "returns URLs without required HostPolicy",
         ),
         Bites(
-            "class SafeUrl:\n    def parse(self, url, *, policy=None):\n        return url\n",
+            "class _unpromoted_pinned_url:\n    def parse(self, url, *, policy=None):\n        return url\n",
             "returns URLs without required HostPolicy",
         ),
         # A method with no policy at all must still be caught.
@@ -421,6 +433,12 @@ URL_RETURNING_HELPERS_REQUIRE_HOST_POLICY = Rule(
         "from app.models.normalized_url import admit_or_none\n"
         "def rebuild(parts, *, policy: HostPolicy):\n"
         "    return admit_or_none(urlunsplit(parts), policy=policy)\n",
+        # A parameter annotated NormalizedUrl is admitted at its own
+        # construction boundary -- the sole chokepoint -- so projecting .raw
+        # from it inside a helper is the sanctioned text projection, not a
+        # policy bypass. The policy travels with the type, not a parameter.
+        "def connect(url: NormalizedUrl, headers: dict[str, str]):\n"
+        "    return url.raw, dict(headers)\n",
     ),
 )
 

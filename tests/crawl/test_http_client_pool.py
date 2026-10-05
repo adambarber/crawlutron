@@ -18,6 +18,7 @@ from app.crawl.strategies.fetchers import _cffi_fetch
 from app.crawl.strategies.http_client_pool import get_async_http_client
 from app.validation import HostPolicy
 from tests._async_harnesses import run_loop_rebind_scenario
+from tests._policy_factories import canonical
 from tests._pool_harnesses import builder_for as _builder_for
 from tests._timing_harnesses import await_until
 
@@ -475,7 +476,7 @@ def test_cffi_fetch_drains_pending_closes_before_taking_the_session(stub_builder
         http_mod._PENDING_CLIENT_CLOSE.append(waiting)
 
     async def _attempt():
-        return await _cffi_fetch("http://example.invalid/", {}, 1, 1024, policy=HostPolicy.unrestricted())
+        return await _cffi_fetch(canonical("http://example.invalid/"), {}, 1, 1024)
 
     try:
         assert asyncio.run(_attempt()) is None, "the fake session cannot answer, so the attempt declines"

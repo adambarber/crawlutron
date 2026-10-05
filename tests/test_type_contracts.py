@@ -54,14 +54,6 @@ def _unbound_call(protocol: type, *, resolve_annotations: bool = True) -> inspec
     ``eval_str`` is load-bearing where it can be: the source uses postponed
     annotations, so without it every parameter type reads as the string
     ``'int'`` -- a string compares equal to nothing a caller can check.
-
-    ``HttpFetchContract`` has to be read with ``resolve_annotations=False``, and
-    that is a layering fact rather than a limitation. Its ``policy`` annotation
-    names ``HostPolicy``, which lives in ``app.validation``, which imports
-    ``NormalizedUrl`` from ``app.models`` -- so ``app.models`` may only name it
-    under ``TYPE_CHECKING`` and the annotation does not exist at runtime. A
-    caller asking for the real types would get a ``NameError``; the comparisons
-    made against the contract are by name, which a string answers exactly.
     """
     declared = inspect.signature(protocol.__call__, eval_str=resolve_annotations)
     parameters = list(declared.parameters.values())
@@ -100,24 +92,24 @@ _KEYWORD_ONLY = frozenset({inspect.Parameter.KEYWORD_ONLY})
 # shared shape; what each fetcher adds on top of it is a fact about that fetcher,
 # so it is stated once, here, next to the check that enforces it.
 #
-# ``policy`` is required and ``impersonate`` defaults, and which of them is
-# optional is the axis a name-only comparison cannot see. It is the axis with the
-# safety edge: a default on ``policy`` turns a missing SSRF keyword from a
-# TypeError into an unrestricted HostPolicy and the caller never finds out.
-# Verified: a twin with ``policy: HostPolicy = HostPolicy((), ())`` matches every
-# name below (mypy is happy too, because protocol conformance is one-directional --
-# an implementation may accept more than the contract asks for), so both the type
-# checker and the tree-wide guard went green on a fetcher that silently stopped
-# requiring the policy.
-_BOUND_KEYWORDS = ("policy", "impersonate", "pin")
+# ``impersonate`` and ``pin`` both default, and which parameters are
+# optional is the axis a name-only comparison cannot see. The SSRF axis itself
+# retired with ``policy``: the fetcher's first parameter is a ``NormalizedUrl``
+# now, so the host policy cannot be omitted at a fetcher call at all -- the
+# value was admitted under it before the call was possible, and unparsed text
+# is a type error. What the defaulting comparison still guards is drift the
+# type checker cannot see: mypy is one-directional on protocols (an
+# implementation may accept more than the contract asks for), so a fetcher
+# silently widening what a caller may omit passes every name-based check.
+_BOUND_KEYWORDS = ("impersonate", "pin")
 # ``pin`` is optional for a reason the safety edge above does not cover, and the
-# distinction is the whole reason it is allowed to be optional at all. A default
-# on ``policy`` substitutes a DIFFERENT, possibly permissive value for one the
-# caller must choose; ``pin``'s default of ``None`` is not a substitute for
-# anything -- it means "use the real rule", so omitting it is the safe direction
-# and the parameter cannot be silently lost into a weaker fetch. That is what
-# makes it a binding rather than a hole, and it is why the guard below compares
-# defaulting and still lets this one through.
+# distinction is the whole reason it is allowed to be optional at all. A
+# defaulted policy parameter would substitute a DIFFERENT, possibly permissive
+# value for one the caller must choose; ``pin``'s default of ``None`` is not a
+# substitute for anything -- it means "use the real rule", so omitting it is
+# the safe direction and the parameter cannot be silently lost into a weaker
+# fetch. That is what makes it a binding rather than a hole, and it is why the
+# guard below compares defaulting and still lets this one through.
 _BOUND_KEYWORD_OPTIONAL = frozenset({"impersonate", "pin"})
 
 # The shape every production fetcher must have: HttpFetcher's own positional
@@ -262,8 +254,8 @@ def test_http_fetcher_contract_holds_tree_wide():
     """Every production fetcher is ``HttpFetcher`` plus exactly the bound keywords.
 
     ``HttpFetcher`` is the one declaration of the call shape, and a production
-    fetcher adds a keyword-only ``policy`` and an ``impersonate`` keyword to it.
-    Those two facts are typed in this file, next to the check that enforces them,
+    fetcher adds keyword-only ``impersonate`` and ``pin`` to it. Those two facts
+    are typed in this file, next to the check that enforces them,
     rather than spelled as a second Protocol in ``app/models/taxonomy.py`` -- which is what
     they used to be, and which is how the same four positional parameters came to
     be written twice. This check is the only thing standing between the two
@@ -272,9 +264,9 @@ def test_http_fetcher_contract_holds_tree_wide():
     site that omits it.
 
     Names alone are not the whole shape. Which parameters are *optional* is a
-    separate axis, and it is the one that bites: a fetcher that gives ``policy``
-    a default accepts a call the engine must never make, so an SSRF keyword
-    silently goes missing and the fetch runs against a default policy instead of
+    separate axis, and it is the one that bites: a fetcher that defaults a
+    parameter the contract requires accepts a call the engine must never make,
+    so the fetch silently runs against the fetcher's private choice instead of
     raising. mypy cannot see it, because a protocol only constrains what an
     implementation must accept, never what it may accept beyond that. So the
     comparison here includes defaulting.
@@ -308,8 +300,9 @@ def test_the_contract_guard_sees_defaulting_not_just_names():
     the one mypy accepts: a protocol constrains what an implementation must
     accept, not what it may additionally accept, so widening one twin with a
     default on a required parameter satisfies HttpFetcher and every name-based
-    key in the comparison above. On ``policy`` the default would be a HostPolicy,
-    and a caller omitting the SSRF keyword would get that instead of a TypeError.
+    key in the comparison above. On ``timeout_seconds`` the default would be the
+    fetcher's private choice standing in for one the engine must pass, and a
+    caller omitting it would never see a TypeError.
 
     Written against the real tree: the sweep finds the fetchers, then the
     comparison is run over a synthetic fetcher carrying the mutation, so this
@@ -332,15 +325,15 @@ def test_the_contract_guard_sees_defaulting_not_just_names():
     # hand-spelled copy of the bound keywords is the very second spelling this test
     # exists to prevent: growing the contract by one would fail this assertion for the
     # wrong reason, and leave the next reader believing the guard checks more than it does.
-    rest = ", ".join(f"{name}=None" for name in _EXPECTED_SHAPE["keyword_only"][1:])
+    rest = ", ".join(f"{name}=None" for name in _EXPECTED_SHAPE["keyword_only"])
     mutated = ast.parse(
-        f"async def f(url, headers, timeout_seconds, max_content_length=1, *, policy=None, {rest}): ...\n"
+        f"async def f(url, headers, timeout_seconds=10, max_content_length=1, *, {rest}): ...\n"
     ).body[0]
     assert isinstance(mutated, (ast.FunctionDef, ast.AsyncFunctionDef))
     assert tuple(arg.arg for arg in mutated.args.args) == _EXPECTED_SHAPE["positional"]
     assert tuple(arg.arg for arg in mutated.args.kwonlyargs) == _EXPECTED_SHAPE["keyword_only"]
     widened = _defaulted_params(mutated)
-    assert widened == _EXPECTED_OMITTABLE | {"policy"}, widened
+    assert widened == _EXPECTED_OMITTABLE | {"timeout_seconds"}, widened
     assert widened != _EXPECTED_OMITTABLE, (
         "the mutation must differ from the contract in defaulting only, or it proves nothing"
     )

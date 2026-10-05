@@ -50,8 +50,7 @@ def test_final_url_uses_hostname_not_pinned_ip():
                 {},
                 5,
                 1_000_000,
-                policy=HostPolicy.unrestricted(),
-                pin=lambda url, headers, *, policy: (pinned, {"Host": "example.com"}),
+                pin=lambda url, headers: (pinned, {"Host": "example.com"}),
             )
         )
     assert result.final_url.raw == "http://example.com/page"

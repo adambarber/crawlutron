@@ -133,12 +133,11 @@ async def test_redirect_to_policy_blocked_host_is_refused_before_fetch(monkeypat
     monkeypatch.setattr(pinned_mod, "resolve_and_pin_host", lambda url: ("93.184.216.34", ""))
 
     policy = HostPolicy.from_strings("allowed.test", "blocked.test")
-    with pytest.raises(ValueError, match="host_denied"):
+    with pytest.raises(ValueError, match="refused admission"):
         await fetchers_mod.default_http_fetcher(
             NormalizedUrl("https://allowed.test/", policy=policy),
             {},
             30,
-            policy=policy,
         )
 
     assert [url for url, _follow in client.calls] == ["https://allowed.test"]

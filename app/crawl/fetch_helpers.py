@@ -25,8 +25,8 @@ from app.constants import (
 from app.crawl.decompression import decompress_body as _decompress_body
 from app.crawl.strategies.body_decode import decode_body
 from app.models.host_policy import HostPolicy
-from app.models.http_fetcher import HttpFetcher
 from app.models.http_fetch_result import HttpFetchResult
+from app.models.http_fetcher import HttpFetcher
 from app.models.normalized_url import NormalizedUrl
 
 # Request headers as the discovery fetch takes them: a mapping it only ever
@@ -220,16 +220,19 @@ async def fetch_sitemap_urls(
     max_urls: int = SITEMAP_MAX_URLS,
     conditional: dict[str, str] | None = None,
     host_policy: HostPolicy,
-) -> set[tuple[str, str | None]]:
+) -> set[tuple[NormalizedUrl, str | None]]:
     """Recursively resolve a sitemap URL into ``(loc, lastmod)`` pairs.
 
     Handles sitemap indexes (``<sitemapindex>`` pointing at child sitemaps) up
     to ``max_depth`` levels, and caps total collected URLs at ``max_urls`` so a
     hostile or enormous index cannot run away.
 
-    Each collected entry is a ``(url, lastmod)`` tuple where ``lastmod`` is the
-    sitemap ``<lastmod>`` for that URL when present (used to skip re-fetching
-    unchanged pages); it is ``None`` when the entry has no ``<lastmod>``.
+    Each collected entry is a ``(url, lastmod)`` tuple where ``url`` is the
+    admitted ``NormalizedUrl`` -- resolved here, at the one place that knows
+    the sitemap they came from, so no caller re-joins or re-admits -- and
+    ``lastmod`` is the sitemap ``<lastmod>`` for that URL when present (used
+    to skip re-fetching unchanged pages); it is ``None`` when the entry has
+    no ``<lastmod>``.
 
     If a previous resolution cached an ETag/Last-Modified (or the caller passes
     ``conditional``), the root sitemap is fetched with a conditional request
@@ -241,7 +244,7 @@ async def fetch_sitemap_urls(
     loc_pattern = _re.compile(r"<loc>\s*([^<\s]+)\s*</loc>", _re.IGNORECASE)
     lastmod_re = _re.compile(r"<lastmod>\s*([^<]+)\s*</lastmod>", _re.IGNORECASE)
     visited: set[NormalizedUrl] = set()
-    page_urls: set[tuple[str, str | None]] = set()
+    page_urls: set[tuple[NormalizedUrl, str | None]] = set()
 
     async def recurse(current_url: NormalizedUrl, depth: int, cond_headers: dict[str, str] | None = None):
         etag: str | None = None
@@ -297,7 +300,7 @@ async def fetch_sitemap_urls(
             lastmod = next((val for lpos, val in lastmod_items if pos < lpos < next_pos), None)
             admitted = current_url.resolve(loc)
             if admitted is not None:
-                page_urls.add((admitted.raw, lastmod))
+                page_urls.add((admitted, lastmod))
         return etag, last_modified
 
     cache_key = (sitemap_url.raw, host_policy)

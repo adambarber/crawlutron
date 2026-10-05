@@ -93,7 +93,7 @@ async def test_etag_captured_and_stored_on_200():
     )
 
     out = await fetch_sitemap_urls(fetcher, url, 10, host_policy=UNRESTRICTED_HOST_POLICY)
-    assert ("http://x.test/p1", "2024-01-01") in out
+    assert (canonical("http://x.test/p1"), "2024-01-01") in out
     # The new etag/last-modified are stored so the next crawl can send a 304 check.
     cached = _SITEMAP_CACHE.peek((url.raw, UNRESTRICTED_HOST_POLICY))
     assert cached is not None, "the fetch must have stored its conditional-request headers"
@@ -193,11 +193,11 @@ async def test_extracts_lastmod_per_loc():
         10,
         host_policy=UNRESTRICTED_HOST_POLICY,
     )
-    # Returns (loc, lastmod) tuples
+    # Returns (loc, lastmod) tuples with admitted loc values
     by_loc = {loc: lastmod for loc, lastmod in urls}
-    assert by_loc["http://x.test/a"] == "2024-01-15"
-    assert by_loc["http://x.test/b"] is None
-    assert by_loc["http://x.test/c"] == "2023-06-01T00:00:00Z"
+    assert by_loc[canonical("http://x.test/a")] == "2024-01-15"
+    assert by_loc[canonical("http://x.test/b")] is None
+    assert by_loc[canonical("http://x.test/c")] == "2023-06-01T00:00:00Z"
 
 
 async def test_index_children_recurse_without_lastmod():
@@ -221,7 +221,7 @@ async def test_index_children_recurse_without_lastmod():
         10,
         host_policy=UNRESTRICTED_HOST_POLICY,
     )
-    assert ("http://x.test/p", "2024-03-03") in urls
+    assert (canonical("http://x.test/p"), "2024-03-03") in urls
 
 
 def _policy(extra=None, *, extraction=None):

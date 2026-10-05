@@ -379,7 +379,7 @@ def stub_pinned_request(pinned: tuple[str, dict[str, str]] = PINNED_PUBLIC_IP):
     pin under test.
     """
 
-    async def _stub(url: str, headers: dict[str, str], *, policy):
+    async def _stub(url, headers: dict[str, str]):
         return pinned[0], {**headers, **pinned[1]}
 
     return _stub
@@ -564,13 +564,13 @@ async def run_route_with_pinner(url, *, pinned=None, raises=None, resource_type=
     """
     if raises is not None:
 
-        def pin(url, headers, *, policy):
+        def pin(url, headers):
             raise raises
 
     else:
         outcome = pinned if pinned is not None else (url, {})
 
-        def pin(url, headers, *, policy):
+        def pin(url, headers):
             return outcome
 
     route = FakeRoute()
@@ -631,7 +631,7 @@ def blocking_pinned_request(thread_ids: list[int], delay: float = 0.05):
     import threading
     import time
 
-    def build(url, headers, *, policy):
+    def build(url, headers):
         thread_ids.append(threading.get_ident())
         time.sleep(delay)
         return PINNED_PUBLIC_IP
