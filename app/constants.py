@@ -10,7 +10,8 @@ from __future__ import annotations
 
 from enum import StrEnum
 from typing import Final, Literal
-from urllib.parse import urlparse as _urlparse
+
+from app.models.normalized_url import NormalizedUrl
 
 # Fetch strategies (how bytes are retrieved). Orthogonal to extraction.
 # ---------------------------------------------------------------------------
@@ -859,12 +860,9 @@ ANALYTICS_HOST_SUFFIXES = frozenset(
 _ANALYTICS_DOTTED = tuple("." + s for s in ANALYTICS_HOST_SUFFIXES)
 
 
-def is_analytics_host(url: str) -> bool:
+def is_analytics_host(url: NormalizedUrl) -> bool:
     """True when ``url`` points at a hard-skip host (apex or any subdomain)."""
-    try:
-        host = (_urlparse(url).hostname or "").lower()
-    except Exception:
-        return False
+    host = url.host
     return host in ANALYTICS_HOST_SUFFIXES or host.endswith(_ANALYTICS_DOTTED)
 
 
@@ -882,10 +880,6 @@ DOCUMENT_URL_EXTENSIONS = frozenset(
 _DOCUMENT_URL_EXTENSIONS = tuple(sorted(DOCUMENT_URL_EXTENSIONS))
 
 
-def is_document_url(url: str) -> bool:
+def is_document_url(url: NormalizedUrl) -> bool:
     """True when ``url``'s path ends with a known document extension."""
-    try:
-        path = _urlparse(url).path.lower()
-    except Exception:
-        return False
-    return path.endswith(_DOCUMENT_URL_EXTENSIONS)
+    return url.path.lower().endswith(_DOCUMENT_URL_EXTENSIONS)

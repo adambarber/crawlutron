@@ -157,10 +157,21 @@ def make_ssrf_route_handler(
             # let the browser handle them locally instead of aborting.
             await route.continue_()
             return
+        # The browser-observed request URL is one of the tree's live text
+        # boundaries: admitted here, once, inline -- admission parses only,
+        # no DNS -- so both the analytics skip and the branches below hand a
+        # value, not text, to everything downstream. A URL that will not
+        # admit is the same "unsafe target" verdict the try/except below
+        # aborts on; failing it here just reaches the abort without the DNS.
+        try:
+            admitted = NormalizedUrl(request.url, policy=policy)
+        except ValueError:
+            await route.abort()
+            return
         # Tracking/analytics requests carry no crawlable content; drop them
         # unconditionally so they never consume bandwidth or trigger their own
         # SSRF resolution.
-        if _is_analytics_url(request.url):
+        if _is_analytics_url(admitted):
             await route.abort()
             return
         # Abort non-essential presentation subresources unconditionally: a
@@ -171,12 +182,6 @@ def make_ssrf_route_handler(
             await route.abort()
             return
         try:
-            # The browser-observed request URL is one of the tree's live text
-            # boundaries: admitted here, once, inline -- admission does no
-            # DNS -- so both branches below hand the pin rule and the cached
-            # blocklist check a value, not text. A ValueError from either is
-            # the same "unsafe target" verdict the try/except below aborts on.
-            admitted = NormalizedUrl(request.url, policy=policy)
             # Annotated once, ahead of both branches: the https branch assigns
             # an empty literal, which mypy cannot widen to the dict type the
             # http branch's pin rule returns.

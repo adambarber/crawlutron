@@ -153,9 +153,9 @@ def _candidate_stream(
         normalized = admit_or_none(normalized_raw, policy=host_policy)
         if normalized is None or normalized in known:
             continue
-        if is_analytics_host(normalized.raw):
+        if is_analytics_host(normalized):
             continue
-        if not want_document_bodies and is_document_url(normalized.raw):
+        if not want_document_bodies and is_document_url(normalized):
             continue
         if scope_pattern is not None and not scope_allows(scope_pattern, normalized.raw):
             continue
