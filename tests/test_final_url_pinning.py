@@ -14,7 +14,6 @@ from unittest.mock import patch
 
 from app.crawl.strategies import http_client_pool as pool_mod
 from app.crawl.strategies.fetchers import default_http_fetcher
-from app.validation import HostPolicy
 from tests._policy_factories import canonical
 
 

@@ -18,7 +18,6 @@ from app.crawl.policy import PolicyTier, read_policy
 from app.crawl.strategies.request_profile import _apply_credentials
 from app.models.crawl_policy import CrawlPolicy
 from app.models.credential import Credential
-from app.validation import HostPolicy
 from tests._policy_factories import canonical
 
 #: The settings a payload-policy test runs against: the defaults with nothing

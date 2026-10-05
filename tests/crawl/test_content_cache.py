@@ -9,7 +9,6 @@ import sys
 import tempfile
 import threading
 from collections.abc import Iterator
-from functools import partial
 from pathlib import Path
 from typing import Any
 

@@ -16,7 +16,6 @@ import app.crawl.strategies.http_client_pool as http_mod
 from app import settings as settings_mod
 from app.crawl.strategies.fetchers import _cffi_fetch
 from app.crawl.strategies.http_client_pool import get_async_http_client
-from app.validation import HostPolicy
 from tests._async_harnesses import run_loop_rebind_scenario
 from tests._policy_factories import canonical
 from tests._pool_harnesses import builder_for as _builder_for

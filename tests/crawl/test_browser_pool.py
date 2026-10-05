@@ -16,7 +16,7 @@ from app.crawl.strategies.browser_pool import (
     set_browser_pool,
 )
 from tests._browser_doubles import FakeBrowserPool
-from tests._policy_factories import UNRESTRICTED_HOST_POLICY
+from tests._policy_factories import canonical
 
 
 class TestAcquireTimeout:

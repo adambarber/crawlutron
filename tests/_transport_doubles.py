@@ -39,7 +39,6 @@ import multiprocessing
 from collections.abc import Awaitable, Callable, Sequence
 from multiprocessing.process import BaseProcess
 from multiprocessing.queues import Queue
-from urllib.parse import urlparse
 
 import httpx
 import pytest
@@ -244,7 +243,6 @@ def _genuine_cffi_outcome(url: str, timeout_seconds: int, max_content_length: in
     import asyncio
 
     from app.crawl.strategies.fetchers import impersonating_fetcher
-    from app.validation import HostPolicy
     from tests._policy_factories import canonical
 
     async def _fetch():

@@ -12,7 +12,6 @@ import threading
 from contextlib import contextmanager
 
 from app.crawl.strategies.fetchers import default_http_fetcher
-from app.validation import HostPolicy
 from tests._fetcher_factories import _spawn_fetch
 from tests._policy_factories import canonical
 from tests.helpers.server import SilentHandler

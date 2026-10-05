@@ -13,7 +13,6 @@ import app.crawl.strategies.fetchers as fetchers_mod
 import app.crawl.strategies.http_client_pool as http_mod
 from app.constants import HTTP_CFFI_IMPERSONATE
 from app.crawl.strategies.fetchers import impersonating_fetcher
-from app.validation import HostPolicy
 from tests._fetch_outcome import FetchFailed
 from tests._fetcher_factories import scripted_fetcher, strategy_request
 from tests._policy_factories import canonical, make_base_policy
