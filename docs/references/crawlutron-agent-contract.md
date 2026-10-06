@@ -7,7 +7,7 @@ guidance.
 
 ## Discovery Surfaces
 
-When the service is running at `http://127.0.0.1:${CRAWLUTRON_HOST_PORT:-8765}`,
+When the service is running at its default address `http://127.0.0.1:8765`,
 discover the contract from:
 
 - `GET /health`

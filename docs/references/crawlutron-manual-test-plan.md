@@ -37,7 +37,6 @@ exposed via the API contract.
 ### 2.1 Environment variables (defaults shown)
 | Variable | Default | Effect |
 |---|---|---|
-| `CRAWLUTRON_HOST_PORT` | `8765` | Listen port |
 | `CRAWLUTRON_WORKERS` | 1 | uvicorn workers (Dockerfile) |
 | `CRAWLUTRON_GLOBAL_CONCURRENCY` | _(internal default `4`; env-overridable floor)_ | Concurrency floor for the recursive dispatcher; self-managed by the resource guard |
 | `CRAWLUTRON_PER_DOMAIN_CONCURRENCY` | `2` | Per-host parallel crawls |
