@@ -63,21 +63,30 @@ preference. `CODE_OF_CONDUCT.md` states the expectations in full.
 
 These require explicit review from a maintainer before merge:
 
-- `app/validation.py` — SSRF guard (`check_ssrf_protection`,
-  `resolve_and_pin_host`), URL normalization, `parse_bool_env` for
-  private-target opt-in, webhook URL validation.
-- `app/crawl/strategies/http.py` — DNS pinning / cookie isolation /
-  redirect handling / `Host:` header rewriting / per-tenant cookie
-  namespace (`COOKIE_NAMESPACE` ContextVar).
-- `app/crawl/strategies/browser.py` — browser SSRF / storage_state path
-  validation / `_auto_accept_cookie_consent`.
-- `app/crawl/engine.py` — robots cache, recursive crawl caps,
-  `parse_robots_rules` / `parse_robots_crawl_delay` group matching
-  (must use `USER_AGENT_TOKEN`).
-- `app/crawl/strategies/browser_pool.py` — browser-pool sizing from
-  cgroup memory limits; ensure `BROWSER_RAM_FRACTION` is honoured.
-- `app/main.py` — middleware order, body-size limits, error envelopes,
-  webhook delivery (`deliver_pinned_webhook`).
+- `app/models/normalized_url.py` and `app/models/host_policy.py` — the URL
+  admission chokepoint: the `NormalizedUrl` constructor is the single place
+  raw URL text is parsed, and the public/SSRF egress verdict plus the
+  private-target opt-in are decided here.
+- `app/crawl/strategies/pinned_transport.py` — transport SSRF guard
+  (`check_ssrf_protection`, `resolve_and_pin_host`), request pinning,
+  redirect-target admission, `Host:` header construction.
+- `app/crawl/strategies/cookie_jar.py` — per-tenant cookie namespace
+  (`COOKIE_NAMESPACE` ContextVar) and cookie isolation.
+- `app/crawl/strategies/browser.py` and `browser_driver.py` — browser SSRF,
+  storage_state path validation, opt-in cookie-consent auto-acceptance
+  (`auto_accept_cookie_consent`).
+- `app/crawl/robots.py` and `app/crawl/robots_parse.py` — robots policy and
+  rule cache; `parse_robots_rules` / `parse_robots_crawl_delay` must use
+  `USER_AGENT_TOKEN`.
+- `app/validation.py` — egress filter for scraped JS-endpoint URLs
+  (`filter_js_endpoints`), resolved-address public check
+  (`is_public_ip_value`).
+- `app/resource_pressure.py` and `app/crawl/strategies/browser_pool.py` —
+  browser-pool sizing from cgroup memory limits; `BROWSER_RAM_FRACTION`.
+- `app/main.py` — middleware order, body-size limits, error envelopes.
+- `app/api/webhooks.py` — webhook delivery (`deliver_pinned_webhook`).
+- `app/env.py` — `parse_bool_env` and the operator environment reads,
+  including the private-target opt-in.
 - `app/output_formats.py` — CSV injection (`_csv_neutralize`),
   response serialization.
 - `app/settings.py` — defaults (paths, security knobs); changing a
