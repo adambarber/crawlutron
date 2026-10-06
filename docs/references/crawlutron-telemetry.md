@@ -17,7 +17,7 @@ versions, shipped client telemetry:
 | Component | Role in the service | Telemetry behavior |
 |---|---|---|
 | `onnxruntime` (transitive via `magika`) | ML content-type inference during extraction | Windows-style OneCollector telemetry; device-ID persist at native-lib load |
-| `playwright` (camoufox driver) | Drives the anti-detect browser for JS-heavy pages | Older versions sent 1DS usage stats; **removed** in this pinned version |
+| `playwright` (camoufox driver) | Drives the browser for JavaScript-dependent pages | Older versions sent 1DS usage stats; **removed** in this pinned version |
 | `camoufox` | The browser itself + fingerprint data | Phone-homes **only on demand** (release/update check, IP/geo lookup) — never during a render |
 
 ## The two guard layers

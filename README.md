@@ -6,7 +6,7 @@ FastAPI. It exposes a single, machine-readable crawl contract that supports:
 - **HTTP fetch strategies** — transparent declared-crawler HTTP and TLS-fingerprint
   impersonation (curl_cffi).
 - **Browser rendering** — headless/headed Firefox via [Camoufox](https://github.com/daijro/camoufox)
-  for JS-heavy, anti-bot, or challenge pages.
+  for JavaScript-dependent pages.
 - **Document extraction** — PDF/DOCX/PPTX/XLSX/TXT via markitdown, plus main-text
   extraction via trafilatura.
 - **Content classification** — 30 crawl classifications (success, blocked,
@@ -247,8 +247,8 @@ exhausted.
 | -------- | ----------- |
 | `HTTP_DECLARED_CRAWLER` | Transparent direct HTTP fetch with a declared-crawler identity (lightweight, fast). |
 | `HTTP_CFFI_IMPERSONATE` | TLS-fingerprint-impersonated HTTP via `curl_cffi` with browser-shaped headers, for sites that reject non-browser clients. |
-| `BROWSER_HEADLESS` | Headless Firefox (Camoufox) render for JS-heavy / anti-bot pages. |
-| `BROWSER_HEADED_WARMED` | Headed Firefox with warmup URLs for sites that fingerprint cold browser launches. |
+| `BROWSER_HEADLESS` | Firefox rendering in headless mode using Camoufox for JavaScript-dependent pages. |
+| `BROWSER_HEADED_WARMED` | Headed Firefox with configured warmup URLs for challenge-prone municipal systems. |
 
 ### Extraction methods (`policy.extraction`)
 

@@ -292,7 +292,7 @@ if FastAPI is not None:
             "event loop so liveness stays responsive during crawls. "
             "Clients submit resolved crawl policies, inspect per-URL provenance, and use attempt history "
             "to make reviewable policy suggestions rather than mutating host policy automatically. "
-            "The service classifies Cloudflare/WAF/CAPTCHA/login/paywall "
+            "The service classifies challenge/login/paywall "
             "outcomes but does not bypass, solve, "
             "outsource, rotate identities, rotate proxies, or inject credentials."
         ),
