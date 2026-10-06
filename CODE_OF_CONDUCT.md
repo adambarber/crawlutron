@@ -38,7 +38,7 @@ fixture, or a test string that demeans someone is still a contribution.
 
 ## Reporting
 
-Report a problem to `security@crawlutron.local`, the same address
+Report a problem through a private security advisory on GitHub, the same channel
 `SECURITY.md` uses for vulnerability reports. Include the issue or pull
 request, what happened, and roughly when. Reports are handled
 confidentially, and a reporter who wants anonymity is not named in the
