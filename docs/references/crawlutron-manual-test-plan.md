@@ -44,7 +44,7 @@ exposed via the API contract.
 | `CRAWLUTRON_PER_DOMAIN_DELAY_MS` | `500` | Delay between same-domain jobs |
 | `CRAWLUTRON_MAX_BATCH_SIZE` | `50` | Max URLs per request |
 | `CRAWLUTRON_DEFAULT_TIMEOUT_SECONDS` | `30` | Per-strategy timeout |
-| `CRAWLUTRON_DEFAULT_MAX_RETRIES` | `2` | Retries inside a strategy |
+| `CRAWLUTRON_DEFAULT_MAX_RETRIES` | `5` | Retries inside a strategy |
 | `CRAWLUTRON_RESPECT_ROBOTS` | `true` | Honor robots.txt |
 | `CRAWLUTRON_ALLOWED_HOSTS` | `""` | Allowlist (empty = all public) |
 | `CRAWLUTRON_DENIED_HOSTS` | `""` | Denylist |

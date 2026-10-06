@@ -356,7 +356,7 @@ defaults shown):
 | `CRAWLUTRON_SEARCH_TIMEOUT_SECONDS` | `15` | Provider call timeout. |
 | `CRAWLUTRON_MAX_BATCH_SIZE` | `50` | Max URLs per batch request. |
 | `CRAWLUTRON_DEFAULT_TIMEOUT_SECONDS` | `30` | Default per-request timeout. |
-| `CRAWLUTRON_DEFAULT_MAX_RETRIES` | `2` | Default retry count. |
+| `CRAWLUTRON_DEFAULT_MAX_RETRIES` | `5` | Default retry count. |
 | `CRAWLUTRON_RESPECT_ROBOTS` | `true` | Respect robots.txt by default. |
 | `CRAWLUTRON_ALLOWED_HOSTS` | `""` | Optional host allowlist (comma-separated suffix match; case, IDNA, and port normalized). |
 | `CRAWLUTRON_DENIED_HOSTS` | `""` | Optional host denylist (comma-separated suffix match; deny wins over allow). |
