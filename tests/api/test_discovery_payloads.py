@@ -162,3 +162,32 @@ class TestDiscoveryPayload:
         recommended = " ".join(payload["recommended_endpoints"])
         assert "GET /v1/crawl/{request_id}" in recommended
         assert "POST /v1/jobs" in recommended
+
+    def test_recommended_endpoints_name_the_job_control_pair(self):
+        """An agent that discovers the service the documented way can start a
+        job and read its state, but could not stop one: the control and delete
+        endpoints were live in the router and absent from the recommendation
+        list, which is the surface a discovering agent reads."""
+        recommended = discovery_payload()["recommended_endpoints"]
+        assert "POST /v1/jobs/{job_id}/control" in recommended
+        assert "DELETE /v1/jobs/{job_id}" in recommended
+
+    def test_every_recommended_endpoint_is_a_live_route(self):
+        """The recommendation list is hand-curated, so it can drift from the
+        routers it mirrors: an entry for a route that no longer exists sends a
+        discovering agent at a 404 with no signal the list is stale. Every
+        advertised METHOD /path must resolve against the real app."""
+        from app.main import app as service
+
+        # The app mounts its routers via _IncludedRouter, so app.routes does
+        # not expose APIRoute objects; the OpenAPI schema is the surface the
+        # recommendation list mirrors and the one a discovering agent resolves
+        # against.
+        live = {
+            f"{method.upper()} {route}"
+            for route, operations in service.openapi()["paths"].items()
+            for method in operations
+        }
+        advertised = discovery_payload()["recommended_endpoints"]
+        stale = [entry for entry in advertised if entry not in live]
+        assert not stale, f"recommended_endpoints name routes the app does not serve: {stale}"

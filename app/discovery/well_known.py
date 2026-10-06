@@ -36,6 +36,8 @@ def discovery_payload() -> dict[str, Any]:
             "POST /v1/jobs",
             "GET /v1/jobs",
             "GET /v1/jobs/{job_id}",
+            "POST /v1/jobs/{job_id}/control",
+            "DELETE /v1/jobs/{job_id}",
             "GET /v1/crawl/{request_id}",
             "POST /mcp",
         ],

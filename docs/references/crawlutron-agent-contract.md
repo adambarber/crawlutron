@@ -30,6 +30,13 @@ universal strategy chain. Use `POST /v1/search` to discover public URLs from a
 query without crawling them. Use `POST /mcp` to drive search/crawl/map/render
 as MCP tools from an agent runtime.
 
+Use `POST /v1/jobs` for durable, resumable whole-site jobs. Control one with
+`POST /v1/jobs/{job_id}/control`: `pause` stops the runner at the next batch
+boundary (frontier retained), `resume` respawns it from the persisted frontier,
+and `cancel` is terminal with the frontier kept for audit. Read job state with
+`GET /v1/jobs/{job_id}`; permanently remove a job with `DELETE /v1/jobs/{job_id}`,
+which cancels a running job first.
+
 Use `GET /health` for process liveness and Docker healthcheck interpretation.
 Use `GET /ready` for crawl-capacity readiness before submitting large batches
 or retrying after a timeout.
