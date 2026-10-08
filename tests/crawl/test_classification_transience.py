@@ -21,14 +21,14 @@ import socket
 import httpx
 import pytest
 
-from app.constants import (
+from app.crawl.result_helpers import classify_error_code
+from app.vocabulary.taxonomy import (
     CLASSIFICATION_STATUS_BY_LABEL,
     NON_TRANSIENT_CLASSIFICATIONS,
     TRANSIENT_CLASSIFICATIONS,
     CrawlClassification,
     is_transient_classification,
 )
-from app.crawl.result_helpers import classify_error_code
 
 
 class TestTransienceIsATaxonomyOwnedVerdict:

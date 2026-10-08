@@ -9,10 +9,10 @@ from urllib.parse import urlsplit
 
 import pytest
 
-from app.constants import BROWSER_HEADLESS
 from app.models.crawl_task import CrawlTask
 from app.models.discovered_link import DiscoveredLink
 from app.scheduler import DomainScheduler
+from app.vocabulary.strategies import BROWSER_HEADLESS
 from tests._policy_factories import canonical
 from tests._recursive_harnesses import ContentionFreeGate, drive_recursive_crawl, make_crawl_task
 from tests._result_builders import engine_result, make_engine_result

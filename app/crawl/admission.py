@@ -9,7 +9,6 @@ from collections.abc import Awaitable, Callable, Iterable, MutableSequence
 from dataclasses import dataclass, field
 from typing import Any, TypeVar
 
-from app.constants import is_analytics_host, is_document_url
 from app.crawl.fetch_helpers import fetch_sitemap_urls
 from app.crawl.job_store import FrontierEntry, job_max_pages
 from app.crawl.policy import PolicyTier, discovery_flags, read_policy
@@ -22,6 +21,7 @@ from app.models.host_policy import HostPolicy
 from app.models.normalized_url import NormalizedUrl, admit_or_none
 from app.safe_regex import BoundedPattern, UnsafePattern, compile_untrusted
 from app.scheduler import DomainScheduler
+from app.vocabulary.hosts import is_analytics_host, is_document_url
 
 _logger = logging.getLogger(__name__)
 

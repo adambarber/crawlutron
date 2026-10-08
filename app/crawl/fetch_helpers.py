@@ -13,7 +13,13 @@ from collections.abc import Awaitable, Callable, Mapping
 from typing import Any, NamedTuple
 
 from app.bounded_ttl import BoundedTTLCache
-from app.constants import (
+from app.crawl.decompression import decompress_body as _decompress_body
+from app.crawl.strategies.body_decode import decode_body
+from app.models.host_policy import HostPolicy
+from app.models.http_fetch_result import HttpFetchResult
+from app.models.http_fetcher import HttpFetcher
+from app.models.normalized_url import NormalizedUrl
+from app.vocabulary.limits import (
     DISCOVERY_BODY_MAX_BYTES,
     SITEMAP_CACHE_MAX_ENTRIES,
     SITEMAP_CACHE_TTL_SECONDS,
@@ -22,12 +28,6 @@ from app.constants import (
     SITEMAP_MAX_DEPTH,
     SITEMAP_MAX_URLS,
 )
-from app.crawl.decompression import decompress_body as _decompress_body
-from app.crawl.strategies.body_decode import decode_body
-from app.models.host_policy import HostPolicy
-from app.models.http_fetch_result import HttpFetchResult
-from app.models.http_fetcher import HttpFetcher
-from app.models.normalized_url import NormalizedUrl
 
 # Request headers as the discovery fetch takes them: a mapping it only ever
 # reads, or None for "send none". One declaration, because the fetch signatures

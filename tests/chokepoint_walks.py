@@ -75,6 +75,25 @@ def _model_modules() -> tuple[ModuleType, ...]:
     )
 
 
+def _vocabulary_modules() -> tuple[ModuleType, ...]:
+    """Every topic module in ``app.vocabulary``, derived the same way.
+
+    A taxonomy name has to be looked up across the package rather than in one
+    module: the vocabulary is split by topic, so ``CrawlClassification`` is in
+    ``taxonomy`` and the strategy names are in ``strategies``. A lookup that
+    tried a single module would raise ``LookupError`` on a name that exists --
+    and, worse, one that tried a stale list would approve every literal.
+    """
+    import importlib
+    import pkgutil
+
+    package = importlib.import_module("app.vocabulary")
+    return tuple(
+        importlib.import_module(f"app.vocabulary.{info.name}")
+        for info in pkgutil.iter_modules(package.__path__)
+    )
+
+
 # app/safe_regex.py is the sanctioned regex wrapper (stdlib `re` for
 # literals; the third-party `regex` engine for bounded execution). It owns
 # the banned primitives, so a full-tree walk excludes it. A test that must
@@ -1130,15 +1149,14 @@ def real_members(type_name: str) -> frozenset[str]:
     silently resolved to the empty set would approve every literal, which is the
     failure this function exists to make impossible.
     """
-    from app import constants
     from app.models import taxonomy
 
-    for module in (taxonomy, *_model_modules(), constants):
+    for module in (taxonomy, *_model_modules(), *_vocabulary_modules()):
         owner = getattr(module, type_name, None)
         if owner is not None:
             break
     else:
-        raise LookupError(f"{type_name} is not a taxonomy anywhere in app/models or app.constants")
+        raise LookupError(f"{type_name} is not a taxonomy anywhere in app/models or app/vocabulary")
     if hasattr(owner, "__members__"):
         return frozenset(member.value for member in owner)
     return taxonomy.literal_members(owner)

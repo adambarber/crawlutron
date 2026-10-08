@@ -12,7 +12,6 @@ import inspect
 import re
 from typing import Any
 
-from app.constants import DEFAULT_MAX_CONTENT_LENGTH_BYTES, DISCOVERY_BODY_MAX_BYTES
 from app.crawl.decompression import decompress_body as _decompress_body
 from app.crawl.policy import discovery_flags
 from app.crawl.result_helpers import classify_error_code
@@ -21,6 +20,7 @@ from app.models.crawl_policy import CrawlPolicy
 from app.models.host_policy import HostPolicy
 from app.models.http_fetcher import HttpFetcher
 from app.models.normalized_url import NormalizedUrl
+from app.vocabulary.limits import DEFAULT_MAX_CONTENT_LENGTH_BYTES, DISCOVERY_BODY_MAX_BYTES
 
 _RETRY_BACKOFF_BASE_SECONDS = 0.25
 _RETRY_BACKOFF_CAP_SECONDS = 2.0

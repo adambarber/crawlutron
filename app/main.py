@@ -17,8 +17,8 @@ from app.crawl.policy import PolicyTier
 from app.env import get_env_float, get_env_int
 from app.logging_config import configure_service_logging
 from app.models.host_policy import HostPolicy
+from app.vocabulary.identity import SERVICE_ID, SERVICE_VERSION
 
-from .constants import SERVICE_ID, SERVICE_VERSION
 from .crawl.job_store import JobStore
 from .crawl.result_store import CrawlResultStore
 from .crawl.strategies.browser_pool import (

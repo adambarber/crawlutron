@@ -11,16 +11,12 @@ from dataclasses import asdict, replace
 import httpx
 import pytest
 
-from app.constants import (
-    BROWSER_HEADED_WARMED,
-    BROWSER_HEADLESS,
-    HTTP_DECLARED_CRAWLER,
-)
 from app.crawl.result_helpers import classify_error_code, engine_result_from_exception
 from app.crawl.strategies.browser_pool import BrowserPoolExhaustedError
 from app.models.engine_crawl_result import EngineCrawlResult
 from app.models.host_policy import HostPolicy
 from app.models.normalized_url import NormalizedUrl
+from app.vocabulary.strategies import BROWSER_HEADED_WARMED, BROWSER_HEADLESS, HTTP_DECLARED_CRAWLER
 from tests._browser_doubles import _fake_browser
 from tests._fetcher_factories import failing_fetcher, raise_fetcher, run_chain
 from tests._worker_doubles import (
@@ -62,7 +58,7 @@ def test_existing_taxonomy_is_preserved():
 
 def test_pool_exhausted_is_a_taxonomy_member():
     """A non-member code rejects the whole batch at response shaping (constants.py)."""
-    from app.constants import CrawlClassification
+    from app.vocabulary.taxonomy import CrawlClassification
 
     assert CrawlClassification.browser_pool_exhausted.value == "browser_pool_exhausted"
 
@@ -155,7 +151,7 @@ class TestClassificationValueValidity:
     """
 
     def test_url_budget_exceeded_is_a_taxonomy_member(self):
-        from app.constants import CrawlClassification
+        from app.vocabulary.taxonomy import CrawlClassification
 
         assert CrawlClassification.url_budget_exceeded.value == "url_budget_exceeded"
 
@@ -254,7 +250,7 @@ class TestShapeAllGuardsPerItem:
         # same value the fallback set, or the two paths describe different
         # outcomes for the same item.
         from app.api.response_shaping import _failed_unified_result
-        from app.constants import status_for_classification
+        from app.vocabulary.taxonomy import status_for_classification
 
         result = _failed_unified_result({"normalized_url": "https://example.org/a"})
         assert status_for_classification(result.classification) == result.status

@@ -16,7 +16,7 @@ raised the one or read the other. ``test_every_protocol_constant_is_produced``
 holds the line.
 """
 
-from app.constants import SERVICE_ID, SERVICE_VERSION
+from app.vocabulary.identity import SERVICE_ID, SERVICE_VERSION
 
 # The version this server implements, and the only one it accepts. Named apart
 # from the list because the two are different claims -- what we speak, and what we

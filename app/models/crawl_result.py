@@ -22,10 +22,10 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-from app.constants import ResultStatus
 from app.models.literal_checked import LiteralChecked
 from app.models.normalized_url import NormalizedUrl
 from app.models.taxonomy import Classification, CrawlError, CrawlStrategyName
+from app.vocabulary.taxonomy import ResultStatus
 
 
 @dataclass(frozen=True)

@@ -8,9 +8,6 @@ from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field, replace
 from typing import Any, cast
 
-from app.constants import (
-    ENGINE_BATCH_CONCURRENCY_MULTIPLIER,
-)
 from app.crawl import robots as robots_policy
 from app.crawl.admission import gather_robots_decisions, normalize_sitemap_candidates
 from app.crawl.cache import HttpCache
@@ -43,6 +40,7 @@ from app.resource_pressure import (
 from app.safe_regex import BoundedPattern
 from app.scheduler import DomainScheduler
 from app.settings import CrawlerSettings
+from app.vocabulary.limits import ENGINE_BATCH_CONCURRENCY_MULTIPLIER
 
 
 @dataclass(frozen=True)

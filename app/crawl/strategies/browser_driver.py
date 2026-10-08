@@ -19,7 +19,7 @@ whose ``open_page`` returns the page it was built with. Browser recycling lives
 here rather than in the renderer because it bounds the growth of a long-lived
 browser process, which is what this class owns.
 
-The action vocabulary is NOT here. It is ``app.constants``
+The action vocabulary is NOT here. It is ``app.vocabulary.browser``
 (``BROWSER_ACTION_TYPES`` and friends), because ``CrawlPolicy`` reads the same
 set at the model boundary and two hand-maintained lists that must agree is the
 bug this module used to be able to cause.
@@ -39,14 +39,14 @@ from typing import TYPE_CHECKING, Any, TypeVar
 
 from camoufox.async_api import AsyncCamoufox
 
-from app.constants import (
-    BROWSER_ACTION_TYPES,
+from app.env import get_env_int, parse_bool_value
+from app.vocabulary.browser import BROWSER_ACTION_TYPES
+from app.vocabulary.limits import (
     DEFAULT_COOKIE_HARVEST_TIMEOUT_SECONDS,
     DEFAULT_LAZY_SCROLL_DELAY_SECONDS,
     DEFAULT_LAZY_SCROLL_STEPS,
     DEFAULT_MAX_BROWSER_RENDERS,
 )
-from app.env import get_env_int, parse_bool_value
 
 if TYPE_CHECKING:
     from app.settings import CrawlerSettings
@@ -685,7 +685,7 @@ class BrowserDriver:
         held from a finally block, so an unbounded value is a hold on a shared
         resource rather than on the caller's own budget.
         """
-        from app.constants import MAX_COOKIE_HARVEST_TIMEOUT_SECONDS
+        from app.vocabulary.limits import MAX_COOKIE_HARVEST_TIMEOUT_SECONDS
 
         profile = browser_profile or {}
         return _profile_float(
@@ -702,7 +702,7 @@ class BrowserDriver:
         runs directly below the budgeted action chain, and 10**12 steps is a
         render that never returns.
         """
-        from app.constants import MAX_LAZY_SCROLL_DELAY_SECONDS, MAX_LAZY_SCROLL_STEPS
+        from app.vocabulary.limits import MAX_LAZY_SCROLL_DELAY_SECONDS, MAX_LAZY_SCROLL_STEPS
 
         profile = browser_profile or {}
         return (

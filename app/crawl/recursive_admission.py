@@ -9,11 +9,6 @@ from dataclasses import dataclass
 from itertools import islice
 from typing import Any, NamedTuple, Protocol
 
-from app.constants import (
-    BROWSER_STRATEGIES,
-    ENGINE_BATCH_CONCURRENCY_MULTIPLIER,
-    HTTP_STRATEGIES,
-)
 from app.crawl.admission import gather_robots_decisions
 from app.metrics import MetricsStore
 from app.models.crawl_task import CrawlTask
@@ -23,6 +18,8 @@ from app.models.normalized_url import NormalizedUrl
 from app.resource_pressure import ResourceGate, WeightedAdmission
 from app.safe_regex import BoundedPattern
 from app.scheduler import DomainScheduler
+from app.vocabulary.limits import ENGINE_BATCH_CONCURRENCY_MULTIPLIER
+from app.vocabulary.strategies import BROWSER_STRATEGIES, HTTP_STRATEGIES
 
 logger = logging.getLogger(__name__)
 

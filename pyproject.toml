@@ -102,7 +102,7 @@ dev = [
 ]
 
 [project.urls]
-# The canonical remote, and the same value as app.constants.REPOSITORY_URL --
+# The canonical remote, and the same value as app.vocabulary.identity.REPOSITORY_URL --
 # which is the copy that goes out on the wire in the user-agent. pyproject
 # cannot import it, so tests/test_project_urls.py fails if these drift apart.
 Homepage = "https://github.com/adambarber/crawlutron"

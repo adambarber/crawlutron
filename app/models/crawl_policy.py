@@ -5,12 +5,12 @@ from urllib.parse import urlsplit
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from app.constants import REQUEST_PROFILE_KEYS
 from app.models.crawl_extraction_method import CrawlExtractionMethod
 from app.models.crawl_policy_limits import CrawlPolicyLimits
 from app.models.crawl_strategy import CrawlStrategy
 from app.models.credential import Credential
 from app.models.discovery_config import DiscoveryConfig
+from app.vocabulary.request_profiles import REQUEST_PROFILE_KEYS
 
 POLICY_SCHEMA_VERSION = "2026-06-23"
 
@@ -33,7 +33,7 @@ def _close_browser_profile_vocabulary(profile: dict[str, Any]) -> dict[str, Any]
     the caller got a page that loaded with nothing done and nothing said. An
     inert key and a key that worked looked identical.
 
-    The vocabulary is imported from ``app.constants`` rather than restated,
+    The vocabulary is imported from ``app.vocabulary`` rather than restated,
     because the renderer's chain recognises the same set and the two lists have
     to agree -- the shape of bug this closes. ``execute_js`` stays refused in
     BOTH places on purpose: here so a malicious payload never reaches a render,
@@ -51,7 +51,7 @@ def _close_browser_profile_vocabulary(profile: dict[str, Any]) -> dict[str, Any]
     into an HTTP 500 on every policy-bearing endpoint. A caller mistake must
     arrive as a refusal, which is the only shape the caller can act on.
     """
-    from app.constants import ALLOWED_BROWSER_ACTION_TYPES, BROWSER_PROFILE_KEYS
+    from app.vocabulary.browser import ALLOWED_BROWSER_ACTION_TYPES, BROWSER_PROFILE_KEYS
 
     if not isinstance(profile, dict):
         return profile
@@ -99,7 +99,7 @@ def _refuse_over_ceiling_knobs(profile: dict[str, Any]) -> None:
     path. This refusal exists so the caller is *told*, rather than silently
     handed a render that finished early.
     """
-    from app.constants import (
+    from app.vocabulary.limits import (
         MAX_COOKIE_HARVEST_TIMEOUT_SECONDS,
         MAX_LAZY_SCROLL_DELAY_SECONDS,
         MAX_LAZY_SCROLL_STEPS,
@@ -132,7 +132,11 @@ def _refuse_unusable_action(action: Any, index: int, allowed: str) -> None:
     passed in so this stays a check on one action rather than a place the
     vocabulary is read a second time.
     """
-    from app.constants import ACTIONS_REQUIRING_SELECTOR, ALLOWED_BROWSER_ACTION_TYPES, BROWSER_ACTION_KEYS
+    from app.vocabulary.browser import (
+        ACTIONS_REQUIRING_SELECTOR,
+        ALLOWED_BROWSER_ACTION_TYPES,
+        BROWSER_ACTION_KEYS,
+    )
 
     if not isinstance(action, dict):
         raise ValueError("each browser_profile action must be an object with a 'type'")
@@ -226,7 +230,7 @@ def _refuse_malformed_profile_values(profile: dict[str, Any]) -> None:
     is not the thing that key means. The second was the one that had no home, so
     a malformed value reached the header builder and raised from inside it.
     """
-    from app.constants import (
+    from app.vocabulary.request_profiles import (
         MAX_COOKIE_NAMESPACE_LENGTH,
         MAX_PROFILE_COOKIE_HOSTS,
         MAX_PROFILE_COOKIE_PAIRS,

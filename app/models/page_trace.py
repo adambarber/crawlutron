@@ -6,11 +6,11 @@ from typing import Annotated
 
 from pydantic import BaseModel, Field
 
-from app.constants import CrawlClassification
 from app.models.classification_evidence import ClassificationEvidence
 from app.models.crawl_status import CrawlStatus
 from app.models.crawl_strategy import CrawlStrategy
 from app.models.strategy_attempt import StrategyAttempt
+from app.vocabulary.taxonomy import CrawlClassification
 
 
 class PageTrace(BaseModel):

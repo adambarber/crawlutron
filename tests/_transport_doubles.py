@@ -43,8 +43,8 @@ from multiprocessing.queues import Queue
 import httpx
 import pytest
 
-from app.constants import DEFAULT_MAX_CONTENT_LENGTH_BYTES
 from app.models.http_fetch_result import HttpFetchResult
+from app.vocabulary.limits import DEFAULT_MAX_CONTENT_LENGTH_BYTES
 from tests._fetch_outcome import FetchFailed, FetchOutcome
 
 _ISOLATED = multiprocessing.get_context("spawn")

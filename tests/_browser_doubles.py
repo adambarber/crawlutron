@@ -3,13 +3,13 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Any, Protocol
 
-from app.constants import ResultStatus
 from app.crawl.strategies.browser import BrowserRenderer
 from app.crawl.strategies.browser_pool import (
     BROWSER_POOL_ACQUIRE_TIMEOUT_SECONDS,
     BrowserPool,
     set_browser_pool,
 )
+from app.vocabulary.taxonomy import ResultStatus
 
 ROUTE_ARG_UNSET = object()
 

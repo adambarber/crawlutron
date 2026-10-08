@@ -11,16 +11,16 @@ import logging
 
 import pytest
 
-from app.constants import (
+from app.crawl.policy import PolicyTier, read_policy, validate_wire_policy
+from app.env import get_env_float, get_env_int, parse_bool_env
+from app.settings import CrawlerSettings
+from app.vocabulary.limits import (
     DEFAULT_HTTP_TIMEOUT_SECONDS,
     DEFAULT_MAX_RETRIES,
     MAX_HTTP_TIMEOUT_SECONDS,
     MAX_JOB_MAX_RETRIES,
     MAX_RETRIES,
 )
-from app.crawl.policy import PolicyTier, read_policy, validate_wire_policy
-from app.env import get_env_float, get_env_int, parse_bool_env
-from app.settings import CrawlerSettings
 
 
 class TestGetEnvInt:

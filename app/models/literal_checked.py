@@ -19,13 +19,13 @@ from __future__ import annotations
 
 from typing import Any
 
-from app.constants import ResultStatus, status_agrees_with_classification
 from app.models.taxonomy import (
     Classification,
     CrawlError,
     CrawlStrategyName,
     literal_members,
 )
+from app.vocabulary.taxonomy import ResultStatus, status_agrees_with_classification
 
 # Fields whose declared type is a Literal: a value that is not a member is a
 # shape lie, so the dataclasses validate them at construction. Kept here next to

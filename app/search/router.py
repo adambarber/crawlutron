@@ -5,11 +5,11 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends
 
 from app.api.dependencies import get_settings
-from app.constants import ROUTER_MODULE_DOC
 from app.models.error_response import ErrorResponse
 from app.models.search_request import SearchRequest
 from app.models.search_response import SearchResponse
 from app.search.endpoint import search as search_handler
+from app.vocabulary.identity import ROUTER_MODULE_DOC
 
 __doc__ = f"""``/v1/search`` URL→handler mapping.
 

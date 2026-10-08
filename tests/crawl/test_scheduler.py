@@ -744,8 +744,8 @@ class TestSchedulerFailureAccountingIsAboutStatuses:
     @staticmethod
     def _terminal(job: CrawlJob, classification: Classification):
         """A real terminal result, with its status derived by the real chokepoint."""
-        from app.constants import status_for_classification
         from app.crawl.result_helpers import _terminal_engine_result
+        from app.vocabulary.taxonomy import status_for_classification
 
         # Status is the outer function's own keyword, not a field of the shared
         # value: it is what the per-status constructors pin, and a
@@ -815,8 +815,8 @@ class TestSchedulerFailureAccountingIsAboutStatuses:
         """
         import typing
 
-        from app.constants import ResultStatus
         from app.scheduler import _STATUS_ACCOUNTING
+        from app.vocabulary.taxonomy import ResultStatus
 
         members = set(typing.get_args(ResultStatus))
         assert members, "ResultStatus must be a Literal to be checkable"

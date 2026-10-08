@@ -202,11 +202,11 @@ def _transience_verdict_name(target: ast.expr, value: ast.expr | None) -> str | 
 
 
 def _ad_hoc_transience_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
-    """Flag a module-level transience/retry verdict defined outside app.constants.
+    """Flag a module-level transience/retry verdict defined outside the taxonomy.
 
     A consumer asking "does this failure deserve another pass" must call
-    ``app.constants.is_transient_classification``. A local answer is a second
-    opinion, and second opinions are what made ``dns_error`` look retryable
+    ``app.vocabulary.taxonomy.is_transient_classification``. A local answer is a
+    second opinion, and second opinions are what made ``dns_error`` look retryable
     while ``connection_error`` -- the label every transport failure actually
     gets -- did not.
     """
@@ -221,7 +221,7 @@ TRANSIENCE_VERDICT_HAS_ONE_HOME = Rule(
     name="transience-verdict-has-one-home",
     find=_ad_hoc_transience_offenders,
     summary=(
-        "app.constants.is_transient_classification is the single answer for "
+        "app.vocabulary.taxonomy.is_transient_classification is the single answer for "
         "'is this failure worth another pass'"
     ),
     excludes=SANCTIONED | _TRANSIENCE_HOME_SANCTIONED,
@@ -237,8 +237,8 @@ TRANSIENCE_VERDICT_HAS_ONE_HOME = Rule(
         "RETRYABLE_CLASSIFICATIONS = frozenset()\n",
         # A named alias to the taxonomy's own set is a re-export, not a second
         # opinion: that is the one legitimate spelling here.
-        "from app.constants import TRANSIENT_CLASSIFICATIONS\n",
-        "from app.constants import is_transient_classification as is_transient\n",
+        "from app.vocabulary.taxonomy import TRANSIENT_CLASSIFICATIONS\n",
+        "from app.vocabulary.taxonomy import is_transient_classification as is_transient\n",
         "TRANSIENT_CLASSIFICATIONS = TRANSIENT_CLASSIFICATIONS\n",
         # A local *budget* is not a local *answer*: MAX_TRANSIENT_REQUEUES caps
         # how many times the recursive loop may re-try, which is legitimately
@@ -250,7 +250,7 @@ TRANSIENCE_VERDICT_HAS_ONE_HOME = Rule(
 
 
 def test_transience_verdict_has_one_home():
-    """No module outside app/constants.py may hold its own transient/retry set."""
+    """No module outside app/vocabulary/taxonomy.py may hold its own transient/retry set."""
     TRANSIENCE_VERDICT_HAS_ONE_HOME.scan()
 
 
@@ -494,7 +494,7 @@ def _non_member_classification_offenders(tree, path, *, members=None):
             path,
             node,
             f"classification={value!r} is not a CrawlClassification member; "
-            r"add it to the enum (app/constants.py) or route through the classifier",
+            r"add it to the enum (app/vocabulary/taxonomy.py) or route through the classifier",
         )
         for node, _field, value in non_member_literals(
             (node, "classification", value, members)
@@ -696,7 +696,7 @@ def test_non_member_status_detector_bites():
 # --- 4e (optional): the attempt dataclass is pinned at its construction site ---
 #
 # ``CrawlStrategyName`` is now a true Literal (the strategy constants in
-# ``app/constants.py`` are ``Final``, so ``Literal["HTTP_DECLARED_CRAWLER", ...]``
+# ``app/vocabulary/strategies.py`` are ``Final``, so ``Literal["HTTP_DECLARED_CRAWLER", ...]``
 # resolves and mypy enforces the ``strategy=`` arg-type at every
 # ``CrawlStrategyAttempt`` construction site statically. That replaced the six
 # ``# type: ignore[arg-type]`` comments the producers used to carry. This
@@ -766,24 +766,29 @@ def test_crawl_strategy_attempt_detector_bites():
     CRAWL_STRATEGY_ATTEMPT_SITES_USE_REAL_MEMBERS.check_bites()
 
 
-def test_crawl_strategy_name_members_match_constants():
-    """The ``CrawlStrategyName`` Literal must not drift from ``app.constants``.
+def test_crawl_strategy_name_members_match_vocabulary():
+    """The ``CrawlStrategyName`` Literal must not drift from the vocabulary.
 
     ``CrawlStrategyName`` cannot reference the ``Final`` constants directly inside
     ``Literal[...]`` (mypy rejects that), so its members are spelled as string
-    literals. constants.py remains the single source of truth; this pins the two
-    together so a rename there cannot orphan the alias.
+    literals. ``app/vocabulary/strategies.py`` remains the single source of truth;
+    this pins the two together so a rename there cannot orphan the alias.
     """
     from typing import get_args
 
-    from app import constants
     from app.models.taxonomy import CrawlStrategyName
+    from app.vocabulary.strategies import (
+        BROWSER_HEADED_WARMED,
+        BROWSER_HEADLESS,
+        HTTP_CFFI_IMPERSONATE,
+        HTTP_DECLARED_CRAWLER,
+    )
 
     declared = {
-        constants.HTTP_DECLARED_CRAWLER,
-        constants.HTTP_CFFI_IMPERSONATE,
-        constants.BROWSER_HEADLESS,
-        constants.BROWSER_HEADED_WARMED,
+        HTTP_DECLARED_CRAWLER,
+        HTTP_CFFI_IMPERSONATE,
+        BROWSER_HEADLESS,
+        BROWSER_HEADED_WARMED,
     }
     assert set(get_args(CrawlStrategyName)) == declared
 
@@ -808,8 +813,8 @@ def test_classification_literal_covers_the_enum_exactly():
     """
     from typing import get_args
 
-    from app.constants import CrawlClassification
     from app.models.taxonomy import Classification
+    from app.vocabulary.taxonomy import CrawlClassification
 
     declared = set(get_args(Classification))
     enum = {member.value for member in CrawlClassification}

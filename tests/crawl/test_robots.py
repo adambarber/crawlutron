@@ -10,7 +10,6 @@ from unittest.mock import patch
 import pytest
 
 from app.bounded_ttl import BoundedTTLCache
-from app.constants import HTTP_DECLARED_CRAWLER, SERVICE_ID
 from app.crawl import engine as engine_mod
 from app.crawl.cache import HttpCache
 from app.crawl.engine import crawl_request
@@ -27,6 +26,8 @@ from app.crawl.strategies.fetch_policy import discovery_diagnostics
 from app.models.host_policy import HostPolicy
 from app.models.normalized_url import NormalizedUrl
 from app.settings import CrawlerSettings
+from app.vocabulary.identity import SERVICE_ID
+from app.vocabulary.strategies import HTTP_DECLARED_CRAWLER
 from tests._fetcher_factories import make_fetch, routed_fetcher
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY, canonical, crawl_policy
 from tests._timing_harnesses import cpu_seconds

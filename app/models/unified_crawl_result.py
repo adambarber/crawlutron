@@ -4,7 +4,6 @@ from typing import Annotated, Any
 
 from pydantic import BaseModel, Field
 
-from app.constants import CrawlClassification
 from app.models.classification_evidence import ClassificationEvidence
 from app.models.content_validators import ContentValidators
 from app.models.crawl_status import CrawlStatus
@@ -13,6 +12,7 @@ from app.models.discovered_link_response import DiscoveredLinkResponse
 from app.models.normalized_url import NormalizedUrl
 from app.models.page_metadata_response import PageMetadataResponse
 from app.models.strategy_attempt import StrategyAttempt
+from app.vocabulary.taxonomy import CrawlClassification
 
 
 class UnifiedCrawlResult(BaseModel):

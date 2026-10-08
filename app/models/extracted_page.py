@@ -6,9 +6,9 @@ from typing import Annotated
 
 from pydantic import BaseModel, Field
 
-from app.constants import CrawlClassification
 from app.models.crawl_status import CrawlStatus
 from app.models.normalized_url import NormalizedUrl
+from app.vocabulary.taxonomy import CrawlClassification
 
 
 class ExtractedPage(BaseModel):

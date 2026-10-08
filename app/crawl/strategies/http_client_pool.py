@@ -47,8 +47,9 @@ from typing import TYPE_CHECKING, Any, Protocol, TypeVar, cast
 import curl_cffi.requests as cffi_requests
 import httpx
 
-from app.constants import CFFI_IMPERSONATE_TARGET, DEFAULT_USER_AGENT
 from app.timeouts import Timeouts
+from app.vocabulary.identity import DEFAULT_USER_AGENT
+from app.vocabulary.strategies import CFFI_IMPERSONATE_TARGET
 
 if TYPE_CHECKING:
     from app.settings import CrawlerSettings

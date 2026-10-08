@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from enum import StrEnum
 
-from app.constants import (
+from app.vocabulary.extraction import (
     EXTRACTION_DOCUMENT,
     EXTRACTION_DOM,
     EXTRACTION_FULL,

@@ -8,14 +8,6 @@ import brotli
 import pytest
 
 from app.api.render import _render_options
-from app.constants import (
-    BROWSER_HEADLESS,
-    EXTRACTION_DOCUMENT,
-    EXTRACTION_METHOD_BINARY_NO_TEXT,
-    EXTRACTION_TRAFILATURA,
-    HTTP_DECLARED_CRAWLER,
-    status_for_classification,
-)
 from app.crawl.cache import HttpCache
 from app.crawl.document_text import format_extracted_document_text
 from app.crawl.engine import (
@@ -44,6 +36,13 @@ from app.crawl.strategies.request_profile import (
 )
 from app.settings import CrawlerSettings
 from app.validation import HostPolicy
+from app.vocabulary.extraction import (
+    EXTRACTION_DOCUMENT,
+    EXTRACTION_METHOD_BINARY_NO_TEXT,
+    EXTRACTION_TRAFILATURA,
+)
+from app.vocabulary.strategies import BROWSER_HEADLESS, HTTP_DECLARED_CRAWLER
+from app.vocabulary.taxonomy import status_for_classification
 from tests._assertions import assert_result_failed, assert_result_success
 from tests._extraction_helpers import extract_discovered_links
 from tests._fetcher_factories import (

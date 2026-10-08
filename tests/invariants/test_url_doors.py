@@ -922,8 +922,8 @@ def test_job_frontier_growth_detector_bites():
 
 
 _FILTER_NAMES = {
-    "app.constants.is_analytics_host": "is_analytics_host",
-    "app.constants.is_document_url": "is_document_url",
+    "app.vocabulary.hosts.is_analytics_host": "is_analytics_host",
+    "app.vocabulary.hosts.is_document_url": "is_document_url",
     "app.crawl.scope_match.scope_allows": "scope_allows",
 }
 
@@ -932,7 +932,7 @@ def _imported_filter_names(tree: ast.Module) -> dict[str, str]:
     aliases: dict[str, str] = {}
     for node in nodes_of(tree):
         if isinstance(node, ast.ImportFrom) and node.module in {
-            "app.constants",
+            "app.vocabulary.hosts",
             "app.crawl.scope_match",
         }:
             for imported in node.names:

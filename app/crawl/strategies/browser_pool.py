@@ -12,7 +12,6 @@ import time
 from dataclasses import replace
 from typing import Any
 
-from app.constants import BROWSER_HEADED_WARMED, BROWSER_HEADLESS
 from app.crawl.result_helpers import crawl_result_from_exception
 from app.crawl.strategies.browser import BrowserRenderer
 from app.models.browser_pool_exhausted import BrowserPoolExhaustedError
@@ -25,6 +24,7 @@ from app.resource_pressure import (
     derive_browser_pool_size as _derive_browser_pool_size,
 )
 from app.settings import CrawlerSettings
+from app.vocabulary.strategies import BROWSER_HEADED_WARMED, BROWSER_HEADLESS
 
 logger = logging.getLogger(__name__)
 

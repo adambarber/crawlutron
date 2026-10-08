@@ -166,8 +166,8 @@ class TestHttpStrategyEdges:
         assert isinstance(result, str)
 
     async def test_http_strategy_result_binary_classification(self):
-        from app.constants import EXTRACTION_METHOD_BINARY_NO_TEXT
         from app.crawl.cache import HttpCache
+        from app.vocabulary.extraction import EXTRACTION_METHOD_BINARY_NO_TEXT
 
         cache = HttpCache()
 

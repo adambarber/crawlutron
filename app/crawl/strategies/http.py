@@ -13,13 +13,6 @@ from dataclasses import dataclass, field, replace
 from typing import Any
 
 from app.classify import classify_page_with_evidence
-from app.constants import (
-    EXTRACTION_DOCUMENT,
-    EXTRACTION_METHOD_HTTP_BODY,
-    EXTRACTION_METHOD_HTTP_HTML,
-    EXTRACTION_TRAFILATURA,
-    status_for_classification,
-)
 from app.crawl.cache import HttpCache
 from app.crawl.content_cache import ContentCache
 from app.crawl.decompression import decompress_body as _decompress_body
@@ -49,6 +42,13 @@ from app.models.host_policy import HostPolicy
 from app.models.http_fetch_result import HttpFetchResult
 from app.models.normalized_url import NormalizedUrl
 from app.models.taxonomy import Classification, CrawlStrategyName
+from app.vocabulary.extraction import (
+    EXTRACTION_DOCUMENT,
+    EXTRACTION_METHOD_HTTP_BODY,
+    EXTRACTION_METHOD_HTTP_HTML,
+    EXTRACTION_TRAFILATURA,
+)
+from app.vocabulary.taxonomy import status_for_classification
 
 
 @dataclass

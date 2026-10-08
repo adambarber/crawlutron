@@ -71,7 +71,7 @@ def test_browser_knob_defaults_unchanged():
     runtime: a driver reads its knobs at construction, so there is no module
     global for a test to patch and drift behind.
     """
-    from app.constants import (
+    from app.vocabulary.limits import (
         DEFAULT_COOKIE_HARVEST_TIMEOUT_SECONDS,
         DEFAULT_LAZY_SCROLL_DELAY_SECONDS,
         DEFAULT_LAZY_SCROLL_STEPS,

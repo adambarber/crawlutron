@@ -10,7 +10,6 @@ from typing import Any, TypeVar
 
 import httpx
 
-from app.constants import ResultStatus, is_transient_classification
 from app.crawl.decompression import DecompressionError, DecompressionTooLargeError
 from app.crawl.scheduler_exceptions import _CircuitBreakerOpen
 from app.models.browser_pool_exhausted import BrowserPoolExhaustedError
@@ -18,6 +17,7 @@ from app.models.crawl_result import CrawlResult, CrawlStrategyAttempt
 from app.models.engine_crawl_result import EngineCrawlResult
 from app.models.normalized_url import NormalizedUrl
 from app.models.taxonomy import Classification, CrawlError, CrawlStrategyName
+from app.vocabulary.taxonomy import ResultStatus, is_transient_classification
 
 _JobT = TypeVar("_JobT")
 

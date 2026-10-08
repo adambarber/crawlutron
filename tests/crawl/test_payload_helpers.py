@@ -55,13 +55,13 @@ class TestPayloadPolicyCarriesAdvertisedLimits:
         # An explicit cap must not be a caller-controlled RAM/decompression
         # override: over the hard ceiling it is rejected, like max_rps, never
         # silently clamped into a different contract.
-        from app.constants import MAX_CONTENT_LENGTH_BYTES
+        from app.vocabulary.limits import MAX_CONTENT_LENGTH_BYTES
 
         with pytest.raises(ValueError):
             _normalized_policy(limits={"max_content_length_bytes": MAX_CONTENT_LENGTH_BYTES + 1})
 
     def test_max_content_length_at_ceiling_survives(self):
-        from app.constants import MAX_CONTENT_LENGTH_BYTES
+        from app.vocabulary.limits import MAX_CONTENT_LENGTH_BYTES
 
         policy = _normalized_policy(limits={"max_content_length_bytes": MAX_CONTENT_LENGTH_BYTES})
         assert policy.limits.max_content_length_bytes == MAX_CONTENT_LENGTH_BYTES
@@ -69,8 +69,8 @@ class TestPayloadPolicyCarriesAdvertisedLimits:
     def test_max_content_length_above_ceiling_is_a_validation_error(self):
         # The pydantic boundary must 422 oversized caps (le= on the model).
 
-        from app.constants import MAX_CONTENT_LENGTH_BYTES
         from app.models.crawl_policy_limits import CrawlPolicyLimits
+        from app.vocabulary.limits import MAX_CONTENT_LENGTH_BYTES
 
         with pytest.raises(ValidationError):
             CrawlPolicyLimits(max_content_length_bytes=MAX_CONTENT_LENGTH_BYTES + 1)
@@ -120,8 +120,8 @@ class TestMaxContentLengthBytesActuallyEnforced:
     async def test_crawl_enforces_explicit_content_cap(self, base_url, monkeypatch):
         # The advertised limit must bite end-to-end: normalization keeps it
         # and the fetcher fails the page with HTTP 413.
-        from app.constants import HTTP_DECLARED_CRAWLER
         from app.crawl.engine import crawl_request
+        from app.vocabulary.strategies import HTTP_DECLARED_CRAWLER
 
         monkeypatch.setenv("CRAWLUTRON_ALLOW_PRIVATE_TARGETS", "1")
         settings = CrawlerSettings.from_mapping({"CRAWLUTRON_ALLOW_PRIVATE_TARGETS": "1"})
@@ -176,7 +176,7 @@ class TestExplicitEmptyStrategiesIsRejectedNotDefaulted:
 
     def test_an_absent_strategies_key_still_gets_the_default_chain(self):
         """Rejection must not cost the documented default."""
-        from app.constants import DEFAULT_STRATEGIES
+        from app.vocabulary.strategies import DEFAULT_STRATEGIES
 
         assert [s.value for s in _normalized_policy().strategies] == DEFAULT_STRATEGIES
 

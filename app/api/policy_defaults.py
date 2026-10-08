@@ -4,12 +4,8 @@ Centralizes the default strategy chains and limit configurations
 used by both agent_hints.py and main.py documentation/examples.
 """
 
-from app.constants import (
-    BROWSER_HEADLESS,
-    EXTRACTION_DOCUMENT,
-    HTTP_CFFI_IMPERSONATE,
-    HTTP_DECLARED_CRAWLER,
-)
+from app.vocabulary.extraction import EXTRACTION_DOCUMENT
+from app.vocabulary.strategies import BROWSER_HEADLESS, HTTP_CFFI_IMPERSONATE, HTTP_DECLARED_CRAWLER
 
 BROWSER_FALLBACK_POLICY = {
     "strategies": [HTTP_DECLARED_CRAWLER, HTTP_CFFI_IMPERSONATE, BROWSER_HEADLESS],

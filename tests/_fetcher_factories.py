@@ -4,10 +4,6 @@ from collections.abc import Callable
 from typing import Any
 from urllib.parse import urlparse
 
-from app.constants import (
-    DEFAULT_MAX_CONTENT_LENGTH_BYTES,
-    HTTP_DECLARED_CRAWLER,
-)
 from app.crawl.cache import HttpCache
 from app.crawl.content_cache import ContentCache
 from app.crawl.engine import crawl_request
@@ -19,6 +15,8 @@ from app.models.host_policy import HostPolicy
 from app.models.http_fetch_result import HttpFetchResult
 from app.models.normalized_url import NormalizedUrl
 from app.models.taxonomy import CrawlStrategyName
+from app.vocabulary.limits import DEFAULT_MAX_CONTENT_LENGTH_BYTES
+from app.vocabulary.strategies import HTTP_DECLARED_CRAWLER
 from tests._browser_doubles import _fake_browser
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY, canonical
 

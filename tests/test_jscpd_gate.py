@@ -972,7 +972,7 @@ def test_a_fragment_of_imports_alone_is_a_shared_vocabulary_not_a_clone() -> Non
     reported clones forever -- the one shape of duplication that carrying no
     information about where a chokepoint is missing.
     """
-    imports = """from app.constants import ResultStatus
+    imports = """from app.vocabulary.taxonomy import ResultStatus
 from app.models.crawl_job import CrawlJob
 from app.models.crawl_result import CrawlResult
 from app.models.crawl_worker import CrawlWorker
@@ -987,7 +987,7 @@ def test_one_line_of_code_between_two_import_runs_keeps_the_pair_under_judgement
     code, so a fragment that mixes an import run with a body is exactly the
     case that must stay visible -- including when the body is only a signature.
     """
-    fragment = """from app.constants import ResultStatus
+    fragment = """from app.vocabulary.taxonomy import ResultStatus
 from app.models.crawl_result import CrawlResult
 
 

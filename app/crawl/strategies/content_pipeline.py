@@ -25,12 +25,6 @@ import asyncio
 from dataclasses import dataclass
 from typing import Any
 
-from app.constants import (
-    EXTRACTION_DOCUMENT,
-    EXTRACTION_METHOD_DOCUMENT,
-    EXTRACTION_METHOD_TRAFILATURA,
-    EXTRACTION_TRAFILATURA,
-)
 from app.crawl.extraction import (
     Selectors,
     extract_content,
@@ -46,6 +40,12 @@ from app.models.host_policy import HostPolicy
 from app.models.normalized_url import NormalizedUrl
 from app.models.taxonomy import CrawlError
 from app.validation import filter_js_endpoints
+from app.vocabulary.extraction import (
+    EXTRACTION_DOCUMENT,
+    EXTRACTION_METHOD_DOCUMENT,
+    EXTRACTION_METHOD_TRAFILATURA,
+    EXTRACTION_TRAFILATURA,
+)
 
 
 @dataclass(frozen=True)

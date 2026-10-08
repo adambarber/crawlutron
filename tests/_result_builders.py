@@ -2,7 +2,6 @@ from dataclasses import replace
 from typing import Any
 from urllib.parse import urljoin
 
-from app.constants import HTTP_DECLARED_CRAWLER, ResultStatus
 from app.crawl.result_helpers import terminal_attempt
 from app.models.crawl_job import CrawlJob
 from app.models.crawl_result import CrawlResult, CrawlStrategyAttempt
@@ -12,6 +11,8 @@ from app.models.normalized_url import NormalizedUrl, admit_or_none
 from app.models.registrable_domain import registrable_domain
 from app.models.render_options import RenderOptions
 from app.models.taxonomy import Classification, CrawlError, CrawlStrategyName
+from app.vocabulary.strategies import HTTP_DECLARED_CRAWLER
+from app.vocabulary.taxonomy import ResultStatus
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY, canonical
 
 
@@ -83,7 +84,7 @@ def engine_result(
     ``EngineCrawlResult`` exists and it always records one, so ``[]`` was a shape
     no runtime result has -- and nothing type-checks emptiness, so it survived.
     """
-    from app.constants import status_for_classification
+    from app.vocabulary.taxonomy import status_for_classification
 
     if "discovered_link_count" in overrides:
         raise TypeError("discovered_link_count is derived from discovered_links; pass only the links")

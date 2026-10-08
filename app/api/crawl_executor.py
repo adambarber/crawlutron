@@ -12,13 +12,13 @@ import asyncio
 from typing import Any
 
 from app.api.exceptions import browser_pool_unavailable
-from app.constants import BROWSER_STRATEGIES
 from app.crawl.engine import crawl_request
 from app.crawl.policy import read_policy
 from app.crawl.result_record import ProducerEnvelope
 from app.crawl.strategies.browser_pool import PooledBrowserWorker, get_browser_pool
 from app.models.host_policy import HostPolicy
 from app.settings import CrawlerSettings
+from app.vocabulary.strategies import BROWSER_STRATEGIES
 
 
 def _request_needs_browser(payload_dict: dict) -> bool:

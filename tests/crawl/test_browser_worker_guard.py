@@ -4,9 +4,9 @@ from collections import deque
 
 import pytest
 
-from app.constants import BROWSER_HEADLESS
 from app.crawl.strategies.browser import BrowserRenderer
 from app.crawl.strategies.browser_pool import BrowserPool, BrowserPoolExhaustedError
+from app.vocabulary.strategies import BROWSER_HEADLESS
 from tests._assertions import assert_result_failed
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY, canonical, crawl_policy
 

@@ -10,8 +10,8 @@ sites' contracts so the collapse is provably behavior-preserving.
 import gzip
 from dataclasses import dataclass, field
 
-from app.constants import DISCOVERY_BODY_MAX_BYTES
 from app.crawl.fetch_helpers import _fetch_decode_discovery, _fetch_text, fetch_and_decode
+from app.vocabulary.limits import DISCOVERY_BODY_MAX_BYTES
 
 
 class _FakeResp:

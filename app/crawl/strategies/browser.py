@@ -29,15 +29,6 @@ if TYPE_CHECKING:
 
 
 from app.classify import classify_page
-from app.constants import (
-    DEFAULT_CHALLENGE_WAIT_SECONDS,
-    DEFAULT_MAX_CONCURRENT_PAGES,
-    ResultStatus,
-    status_for_classification,
-)
-from app.constants import (
-    is_analytics_host as _is_analytics_url,
-)
 from app.crawl.result_helpers import classify_error_code, terminal_attempt, terminal_crawl_result
 from app.crawl.strategies.browser_driver import BrowserDriver, async_sleep
 from app.crawl.strategies.document import _default_document_text_extractor
@@ -54,6 +45,9 @@ from app.models.normalized_url import NormalizedUrl
 from app.models.render_options import RenderOptions
 from app.models.taxonomy import Classification, CrawlError
 from app.settings import CrawlerSettings
+from app.vocabulary.hosts import is_analytics_host as _is_analytics_url
+from app.vocabulary.limits import DEFAULT_CHALLENGE_WAIT_SECONDS, DEFAULT_MAX_CONCURRENT_PAGES
+from app.vocabulary.taxonomy import ResultStatus, status_for_classification
 
 logger = logging.getLogger(__name__)
 
@@ -111,7 +105,7 @@ def _is_ssrf_blocked(url: str, *, policy: HostPolicy) -> bool:
 # document/script/xhr/stylesheet to extract content.
 # Tracking/analytics hosts: never fetch them -- they return no crawlable
 # content and only add network load. The canonical list lives in
-# app.constants (single source of truth) so the engine can also refuse to
+# app.vocabulary.hosts (single source of truth) so the engine can also refuse to
 # enqueue these hosts as jobs.
 _REDUCED_BLOCK_RESOURCE_TYPES = frozenset({"image", "font", "media"})
 
@@ -252,12 +246,12 @@ def make_ssrf_websocket_handler(*, policy: HostPolicy):
     return _ws_handler
 
 
-# The blocked/failed label groups live in app.constants now, alongside the
+# The blocked/failed label groups live in app.vocabulary.taxonomy now, alongside the
 # classification -> status table both strategies share, so the HTTP and browser
 # paths cannot disagree about a label again. Importers use the constants
 # directly, exactly like the LAZY_SCROLL_* aliases below.
 
-# Canonical defaults live in app.constants (single source of truth); these
+# Canonical defaults live in app.vocabulary.limits (single source of truth); these
 # module names stay as the settings-less fallback so existing references
 # (including the test-suite scroll disabler) keep working with identical values.
 _BROWSER_COOKIES_MAX = 500
@@ -371,7 +365,7 @@ class BrowserRenderer:
         self._sleep = sleep
         # Prefer the passed policy limit, then the centralized settings field,
         # then the raw env var (falling back to the canonical default). This
-        # keeps the default in one place (app.constants) instead of a bare
+        # keeps the default in one place (app.vocabulary.limits) instead of a bare
         # literal here.
         if challenge_wait_seconds is None:
             if settings is not None:
@@ -446,7 +440,7 @@ class BrowserRenderer:
         """Resolved warmup URLs for this renderer's browser profile.
 
         The headed-warmed strategy profile is the one carrying warmup URLs (see
-        ``app.constants.BROWSER_STRATEGIES``); exposing the resolved list lets
+        ``app.vocabulary.strategies.BROWSER_STRATEGIES``); exposing the resolved list lets
         the browser pool label its renders with the real browser mode instead
         of inventing a strategy name on a failure path.
         """

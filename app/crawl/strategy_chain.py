@@ -6,13 +6,6 @@ from collections.abc import Iterable
 from dataclasses import dataclass, replace
 from typing import Any, cast, get_args
 
-from app.constants import (
-    BROWSER_BLOCKED_CLASSIFICATIONS,
-    BROWSER_STRATEGIES,
-    HTTP_BLOCKED_CLASSIFICATIONS,
-    HTTP_CFFI_IMPERSONATE,
-    HTTP_STRATEGIES,
-)
 from app.crawl.result_helpers import TerminalResult, _failed_engine_result, engine_result_from_exception
 from app.crawl.strategies.browser_result import browser_strategy_result
 from app.crawl.strategies.http import http_strategy_result
@@ -27,6 +20,8 @@ from app.models.http_fetcher import HttpFetcher
 from app.models.normalized_url import NormalizedUrl
 from app.models.taxonomy import Classification, CrawlError, CrawlStrategyName
 from app.scheduler import DomainScheduler
+from app.vocabulary.strategies import BROWSER_STRATEGIES, HTTP_CFFI_IMPERSONATE, HTTP_STRATEGIES
+from app.vocabulary.taxonomy import BROWSER_BLOCKED_CLASSIFICATIONS, HTTP_BLOCKED_CLASSIFICATIONS
 
 BLOCKED_CLASSIFICATIONS = HTTP_BLOCKED_CLASSIFICATIONS | BROWSER_BLOCKED_CLASSIFICATIONS
 

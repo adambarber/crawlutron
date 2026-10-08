@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from enum import StrEnum
 
-from app.constants import (
+from app.vocabulary.strategies import (
     BROWSER_HEADED_WARMED,
     BROWSER_HEADLESS,
     HTTP_CFFI_IMPERSONATE,

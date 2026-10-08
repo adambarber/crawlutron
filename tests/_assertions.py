@@ -96,7 +96,7 @@ def assert_result_failed(result, classification: str) -> None:
     here instead of being asserted into "failed" by a test that copied the
     string.
     """
-    from app.constants import status_for_classification
+    from app.vocabulary.taxonomy import status_for_classification
 
     assert _field(result, "classification") == classification
     assert _field(result, "status") == status_for_classification(classification)

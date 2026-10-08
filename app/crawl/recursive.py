@@ -16,7 +16,6 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field, replace
 from typing import Any, cast
 
-from app.constants import ENGINE_BATCH_CONCURRENCY_MULTIPLIER, is_transient_classification
 from app.crawl.admission import (
     AdmittedLink,
     admit_discovered_links,
@@ -31,6 +30,8 @@ from app.models.normalized_url import NormalizedUrl
 from app.resource_pressure import ResourceGate, WeightedAdmission, default_admission_policy
 from app.safe_regex import BoundedPattern
 from app.scheduler import DomainScheduler
+from app.vocabulary.limits import ENGINE_BATCH_CONCURRENCY_MULTIPLIER
+from app.vocabulary.taxonomy import is_transient_classification
 
 # A transiently-failed URL is not a dead page: our fetch died, or capacity was
 # the problem, so the page itself is still worth having. The recursive loop
@@ -39,7 +40,7 @@ from app.scheduler import DomainScheduler
 # cap stops a permanently unreachable host from spinning one URL forever: after
 # this many re-queues the URL fails for real and the crawl degrades instead of
 # livelocking. Which failures qualify is the taxonomy's call, not a local list
-# -- see ``app.constants.is_transient_classification``.
+# -- see ``app.vocabulary.taxonomy.is_transient_classification``.
 MAX_TRANSIENT_REQUEUES = 3
 
 
@@ -69,7 +70,7 @@ def requeue_transient(
     many times it has already been re-queued and is mutated in place.
 
     Whether a classification is transient at all is the taxonomy's call (see
-    ``app.constants.is_transient_classification``); this function owns only the
+    ``app.vocabulary.taxonomy.is_transient_classification``); this function owns only the
     bound, so the cap cannot be sidestepped by a caller re-queueing for its own
     reason.
     """

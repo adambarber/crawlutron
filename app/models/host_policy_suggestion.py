@@ -6,8 +6,8 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, Field
 
-from app.constants import CrawlClassification
 from app.models.classification_evidence import ClassificationEvidence
+from app.vocabulary.taxonomy import CrawlClassification
 
 CandidateRule = Literal["denied_hosts"]
 """The host policy rules evidence can support.

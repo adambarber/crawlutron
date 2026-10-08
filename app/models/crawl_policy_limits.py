@@ -4,7 +4,7 @@ from typing import Annotated
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.constants import (
+from app.vocabulary.limits import (
     DEFAULT_CHALLENGE_WAIT_SECONDS,
     DEFAULT_HTTP_TIMEOUT_SECONDS,
     DEFAULT_MAX_DISCOVERED_LINKS,

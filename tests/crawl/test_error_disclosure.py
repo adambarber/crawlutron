@@ -203,7 +203,7 @@ class TestEmittedErrorCodesAreValidClassifications:
         URL eligible for re-crawl as if it were an unclassified block, and it
         disagrees with the ``failed`` status the strategy already reported.
         """
-        from app.constants import CLASSIFICATION_STATUS_BY_LABEL, status_for_classification
+        from app.vocabulary.taxonomy import CLASSIFICATION_STATUS_BY_LABEL, status_for_classification
 
         for code in _NEW_ERROR_CODES:
             assert code in CLASSIFICATION_STATUS_BY_LABEL, (

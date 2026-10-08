@@ -21,7 +21,6 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, TypeVar
 
-from app.constants import CrawlClassification
 from app.crawl.llm_format import (
     PageMetadata as ExtractedPageMetadata,
 )
@@ -44,6 +43,7 @@ from app.models.strategy_attempt import StrategyAttempt
 from app.models.taxonomy import CrawlStrategyName
 from app.models.unified_crawl_response import UnifiedCrawlResponse
 from app.models.unified_crawl_result import UnifiedCrawlResult
+from app.vocabulary.taxonomy import CrawlClassification
 
 _logger = logging.getLogger(__name__)
 

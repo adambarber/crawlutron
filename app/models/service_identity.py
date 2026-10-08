@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from typing import Final
 
-from app.constants import SERVICE_ID, SERVICE_VERSION
 from app.models.crawl_policy import POLICY_SCHEMA_VERSION
+from app.vocabulary.identity import SERVICE_ID, SERVICE_VERSION
 
 #: The identity block every discovery response opens with. Two payloads were
 #: spelling the same three keys, and a top-level key reaching one endpoint and not

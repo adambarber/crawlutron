@@ -10,7 +10,6 @@ import pytest
 import app.crawl.extraction as ext_mod
 import app.crawl.extraction as extraction
 import app.crawl.extraction as extraction_mod
-from app.constants import DEFAULT_EXTRACTION_MAX_MARKDOWN
 from app.crawl.doc_pool import DocExtractionPool, doc_task_hooks
 from app.crawl.extraction import (
     ExtractedContent,
@@ -26,6 +25,7 @@ from app.crawl.extraction import (
     text_from_html,
 )
 from app.env import parse_bool_env
+from app.vocabulary.limits import DEFAULT_EXTRACTION_MAX_MARKDOWN
 from tests._assertions import set_optional_env
 from tests._extraction_helpers import (
     detect_pagination,

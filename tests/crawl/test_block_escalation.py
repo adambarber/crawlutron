@@ -4,10 +4,7 @@ successful result; the engine must try the next strategy in the chain
 
 import pytest
 
-from app.constants import (
-    HTTP_CFFI_IMPERSONATE,
-    HTTP_DECLARED_CRAWLER,
-)
+from app.vocabulary.strategies import HTTP_CFFI_IMPERSONATE, HTTP_DECLARED_CRAWLER
 from tests._assertions import assert_result_success
 from tests._fetcher_factories import run_chain, scripted_fetcher, sequenced_fetcher
 

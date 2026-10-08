@@ -16,16 +16,16 @@ import pytest
 from httpx import AsyncClient
 from pydantic import BaseModel, ValidationError
 
-from app.constants import (
+from app.models.crawl_policy import MAX_BROWSER_ACTIONS
+from app.models.crawl_request import CrawlRequest
+from app.models.crawl_strategy import CrawlStrategy
+from app.models.render_request import RenderRequest
+from app.vocabulary.browser import (
     ACTIONS_REQUIRING_SELECTOR,
     ALLOWED_BROWSER_ACTION_TYPES,
     BROWSER_ACTION_TYPES,
     BROWSER_PROFILE_KEYS,
 )
-from app.models.crawl_policy import MAX_BROWSER_ACTIONS
-from app.models.crawl_request import CrawlRequest
-from app.models.crawl_strategy import CrawlStrategy
-from app.models.render_request import RenderRequest
 from tests._app_factory import service_app
 from tests.chokepoint_walks import APP_ROOT
 
@@ -432,7 +432,7 @@ class TestBrowserProfileVocabularyIsClosed:
         A type in the model but not the renderer is the worst pairing: accepted
         at the boundary, then silently skipped at the point of use.
         """
-        from app.constants import ALLOWED_BROWSER_ACTION_TYPES
+        from app.vocabulary.browser import ALLOWED_BROWSER_ACTION_TYPES
 
         assert set(self.ALLOWED) == set(ALLOWED_BROWSER_ACTION_TYPES)
 
@@ -621,7 +621,7 @@ class TestTheRendererAgreesWithTheVocabulary:
 
     The closure refuses an action type the renderer does not implement, so the
     two are one decision that happens to be written twice: once as a table in
-    ``app.constants`` and once as an if/elif chain in the renderer. The previous
+    ``app.vocabulary.browser`` and once as an if/elif chain in the renderer. The previous
     guard compared the table to a tuple written in this test file, so it was a
     third copy that could not see the chain at all -- adding a member to the
     table without adding an ``elif`` reproduced the exact defect the closure
@@ -977,7 +977,7 @@ class TestBrowserActionKeysAreClosed:
         """
         import ast
 
-        from app.constants import BROWSER_ACTION_KEYS
+        from app.vocabulary.browser import BROWSER_ACTION_KEYS
         from tests.chokepoint_walks import STRATEGIES_DIR, attribute_calls, string_argument
 
         source = (STRATEGIES_DIR / "browser_driver.py").read_text()
@@ -1079,12 +1079,12 @@ class TestCallerKnobsBehindClosedKeysAreCeilinged:
         ``_profile_int`` with no ceiling, whose contract is deliberately to pass a
         value through.
         """
-        from app.constants import (
+        from app.crawl.strategies.browser_driver import BrowserDriver
+        from app.vocabulary.limits import (
             MAX_COOKIE_HARVEST_TIMEOUT_SECONDS,
             MAX_LAZY_SCROLL_DELAY_SECONDS,
             MAX_LAZY_SCROLL_STEPS,
         )
-        from app.crawl.strategies.browser_driver import BrowserDriver
 
         driver = BrowserDriver(
             lazy_scroll_steps=3, lazy_scroll_delay_seconds=0.5, harvest_timeout_seconds=2.0

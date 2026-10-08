@@ -2,14 +2,10 @@
 
 from __future__ import annotations
 
-from app.constants import (
-    BROWSER_HEADLESS,
-    HTTP_CFFI_IMPERSONATE,
-    HTTP_DECLARED_CRAWLER,
-)
 from app.crawl.strategy_chain import _starting_strategies
 from app.models.crawl_strategy import CrawlStrategy
 from app.scheduler import DomainScheduler
+from app.vocabulary.strategies import BROWSER_HEADLESS, HTTP_CFFI_IMPERSONATE, HTTP_DECLARED_CRAWLER
 
 # The policy ladder as the enum members `_starting_strategies` validates, not as
 # the bare name strings. It takes `Iterable[CrawlStrategy]` because it calls

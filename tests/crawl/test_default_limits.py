@@ -23,9 +23,9 @@ def test_default_max_content_length_is_none_so_ram_scaling_stays_live():
 
 def test_engine_fallback_limit_matches():
     sys.path.insert(0, str(_APP_ROOT))
-    from app.constants import DEFAULT_MAX_CONTENT_LENGTH_BYTES
+    from app.vocabulary.limits import DEFAULT_MAX_CONTENT_LENGTH_BYTES
 
-    # The 10MB default lives in ONE place (app.constants) and is referenced by
+    # The 10MB default lives in ONE place (app.vocabulary.limits) and is referenced by
     # the http strategy instead of being hard-coded a second time.
     assert DEFAULT_MAX_CONTENT_LENGTH_BYTES == 10 * 1024 * 1024
     src = (_APP_ROOT / "app/crawl/strategies/content_cache_key.py").read_text()

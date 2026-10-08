@@ -247,7 +247,7 @@ _EXTRACTION_CONSTANT_PREFIXES = ("EXTRACTION_METHOD_", "EXTRACTION_")
 # Which field each namespace must never feed. Extraction-method constants are
 # provenance labels for how bytes were parsed; the classification field is a
 # page outcome. The two axes are orthogonal by design (see
-# app/constants.py: "These are output-pipeline options, strictly orthogonal to
+# app/vocabulary/extraction.py: "These are output-pipeline options, strictly orthogonal to
 # fetch strategies"), and the historical defect was exactly their collision.
 _NAMESPACE_FIELD_BANS: dict[tuple[str, ...], str] = {
     _EXTRACTION_CONSTANT_PREFIXES: "classification",

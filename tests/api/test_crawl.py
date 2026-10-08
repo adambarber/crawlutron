@@ -8,8 +8,8 @@ import pytest
 from fastapi import Request
 from fastapi.exceptions import RequestValidationError
 
-from app.constants import HTTP_DECLARED_CRAWLER
 from app.models.crawl_policy import CrawlPolicy
+from app.vocabulary.strategies import HTTP_DECLARED_CRAWLER
 from tests._assertions import (
     accepted_crawl,
     assert_pool_unavailable,
@@ -272,9 +272,9 @@ class TestDiscoveryAndRenderApi:
         # browser_pool_exhausted classification off the result -- and not
         # through the incidental route the old raising fake exploited.
         import app.api.render_endpoint as render_endpoint
-        from app.constants import BROWSER_HEADLESS
         from app.crawl.result_helpers import crawl_result_from_exception
         from app.crawl.strategies.browser_pool import BrowserPoolExhaustedError
+        from app.vocabulary.strategies import BROWSER_HEADLESS
 
         class _ExhaustedWorker:
             def __init__(self, pool):
@@ -399,7 +399,7 @@ class TestDiscoveryAndRenderApi:
         render. The adapter used to hard-code ``BROWSER_HEADLESS`` for every
         result while a warmed pool serves ``BROWSER_HEADED_WARMED`` -- the two
         endpoints then disagreed about the provenance of the same render."""
-        from app.constants import BROWSER_HEADED_WARMED
+        from app.vocabulary.strategies import BROWSER_HEADED_WARMED
 
         item = await self._render_result(monkeypatch, ["https://warmup.example/"])
         assert item["selected_strategy"] == BROWSER_HEADED_WARMED, item
@@ -408,7 +408,7 @@ class TestDiscoveryAndRenderApi:
     async def test_v1_render_reports_headless_without_warmup(self, monkeypatch):
         """Inverse case: a plain headless pool still labels its own mode, not the
         warmed member."""
-        from app.constants import BROWSER_HEADLESS
+        from app.vocabulary.strategies import BROWSER_HEADLESS
 
         item = await self._render_result(monkeypatch, [])
         assert item["selected_strategy"] == BROWSER_HEADLESS, item

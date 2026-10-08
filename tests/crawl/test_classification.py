@@ -6,26 +6,26 @@ import re
 
 import pytest
 
-from app import constants as app_constants
 from app.classify import (
     CLASSIFICATION_SIGNATURES,
     STRONG_CLASSIFICATION_MARKERS,
     classify_page,
     classify_page_with_evidence,
 )
-from app.constants import (
+from app.crawl.result_helpers import TerminalResult
+from app.crawl.strategies import browser as browser_mod
+from app.crawl.strategies import http as http_mod
+from app.crawl.strategies.browser import BrowserRenderer
+from app.vocabulary.taxonomy import (
     BROWSER_BLOCKED_CLASSIFICATIONS,
     CLASSIFICATION_STATUS_BY_LABEL,
     FAILED_CLASSIFICATIONS,
     HTTP_BLOCKED_CLASSIFICATIONS,
     NON_TRANSIENT_CLASSIFICATIONS,
+    UNKNOWN_CLASSIFICATION_STATUS,
     CrawlClassification,
     status_for_classification,
 )
-from app.crawl.result_helpers import TerminalResult
-from app.crawl.strategies import browser as browser_mod
-from app.crawl.strategies import http as http_mod
-from app.crawl.strategies.browser import BrowserRenderer
 from tests._result_builders import skipped_result
 from tests._timing_harnesses import cpu_seconds
 from tests.chokepoint_walks import app_trees, nodes_of
@@ -96,7 +96,7 @@ def test_the_status_resolver_is_defined_once_not_per_strategy():
     """Drift guard: no strategy module may reintroduce its own resolver.
 
     The historical defect was two independent if-chains. Both call sites now
-    import ``status_for_classification`` from ``app.constants``, and a new
+    import ``status_for_classification`` from ``app.vocabulary.taxonomy``, and a new
     per-module copy here is exactly the regression this pins.
     """
     for module in (http_mod, browser_mod):
@@ -113,7 +113,7 @@ def test_the_status_resolver_is_defined_once_not_per_strategy():
     for module in (http_mod, browser_mod):
         source = inspect.getsource(module)
         assert "status_for_classification" in source, (
-            f"{module.__name__} no longer resolves classifications through the shared app.constants table"
+            f"{module.__name__} no longer resolves classifications through the shared vocabulary table"
         )
         assert not re.search(r"def\s+\w*status_for\w*\s*\(", source), (
             f"{module.__name__} defined its own status resolver instead of importing one"
@@ -139,7 +139,7 @@ def test_the_status_resolver_is_defined_once_not_per_strategy():
 #    the same new label had to be added there by hand and nothing failed when it
 #    was not. A frozenset missing a member is still a valid frozenset.
 #
-# The walk is tree-wide over app/ rather than scoped to ``app/constants.py``: a
+# The walk is tree-wide over app/ rather than scoped to ``app/vocabulary``: a
 # grouping declared in a second module is the same drift at a different address,
 # and a check that reads one file cannot see it.
 _GROUPING_ASSIGNMENTS = frozenset(
@@ -300,7 +300,7 @@ def test_the_grouping_relations_still_hold():
 
     Deriving the groupings is only safe if the sets are still the same sets.
     These are the properties the hand-written transcriptions were carrying, and
-    they are what a refactor of ``app/constants.py`` could silently break.
+    they are what a refactor of ``app/vocabulary`` could silently break.
     """
     entire = {member.value for member in CrawlClassification}
     assert BROWSER_BLOCKED_CLASSIFICATIONS <= HTTP_BLOCKED_CLASSIFICATIONS
@@ -319,7 +319,7 @@ def test_every_classifiable_label_is_an_explicit_table_entry():
     first place (an unlisted label silently took whichever default the local
     copy happened to use).
     """
-    table = app_constants.CLASSIFICATION_STATUS_BY_LABEL
+    table = CLASSIFICATION_STATUS_BY_LABEL
     missing = [label for label in _classifiable_labels() if label not in table]
     assert not missing, f"classifications with no explicit status entry: {missing}"
 
@@ -336,8 +336,8 @@ def test_every_classifiable_label_resolves_through_the_table(browser_resolver):
     labels += sorted(HTTP_BLOCKED_CLASSIFICATIONS | BROWSER_BLOCKED_CLASSIFICATIONS)
     labels += list(UNRECOGNIZED_LABELS)
     for label in labels:
-        expected = app_constants.CLASSIFICATION_STATUS_BY_LABEL.get(
-            label, app_constants.UNKNOWN_CLASSIFICATION_STATUS
+        expected = CLASSIFICATION_STATUS_BY_LABEL.get(
+            label, UNKNOWN_CLASSIFICATION_STATUS
         )
         assert status_for_classification(label) == expected
         assert browser_resolver(label) == expected
@@ -347,7 +347,7 @@ def test_unknown_classification_has_one_documented_default(browser_resolver):
     """A label nobody knows about must resolve to the documented default."""
     for label in UNRECOGNIZED_LABELS:
         status = status_for_classification(label)
-        assert status == browser_resolver(label) == app_constants.UNKNOWN_CLASSIFICATION_STATUS
+        assert status == browser_resolver(label) == UNKNOWN_CLASSIFICATION_STATUS
         # The safe default may never be "success": an unrecognized label has
         # not produced verified content.
         assert status != "success"
@@ -359,7 +359,7 @@ def test_known_group_statuses_are_unchanged(browser_resolver):
     assert browser_resolver("rendered") == "success"
     # Conditional freshness is a success: the caller's validators proved it.
     assert status_for_classification("not_modified") == "success"
-    assert app_constants.status_for_classification("not_modified") == "success"
+    assert status_for_classification("not_modified") == "success"
     for classification in BROWSER_BLOCKED_CLASSIFICATIONS:
         assert browser_resolver(classification) == "blocked"
     for classification in HTTP_BLOCKED_CLASSIFICATIONS:
@@ -371,13 +371,13 @@ def test_known_group_statuses_are_unchanged(browser_resolver):
 
 class TestStatusForClassification:
     def test_http_status_not_found(self):
-        from app.constants import status_for_classification
+        from app.vocabulary.taxonomy import status_for_classification
 
         status = status_for_classification("not_found")
         assert status == "failed"
 
     def test_http_status_site_error(self):
-        from app.constants import status_for_classification
+        from app.vocabulary.taxonomy import status_for_classification
 
         status = status_for_classification("site_error")
         assert status == "failed"
@@ -528,7 +528,7 @@ def test_every_table_status_is_a_declared_result_status():
     invented status would be silently coerced to ``failed`` at shaping."""
     import typing
 
-    from app.constants import ResultStatus
+    from app.vocabulary.taxonomy import ResultStatus
 
     declared = set(typing.get_args(ResultStatus))
     bad = {
@@ -559,8 +559,8 @@ class TestStatusAgreesWithClassification:
         ],
     )
     def test_exception_chokepoint_status_matches_the_table(self, classification):
-        from app.constants import status_for_classification
         from app.crawl.result_helpers import engine_result_from_exception
+        from app.vocabulary.taxonomy import status_for_classification
 
         result = engine_result_from_exception(
             error=ConnectionError("boom"),
@@ -572,7 +572,7 @@ class TestStatusAgreesWithClassification:
         assert result.status == status_for_classification(classification) == "failed"
 
     def test_robots_disallowed_builder_status_matches_the_table(self):
-        from app.constants import status_for_classification
+        from app.vocabulary.taxonomy import status_for_classification
 
         result = skipped_result(
             "http://example.com/",
@@ -584,8 +584,8 @@ class TestStatusAgreesWithClassification:
 
     def test_browser_retry_exhausted_status_matches_the_table(self):
         """The browser retry loop's terminal verdict for a navigation timeout."""
-        from app.constants import status_for_classification
         from app.crawl.result_helpers import terminal_crawl_result
+        from app.vocabulary.taxonomy import status_for_classification
 
         result = terminal_crawl_result(
             url="http://example.com/",
@@ -601,7 +601,7 @@ class TestStatusAgreesWithClassification:
     def test_taxonomy_allows_the_documented_context_varying_status(self):
         """``unknown_error`` legitimately also pairs with ``retry_exhausted``:
         the browser retry loop's verdict describes the attempt, not the page."""
-        from app.constants import status_agrees_with_classification, status_for_classification
+        from app.vocabulary.taxonomy import status_agrees_with_classification, status_for_classification
 
         assert status_for_classification("unknown_error") == "failed"
         assert status_agrees_with_classification("unknown_error", "failed")
@@ -703,8 +703,8 @@ def test_wire_classification_literal_matches_the_enum():
     """
     import typing
 
-    from app.constants import CrawlClassification
     from app.models.taxonomy import Classification
+    from app.vocabulary.taxonomy import CrawlClassification
 
     args = typing.get_args(Classification)
     enum_values = {m.value for m in CrawlClassification}

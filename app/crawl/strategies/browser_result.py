@@ -4,9 +4,6 @@ from __future__ import annotations
 
 from typing import Any
 
-from app.constants import (
-    EXTRACTION_METHOD_DOM_TEXT,
-)
 from app.crawl.render_options import resolve_render_options
 from app.crawl.result_helpers import build_engine_result
 from app.crawl.strategies.body_decode import quality_score
@@ -28,6 +25,7 @@ from app.models.host_policy import HostPolicy
 from app.models.normalized_url import NormalizedUrl
 from app.models.render_options import RenderOptions
 from app.models.taxonomy import CrawlStrategyName
+from app.vocabulary.extraction import EXTRACTION_METHOD_DOM_TEXT
 
 
 def _browser_options(policy: CrawlPolicy) -> RenderOptions:

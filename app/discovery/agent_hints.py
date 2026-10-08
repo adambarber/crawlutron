@@ -5,16 +5,13 @@ from typing import Any
 from fastapi import APIRouter
 
 from app.api.policy_defaults import BROWSER_FALLBACK_POLICY, DOCUMENT_EXTRACTION_POLICY
-from app.constants import (
-    CFFI_IMPERSONATE_TARGET,
-    EXTRACTION_TRAFILATURA,
-    HTTP_DECLARED_CRAWLER,
-    LARGE_CRAWL_GUIDANCE,
-    SERVICE_ID,
-)
 from app.models.agent_hints_response import AgentHintsResponse
 from app.models.crawl_extraction_method import CrawlExtractionMethod
 from app.models.crawl_strategy import CrawlStrategy
+from app.vocabulary.extraction import EXTRACTION_TRAFILATURA
+from app.vocabulary.identity import SERVICE_ID
+from app.vocabulary.limits import LARGE_CRAWL_GUIDANCE
+from app.vocabulary.strategies import CFFI_IMPERSONATE_TARGET, HTTP_DECLARED_CRAWLER
 
 STRATEGY_DESCRIPTIONS = {
     CrawlStrategy.HTTP_DECLARED_CRAWLER: "Direct HTTP using a transparent crawler user agent and caller-approved headers.",  # noqa: E501

@@ -19,7 +19,6 @@ from __future__ import annotations
 import logging
 
 from app.api.dependencies import ResultStoreDep, SettingsDep
-from app.constants import CrawlClassification
 from app.models.classification_evidence import ClassificationEvidence
 from app.models.crawl_status import CrawlStatus
 from app.models.host_policy import HostPolicy
@@ -27,6 +26,7 @@ from app.models.host_policy_suggestion import CandidateRule, HostPolicySuggestio
 from app.models.normalized_url import admit_or_none
 from app.models.policy_suggestions_response import PolicySuggestionsResponse
 from app.models.trace_response import TraceResponse
+from app.vocabulary.taxonomy import CrawlClassification
 
 logger = logging.getLogger(__name__)
 

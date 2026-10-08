@@ -8,12 +8,12 @@ from __future__ import annotations
 
 import json
 
-from app.constants import DEFAULT_MAX_CONTENT_LENGTH_BYTES
 from app.crawl.content_cache import ContentCache
 from app.env import get_env_int
 from app.models.crawl_policy_limits import CrawlPolicyLimits
 from app.models.normalized_url import NormalizedUrl
 from app.resource_pressure import worker_count
+from app.vocabulary.limits import DEFAULT_MAX_CONTENT_LENGTH_BYTES
 
 
 def build_content_cache_key(

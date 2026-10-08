@@ -4,9 +4,9 @@ from typing import Annotated
 
 from pydantic import BaseModel, Field
 
-from app.constants import CrawlClassification
 from app.models.crawl_status import CrawlStatus
 from app.models.crawl_strategy import CrawlStrategy
+from app.vocabulary.taxonomy import CrawlClassification
 
 
 class StrategyAttempt(BaseModel):

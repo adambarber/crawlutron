@@ -20,7 +20,7 @@ from pathlib import Path
 
 import pytest
 
-from app.constants import DEFAULT_USER_AGENT, REPOSITORY_URL, SERVICE_ID, SERVICE_VERSION
+from app.vocabulary.identity import DEFAULT_USER_AGENT, REPOSITORY_URL, SERVICE_ID, SERVICE_VERSION
 
 SERVICE_ROOT = Path(__file__).resolve().parent.parent
 PYPROJECT = SERVICE_ROOT / "pyproject.toml"

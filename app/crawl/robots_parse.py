@@ -20,7 +20,7 @@ import math
 from collections.abc import Callable, Iterator
 from typing import Any
 
-from app.constants import USER_AGENT_TOKEN
+from app.vocabulary.identity import USER_AGENT_TOKEN
 
 
 def iter_robots_fields(text: str) -> Iterator[tuple[str, str]]:

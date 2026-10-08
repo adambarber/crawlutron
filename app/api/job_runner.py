@@ -32,11 +32,6 @@ from typing import Any
 
 from app.api.crawl_executor import execute_crawl as _real_execute_crawl
 from app.api.response_shaping import _failed_unified_result, abuild_unified_result
-from app.constants import (
-    MAX_URL_TRANSIENT_ATTEMPTS,
-    is_transient_classification,
-    status_for_classification,
-)
 from app.crawl.admission import (
     JobAdmissionContext,
     admit_job_links,
@@ -63,6 +58,8 @@ from app.models.crawl_task import CrawlTask
 from app.models.engine_crawl_result import EngineCrawlResult
 from app.models.normalized_url import NormalizedUrl, admit_or_none
 from app.models.taxonomy import Classification
+from app.vocabulary.limits import MAX_URL_TRANSIENT_ATTEMPTS
+from app.vocabulary.taxonomy import is_transient_classification, status_for_classification
 
 logger = logging.getLogger(__name__)
 

@@ -9,7 +9,7 @@ removed. These tests pin the boundary: tracking/ad infrastructure stays
 skipped, real content hosts never enter the list.
 """
 
-from app.constants import ANALYTICS_HOST_SUFFIXES, is_analytics_host
+from app.vocabulary.hosts import ANALYTICS_HOST_SUFFIXES, is_analytics_host
 from tests._policy_factories import canonical
 
 

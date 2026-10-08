@@ -634,7 +634,7 @@ PRIVATE_NAME_LEAKS_PACKAGE = Rule(
             at=_STRATEGY_SIBLING_PROOF_PATH,
         ),
         # Public cross-package: no underscore, so no boundary is being crossed.
-        "from app.constants import USER_AGENT_TOKEN\n",
+        "from app.vocabulary.identity import USER_AGENT_TOKEN\n",
         # dunder spellings are not privacy, they are protocol hooks.
         "from app.crawl.strategies.http import __all__\n",
         # stdlib and third-party are outside the rule entirely.
@@ -1074,3 +1074,77 @@ def test_vocabulary_primitive_detector_bites():
     single-consumer double, and a gate that does that gets deleted.
     """
     VOCABULARY_PRIMITIVES_ARE_REFERENCED.check_bites()
+
+
+# ===========================================================================
+# The retired vocabulary bucket (#149)
+# ===========================================================================
+
+#: The module the vocabulary split retires. Every import has to name a topic
+#: module instead, so this name stops being importable the day the split lands --
+#: which is the only way "every import names a topic" is a fact rather than a
+#: promise in a commit message. Until then it is a ratchet that reports every
+#: site the split has to repoint.
+_RETIRED_VOCABULARY = "app.constants"
+
+_RETIRED_VOCABULARY_IMPORTED = (
+    "imports app.constants, the topic bucket whose vocabulary lives in per-topic modules now: "
+    "name the topic (app.vocabulary.taxonomy, app.vocabulary.limits, app.vocabulary.identity, ...)"
+)
+
+
+def _retired_vocabulary_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
+    """This module's sites still importing the retired bucket, by line."""
+    offenders: list[str] = []
+    for node in from_imports(tree):
+        if node.module == _RETIRED_VOCABULARY:
+            offenders.append(offender_at(path, node, _RETIRED_VOCABULARY_IMPORTED))
+    for node in plain_imports(tree):
+        if any(alias.name == _RETIRED_VOCABULARY for alias in node.names):
+            offenders.append(offender_at(path, node, _RETIRED_VOCABULARY_IMPORTED))
+    return offenders
+
+
+RETIRED_VOCABULARY_IS_NOT_IMPORTABLE = Rule(
+    name="vocabulary-imports-name-a-topic",
+    find=_retired_vocabulary_offenders,
+    summary=(
+        "app/constants.py is a topic bucket: taxonomy, strategies, limits, browser vocabulary, "
+        "request profiles, host classifiers and identity in one file, so a reader cannot answer "
+        "'where does X live' from the mental model. Import the topic module instead"
+    ),
+    scope=lambda *, exclude: trees_under(APP_ROOT),
+    bite=lambda: Bites(
+        # Both spellings, because a fix that repoints `from app.constants import X` and
+        # leaves `import app.constants` is a site that still reads as the old layout.
+        "from app.constants import UNSORTED_TOPIC_NAME\nimport app.constants as bucket\n",
+        marker="name the topic",
+        count=2,
+    ),
+    clean=lambda: (
+        # A name that merely ENDS in constants is not the retired module, and neither
+        # is a stdlib or third-party import of the same shape.
+        "from app.vocabulary.taxonomy import CrawlClassification\n"
+        "from app.constants_helpers import helper\n"
+        "import constants\nfrom constants import value\n",
+    ),
+)
+
+
+def test_no_module_imports_the_retired_vocabulary_bucket():
+    """Every vocabulary import names a topic module.
+
+    The measurable half of #149's definition of done. A one-time sweep would
+    satisfy it for exactly one commit; this is what stops the bucket regrowing
+    after the split.
+    """
+    RETIRED_VOCABULARY_IS_NOT_IMPORTABLE.scan()
+
+
+def test_retired_vocabulary_detector_bites():
+    """The rule bites on both import spellings, and stays quiet on lookalikes.
+
+    Without the clean half this would also pass as "no import whose module ends
+    in the word constants", which is a different and much less useful rule.
+    """
+    RETIRED_VOCABULARY_IS_NOT_IMPORTABLE.check_bites()
