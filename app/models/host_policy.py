@@ -8,8 +8,8 @@ from dataclasses import dataclass
 from functools import lru_cache
 from urllib.parse import urlparse
 
-from app.addresses import AddressClass, classify
 from app.env import parse_bool_env
+from app.models.address_class import AddressClass, classify
 
 
 def _normalize_policy_host(host: str) -> str:
@@ -81,6 +81,7 @@ HOST_POLICY_ENTRY_POINTS = (
     "app/api/response_shaping.py:frontier_link_url",
     "app/api/watch_router.py:create_watch",
     "app/api/policy_suggestions.py:policy_suggestions",
+    "app/api/site_map.py:build_site_map",
     "app/api/policy_suggestions.py:build_policy_suggestions",
     "app/api/webhooks.py:post_webhook",
     "app/api/webhooks.py:deliver_pinned_webhook",

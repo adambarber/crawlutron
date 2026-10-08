@@ -25,7 +25,7 @@ class Property:
 PROPERTY_REGISTRY = (
     Property(
         name="public-target",
-        owner_module="app/addresses.py",
+        owner_module="app/models/address_class.py",
         owner_symbols=(
             "classify",
             "_parse",
@@ -33,7 +33,7 @@ PROPERTY_REGISTRY = (
             "_resolver_numeric_ipv4",
             "_resolver_numeric_part",
         ),
-        definition_site="app/addresses.py:classify",
+        definition_site="app/models/address_class.py:classify",
         fingerprints=("ipaddress_range_verdict",),
         reason=(
             "Address ranges are classified once; every egress, pinning and bind "

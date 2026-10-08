@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from app.addresses import AddressClass, classify
+from app.models.address_class import AddressClass, classify
 from app.models.host_policy import HostPolicy
 from app.models.normalized_url import NormalizedUrl, admit_or_none
 

@@ -6,7 +6,7 @@ from datetime import UTC, datetime, timedelta
 from functools import partial
 
 from app.admission.policy import read_policy
-from app.map import build_site_map
+from app.api.site_map import build_site_map
 from app.models.result_record import ProducerEnvelope
 from app.orchestration.engine import _parse_lastmod, _seed_is_fresh, _stale_seeds
 from app.orchestration.fetch_helpers import _SITEMAP_CACHE, fetch_sitemap_urls

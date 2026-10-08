@@ -14,7 +14,7 @@ from typing import Any
 import httpx
 import pytest
 
-from app.timeouts import Timeouts
+from app.transport.timeouts import Timeouts
 
 
 class TestTimeoutsChokepoint:

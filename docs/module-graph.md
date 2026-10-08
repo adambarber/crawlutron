@@ -120,7 +120,7 @@ graph LR
     api_main_helpers --> storage_job_store
     api_map_endpoint --> api_crawl_executor
     api_map_endpoint --> api_main_helpers
-    api_map_endpoint --> map
+    api_map_endpoint --> api_site_map
     api_map_endpoint --> models_discovery_config
     api_map_endpoint --> models_host_policy
     api_map_endpoint --> models_map_request
@@ -196,6 +196,10 @@ graph LR
     api_response_shaping --> models_unified_crawl_response
     api_response_shaping --> models_unified_crawl_result
     api_response_shaping --> vocabulary_taxonomy
+    api_site_map --> api_response_shaping
+    api_site_map --> models_host_policy
+    api_site_map --> models_normalized_url
+    api_site_map --> models_result_record
     api_watch_router --> api_dependencies
     api_watch_router --> api_exceptions
     api_watch_router --> api_webhooks
@@ -223,8 +227,8 @@ graph LR
     api_webhooks --> env
     api_webhooks --> models_host_policy
     api_webhooks --> models_normalized_url
-    api_webhooks --> timeouts
     api_webhooks --> transport_pinned_transport
+    api_webhooks --> transport_timeouts
     discovery_agent_hints --> api_policy_defaults
     discovery_agent_hints --> models_agent_hints_response
     discovery_agent_hints --> models_crawl_extraction_method
@@ -261,22 +265,18 @@ graph LR
     extraction_output_formats --> json_safe
     health_readiness --> metrics
     health_readiness --> models_readiness_response
-    main --> addresses
     main --> admission_policy
     main --> api_exceptions
     main --> api_middleware
     main --> env
     main --> logging_config
+    main --> models_address_class
     main --> models_host_policy
     main --> storage_coordination_cookies
     main --> storage_coordination_counters
     main --> transport_cookie_jar
     main --> transport_http_client_pool
     main --> vocabulary_identity
-    map --> api_response_shaping
-    map --> models_host_policy
-    map --> models_normalized_url
-    map --> models_result_record
     mcp --> mcp_tools
     mcp_constants --> vocabulary_identity
     mcp_protocol --> mcp_constants
@@ -353,8 +353,8 @@ graph LR
     models_extracted_page --> models_crawl_status
     models_extracted_page --> models_normalized_url
     models_extracted_page --> vocabulary_taxonomy
-    models_host_policy --> addresses
     models_host_policy --> env
+    models_host_policy --> models_address_class
     models_host_policy_suggestion --> models_classification_evidence
     models_host_policy_suggestion --> vocabulary_taxonomy
     models_http_fetch_result --> models_normalized_url
@@ -523,8 +523,8 @@ graph LR
     search_endpoint --> search_providers
     search_providers --> bounded_io
     search_providers --> models_normalized_url
-    search_providers --> timeouts
     search_providers --> transport_http_client_pool
+    search_providers --> transport_timeouts
     search_providers --> validation
     search_router --> api_dependencies
     search_router --> models_error_response
@@ -649,7 +649,7 @@ graph LR
     transport_document --> bounded_io
     transport_document --> extraction_content
     transport_document --> models_normalized_url
-    transport_document --> timeouts
+    transport_document --> transport_timeouts
     transport_fetch_policy --> admission_policy
     transport_fetch_policy --> models_crawl_policy
     transport_fetch_policy --> models_host_policy
@@ -663,9 +663,9 @@ graph LR
     transport_fetchers --> models_http_fetch_result
     transport_fetchers --> models_http_fetcher
     transport_fetchers --> models_normalized_url
-    transport_fetchers --> timeouts
     transport_fetchers --> transport_decompression
     transport_fetchers --> transport_request_profile
+    transport_fetchers --> transport_timeouts
     transport_fetchers --> vocabulary_limits
     transport_http --> admission_policy
     transport_http --> admission_render_options
@@ -690,7 +690,7 @@ graph LR
     transport_http --> vocabulary_extraction
     transport_http --> vocabulary_taxonomy
     transport_http_client_pool --> settings
-    transport_http_client_pool --> timeouts
+    transport_http_client_pool --> transport_timeouts
     transport_http_client_pool --> vocabulary_identity
     transport_http_client_pool --> vocabulary_strategies
     transport_pinned_transport --> bounded_ttl
@@ -708,7 +708,7 @@ graph LR
     transport_strategy_request --> models_host_policy
     transport_strategy_request --> models_normalized_url
     transport_strategy_request --> models_taxonomy
-    validation --> addresses
+    validation --> models_address_class
     validation --> models_host_policy
     validation --> models_normalized_url
     vocabulary_hosts --> models_normalized_url

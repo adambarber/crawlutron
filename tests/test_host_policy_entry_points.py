@@ -358,6 +358,70 @@ async def _probe_watch_router(monkeypatch, tmp_path):
     )
 
 
+async def _probe_site_map(monkeypatch, tmp_path):
+    """A denied host must not reach the output by the path where the policy is the
+    only filter.
+
+    Every other probe here proves a refusal by catching one. This entry point
+    FILTERS instead of raising -- its own docstring promises a denied URL is
+    "dropped rather than leaked raw" -- so the claim to prove is the output.
+
+    The shape is a record with NO normalized root, which is what routes the
+    aggregation through ``admit_or_none`` at all. With a root present, discovered
+    links are RESOLVED against it and a link the crawl already normalized is
+    returned untouched: re-admitting every one of the thousands a page yields
+    would repeat a decision the crawl already made under the same policy. So the
+    policy is reachable exactly when the root is absent -- a record whose URLs were
+    never admitted -- and that is the branch this pins. The record's own type
+    declares both URL fields Optional, so this is a shape it can hold; every
+    builder in the tree happens to fill them.
+
+    It is also a differential: the scope permits both hosts, so the denied one is
+    absent only because the policy was consulted. A probe asserting only "the list
+    came back empty" would pass just as well for a function that ignored the policy
+    entirely.
+    """
+    from app.api.site_map import build_site_map
+    from app.models.engine_crawl_result import EngineCrawlResult
+    from app.models.host_policy import HostPolicy
+    from app.models.result_record import ProducerEnvelope
+
+    allowed, denied = "https://allowed.test/feed", "https://denied.test/sitemap"
+    result = EngineCrawlResult(
+        original_url="https://denied.test/page",
+        normalized_url=None,
+        final_url=None,
+        status="failed",
+        classification="site_error",
+        selected_strategy=None,
+        attempted_strategies=[],
+        http_status=None,
+        headers={},
+        content_type=None,
+        html=None,
+        text=None,
+        extraction_method=None,
+        quality_score=0.0,
+        diagnostics={"discovery": {"feeds": [allowed, denied]}},
+    )
+    envelope: ProducerEnvelope = {
+        "request_id": "req-1",
+        "submitted_count": 1,
+        "policy_schema_version": "1",
+        "results": [result],
+    }
+    mapped = build_site_map(
+        envelope,
+        host_policy=HostPolicy.from_strings("allowed.test", "denied.test"),
+    )
+    assert mapped["url"] is None, mapped
+    assert allowed in mapped["all_urls"], mapped
+    assert denied not in mapped["all_urls"], mapped
+    assert mapped["url"] is None, mapped
+    assert allowed in mapped["all_urls"], mapped
+    assert denied not in mapped["all_urls"], mapped
+
+
 async def _probe_render(monkeypatch, tmp_path):
     from app.api.render import render_request
 
@@ -568,6 +632,7 @@ _PROBES = {
     "app/api/crawl_executor.py:execute_crawl": _probe_crawl_executor,
     "app/api/jobs_router.py:create_job": _probe_jobs_router,
     "app/api/map_endpoint.py:map_site": _probe_map_endpoint,
+    "app/api/site_map.py:build_site_map": _probe_site_map,
     "app/api/render.py:render_request": _probe_render,
     "app/api/async_crawl_runner.py:run_async_crawl": _probe_async_runner,
     "app/api/response_shaping.py:frontier_link_url": _probe_response_shaping,

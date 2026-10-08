@@ -8,14 +8,15 @@ from collections.abc import Awaitable, Callable, Sequence
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING
 
+from app.admission.policy import PolicyTier
+from app.env import get_env_float, get_env_int
+from app.logging_config import configure_service_logging
+
 # Standalone JSON-line logging configuration, wired once here so every
 # entry point logs the same way. Integration deployments that want richer
 # logging can override ``configure_service_logging`` in their own
 # integration layer.
-from app.addresses import is_loopback_bind
-from app.admission.policy import PolicyTier
-from app.env import get_env_float, get_env_int
-from app.logging_config import configure_service_logging
+from app.models.address_class import is_loopback_bind
 from app.models.host_policy import HostPolicy
 from app.vocabulary.identity import SERVICE_ID, SERVICE_VERSION
 

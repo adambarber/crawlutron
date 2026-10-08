@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING, Any
 import pdfplumber
 
 from app.models.normalized_url import NormalizedUrl
-from app.timeouts import Timeouts
+from app.transport.timeouts import Timeouts
 
 if TYPE_CHECKING:
     from app.transport import pinned_transport

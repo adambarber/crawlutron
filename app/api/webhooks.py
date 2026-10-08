@@ -33,7 +33,7 @@ from app.bounded_io import BodyTooLarge, read_capped_async
 from app.env import get_mapping_int
 from app.models.host_policy import HostPolicy
 from app.models.normalized_url import NormalizedUrl
-from app.timeouts import Timeouts
+from app.transport.timeouts import Timeouts
 
 logger = logging.getLogger(__name__)
 
