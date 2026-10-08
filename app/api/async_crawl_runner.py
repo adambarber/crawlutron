@@ -44,7 +44,7 @@ _WEBHOOK_CRAWL_CONCURRENCY = get_env_int("CRAWLUTRON_MAX_WEBHOOK_CONCURRENCY", 4
 # A lazily-built module-global asyncio.Semaphore binds to whichever event
 # loop first uses it, and asyncio's loop-bound primitives cannot be awaited from
 # a loop other than the one they were created on -- the same hazard
-# ``_LoopBoundPooledClient`` was built for in app.crawl.strategies.http. The
+# ``_LoopBoundPooledClient`` was built for in app.transport.http. The
 # instance therefore tracks the loop it was built for and is rebuilt when the
 # running loop changes (for example a test harness driving many asyncio.run
 # calls in sequence).

@@ -8,7 +8,7 @@ from urllib.parse import urlparse
 import httpx
 import pdfplumber
 
-from app.crawl.strategies.document import (
+from app.transport.document import (
     _extract_pdf_bytes_to_markdown,
     _format_table,
     _pdf_to_markdown,
@@ -81,7 +81,7 @@ class TestDocumentRedirectSsrf:
     def _install_fakes(self, monkeypatch, pdf_bytes, redirects):
         from urllib.parse import urlparse
 
-        import app.crawl.strategies.http_client_pool as pool_mod
+        import app.transport.http_client_pool as pool_mod
         from tests._transport_doubles import MockResponse, dispatching_transport_client
 
         table = {"evil.test": "169.254.169.254"}

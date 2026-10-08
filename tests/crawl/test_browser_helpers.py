@@ -1,9 +1,9 @@
 """Real tests for the browser strategy's logic (no browser; inject failing factories)."""
 
-from app.crawl.strategies.browser import BrowserRenderer
-from app.crawl.strategies.browser_driver import BrowserDriver
 from app.models.normalized_url import NormalizedUrl
 from app.models.render_options import RenderOptions
+from app.transport.browser import BrowserRenderer
+from app.transport.browser_driver import BrowserDriver
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY
 
 

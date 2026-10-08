@@ -9,12 +9,12 @@ import pytest
 from app.crawl.engine import _payload_policy
 from app.crawl.policy import PolicyTier, read_policy
 from app.crawl.result_helpers import terminal_attempt
-from app.crawl.strategies.browser import BrowserRenderer
 from app.models.crawl_policy import CrawlPolicy
 from app.models.crawl_policy_limits import CrawlPolicyLimits
 from app.models.crawl_result import CrawlResult
 from app.models.serialization import to_dict
 from app.scheduler import DomainScheduler
+from app.transport.browser import BrowserRenderer
 from app.vocabulary.extraction import EXTRACTION_DOCUMENT, EXTRACTION_TRAFILATURA
 from app.vocabulary.strategies import BROWSER_HEADLESS, HTTP_DECLARED_CRAWLER
 from tests._assertions import browser_available
@@ -102,9 +102,9 @@ def test_seed_freshness_uses_real_default_strategies():
     real default chain -- not the placeholder ["HTTP"], whose cache keys
     can never match anything actually stored."""
     from app.crawl.engine import _parse_lastmod, _seed_is_fresh
-    from app.crawl.strategies.content_cache_key import build_content_cache_key
-    from app.crawl.strategies.request_profile import headers_for_strategy
     from app.models.crawl_extraction_method import CrawlExtractionMethod
+    from app.transport.content_cache_key import build_content_cache_key
+    from app.transport.request_profile import headers_for_strategy
     from app.vocabulary.strategies import HTTP_DECLARED_CRAWLER
 
     url = canonical("http://seed-fresh.test/page")
@@ -288,7 +288,7 @@ class TestEngineChainEdges:
     def test_effective_max_content_length_scales(self):
         """Per-page cap shrinks as concurrency rises, floor
         respected, explicit policy value wins."""
-        from app.crawl.strategies.content_cache_key import _effective_max_content_length
+        from app.transport.content_cache_key import _effective_max_content_length
         from app.vocabulary.limits import DEFAULT_MAX_CONTENT_LENGTH_BYTES
 
         # Explicit value always wins.

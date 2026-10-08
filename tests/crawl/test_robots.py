@@ -22,10 +22,10 @@ from app.crawl.robots_parse import (
     parse_robots_sitemaps,
     select_robots_values,
 )
-from app.crawl.strategies.fetch_policy import discovery_diagnostics
 from app.models.host_policy import HostPolicy
 from app.models.normalized_url import NormalizedUrl
 from app.settings import CrawlerSettings
+from app.transport.fetch_policy import discovery_diagnostics
 from app.vocabulary.identity import SERVICE_ID
 from app.vocabulary.strategies import HTTP_DECLARED_CRAWLER
 from tests._fetcher_factories import make_fetch, routed_fetcher

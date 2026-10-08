@@ -7,10 +7,10 @@ from app.crawl.extraction import extract_content
 from app.crawl.extraction import extract_discovered_links as _production_extract_discovered_links
 from app.crawl.extraction import extract_js_endpoints as _extract_js_endpoints_with_policy
 from app.crawl.extraction import html_diagnostics as _production_html_diagnostics
-from app.crawl.strategies.document import _default_document_text_extractor as _production_document_extractor
-from app.crawl.strategies.document import _format_table
-from app.crawl.strategies.fetchers import default_http_fetcher as _production_default_http_fetcher
 from app.settings import CrawlerSettings
+from app.transport.document import _default_document_text_extractor as _production_document_extractor
+from app.transport.document import _format_table
+from app.transport.fetchers import default_http_fetcher as _production_default_http_fetcher
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY, canonical
 
 

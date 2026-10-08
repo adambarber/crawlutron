@@ -10,9 +10,9 @@ from app.crawl.engine import _parse_lastmod, _seed_is_fresh, _stale_seeds
 from app.crawl.fetch_helpers import _SITEMAP_CACHE, fetch_sitemap_urls
 from app.crawl.policy import read_policy
 from app.crawl.result_record import ProducerEnvelope
-from app.crawl.strategies.content_cache_key import build_content_cache_key
-from app.crawl.strategies.request_profile import headers_for_strategy
 from app.map import build_site_map
+from app.transport.content_cache_key import build_content_cache_key
+from app.transport.request_profile import headers_for_strategy
 from tests._assertions import install_to_thread_spy
 from tests._fetcher_factories import (
     concurrent_fetcher,

@@ -15,7 +15,7 @@ from unittest.mock import patch
 
 import pytest
 
-from app.crawl.strategies import pinned_transport as http_mod
+from app.transport import pinned_transport as http_mod
 from tests._policy_factories import canonical
 from tests._thread_fanout import run_thread_fanout
 
@@ -73,7 +73,7 @@ def test_ssrf_check_uses_cache_and_still_blocks_private(monkeypatch):
 class TestDnsCacheLocking:
     def test_dns_cache_lock_is_present_and_used(self):
         from app.bounded_ttl import BoundedTTLCache
-        from app.crawl.strategies import pinned_transport as http_mod
+        from app.transport import pinned_transport as http_mod
 
         # The chokepoint moved the lock INSIDE the cache: the module no longer
         # carries a bare dict + lock pair that callers must compose correctly.
@@ -82,7 +82,7 @@ class TestDnsCacheLocking:
 
     def test_dns_cache_concurrent_writes_do_not_corrupt(self):
         """Eight threads racing ``_resolve_ips`` must leave a consistent cache."""
-        from app.crawl.strategies import pinned_transport as http_mod
+        from app.transport import pinned_transport as http_mod
 
         # Resolve a host that exists on every test machine
         host = "127.0.0.1"

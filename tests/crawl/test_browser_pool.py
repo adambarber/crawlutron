@@ -4,10 +4,10 @@ import inspect
 
 import pytest
 
-import app.crawl.strategies.browser_pool as bp
+import app.transport.browser_pool as bp
 from app import resource_pressure as rp
-from app.crawl.strategies.browser_driver import BrowserDriver
-from app.crawl.strategies.browser_pool import (
+from app.transport.browser_driver import BrowserDriver
+from app.transport.browser_pool import (
     BROWSER_POOL_ACQUIRE_TIMEOUT_SECONDS,
     BrowserPool,
     BrowserPoolExhaustedError,
@@ -194,7 +194,7 @@ def _bare_renderer(**overrides):
     page is a double, which is what keeps these tests about the strategy's own
     error handling rather than a stub's.
     """
-    from app.crawl.strategies.browser import BrowserRenderer
+    from app.transport.browser import BrowserRenderer
 
     return BrowserRenderer(**overrides)
 

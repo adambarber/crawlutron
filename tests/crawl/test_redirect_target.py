@@ -1,6 +1,6 @@
 """Unit tests for the shared manual-redirect decision helper (both fetchers)."""
 
-from app.crawl.strategies.pinned_transport import _MAX_REDIRECT_HOPS, _redirect_target
+from app.transport.pinned_transport import _MAX_REDIRECT_HOPS, _redirect_target
 from tests._policy_factories import canonical
 
 

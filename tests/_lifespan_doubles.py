@@ -21,9 +21,9 @@ def stub_heavy_teardown(monkeypatch) -> Any:
     """
     from app import main as main_mod
     from app.api import job_runner as job_runner_mod
-    from app.crawl.strategies import http_client_pool as http_mod
     from app.health import readiness as readiness_mod
     from app.health.readiness import ReadinessState
+    from app.transport import http_client_pool as http_mod
 
     async def _noop() -> None:
         return None

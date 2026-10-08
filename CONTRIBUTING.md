@@ -67,12 +67,12 @@ These require explicit review from a maintainer before merge:
   admission chokepoint: the `NormalizedUrl` constructor is the single place
   raw URL text is parsed, and the public/SSRF egress verdict plus the
   private-target opt-in are decided here.
-- `app/crawl/strategies/pinned_transport.py` — transport SSRF guard
+- `app/transport/pinned_transport.py` — transport SSRF guard
   (`check_ssrf_protection`, `resolve_and_pin_host`), request pinning,
   redirect-target admission, `Host:` header construction.
-- `app/crawl/strategies/cookie_jar.py` — per-tenant cookie namespace
+- `app/transport/cookie_jar.py` — per-tenant cookie namespace
   (`COOKIE_NAMESPACE` ContextVar) and cookie isolation.
-- `app/crawl/strategies/browser.py` and `browser_driver.py` — browser SSRF,
+- `app/transport/browser.py` and `browser_driver.py` — browser SSRF,
   storage_state path validation, opt-in cookie-consent auto-acceptance
   (`auto_accept_cookie_consent`).
 - `app/crawl/robots.py` and `app/crawl/robots_parse.py` — robots policy and
@@ -81,7 +81,7 @@ These require explicit review from a maintainer before merge:
 - `app/validation.py` — egress filter for scraped JS-endpoint URLs
   (`filter_js_endpoints`), resolved-address public check
   (`is_public_ip_value`).
-- `app/resource_pressure.py` and `app/crawl/strategies/browser_pool.py` —
+- `app/resource_pressure.py` and `app/transport/browser_pool.py` —
   browser-pool sizing from cgroup memory limits; `BROWSER_RAM_FRACTION`.
 - `app/main.py` — middleware order, body-size limits, error envelopes.
 - `app/api/webhooks.py` — webhook delivery (`deliver_pinned_webhook`).

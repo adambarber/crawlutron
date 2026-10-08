@@ -26,8 +26,8 @@ import pytest
 from app.api.render import _render_options
 from app.crawl.policy import read_policy
 from app.crawl.render_options import policy_wants_html, resolve_render_options
-from app.crawl.strategies.browser_result import browser_strategy_result
 from app.settings import CrawlerSettings
+from app.transport.browser_result import browser_strategy_result
 from tests._browser_doubles import _fake_browser
 from tests._fetcher_factories import strategy_request
 

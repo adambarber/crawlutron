@@ -8,9 +8,9 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from pydantic import ValidationError
 
-from app.crawl.strategies.browser import BrowserRenderer, make_ssrf_route_handler
-from app.crawl.strategies.browser_driver import BrowserDriver
 from app.models.crawl_policy import CrawlPolicy
+from app.transport.browser import BrowserRenderer, make_ssrf_route_handler
+from app.transport.browser_driver import BrowserDriver
 from tests._browser_doubles import (
     BrowserFakePage,
     FakeRequest,
@@ -135,7 +135,7 @@ async def test_ssrf_route_handler_allows_non_network_schemes():
 
 async def test_ws_guard_closes_internal_targets(monkeypatch):
     """WebSocket upgrades to private hosts are closed; public ones pass."""
-    from app.crawl.strategies.browser import make_ssrf_websocket_handler
+    from app.transport.browser import make_ssrf_websocket_handler
     from tests._assertions import block_private_targets
 
     block_private_targets(monkeypatch)

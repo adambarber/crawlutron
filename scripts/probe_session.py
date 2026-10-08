@@ -35,7 +35,7 @@ _PROBE_OUTPUT = os.environ.get("CRAWLUTRON_PROBE_OUTPUT", str(_REPO_ROOT / "tmp"
 
 async def main() -> None:
     out = []
-    from app.crawl.strategies.browser_driver import BrowserDriver
+    from app.transport.browser_driver import BrowserDriver
 
     # open_page, not acquire-then-new_page: a caller that wants a page has no
     # reason to know the browser is recycled underneath it. Reaching past that

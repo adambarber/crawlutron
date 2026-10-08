@@ -418,7 +418,7 @@ class ResourceGate:
 _HTTP_TASK_RAM_BYTES = get_env_int("CRAWLUTRON_HTTP_TASK_RAM_BYTES", 48 * 1024 * 1024, lo=0)
 # The 700 MiB default reservation sits BELOW the measured RSS range for a
 # live renderer (~600-900 MiB once WebExtensions/Web Content are counted; see
-# app/crawl/strategies/browser_pool.py). That gap is deliberate, not an
+# app/transport/browser_pool.py). That gap is deliberate, not an
 # oversight, and this comment exists so it is not "corrected" by reflex: the
 # reservation is the weight the weighted admission subtracts from the RAM
 # budget per browser task, and raising it toward the top of the measured range
@@ -493,7 +493,7 @@ def derive_browser_pool_size(limit_bytes: int | None = None) -> int:
     Honors ``CRAWLUTRON_BROWSER_POOL_SIZE``; else derives so this process's
     share of the fleet uses at most ``BROWSER_RAM_FRACTION`` of RAM; falls back
     to 1 when no limit is discoverable. Shared by
-    ``app.crawl.strategies.browser_pool`` and the httpx pool sizing so the
+    ``app.transport.browser_pool`` and the httpx pool sizing so the
     connection ceiling tracks the admission's HTTP concurrency.
 
     The cgroup limit belongs to the container, so it is the same number in every

@@ -6,9 +6,9 @@ import socket
 
 import pytest
 
-import app.crawl.strategies.pinned_transport as http_mod
-from app.crawl.strategies.pinned_transport import check_ssrf_protection, resolve_and_pin_host
+import app.transport.pinned_transport as http_mod
 from app.models.normalized_url import NormalizedUrl
+from app.transport.pinned_transport import check_ssrf_protection, resolve_and_pin_host
 from app.validation import HostPolicy
 from tests._assertions import (
     assert_dns_pinning_uses_first_resolution,
@@ -238,7 +238,7 @@ class TestSSRFProtection:
         persists across tests, so without isolation a prior test that resolved
         the same host would serve this call from cache (0 getaddrinfo calls).
         """
-        from app.crawl.strategies.pinned_transport import _DNS_CACHE
+        from app.transport.pinned_transport import _DNS_CACHE
 
         _DNS_CACHE.clear()
         with host_resolves_to(monkeypatch, "8.8.8.8") as resolved:

@@ -20,9 +20,9 @@ import inspect
 
 import pytest
 
-from app.crawl.strategies.fetchers import default_http_fetcher
 from app.models.http_fetch_result import HttpFetchResult
 from app.models.http_fetcher import HttpFetcher
+from app.transport.fetchers import default_http_fetcher
 from tests._policy_factories import canonical
 from tests._result_builders import _link
 from tests.chokepoint_walks import (

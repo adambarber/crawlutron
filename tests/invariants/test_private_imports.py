@@ -137,7 +137,7 @@ PRIVATE_IMPORT_LEDGER = Rule(
         # a test whose import is invisible to a reviewer of the module it reaches.
         # The name has to be one the ledger does not already hold, or the proof
         # fires on nothing -- which is the failure this rule is meant to prevent.
-        "from app.crawl.strategies.browser import _undeclared_probe_name\n",
+        "from app.transport.browser import _undeclared_probe_name\n",
         # And the `import x.y` / `x.y._name` form, which reaches the same private
         # name through a module object instead of a from-import.
         "import app.crawl.engine\n\nassert app.crawl.engine._undeclared_probe\n",
@@ -217,9 +217,9 @@ def _cross_module_private_names(tree: ast.Module, path: pathlib.Path) -> dict[st
 
     A module reaching its own privates is ordinary -- that is what private means --
     so the owning module has to be resolved and compared rather than assumed. The
-    resolved name supplies both: ``from app.crawl.strategies import body_decode``
+    resolved name supplies both: ``from app.transport import body_decode``
     binds ``body_decode``, so ``body_decode.decode_body`` resolves to
-    ``app.crawl.strategies.body_decode.decode_body``, which names the module that
+    ``app.transport.body_decode.decode_body``, which names the module that
     owns the definition and not merely the binding the caller happens to use.
     """
     here = _module_of(path)
@@ -254,14 +254,14 @@ APP_PRIVATE_WELDS = Rule(
         "reaches into another module's private name; a sibling module is a caller, so the name is "
         "part of the seam between them and the module boundary is a fiction until it is public"
     ),
-    bite=lambda: ("from app.crawl.strategies import body_decode\n\ntext = body_decode._undeclared_probe\n",),
+    bite=lambda: ("from app.transport import body_decode\n\ntext = body_decode._undeclared_probe\n",),
     clean=lambda: (
         # The public name for the same reach.
-        "from app.crawl.strategies import body_decode\n\ntext = body_decode.decode_body\n",
+        "from app.transport import body_decode\n\ntext = body_decode.decode_body\n",
         # A module's own private name is what private means.
         "def helper():\n    return _internal_step()\n",
         # A declared lifecycle drain.
-        "from app.crawl.strategies import http_client_pool as pool\n\npool._drain_pending_client_closes()\n",
+        "from app.transport import http_client_pool as pool\n\npool._drain_pending_client_closes()\n",
     ),
 )
 
@@ -342,14 +342,14 @@ CONFTEST_WELDS = Rule(
         "expose the reset, because a caller obliged to publish a reset has no other way to publish it"
     ),
     bite=lambda: (
-        "from app.crawl.strategies import pinned_transport as pinned_mod\n\n"
+        "from app.transport import pinned_transport as pinned_mod\n\n"
         "pinned_mod._undeclared_probe.clear()\n",
     ),
     clean=lambda: (
         # The shape this rule exists to force: ask the owner, do not touch the state.
-        "from app.crawl.strategies import pinned_transport\n\npinned_transport.reset_dns_cache()\n",
+        "from app.transport import pinned_transport\n\npinned_transport.reset_dns_cache()\n",
         # A public app name is the whole point.
-        "from app.crawl.strategies import pinned_transport\n\npinned_transport.apinned_hops\n",
+        "from app.transport import pinned_transport\n\npinned_transport.apinned_hops\n",
         # Not an app import, so not this rule's business.
         "import os\n\nos.environ.get('CRAWLUTRON_LOG_LEVEL')\n",
     ),

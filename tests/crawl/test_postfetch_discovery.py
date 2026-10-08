@@ -152,7 +152,7 @@ def test_html_diagnostics_omit_policy_blocked_frame_and_private_form(monkeypatch
 
 
 async def test_discovery_feeds_are_policy_filtered():
-    from app.crawl.strategies.fetch_policy import discovery_diagnostics
+    from app.transport.fetch_policy import discovery_diagnostics
 
     html = (
         '<link rel="alternate" type="application/rss+xml" href="https://blocked.test/feed">'

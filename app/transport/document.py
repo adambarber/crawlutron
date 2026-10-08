@@ -19,7 +19,7 @@ from app.models.normalized_url import NormalizedUrl
 from app.timeouts import Timeouts
 
 if TYPE_CHECKING:
-    from app.crawl.strategies import pinned_transport
+    from app.transport import pinned_transport
 
 
 def _format_table(rows: list[list[Any]]) -> str:
@@ -95,7 +95,7 @@ async def _afetch_document_bytes(
     """
     from app.bounded_io import read_capped_async
     from app.crawl.extraction import EXTRACTION_DOC_MAX_INPUT_BYTES
-    from app.crawl.strategies import http_client_pool, pinned_transport
+    from app.transport import http_client_pool, pinned_transport
 
     await http_client_pool._drain_pending_client_closes()
     client = http_client_pool.get_async_http_client()

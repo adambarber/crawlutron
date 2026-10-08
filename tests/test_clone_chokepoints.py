@@ -331,7 +331,7 @@ def _scripted_fetcher(node):
     """A def that re-declares the production ``http_fetcher`` contract.
 
     The distinctive part is the ``max_content_length`` default: 50 MiB is the
-    ceiling in ``app/crawl/strategies/fetchers.py``, and a test def that
+    ceiling in ``app/transport/fetchers.py``, and a test def that
     hard-codes it is asserting that ceiling by copying it. When production
     lowers the ceiling such a copy still passes, and the test that looked like
     it covered the bound covers nothing.

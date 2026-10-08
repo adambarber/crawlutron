@@ -9,7 +9,7 @@ import tempfile
 
 import pytest
 
-from app.crawl.strategies.browser_driver import BrowserDriver
+from app.transport.browser_driver import BrowserDriver
 from tests._assertions import set_optional_env
 from tests._browser_doubles import ScriptedPage
 from tests._policy_factories import BOOL_ENV_CASES

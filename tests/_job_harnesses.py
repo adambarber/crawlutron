@@ -755,7 +755,7 @@ async def post_api_job(client, root_url: str, policy: PolicyLike | None = None):
 
 
 async def post_render_with_pool(client, pool, url: str):
-    from app.crawl.strategies.browser_pool import set_browser_pool
+    from app.transport.browser_pool import set_browser_pool
 
     old = set_browser_pool(pool)
     try:

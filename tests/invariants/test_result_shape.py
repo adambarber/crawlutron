@@ -1052,7 +1052,7 @@ def test_result_status_pair_detector_bites():
 # The browser and HTTP strategies each carried the same three-way extraction
 # dispatch, the same offloaded post-fetch discovery call, and the same block of
 # discovered-links result fields. All three now live in
-# app/crawl/strategies/content_pipeline.py, and `_discovery_result_fields` is
+# app/transport/content_pipeline.py, and `_discovery_result_fields` is
 # the one place a discovery envelope becomes result fields.
 #
 # The projection was a correctness risk rather than cosmetics: a field threaded
@@ -1135,7 +1135,7 @@ def _extraction_reach_past_offenders(tree: ast.AST, path: pathlib.Path) -> list[
     return offenders
 
 
-_EXTRACTION_PROOF_PATH = REPO_ROOT / "app" / "crawl" / "strategies" / "_synthetic.py"
+_EXTRACTION_PROOF_PATH = REPO_ROOT / "app" / "transport" / "_synthetic.py"
 
 
 def _assert_owner_extraction_still_fires() -> None:
@@ -1175,7 +1175,7 @@ EXTRACTION_IS_DISPATCHED_BY_THE_CONTENT_PIPELINE_ALONE = Rule(
     ),
     clean=lambda: (
         # Routing through the chokepoint is the sanctioned shape.
-        "from app.crawl.strategies.content_pipeline import _run_extraction\n"
+        "from app.transport.content_pipeline import _run_extraction\n"
         "async def f(body, final_url):\n"
         "    return await _run_extraction(extraction='full', content=body, decoded='')\n",
     ),
@@ -1269,7 +1269,7 @@ def test_discovery_result_projection_has_exactly_one_definition():
         if node.name == _DISCOVERY_PROJECTION
     ]
     assert len(definitions) == 1, f"the discovery projection was defined again: {definitions}"
-    assert "app/crawl/strategies/content_pipeline.py" in definitions[0], definitions
+    assert "app/transport/content_pipeline.py" in definitions[0], definitions
 
 
 # ---------------------------------------------------------------------------

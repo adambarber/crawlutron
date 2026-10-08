@@ -9,10 +9,10 @@ retry that follows the render.
 import asyncio
 from contextlib import contextmanager
 
-from app.crawl.strategies import browser as browser_mod
-from app.crawl.strategies.browser import BrowserRenderer
-from app.crawl.strategies.browser_driver import BrowserDriver
 from app.models.normalized_url import NormalizedUrl
+from app.transport import browser as browser_mod
+from app.transport.browser import BrowserRenderer
+from app.transport.browser_driver import BrowserDriver
 from tests._browser_doubles import BrowserFakePage, FakeBrowserDriver, ScriptedPage, build_pinned_renderer
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY, canonical
 
@@ -77,7 +77,7 @@ class TestHarvestWaitBounded:
     whole per-URL budget; the finally-block caps the harvest wait."""
 
     async def test_render_finally_harvest_timeout(self, monkeypatch):
-        from app.crawl.strategies.browser import RenderOptions
+        from app.transport.browser import RenderOptions
 
         url = canonical("http://example.com/page")
         with isolated_browser_cookies(url) as domain:

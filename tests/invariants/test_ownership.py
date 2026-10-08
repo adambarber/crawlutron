@@ -102,8 +102,8 @@ def _threading_lock_bindings(tree: ast.AST) -> set[str]:
     return names
 
 
-_OWNER_PATH = REPO_ROOT / "app" / "crawl" / "strategies" / "browser.py"
-_OWNER_MODULE = "app/crawl/strategies/browser.py"
+_OWNER_PATH = REPO_ROOT / "app" / "transport" / "browser.py"
+_OWNER_MODULE = "app/transport/browser.py"
 _ELSEWHERE = REPO_ROOT / "app" / "crawl" / "content_cache.py"
 
 
@@ -688,10 +688,10 @@ def test_doc_pool_reap_detector_bites():
 # handling trips them at the line, not after a session is silently missing a
 # cookie.
 
-_COOKIE_TAIL = "app/crawl/strategies/fetchers.py"
+_COOKIE_TAIL = "app/transport/fetchers.py"
 
 
-_COOKIE_HELPER = "app/crawl/strategies/request_profile.py"
+_COOKIE_HELPER = "app/transport/request_profile.py"
 
 
 _COOKIE_TAIL_FN = "_finish_fetch"
@@ -740,7 +740,7 @@ RESPONSE_COOKIES_ENTER_VIA_THE_FETCH_TAIL = Rule(
         # ONE path and must fire at every other, so a string -- which is always run
         # at the rule's single proof path -- would assert the opposite claim here.
         Silent(
-            "from app.crawl.strategies.request_profile import _store_set_cookies\n"
+            "from app.transport.request_profile import _store_set_cookies\n"
             "def _finish_fetch(**kwargs):\n"
             "    return _store_set_cookies(kwargs)\n",
             at=REPO_ROOT / _COOKIE_TAIL,
@@ -754,7 +754,7 @@ RESPONSE_COOKIES_ENTER_VIA_THE_FETCH_TAIL = Rule(
         # alone would wave it through, which is the whole reason the rule is keyed
         # on the path -- so this is a firing proof, not another exemption.
         Bites(
-            "from app.crawl.strategies.request_profile import _store_set_cookies\n"
+            "from app.transport.request_profile import _store_set_cookies\n"
             "def _finish_fetch(**kwargs):\n"
             "    return _store_set_cookies(kwargs)\n",
             "_store_set_cookies() outside _finish_fetch()",
@@ -790,7 +790,7 @@ _BROWSER_RELEASE_FIELDS = ("_browser_cm", "_browser", "_browser_reused")
 #: rather than picked out of it: ``Path`` hashes through the (per-process
 #: randomized) string hash, so ``next(iter(frozenset_of_paths))`` names a
 #: different file on different runs and the proof would bite at random.
-_BROWSER_RELEASE_OWNER = REPO_ROOT / "app" / "crawl" / "strategies" / "browser_driver.py"
+_BROWSER_RELEASE_OWNER = REPO_ROOT / "app" / "transport" / "browser_driver.py"
 
 
 #: Both files, not one. The cached fields and the release chokepoint moved to
@@ -800,7 +800,7 @@ _BROWSER_RELEASE_OWNER = REPO_ROOT / "app" / "crawl" / "strategies" / "browser_d
 #: the pair keeps the invariant whole across the split: a field reintroduced on
 #: either side is still caught by whichever file spells the clear.
 _BROWSER_RELEASE_OWNERS = frozenset(
-    {_BROWSER_RELEASE_OWNER, REPO_ROOT / "app" / "crawl" / "strategies" / "browser.py"}
+    {_BROWSER_RELEASE_OWNER, REPO_ROOT / "app" / "transport" / "browser.py"}
 )
 
 

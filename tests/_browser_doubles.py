@@ -3,8 +3,8 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Any, Protocol
 
-from app.crawl.strategies.browser import BrowserRenderer
-from app.crawl.strategies.browser_pool import (
+from app.transport.browser import BrowserRenderer
+from app.transport.browser_pool import (
     BROWSER_POOL_ACQUIRE_TIMEOUT_SECONDS,
     BrowserPool,
     set_browser_pool,
@@ -345,7 +345,7 @@ def build_pinned_renderer(page, monkeypatch=None, **overrides):
     ``overrides`` steer the two renderer-owned collaborators a test varies:
     ``extract=`` and ``looks_like_pdf=``.
     """
-    from app.crawl.strategies.browser import BrowserRenderer
+    from app.transport.browser import BrowserRenderer
 
     renderer = BrowserRenderer(
         warmup_urls=[],
@@ -501,8 +501,8 @@ def ssrf_route_handler(resource_mode=None, *, include_screenshot: bool = False, 
     these tests about the blocklist rather than about the guard: a test that
     wants the guard's own verdict builds its own handler and calls it directly.
     """
-    from app.crawl.strategies.browser import make_ssrf_route_handler
-    from app.crawl.strategies.pinned_transport import build_pinned_request
+    from app.transport.browser import make_ssrf_route_handler
+    from app.transport.pinned_transport import build_pinned_request
     from tests._policy_factories import UNRESTRICTED_HOST_POLICY
 
     return make_ssrf_route_handler(
@@ -595,8 +595,8 @@ def scripted_renderer(browser, cm=None, *, sleep=None):
     page-cap test take its cap in wall-clock, which is the one measurement it
     explicitly is not.
     """
-    from app.crawl.strategies.browser import BrowserRenderer
-    from app.crawl.strategies.browser_driver import BrowserDriver
+    from app.transport.browser import BrowserRenderer
+    from app.transport.browser_driver import BrowserDriver
 
     def _sleep(_seconds):
         return None if sleep is None else sleep(_seconds)
@@ -640,7 +640,7 @@ def blocking_pinned_request(thread_ids: list[int], delay: float = 0.05):
 
 
 def response_handler_double(url: str, payload=None, error=None):
-    from app.crawl.strategies.browser import BrowserRenderer
+    from app.transport.browser import BrowserRenderer
 
     collected: list[dict] = []
     handler = BrowserRenderer.make_response_handler(collected)
@@ -668,7 +668,7 @@ async def run_blocking_document_route():
     """
     import threading
 
-    from app.crawl.strategies.browser import make_ssrf_route_handler
+    from app.transport.browser import make_ssrf_route_handler
     from tests._policy_factories import UNRESTRICTED_HOST_POLICY
 
     thread_ids: list[int] = []

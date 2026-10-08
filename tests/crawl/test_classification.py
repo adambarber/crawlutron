@@ -13,9 +13,9 @@ from app.classify import (
     classify_page_with_evidence,
 )
 from app.crawl.result_helpers import TerminalResult
-from app.crawl.strategies import browser as browser_mod
-from app.crawl.strategies import http as http_mod
-from app.crawl.strategies.browser import BrowserRenderer
+from app.transport import browser as browser_mod
+from app.transport import http as http_mod
+from app.transport.browser import BrowserRenderer
 from app.vocabulary.taxonomy import (
     BROWSER_BLOCKED_CLASSIFICATIONS,
     CLASSIFICATION_STATUS_BY_LABEL,

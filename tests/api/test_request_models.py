@@ -643,7 +643,7 @@ class TestTheRendererAgreesWithTheVocabulary:
         import ast
         import inspect
 
-        from app.crawl.strategies.browser_driver import BrowserDriver
+        from app.transport.browser_driver import BrowserDriver
 
         source = inspect.getsource(BrowserDriver._dispatch_action)
         tree = ast.parse(textwrap.dedent(source))
@@ -978,9 +978,9 @@ class TestBrowserActionKeysAreClosed:
         import ast
 
         from app.vocabulary.browser import BROWSER_ACTION_KEYS
-        from tests.chokepoint_walks import STRATEGIES_DIR, attribute_calls, string_argument
+        from tests.chokepoint_walks import TRANSPORT_DIR, attribute_calls, string_argument
 
-        source = (STRATEGIES_DIR / "browser_driver.py").read_text()
+        source = (TRANSPORT_DIR / "browser_driver.py").read_text()
         read: set[str] = set()
         for node, func in attribute_calls(ast.parse(source)):
             if func.attr == "get" and isinstance(func.value, ast.Name) and func.value.id == "action":
@@ -1079,7 +1079,7 @@ class TestCallerKnobsBehindClosedKeysAreCeilinged:
         ``_profile_int`` with no ceiling, whose contract is deliberately to pass a
         value through.
         """
-        from app.crawl.strategies.browser_driver import BrowserDriver
+        from app.transport.browser_driver import BrowserDriver
         from app.vocabulary.limits import (
             MAX_COOKIE_HARVEST_TIMEOUT_SECONDS,
             MAX_LAZY_SCROLL_DELAY_SECONDS,

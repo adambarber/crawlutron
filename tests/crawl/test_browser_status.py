@@ -1,6 +1,6 @@
 """Tests for browser.py module."""
 
-from app.crawl.strategies.browser import BrowserRenderer
+from app.transport.browser import BrowserRenderer
 
 
 class TestBrowserRendererStatus:

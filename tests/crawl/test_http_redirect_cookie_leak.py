@@ -1,8 +1,8 @@
 from http.server import BaseHTTPRequestHandler
 
-from app.crawl.strategies import cookie_jar
-from app.crawl.strategies.cookie_jar import CookieJar
-from app.crawl.strategies.request_profile import _store_set_cookies
+from app.transport import cookie_jar
+from app.transport.cookie_jar import CookieJar
+from app.transport.request_profile import _store_set_cookies
 from tests._fetcher_factories import run_default_http_fetcher
 from tests._policy_factories import canonical
 from tests._transport_doubles import MockResponse, patch_http_fetcher_transport
@@ -117,7 +117,7 @@ async def test_http_fetcher_persists_every_set_cookie_header():
     helper's own multi-header guarantee is pinned separately below and passed
     happily while the caller defeated it.
     """
-    from app.crawl.strategies import cookie_jar as cookie_mod
+    from app.transport import cookie_jar as cookie_mod
     from tests.helpers.server import spawn_threaded_server
 
     server = spawn_threaded_server(_TwoCookieHandler)

@@ -9,7 +9,7 @@ import pytest
 
 from app.crawl import decompression as decompression_mod
 from app.crawl.decompression import DecompressionTooLargeError, _decompress_bounded, decompress_body
-from app.crawl.strategies.body_decode import decode_body
+from app.transport.body_decode import decode_body
 
 _CAP = 10_000_000
 
@@ -108,7 +108,7 @@ def test_decompression_gzip():
 
 
 def test_http_charset_decode_error():
-    from app.crawl.strategies.body_decode import decode_body
+    from app.transport.body_decode import decode_body
 
     # Charset rides on the content-type only; a stray value can never
     # reach the decoder as a headers argument (the parameter is gone).

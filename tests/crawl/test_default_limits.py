@@ -28,5 +28,5 @@ def test_engine_fallback_limit_matches():
     # The 10MB default lives in ONE place (app.vocabulary.limits) and is referenced by
     # the http strategy instead of being hard-coded a second time.
     assert DEFAULT_MAX_CONTENT_LENGTH_BYTES == 10 * 1024 * 1024
-    src = (_APP_ROOT / "app/crawl/strategies/content_cache_key.py").read_text()
+    src = (_APP_ROOT / "app/transport/content_cache_key.py").read_text()
     assert "DEFAULT_MAX_CONTENT_LENGTH_BYTES" in src

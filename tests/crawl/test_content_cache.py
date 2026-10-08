@@ -17,8 +17,8 @@ import pytest
 import app.crawl.content_cache as cc
 from app.crawl.cache import HttpCache
 from app.crawl.content_cache import ContentCache
-from app.crawl.strategies.fetchers import default_http_fetcher
 from app.models.normalized_url import NormalizedUrl
+from app.transport.fetchers import default_http_fetcher
 from app.validation import HostPolicy
 from app.vocabulary.strategies import HTTP_DECLARED_CRAWLER
 from tests._fetcher_factories import (

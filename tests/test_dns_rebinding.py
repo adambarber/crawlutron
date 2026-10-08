@@ -11,7 +11,7 @@ from urllib.parse import urlparse
 
 import httpx
 
-from app.crawl.strategies.fetchers import default_http_fetcher
+from app.transport.fetchers import default_http_fetcher
 from tests._assertions import (
     assert_dns_pinning_uses_first_resolution,
     block_private_targets,
@@ -41,7 +41,7 @@ class TestDNSRebindingProtection:
 
         with (
             host_resolves_to(monkeypatch, "1.2.3.4"),
-            patch("app.crawl.strategies.http_client_pool.get_async_http_client", return_value=client),
+            patch("app.transport.http_client_pool.get_async_http_client", return_value=client),
         ):
             result = await default_http_fetcher(
                 canonical("http://example.com/page"),

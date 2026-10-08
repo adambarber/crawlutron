@@ -2,8 +2,8 @@
 
 import tempfile
 
-from app.crawl.strategies.browser import BrowserRenderer
 from app.settings import CrawlerSettings
+from app.transport.browser import BrowserRenderer
 
 
 class TestStorageStatePathValidation:
@@ -58,14 +58,14 @@ class TestStorageStatePathValidation:
         # left behind was invisible to a passing test. Asserting on the record's
         # `name` is what pins the emitter: it is the one thing that fails when a
         # rename moves the log to a module this test no longer names.
-        with caplog.at_level(logging.WARNING, logger="app.crawl.strategies.browser_driver"):
+        with caplog.at_level(logging.WARNING, logger="app.transport.browser_driver"):
             assert r.driver.validate_storage_state_path(f"{tempfile.gettempdir()}/storage.json") is None
 
         messages = [record.getMessage() for record in caplog.records]
         assert any("cache_dir" in message for message in messages), (
             f"the refusal did not name the setting to configure: {messages}"
         )
-        assert [record.name for record in caplog.records] == ["app.crawl.strategies.browser_driver"], (
+        assert [record.name for record in caplog.records] == ["app.transport.browser_driver"], (
             f"the refusal moved module; the logger pinned above is now the wrong one: "
             f"{[record.name for record in caplog.records]}"
         )

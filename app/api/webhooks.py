@@ -64,7 +64,7 @@ async def deliver_pinned_webhook(
     # inline -- the manual composition is exactly the shape that produced the
     # redirect findings. validate_webhook_url already ran at the edge; running
     # the rule again here closes the TOCTOU between validation and delivery.
-    from app.crawl.strategies.pinned_transport import build_pinned_request_async
+    from app.transport.pinned_transport import build_pinned_request_async
 
     connect_url, connect_headers = await build_pinned_request_async(
         NormalizedUrl(webhook_url, policy=host_policy), {}
@@ -174,7 +174,7 @@ def validate_webhook_url(webhook_url: str, *, host_policy: HostPolicy) -> None:
     + DNS check + resolve-and-pin, composed in one place. Raises ValueError
     if unsafe; returns None when the URL is safe to deliver to.
     """
-    from app.crawl.strategies.pinned_transport import build_pinned_request
+    from app.transport.pinned_transport import build_pinned_request
 
     build_pinned_request(NormalizedUrl(webhook_url, policy=host_policy), {})
 
@@ -191,7 +191,7 @@ async def validate_webhook_url_async(webhook_url: str, *, host_policy: HostPolic
     Every caller of ``validate_webhook_url`` is already async, so they route
     here instead.
     """
-    from app.crawl.strategies.pinned_transport import build_pinned_request_async
+    from app.transport.pinned_transport import build_pinned_request_async
 
     await build_pinned_request_async(NormalizedUrl(webhook_url, policy=host_policy), {})
 

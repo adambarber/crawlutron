@@ -22,19 +22,19 @@ from app.crawl.extraction import (
 )
 from app.crawl.payload_helpers import _payload_urls
 from app.crawl.policy import PolicyTier, read_policy
-from app.crawl.strategies.fetch_policy import (
+from app.settings import CrawlerSettings
+from app.transport.fetch_policy import (
     fetch_with_retries,
     looks_like_binary_body,
     retry_after_seconds,
     retry_backoff_seconds,
 )
-from app.crawl.strategies.http import http_strategy_result
-from app.crawl.strategies.request_profile import (
+from app.transport.http import http_strategy_result
+from app.transport.request_profile import (
     _cookie_header_for_url,
     _select_fingerprint,
     headers_for_strategy,
 )
-from app.settings import CrawlerSettings
 from app.validation import HostPolicy
 from app.vocabulary.extraction import (
     EXTRACTION_DOCUMENT,
@@ -167,7 +167,7 @@ class TestFetchRetries:
 
     def test_retry_backoff_is_exponential_and_capped(self) -> None:
         """Each retry gap doubles from the base and plateaus at the ceiling."""
-        from app.crawl.strategies.fetch_policy import _RETRY_BACKOFF_CAP_SECONDS
+        from app.transport.fetch_policy import _RETRY_BACKOFF_CAP_SECONDS
 
         assert retry_backoff_seconds(1) == pytest.approx(0.25)
         assert retry_backoff_seconds(2) == pytest.approx(0.5)
@@ -665,13 +665,13 @@ class TestFingerprintInjectionRotation:
 
 class TestQualityScore:
     def test_http_quality_score_failed(self):
-        from app.crawl.strategies.body_decode import quality_score
+        from app.transport.body_decode import quality_score
 
         score = quality_score("failed", "network_error", None, None, None)
         assert score == 0.0
 
     def test_http_quality_score_empty_text(self):
-        from app.crawl.strategies.body_decode import quality_score
+        from app.transport.body_decode import quality_score
 
         score = quality_score("success", "rendered", "", None, 200)
         assert score > 0.0
@@ -724,7 +724,7 @@ class TestFetchHelpersEdges:
     )
     def test_quality_score_reuses_precomputed_metrics(self, text, html):
         """Dup8: threading the diagnostics metrics in must not change the score."""
-        from app.crawl.strategies.body_decode import content_metrics
+        from app.transport.body_decode import content_metrics
 
         metrics = content_metrics(text, html)
         direct = quality_score("success", "rendered", text, html, 200)

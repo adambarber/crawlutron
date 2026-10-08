@@ -32,10 +32,10 @@ graph LR
     api_crawl_executor --> crawl_engine
     api_crawl_executor --> crawl_policy
     api_crawl_executor --> crawl_result_record
-    api_crawl_executor --> crawl_strategies_browser_pool
     api_crawl_executor --> models_host_policy
     api_crawl_executor --> models_normalized_url
     api_crawl_executor --> settings
+    api_crawl_executor --> transport_browser_pool
     api_crawl_executor --> vocabulary_strategies
     api_crawl_router --> api_crawl_endpoint
     api_crawl_router --> api_dependencies
@@ -116,7 +116,6 @@ graph LR
     api_render --> crawl_render_options
     api_render --> crawl_result_helpers
     api_render --> crawl_result_record
-    api_render --> crawl_strategies_browser_pool
     api_render --> crawl_worker
     api_render --> models_crawl_job
     api_render --> models_crawl_policy
@@ -128,14 +127,15 @@ graph LR
     api_render --> models_render_options
     api_render --> scheduler
     api_render --> settings
+    api_render --> transport_browser_pool
     api_render_endpoint --> api_exceptions
     api_render_endpoint --> api_main_helpers
     api_render_endpoint --> api_render
     api_render_endpoint --> api_response_shaping
-    api_render_endpoint --> crawl_strategies_browser_pool
     api_render_endpoint --> models_render_request
     api_render_endpoint --> models_unified_crawl_response
     api_render_endpoint --> settings
+    api_render_endpoint --> transport_browser_pool
     api_render_router --> api_dependencies
     api_render_router --> api_render_endpoint
     api_render_router --> models_error_response
@@ -184,11 +184,11 @@ graph LR
     api_watch_sweep --> vocabulary_strategies
     api_watch_sweep --> vocabulary_taxonomy
     api_webhooks --> bounded_io
-    api_webhooks --> crawl_strategies_pinned_transport
     api_webhooks --> env
     api_webhooks --> models_host_policy
     api_webhooks --> models_normalized_url
     api_webhooks --> timeouts
+    api_webhooks --> transport_pinned_transport
     classify --> bounded_io
     classify --> models_taxonomy
     crawl_admission --> crawl_fetch_helpers
@@ -196,13 +196,13 @@ graph LR
     crawl_admission --> crawl_policy
     crawl_admission --> crawl_robots
     crawl_admission --> crawl_scope_match
-    crawl_admission --> crawl_strategies_fetchers
     crawl_admission --> models_crawl_extraction_method
     crawl_admission --> models_crawl_policy
     crawl_admission --> models_host_policy
     crawl_admission --> models_normalized_url
     crawl_admission --> safe_regex
     crawl_admission --> scheduler
+    crawl_admission --> transport_fetchers
     crawl_admission --> vocabulary_hosts
     crawl_cache --> models_normalized_url
     crawl_content_cache --> atomic_write
@@ -224,10 +224,6 @@ graph LR
     crawl_engine --> crawl_request_pipeline
     crawl_engine --> crawl_result_record
     crawl_engine --> crawl_robots
-    crawl_engine --> crawl_strategies_content_cache_key
-    crawl_engine --> crawl_strategies_cookie_jar
-    crawl_engine --> crawl_strategies_fetchers
-    crawl_engine --> crawl_strategies_request_profile
     crawl_engine --> env
     crawl_engine --> models_crawl_policy
     crawl_engine --> models_crawl_worker
@@ -238,6 +234,10 @@ graph LR
     crawl_engine --> models_serialization
     crawl_engine --> resource_pressure
     crawl_engine --> settings
+    crawl_engine --> transport_content_cache_key
+    crawl_engine --> transport_cookie_jar
+    crawl_engine --> transport_fetchers
+    crawl_engine --> transport_request_profile
     crawl_extraction --> crawl_doc_pool
     crawl_extraction --> crawl_llm_format
     crawl_extraction --> env
@@ -249,11 +249,11 @@ graph LR
     crawl_extraction --> validation
     crawl_fetch_helpers --> bounded_ttl
     crawl_fetch_helpers --> crawl_decompression
-    crawl_fetch_helpers --> crawl_strategies_body_decode
     crawl_fetch_helpers --> models_host_policy
     crawl_fetch_helpers --> models_http_fetch_result
     crawl_fetch_helpers --> models_http_fetcher
     crawl_fetch_helpers --> models_normalized_url
+    crawl_fetch_helpers --> transport_body_decode
     crawl_fetch_helpers --> vocabulary_limits
     crawl_job_store --> crawl_ids
     crawl_job_store --> crawl_policy
@@ -366,136 +366,7 @@ graph LR
     crawl_robots_parse --> vocabulary_identity
     crawl_scope_match --> safe_regex
     crawl_sqlite_store --> crawl_migrations_manifest
-    crawl_strategies_browser --> classify
-    crawl_strategies_browser --> crawl_result_helpers
-    crawl_strategies_browser --> crawl_strategies_browser_driver
-    crawl_strategies_browser --> crawl_strategies_document
-    crawl_strategies_browser --> crawl_strategies_pinned_transport
-    crawl_strategies_browser --> env
-    crawl_strategies_browser --> json_safe
-    crawl_strategies_browser --> models_crawl_result
-    crawl_strategies_browser --> models_host_policy
-    crawl_strategies_browser --> models_normalized_url
-    crawl_strategies_browser --> models_render_options
-    crawl_strategies_browser --> models_taxonomy
-    crawl_strategies_browser --> settings
-    crawl_strategies_browser --> vocabulary_hosts
-    crawl_strategies_browser --> vocabulary_limits
-    crawl_strategies_browser --> vocabulary_taxonomy
-    crawl_strategies_browser_driver --> env
-    crawl_strategies_browser_driver --> settings
-    crawl_strategies_browser_driver --> vocabulary_browser
-    crawl_strategies_browser_driver --> vocabulary_limits
-    crawl_strategies_browser_pool --> crawl_result_helpers
-    crawl_strategies_browser_pool --> crawl_strategies_browser
-    crawl_strategies_browser_pool --> models_browser_pool_exhausted
-    crawl_strategies_browser_pool --> models_crawl_result
-    crawl_strategies_browser_pool --> models_taxonomy
-    crawl_strategies_browser_pool --> resource_pressure
-    crawl_strategies_browser_pool --> settings
-    crawl_strategies_browser_pool --> vocabulary_strategies
-    crawl_strategies_browser_result --> crawl_render_options
-    crawl_strategies_browser_result --> crawl_result_helpers
-    crawl_strategies_browser_result --> crawl_strategies_body_decode
-    crawl_strategies_browser_result --> crawl_strategies_content_pipeline
-    crawl_strategies_browser_result --> crawl_strategies_strategy_request
-    crawl_strategies_browser_result --> crawl_worker
-    crawl_strategies_browser_result --> models_crawl_job
-    crawl_strategies_browser_result --> models_crawl_policy
-    crawl_strategies_browser_result --> models_crawl_result
-    crawl_strategies_browser_result --> models_crawl_worker
-    crawl_strategies_browser_result --> models_engine_crawl_result
-    crawl_strategies_browser_result --> models_host_policy
-    crawl_strategies_browser_result --> models_normalized_url
-    crawl_strategies_browser_result --> models_render_options
-    crawl_strategies_browser_result --> models_taxonomy
-    crawl_strategies_browser_result --> vocabulary_extraction
-    crawl_strategies_content_cache_key --> crawl_content_cache
-    crawl_strategies_content_cache_key --> env
-    crawl_strategies_content_cache_key --> models_crawl_policy_limits
-    crawl_strategies_content_cache_key --> models_normalized_url
-    crawl_strategies_content_cache_key --> resource_pressure
-    crawl_strategies_content_cache_key --> settings
-    crawl_strategies_content_cache_key --> vocabulary_limits
-    crawl_strategies_content_pipeline --> crawl_extraction
-    crawl_strategies_content_pipeline --> crawl_policy
-    crawl_strategies_content_pipeline --> models_crawl_extraction_method
-    crawl_strategies_content_pipeline --> models_crawl_policy
-    crawl_strategies_content_pipeline --> models_host_policy
-    crawl_strategies_content_pipeline --> models_normalized_url
-    crawl_strategies_content_pipeline --> models_taxonomy
-    crawl_strategies_content_pipeline --> validation
-    crawl_strategies_content_pipeline --> vocabulary_extraction
-    crawl_strategies_cookie_jar --> atomic_write
-    crawl_strategies_cookie_jar --> crawl_coordination_cookies
-    crawl_strategies_cookie_jar --> models_normalized_url
-    crawl_strategies_document --> bounded_io
-    crawl_strategies_document --> crawl_extraction
-    crawl_strategies_document --> models_normalized_url
-    crawl_strategies_document --> timeouts
-    crawl_strategies_fetch_policy --> crawl_decompression
-    crawl_strategies_fetch_policy --> crawl_fetch_helpers
-    crawl_strategies_fetch_policy --> crawl_policy
-    crawl_strategies_fetch_policy --> crawl_result_helpers
-    crawl_strategies_fetch_policy --> crawl_strategies_body_decode
-    crawl_strategies_fetch_policy --> models_crawl_policy
-    crawl_strategies_fetch_policy --> models_host_policy
-    crawl_strategies_fetch_policy --> models_http_fetcher
-    crawl_strategies_fetch_policy --> models_normalized_url
-    crawl_strategies_fetch_policy --> vocabulary_limits
-    crawl_strategies_fetchers --> crawl_decompression
-    crawl_strategies_fetchers --> crawl_strategies_request_profile
-    crawl_strategies_fetchers --> models_http_fetch_result
-    crawl_strategies_fetchers --> models_http_fetcher
-    crawl_strategies_fetchers --> models_normalized_url
-    crawl_strategies_fetchers --> timeouts
-    crawl_strategies_fetchers --> vocabulary_limits
-    crawl_strategies_http --> classify
-    crawl_strategies_http --> crawl_cache
-    crawl_strategies_http --> crawl_content_cache
-    crawl_strategies_http --> crawl_decompression
-    crawl_strategies_http --> crawl_document_text
-    crawl_strategies_http --> crawl_extraction
-    crawl_strategies_http --> crawl_policy
-    crawl_strategies_http --> crawl_render_options
-    crawl_strategies_http --> crawl_result_helpers
-    crawl_strategies_http --> crawl_strategies_content_pipeline
-    crawl_strategies_http --> crawl_strategies_strategy_request
-    crawl_strategies_http --> models_crawl_extraction_method
-    crawl_strategies_http --> models_crawl_policy
-    crawl_strategies_http --> models_crawl_policy_limits
-    crawl_strategies_http --> models_crawl_result
-    crawl_strategies_http --> models_engine_crawl_result
-    crawl_strategies_http --> models_host_policy
-    crawl_strategies_http --> models_http_fetch_result
-    crawl_strategies_http --> models_normalized_url
-    crawl_strategies_http --> models_taxonomy
-    crawl_strategies_http --> vocabulary_extraction
-    crawl_strategies_http --> vocabulary_taxonomy
-    crawl_strategies_http_client_pool --> settings
-    crawl_strategies_http_client_pool --> timeouts
-    crawl_strategies_http_client_pool --> vocabulary_identity
-    crawl_strategies_http_client_pool --> vocabulary_strategies
-    crawl_strategies_pinned_transport --> bounded_ttl
-    crawl_strategies_pinned_transport --> models_host_policy
-    crawl_strategies_pinned_transport --> models_http_fetch_result
-    crawl_strategies_pinned_transport --> models_normalized_url
-    crawl_strategies_pinned_transport --> validation
-    crawl_strategies_request_profile --> crawl_credentials
-    crawl_strategies_request_profile --> crawl_strategies_cookie_jar
-    crawl_strategies_request_profile --> models_crawl_policy
-    crawl_strategies_request_profile --> models_normalized_url
-    crawl_strategies_request_profile --> vocabulary_identity
-    crawl_strategies_request_profile --> vocabulary_strategies
-    crawl_strategies_strategy_request --> models_crawl_policy
-    crawl_strategies_strategy_request --> models_host_policy
-    crawl_strategies_strategy_request --> models_normalized_url
-    crawl_strategies_strategy_request --> models_taxonomy
     crawl_strategy_chain --> crawl_result_helpers
-    crawl_strategy_chain --> crawl_strategies_browser
-    crawl_strategy_chain --> crawl_strategies_browser_result
-    crawl_strategy_chain --> crawl_strategies_http
-    crawl_strategy_chain --> crawl_strategies_strategy_request
     crawl_strategy_chain --> models_crawl_policy
     crawl_strategy_chain --> models_crawl_result
     crawl_strategy_chain --> models_crawl_strategy
@@ -506,6 +377,10 @@ graph LR
     crawl_strategy_chain --> models_normalized_url
     crawl_strategy_chain --> models_taxonomy
     crawl_strategy_chain --> scheduler
+    crawl_strategy_chain --> transport_browser
+    crawl_strategy_chain --> transport_browser_result
+    crawl_strategy_chain --> transport_http
+    crawl_strategy_chain --> transport_strategy_request
     crawl_strategy_chain --> vocabulary_strategies
     crawl_strategy_chain --> vocabulary_taxonomy
     crawl_watch_store --> crawl_coordination_store
@@ -544,11 +419,11 @@ graph LR
     main --> crawl_coordination_cookies
     main --> crawl_coordination_counters
     main --> crawl_policy
-    main --> crawl_strategies_cookie_jar
-    main --> crawl_strategies_http_client_pool
     main --> env
     main --> logging_config
     main --> models_host_policy
+    main --> transport_cookie_jar
+    main --> transport_http_client_pool
     main --> vocabulary_identity
     map --> api_response_shaping
     map --> crawl_result_record
@@ -568,7 +443,6 @@ graph LR
     mcp_tools --> api_map_endpoint
     mcp_tools --> api_render_endpoint
     mcp_tools --> api_response_shaping
-    mcp_tools --> crawl_strategies_browser_pool
     mcp_tools --> json_safe
     mcp_tools --> models_crawl_and_extract_response
     mcp_tools --> models_crawl_request
@@ -580,6 +454,7 @@ graph LR
     mcp_tools --> models_site_map_response
     mcp_tools --> models_unified_crawl_response
     mcp_tools --> search_endpoint
+    mcp_tools --> transport_browser_pool
     memory_pressure --> cgroup_sense
     metrics --> crawl_coordination_counters
     metrics --> models_engine_crawl_result
@@ -693,9 +568,9 @@ graph LR
     search_endpoint --> models_search_result_item
     search_endpoint --> search_providers
     search_providers --> bounded_io
-    search_providers --> crawl_strategies_http_client_pool
     search_providers --> models_normalized_url
     search_providers --> timeouts
+    search_providers --> transport_http_client_pool
     search_providers --> validation
     search_router --> api_dependencies
     search_router --> models_error_response
@@ -707,6 +582,131 @@ graph LR
     settings --> memory_pressure
     settings --> resource_pressure
     settings --> vocabulary_limits
+    transport_browser --> classify
+    transport_browser --> crawl_result_helpers
+    transport_browser --> env
+    transport_browser --> json_safe
+    transport_browser --> models_crawl_result
+    transport_browser --> models_host_policy
+    transport_browser --> models_normalized_url
+    transport_browser --> models_render_options
+    transport_browser --> models_taxonomy
+    transport_browser --> settings
+    transport_browser --> transport_browser_driver
+    transport_browser --> transport_document
+    transport_browser --> transport_pinned_transport
+    transport_browser --> vocabulary_hosts
+    transport_browser --> vocabulary_limits
+    transport_browser --> vocabulary_taxonomy
+    transport_browser_driver --> env
+    transport_browser_driver --> settings
+    transport_browser_driver --> vocabulary_browser
+    transport_browser_driver --> vocabulary_limits
+    transport_browser_pool --> crawl_result_helpers
+    transport_browser_pool --> models_browser_pool_exhausted
+    transport_browser_pool --> models_crawl_result
+    transport_browser_pool --> models_taxonomy
+    transport_browser_pool --> resource_pressure
+    transport_browser_pool --> settings
+    transport_browser_pool --> transport_browser
+    transport_browser_pool --> vocabulary_strategies
+    transport_browser_result --> crawl_render_options
+    transport_browser_result --> crawl_result_helpers
+    transport_browser_result --> crawl_worker
+    transport_browser_result --> models_crawl_job
+    transport_browser_result --> models_crawl_policy
+    transport_browser_result --> models_crawl_result
+    transport_browser_result --> models_crawl_worker
+    transport_browser_result --> models_engine_crawl_result
+    transport_browser_result --> models_host_policy
+    transport_browser_result --> models_normalized_url
+    transport_browser_result --> models_render_options
+    transport_browser_result --> models_taxonomy
+    transport_browser_result --> transport_body_decode
+    transport_browser_result --> transport_content_pipeline
+    transport_browser_result --> transport_strategy_request
+    transport_browser_result --> vocabulary_extraction
+    transport_content_cache_key --> crawl_content_cache
+    transport_content_cache_key --> env
+    transport_content_cache_key --> models_crawl_policy_limits
+    transport_content_cache_key --> models_normalized_url
+    transport_content_cache_key --> resource_pressure
+    transport_content_cache_key --> settings
+    transport_content_cache_key --> vocabulary_limits
+    transport_content_pipeline --> crawl_extraction
+    transport_content_pipeline --> crawl_policy
+    transport_content_pipeline --> models_crawl_extraction_method
+    transport_content_pipeline --> models_crawl_policy
+    transport_content_pipeline --> models_host_policy
+    transport_content_pipeline --> models_normalized_url
+    transport_content_pipeline --> models_taxonomy
+    transport_content_pipeline --> validation
+    transport_content_pipeline --> vocabulary_extraction
+    transport_cookie_jar --> atomic_write
+    transport_cookie_jar --> crawl_coordination_cookies
+    transport_cookie_jar --> models_normalized_url
+    transport_document --> bounded_io
+    transport_document --> crawl_extraction
+    transport_document --> models_normalized_url
+    transport_document --> timeouts
+    transport_fetch_policy --> crawl_decompression
+    transport_fetch_policy --> crawl_fetch_helpers
+    transport_fetch_policy --> crawl_policy
+    transport_fetch_policy --> crawl_result_helpers
+    transport_fetch_policy --> models_crawl_policy
+    transport_fetch_policy --> models_host_policy
+    transport_fetch_policy --> models_http_fetcher
+    transport_fetch_policy --> models_normalized_url
+    transport_fetch_policy --> transport_body_decode
+    transport_fetch_policy --> vocabulary_limits
+    transport_fetchers --> crawl_decompression
+    transport_fetchers --> models_http_fetch_result
+    transport_fetchers --> models_http_fetcher
+    transport_fetchers --> models_normalized_url
+    transport_fetchers --> timeouts
+    transport_fetchers --> transport_request_profile
+    transport_fetchers --> vocabulary_limits
+    transport_http --> classify
+    transport_http --> crawl_cache
+    transport_http --> crawl_content_cache
+    transport_http --> crawl_decompression
+    transport_http --> crawl_document_text
+    transport_http --> crawl_extraction
+    transport_http --> crawl_policy
+    transport_http --> crawl_render_options
+    transport_http --> crawl_result_helpers
+    transport_http --> models_crawl_extraction_method
+    transport_http --> models_crawl_policy
+    transport_http --> models_crawl_policy_limits
+    transport_http --> models_crawl_result
+    transport_http --> models_engine_crawl_result
+    transport_http --> models_host_policy
+    transport_http --> models_http_fetch_result
+    transport_http --> models_normalized_url
+    transport_http --> models_taxonomy
+    transport_http --> transport_content_pipeline
+    transport_http --> transport_strategy_request
+    transport_http --> vocabulary_extraction
+    transport_http --> vocabulary_taxonomy
+    transport_http_client_pool --> settings
+    transport_http_client_pool --> timeouts
+    transport_http_client_pool --> vocabulary_identity
+    transport_http_client_pool --> vocabulary_strategies
+    transport_pinned_transport --> bounded_ttl
+    transport_pinned_transport --> models_host_policy
+    transport_pinned_transport --> models_http_fetch_result
+    transport_pinned_transport --> models_normalized_url
+    transport_pinned_transport --> validation
+    transport_request_profile --> crawl_credentials
+    transport_request_profile --> models_crawl_policy
+    transport_request_profile --> models_normalized_url
+    transport_request_profile --> transport_cookie_jar
+    transport_request_profile --> vocabulary_identity
+    transport_request_profile --> vocabulary_strategies
+    transport_strategy_request --> models_crawl_policy
+    transport_strategy_request --> models_host_policy
+    transport_strategy_request --> models_normalized_url
+    transport_strategy_request --> models_taxonomy
     validation --> addresses
     validation --> models_host_policy
     validation --> models_normalized_url

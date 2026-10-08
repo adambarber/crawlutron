@@ -273,7 +273,7 @@ class TestDiscoveryAndRenderApi:
         # through the incidental route the old raising fake exploited.
         import app.api.render_endpoint as render_endpoint
         from app.crawl.result_helpers import crawl_result_from_exception
-        from app.crawl.strategies.browser_pool import BrowserPoolExhaustedError
+        from app.transport.browser_pool import BrowserPoolExhaustedError
         from app.vocabulary.strategies import BROWSER_HEADLESS
 
         class _ExhaustedWorker:
@@ -353,8 +353,8 @@ class TestDiscoveryAndRenderApi:
         before it reaches the assertion.
         """
         from app.crawl.result_helpers import terminal_attempt
-        from app.crawl.strategies.browser_pool import BrowserPool
         from app.models.crawl_result import CrawlResult
+        from app.transport.browser_pool import BrowserPool
 
         class _FakeRenderer:
             async def render(self, url, options, *, policy=None):
@@ -479,7 +479,7 @@ class TestShadowDomApi(_AsgiEndpointTests):
         # browser-strategy crawl needs a live pool. Initialize (real
         # camoufox) and close it in a finally so no browsers leak into
         # later tests.
-        from app.crawl.strategies.browser_pool import close_browser_pool, initialize_browser_pool
+        from app.transport.browser_pool import close_browser_pool, initialize_browser_pool
 
         await initialize_browser_pool()
         try:
@@ -511,7 +511,7 @@ class TestCookiePersistenceApi:
         self.base = base_url
         self.cookie_file = tmp_path / "cookie_jar.json"
         # ASGITransport doesn't run FastAPI lifespan, so manually manage the global cookie jar
-        from app.crawl.strategies.cookie_jar import _GLOBAL_COOKIE_JAR
+        from app.transport.cookie_jar import _GLOBAL_COOKIE_JAR
 
         _GLOBAL_COOKIE_JAR.import_from_file(str(self.cookie_file))
         WEBHOOK_RECEIVED.clear()

@@ -29,7 +29,7 @@ from typing import Any
 
 import pytest
 
-from app.crawl.strategies import http_client_pool
+from app.transport import http_client_pool
 
 __all__ = ["stub_builder"]
 

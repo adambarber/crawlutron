@@ -3,7 +3,7 @@
 The seam is a boundary, not a file split. Everything here touches a LIVE browser
 or a live page: launching it, recycling it, opening a tab, and doing page work
 (ready-state, action chains, lazy scroll, shadow-DOM flattening, cookie consent,
-teardown). :class:`~app.crawl.strategies.browser.BrowserRenderer` keeps the other
+teardown). :class:`~app.transport.browser.BrowserRenderer` keeps the other
 half -- what a render IS: navigate, extract, classify, screenshot, fail.
 
 The boundary exists because the two halves are substituted for different reasons.

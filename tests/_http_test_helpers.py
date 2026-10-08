@@ -1,6 +1,6 @@
 from app.crawl.decompression import decompress_body
-from app.crawl.strategies.body_decode import decode_body, quality_score
-from app.crawl.strategies.request_profile import _cookie_header_for_url, headers_for_strategy
+from app.transport.body_decode import decode_body, quality_score
+from app.transport.request_profile import _cookie_header_for_url, headers_for_strategy
 from app.vocabulary.strategies import HTTP_CFFI_IMPERSONATE
 
 __all__ = [

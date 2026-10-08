@@ -21,12 +21,12 @@ from app.vocabulary.identity import SERVICE_ID, SERVICE_VERSION
 
 from .crawl.job_store import JobStore
 from .crawl.result_store import CrawlResultStore
-from .crawl.strategies.browser_pool import (
+from .crawl.watch_store import WatchStore
+from .settings import CrawlerSettings
+from .transport.browser_pool import (
     close_browser_pool,
     initialize_browser_pool,
 )
-from .crawl.watch_store import WatchStore
-from .settings import CrawlerSettings
 
 if TYPE_CHECKING:
     # FastAPI is only imported for annotations under type checking; the runtime
@@ -209,8 +209,8 @@ if FastAPI is not None:
             # would keep the last-writer-wins path alive.
             os.makedirs(settings.cache_dir, exist_ok=True)
             from app.crawl.coordination_cookies import SharedCookieStore
-            from app.crawl.strategies import cookie_jar as cookie_jar_module
-            from app.crawl.strategies.cookie_jar import CookieJar
+            from app.transport import cookie_jar as cookie_jar_module
+            from app.transport.cookie_jar import CookieJar
 
             jar = CookieJar(SharedCookieStore(DATABASE_PATH))
             jar.import_file_into(settings.cookie_jar_path)
@@ -274,7 +274,7 @@ if FastAPI is not None:
         except asyncio.CancelledError:
             pass
 
-        from app.crawl.strategies.http_client_pool import close_async_http_client, close_cffi_session
+        from app.transport.http_client_pool import close_async_http_client, close_cffi_session
 
         from .crawl.engine import _resource_gate
 

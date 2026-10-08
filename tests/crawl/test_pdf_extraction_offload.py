@@ -10,8 +10,8 @@ body: the branch runs (extraction_method ``pdf_text``) and its extractor is
 recorded as offloaded.
 """
 
-from app.crawl.strategies.browser import BrowserRenderer, RenderOptions
 from app.models.normalized_url import NormalizedUrl
+from app.transport.browser import BrowserRenderer, RenderOptions
 from tests._assertions import install_to_thread_spy
 from tests._browser_doubles import BrowserFakePage, build_pinned_renderer
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY

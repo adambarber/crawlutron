@@ -3,15 +3,15 @@ import threading
 
 import pytest
 
-import app.crawl.strategies.document as doc_mod
-import app.crawl.strategies.pinned_transport as http_mod
-from app.crawl.strategies.browser import (
+import app.transport.document as doc_mod
+import app.transport.pinned_transport as http_mod
+from app.transport.browser import (
     _assert_safe_final_url,
     _is_ssrf_blocked,
     make_ssrf_route_handler,
     resolve_browser_target,
 )
-from app.crawl.strategies.pinned_transport import build_pinned_request, build_pinned_request_async
+from app.transport.pinned_transport import build_pinned_request, build_pinned_request_async
 from tests._assertions import block_private_targets, host_resolves_to
 from tests._browser_doubles import (
     FakeRequest,
@@ -64,7 +64,7 @@ async def test_document_extractor_invokes_ssrf_check(monkeypatch):
     with (
         host_resolves_to(monkeypatch, "93.184.216.34"),
         patch(
-            "app.crawl.strategies.http_client_pool.get_async_http_client",
+            "app.transport.http_client_pool.get_async_http_client",
             return_value=scripted_transport_client(
                 [MockResponse(200, {"content-type": "application/pdf"}, b"")]
             ),

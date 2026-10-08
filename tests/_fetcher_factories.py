@@ -9,12 +9,12 @@ from app.crawl.content_cache import ContentCache
 from app.crawl.engine import crawl_request
 from app.crawl.policy import CrawlPolicy, read_policy
 from app.crawl.result_record import ProducerEnvelope
-from app.crawl.strategies.strategy_request import StrategyRequest
 from app.models.engine_crawl_result import EngineCrawlResult
 from app.models.host_policy import HostPolicy
 from app.models.http_fetch_result import HttpFetchResult
 from app.models.normalized_url import NormalizedUrl
 from app.models.taxonomy import CrawlStrategyName
+from app.transport.strategy_request import StrategyRequest
 from app.vocabulary.limits import DEFAULT_MAX_CONTENT_LENGTH_BYTES
 from app.vocabulary.strategies import HTTP_DECLARED_CRAWLER
 from tests._browser_doubles import _fake_browser
@@ -776,7 +776,7 @@ async def run_http_strategy(
     content_cache: Any = None,
     **extra: Any,
 ) -> Any:
-    from app.crawl.strategies.http import http_strategy_result
+    from app.transport.http import http_strategy_result
 
     kwargs: dict[str, Any] = {}
     if cache is not None:
@@ -832,7 +832,7 @@ async def invoke_http_strategy(
 async def invoke_browser_strategy(
     monkeypatch: Any, *, policy: CrawlPolicy | dict[str, Any], html: str, text: str = "Hello world"
 ) -> Any:
-    from app.crawl.strategies.browser_result import browser_strategy_result
+    from app.transport.browser_result import browser_strategy_result
 
     return await browser_strategy_result(
         request=strategy_request("http://example.com/", policy, "BROWSER_HEADLESS"),
@@ -852,7 +852,7 @@ async def run_default_http_fetcher(url: str, headers=None, *, pin=None):
     transport module's private builder: a redirect test needs a pin that is not
     a real resolver, and the fetcher is where that choice belongs.
     """
-    from app.crawl.strategies.fetchers import default_http_fetcher
+    from app.transport.fetchers import default_http_fetcher
 
     return await default_http_fetcher(
         canonical(url),

@@ -29,7 +29,6 @@ from app.crawl.policy import PolicyTier
 from app.crawl.request_pipeline import _PipelineDependencies, _PipelineState, run_crawl_request
 from app.crawl.result_record import ProducerEnvelope
 from app.crawl.robots import FetchAndDecode
-from app.crawl.strategies.fetchers import default_http_fetcher, impersonating_fetcher
 from app.env import get_env_int
 from app.models.crawl_policy import CrawlPolicy
 from app.models.crawl_worker import CrawlWorker
@@ -40,6 +39,7 @@ from app.models.normalized_url import NormalizedUrl
 from app.models.serialization import from_wire, to_dict
 from app.resource_pressure import ResourceGate
 from app.settings import CrawlerSettings
+from app.transport.fetchers import default_http_fetcher, impersonating_fetcher
 
 logger = logging.getLogger(__name__)
 
@@ -142,8 +142,8 @@ def _seed_is_fresh(url: NormalizedUrl, lastmod: str | None, content_cache: Any, 
     css = policy.css_selector
     xp = policy.xpath
     # Lazy import avoids a module cycle (engine <-> http).
-    from app.crawl.strategies.content_cache_key import build_content_cache_key
-    from app.crawl.strategies.request_profile import headers_for_strategy
+    from app.transport.content_cache_key import build_content_cache_key
+    from app.transport.request_profile import headers_for_strategy
 
     # Default to the real strategy chain: the old ["HTTP"] placeholder
     # is not a strategy, so its cache keys could never match stored entries
@@ -391,14 +391,14 @@ class _ResultSpill:
 
 
 def _set_cookie_namespace(policy: CrawlPolicy):
-    from app.crawl.strategies.cookie_jar import COOKIE_NAMESPACE
-    from app.crawl.strategies.request_profile import cookie_namespace_for
+    from app.transport.cookie_jar import COOKIE_NAMESPACE
+    from app.transport.request_profile import cookie_namespace_for
 
     return COOKIE_NAMESPACE.set(cookie_namespace_for(policy.request_profile))
 
 
 def _reset_cookie_namespace(token: Any) -> None:
-    from app.crawl.strategies.cookie_jar import COOKIE_NAMESPACE
+    from app.transport.cookie_jar import COOKIE_NAMESPACE
 
     COOKIE_NAMESPACE.reset(token)
 

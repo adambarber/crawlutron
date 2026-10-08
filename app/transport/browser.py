@@ -30,13 +30,6 @@ if TYPE_CHECKING:
 
 from app.classify import classify_page
 from app.crawl.result_helpers import classify_error_code, terminal_attempt, terminal_crawl_result
-from app.crawl.strategies.browser_driver import BrowserDriver, async_sleep
-from app.crawl.strategies.document import _default_document_text_extractor
-from app.crawl.strategies.pinned_transport import (
-    build_pinned_request,
-    build_pinned_request_async,
-    check_ssrf_protection,
-)
 from app.env import get_env_float, get_env_int
 from app.json_safe import json_default
 from app.models.crawl_result import CrawlResult
@@ -45,6 +38,13 @@ from app.models.normalized_url import NormalizedUrl
 from app.models.render_options import RenderOptions
 from app.models.taxonomy import Classification, CrawlError
 from app.settings import CrawlerSettings
+from app.transport.browser_driver import BrowserDriver, async_sleep
+from app.transport.document import _default_document_text_extractor
+from app.transport.pinned_transport import (
+    build_pinned_request,
+    build_pinned_request_async,
+    check_ssrf_protection,
+)
 from app.vocabulary.hosts import is_analytics_host as _is_analytics_url
 from app.vocabulary.limits import DEFAULT_CHALLENGE_WAIT_SECONDS, DEFAULT_MAX_CONCURRENT_PAGES
 from app.vocabulary.taxonomy import ResultStatus, status_for_classification
@@ -394,7 +394,7 @@ class BrowserRenderer:
         # The browser and every step done to a page live in the driver, which
         # also owns the recycle bound, the scroll/harvest knobs, and the
         # storage_state allowlist. A test substitutes the driver, not methods
-        # on this class -- see app/crawl/strategies/browser_driver.py.
+        # on this class -- see app/transport/browser_driver.py.
         self._driver = driver if driver is not None else BrowserDriver(sleep=sleep, settings=settings)
         # Cap concurrent page renders: N simultaneous requests each open a tab,
         # which otherwise crashes/OOMs the browser under burst load.

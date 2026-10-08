@@ -12,10 +12,10 @@ import httpx
 import pytest
 from curl_cffi.requests import AsyncSession
 
-import app.crawl.strategies.http_client_pool as http_mod
+import app.transport.http_client_pool as http_mod
 from app import settings as settings_mod
-from app.crawl.strategies.fetchers import _cffi_fetch
-from app.crawl.strategies.http_client_pool import get_async_http_client
+from app.transport.fetchers import _cffi_fetch
+from app.transport.http_client_pool import get_async_http_client
 from tests._async_harnesses import run_loop_rebind_scenario
 from tests._policy_factories import canonical
 from tests._pool_harnesses import builder_for as _builder_for
@@ -66,7 +66,7 @@ class TestPooledClientBuilders:
 
 class TestAsyncHttpClientLifecycle:
     async def test_http_async_client_close(self):
-        from app.crawl.strategies.http_client_pool import close_async_http_client
+        from app.transport.http_client_pool import close_async_http_client
 
         # Get a client, then close it
         get_async_http_client()
@@ -75,7 +75,7 @@ class TestAsyncHttpClientLifecycle:
 
 class TestPendingClientCloseCap:
     def test_pending_client_close_has_cap(self):
-        from app.crawl.strategies import http_client_pool as http_mod
+        from app.transport import http_client_pool as http_mod
 
         assert hasattr(http_mod, "_PENDING_CLIENT_CLOSE_MAX")
         assert http_mod._PENDING_CLIENT_CLOSE_MAX >= 1
@@ -90,7 +90,7 @@ class TestPendingClientCloseCap:
         """
         from unittest.mock import MagicMock
 
-        from app.crawl.strategies import http_client_pool as http_mod
+        from app.transport import http_client_pool as http_mod
 
         # Pre-fill the pending list to the cap with mock clients.
         mocks = [MagicMock(name=f"client-{i}") for i in range(http_mod._PENDING_CLIENT_CLOSE_MAX)]
@@ -139,7 +139,7 @@ class TestPendingClientCloseCap:
         assert len(http_mod._PENDING_CLIENT_CLOSE) == http_mod._PENDING_CLIENT_CLOSE_MAX
 
     def test_pending_client_close_dedupe_and_cap_are_atomic(self):
-        src_path = "app/crawl/strategies/http_client_pool.py"
+        src_path = "app/transport/http_client_pool.py"
         with open(src_path) as f:
             source = f.read()
         assert "already_queued = old_client in _PENDING_CLIENT_CLOSE" in source

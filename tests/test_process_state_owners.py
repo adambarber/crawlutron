@@ -52,10 +52,10 @@ OWNERS: tuple[str, ...] = (
     "app.cgroup_sense",
     "app.crawl.engine",
     "app.crawl.fetch_helpers",
-    "app.crawl.strategies.browser",
-    "app.crawl.strategies.cookie_jar",
-    "app.crawl.strategies.http_client_pool",
-    "app.crawl.strategies.pinned_transport",
+    "app.transport.browser",
+    "app.transport.cookie_jar",
+    "app.transport.http_client_pool",
+    "app.transport.pinned_transport",
 )
 
 

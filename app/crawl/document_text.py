@@ -2,7 +2,7 @@
 
 Pure ``re``-based functions that turn scraper-extracted document text (item
 numbers, actions, headings, paragraph glue) into clean, annotation-ready text.
-Kept separate from :mod:`app.crawl.strategies.http` so the fetching code and the
+Kept separate from :mod:`app.transport.http` so the fetching code and the
 document-text shaping code do not colocate, and so this module has exactly one
 public name -- every step below it is reachable only through
 :func:`format_extracted_document_text`, which is what the tests drive.

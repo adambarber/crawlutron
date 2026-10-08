@@ -3,9 +3,9 @@ from __future__ import annotations
 import httpx
 import pytest
 
-import app.crawl.strategies.fetchers as fetchers_mod
-import app.crawl.strategies.http_client_pool as pool_mod
-import app.crawl.strategies.pinned_transport as pinned_mod
+import app.transport.fetchers as fetchers_mod
+import app.transport.http_client_pool as pool_mod
+import app.transport.pinned_transport as pinned_mod
 from app.crawl.engine import crawl_request
 from app.crawl.extraction import extract_post_fetch_discovery
 from app.models.normalized_url import NormalizedUrl

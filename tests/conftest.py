@@ -183,7 +183,7 @@ def ssrf_guard_required(monkeypatch):
             check_ssrf_protection(...)
     """
     called: list[str] = []
-    from app.crawl.strategies import pinned_transport as pinned_mod
+    from app.transport import pinned_transport as pinned_mod
 
     def _track(name: str, fn):
         def wrapper(*args, **kwargs):
@@ -303,7 +303,7 @@ def stub_cffi_fetcher(request, monkeypatch):
     """
     if request.node.get_closest_marker("real_cffi"):
         return
-    import app.crawl.strategies.fetchers as fetchers_module
+    import app.transport.fetchers as fetchers_module
 
     async def _stub_cffi_fetcher(url, headers, timeout_seconds, max_content_length=0):
         raise ConnectionError("curl_cffi stubbed in tests (mark test with real_cffi to opt in)")
@@ -546,8 +546,8 @@ def _clear_global_http_state() -> None:
     """
     import asyncio
 
-    from app.crawl.strategies import cookie_jar as cookie_mod
-    from app.crawl.strategies import http_client_pool as pool_mod
+    from app.transport import cookie_jar as cookie_mod
+    from app.transport import http_client_pool as pool_mod
 
     with contextlib.suppress(Exception):
         cookie_mod.reset_process_state()
@@ -557,7 +557,7 @@ def _clear_global_http_state() -> None:
         # next test to assert against. It used to be undone per test with
         # monkeypatch.setitem, which only worked while the store was a
         # MutableMapping; the reset door is the one place process state is dropped.
-        from app.crawl.strategies import browser as browser_mod
+        from app.transport import browser as browser_mod
 
         browser_mod.reset_process_state()
     with contextlib.suppress(Exception):
@@ -594,7 +594,7 @@ def _clear_global_http_state() -> None:
     # or schedules a client close would leak state into the next test.
     # ``cookie_mod``/``pool_mod`` are the ones bound at the top of this function;
     # only ``pinned_mod`` is new here.
-    from app.crawl.strategies import pinned_transport as pinned_mod
+    from app.transport import pinned_transport as pinned_mod
 
     with contextlib.suppress(Exception):
         pinned_mod.reset_process_state()

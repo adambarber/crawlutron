@@ -51,7 +51,7 @@ def _last_record(log_file):
 
 def test_module_logger_extras_serialize_to_json(service_sink):
     """Module loggers (app.*) must emit extras as JSON fields, not bare text."""
-    logging.getLogger("app.crawl.strategies.http").warning(
+    logging.getLogger("app.transport.http").warning(
         "http_strategy_result_error", extra={"error_code": "boom", "error_detail": "bad"}
     )
     record = _last_record(service_sink)

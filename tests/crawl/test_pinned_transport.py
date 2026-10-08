@@ -4,7 +4,7 @@ import socket
 from unittest.mock import patch
 from urllib.parse import urlparse
 
-from app.crawl.strategies.pinned_transport import build_pinned_request
+from app.transport.pinned_transport import build_pinned_request
 from tests._assertions import block_private_targets
 from tests._policy_factories import canonical
 

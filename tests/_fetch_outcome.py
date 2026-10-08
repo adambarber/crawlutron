@@ -18,7 +18,7 @@ reader can reach every other field the result carries instead of only the two th
 reporter chose to copy.
 
 The corresponding production declaration is ``HttpFetchResult | None``, the return
-of ``app.crawl.strategies.fetchers._cffi_fetch``. This type adds the one thing
+of ``app.transport.fetchers._cffi_fetch``. This type adds the one thing
 production does not have: the reason, which exists only because a queue discards
 an exception raised in the child.
 """

@@ -520,6 +520,7 @@ _DOC_REFERENCE_EXCLUSIONS = {
     "CHANGELOG.md": "a record of what shipped; its citations name modules that were refactored away",
     "ADVERSARIAL_REVIEW_BROWSER_CRAWLER.md": "a dated review quoting the tree it reviewed",
     "docs/review-and-refactoring-plan.md": "stamped ARCHIVED; describes a topology that no longer exists",
+    "docs/2026-09-15-performance-review.md": "a dated performance review quoting the tree it measured",
 }
 _SKIP_DIRECTORIES = frozenset({".git", ".venv", "work", "node_modules", ".pytest_cache", "__pycache__"})
 

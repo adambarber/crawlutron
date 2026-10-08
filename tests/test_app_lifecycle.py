@@ -125,9 +125,9 @@ class TestMultiWorkerInvariants:
         """
         from app.crawl.coordination_cookies import SharedCookieStore
         from app.crawl.coordination_counters import CoordinationCounters
-        from app.crawl.strategies.cookie_jar import CookieJar
         from app.main import DATABASE_PATH, job_store, result_store
         from app.metrics import get_metrics
+        from app.transport.cookie_jar import CookieJar
 
         app = _booted_app(monkeypatch)
 

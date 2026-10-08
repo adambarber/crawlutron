@@ -3,7 +3,7 @@
 A lazily-constructed module-global ``asyncio.Semaphore`` binds to whichever
 event loop first uses it; two ``asyncio.run`` calls are two distinct loops, and
 a semaphore created on a closed loop cannot be awaited on a live one. The fix
-mirrors ``_LoopBoundPooledClient`` (app.crawl.strategies.http): the module
+mirrors ``_LoopBoundPooledClient`` (app.transport.http): the module
 global stays the single slot -- so a suite reset or a patched builder is still
 observed -- and the cached instance is rebuilt whenever the running loop
 changes.

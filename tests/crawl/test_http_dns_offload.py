@@ -6,8 +6,8 @@ import threading
 import httpx
 import pytest
 
-from app.crawl.strategies import pinned_transport
-from app.crawl.strategies.fetchers import default_http_fetcher
+from app.transport import pinned_transport
+from app.transport.fetchers import default_http_fetcher
 from tests._policy_factories import canonical
 
 

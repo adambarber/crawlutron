@@ -12,7 +12,7 @@ _rendered = _fake_browser(html="<html>rendered</html>", text="rendered")
 
 
 async def test_browser_cookies_replayed_through_cffi():
-    from app.crawl.strategies import browser as bmod
+    from app.transport import browser as bmod
 
     bmod._store_browser_cookies("example.com", "incap_ses=abc; visid=def")
 

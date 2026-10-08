@@ -12,10 +12,10 @@ import httpx
 import pytest
 
 from app.crawl.result_helpers import classify_error_code, engine_result_from_exception
-from app.crawl.strategies.browser_pool import BrowserPoolExhaustedError
 from app.models.engine_crawl_result import EngineCrawlResult
 from app.models.host_policy import HostPolicy
 from app.models.normalized_url import NormalizedUrl
+from app.transport.browser_pool import BrowserPoolExhaustedError
 from app.vocabulary.strategies import BROWSER_HEADED_WARMED, BROWSER_HEADLESS, HTTP_DECLARED_CRAWLER
 from tests._browser_doubles import _fake_browser
 from tests._fetcher_factories import failing_fetcher, raise_fetcher, run_chain
@@ -34,7 +34,7 @@ from tests.crawl._chain_policies import chain_policy
 def test_classifier_lives_in_result_helpers_not_a_strategy_module():
     """The classifier is strategy-neutral; browser.py must import it from result_helpers."""
 
-    import app.crawl.strategies.browser as browser_mod
+    import app.transport.browser as browser_mod
 
     source = inspect.getsource(browser_mod)
     assert "classify_error_code" in source

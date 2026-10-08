@@ -25,14 +25,6 @@ from app.crawl.result_helpers import (
     build_engine_result,
     engine_result_from_exception,
 )
-from app.crawl.strategies import body_decode, content_cache_key, fetch_policy, request_profile
-from app.crawl.strategies.content_pipeline import (
-    _discover_after_fetch,
-    _discovery_result_fields,
-    _post_fetch_diagnostics,
-    _run_extraction,
-)
-from app.crawl.strategies.strategy_request import StrategyRequest
 from app.models.crawl_extraction_method import CrawlExtractionMethod
 from app.models.crawl_policy import CrawlPolicy
 from app.models.crawl_policy_limits import CrawlPolicyLimits
@@ -42,6 +34,14 @@ from app.models.host_policy import HostPolicy
 from app.models.http_fetch_result import HttpFetchResult
 from app.models.normalized_url import NormalizedUrl
 from app.models.taxonomy import Classification, CrawlStrategyName
+from app.transport import body_decode, content_cache_key, fetch_policy, request_profile
+from app.transport.content_pipeline import (
+    _discover_after_fetch,
+    _discovery_result_fields,
+    _post_fetch_diagnostics,
+    _run_extraction,
+)
+from app.transport.strategy_request import StrategyRequest
 from app.vocabulary.extraction import (
     EXTRACTION_DOCUMENT,
     EXTRACTION_METHOD_HTTP_BODY,

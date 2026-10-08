@@ -120,7 +120,7 @@ _OWNER_PUBLIC_SURFACE_RATCHET = {
     # carries. The chokepoint is the entry point; the count moved because the
     # chokepoint needs to be reachable.
     "app/crawl/result_helpers.py": (10, 9),
-    "app/crawl/strategies/fetch_policy.py": (5, 5),
+    "app/transport/fetch_policy.py": (5, 5),
     "app/models/host_policy.py": (6, 5),
 }
 

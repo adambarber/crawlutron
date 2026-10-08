@@ -77,7 +77,7 @@ _SERVICE_ROOT_NAMES = frozenset({"REPO_ROOT", "SERVICE_ROOT", "HERE", "ROOT"})
 
 
 # Already inside app/ by construction: the walk helpers hand these out.
-_APP_ROOTED_NAMES = frozenset({"APP_ROOT", "STRATEGIES_DIR"})
+_APP_ROOTED_NAMES = frozenset({"APP_ROOT", "TRANSPORT_DIR"})
 
 
 # Qualifiers whose mutating call takes the path as an ARGUMENT
@@ -523,7 +523,7 @@ PLANTED_BARE_IMPORT = (
 def _own_package(module: str) -> str:
     """The package a dotted module name belongs to.
 
-    ``app.crawl.strategies.http`` -> ``app.crawl.strategies``; a top-level module
+    ``app.transport.http`` -> ``app.transport``; a top-level module
     like ``app.metrics`` -> ``app``. A module name is never its own package, so a
     leaf module and its siblings share one boundary.
 
@@ -554,9 +554,9 @@ def _private_leak_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
 
     A leading underscore has two halves and a name is only honest if both are
     respected. The conventional half is package-internal: ``_post_fetch_diagnostics``
-    is private to ``app.crawl.strategies`` and every sibling strategy may use it,
+    is private to ``app.transport`` and every sibling strategy may use it,
     because no consumer outside ``strategies`` can be written ``from
-    app.crawl.strategies.http import _post_fetch_diagnostics`` and get far. The
+    app.transport.http import _post_fetch_diagnostics`` and get far. The
     half that gets broken is the one the import form defeats -- binding the name
     into another package *does* make it reachable, and the underscore is then
     asserting a boundary the reader cannot check.
@@ -601,7 +601,7 @@ _RENDER_PROOF_PATH = REPO_ROOT / "app" / "api" / "render.py"
 
 #: A real sibling of ``strategies.content_pipeline``, so the private import in the
 #: clean proof resolves inside one package and must stay quiet.
-_STRATEGY_SIBLING_PROOF_PATH = REPO_ROOT / "app" / "crawl" / "strategies" / "browser_result.py"
+_TRANSPORT_SIBLING_PROOF_PATH = REPO_ROOT / "app" / "transport" / "browser_result.py"
 
 
 PRIVATE_NAME_LEAKS_PACKAGE = Rule(
@@ -618,7 +618,7 @@ PRIVATE_NAME_LEAKS_PACKAGE = Rule(
         # offender this rule found -- so the proof silently became vacuous
         # halfway through the migration and only a rename exposed it. A synthetic
         # name cannot be promoted, so the proof outlives the tree it describes.
-        "from app.crawl.strategies.http import _unpromoted_strategy_result\n"
+        "from app.transport.http import _unpromoted_strategy_result\n"
         "from app.validation import _unpromoted_private_target_gate\n",
         marker="which is outside the",
         count=2,
@@ -630,13 +630,13 @@ PRIVATE_NAME_LEAKS_PACKAGE = Rule(
         # whole content of this rule is a package comparison -- run it in a module
         # that is not inside the boundary and the quiet is the other claim.
         Silent(
-            "from app.crawl.strategies.content_pipeline import _unpromoted_sibling_detail\n",
-            at=_STRATEGY_SIBLING_PROOF_PATH,
+            "from app.transport.content_pipeline import _unpromoted_sibling_detail\n",
+            at=_TRANSPORT_SIBLING_PROOF_PATH,
         ),
         # Public cross-package: no underscore, so no boundary is being crossed.
         "from app.vocabulary.identity import USER_AGENT_TOKEN\n",
         # dunder spellings are not privacy, they are protocol hooks.
-        "from app.crawl.strategies.http import __all__\n",
+        "from app.transport.http import __all__\n",
         # stdlib and third-party are outside the rule entirely.
         "import httpx\nfrom pathlib import Path\n",
     ),

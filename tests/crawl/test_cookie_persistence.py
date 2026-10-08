@@ -1,6 +1,6 @@
 """Cookie persistence - pure tests (no mocks)."""
 
-from app.crawl.strategies.cookie_jar import CookieJar
+from app.transport.cookie_jar import CookieJar
 from tests._policy_factories import canonical
 
 

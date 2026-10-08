@@ -12,7 +12,7 @@ import os
 import tempfile
 from unittest.mock import patch
 
-from app.crawl.strategies.cookie_jar import CookieJar
+from app.transport.cookie_jar import CookieJar
 from tests._cookie_helpers import cookie_file, read_cookie_file
 from tests._policy_factories import canonical
 from tests._thread_fanout import run_thread_fanout
@@ -76,7 +76,7 @@ def test_concurrent_cookie_writes_do_not_raise():
 
 def _cookie_jar_max_hosts() -> int:
     """The jar's LRU cap, read from the module that owns it."""
-    from app.crawl.strategies.cookie_jar import _COOKIE_JAR_MAX_HOSTS
+    from app.transport.cookie_jar import _COOKIE_JAR_MAX_HOSTS
 
     return _COOKIE_JAR_MAX_HOSTS
 
@@ -118,7 +118,7 @@ def test_cookie_jar_read_refreshes_host_recency():
 
 class TestCookieJarHeaderHandling:
     def test_http_cookie_invalid(self):
-        from app.crawl.strategies.cookie_jar import _GLOBAL_COOKIE_JAR
+        from app.transport.cookie_jar import _GLOBAL_COOKIE_JAR
 
         # Call with an invalid cookie header - should not raise. The header is
         # a string, not a mapping: an empty ``{}`` was only "not a string" for as
@@ -155,8 +155,8 @@ def test_no_store_cookie_jar_inherits_the_stdlib_jar_not_the_storing_one():
     """
     import http.cookiejar
 
-    from app.crawl.strategies import http_client_pool as pool_mod
-    from app.crawl.strategies.cookie_jar import CookieJar
+    from app.transport import http_client_pool as pool_mod
+    from app.transport.cookie_jar import CookieJar
 
     assert issubclass(pool_mod._NoStoreCookieJar, http.cookiejar.CookieJar)
     # The project's own jar STORES cookies; the inert jar must not be one.
@@ -165,7 +165,7 @@ def test_no_store_cookie_jar_inherits_the_stdlib_jar_not_the_storing_one():
 
 def test_no_store_cookie_jar_never_stores_a_set_cookie():
     """The inert jar must stay empty after a response carries a Set-Cookie."""
-    from app.crawl.strategies.http_client_pool import _NoStoreCookieJar
+    from app.transport.http_client_pool import _NoStoreCookieJar
 
     jar = _NoStoreCookieJar()
     assert jar.extract_cookies(_RecordingResponse(), _RecordingRequest()) is None

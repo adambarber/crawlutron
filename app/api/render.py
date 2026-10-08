@@ -117,7 +117,7 @@ async def render_request(
     # Worker exceptions are swallowed by the scheduler's gather, so capture
     # them per index: total pool exhaustion raises for a 503, any other
     # missing slot becomes a per-URL failed result instead of a 500.
-    from app.crawl.strategies.browser_pool import BrowserPoolExhaustedError
+    from app.transport.browser_pool import BrowserPoolExhaustedError
 
     by_index: dict[int, CrawlResult] = {}
     worker_errors: dict[int, BaseException] = {}

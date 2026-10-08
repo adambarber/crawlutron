@@ -9,7 +9,7 @@ above its insides. 43 of the 49 structural commits that moved ``app/`` also move
 **A module reaching into a sibling** is worse, because it means the module
 boundary is a convention nobody is holding. Six modules do it, thirteen reaches
 in all: ``app/crawl/engine.py`` reaches into ``app/crawl/robots.py`` for four
-private classes and two pattern helpers, and ``app/crawl/strategies/http.py``
+private classes and two pattern helpers, and ``app/transport/http.py``
 reaches into ``content_cache_key`` and ``request_profile``. Nothing checked that,
 and nothing stopped it growing.
 
@@ -19,7 +19,7 @@ convention, and conventions decay. What the bluntness buys is that a new weld
 cannot land without somebody writing down why it is acceptable.
 
 One table, not two, because a name can be reached from both sides -- and
-``app.crawl.strategies.http_client_pool._drain_pending_client_closes`` is, by a
+``app.transport.http_client_pool._drain_pending_client_closes`` is, by a
 test and by two production modules -- and one name is one declaration whichever
 hand reaches for it. The ``side`` field records who reaches, not what they are
 allowed to.
@@ -405,157 +405,157 @@ DECLARED: dict[str, Declaration] = {
     "app.crawl.robots.robots_cache._entries": _d(_CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]),
     "app.crawl.sqlite_store._BUSY_TIMEOUT_MS": _SUBSTITUTED_CAP,
     "app.crawl.sqlite_store._WAL_RETRY_SECONDS": _SUBSTITUTED_CAP,
-    "app.crawl.strategies.browser._BROWSER_COOKIES_BY_DOMAIN": _d(
+    "app.transport.browser._BROWSER_COOKIES_BY_DOMAIN": _d(
         _CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]
     ),
-    "app.crawl.strategies.browser._BROWSER_COOKIES_BY_DOMAIN._lock": _d(
+    "app.transport.browser._BROWSER_COOKIES_BY_DOMAIN._lock": _d(
         _CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]
     ),
-    "app.crawl.strategies.browser._BROWSER_COOKIES_MAX": _d(
+    "app.transport.browser._BROWSER_COOKIES_MAX": _d(
         _CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]
     ),
-    "app.crawl.strategies.browser._assert_safe_final_url": _d(
+    "app.transport.browser._assert_safe_final_url": _d(
         "unreviewed",
         "Not yet triaged.\n",
         ["test"],
     ),
-    "app.crawl.strategies.browser._is_ssrf_blocked": _d(
+    "app.transport.browser._is_ssrf_blocked": _d(
         "unreviewed",
         "Not yet triaged.\n",
         ["test"],
     ),
-    "app.crawl.strategies.browser._store_browser_cookies": _d(
+    "app.transport.browser._store_browser_cookies": _d(
         "unreviewed",
         "Not yet triaged.\n",
         ["test"],
     ),
-    "app.crawl.strategies.browser_driver.BrowserDriver._dispatch_action": _d(
+    "app.transport.browser_driver.BrowserDriver._dispatch_action": _d(
         _PRIVATE_TYPE.kind, _PRIVATE_TYPE.reason, ["test"]
     ),
-    "app.crawl.strategies.browser_pool._derive_browser_pool_size": _d(
+    "app.transport.browser_pool._derive_browser_pool_size": _d(
         "unreviewed",
         "Not yet triaged.\n",
         ["test"],
     ),
-    "app.crawl.strategies.content_cache_key._RAM_SAFETY_BYTES": _SUBSTITUTED_CAP,
-    "app.crawl.strategies.content_cache_key._effective_max_content_length": _d(
+    "app.transport.content_cache_key._RAM_SAFETY_BYTES": _SUBSTITUTED_CAP,
+    "app.transport.content_cache_key._effective_max_content_length": _d(
         "unreviewed",
         "Not yet triaged.\n",
         ["test", "app"],
     ),
-    "app.crawl.strategies.cookie_jar._COOKIE_JAR_MAX_HOSTS": _d(
+    "app.transport.cookie_jar._COOKIE_JAR_MAX_HOSTS": _d(
         _CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]
     ),
-    "app.crawl.strategies.cookie_jar._GLOBAL_COOKIE_JAR": _d(
+    "app.transport.cookie_jar._GLOBAL_COOKIE_JAR": _d(
         _CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test", "app"]
     ),
-    "app.crawl.strategies.document._default_document_text_extractor": _d(
+    "app.transport.document._default_document_text_extractor": _d(
         "unreviewed",
         "Not yet triaged.\n",
         ["test"],
     ),
-    "app.crawl.strategies.document._extract_pdf_bytes_to_markdown": _d(
+    "app.transport.document._extract_pdf_bytes_to_markdown": _d(
         "unreviewed",
         "Not yet triaged.\n",
         ["test"],
     ),
-    "app.crawl.strategies.document._format_table": _d(
+    "app.transport.document._format_table": _d(
         "unreviewed",
         "Not yet triaged.\n",
         ["test"],
     ),
-    "app.crawl.strategies.document._pdf_to_markdown": _d(
+    "app.transport.document._pdf_to_markdown": _d(
         "unreviewed",
         "Not yet triaged.\n",
         ["test"],
     ),
-    "app.crawl.strategies.fetch_policy._RETRY_BACKOFF_CAP_SECONDS": _d(
+    "app.transport.fetch_policy._RETRY_BACKOFF_CAP_SECONDS": _d(
         _CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]
     ),
-    "app.crawl.strategies.fetchers._cffi_fetch": _d(
+    "app.transport.fetchers._cffi_fetch": _d(
         "unreviewed",
         "Not yet triaged.\n",
         ["test"],
     ),
-    "app.crawl.strategies.fetchers._release_stream_noblock": _SUBSTITUTED_COLLABORATOR,
-    "app.crawl.strategies.http_client_pool._LoopBoundPooledClient": _d(
+    "app.transport.fetchers._release_stream_noblock": _SUBSTITUTED_COLLABORATOR,
+    "app.transport.http_client_pool._LoopBoundPooledClient": _d(
         _PRIVATE_TYPE.kind, _PRIVATE_TYPE.reason, ["test"]
     ),
-    "app.crawl.strategies.http_client_pool._NoStoreCookieJar": _d(
+    "app.transport.http_client_pool._NoStoreCookieJar": _d(
         _PRIVATE_TYPE.kind, _PRIVATE_TYPE.reason, ["test"]
     ),
-    "app.crawl.strategies.http_client_pool._PENDING_CLIENT_CLOSE": _d(
+    "app.transport.http_client_pool._PENDING_CLIENT_CLOSE": _d(
         _CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]
     ),
-    "app.crawl.strategies.http_client_pool._PENDING_CLIENT_CLOSE_LOCK": _d(
+    "app.transport.http_client_pool._PENDING_CLIENT_CLOSE_LOCK": _d(
         _CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]
     ),
-    "app.crawl.strategies.http_client_pool._PENDING_CLIENT_CLOSE_MAX": _d(
+    "app.transport.http_client_pool._PENDING_CLIENT_CLOSE_MAX": _d(
         _CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]
     ),
-    "app.crawl.strategies.http_client_pool._build_async_client": _SUBSTITUTED_COLLABORATOR,
-    "app.crawl.strategies.http_client_pool._build_cffi_session": _SUBSTITUTED_COLLABORATOR,
-    "app.crawl.strategies.http_client_pool._drain_pending_client_closes": _d(
+    "app.transport.http_client_pool._build_async_client": _SUBSTITUTED_COLLABORATOR,
+    "app.transport.http_client_pool._build_cffi_session": _SUBSTITUTED_COLLABORATOR,
+    "app.transport.http_client_pool._drain_pending_client_closes": _d(
         _LIFECYCLE_DRAIN_PENDING_CLIENT_CLOSES.kind,
         _LIFECYCLE_DRAIN_PENDING_CLIENT_CLOSES.reason,
         ["test", "app"],
     ),
-    "app.crawl.strategies.http_client_pool._queue_superseded_close": _SUBSTITUTED_COLLABORATOR,
-    "app.crawl.strategies.http_client_pool._release_dropped_client": _OWNED_POOL_MACHINERY,
-    "app.crawl.strategies.http_client_pool._schedule_client_close": _OWNED_POOL_MACHINERY,
-    "app.crawl.strategies.pinned_transport._CREDENTIAL_HEADERS": _d(
+    "app.transport.http_client_pool._queue_superseded_close": _SUBSTITUTED_COLLABORATOR,
+    "app.transport.http_client_pool._release_dropped_client": _OWNED_POOL_MACHINERY,
+    "app.transport.http_client_pool._schedule_client_close": _OWNED_POOL_MACHINERY,
+    "app.transport.pinned_transport._CREDENTIAL_HEADERS": _d(
         _CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]
     ),
-    "app.crawl.strategies.pinned_transport._DNS_CACHE": _d(
+    "app.transport.pinned_transport._DNS_CACHE": _d(
         _CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]
     ),
-    "app.crawl.strategies.pinned_transport._DNS_CACHE._lock": _d(
+    "app.transport.pinned_transport._DNS_CACHE._lock": _d(
         _CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]
     ),
-    "app.crawl.strategies.pinned_transport._MAX_REDIRECT_HOPS": _d(
+    "app.transport.pinned_transport._MAX_REDIRECT_HOPS": _d(
         _CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]
     ),
-    "app.crawl.strategies.pinned_transport._declared_length_exceeds": _d(
+    "app.transport.pinned_transport._declared_length_exceeds": _d(
         "unreviewed",
         "Not yet triaged.\n",
         ["test", "app"],
     ),
-    "app.crawl.strategies.pinned_transport._http_413": _d(
+    "app.transport.pinned_transport._http_413": _d(
         "unreviewed",
         "Not yet triaged.\n",
         ["app"],
     ),
-    "app.crawl.strategies.pinned_transport._is_private_or_loopback_ip": _d(
+    "app.transport.pinned_transport._is_private_or_loopback_ip": _d(
         "unreviewed",
         "Not yet triaged.\n",
         ["test"],
     ),
-    "app.crawl.strategies.pinned_transport._redirect_target": _d(
+    "app.transport.pinned_transport._redirect_target": _d(
         "unreviewed",
         "Not yet triaged.\n",
         ["test"],
     ),
-    "app.crawl.strategies.pinned_transport._resolve_ips": _d(
+    "app.transport.pinned_transport._resolve_ips": _d(
         "unreviewed",
         "Not yet triaged.\n",
         ["test"],
     ),
-    "app.crawl.strategies.request_profile._apply_credentials": _d(
+    "app.transport.request_profile._apply_credentials": _d(
         "unreviewed",
         "Not yet triaged.\n",
         ["test"],
     ),
-    "app.crawl.strategies.request_profile._cookie_header_for_url": _d(
+    "app.transport.request_profile._cookie_header_for_url": _d(
         "unreviewed",
         "Not yet triaged.\n",
         ["test"],
     ),
-    "app.crawl.strategies.request_profile._select_fingerprint": _d(
+    "app.transport.request_profile._select_fingerprint": _d(
         "unreviewed",
         "Not yet triaged.\n",
         ["test"],
     ),
-    "app.crawl.strategies.request_profile._store_set_cookies": _d(
+    "app.transport.request_profile._store_set_cookies": _d(
         "unreviewed",
         "Not yet triaged.\n",
         ["test"],

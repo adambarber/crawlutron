@@ -205,7 +205,7 @@ def allow_scripted_egress(monkeypatch, ip: str = "1.2.3.4") -> None:
     construction, because a pinned private address is exactly what the guard
     would have rejected and a test here is not about the guard.
     """
-    from app.crawl.strategies import pinned_transport as pinned_mod
+    from app.transport import pinned_transport as pinned_mod
 
     monkeypatch.setattr(pinned_mod, "check_ssrf_protection", lambda url: None)
     monkeypatch.setattr(pinned_mod, "resolve_and_pin_host", lambda url: (url.host, ip))
@@ -226,7 +226,7 @@ def patch_http_fetcher_transport(
     if not allow_ssrf_bypass:
         raise ValueError("patch_http_fetcher_transport requires allow_ssrf_bypass=True")
 
-    from app.crawl.strategies import http_client_pool as pool_mod
+    from app.transport import http_client_pool as pool_mod
 
     client = scripted_transport_client(responses)
     monkeypatch.setattr(pool_mod, "get_async_http_client", lambda: client)
@@ -242,7 +242,7 @@ def _genuine_cffi_outcome(url: str, timeout_seconds: int, max_content_length: in
     """
     import asyncio
 
-    from app.crawl.strategies.fetchers import impersonating_fetcher
+    from app.transport.fetchers import impersonating_fetcher
     from tests._policy_factories import canonical
 
     async def _fetch():

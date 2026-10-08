@@ -54,7 +54,7 @@ from types import ModuleType
 TESTS_DIR = pathlib.Path(__file__).resolve().parent
 REPO_ROOT = TESTS_DIR.parent
 APP_ROOT = REPO_ROOT / "app"
-STRATEGIES_DIR = APP_ROOT / "crawl" / "strategies"
+TRANSPORT_DIR = APP_ROOT / "transport"
 
 
 @lru_cache(maxsize=1)
