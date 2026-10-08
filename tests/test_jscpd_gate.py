@@ -55,7 +55,7 @@ def _strip_root(name: str, root: str) -> str:
 
     A single-root invocation reports paths relative to that root. Handed several,
     it strips the root prefix from each and reports `crawl/recursive.py` for
-    `app/crawl/recursive.py` and `_recursive_harnesses.py` for
+    `app/orchestration/recursive.py` and `_recursive_harnesses.py` for
     `tests/_recursive_harnesses.py` -- measured, not assumed: a multi-path scan of
     this service returns exactly those two strings, neither of which names the
     tree it came from. The stub has to reproduce that, because the gate resolves
@@ -332,7 +332,7 @@ def _cross_tree_duplicate() -> dict:
     looks like one legitimate copy on each side, so a per-tree gate has nothing to
     object to even in principle.
     """
-    return _duplicate("app/crawl/recursive.py", "tests/_recursive_harnesses.py")
+    return _duplicate("app/orchestration/recursive.py", "tests/_recursive_harnesses.py")
 
 
 def _sanctioned_cross_tree_pair() -> dict:
@@ -345,7 +345,7 @@ def _sanctioned_cross_tree_pair() -> dict:
     nothing.
     """
     pair = _valid_pair()
-    pair["first"] = {"path": "app/crawl/recursive.py", "start": 10, "end": 20}
+    pair["first"] = {"path": "app/orchestration/recursive.py", "start": 10, "end": 20}
     pair["second"] = {"path": "tests/_recursive_harnesses.py", "start": 30, "end": 40}
     return pair
 
@@ -368,7 +368,7 @@ def test_a_clone_spanning_two_trees_fails(monkeypatch, tmp_path, capsys) -> None
     # Both sides named, each with the root that actually holds it -- the gate has
     # to re-attach the root jscpd stripped, or a cross-tree report would be
     # unactionable.
-    assert "app/crawl/recursive.py" in error
+    assert "app/orchestration/recursive.py" in error
     assert "tests/_recursive_harnesses.py" in error
 
 
@@ -661,7 +661,7 @@ def test_every_root_is_scanned_by_its_own_single_root_invocation() -> None:
     """One root per invocation, because jscpd's names are root-relative.
 
     `name` is relative to the scan root, so an invocation given several roots
-    cannot tell production from test: `app/crawl/x.py` and `tests/crawl/x.py`
+    cannot tell production from test: `app/api/x.py` and `tests/api/x.py`
     both arrive as `crawl/x.py`, and a clone spanning the two is reported
     against a path that names neither tree. A tree may hold several roots, but
     each of them is scanned alone, which is what makes this gate's own report

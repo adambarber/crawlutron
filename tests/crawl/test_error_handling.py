@@ -11,10 +11,10 @@ from dataclasses import asdict, replace
 import httpx
 import pytest
 
-from app.crawl.result_helpers import classify_error_code, engine_result_from_exception
 from app.models.engine_crawl_result import EngineCrawlResult
 from app.models.host_policy import HostPolicy
 from app.models.normalized_url import NormalizedUrl
+from app.orchestration.result_helpers import classify_error_code, engine_result_from_exception
 from app.transport.browser_pool import BrowserPoolExhaustedError
 from app.vocabulary.strategies import BROWSER_HEADED_WARMED, BROWSER_HEADLESS, HTTP_DECLARED_CRAWLER
 from tests._browser_doubles import _fake_browser
@@ -38,8 +38,8 @@ def test_classifier_lives_in_result_helpers_not_a_strategy_module():
 
     source = inspect.getsource(browser_mod)
     assert "classify_error_code" in source
-    assert "from app.crawl.result_helpers import classify_error_code" in source, (
-        "browser.py must import classify_error_code from app.crawl.result_helpers, "
+    assert "from app.orchestration.result_helpers import classify_error_code" in source, (
+        "browser.py must import classify_error_code from app.orchestration.result_helpers, "
         "not reach across into the HTTP strategy module"
     )
 
@@ -166,7 +166,7 @@ class TestClassificationValueValidity:
 
 def _budget_item() -> dict:
     """An engine result dict as produced by engine_result_from_exception."""
-    from app.crawl.result_helpers import engine_result_from_exception
+    from app.orchestration.result_helpers import engine_result_from_exception
 
     result = engine_result_from_exception(
         error=TimeoutError("budget exhausted"),

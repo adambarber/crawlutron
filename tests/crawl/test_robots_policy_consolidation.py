@@ -5,16 +5,16 @@ import asyncio
 import pytest
 
 from app.admission.admission import RobotsGate
-from app.crawl.engine import crawl_request
-from app.crawl.robots import (
+from app.models.crawl_policy import CrawlPolicy
+from app.models.host_policy import HostPolicy
+from app.orchestration.engine import crawl_request
+from app.orchestration.robots import (
     ROBOTS_CACHE_TTL_SECONDS,
     ROBOTS_FAILURE_TTL_SECONDS,
     FetchAndDecode,
     load_robots_rules,
     robots_cache,
 )
-from app.models.crawl_policy import CrawlPolicy
-from app.models.host_policy import HostPolicy
 from tests._fetcher_factories import make_html_fetcher
 from tests._policy_factories import canonical, crawl_policy
 
@@ -114,7 +114,7 @@ async def test_engine_and_job_single_flight_each_collapse_same_origin_misses():
 async def test_owner_preserves_404_and_5xx_ttl_semantics():
     import time
 
-    import app.crawl.robots as owner
+    import app.orchestration.robots as owner
 
     robots_cache.clear()
     statuses = iter((404, 500))

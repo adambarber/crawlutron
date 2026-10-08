@@ -4,9 +4,9 @@ import base64
 
 import pytest
 
-from app.crawl.engine import crawl_request
 from app.models.crawl_result import CrawlResult
 from app.models.render_options import RenderOptions
+from app.orchestration.engine import crawl_request
 from app.transport.browser import BrowserRenderer
 from app.transport.cache import HttpCache
 from app.validation import HostPolicy

@@ -43,14 +43,14 @@ from app.admission.admission import (
 from app.admission.policy import read_policy
 from app.api.crawl_executor import execute_crawl as _real_execute_crawl
 from app.api.response_shaping import _failed_unified_result, abuild_unified_result
-from app.crawl.result_helpers import terminal_attempt
-from app.crawl.result_record import ProducerEnvelope
-from app.crawl.robots import FetchAndDecode
 from app.models.crawl_result import CrawlResult
 from app.models.crawl_task import CrawlTask
 from app.models.engine_crawl_result import EngineCrawlResult
 from app.models.normalized_url import NormalizedUrl, admit_or_none
+from app.models.result_record import ProducerEnvelope
 from app.models.taxonomy import Classification
+from app.orchestration.result_helpers import terminal_attempt
+from app.orchestration.robots import FetchAndDecode
 from app.storage.job_store import (
     FrontierEntry,
     JobKind,

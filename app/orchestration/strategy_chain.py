@@ -6,7 +6,6 @@ from collections.abc import Iterable
 from dataclasses import dataclass, replace
 from typing import Any, cast, get_args
 
-from app.crawl.result_helpers import TerminalResult, _failed_engine_result, engine_result_from_exception
 from app.models.crawl_policy import CrawlPolicy
 from app.models.crawl_result import CrawlStrategyAttempt
 from app.models.crawl_strategy import CrawlStrategy
@@ -16,7 +15,12 @@ from app.models.host_policy import HostPolicy
 from app.models.http_fetcher import HttpFetcher
 from app.models.normalized_url import NormalizedUrl
 from app.models.taxonomy import Classification, CrawlError, CrawlStrategyName
-from app.scheduler import DomainScheduler
+from app.orchestration.result_helpers import (
+    TerminalResult,
+    _failed_engine_result,
+    engine_result_from_exception,
+)
+from app.orchestration.scheduler import DomainScheduler
 from app.transport.browser_result import browser_strategy_result
 from app.transport.http import http_strategy_result
 from app.transport.strategy_request import StrategyRequest

@@ -451,8 +451,8 @@ class FakeRequest:
 
 
 def _fake_browser(html=None, text="doc", metadata=None, status="success", classification="rendered"):
-    from app.crawl.result_helpers import terminal_attempt
     from app.models.crawl_result import CrawlResult
+    from app.orchestration.result_helpers import terminal_attempt
 
     def worker(job):
         return CrawlResult(

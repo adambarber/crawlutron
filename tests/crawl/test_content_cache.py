@@ -439,7 +439,7 @@ class TestContentCacheCorruptEntry:
 
 class TestSharedContentCache:
     def test_engine_shared_content_cache(self):
-        from app.crawl.engine import _get_shared_content_cache
+        from app.orchestration.engine import _get_shared_content_cache
         from app.transport.content_cache import ContentCache
 
         cache = _get_shared_content_cache()

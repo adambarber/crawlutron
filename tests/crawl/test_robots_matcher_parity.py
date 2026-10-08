@@ -28,7 +28,7 @@ import re
 
 import pytest
 
-from app.crawl.robots import _RobotsPathMatcher, robots_allows
+from app.orchestration.robots import _RobotsPathMatcher, robots_allows
 from tests._policy_factories import canonical
 
 

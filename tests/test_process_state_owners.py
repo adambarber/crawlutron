@@ -50,8 +50,8 @@ from tests.chokepoint_walks import REPO_ROOT
 
 OWNERS: tuple[str, ...] = (
     "app.cgroup_sense",
-    "app.crawl.engine",
-    "app.crawl.fetch_helpers",
+    "app.orchestration.engine",
+    "app.orchestration.fetch_helpers",
     "app.transport.browser",
     "app.transport.cookie_jar",
     "app.transport.http_client_pool",

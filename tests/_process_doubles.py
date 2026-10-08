@@ -10,7 +10,7 @@ freezing its own idea of what ``exitcode`` should be.
 
 from typing import Any
 
-from app.crawl.doc_pool import DocExtractionPool, DocWorker
+from app.orchestration.doc_pool import DocExtractionPool, DocWorker
 
 
 class StubProc:

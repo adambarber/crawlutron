@@ -108,7 +108,7 @@ CROSS_TREE = "cross"
 CROSS_TREE_ROOT = "."
 # One root per invocation, so that every pair jscpd reports can be attributed to
 # the tree it is in: jscpd names files relative to the root it was handed, and
-# `app/crawl/x.py` and `tests/crawl/x.py` both come back as `crawl/x.py`. A
+# `app/api/x.py` and `tests/api/x.py` both come back as `x.py`. A
 # single invocation over all roots would make that attribution impossible.
 #
 # This is a real cost and used to be accepted as the price of attribution: it
@@ -351,7 +351,7 @@ def _resolve_roots(name: str, profile: str) -> tuple[str, ...]:
 
     jscpd strips the root prefix when it is handed several paths, so one
     invocation over `app tests` returns `crawl/recursive.py` for
-    `app/crawl/recursive.py` AND `_recursive_harnesses.py` for
+    `app/orchestration/recursive.py` AND `_recursive_harnesses.py` for
     `tests/_recursive_harnesses.py` -- names that name no tree, which is the
     whole reason attribution was delegated to one-root-per-invocation scans in
     the first place. There is no flag to turn that off, so attribution is

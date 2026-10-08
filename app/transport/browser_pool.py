@@ -12,10 +12,10 @@ import time
 from dataclasses import replace
 from typing import Any
 
-from app.crawl.result_helpers import crawl_result_from_exception
 from app.models.browser_pool_exhausted import BrowserPoolExhaustedError
 from app.models.crawl_result import CrawlResult
 from app.models.taxonomy import CrawlStrategyName
+from app.orchestration.result_helpers import crawl_result_from_exception
 from app.resource_pressure import (
     BROWSER_RAM_FRACTION,
 )

@@ -169,7 +169,7 @@ class TestResolveEgress:
 
 
 async def test_crawl_request_applies_settings_host_policy():
-    from app.crawl.engine import crawl_request
+    from app.orchestration.engine import crawl_request
     from app.settings import CrawlerSettings
 
     settings = CrawlerSettings(allowed_hosts="allowed.test")

@@ -61,7 +61,7 @@ class CrawlClassification(StrEnum):
     # rejected the entire batch with a 500.
     url_budget_exceeded = "url_budget_exceeded"
     # Strategy-level failure codes emitted by the shared error classifier
-    # (``app.crawl.result_helpers.classify_error_code``). They are members of
+    # (``app.orchestration.result_helpers.classify_error_code``). They are members of
     # the taxonomy (not internal-only strings) because they are stored verbatim
     # in ``CrawlStrategyAttempt.classification`` and this field is the strict
     # enum at response shaping: a non-member code sails through the lenient

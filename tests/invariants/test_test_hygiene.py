@@ -282,7 +282,7 @@ def test_swallowing_double_detector_bites():
 def _scheduler_run_positional_names() -> tuple[str, ...]:
     """The real ``DomainScheduler.run`` positional parameter names, in order.
 
-    Read from ``app/scheduler.py`` rather than typed, because both the count and
+    Read from ``app/orchestration/scheduler.py`` rather than typed, because both the count and
     the names are what tell a scheduler double from an unrelated function that
     happens to be called ``run`` -- and a hand-kept tuple goes stale the moment a
     parameter is added to the real signature, at which point the detector is
@@ -291,12 +291,14 @@ def _scheduler_run_positional_names() -> tuple[str, ...]:
     is matched on the arguments a caller passes, and whether it is a method is not
     part of that.
     """
-    tree = ast.parse((REPO_ROOT / "app" / "scheduler.py").read_text(encoding="utf-8"))
+    tree = ast.parse((REPO_ROOT / "app" / "orchestration" / "scheduler.py").read_text(encoding="utf-8"))
     for node in nodes_of(tree):
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == "run":
             args = node.args
             return tuple(a.arg for a in args.posonlyargs + args.args if a.arg not in {"self", "cls"})
-    raise AssertionError("app/scheduler.py no longer has a run(); the rule it backs is unverifiable")
+    raise AssertionError(
+        "app/orchestration/scheduler.py no longer has a run(); the rule it backs is unverifiable"
+    )
 
 
 def _failed_result_binding_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:

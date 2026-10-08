@@ -6,10 +6,10 @@ from datetime import UTC, datetime, timedelta
 from functools import partial
 
 from app.admission.policy import read_policy
-from app.crawl.engine import _parse_lastmod, _seed_is_fresh, _stale_seeds
-from app.crawl.fetch_helpers import _SITEMAP_CACHE, fetch_sitemap_urls
-from app.crawl.result_record import ProducerEnvelope
 from app.map import build_site_map
+from app.models.result_record import ProducerEnvelope
+from app.orchestration.engine import _parse_lastmod, _seed_is_fresh, _stale_seeds
+from app.orchestration.fetch_helpers import _SITEMAP_CACHE, fetch_sitemap_urls
 from app.transport.content_cache import ContentCache
 from app.transport.content_cache_key import build_content_cache_key
 from app.transport.request_profile import headers_for_strategy
@@ -336,7 +336,7 @@ class TestSeedingIsOffLoop:
     async def test_freshness_filter_runs_in_a_worker_thread(self, monkeypatch, tmp_path):
         """The engine's sitemap seeding must offload the freshness batch via
         ``asyncio.to_thread`` rather than parsing envelopes on the loop."""
-        from app.crawl.engine import crawl_request
+        from app.orchestration.engine import crawl_request
 
         seen = install_to_thread_spy(monkeypatch)
         fresh_url = "http://seed-batch.test/fresh"

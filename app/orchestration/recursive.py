@@ -1,6 +1,6 @@
 """Recursive crawl dispatch (bounded BFS) with self-tuning admission.
 
-Extracted from :mod:`app.crawl.engine.crawl_request` so the resource-gated
+Extracted from :mod:`app.orchestration.engine.crawl_request` so the resource-gated
 batch loop can be unit-tested in isolation, without standing up the whole
 engine. The engine still owns policy parsing, the per-URL crawl chain, robots
 handling, and result spill/reassembly; it hands this function the already-built
@@ -21,15 +21,15 @@ from app.admission.admission import (
     admit_discovered_links,
 )
 from app.admission.recursive_admission import RecursiveRunState, admit_recursive_batch
-from app.crawl.result_helpers import failed_result_for
 from app.metrics import get_metrics
 from app.models.crawl_task import CrawlTask
 from app.models.engine_crawl_result import EngineCrawlResult
 from app.models.host_policy import HostPolicy
 from app.models.normalized_url import NormalizedUrl
+from app.orchestration.result_helpers import failed_result_for
+from app.orchestration.scheduler import DomainScheduler
 from app.resource_pressure import ResourceGate, WeightedAdmission, default_admission_policy
 from app.safe_regex import BoundedPattern
-from app.scheduler import DomainScheduler
 from app.vocabulary.limits import ENGINE_BATCH_CONCURRENCY_MULTIPLIER
 from app.vocabulary.taxonomy import is_transient_classification
 

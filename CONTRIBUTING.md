@@ -75,7 +75,7 @@ These require explicit review from a maintainer before merge:
 - `app/transport/browser.py` and `browser_driver.py` — browser SSRF,
   storage_state path validation, opt-in cookie-consent auto-acceptance
   (`auto_accept_cookie_consent`).
-- `app/crawl/robots.py` and `app/crawl/robots_parse.py` — robots policy and
+- `app/orchestration/robots.py` and `app/orchestration/robots_parse.py` — robots policy and
   rule cache; `parse_robots_rules` / `parse_robots_crawl_delay` must use
   `USER_AGENT_TOKEN`.
 - `app/validation.py` — egress filter for scraped JS-endpoint URLs

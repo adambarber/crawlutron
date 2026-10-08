@@ -5,7 +5,7 @@ Usage:
     python scripts/extract_comments.py -o tmp/comments.txt    # to a file
     python scripts/extract_comments.py --grep 'jscpd|REVIEW'  # only matching lines
     python scripts/extract_comments.py --no-docstrings         # '#' comments only
-    python scripts/extract_comments.py --path app/crawl        # one subtree
+    python scripts/extract_comments.py --path app/transport   # one subtree
 
 Output is one ``path:line:text`` record per line, in file-then-line order, so
 the extract reads as a single numbered document and every entry is greppable

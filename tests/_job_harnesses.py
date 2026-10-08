@@ -42,10 +42,10 @@ from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 
 from app.admission.policy import PolicyLike, PolicyTier
-from app.crawl.result_record import ProducerEnvelope
 from app.models.crawl_policy import CrawlPolicy
 from app.models.engine_crawl_result import EngineCrawlResult
 from app.models.normalized_url import NormalizedUrl
+from app.models.result_record import ProducerEnvelope
 from app.models.taxonomy import Classification
 from app.storage.job_store import TERMINAL_STATUSES, CrawlJobState, FrontierEntry, JobStatus, JobStore
 from app.storage.job_store import _Expected as _Expected

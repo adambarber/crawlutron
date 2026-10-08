@@ -952,7 +952,7 @@ def test_advertised_payload_detector_bites():
 
 # --- A result may not spell its own (status, classification) pair -------------
 #
-# app/crawl/result_helpers.py is the chokepoint for building results, and both
+# app/orchestration/result_helpers.py is the chokepoint for building results, and both
 # of its terminal primitives call _enforce_status_classification first. That
 # check is the whole point: it makes a result that asserts a status the taxonomy
 # would re-derive differently for the same label unrepresentable, because the
@@ -969,7 +969,7 @@ def test_advertised_payload_detector_bites():
 _RESULT_CONSTRUCTORS = frozenset({"CrawlStrategyAttempt", "EngineCrawlResult"})
 
 
-_RESULT_CHOKEPOINT_MODULE = "app/crawl/result_helpers.py"
+_RESULT_CHOKEPOINT_MODULE = "app/orchestration/result_helpers.py"
 
 
 def _literal_status_classification_pairs(tree: ast.AST, path: pathlib.Path) -> list[str]:

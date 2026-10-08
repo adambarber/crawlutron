@@ -10,7 +10,6 @@ import pytest
 import app.extraction.content as ext_mod
 import app.extraction.content as extraction
 import app.extraction.content as extraction_mod
-from app.crawl.doc_pool import DocExtractionPool, doc_task_hooks
 from app.env import parse_bool_env
 from app.extraction.content import (
     ExtractedContent,
@@ -25,6 +24,7 @@ from app.extraction.content import (
     shutdown_doc_extraction_executor,
     text_from_html,
 )
+from app.orchestration.doc_pool import DocExtractionPool, doc_task_hooks
 from app.vocabulary.limits import DEFAULT_EXTRACTION_MAX_MARKDOWN
 from tests._assertions import set_optional_env
 from tests._extraction_helpers import (

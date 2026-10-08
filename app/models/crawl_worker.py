@@ -16,7 +16,7 @@ from app.models.crawl_job import CrawlJob
 from app.models.crawl_result import CrawlResult
 
 # ``CrawlWorker`` is the per-URL render/strategy worker used by the engine and
-# service layers; ``SchedulerWorker`` (defined in app.scheduler) is the worker the
+# service layers; ``SchedulerWorker`` (defined in app.orchestration.scheduler) is the worker the
 # domain scheduler drives, which returns the internal engine result.
 SyncCrawlWorker = Callable[[CrawlJob], CrawlResult]
 AsyncCrawlWorker = Callable[[CrawlJob], Awaitable[CrawlResult]]

@@ -540,7 +540,9 @@ def _parser_definition(tree: ast.AST, path: pathlib.Path, node: ast.AST) -> bool
         return False
     _source, _literals = _source_and_literals(node)
     name = node.name.lower()
-    if _relative_app_path(path) == "app/crawl/robots_parse.py" and ("robot" in name or "parse" in name):
+    if _relative_app_path(path) == "app/orchestration/robots_parse.py" and (
+        "robot" in name or "parse" in name
+    ):
         return True
     if "robot" in name and any(token in name for token in ("parse", "rule", "directive")):
         return True
@@ -993,7 +995,7 @@ def test_robots_policy_detector_bites():
         caught={
             "parser call and cache": (
                 "from app.bounded_ttl import BoundedTTLCache as Cache\n"
-                "from app.crawl.robots_parse import parse_robots_rules as parse\n"
+                "from app.orchestration.robots_parse import parse_robots_rules as parse\n"
                 "def robots_loader(origin):\n"
                 "    cache = Cache(max_entries=1, ttl=1)\n"
                 "    return parse('User-agent: *')\n",
@@ -1043,7 +1045,7 @@ def test_robots_policy_detector_bites():
             ),
         },
         quiet=(
-            "from app.crawl.robots import load_robots_rules as load\n"
+            "from app.orchestration.robots import load_robots_rules as load\n"
             "def check(origin):\n"
             "    return load(origin, fetcher, 5)\n"
         ),

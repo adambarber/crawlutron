@@ -5,8 +5,6 @@ from __future__ import annotations
 from typing import Any
 
 from app.admission.render_options import resolve_render_options
-from app.crawl.result_helpers import build_engine_result
-from app.crawl.worker import call_worker
 from app.models.crawl_job import CrawlJob
 from app.models.crawl_policy import CrawlPolicy
 from app.models.crawl_result import CrawlStrategyAttempt
@@ -16,6 +14,8 @@ from app.models.host_policy import HostPolicy
 from app.models.normalized_url import NormalizedUrl
 from app.models.render_options import RenderOptions
 from app.models.taxonomy import CrawlStrategyName
+from app.orchestration.result_helpers import build_engine_result
+from app.orchestration.worker import call_worker
 from app.transport.body_decode import quality_score
 from app.transport.content_pipeline import (
     _discover_after_fetch,

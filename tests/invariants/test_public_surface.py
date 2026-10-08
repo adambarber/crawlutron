@@ -106,7 +106,7 @@ _OWNER_PUBLIC_SURFACE_RATCHET = {
     "app/api/response_shaping.py": (11, 10),
     "app/storage/sqlite_store.py": (9, 7),
     "app/safe_regex.py": (7, 2),
-    "app/crawl/robots.py": (12, 3),
+    "app/orchestration/robots.py": (12, 3),
     "app/bounded_io.py": (4, 2),
     "app/transport/decompression.py": (3, 1),
     "app/admission/credentials.py": (3, 3),
@@ -124,7 +124,7 @@ _OWNER_PUBLIC_SURFACE_RATCHET = {
     # each spelling its own would be four statements of what a terminal result
     # carries. The chokepoint is the entry point; the count moved because the
     # chokepoint needs to be reachable.
-    "app/crawl/result_helpers.py": (10, 9),
+    "app/orchestration/result_helpers.py": (10, 9),
     "app/transport/fetch_policy.py": (5, 5),
     "app/models/host_policy.py": (6, 5),
 }

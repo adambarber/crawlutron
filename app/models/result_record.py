@@ -37,7 +37,7 @@ class ProducerEnvelope(TypedDict):
     """What the crawl pipeline hands back: engine results plus the batch's scalars.
 
     ``webhook_url`` is the one key the two producers disagree about --
-    ``app/crawl/request_pipeline.py`` stamps it when a webhook is configured and
+    ``app/orchestration/request_pipeline.py`` stamps it when a webhook is configured and
     ``app/api/render.py`` has none -- so it is optional here and the literal is
     checked against this declaration by
     ``test_producer_envelope_declares_exactly_the_keys_its_producers_stamp``.

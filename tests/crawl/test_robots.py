@@ -11,18 +11,18 @@ import pytest
 
 from app.admission.policy import read_policy
 from app.bounded_ttl import BoundedTTLCache
-from app.crawl import engine as engine_mod
-from app.crawl.engine import crawl_request
-from app.crawl.robots import _robots_pattern_to_regex, robots_allows
-from app.crawl.robots_parse import (
+from app.models.host_policy import HostPolicy
+from app.models.normalized_url import NormalizedUrl
+from app.orchestration import engine as engine_mod
+from app.orchestration.engine import crawl_request
+from app.orchestration.robots import _robots_pattern_to_regex, robots_allows
+from app.orchestration.robots_parse import (
     iter_robots_fields,
     parse_robots_crawl_delay,
     parse_robots_rules,
     parse_robots_sitemaps,
     select_robots_values,
 )
-from app.models.host_policy import HostPolicy
-from app.models.normalized_url import NormalizedUrl
 from app.settings import CrawlerSettings
 from app.transport.cache import HttpCache
 from app.transport.fetch_policy import discovery_diagnostics
@@ -188,14 +188,14 @@ class TestSitemapParser:
     def test_uses_the_shared_tokenizer(self):
         # A regression that re-rolls its own splitlines() scan would still pass
         # the value assertions above; this pins the consolidation itself.
-        from app.crawl import robots_parse
+        from app.orchestration import robots_parse
 
         src = _module_source(robots_parse)
         assert src.count("splitlines()") == 1
 
 
 def _groups(text, accepts):
-    from app.crawl.robots_parse import robots_groups
+    from app.orchestration.robots_parse import robots_groups
 
     return robots_groups(text, accepts)
 
@@ -327,8 +327,8 @@ def test_identical_patterns_on_different_hosts_are_isolated():
 def test_purge_removes_only_expired_production_tuples():
     import time
 
-    import app.crawl.engine as em
-    from app.crawl.engine import _purge_robots_cache
+    import app.orchestration.engine as em
+    from app.orchestration.engine import _purge_robots_cache
 
     assert isinstance(em.robots_cache, BoundedTTLCache)
     em.robots_cache.clear()
@@ -354,9 +354,9 @@ async def test_purge_handles_production_shaped_entries():
     was a bare origin string the read path never looked under. Purging a full
     cache raised ``ValueError`` instead of evicting."""
 
-    import app.crawl.engine as em
-    from app.crawl.engine import crawl_request
-    from app.crawl.robots import ROBOTS_CACHE_MAX_ENTRIES
+    import app.orchestration.engine as em
+    from app.orchestration.engine import crawl_request
+    from app.orchestration.robots import ROBOTS_CACHE_MAX_ENTRIES
     from app.settings import CrawlerSettings
 
     em.robots_cache.clear()
@@ -392,7 +392,7 @@ def test_failure_ttl_is_60s_not_600s():
     """G3 pin: robots transport failure writes ttl=60s, not the 600s default."""
     import time
 
-    import app.crawl.engine as em
+    import app.orchestration.engine as em
 
     em.robots_cache.clear()
     try:
@@ -416,7 +416,7 @@ def test_failure_ttl_is_60s_not_600s():
 
 
 async def test_robots_cache_shared_across_requests():
-    import app.crawl.engine as em
+    import app.orchestration.engine as em
 
     # Reset any module-level robots cache so the test is deterministic.
     cache = getattr(em, "robots_cache", None)

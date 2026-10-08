@@ -135,7 +135,7 @@ async def test_recursive_link_robots_checks_run_concurrently():
 
 async def test_nonrecursive_robots_checks_run_concurrently(monkeypatch):
     """The engine's non-recursive branch must screen its batch with overlap."""
-    from app.crawl.engine import crawl_request
+    from app.orchestration.engine import crawl_request
 
     state = {"in_flight": 0, "max_in_flight": 0}
 

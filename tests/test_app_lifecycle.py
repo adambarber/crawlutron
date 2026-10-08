@@ -99,7 +99,7 @@ class TestMultiWorkerInvariants:
         A correct `derive_browser_pool_size` that production never calls is an
         unused function and an over-subscribed fleet.
         """
-        from app.crawl import request_pipeline
+        from app.orchestration import request_pipeline
         from app.resource_pressure import derive_browser_pool_size
 
         monkeypatch.setenv("CRAWLUTRON_WORKERS", "4")

@@ -9,16 +9,16 @@ from collections import OrderedDict
 from collections.abc import Awaitable, Callable
 
 from app.bounded_ttl import BoundedTTLCache
-from app.crawl.fetch_helpers import _single_flight
-from app.crawl.fetch_helpers import fetch_and_decode as default_fetch_and_decode
-from app.crawl.robots_parse import (
+from app.models.host_policy import HostPolicy
+from app.models.http_fetcher import HttpFetcher
+from app.models.normalized_url import NormalizedUrl
+from app.orchestration.fetch_helpers import _single_flight
+from app.orchestration.fetch_helpers import fetch_and_decode as default_fetch_and_decode
+from app.orchestration.robots_parse import (
     parse_robots_crawl_delay,
     parse_robots_rules,
     parse_robots_sitemaps,
 )
-from app.models.host_policy import HostPolicy
-from app.models.http_fetcher import HttpFetcher
-from app.models.normalized_url import NormalizedUrl
 
 ROBOTS_CACHE_MAX_ENTRIES = 2048
 ROBOTS_CACHE_TTL_SECONDS = 600.0

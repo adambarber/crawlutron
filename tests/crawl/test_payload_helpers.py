@@ -120,7 +120,7 @@ class TestMaxContentLengthBytesActuallyEnforced:
     async def test_crawl_enforces_explicit_content_cap(self, base_url, monkeypatch):
         # The advertised limit must bite end-to-end: normalization keeps it
         # and the fetcher fails the page with HTTP 413.
-        from app.crawl.engine import crawl_request
+        from app.orchestration.engine import crawl_request
         from app.vocabulary.strategies import HTTP_DECLARED_CRAWLER
 
         monkeypatch.setenv("CRAWLUTRON_ALLOW_PRIVATE_TARGETS", "1")

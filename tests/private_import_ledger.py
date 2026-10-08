@@ -8,7 +8,7 @@ above its insides. 43 of the 49 structural commits that moved ``app/`` also move
 
 **A module reaching into a sibling** is worse, because it means the module
 boundary is a convention nobody is holding. Six modules do it, thirteen reaches
-in all: ``app/crawl/engine.py`` reaches into ``app/crawl/robots.py`` for four
+in all: ``app/orchestration/engine.py`` reaches into ``app/orchestration/robots.py`` for four
 private classes and two pattern helpers, and ``app/transport/http.py``
 reaches into ``content_cache_key`` and ``request_profile``. Nothing checked that,
 and nothing stopped it growing.
@@ -289,54 +289,62 @@ DECLARED: dict[str, Declaration] = {
         "Not yet triaged.\n",
         ["test"],
     ),
-    "app.crawl.engine._LAST_SPILL_GC_MONOTONIC": _d(
+    "app.orchestration.engine._LAST_SPILL_GC_MONOTONIC": _d(
         _CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]
     ),
-    "app.crawl.engine._ResultSpill": _d(_PRIVATE_TYPE.kind, _PRIVATE_TYPE.reason, ["test"]),
-    "app.crawl.engine._ResultSpill._gc_stale_spills": _d(_PRIVATE_TYPE.kind, _PRIVATE_TYPE.reason, ["test"]),
-    "app.crawl.engine._SPILL_GC_MIN_INTERVAL_SECONDS": _d(
+    "app.orchestration.engine._ResultSpill": _d(_PRIVATE_TYPE.kind, _PRIVATE_TYPE.reason, ["test"]),
+    "app.orchestration.engine._ResultSpill._gc_stale_spills": _d(
+        _PRIVATE_TYPE.kind, _PRIVATE_TYPE.reason, ["test"]
+    ),
+    "app.orchestration.engine._SPILL_GC_MIN_INTERVAL_SECONDS": _d(
         _CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]
     ),
-    "app.crawl.engine._SPILL_PREFIX": _d(_CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]),
-    "app.crawl.engine._get_shared_content_cache": _d(
+    "app.orchestration.engine._SPILL_PREFIX": _d(_CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]),
+    "app.orchestration.engine._get_shared_content_cache": _d(
         "unreviewed",
         "Not yet triaged.\n",
         ["test"],
     ),
-    "app.crawl.engine._parse_lastmod": _d(
+    "app.orchestration.engine._parse_lastmod": _d(
         "unreviewed",
         "Not yet triaged.\n",
         ["test"],
     ),
-    "app.crawl.engine._purge_robots_cache": _d(
+    "app.orchestration.engine._purge_robots_cache": _d(
         "unreviewed",
         "Not yet triaged.\n",
         ["test"],
     ),
-    "app.crawl.engine._resource_gate": _d(_CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]),
-    "app.crawl.engine._seed_is_fresh": _d(
+    "app.orchestration.engine._resource_gate": _d(_CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]),
+    "app.orchestration.engine._seed_is_fresh": _d(
         "unreviewed",
         "Not yet triaged.\n",
         ["test"],
     ),
-    "app.crawl.engine._stale_seeds": _d(
+    "app.orchestration.engine._stale_seeds": _d(
         "unreviewed",
         "Not yet triaged.\n",
         ["test"],
     ),
-    "app.crawl.engine.robots_cache._entries": _d(_CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]),
-    "app.crawl.engine.robots_cache._lock": _d(_CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]),
+    "app.orchestration.engine.robots_cache._entries": _d(
+        _CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]
+    ),
+    "app.orchestration.engine.robots_cache._lock": _d(
+        _CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]
+    ),
     "app.extraction.content._FrameCollector": _d(
         _IMPLEMENTATION_STEP.kind, _IMPLEMENTATION_STEP.reason, ["test"]
     ),
     "app.extraction.content._walkable": _d(_IMPLEMENTATION_STEP.kind, _IMPLEMENTATION_STEP.reason, ["test"]),
-    "app.crawl.fetch_helpers._SITEMAP_CACHE": _d(_CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]),
-    "app.crawl.fetch_helpers._fetch_decode_discovery": _d(
+    "app.orchestration.fetch_helpers._SITEMAP_CACHE": _d(
+        _CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]
+    ),
+    "app.orchestration.fetch_helpers._fetch_decode_discovery": _d(
         "unreviewed",
         "Not yet triaged.\n",
         ["test"],
     ),
-    "app.crawl.fetch_helpers._fetch_text": _d(
+    "app.orchestration.fetch_helpers._fetch_text": _d(
         "unreviewed",
         "Not yet triaged.\n",
         ["test"],
@@ -355,38 +363,38 @@ DECLARED: dict[str, Declaration] = {
         "Not yet triaged.\n",
         ["test"],
     ),
-    "app.crawl.result_helpers._CLASSIFICATION_BY_EXCEPTION": _d(
+    "app.orchestration.result_helpers._CLASSIFICATION_BY_EXCEPTION": _d(
         _CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]
     ),
-    "app.crawl.result_helpers._failed_engine_result": _d(
+    "app.orchestration.result_helpers._failed_engine_result": _d(
         "unreviewed",
         "Not yet triaged.\n",
         ["test"],
     ),
-    "app.crawl.result_helpers._skipped_engine_result": _d(
+    "app.orchestration.result_helpers._skipped_engine_result": _d(
         "unreviewed",
         "Not yet triaged.\n",
         ["test"],
     ),
-    "app.crawl.result_helpers._terminal_engine_result": _d(
+    "app.orchestration.result_helpers._terminal_engine_result": _d(
         "unreviewed",
         "Not yet triaged.\n",
         ["test"],
     ),
-    "app.crawl.robots._RobotsPathMatcher": _d(
+    "app.orchestration.robots._RobotsPathMatcher": _d(
         "private type",
         "A private class nothing outside the module constructs -- production only ever builds a\n"
         "matcher through _RobotsPatternCache. The suite has to construct one because the parity\n"
         "oracle generates group compositions and feeds them in; that is the test's subject, not a\n"
         "hole in the class's surface.\n"
         "\n"
-        "This used to be reached through app.crawl.engine, which re-exported six robots privates\n"
+        "This used to be reached through app.orchestration.engine, which re-exported six robots privates\n"
         "for no production reason at all -- the aliases were dead in engine and alive only in the\n"
         "suite. Reaching the class where it is defined removes an alias chain rather than adding\n"
         "a door.\n",
         ["test"],
     ),
-    "app.crawl.robots._robots_pattern_to_regex": _d(
+    "app.orchestration.robots._robots_pattern_to_regex": _d(
         "implementation step",
         "Pattern-to-matcher compilation, reached to prove per-host binding and that a pathological\n"
         "pattern stays linear. Asserting on the compiled matcher is asserting the mechanism; the\n"
@@ -394,7 +402,9 @@ DECLARED: dict[str, Declaration] = {
         "cache slot per (host, pattern) -- has no expression through robots_allows.\n",
         ["test"],
     ),
-    "app.crawl.robots.robots_cache._entries": _d(_CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]),
+    "app.orchestration.robots.robots_cache._entries": _d(
+        _CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]
+    ),
     "app.storage.sqlite_store._BUSY_TIMEOUT_MS": _SUBSTITUTED_CAP,
     "app.storage.sqlite_store._WAL_RETRY_SECONDS": _SUBSTITUTED_CAP,
     "app.transport.browser._BROWSER_COOKIES_BY_DOMAIN": _d(
@@ -552,7 +562,7 @@ DECLARED: dict[str, Declaration] = {
         "Not yet triaged.\n",
         ["test"],
     ),
-    "app.crawl.strategy_chain._starting_strategies": _d(
+    "app.orchestration.strategy_chain._starting_strategies": _d(
         "unreviewed",
         "Not yet triaged.\n",
         ["test"],
@@ -617,10 +627,16 @@ DECLARED: dict[str, Declaration] = {
     "app.resource_pressure._MAX_DERIVED_POOL_SIZE": _d(
         _CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]
     ),
-    "app.scheduler._COOLDOWN_PURGE_INTERVAL": _d(_CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]),
-    "app.scheduler._MAX_COOLDOWN_WAIT": _d(_CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]),
-    "app.scheduler._STATUS_ACCOUNTING": _d(_CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]),
-    "app.scheduler._TokenBucket": _d(_PRIVATE_TYPE.kind, _PRIVATE_TYPE.reason, ["test"]),
+    "app.orchestration.scheduler._COOLDOWN_PURGE_INTERVAL": _d(
+        _CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]
+    ),
+    "app.orchestration.scheduler._MAX_COOLDOWN_WAIT": _d(
+        _CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]
+    ),
+    "app.orchestration.scheduler._STATUS_ACCOUNTING": _d(
+        _CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]
+    ),
+    "app.orchestration.scheduler._TokenBucket": _d(_PRIVATE_TYPE.kind, _PRIVATE_TYPE.reason, ["test"]),
     "app.search.providers._MAX_TEXT_LENGTH": _d(_CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]),
     "app.search.providers._collect_results": _d(
         "unreviewed",

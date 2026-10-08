@@ -28,7 +28,6 @@ if TYPE_CHECKING:
     pass
 
 
-from app.crawl.result_helpers import classify_error_code, terminal_attempt, terminal_crawl_result
 from app.env import get_env_float, get_env_int
 from app.extraction.classify import classify_page
 from app.json_safe import json_default
@@ -37,6 +36,7 @@ from app.models.host_policy import HostPolicy
 from app.models.normalized_url import NormalizedUrl
 from app.models.render_options import RenderOptions
 from app.models.taxonomy import Classification, CrawlError
+from app.orchestration.result_helpers import classify_error_code, terminal_attempt, terminal_crawl_result
 from app.settings import CrawlerSettings
 from app.transport.browser_driver import BrowserDriver, async_sleep
 from app.transport.document import _default_document_text_extractor

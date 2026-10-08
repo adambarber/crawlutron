@@ -1,4 +1,4 @@
-"""Direct unit tests for the extracted recursive dispatch (app.crawl.recursive).
+"""Direct unit tests for the extracted recursive dispatch (app.orchestration.recursive).
 
 These drive :func:`run_recursive_crawl` with fake closures/scheduler/spill so
 the batch-sizing and admission-gate logic is covered without standing up the
@@ -11,7 +11,7 @@ import pytest
 
 from app.models.crawl_task import CrawlTask
 from app.models.discovered_link import DiscoveredLink
-from app.scheduler import DomainScheduler
+from app.orchestration.scheduler import DomainScheduler
 from app.vocabulary.strategies import BROWSER_HEADLESS
 from tests._policy_factories import canonical
 from tests._recursive_harnesses import ContentionFreeGate, drive_recursive_crawl, make_crawl_task
@@ -361,7 +361,7 @@ async def test_pool_exhaustion_requeue_does_not_consume_a_max_pages_slot():
     budget admits exactly that real page after all the retries, so it is
     reached only when the retries themselves cost nothing.
     """
-    from app.crawl.recursive import MAX_TRANSIENT_REQUEUES
+    from app.orchestration.recursive import MAX_TRANSIENT_REQUEUES
 
     total_attempts = 1 + MAX_TRANSIENT_REQUEUES
 

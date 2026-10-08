@@ -272,7 +272,7 @@ class TestDiscoveryAndRenderApi:
         # browser_pool_exhausted classification off the result -- and not
         # through the incidental route the old raising fake exploited.
         import app.api.render_endpoint as render_endpoint
-        from app.crawl.result_helpers import crawl_result_from_exception
+        from app.orchestration.result_helpers import crawl_result_from_exception
         from app.transport.browser_pool import BrowserPoolExhaustedError
         from app.vocabulary.strategies import BROWSER_HEADLESS
 
@@ -352,8 +352,8 @@ class TestDiscoveryAndRenderApi:
         key the adapter emits but the wire model does not declare is dropped
         before it reaches the assertion.
         """
-        from app.crawl.result_helpers import terminal_attempt
         from app.models.crawl_result import CrawlResult
+        from app.orchestration.result_helpers import terminal_attempt
         from app.transport.browser_pool import BrowserPool
 
         class _FakeRenderer:

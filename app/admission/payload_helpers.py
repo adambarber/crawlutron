@@ -1,7 +1,7 @@
 """Shared payload parsing helpers for crawl entry points.
 
 Centralizes URL extraction and policy normalization used by both
-``app.crawl.engine.crawl_request`` and the API routers that invoke it.
+``app.orchestration.engine.crawl_request`` and the API routers that invoke it.
 """
 
 from __future__ import annotations

@@ -593,10 +593,10 @@ def _private_leak_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
     ]
 
 
-#: ``app/api/render.py``: in ``app.api``, so anything under ``app.crawl`` is outside
-#: its package. Chosen over the default synthetic proof path because that path sits
-#: in ``app`` itself, where a single underscore-prefixed import from ``app.crawl``
-#: would be a sibling reach and the bite would prove nothing.
+#: ``app/api/render.py``: in ``app.api``, so anything under ``app.orchestration`` is
+#: outside its package. Chosen over the default synthetic proof path because that
+#: path sits in ``app`` itself, where a single underscore-prefixed import from
+#: ``app.orchestration`` would be a sibling reach and the bite would prove nothing.
 _RENDER_PROOF_PATH = REPO_ROOT / "app" / "api" / "render.py"
 
 #: A real sibling of ``strategies.content_pipeline``, so the private import in the

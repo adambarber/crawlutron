@@ -14,11 +14,6 @@ from typing import Any
 
 from app.admission.policy import discovery_flags
 from app.admission.render_options import policy_wants_html
-from app.crawl.result_helpers import (
-    binary_no_text_result,
-    build_engine_result,
-    engine_result_from_exception,
-)
 from app.extraction.classify import classify_page_with_evidence
 from app.extraction.content import is_html
 from app.extraction.document_text import format_extracted_document_text
@@ -31,6 +26,11 @@ from app.models.host_policy import HostPolicy
 from app.models.http_fetch_result import HttpFetchResult
 from app.models.normalized_url import NormalizedUrl
 from app.models.taxonomy import Classification, CrawlStrategyName
+from app.orchestration.result_helpers import (
+    binary_no_text_result,
+    build_engine_result,
+    engine_result_from_exception,
+)
 from app.transport import body_decode, content_cache_key, fetch_policy, request_profile
 from app.transport.cache import HttpCache
 from app.transport.content_cache import ContentCache

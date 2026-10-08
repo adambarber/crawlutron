@@ -337,7 +337,7 @@ _DISCOVERY_FETCH = "_fetch_decode_discovery"
 
 
 # The chokepoint module that legitimately owns what it bans.
-_DISCOVERY_CHOKEPOINT = "app/crawl/fetch_helpers.py"
+_DISCOVERY_CHOKEPOINT = "app/orchestration/fetch_helpers.py"
 
 
 def _is_discovery_fetch(value: ast.AST | None) -> bool:
@@ -538,7 +538,7 @@ def test_every_rule_bites():
 # ---------------------------------------------------------------------------
 
 # Request headers named `br` unconditionally while the brotli decoder is an
-# OPTIONAL dependency -- app/crawl/decompression supports two incompatible
+# OPTIONAL dependency -- app/transport/decompression supports two incompatible
 # brotli APIs precisely because either may be the one installed. So on a host
 # without it, every brotli-capable server was told to return a body the process
 # would then refuse, and the crawl failed on a request we chose to make that
@@ -601,7 +601,7 @@ def _undecodable_encoding_offenders(tree, path, *, decodable: set[str] | None = 
             return
         for token in sorted(tokens - decodable):
             seen[(node.lineno, token)] = (
-                f"{path.name}:{node.lineno} advertises {token!r}, which app/crawl/decompression "
+                f"{path.name}:{node.lineno} advertises {token!r}, which app/transport/decompression "
                 f"cannot decode here (decodable: {', '.join(sorted(decodable))})"
             )
 

@@ -6,8 +6,8 @@ import json
 import os
 import time
 
-from app.crawl.engine import _ResultSpill
 from app.models.serialization import to_dict
+from app.orchestration.engine import _ResultSpill
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY
 from tests._result_builders import engine_result
 
@@ -79,7 +79,7 @@ class TestSpillGcCadence:
     def _spy(self, monkeypatch):
         import os
 
-        import app.crawl.engine as engine_mod
+        import app.orchestration.engine as engine_mod
 
         scans = {"n": 0}
         real_listdir = os.listdir
@@ -93,7 +93,7 @@ class TestSpillGcCadence:
         return scans
 
     def test_first_construction_scans_and_following_ones_do_not(self, monkeypatch):
-        import app.crawl.engine as engine_mod
+        import app.orchestration.engine as engine_mod
 
         scans = self._spy(monkeypatch)
         spills = [_ResultSpill(), _ResultSpill(), _ResultSpill()]
@@ -107,7 +107,7 @@ class TestSpillGcCadence:
     def test_scan_resumes_once_the_interval_elapsed(self, monkeypatch):
         import time
 
-        import app.crawl.engine as engine_mod
+        import app.orchestration.engine as engine_mod
 
         scans = self._spy(monkeypatch)
         spill = _ResultSpill()
@@ -128,7 +128,7 @@ class TestSpillGcCadence:
 class TestSpillFileOwnership:
     def test_result_spill_close_deletes_owned_file(self):
         """Auto-created spill files are removed on close."""
-        from app.crawl.engine import _ResultSpill
+        from app.orchestration.engine import _ResultSpill
 
         spill = _ResultSpill()  # auto-owned path
         path = spill.path
@@ -140,7 +140,7 @@ class TestSpillFileOwnership:
         """Caller-supplied spill paths are NOT removed on close."""
         import tempfile
 
-        from app.crawl.engine import _ResultSpill
+        from app.orchestration.engine import _ResultSpill
 
         target = os.path.join(tempfile.gettempdir(), "spill_keep_test.json")
         try:

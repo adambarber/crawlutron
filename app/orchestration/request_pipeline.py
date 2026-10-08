@@ -11,13 +11,6 @@ from typing import Any, cast
 from app.admission.admission import gather_robots_decisions, normalize_sitemap_candidates
 from app.admission.policy import DiscoveryFlags, discovery_flags
 from app.admission.render_options import policy_wants_html
-from app.crawl import robots as robots_policy
-from app.crawl.fetch_helpers import fetch_sitemap_urls
-from app.crawl.recursive import RECURSIVE_RAMP_MAX, _spill_write, run_recursive_crawl
-from app.crawl.result_helpers import TerminalResult, _skipped_engine_result, engine_result_from_exception
-from app.crawl.result_record import ProducerEnvelope
-from app.crawl.robots import FetchAndDecode
-from app.crawl.strategy_chain import execute_crawl_chain
 from app.memory_pressure import read_memory_stats
 from app.models.crawl_extraction_method import CrawlExtractionMethod
 from app.models.crawl_policy import POLICY_SCHEMA_VERSION, CrawlPolicy
@@ -26,6 +19,18 @@ from app.models.crawl_worker import CrawlWorker
 from app.models.engine_crawl_result import EngineCrawlResult
 from app.models.host_policy import HostPolicy
 from app.models.normalized_url import NormalizedUrl, admit_or_none
+from app.models.result_record import ProducerEnvelope
+from app.orchestration import robots as robots_policy
+from app.orchestration.fetch_helpers import fetch_sitemap_urls
+from app.orchestration.recursive import RECURSIVE_RAMP_MAX, _spill_write, run_recursive_crawl
+from app.orchestration.result_helpers import (
+    TerminalResult,
+    _skipped_engine_result,
+    engine_result_from_exception,
+)
+from app.orchestration.robots import FetchAndDecode
+from app.orchestration.scheduler import DomainScheduler
+from app.orchestration.strategy_chain import execute_crawl_chain
 from app.resource_pressure import (
     ResourceGate,
     TaskRamBudget,
@@ -35,7 +40,6 @@ from app.resource_pressure import (
     doc_worker_count,
 )
 from app.safe_regex import BoundedPattern
-from app.scheduler import DomainScheduler
 from app.settings import CrawlerSettings
 from app.storage.ids import new_request_id
 from app.transport.cache import HttpCache

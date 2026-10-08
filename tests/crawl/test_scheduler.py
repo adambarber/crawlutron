@@ -5,12 +5,12 @@ import time
 
 import pytest
 
-from app.crawl.result_helpers import TerminalResult
 from app.models.crawl_job import CrawlJob
 from app.models.crawl_task import CrawlTask
 from app.models.engine_crawl_result import EngineCrawlResult
 from app.models.taxonomy import Classification
-from app.scheduler import _COOLDOWN_PURGE_INTERVAL, DomainScheduler, jittered_delay
+from app.orchestration.result_helpers import TerminalResult
+from app.orchestration.scheduler import _COOLDOWN_PURGE_INTERVAL, DomainScheduler, jittered_delay
 from tests._policy_factories import canonical
 from tests._result_builders import make_job, make_result
 from tests._scheduler_doubles import (
@@ -179,8 +179,8 @@ class TestObservedLatencyCrossesPipelines:
 
     @staticmethod
     def _rendered_result(elapsed_ms: int):
-        from app.crawl.result_helpers import terminal_attempt
         from app.models.crawl_result import CrawlResult
+        from app.orchestration.result_helpers import terminal_attempt
 
         return CrawlResult(
             url="https://example.com/x",
@@ -200,8 +200,8 @@ class TestObservedLatencyCrossesPipelines:
 
     @staticmethod
     def _crawled_result(elapsed_ms: int):
-        from app.crawl.result_helpers import build_engine_result
         from app.models.crawl_result import CrawlStrategyAttempt
+        from app.orchestration.result_helpers import build_engine_result
 
         return build_engine_result(
             original_url="https://example.com/x",
@@ -344,7 +344,7 @@ class TestSchedulerPolicies:
     """Cover remaining branches in scheduler.py"""
 
     def test_token_bucket_basic(self):
-        from app.scheduler import _TokenBucket
+        from app.orchestration.scheduler import _TokenBucket
 
         bucket = _TokenBucket(rate=10.0, capacity=5)
         wait = bucket.consume(1.0)
@@ -355,7 +355,7 @@ class TestSchedulerPolicies:
         assert wait > 0.0
 
     def test_token_bucket_refill(self):
-        from app.scheduler import _TokenBucket
+        from app.orchestration.scheduler import _TokenBucket
 
         bucket = _TokenBucket(rate=100.0, capacity=10)
         bucket.consume(10.0)
@@ -419,26 +419,26 @@ class TestSchedulerPolicies:
         assert s.current_delay("a.com") == 5.0
 
     def test_parse_robots_crawl_delay_specific_group_wins(self):
-        from app.crawl.robots_parse import parse_robots_crawl_delay as _parse_robots_crawl_delay
+        from app.orchestration.robots_parse import parse_robots_crawl_delay as _parse_robots_crawl_delay
 
         text = "User-agent: *\nCrawl-delay: 1\nUser-agent: crawlutron\nCrawl-delay: 4\n"
         assert _parse_robots_crawl_delay(text) == 4.0
 
     def test_parse_robots_crawl_delay_star_only(self):
-        from app.crawl.robots_parse import parse_robots_crawl_delay as _parse_robots_crawl_delay
+        from app.orchestration.robots_parse import parse_robots_crawl_delay as _parse_robots_crawl_delay
 
         text = "User-agent: *\nCrawl-delay: 3\n"
         assert _parse_robots_crawl_delay(text) == 3.0
 
     def test_parse_robots_crawl_delay_absent(self):
-        from app.crawl.robots_parse import parse_robots_crawl_delay as _parse_robots_crawl_delay
+        from app.orchestration.robots_parse import parse_robots_crawl_delay as _parse_robots_crawl_delay
 
         assert _parse_robots_crawl_delay("User-agent: *\nDisallow: /\n") is None
 
     def test_set_domain_min_delay_is_capped_at_the_politeness_ceiling(self):
         """A huge (finite) robots Crawl-delay must not install an
         unbounded politeness floor — the scheduler clamps it at the write."""
-        from app.scheduler import _MAX_COOLDOWN_WAIT
+        from app.orchestration.scheduler import _MAX_COOLDOWN_WAIT
 
         scheduler = make_scheduler(global_limit=10, per_domain_limit=10)
         scheduler.set_domain_min_delay("example.com", 1e12)
@@ -526,7 +526,7 @@ class TestCooldownPurgeCadence:
         once the interval elapses only expired entries drop, and the fresh
         cooldown for the setting domain survives."""
         fake_now = [1000.0]
-        monkeypatch.setattr("app.scheduler.time.time", lambda: fake_now[0])
+        monkeypatch.setattr("app.orchestration.scheduler.time.time", lambda: fake_now[0])
         scheduler = make_scheduler()
         scheduler.set_domain_cooldown("old.test", 10.0)
         fake_now[0] = 1100.0  # the first cooldown has elapsed
@@ -539,7 +539,7 @@ class TestCooldownPurgeCadence:
     def test_a_fresh_cooldown_is_never_purged_by_the_amortized_run(self, monkeypatch):
         """The domain that just earned a cooldown is never removed by the purge
         that follows its own set."""
-        monkeypatch.setattr("app.scheduler.time.time", lambda: 1000.0)
+        monkeypatch.setattr("app.orchestration.scheduler.time.time", lambda: 1000.0)
         scheduler = make_scheduler()
         scheduler.set_domain_cooldown("rate-limited.test", 30.0)
         assert "rate-limited.test" in scheduler._domain_cooldowns
@@ -744,7 +744,7 @@ class TestSchedulerFailureAccountingIsAboutStatuses:
     @staticmethod
     def _terminal(job: CrawlJob, classification: Classification):
         """A real terminal result, with its status derived by the real chokepoint."""
-        from app.crawl.result_helpers import _terminal_engine_result
+        from app.orchestration.result_helpers import _terminal_engine_result
         from app.vocabulary.taxonomy import status_for_classification
 
         # Status is the outer function's own keyword, not a field of the shared
@@ -815,7 +815,7 @@ class TestSchedulerFailureAccountingIsAboutStatuses:
         """
         import typing
 
-        from app.scheduler import _STATUS_ACCOUNTING
+        from app.orchestration.scheduler import _STATUS_ACCOUNTING
         from app.vocabulary.taxonomy import ResultStatus
 
         members = set(typing.get_args(ResultStatus))

@@ -21,7 +21,6 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, TypeVar
 
-from app.crawl.result_record import AnyResult, ProducerEnvelope, RenderEnvelope
 from app.extraction.llm_format import (
     PageMetadata as ExtractedPageMetadata,
 )
@@ -39,6 +38,7 @@ from app.models.engine_crawl_result import EngineCrawlResult
 from app.models.host_policy import HostPolicy
 from app.models.normalized_url import NormalizedUrl, admit_or_none
 from app.models.page_metadata_response import PageMetadataResponse
+from app.models.result_record import AnyResult, ProducerEnvelope, RenderEnvelope
 from app.models.strategy_attempt import StrategyAttempt
 from app.models.taxonomy import CrawlStrategyName
 from app.models.unified_crawl_response import UnifiedCrawlResponse

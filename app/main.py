@@ -175,8 +175,8 @@ if FastAPI is not None:
     @asynccontextmanager
     async def _lifespan(_app: FastAPI):
         # Startup: initialize the browser pool, then load the cookie jar.
-        from .crawl.engine import _resource_gate
         from .health.readiness import READINESS_STATE
+        from .orchestration.engine import _resource_gate
 
         # Readiness saturation comes from the live resource gate, not the
         # metrics gauges (which only recursive crawls refresh).
@@ -276,12 +276,11 @@ if FastAPI is not None:
 
         from app.transport.http_client_pool import close_async_http_client, close_cffi_session
 
-        from .crawl.engine import _resource_gate
-
         # Imported here, not at module scope: this pulls in the markitdown
         # extraction stack, and the deferred import is what keeps it off the
         # import path of every CLI and MCP caller that never renders a PDF.
         from .extraction.content import shutdown_doc_extraction_executor
+        from .orchestration.engine import _resource_gate
 
         async def _close_gate() -> None:
             _resource_gate.close()

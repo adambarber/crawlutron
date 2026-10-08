@@ -10,10 +10,6 @@ import pytest
 from app.admission.payload_helpers import _payload_urls
 from app.admission.policy import PolicyTier, read_policy
 from app.api.render import _render_options
-from app.crawl.engine import (
-    crawl_request,
-    payload_policy,
-)
 from app.extraction.content import (
     _FrameCollector,
     _walkable,
@@ -21,6 +17,10 @@ from app.extraction.content import (
     frames_from,
 )
 from app.extraction.document_text import format_extracted_document_text
+from app.orchestration.engine import (
+    crawl_request,
+    payload_policy,
+)
 from app.settings import CrawlerSettings
 from app.transport.cache import HttpCache
 from app.transport.fetch_policy import (

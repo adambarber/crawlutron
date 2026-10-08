@@ -7,13 +7,13 @@ from typing import Any
 import pytest
 
 from app.admission.policy import PolicyTier, read_policy
-from app.crawl.engine import payload_policy
-from app.crawl.result_helpers import terminal_attempt
 from app.models.crawl_policy import CrawlPolicy
 from app.models.crawl_policy_limits import CrawlPolicyLimits
 from app.models.crawl_result import CrawlResult
 from app.models.serialization import to_dict
-from app.scheduler import DomainScheduler
+from app.orchestration.engine import payload_policy
+from app.orchestration.result_helpers import terminal_attempt
+from app.orchestration.scheduler import DomainScheduler
 from app.transport.browser import BrowserRenderer
 from app.vocabulary.extraction import EXTRACTION_DOCUMENT, EXTRACTION_TRAFILATURA
 from app.vocabulary.strategies import BROWSER_HEADLESS, HTTP_DECLARED_CRAWLER
@@ -101,8 +101,8 @@ def test_seed_freshness_uses_real_default_strategies():
     """Without an explicit strategies list, freshness must probe the
     real default chain -- not the placeholder ["HTTP"], whose cache keys
     can never match anything actually stored."""
-    from app.crawl.engine import _parse_lastmod, _seed_is_fresh
     from app.models.crawl_extraction_method import CrawlExtractionMethod
+    from app.orchestration.engine import _parse_lastmod, _seed_is_fresh
     from app.transport.content_cache_key import build_content_cache_key
     from app.transport.request_profile import headers_for_strategy
     from app.vocabulary.strategies import HTTP_DECLARED_CRAWLER
@@ -131,7 +131,7 @@ class TestCrawlRequestWebhook:
     async def test_engine_crawl_request_with_webhook(self):
         import asyncio
 
-        from app.crawl.engine import crawl_request
+        from app.orchestration.engine import crawl_request
         from app.settings import CrawlerSettings
 
         async def browser_worker(job):
@@ -319,7 +319,7 @@ class TestEngineScopeEdges:
     """Cover remaining branches in engine.py"""
 
     def test_crawl_chain_robots_disallowed(self):
-        from app.crawl.result_helpers import TerminalResult, _skipped_engine_result
+        from app.orchestration.result_helpers import TerminalResult, _skipped_engine_result
         from app.vocabulary.taxonomy import status_for_classification
 
         result = _skipped_engine_result(

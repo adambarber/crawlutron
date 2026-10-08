@@ -19,8 +19,8 @@ import pytest
 
 import app.transport.content_cache as cc
 from app.api.job_runner import _run_job
-from app.crawl.engine import _ResultSpill
 from app.models.crawl_policy import CrawlPolicy
+from app.orchestration.engine import _ResultSpill
 from app.storage.job_store import JobStatus
 from app.transport.content_cache import ContentCache
 from tests._fetcher_factories import crawled_results

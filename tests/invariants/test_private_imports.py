@@ -140,16 +140,16 @@ PRIVATE_IMPORT_LEDGER = Rule(
         "from app.transport.browser import _undeclared_probe_name\n",
         # And the `import x.y` / `x.y._name` form, which reaches the same private
         # name through a module object instead of a from-import.
-        "import app.crawl.engine\n\nassert app.crawl.engine._undeclared_probe\n",
+        "import app.orchestration.engine\n\nassert app.orchestration.engine._undeclared_probe\n",
         # And the string form, which is how the suite actually substitutes most of
         # what it reaches: the private name is a literal argument, so a detector
         # reading imports and attribute reads sees nothing at all.
-        "import app.crawl.engine as engine\n\n"
+        "import app.orchestration.engine as engine\n\n"
         'monkeypatch.setattr(engine, "_undeclared_probe_name", lambda: None)\n',
     ),
     clean=lambda: (
         # A public name needs no ledger row -- that is the whole point of the fix.
-        "from app.crawl.engine import crawl_request\n",
+        "from app.orchestration.engine import crawl_request\n",
         # A declared lifecycle weld is allowed, and says why.
         "from app.extraction.content import shutdown_doc_extraction_executor\n",
         # A name from outside app/ is not this rule's business.

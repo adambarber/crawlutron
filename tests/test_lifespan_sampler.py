@@ -17,8 +17,8 @@ def _spy_on_every_teardown(monkeypatch, http_closer) -> list[str]:
     only knows the one method under test fails on whatever the next one is.
     """
     from app import main as main_mod
-    from app.crawl import engine as engine_mod
     from app.extraction import content as extraction_mod
+    from app.orchestration import engine as engine_mod
     from app.transport import http_client_pool as http_mod
 
     ran: list[str] = []

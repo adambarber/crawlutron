@@ -50,9 +50,9 @@ PROPERTY_REGISTRY = (
     ),
     Property(
         name="robots-policy",
-        owner_module="app/crawl/robots.py",
+        owner_module="app/orchestration/robots.py",
         owner_symbols=("_load_uncached", "load_robots_rules", "robots_allows"),
-        definition_site="app/crawl/robots.py:load_robots_rules",
+        definition_site="app/orchestration/robots.py:load_robots_rules",
         fingerprints=(
             "robots_url",
             "parse_robots_rules_call",
@@ -62,13 +62,13 @@ PROPERTY_REGISTRY = (
         reason="The engine and durable admission path must share one robots policy loader and cache.",
         suppressions=(
             _Suppression(
-                module="app/crawl/robots_parse.py",
+                module="app/orchestration/robots_parse.py",
                 symbol="iter_robots_fields",
                 fingerprint="parse_robots_rules_definition",
                 reason="The tokenizer is a shared lower-level primitive consumed by the policy owner.",
             ),
             _Suppression(
-                module="app/crawl/robots_parse.py",
+                module="app/orchestration/robots_parse.py",
                 symbol="robots_groups",
                 fingerprint="parse_robots_rules_definition",
                 reason="The grouping primitive is a shared "
@@ -76,7 +76,7 @@ PROPERTY_REGISTRY = (
                 "owner.",
             ),
             _Suppression(
-                module="app/crawl/robots_parse.py",
+                module="app/orchestration/robots_parse.py",
                 symbol="select_robots_values",
                 fingerprint="parse_robots_rules_definition",
                 reason="The selection primitive is a shared "
@@ -84,7 +84,7 @@ PROPERTY_REGISTRY = (
                 "owner.",
             ),
             _Suppression(
-                module="app/crawl/robots_parse.py",
+                module="app/orchestration/robots_parse.py",
                 symbol="parse_robots_rules",
                 fingerprint="parse_robots_rules_definition",
                 reason=(
@@ -93,7 +93,7 @@ PROPERTY_REGISTRY = (
                 ),
             ),
             _Suppression(
-                module="app/crawl/robots_parse.py",
+                module="app/orchestration/robots_parse.py",
                 symbol="parse_robots_crawl_delay",
                 fingerprint="parse_robots_rules_definition",
                 reason=(
@@ -102,7 +102,7 @@ PROPERTY_REGISTRY = (
                 ),
             ),
             _Suppression(
-                module="app/crawl/robots_parse.py",
+                module="app/orchestration/robots_parse.py",
                 symbol="parse_robots_sitemaps",
                 fingerprint="parse_robots_rules_definition",
                 reason=(
@@ -120,7 +120,7 @@ PROPERTY_REGISTRY = (
                 ),
             ),
             _Suppression(
-                module="app/crawl/robots.py",
+                module="app/orchestration/robots.py",
                 symbol="<module>",
                 fingerprint="robots_bounded_ttl_cache",
                 reason="The declared module-level robots cache is the policy owner's sanctioned cache "

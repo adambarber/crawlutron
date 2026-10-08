@@ -362,7 +362,7 @@ def _robots_scanner_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
 
     Sink: a function doing the ``lstrip(BOM) + splitlines()`` scan. It lived
     three times (crawl-delay, rules, sitemaps) and drifted on the empty-value
-    gate; the tokenizer in app/crawl/robots_parse.py is now the only one.
+    gate; the tokenizer in app/orchestration/robots_parse.py is now the only one.
     """
     offenders: list[str] = []
     for node in functions(tree):
@@ -388,7 +388,7 @@ ROBOTS_LINE_SCANNER_LIVES_IN_ONE_PLACE = Rule(
     name="robots-line-scanner-lives-in-one-place",
     find=_robots_scanner_offenders,
     summary=(
-        "app/crawl/robots_parse.iter_robots_fields is the single scanner for robots"
+        "app/orchestration/robots_parse.iter_robots_fields is the single scanner for robots"
         " consumers, so the shared line-walk cannot drift on the empty-value gate"
     ),
     bite=lambda: Bites(

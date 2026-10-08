@@ -13,9 +13,9 @@ from typing import Any
 
 from app.admission.policy import read_policy
 from app.api.exceptions import browser_pool_unavailable
-from app.crawl.engine import crawl_request
-from app.crawl.result_record import ProducerEnvelope
 from app.models.host_policy import HostPolicy
+from app.models.result_record import ProducerEnvelope
+from app.orchestration.engine import crawl_request
 from app.settings import CrawlerSettings
 from app.transport.browser_pool import PooledBrowserWorker, get_browser_pool
 from app.vocabulary.strategies import BROWSER_STRATEGIES

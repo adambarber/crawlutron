@@ -13,14 +13,6 @@ from typing import Any
 
 from app.admission.payload_helpers import checked_payload_urls
 from app.admission.render_options import resolve_render_options
-from app.crawl.result_helpers import (
-    classify_error_code,
-    crawl_result_from_engine_result,
-    failed_result_for,
-    terminal_crawl_result,
-)
-from app.crawl.result_record import RenderEnvelope
-from app.crawl.worker import call_worker
 from app.models.crawl_job import CrawlJob
 from app.models.crawl_policy import POLICY_SCHEMA_VERSION
 from app.models.crawl_result import CrawlResult
@@ -29,7 +21,15 @@ from app.models.engine_crawl_result import EngineCrawlResult
 from app.models.host_policy import HostPolicy
 from app.models.normalized_url import NormalizedUrl
 from app.models.render_options import RenderOptions
-from app.scheduler import DomainScheduler
+from app.models.result_record import RenderEnvelope
+from app.orchestration.result_helpers import (
+    classify_error_code,
+    crawl_result_from_engine_result,
+    failed_result_for,
+    terminal_crawl_result,
+)
+from app.orchestration.scheduler import DomainScheduler
+from app.orchestration.worker import call_worker
 from app.settings import CrawlerSettings
 from app.storage.ids import new_request_id
 

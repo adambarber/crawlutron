@@ -2,7 +2,6 @@ from dataclasses import replace
 from typing import Any
 from urllib.parse import urljoin
 
-from app.crawl.result_helpers import terminal_attempt
 from app.models.crawl_job import CrawlJob
 from app.models.crawl_result import CrawlResult, CrawlStrategyAttempt
 from app.models.discovered_link import DiscoveredLink
@@ -11,6 +10,7 @@ from app.models.normalized_url import NormalizedUrl, admit_or_none
 from app.models.registrable_domain import registrable_domain
 from app.models.render_options import RenderOptions
 from app.models.taxonomy import Classification, CrawlError, CrawlStrategyName
+from app.orchestration.result_helpers import terminal_attempt
 from app.vocabulary.strategies import HTTP_DECLARED_CRAWLER
 from app.vocabulary.taxonomy import ResultStatus
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY, canonical
@@ -142,7 +142,7 @@ def skipped_result(
     an error string the production builder never emits for that classification,
     which is exactly the drift the table exists to catch.
     """
-    from app.crawl.result_helpers import TerminalResult, _skipped_engine_result
+    from app.orchestration.result_helpers import TerminalResult, _skipped_engine_result
 
     return _skipped_engine_result(
         TerminalResult(
@@ -200,7 +200,7 @@ def make_result(url: str, domain: str):
 
 
 def crawl_result(url: str, domain: str | None = None) -> CrawlResult:
-    """A ``CrawlResult`` -- the object ``app.crawl.worker.call_worker`` hands back.
+    """A ``CrawlResult`` -- the object ``app.orchestration.worker.call_worker`` hands back.
 
     Worker-dispatch tests need a real result because the claim they make is
     identity: that the worker's own object is what comes back, rather than a copy

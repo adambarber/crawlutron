@@ -5,13 +5,13 @@ from typing import Any
 from urllib.parse import urlparse
 
 from app.admission.policy import CrawlPolicy, read_policy
-from app.crawl.engine import crawl_request
-from app.crawl.result_record import ProducerEnvelope
 from app.models.engine_crawl_result import EngineCrawlResult
 from app.models.host_policy import HostPolicy
 from app.models.http_fetch_result import HttpFetchResult
 from app.models.normalized_url import NormalizedUrl
+from app.models.result_record import ProducerEnvelope
 from app.models.taxonomy import CrawlStrategyName
+from app.orchestration.engine import crawl_request
 from app.transport.cache import HttpCache
 from app.transport.content_cache import ContentCache
 from app.transport.strategy_request import StrategyRequest
@@ -92,7 +92,7 @@ class FetcherDouble:
     so the observations were invisible to every type that saw the return: a test
     reading ``fetcher.calls`` was reaching for something only the factory could
     promise. The class is where that promise lives, and it is still a real
-    ``HttpFetcher`` everywhere production asks for one -- ``app.crawl.worker``
+    ``HttpFetcher`` everywhere production asks for one -- ``app.orchestration.worker``
     recognises a callable object by its ``__call__``, so the async-discipline
     check sees exactly what it saw before.
 
@@ -673,8 +673,8 @@ async def run_chain(
     means "the cffi step behaves like the http step", which is what a
     single-fetcher chain test means.
     """
-    from app.crawl.strategy_chain import execute_crawl_chain
-    from app.scheduler import DomainScheduler
+    from app.orchestration.scheduler import DomainScheduler
+    from app.orchestration.strategy_chain import execute_crawl_chain
 
     if scheduler is None:
         scheduler = DomainScheduler(global_limit=1, per_domain_limit=1, delay_seconds=0.0)

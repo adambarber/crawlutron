@@ -13,11 +13,11 @@ import re
 from typing import Any
 
 from app.admission.policy import discovery_flags
-from app.crawl.result_helpers import classify_error_code
 from app.models.crawl_policy import CrawlPolicy
 from app.models.host_policy import HostPolicy
 from app.models.http_fetcher import HttpFetcher
 from app.models.normalized_url import NormalizedUrl
+from app.orchestration.result_helpers import classify_error_code
 from app.transport.body_decode import decode_body
 from app.transport.decompression import decompress_body as _decompress_body
 from app.vocabulary.limits import DEFAULT_MAX_CONTENT_LENGTH_BYTES, DISCOVERY_BODY_MAX_BYTES
@@ -218,7 +218,7 @@ async def discovery_diagnostics(
     sitemap_urls: list[str] = []
     if flags.sitemaps:
         candidate_sitemaps = robots_sitemaps or ["/sitemap.xml"]
-        from app.crawl.fetch_helpers import fetch_sitemap_urls
+        from app.orchestration.fetch_helpers import fetch_sitemap_urls
 
         admitted_sitemaps = (
             safe_source.resolve(entry) for entry in candidate_sitemaps

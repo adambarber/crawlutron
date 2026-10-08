@@ -510,7 +510,7 @@ def _clear_sitemap_cache() -> None:
     Tests inject fake fetchers serving different content for the same
     sitemap URLs; without this the shared cache leaks across tests.
     """
-    import app.crawl.fetch_helpers as fh
+    import app.orchestration.fetch_helpers as fh
 
     fh.reset_process_state()
 
@@ -577,7 +577,7 @@ def _clear_global_http_state() -> None:
     # clear it between tests for isolation. Production keeps it shared (a given
     # origin always serves the same robots.txt).
     with contextlib.suppress(Exception):
-        from app.crawl import engine as _engine_mod
+        from app.orchestration import engine as _engine_mod
 
         # The robots cache, the shared HTTP cache and the admission gate are one
         # crawl-lifetime unit, so the engine empties all three itself. It used to

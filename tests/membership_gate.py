@@ -5,7 +5,7 @@ same class seen twice.
 
 The class
 ---------
-``app/crawl/result_helpers.py`` is the chokepoint for building a result; the
+``app/orchestration/result_helpers.py`` is the chokepoint for building a result; the
 dataclasses it fills carry ``Literal`` annotations. The annotations are
 *comments to the runtime*: ``CrawlResult`` is a plain frozen dataclass, so
 nothing rejects ``classification="url_budget_exceeded"`` until the value
@@ -507,7 +507,7 @@ def swallowing_test_double_offenders(tree: ast.AST, path: pathlib.Path) -> list[
 # ``import re as _re`` followed by ``_re.compile(<pattern>)`` is invisible to a
 # detector that matches on the name ``re``. The historical detectors did match
 # on that name, so an alias was an escape hatch -- not a malicious one, but a
-# real one: app/crawl/fetch_helpers.py carries that shape today (with safe
+# real one: app/orchestration/fetch_helpers.py carries that shape today (with safe
 # literal patterns), and a *dynamic* pattern behind the same alias would sail
 # past every guard. Keying on the import binding instead of the literal name
 # closes the class: whichever alias a module picks, the binding is resolved

@@ -10,12 +10,12 @@ from typing import Any, TypeVar
 
 import httpx
 
-from app.crawl.scheduler_exceptions import _CircuitBreakerOpen
 from app.models.browser_pool_exhausted import BrowserPoolExhaustedError
 from app.models.crawl_result import CrawlResult, CrawlStrategyAttempt
 from app.models.engine_crawl_result import EngineCrawlResult
 from app.models.normalized_url import NormalizedUrl
 from app.models.taxonomy import Classification, CrawlError, CrawlStrategyName
+from app.orchestration.scheduler_exceptions import _CircuitBreakerOpen
 from app.transport.decompression import DecompressionError, DecompressionTooLargeError
 from app.vocabulary.taxonomy import ResultStatus, is_transient_classification
 

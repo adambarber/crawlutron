@@ -2,7 +2,7 @@
 
 import pytest
 
-from app.crawl.engine import crawl_request
+from app.orchestration.engine import crawl_request
 from app.transport.cache import HttpCache
 from tests._extraction_helpers import default_http_fetcher
 from tests._fetcher_factories import run_http_strategy

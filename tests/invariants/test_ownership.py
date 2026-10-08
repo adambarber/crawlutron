@@ -295,7 +295,7 @@ def test_locked_helper_lock_ownership_detector_bites():
 
 
 def _id_mint_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
-    """Flag direct ``uuid4()`` calls or ``.hex`` slicing outside app/crawl/ids.
+    """Flag direct ``uuid4()`` calls or ``.hex`` slicing outside app/storage/ids.
 
     Handles double as the lookup credential for status/result routes, so the
     full-entropy policy must live in exactly one primitive; a re-inlined mint

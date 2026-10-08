@@ -3,7 +3,7 @@
 A "map" is a structured discovery of the URLs reachable from a root URL: the
 in-page discovered links plus the URLs advertised via robots.txt sitemaps and
 feeds. The crawler already gathers these during a normal crawl (discovery diag
-in :func:`app.crawl.engine.crawl_request`); ``build_site_map`` aggregates them
+in :func:`app.orchestration.engine.crawl_request`); ``build_site_map`` aggregates them
 into a single de-duplicated, stable-ordered URL list for callers that only want
 the frontier (e.g. to drive their own recursive crawl or sitemap generation).
 """
@@ -13,9 +13,9 @@ from __future__ import annotations
 from typing import Any
 
 from app.api.response_shaping import frontier_link_url
-from app.crawl.result_record import ProducerEnvelope
 from app.models.host_policy import HostPolicy
 from app.models.normalized_url import admit_or_none
+from app.models.result_record import ProducerEnvelope
 
 
 def build_site_map(crawl_response: ProducerEnvelope, *, host_policy: HostPolicy) -> dict[str, Any]:

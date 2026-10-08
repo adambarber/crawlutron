@@ -10,10 +10,10 @@ from typing import Any
 import pytest
 from pydantic import ValidationError
 
-from app.crawl.engine import crawl_request
 from app.models.crawl_request import CrawlRequest
 from app.models.host_policy import HostPolicy
 from app.models.normalized_url import NormalizedUrl
+from app.orchestration.engine import crawl_request
 from tests._fetcher_factories import request_fetcher, run_http_strategy, scripted_fetcher
 from tests._policy_factories import http_strategy_policy
 

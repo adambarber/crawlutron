@@ -1,6 +1,6 @@
 """Worker dispatch: the two shapes ``call_worker`` accepts, and the lie it names.
 
-``app.crawl.worker.call_worker`` is the seam between the engine and whatever
+``app.orchestration.worker.call_worker`` is the seam between the engine and whatever
 fetches a job, so its whole contract is two overloads and one runtime refusal.
 Five tests across two modules were re-deriving that contract independently, with
 untyped workers, a bare ``class _Job: pass`` in place of a ``CrawlJob``, and a
@@ -15,10 +15,10 @@ from typing import cast
 
 import pytest
 
-from app.crawl.worker import call_worker
 from app.models.crawl_job import CrawlJob
 from app.models.crawl_result import CrawlResult
 from app.models.crawl_worker import SyncCrawlWorker
+from app.orchestration.worker import call_worker
 from tests._result_builders import crawl_result, make_job
 
 WORKER_URL = "http://worker.test/page"

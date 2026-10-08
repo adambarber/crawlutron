@@ -9,9 +9,8 @@ from collections.abc import Awaitable, Callable
 from secrets import SystemRandom
 from typing import Protocol, TypeVar
 
+from app.orchestration.scheduler_exceptions import _CircuitBreakerOpen
 from app.vocabulary.taxonomy import ResultStatus
-
-from .crawl.scheduler_exceptions import _CircuitBreakerOpen
 
 logger = logging.getLogger(__name__)
 

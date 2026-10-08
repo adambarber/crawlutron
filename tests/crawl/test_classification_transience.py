@@ -21,7 +21,7 @@ import socket
 import httpx
 import pytest
 
-from app.crawl.result_helpers import classify_error_code
+from app.orchestration.result_helpers import classify_error_code
 from app.vocabulary.taxonomy import (
     CLASSIFICATION_STATUS_BY_LABEL,
     NON_TRANSIENT_CLASSIFICATIONS,

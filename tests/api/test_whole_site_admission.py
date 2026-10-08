@@ -25,7 +25,7 @@ from typing import Any
 import pytest
 
 from app.api import job_runner
-from app.crawl.robots_parse import parse_robots_rules
+from app.orchestration.robots_parse import parse_robots_rules
 from app.storage.job_store import JobStatus
 from tests._job_harnesses import (
     ScriptedExecute,
@@ -293,7 +293,7 @@ class TestWholeSiteAdmissionContract:
         )
 
     async def test_robots_crawl_delay_is_committed_before_admission(self, client, job_store, monkeypatch):
-        from app.scheduler import DomainScheduler
+        from app.orchestration.scheduler import DomainScheduler
 
         root = "https://example.test/root"
         child = "https://example.test/child"

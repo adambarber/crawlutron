@@ -314,7 +314,7 @@ class TestAProofStatesWhichModuleItRunsIn:
     """
 
     OWNER = pathlib.Path("/repo/app/owner.py")
-    ELSEWHERE = pathlib.Path("/repo/app/crawl/other.py")
+    ELSEWHERE = pathlib.Path("/repo/app/transport/other.py")
     SOURCE = "class R:\n    async def close(self):\n        self._browser = None\n"
 
     @staticmethod

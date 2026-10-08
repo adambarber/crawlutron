@@ -86,8 +86,8 @@ class TestTransientRequeue:
         attempted, so recording it as a permanent failure loses work. The
         recursive loop must re-queue it at the frontier tail under a per-job
         cap so a permanently oversubscribed crawl degrades instead of spinning."""
-        from app.crawl.recursive import MAX_TRANSIENT_REQUEUES, requeue_transient
         from app.models.crawl_task import CrawlTask
+        from app.orchestration.recursive import MAX_TRANSIENT_REQUEUES, requeue_transient
 
         task = CrawlTask(
             index=0,
@@ -120,7 +120,7 @@ class TestTransientRequeue:
         classification was destroyed at the scheduler envelope (AttributeError
         -> network_error) and the re-queue never fired.
         """
-        from app.crawl.recursive import MAX_TRANSIENT_REQUEUES
+        from app.orchestration.recursive import MAX_TRANSIENT_REQUEUES
         from app.transport.browser_pool import PooledBrowserWorker
         from tests._fetcher_factories import run_crawl_async
 
