@@ -145,7 +145,7 @@ class ResourceGauge:
         """Block while at/above the hard ceiling; release below it.
 
         The budget is a deadline read from the injected ``clock`` (the seam
-        ``app.crawl.content_cache`` uses for TTL); without it a bound can only
+        ``app.transport.content_cache`` uses for TTL); without it a bound can only
         be demonstrated by spending it in real time, which is what kept one
         admission test at ten real seconds. The rate samplers keep reading
         ``time.monotonic`` -- they measure intervals between samples.

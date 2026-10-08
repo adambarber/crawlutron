@@ -524,7 +524,7 @@ _STDALIAS_MODULES = frozenset({"re"})
 # elsewhere in this suite. A detector keyed on a literal name cannot see an
 # alias of that name, so the set of aliases is resolved from imports instead.
 _SANCTIONED_FUNC_MODULES: dict[str, frozenset[str]] = {
-    "decompress_body": frozenset({"app.crawl.decompression"}),
+    "decompress_body": frozenset({"app.transport.decompression"}),
 }
 
 
@@ -547,7 +547,7 @@ def _aliased_module_bindings(tree: ast.AST) -> set[str]:
 def _aliased_sanctioned_func_names(tree: ast.AST) -> dict[str, set[str]]:
     """Every local alias of a sanctioned chokepoint function, by canonical name.
 
-    ``from app.crawl.decompression import decompress_body`` binds
+    ``from app.transport.decompression import decompress_body`` binds
     ``decompress_body``; ``... as dec`` binds ``dec``. The detectors that guard
     chokepoint call sites match on the literal import name, so an alias is an
     escape hatch in the same way ``import re as _re`` is. This resolves the

@@ -195,14 +195,14 @@ def test_sanctioned_func_alias_detector_bites():
     from tests.membership_gate import aliased_sanctioned_func_offenders
 
     unknown = ast.parse(
-        "from app.crawl.decompression import decompress_body as dec\n\n"
+        "from app.transport.decompression import decompress_body as dec\n\n"
         "def f(raw, enc):\n    return dec(raw, enc)\n"
     )
     hits = aliased_sanctioned_func_offenders(unknown, REPO_ROOT / "app" / "_synthetic.py")
     assert len(hits) == 1 and "decompress_body" in hits[0], hits
     # The two spellings _DECOMPRESS_FUNCS already lists are known and silent.
     known = ast.parse(
-        "from app.crawl.decompression import decompress_body as _decompress_body\n\n"
+        "from app.transport.decompression import decompress_body as _decompress_body\n\n"
         "def f(raw, enc):\n    return _decompress_body(raw, enc)\n"
     )
     assert not aliased_sanctioned_func_offenders(known, REPO_ROOT / "app" / "_synthetic.py")

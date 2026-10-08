@@ -278,13 +278,13 @@ DECLARED: dict[str, Declaration] = {
         "Not yet triaged.\n",
         ["test"],
     ),
-    "app.crawl.content_cache.ContentCache._remember_memory_locked": _d(
+    "app.transport.content_cache.ContentCache._remember_memory_locked": _d(
         _PRIVATE_TYPE.kind, _PRIVATE_TYPE.reason, ["test"]
     ),
-    "app.crawl.decompression._DECODABLE_ENCODINGS": _d(
+    "app.transport.decompression._DECODABLE_ENCODINGS": _d(
         _CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]
     ),
-    "app.crawl.decompression._decompress_bounded": _d(
+    "app.transport.decompression._decompress_bounded": _d(
         "unreviewed",
         "Not yet triaged.\n",
         ["test"],

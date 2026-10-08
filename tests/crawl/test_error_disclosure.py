@@ -12,13 +12,13 @@ import socket
 
 import httpx
 
-from app.crawl.decompression import DecompressionTooLargeError
 from app.crawl.result_helpers import (
     classify_error_code,
     crawl_result_from_exception,
     engine_result_from_exception,
 )
 from app.models.serialization import to_dict
+from app.transport.decompression import DecompressionTooLargeError
 from tests._fetcher_factories import invoke_http_strategy, run_http_strategy
 from tests._policy_factories import http_strategy_policy
 

@@ -5,12 +5,12 @@ from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
 from functools import partial
 
-from app.crawl.content_cache import ContentCache
 from app.crawl.engine import _parse_lastmod, _seed_is_fresh, _stale_seeds
 from app.crawl.fetch_helpers import _SITEMAP_CACHE, fetch_sitemap_urls
 from app.crawl.policy import read_policy
 from app.crawl.result_record import ProducerEnvelope
 from app.map import build_site_map
+from app.transport.content_cache import ContentCache
 from app.transport.content_cache_key import build_content_cache_key
 from app.transport.request_profile import headers_for_strategy
 from tests._assertions import install_to_thread_spy

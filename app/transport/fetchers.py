@@ -15,13 +15,13 @@ from typing import Any
 from curl_cffi.requests.exceptions import RequestException
 from curl_cffi.requests.models import STREAM_END
 
-from app.crawl.decompression import DecompressionError, DecompressionTooLargeError
-from app.crawl.decompression import decompress_body as _decompress_body
 from app.models.http_fetch_result import HttpFetchResult
 from app.models.http_fetcher import HttpFetcher
 from app.models.normalized_url import NormalizedUrl
 from app.timeouts import Timeouts
 from app.transport import http_client_pool, pinned_transport
+from app.transport.decompression import DecompressionError, DecompressionTooLargeError
+from app.transport.decompression import decompress_body as _decompress_body
 from app.transport.request_profile import _store_set_cookies, _TransportHeaders
 from app.vocabulary.limits import DEFAULT_MAX_CONTENT_LENGTH_BYTES
 

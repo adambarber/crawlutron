@@ -28,7 +28,7 @@ _DEFAULT_CFFI_FETCHER = impersonating_fetcher()
 
 class TestCffiImpersonateStrategy:
     async def test_http_cffi_imersonate_result(self):
-        from app.crawl.cache import HttpCache
+        from app.transport.cache import HttpCache
         from app.transport.http import http_strategy_result
 
         # A real HttpFetchResult, not a local class that has the same five

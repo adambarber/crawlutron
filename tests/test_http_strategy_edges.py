@@ -113,7 +113,7 @@ class TestHttpStrategyEdges:
         ), f"cffi fetch produced {outcome!r}"
 
     async def test_http_strategy_result_httpx_request_error(self):
-        from app.crawl.cache import HttpCache
+        from app.transport.cache import HttpCache
 
         cache = HttpCache()
 
@@ -133,7 +133,7 @@ class TestHttpStrategyEdges:
         assert result.classification == "http_error"
 
     async def test_http_strategy_result_httpx_http_status_error(self):
-        from app.crawl.cache import HttpCache
+        from app.transport.cache import HttpCache
 
         cache = HttpCache()
 
@@ -166,7 +166,7 @@ class TestHttpStrategyEdges:
         assert isinstance(result, str)
 
     async def test_http_strategy_result_binary_classification(self):
-        from app.crawl.cache import HttpCache
+        from app.transport.cache import HttpCache
         from app.vocabulary.extraction import EXTRACTION_METHOD_BINARY_NO_TEXT
 
         cache = HttpCache()

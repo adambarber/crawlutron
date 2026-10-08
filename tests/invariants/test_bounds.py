@@ -195,22 +195,22 @@ def _decompress_cap_proofs() -> tuple[Bites, ...]:
     return (
         Bites("def f(raw, enc):\n" + calls.format(call="decompress_body"), "without max_output_bytes"),
         Bites(
-            "import app.crawl.decompression as compression\ndef f(raw, enc):\n"
+            "import app.transport.decompression as compression\ndef f(raw, enc):\n"
             + calls.format(call="compression.decompress_body"),
             "without max_output_bytes",
         ),
         Bites(
-            "from app.crawl.decompression import decompress_body as decode\ndef f(raw, enc):\n"
+            "from app.transport.decompression import decompress_body as decode\ndef f(raw, enc):\n"
             + calls.format(call="decode"),
             "without max_output_bytes",
         ),
         Bites(
-            "from app.crawl.decompression import decompress_body\ndecode = decompress_body\n"
+            "from app.transport.decompression import decompress_body\ndecode = decompress_body\n"
             "def f(raw, enc):\n" + calls.format(call="decode"),
             "without max_output_bytes",
         ),
         Bites(
-            "import app.crawl.decompression as compression\ndef f(raw, enc):\n"
+            "import app.transport.decompression as compression\ndef f(raw, enc):\n"
             + calls.format(call="getattr(compression, 'decompress_body')"),
             "without max_output_bytes",
         ),
@@ -231,7 +231,7 @@ DECOMPRESS_CAP = Rule(
 # Decompression reaches only through the capped chokepoint
 # ---------------------------------------------------------------------------
 
-# The codecs app/crawl/decompression.py imports to implement decompress_body.
+# The codecs app/transport/decompression.py imports to implement decompress_body.
 _DECOMPRESS_CODECS = frozenset({"gzip", "zlib", "brotli"})
 
 
@@ -308,7 +308,7 @@ DECOMPRESS_BYPASS = Rule(
         ),
     ),
     clean=lambda: (
-        "from app.crawl.decompression import decompress_body\n"
+        "from app.transport.decompression import decompress_body\n"
         "def f(raw, hdr):\n"
         "    return decompress_body(raw, hdr.get('content-encoding', ''), max_output_bytes=1024)\n",
     ),

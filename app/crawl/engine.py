@@ -22,8 +22,6 @@ from typing import Any, cast
 
 from app.crawl import robots as _robots_policy
 from app.crawl.admission import compile_scope_pattern
-from app.crawl.cache import HttpCache
-from app.crawl.content_cache import ContentCache
 from app.crawl.payload_helpers import _payload_policy, checked_payload_urls
 from app.crawl.policy import PolicyTier
 from app.crawl.request_pipeline import _PipelineDependencies, _PipelineState, run_crawl_request
@@ -39,6 +37,8 @@ from app.models.normalized_url import NormalizedUrl
 from app.models.serialization import from_wire, to_dict
 from app.resource_pressure import ResourceGate
 from app.settings import CrawlerSettings
+from app.transport.cache import HttpCache
+from app.transport.content_cache import ContentCache
 from app.transport.fetchers import default_http_fetcher, impersonating_fetcher
 
 logger = logging.getLogger(__name__)

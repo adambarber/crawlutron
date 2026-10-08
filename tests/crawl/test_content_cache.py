@@ -14,10 +14,10 @@ from typing import Any
 
 import pytest
 
-import app.crawl.content_cache as cc
-from app.crawl.cache import HttpCache
-from app.crawl.content_cache import ContentCache
+import app.transport.content_cache as cc
 from app.models.normalized_url import NormalizedUrl
+from app.transport.cache import HttpCache
+from app.transport.content_cache import ContentCache
 from app.transport.fetchers import default_http_fetcher
 from app.validation import HostPolicy
 from app.vocabulary.strategies import HTTP_DECLARED_CRAWLER
@@ -439,8 +439,8 @@ class TestContentCacheCorruptEntry:
 
 class TestSharedContentCache:
     def test_engine_shared_content_cache(self):
-        from app.crawl.content_cache import ContentCache
         from app.crawl.engine import _get_shared_content_cache
+        from app.transport.content_cache import ContentCache
 
         cache = _get_shared_content_cache()
         assert isinstance(cache, ContentCache)

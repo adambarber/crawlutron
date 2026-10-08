@@ -108,7 +108,7 @@ _OWNER_PUBLIC_SURFACE_RATCHET = {
     "app/safe_regex.py": (7, 2),
     "app/crawl/robots.py": (12, 3),
     "app/bounded_io.py": (4, 2),
-    "app/crawl/decompression.py": (3, 1),
+    "app/transport/decompression.py": (3, 1),
     "app/crawl/credentials.py": (3, 3),
     "app/crawl/render_options.py": (2, 2),
     "app/crawl/payload_helpers.py": (1, 1),

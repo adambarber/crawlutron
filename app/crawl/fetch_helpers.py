@@ -13,12 +13,12 @@ from collections.abc import Awaitable, Callable, Mapping
 from typing import Any, NamedTuple
 
 from app.bounded_ttl import BoundedTTLCache
-from app.crawl.decompression import decompress_body as _decompress_body
 from app.models.host_policy import HostPolicy
 from app.models.http_fetch_result import HttpFetchResult
 from app.models.http_fetcher import HttpFetcher
 from app.models.normalized_url import NormalizedUrl
 from app.transport.body_decode import decode_body
+from app.transport.decompression import decompress_body as _decompress_body
 from app.vocabulary.limits import (
     DISCOVERY_BODY_MAX_BYTES,
     SITEMAP_CACHE_MAX_ENTRIES,
@@ -119,7 +119,7 @@ async def _fetch_decode_discovery(
     fields are ``None`` on transport-level failure, and ``_Discovery`` is the
     only thing a consumer is meant to read off the result.
     """
-    from app.crawl.decompression import DecompressionTooLargeError
+    from app.transport.decompression import DecompressionTooLargeError
 
     with contextlib.suppress(Exception):
         resp = await _call_fetcher(fetcher, url, headers or {}, timeout_seconds)

@@ -8,7 +8,6 @@ import brotli
 import pytest
 
 from app.api.render import _render_options
-from app.crawl.cache import HttpCache
 from app.crawl.document_text import format_extracted_document_text
 from app.crawl.engine import (
     _payload_policy,
@@ -23,6 +22,7 @@ from app.crawl.extraction import (
 from app.crawl.payload_helpers import _payload_urls
 from app.crawl.policy import PolicyTier, read_policy
 from app.settings import CrawlerSettings
+from app.transport.cache import HttpCache
 from app.transport.fetch_policy import (
     fetch_with_retries,
     looks_like_binary_body,
@@ -746,7 +746,7 @@ class TestAcceptEncodingAdvertisesOnlyWhatWeCanDecode:
     """Asking for an encoding we cannot decode is a self-inflicted failure.
 
     ``Accept-Encoding`` must not name a coding outside
-    ``app.crawl.decompression._DECODABLE_ENCODINGS``: a server told to send a body
+    ``app.transport.decompression._DECODABLE_ENCODINGS``: a server told to send a body
     this process will then refuse or pass through whole fails the crawl on a
     request we chose to make that way.
 
@@ -769,7 +769,7 @@ class TestAcceptEncodingAdvertisesOnlyWhatWeCanDecode:
         import gzip
         import zlib
 
-        from app.crawl.decompression import decompress_body
+        from app.transport.decompression import decompress_body
 
         payload = b"<html>hello</html>"
         for encoding, compressed in (
@@ -782,7 +782,7 @@ class TestAcceptEncodingAdvertisesOnlyWhatWeCanDecode:
     def test_the_header_advertises_only_decodable_encodings(self):
         # The negative direction: the list is not merely "includes br", it names
         # nothing outside the decoder set, so a future token cannot slip in.
-        from app.crawl.decompression import _DECODABLE_ENCODINGS
+        from app.transport.decompression import _DECODABLE_ENCODINGS
 
         headers = headers_for_strategy(HTTP_DECLARED_CRAWLER, read_policy({"headers": {}}), canonical("http://e.com/"))
         advertised = {token.strip() for token in headers["Accept-Encoding"].split(",")}

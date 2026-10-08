@@ -7,9 +7,9 @@ from typing import Any
 import brotli
 import pytest
 
-from app.crawl import decompression as decompression_mod
-from app.crawl.decompression import DecompressionTooLargeError, _decompress_bounded, decompress_body
+from app.transport import decompression as decompression_mod
 from app.transport.body_decode import decode_body
+from app.transport.decompression import DecompressionTooLargeError, _decompress_bounded, decompress_body
 
 _CAP = 10_000_000
 
@@ -208,7 +208,7 @@ def test_decode_unknown_charset_falls_back():
 
 def test_decode_handles_bytearray_and_headers():
 
-    from app.crawl.decompression import decompress_body
+    from app.transport.decompression import decompress_body
 
     raw = b"compressed"
     body = gzip.compress(raw)
@@ -222,7 +222,7 @@ def test_decode_handles_bytearray_and_headers():
 
 def test_accepts_bytearray_gzip():
 
-    from app.crawl.decompression import decompress_body
+    from app.transport.decompression import decompress_body
 
     body = bytearray(gzip.compress(b"hello world"))
     out = decompress_body(body, "gzip", max_output_bytes=1024)
@@ -230,7 +230,7 @@ def test_accepts_bytearray_gzip():
 
 
 def test_accepts_bytearray_brotli():
-    from app.crawl.decompression import decompress_body
+    from app.transport.decompression import decompress_body
 
     body = bytearray(brotli.compress(b"<html>br content</html>"))
     out = decompress_body(body, "br", max_output_bytes=1024)
@@ -238,7 +238,7 @@ def test_accepts_bytearray_brotli():
 
 
 def test_accepts_memoryview():
-    from app.crawl.decompression import decompress_body
+    from app.transport.decompression import decompress_body
 
     body = memoryview(gzip.compress(b"mv test"))
     out = decompress_body(body, "gzip", max_output_bytes=10_000_000)

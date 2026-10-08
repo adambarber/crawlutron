@@ -9,8 +9,8 @@
 
 import pytest
 
-from app.crawl.cache import HttpCache
 from app.crawl.engine import crawl_request
+from app.transport.cache import HttpCache
 from tests._fetcher_factories import site_fetcher, tap_fetcher
 
 

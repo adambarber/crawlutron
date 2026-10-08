@@ -1,8 +1,8 @@
 """HTTP fetch strategy behavior against a real local server (no mocks)."""
 
-from app.crawl.cache import HttpCache
 from app.crawl.result_helpers import crawl_result_from_engine_result
 from app.models.crawl_result import CrawlStrategyAttempt
+from app.transport.cache import HttpCache
 from app.transport.fetch_policy import looks_like_binary_body
 from app.transport.fetchers import default_http_fetcher
 from app.transport.http import http_strategy_result
@@ -270,7 +270,7 @@ async def test_recursive_crawl_drops_sitewide_lists_from_page_diagnostics(monkey
 
 class TestHttpStrategyRetry:
     async def test_http_strategy_with_cffi_retry(self):
-        from app.crawl.cache import HttpCache
+        from app.transport.cache import HttpCache
 
         # The cffi retry is the second step, so the sequence is the fixture:
         # attempt one fails, attempt two succeeds.

@@ -11,7 +11,6 @@ import pytest
 
 from app.bounded_ttl import BoundedTTLCache
 from app.crawl import engine as engine_mod
-from app.crawl.cache import HttpCache
 from app.crawl.engine import crawl_request
 from app.crawl.policy import read_policy
 from app.crawl.robots import _robots_pattern_to_regex, robots_allows
@@ -25,6 +24,7 @@ from app.crawl.robots_parse import (
 from app.models.host_policy import HostPolicy
 from app.models.normalized_url import NormalizedUrl
 from app.settings import CrawlerSettings
+from app.transport.cache import HttpCache
 from app.transport.fetch_policy import discovery_diagnostics
 from app.vocabulary.identity import SERVICE_ID
 from app.vocabulary.strategies import HTTP_DECLARED_CRAWLER

@@ -13,9 +13,6 @@ from dataclasses import dataclass, field, replace
 from typing import Any
 
 from app.classify import classify_page_with_evidence
-from app.crawl.cache import HttpCache
-from app.crawl.content_cache import ContentCache
-from app.crawl.decompression import decompress_body as _decompress_body
 from app.crawl.document_text import format_extracted_document_text
 from app.crawl.extraction import is_html
 from app.crawl.policy import discovery_flags
@@ -35,12 +32,15 @@ from app.models.http_fetch_result import HttpFetchResult
 from app.models.normalized_url import NormalizedUrl
 from app.models.taxonomy import Classification, CrawlStrategyName
 from app.transport import body_decode, content_cache_key, fetch_policy, request_profile
+from app.transport.cache import HttpCache
+from app.transport.content_cache import ContentCache
 from app.transport.content_pipeline import (
     _discover_after_fetch,
     _discovery_result_fields,
     _post_fetch_diagnostics,
     _run_extraction,
 )
+from app.transport.decompression import decompress_body as _decompress_body
 from app.transport.strategy_request import StrategyRequest
 from app.vocabulary.extraction import (
     EXTRACTION_DOCUMENT,

@@ -1,6 +1,6 @@
 """In-container disk content cache (no sidecar / external service).
 
-This complements :mod:`app.crawl.cache.HttpCache` (which stores only
+This complements :mod:`app.transport.cache.HttpCache` (which stores only
 ``ETag``/``Last-Modified`` metadata for :rfc:`7232` conditional re-requests).
 ``ContentCache`` persists the actual fetched response on local disk so repeated
 crawls of an unchanged URL avoid re-downloading (and, if callers choose to cache

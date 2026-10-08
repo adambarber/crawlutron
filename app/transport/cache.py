@@ -17,7 +17,7 @@ Design notes:
   access pattern.
 * The cache is intentionally in-memory. Persistence across restarts is out of
   scope here (conditional revalidation is a within-session fast path); content
-  caching belongs to :class:`app.crawl.content_cache.ContentCache`.
+  caching belongs to :class:`app.transport.content_cache.ContentCache`.
 """
 
 from __future__ import annotations

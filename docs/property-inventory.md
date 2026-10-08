@@ -52,7 +52,7 @@ route gate, which is why the same defect keeps reappearing at a new call site.
 |---|---|---|---|---|---|
 | B1 | Attacker-influenced regex is compiled and executed through the bounded primitive with a native timeout, never through bare `re` | `app/safe_regex.py` | runtime construction | dynamic-pattern + direct-import + bare-compile AST detectors; timing-contract tests | `GATED` |
 | B2 | Robots wildcard matching is linear-time in the input, not backtracking | `app/crawl/robots_parse.py` (line scanner) | implementation | timing-contract tests | `GATED` |
-| B3 | Decompression is bounded **and fails closed**: no branch may expand the body before the cap is checked | `app/crawl/decompression.py` | runtime construction | AST requires a cap at every call site; behavioral bomb tests | `PARTIAL` — the no-streaming-API fallback expands before rejecting |
+| B3 | Decompression is bounded **and fails closed**: no branch may expand the body before the cap is checked | `app/transport/decompression.py` | runtime construction | AST requires a cap at every call site; behavioral bomb tests | `PARTIAL` — the no-streaming-API fallback expands before rejecting |
 | B4 | Response bodies are read only through the bounded reader; no bare `.read()` / `.content` on an unbounded path | `app/bounded_io.py` | AST route | bare-body-read detector | `GATED` |
 | B5 | Caller policy bounds (page count, depth, rps, content length, volume) are **rejected** when out of range, never silently clamped into a different contract | `app/models/crawl_policy.py` + `app/crawl/payload_helpers.py:_payload_policy` | runtime construction | validation tests for each field | `GATED` |
 | B6 | Sitemap `lastmod` cannot place a seed in the future beyond the configured skew — future-dated freshness always re-fetches | `app/crawl/engine.py:_parse_lastmod` | runtime construction | sitemap tests | `GATED` |
@@ -92,7 +92,7 @@ route gate, which is why the same defect keeps reappearing at a new call site.
 | # | Property | Owner | Seam | Gate | Status |
 |---|---|---|---|---|---|
 | E1 | Blocking I/O never runs on the event loop | the store family owns it (D5); other callers | AST route + spy | await-inside-lock detector; `test_no_sync_store_method_is_called_from_an_async_frame` | `PARTIAL` — the two SQLite stores are now gated at the seam rather than per call site, but the property is wider than that family and the remaining blocking calls (decompress, file writes) are not swept tree-wide |
-| E2 | No lock is held across blocking disk I/O | `app/crawl/content_cache.py` | runtime construction | AST detector + race tests | `GATED` |
+| E2 | No lock is held across blocking disk I/O | `app/transport/content_cache.py` | runtime construction | AST detector + race tests | `GATED` |
 | E3 | Loop-bound primitives are rebound when the loop changes | `app/transport/http_client_pool.py:_LoopBoundPooledClient`, async runner semaphore | runtime construction | loop-bound detector | `GATED` |
 | E4 | Remote politeness directives cannot install an unbounded sleep | `app/scheduler.py` | runtime construction | clamp tests | `GATED` |
 | E5 | Work submitted to a closing loop cannot raise into a completed task | `app/transport/http_client_pool.py` close helpers | runtime construction | deterministic close-race tests | `GATED` |

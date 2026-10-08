@@ -4,8 +4,6 @@ from collections.abc import Callable
 from typing import Any
 from urllib.parse import urlparse
 
-from app.crawl.cache import HttpCache
-from app.crawl.content_cache import ContentCache
 from app.crawl.engine import crawl_request
 from app.crawl.policy import CrawlPolicy, read_policy
 from app.crawl.result_record import ProducerEnvelope
@@ -14,6 +12,8 @@ from app.models.host_policy import HostPolicy
 from app.models.http_fetch_result import HttpFetchResult
 from app.models.normalized_url import NormalizedUrl
 from app.models.taxonomy import CrawlStrategyName
+from app.transport.cache import HttpCache
+from app.transport.content_cache import ContentCache
 from app.transport.strategy_request import StrategyRequest
 from app.vocabulary.limits import DEFAULT_MAX_CONTENT_LENGTH_BYTES
 from app.vocabulary.strategies import HTTP_DECLARED_CRAWLER

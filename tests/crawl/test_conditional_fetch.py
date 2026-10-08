@@ -197,7 +197,7 @@ def test_conditional_headers_rejected_without_validators():
 async def test_malformed_gzip_is_rejected_by_strategy():
     import gzip
 
-    from app.crawl.decompression import DecompressionTooLargeError, decompress_body
+    from app.transport.decompression import DecompressionTooLargeError, decompress_body
 
     compressed = bytearray(gzip.compress(_html("real content").encode()))
     for i in range(2, 12):
@@ -230,7 +230,7 @@ async def test_malformed_gzip_is_rejected_by_strategy():
 
 class TestNotModifiedResponse:
     async def test_http_strategy_not_modified(self):
-        from app.crawl.cache import HttpCache
+        from app.transport.cache import HttpCache
 
         not_mod_fetcher = scripted_fetcher(
             status=304, headers={"etag": "v1", "content-type": "text/html"}, body=b"not modified"

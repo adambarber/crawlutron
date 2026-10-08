@@ -4,11 +4,11 @@ import base64
 
 import pytest
 
-from app.crawl.cache import HttpCache
 from app.crawl.engine import crawl_request
 from app.models.crawl_result import CrawlResult
 from app.models.render_options import RenderOptions
 from app.transport.browser import BrowserRenderer
+from app.transport.cache import HttpCache
 from app.validation import HostPolicy
 from app.vocabulary.strategies import BROWSER_HEADLESS
 from tests._assertions import assert_result_success

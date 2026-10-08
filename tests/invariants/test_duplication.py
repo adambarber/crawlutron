@@ -656,7 +656,7 @@ def _reinline_js_endpoints_filter_offenders(tree: ast.AST, path: pathlib.Path) -
     return offenders
 
 
-_JS_EGRESS_ELSEWHERE = REPO_ROOT / "app" / "crawl" / "content_cache.py"
+_JS_EGRESS_ELSEWHERE = REPO_ROOT / "app" / "transport" / "content_cache.py"
 
 
 # The chokepoint's own comprehension really is the matched shape: the file
@@ -887,7 +887,7 @@ def test_comment_clone_detector_bites():
     into modules: a comment is not in the ``ast`` at all, so this is the one
     detector in the file whose input is the text.
     """
-    path = REPO_ROOT / "app" / "crawl" / "content_cache.py"
+    path = REPO_ROOT / "app" / "transport" / "content_cache.py"
     repeated = "# first line of the note\n# second line\n# third line\n"
     other = "# a different note entirely\n# with three lines\n# of its own text\n"
     detached = "        # first line of the note\n        # second line\n        # third line\n"
@@ -898,9 +898,8 @@ def test_comment_clone_detector_bites():
     once = detect(f"x = 1\n{repeated}y = 2\n")
     assert not once, once
     twice = detect(f"x = 1\n{repeated}y = 2\n{repeated}")
-    assert len(twice) == 1 and "app/crawl/content_cache.py:2 and app/crawl/content_cache.py:6" in twice[0], (
-        twice
-    )
+    expected = "app/transport/content_cache.py:2 and app/transport/content_cache.py:6"
+    assert len(twice) == 1 and expected in twice[0], twice
     # Two blocks of the same length but different text are two notes.
     assert not detect(f"x = 1\n{repeated}y = 2\n{other}"), "equal-length distinct blocks are not clones"
     # Two lines is a section rule, not a WHY to centralize.

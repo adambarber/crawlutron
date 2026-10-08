@@ -204,9 +204,6 @@ graph LR
     crawl_admission --> scheduler
     crawl_admission --> transport_fetchers
     crawl_admission --> vocabulary_hosts
-    crawl_cache --> models_normalized_url
-    crawl_content_cache --> atomic_write
-    crawl_content_cache --> vocabulary_limits
     crawl_coordination_cookies --> crawl_coordination_store
     crawl_coordination_cookies --> crawl_migrations_manifest
     crawl_coordination_counters --> crawl_coordination_store
@@ -217,8 +214,6 @@ graph LR
     crawl_credentials --> models_normalized_url
     crawl_doc_pool --> env
     crawl_engine --> crawl_admission
-    crawl_engine --> crawl_cache
-    crawl_engine --> crawl_content_cache
     crawl_engine --> crawl_payload_helpers
     crawl_engine --> crawl_policy
     crawl_engine --> crawl_request_pipeline
@@ -234,6 +229,8 @@ graph LR
     crawl_engine --> models_serialization
     crawl_engine --> resource_pressure
     crawl_engine --> settings
+    crawl_engine --> transport_cache
+    crawl_engine --> transport_content_cache
     crawl_engine --> transport_content_cache_key
     crawl_engine --> transport_cookie_jar
     crawl_engine --> transport_fetchers
@@ -248,12 +245,12 @@ graph LR
     crawl_extraction --> settings
     crawl_extraction --> validation
     crawl_fetch_helpers --> bounded_ttl
-    crawl_fetch_helpers --> crawl_decompression
     crawl_fetch_helpers --> models_host_policy
     crawl_fetch_helpers --> models_http_fetch_result
     crawl_fetch_helpers --> models_http_fetcher
     crawl_fetch_helpers --> models_normalized_url
     crawl_fetch_helpers --> transport_body_decode
+    crawl_fetch_helpers --> transport_decompression
     crawl_fetch_helpers --> vocabulary_limits
     crawl_job_store --> crawl_ids
     crawl_job_store --> crawl_policy
@@ -321,8 +318,6 @@ graph LR
     crawl_render_options --> models_crawl_policy
     crawl_render_options --> models_render_options
     crawl_request_pipeline --> crawl_admission
-    crawl_request_pipeline --> crawl_cache
-    crawl_request_pipeline --> crawl_content_cache
     crawl_request_pipeline --> crawl_fetch_helpers
     crawl_request_pipeline --> crawl_ids
     crawl_request_pipeline --> crawl_policy
@@ -344,14 +339,16 @@ graph LR
     crawl_request_pipeline --> safe_regex
     crawl_request_pipeline --> scheduler
     crawl_request_pipeline --> settings
+    crawl_request_pipeline --> transport_cache
+    crawl_request_pipeline --> transport_content_cache
     crawl_request_pipeline --> vocabulary_limits
-    crawl_result_helpers --> crawl_decompression
     crawl_result_helpers --> crawl_scheduler_exceptions
     crawl_result_helpers --> models_browser_pool_exhausted
     crawl_result_helpers --> models_crawl_result
     crawl_result_helpers --> models_engine_crawl_result
     crawl_result_helpers --> models_normalized_url
     crawl_result_helpers --> models_taxonomy
+    crawl_result_helpers --> transport_decompression
     crawl_result_helpers --> vocabulary_taxonomy
     crawl_result_record --> models_crawl_result
     crawl_result_record --> models_engine_crawl_result
@@ -626,12 +623,15 @@ graph LR
     transport_browser_result --> transport_content_pipeline
     transport_browser_result --> transport_strategy_request
     transport_browser_result --> vocabulary_extraction
-    transport_content_cache_key --> crawl_content_cache
+    transport_cache --> models_normalized_url
+    transport_content_cache --> atomic_write
+    transport_content_cache --> vocabulary_limits
     transport_content_cache_key --> env
     transport_content_cache_key --> models_crawl_policy_limits
     transport_content_cache_key --> models_normalized_url
     transport_content_cache_key --> resource_pressure
     transport_content_cache_key --> settings
+    transport_content_cache_key --> transport_content_cache
     transport_content_cache_key --> vocabulary_limits
     transport_content_pipeline --> crawl_extraction
     transport_content_pipeline --> crawl_policy
@@ -649,7 +649,6 @@ graph LR
     transport_document --> crawl_extraction
     transport_document --> models_normalized_url
     transport_document --> timeouts
-    transport_fetch_policy --> crawl_decompression
     transport_fetch_policy --> crawl_fetch_helpers
     transport_fetch_policy --> crawl_policy
     transport_fetch_policy --> crawl_result_helpers
@@ -658,18 +657,16 @@ graph LR
     transport_fetch_policy --> models_http_fetcher
     transport_fetch_policy --> models_normalized_url
     transport_fetch_policy --> transport_body_decode
+    transport_fetch_policy --> transport_decompression
     transport_fetch_policy --> vocabulary_limits
-    transport_fetchers --> crawl_decompression
     transport_fetchers --> models_http_fetch_result
     transport_fetchers --> models_http_fetcher
     transport_fetchers --> models_normalized_url
     transport_fetchers --> timeouts
+    transport_fetchers --> transport_decompression
     transport_fetchers --> transport_request_profile
     transport_fetchers --> vocabulary_limits
     transport_http --> classify
-    transport_http --> crawl_cache
-    transport_http --> crawl_content_cache
-    transport_http --> crawl_decompression
     transport_http --> crawl_document_text
     transport_http --> crawl_extraction
     transport_http --> crawl_policy
@@ -684,7 +681,10 @@ graph LR
     transport_http --> models_http_fetch_result
     transport_http --> models_normalized_url
     transport_http --> models_taxonomy
+    transport_http --> transport_cache
+    transport_http --> transport_content_cache
     transport_http --> transport_content_pipeline
+    transport_http --> transport_decompression
     transport_http --> transport_strategy_request
     transport_http --> vocabulary_extraction
     transport_http --> vocabulary_taxonomy
