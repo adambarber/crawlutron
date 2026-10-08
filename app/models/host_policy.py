@@ -80,6 +80,8 @@ HOST_POLICY_ENTRY_POINTS = (
     "app/api/async_crawl_runner.py:run_async_crawl",
     "app/api/response_shaping.py:frontier_link_url",
     "app/api/watch_router.py:create_watch",
+    "app/api/policy_suggestions.py:policy_suggestions",
+    "app/api/policy_suggestions.py:build_policy_suggestions",
     "app/api/webhooks.py:post_webhook",
     "app/api/webhooks.py:deliver_pinned_webhook",
     "app/mcp/tools.py:_handle_crawl",

@@ -15,6 +15,7 @@ from pathlib import Path
 
 from app.crawl.coordination_store import CoordinationStore
 from app.crawl.migrations import StoreSchema
+from app.models.json_value import JsonValue
 
 
 class CrawlResultStore(CoordinationStore):
@@ -79,6 +80,23 @@ class CrawlResultStore(CoordinationStore):
             return None
         return json.loads(payload)
 
+    def payloads(self) -> list[JsonValue]:
+        """Every retained payload, newest first.
+
+        The same TTL filter as :meth:`get`, applied here too: an expired row
+        that still answered a rollup would have the store reporting evidence it
+        has already declared gone. Ordering is newest-first so a caller reading
+        a bounded prefix sees the most recent records.
+        """
+        now = self._clock()
+        cutoff = now - self._ttl_seconds if self._ttl_seconds > 0 else 0.0
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT payload FROM results WHERE stored_at >= ? ORDER BY stored_at DESC",
+                (cutoff,),
+            ).fetchall()
+        return [json.loads(row[0]) for row in rows]
+
     async def aput(self, request_id: str, payload: dict) -> None:
         """Async :meth:`put`: the prune, the payload dumps and both commits off-loop."""
         await asyncio.to_thread(self.put, request_id, payload)
@@ -86,6 +104,10 @@ class CrawlResultStore(CoordinationStore):
     async def aget(self, request_id: str) -> dict | None:
         """Async :meth:`get`: a status-poll read must not park the loop."""
         return await asyncio.to_thread(self.get, request_id)
+
+    async def apayloads(self) -> list[JsonValue]:
+        """Async :meth:`payloads`: a whole-cache rollup must not park the loop."""
+        return await asyncio.to_thread(self.payloads)
 
     def _prune(self, now: float) -> None:
         if self._ttl_seconds <= 0:

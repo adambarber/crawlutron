@@ -507,6 +507,50 @@ async def _probe_mcp_search(monkeypatch, tmp_path):
     )
 
 
+def _blocked_records() -> list[dict]:
+    """One retained crawl record whose only page was blocked."""
+    return [
+        {
+            "request_id": "req-1",
+            "results": [
+                {
+                    "normalized_url": _BLOCKED_URL,
+                    "status": "blocked",
+                    "classification": "captcha_detected",
+                    "selected_strategy": None,
+                    "attempted_strategies": [],
+                    "classification_evidence": [],
+                }
+            ],
+        }
+    ]
+
+
+async def _probe_policy_suggestions(monkeypatch, tmp_path):
+    """A host this deployment refuses must produce no suggestion at either level.
+
+    The rollup admits every stored URL through the deployment's policy, and a
+    candidate rule about a host this deployment may not crawl is not reviewable
+    -- so the refusal shows up as an empty proposal rather than an exception,
+    which is why this probe asserts on the suggestion list instead of reusing
+    :func:`_assert_refused`.
+    """
+    from app.api import policy_suggestions as module
+    from app.models.trace_response import TraceResponse
+
+    async def _payloads():
+        return _blocked_records()
+
+    store = type("Store", (), {"apayloads": staticmethod(_payloads)})()
+
+    from_handler = await module.policy_suggestions(result_store=store, settings=_denied_settings())
+    assert from_handler.suggestions == []
+
+    record = TraceResponse.model_validate(_blocked_records()[0])
+    from_builder = module.build_policy_suggestions([record], host_policy=_denied_policy())
+    assert from_builder.suggestions == []
+
+
 _PROBES = {
     "app/api/crawl_endpoint.py:crawl": _probe_crawl_endpoint,
     "app/api/crawl_executor.py:execute_crawl": _probe_crawl_executor,
@@ -516,6 +560,8 @@ _PROBES = {
     "app/api/async_crawl_runner.py:run_async_crawl": _probe_async_runner,
     "app/api/response_shaping.py:frontier_link_url": _probe_response_shaping,
     "app/api/watch_router.py:create_watch": _probe_watch_router,
+    "app/api/policy_suggestions.py:policy_suggestions": _probe_policy_suggestions,
+    "app/api/policy_suggestions.py:build_policy_suggestions": _probe_policy_suggestions,
     "app/api/webhooks.py:post_webhook": _probe_webhook,
     "app/api/webhooks.py:deliver_pinned_webhook": _probe_webhook_delivery,
     "app/mcp/tools.py:_handle_crawl": _probe_mcp_crawl,

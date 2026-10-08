@@ -190,6 +190,13 @@ class TestDiscoveryPayload:
         recommended = discovery_payload()["recommended_endpoints"]
         assert "GET /v1/crawl/{request_id}/trace" in recommended
 
+    def test_recommended_endpoints_name_the_policy_suggestion_surface(self):
+        """A suggestion surface an agent cannot discover is not a surface: the
+        guidance already tells agents to generate reviewable policy suggestions,
+        and this is the door that does it."""
+        recommended = discovery_payload()["recommended_endpoints"]
+        assert "GET /v1/policy-suggestions" in recommended
+
     def test_capabilities_advertises_watches(self):
         """``conditional_fetch`` is the primitive; ``watches`` is the surface that
         uses it on the caller's behalf. An agent deciding whether to poll for

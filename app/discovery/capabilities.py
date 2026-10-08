@@ -74,6 +74,9 @@ def capabilities_payload(settings: CrawlerSettings) -> dict[str, Any]:
             # The stored crawl record's diagnostic spine, read over existing
             # data: attempts and classification evidence without page bodies.
             "per_request_trace": True,
+            # Candidate host rules proposed from recorded evidence, for a person
+            # to review. Nothing here applies a rule.
+            "policy_suggestions": True,
             # The surface that uses `conditional_fetch` on the caller's behalf:
             # registered URLs the sweep rechecks, and announces when they change.
             "watches": True,

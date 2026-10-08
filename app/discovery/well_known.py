@@ -24,6 +24,7 @@ def discovery_payload() -> dict[str, Any]:
             "watches": "/v1/watches",
             "result_retrieval": "/v1/crawl/{request_id}",
             "trace": "/v1/crawl/{request_id}/trace",
+            "policy_suggestions": "/v1/policy-suggestions",
             "mcp": "/mcp",
         },
         "recommended_endpoints": [
@@ -46,6 +47,7 @@ def discovery_payload() -> dict[str, Any]:
             "DELETE /v1/watches/{watch_id}",
             "GET /v1/crawl/{request_id}",
             "GET /v1/crawl/{request_id}/trace",
+            "GET /v1/policy-suggestions",
             "POST /mcp",
         ],
         "description": "Policy-driven universal crawler execution service for script-tool municipal crawling.",  # noqa: E501

@@ -113,6 +113,10 @@ class LoopGuardResultStore(CrawlResultStore):
         _refuse_on_loop("CrawlResultStore.get")
         return super().get(request_id)
 
+    def payloads(self):
+        _refuse_on_loop("CrawlResultStore.payloads")
+        return super().payloads()
+
     def close(self):
         _refuse_on_loop("CrawlResultStore.close")
         return super().close()
