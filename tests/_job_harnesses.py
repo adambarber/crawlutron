@@ -41,7 +41,7 @@ from typing import Any
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 
-from app.crawl.policy import PolicyLike, PolicyTier
+from app.admission.policy import PolicyLike, PolicyTier
 from app.crawl.result_record import ProducerEnvelope
 from app.models.crawl_policy import CrawlPolicy
 from app.models.engine_crawl_result import EngineCrawlResult

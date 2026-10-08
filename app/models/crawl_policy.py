@@ -484,7 +484,7 @@ class CrawlPolicy(BaseModel):
         """Key every credential by its canonical origin, at the read edge.
 
                 The lookup at request time is a plain dict hit on
-                ``app.crawl.credentials.origin_of(url)``, which lowercases the scheme
+                ``app.admission.credentials.origin_of(url)``, which lowercases the scheme
                 and host and drops a default port. The canonicality rule itself lives
                 in ``origin_of`` -- the same function every lookup uses, so one rule at
                 one site -- and this is the only place it is applied to a stored key.
@@ -520,7 +520,7 @@ class CrawlPolicy(BaseModel):
         """
         if not isinstance(value, dict):
             return value
-        from app.crawl.credentials import origin_of
+        from app.admission.credentials import origin_of
 
         canonical: dict[str, Any] = {}
         spelling: dict[str, str] = {}

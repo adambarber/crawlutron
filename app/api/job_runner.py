@@ -30,9 +30,7 @@ from collections.abc import Awaitable, Callable, Coroutine, Sequence
 from dataclasses import replace
 from typing import Any
 
-from app.api.crawl_executor import execute_crawl as _real_execute_crawl
-from app.api.response_shaping import _failed_unified_result, abuild_unified_result
-from app.crawl.admission import (
+from app.admission.admission import (
     JobAdmissionContext,
     admit_job_links,
     fetch_job_sitemap_candidates,
@@ -42,7 +40,9 @@ from app.crawl.admission import (
     remaining_page_capacity,
     requeue_admitted_pages,
 )
-from app.crawl.policy import read_policy
+from app.admission.policy import read_policy
+from app.api.crawl_executor import execute_crawl as _real_execute_crawl
+from app.api.response_shaping import _failed_unified_result, abuild_unified_result
 from app.crawl.result_helpers import terminal_attempt
 from app.crawl.result_record import ProducerEnvelope
 from app.crawl.robots import FetchAndDecode

@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING
 # logging can override ``configure_service_logging`` in their own
 # integration layer.
 from app.addresses import is_loopback_bind
-from app.crawl.policy import PolicyTier
+from app.admission.policy import PolicyTier
 from app.env import get_env_float, get_env_int
 from app.logging_config import configure_service_logging
 from app.models.host_policy import HostPolicy

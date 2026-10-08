@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from app.crawl.render_options import resolve_render_options
+from app.admission.render_options import resolve_render_options
 from app.crawl.result_helpers import build_engine_result
 from app.crawl.worker import call_worker
 from app.models.crawl_job import CrawlJob

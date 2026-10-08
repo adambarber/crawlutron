@@ -7,13 +7,13 @@ from typing import Any
 import brotli
 import pytest
 
+from app.admission.payload_helpers import _payload_urls
+from app.admission.policy import PolicyTier, read_policy
 from app.api.render import _render_options
 from app.crawl.engine import (
-    _payload_policy,
     crawl_request,
+    payload_policy,
 )
-from app.crawl.payload_helpers import _payload_urls
-from app.crawl.policy import PolicyTier, read_policy
 from app.extraction.content import (
     _FrameCollector,
     _walkable,
@@ -130,7 +130,7 @@ class TestValidationHelpers:
         ]
         for payload, expected in cases:
             with pytest.raises(ValueError, match=rf"^{expected}$"):
-                _payload_policy(payload, tier)
+                payload_policy(payload, tier)
 
     def test_retry_after_seconds_invalid(self) -> None:
         assert retry_after_seconds({"retry-after": "notanint"}) is None
@@ -470,7 +470,7 @@ class TestCrawlRequest:
 
     def test_checked_payload_urls_is_the_shared_batch_gate(self) -> None:
         """One chokepoint returns in-range urls and rejects oversized batches."""
-        from app.crawl.payload_helpers import checked_payload_urls
+        from app.admission.payload_helpers import checked_payload_urls
 
         within = {"urls": ["http://example.com/a", "http://example.com/a", "http://example.com/b"]}
         assert checked_payload_urls(
@@ -490,7 +490,7 @@ class TestCrawlRequest:
         """Tier-2 the endpoint gate's result may be handed to the engine so
         the batch is parsed once per request. A forwarded batch is returned as
         the job set without re-deriving from the payload..."""
-        from app.crawl.payload_helpers import checked_payload_urls
+        from app.admission.payload_helpers import checked_payload_urls
 
         forwarded = ["http://example.com/a", "http://example.com/b"]
         oversized_payload = {"urls": [f"http://example.com/{i}" for i in range(11)]}
@@ -507,7 +507,7 @@ class TestCrawlRequest:
     def test_forwarded_batch_still_faces_the_cap(self) -> None:
         """...but the cap still applies to a forwarded batch (invariant: the
         engine-internal ceiling cannot be bypassed by supplying urls)."""
-        from app.crawl.payload_helpers import checked_payload_urls
+        from app.admission.payload_helpers import checked_payload_urls
 
         forwarded = [f"http://example.com/{i}" for i in range(11)]
         with pytest.raises(ValueError, match=r"^batch_size_exceeded$"):

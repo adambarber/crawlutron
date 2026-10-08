@@ -1,6 +1,6 @@
 """The one read edge between a policy as it arrives and the model everything reads.
 
-Two producers fed this shape before, and they disagreed. ``_payload_policy``
+Two producers fed this shape before, and they disagreed. ``payload_policy``
 validated a wire payload field by field, re-spelling every bound the model
 already declares; ``job_store.normalized_policy`` merely copied a stored dict
 and filled in nothing, so a stored job policy that predated a field -- or was

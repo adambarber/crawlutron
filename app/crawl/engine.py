@@ -20,10 +20,10 @@ from collections.abc import Iterable
 from datetime import UTC, datetime
 from typing import Any, cast
 
+from app.admission.admission import compile_scope_pattern
+from app.admission.payload_helpers import checked_payload_urls, payload_policy
+from app.admission.policy import PolicyTier
 from app.crawl import robots as _robots_policy
-from app.crawl.admission import compile_scope_pattern
-from app.crawl.payload_helpers import _payload_policy, checked_payload_urls
-from app.crawl.policy import PolicyTier
 from app.crawl.request_pipeline import _PipelineDependencies, _PipelineState, run_crawl_request
 from app.crawl.result_record import ProducerEnvelope
 from app.crawl.robots import FetchAndDecode
@@ -430,7 +430,7 @@ async def crawl_request(
         urls=urls,
         host_policy=host_policy,
     )
-    policy = _payload_policy(payload, PolicyTier.from_settings(active_settings))
+    policy = payload_policy(payload, PolicyTier.from_settings(active_settings))
     fetcher = http_fetcher or default_http_fetcher
     # The transport preference is a BINDING of the one fetcher, not a second
     # entry point: the impersonating strategy gets the same callable with the

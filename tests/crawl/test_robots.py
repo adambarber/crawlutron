@@ -9,10 +9,10 @@ from unittest.mock import patch
 
 import pytest
 
+from app.admission.policy import read_policy
 from app.bounded_ttl import BoundedTTLCache
 from app.crawl import engine as engine_mod
 from app.crawl.engine import crawl_request
-from app.crawl.policy import read_policy
 from app.crawl.robots import _robots_pattern_to_regex, robots_allows
 from app.crawl.robots_parse import (
     iter_robots_fields,

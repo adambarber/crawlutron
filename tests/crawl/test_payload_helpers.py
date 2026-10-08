@@ -5,14 +5,14 @@ from typing import Any
 import pytest
 from pydantic import ValidationError
 
-from app.crawl.payload_helpers import _payload_policy
-from app.crawl.policy import PolicyTier
+from app.admission.payload_helpers import payload_policy
+from app.admission.policy import PolicyTier
 from app.models.crawl_policy import CrawlPolicy
 from app.settings import CrawlerSettings
 
 
 def _normalized_policy(**policy: Any) -> CrawlPolicy:
-    """``_payload_policy`` over a bare crawl payload, with default settings.
+    """``payload_policy`` over a bare crawl payload, with default settings.
 
     Every test in this file is about one field of the normalized policy, and
     they differed only in the policy body they handed it -- so the payload
@@ -20,13 +20,13 @@ def _normalized_policy(**policy: Any) -> CrawlPolicy:
     that is about a *rejection* still gets the raise from the real entry point:
     the helper is called inside ``pytest.raises``, it does not swallow anything.
 
-    The return type is ``CrawlPolicy`` because that is what ``_payload_policy``
+    The return type is ``CrawlPolicy`` because that is what ``payload_policy``
     returns and what every assertion here reads ``.limits`` off. It was annotated
     ``-> dict``, which made the whole file look like attribute access on a
     mapping. The annotation was the only thing wrong with it, and it was wrong in
     the one place that decides what the helper hands back.
     """
-    return _payload_policy(
+    return payload_policy(
         {"url": "https://example.com/", "policy": policy},
         PolicyTier.model_defaults(),
     )
@@ -109,7 +109,7 @@ class TestPydanticDefaultPreservesRamScaling:
             url="https://example.com/",
             policy={"limits": CrawlPolicyLimits(max_content_length_bytes=4096)},
         )
-        policy = _payload_policy(
+        policy = payload_policy(
             request.model_dump(exclude_none=True),
             PolicyTier.model_defaults(),
         )
@@ -144,13 +144,13 @@ class TestPayloadHelpersEdges:
     """Cover remaining branches in payload_helpers.py"""
 
     def test_payload_policy_invalid_limits(self):
-        from app.crawl.payload_helpers import _payload_policy
+        from app.admission.payload_helpers import payload_policy
 
         with pytest.raises(ValueError) as cm:
-            _payload_policy({"policy": {"limits": "not a dict"}}, PolicyTier.model_defaults())
+            payload_policy({"policy": {"limits": "not a dict"}}, PolicyTier.model_defaults())
         assert str(cm.value) == "invalid_policy_limits"
         with pytest.raises(ValueError) as cm:
-            _payload_policy({"policy": {"limits": {"max_depth": "not an int"}}}, PolicyTier.model_defaults())
+            payload_policy({"policy": {"limits": {"max_depth": "not an int"}}}, PolicyTier.model_defaults())
         assert str(cm.value) == "invalid_policy_limits"
 
 

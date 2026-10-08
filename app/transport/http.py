@@ -12,8 +12,8 @@ import time
 from dataclasses import dataclass, field, replace
 from typing import Any
 
-from app.crawl.policy import discovery_flags
-from app.crawl.render_options import policy_wants_html
+from app.admission.policy import discovery_flags
+from app.admission.render_options import policy_wants_html
 from app.crawl.result_helpers import (
     binary_no_text_result,
     build_engine_result,

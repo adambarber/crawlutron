@@ -420,7 +420,7 @@ def _render_options_construction_offenders(tree: ast.AST, path: pathlib.Path) ->
     point and the copies drifted -- the browser strategy hardcoded the
     capture knobs while policy reads respected the caller elsewhere, and
     the /v1/render builder silently dropped browser_profile. Only
-    app/crawl/render_options.py may decide the shape; callers map their own
+    app/admission/render_options.py may decide the shape; callers map their own
     source into the resolver's mappings."""
     if path.name == "render_options.py":
         return []
@@ -434,7 +434,7 @@ RENDER_OPTIONS_BUILT_ONLY_BY_THE_RESOLVER = Rule(
     name="render-options-built-only-by-the-resolver",
     find=_render_options_construction_offenders,
     summary=(
-        "Use app.crawl.render_options.resolve_render_options so request-side "
+        "Use app.admission.render_options.resolve_render_options so request-side "
         "options and server defaults merge in exactly one place"
     ),
     excludes=SANCTIONED,

@@ -11,7 +11,7 @@ import os
 from collections.abc import Iterable, Mapping
 from typing import Any, Protocol, runtime_checkable
 
-from app.crawl.credentials import apply_credentials as _apply_credentials
+from app.admission.credentials import apply_credentials as _apply_credentials
 from app.models.crawl_policy import CrawlPolicy
 from app.models.normalized_url import NormalizedUrl
 from app.transport import cookie_jar

@@ -5,9 +5,9 @@ from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
 from functools import partial
 
+from app.admission.policy import read_policy
 from app.crawl.engine import _parse_lastmod, _seed_is_fresh, _stale_seeds
 from app.crawl.fetch_helpers import _SITEMAP_CACHE, fetch_sitemap_urls
-from app.crawl.policy import read_policy
 from app.crawl.result_record import ProducerEnvelope
 from app.map import build_site_map
 from app.transport.content_cache import ContentCache
@@ -251,7 +251,7 @@ def _cache_with_fresh(tmp_path, url, lastmod, policy):
 
     The key must match what sitemap seeding looks up, so the caller passes the
     exact policy the engine derives (unit tests use ``_POLICY_SEED_BATCH()`` directly; the
-    integration test derives it via ``_payload_policy``).
+    integration test derives it via ``payload_policy``).
     """
     cache = ContentCache(str(tmp_path), clock=lambda: 1_700_000_000.0)
     strategy = list(policy.strategies) or ["HTTP_DECLARED_CRAWLER"]
@@ -345,10 +345,10 @@ class TestSeedingIsOffLoop:
             "policy": crawl_policy(discovery={"sitemaps": True}, limits={"max_depth": 1}),
         }
 
-        from app.crawl.payload_helpers import _payload_policy
-        from app.crawl.policy import PolicyTier
+        from app.admission.payload_helpers import payload_policy
+        from app.admission.policy import PolicyTier
 
-        derived = _payload_policy(payload, PolicyTier.model_defaults())
+        derived = payload_policy(payload, PolicyTier.model_defaults())
         cache = _cache_with_fresh(tmp_path, fresh_url, "2020-01-01T00:00:00Z", derived)
         fetched: list[str] = []
 

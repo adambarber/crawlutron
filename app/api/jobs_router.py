@@ -12,11 +12,11 @@ from typing import NoReturn, cast
 
 from fastapi import APIRouter
 
+from app.admission.payload_helpers import checked_payload_urls
 from app.api import job_runner
 from app.api.dependencies import JobStoreDep, SettingsDep, ShutdownEventDep
 from app.api.exceptions import http_error, validation_http_error
 from app.api.main_helpers import _build_job_status
-from app.crawl.payload_helpers import checked_payload_urls
 from app.models.error_response import ErrorResponse
 from app.models.host_policy import HostPolicy
 from app.models.job_control_request import JobControlRequest

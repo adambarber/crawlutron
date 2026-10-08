@@ -12,7 +12,7 @@ import inspect
 import re
 from typing import Any
 
-from app.crawl.policy import discovery_flags
+from app.admission.policy import discovery_flags
 from app.crawl.result_helpers import classify_error_code
 from app.models.crawl_policy import CrawlPolicy
 from app.models.host_policy import HostPolicy

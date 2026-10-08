@@ -6,7 +6,7 @@ import logging
 import sqlite3
 from concurrent.futures import ThreadPoolExecutor
 
-from app.crawl.policy import read_policy
+from app.admission.policy import read_policy
 from app.models.crawl_policy import CrawlPolicy
 from app.settings import CrawlerSettings
 from app.storage.job_store import CrawlJobState, FrontierEntry, JobStatus

@@ -11,8 +11,8 @@ import time
 from dataclasses import replace
 from typing import Any
 
-from app.crawl.payload_helpers import checked_payload_urls
-from app.crawl.render_options import resolve_render_options
+from app.admission.payload_helpers import checked_payload_urls
+from app.admission.render_options import resolve_render_options
 from app.crawl.result_helpers import (
     classify_error_code,
     crawl_result_from_engine_result,
@@ -76,7 +76,7 @@ async def render_request(
     """Run a /v1/render-shaped request through the per-domain scheduler."""
     active_settings = settings or CrawlerSettings.from_mapping()
     host_policy = HostPolicy.from_settings(active_settings)
-    # The single shared batch gate (app.crawl.payload_helpers.checked_payload_urls):
+    # The single shared batch gate (app.admission.payload_helpers.checked_payload_urls):
     # this route used to hand-roll the same cap against max_batch_size with a
     # different failure shape, so the two gates could drift.
     # The submitted texts are kept beside their admitted values: the wire's

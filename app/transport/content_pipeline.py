@@ -25,7 +25,7 @@ import asyncio
 from dataclasses import dataclass
 from typing import Any
 
-from app.crawl.policy import discovery_flags
+from app.admission.policy import discovery_flags
 from app.extraction.content import (
     Selectors,
     extract_content,

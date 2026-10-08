@@ -20,9 +20,9 @@ import logging
 import time
 from collections.abc import Callable
 
+from app.admission.policy import read_policy
 from app.api.crawl_executor import execute_crawl
 from app.api.webhooks import post_webhook
-from app.crawl.policy import read_policy
 from app.models.content_validators import ContentValidators
 from app.models.fetch_validators import FetchValidators
 from app.models.host_policy import HostPolicy

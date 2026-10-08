@@ -6,8 +6,8 @@ from typing import Any
 
 import pytest
 
-from app.crawl.engine import _payload_policy
-from app.crawl.policy import PolicyTier, read_policy
+from app.admission.policy import PolicyTier, read_policy
+from app.crawl.engine import payload_policy
 from app.crawl.result_helpers import terminal_attempt
 from app.models.crawl_policy import CrawlPolicy
 from app.models.crawl_policy_limits import CrawlPolicyLimits
@@ -175,7 +175,7 @@ class TestEngineChainEdges:
         # A real tier: the only production caller builds one from the active
         # settings, so ``None`` was never a value this entry point accepts.
         with pytest.raises(ValueError):
-            _payload_policy({"policy": {"strategies": ["BOGUS"]}}, PolicyTier.model_defaults())
+            payload_policy({"policy": {"strategies": ["BOGUS"]}}, PolicyTier.model_defaults())
 
     async def test_browser_strategy_document_extraction(self, base_url):
         # Live origin: 's robots gate fail-closes connection-refused origins

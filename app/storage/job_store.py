@@ -18,8 +18,8 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Any, TypedDict
 
-from app.crawl.policy import PolicyLike, PolicyTier, read_policy
-from app.crawl.policy import stored_policy as _stored_policy
+from app.admission.policy import PolicyLike, PolicyTier, read_policy
+from app.admission.policy import stored_policy as _stored_policy
 from app.models.crawl_policy import CrawlPolicy
 from app.models.host_policy import HostPolicy
 from app.models.normalized_url import NormalizedUrl, admit_or_none
@@ -91,7 +91,7 @@ class FrontierEntry:
 _PersistedJSON = object
 
 
-# The read edge is :func:`app.crawl.policy.read_policy` and it has exactly one
+# The read edge is :func:`app.admission.policy.read_policy` and it has exactly one
 # name. This module used to export ``normalized_policy`` as its own copy of that
 # function, which made the shared read edge a two-home surface: importers picked
 # up whichever spelling their file already imported, and a future change to the

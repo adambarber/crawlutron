@@ -273,7 +273,7 @@ DECLARED: dict[str, Declaration] = {
         "Not yet triaged.\n",
         ["test"],
     ),
-    "app.crawl.admission._frontier_identity": _d(
+    "app.admission.admission._frontier_identity": _d(
         "unreviewed",
         "Not yet triaged.\n",
         ["test"],
@@ -304,11 +304,6 @@ DECLARED: dict[str, Declaration] = {
         ["test"],
     ),
     "app.crawl.engine._parse_lastmod": _d(
-        "unreviewed",
-        "Not yet triaged.\n",
-        ["test"],
-    ),
-    "app.crawl.engine._payload_policy": _d(
         "unreviewed",
         "Not yet triaged.\n",
         ["test"],
@@ -347,18 +342,15 @@ DECLARED: dict[str, Declaration] = {
         ["test"],
     ),
     "app.storage.job_store._Expected": _d(_CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]),
-    "app.crawl.payload_helpers._payload_policy": _d(
+    "app.admission.payload_helpers._payload_urls": _d(
         "unreviewed",
         "Not yet triaged.\n",
         ["test"],
     ),
-    "app.crawl.payload_helpers._payload_urls": _d(
-        "unreviewed",
-        "Not yet triaged.\n",
-        ["test"],
+    "app.admission.policy._ERROR_CODE_BY_FIELD": _d(
+        _CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]
     ),
-    "app.crawl.policy._ERROR_CODE_BY_FIELD": _d(_CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]),
-    "app.crawl.recursive_admission._batch_is_http_heavy": _d(
+    "app.admission.recursive_admission._batch_is_http_heavy": _d(
         "unreviewed",
         "Not yet triaged.\n",
         ["test"],

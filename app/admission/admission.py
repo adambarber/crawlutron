@@ -9,10 +9,10 @@ from collections.abc import Awaitable, Callable, Iterable, MutableSequence
 from dataclasses import dataclass, field
 from typing import Any, TypeVar
 
+from app.admission.policy import PolicyTier, discovery_flags, read_policy
+from app.admission.scope_match import scope_allows
 from app.crawl.fetch_helpers import fetch_sitemap_urls
-from app.crawl.policy import PolicyTier, discovery_flags, read_policy
 from app.crawl.robots import FetchAndDecode, load_robots_rules, robots_allows
-from app.crawl.scope_match import scope_allows
 from app.models.crawl_extraction_method import CrawlExtractionMethod
 from app.models.crawl_policy import CrawlPolicy
 from app.models.host_policy import HostPolicy

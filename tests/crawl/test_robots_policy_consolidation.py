@@ -4,7 +4,7 @@ import asyncio
 
 import pytest
 
-from app.crawl.admission import RobotsGate
+from app.admission.admission import RobotsGate
 from app.crawl.engine import crawl_request
 from app.crawl.robots import (
     ROBOTS_CACHE_TTL_SECONDS,

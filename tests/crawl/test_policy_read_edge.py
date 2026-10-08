@@ -1,4 +1,4 @@
-"""``app/crawl/policy.py`` — the one read edge between a policy and the model.
+"""``app/admission/policy.py`` — the one read edge between a policy and the model.
 
 Two edges, deliberately not the same function: :func:`read_policy` is total
 and repairs, :func:`validate_wire_policy` is the API edge and rejects. These
@@ -23,8 +23,8 @@ from typing import Any
 import pytest
 from pydantic import ValidationError
 
-from app.crawl import policy as policy_module
-from app.crawl.policy import (
+from app.admission import policy as policy_module
+from app.admission.policy import (
     _ERROR_CODE_BY_FIELD,
     PolicyTier,
     discovery_flags,

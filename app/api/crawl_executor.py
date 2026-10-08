@@ -11,9 +11,9 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
+from app.admission.policy import read_policy
 from app.api.exceptions import browser_pool_unavailable
 from app.crawl.engine import crawl_request
-from app.crawl.policy import read_policy
 from app.crawl.result_record import ProducerEnvelope
 from app.models.host_policy import HostPolicy
 from app.settings import CrawlerSettings

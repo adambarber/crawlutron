@@ -93,7 +93,7 @@ _PUBLIC_SURFACE_PROPERTY = Property(
 # exist to remove. Two adapters, one shared `_envelope_options`, and each one
 # reachable only through the endpoint that has the matching envelope.
 _OWNER_PUBLIC_SURFACE_RATCHET = {
-    "app/crawl/admission.py": (19, 13),
+    "app/admission/admission.py": (19, 13),
     # RAISED to (14, 11) then LOWERED to (7, 6), (5, 5), (4, 4), then (2, 2):
     # HostPolicy and registrable_domain moved to app/models, then the env family
     # to app/env.py, then the egress verdict to app/models/host_policy.py, then
@@ -109,9 +109,14 @@ _OWNER_PUBLIC_SURFACE_RATCHET = {
     "app/crawl/robots.py": (12, 3),
     "app/bounded_io.py": (4, 2),
     "app/transport/decompression.py": (3, 1),
-    "app/crawl/credentials.py": (3, 3),
-    "app/crawl/render_options.py": (2, 2),
-    "app/crawl/payload_helpers.py": (1, 1),
+    "app/admission/credentials.py": (3, 3),
+    "app/admission/render_options.py": (2, 2),
+    # RAISED to (2, 2): `payload_policy` was `_payload_policy` until the layout
+    # put its only production caller (the engine) in another package. The
+    # private-name rule prescribes promoting a name another package needs rather
+    # than importing it across the boundary, so the chokepoint became reachable
+    # and its count moved with it.
+    "app/admission/payload_helpers.py": (2, 2),
     # RAISED to (10, 9): terminal_attempt became public when CrawlResult stopped
     # copying four axes out of the attempt it holds. Three call sites outside
     # this module build that attempt -- the render endpoint's paced-task result,
@@ -230,7 +235,7 @@ def test_public_surface_detector_bites():
         _PUBLIC_SURFACE_PROPERTY,
         _public_surface_offenders,
         caught={"uncapped decompression at ca425fc": (historical_decompression_owner, 1)},
-        quiet=(REPO_ROOT / "app" / "crawl" / "credentials.py").read_text(encoding="utf-8"),
+        quiet=(REPO_ROOT / "app" / "admission" / "credentials.py").read_text(encoding="utf-8"),
     )
 
 

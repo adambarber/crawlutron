@@ -10,7 +10,7 @@ import asyncio
 
 from lxml import etree
 
-from app.crawl.policy import read_policy
+from app.admission.policy import read_policy
 from app.extraction.content import extract_post_fetch_discovery
 from app.models.crawl_policy import CrawlPolicy
 from app.models.normalized_url import NormalizedUrl

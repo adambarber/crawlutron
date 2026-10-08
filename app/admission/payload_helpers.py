@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from app.crawl.policy import PolicyTier, validate_wire_policy
+from app.admission.policy import PolicyTier, validate_wire_policy
 from app.models.crawl_policy import CrawlPolicy
 from app.models.host_policy import HostPolicy
 from app.models.normalized_url import NormalizedUrl
@@ -87,11 +87,11 @@ def checked_payload_urls(
     return urls
 
 
-def _payload_policy(payload: dict[str, Any], tier: PolicyTier) -> CrawlPolicy:
+def payload_policy(payload: dict[str, Any], tier: PolicyTier) -> CrawlPolicy:
     """Validate a wire policy into the model every decision site reads.
 
     The ``invalid_policy_*`` codes this raises are derived from where the model
-    reports the error, in :func:`app.crawl.policy.validate_wire_policy`, rather
+    reports the error, in :func:`app.admission.policy.validate_wire_policy`, rather
     than spelled out here -- the hand-spelled version that used to live in this
     function had already begun to read ``limits`` three different ways and to
     enforce bounds the model did not declare.
@@ -109,4 +109,4 @@ def _payload_policy(payload: dict[str, Any], tier: PolicyTier) -> CrawlPolicy:
     return validate_wire_policy(payload.get("policy") or {}, tier)
 
 
-__all__ = ["checked_payload_urls"]
+__all__ = ["checked_payload_urls", "payload_policy"]

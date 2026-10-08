@@ -437,7 +437,7 @@ class TestNormalizedUrlIsAValueNotAString:
     def test_the_admission_boundary_is_typed_as_the_value(self):
         from typing import get_type_hints
 
-        from app.crawl.admission import AdmittedLink
+        from app.admission.admission import AdmittedLink
         from app.models.normalized_url import NormalizedUrl
 
         assert get_type_hints(AdmittedLink)["normalized_url"] is NormalizedUrl

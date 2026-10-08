@@ -4,8 +4,8 @@ from collections.abc import Callable
 from typing import Any
 from urllib.parse import urlparse
 
+from app.admission.policy import CrawlPolicy, read_policy
 from app.crawl.engine import crawl_request
-from app.crawl.policy import CrawlPolicy, read_policy
 from app.crawl.result_record import ProducerEnvelope
 from app.models.engine_crawl_result import EngineCrawlResult
 from app.models.host_policy import HostPolicy

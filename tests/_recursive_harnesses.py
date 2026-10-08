@@ -59,7 +59,7 @@ class ContentionFreeGate:
 
     ``consultations`` counts the ``batch_scale_factor`` calls, which is the only
     gate method the recursive path actually invokes
-    (``app/crawl/recursive_admission.py``). The gate also exposes
+    (``app/admission/recursive_admission.py``). The gate also exposes
     ``wait_while_saturated``, and deliberately does not count it: the recursive
     loop must not consult it -- admission is per-batch weighted, not a
     stop-the-world pause -- so a counter on it is a counter nothing increments.

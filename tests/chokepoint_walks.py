@@ -531,7 +531,7 @@ def _app_trees(exclude: frozenset[str]) -> tuple[tuple[pathlib.Path, ast.Module]
 
 
 def relative_posix(path: pathlib.Path) -> str:
-    """``app/crawl/admission.py`` -- the label a detector exempts a path by."""
+    """``app/admission/admission.py`` -- the label a detector exempts a path by."""
     return path.relative_to(REPO_ROOT).as_posix()
 
 

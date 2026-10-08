@@ -594,8 +594,8 @@ def test_host_policy_probe_table_matches_entry_table():
 
 
 async def test_render_probe_fails_when_policy_enforcement_is_removed(monkeypatch, tmp_path):
+    from app.admission import payload_helpers
     from app.api import render
-    from app.crawl import payload_helpers
 
     def allow(url, *, policy):
         # The VALUE shape render reads ``.raw``/``.site`` off, with the host

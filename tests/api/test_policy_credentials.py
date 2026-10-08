@@ -13,8 +13,8 @@ by the chokepoint that already scrubs cookies.
 
 import pytest
 
-from app.crawl.payload_helpers import _payload_policy
-from app.crawl.policy import PolicyTier, read_policy
+from app.admission.payload_helpers import payload_policy
+from app.admission.policy import PolicyTier, read_policy
 from app.models.crawl_policy import CrawlPolicy
 from app.models.credential import Credential
 from app.transport.request_profile import _apply_credentials
@@ -117,7 +117,7 @@ class TestApplyCredentials:
 
 class TestPayloadPolicy:
     def test_keys_canonicalize_to_origin_form(self):
-        policy = _payload_policy(
+        policy = payload_policy(
             {"policy": {"credentials": {"HTTPS://Private.Example:443/": {"kind": "bearer", "token": "t"}}}},
             MODEL_DEFAULTS_TIER,
         )
@@ -126,7 +126,7 @@ class TestPayloadPolicy:
 
     def test_malformed_credential_is_rejected_not_dropped(self):
         with pytest.raises(ValueError, match="credentials"):
-            _payload_policy(
+            payload_policy(
                 {"policy": {"credentials": {"https://a.example": {"kind": "carrier"}}}}, MODEL_DEFAULTS_TIER
             )
 
@@ -168,7 +168,7 @@ class TestPayloadPolicy:
         with an extra step, so the wire path is asserted to reject outright.
         """
         with pytest.raises(ValueError, match="invalid_policy_credentials"):
-            _payload_policy(
+            payload_policy(
                 {
                     "policy": {
                         "credentials": {
@@ -182,7 +182,7 @@ class TestPayloadPolicy:
 
     def test_distinct_origins_still_validate(self):
         """The collision check must not reject a policy that merely looks similar."""
-        policy = _payload_policy(
+        policy = payload_policy(
             {
                 "policy": {
                     "credentials": {
@@ -207,9 +207,9 @@ class TestPayloadPolicy:
         canonical forms, a policy that was already canonical would report itself
         as colliding with itself on every reload.
         """
-        once = _payload_policy(
+        once = payload_policy(
             {"policy": {"credentials": {"https://a.example": {"kind": "bearer", "token": "t"}}}},
             MODEL_DEFAULTS_TIER,
         )
-        twice = _payload_policy({"policy": {"credentials": dict(once.credentials)}}, MODEL_DEFAULTS_TIER)
+        twice = payload_policy({"policy": {"credentials": dict(once.credentials)}}, MODEL_DEFAULTS_TIER)
         assert dict(twice.credentials) == dict(once.credentials)

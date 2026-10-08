@@ -6,10 +6,10 @@ from types import SimpleNamespace
 
 import pytest
 
-from app.crawl.admission import requeue_admitted_pages
-from app.crawl.payload_helpers import _payload_policy
-from app.crawl.policy import PolicyTier
-from app.crawl.recursive_admission import _batch_is_http_heavy
+from app.admission.admission import requeue_admitted_pages
+from app.admission.payload_helpers import payload_policy
+from app.admission.policy import PolicyTier
+from app.admission.recursive_admission import _batch_is_http_heavy
 from app.health.readiness import ReadinessState
 from app.memory_pressure import (
     MemoryGate,
@@ -706,13 +706,13 @@ class TestHttpScaleEscapesMemory:
 
 
 async def test_max_pages_default_is_bounded_not_unlimited():
-    policy = _payload_policy({"url": "http://example.com/", "policy": {}}, PolicyTier.model_defaults())
+    policy = payload_policy({"url": "http://example.com/", "policy": {}}, PolicyTier.model_defaults())
     # DEFAULT_MAX_PAGES, not 0/"unlimited".
     assert policy.limits.max_pages == 100
 
 
 async def test_max_pages_zero_falls_back_to_default():
-    policy = _payload_policy(
+    policy = payload_policy(
         {"url": "http://example.com/", "policy": {"limits": {"max_pages": 0}}}, PolicyTier.model_defaults()
     )
     assert policy.limits.max_pages == 100
@@ -723,14 +723,14 @@ async def test_max_pages_above_upper_bound_is_rejected_not_clamped():
     # and the effective behaviour described different contracts; a rejection says
     # the same thing in both places.
     with pytest.raises(ValueError, match="invalid_policy_limits"):
-        _payload_policy(
+        payload_policy(
             {"url": "http://example.com/", "policy": {"limits": {"max_pages": 99999}}},
             PolicyTier.model_defaults(),
         )
 
 
 async def test_max_pages_positive_preserved():
-    policy = _payload_policy(
+    policy = payload_policy(
         {"url": "http://example.com/", "policy": {"limits": {"max_pages": 7}}}, PolicyTier.model_defaults()
     )
     assert policy.limits.max_pages == 7

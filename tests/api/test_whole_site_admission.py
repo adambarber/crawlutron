@@ -183,7 +183,7 @@ class TestWholeSiteAdmissionContract:
         # JobAdmissionContext.create and the decode rule is not a thing the test
         # holds. Patching the loader says the same thing about the same gate and
         # names something the module actually publishes.
-        monkeypatch.setattr("app.crawl.admission.load_robots_rules", _rules_from(fetch_robots))
+        monkeypatch.setattr("app.admission.admission.load_robots_rules", _rules_from(fetch_robots))
         policy = self._policy(1, 2)
         policy["limits"]["respect_robots"] = True
         await self._admitted(
@@ -308,8 +308,8 @@ class TestWholeSiteAdmissionContract:
         def set_domain_min_delay(self, domain: str, seconds: float) -> None:
             committed.append((domain, seconds))
 
-        monkeypatch.setattr("app.crawl.admission.RobotsGate.allows", allows)
-        monkeypatch.setattr("app.crawl.admission.RobotsGate.crawl_delay", crawl_delay)
+        monkeypatch.setattr("app.admission.admission.RobotsGate.allows", allows)
+        monkeypatch.setattr("app.admission.admission.RobotsGate.crawl_delay", crawl_delay)
         monkeypatch.setattr(DomainScheduler, "set_domain_min_delay", set_domain_min_delay)
         policy = self._policy(1, 2)
         policy["limits"]["respect_robots"] = True

@@ -1,7 +1,7 @@
 import httpx
 import pytest
 
-from app.crawl.policy import PolicyTier, read_policy, validate_wire_policy
+from app.admission.policy import PolicyTier, read_policy, validate_wire_policy
 from app.models.host_policy import HostPolicy
 from app.models.http_fetch_result import HttpFetchResult
 from app.models.normalized_url import NormalizedUrl

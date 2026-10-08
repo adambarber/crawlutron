@@ -173,7 +173,7 @@ def _scope_matcher_definitions() -> list[str]:
 
     The bounded scope check was verbatim-copied into engine.py and
     recursive.py; a one-sided fix would have left the other on the stale
-    contract. Deduped into app/crawl/scope_match.py -- a second definition
+    contract. Deduped into app/admission/scope_match.py -- a second definition
     anywhere means the copy crept back.
     """
     defs: list[str] = []
@@ -192,7 +192,7 @@ def test_scope_matcher_has_exactly_one_definition():
     """
     defs = _scope_matcher_definitions()
     assert len(defs) == 1, f"scope matcher duplicated again: {defs}"
-    assert "app/crawl/scope_match.py" in defs[0], defs
+    assert "app/admission/scope_match.py" in defs[0], defs
 
 
 def test_no_pinned_url_leaks_into_final_url():
@@ -784,8 +784,8 @@ def test_scope_regex_compiler_has_exactly_one_definition():
     bounds = [label for label in found if "length bound" in label]
     assert len(compilers) == 1, f"scope-regex compiler duplicated again: {compilers}"
     assert len(bounds) == 1, f"scope-regex length bound duplicated again: {bounds}"
-    assert "app/crawl/admission.py" in compilers[0], compilers
-    assert "app/crawl/admission.py" in bounds[0], bounds
+    assert "app/admission/admission.py" in compilers[0], compilers
+    assert "app/admission/admission.py" in bounds[0], bounds
 
 
 def test_scope_regex_compiler_detector_bites():
@@ -812,7 +812,7 @@ def _frontier_expression(node: ast.AST) -> bool:
 # The admission chokepoint owns the pattern it bans: admit_job_links is the one
 # function allowed to grow a frontier, so the sweep that bans direct growth
 # everywhere else has to skip the module that defines it.
-_ADMISSION_CHOKEPOINT = "app/crawl/admission.py"
+_ADMISSION_CHOKEPOINT = "app/admission/admission.py"
 
 
 def _direct_frontier_growth_offenders(
@@ -924,7 +924,7 @@ def test_job_frontier_growth_detector_bites():
 _FILTER_NAMES = {
     "app.vocabulary.hosts.is_analytics_host": "is_analytics_host",
     "app.vocabulary.hosts.is_document_url": "is_document_url",
-    "app.crawl.scope_match.scope_allows": "scope_allows",
+    "app.admission.scope_match.scope_allows": "scope_allows",
 }
 
 
@@ -933,7 +933,7 @@ def _imported_filter_names(tree: ast.Module) -> dict[str, str]:
     for node in nodes_of(tree):
         if isinstance(node, ast.ImportFrom) and node.module in {
             "app.vocabulary.hosts",
-            "app.crawl.scope_match",
+            "app.admission.scope_match",
         }:
             for imported in node.names:
                 canonical = f"{node.module}.{imported.name}"

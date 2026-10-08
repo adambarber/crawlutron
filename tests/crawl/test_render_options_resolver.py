@@ -4,7 +4,7 @@ Effective render options used to be decided in several places that had
 already drifted: the engine's browser strategy hard-coded the capture
 knobs while policy-derived reads respected the caller elsewhere, and the
 ``/v1/render`` builder silently dropped ``browser_profile``. Exactly one
-place (``app/crawl/render_options.py``) now turns request-side options +
+place (``app/admission/render_options.py``) now turns request-side options +
 server defaults into the effective ``RenderOptions``.
 
 The knob has TWO consumers with different owners, and the split is pinned
@@ -23,9 +23,9 @@ from __future__ import annotations
 
 import pytest
 
+from app.admission.policy import read_policy
+from app.admission.render_options import policy_wants_html, resolve_render_options
 from app.api.render import _render_options
-from app.crawl.policy import read_policy
-from app.crawl.render_options import policy_wants_html, resolve_render_options
 from app.settings import CrawlerSettings
 from app.transport.browser_result import browser_strategy_result
 from tests._browser_doubles import _fake_browser

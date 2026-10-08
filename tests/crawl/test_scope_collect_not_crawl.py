@@ -149,7 +149,7 @@ class TestSitemapCandidateBuilderUsesTheCanonicalOrigin:
 
     async def _sitemap_url_for(self, root_url: str) -> str | None:
         """Run the builder with the sitemap fetch stubbed, returning the URL asked for."""
-        import app.crawl.admission as admission
+        import app.admission.admission as admission
 
         seen: list[str] = []
 
@@ -157,8 +157,8 @@ class TestSitemapCandidateBuilderUsesTheCanonicalOrigin:
             seen.append(sitemap_url.raw)
             return set()
 
-        from app.crawl.admission import JobAdmissionContext
-        from app.crawl.policy import PolicyTier
+        from app.admission.admission import JobAdmissionContext
+        from app.admission.policy import PolicyTier
         from app.models.crawl_policy import CrawlPolicy
         from app.settings import CrawlerSettings
 

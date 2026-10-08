@@ -21,14 +21,14 @@ from typing import Any
 from fastapi import HTTPException, Request
 from fastapi.responses import JSONResponse, Response
 
+from app.admission.payload_helpers import checked_payload_urls
+from app.admission.policy import read_policy
 from app.api.crawl_executor import execute_crawl
 from app.api.exceptions import http_error, validation_http_error
 from app.api.job_runner import start_tracked_task
 from app.api.main_helpers import record_crawl_completion, request_gate
 from app.api.response_shaping import aunified_response_from_result
 from app.api.webhooks import validate_webhook_url_async
-from app.crawl.payload_helpers import checked_payload_urls
-from app.crawl.policy import read_policy
 from app.extraction.output_formats import serialize_results
 from app.metrics import get_metrics
 from app.models.crawl_request import CrawlRequest

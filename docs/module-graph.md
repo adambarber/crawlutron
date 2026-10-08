@@ -1,5 +1,41 @@
 ```mermaid
 graph LR
+    admission_admission --> admission_policy
+    admission_admission --> admission_scope_match
+    admission_admission --> crawl_fetch_helpers
+    admission_admission --> crawl_robots
+    admission_admission --> models_crawl_extraction_method
+    admission_admission --> models_crawl_policy
+    admission_admission --> models_host_policy
+    admission_admission --> models_normalized_url
+    admission_admission --> safe_regex
+    admission_admission --> scheduler
+    admission_admission --> storage_job_store
+    admission_admission --> transport_fetchers
+    admission_admission --> vocabulary_hosts
+    admission_credentials --> models_credential
+    admission_credentials --> models_normalized_url
+    admission_payload_helpers --> admission_policy
+    admission_payload_helpers --> models_crawl_policy
+    admission_payload_helpers --> models_host_policy
+    admission_payload_helpers --> models_normalized_url
+    admission_policy --> models_crawl_policy
+    admission_policy --> models_crawl_policy_limits
+    admission_policy --> settings
+    admission_recursive_admission --> admission_admission
+    admission_recursive_admission --> metrics
+    admission_recursive_admission --> models_crawl_task
+    admission_recursive_admission --> models_engine_crawl_result
+    admission_recursive_admission --> models_host_policy
+    admission_recursive_admission --> models_normalized_url
+    admission_recursive_admission --> resource_pressure
+    admission_recursive_admission --> safe_regex
+    admission_recursive_admission --> scheduler
+    admission_recursive_admission --> vocabulary_limits
+    admission_recursive_admission --> vocabulary_strategies
+    admission_render_options --> models_crawl_policy
+    admission_render_options --> models_render_options
+    admission_scope_match --> safe_regex
     api_async_crawl_runner --> api_crawl_executor
     api_async_crawl_runner --> api_job_runner
     api_async_crawl_runner --> api_response_shaping
@@ -9,6 +45,8 @@ graph LR
     api_async_crawl_runner --> models_host_policy
     api_async_crawl_runner --> settings
     api_async_crawl_runner --> storage_job_store
+    api_crawl_endpoint --> admission_payload_helpers
+    api_crawl_endpoint --> admission_policy
     api_crawl_endpoint --> api_async_crawl_runner
     api_crawl_endpoint --> api_crawl_executor
     api_crawl_endpoint --> api_exceptions
@@ -16,8 +54,6 @@ graph LR
     api_crawl_endpoint --> api_main_helpers
     api_crawl_endpoint --> api_response_shaping
     api_crawl_endpoint --> api_webhooks
-    api_crawl_endpoint --> crawl_payload_helpers
-    api_crawl_endpoint --> crawl_policy
     api_crawl_endpoint --> extraction_output_formats
     api_crawl_endpoint --> metrics
     api_crawl_endpoint --> models_crawl_request
@@ -28,9 +64,9 @@ graph LR
     api_crawl_endpoint --> storage_ids
     api_crawl_endpoint --> storage_job_store
     api_crawl_endpoint --> storage_result_store
+    api_crawl_executor --> admission_policy
     api_crawl_executor --> api_exceptions
     api_crawl_executor --> crawl_engine
-    api_crawl_executor --> crawl_policy
     api_crawl_executor --> crawl_result_record
     api_crawl_executor --> models_host_policy
     api_crawl_executor --> models_normalized_url
@@ -49,10 +85,10 @@ graph LR
     api_dependencies --> storage_job_store
     api_dependencies --> storage_result_store
     api_dependencies --> storage_watch_store
+    api_job_runner --> admission_admission
+    api_job_runner --> admission_policy
     api_job_runner --> api_crawl_executor
     api_job_runner --> api_response_shaping
-    api_job_runner --> crawl_admission
-    api_job_runner --> crawl_policy
     api_job_runner --> crawl_result_helpers
     api_job_runner --> crawl_result_record
     api_job_runner --> crawl_robots
@@ -64,10 +100,10 @@ graph LR
     api_job_runner --> storage_job_store
     api_job_runner --> vocabulary_limits
     api_job_runner --> vocabulary_taxonomy
+    api_jobs_router --> admission_payload_helpers
     api_jobs_router --> api_dependencies
     api_jobs_router --> api_exceptions
     api_jobs_router --> api_main_helpers
-    api_jobs_router --> crawl_payload_helpers
     api_jobs_router --> models_error_response
     api_jobs_router --> models_host_policy
     api_jobs_router --> models_job_control_request
@@ -111,8 +147,8 @@ graph LR
     api_policy_suggestions --> models_policy_suggestions_response
     api_policy_suggestions --> models_trace_response
     api_policy_suggestions --> vocabulary_taxonomy
-    api_render --> crawl_payload_helpers
-    api_render --> crawl_render_options
+    api_render --> admission_payload_helpers
+    api_render --> admission_render_options
     api_render --> crawl_result_helpers
     api_render --> crawl_result_record
     api_render --> crawl_worker
@@ -169,9 +205,9 @@ graph LR
     api_watch_router --> models_watch_create_request
     api_watch_router --> models_watch_list_response
     api_watch_router --> models_watch_state
+    api_watch_sweep --> admission_policy
     api_watch_sweep --> api_crawl_executor
     api_watch_sweep --> api_webhooks
-    api_watch_sweep --> crawl_policy
     api_watch_sweep --> models_content_validators
     api_watch_sweep --> models_fetch_validators
     api_watch_sweep --> models_host_policy
@@ -189,25 +225,10 @@ graph LR
     api_webhooks --> models_normalized_url
     api_webhooks --> timeouts
     api_webhooks --> transport_pinned_transport
-    crawl_admission --> crawl_fetch_helpers
-    crawl_admission --> crawl_policy
-    crawl_admission --> crawl_robots
-    crawl_admission --> crawl_scope_match
-    crawl_admission --> models_crawl_extraction_method
-    crawl_admission --> models_crawl_policy
-    crawl_admission --> models_host_policy
-    crawl_admission --> models_normalized_url
-    crawl_admission --> safe_regex
-    crawl_admission --> scheduler
-    crawl_admission --> storage_job_store
-    crawl_admission --> transport_fetchers
-    crawl_admission --> vocabulary_hosts
-    crawl_credentials --> models_credential
-    crawl_credentials --> models_normalized_url
     crawl_doc_pool --> env
-    crawl_engine --> crawl_admission
-    crawl_engine --> crawl_payload_helpers
-    crawl_engine --> crawl_policy
+    crawl_engine --> admission_admission
+    crawl_engine --> admission_payload_helpers
+    crawl_engine --> admission_policy
     crawl_engine --> crawl_request_pipeline
     crawl_engine --> crawl_result_record
     crawl_engine --> crawl_robots
@@ -235,15 +256,8 @@ graph LR
     crawl_fetch_helpers --> transport_body_decode
     crawl_fetch_helpers --> transport_decompression
     crawl_fetch_helpers --> vocabulary_limits
-    crawl_payload_helpers --> crawl_policy
-    crawl_payload_helpers --> models_crawl_policy
-    crawl_payload_helpers --> models_host_policy
-    crawl_payload_helpers --> models_normalized_url
-    crawl_policy --> models_crawl_policy
-    crawl_policy --> models_crawl_policy_limits
-    crawl_policy --> settings
-    crawl_recursive --> crawl_admission
-    crawl_recursive --> crawl_recursive_admission
+    crawl_recursive --> admission_admission
+    crawl_recursive --> admission_recursive_admission
     crawl_recursive --> crawl_result_helpers
     crawl_recursive --> metrics
     crawl_recursive --> models_crawl_task
@@ -255,24 +269,11 @@ graph LR
     crawl_recursive --> scheduler
     crawl_recursive --> vocabulary_limits
     crawl_recursive --> vocabulary_taxonomy
-    crawl_recursive_admission --> crawl_admission
-    crawl_recursive_admission --> metrics
-    crawl_recursive_admission --> models_crawl_task
-    crawl_recursive_admission --> models_engine_crawl_result
-    crawl_recursive_admission --> models_host_policy
-    crawl_recursive_admission --> models_normalized_url
-    crawl_recursive_admission --> resource_pressure
-    crawl_recursive_admission --> safe_regex
-    crawl_recursive_admission --> scheduler
-    crawl_recursive_admission --> vocabulary_limits
-    crawl_recursive_admission --> vocabulary_strategies
-    crawl_render_options --> models_crawl_policy
-    crawl_render_options --> models_render_options
-    crawl_request_pipeline --> crawl_admission
+    crawl_request_pipeline --> admission_admission
+    crawl_request_pipeline --> admission_policy
+    crawl_request_pipeline --> admission_render_options
     crawl_request_pipeline --> crawl_fetch_helpers
-    crawl_request_pipeline --> crawl_policy
     crawl_request_pipeline --> crawl_recursive
-    crawl_request_pipeline --> crawl_render_options
     crawl_request_pipeline --> crawl_result_helpers
     crawl_request_pipeline --> crawl_result_record
     crawl_request_pipeline --> crawl_robots
@@ -310,7 +311,6 @@ graph LR
     crawl_robots --> models_http_fetcher
     crawl_robots --> models_normalized_url
     crawl_robots_parse --> vocabulary_identity
-    crawl_scope_match --> safe_regex
     crawl_strategy_chain --> crawl_result_helpers
     crawl_strategy_chain --> models_crawl_policy
     crawl_strategy_chain --> models_crawl_result
@@ -368,9 +368,9 @@ graph LR
     health_readiness --> metrics
     health_readiness --> models_readiness_response
     main --> addresses
+    main --> admission_policy
     main --> api_exceptions
     main --> api_middleware
-    main --> crawl_policy
     main --> env
     main --> logging_config
     main --> models_host_policy
@@ -425,7 +425,7 @@ graph LR
     models_crawl_job --> models_host_policy
     models_crawl_job --> models_normalized_url
     models_crawl_job --> models_render_options
-    models_crawl_policy --> crawl_credentials
+    models_crawl_policy --> admission_credentials
     models_crawl_policy --> models_crawl_extraction_method
     models_crawl_policy --> models_crawl_policy_limits
     models_crawl_policy --> models_crawl_strategy
@@ -541,7 +541,7 @@ graph LR
     storage_coordination_counters --> storage_migrations_manifest
     storage_coordination_store --> storage_migrations_manifest
     storage_coordination_store --> storage_sqlite_store
-    storage_job_store --> crawl_policy
+    storage_job_store --> admission_policy
     storage_job_store --> json_safe
     storage_job_store --> models_crawl_policy
     storage_job_store --> models_host_policy
@@ -607,7 +607,7 @@ graph LR
     transport_browser_pool --> settings
     transport_browser_pool --> transport_browser
     transport_browser_pool --> vocabulary_strategies
-    transport_browser_result --> crawl_render_options
+    transport_browser_result --> admission_render_options
     transport_browser_result --> crawl_result_helpers
     transport_browser_result --> crawl_worker
     transport_browser_result --> models_crawl_job
@@ -633,7 +633,7 @@ graph LR
     transport_content_cache_key --> settings
     transport_content_cache_key --> transport_content_cache
     transport_content_cache_key --> vocabulary_limits
-    transport_content_pipeline --> crawl_policy
+    transport_content_pipeline --> admission_policy
     transport_content_pipeline --> extraction_content
     transport_content_pipeline --> models_crawl_extraction_method
     transport_content_pipeline --> models_crawl_policy
@@ -649,8 +649,8 @@ graph LR
     transport_document --> extraction_content
     transport_document --> models_normalized_url
     transport_document --> timeouts
+    transport_fetch_policy --> admission_policy
     transport_fetch_policy --> crawl_fetch_helpers
-    transport_fetch_policy --> crawl_policy
     transport_fetch_policy --> crawl_result_helpers
     transport_fetch_policy --> models_crawl_policy
     transport_fetch_policy --> models_host_policy
@@ -666,8 +666,8 @@ graph LR
     transport_fetchers --> transport_decompression
     transport_fetchers --> transport_request_profile
     transport_fetchers --> vocabulary_limits
-    transport_http --> crawl_policy
-    transport_http --> crawl_render_options
+    transport_http --> admission_policy
+    transport_http --> admission_render_options
     transport_http --> crawl_result_helpers
     transport_http --> extraction_classify
     transport_http --> extraction_content
@@ -697,7 +697,7 @@ graph LR
     transport_pinned_transport --> models_http_fetch_result
     transport_pinned_transport --> models_normalized_url
     transport_pinned_transport --> validation
-    transport_request_profile --> crawl_credentials
+    transport_request_profile --> admission_credentials
     transport_request_profile --> models_crawl_policy
     transport_request_profile --> models_normalized_url
     transport_request_profile --> transport_cookie_jar

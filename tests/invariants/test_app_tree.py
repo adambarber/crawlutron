@@ -538,7 +538,7 @@ def _own_package(module: str) -> str:
 
 
 def _dotted_module(path: pathlib.Path) -> str:
-    """``app/crawl/admission.py`` -> ``app.crawl.admission``.
+    """``app/admission/admission.py`` -> ``app.admission.admission``.
 
     Root-relative, because the import being judged is written root-relative and
     a comparison between an absolute path and a dotted name never matches. The
@@ -684,7 +684,7 @@ TEST_HELPERS_IMPORTED_BY_PACKAGE_PATH = Rule(
         "import pytest\n"
         "from tests._policy_factories import _policy\n"
         "from tests.crawl._chain_policies import chain_policy\n"
-        "from app.crawl.policy import read_policy\n",
+        "from app.admission.policy import read_policy\n",
     ),
 )
 

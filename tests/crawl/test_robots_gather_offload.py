@@ -9,7 +9,7 @@ contract: overlapping checks must be observable via an in-flight counter.
 import asyncio
 from contextlib import asynccontextmanager
 
-from app.crawl.admission import RobotsGate
+from app.admission.admission import RobotsGate
 from app.models.crawl_policy import CrawlPolicy
 from app.models.discovered_link import DiscoveredLink
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY, canonical
@@ -178,7 +178,7 @@ async def test_nonrecursive_robots_checks_run_concurrently(monkeypatch):
 
 async def test_gather_preserves_order_and_skips_delay_when_disallowed():
     """Order is input order; disallowed URLs never pay for a crawl-delay fetch."""
-    from app.crawl.admission import gather_robots_decisions
+    from app.admission.admission import gather_robots_decisions
 
     delay_calls: list[str] = []
 

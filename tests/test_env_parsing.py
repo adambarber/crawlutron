@@ -11,7 +11,7 @@ import logging
 
 import pytest
 
-from app.crawl.policy import PolicyTier, read_policy, validate_wire_policy
+from app.admission.policy import PolicyTier, read_policy, validate_wire_policy
 from app.env import get_env_float, get_env_int, parse_bool_env
 from app.settings import CrawlerSettings
 from app.vocabulary.limits import (

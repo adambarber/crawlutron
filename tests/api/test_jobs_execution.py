@@ -20,9 +20,9 @@ from fastapi.params import Depends as DependsParam
 from fastapi.routing import APIRoute
 from httpx import ASGITransport, AsyncClient
 
+from app.admission.policy import read_policy
 from app.api import dependencies, job_runner, jobs_router
 from app.api.dependencies import get_job_store, get_settings, get_shutdown_event
-from app.crawl.policy import read_policy
 from app.models.crawl_policy import CrawlPolicy
 from app.settings import CrawlerSettings
 from app.storage.job_store import FrontierEntry, JobStatus

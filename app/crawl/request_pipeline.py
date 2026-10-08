@@ -8,12 +8,12 @@ from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field, replace
 from typing import Any, cast
 
+from app.admission.admission import gather_robots_decisions, normalize_sitemap_candidates
+from app.admission.policy import DiscoveryFlags, discovery_flags
+from app.admission.render_options import policy_wants_html
 from app.crawl import robots as robots_policy
-from app.crawl.admission import gather_robots_decisions, normalize_sitemap_candidates
 from app.crawl.fetch_helpers import fetch_sitemap_urls
-from app.crawl.policy import DiscoveryFlags, discovery_flags
 from app.crawl.recursive import RECURSIVE_RAMP_MAX, _spill_write, run_recursive_crawl
-from app.crawl.render_options import policy_wants_html
 from app.crawl.result_helpers import TerminalResult, _skipped_engine_result, engine_result_from_exception
 from app.crawl.result_record import ProducerEnvelope
 from app.crawl.robots import FetchAndDecode
