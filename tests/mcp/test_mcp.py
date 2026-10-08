@@ -15,6 +15,7 @@ import pytest
 
 from tests._assertions import one_search_result
 from tests._browser_doubles import FakeBrowserPool, owned_browser_pool
+from tests._policy_factories import canonical
 
 _PROTOCOL_VERSION = "2026-07-28"
 
@@ -238,10 +239,13 @@ class TestDiscover:
 
 
 class TestToolsList:
-    async def test_tools_list_exposes_the_four_primitives(self, async_client):
+    async def test_tools_list_exposes_every_tool(self, async_client):
+        """The advertised set is the whole surface, composite included: an agent
+        reads this list and nothing else, so a tool that exists but is not
+        advertised is a tool no agent finds."""
         result = await _assert_complete(async_client, _body("tools/list"))
         names = [tool["name"] for tool in result["tools"]]
-        assert names == ["search", "crawl", "map", "render"]
+        assert names == ["search", "crawl", "crawl_and_extract", "map", "render"]
         for tool in result["tools"]:
             assert tool["description"]
             assert tool["inputSchema"]["type"] == "object"
@@ -285,6 +289,47 @@ class TestToolsCall:
         sc = await _tool_call(async_client, "crawl", {"url": f"{base_url}/"})
         assert sc["success"] is True
         assert sc["results"][0]["classification"] in ("success", "rendered")
+
+    async def test_crawl_and_extract_returns_content_without_the_crawl_bulk(
+        self, async_client, base_url, browser_pool_stub
+    ):
+        """The composite exists for the projection: many pages' extracted content,
+        without the html, headers and diagnostics the full response repeats."""
+        sc = await _tool_call(
+            async_client,
+            "crawl_and_extract",
+            {"urls": [f"{base_url}/", f"{base_url}/blog"]},
+        )
+
+        assert sc["submitted_count"] == 2
+        pages = sc["pages"]
+        assert [page["url"] for page in pages] == [
+            canonical(f"{base_url}/").raw,
+            canonical(f"{base_url}/blog").raw,
+        ]
+        assert all(page["status"] == "success" for page in pages)
+        assert all(page["markdown"] for page in pages)
+        for bulk in ("html", "headers", "diagnostics", "results"):
+            assert bulk not in sc, f"the composite carried {bulk}"
+
+    async def test_crawl_and_extract_reports_the_same_verdict_as_the_full_crawl(
+        self, async_client, base_url, browser_pool_stub
+    ):
+        """The projection is faithful: a caller must not get a kinder verdict from
+        the composite than from the crawl it replaced. Whatever the strategy chain
+        settles on -- HTTP sees the access-denied page, the stub pool cannot render
+        it -- both doors report the same status, classification and content."""
+        full = await _tool_call(async_client, "crawl", {"url": f"{base_url}/blocked"})
+        projected = await _tool_call(async_client, "crawl_and_extract", {"url": f"{base_url}/blocked"})
+
+        original = full["results"][0]
+        page = projected["pages"][0]
+        assert (page["status"], page["classification"], page["markdown"]) == (
+            original["status"],
+            original["classification"],
+            original["markdown"],
+        )
+        assert page["markdown"] is None, "a blocked page produced content; the fixture changed"
 
     async def test_map_tool_returns_frontier(self, async_client, base_url, browser_pool_stub):
         # Default policy: the full strategy chain is reachable over MCP.

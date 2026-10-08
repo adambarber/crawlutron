@@ -479,6 +479,18 @@ async def _probe_mcp_crawl(monkeypatch, tmp_path):
     )
 
 
+async def _probe_mcp_crawl_and_extract(monkeypatch, tmp_path):
+    from app.mcp import tools
+
+    monkeypatch.setattr(tools, "execute_crawl", _blocked_http)
+    await _assert_refused(
+        tools._handle_crawl_and_extract(
+            _tool_payload("crawl_and_extract", url=_BLOCKED_URL), _denied_settings(), None
+        ),
+        {},
+    )
+
+
 async def _probe_mcp_map(monkeypatch, tmp_path):
     from app.mcp import tools
 
@@ -565,6 +577,7 @@ _PROBES = {
     "app/api/webhooks.py:post_webhook": _probe_webhook,
     "app/api/webhooks.py:deliver_pinned_webhook": _probe_webhook_delivery,
     "app/mcp/tools.py:_handle_crawl": _probe_mcp_crawl,
+    "app/mcp/tools.py:_handle_crawl_and_extract": _probe_mcp_crawl_and_extract,
     "app/mcp/tools.py:_handle_map": _probe_mcp_map,
     "app/mcp/tools.py:_handle_render": _probe_mcp_render,
     "app/mcp/tools.py:_handle_search": _probe_mcp_search,

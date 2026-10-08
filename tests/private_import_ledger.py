@@ -577,6 +577,11 @@ DECLARED: dict[str, Declaration] = {
         "Not yet triaged.\n",
         ["test"],
     ),
+    "app.mcp.tools._handle_crawl_and_extract": _d(
+        "unreviewed",
+        "Not yet triaged.\n",
+        ["test"],
+    ),
     "app.mcp.tools._handle_map": _d(
         "unreviewed",
         "Not yet triaged.\n",

@@ -85,6 +85,7 @@ HOST_POLICY_ENTRY_POINTS = (
     "app/api/webhooks.py:post_webhook",
     "app/api/webhooks.py:deliver_pinned_webhook",
     "app/mcp/tools.py:_handle_crawl",
+    "app/mcp/tools.py:_handle_crawl_and_extract",
     "app/mcp/tools.py:_handle_map",
     "app/mcp/tools.py:_handle_render",
     "app/mcp/tools.py:_handle_search",

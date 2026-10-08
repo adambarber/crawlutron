@@ -64,7 +64,8 @@ GUIDANCE = [
     "The active search provider is operator-configured (CRAWLUTRON_SEARCH_PROVIDER + the matching "
     "*_API_KEY); GET /v1/capabilities reports which provider is active.",
     "Use POST /mcp for MCP (2026-07-28, stateless streamable HTTP): server/discover lists supported protocol "
-    "versions and capabilities, and tools/list exposes search, crawl, map, and render. The MCP tools mirror "
+    "versions and capabilities, and tools/list exposes search, crawl, crawl_and_extract, map, and render. "
+    "crawl_and_extract is the crawl response projected to per-page content. The MCP tools mirror "
     "the REST endpoints exactly.",
     "Use discovered_link_count and discovered_links_truncated to decide whether to request a higher "
     "max_discovered_links limit.",

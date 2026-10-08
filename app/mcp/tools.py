@@ -24,7 +24,9 @@ from app.api.render_endpoint import render as render_endpoint_handler
 from app.api.response_shaping import aunified_response_from_result
 from app.crawl.strategies.browser_pool import get_browser_pool
 from app.json_safe import json_default
+from app.models.crawl_and_extract_response import CrawlAndExtractResponse
 from app.models.crawl_request import CrawlRequest
+from app.models.extracted_page import ExtractedPage
 from app.models.map_request import MapRequest
 from app.models.render_request import RenderRequest
 from app.models.search_request import SearchRequest
@@ -148,14 +150,56 @@ async def _crawled(payload: CrawlRequest, settings, shutdown_event):
     )
 
 
-async def _handle_crawl(payload: CrawlRequest, settings, shutdown_event) -> ToolResult:
+def _delivery_refusal(payload: CrawlRequest) -> ToolResult | None:
+    """The one refusal both crawl tools make: delivery is a REST concern.
+
+    Shared so the message cannot differ between the two tools an agent chooses
+    between, and so a field added to that set is refused by both.
+    """
     if _UNSUPPORTED_CRAWL_FIELDS & payload.model_fields_set:
         return ToolResult(
             text="async_mode and webhook_url are not supported over MCP; "
             "use POST /v1/crawl for webhook/async delivery.",
             is_error=True,
         )
+    return None
+
+
+async def _handle_crawl(payload: CrawlRequest, settings, shutdown_event) -> ToolResult:
+    refusal = _delivery_refusal(payload)
+    if refusal is not None:
+        return refusal
     return await _tool_result(_crawled(payload, settings, shutdown_event))
+
+
+async def _extracted(response: UnifiedCrawlResponse) -> CrawlAndExtractResponse:
+    """The crawl response read as extraction records.
+
+    The same projection shape over the same stored data, with the provenance
+    dropped: an MCP result carries its payload twice, so per-page bulk is
+    doubled on the wire, and a caller who only wants content pays for attempts,
+    headers, diagnostics and evidence anyway.
+    """
+    return CrawlAndExtractResponse(
+        submitted_count=response.submitted_count,
+        pages=[
+            ExtractedPage(
+                url=result.normalized_url,
+                status=result.status,
+                classification=result.classification,
+                title=result.metadata.title,
+                markdown=result.markdown,
+            )
+            for result in response.results
+        ],
+    )
+
+
+async def _handle_crawl_and_extract(payload: CrawlRequest, settings, shutdown_event) -> ToolResult:
+    refusal = _delivery_refusal(payload)
+    if refusal is not None:
+        return refusal
+    return await _tool_result(_extracted(await _crawled(payload, settings, shutdown_event)))
 
 
 async def _handle_map(payload: MapRequest, settings, shutdown_event) -> ToolResult:
@@ -211,6 +255,21 @@ TOOL_SPECS: list[ToolSpec] = [
         unsupported_fields=_UNSUPPORTED_CRAWL_FIELDS,
         output_schema=_schema(UnifiedCrawlResponse),
         handler=_handle_crawl,
+    ),
+    ToolSpec(
+        name="crawl_and_extract",
+        title="Crawl URLs and return extracted content",
+        description=(
+            "Crawl one or more public HTTP(S) URLs and return each page's content rather than "
+            "the full crawl envelope: canonical URL, status, classification, title and markdown. "
+            "Same request shape and policy as the crawl tool. Use this when you want the content "
+            "of many pages; use crawl when you need the provenance -- attempted strategies, "
+            "classification evidence, diagnostics, discovered links."
+        ),
+        request_model=CrawlRequest,
+        unsupported_fields=_UNSUPPORTED_CRAWL_FIELDS,
+        output_schema=_schema(CrawlAndExtractResponse),
+        handler=_handle_crawl_and_extract,
     ),
     ToolSpec(
         name="map",
