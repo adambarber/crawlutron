@@ -71,6 +71,9 @@ def capabilities_payload(settings: CrawlerSettings) -> dict[str, Any]:
             "frame_discovery": True,
             "form_discovery": True,
             "conditional_fetch": True,
+            # The stored crawl record's diagnostic spine, read over existing
+            # data: attempts and classification evidence without page bodies.
+            "per_request_trace": True,
             # The surface that uses `conditional_fetch` on the caller's behalf:
             # registered URLs the sweep rechecks, and announces when they change.
             "watches": True,

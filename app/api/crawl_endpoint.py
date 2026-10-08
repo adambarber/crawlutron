@@ -35,6 +35,8 @@ from app.crawl.result_store import CrawlResultStore
 from app.metrics import get_metrics
 from app.models.crawl_request import CrawlRequest
 from app.models.host_policy import HostPolicy
+from app.models.json_value import JsonValue
+from app.models.trace_response import TraceResponse
 from app.output_formats import serialize_results
 from app.settings import CrawlerSettings
 
@@ -193,28 +195,32 @@ async def crawl(
         return response_model
 
 
-async def get_crawl_result(
+async def _stored_response_payload(
     request_id: str,
     job_store,
     result_store,
-) -> Response:
-    """Retrieve a completed crawl response by request_id.
+) -> JsonValue | None:
+    """The stored response for ``request_id``, or None when nothing is stored.
 
-    Answers 200 only for a job in a terminal state. A job that has written its
-    results but not yet been marked ``COMPLETED`` is still 202, because
-    ``run_async_crawl`` performs those two writes in that order: reporting the
-    result a moment early tells a polling client the crawl is finished while it
-    is still running, and the job store it then reads says ``running``.
+    One definition of "what may be shown for this request_id", shared by the
+    response door and the trace door, because a second copy is how the two
+    drifted into answering differently about the same crawl.
+
+    A job that is not in a terminal state raises 202 rather than answering. A
+    job that has written its results but not yet been marked ``COMPLETED`` is
+    still 202, because ``run_async_crawl`` performs those two writes in that
+    order: reporting a moment early tells a polling client the crawl is
+    finished while it is still running, and the job store it then reads says
+    ``running``.
 
     The job is consulted *before* the result store for the same reason. The
     store is a cache of finished crawls, but nothing about a row in it proves
     the job finished: the runner publishes after its terminal write, so a job
-    paused in between sits in the store while it is still running, and reading
-    the store first turns that into a 200 for a crawl that is not done.
+    paused in between sits in the store while it is still running.
 
-    A request_id with no job at all still answers 200 from the store. That is
-    the synchronous path, which writes the store as the last step of a crawl
-    that has already returned -- there was never a job to be in flight.
+    A request_id with no job at all still answers from the store. That is the
+    synchronous path, which writes the store as the last step of a crawl that
+    has already returned -- there was never a job to be in flight.
     """
     job = await job_store.aload(request_id)
     if job is not None and job.status not in TERMINAL_STATUSES:
@@ -225,19 +231,53 @@ async def get_crawl_result(
             {"status": job.status.value},
         )
     stored = await result_store.aget(request_id)
-    # A replay is bytes, not values. The stored payload is the response
-    # model's own dump -- the documented wire shape itself -- so serving it
-    # directly answers the request byte-for-byte. Rebuilding models from it
-    # would re-validate URL fields, and admission is the constructor's job
-    # with a policy the cache does not own: the value discipline governs
-    # ingress (crawl results entering the response), not the replay of an
-    # already-shaped record.
     if stored is not None:
-        return JSONResponse(content=stored)
+        return stored
     if job is not None and job.kind == JobKind.SINGLE_SHOT and job.results:
-        # Same wire payload, written by the runner to the job's results.
-        return JSONResponse(content=job.results[0])
-    raise http_error(404, "not_found", f"Unknown or expired request_id: {request_id}")
+        # Same wire payload, written by the runner to the job's results. It is
+        # also the durable copy: the result cache expires, the job row does not.
+        return job.results[0]
+    return None
 
 
-__all__ = ["crawl", "get_crawl_result"]
+async def get_crawl_result(
+    request_id: str,
+    job_store,
+    result_store,
+) -> Response:
+    """Retrieve a completed crawl response by request_id.
+
+    A replay is bytes, not values: the stored payload is the response model's
+    own dump -- the documented wire shape itself -- so serving it directly
+    answers the request byte-for-byte. Rebuilding models from it would
+    re-validate URL fields, and admission is the constructor's job with a policy
+    the cache does not own: the value discipline governs ingress (crawl results
+    entering the response), not the replay of an already-shaped record.
+    """
+    payload = await _stored_response_payload(request_id, job_store, result_store)
+    if payload is None:
+        raise http_error(404, "not_found", f"Unknown or expired request_id: {request_id}")
+    return JSONResponse(content=payload)
+
+
+async def get_crawl_trace(
+    request_id: str,
+    job_store,
+    result_store,
+) -> TraceResponse:
+    """The same stored record, read as a trace: attempts and evidence, no bodies.
+
+    A projection, not a second store: the trace validates straight off the
+    response envelope's dump, so it cannot claim an attempt the response does
+    not have. ``TraceResponse`` names its keys as the stored envelope names
+    them, which is what lets the stored record be read here without a
+    translation layer -- including the URLs, which stay text because
+    re-admitting them would need a policy the result cache does not own.
+    """
+    payload = await _stored_response_payload(request_id, job_store, result_store)
+    if payload is None:
+        raise http_error(404, "not_found", f"Unknown or expired request_id: {request_id}")
+    return TraceResponse.model_validate(payload)
+
+
+__all__ = ["crawl", "get_crawl_result", "get_crawl_trace"]

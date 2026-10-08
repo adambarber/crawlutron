@@ -14,11 +14,13 @@ from fastapi.responses import Response
 
 from app.api.crawl_endpoint import crawl as crawl_handler
 from app.api.crawl_endpoint import get_crawl_result as get_crawl_result_handler
+from app.api.crawl_endpoint import get_crawl_trace as get_crawl_trace_handler
 from app.api.dependencies import get_job_store, get_result_store, get_settings, get_shutdown_event
 from app.api.policy_defaults import BROWSER_FALLBACK_POLICY, DOCUMENT_EXTRACTION_POLICY
 from app.constants import LARGE_CRAWL_GUIDANCE
 from app.models.crawl_request import CrawlRequest
 from app.models.error_response import ErrorResponse
+from app.models.trace_response import TraceResponse
 from app.models.unified_crawl_response import UnifiedCrawlResponse
 
 router = APIRouter(tags=["Crawler"])
@@ -146,6 +148,26 @@ async def get_crawl_result(
     # docstring), so the wire schema is documented via response_model while
     # the honest runtime return is the replayed Response.
     return await get_crawl_result_handler(request_id, job_store=job_store, result_store=result_store)
+
+
+@router.get(
+    "/v1/crawl/{request_id}/trace",
+    response_model=TraceResponse,
+    summary="Retrieve the trace of a completed crawl",
+    description=(
+        "Return what each strategy attempted for every submitted URL -- its status, "
+        "classification, HTTP status and elapsed time -- plus the classification "
+        "evidence, and no page bodies. This is a projection of the same stored "
+        "response /v1/crawl/{request_id} replays, so it reports 202 while the crawl "
+        "is still running and 404 once the record is gone."
+    ),
+)
+async def get_crawl_trace(
+    request_id: str,
+    job_store=Depends(get_job_store),
+    result_store=Depends(get_result_store),
+) -> TraceResponse:
+    return await get_crawl_trace_handler(request_id, job_store=job_store, result_store=result_store)
 
 
 __all__ = ["router"]

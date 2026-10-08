@@ -182,6 +182,14 @@ class TestDiscoveryPayload:
         assert "GET /v1/watches/{watch_id}" in recommended
         assert "DELETE /v1/watches/{watch_id}" in recommended
 
+    def test_recommended_endpoints_name_the_trace_view(self):
+        """A trace nobody can find is not shipped: the door an agent reads first
+        is the discovery list, not the OpenAPI document."""
+        from app.discovery.well_known import discovery_payload
+
+        recommended = discovery_payload()["recommended_endpoints"]
+        assert "GET /v1/crawl/{request_id}/trace" in recommended
+
     def test_capabilities_advertises_watches(self):
         """``conditional_fetch`` is the primitive; ``watches`` is the surface that
         uses it on the caller's behalf. An agent deciding whether to poll for
