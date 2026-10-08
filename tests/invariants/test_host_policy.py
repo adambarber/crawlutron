@@ -462,7 +462,7 @@ def test_required_host_policy_detector_covers_new_url_helper_shapes():
 
 
 def test_host_policy_detector_accepts_fixed_extraction_boundaries():
-    path = REPO_ROOT / "app" / "crawl" / "extraction.py"
+    path = REPO_ROOT / "app" / "extraction" / "content.py"
     tree = ast.parse(path.read_text(encoding="utf-8"))
     assert not [
         offender

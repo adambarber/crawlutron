@@ -13,7 +13,7 @@ constructor: how a worker is built, how many there should be, whether the
 feature is on, and the lock its slots live under. A caller that needs a
 different arrangement builds a pool instead of rewriting another module's names,
 which is what lets the suite test this machinery against stubs rather than by
-reaching into ``app.crawl.extraction``'s internals.
+reaching into ``app.extraction.content``'s internals.
 """
 
 import io

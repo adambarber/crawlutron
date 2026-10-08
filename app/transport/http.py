@@ -12,9 +12,6 @@ import time
 from dataclasses import dataclass, field, replace
 from typing import Any
 
-from app.classify import classify_page_with_evidence
-from app.crawl.document_text import format_extracted_document_text
-from app.crawl.extraction import is_html
 from app.crawl.policy import discovery_flags
 from app.crawl.render_options import policy_wants_html
 from app.crawl.result_helpers import (
@@ -22,6 +19,9 @@ from app.crawl.result_helpers import (
     build_engine_result,
     engine_result_from_exception,
 )
+from app.extraction.classify import classify_page_with_evidence
+from app.extraction.content import is_html
+from app.extraction.document_text import format_extracted_document_text
 from app.models.crawl_extraction_method import CrawlExtractionMethod
 from app.models.crawl_policy import CrawlPolicy
 from app.models.crawl_policy_limits import CrawlPolicyLimits
@@ -387,7 +387,7 @@ def _binary_result_if_needed(ctx: _HttpStrategyContext, resp: _FetchedResponse) 
 async def _extract_http_phase(ctx: _HttpStrategyContext, resp: _FetchedResponse) -> _ExtractedHttpContent:
     """Decode the body, run the selected extractor, and measure content.
 
-    ``is_html`` is :func:`app.crawl.extraction.is_html`, the same predicate the
+    ``is_html`` is :func:`app.extraction.content.is_html`, the same predicate the
     unified funnel dispatches on, rather than a second reading of the same
     question: this copy asked "does the content type mention html, or does the
     decoded text open like a document" and extraction.py asked "the same", in

@@ -7,7 +7,7 @@ import app.transport.fetchers as fetchers_mod
 import app.transport.http_client_pool as pool_mod
 import app.transport.pinned_transport as pinned_mod
 from app.crawl.engine import crawl_request
-from app.crawl.extraction import extract_post_fetch_discovery
+from app.extraction.content import extract_post_fetch_discovery
 from app.models.normalized_url import NormalizedUrl
 from app.settings import CrawlerSettings
 from app.validation import HostPolicy

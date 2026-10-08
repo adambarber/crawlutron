@@ -399,7 +399,7 @@ def _cleanup_extraction_executors():
     yield
     import asyncio
 
-    from app.crawl.extraction import shutdown_doc_extraction_executor
+    from app.extraction.content import shutdown_doc_extraction_executor
 
     asyncio.run(shutdown_doc_extraction_executor())
 

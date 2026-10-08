@@ -112,7 +112,7 @@ def test_provider_loop_detector_bites():
 
 
 # The names of the one selector contract, and the single parameter that carries
-# them; see ``app/crawl/extraction.py`` for why they are one value rather than
+# them; see ``app/extraction/content.py`` for why they are one value rather than
 # two parameters on three signatures.
 _SELECTOR_PARAMS = ("css_selector", "xpath")
 
@@ -144,7 +144,7 @@ def _selector_contract_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]
     signatures plus the mapping that fed them -- because satisfying a parameter
     rule is a spelling, and a spelling cannot be shared between entry points.
 
-    :class:`app.crawl.extraction.Selectors` replaced the spelling, so the rule
+    :class:`app.extraction.content.Selectors` replaced the spelling, so the rule
     inverts: a function narrows by taking ONE ``selectors`` value, and nothing
     outside the carrier declares the names. That is stronger in the direction
     that matters -- there is no longer any signature in which passing one

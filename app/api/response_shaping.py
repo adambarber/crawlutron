@@ -21,13 +21,13 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, TypeVar
 
-from app.crawl.llm_format import (
+from app.crawl.result_record import AnyResult, ProducerEnvelope, RenderEnvelope
+from app.extraction.llm_format import (
     PageMetadata as ExtractedPageMetadata,
 )
-from app.crawl.llm_format import (
+from app.extraction.llm_format import (
     extract_carried_metadata,
 )
-from app.crawl.result_record import AnyResult, ProducerEnvelope, RenderEnvelope
 from app.models.classification_evidence import ClassificationEvidence
 from app.models.content_validators import ContentValidators
 from app.models.crawl_result import CrawlResult, CrawlStrategyAttempt
@@ -84,7 +84,7 @@ def format_crawl_item(item: EngineCrawlResult) -> tuple[str | None, ExtractedPag
         if isinstance(carried, dict) and carried:
             return markdown, extract_carried_metadata(carried)
         if html and url is not None:
-            from app.crawl.llm_format import extract_llm_metadata
+            from app.extraction.llm_format import extract_llm_metadata
 
             return markdown, extract_llm_metadata(html, url)
         return markdown, {}

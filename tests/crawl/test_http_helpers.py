@@ -8,19 +8,19 @@ import brotli
 import pytest
 
 from app.api.render import _render_options
-from app.crawl.document_text import format_extracted_document_text
 from app.crawl.engine import (
     _payload_policy,
     crawl_request,
 )
-from app.crawl.extraction import (
+from app.crawl.payload_helpers import _payload_urls
+from app.crawl.policy import PolicyTier, read_policy
+from app.extraction.content import (
     _FrameCollector,
     _walkable,
     forms_from,
     frames_from,
 )
-from app.crawl.payload_helpers import _payload_urls
-from app.crawl.policy import PolicyTier, read_policy
+from app.extraction.document_text import format_extracted_document_text
 from app.settings import CrawlerSettings
 from app.transport.cache import HttpCache
 from app.transport.fetch_policy import (

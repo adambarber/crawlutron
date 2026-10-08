@@ -1071,11 +1071,11 @@ _CONTENT_PIPELINE_OWNER = frozenset({"content_pipeline.py"})
 # Import-resolved, so an alias cannot slip past the sweep.
 _EXTRACTION_ENTRY_POINTS = frozenset(
     {
-        "app.crawl.extraction.extract_document",
-        "app.crawl.extraction.extract_html",
-        "app.crawl.extraction.extract_content",
-        "app.crawl.extraction.extract_post_fetch_discovery",
-        "app.crawl.extraction.normalized_extraction",
+        "app.extraction.content.extract_document",
+        "app.extraction.content.extract_html",
+        "app.extraction.content.extract_content",
+        "app.extraction.content.extract_post_fetch_discovery",
+        "app.extraction.content.normalized_extraction",
     }
 )
 
@@ -1159,7 +1159,7 @@ EXTRACTION_IS_DISPATCHED_BY_THE_CONTENT_PIPELINE_ALONE = Rule(
         # The offloaded extractor AND the bare extractor call are two dispatch
         # shapes, so a source carrying both is worth exactly two findings.
         Bites(
-            "from app.crawl.extraction import extract_html, normalized_extraction\n"
+            "from app.extraction.content import extract_html, normalized_extraction\n"
             "async def f(decoded, final_url):\n"
             "    extracted = await asyncio.to_thread(extract_html, decoded, final_url)\n"
             "    return normalized_extraction(extracted)\n",
@@ -1167,7 +1167,7 @@ EXTRACTION_IS_DISPATCHED_BY_THE_CONTENT_PIPELINE_ALONE = Rule(
             count=2,
         ),
         Bites(
-            "from app.crawl.extraction import extract_content as _ec\n"
+            "from app.extraction.content import extract_content as _ec\n"
             "def f(body, content_type, url):\n"
             "    return _ec(body, content_type, url)\n",
             "_run_extraction",

@@ -10,8 +10,8 @@ import asyncio
 
 from lxml import etree
 
-from app.crawl.extraction import extract_post_fetch_discovery
 from app.crawl.policy import read_policy
+from app.extraction.content import extract_post_fetch_discovery
 from app.models.crawl_policy import CrawlPolicy
 from app.models.normalized_url import NormalizedUrl
 from app.validation import HostPolicy
@@ -106,7 +106,7 @@ async def test_browser_post_fetch_block_runs_off_loop(monkeypatch):
 
 async def test_no_lxml_tree_escapes_to_loop(monkeypatch):
     """The offloaded block returns plain data: no lxml element crosses back."""
-    import app.crawl.extraction as ext_mod
+    import app.extraction.content as ext_mod
 
     out = await asyncio.to_thread(
         ext_mod.extract_post_fetch_discovery,

@@ -1,12 +1,12 @@
 from dataclasses import replace
 
-import app.crawl.extraction as _extraction_module
-from app.crawl.document_text import format_extracted_document_text
-from app.crawl.extraction import detect_pagination as _production_detect_pagination
-from app.crawl.extraction import extract_content
-from app.crawl.extraction import extract_discovered_links as _production_extract_discovered_links
-from app.crawl.extraction import extract_js_endpoints as _extract_js_endpoints_with_policy
-from app.crawl.extraction import html_diagnostics as _production_html_diagnostics
+import app.extraction.content as _extraction_module
+from app.extraction.content import detect_pagination as _production_detect_pagination
+from app.extraction.content import extract_content
+from app.extraction.content import extract_discovered_links as _production_extract_discovered_links
+from app.extraction.content import extract_js_endpoints as _extract_js_endpoints_with_policy
+from app.extraction.content import html_diagnostics as _production_html_diagnostics
+from app.extraction.document_text import format_extracted_document_text
 from app.settings import CrawlerSettings
 from app.transport.document import _default_document_text_extractor as _production_document_extractor
 from app.transport.document import _format_table

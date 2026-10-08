@@ -6,7 +6,7 @@ refactor, which is the kind of cost that gets re-litigated instead of paid down.
 
 The underlying fact is that a test importing an ``app`` module's private name is
 not making a choice -- it is reporting that the module has no level above its
-insides, so there is nowhere else to stand. ``app/crawl/extraction.py`` published
+insides, so there is nowhere else to stand. ``app/extraction/content.py`` published
 four entry points that were all *compositions*, while the twenty contracts
 underneath them were private; a caller reading the public surface would conclude
 it was covered, and the suite knew better.
@@ -151,12 +151,12 @@ PRIVATE_IMPORT_LEDGER = Rule(
         # A public name needs no ledger row -- that is the whole point of the fix.
         "from app.crawl.engine import crawl_request\n",
         # A declared lifecycle weld is allowed, and says why.
-        "from app.crawl.extraction import shutdown_doc_extraction_executor\n",
+        "from app.extraction.content import shutdown_doc_extraction_executor\n",
         # A name from outside app/ is not this rule's business.
         "from tests.private_import_ledger import LEDGER\n",
         # A public name through a bound module object is the same name publicly,
         # so it needs no row either.
-        "import app.crawl.extraction as extraction\n\nvalue = extraction.extract_content\n",
+        "import app.extraction.content as extraction\n\nvalue = extraction.extract_content\n",
         # And the same exemption for the string form: a private name on a *test*
         # module, patched by string, is the suite substituting its own double.
         "import tests.membership_gate as gate\n\n"

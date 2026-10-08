@@ -5,7 +5,7 @@ from typing import Any
 
 import pytest
 
-from app.output_formats import (
+from app.extraction.output_formats import (
     SUPPORTED_OUTPUT_FORMATS,
     _csv_neutralize,
     serialize_results,
@@ -113,7 +113,7 @@ def test_unsupported_format_raises():
 
 class TestOutputFormatDefaults:
     def test_output_formats_default_with_dict(self):
-        from app.output_formats import _default
+        from app.extraction.output_formats import _default
 
         # Object with model_dump method
         class FakeObj:
@@ -124,7 +124,7 @@ class TestOutputFormatDefaults:
         assert result == {"serialized": "true"}
 
     def test_output_formats_default_dict_method(self):
-        from app.output_formats import _default
+        from app.extraction.output_formats import _default
 
         class DictObj:
             def dict(self):
@@ -134,7 +134,7 @@ class TestOutputFormatDefaults:
         assert result == {"from_dict": "value"}
 
     def test_output_formats_default_str_fallback(self):
-        from app.output_formats import _default
+        from app.extraction.output_formats import _default
 
         result = _default(42)
         assert result == "42"
@@ -142,7 +142,7 @@ class TestOutputFormatDefaults:
 
 class TestOutputFormatSerialization:
     def test_output_formats_serialize_unknown_format(self):
-        from app.output_formats import serialize_results
+        from app.extraction.output_formats import serialize_results
 
         results = [{"original_url": "http://x/"}]
         with pytest.raises(ValueError):
@@ -151,26 +151,26 @@ class TestOutputFormatSerialization:
 
 class TestOutputFormatSafeCoercion:
     def test_output_formats_safe_json(self):
-        from app.output_formats import _safe
+        from app.extraction.output_formats import _safe
 
         val = {"nested": [1, 2, 3]}
         result = _safe(val)
         assert isinstance(result, str)
 
     def test_output_formats_safe_none(self):
-        from app.output_formats import _safe
+        from app.extraction.output_formats import _safe
 
         result = _safe(None)
         assert result == ""
 
     def test_output_formats_safe_string(self):
-        from app.output_formats import _safe
+        from app.extraction.output_formats import _safe
 
         result = _safe("hello")
         assert result == "hello"
 
     def test_output_formats_safe_int(self):
-        from app.output_formats import _safe
+        from app.extraction.output_formats import _safe
 
         result = _safe(42)
         assert result == "42"
@@ -236,7 +236,7 @@ class TestOutputFormatsEdges:
     """Cover remaining branches in output_formats.py"""
 
     def test_serialize_default_fallback(self):
-        from app.output_formats import _default
+        from app.extraction.output_formats import _default
 
         class CustomObj:
             def __init__(self):
@@ -266,14 +266,14 @@ class TestOutputFormatsEdges:
         passes and the media type that comes back, which is data, not behaviour:
         as three bodies it was three places for a format rename to land in two.
         """
-        from app.output_formats import serialize_results
+        from app.extraction.output_formats import serialize_results
 
         output, out_media_type = serialize_results(results, fmt)
         assert needle in output
         assert out_media_type == media_type
 
     def test_serialize_results_csv(self):
-        from app.output_formats import serialize_results
+        from app.extraction.output_formats import serialize_results
 
         results = [
             {
@@ -294,7 +294,7 @@ class TestOutputFormatsEdges:
         assert media_type == "text/csv; charset=utf-8"
 
     def test_serialize_results_unknown_format(self):
-        from app.output_formats import serialize_results
+        from app.extraction.output_formats import serialize_results
 
         results = [{"url": "http://x/", "text": "content"}]
         with pytest.raises(ValueError):
@@ -322,7 +322,7 @@ class TestTheSerializerCoversTheVocabulary:
         import inspect
         import textwrap
 
-        import app.output_formats as output_formats
+        import app.extraction.output_formats as output_formats
 
         tree = ast.parse(textwrap.dedent(inspect.getsource(output_formats.serialize_results)))
         function = next(node for node in tree.body if isinstance(node, ast.FunctionDef))
@@ -353,7 +353,7 @@ class TestTheSerializerCoversTheVocabulary:
         return dispatched
 
     def test_every_admitted_format_has_a_branch(self):
-        from app.output_formats import SUPPORTED_OUTPUT_FORMATS
+        from app.extraction.output_formats import SUPPORTED_OUTPUT_FORMATS
 
         dispatched = self._dispatched_formats()
         assert dispatched == set(SUPPORTED_OUTPUT_FORMATS), (

@@ -21,12 +21,12 @@ graph LR
     api_crawl_endpoint --> crawl_payload_helpers
     api_crawl_endpoint --> crawl_policy
     api_crawl_endpoint --> crawl_result_store
+    api_crawl_endpoint --> extraction_output_formats
     api_crawl_endpoint --> metrics
     api_crawl_endpoint --> models_crawl_request
     api_crawl_endpoint --> models_host_policy
     api_crawl_endpoint --> models_json_value
     api_crawl_endpoint --> models_trace_response
-    api_crawl_endpoint --> output_formats
     api_crawl_endpoint --> settings
     api_crawl_executor --> api_exceptions
     api_crawl_executor --> crawl_engine
@@ -142,8 +142,8 @@ graph LR
     api_render_router --> models_render_request
     api_render_router --> models_unified_crawl_response
     api_render_router --> vocabulary_identity
-    api_response_shaping --> crawl_llm_format
     api_response_shaping --> crawl_result_record
+    api_response_shaping --> extraction_llm_format
     api_response_shaping --> models_classification_evidence
     api_response_shaping --> models_content_validators
     api_response_shaping --> models_crawl_result
@@ -189,8 +189,6 @@ graph LR
     api_webhooks --> models_normalized_url
     api_webhooks --> timeouts
     api_webhooks --> transport_pinned_transport
-    classify --> bounded_io
-    classify --> models_taxonomy
     crawl_admission --> crawl_fetch_helpers
     crawl_admission --> crawl_job_store
     crawl_admission --> crawl_policy
@@ -235,15 +233,6 @@ graph LR
     crawl_engine --> transport_cookie_jar
     crawl_engine --> transport_fetchers
     crawl_engine --> transport_request_profile
-    crawl_extraction --> crawl_doc_pool
-    crawl_extraction --> crawl_llm_format
-    crawl_extraction --> env
-    crawl_extraction --> models_discovered_link
-    crawl_extraction --> models_host_policy
-    crawl_extraction --> models_normalized_url
-    crawl_extraction --> resource_pressure
-    crawl_extraction --> settings
-    crawl_extraction --> validation
     crawl_fetch_helpers --> bounded_ttl
     crawl_fetch_helpers --> models_host_policy
     crawl_fetch_helpers --> models_http_fetch_result
@@ -259,10 +248,6 @@ graph LR
     crawl_job_store --> models_crawl_policy
     crawl_job_store --> models_host_policy
     crawl_job_store --> models_normalized_url
-    crawl_llm_format --> bounded_io
-    crawl_llm_format --> crawl_extraction
-    crawl_llm_format --> models_normalized_url
-    crawl_llm_format --> models_page_metadata
     crawl_migrations --> crawl_migrations_manifest
     crawl_migrations --> crawl_migrations_runner
     crawl_migrations_0001_coordination_cookies_initial --> crawl_migrations_manifest
@@ -408,6 +393,22 @@ graph LR
     discovery_capabilities --> vocabulary_taxonomy
     discovery_well_known --> models_discovery_response
     discovery_well_known --> models_service_identity
+    extraction_classify --> bounded_io
+    extraction_classify --> models_taxonomy
+    extraction_content --> crawl_doc_pool
+    extraction_content --> env
+    extraction_content --> extraction_llm_format
+    extraction_content --> models_discovered_link
+    extraction_content --> models_host_policy
+    extraction_content --> models_normalized_url
+    extraction_content --> resource_pressure
+    extraction_content --> settings
+    extraction_content --> validation
+    extraction_llm_format --> bounded_io
+    extraction_llm_format --> extraction_content
+    extraction_llm_format --> models_normalized_url
+    extraction_llm_format --> models_page_metadata
+    extraction_output_formats --> json_safe
     health_readiness --> metrics
     health_readiness --> models_readiness_response
     main --> addresses
@@ -479,10 +480,10 @@ graph LR
     models_crawl_policy --> vocabulary_limits
     models_crawl_policy --> vocabulary_request_profiles
     models_crawl_policy_limits --> vocabulary_limits
+    models_crawl_request --> extraction_output_formats
     models_crawl_request --> models_crawl_policy
     models_crawl_request --> models_fetch_validators
     models_crawl_request --> models_single_url_source_request
-    models_crawl_request --> output_formats
     models_crawl_result --> models_literal_checked
     models_crawl_result --> models_normalized_url
     models_crawl_result --> models_taxonomy
@@ -551,7 +552,6 @@ graph LR
     models_watch_state --> models_content_validators
     models_watch_state --> models_watch_outcome
     models_watch_state --> models_watch_status
-    output_formats --> json_safe
     resource_pressure --> cgroup_sense
     resource_pressure --> env
     resource_pressure --> memory_pressure
@@ -579,9 +579,9 @@ graph LR
     settings --> memory_pressure
     settings --> resource_pressure
     settings --> vocabulary_limits
-    transport_browser --> classify
     transport_browser --> crawl_result_helpers
     transport_browser --> env
+    transport_browser --> extraction_classify
     transport_browser --> json_safe
     transport_browser --> models_crawl_result
     transport_browser --> models_host_policy
@@ -633,8 +633,8 @@ graph LR
     transport_content_cache_key --> settings
     transport_content_cache_key --> transport_content_cache
     transport_content_cache_key --> vocabulary_limits
-    transport_content_pipeline --> crawl_extraction
     transport_content_pipeline --> crawl_policy
+    transport_content_pipeline --> extraction_content
     transport_content_pipeline --> models_crawl_extraction_method
     transport_content_pipeline --> models_crawl_policy
     transport_content_pipeline --> models_host_policy
@@ -646,7 +646,7 @@ graph LR
     transport_cookie_jar --> crawl_coordination_cookies
     transport_cookie_jar --> models_normalized_url
     transport_document --> bounded_io
-    transport_document --> crawl_extraction
+    transport_document --> extraction_content
     transport_document --> models_normalized_url
     transport_document --> timeouts
     transport_fetch_policy --> crawl_fetch_helpers
@@ -666,12 +666,12 @@ graph LR
     transport_fetchers --> transport_decompression
     transport_fetchers --> transport_request_profile
     transport_fetchers --> vocabulary_limits
-    transport_http --> classify
-    transport_http --> crawl_document_text
-    transport_http --> crawl_extraction
     transport_http --> crawl_policy
     transport_http --> crawl_render_options
     transport_http --> crawl_result_helpers
+    transport_http --> extraction_classify
+    transport_http --> extraction_content
+    transport_http --> extraction_document_text
     transport_http --> models_crawl_extraction_method
     transport_http --> models_crawl_policy
     transport_http --> models_crawl_policy_limits

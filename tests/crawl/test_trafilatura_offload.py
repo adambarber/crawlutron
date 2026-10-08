@@ -6,7 +6,7 @@ inside async functions. Both must go through ``asyncio.to_thread`` like the
 neighboring ``extract_document``/``extract_content`` calls already do.
 """
 
-from app.crawl.extraction import extract_html
+from app.extraction.content import extract_html
 from app.models.host_policy import HostPolicy
 from app.models.normalized_url import NormalizedUrl
 from tests._assertions import install_to_thread_spy

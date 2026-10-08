@@ -25,7 +25,8 @@ import asyncio
 from dataclasses import dataclass
 from typing import Any
 
-from app.crawl.extraction import (
+from app.crawl.policy import discovery_flags
+from app.extraction.content import (
     Selectors,
     extract_content,
     extract_document,
@@ -33,7 +34,6 @@ from app.crawl.extraction import (
     extract_post_fetch_discovery,
     normalized_extraction,
 )
-from app.crawl.policy import discovery_flags
 from app.models.crawl_extraction_method import CrawlExtractionMethod
 from app.models.crawl_policy import CrawlPolicy
 from app.models.host_policy import HostPolicy

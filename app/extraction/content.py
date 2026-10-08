@@ -41,11 +41,11 @@ from trafilatura import extract as _trafilatura_extract
 # `try/except ImportError` that returned "no content" for a package that cannot
 # be absent.
 from app.crawl.doc_pool import DocExtractionPool, doc_task_hooks
-from app.crawl.llm_format import (
+from app.env import get_env_int, parse_bool_env
+from app.extraction.llm_format import (
     PageMetadata as ExtractedPageMetadata,
 )
-from app.crawl.llm_format import _llm_metadata_from_tree, text_from_html
-from app.env import get_env_int, parse_bool_env
+from app.extraction.llm_format import _llm_metadata_from_tree, text_from_html
 from app.models.discovered_link import DiscoveredLink
 from app.models.host_policy import HostPolicy
 from app.models.normalized_url import NormalizedUrl, admit_or_none

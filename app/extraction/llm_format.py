@@ -73,7 +73,7 @@ def extract_llm_metadata(html: str, url: NormalizedUrl | None) -> PageMetadata:
 
     This is the fallback computation site: engine-produced items carry
     metadata computed once from the discovery tree
-    (``app.crawl.extraction.extract_post_fetch_discovery``) and shaping
+    (``app.extraction.content.extract_post_fetch_discovery``) and shaping
     reads that dict instead of reaching this function. Keep the two
     paths in sync through :func:`_llm_metadata_from_tree` -- it is the only
     reader of a parsed tree.
@@ -83,7 +83,7 @@ def extract_llm_metadata(html: str, url: NormalizedUrl | None) -> PageMetadata:
     html = truncate_html_input(html)
     # Lazy import avoids a circular import: extraction.py imports this module
     # at module level, so this direction must stay lazy.
-    from app.crawl.extraction import parse_html_tree
+    from app.extraction.content import parse_html_tree
 
     tree = parse_html_tree(html)
     if tree is None:

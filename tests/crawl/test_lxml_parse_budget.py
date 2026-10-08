@@ -109,7 +109,7 @@ async def test_shaping_never_reparses_engine_produced_items(parse_budget):
     import json
 
     from app.api.response_shaping import format_crawl_item
-    from app.crawl.llm_format import extract_llm_metadata
+    from app.extraction.llm_format import extract_llm_metadata
     from app.models.serialization import to_dict
 
     result = await _run({"limits": {"max_depth": 1}}, html=META_HTML)

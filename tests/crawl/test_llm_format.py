@@ -1,6 +1,6 @@
 """LLM output formatting: metadata extraction and markdown edges."""
 
-from app.crawl.llm_format import extract_llm_metadata, text_from_html
+from app.extraction.llm_format import extract_llm_metadata, text_from_html
 from tests._extraction_helpers import extract_content
 from tests._fetcher_factories import LLM_FORMAT_TEST_HTML
 from tests._parse_budget import ParseBudget

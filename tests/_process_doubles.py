@@ -150,7 +150,7 @@ def install_unkillable_doc_worker() -> tuple[DocWorker, DocExtractionPool, StubS
     comes back so a test can queue the workers the pool should grow into once it
     has reaped the slot nothing can reclaim.
     """
-    import app.crawl.extraction as ext_mod
+    import app.extraction.content as ext_mod
 
     zombie = unkillable_doc_worker()
     spawner = StubSpawner(zombie)

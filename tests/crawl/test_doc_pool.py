@@ -14,9 +14,9 @@ import time
 import pytest
 
 import app.crawl.doc_pool as doc_pool_mod
-import app.crawl.extraction as ext_mod
+import app.extraction.content as ext_mod
 from app.crawl.doc_pool import DocExtractionPool, DocWorker, terminate_doc_process
-from app.crawl.extraction import ExtractedContent
+from app.extraction.content import ExtractedContent
 from tests._app_factory import service_app
 from tests._extraction_helpers import settings_with
 from tests._lifespan_doubles import stub_heavy_teardown

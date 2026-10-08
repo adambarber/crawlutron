@@ -951,7 +951,7 @@ def test_every_sanctioned_pair_names_a_guard_that_exists_and_pins_its_fragment()
         "HttpFetcher/HttpFetchContract twin signature and the extraction.py selector pair -- and "
         "the first is now one declaration, with the bound keywords checked where each production "
         "fetcher declares them instead of spelled a second time in app/models/taxonomy.py. See "
-        "app/crawl/extraction.py Selectors for the one that remains."
+        "app/extraction/content.py Selectors for the one that remains."
     )
     for pair in gate._expected_pairs():
         guard = pair["guard"]

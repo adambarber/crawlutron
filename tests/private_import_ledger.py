@@ -268,7 +268,7 @@ DECLARED: dict[str, Declaration] = {
         "Not yet triaged.\n",
         ["test"],
     ),
-    "app.classify._strip_html_noise": _d(
+    "app.extraction.classify._strip_html_noise": _d(
         "unreviewed",
         "Not yet triaged.\n",
         ["test"],
@@ -331,10 +331,10 @@ DECLARED: dict[str, Declaration] = {
     ),
     "app.crawl.engine.robots_cache._entries": _d(_CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]),
     "app.crawl.engine.robots_cache._lock": _d(_CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]),
-    "app.crawl.extraction._FrameCollector": _d(
+    "app.extraction.content._FrameCollector": _d(
         _IMPLEMENTATION_STEP.kind, _IMPLEMENTATION_STEP.reason, ["test"]
     ),
-    "app.crawl.extraction._walkable": _d(_IMPLEMENTATION_STEP.kind, _IMPLEMENTATION_STEP.reason, ["test"]),
+    "app.extraction.content._walkable": _d(_IMPLEMENTATION_STEP.kind, _IMPLEMENTATION_STEP.reason, ["test"]),
     "app.crawl.fetch_helpers._SITEMAP_CACHE": _d(_CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]),
     "app.crawl.fetch_helpers._fetch_decode_discovery": _d(
         "unreviewed",
@@ -597,18 +597,18 @@ DECLARED: dict[str, Declaration] = {
         "Not yet triaged.\n",
         ["test"],
     ),
-    "app.output_formats._csv_neutralize": _d(
+    "app.extraction.output_formats._csv_neutralize": _d(
         "unreviewed",
         "Not yet triaged.\n",
         ["test"],
     ),
     "app.models.registrable_domain._PSL": _d(_CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]),
-    "app.output_formats._default": _d(
+    "app.extraction.output_formats._default": _d(
         "unreviewed",
         "Not yet triaged.\n",
         ["test"],
     ),
-    "app.output_formats._safe": _d(
+    "app.extraction.output_formats._safe": _d(
         "unreviewed",
         "Not yet triaged.\n",
         ["test"],

@@ -6,10 +6,10 @@ from typing import Annotated
 
 from pydantic import ConfigDict, Field
 
+from app.extraction.output_formats import OutputFormat
 from app.models.crawl_policy import CrawlPolicy
 from app.models.fetch_validators import FetchValidators
 from app.models.single_url_source_request import SingleUrlSourceRequest
-from app.output_formats import OutputFormat
 
 #: Policy, not schema: a caller can size a validators map freely, and unbounded is a
 #: fan-out agreed to before any admission check runs.

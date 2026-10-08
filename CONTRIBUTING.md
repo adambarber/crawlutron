@@ -87,7 +87,7 @@ These require explicit review from a maintainer before merge:
 - `app/api/webhooks.py` — webhook delivery (`deliver_pinned_webhook`).
 - `app/env.py` — `parse_bool_env` and the operator environment reads,
   including the private-target opt-in.
-- `app/output_formats.py` — CSV injection (`_csv_neutralize`),
+- `app/extraction/output_formats.py` — CSV injection (`_csv_neutralize`),
   response serialization.
 - `app/settings.py` — defaults (paths, security knobs); changing a
   default is a security decision.

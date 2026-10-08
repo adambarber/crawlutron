@@ -6,13 +6,13 @@ import re
 
 import pytest
 
-from app.classify import (
+from app.crawl.result_helpers import TerminalResult
+from app.extraction.classify import (
     CLASSIFICATION_SIGNATURES,
     STRONG_CLASSIFICATION_MARKERS,
     classify_page,
     classify_page_with_evidence,
 )
-from app.crawl.result_helpers import TerminalResult
 from app.transport import browser as browser_mod
 from app.transport import http as http_mod
 from app.transport.browser import BrowserRenderer
@@ -314,7 +314,7 @@ def test_the_grouping_relations_still_hold():
 def test_every_classifiable_label_is_an_explicit_table_entry():
     """Drift guard: no classifier output may fall through to the default.
 
-    Adding a signature to ``app.classify`` without giving it a status is the
+    Adding a signature to ``app.extraction.classify`` without giving it a status is the
     regression this pins; it is what let the two if-chains drift apart in the
     first place (an unlisted label silently took whichever default the local
     copy happened to use).
@@ -387,7 +387,7 @@ class TestStatusForClassification:
 
 
 def _strip(html):
-    from app.classify import _strip_html_noise
+    from app.extraction.classify import _strip_html_noise
 
     return _strip_html_noise(html)
 
@@ -410,7 +410,7 @@ def test_case_insensitive_tags():
 
 
 def test_classify_unchanged_after_refactor():
-    from app.classify import classify_page
+    from app.extraction.classify import classify_page
 
     # spoof attempt still neutralized
     assert (
@@ -444,7 +444,7 @@ def test_strip_is_linear_under_pathological_unclosed_script_flood():
     not weaker: linear lands near 4x, quadratic near 16x, and the band between
     them is wider than the one it replaces.
     """
-    from app.classify import _strip_html_noise
+    from app.extraction.classify import _strip_html_noise
 
     def cpu_for(n):
         payload = ("<script>" + "a" * 500) * n

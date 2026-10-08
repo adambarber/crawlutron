@@ -28,9 +28,9 @@ if TYPE_CHECKING:
     pass
 
 
-from app.classify import classify_page
 from app.crawl.result_helpers import classify_error_code, terminal_attempt, terminal_crawl_result
 from app.env import get_env_float, get_env_int
+from app.extraction.classify import classify_page
 from app.json_safe import json_default
 from app.models.crawl_result import CrawlResult
 from app.models.host_policy import HostPolicy

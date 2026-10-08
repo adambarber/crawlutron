@@ -10,7 +10,7 @@ the patch.
 
 from dataclasses import dataclass, field
 
-from app.crawl.extraction import parse_count
+from app.extraction.content import parse_count
 
 
 @dataclass

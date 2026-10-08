@@ -94,7 +94,7 @@ async def _afetch_document_bytes(
     buffer into memory before extraction sees it.
     """
     from app.bounded_io import read_capped_async
-    from app.crawl.extraction import EXTRACTION_DOC_MAX_INPUT_BYTES
+    from app.extraction.content import EXTRACTION_DOC_MAX_INPUT_BYTES
     from app.transport import http_client_pool, pinned_transport
 
     await http_client_pool._drain_pending_client_closes()

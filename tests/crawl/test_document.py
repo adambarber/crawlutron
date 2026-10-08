@@ -247,7 +247,7 @@ class TestDocumentExtractionEdges:
         # The read itself is capped. /sample_table.pdf is a real PDF far
         # larger than the shrunken cap, so the extractor must fail closed
         # (empty text) instead of buffering the whole body.
-        import app.crawl.extraction as extraction_mod
+        import app.extraction.content as extraction_mod
 
         original_cap = extraction_mod.EXTRACTION_DOC_MAX_INPUT_BYTES
         extraction_mod.EXTRACTION_DOC_MAX_INPUT_BYTES = 64

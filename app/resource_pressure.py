@@ -429,7 +429,7 @@ _HTTP_TASK_RAM_BYTES = get_env_int("CRAWLUTRON_HTTP_TASK_RAM_BYTES", 48 * 1024 *
 # measured range straddles it. The right knob for that trade-off is here
 # (CRAWLUTRON_BROWSER_TASK_RAM_BYTES), not a change to the default.
 _BROWSER_TASK_RAM_BYTES = get_env_int("CRAWLUTRON_BROWSER_TASK_RAM_BYTES", 700 * 1024 * 1024, lo=0)
-# Persistent markitdown workers (app.crawl.extraction._DocWorker): each imports
+# Persistent markitdown workers (app.extraction.content._DocWorker): each imports
 # markitdown plus the PDF/Office parsers once and stays alive for the process, so
 # this is a FIXED reservation, not a per-task estimate. Measured footprint is
 # 100-300 MiB apiece depending on which parsers get touched; the conservative
@@ -470,7 +470,7 @@ def worker_count() -> int:
 def doc_worker_count() -> int:
     """Persistent markitdown worker count *for this process*.
 
-    The single home for this count: ``app.crawl.extraction`` borrows it so the
+    The single home for this count: ``app.extraction.content`` borrows it so the
     pool it spawns is exactly the size admission reserved. Reading the env var
     in two places would let the spawned pool and the RAM reservation drift
     apart. A malformed value falls back to the default rather than aborting

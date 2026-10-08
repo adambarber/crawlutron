@@ -7,11 +7,12 @@ import threading
 import bs4
 import pytest
 
-import app.crawl.extraction as ext_mod
-import app.crawl.extraction as extraction
-import app.crawl.extraction as extraction_mod
+import app.extraction.content as ext_mod
+import app.extraction.content as extraction
+import app.extraction.content as extraction_mod
 from app.crawl.doc_pool import DocExtractionPool, doc_task_hooks
-from app.crawl.extraction import (
+from app.env import parse_bool_env
+from app.extraction.content import (
     ExtractedContent,
     Selectors,
     extract_document,
@@ -24,7 +25,6 @@ from app.crawl.extraction import (
     shutdown_doc_extraction_executor,
     text_from_html,
 )
-from app.env import parse_bool_env
 from app.vocabulary.limits import DEFAULT_EXTRACTION_MAX_MARKDOWN
 from tests._assertions import set_optional_env
 from tests._extraction_helpers import (
@@ -222,7 +222,7 @@ class TestKatanaDiscovery:
 
 async def test_extract_document_skips_oversized_input(monkeypatch):
     """#mem-guard: markitdown workers must never receive unbounded input."""
-    import app.crawl.extraction as ex
+    import app.extraction.content as ex
 
     acquisitions = doc_worker_acquisitions(monkeypatch)
     monkeypatch.setattr(ex, "EXTRACTION_DOC_MAX_INPUT_BYTES", 100)
@@ -265,7 +265,7 @@ def _enabled_from_env() -> bool:
 
 async def test_extract_document_kill_switch(monkeypatch):
     """Env kill-switch lets deployments disable subprocess doc extraction."""
-    import app.crawl.extraction as ex
+    import app.extraction.content as ex
 
     acquisitions = doc_worker_acquisitions(monkeypatch)
     monkeypatch.setenv("CRAWLUTRON_EXTRACTION_DOC_ENABLED", "0")
@@ -460,7 +460,7 @@ async def test_extract_document_process_pool_isolation(monkeypatch):
 
 async def test_extract_document_process_pool_normal_works():
     """Normal document extraction still works with process isolation."""
-    from app.crawl.extraction import extract_document
+    from app.extraction.content import extract_document
 
     # Don't set TEST_MARKITDOWN_HANG - normal operation.
     result = extract_document(b"%PDF-1.4 fake", "http://example.com/x.pdf")
@@ -544,7 +544,7 @@ def test_css_selector_slow_must_not_hang(monkeypatch, caplog):
         lambda self, selector: never_released.wait(timeout=30) or [],
     )
     html = "<html><body><p class='x'>hi</p></body></html>"
-    with caplog.at_level(logging.WARNING, logger="app.crawl.extraction"):
+    with caplog.at_level(logging.WARNING, logger="app.extraction.content"):
         result = extract_selected(
             html,
             "http://example.com/",
@@ -578,7 +578,7 @@ def test_xpath_selector_slow_must_not_hang(caplog):
     the evaluation this function actually performs.
     """
     html = "<html><body><p>x</p></body></html>"
-    with caplog.at_level(logging.WARNING, logger="app.crawl.extraction"):
+    with caplog.at_level(logging.WARNING, logger="app.extraction.content"):
         result = extract_selected(
             html,
             "http://example.com/",
@@ -810,7 +810,7 @@ def test_selector_on_non_html_is_reported_not_silently_dropped(caplog):
     from caller policy and spreads it into this function.
     """
     pdf = b"%PDF-1.7\n1 0 obj\n<< /Type /Catalog >>\nendobj\ntrailer\n%%EOF\n"
-    with caplog.at_level(logging.WARNING, logger="app.crawl.extraction"):
+    with caplog.at_level(logging.WARNING, logger="app.extraction.content"):
         result = extraction_mod.extract_content(
             pdf,
             "application/pdf",
@@ -829,7 +829,7 @@ def test_selector_on_non_html_is_reported_not_silently_dropped(caplog):
     # this passes by warning unconditionally and proves nothing.
     caplog.clear()
     html = "<html><body><div id='agenda'>item one</div><p>filler</p></body></html>"
-    with caplog.at_level(logging.WARNING, logger="app.crawl.extraction"):
+    with caplog.at_level(logging.WARNING, logger="app.extraction.content"):
         narrowed = extraction_mod.extract_content(
             html, "text/html", "http://example.com/", selectors=Selectors(css="#agenda")
         )
@@ -839,7 +839,7 @@ def test_selector_on_non_html_is_reported_not_silently_dropped(caplog):
 
     # No selector, no warning: the common path must stay quiet.
     caplog.clear()
-    with caplog.at_level(logging.WARNING, logger="app.crawl.extraction"):
+    with caplog.at_level(logging.WARNING, logger="app.extraction.content"):
         extraction_mod.extract_content(pdf, "application/pdf", canonical("http://example.com/doc.pdf"))
     assert "extraction_selector_ignored_non_html" not in caplog.text, caplog.text
 
@@ -868,8 +868,8 @@ EXTRACTION_STAGE_CONTRACTS = (
 def test_extraction_stage_contracts_are_public(name):
     """A stage contract a test can name must not be a private name."""
     assert not name.startswith("_")
-    assert hasattr(extraction, name), f"app.crawl.extraction.{name} is not public"
-    assert name in vars(extraction), f"{name} is not defined in app.crawl.extraction"
+    assert hasattr(extraction, name), f"app.extraction.content.{name} is not public"
+    assert name in vars(extraction), f"{name} is not defined in app.extraction.content"
 
 
 @pytest.mark.parametrize("name", EXTRACTION_STAGE_CONTRACTS)

@@ -32,12 +32,12 @@ from app.crawl.job_store import TERMINAL_STATUSES, JobKind, JobStore
 from app.crawl.payload_helpers import checked_payload_urls
 from app.crawl.policy import read_policy
 from app.crawl.result_store import CrawlResultStore
+from app.extraction.output_formats import serialize_results
 from app.metrics import get_metrics
 from app.models.crawl_request import CrawlRequest
 from app.models.host_policy import HostPolicy
 from app.models.json_value import JsonValue
 from app.models.trace_response import TraceResponse
-from app.output_formats import serialize_results
 from app.settings import CrawlerSettings
 
 logger = logging.getLogger(__name__)

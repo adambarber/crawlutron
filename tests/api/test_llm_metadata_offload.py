@@ -47,7 +47,7 @@ def _html_item(i: int = 0) -> EngineCrawlResult:
 async def test_aformat_crawl_item_offloads_metadata_parse(monkeypatch):
     """The lxml metadata parse runs in a worker thread, not on the loop."""
     calls: list[tuple[str, str]] = []
-    from app.crawl import llm_format as llm_mod
+    from app.extraction import llm_format as llm_mod
 
     real_fn = llm_mod.extract_llm_metadata
 
