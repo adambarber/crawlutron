@@ -2,7 +2,7 @@
 
 from typing import Any
 
-from app.bounded_ttl import BoundedTTLCache
+from app.safety.bounded_ttl import BoundedTTLCache
 from tests._thread_fanout import run_thread_fanout
 
 

@@ -24,11 +24,11 @@ from urllib.parse import parse_qs, unquote, urlsplit
 
 from lxml import html as lxml_html
 
-from app.bounded_io import BodyTooLarge, read_capped_async
 from app.models.normalized_url import admit_or_none
+from app.safety.bounded_io import BodyTooLarge, read_capped_async
+from app.safety.validation import HostPolicy
 from app.transport.http_client_pool import get_async_http_client
 from app.transport.timeouts import Timeouts
-from app.validation import HostPolicy
 
 logger = logging.getLogger(__name__)
 

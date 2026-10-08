@@ -23,6 +23,7 @@ from collections.abc import Callable
 from app.admission.policy import read_policy
 from app.api.crawl_executor import execute_crawl
 from app.api.webhooks import post_webhook
+from app.config.settings import CrawlerSettings
 from app.models.content_validators import ContentValidators
 from app.models.fetch_validators import FetchValidators
 from app.models.host_policy import HostPolicy
@@ -30,7 +31,6 @@ from app.models.normalized_url import NormalizedUrl
 from app.models.watch_announcement import WatchAnnouncement
 from app.models.watch_outcome import WatchOutcome
 from app.models.watch_state import WatchState
-from app.settings import CrawlerSettings
 from app.storage.watch_store import WatchStore
 from app.vocabulary.strategies import HTTP_DECLARED_CRAWLER
 from app.vocabulary.taxonomy import CrawlClassification

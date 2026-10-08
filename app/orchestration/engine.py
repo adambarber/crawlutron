@@ -23,7 +23,8 @@ from typing import Any, cast
 from app.admission.admission import compile_scope_pattern
 from app.admission.payload_helpers import checked_payload_urls, payload_policy
 from app.admission.policy import PolicyTier
-from app.env import get_env_int
+from app.config.env import get_env_int
+from app.config.settings import CrawlerSettings
 from app.models.crawl_policy import CrawlPolicy
 from app.models.crawl_worker import CrawlWorker
 from app.models.engine_crawl_result import EngineCrawlResult
@@ -35,8 +36,7 @@ from app.models.serialization import from_wire, to_dict
 from app.orchestration import robots as _robots_policy
 from app.orchestration.request_pipeline import _PipelineDependencies, _PipelineState, run_crawl_request
 from app.orchestration.robots import FetchAndDecode
-from app.resource_pressure import ResourceGate
-from app.settings import CrawlerSettings
+from app.runtime.resource_pressure import ResourceGate
 from app.transport.cache import HttpCache
 from app.transport.content_cache import ContentCache
 from app.transport.fetchers import default_http_fetcher, impersonating_fetcher

@@ -12,11 +12,11 @@ import inspect
 from collections.abc import Awaitable, Callable, Mapping
 from typing import Any, NamedTuple
 
-from app.bounded_ttl import BoundedTTLCache
 from app.models.host_policy import HostPolicy
 from app.models.http_fetch_result import HttpFetchResult
 from app.models.http_fetcher import HttpFetcher
 from app.models.normalized_url import NormalizedUrl
+from app.safety.bounded_ttl import BoundedTTLCache
 from app.transport.body_decode import decode_body
 from app.transport.decompression import decompress_body as _decompress_body
 from app.vocabulary.limits import (
@@ -202,7 +202,7 @@ async def _fetch_text(
     return resp.text, etag, last_modified, False
 
 
-# Sitemap cache: one locked, bounded, TTL'd store (app.bounded_ttl).
+# Sitemap cache: one locked, bounded, TTL'd store (app.safety.bounded_ttl).
 #
 # The lock lives inside the chokepoint, so call sites can never forget it
 # (the class of bug that produced the robots-cache and DNS-cache races).

@@ -5,7 +5,7 @@ explicit CRAWLUTRON_HOST=0.0.0.0 (as the compose file sets, where the
 loopback ports mapping is the external control) exposes the port.
 """
 
-from app.settings import CrawlerSettings
+from app.config.settings import CrawlerSettings
 
 
 def test_default_bind_is_loopback():

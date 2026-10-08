@@ -5,7 +5,7 @@ import time
 
 import pytest
 
-from app.safe_regex import (
+from app.safety.safe_regex import (
     RegexTimeout,
     UnsafePattern,
     compile_untrusted,

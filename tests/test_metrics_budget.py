@@ -101,7 +101,7 @@ from tests.chokepoint_walks import app_trees, nodes_of
 # rotted arithmetic in a comment is worse than none.
 #
 # `exclude=frozenset()` is load-bearing, not decoration: the default excludes
-# app/safe_regex.py, and these budgets are measured over EVERY app module. A
+# app/safety/safe_regex.py, and these budgets are measured over EVERY app module. A
 # dropped module would lower the offender count and quietly buy budget.
 _ALL_APP: frozenset[str] = frozenset()
 

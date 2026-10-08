@@ -3,7 +3,7 @@
 from functools import partial
 
 from app.models.normalized_url import NormalizedUrl as _NormalizedUrl
-from app.validation import HostPolicy
+from app.safety.validation import HostPolicy
 
 admit = partial(
     _NormalizedUrl,

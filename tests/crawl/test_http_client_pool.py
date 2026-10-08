@@ -13,7 +13,7 @@ import pytest
 from curl_cffi.requests import AsyncSession
 
 import app.transport.http_client_pool as http_mod
-from app import settings as settings_mod
+from app.config import settings as settings_mod
 from app.transport.fetchers import _cffi_fetch
 from app.transport.http_client_pool import get_async_http_client
 from tests._async_harnesses import run_loop_rebind_scenario

@@ -150,7 +150,7 @@ def test_dynamic_pattern_re_calls_under_any_alias():
 
     offenders = app_offenders(aliased_dynamic_pattern_re_offenders)
     assert not offenders, (
-        "re.<method> with a dynamic pattern must go through app.safe_regex, under any"
+        "re.<method> with a dynamic pattern must go through app.safety.safe_regex, under any"
         f" import alias: {'; '.join(offenders)}"
     )
 

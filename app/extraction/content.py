@@ -31,7 +31,8 @@ from lxml.etree import ParserError
 from markdownify import markdownify as html_to_md
 from trafilatura import extract as _trafilatura_extract
 
-from app.env import get_env_int, parse_bool_env
+from app.config.env import get_env_int, parse_bool_env
+from app.config.settings import CrawlerSettings
 from app.extraction.llm_format import (
     PageMetadata as ExtractedPageMetadata,
 )
@@ -50,9 +51,8 @@ from app.models.normalized_url import NormalizedUrl, admit_or_none
 # `try/except ImportError` that returned "no content" for a package that cannot
 # be absent.
 from app.orchestration.doc_pool import DocExtractionPool, doc_task_hooks
-from app.resource_pressure import doc_worker_count
-from app.settings import CrawlerSettings
-from app.validation import filter_js_endpoints
+from app.runtime.resource_pressure import doc_worker_count
+from app.safety.validation import filter_js_endpoints
 
 logger = logging.getLogger(__name__)
 
@@ -115,7 +115,7 @@ def _extraction_executor() -> concurrent.futures.ThreadPoolExecutor:
 # Document extraction (markitdown) runs in a PERSISTENT pool of worker
 # processes; the pool and its machinery live in app.orchestration.doc_pool. This module
 # owns the extraction pipeline, and holds one process-lifetime pool built from
-# the environment. Sized by doc_worker_count() (app.resource_pressure -- the
+# the environment. Sized by doc_worker_count() (app.runtime.resource_pressure -- the
 # single home for the count) so memory stays within the container ceiling.
 
 

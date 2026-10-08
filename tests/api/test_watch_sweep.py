@@ -15,9 +15,9 @@ import pytest
 
 from app.api import watch_sweep
 from app.api.watch_sweep import WatchSweeper, sweep_watches_forever
+from app.config.settings import CrawlerSettings
 from app.models.content_validators import ContentValidators
 from app.models.watch_outcome import WatchOutcome
-from app.settings import CrawlerSettings
 from tests._assertions import block_private_targets
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY, canonical
 from tests.helpers.server import EtagHandler

@@ -1,7 +1,7 @@
 """Never re-derive env numbers without the parser.
 
 Bare `int()`/`float()` on an env-sourced mapping read is the config-typo
-crash the env parser (`app/validation.py:get_env_int`/`get_env_float`)
+crash the env parser (`app/safety/validation.py:get_env_int`/`get_env_float`)
 exists to absorb -- it raised at import and denied boot. This AST scan
 keeps every app module on the safe path.
 

@@ -233,7 +233,7 @@ class TestCleanCheck:
     def test_the_owner_is_excluded_by_default(self):
         """Sanctioned basenames keep a rule from failing on the owner that defines it."""
         rule = _urljoin_rule(excludes=frozenset({"validation.py"}))
-        rule.check_clean([(pathlib.Path("app/validation.py"), ast.parse("urljoin(a, b)\n"))])
+        rule.check_clean([(pathlib.Path("app/safety/validation.py"), ast.parse("urljoin(a, b)\n"))])
 
 
 class TestRuleScope:

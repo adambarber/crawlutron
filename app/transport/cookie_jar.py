@@ -178,13 +178,13 @@ class CookieJar:
         exists. A caller wanting a file now gets a mirror of shared state, and
         the mirror is never read back on the request path.
 
-        Routes through the app.atomic_write chokepoint (temp file + fsync
+        Routes through the app.safety.atomic_write chokepoint (temp file + fsync
         + replace), so a crash (or write error) mid-serialization cannot
         leave a truncated/corrupted file.
         """
         import json
 
-        from app.atomic_write import atomic_write_text
+        from app.safety.atomic_write import atomic_write_text
 
         atomic_write_text(path, json.dumps(self._legacy_slots()))
 

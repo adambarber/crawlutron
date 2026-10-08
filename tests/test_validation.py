@@ -6,7 +6,7 @@ import pytest
 
 from app.models.host_policy import HostPolicy
 from app.models.normalized_url import NormalizedUrl
-from app.validation import filter_js_endpoints as _filter_js_endpoints
+from app.safety.validation import filter_js_endpoints as _filter_js_endpoints
 
 _HOST_POLICY = HostPolicy.unrestricted()
 admit = partial(NormalizedUrl, policy=_HOST_POLICY)

@@ -13,7 +13,7 @@ from app.api.webhooks import (
 from app.api.webhooks import (
     validate_webhook_url as _validate_webhook_url,
 )
-from app.validation import HostPolicy
+from app.safety.validation import HostPolicy
 from tests._assertions import block_private_targets, host_resolves_to
 from tests._webhook_doubles import assert_delivered_once, record_webhook_delivery
 

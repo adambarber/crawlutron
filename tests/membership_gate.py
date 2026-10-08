@@ -601,7 +601,7 @@ def aliased_dynamic_pattern_re_offenders(tree: ast.AST, path: pathlib.Path) -> l
                 path,
                 node.lineno,
                 f"{func.value.id}.{func.attr}(<dynamic pattern>) -- alias of re;"
-                " route through app.safe_regex",
+                " route through app.safety.safe_regex",
             )
         )
     return out

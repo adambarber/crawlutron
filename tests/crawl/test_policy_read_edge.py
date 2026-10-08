@@ -32,9 +32,9 @@ from app.admission.policy import (
     stored_policy,
     validate_wire_policy,
 )
+from app.config.settings import CrawlerSettings
 from app.models.crawl_policy import CrawlPolicy
 from app.models.crawl_policy_limits import CrawlPolicyLimits
-from app.settings import CrawlerSettings
 
 # A field the model will reject on its own, used wherever a test needs "this row
 # has exactly one bad field" without hand-writing an invalid value inline.

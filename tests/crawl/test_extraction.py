@@ -10,7 +10,7 @@ import pytest
 import app.extraction.content as ext_mod
 import app.extraction.content as extraction
 import app.extraction.content as extraction_mod
-from app.env import parse_bool_env
+from app.config.env import parse_bool_env
 from app.extraction.content import (
     ExtractedContent,
     Selectors,

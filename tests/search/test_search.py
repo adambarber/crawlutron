@@ -12,6 +12,7 @@ from unittest import mock
 
 import pytest
 
+from app.safety.validation import HostPolicy
 from app.search.providers import (
     BraveProvider,
     DuckDuckGoProvider,
@@ -24,7 +25,6 @@ from app.search.providers import (
     configured_search_providers,
     get_search_provider,
 )
-from app.validation import HostPolicy
 from tests._assertions import one_search_result, provider_results
 
 
@@ -323,7 +323,7 @@ class TestSearchEndpoint:
         assert resp.status_code == 422
 
     async def test_search_records_metrics(self, async_client, override_settings, fake_provider_http):
-        from app.metrics import get_metrics
+        from app.runtime.metrics import get_metrics
 
         override_settings(search_provider="tavily", tavily_api_key="k")
         fake_provider_http(200, provider_results({"title": "A", "url": "https://example.gov/a"}))

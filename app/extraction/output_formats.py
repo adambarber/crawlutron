@@ -40,8 +40,8 @@ SUPPORTED_OUTPUT_FORMATS: tuple[str, ...] = get_args(OutputFormat)
 
 
 def _default(obj: Any) -> Any:
-    """Output fallback -- now the shared app.json_safe chokepoint."""
-    from app.json_safe import json_default
+    """Output fallback -- now the shared app.safety.json_safe chokepoint."""
+    from app.safety.json_safe import json_default
 
     return json_default(obj)
 

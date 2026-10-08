@@ -52,7 +52,7 @@ _PUBLIC_SURFACE_PROPERTY = Property(
 # classes, exceptions, type aliases, and constants remain part of the contract,
 # but only functions and classes with their own methods are alternate ways in.
 #
-# app/bounded_io.py LOWERED to (4, 2): read_capped_sync is gone. It existed only
+# app/safety/bounded_io.py LOWERED to (4, 2): read_capped_sync is gone. It existed only
 # for the document extractor's urllib path, and that path is now the shared pinned
 # httpx transport like every other fetch, so the module has one reader rather
 # than a sync one and an async one that nothing used side by side.
@@ -65,7 +65,7 @@ _PUBLIC_SURFACE_PROPERTY = Property(
 # made the builders agree by construction; a narrower budget would push the
 # options back out into two hand-maintained lists.
 #
-# app/validation.py RAISED to (17, 11) for `in_range`. The int face of the env
+# app/safety/validation.py RAISED to (17, 11) for `in_range`. The int face of the env
 # chokepoint could not REFUSE an out-of-range value -- only clamp it -- because
 # the `validate`/`validate_event` pair that says "warn and use the fallback"
 # existed on the float face and had never been exposed on the int face. So an
@@ -96,18 +96,18 @@ _OWNER_PUBLIC_SURFACE_RATCHET = {
     "app/admission/admission.py": (19, 13),
     # RAISED to (14, 11) then LOWERED to (7, 6), (5, 5), (4, 4), then (2, 2):
     # HostPolicy and registrable_domain moved to app/models, then the env family
-    # to app/env.py, then the egress verdict to app/models/host_policy.py, then
+    # to app/config/env.py, then the egress verdict to app/models/host_policy.py, then
     # the normalizer to app/models/normalized_url.py. The NormalizedUrl
     # convergence then retired the public_url_or_none family outright, leaving
     # only the two facts that are still validation's to own: the resolved-address
     # publicness predicate and the JS-endpoint egress filter.
-    "app/validation.py": (2, 2),
-    "app/env.py": (7, 5),
+    "app/safety/validation.py": (2, 2),
+    "app/config/env.py": (7, 5),
     "app/api/response_shaping.py": (11, 10),
     "app/storage/sqlite_store.py": (9, 7),
-    "app/safe_regex.py": (7, 2),
+    "app/safety/safe_regex.py": (7, 2),
     "app/orchestration/robots.py": (12, 3),
-    "app/bounded_io.py": (4, 2),
+    "app/safety/bounded_io.py": (4, 2),
     "app/transport/decompression.py": (3, 1),
     "app/admission/credentials.py": (3, 3),
     "app/admission/render_options.py": (2, 2),

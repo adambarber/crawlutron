@@ -41,7 +41,7 @@ def _base_class_name(base: ast.expr) -> str | None:
     """The trailing name behind a base, however it was written.
 
     ``Foo``, ``mod.Foo`` and ``Foo[int]`` all name ``Foo``; only the dotted and
-    subscripted forms were unreadable, and ``app/logging_config.py`` already
+    subscripted forms were unreadable, and ``app/runtime/logging_config.py`` already
     writes bases that way.
     """
     if isinstance(base, ast.Name):

@@ -16,7 +16,7 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass
 
-from app.cgroup_sense import _read_int
+from app.runtime.cgroup_sense import _read_int
 
 # Self-managed, no operator knob: the gate rides at TARGET and pauses at HARD.
 # Lowered from 0.92/0.97 to prevent first-batch burst overshoot (was spiking

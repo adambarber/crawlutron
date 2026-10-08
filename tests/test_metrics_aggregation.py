@@ -21,7 +21,7 @@ what two worker processes hold, which is how the counter store's own tests
 prove the same property.
 """
 
-from app.metrics import MetricsStore
+from app.runtime.metrics import MetricsStore
 from app.storage.coordination_counters import CoordinationCounters
 from app.vocabulary.strategies import HTTP_DECLARED_CRAWLER
 from tests._result_builders import engine_result

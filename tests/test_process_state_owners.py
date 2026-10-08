@@ -19,7 +19,7 @@ What is asserted, and what is deliberately not
 
 Three things, all checkable without a network:
 
-1. **Shape.** Each owner satisfies :class:`~app.process_state.ProcessStateOwner`.
+1. **Shape.** Each owner satisfies :class:`~app.runtime.process_state.ProcessStateOwner`.
 2. **Agreement.** The probe and the reset name the same module-level state. A probe
    reading a different object than the reset empties would certify a reset that
    never emptied anything, and no live assertion catches that -- see below.
@@ -45,11 +45,11 @@ import pathlib
 
 import pytest
 
-from app.process_state import ProcessStateOwner
+from app.runtime.process_state import ProcessStateOwner
 from tests.chokepoint_walks import REPO_ROOT
 
 OWNERS: tuple[str, ...] = (
-    "app.cgroup_sense",
+    "app.runtime.cgroup_sense",
     "app.orchestration.engine",
     "app.orchestration.fetch_helpers",
     "app.transport.browser",

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Response
 
-from app.metrics import get_metrics
+from app.runtime.metrics import get_metrics
 
 router = APIRouter(tags=["Health"])
 

@@ -8,8 +8,8 @@ import pytest
 
 import app.transport.pinned_transport as http_mod
 from app.models.normalized_url import NormalizedUrl
+from app.safety.validation import HostPolicy
 from app.transport.pinned_transport import check_ssrf_protection, resolve_and_pin_host
-from app.validation import HostPolicy
 from tests._assertions import (
     assert_dns_pinning_uses_first_resolution,
     block_private_targets,
@@ -402,7 +402,7 @@ def test_allow_private_preserves_host_for_webhook_style_urls(monkeypatch):
 
 def test_shared_public_target_verdict_matches_reserved_range_corpus(monkeypatch):
     from app.models.host_policy import host_egress_reason, reset_private_target_memo
-    from app.validation import is_public_ip_value
+    from app.safety.validation import is_public_ip_value
 
     # The corpus claim is about the host verdict, so the escape hatch must be
     # off: with it on, host_egress_reason admits everything by design.

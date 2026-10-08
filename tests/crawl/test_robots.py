@@ -10,7 +10,7 @@ from unittest.mock import patch
 import pytest
 
 from app.admission.policy import read_policy
-from app.bounded_ttl import BoundedTTLCache
+from app.config.settings import CrawlerSettings
 from app.models.host_policy import HostPolicy
 from app.models.normalized_url import NormalizedUrl
 from app.orchestration import engine as engine_mod
@@ -23,7 +23,7 @@ from app.orchestration.robots_parse import (
     parse_robots_sitemaps,
     select_robots_values,
 )
-from app.settings import CrawlerSettings
+from app.safety.bounded_ttl import BoundedTTLCache
 from app.transport.cache import HttpCache
 from app.transport.fetch_policy import discovery_diagnostics
 from app.vocabulary.identity import SERVICE_ID
@@ -355,9 +355,9 @@ async def test_purge_handles_production_shaped_entries():
     cache raised ``ValueError`` instead of evicting."""
 
     import app.orchestration.engine as em
+    from app.config.settings import CrawlerSettings
     from app.orchestration.engine import crawl_request
     from app.orchestration.robots import ROBOTS_CACHE_MAX_ENTRIES
-    from app.settings import CrawlerSettings
 
     em.robots_cache.clear()
     try:

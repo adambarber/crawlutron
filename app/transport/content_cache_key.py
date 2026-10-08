@@ -8,10 +8,10 @@ from __future__ import annotations
 
 import json
 
-from app.env import get_env_int
+from app.config.env import get_env_int
 from app.models.crawl_policy_limits import CrawlPolicyLimits
 from app.models.normalized_url import NormalizedUrl
-from app.resource_pressure import worker_count
+from app.runtime.resource_pressure import worker_count
 from app.transport.content_cache import ContentCache
 from app.vocabulary.limits import DEFAULT_MAX_CONTENT_LENGTH_BYTES
 
@@ -69,7 +69,7 @@ _MIN_PER_PAGE_BYTES = 256 * 1024  # never shrink the cap below 256 KiB
 
 
 def _default_global_concurrency() -> int:
-    from app.settings import CrawlerSettings
+    from app.config.settings import CrawlerSettings
 
     try:
         return max(1, int(CrawlerSettings.from_mapping().global_concurrency))

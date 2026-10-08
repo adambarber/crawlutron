@@ -15,7 +15,7 @@ from httpx import ASGITransport, AsyncClient
 
 from app.api.dependencies import get_settings, get_watch_store
 from app.api.watch_router import router as watch_router
-from app.settings import CrawlerSettings
+from app.config.settings import CrawlerSettings
 from tests._app_factory import service_app
 
 

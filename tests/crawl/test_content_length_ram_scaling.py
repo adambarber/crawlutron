@@ -50,8 +50,8 @@ async def test_http_strategy_result_cap_follows_concurrency(monkeypatch, global_
 
 async def test_crawl_request_threads_active_concurrency_to_fetcher():
     """End to end: the crawl's own settings.global_concurrency sizes the cap."""
+    from app.config.settings import CrawlerSettings
     from app.orchestration.engine import crawl_request
-    from app.settings import CrawlerSettings
 
     seen: list[int] = []
 

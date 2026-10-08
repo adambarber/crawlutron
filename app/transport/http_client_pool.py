@@ -52,7 +52,7 @@ from app.vocabulary.identity import DEFAULT_USER_AGENT
 from app.vocabulary.strategies import CFFI_IMPERSONATE_TARGET
 
 if TYPE_CHECKING:
-    from app.settings import CrawlerSettings
+    from app.config.settings import CrawlerSettings
 
 
 _DEFAULT_HTTP_CLIENT: httpx.AsyncClient | None = None
@@ -61,7 +61,7 @@ _HTTP_CLIENT_INIT_LOCK = threading.Lock()
 
 def _default_settings() -> CrawlerSettings:
     """Get default crawler settings for HTTP client configuration."""
-    from app.settings import CrawlerSettings
+    from app.config.settings import CrawlerSettings
 
     return CrawlerSettings.from_mapping()
 

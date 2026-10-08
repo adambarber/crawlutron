@@ -51,10 +51,10 @@ dependencies = [
     "pydantic>=2.0",
     # Local DBAPI schema migrations only; the package documents no network or telemetry behavior.
     "yoyo-migrations==9.0.0",
-    # Bounded-execution regex engine (app/safe_regex.py): stdlib re cannot be
+    # Bounded-execution regex engine (app/safety/safe_regex.py): stdlib re cannot be
     # interrupted (GIL wedge) -- correctness/security needs the native timeout.
     "regex>=2026.5.9",
-    # Public-suffix dataset for registrable_domain (app/validation.py):
+    # Public-suffix dataset for registrable_domain (app/models/registrable_domain.py):
     # without it the suffix heuristic silently degrades.
     "publicsuffixlist>=1.0.2",
 ]

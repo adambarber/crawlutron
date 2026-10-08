@@ -108,7 +108,7 @@ def _bare_body_reads(tree: ast.AST, path: pathlib.Path) -> list[str]:
     """Flag an unbounded body acquisition on a response-like object.
 
     Both ``response.read()`` (no size arg) and ``response.content`` pull the
-    whole body into RAM. Capped reads go through app.bounded_io.read_capped_async;
+    whole body into RAM. Capped reads go through app.safety.bounded_io.read_capped_async;
     curl_cffi's ``.body`` attribute and non-response reads (files, sockets)
     are not HTTP body acquisitions and stay exempt. Tree-wide: any module may
 
@@ -141,7 +141,7 @@ EVERY_HTTP_BODY_READ_IS_CAPPED = Rule(
     find=_bare_body_reads,
     summary=(
         "A response.read() with no size arg, or response.content, pulls the whole "
-        "body into RAM; use app.bounded_io.read_capped_async instead"
+        "body into RAM; use app.safety.bounded_io.read_capped_async instead"
     ),
     excludes=SANCTIONED | {"bounded_io.py"},
     bite=lambda: (
@@ -155,7 +155,7 @@ EVERY_HTTP_BODY_READ_IS_CAPPED = Rule(
 def test_no_bare_body_reads():
     """Every HTTP body read anywhere must be capped ().
 
-    Scope note: app/bounded_io.py IS the chokepoint and streams the capped body
+    Scope note: app/safety/bounded_io.py IS the chokepoint and streams the capped body
     itself -- exempt by receiver, not path, so it survives a tree-wide sweep.
     Widening kept precise on the response-object convention to avoid flagging
     file/socket reads.

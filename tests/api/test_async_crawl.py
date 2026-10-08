@@ -38,7 +38,7 @@ class TestAsyncCrawlApi:
 
     async def test_v1_crawl_async_mode_over_batch_size_returns_422(self, crawl_api):
         """An oversized batch is rejected at accept-time, never 202'd then failed async."""
-        from app.settings import CrawlerSettings
+        from app.config.settings import CrawlerSettings
 
         urls = [f"{crawl_api.base}/{i}" for i in range(CrawlerSettings.from_mapping().max_batch_size + 1)]
         resp = await crawl_api.client.post("/v1/crawl", json={"urls": urls, "async_mode": True})

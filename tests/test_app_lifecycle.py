@@ -100,7 +100,7 @@ class TestMultiWorkerInvariants:
         unused function and an over-subscribed fleet.
         """
         from app.orchestration import request_pipeline
-        from app.resource_pressure import derive_browser_pool_size
+        from app.runtime.resource_pressure import derive_browser_pool_size
 
         monkeypatch.setenv("CRAWLUTRON_WORKERS", "4")
         monkeypatch.setenv("CRAWLUTRON_BROWSER_POOL_SIZE", "")
@@ -124,7 +124,7 @@ class TestMultiWorkerInvariants:
         back and hide it.
         """
         from app.main import DATABASE_PATH, job_store, result_store
-        from app.metrics import get_metrics
+        from app.runtime.metrics import get_metrics
         from app.storage.coordination_cookies import SharedCookieStore
         from app.storage.coordination_counters import CoordinationCounters
         from app.transport.cookie_jar import CookieJar

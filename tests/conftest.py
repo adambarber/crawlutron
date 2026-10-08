@@ -3,7 +3,7 @@
 Puts the service root on ``sys.path`` once so every test file can import
 :mod:`app` and the suite's own helpers (as ``tests.helpers.server``). The
 parent monorepo's ``shared/python`` directory is no longer referenced; the
-equivalent logging helper lives at :mod:`app.logging_config` and is
+equivalent logging helper lives at :mod:`app.runtime.logging_config` and is
 importable from the package root.
 """
 
@@ -49,7 +49,7 @@ ROOT = HERE.parent  # the repository root, which is now the service root
 if ROOT.exists() and str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-# The ``app/validation.py`` production default for
+# The ``app/safety/validation.py`` production default for
 # ``CRAWLUTRON_ALLOW_PRIVATE_TARGETS`` is ``False`` (the secure default).
 # For this test suite, the file-level default is ALSO ``"0"`` so that anyone
 # reading ``conftest.py`` sees the secure default first. The session-scoped
@@ -354,7 +354,7 @@ def override_settings():
     instance it returns, so there is one place that decides how an override key
     becomes an environment variable.
     """
-    from app.settings import CrawlerSettings
+    from app.config.settings import CrawlerSettings
     from tests._app_factory import service_app
 
     app = service_app()
@@ -524,7 +524,7 @@ def _clear_metrics() -> None:
     by an earlier recursive crawl). Resetting in place keeps every test hermetic
     while preserving the object identity that ``engine``/``main`` obtain via ``get_metrics()``.
     """
-    from app.metrics import get_metrics
+    from app.runtime.metrics import get_metrics
 
     get_metrics().reset()
 
@@ -586,7 +586,7 @@ def _clear_global_http_state() -> None:
         _engine_mod.reset_process_state()
         # Drop any memoized cgroup reads so a test that asserts fresh sensing
         # (e.g. writes a new fake cgroup file) is not served a stale value.
-        from app.cgroup_sense import reset_process_state
+        from app.runtime.cgroup_sense import reset_process_state
 
         reset_process_state()
     # DNS cache + pending client close queue + cookie namespace contextvar

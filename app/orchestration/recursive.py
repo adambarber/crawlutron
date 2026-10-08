@@ -21,15 +21,15 @@ from app.admission.admission import (
     admit_discovered_links,
 )
 from app.admission.recursive_admission import RecursiveRunState, admit_recursive_batch
-from app.metrics import get_metrics
 from app.models.crawl_task import CrawlTask
 from app.models.engine_crawl_result import EngineCrawlResult
 from app.models.host_policy import HostPolicy
 from app.models.normalized_url import NormalizedUrl
 from app.orchestration.result_helpers import failed_result_for
 from app.orchestration.scheduler import DomainScheduler
-from app.resource_pressure import ResourceGate, WeightedAdmission, default_admission_policy
-from app.safe_regex import BoundedPattern
+from app.runtime.metrics import get_metrics
+from app.runtime.resource_pressure import ResourceGate, WeightedAdmission, default_admission_policy
+from app.safety.safe_regex import BoundedPattern
 from app.vocabulary.limits import ENGINE_BATCH_CONCURRENCY_MULTIPLIER
 from app.vocabulary.taxonomy import is_transient_classification
 

@@ -45,7 +45,7 @@ class TestPolicyValidation:
         assert_url_refused("https://other.test/page", policy, "host_not_allowed")
 
     def test_host_policy_constructed_from_settings(self):
-        from app.settings import CrawlerSettings
+        from app.config.settings import CrawlerSettings
 
         settings = CrawlerSettings.from_mapping(
             {
@@ -169,8 +169,8 @@ class TestResolveEgress:
 
 
 async def test_crawl_request_applies_settings_host_policy():
+    from app.config.settings import CrawlerSettings
     from app.orchestration.engine import crawl_request
-    from app.settings import CrawlerSettings
 
     settings = CrawlerSettings(allowed_hosts="allowed.test")
     with pytest.raises(ValueError, match="host_not_allowed"):

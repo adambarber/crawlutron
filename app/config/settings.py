@@ -4,9 +4,9 @@ import os
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 
-from app.env import get_mapping_float, get_mapping_int, in_range, parse_bool_value
-from app.memory_pressure import read_memory_stats
-from app.resource_pressure import derive_browser_pool_size, max_http_concurrency_for
+from app.config.env import get_mapping_float, get_mapping_int, in_range, parse_bool_value
+from app.runtime.memory_pressure import read_memory_stats
+from app.runtime.resource_pressure import derive_browser_pool_size, max_http_concurrency_for
 from app.vocabulary.limits import (
     DEFAULT_BROWSER_POOL_SIZE,
     DEFAULT_CHALLENGE_WAIT_SECONDS,

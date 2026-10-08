@@ -11,8 +11,8 @@ import itertools
 
 import pytest
 
-import app.resource_pressure as rp
-from app.resource_pressure import LoopLagProbe, ResourceGate
+import app.runtime.resource_pressure as rp
+from app.runtime.resource_pressure import LoopLagProbe, ResourceGate
 
 
 def test_probe_does_not_start_without_running_loop():

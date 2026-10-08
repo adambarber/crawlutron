@@ -47,9 +47,9 @@ from app.models.engine_crawl_result import EngineCrawlResult
 from app.models.normalized_url import NormalizedUrl
 from app.models.result_record import ProducerEnvelope
 from app.models.taxonomy import Classification
+from app.safety.validation import HostPolicy
 from app.storage.job_store import TERMINAL_STATUSES, CrawlJobState, FrontierEntry, JobStatus, JobStore
 from app.storage.job_store import _Expected as _Expected
-from app.validation import HostPolicy
 from tests._policy_factories import canonical, job_store
 from tests._result_builders import _canned_result
 
@@ -358,7 +358,7 @@ class ScriptedExecute:
 def _make_app(job_store):
     from app.api.dependencies import get_job_store, get_settings, get_shutdown_event
     from app.api.jobs_router import router as jobs_router
-    from app.settings import CrawlerSettings
+    from app.config.settings import CrawlerSettings
 
     app = FastAPI()
     app.include_router(jobs_router)
@@ -577,7 +577,7 @@ def drive_job(job_id, job_store, settings=None, shutdown_event=None):
     or wait on a *running* job have to hold the task to do it.
     """
     from app.api import job_runner
-    from app.settings import CrawlerSettings
+    from app.config.settings import CrawlerSettings
 
     return asyncio.ensure_future(
         job_runner._run_job(

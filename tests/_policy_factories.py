@@ -23,11 +23,11 @@ from typing import Any
 
 from app.admission.admission import admit_discovered_links
 from app.admission.policy import PolicyTier, read_policy
+from app.config.settings import CrawlerSettings
 from app.models.crawl_policy import CrawlPolicy
 from app.models.normalized_url import NormalizedUrl
-from app.settings import CrawlerSettings
+from app.safety.validation import HostPolicy
 from app.storage.job_store import JobStore
-from app.validation import HostPolicy
 from app.vocabulary.strategies import HTTP_DECLARED_CRAWLER
 
 UNRESTRICTED_HOST_POLICY = HostPolicy.unrestricted()

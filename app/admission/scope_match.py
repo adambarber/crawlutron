@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import logging
 
-from app.safe_regex import RegexTimeout, match_bounded
+from app.safety.safe_regex import RegexTimeout, match_bounded
 
 logger = logging.getLogger(__name__)
 

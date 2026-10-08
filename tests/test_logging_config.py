@@ -15,7 +15,7 @@ import logging
 
 import pytest
 
-from app.logging_config import _BC_OWNED_HANDLER, configure_service_logging
+from app.runtime.logging_config import _BC_OWNED_HANDLER, configure_service_logging
 
 
 @pytest.fixture

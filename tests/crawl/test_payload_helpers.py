@@ -7,8 +7,8 @@ from pydantic import ValidationError
 
 from app.admission.payload_helpers import payload_policy
 from app.admission.policy import PolicyTier
+from app.config.settings import CrawlerSettings
 from app.models.crawl_policy import CrawlPolicy
-from app.settings import CrawlerSettings
 
 
 def _normalized_policy(**policy: Any) -> CrawlPolicy:

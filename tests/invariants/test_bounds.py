@@ -84,7 +84,7 @@ EXTRACTION_TEXT_NORMALIZATION = Rule(
 # was actually enforced for whichever module happened to be edited. The shape is
 # the same as every other drift-prone twin here: a resource bound is a policy, and
 # a policy with two declarations is a policy that will disagree with itself. The
-# cap now lives once in app/bounded_io.py next to the stream caps that share its
+# cap now lives once in app/safety/bounded_io.py next to the stream caps that share its
 # purpose, and this rule keeps the second copy from reappearing.
 
 
@@ -125,9 +125,9 @@ HTML_INPUT_CAP = Rule(
     find=_local_html_input_caps,
     summary=(
         "declares a second HTML input byte cap; import MAX_HTML_INPUT_BYTES from "
-        "app/bounded_io.py and call truncate_html_input instead"
+        "app/safety/bounded_io.py and call truncate_html_input instead"
     ),
-    # app/bounded_io.py is exempt because it IS the chokepoint that owns the cap
+    # app/safety/bounded_io.py is exempt because it IS the chokepoint that owns the cap
     # alongside the stream caps.
     excludes=SANCTIONED | {"bounded_io.py"},
     bite=lambda: (
@@ -141,7 +141,7 @@ HTML_INPUT_CAP = Rule(
     ),
     clean=lambda: (
         # The sanctioned import-and-delegate shape.
-        "from app.bounded_io import MAX_HTML_INPUT_BYTES, truncate_html_input\n",
+        "from app.safety.bounded_io import MAX_HTML_INPUT_BYTES, truncate_html_input\n",
         "body = truncate_html_input(html)\n",
         # Unrelated byte budgets: the sink has its own, and it is not HTML input.
         "MAX_WEBHOOK_RESPONSE_BYTES = 10_485_760\n",

@@ -49,7 +49,7 @@ __all__ = ["ContentionFreeGate", "RecursiveRun", "drive_recursive_crawl", "make_
 class ContentionFreeGate:
     """A ``ResourceGate`` that reports a fixed scale and no memory or CPU use.
 
-    Stands in for ``app.resource_pressure.ResourceGate``, which reads the real
+    Stands in for ``app.runtime.resource_pressure.ResourceGate``, which reads the real
     cgroup and the real clock. What a dispatch test needs from a gate is a
     *known* scale, and that is a statement about the test rather than a
     reimplementation of the gate: a double that computed anything would be

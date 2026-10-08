@@ -31,7 +31,7 @@ from fastapi import HTTPException
 from httpx import ASGITransport, AsyncClient
 
 from app.api import job_runner
-from app.settings import CrawlerSettings
+from app.config.settings import CrawlerSettings
 from app.storage.job_store import TERMINAL_STATUSES, JobAccumulators, JobStatus, JobStore
 from app.storage.result_store import CrawlResultStore
 from app.storage.watch_store import WatchStore

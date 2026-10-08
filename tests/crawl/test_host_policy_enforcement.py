@@ -6,11 +6,11 @@ import pytest
 import app.transport.fetchers as fetchers_mod
 import app.transport.http_client_pool as pool_mod
 import app.transport.pinned_transport as pinned_mod
+from app.config.settings import CrawlerSettings
 from app.extraction.content import extract_post_fetch_discovery
 from app.models.normalized_url import NormalizedUrl
 from app.orchestration.engine import crawl_request
-from app.settings import CrawlerSettings
-from app.validation import HostPolicy
+from app.safety.validation import HostPolicy
 from tests._browser_doubles import _fake_browser
 from tests._fetcher_factories import make_html_fetcher, routed_fetcher
 from tests._policy_factories import canonical

@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 
-from app.settings import ENVIRONMENT_FIELD_ALIASES
+from app.config.settings import ENVIRONMENT_FIELD_ALIASES
 from scripts.ast_scopes import is_body_owner
 from tests.chokepoint_walks import (
     APP_ROOT,
@@ -281,7 +281,7 @@ def _settings_alias_declaration_constant(
     tree: ast.AST,
     node: ast.Constant,
 ) -> bool:
-    if _relative_app_path(path) != "app/settings.py":
+    if _relative_app_path(path) != "app/config/settings.py":
         return False
     parents = parent_map(tree)
     current: ast.AST = node
@@ -362,7 +362,7 @@ def _environment_reader_reference(
 
 
 def _settings_fields() -> set[str]:
-    tree = file_tree("app/settings.py")[1]
+    tree = file_tree("app/config/settings.py")[1]
     for node in class_defs(tree):
         if node.name == "CrawlerSettings":
             return {
@@ -408,7 +408,7 @@ def _production_browser_knob_references() -> set[str]:
                 )
                 if environment is not None:
                     references.add(environment)
-            if isinstance(node, ast.Attribute) and _relative_app_path(path) != "app/settings.py":
+            if isinstance(node, ast.Attribute) and _relative_app_path(path) != "app/config/settings.py":
                 environment = ENVIRONMENT_FIELD_ALIASES.get(node.attr)
                 if environment is not None:
                     references.add(environment)
@@ -750,9 +750,9 @@ def test_documented_knob_detector_bites():
     ) == ["browser_lazy_scroll_steps, log_file_path map to CRAWLUTRON_FAKE"]
     prop = Property(
         name="resolved-env-reader",
-        owner_module="app/settings.py",
+        owner_module="app/config/settings.py",
         owner_symbols=("from_mapping",),
-        definition_site="app/settings.py:from_mapping",
+        definition_site="app/config/settings.py:from_mapping",
         fingerprints=("environment_reader_reference",),
         reason="A documented environment name must resolve through a value reader.",
     )
@@ -761,7 +761,7 @@ def test_documented_knob_detector_bites():
         _resolved_env_reader_offenders,
         caught={
             "mapping lookup passes field name to reader": (
-                "from app.settings import ENVIRONMENT_FIELD_ALIASES\n"
+                "from app.config.settings import ENVIRONMENT_FIELD_ALIASES\n"
                 "def broken(source):\n"
                 "    return get_mapping_int(source, "
                 "ENVIRONMENT_FIELD_ALIASES['CRAWLUTRON_LAZY_SCROLL_STEPS'], 3)\n",
@@ -775,7 +775,7 @@ def test_documented_knob_detector_bites():
             ),
         },
         quiet=(
-            "from app.settings import ENVIRONMENT_FIELD_ALIASES\n"
+            "from app.config.settings import ENVIRONMENT_FIELD_ALIASES\n"
             "def resolved(source):\n"
             "    return get_mapping_int(source, ENVIRONMENT_FIELD_ALIASES['browser_lazy_scroll_steps'], 3)\n"
         ),

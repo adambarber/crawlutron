@@ -38,7 +38,7 @@ from app.models.crawl_policy import CrawlPolicy
 from app.models.crawl_policy_limits import CrawlPolicyLimits
 
 if TYPE_CHECKING:  # pragma: no cover - import cycle guard
-    from app.settings import CrawlerSettings
+    from app.config.settings import CrawlerSettings
 
 __all__ = [
     "DEFAULT_MAX_PAGES",

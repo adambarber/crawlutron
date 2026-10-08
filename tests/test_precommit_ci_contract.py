@@ -46,7 +46,7 @@ ERREXIT_SHELL = "bash -e {0}"
 # them must run the enforcement: the config that decides what is checked cannot
 # itself be the one change that skips the check.
 ENFORCEMENT_INPUTS = (
-    "app/settings.py",
+    "app/config/settings.py",
     "tests/test_jscpd_gate.py",
     # The duplication gate's own implementation. A commit that edits it changes
     # what every root is measured against, so it belongs beside the config that

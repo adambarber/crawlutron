@@ -5,8 +5,8 @@ time, bypassing DomainScheduler entirely (no global/per-domain concurrency,
 no rate limiting).
 """
 
+from app.config.settings import CrawlerSettings
 from app.orchestration.engine import crawl_request
-from app.settings import CrawlerSettings
 from tests._fetcher_factories import concurrent_fetcher
 
 

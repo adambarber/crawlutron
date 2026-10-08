@@ -22,7 +22,7 @@ from app.api.dependencies import (
     get_shutdown_event,
 )
 from app.api.policy_router import router as policy_router
-from app.settings import CrawlerSettings
+from app.config.settings import CrawlerSettings
 from tests._app_factory import service_app
 
 

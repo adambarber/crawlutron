@@ -16,7 +16,7 @@ from tests._policy_factories import BOOL_ENV_CASES
 
 
 def _settings(**overrides):
-    from app.settings import CrawlerSettings
+    from app.config.settings import CrawlerSettings
 
     return CrawlerSettings(**overrides)
 
@@ -96,7 +96,7 @@ def test_headless_decision_uses_shared_bool_parser(monkeypatch, raw, expected):
 
 def test_browser_knob_env_mapping():
     """Env vars flow through CrawlerSettings; garbage falls back to defaults."""
-    from app.settings import CrawlerSettings
+    from app.config.settings import CrawlerSettings
 
     mapped = CrawlerSettings.from_mapping(
         {
@@ -121,7 +121,7 @@ def test_browser_knob_env_mapping():
 
 
 def test_log_knob_env_mapping():
-    from app.settings import CrawlerSettings
+    from app.config.settings import CrawlerSettings
 
     log_file = f"{tempfile.gettempdir()}/crawler.jsonl"
     mapped = CrawlerSettings.from_mapping(

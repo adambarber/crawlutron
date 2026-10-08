@@ -2,7 +2,7 @@
 
 import tempfile
 
-from app.settings import CrawlerSettings
+from app.config.settings import CrawlerSettings
 from app.transport.browser import BrowserRenderer
 
 

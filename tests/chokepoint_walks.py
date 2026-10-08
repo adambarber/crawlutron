@@ -94,7 +94,7 @@ def _vocabulary_modules() -> tuple[ModuleType, ...]:
     )
 
 
-# app/safe_regex.py is the sanctioned regex wrapper (stdlib `re` for
+# app/safety/safe_regex.py is the sanctioned regex wrapper (stdlib `re` for
 # literals; the third-party `regex` engine for bounded execution). It owns
 # the banned primitives, so a full-tree walk excludes it. A test that must
 # also exempt its own chokepoint module passes `exclude=SANCTIONED | {"..."}`.

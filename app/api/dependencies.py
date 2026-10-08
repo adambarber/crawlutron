@@ -23,7 +23,7 @@ from typing import Annotated
 
 from fastapi import Depends, Request
 
-from app.settings import CrawlerSettings
+from app.config.settings import CrawlerSettings
 from app.storage.job_store import JobStore
 from app.storage.result_store import CrawlResultStore
 from app.storage.watch_store import WatchStore

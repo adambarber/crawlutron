@@ -21,7 +21,7 @@ at the default 2 is 2N of them.
 
 import pytest
 
-from app import resource_pressure as rp
+from app.runtime import resource_pressure as rp
 
 
 @pytest.fixture(autouse=True)

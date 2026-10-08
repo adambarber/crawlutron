@@ -16,10 +16,10 @@ import pytest
 
 import app.transport.content_cache as cc
 from app.models.normalized_url import NormalizedUrl
+from app.safety.validation import HostPolicy
 from app.transport.cache import HttpCache
 from app.transport.content_cache import ContentCache
 from app.transport.fetchers import default_http_fetcher
-from app.validation import HostPolicy
 from app.vocabulary.strategies import HTTP_DECLARED_CRAWLER
 from tests._fetcher_factories import (
     clocked_cache,

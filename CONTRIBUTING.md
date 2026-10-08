@@ -78,18 +78,18 @@ These require explicit review from a maintainer before merge:
 - `app/orchestration/robots.py` and `app/orchestration/robots_parse.py` — robots policy and
   rule cache; `parse_robots_rules` / `parse_robots_crawl_delay` must use
   `USER_AGENT_TOKEN`.
-- `app/validation.py` — egress filter for scraped JS-endpoint URLs
+- `app/safety/validation.py` — egress filter for scraped JS-endpoint URLs
   (`filter_js_endpoints`), resolved-address public check
   (`is_public_ip_value`).
-- `app/resource_pressure.py` and `app/transport/browser_pool.py` —
+- `app/runtime/resource_pressure.py` and `app/transport/browser_pool.py` —
   browser-pool sizing from cgroup memory limits; `BROWSER_RAM_FRACTION`.
 - `app/main.py` — middleware order, body-size limits, error envelopes.
 - `app/api/webhooks.py` — webhook delivery (`deliver_pinned_webhook`).
-- `app/env.py` — `parse_bool_env` and the operator environment reads,
+- `app/config/env.py` — `parse_bool_env` and the operator environment reads,
   including the private-target opt-in.
 - `app/extraction/output_formats.py` — CSV injection (`_csv_neutralize`),
   response serialization.
-- `app/settings.py` — defaults (paths, security knobs); changing a
+- `app/config/settings.py` — defaults (paths, security knobs); changing a
   default is a security decision.
 
 If your PR modifies any of these, please call it out in the description

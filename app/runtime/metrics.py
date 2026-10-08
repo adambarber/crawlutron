@@ -346,7 +346,7 @@ metrics = MetricsStore()
 def get_metrics() -> MetricsStore:
     """Return the metrics singleton.
 
-    Callers should use this accessor instead of ``from app.metrics import
+    Callers should use this accessor instead of ``from app.runtime.metrics import
     metrics`` so they always observe the current store -- including if a test
     or harness swaps the singleton -- rather than a name bound at import time.
     """

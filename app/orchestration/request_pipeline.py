@@ -11,7 +11,7 @@ from typing import Any, cast
 from app.admission.admission import gather_robots_decisions, normalize_sitemap_candidates
 from app.admission.policy import DiscoveryFlags, discovery_flags
 from app.admission.render_options import policy_wants_html
-from app.memory_pressure import read_memory_stats
+from app.config.settings import CrawlerSettings
 from app.models.crawl_extraction_method import CrawlExtractionMethod
 from app.models.crawl_policy import POLICY_SCHEMA_VERSION, CrawlPolicy
 from app.models.crawl_task import CrawlTask
@@ -31,7 +31,8 @@ from app.orchestration.result_helpers import (
 from app.orchestration.robots import FetchAndDecode
 from app.orchestration.scheduler import DomainScheduler
 from app.orchestration.strategy_chain import execute_crawl_chain
-from app.resource_pressure import (
+from app.runtime.memory_pressure import read_memory_stats
+from app.runtime.resource_pressure import (
     ResourceGate,
     TaskRamBudget,
     WeightedAdmission,
@@ -39,8 +40,7 @@ from app.resource_pressure import (
     derive_browser_pool_size,
     doc_worker_count,
 )
-from app.safe_regex import BoundedPattern
-from app.settings import CrawlerSettings
+from app.safety.safe_regex import BoundedPattern
 from app.storage.ids import new_request_id
 from app.transport.cache import HttpCache
 from app.transport.content_cache import ContentCache

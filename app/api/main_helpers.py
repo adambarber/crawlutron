@@ -14,9 +14,9 @@ from fastapi import HTTPException
 
 from app.api.exceptions import validation_http_error
 from app.health.readiness import READINESS_STATE as readiness_state
-from app.metrics import get_metrics
 from app.models.job_status_response import JobStatusResponse
 from app.models.result_record import ProducerEnvelope
+from app.runtime.metrics import get_metrics
 from app.storage.job_store import JobStatusView
 
 

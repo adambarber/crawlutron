@@ -371,7 +371,7 @@ class TestAsyncCrawlRunnerSavesOffTheEventLoop:
 
     async def test_run_async_crawl_save_does_not_block_the_event_loop(self, monkeypatch, tmp_path) -> None:
         from app.api.async_crawl_runner import run_async_crawl
-        from app.settings import CrawlerSettings
+        from app.config.settings import CrawlerSettings
         from app.storage.result_store import CrawlResultStore
         from tests._job_harnesses import make_job_store
 

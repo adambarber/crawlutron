@@ -19,11 +19,11 @@ import time
 from collections.abc import AsyncIterator, Awaitable, Callable
 from typing import Any, Protocol
 
-from app.bounded_ttl import BoundedTTLCache
 from app.models.host_policy import allow_private_targets
 from app.models.http_fetch_result import HttpFetchResult
 from app.models.normalized_url import NormalizedUrl
-from app.validation import is_public_ip_value
+from app.safety.bounded_ttl import BoundedTTLCache
+from app.safety.validation import is_public_ip_value
 
 
 def _is_private_or_loopback_ip(ip: str) -> bool:
@@ -36,7 +36,7 @@ def _is_private_or_loopback_ip(ip: str) -> bool:
 # deliberately short so DNS changes (and the rebinding window for SSRF) stay
 # bounded; the SSRF path re-validates resolved IPs on every fresh resolution.
 #
-# One locked, bounded, TTL'd store (app.bounded_ttl): the whole-cache clear
+# One locked, bounded, TTL'd store (app.safety.bounded_ttl): the whole-cache clear
 # beyond the cap and the manual lock both lived here before, and both
 # produced races. LRU eviction inside put() replaces the soft-cap clear.
 _DNS_TTL = 60.0

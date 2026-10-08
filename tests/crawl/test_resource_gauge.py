@@ -2,9 +2,9 @@
 
 import pytest
 
-from app.cgroup_sense import _read_int, reset_process_state
-from app.memory_pressure import MemoryGate, ResourceGauge
-from app.resource_pressure import LoopLagProbe, ResourceGate
+from app.runtime.cgroup_sense import _read_int, reset_process_state
+from app.runtime.memory_pressure import MemoryGate, ResourceGauge
+from app.runtime.resource_pressure import LoopLagProbe, ResourceGate
 
 
 def _sensor(sequence: list[float]):
@@ -91,7 +91,7 @@ def test_leading_memory_signal_anticipates_climb(tmp_path, monkeypatch):
     idx = [0]
 
     def _fake_stats(*, cgroup_root):
-        from app.memory_pressure import MemoryStats
+        from app.runtime.memory_pressure import MemoryStats
 
         # ``int`` because the field is bytes: a fraction here was a fraction of a
         # byte, and the ratio the gauge computes is the same either way -- so the
@@ -100,7 +100,7 @@ def test_leading_memory_signal_anticipates_climb(tmp_path, monkeypatch):
         idx[0] += 1
         return MemoryStats(total_bytes=100, used_bytes=int(v * 100))
 
-    monkeypatch.setattr("app.memory_pressure.read_memory_stats", _fake_stats)
+    monkeypatch.setattr("app.runtime.memory_pressure.read_memory_stats", _fake_stats)
     reset_process_state()
 
     ratios = [gate.leading_usage_ratio() for _ in range(len(values))]

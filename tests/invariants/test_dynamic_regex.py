@@ -58,10 +58,10 @@ _dynamic_pattern_re_calls = _re_dynamic_pattern_offenders(_RE_DYNAMIC_METHODS)
 
 
 def test_no_dynamic_pattern_re_calls():
-    """re.* with a non-literal pattern must go through app.safe_regex."""
+    """re.* with a non-literal pattern must go through app.safety.safe_regex."""
     assert_trees_clean(
         _dynamic_pattern_re_calls,
-        "Use app.safe_regex.compile_untrusted/match_bounded",
+        "Use app.safety.safe_regex.compile_untrusted/match_bounded",
         trees=app_trees(),
     )
 
@@ -78,13 +78,13 @@ def test_no_direct_regex_engine_import():
             elif isinstance(node, ast.ImportFrom):
                 if node.module == "regex":
                     offenders.append(offender(path, node.lineno))
-    assert not offenders, "Only app.safe_regex may import the regex engine: " + ", ".join(offenders)
+    assert not offenders, "Only app.safety.safe_regex may import the regex engine: " + ", ".join(offenders)
 
 
 def test_no_bare_re_compile_on_nonliteral():
-    """Non-literal re.compile must go through app.safe_regex.compile_untrusted."""
+    """Non-literal re.compile must go through app.safety.safe_regex.compile_untrusted."""
     assert_trees_clean(
         _re_dynamic_pattern_offenders(frozenset({"compile"})),
-        "Use app.safe_regex.compile_untrusted for non-literal patterns",
+        "Use app.safety.safe_regex.compile_untrusted for non-literal patterns",
         trees=app_trees(),
     )

@@ -31,8 +31,8 @@ logger = logging.getLogger(__name__)
 
 
 def _json_default(obj):
-    """JobStore save fallback -- now the shared app.json_safe chokepoint."""
-    from app.json_safe import json_default
+    """JobStore save fallback -- now the shared app.safety.json_safe chokepoint."""
+    from app.safety.json_safe import json_default
 
     return json_default(obj)
 

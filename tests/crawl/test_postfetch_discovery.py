@@ -14,7 +14,7 @@ from app.admission.policy import read_policy
 from app.extraction.content import extract_post_fetch_discovery
 from app.models.crawl_policy import CrawlPolicy
 from app.models.normalized_url import NormalizedUrl
-from app.validation import HostPolicy
+from app.safety.validation import HostPolicy
 from tests._assertions import install_to_thread_spy
 from tests._fetcher_factories import invoke_browser_strategy, invoke_http_strategy, make_fetch
 from tests._policy_factories import canonical, http_strategy_policy

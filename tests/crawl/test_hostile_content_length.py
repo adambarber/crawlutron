@@ -8,9 +8,9 @@ fetch and turn one crafted response into that URL's failure.
 """
 
 from app.models.normalized_url import NormalizedUrl
+from app.safety.validation import HostPolicy
 from app.transport.fetchers import default_http_fetcher
 from app.transport.pinned_transport import _declared_length_exceeds
-from app.validation import HostPolicy
 from tests._transport_doubles import MockResponse, patch_http_fetcher_transport
 
 

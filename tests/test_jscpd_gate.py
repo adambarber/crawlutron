@@ -1026,7 +1026,7 @@ def test_a_fragment_ending_inside_an_open_import_is_still_a_declaration() -> Non
     fragment = """from app.storage.job_store import FrontierEntry, JobStatus
 from app.admission.policy import read_policy
 from app.models.crawl_policy import CrawlPolicy
-from app.settings import CrawlerSettings
+from app.config.settings import CrawlerSettings
 from tests._job_harnesses import (
 """
     assert gate._is_dependency_declaration(fragment)

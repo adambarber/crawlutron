@@ -11,16 +11,16 @@ from app.admission.payload_helpers import payload_policy
 from app.admission.policy import PolicyTier
 from app.admission.recursive_admission import _batch_is_http_heavy
 from app.health.readiness import ReadinessState
-from app.memory_pressure import (
+from app.models.host_policy import HostPolicy
+from app.models.normalized_url import NormalizedUrl
+from app.runtime.memory_pressure import (
     MemoryGate,
     MemoryStats,
     batch_scale,
     read_memory_stats,
 )
-from app.metrics import get_metrics
-from app.models.host_policy import HostPolicy
-from app.models.normalized_url import NormalizedUrl
-from app.resource_pressure import (
+from app.runtime.metrics import get_metrics
+from app.runtime.resource_pressure import (
     _BROWSER_TASK_RAM_BYTES,
     _DOC_TASK_RAM_BYTES,
     _HTTP_TASK_RAM_BYTES,
@@ -165,9 +165,9 @@ def _cpu_gate(monkeypatch, *, target=0.90):
     production's.
     """
     clock, usage = [0.0], [0.0]
-    monkeypatch.setattr("app.resource_pressure.time.monotonic", lambda: clock[0])
-    monkeypatch.setattr("app.resource_pressure.read_cpu_usage_seconds", lambda root="": usage[0])
-    monkeypatch.setattr("app.resource_pressure.read_cpu_quota", lambda root="": 2.0)
+    monkeypatch.setattr("app.runtime.resource_pressure.time.monotonic", lambda: clock[0])
+    monkeypatch.setattr("app.runtime.resource_pressure.read_cpu_usage_seconds", lambda root="": usage[0])
+    monkeypatch.setattr("app.runtime.resource_pressure.read_cpu_quota", lambda root="": 2.0)
     return CpuGate(target=target), clock, usage
 
 
@@ -212,8 +212,8 @@ _GATE_KIND_IDS = [kind for kind, _ in GATE_KINDS]
 async def test_cpu_gate_unbounded_is_noop(monkeypatch):
     """No cgroup quota and no manual budget -> never throttles."""
     gate = CpuGate(target=0.90)
-    monkeypatch.setattr("app.resource_pressure.read_cpu_quota", lambda root="": None)
-    monkeypatch.setattr("app.resource_pressure.read_cpu_usage_seconds", lambda root="": 999.0)
+    monkeypatch.setattr("app.runtime.resource_pressure.read_cpu_quota", lambda root="": None)
+    monkeypatch.setattr("app.runtime.resource_pressure.read_cpu_usage_seconds", lambda root="": 999.0)
     assert gate.batch_scale_factor() == 1.0
     sleeps = recorder(monkeypatch)
     await gate.wait_while_saturated(max_wait_seconds=10)
@@ -348,7 +348,7 @@ def test_cpu_gate_is_warm_only_after_sample(monkeypatch):
 
     # Feed a real usage reading so the gate can take its first sample.
     monkeypatch.setattr(
-        "app.resource_pressure.read_cpu_usage_seconds",
+        "app.runtime.resource_pressure.read_cpu_usage_seconds",
         lambda root="/sys/fs/cgroup": 1.0,
     )
     gate.cpu_ratio()  # first sample establishes the baseline
@@ -372,7 +372,7 @@ def test_read_memory_stats_v2_max_string_falls_back_to_total_ram(tmp_path, monke
     cg.mkdir()
     (cg / "memory.max").write_text("max\n")
     (cg / "memory.current").write_text("104857600\n")
-    monkeypatch.setattr("app.memory_pressure._total_system_ram", lambda: 8 * 1024**3)
+    monkeypatch.setattr("app.runtime.memory_pressure._total_system_ram", lambda: 8 * 1024**3)
     stats = read_memory_stats(cgroup_root=str(cg))
     assert stats.total_bytes == 8 * 1024**3
 
@@ -388,7 +388,7 @@ def test_read_memory_stats_v1(tmp_path):
 
 
 def test_read_memory_stats_missing_files_falls_back_to_total_ram(tmp_path, monkeypatch):
-    monkeypatch.setattr("app.memory_pressure._total_system_ram", lambda: 4 * 1024**3)
+    monkeypatch.setattr("app.runtime.memory_pressure._total_system_ram", lambda: 4 * 1024**3)
     stats = read_memory_stats(cgroup_root=str(tmp_path / "does-not-exist"))
     assert stats.total_bytes == 4 * 1024**3
     assert stats.used_bytes == 0
@@ -448,7 +448,7 @@ def test_direct_reads_do_not_perturb_slope(monkeypatch):
     """The usage sensor is read by readiness/metrics/waits between dispatch
     scale computations. Those reads must not mutate the slope series, or a
     single stray sample invents a climb that is not there."""
-    import app.memory_pressure as mp
+    import app.runtime.memory_pressure as mp
 
     ratios = iter([0.5, 0.5, 0.1, 0.5, 0.5])
     ticks = iter([0.0, 10.0, 20.0, 30.0, 40.0])

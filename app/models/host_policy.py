@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from functools import lru_cache
 from urllib.parse import urlparse
 
-from app.env import parse_bool_env
+from app.config.env import parse_bool_env
 from app.models.address_class import AddressClass, classify
 
 

@@ -30,10 +30,10 @@ from app.api.response_shaping import (
     abuild_unified_crawl_response,
     build_unified_result,
 )
-from app.env import get_env_int
-from app.metrics import get_metrics
+from app.config.env import get_env_int
+from app.config.settings import CrawlerSettings
 from app.models.host_policy import HostPolicy
-from app.settings import CrawlerSettings
+from app.runtime.metrics import get_metrics
 from app.storage.job_store import TERMINAL_STATUSES, JobStatus
 
 logger = logging.getLogger(__name__)

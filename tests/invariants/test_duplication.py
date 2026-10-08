@@ -695,7 +695,7 @@ JS_ENDPOINTS_FILTER_IS_NOT_REINLINED = Rule(
         "def f(endpoints, base):\n    return filter_js_endpoints(endpoints, resolve_against=base)\n",
         # The very same chokepoint comprehension stays clean at its own path:
         # validation.py is where the filter legitimately lives.
-        Silent(_JS_ENDPOINTS_VALIDATION_SOURCE, at=REPO_ROOT / "app" / "validation.py"),
+        Silent(_JS_ENDPOINTS_VALIDATION_SOURCE, at=REPO_ROOT / "app" / "safety" / "validation.py"),
     ),
 )
 

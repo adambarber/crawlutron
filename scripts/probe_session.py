@@ -22,7 +22,7 @@ from pathlib import Path
 # works whether it is invoked from a container, a workstation, or a CI
 # checkout. The previous version of this script also injected the parent
 # monorepo's ``shared/python`` directory; the equivalent logging helper now
-# lives at ``app.logging_config`` and is reachable from the repo root.
+# lives at ``app.runtime.logging_config`` and is reachable from the repo root.
 _HERE = Path(__file__).resolve().parent
 _REPO_ROOT = _HERE.parent  # the repository root, which is now the service root
 

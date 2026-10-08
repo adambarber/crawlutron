@@ -11,7 +11,7 @@ from unittest import mock
 
 import pytest
 
-from app.atomic_write import atomic_write_text
+from app.safety.atomic_write import atomic_write_text
 
 
 class TestAtomicWrite:

@@ -39,7 +39,7 @@ from typing import TYPE_CHECKING, Any, TypeVar
 
 from camoufox.async_api import AsyncCamoufox
 
-from app.env import get_env_int, parse_bool_value
+from app.config.env import get_env_int, parse_bool_value
 from app.vocabulary.browser import BROWSER_ACTION_TYPES
 from app.vocabulary.limits import (
     DEFAULT_COOKIE_HARVEST_TIMEOUT_SECONDS,
@@ -49,7 +49,7 @@ from app.vocabulary.limits import (
 )
 
 if TYPE_CHECKING:
-    from app.settings import CrawlerSettings
+    from app.config.settings import CrawlerSettings
 
 logger = logging.getLogger(__name__)
 

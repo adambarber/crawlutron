@@ -5,12 +5,12 @@ from typing import Any
 from fastapi import APIRouter, Depends
 
 from app.api.dependencies import get_settings
+from app.config.settings import CrawlerSettings
 from app.models.capabilities_response import CapabilitiesResponse
 from app.models.crawl_extraction_method import CrawlExtractionMethod
 from app.models.crawl_strategy import CrawlStrategy
 from app.models.service_identity import SERVICE_IDENTITY
 from app.search import active_search_provider_name, configured_search_providers
-from app.settings import CrawlerSettings
 from app.vocabulary.limits import (
     DEFAULT_CHALLENGE_WAIT_SECONDS,
     DEFAULT_MAX_DISCOVERED_LINKS,

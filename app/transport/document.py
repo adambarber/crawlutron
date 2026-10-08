@@ -93,8 +93,8 @@ async def _afetch_document_bytes(
     target nobody checked. The read is capped so a hostile infinite body cannot
     buffer into memory before extraction sees it.
     """
-    from app.bounded_io import read_capped_async
     from app.extraction.content import EXTRACTION_DOC_MAX_INPUT_BYTES
+    from app.safety.bounded_io import read_capped_async
     from app.transport import http_client_pool, pinned_transport
 
     await http_client_pool._drain_pending_client_closes()

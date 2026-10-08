@@ -27,7 +27,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from app.atomic_write import atomic_write_text
+from app.safety.atomic_write import atomic_write_text
 from app.vocabulary.limits import (
     CONTENT_CACHE_MAX_ENTRY_BYTES,
     CONTENT_CACHE_MAX_TOTAL_BYTES,

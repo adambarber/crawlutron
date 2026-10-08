@@ -8,11 +8,11 @@ from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
-from app.metrics import get_metrics
 from app.models.readiness_response import ReadinessResponse
+from app.runtime.metrics import get_metrics
 
 # Self-managed saturation thresholds. These mirror the resource-gate ride
-# targets (app.memory_pressure._DEFAULT_TARGET / app.resource_pressure._DEFAULT_CPU_TARGET).
+# targets (app.runtime.memory_pressure._DEFAULT_TARGET / app.runtime.resource_pressure._DEFAULT_CPU_TARGET).
 # The service reports saturated (HTTP 503) when its own guard is riding its
 # ceiling, instead of a removed external concurrency knob.
 _MEMORY_SATURATION = 0.92

@@ -39,7 +39,7 @@ def test_nested_quantifiers_compile_and_match_bounded():
     # classic catastrophic shapes now COMPILE (valid syntax) and the safety
     # guarantee moved to bounded execution: a hostile match raises
     # RegexTimeout instead of hanging the crawl loop.
-    from app.safe_regex import RegexTimeout, match_bounded
+    from app.safety.safe_regex import RegexTimeout, match_bounded
 
     for evil in ["(a+)+$", "(a|a)+$", "(a*)*", "(?:a+)+b", "(a+)+c"]:
         pat = compile_scope_pattern(evil)

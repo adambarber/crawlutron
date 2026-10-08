@@ -3,8 +3,8 @@ from __future__ import annotations
 import re
 from typing import Any, Final
 
-from app.bounded_io import truncate_html_input
 from app.models.taxonomy import Classification, as_classification
+from app.safety.bounded_io import truncate_html_input
 
 # Declared as Final[Classification] rather than returned as bare literals. A
 # string literal in return position widens to `str`, which is how a function
@@ -266,7 +266,7 @@ _TAGS_RE = re.compile(r"<[^>]+>")
 # Cap the input size for the noise-stripping scan. The scanner is linear, so
 # the bound is on resources (scan + output size), not correctness: anything
 # above a few MB is overwhelmingly likely to be a hostile payload. The value
-# itself lives in app.bounded_io next to the stream caps it shares a purpose
+# itself lives in app.safety.bounded_io next to the stream caps it shares a purpose
 # with; this site keeps only the reason THIS scan needs one.
 
 

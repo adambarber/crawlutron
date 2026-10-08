@@ -11,10 +11,10 @@ import time
 from app.api.crawl_executor import execute_crawl
 from app.api.main_helpers import record_crawl_completion, request_gate
 from app.api.site_map import build_site_map
+from app.config.settings import CrawlerSettings
 from app.models.discovery_config import DiscoveryConfig
 from app.models.host_policy import HostPolicy
 from app.models.map_request import MapRequest
-from app.settings import CrawlerSettings
 from app.vocabulary.limits import MAX_DISCOVERED_LINKS
 
 logger = logging.getLogger(__name__)

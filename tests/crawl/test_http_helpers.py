@@ -10,6 +10,7 @@ import pytest
 from app.admission.payload_helpers import _payload_urls
 from app.admission.policy import PolicyTier, read_policy
 from app.api.render import _render_options
+from app.config.settings import CrawlerSettings
 from app.extraction.content import (
     _FrameCollector,
     _walkable,
@@ -21,7 +22,7 @@ from app.orchestration.engine import (
     crawl_request,
     payload_policy,
 )
-from app.settings import CrawlerSettings
+from app.safety.validation import HostPolicy
 from app.transport.cache import HttpCache
 from app.transport.fetch_policy import (
     fetch_with_retries,
@@ -35,7 +36,6 @@ from app.transport.request_profile import (
     _select_fingerprint,
     headers_for_strategy,
 )
-from app.validation import HostPolicy
 from app.vocabulary.extraction import (
     EXTRACTION_DOCUMENT,
     EXTRACTION_METHOD_BINARY_NO_TEXT,

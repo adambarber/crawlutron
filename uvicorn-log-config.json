@@ -3,12 +3,12 @@
   "disable_existing_loggers": false,
   "formatters": {
     "json": {
-      "()": "app.logging_config._JsonFormatter"
+      "()": "app.runtime.logging_config._JsonFormatter"
     }
   },
   "filters": {
     "service": {
-      "()": "app.logging_config._ServiceFieldFilter",
+      "()": "app.runtime.logging_config._ServiceFieldFilter",
       "service_name": "crawlutron"
     }
   },

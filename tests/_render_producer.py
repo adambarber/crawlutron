@@ -19,7 +19,7 @@ async def render_stub_request(payload: dict, *, worker=None) -> dict:
     jobs it was handed.
     """
     from app.api.render import render_request
-    from app.settings import CrawlerSettings
+    from app.config.settings import CrawlerSettings
 
     return await render_request(
         payload,

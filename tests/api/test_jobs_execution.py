@@ -23,8 +23,8 @@ from httpx import ASGITransport, AsyncClient
 from app.admission.policy import read_policy
 from app.api import dependencies, job_runner, jobs_router
 from app.api.dependencies import get_job_store, get_settings, get_shutdown_event
+from app.config.settings import CrawlerSettings
 from app.models.crawl_policy import CrawlPolicy
-from app.settings import CrawlerSettings
 from app.storage.job_store import FrontierEntry, JobStatus
 from tests._job_harnesses import (
     ScriptedExecute,
@@ -193,7 +193,7 @@ class TestCrashRecovery:
     ):
 
         from app.api.dependencies import get_settings
-        from app.settings import CrawlerSettings
+        from app.config.settings import CrawlerSettings
 
         app = _make_app(job_store)
         app.dependency_overrides[get_settings] = lambda: CrawlerSettings.from_mapping(
@@ -616,7 +616,7 @@ class TestRunnerLifecycle:
     async def test_recover_and_start_resumes_pending_jobs(self, job_store):
         import asyncio as _asyncio
 
-        from app.settings import CrawlerSettings as _CS
+        from app.config.settings import CrawlerSettings as _CS
 
         hang = _asyncio.Event()
         job_runner.install_execute_crawl(ScriptedExecute(results=[_canned_result(GRAPH_ROOT)], hang=hang))

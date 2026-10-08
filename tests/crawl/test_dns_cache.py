@@ -72,7 +72,7 @@ def test_ssrf_check_uses_cache_and_still_blocks_private(monkeypatch):
 
 class TestDnsCacheLocking:
     def test_dns_cache_lock_is_present_and_used(self):
-        from app.bounded_ttl import BoundedTTLCache
+        from app.safety.bounded_ttl import BoundedTTLCache
         from app.transport import pinned_transport as http_mod
 
         # The chokepoint moved the lock INSIDE the cache: the module no longer

@@ -12,8 +12,8 @@ from fastapi import HTTPException
 
 from app.api.exceptions import error_envelope_from_detail
 from app.api.render_endpoint import render
+from app.config.settings import CrawlerSettings
 from app.models.render_request import RenderRequest
-from app.settings import CrawlerSettings
 from tests._browser_doubles import FakeBrowserPool, owned_browser_pool
 
 

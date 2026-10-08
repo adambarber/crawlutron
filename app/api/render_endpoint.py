@@ -16,9 +16,9 @@ from app.api.exceptions import browser_pool_unavailable, http_error
 from app.api.main_helpers import request_gate
 from app.api.render import render_request
 from app.api.response_shaping import arender_response_from_result
+from app.config.settings import CrawlerSettings
 from app.models.render_request import RenderRequest
 from app.models.unified_crawl_response import UnifiedCrawlResponse
-from app.settings import CrawlerSettings
 from app.transport.browser_pool import (
     BrowserPoolExhaustedError,
     PooledBrowserWorker,

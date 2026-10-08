@@ -12,17 +12,17 @@ import time
 from dataclasses import replace
 from typing import Any
 
+from app.config.settings import CrawlerSettings
 from app.models.browser_pool_exhausted import BrowserPoolExhaustedError
 from app.models.crawl_result import CrawlResult
 from app.models.taxonomy import CrawlStrategyName
 from app.orchestration.result_helpers import crawl_result_from_exception
-from app.resource_pressure import (
+from app.runtime.resource_pressure import (
     BROWSER_RAM_FRACTION,
 )
-from app.resource_pressure import (
+from app.runtime.resource_pressure import (
     derive_browser_pool_size as _derive_browser_pool_size,
 )
-from app.settings import CrawlerSettings
 from app.transport.browser import BrowserRenderer
 from app.vocabulary.strategies import BROWSER_HEADED_WARMED, BROWSER_HEADLESS
 
@@ -38,7 +38,7 @@ BROWSER_POOL_ACQUIRE_TIMEOUT_SECONDS: float = 60.0
 # Each pooled renderer owns one persistent Camoufox process (~600-900 MiB RSS once
 # WebExtensions/Web Content are counted). Because uvicorn runs one pool PER WORKER
 # process, the only way to keep the TOTAL browser count bounded is a single worker
-# Browser-pool RAM-budget sizing now lives in app.resource_pressure.derive_browser_pool_size
+# Browser-pool RAM-budget sizing now lives in app.runtime.resource_pressure.derive_browser_pool_size
 # (single source of truth shared with the httpx connection pool and the weighted admission).
 
 

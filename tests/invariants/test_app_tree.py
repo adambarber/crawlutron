@@ -524,10 +524,10 @@ def _own_package(module: str) -> str:
     """The package a dotted module name belongs to.
 
     ``app.transport.http`` -> ``app.transport``; a top-level module
-    like ``app.metrics`` -> ``app``. A module name is never its own package, so a
+    like ``app.runtime.metrics`` -> ``app``. A module name is never its own package, so a
     leaf module and its siblings share one boundary.
 
-    That last clause is why ``app.cgroup_sense`` and ``app.memory_pressure`` are
+    That last clause is why ``app.runtime.cgroup_sense`` and ``app.runtime.memory_pressure`` are
     one package rather than two. Reading a top-level module as its own package
     would exempt every one of the top-level modules from each other, and those
     are exactly the reaches hardest to see -- there is no directory name to
@@ -619,7 +619,7 @@ PRIVATE_NAME_LEAKS_PACKAGE = Rule(
         # halfway through the migration and only a rename exposed it. A synthetic
         # name cannot be promoted, so the proof outlives the tree it describes.
         "from app.transport.http import _unpromoted_strategy_result\n"
-        "from app.validation import _unpromoted_private_target_gate\n",
+        "from app.safety.validation import _unpromoted_private_target_gate\n",
         marker="which is outside the",
         count=2,
         at=_RENDER_PROOF_PATH,

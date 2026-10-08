@@ -1,6 +1,6 @@
 """Resource-adaptive admission control: every bounded resource, not just memory.
 
-:class:`app.memory_pressure.MemoryGate` senses the memory ceiling and throttles
+:class:`app.runtime.memory_pressure.MemoryGate` senses the memory ceiling and throttles
 crawl-batch dispatch against it, with no operator knob. This module extends
 that to the other bounded resources the service runs under: the cgroup CPU
 quota, which the kernel would otherwise throttle from behind the crawler's back,
@@ -21,15 +21,15 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
-from app.cgroup_sense import _read_int, _read_text
-from app.env import get_env_float, get_env_int, parse_bool_env
-from app.memory_pressure import (
+from app.config.env import get_env_float, get_env_int, parse_bool_env
+from app.runtime.cgroup_sense import _read_int, _read_text
+from app.runtime.memory_pressure import (
     MemoryGate,
     ResourceGauge,
     read_memory_stats,
 )
 
-# Self-managed, no operator knob (mirrors app/memory_pressure.py): the gate
+# Self-managed, no operator knob (mirrors app/runtime/memory_pressure.py): the gate
 # rides at TARGET and pauses at HARD against the cgroup quota it discovers.
 _DEFAULT_CPU_TARGET = 0.90
 _DEFAULT_CPU_HARD = 0.95

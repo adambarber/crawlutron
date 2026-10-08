@@ -1,5 +1,6 @@
 """Capabilities, agent-hints and well-known discovery payload contracts."""
 
+from app.config.settings import CrawlerSettings
 from app.discovery.agent_hints import (
     EXAMPLE_POLICIES,
     STRATEGY_DESCRIPTIONS,
@@ -8,7 +9,6 @@ from app.discovery.agent_hints import (
 )
 from app.discovery.capabilities import capabilities_payload, create_capabilities_router
 from app.discovery.well_known import create_well_known_router, discovery_payload
-from app.settings import CrawlerSettings
 
 
 class TestCapabilitiesPayload:

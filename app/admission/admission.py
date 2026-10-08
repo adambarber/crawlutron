@@ -18,7 +18,7 @@ from app.models.normalized_url import NormalizedUrl, admit_or_none
 from app.orchestration.fetch_helpers import fetch_sitemap_urls
 from app.orchestration.robots import FetchAndDecode, load_robots_rules, robots_allows
 from app.orchestration.scheduler import DomainScheduler
-from app.safe_regex import BoundedPattern, UnsafePattern, compile_untrusted
+from app.safety.safe_regex import BoundedPattern, UnsafePattern, compile_untrusted
 from app.storage.job_store import FrontierEntry, job_max_pages
 from app.transport.fetchers import default_http_fetcher
 from app.vocabulary.hosts import is_analytics_host, is_document_url
@@ -64,7 +64,7 @@ def compile_scope_pattern(scope_regex: Any) -> BoundedPattern | None:
     Defense in depth: static shape rejection is bypassable by
     construction -- the depth-3 nested-quantifier ``(((a|aa)))*`` defeated
     every enumerated heuristic -- so the durable guarantee is BOUNDED
-    EXECUTION via :mod:`app.safe_regex`: every match runs on the ``regex``
+    EXECUTION via :mod:`app.safety.safe_regex`: every match runs on the ``regex``
     engine with a wall-clock timeout, raising RegexTimeout instead of hanging
     the crawl loop. The cheap heuristics there remain as an early filter for
     obvious footguns; they are not load-bearing.

@@ -9,8 +9,7 @@ from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING
 
 from app.admission.policy import PolicyTier
-from app.env import get_env_float, get_env_int
-from app.logging_config import configure_service_logging
+from app.config.env import get_env_float, get_env_int
 
 # Standalone JSON-line logging configuration, wired once here so every
 # entry point logs the same way. Integration deployments that want richer
@@ -18,9 +17,10 @@ from app.logging_config import configure_service_logging
 # integration layer.
 from app.models.address_class import is_loopback_bind
 from app.models.host_policy import HostPolicy
+from app.runtime.logging_config import configure_service_logging
 from app.vocabulary.identity import SERVICE_ID, SERVICE_VERSION
 
-from .settings import CrawlerSettings
+from .config.settings import CrawlerSettings
 from .storage.job_store import JobStore
 from .storage.result_store import CrawlResultStore
 from .storage.watch_store import WatchStore
@@ -226,7 +226,7 @@ if FastAPI is not None:
         # summing them would report a utilization no process experiences.
         from app.storage.coordination_counters import CoordinationCounters
 
-        from .metrics import get_metrics
+        from .runtime.metrics import get_metrics
 
         get_metrics().bind_counters(CoordinationCounters(DATABASE_PATH))
 

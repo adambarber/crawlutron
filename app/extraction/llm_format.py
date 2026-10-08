@@ -8,9 +8,9 @@ import re
 from html import unescape
 from typing import Any, cast, get_args, get_type_hints
 
-from app.bounded_io import truncate_html_input
 from app.models.normalized_url import NormalizedUrl
 from app.models.page_metadata import PageMetadata
+from app.safety.bounded_io import truncate_html_input
 
 #: Every field's declared type, read from the record rather than transcribed, so
 #: a field added there is admitted here without a second edit. A bare ``str`` has
@@ -57,7 +57,7 @@ def extract_carried_metadata(value: Any) -> PageMetadata:
 # Cap the HTML passed to lxml parsing for metadata extraction. lxml builds a
 # full DOM tree; a 50 MB body can balloon to ~200 MB+ of RAM during parsing.
 # Anything above a few MB is almost certainly above the practical meta-tag
-# density and is rejected. The value lives in app.bounded_io; this site keeps
+# density and is rejected. The value lives in app.safety.bounded_io; this site keeps
 # the reason THIS parse needs one.
 
 

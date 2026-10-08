@@ -67,7 +67,7 @@ def _admission_budget_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
 
 def _task_ram_budget():
     """The budget dataclass, imported late so the module docstring stays the first prose."""
-    from app.resource_pressure import TaskRamBudget
+    from app.runtime.resource_pressure import TaskRamBudget
 
     return TaskRamBudget
 
@@ -84,7 +84,7 @@ def _admission_weights_are_known() -> None:
 
 
 ADMISSION_WEIGHTS_ARE_KEYWORDS = (
-    "from app.resource_pressure import build_admission_policy\n"
+    "from app.runtime.resource_pressure import build_admission_policy\n"
     "def build(limit, pool_size):\n"
     "    return build_admission_policy(limit, pool_size=pool_size,"
     " max_concurrent_pages=3, doc_workers=2)\n"
@@ -100,15 +100,15 @@ ADMISSION_BUDGET_ARRIVES_AS_A_BUDGET = Rule(
     premise=_admission_weights_are_known,
     bite=lambda: Bites(ADMISSION_WEIGHTS_ARE_KEYWORDS, marker="doc_workers=2"),
     clean=lambda: (
-        "from app.resource_pressure import TaskRamBudget, build_admission_policy\n"
+        "from app.runtime.resource_pressure import TaskRamBudget, build_admission_policy\n"
         "def build(limit, pool_size):\n"
         "    return build_admission_policy(limit, pool_size=pool_size,"
         " max_concurrent_pages=3, budget=TaskRamBudget(doc_workers=2))\n",
         # The computation itself is not this guard's subject.
-        "from app.resource_pressure import max_http_concurrency_for\n"
+        "from app.runtime.resource_pressure import max_http_concurrency_for\n"
         "def ceiling(limit, pool_size):\n"
         "    return max_http_concurrency_for(limit, pool_size, doc_workers=2)\n",
-        "from app.resource_pressure import build_admission_policy\n"
+        "from app.runtime.resource_pressure import build_admission_policy\n"
         "def build(limit, pool_size):\n"
         "    return build_admission_policy(limit, pool_size=pool_size, max_concurrent_pages=3)\n",
     ),

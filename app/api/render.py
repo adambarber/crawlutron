@@ -13,6 +13,7 @@ from typing import Any
 
 from app.admission.payload_helpers import checked_payload_urls
 from app.admission.render_options import resolve_render_options
+from app.config.settings import CrawlerSettings
 from app.models.crawl_job import CrawlJob
 from app.models.crawl_policy import POLICY_SCHEMA_VERSION
 from app.models.crawl_result import CrawlResult
@@ -30,7 +31,6 @@ from app.orchestration.result_helpers import (
 )
 from app.orchestration.scheduler import DomainScheduler
 from app.orchestration.worker import call_worker
-from app.settings import CrawlerSettings
 from app.storage.ids import new_request_id
 
 

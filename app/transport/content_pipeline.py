@@ -39,7 +39,7 @@ from app.models.crawl_policy import CrawlPolicy
 from app.models.host_policy import HostPolicy
 from app.models.normalized_url import NormalizedUrl
 from app.models.taxonomy import CrawlError
-from app.validation import filter_js_endpoints
+from app.safety.validation import filter_js_endpoints
 from app.vocabulary.extraction import (
     EXTRACTION_DOCUMENT,
     EXTRACTION_METHOD_DOCUMENT,

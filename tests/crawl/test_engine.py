@@ -131,8 +131,8 @@ class TestCrawlRequestWebhook:
     async def test_engine_crawl_request_with_webhook(self):
         import asyncio
 
+        from app.config.settings import CrawlerSettings
         from app.orchestration.engine import crawl_request
-        from app.settings import CrawlerSettings
 
         async def browser_worker(job):
             return None
