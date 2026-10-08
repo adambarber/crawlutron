@@ -25,6 +25,7 @@ from .crawl.strategies.browser_pool import (
     close_browser_pool,
     initialize_browser_pool,
 )
+from .crawl.watch_store import WatchStore
 from .settings import CrawlerSettings
 
 if TYPE_CHECKING:
@@ -82,7 +83,7 @@ async def _run_shutdown_steps(steps: Sequence[_TeardownStep]) -> None:
 
 # ONE database for the whole service. The store chokepoint opens a connection
 # per StoreSchema and the migration runner filters each schema's migrations by
-# id against the file's single ledger, so four tables in one file cost nothing
+# id against the file's single ledger, so five schemas in one file cost nothing
 # structurally -- and a second file would mean a second ledger, a second backup,
 # and a second thing to reason about when something is locked.
 #
@@ -104,6 +105,11 @@ result_store = CrawlResultStore(
     ttl_seconds=get_env_float("CRAWLUTRON_RESULT_TTL_SECONDS", 3600.0),
     max_entries=get_env_int("CRAWLUTRON_RESULT_MAX_ENTRIES", 1000),
 )
+
+# Registered watches and their revalidation history. No policy or tier: a watch
+# arrives admitted, and the sweep re-admits against the policy in force when it
+# checks, so a row outlives the deployment that wrote it.
+watch_store = WatchStore(DATABASE_PATH)
 
 # Ensure the parent directory of the log file exists before the logger tries
 # to open it; standalone checkouts default to ./logs which may not exist.
@@ -230,6 +236,21 @@ if FastAPI is not None:
         _app.state.shutdown_event = shutdown_event
         await recover_and_start_pending_jobs(job_store, settings, shutdown_event)
 
+        # Watches: the periodic sweep of the due registry, owned by the process
+        # that owns the store for the same reason job recovery runs here. Started
+        # before the first request, so a registered watch is kept by this
+        # deployment rather than by whichever one started last.
+        from .api.watch_sweep import sweep_watches_forever
+
+        watch_sweep_task = asyncio.create_task(
+            sweep_watches_forever(
+                watch_store,
+                host_policy=HostPolicy.from_settings(settings),
+                settings=settings,
+                shutdown_event=shutdown_event,
+            )
+        )
+
         yield
 
         # Shutdown: stop the world FIRST so in-flight job crawls can't
@@ -242,6 +263,16 @@ if FastAPI is not None:
         from .api.job_runner import shutdown_job_runner
 
         await shutdown_job_runner()
+        # The sweep is mid-fetch the moment this runs, so it is cancelled rather
+        # than waited on politely: the event only stops the NEXT pass. Cancelling
+        # leaves the watch due, which is the registry's at-least-once contract --
+        # the next deployment picks it up -- whereas awaiting a pass to finish
+        # would deliver webhooks against the pools closing immediately below.
+        watch_sweep_task.cancel()
+        try:
+            await watch_sweep_task
+        except asyncio.CancelledError:
+            pass
 
         from app.crawl.strategies.http_client_pool import close_async_http_client, close_cffi_session
 
@@ -328,6 +359,7 @@ if FastAPI is not None:
     app.state.crawler_settings = settings
     app.state.job_store = job_store
     app.state.result_store = result_store
+    app.state.watch_store = watch_store
 
     # Body-size guard: 16 MiB cap at the ASGI receive layer (see
     # app/api/middleware.py for how truncation and keep-alive are handled).

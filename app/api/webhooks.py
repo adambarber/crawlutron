@@ -24,6 +24,7 @@ import functools
 import json
 import logging
 import os
+from collections.abc import Mapping
 from typing import Any
 
 import httpx
@@ -121,19 +122,25 @@ def _max_webhook_size() -> int:
 
 async def post_webhook(
     webhook_url: str,
-    payload: dict[str, Any],
+    payload: Mapping[str, Any],
     *,
     host_policy: HostPolicy,
 ) -> None:
     """POST payload to webhook URL with size limit and SSRF+IP-pinning.
-
     Routes through the same validated + IP-pinned delivery path
     (:func:`deliver_pinned_webhook`) so a malicious or rebinding webhook URL cannot
     escape the SSRF guard between endpoint validation and delivery
     (TOCTOU window). The size cap and best-effort failure handling live
     here so the crawl worker is never crashed by a dead callback.
+
+    ``payload`` is the body some producer declared (``WatchAnnouncement``) or
+    assembled (the async-crawl failure body), and this funnel serializes it
+    without reading a single key of it -- so it takes the shape it can accept
+    rather than the shape the first caller happened to hold. The size cap
+    measures what actually goes on the wire, which is why the ``dict`` call is
+    here: ``json.dumps`` serializes a dict, and a ``Mapping`` need not be one.
     """
-    payload_bytes = json.dumps(payload).encode("utf-8")
+    payload_bytes = json.dumps(dict(payload)).encode("utf-8")
     if len(payload_bytes) > _max_webhook_size():
         logger.warning(
             "webhook_payload_too_large",
