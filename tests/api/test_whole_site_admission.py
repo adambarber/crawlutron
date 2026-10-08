@@ -25,8 +25,8 @@ from typing import Any
 import pytest
 
 from app.api import job_runner
-from app.crawl.job_store import JobStatus
 from app.crawl.robots_parse import parse_robots_rules
+from app.storage.job_store import JobStatus
 from tests._job_harnesses import (
     ScriptedExecute,
     _create_api_job,

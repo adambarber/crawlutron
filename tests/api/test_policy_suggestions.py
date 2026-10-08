@@ -13,7 +13,7 @@ this surface applies one: the service proposes rules, a caller owns host policy.
 
 import pytest
 
-from app.crawl.result_store import CrawlResultStore
+from app.storage.result_store import CrawlResultStore
 from tests._assertions import completed_crawl
 from tests._fetcher_factories import make_crawl_payload
 from tests._policy_factories import canonical

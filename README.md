@@ -128,26 +128,26 @@ container with Caddy or another reverse proxy that owns the `.local` zone.
 
 ## SQLite schema migrations
 
-Migrations live in `app/crawl/migrations/`. Every store schema — jobs, results, metrics, coordination — lives in the single `cache/crawler.db`; startup applies that database's pending migrations under yoyo's lock, and an exact pre-ledger table is stamped instead of recreated. The CLI names the schema explicitly because they share one file.
+Migrations live in `app/storage/migrations/`. Every store schema — jobs, results, metrics, coordination — lives in the single `cache/crawler.db`; startup applies that database's pending migrations under yoyo's lock, and an exact pre-ledger table is stamped instead of recreated. The CLI names the schema explicitly because they share one file.
 
 ```bash
 # Apply pending migrations (normally automatic when the store opens).
-.venv/bin/python -m app.crawl.migrations apply cache/crawler.db crawl_jobs
-.venv/bin/python -m app.crawl.migrations apply cache/crawler.db results
+.venv/bin/python -m app.storage.migrations apply cache/crawler.db crawl_jobs
+.venv/bin/python -m app.storage.migrations apply cache/crawler.db results
 
 # Add a migration: add a versioned schema to manifest.py, point CURRENT_SCHEMAS at it,
 # then add a yoyo step with apply and rollback SQL under the migration directory.
-$EDITOR app/crawl/migrations/manifest.py
-$EDITOR app/crawl/migrations/0002_crawl_jobs_descriptive_name.py
+$EDITOR app/storage/migrations/manifest.py
+$EDITOR app/storage/migrations/0002_crawl_jobs_descriptive_name.py
 
 # Stamp an existing database after checking it against the declared schema.
-.venv/bin/python -m app.crawl.migrations stamp cache/crawler.db crawl_jobs
-.venv/bin/python -m app.crawl.migrations stamp cache/crawler.db results
+.venv/bin/python -m app.storage.migrations stamp cache/crawler.db crawl_jobs
+.venv/bin/python -m app.storage.migrations stamp cache/crawler.db results
 
 # Roll back one schema's applied migrations in reverse order; do not open the
 # store afterward. Rolling one schema back leaves the others applied.
-.venv/bin/python -m app.crawl.migrations rollback cache/crawler.db crawl_jobs
-.venv/bin/python -m app.crawl.migrations rollback cache/crawler.db results
+.venv/bin/python -m app.storage.migrations rollback cache/crawler.db crawl_jobs
+.venv/bin/python -m app.storage.migrations rollback cache/crawler.db results
 ```
 
 ---

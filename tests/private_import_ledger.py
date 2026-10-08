@@ -346,7 +346,7 @@ DECLARED: dict[str, Declaration] = {
         "Not yet triaged.\n",
         ["test"],
     ),
-    "app.crawl.job_store._Expected": _d(_CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]),
+    "app.storage.job_store._Expected": _d(_CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]),
     "app.crawl.payload_helpers._payload_policy": _d(
         "unreviewed",
         "Not yet triaged.\n",
@@ -403,8 +403,8 @@ DECLARED: dict[str, Declaration] = {
         ["test"],
     ),
     "app.crawl.robots.robots_cache._entries": _d(_CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]),
-    "app.crawl.sqlite_store._BUSY_TIMEOUT_MS": _SUBSTITUTED_CAP,
-    "app.crawl.sqlite_store._WAL_RETRY_SECONDS": _SUBSTITUTED_CAP,
+    "app.storage.sqlite_store._BUSY_TIMEOUT_MS": _SUBSTITUTED_CAP,
+    "app.storage.sqlite_store._WAL_RETRY_SECONDS": _SUBSTITUTED_CAP,
     "app.transport.browser._BROWSER_COOKIES_BY_DOMAIN": _d(
         _CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]
     ),

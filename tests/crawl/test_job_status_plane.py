@@ -12,7 +12,7 @@ atomic compare-and-set on the row itself.
 import ast
 import asyncio
 
-from app.crawl.job_store import CrawlJobState, JobStatus, JobStore
+from app.storage.job_store import CrawlJobState, JobStatus, JobStore
 from tests._job_harnesses import frontier, loaded_job, make_job_store, run_to_terminal
 from tests._policy_factories import canonical
 from tests.chokepoint_walks import app_trees, nodes_of, offender

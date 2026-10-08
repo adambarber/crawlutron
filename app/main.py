@@ -19,10 +19,10 @@ from app.logging_config import configure_service_logging
 from app.models.host_policy import HostPolicy
 from app.vocabulary.identity import SERVICE_ID, SERVICE_VERSION
 
-from .crawl.job_store import JobStore
-from .crawl.result_store import CrawlResultStore
-from .crawl.watch_store import WatchStore
 from .settings import CrawlerSettings
+from .storage.job_store import JobStore
+from .storage.result_store import CrawlResultStore
+from .storage.watch_store import WatchStore
 from .transport.browser_pool import (
     close_browser_pool,
     initialize_browser_pool,
@@ -208,7 +208,7 @@ if FastAPI is not None:
             # file format is a legacy mirror, and keeping it authoritative
             # would keep the last-writer-wins path alive.
             os.makedirs(settings.cache_dir, exist_ok=True)
-            from app.crawl.coordination_cookies import SharedCookieStore
+            from app.storage.coordination_cookies import SharedCookieStore
             from app.transport import cookie_jar as cookie_jar_module
             from app.transport.cookie_jar import CookieJar
 
@@ -223,7 +223,7 @@ if FastAPI is not None:
         # same shared store as the cookies; the two resource gauges stay
         # process-local because they read a cgroup every worker shares and
         # summing them would report a utilization no process experiences.
-        from app.crawl.coordination_counters import CoordinationCounters
+        from app.storage.coordination_counters import CoordinationCounters
 
         from .metrics import get_metrics
 

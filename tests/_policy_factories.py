@@ -22,11 +22,11 @@ import pathlib
 from typing import Any
 
 from app.crawl.admission import admit_discovered_links
-from app.crawl.job_store import JobStore
 from app.crawl.policy import PolicyTier, read_policy
 from app.models.crawl_policy import CrawlPolicy
 from app.models.normalized_url import NormalizedUrl
 from app.settings import CrawlerSettings
+from app.storage.job_store import JobStore
 from app.validation import HostPolicy
 from app.vocabulary.strategies import HTTP_DECLARED_CRAWLER
 

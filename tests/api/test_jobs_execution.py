@@ -22,10 +22,10 @@ from httpx import ASGITransport, AsyncClient
 
 from app.api import dependencies, job_runner, jobs_router
 from app.api.dependencies import get_job_store, get_settings, get_shutdown_event
-from app.crawl.job_store import FrontierEntry, JobStatus
 from app.crawl.policy import read_policy
 from app.models.crawl_policy import CrawlPolicy
 from app.settings import CrawlerSettings
+from app.storage.job_store import FrontierEntry, JobStatus
 from tests._job_harnesses import (
     ScriptedExecute,
     _create_api_job,
@@ -783,7 +783,7 @@ class TestJobStateWaitContract:
         matches -- is exactly the implementation that raced a starved box, so
         the harness refuses the job instead of quietly reintroducing it.
         """
-        from app.crawl.job_store import JobStore
+        from app.storage.job_store import JobStore
         from tests._job_harnesses import _wait_status as wait_status
         from tests._policy_factories import UNRESTRICTED_HOST_POLICY, deployment_tier
 
@@ -881,8 +881,8 @@ class TestJobControlTransitions:
 
     @staticmethod
     async def _control(action: str, expected: int, *, seed_terminal: bool = False) -> None:
-        from app.crawl.job_store import JobStatus
         from app.main import job_store
+        from app.storage.job_store import JobStatus
         from tests._app_factory import service_app
 
         job = job_store.create("http://example.com/", CrawlPolicy())

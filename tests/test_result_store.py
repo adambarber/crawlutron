@@ -1,6 +1,6 @@
 """Result retrieval by request_id (fixes dead status_url + lost sync results)."""
 
-from app.crawl.result_store import CrawlResultStore
+from app.storage.result_store import CrawlResultStore
 
 
 def _clock(start=1000.0):

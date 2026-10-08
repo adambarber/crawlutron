@@ -144,7 +144,7 @@ SANCTIONED_IGNORE_GLOBS = (
     "**/node_modules/**",
     "**/.git/**",
     "**/fixtures/**",
-    "**/app/crawl/migrations/**",
+    "**/app/storage/migrations/**",
 )
 
 

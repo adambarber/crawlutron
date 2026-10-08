@@ -24,8 +24,8 @@ from __future__ import annotations
 
 import math
 
-from app.crawl.coordination_store import CoordinationStore
-from app.crawl.migrations.manifest import StoreSchema
+from app.storage.coordination_store import CoordinationStore
+from app.storage.migrations.manifest import StoreSchema
 
 __all__ = ["CoordinationCounters"]
 

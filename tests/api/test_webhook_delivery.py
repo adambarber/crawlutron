@@ -12,8 +12,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from app.api.async_crawl_runner import run_async_crawl
-from app.crawl.job_store import JobStatus
-from app.crawl.result_store import CrawlResultStore
+from app.storage.job_store import JobStatus
+from app.storage.result_store import CrawlResultStore
 from app.validation import HostPolicy
 from tests._assertions import block_private_targets, host_resolves_to
 from tests._webhook_doubles import record_webhook_delivery

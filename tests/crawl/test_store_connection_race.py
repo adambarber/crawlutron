@@ -25,8 +25,8 @@ import threading
 import time
 from contextlib import contextmanager
 
-from app.crawl import sqlite_store
-from app.crawl.sqlite_store import configure_store_connection
+from app.storage import sqlite_store
+from app.storage.sqlite_store import configure_store_connection
 
 
 def _delete_mode_database(path: str) -> None:

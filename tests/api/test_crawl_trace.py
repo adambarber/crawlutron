@@ -12,8 +12,8 @@ import pytest
 from fastapi import HTTPException
 
 from app.api.crawl_endpoint import get_crawl_trace
-from app.crawl.job_store import JobStatus
-from app.crawl.result_store import CrawlResultStore
+from app.storage.job_store import JobStatus
+from app.storage.result_store import CrawlResultStore
 from app.vocabulary.strategies import HTTP_DECLARED_CRAWLER
 from tests._assertions import completed_crawl
 from tests._fetcher_factories import make_crawl_payload

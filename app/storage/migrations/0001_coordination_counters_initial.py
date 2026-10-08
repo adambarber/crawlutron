@@ -1,7 +1,7 @@
 """Create the cross-process counter table backing /metrics aggregation."""
 
-from app.crawl.migrations.manifest import COORDINATION_COUNTERS_SCHEMA, create_table_sql
-from app.crawl.migrations.runner import migration_step as step
+from app.storage.migrations.manifest import COORDINATION_COUNTERS_SCHEMA, create_table_sql
+from app.storage.migrations.runner import migration_step as step
 
 __depends__: set[str] = set()
 

@@ -335,9 +335,9 @@ def _sync_store_methods() -> dict[str, frozenset[str]]:
     store modules is safe: the schema runs when a store is CONSTRUCTED, not at
     import.
     """
-    from app.crawl.job_store import JobStore
-    from app.crawl.result_store import CrawlResultStore
-    from app.crawl.watch_store import WatchStore
+    from app.storage.job_store import JobStore
+    from app.storage.result_store import CrawlResultStore
+    from app.storage.watch_store import WatchStore
 
     derived: dict[str, frozenset[str]] = {}
     for class_name, store_class in (

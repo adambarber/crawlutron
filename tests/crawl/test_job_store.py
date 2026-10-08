@@ -6,10 +6,10 @@ import logging
 import sqlite3
 from concurrent.futures import ThreadPoolExecutor
 
-from app.crawl.job_store import CrawlJobState, FrontierEntry, JobStatus
 from app.crawl.policy import read_policy
 from app.models.crawl_policy import CrawlPolicy
 from app.settings import CrawlerSettings
+from app.storage.job_store import CrawlJobState, FrontierEntry, JobStatus
 from tests._job_harnesses import frontier, loaded_job, make_job_store, raw_job_row, write_row_policy
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY, canonical, deployment_tier, job_store
 
@@ -371,7 +371,7 @@ def test_normalize_frontier_keeps_shallowest_duplicate_depth(tmp_path):
 
 
 def test_cross_list_duplicate_keeps_shallowest_depth():
-    from app.crawl.job_store import FrontierEntry
+    from app.storage.job_store import FrontierEntry
 
     loaded = CrawlJobState.from_json(
         {

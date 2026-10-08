@@ -306,10 +306,10 @@ def _id_mint_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
     or as a bare import" is decided once.
     """
     return [
-        offender_at(path, call, "uuid4() minted outside app/crawl/ids.py")
+        offender_at(path, call, "uuid4() minted outside app/storage/ids.py")
         for call in calls_named_leaf(tree, {"uuid4"})
     ] + [
-        offender_at(path, node, "uuid hex sliced outside app/crawl/ids.py")
+        offender_at(path, node, "uuid hex sliced outside app/storage/ids.py")
         for node in subscript_reads(tree)
         if getattr(node.value, "attr", None) == "hex"
     ]
@@ -321,19 +321,19 @@ HANDLE_MINTING_IS_SINGLE_SOURCED = Rule(
     summary=(
         "Handles double as the lookup credential for the status/result routes, "
         "so a re-inlined mint is where a shorter slice silently regresses to 48 "
-        "bits; mint through app/crawl/ids.py"
+        "bits; mint through app/storage/ids.py"
     ),
-    skip=frozenset({"app/crawl/ids.py"}),
+    skip=frozenset({"app/storage/ids.py"}),
     bite=lambda: Trips(
         "import uuid\n\ndef f():\n    return uuid.uuid4().hex[:12]\n",
         count=2,
     ),
-    clean=lambda: ("from app.crawl.ids import new_request_id\n\ndef f():\n    return new_request_id()\n",),
+    clean=lambda: ("from app.storage.ids import new_request_id\n\ndef f():\n    return new_request_id()\n",),
 )
 
 
 def test_handles_are_minted_in_one_place():
-    """Only app/crawl/ids.py calls uuid4 or slices its hex ()."""
+    """Only app/storage/ids.py calls uuid4 or slices its hex ()."""
     HANDLE_MINTING_IS_SINGLE_SOURCED.scan()
 
 

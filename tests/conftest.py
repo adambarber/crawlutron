@@ -445,7 +445,7 @@ def job_store(tmp_path):
 @pytest.fixture
 def watch_store(tmp_path):
     """WatchStore backed by a per-test SQLite db under ``tmp_path``."""
-    from app.crawl.watch_store import WatchStore
+    from app.storage.watch_store import WatchStore
 
     return WatchStore(tmp_path / "watches.db")
 

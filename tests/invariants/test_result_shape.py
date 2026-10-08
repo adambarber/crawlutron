@@ -15,8 +15,8 @@ from typing import get_args
 
 import pytest
 
-from app.crawl.migrations.manifest import LEGACY_COLUMNS, StoreSchema
 from app.models.unified_crawl_response import UnifiedCrawlResponse
+from app.storage.migrations.manifest import LEGACY_COLUMNS, StoreSchema
 from tests.chokepoint_walks import (
     REPO_ROOT,
     SANCTIONED,

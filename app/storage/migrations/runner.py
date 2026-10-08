@@ -14,7 +14,7 @@ from yoyo.backends import DatabaseBackend, SQLiteBackend
 from yoyo.connections import DatabaseURI
 from yoyo.migrations import MigrationList, default_migration_table
 
-from app.crawl.migrations.manifest import (
+from app.storage.migrations.manifest import (
     CURRENT_SCHEMAS,
     MIGRATION_IDS,
     MIGRATION_SEQUENCES,
@@ -22,7 +22,7 @@ from app.crawl.migrations.manifest import (
     legacy_stamp_drift,
     schema_drift,
 )
-from app.crawl.sqlite_store import process_lock, store_lock_key, table_has_column
+from app.storage.sqlite_store import process_lock, store_lock_key, table_has_column
 
 __all__ = ["migration_step"]
 
@@ -170,7 +170,7 @@ def rollback_store(db_path: str | Path, schema: StoreSchema | str) -> None:
 
 
 def _parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="python -m app.crawl.migrations")
+    parser = argparse.ArgumentParser(prog="python -m app.storage.migrations")
     commands = parser.add_subparsers(dest="command", required=True)
     for command in ("apply", "stamp", "rollback"):
         command_parser = commands.add_parser(command)

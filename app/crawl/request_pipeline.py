@@ -11,7 +11,6 @@ from typing import Any, cast
 from app.crawl import robots as robots_policy
 from app.crawl.admission import gather_robots_decisions, normalize_sitemap_candidates
 from app.crawl.fetch_helpers import fetch_sitemap_urls
-from app.crawl.ids import new_request_id
 from app.crawl.policy import DiscoveryFlags, discovery_flags
 from app.crawl.recursive import RECURSIVE_RAMP_MAX, _spill_write, run_recursive_crawl
 from app.crawl.render_options import policy_wants_html
@@ -38,6 +37,7 @@ from app.resource_pressure import (
 from app.safe_regex import BoundedPattern
 from app.scheduler import DomainScheduler
 from app.settings import CrawlerSettings
+from app.storage.ids import new_request_id
 from app.transport.cache import HttpCache
 from app.transport.content_cache import ContentCache
 from app.vocabulary.limits import ENGINE_BATCH_CONCURRENCY_MULTIPLIER

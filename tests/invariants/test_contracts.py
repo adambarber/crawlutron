@@ -784,16 +784,16 @@ def test_documented_knob_detector_bites():
 
 _MIGRATION_DDL_PROPERTY = Property(
     name="migration-ddl",
-    owner_module="app/crawl/migrations/",
+    owner_module="app/storage/migrations/",
     owner_symbols=(),
-    definition_site="app/crawl/migrations/",
+    definition_site="app/storage/migrations/",
     fingerprints=("ddl",),
     reason="Schema changes must remain ordered and reversible in the migration package.",
 )
 
 
 def _ddl_offenders(tree: ast.AST, path: pathlib.Path, prop: Property) -> list[str]:
-    if _relative_app_path(path).startswith("app/crawl/migrations/"):
+    if _relative_app_path(path).startswith("app/storage/migrations/"):
         return []
     found: list[str] = []
     for node in nodes_of(tree):
@@ -812,7 +812,7 @@ DDL_IS_CONFINED_TO_THE_MIGRATIONS_PACKAGE = Rule(
     name="ddl-is-confined-to-the-migrations-package",
     find=lambda tree, path: _ddl_offenders(tree, path, _MIGRATION_DDL_PROPERTY),
     summary=(
-        "CREATE/ALTER/DROP statements belong only in app/crawl/migrations, where "
+        "CREATE/ALTER/DROP statements belong only in app/storage/migrations, where "
         "they are ordered and reversible; a DDL statement anywhere else is a "
         "schema change that ships without a migration"
     ),
@@ -832,7 +832,7 @@ DDL_IS_CONFINED_TO_THE_MIGRATIONS_PACKAGE = Rule(
         # there and must fire at every other module.
         Silent(
             "def apply(conn):\n    conn.execute('CREATE TABLE x (id TEXT)')\n",
-            at=REPO_ROOT / "app" / "crawl" / "migrations" / "0001_crawl_jobs_initial.py",
+            at=REPO_ROOT / "app" / "storage" / "migrations" / "0001_crawl_jobs_initial.py",
         ),
     ),
 )

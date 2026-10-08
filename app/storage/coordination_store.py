@@ -23,8 +23,8 @@ import sqlite3
 from pathlib import Path
 from typing import ClassVar
 
-from app.crawl.migrations.manifest import StoreSchema
-from app.crawl.sqlite_store import connect_store, process_lock, store_lock_key
+from app.storage.migrations.manifest import StoreSchema
+from app.storage.sqlite_store import connect_store, process_lock, store_lock_key
 
 __all__ = ["CoordinationStore"]
 

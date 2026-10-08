@@ -52,7 +52,7 @@ def _tests_tree(*, exclude: frozenset[str]) -> tuple[tuple[pathlib.Path, ast.Mod
 # anything that walks it concurrently becomes a list-then-read race: it globs
 # the file list, the probe disappears, and `read_text` raises. Measured with 6
 # concurrent copies of that file against 6 concurrent copies of this one, 10
-# tests failed with `FileNotFoundError: .../app/crawl/migrations/zz_probe_clone.py`
+# tests failed with `FileNotFoundError: .../app/storage/migrations/zz_probe_clone.py`
 # -- and the victims were the tree-wide chokepoint detectors (await-in-lock,
 # bare `re.compile`, `regex` import), so they reported nothing for the entire run
 # while appearing green. A detector that cannot see the tree cannot hold it.

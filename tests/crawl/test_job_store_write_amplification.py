@@ -21,8 +21,8 @@ from contextlib import contextmanager
 
 import pytest
 
-from app.crawl.job_store import CrawlJobState, JobStore
 from app.models.crawl_policy import CrawlPolicy
+from app.storage.job_store import CrawlJobState, JobStore
 from tests._job_harnesses import make_crawled_job_store, make_job_store
 from tests._policy_factories import canonical
 

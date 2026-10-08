@@ -16,13 +16,13 @@ results, so it is not the cost that justified this change.
 
 import json
 
-from app.crawl.migrations.manifest import (
+from app.storage.migrations.manifest import (
     CRAWL_JOB_RESULTS_SCHEMA,
     CRAWL_JOB_VISITED_SCHEMA,
     create_table_sql,
 )
-from app.crawl.migrations.runner import migration_step as step
-from app.crawl.sqlite_store import table_columns
+from app.storage.migrations.runner import migration_step as step
+from app.storage.sqlite_store import table_columns
 
 __depends__ = {"0001_crawl_jobs_initial"}
 

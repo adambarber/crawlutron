@@ -83,7 +83,7 @@ class TestMultiWorkerInvariants:
         only this process can see is exactly what made N workers lose every
         cookie the others collected while reporting healthy.
         """
-        from app.crawl.coordination_cookies import SharedCookieStore
+        from app.storage.coordination_cookies import SharedCookieStore
 
         app = _booted_app(monkeypatch, workers="4")
 
@@ -123,10 +123,10 @@ class TestMultiWorkerInvariants:
         store that resolved or substituted its own file would echo the argument
         back and hide it.
         """
-        from app.crawl.coordination_cookies import SharedCookieStore
-        from app.crawl.coordination_counters import CoordinationCounters
         from app.main import DATABASE_PATH, job_store, result_store
         from app.metrics import get_metrics
+        from app.storage.coordination_cookies import SharedCookieStore
+        from app.storage.coordination_counters import CoordinationCounters
         from app.transport.cookie_jar import CookieJar
 
         app = _booted_app(monkeypatch)

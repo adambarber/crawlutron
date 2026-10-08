@@ -14,7 +14,7 @@ rather than exercising a single object twice.
 
 import pytest
 
-from app.crawl.coordination_counters import CoordinationCounters
+from app.storage.coordination_counters import CoordinationCounters
 
 
 def test_increments_from_independent_connections_sum(tmp_path):

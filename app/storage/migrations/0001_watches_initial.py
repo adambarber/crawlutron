@@ -1,7 +1,7 @@
 """Create the watches table and its due-sweep index."""
 
-from app.crawl.migrations.manifest import WATCHES_SCHEMA, create_index_sql, create_table_sql
-from app.crawl.migrations.runner import migration_step as step
+from app.storage.migrations.manifest import WATCHES_SCHEMA, create_index_sql, create_table_sql
+from app.storage.migrations.runner import migration_step as step
 
 __depends__: set[str] = set()
 

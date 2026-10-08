@@ -42,13 +42,6 @@ from app.crawl.admission import (
     remaining_page_capacity,
     requeue_admitted_pages,
 )
-from app.crawl.job_store import (
-    FrontierEntry,
-    JobKind,
-    JobStatus,
-    JobStore,
-    normalize_job_state,
-)
 from app.crawl.policy import read_policy
 from app.crawl.result_helpers import terminal_attempt
 from app.crawl.result_record import ProducerEnvelope
@@ -58,6 +51,13 @@ from app.models.crawl_task import CrawlTask
 from app.models.engine_crawl_result import EngineCrawlResult
 from app.models.normalized_url import NormalizedUrl, admit_or_none
 from app.models.taxonomy import Classification
+from app.storage.job_store import (
+    FrontierEntry,
+    JobKind,
+    JobStatus,
+    JobStore,
+    normalize_job_state,
+)
 from app.vocabulary.limits import MAX_URL_TRANSIENT_ATTEMPTS
 from app.vocabulary.taxonomy import is_transient_classification, status_for_classification
 

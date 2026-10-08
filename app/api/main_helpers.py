@@ -13,11 +13,11 @@ from contextlib import contextmanager
 from fastapi import HTTPException
 
 from app.api.exceptions import validation_http_error
-from app.crawl.job_store import JobStatusView
 from app.crawl.result_record import ProducerEnvelope
 from app.health.readiness import READINESS_STATE as readiness_state
 from app.metrics import get_metrics
 from app.models.job_status_response import JobStatusResponse
+from app.storage.job_store import JobStatusView
 
 
 def _build_job_status(view: JobStatusView) -> JobStatusResponse:

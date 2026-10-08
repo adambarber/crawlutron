@@ -13,9 +13,9 @@ import json
 import time
 from pathlib import Path
 
-from app.crawl.coordination_store import CoordinationStore
-from app.crawl.migrations import StoreSchema
 from app.models.json_value import JsonValue
+from app.storage.coordination_store import CoordinationStore
+from app.storage.migrations import StoreSchema
 
 
 class CrawlResultStore(CoordinationStore):

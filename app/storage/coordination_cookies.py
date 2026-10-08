@@ -25,8 +25,8 @@ import json
 import time
 from pathlib import Path
 
-from app.crawl.coordination_store import CoordinationStore
-from app.crawl.migrations.manifest import StoreSchema
+from app.storage.coordination_store import CoordinationStore
+from app.storage.migrations.manifest import StoreSchema
 
 __all__ = ["DEFAULT_MAX_HOSTS", "SharedCookieStore"]
 

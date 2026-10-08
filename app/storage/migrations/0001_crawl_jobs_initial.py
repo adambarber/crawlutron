@@ -1,7 +1,7 @@
 """Create the crawl job table."""
 
-from app.crawl.migrations.manifest import CRAWL_JOBS_SCHEMA, create_table_sql
-from app.crawl.migrations.runner import migration_step as step
+from app.storage.migrations.manifest import CRAWL_JOBS_SCHEMA, create_table_sql
+from app.storage.migrations.runner import migration_step as step
 
 __depends__: set[str] = set()
 

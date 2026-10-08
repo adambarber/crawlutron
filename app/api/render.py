@@ -11,7 +11,6 @@ import time
 from dataclasses import replace
 from typing import Any
 
-from app.crawl.ids import new_request_id
 from app.crawl.payload_helpers import checked_payload_urls
 from app.crawl.render_options import resolve_render_options
 from app.crawl.result_helpers import (
@@ -32,6 +31,7 @@ from app.models.normalized_url import NormalizedUrl
 from app.models.render_options import RenderOptions
 from app.scheduler import DomainScheduler
 from app.settings import CrawlerSettings
+from app.storage.ids import new_request_id
 
 
 def _render_options(payload: dict[str, Any], settings: CrawlerSettings) -> RenderOptions:

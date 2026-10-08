@@ -12,11 +12,11 @@ import threading
 from collections import OrderedDict
 from typing import TYPE_CHECKING
 
-from app.crawl.coordination_cookies import DEFAULT_MAX_HOSTS
 from app.models.normalized_url import NormalizedUrl
+from app.storage.coordination_cookies import DEFAULT_MAX_HOSTS
 
 if TYPE_CHECKING:
-    from app.crawl.coordination_cookies import SharedCookieStore
+    from app.storage.coordination_cookies import SharedCookieStore
 
 # Per-request cookie namespace: set by ``crawl_request`` so concurrent crawls
 # from different tenants cannot leak cookies through the shared

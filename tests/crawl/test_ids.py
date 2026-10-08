@@ -8,7 +8,7 @@ entropy exposed in a status URL.
 
 import re
 
-from app.crawl.ids import new_job_id, new_request_id
+from app.storage.ids import new_job_id, new_request_id
 
 HEX32 = re.compile(r"^[0-9a-f]{32}$")
 

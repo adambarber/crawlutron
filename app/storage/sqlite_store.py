@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from app.crawl.migrations.manifest import StoreSchema
+    from app.storage.migrations.manifest import StoreSchema
 
 _BUSY_TIMEOUT_MS = 5000
 
@@ -270,7 +270,7 @@ def connect_store(db_path: str | Path, *, schema: StoreSchema) -> sqlite3.Connec
     try:
         configure_store_connection(conn)
         _trace_store_connection(db_path, schema, memory_name)
-        from app.crawl.migrations import migrate_store
+        from app.storage.migrations import migrate_store
 
         migrate_store(db_path, schema, memory_name=memory_name)
     except BaseException:

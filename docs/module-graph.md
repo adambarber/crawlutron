@@ -4,11 +4,11 @@ graph LR
     api_async_crawl_runner --> api_job_runner
     api_async_crawl_runner --> api_response_shaping
     api_async_crawl_runner --> api_webhooks
-    api_async_crawl_runner --> crawl_job_store
     api_async_crawl_runner --> env
     api_async_crawl_runner --> metrics
     api_async_crawl_runner --> models_host_policy
     api_async_crawl_runner --> settings
+    api_async_crawl_runner --> storage_job_store
     api_crawl_endpoint --> api_async_crawl_runner
     api_crawl_endpoint --> api_crawl_executor
     api_crawl_endpoint --> api_exceptions
@@ -16,11 +16,8 @@ graph LR
     api_crawl_endpoint --> api_main_helpers
     api_crawl_endpoint --> api_response_shaping
     api_crawl_endpoint --> api_webhooks
-    api_crawl_endpoint --> crawl_ids
-    api_crawl_endpoint --> crawl_job_store
     api_crawl_endpoint --> crawl_payload_helpers
     api_crawl_endpoint --> crawl_policy
-    api_crawl_endpoint --> crawl_result_store
     api_crawl_endpoint --> extraction_output_formats
     api_crawl_endpoint --> metrics
     api_crawl_endpoint --> models_crawl_request
@@ -28,6 +25,9 @@ graph LR
     api_crawl_endpoint --> models_json_value
     api_crawl_endpoint --> models_trace_response
     api_crawl_endpoint --> settings
+    api_crawl_endpoint --> storage_ids
+    api_crawl_endpoint --> storage_job_store
+    api_crawl_endpoint --> storage_result_store
     api_crawl_executor --> api_exceptions
     api_crawl_executor --> crawl_engine
     api_crawl_executor --> crawl_policy
@@ -45,14 +45,13 @@ graph LR
     api_crawl_router --> models_trace_response
     api_crawl_router --> models_unified_crawl_response
     api_crawl_router --> vocabulary_limits
-    api_dependencies --> crawl_job_store
-    api_dependencies --> crawl_result_store
-    api_dependencies --> crawl_watch_store
     api_dependencies --> settings
+    api_dependencies --> storage_job_store
+    api_dependencies --> storage_result_store
+    api_dependencies --> storage_watch_store
     api_job_runner --> api_crawl_executor
     api_job_runner --> api_response_shaping
     api_job_runner --> crawl_admission
-    api_job_runner --> crawl_job_store
     api_job_runner --> crawl_policy
     api_job_runner --> crawl_result_helpers
     api_job_runner --> crawl_result_record
@@ -62,12 +61,12 @@ graph LR
     api_job_runner --> models_engine_crawl_result
     api_job_runner --> models_normalized_url
     api_job_runner --> models_taxonomy
+    api_job_runner --> storage_job_store
     api_job_runner --> vocabulary_limits
     api_job_runner --> vocabulary_taxonomy
     api_jobs_router --> api_dependencies
     api_jobs_router --> api_exceptions
     api_jobs_router --> api_main_helpers
-    api_jobs_router --> crawl_job_store
     api_jobs_router --> crawl_payload_helpers
     api_jobs_router --> models_error_response
     api_jobs_router --> models_host_policy
@@ -76,12 +75,13 @@ graph LR
     api_jobs_router --> models_job_create_response
     api_jobs_router --> models_job_list_response
     api_jobs_router --> models_job_status_response
+    api_jobs_router --> storage_job_store
     api_main_helpers --> api_exceptions
-    api_main_helpers --> crawl_job_store
     api_main_helpers --> crawl_result_record
     api_main_helpers --> health_readiness
     api_main_helpers --> metrics
     api_main_helpers --> models_job_status_response
+    api_main_helpers --> storage_job_store
     api_map_endpoint --> api_crawl_executor
     api_map_endpoint --> api_main_helpers
     api_map_endpoint --> map
@@ -111,7 +111,6 @@ graph LR
     api_policy_suggestions --> models_policy_suggestions_response
     api_policy_suggestions --> models_trace_response
     api_policy_suggestions --> vocabulary_taxonomy
-    api_render --> crawl_ids
     api_render --> crawl_payload_helpers
     api_render --> crawl_render_options
     api_render --> crawl_result_helpers
@@ -127,6 +126,7 @@ graph LR
     api_render --> models_render_options
     api_render --> scheduler
     api_render --> settings
+    api_render --> storage_ids
     api_render --> transport_browser_pool
     api_render_endpoint --> api_exceptions
     api_render_endpoint --> api_main_helpers
@@ -172,7 +172,6 @@ graph LR
     api_watch_sweep --> api_crawl_executor
     api_watch_sweep --> api_webhooks
     api_watch_sweep --> crawl_policy
-    api_watch_sweep --> crawl_watch_store
     api_watch_sweep --> models_content_validators
     api_watch_sweep --> models_fetch_validators
     api_watch_sweep --> models_host_policy
@@ -181,6 +180,7 @@ graph LR
     api_watch_sweep --> models_watch_outcome
     api_watch_sweep --> models_watch_state
     api_watch_sweep --> settings
+    api_watch_sweep --> storage_watch_store
     api_watch_sweep --> vocabulary_strategies
     api_watch_sweep --> vocabulary_taxonomy
     api_webhooks --> bounded_io
@@ -190,7 +190,6 @@ graph LR
     api_webhooks --> timeouts
     api_webhooks --> transport_pinned_transport
     crawl_admission --> crawl_fetch_helpers
-    crawl_admission --> crawl_job_store
     crawl_admission --> crawl_policy
     crawl_admission --> crawl_robots
     crawl_admission --> crawl_scope_match
@@ -200,14 +199,9 @@ graph LR
     crawl_admission --> models_normalized_url
     crawl_admission --> safe_regex
     crawl_admission --> scheduler
+    crawl_admission --> storage_job_store
     crawl_admission --> transport_fetchers
     crawl_admission --> vocabulary_hosts
-    crawl_coordination_cookies --> crawl_coordination_store
-    crawl_coordination_cookies --> crawl_migrations_manifest
-    crawl_coordination_counters --> crawl_coordination_store
-    crawl_coordination_counters --> crawl_migrations_manifest
-    crawl_coordination_store --> crawl_migrations_manifest
-    crawl_coordination_store --> crawl_sqlite_store
     crawl_credentials --> models_credential
     crawl_credentials --> models_normalized_url
     crawl_doc_pool --> env
@@ -241,34 +235,6 @@ graph LR
     crawl_fetch_helpers --> transport_body_decode
     crawl_fetch_helpers --> transport_decompression
     crawl_fetch_helpers --> vocabulary_limits
-    crawl_job_store --> crawl_ids
-    crawl_job_store --> crawl_policy
-    crawl_job_store --> crawl_sqlite_store
-    crawl_job_store --> json_safe
-    crawl_job_store --> models_crawl_policy
-    crawl_job_store --> models_host_policy
-    crawl_job_store --> models_normalized_url
-    crawl_migrations --> crawl_migrations_manifest
-    crawl_migrations --> crawl_migrations_runner
-    crawl_migrations_0001_coordination_cookies_initial --> crawl_migrations_manifest
-    crawl_migrations_0001_coordination_cookies_initial --> crawl_migrations_runner
-    crawl_migrations_0001_coordination_counters_initial --> crawl_migrations_manifest
-    crawl_migrations_0001_coordination_counters_initial --> crawl_migrations_runner
-    crawl_migrations_0001_crawl_jobs_initial --> crawl_migrations_manifest
-    crawl_migrations_0001_crawl_jobs_initial --> crawl_migrations_runner
-    crawl_migrations_0001_results_initial --> crawl_migrations_manifest
-    crawl_migrations_0001_results_initial --> crawl_migrations_runner
-    crawl_migrations_0001_watches_initial --> crawl_migrations_manifest
-    crawl_migrations_0001_watches_initial --> crawl_migrations_runner
-    crawl_migrations_0002_crawl_jobs_drop_canonicalized --> crawl_migrations_runner
-    crawl_migrations_0002_crawl_jobs_drop_canonicalized --> crawl_sqlite_store
-    crawl_migrations_0003_crawl_jobs_split_accumulators --> crawl_migrations_manifest
-    crawl_migrations_0003_crawl_jobs_split_accumulators --> crawl_migrations_runner
-    crawl_migrations_0003_crawl_jobs_split_accumulators --> crawl_sqlite_store
-    crawl_migrations___main__ --> crawl_migrations_runner
-    crawl_migrations_manifest --> crawl_sqlite_store
-    crawl_migrations_runner --> crawl_migrations_manifest
-    crawl_migrations_runner --> crawl_sqlite_store
     crawl_payload_helpers --> crawl_policy
     crawl_payload_helpers --> models_crawl_policy
     crawl_payload_helpers --> models_host_policy
@@ -304,7 +270,6 @@ graph LR
     crawl_render_options --> models_render_options
     crawl_request_pipeline --> crawl_admission
     crawl_request_pipeline --> crawl_fetch_helpers
-    crawl_request_pipeline --> crawl_ids
     crawl_request_pipeline --> crawl_policy
     crawl_request_pipeline --> crawl_recursive
     crawl_request_pipeline --> crawl_render_options
@@ -324,6 +289,7 @@ graph LR
     crawl_request_pipeline --> safe_regex
     crawl_request_pipeline --> scheduler
     crawl_request_pipeline --> settings
+    crawl_request_pipeline --> storage_ids
     crawl_request_pipeline --> transport_cache
     crawl_request_pipeline --> transport_content_cache
     crawl_request_pipeline --> vocabulary_limits
@@ -337,8 +303,6 @@ graph LR
     crawl_result_helpers --> vocabulary_taxonomy
     crawl_result_record --> models_crawl_result
     crawl_result_record --> models_engine_crawl_result
-    crawl_result_store --> crawl_coordination_store
-    crawl_result_store --> models_json_value
     crawl_robots --> bounded_ttl
     crawl_robots --> crawl_fetch_helpers
     crawl_robots --> crawl_robots_parse
@@ -347,7 +311,6 @@ graph LR
     crawl_robots --> models_normalized_url
     crawl_robots_parse --> vocabulary_identity
     crawl_scope_match --> safe_regex
-    crawl_sqlite_store --> crawl_migrations_manifest
     crawl_strategy_chain --> crawl_result_helpers
     crawl_strategy_chain --> models_crawl_policy
     crawl_strategy_chain --> models_crawl_result
@@ -365,13 +328,6 @@ graph LR
     crawl_strategy_chain --> transport_strategy_request
     crawl_strategy_chain --> vocabulary_strategies
     crawl_strategy_chain --> vocabulary_taxonomy
-    crawl_watch_store --> crawl_coordination_store
-    crawl_watch_store --> crawl_ids
-    crawl_watch_store --> models_content_validators
-    crawl_watch_store --> models_normalized_url
-    crawl_watch_store --> models_watch_outcome
-    crawl_watch_store --> models_watch_state
-    crawl_watch_store --> models_watch_status
     crawl_worker --> models_crawl_job
     crawl_worker --> models_crawl_result
     crawl_worker --> models_crawl_worker
@@ -414,12 +370,12 @@ graph LR
     main --> addresses
     main --> api_exceptions
     main --> api_middleware
-    main --> crawl_coordination_cookies
-    main --> crawl_coordination_counters
     main --> crawl_policy
     main --> env
     main --> logging_config
     main --> models_host_policy
+    main --> storage_coordination_cookies
+    main --> storage_coordination_counters
     main --> transport_cookie_jar
     main --> transport_http_client_pool
     main --> vocabulary_identity
@@ -454,8 +410,8 @@ graph LR
     mcp_tools --> search_endpoint
     mcp_tools --> transport_browser_pool
     memory_pressure --> cgroup_sense
-    metrics --> crawl_coordination_counters
     metrics --> models_engine_crawl_result
+    metrics --> storage_coordination_counters
     models_agent_hints_response --> models_crawl_extraction_method
     models_agent_hints_response --> models_crawl_strategy
     models_capabilities_response --> models_crawl_extraction_method
@@ -579,6 +535,50 @@ graph LR
     settings --> memory_pressure
     settings --> resource_pressure
     settings --> vocabulary_limits
+    storage_coordination_cookies --> storage_coordination_store
+    storage_coordination_cookies --> storage_migrations_manifest
+    storage_coordination_counters --> storage_coordination_store
+    storage_coordination_counters --> storage_migrations_manifest
+    storage_coordination_store --> storage_migrations_manifest
+    storage_coordination_store --> storage_sqlite_store
+    storage_job_store --> crawl_policy
+    storage_job_store --> json_safe
+    storage_job_store --> models_crawl_policy
+    storage_job_store --> models_host_policy
+    storage_job_store --> models_normalized_url
+    storage_job_store --> storage_ids
+    storage_job_store --> storage_sqlite_store
+    storage_migrations --> storage_migrations_manifest
+    storage_migrations --> storage_migrations_runner
+    storage_migrations_0001_coordination_cookies_initial --> storage_migrations_manifest
+    storage_migrations_0001_coordination_cookies_initial --> storage_migrations_runner
+    storage_migrations_0001_coordination_counters_initial --> storage_migrations_manifest
+    storage_migrations_0001_coordination_counters_initial --> storage_migrations_runner
+    storage_migrations_0001_crawl_jobs_initial --> storage_migrations_manifest
+    storage_migrations_0001_crawl_jobs_initial --> storage_migrations_runner
+    storage_migrations_0001_results_initial --> storage_migrations_manifest
+    storage_migrations_0001_results_initial --> storage_migrations_runner
+    storage_migrations_0001_watches_initial --> storage_migrations_manifest
+    storage_migrations_0001_watches_initial --> storage_migrations_runner
+    storage_migrations_0002_crawl_jobs_drop_canonicalized --> storage_migrations_runner
+    storage_migrations_0002_crawl_jobs_drop_canonicalized --> storage_sqlite_store
+    storage_migrations_0003_crawl_jobs_split_accumulators --> storage_migrations_manifest
+    storage_migrations_0003_crawl_jobs_split_accumulators --> storage_migrations_runner
+    storage_migrations_0003_crawl_jobs_split_accumulators --> storage_sqlite_store
+    storage_migrations___main__ --> storage_migrations_runner
+    storage_migrations_manifest --> storage_sqlite_store
+    storage_migrations_runner --> storage_migrations_manifest
+    storage_migrations_runner --> storage_sqlite_store
+    storage_result_store --> models_json_value
+    storage_result_store --> storage_coordination_store
+    storage_sqlite_store --> storage_migrations_manifest
+    storage_watch_store --> models_content_validators
+    storage_watch_store --> models_normalized_url
+    storage_watch_store --> models_watch_outcome
+    storage_watch_store --> models_watch_state
+    storage_watch_store --> models_watch_status
+    storage_watch_store --> storage_coordination_store
+    storage_watch_store --> storage_ids
     transport_browser --> crawl_result_helpers
     transport_browser --> env
     transport_browser --> extraction_classify
@@ -643,8 +643,8 @@ graph LR
     transport_content_pipeline --> validation
     transport_content_pipeline --> vocabulary_extraction
     transport_cookie_jar --> atomic_write
-    transport_cookie_jar --> crawl_coordination_cookies
     transport_cookie_jar --> models_normalized_url
+    transport_cookie_jar --> storage_coordination_cookies
     transport_document --> bounded_io
     transport_document --> extraction_content
     transport_document --> models_normalized_url

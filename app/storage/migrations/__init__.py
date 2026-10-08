@@ -1,6 +1,6 @@
 """Ordered, reversible SQLite schema migrations."""
 
-from app.crawl.migrations.manifest import (
+from app.storage.migrations.manifest import (
     COMPANION_SCHEMAS,
     CURRENT_SCHEMAS,
     LEGACY_COLUMNS,
@@ -14,7 +14,7 @@ from app.crawl.migrations.manifest import (
     legacy_stamp_drift,
     schema_drift,
 )
-from app.crawl.migrations.runner import (
+from app.storage.migrations.runner import (
     LegacySchemaMismatch,
     migrate_store,
     rollback_store,

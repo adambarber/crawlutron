@@ -23,10 +23,10 @@ from typing import Annotated
 
 from fastapi import Depends, Request
 
-from app.crawl.job_store import JobStore
-from app.crawl.result_store import CrawlResultStore
-from app.crawl.watch_store import WatchStore
 from app.settings import CrawlerSettings
+from app.storage.job_store import JobStore
+from app.storage.result_store import CrawlResultStore
+from app.storage.watch_store import WatchStore
 
 
 def get_settings(request: Request) -> CrawlerSettings:

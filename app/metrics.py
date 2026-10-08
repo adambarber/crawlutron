@@ -28,7 +28,7 @@ from typing import TYPE_CHECKING
 from app.models.engine_crawl_result import EngineCrawlResult
 
 if TYPE_CHECKING:
-    from app.crawl.coordination_counters import CoordinationCounters
+    from app.storage.coordination_counters import CoordinationCounters
 
 # Store keys. The Prometheus names differ from these, so the mapping is written
 # out once in `as_prometheus` rather than derived -- a derivation would have to

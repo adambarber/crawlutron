@@ -6,7 +6,7 @@ import sqlite3
 from dataclasses import dataclass
 from enum import StrEnum
 
-from app.crawl.sqlite_store import table_columns, table_indexes
+from app.storage.sqlite_store import table_columns, table_indexes
 
 
 class StoreSchema(StrEnum):

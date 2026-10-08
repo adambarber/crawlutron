@@ -7,7 +7,6 @@ from types import SimpleNamespace
 import pytest
 
 from app.crawl.admission import requeue_admitted_pages
-from app.crawl.job_store import FrontierEntry
 from app.crawl.payload_helpers import _payload_policy
 from app.crawl.policy import PolicyTier
 from app.crawl.recursive_admission import _batch_is_http_heavy
@@ -35,6 +34,7 @@ from app.resource_pressure import (
     read_cpu_quota,
     read_cpu_usage_seconds,
 )
+from app.storage.job_store import FrontierEntry
 from app.vocabulary.strategies import BROWSER_HEADLESS, HTTP_DECLARED_CRAWLER
 from tests._fetcher_factories import LINKED_PAIR_LIMITS, crawled_results, site_linking_to
 from tests._policy_factories import admit, canonical

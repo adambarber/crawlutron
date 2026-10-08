@@ -246,13 +246,13 @@ def _valid_pair() -> dict:
 
 _PROBE_BASENAME = "zz_probe_clone.py"
 # The real module the probe is a copy of, by its path inside the mirrored tree.
-PROBE_SOURCE = "app/crawl/ids.py"
+PROBE_SOURCE = "app/storage/ids.py"
 
 
 def _mirrored_service_tree(tmp_path: Path, payload: str) -> Path:
     """A throwaway service tree carrying production's relative layout.
 
-    `app/crawl/ids.py` is IN the mirror, because it is the other half of the
+    `app/storage/ids.py` is IN the mirror, because it is the other half of the
     production clone: the reported pair is the planted probe against the real
     module it was copied from, and a mirror holding only the probe would report
     nothing and pass for the wrong reason.
@@ -261,14 +261,14 @@ def _mirrored_service_tree(tmp_path: Path, payload: str) -> Path:
     not against an absolute path, and that is what makes a tree under pytest's
     `tmp_path` a faithful stand-in: measured by scanning `app/` from a mirror
     rooted under `/tmp`, the `**/tmp/**` glob matched nothing while
-    `**/app/crawl/migrations/**` excluded the migration clone and left the
+    `**/app/storage/migrations/**` excluded the migration clone and left the
     production clone reported. So this holds on a Linux checkout where
     `tmp_path` itself lives under `/tmp`, not only on a macOS tmp dir.
     """
     mirror = tmp_path / "service"
     # Two production files with identical content, plus the same content again
     # under the excluded migrations subtree.
-    for relative in (PROBE_SOURCE, f"app/{_PROBE_BASENAME}", f"app/crawl/migrations/{_PROBE_BASENAME}"):
+    for relative in (PROBE_SOURCE, f"app/{_PROBE_BASENAME}", f"app/storage/migrations/{_PROBE_BASENAME}"):
         planted = mirror / relative
         planted.parent.mkdir(parents=True, exist_ok=True)
         planted.write_text(payload, encoding="utf-8")
@@ -406,8 +406,8 @@ def test_a_pair_inside_one_tree_is_not_also_reported_as_cross_tree(monkeypatch, 
         monkeypatch,
         [
             {
-                "firstFile": {"name": "crawl/ids.py", "start": 10, "end": 20},
-                "secondFile": {"name": "crawl/ids.py", "start": 30, "end": 40},
+                "firstFile": {"name": "storage/ids.py", "start": 10, "end": 20},
+                "secondFile": {"name": "storage/ids.py", "start": 30, "end": 40},
                 "fragment": "within-app-only",
             }
         ],
@@ -752,8 +752,9 @@ def test_migrations_exclusion_is_a_directory_glob_so_new_migrations_are_covered(
     would need editing every time a migration lands, which is the failure mode
     this whole config is now gated against.
     """
-    assert "**/app/crawl/migrations/**" in gate.SANCTIONED_IGNORE_GLOBS
-    assert "**/app/crawl/migrations/**" in json.loads(gate.CONFIG_PATH.read_text(encoding="utf-8"))["ignore"]
+    assert "**/app/storage/migrations/**" in gate.SANCTIONED_IGNORE_GLOBS
+    configured = json.loads(gate.CONFIG_PATH.read_text(encoding="utf-8"))["ignore"]
+    assert "**/app/storage/migrations/**" in configured
 
 
 def test_migrations_clones_are_not_reported_but_production_clones_are(monkeypatch, tmp_path, capsys) -> None:
@@ -768,7 +769,7 @@ def test_migrations_clones_are_not_reported_but_production_clones_are(monkeypatc
     moves while a suite runs: every concurrent walk of `app/` became a
     list-then-read race, and with 6 concurrent copies of this file against 6
     concurrent copies of tests/invariants/, 10 tests died with
-    `FileNotFoundError: .../app/crawl/migrations/zz_probe_clone.py` -- the
+    `FileNotFoundError: .../app/storage/migrations/zz_probe_clone.py` -- the
     tree-wide chokepoint detectors among them, which then reported nothing for
     the whole run while looking green. The glob under test is about path SHAPE,
     so a mirror with the same relative layout is what this needs anyway.
@@ -1022,7 +1023,7 @@ def test_a_fragment_ending_inside_an_open_import_is_still_a_declaration() -> Non
     two test modules that open their shared harness import the same way reported
     a clone of nothing but declarations.
     """
-    fragment = """from app.crawl.job_store import FrontierEntry, JobStatus
+    fragment = """from app.storage.job_store import FrontierEntry, JobStatus
 from app.crawl.policy import read_policy
 from app.models.crawl_policy import CrawlPolicy
 from app.settings import CrawlerSettings

@@ -19,7 +19,7 @@ format is pinned by tests; it just stops being the live persistence mechanism.
 
 import pytest
 
-from app.crawl.coordination_cookies import SharedCookieStore
+from app.storage.coordination_cookies import SharedCookieStore
 from app.transport.cookie_jar import CookieJar
 from tests._policy_factories import canonical
 

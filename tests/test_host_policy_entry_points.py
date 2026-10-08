@@ -11,8 +11,8 @@ import httpx
 import pytest
 from fastapi import HTTPException
 
-from app.crawl.result_store import CrawlResultStore
 from app.models.host_policy import HOST_POLICY_ENTRY_POINTS
+from app.storage.result_store import CrawlResultStore
 from tests.chokepoint_walks import REPO_ROOT, app_trees, local_nodes, nodes_of, resolved_call_name
 from tests.invariants._shared import DefinitionNode, _module_definition_index
 
@@ -383,7 +383,7 @@ async def _probe_async_runner(monkeypatch, tmp_path):
     # the moment a call site moved to the async twin and reported a contract
     # change as an AttributeError, which is noise, not a finding. A real store
     # on a tmp path also proves the refusal happens with nothing persisted.
-    from app.crawl.result_store import CrawlResultStore
+    from app.storage.result_store import CrawlResultStore
     from tests._job_harnesses import make_job_store
 
     job_store = make_job_store(str(tmp_path))

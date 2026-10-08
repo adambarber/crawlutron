@@ -114,8 +114,8 @@ async def _drain_running_crawls(*, guard: float = 10.0) -> None:
     should fail at its own assertion, not hold every later test open until the
     suite's hang guard fires somewhere unrelated.
     """
-    from app.crawl.job_store import JobStatus
     from app.main import job_store
+    from app.storage.job_store import JobStatus
 
     def running() -> list[str]:
         # ``list_jobs`` is the status view, not the state, so this reads the

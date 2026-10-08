@@ -31,10 +31,10 @@ from fastapi import HTTPException
 from httpx import ASGITransport, AsyncClient
 
 from app.api import job_runner
-from app.crawl.job_store import TERMINAL_STATUSES, JobAccumulators, JobStatus, JobStore
-from app.crawl.result_store import CrawlResultStore
-from app.crawl.watch_store import WatchStore
 from app.settings import CrawlerSettings
+from app.storage.job_store import TERMINAL_STATUSES, JobAccumulators, JobStatus, JobStore
+from app.storage.result_store import CrawlResultStore
+from app.storage.watch_store import WatchStore
 from tests._job_harnesses import (
     ScriptedExecute,
     _make_app,

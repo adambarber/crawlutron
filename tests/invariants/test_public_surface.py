@@ -104,7 +104,7 @@ _OWNER_PUBLIC_SURFACE_RATCHET = {
     "app/validation.py": (2, 2),
     "app/env.py": (7, 5),
     "app/api/response_shaping.py": (11, 10),
-    "app/crawl/sqlite_store.py": (9, 7),
+    "app/storage/sqlite_store.py": (9, 7),
     "app/safe_regex.py": (7, 2),
     "app/crawl/robots.py": (12, 3),
     "app/bounded_io.py": (4, 2),

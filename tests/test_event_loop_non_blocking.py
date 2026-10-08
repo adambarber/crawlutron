@@ -20,8 +20,8 @@ import pytest
 import app.transport.content_cache as cc
 from app.api.job_runner import _run_job
 from app.crawl.engine import _ResultSpill
-from app.crawl.job_store import JobStatus
 from app.models.crawl_policy import CrawlPolicy
+from app.storage.job_store import JobStatus
 from app.transport.content_cache import ContentCache
 from tests._fetcher_factories import crawled_results
 from tests._job_harnesses import loaded_job, make_job_store
@@ -371,8 +371,8 @@ class TestAsyncCrawlRunnerSavesOffTheEventLoop:
 
     async def test_run_async_crawl_save_does_not_block_the_event_loop(self, monkeypatch, tmp_path) -> None:
         from app.api.async_crawl_runner import run_async_crawl
-        from app.crawl.result_store import CrawlResultStore
         from app.settings import CrawlerSettings
+        from app.storage.result_store import CrawlResultStore
         from tests._job_harnesses import make_job_store
 
         store = make_job_store(str(tmp_path))

@@ -241,7 +241,7 @@ class TestAsyncCrawlJobStoreIntegration:
 
     async def test_job_store_single_shot_kind(self):
         """Job_store.create_single_shot creates job with SINGLE_SHOT kind."""
-        from app.crawl.job_store import JobKind, JobStatus
+        from app.storage.job_store import JobKind, JobStatus
 
         with single_shot_job() as (_store, job):
             assert job.job_id == "test-id"
@@ -259,10 +259,10 @@ class TestAsyncCrawlJobStoreIntegration:
 
     async def test_job_store_single_shot_persists_results(self):
         """Results are stored in job.results for SINGLE_SHOT jobs."""
-        from app.crawl.job_store import JobKind, JobStatus
         from app.models.crawl_status import CrawlStatus
         from app.models.unified_crawl_response import UnifiedCrawlResponse
         from app.models.unified_crawl_result import UnifiedCrawlResult
+        from app.storage.job_store import JobKind, JobStatus
         from app.vocabulary.taxonomy import CrawlClassification
 
         with single_shot_job() as (store, job):

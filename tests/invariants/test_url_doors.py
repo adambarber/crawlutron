@@ -883,7 +883,7 @@ JOB_FRONTIER_GROWTH_ONLY_USES_FUNNEL = Rule(
     skip=frozenset({_ADMISSION_CHOKEPOINT}),
     kwargs_for=lambda relative: (
         {"allowed_functions": frozenset({"normalize_job_state", "_persist"})}
-        if relative == "app/crawl/job_store.py"
+        if relative == "app/storage/job_store.py"
         else {}
     ),
     proof_path=REPO_ROOT / "app" / "api" / "job_runner.py",
