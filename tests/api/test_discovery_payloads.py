@@ -172,6 +172,24 @@ class TestDiscoveryPayload:
         assert "POST /v1/jobs/{job_id}/control" in recommended
         assert "DELETE /v1/jobs/{job_id}" in recommended
 
+    def test_recommended_endpoints_name_the_watch_surface(self):
+        """A watch is only useful to an agent that can register one and then read
+        what the sweep concluded: both halves were live in the router and absent
+        from the list a discovering agent actually reads."""
+        recommended = discovery_payload()["recommended_endpoints"]
+        assert "POST /v1/watches" in recommended
+        assert "GET /v1/watches" in recommended
+        assert "GET /v1/watches/{watch_id}" in recommended
+        assert "DELETE /v1/watches/{watch_id}" in recommended
+
+    def test_capabilities_advertises_watches(self):
+        """``conditional_fetch`` is the primitive; ``watches`` is the surface that
+        uses it on the caller's behalf. An agent deciding whether to poll for
+        changes has to be able to see that the service will."""
+        from app.discovery.capabilities import capabilities_payload
+        features = capabilities_payload(CrawlerSettings.from_mapping({}))["features"]
+        assert features["watches"] is True
+
     def test_every_recommended_endpoint_is_a_live_route(self):
         """The recommendation list is hand-curated, so it can drift from the
         routers it mirrors: an entry for a route that no longer exists sends a

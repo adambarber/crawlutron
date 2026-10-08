@@ -312,14 +312,18 @@ def test_whole_site_visited_gate_detector_bites():
 # its async twin. The sink is a direct call to a SYNCHRONOUS store method; the
 # requirement is that no async frame in app/ makes one. Tree-wide, because the
 # next handler, runner, or lifespan step is where it comes back.
-_STORE_CLASSES = ("JobStore", "CrawlResultStore")
+_STORE_CLASSES = ("JobStore", "CrawlResultStore", "WatchStore")
 
 
 # The two stores are injected unannotated (FastAPI ``Depends``, lifespan
 # globals, runner arguments), so a type-annotation-only resolution would see
 # nothing. These names are the project's own convention for the injected
 # receiver; a frame that binds one of them holds a store.
-_CONVENTIONAL_STORE_NAMES = {"job_store": "JobStore", "result_store": "CrawlResultStore"}
+_CONVENTIONAL_STORE_NAMES = {
+    "job_store": "JobStore",
+    "result_store": "CrawlResultStore",
+    "watch_store": "WatchStore",
+}
 
 
 def _sync_store_methods() -> dict[str, frozenset[str]]:
@@ -333,9 +337,14 @@ def _sync_store_methods() -> dict[str, frozenset[str]]:
     """
     from app.crawl.job_store import JobStore
     from app.crawl.result_store import CrawlResultStore
+    from app.crawl.watch_store import WatchStore
 
     derived: dict[str, frozenset[str]] = {}
-    for class_name, store_class in (("JobStore", JobStore), ("CrawlResultStore", CrawlResultStore)):
+    for class_name, store_class in (
+        ("JobStore", JobStore),
+        ("CrawlResultStore", CrawlResultStore),
+        ("WatchStore", WatchStore),
+    ):
         derived[class_name] = frozenset(
             member
             for member in dir(store_class)

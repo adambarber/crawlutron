@@ -33,6 +33,7 @@ from httpx import ASGITransport, AsyncClient
 from app.api import job_runner
 from app.crawl.job_store import TERMINAL_STATUSES, JobAccumulators, JobStatus, JobStore
 from app.crawl.result_store import CrawlResultStore
+from app.crawl.watch_store import WatchStore
 from app.settings import CrawlerSettings
 from tests._job_harnesses import (
     ScriptedExecute,
@@ -41,10 +42,12 @@ from tests._job_harnesses import (
     make_crawled_job_store,
     make_job_store,
 )
-from tests._policy_factories import UNRESTRICTED_HOST_POLICY, deployment_tier
+from tests._policy_factories import UNRESTRICTED_HOST_POLICY, canonical, deployment_tier
 from tests._result_builders import _canned_result
+from tests._watch_harnesses import watch_client
 
 _ROOT = "http://example.test/a"
+_DEAD_ORIGIN = "http://127.0.0.1:9/"
 
 
 def _refuse_on_loop(name: str) -> None:
@@ -115,6 +118,46 @@ class LoopGuardResultStore(CrawlResultStore):
         return super().close()
 
 
+class LoopGuardWatchStore(WatchStore):
+    """The real watch store, with every sync entry point refusing the loop.
+
+    The sweep is the harder half of this surface: it runs in the background for
+    the life of the process, so a sync store call there would park the loop
+    that every in-flight request is being answered on, and nothing in the
+    request path would say so.
+    """
+
+    def create(self, url, /, **kwargs):
+        _refuse_on_loop("WatchStore.create")
+        return super().create(url, **kwargs)
+
+    def get(self, watch_id):
+        _refuse_on_loop("WatchStore.get")
+        return super().get(watch_id)
+
+    def list_watches(self):
+        _refuse_on_loop("WatchStore.list_watches")
+        return super().list_watches()
+
+    def delete(self, watch_id):
+        _refuse_on_loop("WatchStore.delete")
+        return super().delete(watch_id)
+
+    def due(self, now):
+        _refuse_on_loop("WatchStore.due")
+        return super().due(now)
+
+    def record_check(self, watch_id, **kwargs):
+        _refuse_on_loop("WatchStore.record_check")
+        return super().record_check(watch_id, **kwargs)
+
+    # Inherited from ``CoordinationStore`` rather than written here, and still
+    # covered: the base's ``close`` takes the same file-wide lock as a write.
+    def close(self):
+        _refuse_on_loop("WatchStore.close")
+        return super().close()
+
+
 @pytest.fixture
 def loop_guard_store(tmp_path) -> LoopGuardJobStore:
     return LoopGuardJobStore(tmp_path / "jobs.db", policy=UNRESTRICTED_HOST_POLICY, tier=deployment_tier())
@@ -123,6 +166,16 @@ def loop_guard_store(tmp_path) -> LoopGuardJobStore:
 @pytest.fixture
 def result_store(tmp_path) -> LoopGuardResultStore:
     return LoopGuardResultStore(tmp_path / "results.db")
+
+
+@pytest.fixture
+def loop_guard_watch_store(tmp_path) -> LoopGuardWatchStore:
+    return LoopGuardWatchStore(tmp_path / "watches.db")
+
+
+@pytest.fixture
+def watches_client(loop_guard_watch_store):
+    return watch_client(loop_guard_watch_store)
 
 
 @pytest.fixture
@@ -188,6 +241,61 @@ class TestJobEndpointsStayOffTheLoop:
             # background task outlives the loop and writes to a closed DB.
             hang.set()
             job_runner.reset_job_runner()
+
+
+class TestWatchSurfaceStaysOffTheLoop:
+    """The ``/v1/watches`` handlers and the sweep, on a store that refuses the loop.
+
+    The sweep is the half that cannot fail loudly: it runs in the background for
+    the life of the process, so a sync store call in it parks the loop that every
+    in-flight request is answered on, and no request path ever reports it.
+    """
+
+    async def test_the_whole_watch_endpoint_surface_stays_off_the_loop(
+        self, loop_guard_watch_store, watches_client
+    ):
+        created = await watches_client.post(
+            "/v1/watches",
+            json={"url": _ROOT, "interval_seconds": 60},
+        )
+        assert created.status_code == 201, created.text
+        watch_id = created.json()["watch_id"]
+
+        listed = await watches_client.get("/v1/watches")
+        assert listed.status_code == 200, listed.text
+        assert watch_id in {row["watch_id"] for row in listed.json()["watches"]}
+
+        fetched = await watches_client.get(f"/v1/watches/{watch_id}")
+        assert fetched.status_code == 200, fetched.text
+
+        removed = await watches_client.delete(f"/v1/watches/{watch_id}")
+        assert removed.status_code == 204, removed.text
+        assert await _off_loop(loop_guard_watch_store.get, watch_id) is None
+
+    async def test_a_sweep_pass_stays_off_the_loop(self, loop_guard_watch_store):
+        """The pass reads the due rows and records each verdict off the loop too."""
+        from app.api.watch_sweep import WatchSweeper
+
+        watch = await _off_loop(
+            loop_guard_watch_store.create,
+            canonical(_DEAD_ORIGIN),
+            interval_seconds=60,
+            now=0.0,
+        )
+        sweeper = WatchSweeper(
+            loop_guard_watch_store,
+            host_policy=UNRESTRICTED_HOST_POLICY,
+            settings=CrawlerSettings.from_mapping({}),
+        )
+
+        # A refused connection is the whole check: this test is about where the
+        # store is read and written, and nothing else has to succeed for the
+        # verdict to be recorded.
+        outcomes = await sweeper.sweep_once(now=60.0)
+
+        assert outcomes, "the due watch was not checked at all"
+        stored = await _off_loop(loop_guard_watch_store.get, watch.watch_id)
+        assert stored.last_outcome is not None
 
 
 class TestStatusReadNeverMaterializesTheCrawl:
@@ -547,3 +655,11 @@ def test_the_stores_live_where_the_guard_expects() -> None:
     assert guarded_result == result_surface, (
         f"unguarded CrawlResultStore methods: {result_surface - guarded_result}"
     )
+
+    guarded_watch = {
+        name
+        for name, value in vars(LoopGuardWatchStore).items()
+        if callable(value) and not name.startswith("_")
+    }
+    watch_surface = _sync_surface(WatchStore)
+    assert guarded_watch == watch_surface, f"unguarded WatchStore methods: {watch_surface - guarded_watch}"

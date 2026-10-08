@@ -338,6 +338,26 @@ async def _probe_map_endpoint(monkeypatch, tmp_path):
     )
 
 
+async def _probe_watch_router(monkeypatch, tmp_path):
+    from app.api import watch_router
+    from app.models.watch_create_request import WatchCreateRequest
+
+    effects = _effects()
+    watch_store = type(
+        "Store",
+        (),
+        {"acreate": lambda self, *args, **kwargs: effects["persisted"].append(args)},
+    )()
+    await _assert_refused(
+        watch_router.create_watch(
+            WatchCreateRequest(url=_BLOCKED_URL, interval_seconds=60),
+            watch_store=watch_store,
+            settings=_denied_settings(),
+        ),
+        effects,
+    )
+
+
 async def _probe_render(monkeypatch, tmp_path):
     from app.api.render import render_request
 
@@ -495,6 +515,7 @@ _PROBES = {
     "app/api/render.py:render_request": _probe_render,
     "app/api/async_crawl_runner.py:run_async_crawl": _probe_async_runner,
     "app/api/response_shaping.py:frontier_link_url": _probe_response_shaping,
+    "app/api/watch_router.py:create_watch": _probe_watch_router,
     "app/api/webhooks.py:post_webhook": _probe_webhook,
     "app/api/webhooks.py:deliver_pinned_webhook": _probe_webhook_delivery,
     "app/mcp/tools.py:_handle_crawl": _probe_mcp_crawl,

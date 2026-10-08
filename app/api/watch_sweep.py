@@ -100,11 +100,11 @@ class WatchSweeper:
         over: the caller reports progress from this, and the row itself is the
         record of what was stored.
         """
-        return [await self._check(watch, now=now) for watch in self._store.due(now)]
+        return [await self._check(watch, now=now) for watch in await self._store.adue(now)]
 
     async def _check(self, watch: WatchState, *, now: float) -> WatchOutcome:
         outcome, validators = await self._revalidate(watch)
-        self._store.record_check(
+        await self._store.arecord_check(
             watch.watch_id,
             outcome=outcome,
             now=now,

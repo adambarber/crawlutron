@@ -17,6 +17,7 @@ up front.
 
 from __future__ import annotations
 
+import asyncio
 import sqlite3
 from pathlib import Path
 
@@ -177,6 +178,64 @@ class WatchStore(CoordinationStore):
                 ),
             )
             self._conn.commit()
+
+    # One async twin per operation, each the same process lock the sync call
+    # takes -- so an async caller (the sweep, the API) never holds the event
+    # loop while that lock is held, and a twin can never race a direct call.
+    # Named as ``JobStore`` names its own, so both stores read the same way.
+
+    async def acreate(
+        self,
+        url: NormalizedUrl,
+        /,
+        *,
+        interval_seconds: int,
+        now: float,
+        webhook_url: str | None = None,
+    ) -> WatchState:
+        """Async form of :meth:`create`."""
+        return await asyncio.to_thread(
+            self.create,
+            url,
+            interval_seconds=interval_seconds,
+            now=now,
+            webhook_url=webhook_url,
+        )
+
+    async def aget(self, watch_id: str) -> WatchState | None:
+        """Async form of :meth:`get`."""
+        return await asyncio.to_thread(self.get, watch_id)
+
+    async def alist_watches(self) -> list[WatchState]:
+        """Async form of :meth:`list_watches`."""
+        return await asyncio.to_thread(self.list_watches)
+
+    async def adelete(self, watch_id: str) -> bool:
+        """Async form of :meth:`delete`."""
+        return await asyncio.to_thread(self.delete, watch_id)
+
+    async def adue(self, now: float) -> list[WatchState]:
+        """Async form of :meth:`due`."""
+        return await asyncio.to_thread(self.due, now)
+
+    async def arecord_check(
+        self,
+        watch_id: str,
+        *,
+        outcome: WatchOutcome,
+        now: float,
+        next_check_at: float,
+        validators: ContentValidators,
+    ) -> None:
+        """Async form of :meth:`record_check`."""
+        await asyncio.to_thread(
+            self.record_check,
+            watch_id,
+            outcome=outcome,
+            now=now,
+            next_check_at=next_check_at,
+            validators=validators,
+        )
 
 
 def _row_to_state(row: sqlite3.Row) -> WatchState:

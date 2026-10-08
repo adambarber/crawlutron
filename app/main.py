@@ -382,6 +382,7 @@ if FastAPI is not None:
     from .api.map_router import router as map_router
     from .api.metrics_router import router as metrics_router
     from .api.render_router import router as render_router
+    from .api.watch_router import router as watch_router
     from .mcp.router import router as mcp_router
     from .search.router import router as search_router
 
@@ -389,6 +390,7 @@ if FastAPI is not None:
     app.include_router(render_router)
     app.include_router(map_router)
     app.include_router(jobs_router)
+    app.include_router(watch_router)
     app.include_router(crawl_router)
     app.include_router(search_router)
     app.include_router(mcp_router)

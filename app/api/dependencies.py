@@ -25,6 +25,7 @@ from fastapi import Depends, Request
 
 from app.crawl.job_store import JobStore
 from app.crawl.result_store import CrawlResultStore
+from app.crawl.watch_store import WatchStore
 from app.settings import CrawlerSettings
 
 
@@ -48,6 +49,11 @@ def get_result_store(request: Request) -> CrawlResultStore:
     return request.app.state.result_store
 
 
+def get_watch_store(request: Request) -> WatchStore:
+    """FastAPI dependency: return the :class:`WatchStore` for the running app."""
+    return request.app.state.watch_store
+
+
 # One declaration per provider: the annotation an endpoint parameter carries.
 # ``Annotated`` rather than a default value, so the dependency is a declared
 # part of the signature instead of an invisible default a reader has to notice.
@@ -64,6 +70,7 @@ SettingsDep = Annotated[CrawlerSettings, Depends(get_settings)]
 ShutdownEventDep = Annotated[asyncio.Event, Depends(get_shutdown_event)]
 JobStoreDep = Annotated[JobStore, Depends(get_job_store)]
 ResultStoreDep = Annotated[CrawlResultStore, Depends(get_result_store)]
+WatchStoreDep = Annotated[WatchStore, Depends(get_watch_store)]
 
 
 __all__ = [
@@ -71,8 +78,10 @@ __all__ = [
     "ResultStoreDep",
     "SettingsDep",
     "ShutdownEventDep",
+    "WatchStoreDep",
     "get_job_store",
     "get_result_store",
     "get_settings",
     "get_shutdown_event",
+    "get_watch_store",
 ]
