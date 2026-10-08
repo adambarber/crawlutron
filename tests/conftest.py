@@ -443,6 +443,14 @@ def job_store(tmp_path):
 
 
 @pytest.fixture
+def watch_store(tmp_path):
+    """WatchStore backed by a per-test SQLite db under ``tmp_path``."""
+    from app.crawl.watch_store import WatchStore
+
+    return WatchStore(tmp_path / "watches.db")
+
+
+@pytest.fixture
 def client(job_store):
     """An AsyncClient over the jobs app, backed by this test's own ``job_store``.
 

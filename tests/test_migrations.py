@@ -26,6 +26,7 @@ from app.crawl.migrations import (
 )
 from app.crawl.migrations.runner import LegacySchemaMismatch
 from app.crawl.result_store import CrawlResultStore
+from app.crawl.watch_store import WatchStore
 from app.models.crawl_policy import CrawlPolicy
 from tests._policy_factories import canonical, job_store
 
@@ -34,7 +35,7 @@ _BOOKKEEPING_TABLES = {"_yoyo_log", "_yoyo_migration", "_yoyo_version", "yoyo_lo
 
 def _open_store(
     schema: StoreSchema, db_path: Path
-) -> JobStore | CrawlResultStore | CoordinationCounters | SharedCookieStore:
+) -> JobStore | CrawlResultStore | CoordinationCounters | SharedCookieStore | WatchStore:
     if schema is StoreSchema.CRAWL_JOBS:
         return job_store(db_path)
     if schema is StoreSchema.RESULTS:
@@ -43,6 +44,8 @@ def _open_store(
         return CoordinationCounters(db_path)
     if schema is StoreSchema.COORDINATION_COOKIES:
         return SharedCookieStore(db_path)
+    if schema is StoreSchema.WATCHES:
+        return WatchStore(db_path)
     # The parametrization above is derived from StoreSchema, so it grows
     # whenever a schema is added. Defaulting here instead would silently
     # migrate the wrong table and fail as a confusing missing-table assertion.

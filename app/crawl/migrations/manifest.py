@@ -14,6 +14,7 @@ class StoreSchema(StrEnum):
     RESULTS = "results"
     COORDINATION_COUNTERS = "coordination_counters"
     COORDINATION_COOKIES = "coordination_cookies"
+    WATCHES = "watches"
 
 
 @dataclass(frozen=True)
@@ -134,11 +135,45 @@ COORDINATION_COOKIES_SCHEMA = TableSchema(
     ),
 )
 
+# One row per registered watch. Small by construction (a watch is a single
+# URL and its revalidation history, rewritten per check), so the row is the
+# whole record -- unlike a crawl job there is no append-only page history to
+# split into a companion table.
+WATCHES_SCHEMA = TableSchema(
+    name="watches",
+    columns=(
+        ColumnSchema("watch_id", "TEXT", False, None, 1),
+        ColumnSchema("url", "TEXT", True, None),
+        # NULL means a poll-only watch: registration does not require a
+        # delivery destination, and the sweep fires nothing without one.
+        ColumnSchema("webhook_url", "TEXT", False, None),
+        ColumnSchema("interval_seconds", "INTEGER", True, None),
+        ColumnSchema("status", "TEXT", True, "'active'"),
+        # etag/last_modified exactly as ContentValidators spells them, so the
+        # API response and the engine result share one vocabulary with no
+        # translation layer between store and wire.
+        ColumnSchema("validators", "TEXT", True, "'{}'"),
+        ColumnSchema("next_check_at", "REAL", True, None),
+        ColumnSchema("last_checked_at", "REAL", False, None),
+        ColumnSchema("last_outcome", "TEXT", False, None),
+        ColumnSchema("last_changed_at", "REAL", False, None),
+        ColumnSchema("consecutive_failures", "INTEGER", True, "0"),
+        ColumnSchema("created_at", "REAL", True, None),
+        ColumnSchema("updated_at", "REAL", True, None),
+    ),
+    indexes=(
+        # The due-claim sweep reads (status, next_check_at) and nothing else;
+        # this is the one query shape the sweeper runs per pass.
+        IndexSchema("watches_due", ("status", "next_check_at")),
+    ),
+)
+
 CURRENT_SCHEMAS = {
     StoreSchema.CRAWL_JOBS: CRAWL_JOBS_SCHEMA,
     StoreSchema.RESULTS: RESULTS_SCHEMA,
     StoreSchema.COORDINATION_COUNTERS: COORDINATION_COUNTERS_SCHEMA,
     StoreSchema.COORDINATION_COOKIES: COORDINATION_COOKIES_SCHEMA,
+    StoreSchema.WATCHES: WATCHES_SCHEMA,
 }
 
 LEGACY_COLUMNS = {
@@ -153,6 +188,7 @@ LEGACY_COLUMNS = {
     StoreSchema.RESULTS: (),
     StoreSchema.COORDINATION_COUNTERS: (),
     StoreSchema.COORDINATION_COOKIES: (),
+    StoreSchema.WATCHES: (),
 }
 
 MIGRATION_SEQUENCES = {
@@ -164,6 +200,7 @@ MIGRATION_SEQUENCES = {
     StoreSchema.RESULTS: ("0001_results_initial",),
     StoreSchema.COORDINATION_COUNTERS: ("0001_coordination_counters_initial",),
     StoreSchema.COORDINATION_COOKIES: ("0001_coordination_cookies_initial",),
+    StoreSchema.WATCHES: ("0001_watches_initial",),
 }
 
 MIGRATION_IDS = {schema: sequence[-1] for schema, sequence in MIGRATION_SEQUENCES.items()}
@@ -194,6 +231,21 @@ def create_table_sql(schema: TableSchema) -> str:
     if len(key_columns) > 1:
         return f"CREATE TABLE {_quote_identifier(schema.name)} (\n{body},\n  PRIMARY KEY ({quoted_keys})\n)"
     return f"CREATE TABLE {_quote_identifier(schema.name)} (\n{body}\n)"
+
+
+def create_index_sql(schema: TableSchema, index: IndexSchema) -> str:
+    """Render an index's DDL from its declaration.
+
+    A migration creates its indexes through this renderer rather than by
+    spelling DDL of its own, so the declared index and the one the drift
+    check compares against cannot be two different statements.
+    """
+    unique = "UNIQUE " if index.unique else ""
+    name = _quote_identifier(index.name)
+    table = _quote_identifier(schema.name)
+    columns = ", ".join(_quote_identifier(column) for column in index.columns)
+    where = f" WHERE {index.partial}" if index.partial else ""
+    return f"CREATE {unique}INDEX {name} ON {table} ({columns}){where}"
 
 
 def _actual_columns(conn: sqlite3.Connection, table_name: str) -> tuple[ColumnSchema, ...]:
