@@ -594,8 +594,12 @@ async def run_seeded_job(job, job_store, execute):
     from app.api import job_runner
 
     job_runner.install_execute_crawl(execute)
+    # A row a crash left RUNNING restarts the way the service restarts it: the
+    # recovery rewind first, because the runner's claim only accepts PENDING.
+    await job_runner.recover_orphaned_running_jobs(job_store)
     await drive_job(job.job_id, job_store)
     return await run_to_terminal(job_store, job.job_id)
+
 
 
 async def run_seeded_scripted_job(

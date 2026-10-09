@@ -12,6 +12,7 @@ import asyncio
 import inspect
 import threading
 from collections.abc import Callable
+from dataclasses import replace
 from typing import Any
 from unittest.mock import MagicMock
 
@@ -25,7 +26,7 @@ from app.api import dependencies, job_runner, jobs_router
 from app.api.dependencies import get_job_store, get_settings, get_shutdown_event
 from app.config.settings import CrawlerSettings
 from app.models.crawl_policy import CrawlPolicy
-from app.storage.job_store import FrontierEntry, JobStatus
+from app.storage.job_store import FrontierEntry, JobStatus, JobStore
 from tests._job_harnesses import (
     ScriptedExecute,
     _create_api_job,
@@ -952,3 +953,74 @@ class TestEveryVisitedUrlHasAnEnvelope:
         """The accounting is a partition: each visited URL, exactly one envelope."""
         job = await run_scripted_api_job(client, job_store, GRAPH_ROOT, results=_root_child_results())
         assert len(job.results) == job.stats["total_crawled"]
+
+
+class TestTheRunnerClaim:
+    """The claim is the CAS: a previously read status never decides who runs the job."""
+
+    @staticmethod
+    def _seeded(job_store):
+        job = job_store.create(GRAPH_ROOT, CrawlPolicy())
+        job.frontier = [FrontierEntry(url=canonical(GRAPH_ROOT), depth=0)]
+        job_store.save(job)
+        return job
+
+    async def test_a_row_already_running_is_left_alone_by_a_second_runner(self, job_store):
+        # The create/recovery entrance path: whoever loaded a RUNNING row is not
+        # the owner, and an owner it did not become means no work.
+        job = self._seeded(job_store)
+        assert job_store.set_status(job.job_id, JobStatus.RUNNING, expected=JobStatus.PENDING)
+        engine = ScriptedExecute(results=[_canned_result(GRAPH_ROOT)])
+        job_runner.install_execute_crawl(engine)
+
+        await drive_job(job.job_id, job_store)
+
+        assert engine.attempts == {}, "a second runner claimed a job it never held"
+        assert job_store.load(job.job_id).status is JobStatus.RUNNING
+
+    async def test_resume_still_runs_the_row_it_flipped_itself(self, job_store):
+        # The flip is the claim on this path, and only the process that performed
+        # it may run the job -- which is what distinguishes it from the case above.
+        job = self._seeded(job_store)
+        assert job_store.set_status(job.job_id, JobStatus.RUNNING, expected=JobStatus.PENDING)
+        assert job_store.set_status(job.job_id, JobStatus.PAUSED, expected=JobStatus.RUNNING)
+        engine = ScriptedExecute(results=[_canned_result(GRAPH_ROOT)])
+        job_runner.install_execute_crawl(engine)
+
+        outcome = await job_runner.resume_job(
+            job.job_id, job_store, CrawlerSettings.from_mapping({}), asyncio.Event()
+        )
+
+        assert outcome == "ok"
+        assert await _wait_status(job_store, job.job_id, {"completed", "failed"}) == "completed"
+        assert job_store.load(job.job_id).visited == {canonical(GRAPH_ROOT)}
+
+    async def test_a_row_stopped_between_the_read_and_the_claim_is_not_crawled(self, job_store):
+        # The runner read RUNNING; by the time it claimed, the row had stopped.
+        # A stale read must not outvote what the store says now.
+        job = self._seeded(job_store)
+        assert job_store.set_status(job.job_id, JobStatus.RUNNING, expected=JobStatus.PENDING)
+        assert job_store.set_status(job.job_id, JobStatus.PAUSED, expected=JobStatus.RUNNING)
+        engine = ScriptedExecute(results=[_canned_result(GRAPH_ROOT)])
+        job_runner.install_execute_crawl(engine)
+        raced = _RunnerReadRunsBeforeTheStore(job_store)
+
+        await drive_job(job.job_id, raced)
+
+        assert engine.attempts == {}, "a runner crawled a job after it had been stopped"
+        assert raced.load(job.job_id).status is JobStatus.PAUSED
+
+
+class _RunnerReadRunsBeforeTheStore:
+    """Store whose rows read as they were before this run's status flip: the
+    read/claim window, with everything else delegating to real rows."""
+
+    def __init__(self, inner: JobStore) -> None:
+        self._inner = inner
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._inner, name)
+
+    async def aload(self, job_id: str):
+        job = await self._inner.aload(job_id)
+        return replace(job, status=JobStatus.RUNNING) if job is not None else None

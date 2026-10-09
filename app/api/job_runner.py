@@ -319,14 +319,19 @@ async def _run_job(
     settings: Any,
     shutdown_event: asyncio.Event,
     fetch_and_decode: FetchAndDecode | None = None,
+    *,
+    preclaimed: bool = False,
 ) -> None:
-    """Whole-site engine loop for one job. Runs until terminal/paused/cancel."""
+    """Whole-site engine loop for one job; ``preclaimed`` says the caller's own
+    PAUSED->RUNNING flip is the claim, so every other row is claimed by the CAS."""
     job = await job_store.aload(job_id)
     if job is None:
         return
-    claimed = await job_store.aset_status(job_id, JobStatus.RUNNING, expected=JobStatus.PENDING)
-    if not claimed and job.status is not JobStatus.RUNNING:
-        return
+    if not preclaimed:
+        # The claim is the whole decision: a row that is not PENDING here belongs
+        # to another process or to an operator who stopped it.
+        if not await job_store.aset_status(job_id, JobStatus.RUNNING, expected=JobStatus.PENDING):
+            return
     await job_store.asave(job)
 
     try:
@@ -496,9 +501,13 @@ def start_job(
     job_store: JobStore,
     settings: Any,
     shutdown_event: asyncio.Event,
+    *,
+    preclaimed: bool = False,
 ) -> asyncio.Task:
-    """Spawn (or return) the runner task for a job."""
-    return start_tracked_task(job_id, lambda: _run_job(job_id, job_store, settings, shutdown_event))
+    """Spawn (or return) the runner task; preclaimed rows were flipped by the caller."""
+    return start_tracked_task(
+        job_id, lambda: _run_job(job_id, job_store, settings, shutdown_event, preclaimed=preclaimed)
+    )
 
 
 def cancel_job_task(job_id: str) -> None:
@@ -545,7 +554,9 @@ async def resume_job(job_id: str, job_store: JobStore, settings: Any, shutdown_e
     """Resume a paused job by respawning its runner task."""
     outcome = await _transition(job_store, job_id, JobStatus.RUNNING, expected=JobStatus.PAUSED)
     if outcome == "ok":
-        start_job(job_id, job_store, settings, shutdown_event)
+        # The flip above is this process's claim, so the runner is told not to
+        # take a second one -- the only way it can run without the CAS failing.
+        start_job(job_id, job_store, settings, shutdown_event, preclaimed=True)
     return outcome
 
 
