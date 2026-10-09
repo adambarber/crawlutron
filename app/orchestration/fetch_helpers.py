@@ -304,24 +304,22 @@ async def fetch_sitemap_urls(
         return etag, last_modified
 
     cache_key = (sitemap_url.raw, host_policy)
-    cached = _SITEMAP_CACHE.get(cache_key)
-    if cached is not None:
+    fresh = _SITEMAP_CACHE.get(cache_key)
+    if fresh is not None:
         # Fresh: serve directly (get() already LRU-touched).
-        return set(cached[0])
-    # Expired (or absent): fall through and re-fetch. Leave the entry in the
-    # cache so a 304 response in recurse() can still reuse its URLs (do NOT pop
-    # it here, or the conditional 304 reuse below would lose the cached set).
-    # On a cache expiry, replay the prior ETag/Last-Modified as a conditional
-    # request unless the caller supplied their own headers.
-    if conditional is None and cached:
-        if cached[1]:
-            conditional = {"If-None-Match": cached[1]}
-        elif cached[2]:
-            conditional = {"If-Modified-Since": cached[2]}
+        return set(fresh[0])
+    # get() hides an expired entry, so read it stale: its validators drive the
+    # replay, and leaving it in place lets a 304 in recurse() reuse its URLs.
+    stale = _SITEMAP_CACHE.get_stale(cache_key)
+    if conditional is None and stale:
+        if stale[1]:
+            conditional = {"If-None-Match": stale[1]}
+        elif stale[2]:
+            conditional = {"If-Modified-Since": stale[2]}
     try:
         root_etag, root_lm = await recurse(sitemap_url, 0, conditional)
     except Exception:
-        root_etag, root_lm = (cached[1] if cached else None), (cached[2] if cached else None)
+        root_etag, root_lm = (stale[1] if stale else None), (stale[2] if stale else None)
     # Store through the chokepoint: LRU recency refresh and bounded eviction
     # happen inside put(), under its lock (no more manual popitem loop).
     _SITEMAP_CACHE.put(cache_key, (list(page_urls), root_etag, root_lm))

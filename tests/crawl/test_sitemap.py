@@ -40,9 +40,33 @@ def _resp(status, body="", etag=None, last_modified=None, ctype="application/xml
     )
 
 
+async def test_expired_entry_replays_its_validator_without_the_caller_asking():
+    """The expiry replay: the fetcher alone decides whether to re-send them."""
+    url = canonical("http://x.test/sitemap.xml")
+    _SITEMAP_CACHE.put(
+        (url.raw, UNRESTRICTED_HOST_POLICY),
+        ([("http://x.test/p1", None)], "v1", None),
+        ttl=-1.0,
+    )
+    sent: list[dict[str, str]] = []
+
+    def respond(u, headers):
+        if headers.get("If-None-Match") == "v1":
+            return _resp(304, etag="v1")
+        return _resp(200, "<x></x>", etag="v2")
+
+    fetcher = request_fetcher(respond, record_headers=sent)
+
+    out = await fetch_sitemap_urls(fetcher, url, 10, host_policy=UNRESTRICTED_HOST_POLICY)
+
+    # The prior etag rode on the request, the origin answered 304, and the
+    # cached set was reused -- which only happens if the replay fired.
+    assert any(h.get("If-None-Match") == "v1" for h in sent), sent
+    assert out == {("http://x.test/p1", None)}
+
+
 async def test_304_reuses_cached_urls_without_reparsing():
     url = canonical("http://x.test/sitemap.xml")
-    # Seed an EXPIRED cache entry (forces a re-fetch attempt).
     # Seed an EXPIRED entry (negative ttl) through the chokepoint seam.
     _SITEMAP_CACHE.put(
         (url.raw, UNRESTRICTED_HOST_POLICY),
