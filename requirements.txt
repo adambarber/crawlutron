@@ -9,9 +9,8 @@ pdfplumber>=0.11.0
 charset-normalizer>=3.3.0
 h2>=4.1.0
 httpx>=0.27.0
-# Imported by app/crawl/extraction.py and app/crawl/llm_format.py
-# (silent dependency before this entry; explicitly listed to keep fresh
-# installs green).
+# Imported by app/extraction/content.py (silent dependency before this entry;
+# explicitly listed to keep fresh installs green).
 lxml>=5.0
 beautifulsoup4>=4.12
 markdownify>=0.13
@@ -19,7 +18,7 @@ markdownify>=0.13
 pydantic>=2.0
 # Local DBAPI schema migrations only; the package documents no network or telemetry behavior.
 yoyo-migrations==9.0.0
-# Bounded-execution regex engine (app/safe_regex.py): native C-loop timeout=
+# Bounded-execution regex engine (app/safety/safe_regex.py): native C-loop timeout=
 # for attacker-influenced patterns; stdlib re cannot be interrupted (GIL wedge).
 regex>=2026.5.9
 # Real public-suffix dataset for registrable_domain. Ships a snapshot

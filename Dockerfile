@@ -131,7 +131,7 @@ COPY --from=builder --chown=appuser:appuser /root/.local /home/appuser/.local
 COPY --from=camoufox-binary /camoufox-bundle /home/appuser/.cache/camoufox
 
 # Copy application code. The logging helper is in-tree at
-# ``app/logging_config.py`` (no external shared-tree copy is needed).
+# ``app/runtime/logging_config.py`` (no external shared-tree copy is needed).
 COPY --chown=appuser:appuser app /app/app
 
 # uvicorn applies its logging config in ``Config.__init__`` -- BEFORE the app

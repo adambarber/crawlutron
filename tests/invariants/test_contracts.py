@@ -525,7 +525,13 @@ _DOC_REFERENCE_EXCLUSIONS = {
 _SKIP_DIRECTORIES = frozenset({".git", ".venv", "work", "node_modules", ".pytest_cache", "__pycache__"})
 
 _BACKTICKED_PATH = re.compile(
-    r"^[\w][\w./-]*/[\w./-]*\.(?:py|md|toml|json|ya?ml|ini|cfg|txt|in|sh)(?::\d+)?$"
+    # A directory must carry its trailing slash: an optional one would let
+    # bare prose such as ``and/or`` read as a path claim, and a gate that
+    # reports noise gets disabled rather than obeyed. A file may end at its
+    # extension or carry a suffix -- a line number or a symbol -- because the
+    # claim being checked is that the FILE exists, and requiring ``:\\d+``
+    # let ``app/crawl/sqlite_store.py:connect_store`` through unnoticed.
+    r"^[\w][\w./-]*/[\w./-]*(?:/|(?:\.(?:py|md|toml|json|ya?ml|ini|cfg|txt|in|sh)(?::[\w.]+)?))$"
 )
 _BACKTICKED_REPO_DOCUMENT = re.compile(r"^[\w][\w-]*\.md$")
 
@@ -728,6 +734,26 @@ def test_live_doc_reference_detector_bites(tmp_path):
     )
     offenders = _broken_doc_reference_offenders(root=tmp_path, documents=["README.md"])
     assert "README.md points at `DOES_NOT_EXIST.md`, which does not exist" in offenders
+
+    # A directory carries no extension, and a symbol suffix is not a line
+    # number -- both shapes a reader is still told to open, and both of which
+    # a module move breaks exactly as a renamed file does. The predicate once
+    # required a final extension and a trailing `:\\d+`, so a live document
+    # kept pointing at `app/crawl/migrations/` and at
+    # `app/crawl/sqlite_store.py:connect_store` while this gate reported a
+    # clean tree.
+    #
+    # The suffix arm claims only that the FILE exists. Whether the symbol
+    # inside it exists is issue #89's question and needs a different gate;
+    # resolving `app/main.py:real_name_real_symbol` here would drag symbol
+    # resolution into a detector whose thesis is navigation.
+    for claim in ("app/does_not_exist_dir/", "app/does_not_exist.py:connect_store"):
+        (tmp_path / "README.md").write_text(
+            document.read_text(encoding="utf-8") + f"\nSee `{claim}`.\n",
+            encoding="utf-8",
+        )
+        offenders = _broken_doc_reference_offenders(root=tmp_path, documents=["README.md"])
+        assert f"README.md points at `{claim}`, which does not exist" in offenders
 
 
 def test_documented_knob_detector_bites():
