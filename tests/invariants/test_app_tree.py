@@ -562,10 +562,10 @@ def _private_leak_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
     asserting a boundary the reader cannot check.
 
     Twenty-one names were doing this. ``DNS_EXECUTOR`` lives in
-    ``strategies.pinned_transport`` and is imported by ``api.webhooks``;
+     ``transport.pinned_transport`` and is imported by ``api.webhooks``;
     ``allow_private_targets`` lives in ``app.models.host_policy`` and is imported
     by a transport strategy; ``BROWSER_RAM_FRACTION`` crosses from ``app`` into
-    ``crawl.strategies.browser_pool``. Each is a real collaboration, which is
+    ``runtime.resource_pressure``. Each is a real collaboration, which is
     precisely why the fix is to promote the name rather than to forbid the call.
 
     The boundary is the *imported-from* module, not a map from name to definer, so
@@ -1109,9 +1109,10 @@ RETIRED_VOCABULARY_IS_NOT_IMPORTABLE = Rule(
     name="vocabulary-imports-name-a-topic",
     find=_retired_vocabulary_offenders,
     summary=(
-        "app/constants.py is a topic bucket: taxonomy, strategies, limits, browser vocabulary, "
-        "request profiles, host classifiers and identity in one file, so a reader cannot answer "
-        "'where does X live' from the mental model. Import the topic module instead"
+        "app/constants.py was one topic bucket -- taxonomy, strategies, limits, browser vocabulary, "
+        "request profiles, host classifiers and identity in a single file, so a reader could not "
+        "answer 'where does X live' from the mental model. It is retired: the vocabulary lives one "
+        "topic per module under app.vocabulary, so name the topic instead"
     ),
     scope=lambda *, exclude: trees_under(APP_ROOT),
     bite=lambda: Bites(
