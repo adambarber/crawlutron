@@ -554,8 +554,8 @@ def _private_leak_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
 
     A leading underscore has two halves and a name is only honest if both are
     respected. The conventional half is package-internal: ``_post_fetch_diagnostics``
-    is private to ``app.transport`` and every sibling strategy may use it,
-    because no consumer outside ``strategies`` can be written ``from
+    is private to ``app.transport`` and every sibling module may use it,
+    because no consumer outside ``transport`` can be written ``from
     app.transport.http import _post_fetch_diagnostics`` and get far. The
     half that gets broken is the one the import form defeats -- binding the name
     into another package *does* make it reachable, and the underscore is then
@@ -599,7 +599,7 @@ def _private_leak_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
 #: ``app.orchestration`` would be a sibling reach and the bite would prove nothing.
 _RENDER_PROOF_PATH = REPO_ROOT / "app" / "api" / "render.py"
 
-#: A real sibling of ``strategies.content_pipeline``, so the private import in the
+#: A real sibling of ``transport.content_pipeline``, so the private import in the
 #: clean proof resolves inside one package and must stay quiet.
 _TRANSPORT_SIBLING_PROOF_PATH = REPO_ROOT / "app" / "transport" / "browser_result.py"
 
