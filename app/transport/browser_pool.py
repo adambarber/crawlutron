@@ -256,7 +256,7 @@ class PooledBrowserWorker:
             # with retryable=True survives to the frontier layer.
             return crawl_result_from_exception(
                 error=error,
-                url=job.url.raw,
+                url=job.url,
                 domain=job.domain,
                 strategy=strategy,
                 elapsed_ms=int((time.monotonic() - started) * 1000),

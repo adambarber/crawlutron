@@ -286,7 +286,7 @@ class TestDiscoveryAndRenderApi:
                 except Exception as error:
                     return crawl_result_from_exception(
                         error=error,
-                        url=job.url.raw,
+                        url=job.url,
                         domain=job.domain,
                         strategy=BROWSER_HEADLESS,
                         elapsed_ms=0,
@@ -334,6 +334,41 @@ class TestDiscoveryAndRenderApi:
         # raw text never reaches the wire.
         assert item["classification"] == "network_error", item
         assert secret not in resp.text, f"raw exception text leaked into the response: {resp.text!r}"
+
+    async def test_v1_render_reports_the_real_failure_for_a_worker_exception(self, monkeypatch):
+        # The production worker, with only the renderer faked: when render
+        # raises, the worker's own failure path builds the result, so a URL
+        # handed to the wire as text instead of the admitted value degrades
+        # the item to site_error/result_shaping_failed and the real
+        # classification never reaches the caller.
+        import app.api.render_endpoint as render_endpoint
+        from app.transport.browser_pool import BrowserPool, PooledBrowserWorker
+
+        class _FakeRenderer:
+            async def render(self, url, options, *, policy=None):
+                raise RuntimeError("renderer died")
+
+        class _RaisingPool(BrowserPool):
+            def __init__(self) -> None:
+                super().__init__(pool_size=1)
+
+            async def acquire(self, timeout=None):
+                return _FakeRenderer()
+
+            def release(self, renderer) -> None:
+                pass
+
+            async def close(self) -> None:
+                pass
+
+        monkeypatch.setattr(render_endpoint, "PooledBrowserWorker", lambda pool: PooledBrowserWorker(pool))
+        resp = await post_render_with_pool(self.client, _RaisingPool(), "http://127.0.0.1:1/x")
+        assert resp.status_code == 200, resp.text
+        item = resp.json()["results"][0]
+        # The wire says why the render failed: the classification the shared
+        # chokepoint gave the exception, not the shaping guard's fallback.
+        assert item["classification"] == "network_error", item
+        assert item["error"] != "result_shaping_failed", item
 
     async def test_v1_render_without_pool_returns_503(self):
         # A None browser pool (startup/shutdown window) must surface as

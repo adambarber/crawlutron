@@ -76,6 +76,41 @@ class TestBrowserWorkerGuard:
         # the render path surfaces it straight into the response diagnostics.
         assert (result.metadata or {}).get("retryable") is True
 
+    async def test_worker_failure_returns_the_admitted_url_as_a_value(self):
+        """The contracted url slot is a NormalizedUrl, never the page's text."""
+        from app.models.crawl_job import CrawlJob
+        from app.models.normalized_url import NormalizedUrl
+        from app.models.render_options import RenderOptions
+        from app.transport.browser_pool import BrowserPool, PooledBrowserWorker
+
+        class _RaisingRenderer:
+            async def render(self, url, options, *, policy=None):
+                raise RuntimeError("render died")
+
+        class _RaisingPool(BrowserPool):
+            def __init__(self) -> None:
+                super().__init__(pool_size=1)
+
+            async def acquire(self, timeout: float | None = None):
+                return _RaisingRenderer()
+
+            def release(self, renderer) -> None:
+                pass
+
+        worker = PooledBrowserWorker(_RaisingPool())
+        job = CrawlJob(
+            index=0,
+            url=NormalizedUrl("https://a.example/x", policy=UNRESTRICTED_HOST_POLICY),
+            options=RenderOptions(timeout_seconds=1),
+            host_policy=UNRESTRICTED_HOST_POLICY,
+        )
+        result = await worker(job)
+
+        assert result.classification == "network_error"
+        # The identity slot carries the admitted value through unchanged; a str
+        # here survives this call but lies later, at the wire model's gate.
+        assert result.url is job.url
+
 
 @pytest.mark.asyncio
 class TestTransientRequeue:
