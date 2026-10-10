@@ -123,8 +123,8 @@ LARGE_CRAWL_GUIDANCE: Final[str] = (
 )
 MAX_TOTAL_URL_BUDGET_SECONDS: float = 900.0
 # Upper bound for the per-domain token-bucket rate limiter (CrawlPolicyLimits
-# max_rps). Mirrors the API model's le=100.0 bound so the normalized policy
-# path and the pydantic path reject the same values.
+# max_rps). The API model's `le=` reads this constant, so there is one source
+# of truth for the bound.
 MAX_RATE_LIMIT_RPS: float = 100.0
 
 # Cache TTLs (seconds).

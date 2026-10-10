@@ -332,7 +332,6 @@ def test_metrics_expose_resource_utilization_and_counters():
     assert "crawler_resource_memory_utilization" in text
     assert "crawler_resource_cpu_utilization" in text
     assert "crawler_resource_throttle_batches_total" in text
-    assert "crawler_resource_pause_seconds_total" in text
     # Defaults render without error.
     assert "crawler_resource_memory_utilization 0.0000" in text
     assert "crawler_resource_cpu_utilization 0.0000" in text

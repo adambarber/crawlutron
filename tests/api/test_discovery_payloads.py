@@ -5,10 +5,9 @@ from app.discovery.agent_hints import (
     EXAMPLE_POLICIES,
     STRATEGY_DESCRIPTIONS,
     agent_hints_payload,
-    create_agent_hints_router,
 )
-from app.discovery.capabilities import capabilities_payload, create_capabilities_router
-from app.discovery.well_known import create_well_known_router, discovery_payload
+from app.discovery.capabilities import capabilities_payload
+from app.discovery.well_known import discovery_payload
 
 
 class TestCapabilitiesPayload:
@@ -133,9 +132,6 @@ class TestAgentHintsPayload:
     # EXAMPLE_POLICIES is imported by the module header; keep a reference so
     # linting does not flag the re-export while the payload tests cover content.
     _example_policies = EXAMPLE_POLICIES
-
-    def _unused_health_router_import_guard(self):  # pragma: no cover
-        return create_capabilities_router, create_agent_hints_router, create_well_known_router
 
 
 class TestDiscoveryPayload:

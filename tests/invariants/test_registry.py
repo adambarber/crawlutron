@@ -614,10 +614,6 @@ def _robot_capabilities_from_nodes(
     return capabilities
 
 
-def _robots_policy_observations(tree: ast.AST, path: pathlib.Path, prop: Property) -> dict[str, int]:
-    return _PropertyObservations(tree, path, prop).robots_policy()
-
-
 def _robots_shared_parser(
     prop: Property,
     path: pathlib.Path,

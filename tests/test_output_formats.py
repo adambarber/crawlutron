@@ -73,7 +73,7 @@ def test_jsonl_one_object_per_line():
 
 
 def test_ndjson_equals_jsonl_media_and_shape():
-    body_j, media_j = serialize_results(SAMPLE, "jsonl")
+    body_j, _ = serialize_results(SAMPLE, "jsonl")
     body_n, media_n = serialize_results(SAMPLE, "ndjson")
     assert media_n == "application/x-ndjson"
     assert body_n == body_j

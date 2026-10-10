@@ -22,7 +22,7 @@ from tests._transport_doubles import MockResponse, scripted_transport_client
 
 
 class TestDNSRebindingProtection:
-    def testresolve_and_pin_host_uses_first_resolution(self, monkeypatch):
+    def test_resolve_and_pin_host_uses_first_resolution(self, monkeypatch):
         """Even if a second resolution would rebound to a private IP, the pinned
         IP (first resolution) is what the connection uses."""
         assert_dns_pinning_uses_first_resolution(monkeypatch, "169.254.169.254")

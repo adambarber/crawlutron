@@ -18,13 +18,6 @@ EXTRACTION_TRAFILATURA: str = "trafilatura"
 EXTRACTION_DOCUMENT: str = "document"
 EXTRACTION_DOM: str = "dom"
 
-SUPPORTED_EXTRACTIONS: list[str] = [
-    EXTRACTION_FULL,
-    EXTRACTION_TRAFILATURA,
-    EXTRACTION_DOCUMENT,
-    EXTRACTION_DOM,
-]
-
 # Human-readable descriptions for discovery/agent-hints.
 EXTRACTION_DESCRIPTIONS: dict[str, str] = {
     EXTRACTION_FULL: "Unified output pipeline: trafilatura HTML main text, "

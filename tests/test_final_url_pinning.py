@@ -19,7 +19,6 @@ from tests._policy_factories import canonical
 
 class _FakeStream:
     def __init__(self, url, status=200, headers=None, body=b"<html></html>"):
-        self._url = url
         self.url = url
         self.status_code = status
         self.headers = headers or {}
@@ -30,9 +29,6 @@ class _FakeStream:
 
     async def __aexit__(self, *exc):
         return False
-
-    async def aread(self):
-        return self._body
 
     async def aiter_raw(self):
         yield self._body

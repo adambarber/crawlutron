@@ -45,7 +45,6 @@ _SEARCH_RESULTS = "search_results_total"
 _SEARCH_ERRORS = "search_errors_total"
 _SEARCH_ELAPSED = "search_total_elapsed_ms"
 _THROTTLE_BATCHES = "resource_throttle_batches_total"
-_PAUSE_SECONDS = "resource_pause_seconds_total"
 
 _STRATEGY_PREFIX = "strategy:"
 _CLASSIFICATION_PREFIX = "classification:"
@@ -67,7 +66,6 @@ _COUNTERS = {
     _SEARCH_ERRORS: "search_errors_total",
     _SEARCH_ELAPSED: "search_total_elapsed_ms",
     _THROTTLE_BATCHES: "resource_throttle_batches_total",
-    _PAUSE_SECONDS: "resource_pause_seconds_total",
 }
 
 # Declared for the type checker and for readers: the counter fields are
@@ -157,10 +155,6 @@ class MetricsStore:
         return self._read(_THROTTLE_BATCHES)
 
     @property
-    def resource_pause_seconds_total(self) -> float:
-        return self._read(_PAUSE_SECONDS)
-
-    @property
     def strategy_counts(self) -> dict[str, float]:
         return self._labelled(_STRATEGY_PREFIX)
 
@@ -224,10 +218,6 @@ class MetricsStore:
         increments when two workers set it at once.
         """
         self._add(_THROTTLE_BATCHES, 1)
-
-    def record_pause(self, seconds: float) -> None:
-        """Count wall-clock seconds dispatch waited for a saturated resource."""
-        self._add(_PAUSE_SECONDS, seconds)
 
     @property
     def counters(self) -> CoordinationCounters | None:
@@ -331,12 +321,6 @@ def _exposition(store: MetricsStore) -> str:
     )
     lines.append("# TYPE crawler_resource_throttle_batches_total counter")
     lines.append(f"crawler_resource_throttle_batches_total {store.resource_throttle_batches_total}")
-    lines.append(
-        "# HELP crawler_resource_pause_seconds_total Wall-clock seconds dispatch was paused waiting "
-        "for a saturated resource to drain."
-    )
-    lines.append("# TYPE crawler_resource_pause_seconds_total counter")
-    lines.append(f"crawler_resource_pause_seconds_total {store.resource_pause_seconds_total:.3f}")
     return "\n".join(lines) + "\n"
 
 

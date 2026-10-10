@@ -21,6 +21,7 @@ checked here rather than remembered.
 from __future__ import annotations
 
 import ast
+import configparser
 import pathlib
 
 from tests.chokepoint_walks import (
@@ -39,10 +40,11 @@ from tests.rules import Bites, Rule
 # ---------------------------------------------------------------------------
 
 # pytest collects a test function only when it sits at module level or is a
-# direct method of a ``Test*`` class. A ``test_*`` def anywhere else is parsed,
-# imported, and then silently ignored -- so the suite stays green while the
-# coverage it appeared to provide is gone. Nothing in a normal test run can
-# catch that: the absence of a failure looks exactly like a passing test.
+# direct method of a ``Test*`` class AND its name matches the configured
+# ``python_functions`` pattern. A ``test``-spelled def anywhere else -- or a
+# near-miss name like ``testresolve_...``, which pytest silently skips while
+# every reader assumes it runs -- is parsed, imported, and then ignored, so the
+# suite stays green while the coverage it appeared to provide is gone.
 #
 # This is not hypothetical. A test added in the middle of a test class, dedented
 # to column 0, does not raise IndentationError -- the methods that followed it
@@ -51,15 +53,32 @@ from tests.rules import Bites, Rule
 # caught is that the count was compared against HEAD rather than assumed.
 
 
+def _collection_prefix() -> str:
+    """The name prefix pytest actually collects, read from pytest.ini.
+
+    The rule used to accept any ``test``-spelled name as collectible, but pytest
+    collects what ``python_functions`` says -- ``test_*`` -- so a near-miss was
+    counted as a running test while pytest skipped it. Reading the configured
+    pattern keeps this rule and the collector from disagreeing again.
+    """
+    parser = configparser.ConfigParser()
+    parser.read(REPO_ROOT / "pytest.ini")
+    pattern = parser["pytest"]["python_functions"].strip()
+    return pattern[: pattern.index("*")]
+
+
 def _uncollectible_tests(tree: ast.Module, path: pathlib.Path) -> list[str]:
-    """Report every ``test_*`` def pytest would silently not collect."""
+    """Report every ``test``-spelled def pytest would silently not collect."""
+    prefix = _collection_prefix()
     legal_owners: set[int] = set()
     for node in tree.body:
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name.startswith(prefix):
             legal_owners.add(id(node))
         elif isinstance(node, ast.ClassDef) and node.name.startswith("Test"):
             legal_owners.update(
-                id(m) for m in node.body if isinstance(m, (ast.FunctionDef, ast.AsyncFunctionDef))
+                id(m)
+                for m in node.body
+                if isinstance(m, (ast.FunctionDef, ast.AsyncFunctionDef)) and m.name.startswith(prefix)
             )
 
     offenders: list[str] = []
@@ -81,7 +100,9 @@ def _uncollectible_tests(tree: ast.Module, path: pathlib.Path) -> list[str]:
             and parent is not test_def
         ]
         where = (
-            f"nested inside {owners[0]}()" if owners else "not a module-level test or a Test* class method"
+            f"nested inside {owners[0]}()"
+            if owners
+            else "not a module-level test or a Test* class method named to the collected pattern"
         )
         offenders.append(offender_at(path, test_def, f"test_{test_def.name} is uncollectible -- {where}"))
     return offenders
@@ -91,8 +112,8 @@ EVERY_TEST_FUNCTION_IS_ONE_PYTEST_CAN_COLLECT = Rule(
     name="every-test-function-is-one-pytest-can-collect",
     find=_uncollectible_tests,
     summary=(
-        "these test functions are silently never run; pytest "
-        "collects only module-level tests and Test* class methods"
+        "these test functions are silently never run; pytest collects only "
+        "module-level tests and Test* class methods named to the configured pattern"
     ),
     bite=lambda: (
         # Nested inside another function: the shape that silently ate 9 tests.
@@ -109,6 +130,12 @@ EVERY_TEST_FUNCTION_IS_ONE_PYTEST_CAN_COLLECT = Rule(
         Bites(
             "class TestOuter:\n    def helper(self):\n        def test_inner(self):\n            pass\n",
             "nested inside helper()",
+        ),
+        # A near-miss name: a direct method of a Test* class that pytest still
+        # never collects, because the name does not match python_functions.
+        Bites(
+            "class TestThings:\n    def testresolve_near_miss(self):\n        pass\n",
+            "collected pattern",
         ),
     ),
     clean=lambda: (

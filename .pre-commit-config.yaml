@@ -207,15 +207,17 @@ repos:
         stages: [pre-commit]
 
       # Dead-code gate: vulture, an existing library rather than a hand-rolled
-      # detector. Its confidence model is the strictness dial, and the number in
-      # the hook name is the current floor: 100 was the loosest band (unused
-      # function/method arguments and unreachable or unsatisfiable code) and
-      # the plan is a ratchet -- each tightening commit lowers the floor, the
-      # same direction the jscpd floor moves. Zero tolerance: no whitelist file;
-      # a genuinely dynamic name is fixed at its definition site, either with
-      # the `_`-prefix idiom for protocol-mandated parameters or with
-      # `pytest.mark.usefixtures` for fixtures a test activates only for its
-      # side effect.
+      # detector. Bare by rule -- no ignore-names, no excludes, no whitelist
+      # file, no ignore-decorators: a finding is fixed in the code or it is not
+      # fixed. The floor is 90, the strictest band this tree holds green without
+      # suppression, because the 60 band reports only names consumed by
+      # dispatch no usage analysis can see -- pydantic wire fields and
+      # validators, pytest fixtures and collected test names, http.server
+      # handler methods, FastAPI route registration. Every real finding the
+      # 60-band triage surfaced was cleaned instead: dead helpers deleted, the
+      # never-recorded pause metric removed end to end, MAX_RATE_LIMIT_RPS
+      # wired as the model's le= source of truth, and one silently-skipped
+      # test (a near-miss name pytest never collected) renamed and restored.
       - id: vulture
         name: vulture dead code (min-confidence 90, zero tolerance)
         entry: >-

@@ -36,7 +36,7 @@ _WAL_RETRY_BACKOFF_SECONDS = 0.05
 
 @dataclass(frozen=True)
 class ColumnInfo:
-    cid: int
+    _cid: int
     name: str
     sqlite_type: str
     not_null: int

@@ -708,20 +708,6 @@ class TestRequestProfileVocabularyIsClosed:
     the same failure as the inert ``state`` key removed in #61.
     """
 
-    #: The keys the profile consumer actually reads.
-    READ_KEYS = frozenset(
-        {
-            "accept_languages",
-            "cookie_jar",
-            "cookie_namespace",
-            "cookies",
-            "fingerprint_rotation",
-            "fingerprint_seed",
-            "user_agent_family",
-            "user_agents",
-        }
-    )
-
     def test_an_unknown_key_is_refused(self):
         from app.models.crawl_policy import CrawlPolicy
 
@@ -928,9 +914,6 @@ class TestBrowserActionKeysAreClosed:
     This is the ``state`` key again (#61) and the ``accept_language``
     description (#64): the same failure, at the third place it can hide.
     """
-
-    #: The keys the action chain reads, per ``browser_driver.py``.
-    READ_KEYS = frozenset({"selector", "timeout", "seconds", "value"})
 
     @pytest.mark.parametrize(
         "action",

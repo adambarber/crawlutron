@@ -96,14 +96,12 @@ class _Response:
         self.status_code = 200
         self.headers = headers if headers is not None else {}
         self.queue = _Queue(items)
-        self.aclose_calls = 0
         self.awaited = False
 
     async def aclose(self):
         # Flips only if the caller actually waits for the close to run, which
         # is the behaviour the stall/cap paths deliberately avoid.
         self.awaited = True
-        self.aclose_calls += 1
 
 
 class _Session:

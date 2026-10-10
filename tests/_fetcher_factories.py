@@ -103,10 +103,6 @@ class FetcherDouble:
     calls: list[str]
     peak: Callable[[], int]
     inflight: Callable[[], int]
-    #: How many fetches this double has answered. Declared because the scripted
-    #: factory below publishes it, and a member the type does not carry is one a
-    #: reader cannot trust is there.
-    served: Callable[[], int]
     #: The headers this double was called with, in order. A separate member from
     #: ``calls`` because the two are different facts: ``calls`` is which URLs
     #: were fetched, this is what was sent with each. :func:`request_fetcher`
@@ -338,7 +334,6 @@ def sequenced_fetcher(
         return steps[index]
 
     fetcher = FetcherDouble(answer, calls)
-    fetcher.served = lambda: state["n"]
     return fetcher
 
 

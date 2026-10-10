@@ -28,7 +28,6 @@ class StubProc:
         self.signals: list[str] = []
         self.join_calls: list[float | None] = []
         self.joined_after_kill = False
-        self.closed_pipes = 0
         self._alive = alive
         self._responds_to_sigterm = responds_to_sigterm
 

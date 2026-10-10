@@ -190,10 +190,6 @@ class ContentCache:
                 self._drop_locked(oldest_key, doomed)
         self._unlink_doomed(doomed)
 
-    def _enforce_max_entries(self) -> None:
-        """Backward-compatible alias for the count+byte enforcement."""
-        self._enforce_limits()
-
     # -- public API ---------------------------------------------------------
     def _read_envelope(self, key: str) -> dict[str, Any] | None:
         """Return the unexpired envelope for ``key`` (registering it in the LRU

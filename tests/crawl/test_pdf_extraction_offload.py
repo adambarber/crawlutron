@@ -32,9 +32,6 @@ class _PdfPage(BrowserFakePage):
     async def evaluate(self, *a, **k):
         return ""
 
-    async def wait_for_load_state(self, state, timeout=None):
-        return None
-
 
 async def _real_extraction(page, options):
     """Un-stub the builder's canned extraction so the real branch is driven.

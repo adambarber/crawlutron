@@ -18,11 +18,6 @@ from tests.chokepoint_walks import trees_under
 from tests.rules import Bites, Registry, Rule, Silent, Trips
 
 
-def _finds_any_call(tree: ast.Module, path: pathlib.Path) -> list[str]:
-    """A deliberately over-broad detector, for proving the proofs catch one."""
-    return [f"{path}:{node.lineno}" for node in ast.walk(tree) if isinstance(node, ast.Call)]
-
-
 def _calls_urljoin(tree: ast.Module, path: pathlib.Path) -> list[str]:
     return [
         f"{path}:{node.lineno}: raw urljoin"

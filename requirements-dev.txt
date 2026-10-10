@@ -35,7 +35,6 @@ mypy==2.3.1
 # removed without replacing that gate. Pinned for the same reason as mypy: a new
 # release must not turn a build red with no repository change.
 pyright==1.1.406
-# Dead-code gate. vulture's confidence model is the strictness dial: at 100
-# the band is unused arguments and unreachable code, and the floor named in
-# .pre-commit-config.yaml ratchets down across passes.
+# Dead-code gate. vulture's confidence model is the strictness dial: the
+# enforced floor lives in .pre-commit-config.yaml.
 vulture==2.16

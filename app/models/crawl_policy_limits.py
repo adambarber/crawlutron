@@ -14,6 +14,7 @@ from app.vocabulary.limits import (
     MAX_DISCOVERED_LINKS,
     MAX_HTTP_TIMEOUT_SECONDS,
     MAX_JOB_MAX_RETRIES,
+    MAX_RATE_LIMIT_RPS,
     MAX_RETRIES,
     MAX_TOTAL_URL_BUDGET_SECONDS,
 )
@@ -100,7 +101,7 @@ class CrawlPolicyLimits(BaseModel):
         float,
         Field(
             ge=0.0,
-            le=100.0,
+            le=MAX_RATE_LIMIT_RPS,
             description="Maximum requests per second per domain enforced via token bucket. 0 disables rate "
             "limiting (default). When > 0, allows short bursts up to 5 tokens while sustaining the "
             "configured RPS.",

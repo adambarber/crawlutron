@@ -419,17 +419,13 @@ async def render_pinned(monkeypatch, url: str = "http://example.com/"):
 class FakeRoute:
     def __init__(self):
         self.actions = []
-        self.aborted = False
-        self.continued = False
         self.continued_url = None
         self.continued_headers = ROUTE_ARG_UNSET
 
     async def abort(self):
-        self.aborted = True
         self.actions.append(("abort", {}))
 
     async def continue_(self, url=ROUTE_ARG_UNSET, headers=ROUTE_ARG_UNSET):
-        self.continued = True
         call = {}
         if url is not ROUTE_ARG_UNSET:
             self.continued_url = url

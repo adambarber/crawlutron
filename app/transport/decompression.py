@@ -166,10 +166,10 @@ def _decompress_brotli(body: bytes | bytearray | memoryview[int], max_output_byt
     try:
         if decoder is not None and hasattr(decoder, "decompress"):
             # Brotlicffi-style bounded API
-            bounded = cast("_BoundedDecompressor", decoder)
+            bounded = cast(_BoundedDecompressor, decoder)
             decoded: bytes | bytearray = bounded.decompress(body, max_output_bytes + 1)
         elif decoder is not None and hasattr(decoder, "process"):
-            streaming = cast("_StreamingDecompressor", decoder)
+            streaming = cast(_StreamingDecompressor, decoder)
             # Google-brotli streaming API: feed incrementally and stop past the
             # cap. A single process(body) call would materialize the entire
             # bomb in RAM. Stopping early leaves the output over the cap, which

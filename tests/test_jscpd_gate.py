@@ -163,25 +163,6 @@ def _stub_report(
     return commands
 
 
-def _command_for(commands: list[list[str]], root: str) -> list[str]:
-    """The scan command declaring ``--fail-on-empty <root>``.
-
-    The ``[None]`` sentinel this replaces stood in for "the flag is the last
-    word and has no value", which it reported by comparing ``None`` to a root --
-    a comparison that is always False, so a command missing the flag and a
-    command naming a different root were indistinguishable and the ``next()``
-    below simply stopped. Naming the two cases is what lets the absence be an
-    error.
-    """
-    for command in commands:
-        if "--fail-on-empty" not in command:
-            continue
-        flag = command.index("--fail-on-empty") + 1
-        if flag < len(command) and command[flag] == root:
-            return command
-    raise AssertionError(f"no scan command declares --fail-on-empty {root}")
-
-
 def _run_against_empty_tree(monkeypatch, tmp_path, **kwargs) -> list[list[str]]:
     """Run the gate over a tree with no duplicates; return the commands issued.
 
@@ -195,13 +176,6 @@ def _run_against_empty_tree(monkeypatch, tmp_path, **kwargs) -> list[list[str]]:
     commands = _stub_report(monkeypatch, [], **kwargs)
     assert gate._run(_args()) == 0
     return commands
-
-
-def _root_relative(root: str, location: dict) -> dict:
-    name = str(location["name"])
-    if root != "." and name.startswith(root + "/"):
-        name = name[len(root) + 1 :]
-    return {**location, "name": name}
 
 
 #: The scan roots this file's stubs understand, read from the gate so a root

@@ -218,11 +218,6 @@ def detector_functions(root: pathlib.Path) -> list[str]:
     return _survey(root)[0]
 
 
-def declared_detectors(root: pathlib.Path) -> list[str]:
-    """The subset of :func:`detector_functions` a ``Rule`` names as its ``find``."""
-    return _survey(root)[1]
-
-
 def _display(path: pathlib.Path) -> str:
     """Repo-relative where possible, absolute otherwise.
 

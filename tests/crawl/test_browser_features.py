@@ -21,13 +21,11 @@ class FakeElement:
     def __init__(self, selector):
         self.selector = selector
         self.scrolled = False
-        self.screenshots = 0
 
     async def scroll_into_view_if_needed(self):
         self.scrolled = True
 
     async def screenshot(self):
-        self.screenshots += 1
         return b"elementpng"
 
 
@@ -45,7 +43,6 @@ class FakePage(ScriptedPage):
         self.calls = []
         self.elements = {}
         self.responses = []
-        self.extra_http_headers = {}
         # Where each interaction call goes. A test that wants one to blow up
         # replaces the ENTRY rather than the method: assigning over a method left
         # the object claiming a method it no longer had.
@@ -56,9 +53,6 @@ class FakePage(ScriptedPage):
 
     async def route(self, pattern, handler):
         self.route_calls.append((pattern, handler))
-
-    async def set_extra_http_headers(self, headers):
-        self.extra_http_headers = headers
 
     def on(self, event, handler):
         self.calls.append(("on", event))

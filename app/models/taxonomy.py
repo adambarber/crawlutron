@@ -149,13 +149,6 @@ def literal_members(alias: Any) -> frozenset[str]:
     return frozenset()
 
 
-# The literal members as a runtime set. ``Classification`` crosses a string
-# boundary in a few places (an exception message carrying a taxonomy code, a
-# cached dict value), and narrowing one back to the Literal needs a membership
-# check against exactly these values -- derived from the alias so the set and
-# the enum cannot drift.
-CLASSIFICATION_MEMBERS: frozenset[str] = literal_members(Classification)
-
 _CLASSIFICATION_TABLE: dict[str, Classification] = {name: name for name in get_args(Classification)}
 
 

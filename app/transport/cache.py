@@ -52,14 +52,6 @@ class HttpCache:
         self._data: dict[NormalizedUrl, tuple[str | None, str | None, float]] = {}
         self._closed = False
 
-    def _purge_expired(self, now: float) -> None:
-        """Drop expired entries (called while holding ``_lock``)."""
-        if not self._ttl_seconds:
-            return
-        expired = [url for url, (_, _, exp) in self._data.items() if exp <= now]
-        for url in expired:
-            self._data.pop(url, None)
-
     def _evict_if_needed(self) -> None:
         if len(self._data) > self._max_entries:
             # Fork/insert order is the same as this dict's iteration order, so

@@ -28,7 +28,7 @@ from app.transport.cache import HttpCache
 from app.transport.fetch_policy import discovery_diagnostics
 from app.vocabulary.identity import SERVICE_ID
 from app.vocabulary.strategies import HTTP_DECLARED_CRAWLER
-from tests._fetcher_factories import make_fetch, routed_fetcher
+from tests._fetcher_factories import routed_fetcher
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY, canonical, crawl_policy
 from tests._timing_harnesses import cpu_seconds
 
@@ -396,11 +396,6 @@ def test_failure_ttl_is_60s_not_600s():
 
     em.robots_cache.clear()
     try:
-
-        async def bad_robots(url, headers, timeout, max_content_length=0):
-            return make_fetch(url=url, final_url=url, status=500, headers={}, body=b"fail")
-
-        # Direct seam: drive via internal fetch (test doesn't need full crawl)
         # Pin the stored per-entry TTL by inspecting BoundedTTLCache internals.
         # A 500 response writes rules=[(False,"/")], ttl=min(600,60)=60.
         em.robots_cache.put(robots_entry_key("http://fail-ttl.test"), ([(False, "/")], [], None), ttl=60.0)

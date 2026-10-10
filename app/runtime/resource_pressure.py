@@ -71,7 +71,6 @@ class LoopLagProbe:
         self._smoothing = smoothing
         self._lag = 0.0
         self._task: asyncio.Task | None = None
-        self._loop: asyncio.AbstractEventLoop | None = None
 
     def start(self) -> None:
         """Begin sampling on the current running loop (idempotent)."""
@@ -83,7 +82,6 @@ class LoopLagProbe:
             return
         if self._task is not None and not self._task.done():
             return
-        self._loop = loop
         self._task = loop.create_task(self._run())
 
     def stop(self) -> None:

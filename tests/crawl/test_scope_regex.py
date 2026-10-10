@@ -8,30 +8,6 @@ refuse to compile pathological patterns and bound the number of links scanned.
 import contextlib
 
 from app.admission.admission import compile_scope_pattern as compile_scope_pattern
-from app.models.engine_crawl_result import EngineCrawlResult
-
-
-def _make_result(urls):
-    links = [type("_L", (), {"normalized_url": u})() for u in urls]
-    return EngineCrawlResult(
-        original_url="http://x.example/",
-        normalized_url="http://x.example/",
-        final_url="http://x.example/",
-        status="success",
-        classification="rendered",
-        selected_strategy=None,
-        attempted_strategies=[],
-        http_status=200,
-        headers={},
-        content_type="text/html",
-        html="",
-        text="",
-        extraction_method=None,
-        quality_score=1.0,
-        discovered_links=links,
-        discovered_link_count=len(links),
-        discovered_links_truncated=False,
-    )
 
 
 def test_nested_quantifiers_compile_and_match_bounded():
