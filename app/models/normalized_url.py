@@ -184,7 +184,7 @@ class NormalizedUrl:
         return hash(self._raw)
 
     @classmethod
-    def __get_pydantic_core_schema__(cls, source_type, handler):
+    def __get_pydantic_core_schema__(cls, _source_type, handler):
         """Accept exactly one thing -- an already-admitted ``NormalizedUrl`` --
         and render as the canonical string on the wire.
 

@@ -282,7 +282,8 @@ class TestToolsCall:
         assert payload["data"][0]["url"] == "https://example.gov/a"
         assert result["structuredContent"]["provider"] == "tavily"
 
-    async def test_crawl_tool_crawls_the_url(self, async_client, base_url, browser_pool_stub):
+    @pytest.mark.usefixtures("browser_pool_stub")
+    async def test_crawl_tool_crawls_the_url(self, async_client, base_url):
         # No policy supplied: the full default strategy chain (direct HTTP,
         # CFFI impersonation, headless + headed browser) must be accepted over
         # MCP; the engine picks the first working strategy.
@@ -290,9 +291,8 @@ class TestToolsCall:
         assert sc["success"] is True
         assert sc["results"][0]["classification"] in ("success", "rendered")
 
-    async def test_crawl_and_extract_returns_content_without_the_crawl_bulk(
-        self, async_client, base_url, browser_pool_stub
-    ):
+    @pytest.mark.usefixtures("browser_pool_stub")
+    async def test_crawl_and_extract_returns_content_without_the_crawl_bulk(self, async_client, base_url):
         """The composite exists for the projection: many pages' extracted content,
         without the html, headers and diagnostics the full response repeats."""
         sc = await _tool_call(
@@ -312,9 +312,8 @@ class TestToolsCall:
         for bulk in ("html", "headers", "diagnostics", "results"):
             assert bulk not in sc, f"the composite carried {bulk}"
 
-    async def test_crawl_and_extract_reports_the_same_verdict_as_the_full_crawl(
-        self, async_client, base_url, browser_pool_stub
-    ):
+    @pytest.mark.usefixtures("browser_pool_stub")
+    async def test_crawl_and_extract_reports_the_same_verdict_as_the_full_crawl(self, async_client, base_url):
         """The projection is faithful: a caller must not get a kinder verdict from
         the composite than from the crawl it replaced. Whatever the strategy chain
         settles on -- HTTP sees the access-denied page, the stub pool cannot render
@@ -331,7 +330,8 @@ class TestToolsCall:
         )
         assert page["markdown"] is None, "a blocked page produced content; the fixture changed"
 
-    async def test_map_tool_returns_frontier(self, async_client, base_url, browser_pool_stub):
+    @pytest.mark.usefixtures("browser_pool_stub")
+    async def test_map_tool_returns_frontier(self, async_client, base_url):
         # Default policy: the full strategy chain is reachable over MCP.
         sc = await _tool_call(async_client, "map", {"url": f"{base_url}/"})
         assert isinstance(sc["all_urls"], list)

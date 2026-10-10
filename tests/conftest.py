@@ -178,7 +178,8 @@ def ssrf_guard_required(monkeypatch):
     short-circuited before the actual guard runs.
 
     Usage:
-        def test_my_ssrf_check(monkeypatch, ssrf_guard_required):
+        @pytest.mark.usefixtures("ssrf_guard_required")
+        def test_my_ssrf_check(monkeypatch):
             monkeypatch.setenv("CRAWLUTRON_ALLOW_PRIVATE_TARGETS", "0")
             check_ssrf_protection(...)
     """

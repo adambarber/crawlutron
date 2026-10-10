@@ -351,7 +351,8 @@ class TestSsrfDnsPinning:
             check_ssrf_protection(canonical("http://example.com/"))
 
 
-def test_ssrf_fixture_passes_when_opted_out(monkeypatch, ssrf_guard_required):
+@pytest.mark.usefixtures("ssrf_guard_required")
+def test_ssrf_fixture_passes_when_opted_out(monkeypatch):
     """The happy path: opt out, then exercise the helper. Should pass."""
     monkeypatch.setenv("CRAWLUTRON_ALLOW_PRIVATE_TARGETS", "0")
     # Call the real helper; it will fail to resolve but the call itself
@@ -360,7 +361,8 @@ def test_ssrf_fixture_passes_when_opted_out(monkeypatch, ssrf_guard_required):
         http_mod.check_ssrf_protection(canonical("http://example.invalid/"))
 
 
-def test_ssrf_fixture_fails_when_opt_out_missing(monkeypatch, ssrf_guard_required):
+@pytest.mark.usefixtures("ssrf_guard_required")
+def test_ssrf_fixture_fails_when_opt_out_missing(monkeypatch):
     """If the test forgets to opt out, the fixture must fail with a clear
     message naming the missing opt-out.
     """

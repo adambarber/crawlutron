@@ -24,7 +24,7 @@ def _counting_resolver(ip: str = "8.8.8.8"):
     """Return (call_counter, fake_getaddrinfo) that resolves every host to ``ip``."""
     calls = {"n": 0}
 
-    def fake_getaddrinfo(host_, *a, **k):
+    def fake_getaddrinfo(_host, *a, **k):
         calls["n"] += 1
         return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", (ip, 80))]
 

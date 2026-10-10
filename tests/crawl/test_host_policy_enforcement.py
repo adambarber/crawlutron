@@ -89,14 +89,15 @@ async def test_sitemap_blocked_host_is_refused_before_page_fetch():
 
 
 class _Response:
-    def __init__(self, status, headers, url):
+    def __init__(self, status, headers, url, body=b""):
         self.status_code = status
         self.headers = httpx.Headers(headers)
         self.url = url
+        self.body = body
 
     async def aiter_raw(self):
-        if False:
-            yield b""
+        if self.body:
+            yield self.body
 
 
 class _Stream:

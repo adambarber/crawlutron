@@ -627,7 +627,7 @@ class TestDispatcherStrategyAwareScaling:
         assert sched.runs == 1  # http scale 1.0 => both admitted at once
 
     @pytest.mark.parametrize(
-        ("case", "pins"),
+        ("_case", "pins"),
         [
             # Browser-pinned domains -> dispatcher stays on the combined gate.
             (
@@ -639,7 +639,7 @@ class TestDispatcherStrategyAwareScaling:
             ("cold_unpinned", {}),
         ],
     )
-    async def test_batch_uses_the_combined_scale(self, case, pins):
+    async def test_batch_uses_the_combined_scale(self, _case, pins):
         jobs = [make_crawl_task(0, "a.gov"), make_crawl_task(0, "b.gov")]
         gate = PinnedGate(batch=1.0, http=1.0)
         await _run_with_gate(_Scheduler(pins), gate, jobs)
