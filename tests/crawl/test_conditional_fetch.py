@@ -239,9 +239,7 @@ class TestNotModifiedResponse:
         cache = HttpCache()
         # The cache is value-keyed: seed it with the admitted value the
         # strategy will read under, or the conditional GET silently misses.
-        cache.store(
-            NormalizedUrl("http://example.com/", policy=HostPolicy.unrestricted()), {"etag": "v1"}
-        )
+        cache.store(NormalizedUrl("http://example.com/", policy=HostPolicy.unrestricted()), {"etag": "v1"})
         result = await run_http_strategy(
             url="http://example.com/",
             policy=http_strategy_policy(),

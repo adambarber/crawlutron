@@ -391,11 +391,7 @@ async def _run_job(
             failed = 0
             for entry in batch:
                 identity = entry.url
-                job.in_flight = [
-                    pending
-                    for pending in job.in_flight
-                    if pending.url != identity
-                ]
+                job.in_flight = [pending for pending in job.in_flight if pending.url != identity]
                 item = resolved.get(identity)
                 if item is None:
                     outcome = "transient"

@@ -220,9 +220,7 @@ async def discovery_diagnostics(
         candidate_sitemaps = robots_sitemaps or ["/sitemap.xml"]
         from app.orchestration.fetch_helpers import fetch_sitemap_urls
 
-        admitted_sitemaps = (
-            safe_source.resolve(entry) for entry in candidate_sitemaps
-        )
+        admitted_sitemaps = (safe_source.resolve(entry) for entry in candidate_sitemaps)
         for sitemap_url in (a for a in admitted_sitemaps if a is not None):
             with contextlib.suppress(Exception):
                 # Recursively resolves sitemap indexes down to (loc, lastmod) pairs.

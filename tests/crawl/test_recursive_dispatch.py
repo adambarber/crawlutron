@@ -350,8 +350,7 @@ async def test_failed_job_does_not_shift_other_results():
     assert spill.writes[1].status == "failed"
 
 
-async def test_pool_exhaustion_requeue_does_not_consume_a_max_pages_slot():
-    ...
+async def test_pool_exhaustion_requeue_does_not_consume_a_max_pages_slot(): ...
 
 
 async def test_in_flight_pages_count_against_the_cap_at_expansion():

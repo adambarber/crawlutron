@@ -146,9 +146,7 @@ def normalize_frontier(
     if not isinstance(values, (list, tuple)):
         return []
     canonical_root = (
-        root_url
-        if isinstance(root_url, NormalizedUrl)
-        else admit_or_none(root_url, policy=host_policy)
+        root_url if isinstance(root_url, NormalizedUrl) else admit_or_none(root_url, policy=host_policy)
     )
     legacy_depth = policy.limits.max_depth
     entries: dict[NormalizedUrl, FrontierEntry] = {}
@@ -367,12 +365,12 @@ class CrawlJobState:
         visited_raw = data.get("visited", [])
         if isinstance(visited_raw, list):
             visited = {
-            admitted
-            for url in visited_raw
-            if isinstance(url, str) and url
-            for admitted in (admit_or_none(url, policy=host_policy),)
-            if admitted is not None
-        }
+                admitted
+                for url in visited_raw
+                if isinstance(url, str) and url
+                for admitted in (admit_or_none(url, policy=host_policy),)
+                if admitted is not None
+            }
         else:
             visited = set()
         transient_raw = data.get("transient_retries", {})

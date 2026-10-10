@@ -799,9 +799,7 @@ _BROWSER_RELEASE_OWNER = REPO_ROOT / "app" / "transport" / "browser_driver.py"
 #: a gate that enforces nothing and says nothing about having stopped. Sweeping
 #: the pair keeps the invariant whole across the split: a field reintroduced on
 #: either side is still caught by whichever file spells the clear.
-_BROWSER_RELEASE_OWNERS = frozenset(
-    {_BROWSER_RELEASE_OWNER, REPO_ROOT / "app" / "transport" / "browser.py"}
-)
+_BROWSER_RELEASE_OWNERS = frozenset({_BROWSER_RELEASE_OWNER, REPO_ROOT / "app" / "transport" / "browser.py"})
 
 
 _BROWSER_RELEASE_CHOKEPOINT = "_release_browser"

@@ -666,7 +666,7 @@ _JS_ENDPOINTS_VALIDATION_SOURCE = (
     "    return [\n"
     "        {**endpoint, 'url': clean.raw}\n"
     "        for endpoint in endpoints\n"
-        "        if (clean := admit_or_none(endpoint)) is not None\n"
+    "        if (clean := admit_or_none(endpoint)) is not None\n"
     "    ]\n"
 )
 
@@ -680,7 +680,7 @@ JS_ENDPOINTS_FILTER_IS_NOT_REINLINED = Rule(
         Bites(
             "def f(endpoints, base):\n"
             '    return [{**e, "url": c} for e in endpoints\n'
-        '           if (c := admit_or_none(e["url"])) is not None]\n',
+            '           if (c := admit_or_none(e["url"])) is not None]\n',
             "filter_js_endpoints",
         ),
         # The detector genuinely matches the chokepoint's OWN comprehension too:

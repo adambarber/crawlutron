@@ -70,8 +70,7 @@ def _names_refusing_call(tree: ast.AST, node: ast.AST) -> bool:
     not None`` -- is the correct refusal question, not an overruling of it.
     """
     return any(
-        isinstance(value, ast.Call)
-        and resolved_call_name(tree, value).rsplit(".", 1)[-1] in _REFUSING_NAMES
+        isinstance(value, ast.Call) and resolved_call_name(tree, value).rsplit(".", 1)[-1] in _REFUSING_NAMES
         for value in getattr(node, "values", [])
     )
 
@@ -127,9 +126,7 @@ def test_admitted_raw_is_the_durable_identity():
 
     # The canonical public form, with the noise the normalizer strips
     # (default port, empty path, fragment) removed, IS the stored identity.
-    admitted = NormalizedUrl(
-        "https://Example.COM:443/a/b/?b=2&a=1#frag", policy=UNRESTRICTED_HOST_POLICY
-    )
+    admitted = NormalizedUrl("https://Example.COM:443/a/b/?b=2&a=1#frag", policy=UNRESTRICTED_HOST_POLICY)
     assert admitted.raw == "https://example.com/a/b?a=1&b=2"
 
     # Identity is stable across constructions of the same URL, which is what

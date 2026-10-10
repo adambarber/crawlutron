@@ -108,11 +108,7 @@ def discover_host_policy_entry_points(
         for callee in callees:
             reverse[callee].add(caller)
     reachable: set[str] = set()
-    pending = [
-        name
-        for name in index
-        if name.rsplit(".", 1)[-1] in _DECISION_NAMES
-    ]
+    pending = [name for name in index if name.rsplit(".", 1)[-1] in _DECISION_NAMES]
     while pending:
         name = pending.pop()
         if name in reachable:

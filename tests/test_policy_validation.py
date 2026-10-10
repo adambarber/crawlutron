@@ -19,7 +19,10 @@ class TestPolicyValidation:
             NormalizedUrl("http://127.0.0.1/x", policy=UNRESTRICTED_HOST_POLICY)
 
     def test_trailing_colon_path(self):
-        assert NormalizedUrl("https://example.com/seg:", policy=UNRESTRICTED_HOST_POLICY).raw == "https://example.com/seg"
+        assert (
+            NormalizedUrl("https://example.com/seg:", policy=UNRESTRICTED_HOST_POLICY).raw
+            == "https://example.com/seg"
+        )
 
     def test_host_allow_list_restricts_targets(self):
         policy = HostPolicy.from_strings("example.com", "")

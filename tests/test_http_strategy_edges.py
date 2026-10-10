@@ -108,9 +108,9 @@ class TestHttpStrategyEdges:
             server.shutdown()
             server.server_close()
 
-        assert outcome.final_url.raw.startswith(
-            NormalizedUrl(url, policy=HostPolicy.unrestricted()).raw
-        ), f"cffi fetch produced {outcome!r}"
+        assert outcome.final_url.raw.startswith(NormalizedUrl(url, policy=HostPolicy.unrestricted()).raw), (
+            f"cffi fetch produced {outcome!r}"
+        )
 
     async def test_http_strategy_result_httpx_request_error(self):
         from app.transport.cache import HttpCache

@@ -117,7 +117,9 @@ class TestRoutingHelpers:
 
     def test_looks_like_document(self):
         assert looks_like_document("application/pdf", b"%PDF", canonical("http://x/a.pdf"))
-        assert looks_like_document("application/octet-stream", b"%PDF-1.4 data", canonical("http://x/mystery"))
+        assert looks_like_document(
+            "application/octet-stream", b"%PDF-1.4 data", canonical("http://x/mystery")
+        )
         assert looks_like_document("text/csv", b"a,b", canonical("http://x/d.csv"))
         assert looks_like_document("application/json", b"{}", None)
         assert not looks_like_document("text/html", b"<html>", canonical("http://x/"))
@@ -186,11 +188,15 @@ class TestKatanaDiscovery:
 
     def test_detect_pagination_anchor_rel_next(self):
         html = '<a rel="next" href="/page2">Next</a>'
-        assert detect_pagination(html, canonical("https://example.com/list")) == canonical("https://example.com/page2")
+        assert detect_pagination(html, canonical("https://example.com/list")) == canonical(
+            "https://example.com/page2"
+        )
 
     def test_detect_pagination_link_rel_next(self):
         html = '<link rel="next" href="/p3">'
-        assert detect_pagination(html, canonical("https://example.com/")) == canonical("https://example.com/p3")
+        assert detect_pagination(html, canonical("https://example.com/")) == canonical(
+            "https://example.com/p3"
+        )
 
     def test_detect_pagination_none_without_hint(self):
         html = '<a href="/page2">Next</a>'
@@ -206,18 +212,16 @@ class TestKatanaDiscovery:
 
     def test_detect_pagination_still_resolves_relative(self):
         # The egress filter must not break legitimate relative pagination.
-        assert (
-            detect_pagination('<a rel="next" href="/p2">n</a>', canonical("https://example.com/list"))
-            == canonical("https://example.com/p2")
-        )
+        assert detect_pagination(
+            '<a rel="next" href="/p2">n</a>', canonical("https://example.com/list")
+        ) == canonical("https://example.com/p2")
 
     def test_detect_pagination_protocol_relative_resolves(self):
         # //evil.com/x resolves against the page URL to https, so it survives
         # the scheme filter exactly like the HTTP path already allowed.
-        assert (
-            detect_pagination('<a rel="next" href="//example.com/p2">n</a>', canonical("https://example.com/list"))
-            == canonical("https://example.com/p2")
-        )
+        assert detect_pagination(
+            '<a rel="next" href="//example.com/p2">n</a>', canonical("https://example.com/list")
+        ) == canonical("https://example.com/p2")
 
 
 async def test_extract_document_skips_oversized_input(monkeypatch):

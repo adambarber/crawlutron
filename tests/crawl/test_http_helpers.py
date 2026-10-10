@@ -146,16 +146,22 @@ class TestHeaderHelpers:
 
     def test_configured_user_agent_overrides_identity(self, monkeypatch) -> None:
         monkeypatch.setenv("CRAWLUTRON_USER_AGENT", "crawler-test/1")
-        headers = headers_for_strategy(HTTP_DECLARED_CRAWLER, read_policy({"headers": {}}), canonical("http://x/"))
+        headers = headers_for_strategy(
+            HTTP_DECLARED_CRAWLER, read_policy({"headers": {}}), canonical("http://x/")
+        )
         assert headers["User-Agent"] == "crawler-test/1"
 
     def test_cookie_header_invalid_structures(self) -> None:
         assert (
-            _cookie_header_for_url({"cookie_jar": "per_host", "cookies": "notdict"}, canonical("http://host/"))
+            _cookie_header_for_url(
+                {"cookie_jar": "per_host", "cookies": "notdict"}, canonical("http://host/")
+            )
             == ""
         )
         assert (
-            _cookie_header_for_url({"cookie_jar": "per_host", "cookies": {"host": "notdict"}}, canonical("http://host/"))
+            _cookie_header_for_url(
+                {"cookie_jar": "per_host", "cookies": {"host": "notdict"}}, canonical("http://host/")
+            )
             == ""
         )
 
@@ -759,7 +765,9 @@ class TestAcceptEncodingAdvertisesOnlyWhatWeCanDecode:
     """
 
     def test_br_is_advertised(self):
-        headers = headers_for_strategy(HTTP_DECLARED_CRAWLER, read_policy({"headers": {}}), canonical("http://e.com/"))
+        headers = headers_for_strategy(
+            HTTP_DECLARED_CRAWLER, read_policy({"headers": {}}), canonical("http://e.com/")
+        )
         assert "br" in headers["Accept-Encoding"]
 
     def test_every_advertised_encoding_is_always_decodable(self):
@@ -784,6 +792,8 @@ class TestAcceptEncodingAdvertisesOnlyWhatWeCanDecode:
         # nothing outside the decoder set, so a future token cannot slip in.
         from app.transport.decompression import _DECODABLE_ENCODINGS
 
-        headers = headers_for_strategy(HTTP_DECLARED_CRAWLER, read_policy({"headers": {}}), canonical("http://e.com/"))
+        headers = headers_for_strategy(
+            HTTP_DECLARED_CRAWLER, read_policy({"headers": {}}), canonical("http://e.com/")
+        )
         advertised = {token.strip() for token in headers["Accept-Encoding"].split(",")}
         assert advertised <= _DECODABLE_ENCODINGS

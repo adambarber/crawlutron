@@ -177,7 +177,9 @@ class TestGcNeverUnlinksASpillStillInUse:
             spill._gc_stale_spills(1.0)
 
             assert os.path.exists(spill.path), "GC unlinked a spill still in use"
-            assert [r.original_url for r in spill.load_ordered(policy=UNRESTRICTED_HOST_POLICY)] == ["https://spill.test/0"]
+            assert [r.original_url for r in spill.load_ordered(policy=UNRESTRICTED_HOST_POLICY)] == [
+                "https://spill.test/0"
+            ]
         finally:
             spill.close()
 

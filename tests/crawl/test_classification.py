@@ -336,9 +336,7 @@ def test_every_classifiable_label_resolves_through_the_table(browser_resolver):
     labels += sorted(HTTP_BLOCKED_CLASSIFICATIONS | BROWSER_BLOCKED_CLASSIFICATIONS)
     labels += list(UNRECOGNIZED_LABELS)
     for label in labels:
-        expected = CLASSIFICATION_STATUS_BY_LABEL.get(
-            label, UNKNOWN_CLASSIFICATION_STATUS
-        )
+        expected = CLASSIFICATION_STATUS_BY_LABEL.get(label, UNKNOWN_CLASSIFICATION_STATUS)
         assert status_for_classification(label) == expected
         assert browser_resolver(label) == expected
 

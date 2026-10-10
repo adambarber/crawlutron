@@ -218,9 +218,7 @@ def _robots_disallowed(state: _PipelineState, job: CrawlTask) -> EngineCrawlResu
 
 
 async def _seeds_for_job(state: _PipelineState, job: CrawlTask) -> list[NormalizedUrl]:
-    sitemap_url = admit_or_none(
-        f"{job.normalized_url.origin}/sitemap.xml", policy=state.host_policy
-    )
+    sitemap_url = admit_or_none(f"{job.normalized_url.origin}/sitemap.xml", policy=state.host_policy)
     if sitemap_url is None:
         return []
     found = await fetch_sitemap_urls(

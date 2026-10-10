@@ -263,8 +263,8 @@ def test_no_inline_pinned_url_composition():
                         and "pinned" in expr.id.lower()
                     ):
                         offenders.append(offender_at(path, node, f"f-string interpolates {expr.id}"))
-    assert not offenders, (
-        "compose pinned URLs via build_pinned_request(), never inline:\n" + "\n".join(offenders)
+    assert not offenders, "compose pinned URLs via build_pinned_request(), never inline:\n" + "\n".join(
+        offenders
     )
 
 
@@ -578,6 +578,7 @@ def test_resolved_call_name_handles_getattr_alias_and_static_name():
 # every door discards refused URLs the same way.
 # ---------------------------------------------------------------------------
 
+
 def _normalize_or_none_offenders(tree, path):
     """A try/except ValueError around the constructor outside the chokepoint."""
     for node in try_blocks(tree):
@@ -732,9 +733,7 @@ JOINED_URLS_ARE_EGRESS_FILTERED = Rule(
             "no egress filter",
         ),
     ),
-    clean=lambda: (
-        "def f(base, href):\n    return base.resolve(href)\n",
-    ),
+    clean=lambda: ("def f(base, href):\n    return base.resolve(href)\n",),
 )
 
 

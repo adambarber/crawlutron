@@ -601,7 +601,6 @@ async def run_seeded_job(job, job_store, execute):
     return await run_to_terminal(job_store, job.job_id)
 
 
-
 async def run_seeded_scripted_job(
     job_store,
     root_url: str,

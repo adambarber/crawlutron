@@ -17,7 +17,9 @@ class TestPageMetadata:
         assert meta["source_url"] == "https://example.com"
 
     def test_handles_empty(self):
-        assert extract_llm_metadata("", canonical("https://example.com")) == {"source_url": "https://example.com"}
+        assert extract_llm_metadata("", canonical("https://example.com")) == {
+            "source_url": "https://example.com"
+        }
 
 
 class TestJsonLdExtraction:

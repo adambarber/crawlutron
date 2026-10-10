@@ -204,9 +204,9 @@ async def test_image_blocked_by_default_unless_screenshot():
 
     # Screenshot explicitly requested -> continue (renders need images/fonts)
     route = FakeRoute()
-    await ssrf_route_handler(
-        include_screenshot=True, pin=lambda url, headers: ("http://1.2.3.4/", {})
-    )(route, FakeRequest("https://x.test/logo.png", "image"))
+    await ssrf_route_handler(include_screenshot=True, pin=lambda url, headers: ("http://1.2.3.4/", {}))(
+        route, FakeRequest("https://x.test/logo.png", "image")
+    )
     assert route.decision == "continue"
 
 

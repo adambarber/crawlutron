@@ -17,9 +17,7 @@ def test_zip_local_header_detected():
 
 
 def test_zip_eocd_detected():
-    assert (
-        looks_like_binary_body(b"PK\x05\x06trailing", "application/zip", canonical("http://x/f")) is True
-    )
+    assert looks_like_binary_body(b"PK\x05\x06trailing", "application/zip", canonical("http://x/f")) is True
 
 
 def test_gzip_magic_detected():

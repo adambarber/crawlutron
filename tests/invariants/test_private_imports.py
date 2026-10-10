@@ -342,8 +342,7 @@ CONFTEST_WELDS = Rule(
         "expose the reset, because a caller obliged to publish a reset has no other way to publish it"
     ),
     bite=lambda: (
-        "from app.transport import pinned_transport as pinned_mod\n\n"
-        "pinned_mod._undeclared_probe.clear()\n",
+        "from app.transport import pinned_transport as pinned_mod\n\npinned_mod._undeclared_probe.clear()\n",
     ),
     clean=lambda: (
         # The shape this rule exists to force: ask the owner, do not touch the state.

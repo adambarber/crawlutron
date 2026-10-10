@@ -199,7 +199,10 @@ class TestWholeSiteAdmissionContract:
             job_store, root, self._policy(1, 2), engine, frontier=[root, second, third]
         )
         assert engine.attempts == {root: 1, second: 1}
-        assert finished.visited == {canonical("https://example.test/root"), canonical("https://example.test/second")}
+        assert finished.visited == {
+            canonical("https://example.test/root"),
+            canonical("https://example.test/second"),
+        }
         assert finished.frontier == []
         assert finished.stats["cap_truncated"] == 1
 
@@ -217,7 +220,10 @@ class TestWholeSiteAdmissionContract:
             running=True,
         )
         assert engine.attempts == {first: 1, second: 1}
-        assert finished.visited == {canonical("https://example.test/first"), canonical("https://example.test/second")}
+        assert finished.visited == {
+            canonical("https://example.test/first"),
+            canonical("https://example.test/second"),
+        }
         assert finished.stats["cap_overcommitted"] == 1
 
     async def test_canonical_root_alias_counts_once(self, client, job_store):

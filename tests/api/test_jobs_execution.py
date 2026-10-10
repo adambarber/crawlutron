@@ -408,7 +408,11 @@ class TestWholeSiteJobExecution:
         await _wait_status(job_store, job_id, {"completed", "failed"})
         job = job_store.load(job_id)
         assert job.stats["total_crawled"] == 3
-        assert job.visited == {canonical(GRAPH_ROOT), canonical(GRAPH_CHILD), canonical("http://example.test/c")}
+        assert job.visited == {
+            canonical(GRAPH_ROOT),
+            canonical(GRAPH_CHILD),
+            canonical("http://example.test/c"),
+        }
 
 
 class TestTransientFailureRequeue:
@@ -827,7 +831,11 @@ class TestJobControlOverRunner:
         assert resume_resp.status_code == 200
         await _wait_status(job_store, job_id, {"completed"})
         job = job_store.load(job_id)
-        assert job.visited == {canonical(GRAPH_ROOT), canonical(GRAPH_CHILD), canonical("http://example.test/c")}
+        assert job.visited == {
+            canonical(GRAPH_ROOT),
+            canonical(GRAPH_CHILD),
+            canonical("http://example.test/c"),
+        }
 
     async def test_cancel_persists_terminal_state(self, client, job_store):
         job_id, release = await self._blocked(client, job_store, _root_child_results())

@@ -437,8 +437,7 @@ URL_RETURNING_HELPERS_REQUIRE_HOST_POLICY = Rule(
         # construction boundary -- the sole chokepoint -- so projecting .raw
         # from it inside a helper is the sanctioned text projection, not a
         # policy bypass. The policy travels with the type, not a parameter.
-        "def connect(url: NormalizedUrl, headers: dict[str, str]):\n"
-        "    return url.raw, dict(headers)\n",
+        "def connect(url: NormalizedUrl, headers: dict[str, str]):\n    return url.raw, dict(headers)\n",
     ),
 )
 

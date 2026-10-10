@@ -880,9 +880,7 @@ def extract_post_fetch_discovery(
     producer covers every consumer.
     """
     tree = parse_html_tree(html) if html and (include_diagnostics or include_links) else None
-    diagnostics = (
-        html_diagnostics(html, final_url, tree=tree) if include_diagnostics else {}
-    )
+    diagnostics = html_diagnostics(html, final_url, tree=tree) if include_diagnostics else {}
     if include_links:
         discovered_links, discovered_link_count, discovered_links_truncated = extract_discovered_links(
             html, final_url, max_links=max_links, tree=tree

@@ -202,6 +202,7 @@ class TestDiscoveryPayload:
         uses it on the caller's behalf. An agent deciding whether to poll for
         changes has to be able to see that the service will."""
         from app.discovery.capabilities import capabilities_payload
+
         features = capabilities_payload(CrawlerSettings.from_mapping({}))["features"]
         assert features["watches"] is True
 

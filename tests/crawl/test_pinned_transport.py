@@ -30,9 +30,7 @@ class TestBuildPinnedRequest:
     def test_plain_http_uses_pinned_ip_and_host_header(self, monkeypatch):
         block_private_targets(monkeypatch)
         with _resolve_as(_PUBLIC):
-            connect_url, headers = build_pinned_request(
-                canonical("http://example.com:8080/a/b?x=1"), {}
-            )
+            connect_url, headers = build_pinned_request(canonical("http://example.com:8080/a/b?x=1"), {})
         parsed = urlparse(connect_url)
         assert parsed.hostname == "93.184.216.34"
         assert parsed.port == 8080
@@ -44,9 +42,7 @@ class TestBuildPinnedRequest:
         block_private_targets(monkeypatch)
         https_addrs = [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 443))]
         with _resolve_as(https_addrs):
-            connect_url, headers = build_pinned_request(
-                canonical("https://example.com/secure.pdf"), {}
-            )
+            connect_url, headers = build_pinned_request(canonical("https://example.com/secure.pdf"), {})
         parsed = urlparse(connect_url)
         assert parsed.hostname == "example.com"  # never the IP (breaks SNI)
         assert "Host" not in headers
@@ -58,9 +54,7 @@ class TestBuildPinnedRequest:
         block_private_targets(monkeypatch)
         v6_addrs = [(socket.AF_INET6, socket.SOCK_STREAM, 6, "", ("2606:4700:4700::1111", 80, 0, 0))]
         with _resolve_as(v6_addrs):
-            connect_url, headers = build_pinned_request(
-                canonical("http://v6.example/docs.pdf?x=1"), {}
-            )
+            connect_url, headers = build_pinned_request(canonical("http://v6.example/docs.pdf?x=1"), {})
         parsed = urlparse(connect_url)
         assert connect_url.startswith("http://[2606:4700:4700::1111]/")
         assert parsed.hostname == "2606:4700:4700::1111"

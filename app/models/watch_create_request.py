@@ -26,6 +26,9 @@ class WatchCreateRequest(BaseModel):
         ...,
         description="Seconds between checks. The first check is one interval after registration.",
     )
-    webhook_url: Annotated[str | None, Field(
-        description="Where to POST a change notification. Omit for a poll-only watch.",
-    )] = None
+    webhook_url: Annotated[
+        str | None,
+        Field(
+            description="Where to POST a change notification. Omit for a poll-only watch.",
+        ),
+    ] = None

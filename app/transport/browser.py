@@ -457,7 +457,6 @@ class BrowserRenderer:
         break the render itself.
         """
         try:
-
             context = getattr(page, "context", None)
             if context is None:
                 return

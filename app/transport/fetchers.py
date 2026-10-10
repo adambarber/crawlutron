@@ -77,9 +77,7 @@ async def default_http_fetcher(
     client = http_client_pool.get_async_http_client()
     started = time.monotonic()
     timeout = Timeouts.for_request(timeout_seconds).as_httpx()
-    async for chain, pinned_url, hop_headers in pinned_transport.apinned_hops(
-        url, headers, pin=pin
-    ):
+    async for chain, pinned_url, hop_headers in pinned_transport.apinned_hops(url, headers, pin=pin):
         # Follow_redirects=False: we follow manually so each hop is SSRF-checked.
         async with client.stream(
             "GET", pinned_url, headers=hop_headers, timeout=timeout, follow_redirects=False
@@ -206,9 +204,7 @@ async def _cffi_fetch(
     client = http_client_pool.get_cffi_session()
     try:
         started = time.monotonic()
-        async for chain, pinned_url, hop_headers in pinned_transport.apinned_hops(
-            url, headers, pin=pin
-        ):
+        async for chain, pinned_url, hop_headers in pinned_transport.apinned_hops(url, headers, pin=pin):
             try:
                 response = await client.get(
                     pinned_url,
