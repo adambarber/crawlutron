@@ -11,10 +11,8 @@ from typing import TYPE_CHECKING
 from app.admission.policy import PolicyTier
 from app.config.env import get_env_float, get_env_int
 
-# Standalone JSON-line logging configuration, wired once here so every
-# entry point logs the same way. Integration deployments that want richer
-# logging can override ``configure_service_logging`` in their own
-# integration layer.
+# Standalone JSON-line logging, wired once so every entry point logs the same;
+# integrations override ``configure_service_logging`` in their own layer.
 from app.models.address_class import is_loopback_bind
 from app.models.host_policy import HostPolicy
 from app.runtime.logging_config import configure_service_logging
@@ -30,9 +28,8 @@ from .transport.browser_pool import (
 )
 
 if TYPE_CHECKING:
-    # FastAPI is only imported for annotations under type checking; the runtime
-    # import below carries the real classes, and this keeps the names usable as
-    # types (a bare pre-declared variable is not a valid type annotation).
+    # FastAPI is imported only for annotations under type checking; the runtime
+    # import below carries the real classes (a bare variable is not a valid annotation).
     from fastapi import FastAPI, HTTPException
     from fastapi.exceptions import RequestValidationError
 else:
@@ -40,11 +37,8 @@ else:
         from fastapi import FastAPI, HTTPException
         from fastapi.exceptions import RequestValidationError
     except ImportError:
-        # FastAPI is optional at import time (the MCP/CLI surface and tests
-        # import this module for its settings and pool wiring without a web
-        # server). ``FastAPI`` becomes None so the ``if FastAPI is not None``
-        # guard further down reads it; the two exception types become
-        # ``Exception`` so handler registration below still types.
+        # FastAPI is optional at import time (MCP/CLI/tests import this module
+        # with no web server): FastAPI -> None, exceptions -> ``Exception``.
         FastAPI = None
         HTTPException = Exception
         RequestValidationError = Exception
@@ -82,14 +76,8 @@ async def _run_shutdown_steps(steps: Sequence[_TeardownStep]) -> None:
         raise RuntimeError("shutdown steps failed: " + " | ".join(failures))
 
 
-# ONE database for the whole service. The store chokepoint opens a connection
-# per StoreSchema and the migration runner filters each schema's migrations by
-# id against the file's single ledger, so five schemas in one file cost nothing
-# structurally -- and a second file would mean a second ledger, a second backup,
-# and a second thing to reason about when something is locked.
-#
-# WAL serializes writers, so the small frequent counter and cookie writes do
-# not contend for anything the large infrequent job writes need.
+# ONE database: the store chokepoint opens a connection per schema and the
+# runner filters by id; WAL serializes writers, so counters never contend.
 DATABASE_PATH = settings.cache_dir + "/crawler.db"
 
 # Job store for resumable crawls
@@ -107,9 +95,8 @@ result_store = CrawlResultStore(
     max_entries=get_env_int("CRAWLUTRON_RESULT_MAX_ENTRIES", 1000),
 )
 
-# Registered watches and their revalidation history. No policy or tier: a watch
-# arrives admitted, and the sweep re-admits against the policy in force when it
-# checks, so a row outlives the deployment that wrote it.
+# Registered watches and revalidation history: no policy or tier -- a watch
+# arrives admitted, and the sweep re-admits against the policy in force when it checks.
 watch_store = WatchStore(DATABASE_PATH)
 
 # Ensure the parent directory of the log file exists before the logger tries
@@ -123,19 +110,8 @@ logger = configure_service_logging(
     log_file_max_bytes=settings.log_file_max_bytes,
     log_file_backup_count=settings.log_file_backup_count,
 )
-# The single browser pool lives in the browser_pool module (set up in lifespan
-# via initialize_browser_pool); request handlers reach it through
-# get_browser_pool(). There is intentionally no second pool global here.
-#
-# The shutdown event is minted inside the lifespan and published to
-# ``app.state`` there, for the same reason. A module-level event wired to
-# ``app.state`` at import is signalled by the first run's teardown and never
-# cleared, so a second run in the same process hands every request a signal
-# that is already set and cancels each crawl before it does any work.
-
-# Third-party extraction libraries log per-element WARNINGs that are expected
-# parser noise (e.g. trafilatura on <a> elements without href) and cannot be
-# acted on. Keep ERROR+ visible, drop the chatter.
+# Third-party extraction libraries log expected per-element WARNINGs (parser
+# noise that cannot be acted on). Keep ERROR+ visible, drop the chatter.
 logging.getLogger("trafilatura").setLevel(logging.ERROR)
 
 
@@ -167,10 +143,8 @@ def _warn_if_bound_off_loopback(host: str) -> None:
 
 
 if FastAPI is not None:
-    # Declared once here so both this branch and the ``else`` below agree on
-    # the type: FastAPI is optional at import time, so the module-level app is
-    # ``FastAPI | None`` by construction, not ``FastAPI`` that happens to be
-    # None on one path.
+    # Declared once so both branches agree on the type: the module-level app is
+    # ``FastAPI | None`` by construction, not FastAPI that happens to be None.
     app: FastAPI | None
 
     @asynccontextmanager
@@ -188,26 +162,18 @@ if FastAPI is not None:
         # loop, so its lag probe must start here.
         _resource_gate.start_lag_probe()
 
-        # Before anything is listening: the exposure is a property of the bind
-        # and is true from the first moment, so it is stated before the first
-        # request rather than on one.
+        # Before anything is listening: the exposure is a property of the bind,
+        # true from the first moment, so stated before the first request.
         _warn_if_bound_off_loopback(settings.host)
 
+        # One browser pool only: initialized here, reached via get_browser_pool(),
+        # with no second pool global.
         await initialize_browser_pool(settings)
         # Cookies first: recovered jobs can receive cookies in their first
         # batch, and a clear-then-populate load would drop those.
         if settings.cookie_persistence_enabled:
-            # The jar is backed by the shared coordination store rather than by
-            # a JSON file rewritten at shutdown. That rewrite was replace-
-            # everything, so with N workers the last process to exit discarded
-            # every cookie the others had collected -- atomic, non-truncated,
-            # and still a lost update. The store merges in a transaction
-            # instead, so workers accumulate rather than overwrite.
-            #
-            # An existing cookie_jar.json is imported once, so an upgrade does
-            # not silently sign every user out. It is never written again: the
-            # file format is a legacy mirror, and keeping it authoritative
-            # would keep the last-writer-wins path alive.
+            # The jar is backed by the shared coordination store, not a JSON file
+            # rewritten at shutdown (last-writer-wins); a legacy jar is imported once.
             os.makedirs(settings.cache_dir, exist_ok=True)
             from app.storage.coordination_cookies import SharedCookieStore
             from app.transport import cookie_jar as cookie_jar_module
@@ -216,14 +182,11 @@ if FastAPI is not None:
             jar = CookieJar(SharedCookieStore(DATABASE_PATH))
             jar.import_file_into(settings.cookie_jar_path)
             cookie_jar_module._GLOBAL_COOKIE_JAR = jar
-            # Published for the same reason as ``shutdown_event`` below: what the
-            # process is actually using is otherwise answerable only by reaching
-            # for the module global the lifespan just assigned.
+            # Published like ``shutdown_event`` below: what the process is using
+            # is otherwise answerable only via the module global the lifespan assigned.
             _app.state.cookie_jar = jar
-        # /metrics must report the service, not this worker. Counters go to the
-        # same shared store as the cookies; the two resource gauges stay
-        # process-local because they read a cgroup every worker shares and
-        # summing them would report a utilization no process experiences.
+        # /metrics reports the service, not this worker: counters go to the shared
+        # store; gauges stay process-local (a shared cgroup summed reports nothing real).
         from app.storage.coordination_counters import CoordinationCounters
 
         from .runtime.metrics import get_metrics
@@ -233,14 +196,14 @@ if FastAPI is not None:
         # Jobs: rewind crash orphans and resume every PENDING whole-site job.
         from .api.job_runner import recover_and_start_pending_jobs
 
+        # Minted in the lifespan, not at import: an import-time event is set by
+        # the first teardown and cancels every later run's crawls.
         shutdown_event = asyncio.Event()
         _app.state.shutdown_event = shutdown_event
         await recover_and_start_pending_jobs(job_store, settings, shutdown_event)
 
-        # Watches: the periodic sweep of the due registry, owned by the process
-        # that owns the store for the same reason job recovery runs here. Started
-        # before the first request, so a registered watch is kept by this
-        # deployment rather than by whichever one started last.
+        # Watches: the due-registry sweep, owned by the store's process (like job
+        # recovery) and started before the first request so this deployment keeps them.
         from .api.watch_sweep import sweep_watches_forever
 
         watch_sweep_task = asyncio.create_task(
@@ -254,21 +217,14 @@ if FastAPI is not None:
 
         yield
 
-        # Shutdown: stop the world FIRST so in-flight job crawls can't
-        # deliver webhooks against cleared dependencies or mint cookies
-        # after the snapshot is taken. Then release webhook
-        # deps and close clients. The cookie jar needs no shutdown step: the
-        # shared store is the persistence, so there is no whole-jar write left
-        # to be last-writer-wins.
+        # Shutdown stops the world FIRST: no webhooks against cleared dependencies,
+        # no cookies after the snapshot. The jar needs no step -- the store persists.
         shutdown_event.set()
         from .api.job_runner import shutdown_job_runner
 
         await shutdown_job_runner()
-        # The sweep is mid-fetch the moment this runs, so it is cancelled rather
-        # than waited on politely: the event only stops the NEXT pass. Cancelling
-        # leaves the watch due, which is the registry's at-least-once contract --
-        # the next deployment picks it up -- whereas awaiting a pass to finish
-        # would deliver webhooks against the pools closing immediately below.
+        # The sweep is cancelled, not awaited: cancellation leaves the watch due
+        # (the at-least-once contract), and awaiting would web-hook against closing pools.
         watch_sweep_task.cancel()
         try:
             await watch_sweep_task
@@ -277,32 +233,23 @@ if FastAPI is not None:
 
         from app.transport.http_client_pool import close_async_http_client, close_cffi_session
 
-        # Imported here, not at module scope: this pulls in the markitdown
-        # extraction stack, and the deferred import is what keeps it off the
-        # import path of every CLI and MCP caller that never renders a PDF.
+        # Imported here, not at module scope: this pulls in the markitdown stack,
+        # which CLI/MCP callers that never render a PDF must not pay for.
         from .extraction.content import shutdown_doc_extraction_executor
         from .orchestration.engine import _resource_gate
 
         async def _close_gate() -> None:
             _resource_gate.close()
 
-        # Every step is attempted, and a failure is reported only after the last
-        # one has run. A close() that raises partway through the list would
-        # otherwise cost every pool below it its teardown -- and the
-        # document-extraction workers are the one pool nothing ever touches
-        # again, so skipping them leaks a markitdown subprocess, its memory and
-        # its pipes past the process's own shutdown. The aggregate still raises,
-        # so a genuinely broken close is still loud and still names itself.
+        # Every step is attempted and failures surface only after the last: a
+        # close() that raises partway leaks every pool below it (and its subprocesses).
         await _run_shutdown_steps(
             (
                 ("close_async_http_client", close_async_http_client),
                 ("close_cffi_session", close_cffi_session),
                 ("close_browser_pool", close_browser_pool),
-                # The persistent document-extraction subprocesses are the last
-                # pool: they are lazy and never touched by the shutdown above,
-                # so without this every markitdown worker (and its memory and
-                # pipes) outlived the process's own shutdown and was only reaped
-                # by the test fixture.
+                # The lazy document-extraction workers are the one pool nothing
+                # above touches; without this their subprocesses outlive shutdown.
                 ("shutdown_doc_extraction_executor", shutdown_doc_extraction_executor),
                 ("_resource_gate.close", _close_gate),
             )
@@ -353,9 +300,8 @@ if FastAPI is not None:
             },
         ],
     )
-    # Stash shared dependencies on ``app.state`` so router handlers outside
-    # this module can fetch them via :func:`get_settings` /
-    # :func:`get_shutdown_event` FastAPI dependencies.
+    # Stash shared dependencies on ``app.state`` so router handlers reach them
+    # via the :func:`get_settings` / :func:`get_shutdown_event` dependencies.
     app.state.crawler_settings = settings
     app.state.job_store = job_store
     app.state.result_store = result_store
@@ -398,8 +344,6 @@ if FastAPI is not None:
     app.include_router(mcp_router)
 
 else:
-    # ``FastAPI`` is None here (the optional import failed), so there is no app
-    # to build. The module-level ``app`` is None on this path; a reader that
-    # needs the optional web surface must handle that, rather than touching a
-    # half-initialized module global.
+    # ``FastAPI`` is None here (the optional import failed): no app to build,
+    # and the module-level ``app`` is None on this path -- readers must handle that.
     app = None
