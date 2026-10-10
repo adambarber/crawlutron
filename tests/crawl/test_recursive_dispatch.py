@@ -351,6 +351,55 @@ async def test_failed_job_does_not_shift_other_results():
 
 
 async def test_pool_exhaustion_requeue_does_not_consume_a_max_pages_slot():
+    ...
+
+
+async def test_in_flight_pages_count_against_the_cap_at_expansion():
+    """Pages admitted this batch but not yet committed are OCCUPIED pages.
+
+    Two seeds share one in-flight batch, so when the first commit expands its
+    discovered links the second seed is admitted-but-uncommitted. The page
+    budget has three slots and two are spent on seeds, so exactly one slot is
+    left for discovered pages. The hand-passed
+    ``occupied=page_count+len(frontier)`` read 1+0 here -- both in-flight
+    seeds invisible -- so expansion robots-queried a page the cap already
+    refused and queued a phantom past the last slot. Occupation is now
+    DERIVED from the module's own reserved set (known ∪ frontier identities),
+    which is exactly the pages a crawl holds: nothing to hand-compute,
+    nothing to get wrong.
+    """
+    probed: list[str] = []
+
+    async def allows(url):
+        probed.append(url.raw)
+        return True
+
+    async def worker(job):
+        if job.normalized_url == canonical("http://a/0"):
+            return make_engine_result(
+                job.normalized_url,
+                [_link(f"http://a/{i}") for i in (1, 2, 3)],
+            )
+        return make_engine_result(job.normalized_url)
+
+    spill, _scheduler, _gate = await drive_recursive_crawl(
+        [_task("http://a/0"), _task("http://a/x", index=1)],
+        worker,
+        allows=allows,
+        max_depth=1,
+        max_pages=3,
+        respect_robots=True,
+    )
+
+    # Page 3 is the falsifier: the write cap holds under the old reading too
+    # (the dispatch loop rechecks it per batch), so the breach shows one
+    # level earlier -- a page the cap refuses must never reach robots.
+    assert "http://a/3" not in probed
+    assert {r.normalized_url for r in spill.writes.values()} == {
+        canonical("http://a/0"),
+        canonical("http://a/x"),
+        canonical("http://a/1"),
+    }
     """A re-queued transiently-failed URL was never crawled, so it must not cost a
     page against ``max_pages``. Before the fix each re-queue incremented
     ``page_count`` and a burst of exhaustion events could terminate the crawl

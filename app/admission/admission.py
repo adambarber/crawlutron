@@ -230,7 +230,6 @@ async def admit_discovered_links[T](
     commit_crawl_delay: CommitCrawlDelay,
     host_policy: HostPolicy,
     reserve_admitted: bool = False,
-    occupied: int | None = None,
 ) -> AdmissionOutcome:
     if source_depth >= max_depth:
         return AdmissionOutcome()
@@ -240,7 +239,10 @@ async def admit_discovered_links[T](
         identity = _frontier_identity(value, host_policy=host_policy)
         if identity is not None:
             reserved.add(identity)
-    current_occupied = occupied if occupied is not None else len(reserved)
+    # Occupation is this set's size, never a caller's arithmetic: known ∪
+    # frontier is exactly committed + in-flight + queued, and a hand-passed
+    # count was blind to whichever term the caller's own variables missed.
+    current_occupied = len(reserved)
     accepted = 0
     cap_blocked = 0
     robots_blocked = 0

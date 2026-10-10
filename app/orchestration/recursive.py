@@ -212,7 +212,6 @@ async def _expand_recursive_result(
         robots_crawl_delay=run.robots_crawl_delay,
         commit_crawl_delay=lambda domain, delay: run.scheduler.set_domain_min_delay(domain, delay),
         host_policy=run.host_policy,
-        occupied=state.page_count + len(state.frontier),
     )
 
 

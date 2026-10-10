@@ -1095,7 +1095,6 @@ async def test_admission_robots_work_stops_at_remaining_capacity():
         known={canonical("https://example.test/root")},
         robots_allows=allows,
         robots_crawl_delay=_no_crawl_delay,
-        occupied=1,
     )
 
     assert calls == ["https://example.test/page-0"]

@@ -165,7 +165,6 @@ async def admit(
     robots_crawl_delay=None,
     commit_crawl_delay=None,
     reserve_admitted: bool = False,
-    occupied: int | None = None,
     host_policy: HostPolicy = UNRESTRICTED_HOST_POLICY,
 ):
     """Run production ``admit_discovered_links`` and return its real outcome.
@@ -199,7 +198,6 @@ async def admit(
         commit_crawl_delay=_commit_nothing if commit_crawl_delay is None else commit_crawl_delay,
         host_policy=host_policy,
         reserve_admitted=reserve_admitted,
-        occupied=occupied,
     )
 
 
