@@ -99,14 +99,8 @@ def _is_ssrf_blocked(url: str, *, policy: HostPolicy) -> bool:
     return False
 
 
-# Subresource types that carry no crawlable text content. When the
-# browser profile runs in "reduced" resource mode, these are aborted at the
-# route layer to cut render bandwidth; the crawler only needs
-# document/script/xhr/stylesheet to extract content.
-# Tracking/analytics hosts: never fetch them -- they return no crawlable
-# content and only add network load. The canonical list lives in
-# app.vocabulary.hosts (single source of truth) so the engine can also refuse to
-# enqueue these hosts as jobs.
+# Subresource types with no crawlable text: aborted in reduced-resource mode.
+# Tracking/analytics hosts are never fetched (app.vocabulary.hosts, shared with enqueue refusal).
 _REDUCED_BLOCK_RESOURCE_TYPES = frozenset({"image", "font", "media"})
 
 
@@ -139,55 +133,38 @@ def make_ssrf_route_handler(
     """
 
     async def _handler(route, request):
-        # Re-validate and pin the IP for this specific subresource request
-        # to prevent DNS-rebinding TOCTOU. The pin rule raises ValueError if
-        # the target resolves to a private/loopback IP,
-        # and returns (pinned_url, {Host: original_hostname}) so we can
-        # force the browser to connect to the validated IP while preserving
-        # the Host header (virtual-host routing).
+        # Re-pin the IP per subresource request (DNS-rebinding TOCTOU): raises on
+        # private/loopback, returns (pinned_url, {Host: hostname}) to preserve routing.
         request_scheme = request.url.split(":", 1)[0].lower()
         if request_scheme not in ("http", "https", ""):
             # Data:, blob:, about:, javascript: never touch the network via DNS;
             # let the browser handle them locally instead of aborting.
             await route.continue_()
             return
-        # The browser-observed request URL is one of the tree's live text
-        # boundaries: admitted here, once, inline -- admission parses only,
-        # no DNS -- so both the analytics skip and the branches below hand a
-        # value, not text, to everything downstream. A URL that will not
-        # admit is the same "unsafe target" verdict the try/except below
-        # aborts on; failing it here just reaches the abort without the DNS.
+        # The browser-observed URL is a live-text boundary: admitted here, once,
+        # inline; an unadmittable URL reaches the same "unsafe target" abort below.
         try:
             admitted = NormalizedUrl(request.url, policy=policy)
         except ValueError:
             await route.abort()
             return
         # Tracking/analytics requests carry no crawlable content; drop them
-        # unconditionally so they never consume bandwidth or trigger their own
-        # SSRF resolution.
+        # unconditionally so they never consume bandwidth or trigger SSRF resolution.
         if _is_analytics_url(admitted):
             await route.abort()
             return
-        # Abort non-essential presentation subresources unconditionally: a
-        # text-extraction crawler never needs images/fonts/media, and blocking
-        # them cuts ~70% of rendered-page bandwidth. They are only permitted
-        # when an explicit screenshot is requested.
+        # Abort presentation subresources: a text crawler never needs them (~70%
+        # of render bandwidth); permitted only when a screenshot is requested.
         if getattr(request, "resource_type", "") in _REDUCED_BLOCK_RESOURCE_TYPES and not include_screenshot:
             await route.abort()
             return
         try:
-            # Annotated once, ahead of both branches: the https branch assigns
-            # an empty literal, which mypy cannot widen to the dict type the
-            # http branch's pin rule returns.
+            # Annotated once for both branches: mypy cannot widen the https
+            # branch's empty literal to the dict type the http pin rule returns.
             host_headers: dict[str, str]
             if request_scheme == "https":
-                # The pinned IP is discarded for https (the pin rule keeps
-                # the original hostname so TLS SNI and certificate validation
-                # work -- real certs carry no IP SAN), so the pin resolve is
-                # discarded work here. Validate through the cached, TTL'd
-                # check instead: one resolver round trip per host, not one
-                # uncached resolve per subresource. The check still fails
-                # closed on private/loopback/resolved-internal targets.
+                # https discards the pinned IP (TLS SNI/certs need the hostname), so
+                # validate via the cached TTL'd check: one resolve per host, fail-closed.
                 await asyncio.to_thread(check_ssrf_protection, admitted)
                 pinned_url, host_headers = request.url, {}
             else:
@@ -204,9 +181,8 @@ def make_ssrf_route_handler(
         overrides = {}
         if host_headers.get("Host"):
             overrides["Host"] = host_headers["Host"]
-        # Omit headers= when there are no overrides: Playwright treats
-        # an explicit headers dict as a full replacement, so passing {}
-        # would wipe UA/cookies/accept headers off every HTTPS subresource.
+        # Omit headers= when empty: Playwright treats an explicit dict as a full
+        # replacement, so {} would wipe UA/cookies/accept off every HTTPS subresource.
         if overrides:
             await route.continue_(url=pinned_url, headers=overrides)
         else:
@@ -246,14 +222,11 @@ def make_ssrf_websocket_handler(*, policy: HostPolicy):
     return _ws_handler
 
 
-# The blocked/failed label groups live in app.vocabulary.taxonomy now, alongside the
-# classification -> status table both strategies share, so the HTTP and browser
-# paths cannot disagree about a label again. Importers use the constants
-# directly, exactly like the LAZY_SCROLL_* aliases below.
+# The blocked/failed labels and the classification -> status table live in
+# app.vocabulary.taxonomy, so the HTTP and browser paths cannot disagree about a label.
 
-# Canonical defaults live in app.vocabulary.limits (single source of truth); these
-# module names stay as the settings-less fallback so existing references
-# (including the test-suite scroll disabler) keep working with identical values.
+# Canonical defaults live in app.vocabulary.limits; these module names stay as the
+# settings-less fallback so existing references (the suite's scroll disabler) keep working.
 _BROWSER_COOKIES_MAX = 500
 
 
@@ -363,10 +336,8 @@ class BrowserRenderer:
         status_for: Callable[[str], ResultStatus] | None = None,
     ) -> None:
         self._sleep = sleep
-        # Prefer the passed policy limit, then the centralized settings field,
-        # then the raw env var (falling back to the canonical default). This
-        # keeps the default in one place (app.vocabulary.limits) instead of a bare
-        # literal here.
+        # Policy limit, then the settings field, then env, then the canonical
+        # default: the number itself lives only in app.vocabulary.limits.
         if challenge_wait_seconds is None:
             if settings is not None:
                 self._challenge_wait_seconds = float(settings.challenge_wait_seconds)
@@ -377,24 +348,18 @@ class BrowserRenderer:
         else:
             self._challenge_wait_seconds = challenge_wait_seconds
         self._pdf_text_extractor = pdf_text_extractor or _default_document_text_extractor
-        # The two renderer-owned predicates a test has to steer: what the page
-        # yielded, and whether it was a PDF. Overridable as collaborators rather
-        # than rebound on the class, so a test substitutes behaviour instead of
-        # the renderer's own internals.
+        # The two renderer-owned predicates a test steers (page yield, PDF);
+        # overridable collaborators, so a test substitutes behaviour, not internals.
         self._extract = extract or self.extract_with_challenge_wait
         self._looks_like = looks_like_pdf or self._looks_like_pdf
         self._warmup_urls = warmup_urls if warmup_urls is not None else self._warmup_urls_from_env()
-        # The two SSRF pin rules the renderer navigates through, and the
-        # classifier the failure path reports against. All three decide something
-        # the render cannot recover from if it is wrong, so a test steers them by
-        # argument rather than by patching this module.
+        # The two SSRF pin rules and the failure-path classifier: all three decide
+        # something the render cannot recover from, so tests steer them by argument.
         self._pin = pin or build_pinned_request_async
         self._pin_sync = pin_sync or build_pinned_request
         self._status_for = status_for or status_for_classification
-        # The browser and every step done to a page live in the driver, which
-        # also owns the recycle bound, the scroll/harvest knobs, and the
-        # storage_state allowlist. A test substitutes the driver, not methods
-        # on this class -- see app/transport/browser_driver.py.
+        # The browser and every page step live in the driver (recycle bound, scroll/
+        # harvest knobs, storage_state allowlist); a test substitutes the driver.
         self._driver = driver if driver is not None else BrowserDriver(sleep=sleep, settings=settings)
         # Cap concurrent page renders: N simultaneous requests each open a tab,
         # which otherwise crashes/OOMs the browser under burst load.
@@ -527,9 +492,8 @@ class BrowserRenderer:
         *,
         policy: HostPolicy,
     ) -> CrawlResult:
-        # SSRF protection: validate + IP-pin the target so the browser
-        # connects to a single resolved IP (DNS-rebinding safe) while preserving
-        # the original Host header. Raises ValueError if the target is unsafe.
+        # SSRF: validate + IP-pin the target (DNS-rebinding safe, Host preserved).
+        # Raises ValueError if the target is unsafe.
         pinned_url, goto_headers = await resolve_browser_target(url, pin=self._pin)
 
         started = time.monotonic()
@@ -568,12 +532,8 @@ class BrowserRenderer:
                 await page.goto(normalized_warmup.raw, wait_until="domcontentloaded")
                 await self._driver.wait_for_ready_state(page)
 
-            # Navigate to target URL: set Host header for pinned IP navigation.
-            # page.goto() does not accept extra_http_headers; use set_extra_http_headers().
-            # The navigation honors RenderOptions.timeout_seconds via
-            # wait_for: expiration raises TimeoutError, which the render
-            # retry envelope maps to navigation_timeout. Floor at 1s so a
-            # zero/negative budget cannot break every render.
+            # Navigate with the Host override via set_extra_http_headers (goto takes no
+            # headers); wait_for honors the timeout, floored at 1s, mapping to navigation_timeout.
             navigation_timeout = max(1.0, float(options.timeout_seconds))
             if goto_headers:
                 await page.set_extra_http_headers(goto_headers)
@@ -582,10 +542,8 @@ class BrowserRenderer:
                 timeout=navigation_timeout,
             )
             if goto_headers:
-                # Clear the page-scoped Host override: it was only needed for
-                # the pinned navigation. Leaving it set would spoof Host on
-                # every later request from this page (third-party XHR,
-                # subsequent navigations).
+                # Clear the page-scoped Host override: leaving it would spoof Host
+                # on every later request from this page (XHR, later navigations).
                 await page.set_extra_http_headers({})
 
             # Browser action chains: run policy-specified interactions before extraction.
@@ -612,15 +570,13 @@ class BrowserRenderer:
 
             extraction_method = "dom_text"
             final_url = NormalizedUrl(page.url, policy=policy)
-            # Re-validate the post-navigation URL: the site may have
-            # redirected the browser to an internal host. Fail closed.
-            # (already admitted as a NormalizedUrl above)
+            # Re-validate the post-navigation URL: the site may have redirected to
+            # an internal host. Fail closed (already admitted as a NormalizedUrl above).
 
             # PDF extraction fallback
             if self._looks_like(final_url.raw) and not (text or "").strip():
-                # Blocking file read + parse: keep it off the event loop like
-                # every other document-extraction path (the extractor may be a
-                # sync downloader/parser).
+                # Blocking file read + parse: keep it off the event loop like every
+                # other document-extraction path.
                 text = await asyncio.to_thread(self._pdf_text_extractor, final_url)
                 html = html if options.include_html else None
                 title = await page.evaluate("() => document.title")
@@ -665,11 +621,8 @@ class BrowserRenderer:
                 metadata=metadata,
             )
         finally:
-            # Always release the page so the rendered tab/process is not leaked
-            # between crawls (the root of the Camoufox memory growth).
-            # a wedged context.cookies() must not hold the pooled renderer
-            # for the whole per-URL budget; fall back to cookieless (
-            # behavior) after a short bounded wait.
+            # Always release the page between crawls (the Camoufox memory-growth
+            # root); a wedged context.cookies() falls back cookieless after a bounded wait.
             try:
                 await asyncio.wait_for(
                     self._harvest_session_cookies(page, url),
@@ -684,14 +637,8 @@ class BrowserRenderer:
 
     @staticmethod
     def make_response_handler(collected: list[dict[str, Any]]) -> Callable[[Any], Awaitable[None]]:
-        # Bounds on intercepted XHR: a hostile page can fire thousands of
-        # JSON responses. Cap at 10 entries x 8KB payload (was 50 x 64KB =
-        # ~3.2MB held per page in result metadata); feed/API discovery does not
-        # need more than a small sample. The URL is page-controlled too and is
-        # bounded on the same terms: an entry cap is not a bound on what an entry
-        # may contain, and ten multi-megabyte request URLs is ten megabytes of
-        # attacker-chosen text reaching result metadata through a field the entry
-        # count appeared to cover.
+        # XHR bounds: 10 entries x 8KB payload (50 x 64KB held ~3.2MB per page);
+        # URLs are page-controlled too, so each entry's URL is bounded on the same terms.
         max_entries = 10
         max_payload_chars = 8192
         max_url_chars = 2048
@@ -718,11 +665,8 @@ class BrowserRenderer:
             if len(url) > max_url_chars:
                 entry["url_truncated"] = True
             try:
-                # ACCEPTED RESIDUAL: the browser process has already
-                # materialized this body in its own memory; Python parses it
-                # once here (transiently) before the 8KB retention cap. Bounding
-                # the parse itself would silently drop legitimate large JSON
-                # API payloads from link discovery.
+                # ACCEPTED RESIDUAL: the browser already materialized this body, so
+                # the 8KB cap applies after one transient parse; bounding it drops real JSON.
                 payload = await response.json()
             except Exception:  # payload capture is best-effort
                 payload = None
