@@ -14,11 +14,8 @@ from app.vocabulary.taxonomy import ResultStatus
 
 logger = logging.getLogger(__name__)
 
-# The crawl-delay jitter draws from the OS entropy pool rather than the
-# Mersenne Twister. It is throughput shaping, not cryptography, so nothing here
-# depends on reproducibility -- but a predictable per-domain delay pattern is a
-# fingerprint, and the draw happens once per job against a network fetch, so the
-# syscall costs nothing.
+# Crawl-delay jitter draws from OS entropy, not Mersenne Twister: a predictable
+# per-domain delay pattern is a fingerprint, and the syscall is free here.
 _JITTER = SystemRandom()
 
 # The jitter band. A fixed delay would make a fleet retry a host in lockstep; the
@@ -104,10 +101,8 @@ class SchedulerResult(Protocol):
 
 
 _Result = TypeVar("_Result", bound=SchedulerResult)
-# The worker is parameterized on the job it accepts. The alias is written with
-# a bound TypeVar (not a contravariant one) because mypy cannot solve a
-# contravariant TypeVar from a bare-alias parameter -- it left the call sites
-# unsolved and silently widened to the protocol's own type.
+# The worker is parameterized on the job it accepts; the alias uses a bound
+# TypeVar because mypy cannot solve a contravariant one from a bare alias.
 SchedulerWorker = Callable[[_Job], Awaitable[_Result]]
 
 
@@ -136,36 +131,12 @@ class _TokenBucket:
 # Upper bound on how long any single job will sleep on a domain cooldown.
 _MAX_COOLDOWN_WAIT = 300.0
 
-# Purge the cooldown/circuit mappings at most once per this many
-# set_domain_cooldown calls, so a crawl with many 429s does not rebuild both
-# dicts on every rate-limited result. ``run`` still purges up front.
+# Purge the cooldown/circuit mappings at most once per this many sets, so a
+# 429-heavy crawl does not rebuild both dicts per result. ``run`` purges up front.
 _COOLDOWN_PURGE_INTERVAL = 100
 
-# What a result's STATUS means for the domain's health, over the whole
-# ResultStatus space rather than the two values the branch used to name.
-#
-# The verdict each status carries is the one CLASSIFICATION_STATUS_BY_LABEL
-# already documents, read as a statement about the DOMAIN rather than the page:
-#  * success   -- usable content, or freshness proved by the caller's validators.
-#                 The host answered, so the domain's counters reset.
-#  * blocked   -- "the page exists, we were kept out" (anti-bot, consent). The
-#                 fetch worked and the host is healthy, so this is a success
-#                 for health purposes: a site that only ever walls us is not a
-#                 site that needs backing off.
-#  * failed    -- retrieved but unusable, or the transport died. A real fault
-#                 against this domain.
-#  * retry_exhausted -- the browser retry loop spent all its attempts. The
-#                 table's own comment says the page may be perfectly renderable
-#                 later, so the verdict describes the ATTEMPT, not the page --
-#                 but repeatedly exhausting every attempt against one host is
-#                 precisely the pressure a domain breaker exists to relieve, and
-#                 leaving it unaccounted meant such a domain never tripped.
-#  * skipped   -- robots disallowed: "we chose not to fetch". Never a failure;
-#                 counting it would let a site's robots.txt degrade its own
-#                 crawl rate, which is the opposite of what robots is for.
-#  * disallowed -- a policy refusal (invalid URL, private target). Says nothing
-#                 whatsoever about the domain, and is usually OUR decision.
-# Exhaustive on purpose: see test_status_accounting_is_total.
+# What each ResultStatus means for DOMAIN health: success/blocked keep the
+# host healthy, failed/retry_exhausted fault it, skipped/disallowed say nothing.
 _STATUS_ACCOUNTING: dict[str, str] = {
     "success": "success",
     "blocked": "success",
@@ -196,16 +167,13 @@ class DomainScheduler:
         self._global_limit = max(1, global_limit)
         self._per_domain_limit = max(1, per_domain_limit)
         self._delay_seconds = max(0.0, delay_seconds)
-        # Per-domain minimum delay (e.g. a robots.txt Crawl-delay directive),
-        # applied in addition to the global/adaptive delay so a host's stated
-        # politeness floor is always respected.
+        # Per-domain minimum delay (e.g. robots Crawl-delay), applied in addition
+        # to the global/adaptive delay so the host's floor is always respected.
         self._domain_min_delay: dict[str, float] = defaultdict(float)
         self._max_rps = max(0.0, max_rps)
         self._circuit_threshold = max(1, circuit_threshold)
-        # Circuit breaker cooldown is now exponential: the first trip waits
-        # ``base`` seconds, each subsequent consecutive trip doubles (capped at
-        # ``circuit_cooldown``). A poisoned/tarpit domain is thus parked for
-        # progressively longer without a manual reset.
+        # Exponential breaker cooldown: first trip waits ``base``, each
+        # consecutive trip doubles (capped) -- a tarpit parks progressively longer.
         self._circuit_cooldown_base = max(1.0, circuit_cooldown_base)
         self._circuit_cooldown_max = max(self._circuit_cooldown_base, circuit_cooldown)
         # Adaptive throttling (AutoThrottle-style): per-domain delay is driven by
@@ -232,16 +200,12 @@ class DomainScheduler:
         # Adaptive throttling state: EMA of observed latency (ms) per domain.
         self._domain_latency_ema: dict[str, float] = {}
 
-        # Per-job per-domain strategy pinning: once a domain proves it needs a
-        # particular strategy (e.g., browser), subsequent fetches for that
-        # domain in the same job start at the pinned strategy instead of
-        # re-climbing the ladder from the cheapest strategy.
+        # Per-job strategy pinning: once a domain proves it needs a strategy,
+        # later fetches in the same job start there, not from the cheapest rung.
         self._domain_strategy_pins: dict[str, str] = {}
 
-        # Every rate-limited result calls set_domain_cooldown; purging both
-        # dicts per call made a crawl with many 429s quadratic. The purge is
-        # amortized to one per ``_COOLDOWN_PURGE_INTERVAL`` sets (``run`` still
-        # purges up front), so the mappings stay bounded without per-429 work.
+        # Purging both dicts per 429 made heavy crawls quadratic; the purge is
+        # amortized to one per interval (``run`` still purges up front).
         self._sets_since_purge = 0
 
     def set_domain_cooldown(self, domain: str, seconds: float) -> None:
@@ -274,9 +238,8 @@ class DomainScheduler:
         if accounting != "success":
             return
         self.record_success(domain)
-        # Feed observed latency into the adaptive estimator. One declared
-        # member, satisfied by both result shapes, so this reads the same
-        # whether the job came through the crawl or the render pipeline.
+        # Feed observed latency to the adaptive estimator; one declared member
+        # satisfied by both result shapes reads the same on either pipeline.
         latency = result.elapsed_ms
         if latency:
             self.record_latency(domain, latency)
@@ -290,9 +253,8 @@ class DomainScheduler:
         """Increment the failure counter; escalate the circuit-breaker cooldown
         exponentially with each threshold-crossing batch of failures."""
         self._domain_failures[domain] += 1
-        # Each completed batch of ``threshold`` failures escalates one step:
-        # trip 1 -> base, trip 2 -> base*2, trip 3 -> base*4,... capped. A
-        # domain that fails 40 times in a row is parked for the max cooldown.
+        # Each ``threshold`` failures escalates one step (base, base*2, ...,
+        # capped); forty consecutive failures park a domain for the max cooldown.
         n = self._domain_failures[domain] // self._circuit_threshold
         if n >= 1 and n > self._circuit_trip_count.get(domain, 0):
             self._circuit_trip_count[domain] = n
@@ -308,9 +270,8 @@ class DomainScheduler:
         if expiry is None:
             return False
         if time.monotonic() >= expiry:
-            # Cooldown elapsed — half-open; reset counters and allow retry.
-            # Resetting the trip count restarts the exponential backoff so a
-            # recovered domain is not penalised by a stale escalation.
+            # Cooldown elapsed (half-open): reset counters so a recovered domain
+            # is not penalised by a stale escalation.
             del self._circuit_open_until[domain]
             self._domain_failures[domain] = 0
             self._circuit_trip_count[domain] = 0
@@ -414,26 +375,12 @@ class DomainScheduler:
         domain_gates: dict[str, asyncio.Semaphore] = defaultdict(
             lambda: asyncio.Semaphore(self._per_domain_limit),
         )
-        # Retain results in memory only when the caller needs them back
-        # (recursive frontier expansion). With on_result set, results are spilled
-        # per-job and never accumulated here, bounding batch RAM.
+        # Retain results in memory only when the caller needs them back;
+        # with on_result set they spill per-job and never accumulate here.
         results: dict[int, _Result] = {}
 
-        # ``on_result`` and the returned mapping are mutually exclusive delivery
-        # channels (spill-to-disk vs. in-memory). The single sink below keeps
-        # that invariant in one place: narrowing ``dict | None`` inside the
-        # closure could not track which branch held, and the two delivery
-        # channels had historically drifted: a slot silently vanished.
-        #
-        # Both a worker's return and the failure envelopes are ``_Result``: the
-        # caller supplies ``failed_result`` so the shape a broken job gets is
-        # decided by the pipeline that owns the contract, not assumed here.
-        #
-        # A sink failure is LOGGED and swallowed. It must not propagate: the
-        # caller's sink raising is not evidence the job failed, so letting it out
-        # was answered with a failure envelope for a page that succeeded -- then
-        # delivered through the same broken sink, and discarded by gather's
-        # return_exceptions with no log line. The "job vanished" shape.
+        # on_result and the mapping are exclusive channels; one sink keeps them
+        # from drifting. A sink failure is logged+swallowed -- never a page verdict.
         async def deliver(index: int, result: _Result) -> None:
             if on_result is None:
                 results[index] = result
@@ -446,31 +393,20 @@ class DomainScheduler:
                 )
 
         async def run_one(job: _Job) -> None:
-            # Domain cooldown MUST be awaited *before* acquiring the global
-            # semaphore, otherwise a single rate-limited domain would block
-            # every other domain's concurrency slot (cooldown deadlock).
+            # Domain cooldown BEFORE the global semaphore, or one rate-limited
+            # domain blocks every other domain's slot (cooldown deadlock).
             cooldown_expiry = self._domain_cooldowns.get(job.domain)
             if cooldown_expiry is not None:
                 now = time.time()
                 if now < cooldown_expiry:
                     # Cap the wait: a hostile Retry-After must not park this
-                    # coroutine (and the whole gather) for years. Beyond the cap
-                    # the job proceeds and the origin will re-assert its limit.
+                    # gather for years; beyond the cap the origin re-asserts.
                     await asyncio.sleep(min(cooldown_expiry - now, _MAX_COOLDOWN_WAIT))
 
             # Circuit breaker: if open, skip the network request entirely.
             if self.is_circuit_open(job.domain):
-                # In on_result mode ``results`` stays empty, so the failed
-                # envelope must go through the same channel as normal results.
-                # Writing results[job.index] directly here raised TypeError,
-                # which gather(return_exceptions=True) swallowed -- the job
-                # then got no envelope, was not spilled, and silently vanished
-                # from /v1/crawl.
-                #
-                # The classification and redaction this branch used to inline
-                # now live in the pipeline's ``failed_result``: the crawl
-                # pipeline keeps its network_error/circuit_breaker_open
-                # envelope, and the render pipeline builds its own shape.
+                # In on_result mode the failed envelope must take the same channel:
+                # a direct dict write once raised, was swallowed, and the job vanished.
                 await deliver(
                     job.index,
                     failed_result(job, _CircuitBreakerOpen(self._domain_cooldowns.get(job.domain))),
@@ -488,10 +424,8 @@ class DomainScheduler:
                     await asyncio.sleep(wait_seconds)
 
             async with domain_gates[job.domain]:
-                # Apply jitter to the (possibly adaptive) per-domain delay while
-                # holding ONLY the per-domain gate. Sleeping inside global_gate
-                # would burn a global concurrency slot on pure waiting and starve
-                # every other domain (throughput fix).
+                # Jitter sleeps while holding ONLY the per-domain gate: sleeping
+                # inside global_gate would burn a global slot on pure waiting.
                 base_delay = self.current_delay(job.domain)
                 delay_sleep = jittered_delay(base_delay)
                 await asyncio.sleep(delay_sleep)
@@ -501,24 +435,16 @@ class DomainScheduler:
                         self._record_result_health(job.domain, result)
                     except Exception as error:
                         self.record_failure(job.domain)
-                        # Chokepoint for "a worker raised": build a classified
-                        # terminal result HERE so no caller can ever observe an
-                        # absent job. Previously every caller improvised its own
-                        # envelope (recursive.py hand-built one; the sync
-                        # ``on_result`` path silently dropped the page), and the
-                        # two drifted in shape and classification. The envelope
-                        # itself comes from ``failed_result`` so a pipeline
-                        # always gets back its own result shape.
+                        # Chokepoint for "a worker raised": the classified envelope
+                        # is built here; ``failed_result`` keeps each pipeline's shape.
                         await deliver(job.index, failed_result(job, error))
                         return
-                    # Delivery sits OUTSIDE the worker's ``try`` (which covers
-                    # the work, and only the work): a raising sink is a delivery
-                    # failure, not a reason to charge the domain's breaker.
+                    # Delivery sits OUTSIDE the worker's try: a raising sink is
+                    # a delivery failure, not a charge against the domain's breaker.
                     await deliver(job.index, result)
 
-        # Return_exceptions=True: a single job failure must not cancel the
-        # other in-flight jobs. Exceptions are captured here; the
-        # failing job is simply absent from the returned mapping.
+        # return_exceptions=True: one job's failure must not cancel the others;
+        # the failing job is simply absent from the returned mapping.
         await asyncio.gather(*(run_one(job) for job in jobs), return_exceptions=True)
         if on_result is not None:
             return None
