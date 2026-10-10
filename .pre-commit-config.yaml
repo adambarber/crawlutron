@@ -208,7 +208,7 @@ repos:
 
       # Dead-code gate: vulture, an existing library rather than a hand-rolled
       # detector. Its confidence model is the strictness dial, and the number in
-      # the hook name is the current floor: 100 is the loosest band (unused
+      # the hook name is the current floor: 100 was the loosest band (unused
       # function/method arguments and unreachable or unsatisfiable code) and
       # the plan is a ratchet -- each tightening commit lowers the floor, the
       # same direction the jscpd floor moves. Zero tolerance: no whitelist file;
@@ -217,10 +217,10 @@ repos:
       # `pytest.mark.usefixtures` for fixtures a test activates only for its
       # side effect.
       - id: vulture
-        name: vulture dead code (min-confidence 100, zero tolerance)
+        name: vulture dead code (min-confidence 90, zero tolerance)
         entry: >-
           bash -c 'for d in "$(git rev-parse --show-toplevel)/docker/browser-crawler" "$(git rev-parse --show-toplevel)"; do [ -x "$d/scripts/gate" ] && exec bash "$d/scripts/gate" "$@"; done; echo "scripts/gate not found in either layout" >&2; exit 1' gate
-          .venv/bin/python -m vulture app tests scripts --min-confidence 100
+          .venv/bin/python -m vulture app tests scripts --min-confidence 90
         language: system
         files: *service_trigger
         pass_filenames: false
