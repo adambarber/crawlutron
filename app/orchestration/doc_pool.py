@@ -31,21 +31,8 @@ from app.config.env import parse_bool_env
 
 logger = logging.getLogger(__name__)
 
-# The start method is named, never inherited from the platform. The default is
-# `fork` on Linux and `spawn` on macOS, and a forked extraction worker is a copy
-# of the whole crawler: the running event loop, every open socket, the HTTP
-# cache, and any lock another thread held at fork time -- held for good, since
-# the thread that owned it does not exist in the child. This worker does nothing
-# but CPU-bound markitdown over a pipe, so a clean interpreter is safer and no
-# more costly, and the persistent pool exists to amortize the spawn cost that
-# naming it does not remove.
-#
-# A forked child also freezes the parent's env at fork time, so a long-lived
-# worker predating a setting never observed it -- which is how the timeout suite
-# passed on macOS and failed on the same assertion on Linux, with no change to
-# the code under test. Every process object handed to the child therefore comes
-# from this one context: a pipe from the default context and a process from
-# another is not a pairing that works.
+# Named start method, never inherited: a forked child inherits the parent's
+# loop, sockets and locks held for good, so one spawn context pairs every child.
 WORKER_CONTEXT = multiprocessing.get_context("spawn")
 
 # Re-check interval for a waiting acquirer (the escape hatch for "nothing will
@@ -65,10 +52,8 @@ class DocWorker:
         self.proc = proc
         self.conn = conn
         self.busy = False
-        # True once the worker has been terminated. Termination is only
-        # best-effort, so a retired process can still report ``is_alive()``;
-        # "alive" is therefore not proof of "usable", and this flag -- not the
-        # process state -- is what keeps a retired worker out of circulation.
+        # Aliveness is not proof of usability: termination is best-effort, so this
+        # flag -- not the process state -- keeps a retired worker out of circulation.
         self.retired = False
 
 
@@ -206,9 +191,8 @@ class DocExtractionPool:
         self._worker_count = worker_count
         self._enabled = enabled
         self._recheck_seconds = recheck_seconds
-        # Injectable so a caller can observe or hold the lock itself -- proving
-        # that a budget starts only once the lock is held needs a lock it can see
-        # from inside.
+        # Injectable so a caller can observe or hold the lock itself, proving that
+        # a budget starts only once the lock is held.
         self._lock = lock if lock is not None else threading.Condition(threading.Lock())
         self._slots: list[DocWorker] | None = None
 
@@ -227,44 +211,19 @@ class DocExtractionPool:
         """
         if not self._enabled():
             return None
-        # Dead slots discovered here are replaced under the lock but TERMINATED
-        # after it: the slot swap is instant, while the kill-escalation a
-        # retirement runs can take ~10s (SIGTERM -> join(5) -> SIGKILL ->
-        # join(5)). Running that under the lock would block every other
-        # acquisition and every release for the whole window. A replaced slot is
-        # unreachable from the pool the instant it is swapped out, so deferring
-        # only its teardown is safe; the list is drained in the finally below,
-        # before this returns.
+        # Swapped under the lock, terminated after it: kill escalation takes ~10s
+        # and would block every acquisition; the list drains in the finally below.
         dead_slots: list[DocWorker] = []
         try:
             with self._lock:
                 if self._slots is None:
                     self._slots = []
-                # Reap retired slots before the scans. A retired slot has been
-                # terminated and can never be handed out again (the handout scan
-                # requires ``not retired``), so it must not keep occupying a pool
-                # entry. The respawn scan below only replaces a slot whose process
-                # is dead, which leaves a retired-but-still-``is_alive()`` slot
-                # (SIGKILL could not reap it -- pathological) skipped by BOTH
-                # scans and stranded in the pool forever: it held a PID while the
-                # size budget grew around it, and ``len(self._slots)`` drifted
-                # permanently above the usable count. Removing every retired slot
-                # here keeps the pool and the budget consistent; the termination
-                # and the process reap already ran when the slot was retired, so
-                # nothing live is dropped. Re-running this on every loop iteration
-                # also catches a slot retired by another thread while this
-                # acquirer waited.
+                # Reap retired slots first: one skipped by both scans (SIGKILL could
+                # not reap it) would strand a PID while the budget grew past it.
                 self._slots = [each for each in self._slots if not each.retired]
                 want = self._worker_count()
-                # The budget starts once the lock is actually held. A caller
-                # queued behind a slow in-lock operation would otherwise pay that
-                # wait out of a budget it never consumed, and could give up on a
-                # pool that had a free slot the whole time it was blocked.
-                # A healthy pool releases a worker when its own task hits the
-                # document deadline, so a full round of the pool is already
-                # generous; this bound exists for the unhealthy case, where a busy
-                # flag is never cleared and an unbounded wait would take the whole
-                # pool down with it.
+                # The budget starts once the lock is held: a queued caller must
+                # not pay a lock wait out of a budget it never consumed.
                 deadline = time.monotonic() + timeout
                 while True:
                     for worker in self._slots:
@@ -278,11 +237,8 @@ class DocExtractionPool:
                             self._slots[index] = fresh
                             dead_slots.append(worker)
                             return fresh
-                    # Retired slots were reaped above, so this is the live usable
-                    # set; when it is short of the configured size the pool grows
-                    # by one rather than degrading to "no worker" -- the failure
-                    # mode the reaped zombie slot used to cause (a slot nothing
-                    # could recover shrinking the pool permanently).
+                    # A short live set grows the pool by one rather than degrading
+                    # to "no worker" -- the failure a stranded slot used to cause.
                     usable = sum(1 for each in self._slots if not each.retired)
                     if usable < want:
                         fresh = self._spawn()
@@ -296,15 +252,12 @@ class DocExtractionPool:
                             extra={"slots": len(self._slots), "workers": want},
                         )
                         return None
-                    # Still a condition wait, not a poll loop: a release notifies
-                    # and wakes immediately. The bounded re-check exists only so a
-                    # stuck busy flag (nothing will ever notify) expires on its
-                    # own.
+                    # A condition wait, not a poll: a release notifies immediately.
+                    # The bounded re-check only guards a busy flag nothing clears.
                     self._lock.wait(timeout=min(remaining, self._recheck_seconds))
         finally:
-            # Teardown of any slot swapped out above, now that the lock is free.
-            # ``retire`` marks retired, terminates and reaps; this path keeps the
-            # same retirement code as the timeout/child-death call sites.
+            # Same retirement path as the timeout/child-death call sites: retire
+            # marks retired, terminates and reaps.
             for worker in dead_slots:
                 self.retire(worker)
 
@@ -328,10 +281,8 @@ class DocExtractionPool:
     def release(self, worker: DocWorker) -> None:
         """Hand a slot back and wake everyone waiting for it."""
         with self._lock:
-            # The worker may have been retired mid-task (timeout/child death).
-            # Clearing busy is still correct: ``retired``, not ``busy``, is what
-            # keeps a terminated worker out of circulation, and the notify lets
-            # waiters reach the slot's lazy respawn instead of sitting on it.
+            # Clear busy even on a mid-task retirement: ``retired``, not ``busy``,
+            # keeps the worker out of circulation; the notify wakes lazy respawn.
             worker.busy = False
             self._lock.notify_all()
 

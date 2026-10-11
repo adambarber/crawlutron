@@ -118,7 +118,7 @@ BLOCK_LENGTH = 40
 # budget cannot be quietly inflated -- the code has to actually get smaller
 # first.
 _BUDGETS = {
-    "function length": 32,
+    "function length": 31,
     "abc size": 5,
     "largest class": 550,
     "block length": 11,

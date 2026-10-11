@@ -6,12 +6,8 @@ from typing import Any, Final
 from app.models.taxonomy import Classification, as_classification
 from app.safety.bounded_io import truncate_html_input
 
-# Declared as Final[Classification] rather than returned as bare literals. A
-# string literal in return position widens to `str`, which is how a function
-# annotated `-> tuple[Classification, ...]` ends up handing its caller a plain
-# string that merely happens to spell a member. Naming the two values once, with
-# the taxonomy type attached, makes the return sites honest and gives the
-# membership drift test something to pin.
+# Final[Classification], not bare literals: a literal in return position widens
+# to ``str`` and hands the caller a plain string that merely spells a member.
 _BINARY_NO_TEXT: Final[Classification] = "binary_no_text"
 _RENDERED: Final[Classification] = "rendered"
 
@@ -108,10 +104,8 @@ def classify_page(html: str | None, text: str | None, *, title: str | None = Non
     return classification
 
 
-# Structural markers that are effectively unforgeable by accident: a benign
-# municipal page never contains Cloudflare/captcha plumbing. Adapted from the
-# marker-tuple approach used by maigret (MIT) and cloudscraper (MIT); a single
-# marker hit is sufficient evidence. NOTICE carries their copyright lines.
+# Structural markers that are unforgeable by accident (no municipal page carries
+# Cloudflare/captcha plumbing); one hit suffices. NOTICE carries the MIT lines.
 STRONG_CLASSIFICATION_MARKERS: tuple[tuple[Classification, tuple[str, ...]], ...] = (
     (
         "bot_challenge_detected",
@@ -139,10 +133,8 @@ STRONG_CLASSIFICATION_MARKERS: tuple[tuple[Classification, tuple[str, ...]], ...
     ),
 )
 
-# Classifications whose prose signatures are common English phrases ("too many
-# requests", "we value your privacy"). A single phrase match must be
-# corroborated by a second independent block signal, otherwise benign pages are
-# misclassified and the engine escalates through every strategy for nothing.
+# Prose signatures that are common English phrases ("too many requests", "we
+# value our privacy"): a single hit must be corroborated or benign pages flip.
 SOFT_SINGLE_SIGNAL_CLASSIFICATIONS = frozenset(
     {
         "rate_limited",
@@ -168,9 +160,8 @@ def classify_page_with_evidence(
             }
         ]
 
-    # Pass 0: structural markers win immediately (single hit suffices).
-    # NOTE: scan the RAW html too -- challenge plumbing (_cf_chl_opt etc.)
-    # lives inside <script> tags which html_haystack strips.
+    # Pass 0: structural markers win immediately (one hit suffices). Scan the RAW
+    # html too -- challenge plumbing (_cf_chl_opt) lives inside stripped <script>s.
     raw_haystack = (html or "").lower()
     for classification, markers in STRONG_CLASSIFICATION_MARKERS:
         for marker in markers:
@@ -182,11 +173,8 @@ def classify_page_with_evidence(
                     _evidence(classification, marker, "structural_marker", raw_haystack, index)
                 ]
 
-    # Pass 1: prose signatures. Record every distinct match; soft
-    # classifications additionally require corroboration (>= 2 distinct
-    # matched signatures anywhere on the page) so a stray phrase cannot flip
-    # an otherwise-benign result into strategy escalation.
-    # Each entry: priority order, classification name, first evidence found.
+    # Pass 1: prose signatures, every distinct match recorded; soft ones also
+    # need corroboration (>= 2 matches) so a stray phrase cannot escalate.
     matches: list[tuple[Classification, dict[str, Any]]] = []
     for priority, (classification, signatures) in enumerate(CLASSIFICATION_SIGNATURES):
         for signature in signatures:
@@ -219,10 +207,8 @@ def classify_page_with_evidence(
         (match for _name, match in matches if match["priority"] == best_priority),
         key=lambda match: match["index"],
     )
-    # The classification travels next to its match (see ``matches`` above) so it
-    # keeps its ``Classification`` type instead of being read back off an
-    # ``Any`` dict, which would widen a taxonomy member to plain ``str`` at the
-    # exact point the declared return has to hold.
+    # The classification travels with its match so it keeps its ``Classification``
+    # type instead of widening to ``str`` off an ``Any`` dict at the return.
     classification = as_classification(next(name for name, match in matches if match is chosen))
 
     # Corroboration: >= 2 independent signals anywhere on the page (either two
@@ -256,23 +242,15 @@ def _evidence(
     }
 
 
-# Compiled once at module import: the hot path calls _strip_html_noise per page
-# on every strategy attempt, so the previous lazy-global compile (which also had
-# a benign double-compile race under threads) is replaced with two module-level
-# compiled patterns.
+# Compiled at import: _strip_html_noise runs per page on every strategy attempt,
+# and the lazy-global compile also carried a benign double-compile race under threads.
 _TAGS_RE = re.compile(r"<[^>]+>")
 
 
-# Cap the input size for the noise-stripping scan. The scanner is linear, so
-# the bound is on resources (scan + output size), not correctness: anything
-# above a few MB is overwhelmingly likely to be a hostile payload. The value
-# itself lives in app.safety.bounded_io next to the stream caps it shares a purpose
-# with; this site keeps only the reason THIS scan needs one.
+# Cap the scan input: linear, so the bound covers resources, not correctness.
 
 
-#: Openers whose matching closers are stripped before the page is classified.
-#: A declaration, not a branch per tag, so adding a noise construct is a list
-#: edit rather than two hand-written lines in the scan loop.
+#: Openers whose closers are stripped before classification: a declaration.
 _NOISE_OPENERS: Final = ("<script", "<style", "<!--")
 
 
@@ -296,10 +274,8 @@ def _strip_html_noise(html: str | None) -> str:
     pos = 0
     lower = body.lower()
     while pos < len(body):
-        # Find the earliest noise opener from ``pos``. The openers are a set,
-        # not a hand-written branch per tag: each branch added two lines and a
-        # new tag to remember, and the list is the whole of what this scan
-        # knows about noise markup.
+        # The openers are a set, not a branch per tag: each branch added two lines
+        # and a tag to remember; the list is what the scan knows about noise.
         candidates = [idx for idx in (lower.find(opener, pos) for opener in _NOISE_OPENERS) if idx != -1]
 
         if not candidates:
@@ -312,9 +288,8 @@ def _strip_html_noise(html: str | None) -> str:
         if body.startswith("<!--", start):
             closer = "-->"
         else:
-            # ``<script``/``<style`` — locate the closing tag. Match against
-            # ``lower`` (the opener scan is case-insensitive; ``body`` may be
-            # ``<SCRIPT>``).
+            # Match against ``lower``: the opener scan is case-insensitive, and
+            # body may appear as ``<SCRIPT>``.
             tag = "script" if lower.startswith("<script", start) else "style"
             # Word-boundary guard (regex ``\b`` parity): ``<scriptable`` is a
             # run of text, not an opening tag.

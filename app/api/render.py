@@ -38,9 +38,7 @@ def _render_options(payload: dict[str, Any], settings: CrawlerSettings) -> Rende
     options = payload.get("options") or {}
     if not isinstance(options, dict):
         raise ValueError("invalid_options")
-    # The /v1/render caller legitimately owns every capture knob, including
-    # browser_profile (forwarded because it used to be dropped, which
-    # made every worker knob unreachable from this path).
+    # The /v1/render caller owns every capture knob, browser_profile included.
     return resolve_render_options(
         options,
         {
@@ -76,11 +74,8 @@ async def render_request(
     """Run a /v1/render-shaped request through the per-domain scheduler."""
     active_settings = settings or CrawlerSettings.from_mapping()
     host_policy = HostPolicy.from_settings(active_settings)
-    # The single shared batch gate (app.admission.payload_helpers.checked_payload_urls):
-    # this route used to hand-roll the same cap against max_batch_size with a
-    # different failure shape, so the two gates could drift.
-    # The submitted texts are kept beside their admitted values: the wire's
-    # ``original_url`` echoes the caller's text, not the canonical form.
+    # One shared batch cap (a hand-rolled copy used to drift from it); submitted
+    # texts stay beside admitted values so the wire's original_url echoes text.
     submitted = list(
         checked_payload_urls(
             payload,
@@ -110,39 +105,23 @@ async def render_request(
         per_domain_limit=active_settings.per_domain_concurrency,
         delay_seconds=active_settings.per_domain_delay_ms / 1000,
     )
-    # The scheduler hands each completed result to on_result together with the
-    # submitting job's index, so duplicate URLs in one batch map to their own
-    # slots. Matching by URL here would collapse duplicates onto index 0 and
-    # KeyError on the missing slot, and is O(n^2).
-    # Worker exceptions are swallowed by the scheduler's gather, so capture
-    # them per index: total pool exhaustion raises for a 503, any other
-    # missing slot becomes a per-URL failed result instead of a 500.
+    # Results carry the submitting job's index, so duplicates keep their own
+    # slots; per-index capture maps pool exhaustion to a 503, not a 500.
     from app.transport.browser_pool import BrowserPoolExhaustedError
 
     by_index: dict[int, CrawlResult] = {}
     worker_errors: dict[int, BaseException] = {}
 
     async def _collect(index: int, result: EngineCrawlResult | CrawlResult) -> None:
-        # The single point the render pipeline receives results. The scheduler's
-        # worker-exception envelope is an EngineCrawlResult (built inside the
-        # scheduler, which cannot know which pipeline it is serving): correct
-        # for /v1/crawl, but that shape carries no ``url``, and
-        # render_result_to_unified reads it -- so an unnormalized entry used to
-        # reach the endpoint and die with a KeyError. Normalize here so
-        # ``by_index`` holds only the contracted CrawlResult, whatever the
-        # scheduler handed back.
+        # The scheduler's worker-exception envelope is an EngineCrawlResult with no
+        # ``url``; normalize here so ``by_index`` holds only contracted results.
         if not isinstance(result, CrawlResult):
             result = crawl_result_from_engine_result(result, url=urls[index])
         by_index[index] = result
 
     async def _call_and_capture(job: CrawlJob) -> CrawlResult:
-        # Declared ``-> CrawlResult`` on purpose: the render pipeline's worker is
-        # a ``CrawlWorker`` (the /v1/render contract), never the engine's
-        # scheduler worker. The scheduler drives this through the
-        # ``SchedulerWorker`` alias, which returns ``EngineCrawlResult`` for the
-        # crawl pipeline -- and ``_collect`` converts either shape at the single
-        # boundary that consumes both, so this function stays honest about the
-        # one shape it actually returns.
+        # A CrawlWorker for the /v1/render contract, never the engine scheduler;
+        # the returned shape is the honest one -- conversion happens in ``_collect``.
         try:
             return await call_worker(worker, job)
         except Exception as capture_error:
@@ -159,14 +138,8 @@ async def render_request(
             ),
         )
 
-    # Pool exhaustion is a capacity condition, not a per-URL page failure.
-    # The worker returns a classified terminal result instead of raising, so
-    # the 503 signal is read off the results: an exhausted slot means renderer
-    # capacity was unavailable, the request cannot be served at all, and the
-    # caller retries -- reporting a per-URL page failure for a capacity problem
-    # would be a lie the render path cannot take back (it has no frontier to
-    # re-queue onto). The classification is chokepoint-sourced, so this reads
-    # it and never re-derives it; the endpoint maps the error to the 503.
+    # Pool exhaustion is a capacity condition, not a per-URL failure: the worker
+    # returns a classified terminal result and the endpoint maps it to the 503.
     if any(r.classification == "browser_pool_exhausted" for r in by_index.values()):
         raise BrowserPoolExhaustedError(
             # Static text only: the endpoint puts this message on the wire, so
@@ -187,34 +160,25 @@ async def render_request(
                 attempts=0,
                 elapsed_ms=int((time.monotonic() - started) * 1000),
                 domain="",
-                # The wire-visible error must be a stable classification, never
-                # raw exception text: str(exc) would leak DNS names / paths /
-                # secrets straight into the body.
+                # Never raw exception text: str(exc) would leak DNS names, paths
+                # and secrets into the body.
                 error=classify_error_code(worker_error) if worker_error is not None else "unknown_error",
             )
 
     ordered_results = [
-        # The funnel: every result gets the caller's submitted text as its
-        # ``original_url`` here, whatever shape produced it (worker result,
-        # converted engine envelope, missing-slot terminal). The wire field
-        # means "Caller-provided URL before normalization" on both doors; this
-        # stamp is where the render door makes that true.
+        # Every result is stamped with the caller's submitted text as
+        # ``original_url`` (the wire's "before normalization" field), right here.
         replace(by_index[index], original_url=submitted[index])
         for index in range(len(urls))
     ]
     response: RenderEnvelope = {
         "request_id": new_request_id(),
         "submitted_count": len(urls),
-        # The producer envelope carries the same key the engine's crawl
-        # envelope does, so response_shaping's single adapter reads one shape
-        # from both producers. /v1/render used to substitute the constant at
-        # the endpoint instead, which is a second place a version could be
-        # updated and a silent one (an unpassed field is dropped by the model).
+        # Same envelope key as the engine crawl envelope, so one adapter reads
+        # both producers; a per-endpoint substitution would be a second source.
         "policy_schema_version": POLICY_SCHEMA_VERSION,
-        # The worker's own objects, not a serialization of them: /v1/render
-        # never crosses a disk, so there is nothing here that needs to be
-        # a dict, and handing the record through keeps its key set declared
-        # exactly once, by the class it is.
+        # The worker's own objects, never a serialization: no dict crosses a disk,
+        # and the record's key set stays declared once, by the class it is.
         "results": list(ordered_results),
     }
     return response
