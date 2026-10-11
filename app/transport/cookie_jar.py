@@ -2,6 +2,13 @@
 
 This module owns cookie parsing, namespace keys, persistence, and the process cookie jar.
 It must not construct HTTP clients or assemble request headers.
+
+The per-request ``cookie_namespace`` is a PARTITIONING CONVENTION, not an
+authorization boundary: the service authenticates no callers, so a namespace
+separates tenants only as far as callers pick distinct values and trust each
+other. The default ``""`` keeps one shared jar for a single-tenant deployment;
+a multi-tenant deployment must set a unique tenant id per crawl. Put
+authentication in front of the service when isolation is a requirement.
 """
 
 from __future__ import annotations
@@ -18,40 +25,14 @@ from app.storage.coordination_cookies import DEFAULT_MAX_HOSTS
 if TYPE_CHECKING:
     from app.storage.coordination_cookies import SharedCookieStore
 
-# Per-request cookie namespace: set by ``crawl_request`` so concurrent crawls
-# from different tenants cannot leak cookies through the shared
-# ``_GLOBAL_COOKIE_JAR``.
-#
-# IMPORTANT: the default namespace is ``""`` (empty string), which keeps the
-# legacy single-jar behavior: every crawl that does NOT explicitly set
-# ``request_profile.cookie_namespace`` shares the same jar. This is the
-# sensible default for the common single-tenant deployment, but a
-# multi-tenant deployment MUST set ``request_profile.cookie_namespace`` to a
-# unique tenant id on every crawl, otherwise cookies WILL leak between
-# tenants. The legacy shared behavior is intentionally NOT opt-in because
-# silently switching to per-tenant isolation would break deployments that
-# depend on cross-request cookie persistence for a single user.
-#
-# READ THAT SENTENCE AS A REQUIREMENT ON THE OPERATOR, NOT AS A GUARANTEE.
-# The namespace is a string the caller supplies in its own request profile, and
-# this service authenticates no callers (``app/mcp/server.py`` states as much).
-# So the namespace separates tenants only as far as callers choose distinct
-# values and are trusted not to reuse each other's: a caller that names another
-# tenant's namespace reads that tenant's cookies straight out of the shared
-# module-global jar, and one that omits the key shares ``""`` with everyone.
-# There is no configuration of this class that turns a self-asserted key into an
-# authorization boundary; that would need a trusted caller identity the service
-# does not have. Treat the namespace as a partitioning convention and put
-# authentication in front of the service if isolation is required.
+# Per-request cookie namespace set by ``crawl_request``; its operator-facing
+# limits live in the module docstring, not here.
 COOKIE_NAMESPACE: contextvars.ContextVar[str] = contextvars.ContextVar(
     "crawlutron_cookie_namespace", default=""
 )
 
-# Cap on distinct (namespace, host) cookie slots. The jar is module-global
-# and long-lived: without eviction every crawled host accumulates forever
-# (the DNS/robots/sitemap caches are all bounded; the jar was the outlier).
-# Defined once by the shared store, which is what bounds the slots when the
-# jar is storage-backed; re-declared here it would be a second number to drift.
+# Cap on distinct (namespace, host) cookie slots: the jar is module-global and
+# long-lived, and it is defined once by the shared store, never re-declared here.
 _COOKIE_JAR_MAX_HOSTS = DEFAULT_MAX_HOSTS
 
 
@@ -79,9 +60,8 @@ class CookieJar:
         # OrderedDict: insertion order doubles as the eviction order for the
         # (namespace, host) LRU cap — plain dict has no move_to_end.
         self._cookies: OrderedDict[tuple[str, str], dict[str, str]] = OrderedDict()
-        # No per-namespace isolation is enforced here -- callers opt in by
-        # passing a non-empty ``namespace``. The shared default is preserved
-        # so existing single-tenant callers see no change.
+        # No per-namespace isolation is enforced here: callers opt in with a
+        # non-empty ``namespace``, and the shared default is preserved as-is.
         self._lock = threading.Lock()
 
     @property
@@ -263,7 +243,5 @@ def reset_process_state() -> None:
 def has_process_state() -> bool:
     """Whether the jar holds a cookie, or a request namespace is still selected."""
     # Not ``bool(_GLOBAL_COOKIE_JAR)``: the jar defines no ``__len__`` or
-    # ``__bool__``, so every object is truthy and that expression is a constant
-    # True. A probe stuck on True certifies nothing, so this reads the jar's own
-    # cookie mapping instead of asking the jar to be honest about itself.
+    # ``__bool__``, so truthiness is constant True; this reads its cookie mapping.
     return bool(_GLOBAL_COOKIE_JAR._cookies) or COOKIE_NAMESPACE.get() != ""

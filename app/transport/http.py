@@ -136,9 +136,8 @@ class _FetchedResponse:
         return cls(response, headers, headers.get("content-type"))
 
     def __getattr__(self, name: str) -> Any:
-        # Only reached for names the three fields above do not claim, and
-        # ``object.__getattribute__`` rather than ``self.raw`` so that a missing
-        # ``raw`` raises AttributeError instead of recursing back into here.
+        # Only reached for names the three fields above do not claim;
+        # ``object.__getattribute__`` keeps a missing ``raw`` from recursing here.
         return getattr(object.__getattribute__(self, "raw"), name)
 
     @property
@@ -318,9 +317,7 @@ def _not_modified_result(ctx: _HttpStrategyContext, resp: _FetchedResponse) -> E
 
     elapsed_ms = int((time.monotonic() - ctx.started) * 1000)
     # The label is spelled once and the status is asked for, so the attempt and
-    # the result that carries it cannot disagree about it -- correct today, and
-    # still correct the day the taxonomy moves ``not_modified`` off "success",
-    # with nothing in the suite able to see a spelled pair that had done so.
+    # the result cannot disagree about it the day the taxonomy moves a default.
     classification: Classification = "not_modified"
     status = status_for_classification(classification)
     attempt = CrawlStrategyAttempt(
@@ -376,11 +373,8 @@ def _binary_result_if_needed(ctx: _HttpStrategyContext, resp: _FetchedResponse) 
         content_type=resp.content_type,
         elapsed_ms=resp.elapsed_ms,
     )
-    # ``replace``, not an ``asdict`` round-trip through the constructor. asdict
-    # recurses into the dataclass fields, so it silently converted the frozen
-    # CrawlStrategyAttempt list into plain dicts: the copy still compared equal
-    # field-for-field and then raised AttributeError the moment a consumer
-    # reached for an attribute, which the render adapter does on its first read.
+    # ``replace``, not an ``asdict`` round-trip: asdict converts the frozen
+    # CrawlStrategyAttempt list into plain dicts, which then fails on first read.
     return replace(result, diagnostics={"retry": ctx.retry_diagnostics})
 
 
@@ -521,11 +515,8 @@ async def _construct_http_result(
         "runtime": {"elapsed_ms": resp.elapsed_ms, "final_url": resp.final_url},
         "content_metrics": extracted.content_metrics,
     }
-    # "Any channel on", not "the block exists". Those were the same test while
-    # every channel defaulted to on; with them off by default, a block whose
-    # channels are all off is exactly the empty mapping the old
-    # `bool(policy.get("discovery") or {})` read as false, and `is not None`
-    # would have started doing discovery work for a caller who asked for none.
+    # "Any channel on", not "the block exists": with channels off by default,
+    # an all-off block is the empty mapping that ``is not None`` now distinguishes.
     post_fetch = await _discover_after_fetch(
         html=extracted.html,
         final_url=resp.final_url,

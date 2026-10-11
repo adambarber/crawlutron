@@ -11,10 +11,7 @@ from __future__ import annotations
 from app.models.normalized_url import NormalizedUrl
 
 # --- Universal non-content hosts (hard-skip) ---
-# Hosts that never carry crawlable municipal content: tracking/ad/social-feed
-# infrastructure. Advertised links to them are still RECORDED on pages, but
-# they are never enqueued as crawl jobs (any strategy) and the browser route
-# handler aborts their requests unconditionally.
+# Tracking/ad/social-feed infrastructure: recorded as links, never enqueued.
 ANALYTICS_HOST_SUFFIXES = frozenset(
     {
         "google-analytics.com",
@@ -41,12 +38,8 @@ ANALYTICS_HOST_SUFFIXES = frozenset(
     }
 )
 
-# Precomputed forms for the is_analytics_host / is_document_url hot paths
-# (both run once per discovered link, up to thousands per page).
-# ``is_analytics_host`` is true iff the host *is* a suffix (apex) or ends with
-# "." + a suffix (subdomain). The apex-membership test uses the set directly;
-# the per-subdomain dotted suffixes are precomputed to a tuple so ``endswith``
-# takes a single C-level call instead of allocating ``"." + s`` per suffix.
+# Precomputed forms for the per-link hot paths: dotted suffixes become a tuple
+# so ``endswith`` is one C-level call instead of an allocation per suffix.
 _ANALYTICS_DOTTED = tuple("." + s for s in ANALYTICS_HOST_SUFFIXES)
 
 
@@ -57,16 +50,13 @@ def is_analytics_host(url: NormalizedUrl) -> bool:
 
 
 # --- Non-HTML resource extensions ---
-# Documents yield no further HTML links, so URL-discovery crawls record their
-# URLs but skip downloading them. Callers requesting EXTRACTION_DOCUMENT opt
-# back in to fetching file contents.
+# No further HTML links: discovery records them, EXTRACTION_DOCUMENT fetches.
 DOCUMENT_URL_EXTENSIONS = frozenset(
     {".pdf", ".csv", ".doc", ".docx", ".ppt", ".pptx", ".xls", ".xlsx", ".zip", ".rtf"}
 )
 
-# Precomputed extension tuple for the is_document_url hot path: ``str.endswith``
-# accepts a tuple and does a single C-level pass instead of re-building the
-# tuple from the frozenset on every call.
+# Precomputed extension tuple for the is_document_url hot path: one C-level
+# ``str.endswith`` pass instead of rebuilding the tuple on every call.
 _DOCUMENT_URL_EXTENSIONS = tuple(sorted(DOCUMENT_URL_EXTENSIONS))
 
 
