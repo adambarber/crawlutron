@@ -47,9 +47,8 @@ from app.vocabulary.taxonomy import CrawlClassification
 
 _logger = logging.getLogger(__name__)
 
-#: The batch shaper is generic over the result shape it is handed so that
-#: ``adapt`` and ``results`` agree: a caller cannot pass browser results with a
-#: engine adapter, which was expressible before and did nothing when it was.
+#: The batch shaper is generic over its result shape so ``adapt`` and ``results``
+#: agree: browser results with an engine adapter are no longer expressible.
 _ResultT = TypeVar("_ResultT", bound=AnyResult)
 
 
@@ -173,12 +172,8 @@ def build_unified_result(item: EngineCrawlResult) -> UnifiedCrawlResult:
         original_url=item.original_url,
         normalized_url=item.normalized_url,
         final_url=item.final_url,
-        # No fallback branch on any of these three: the internal and wire
-        # taxonomies are the same set, asserted by
-        # test_the_internal_and_wire_taxonomies_name_the_same_members, and the
-        # engine result's own constructor already refused a value outside its
-        # declared Literal. A conversion that cannot fail needs no story about
-        # what it does when it does.
+        # No fallback branch: the internal and wire taxonomies are the same set, and
+        # the engine constructor already refuses a value outside its declared Literal.
         status=CrawlStatus(item.status),
         classification=CrawlClassification(item.classification),
         selected_strategy=_coerce_strategy(item.selected_strategy),
@@ -203,12 +198,8 @@ def build_unified_result(item: EngineCrawlResult) -> UnifiedCrawlResult:
     )
 
 
-#: Browser ``CrawlResult.metadata`` keys the wire model carries in a declared
-#: field, so they are read out of ``diagnostics`` rather than duplicated there.
-#: This set and :data:`_RENDER_METADATA_AS_TOP_LEVEL` together name EVERY key
-#: the browser worker emits; anything else in ``metadata`` passes through. The
-#: pair is the whole browser->wire mapping, so a new worker key lands in
-#: ``diagnostics`` by default instead of being filtered away by name.
+#: Browser metadata keys the wire model carries in a declared field, read from
+#: ``diagnostics``; with the pair above, a new worker key maps by default, not away.
 _RENDER_METADATA_AS_MODEL_FIELD = frozenset({"title"})
 _RENDER_METADATA_AS_TOP_LEVEL = frozenset({"extraction_method"})
 
@@ -247,10 +238,8 @@ def render_result_to_unified(item: CrawlResult) -> UnifiedCrawlResult:
     classification = CrawlClassification(item.classification)
     selected_strategy = _coerce_strategy(item.selected_strategy)
     return UnifiedCrawlResult(
-        # The render pipeline's funnel stamps every request-produced result
-        # with the caller's submitted text, so the wire key means the same
-        # thing here as it does at the crawl door. Results built outside a
-        # request funnel keep None and fall back to the page's canonical text.
+        # The render funnel stamps every request-produced result with the caller's
+        # submitted text, so the wire key means the same thing at both doors.
         original_url=item.original_url if item.original_url is not None else item.url.raw,
         normalized_url=item.url,
         final_url=item.final_url,
@@ -275,11 +264,8 @@ def render_result_to_unified(item: CrawlResult) -> UnifiedCrawlResult:
         quality_score=1.0 if item.status == "success" else 0.0,
         extraction_method=metadata.get("extraction_method"),
         diagnostics=_render_diagnostics(metadata),
-        # The browser worker surfaces no origin validators. The field is typed
-        # ``ContentValidators | None`` and has no model default, so this was a
-        # real omission until the adapter started constructing the model: the
-        # old dict path let ``build_unified_result`` supply the fallback
-        # silently, and pyright only saw it once the constructor was explicit.
+        # The browser worker surfaces no origin validators: the field is typed
+        # ``ContentValidators | None``, so the adapter constructs the model.
         validators=None,
     )
 
@@ -413,9 +399,8 @@ def _shape_all[ResultT: AnyResult](
         try:
             shaped.append(adapt(item))
         except Exception:
-            # Log loudly: the original bug was a bare except that swallowed
-            # the exception, degraded the item to site_error, and left no
-            # trace of which shape failed or why.
+            # Log loudly: a bare except used to swallow this, degrade the item to
+            # site_error, and leave no trace of which shape failed or why.
             _logger.warning(
                 "response shaping failed for one item; degrading it to a terminal failure",
                 exc_info=True,
@@ -436,17 +421,12 @@ def _peek_failed_fields(item: Any) -> dict[str, Any]:
     out of the guard and 500ing the whole batch.
     """
     if isinstance(item, NormalizedUrl):
-        # A page the batch never answered, whose identity the runner still
-        # holds as an admitted value. The value is passed as the identity --
-        # not its text and not a two-key dict: this function reads attributes,
-        # so a dict arrived here as an envelope with no URL at all, which is
-        # the gap this branch exists to close.
+        # A page the batch never answered, held by the runner as an admitted
+        # value -- passed as the value, not its text, because this reads attributes.
         return {"normalized_url": item}
     if isinstance(item, str):
-        # Text-only means no admitted identity exists: the submission text is
-        # the whole of what is known. The value fields stay None -- admitting
-        # the text here would need a policy the wire does not have, and a
-        # guessed admission is exactly the hole the value class exists to close.
+        # Text-only means no admitted identity exists: the text is all that is
+        # known, and guessing admission here is the hole the value class closes.
         return {"original_url": item}
     try:
         return {
@@ -488,11 +468,8 @@ def _failed_unified_result(item: Any) -> UnifiedCrawlResult:
         normalized_url=normalized,
         final_url=_value("final_url"),
         status=CrawlStatus.failed,
-        # Site_error is a FAILED_CLASSIFICATIONS member, so its status-table
-        # entry is "failed" -- this keeps (status, classification) consistent
-        # for any consumer that re-derives status from classification.
-        # unknown_error maps to "blocked", which would disagree with the
-        # hardcoded status above.
+        # site_error is a FAILED_CLASSIFICATIONS member, so its status entry is
+        # "failed"; mapping it as unknown_error ("blocked") would disagree.
         classification=CrawlClassification.site_error,
         error=peeked.get("error") or "result_shaping_failed",
     )
