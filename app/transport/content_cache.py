@@ -61,40 +61,25 @@ class ContentCache:
         self.max_entries = max_entries
         self.max_entry_bytes = max_entry_bytes
         # ``None`` means "no total-bytes cap" and ``_over_limits`` branches on
-        # exactly that, so the parameter says so too. Without it the byte bound
-        # was a safety bound in the body and a type error at the constructor --
-        # and ``max_entries`` is the only bound left when a caller turns this
-        # one off, which is why turning it off is a deliberate, visible
-        # constructor argument rather than a default.
+        # exactly that; turning it off is a deliberate, visible argument.
         self.max_total_bytes = max_total_bytes
-        # The single disk-write seam. ``write_data`` is data, not an override:
-        # a caller that needs to watch, fail or relocate writes hands over a
-        # callable, so "which writer is live" has exactly one answer and no test
-        # reaches past it to rebind a private method on a live cache.
+        # The single disk-write seam: a caller that must watch, fail or relocate
+        # writes hands over a callable -- no test rebinds a private method.
         self.write_data = self._write_data if write_data is None else write_data
         # Parallel byte accounting for the LRU index: entry count alone
         # cannot bound disk use when one envelope holds a multi-MB body.
         self._index_sizes: dict[str, int] = {}
         self._index_total_bytes: int = 0
-        # Metadata mirror for cached_at_of(): (expires, cached_at) per live key,
-        # parallel to _index. Sitemap freshness checks run this for every key
-        # of a crawl and must not deserialize multi-MB envelopes to read a
-        # timestamp. _read_envelope stays the single chokepoint for full
-        # reads and for every index mutation; this mirror only answers.
+        # (expires, cached_at) mirror per live key: freshness checks must not
+        # deserialize multi-MB envelopes to read a timestamp. _read_envelope mutates.
         self._index_cached_at: dict[str, tuple[float | None, float | None]] = {}
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         self._lock = threading.Lock()
-        # In-memory LRU index (key -> path) so eviction never globs/stats the
-        # whole cache directory on the hot path. The on-disk file remains
-        # the source of truth for values; this index only tracks recency/order.
-        # (A warm restart with pre-existing files repopulates the index lazily
-        # on first get/set of each key; prune() reconciles disk vs index.)
+        # In-memory LRU index (key -> path) so eviction never globs the cache
+        # directory on the hot path; disk stays the source of truth for values.
         self._index: OrderedDict[str, Path] = OrderedDict()
-        # In-memory value cache: keep small values resident so repeated reads
-        # of a hot URL never touch disk. Bounded LRU (max 100 entries) of
-        # entries whose shallow size is < 1MB. The on-disk file remains the
-        # source of truth; this is purely a read accelerator. Entries store a
-        # (expires, value) tuple so get() can honor TTL without a disk read.
+        # Small-value RAM mirror (bounded LRU, shallow size < 1MB) so hot reads
+        # never touch disk; entries carry (expires, value) to honor TTL inline.
         self._memory_cache: OrderedDict[str, tuple[float | None, Any]] = OrderedDict()
         self._MEMORY_CACHE_MAX = 100
         self._MEMORY_CACHE_MAX_SIZE = 1024 * 1024
@@ -233,38 +218,26 @@ class ContentCache:
                     return None
                 expires = envelope.get("expires")
                 if expires is not None and self.clock() > expires:
-                    # Free the byte accounting too, not just the index slot
-                    # otherwise an expired read leaves phantom bytes that
-                    # keep ``_over_limits`` true and evict LIVE entries later.
+                    # Free the byte accounting too: phantom bytes would keep
+                    # ``_over_limits`` true and evict LIVE entries later.
                     self._drop_locked(key, doomed)
                     return None
                 if key not in self._index:
-                    # Lazily register a cold on-disk entry, with the exact byte
-                    # size just read: the RAM-mirror gate and the byte
-                    # budget need a real size, and recording it here is what
-                    # keeps every size lookup off the disk path.
+                    # Register a cold on-disk entry with the exact byte size
+                    # just read -- every later size lookup stays off the disk.
                     self._index[key] = path
                     self._index_total_bytes += len(raw) - self._index_sizes.pop(key, 0)
                     self._index_sizes[key] = len(raw)
                 # Mark recently used (LRU) by moving to the end of the ordered index.
                 self._index.move_to_end(key)
-                # Both mirrors below are written from bytes read OFF the lock,
-                # so both must re-check currency under it: the read and the
-                # commit are not atomic, and a concurrent write that landed in
-                # between would otherwise let a superseded envelope shadow the
-                # newer one -- in the freshness metadata (a fabricated
-                # cached_at, or a stale ``expires=None`` making a live entry
-                # look never-expiring) and in the RAM value. A cold entry was
-                # registered just above with the exact size read, so it always
-                # passes; the guard is what keeps a warm entry honest.
+                # Both mirrors re-check currency under the lock: a concurrent
+                # write landing between read and commit must not be shadowed.
                 if self._index_sizes.get(key) == len(raw):
                     # Remember the freshness metadata so later cached_at_of()
                     # calls are answered without re-reading the envelope.
                     self._index_cached_at[key] = (envelope.get("expires"), envelope.get("cached_at"))
-                    # Warm the RAM mirror under the same lock (the accelerator
-                    # contract is method-independent); the gate uses the exact
-                    # bytes just read, so a cold read can never smuggle a
-                    # multi-MB value into the small-value mirror.
+                    # Warm the RAM mirror under the same lock, gated on the
+                    # exact bytes just read -- a cold read cannot smuggle multi-MB.
                     self._remember_memory_locked(key, envelope.get("value"), expires, len(raw))
                 return envelope
         finally:
@@ -434,17 +407,12 @@ class ContentCache:
         try:
             await asyncio.to_thread(self.write_data, path, data)
         except BaseException:
-            # Nothing above mutated the index, byte totals, or RAM mirror before
-            # this point, and atomic_write_text leaves the prior file byte-
-            # identical on failure — so the pre-write state is already exactly
-            # consistent. A prior valid entry stays reachable and a new key
-            # stays absent; there is nothing to roll back. Just propagate.
+            # Nothing above mutated on failure and atomic_write_text leaves the
+            # prior file intact: the pre-write state is consistent. Just propagate.
             raise
         with self._lock:
-            # The prior size is read here rather than before the size check, so a
-            # concurrent commit between the two cannot leave the byte total off
-            # by a stale delta. The commit reads it under the same lock, which
-            # is the only reason that holds.
+            # The prior size is read here (not before the check) so a concurrent
+            # commit cannot leave the byte total off by a stale delta.
             self._commit_entry_locked(key, path, size)
             # Mirror only after the write commits, under the shared gate.
             self._remember_memory_locked(key, value, expires, size)
@@ -478,10 +446,8 @@ class ContentCache:
     def prune(self) -> int:
         """Delete expired entries; return the number removed."""
         now = self.clock()
-        # Glob + read + parse OUTSIDE the lock: the event-loop thread contends
-        # on self._lock (aget/aset) and this is the multi-MB work. The RAM
-        # state is reconciled under the lock below, and the unlinks go through
-        # _unlink_doomed's re-validation afterwards.
+        # Glob + read + parse OUTSIDE the lock: this is the multi-MB work and
+        # the event-loop thread contends on self._lock. Reconcile under it below.
         expired: list[tuple[Path, int]] = []
         surviving: dict[Path, int] = {}
         for path in self.cache_dir.glob(f"{self.namespace}.*.json"):
@@ -498,22 +464,16 @@ class ContentCache:
                 continue
             expires = envelope.get("expires")
             if expires is not None and now > expires:
-                # The byte size rides the verdict: the verdict is applied under
-                # the lock below, and only against the entry these bytes still
-                # describe.
+                # The byte size rides the verdict: applied under the lock below,
+                # only against the entry these bytes still describe.
                 expired.append((path, len(raw)))
             else:
                 surviving[path] = len(raw)
 
         doomed: list[tuple[str | None, Path]] = []
         with self._lock:
-            # Map the verdicts onto the live index: a key re-set since the glob
-            # reuses the deterministic path, so the verdict must be
-            # re-validated before it is applied -- the bytes it was computed
-            # from were read off the lock (same currency guard
-            # _read_envelope applies to its mirror writes). A re-set during the
-            # scan has a new TTL and a new byte size; the old verdict describes
-            # bytes no entry holds and must not expire the live one.
+            # Verdicts are re-validated before application: a key re-set since
+            # the glob has a new TTL and size; the old verdict must not expire it.
             by_path: dict[Path, str] = {p: k for k, p in self._index.items()}
             for path, size in expired:
                 key = by_path.get(path)
@@ -522,15 +482,11 @@ class ContentCache:
                 elif self._index_sizes.get(key) == size:
                     self._drop_locked(key, doomed)
                 else:
-                    # A re-set landed during the scan. The file is spared (no
-                    # unlink) and the entry stays registered under its current
-                    # recorded size, so neither the verdict nor the disk
-                    # reconciliation below touches it.
+                    # A re-set landed during the scan: spare the file, keep the
+                    # entry registered under its current recorded size.
                     surviving[path] = self._index_sizes[key]
-            # Rebuild the index and the byte accounting from what survived on
-            # disk. An entry whose file was unreadable or gone at glob
-            # time drops out; a later read re-registers it from disk, exactly
-            # like a warm restart.
+            # Rebuild index and byte accounting from what survived on disk;
+            # a dropped entry re-registers from disk later, like a warm restart.
             live: OrderedDict[str, Path] = OrderedDict(
                 (k, p) for k, p in self._index.items() if p in surviving
             )

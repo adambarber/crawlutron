@@ -118,10 +118,10 @@ BLOCK_LENGTH = 40
 # budget cannot be quietly inflated -- the code has to actually get smaller
 # first.
 _BUDGETS = {
-    "function length": 33,
+    "function length": 32,
     "abc size": 5,
     "largest class": 550,
-    "block length": 12,
+    "block length": 11,
 }
 
 # The complexity approximation counts every node that introduces a branch, which
