@@ -53,11 +53,8 @@ CRAWL_JOBS_SCHEMA = TableSchema(
         ColumnSchema("root_url", "TEXT", True, "''"),
         ColumnSchema("policy", "TEXT", True, "'{}'"),
         ColumnSchema("status", "TEXT", True, None),
-        # The outstanding work queue, and only that. `visited` and `results`
-        # used to sit here as JSON columns holding the job's whole history,
-        # which made every batch persist re-serialize it; they are companion
-        # tables now (see COMPANION_SCHEMAS). `frontier` stays a column
-        # because it mutates as a queue rather than accumulating.
+        # The outstanding queue only: `visited`/`results` are companion tables now
+        # (COMPANION_SCHEMAS); `frontier` mutates as a queue, so it stays a column.
         ColumnSchema("frontier", "TEXT", True, "'[]'"),
         ColumnSchema("in_flight", "TEXT", True, "'[]'"),
         ColumnSchema("transient_retries", "TEXT", True, "'{}'"),
@@ -68,10 +65,8 @@ CRAWL_JOBS_SCHEMA = TableSchema(
     ),
 )
 
-# The two accumulators, split out of the job row. `seq` is the page's position
-# in the crawl, which is also its identity here: results are appended and never
-# rewritten, so the ordinal is both the insert key and the read order, and a
-# batch persist costs one INSERT per new page instead of a full rewrite.
+# The two accumulators, split from the job row: `seq` is the page's position and
+# identity (appended, never rewritten), so a persist is one INSERT per new page.
 CRAWL_JOB_RESULTS_SCHEMA = TableSchema(
     name="crawl_job_results",
     columns=(
@@ -91,10 +86,8 @@ CRAWL_JOB_VISITED_SCHEMA = TableSchema(
     ),
 )
 
-# Tables that belong to a store schema's lifecycle but are not that schema's
-# single primary table. They are created by the same migration chain, checked by
-# the same drift check, and dropped with the same rollback, so a store cannot be
-# half-migrated: there is one declaration of what a job store must contain.
+# Tables in a store schema's lifecycle that are not its single primary table:
+# created, drift-checked and rolled back together, so none can be half-migrated.
 COMPANION_SCHEMAS: dict[StoreSchema, tuple[TableSchema, ...]] = {
     StoreSchema.CRAWL_JOBS: (CRAWL_JOB_RESULTS_SCHEMA, CRAWL_JOB_VISITED_SCHEMA),
 }
@@ -112,9 +105,8 @@ COORDINATION_COUNTERS_SCHEMA = TableSchema(
     name="coordination_counters",
     columns=(
         ColumnSchema("name", "TEXT", False, None, 1),
-        # NOT NULL with a default so a row can never exist without a value. The
-        # increment is atomic because the upsert names the column in its SET
-        # list (see CoordinationCounters.add), not because of this default.
+        # NOT NULL with a default, so a row never lacks a value; the increment is
+        # atomic by the upsert's SET list (CoordinationCounters.add), not the default.
         ColumnSchema("value", "REAL", True, "0"),
     ),
 )
@@ -124,10 +116,8 @@ COORDINATION_COOKIES_SCHEMA = TableSchema(
     columns=(
         ColumnSchema("namespace", "TEXT", False, None, 1),
         ColumnSchema("host", "TEXT", False, None, 2),
-        # One JSON object per (namespace, host). Cookies for a host are few and
-        # always rewritten together, so a row is the natural unit; a row per
-        # cookie would only add a join to answer a question the header already
-        # answers in one read.
+        # One JSON object per (namespace, host): cookies for a host are few and
+        # always rewritten together, so one read answers the header question.
         ColumnSchema("payload", "TEXT", True, "'{}'"),
         # LRU clock. The jar is long-lived and every crawled host adds a slot,
         # so the table is bounded the same way the in-memory map was.
@@ -135,10 +125,8 @@ COORDINATION_COOKIES_SCHEMA = TableSchema(
     ),
 )
 
-# One row per registered watch. Small by construction (a watch is a single
-# URL and its revalidation history, rewritten per check), so the row is the
-# whole record -- unlike a crawl job there is no append-only page history to
-# split into a companion table.
+# One row per registered watch: a watch is a single URL and its revalidation
+# history, rewritten per check -- no append-only page history to split out.
 WATCHES_SCHEMA = TableSchema(
     name="watches",
     columns=(
@@ -149,9 +137,8 @@ WATCHES_SCHEMA = TableSchema(
         ColumnSchema("webhook_url", "TEXT", False, None),
         ColumnSchema("interval_seconds", "INTEGER", True, None),
         ColumnSchema("status", "TEXT", True, "'active'"),
-        # etag/last_modified exactly as ContentValidators spells them, so the
-        # API response and the engine result share one vocabulary with no
-        # translation layer between store and wire.
+        # etag/last_modified exactly as ContentValidators spells them, so store
+        # and wire share one vocabulary with no translation layer.
         ColumnSchema("validators", "TEXT", True, "'{}'"),
         ColumnSchema("next_check_at", "REAL", True, None),
         ColumnSchema("last_checked_at", "REAL", False, None),
@@ -179,9 +166,8 @@ CURRENT_SCHEMAS = {
 LEGACY_COLUMNS = {
     StoreSchema.CRAWL_JOBS: (
         ColumnSchema("canonicalized", "INTEGER", True, "0"),
-        # Present only on a database that has not run 0003 yet. They are
-        # accepted rather than ignored so the stamping path can bring such a
-        # database forward to the current schema instead of refusing to start.
+        # Present only on a database that has not run 0003 yet; accepted so the
+        # stamping path brings it forward instead of refusing to start.
         ColumnSchema("visited", "TEXT", True, "'[]'"),
         ColumnSchema("results", "TEXT", True, "'[]'"),
     ),
@@ -215,10 +201,8 @@ def create_table_sql(schema: TableSchema) -> str:
     declarations: list[str] = []
     for column in schema.columns:
         declaration = f"  {_quote_identifier(column.name)} {column.sqlite_type}"
-        # A composite key cannot be expressed inline -- SQLite rejects more
-        # than one column-level PRIMARY KEY -- so it becomes a table constraint
-        # below. A single-column key keeps the inline form, leaving the DDL of
-        # the tables already written unchanged under a new renderer.
+        # A composite key cannot be inline (SQLite rejects multiple column-level
+        # PRIMARY KEYs) -- a table constraint instead; single keys stay inline.
         if column.primary_key_position and len(key_columns) == 1:
             declaration += " PRIMARY KEY"
         if column.not_null:

@@ -88,14 +88,8 @@ async def default_http_fetcher(
             status_code = response.status_code
             if chain.advance(response):
                 continue
-            # Terminal response: stream RAW bytes, capping total read.
-            # bytearray.extend is O(chunk); ``raw += chunk`` on immutable
-            # bytes re-allocates and copies the whole buffer per chunk.
-            # A non-2xx streams through this same capped loop, so an error
-            # body is bounded by max_content_length exactly like a success
-            # body -- there is no separate status-error branch, and none
-            # could fire: raise_for_status is never called, so httpx cannot
-            # raise HTTPStatusError out of stream().
+            # Terminal response: stream RAW bytes with a cap; a non-2xx takes the
+            # same loop, since raise_for_status is never called out of stream().
             raw = bytearray()
             async for chunk in response.aiter_raw():
                 raw.extend(chunk)
@@ -197,10 +191,9 @@ async def _cffi_fetch(
     # Same release point as the http fetcher: any pooled client superseded by a
     # loop change (either kind) is closed here, on this live loop.
     await http_client_pool._drain_pending_client_closes()
-    # Shared session: built once per event loop instead of
-    # per request. NOTE: the client class is AsyncSession (curl_cffi>=0.7 API).
-    # AsyncClient does not exist; referencing it raises AttributeError
-    # and would silently degrade every impersonated fetch to plain httpx.
+    # Shared session, built once per event loop instead of per request. The class
+    # is AsyncSession (curl_cffi>=0.7): AsyncClient does not exist, and naming it
+    # raises AttributeError and silently degrades every fetch to plain httpx.
     client = http_client_pool.get_cffi_session()
     try:
         started = time.monotonic()
@@ -226,53 +219,26 @@ async def _cffi_fetch(
             if chain.advance(response):
                 await response.aclose()  # release the curl handle
                 continue
-            # Do not trust response.elapsed across curl_cffi versions
-            # (timedelta in a requests-compatible build would TypeError
-            # here and silently downgrade every fetch to httpx).
+            # Never trust response.elapsed across curl_cffi versions: a timedelta
+            # there TypeErrors and silently downgrades every fetch to plain httpx.
             elapsed_ms = int((time.monotonic() - started) * 1000)
-            # Stream RAW bytes with a running cap: a hostile origin
-            # can omit content-length and stream gigabytes (chunked).
-            # Abort with a 413 as soon as the cap is exceeded instead of
-            # buffering the whole body into memory first.
+            # Stream RAW bytes with a running cap: a hostile origin can omit
+            # content-length and stream gigabytes; abort with a 413 past the cap.
             raw = bytearray()
-            # Consume the curl queue directly rather than
-            # response.aiter_content(): on curl_cffi 0.16 the wrapper's
-            # exception path awaits aclose(), which blocks forever on the
-            # very stalled-stream error it is trying to re-raise (the
-            # LOW_SPEED abort lands as a queue item but the wrapper wedges
-            # before delivering it). Reading the queue keeps the abort
-            # prompt and the failure reraise unblocked.
-            #
-            # Every exit out of this loop except STREAM_END is an abandon, and
-            # an abandoned handle is never reclaimed on its own now that the
-            # session is shared per loop: the error re-raise below and a
-            # cancellation of the queue wait (the engine's per-URL budget
-            # cancels in-flight fetches routinely) both used to leave it busy.
-            # ``stream_completed`` therefore gates a release-on-any-exit in the
-            # finally, using the same non-blocking path the stall and cap
-            # branches already used -- awaiting aclose here would join the
-            # hostile producer being escaped.
+            # Read the curl queue directly: aiter_content() awaits aclose() on the
+            # stalled-stream error and blocks forever; every exit releases the handle.
             stream_completed = False
             try:
                 while True:
-                    # Bound the wait PER CHUNK, not per response: this
-                    # mirrors httpx's read-timeout semantics -- an inter-chunk
-                    # gap limit. A slow-drip origin (one byte per interval)
-                    # can keep the stream alive up to max_content_length; the
-                    # per-URL budget above bounds the total. Do not "fix"
-                    # this into a total deadline without also bounding drips.
-                    # queue.get() is pure asyncio, so wait_for cancellation is
-                    # safe here (unlike cancelling curl's internal machinery).
+                    # A per-chunk wait, mirroring httpx read-timeout semantics: the
+                    # per-URL budget bounds the total, and queue.get() is pure asyncio.
                     try:
                         chunk = await asyncio.wait_for(
                             response.queue.get(), timeout=max(timeout_seconds + 5.0, 10.0)
                         )
                     except TimeoutError as error:
-                        # Stall: release the handle WITHOUT awaiting. aclose()
-                        # joins the producer task, which is exactly the wedged
-                        # task being escaped; awaiting it hangs like the old
-                        # aiter_content() wrapper did. A scheduled close
-                        # reclaims the handle; the session client bounds any leak.
+                        # Stall: release WITHOUT awaiting -- aclose() joins the very
+                        # producer task being escaped. A scheduled close reclaims.
                         raise TimeoutError("cffi stream queue stalled") from error
                     if isinstance(chunk, RequestException):
                         raise chunk
@@ -281,18 +247,14 @@ async def _cffi_fetch(
                         break
                     raw.extend(chunk)
                     if len(raw) > max_content_length:
-                        # Mid-stream abandon: a 413 out of the loop is still an
-                        # abandon, and the producer may be a hostile drip --
-                        # never wait on it. The finally releases the handle.
+                        # A 413 out of the loop is still an abandon, and the
+                        # producer may be a hostile drip -- never wait on it.
                         return _cffi_too_large_result(url, chain.url, response, elapsed_ms)
             finally:
                 if not stream_completed:
                     _release_stream_noblock(response)
-            # STREAM_END reached: the producer is done, so awaiting the close
-            # is safe (unlike the stall/abandon paths above) and required now
-            # that the session is shared -- the per-request `async with` used
-            # to release the handle implicitly. Without this the next streamed
-            # request on the shared session stalls on the busy handle.
+            # STREAM_END means the producer is done, so awaiting close is safe -- and
+            # now required: an unreleased handle stalls the next streamed request.
             await response.aclose()
             # Decompress with a size cap (decompression-bomb guard), normalise
             # headers and persist cookies via the shared tail.

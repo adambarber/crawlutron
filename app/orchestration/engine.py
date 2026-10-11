@@ -145,9 +145,8 @@ def _seed_is_fresh(url: NormalizedUrl, lastmod: str | None, content_cache: Any, 
     from app.transport.content_cache_key import build_content_cache_key
     from app.transport.request_profile import headers_for_strategy
 
-    # Default to the real strategy chain: the old ["HTTP"] placeholder
-    # is not a strategy, so its cache keys could never match stored entries
-    # and freshness was never detected through this path.
+    # Default to the real strategy chain: the old placeholder's cache keys never
+    # matched stored entries, so freshness was never detected through this path.
     for strategy in policy.strategies:
         key = build_content_cache_key(
             url,
@@ -180,20 +179,11 @@ def _stale_seeds(
 
 _SPILL_PREFIX = "bc-spill-"
 
-# A spill is owned for as long as some process holds an exclusive advisory lock
-# on it, and that ownership is a kernel fact rather than a fact about this
-# process's memory. An earlier version tracked ownership in a module-level set,
-# which could only answer "is a spill owned by *me* live?" -- so a concurrent
-# process's in-flight spill looked identical to one abandoned by a killed run
-# and was unlinked mid-crawl. The temp dir is shared with every other process on
-# the host, so that was the default outcome whenever two processes crawled at
-# once. The lock is held on the spill's own descriptor: closing it, or the
-# process dying, releases ownership automatically, which is what lets the sweep
-# still reclaim what killed runs leave behind.
+# A spill is owned while any process holds an advisory lock on it -- a kernel
+# fact, not this process's memory; see :func:`_spill_is_unowned`.
 
-# Cadence gate for _ResultSpill's stale-spill sweep: at most
-# one temp-dir scan per interval per process; None means "never scanned",
-# forcing the first construction to sweep immediately.
+
+# Sweep cadence: one temp-dir scan per interval per process; None sweeps at once.
 _SPILL_GC_MIN_INTERVAL_SECONDS = 300.0
 _LAST_SPILL_GC_MONOTONIC: float | None = None
 
@@ -242,9 +232,8 @@ class _ResultSpill:
         gc_age_seconds: float = 3600,
     ) -> None:
         self._own = path is None
-        # ``resolved`` is the concrete path on both branches (mkstemp fills in
-        # the temp path when the caller gave none), so it is the only value
-        # stored on ``self``: ``self.path`` is always a str a reader can open.
+        # ``resolved`` is the concrete path on both branches (mkstemp fills a temp
+        # path in), so ``self.path`` is always a str a reader can open.
         resolved: str
         if self._own:
             fd, resolved = tempfile.mkstemp(prefix=_SPILL_PREFIX, suffix=".ndjson")
@@ -277,11 +266,8 @@ class _ResultSpill:
             _LAST_SPILL_GC_MONOTONIC is None
             or now_mono - _LAST_SPILL_GC_MONOTONIC >= _SPILL_GC_MIN_INTERVAL_SECONDS
         ):
-            # Cadence gate: the temp-dir sweep is O(dir) and
-            # ran per crawl request. The None-initial stamp guarantees the
-            # first construction in a process always scans, so spill files
-            # orphaned by killed runs are still reclaimed; the age predicate
-            # below still protects active spills from early unlink.
+            # Cadence gate: the sweep is O(dir) and ran per crawl request; the None
+            # stamp guarantees the first construction in a process scans anyway.
             _LAST_SPILL_GC_MONOTONIC = now_mono
             with contextlib.suppress(Exception):
                 self._gc_stale_spills(gc_age_seconds)
@@ -377,12 +363,8 @@ class _ResultSpill:
     def close(self) -> None:
         with contextlib.suppress(Exception):
             self._fh.close()
-        # Closing the descriptor released the ownership lock, so the sweep and
-        # this cleanup can no longer both act on the same path.
-        #
-        # Auto-cleanup of owned files: when this spill was created without
-        # an explicit path (caller-owned spills retain their file), drop the
-        # backing temp file so a happy-path close never orphans it.
+        # The descriptor closed, so the lock released and the sweep can no longer
+        # race this cleanup; a temp-path spill drops its file on a happy-path close.
         if getattr(self, "_own", False):
             try:
                 os.unlink(self.path)
@@ -421,9 +403,8 @@ async def crawl_request(
 ) -> ProducerEnvelope:
     active_settings = settings or CrawlerSettings.from_mapping()
     host_policy = HostPolicy.from_settings(active_settings)
-    # The batch cap is enforced by the same gate the async endpoint uses
-    # before accepting, so sync and async cannot drift on oversized batches.
-    # A forwarded batch skips re-derivation but not the cap.
+    # One batch cap -- the same gate the async endpoint uses before accepting, so
+    # sync and async cannot drift; a forwarded batch skips re-derivation, not the cap.
     urls = checked_payload_urls(
         payload,
         active_settings.max_batch_size,
@@ -432,15 +413,12 @@ async def crawl_request(
     )
     policy = payload_policy(payload, PolicyTier.from_settings(active_settings))
     fetcher = http_fetcher or default_http_fetcher
-    # The transport preference is a BINDING of the one fetcher, not a second
-    # entry point: the impersonating strategy gets the same callable with the
-    # cffi transport preferred, so the contract is spelled once in the whole tree.
+    # A binding of the one fetcher, not a second entry point: the impersonating
+    # strategy takes the same callable with the cffi transport preferred.
     cffi = cffi_fetcher or impersonating_fetcher()
     shutdown_event = shutdown_event or asyncio.Event()
-    # Bind the cookie namespace for the lifetime of this crawl so concurrent
-    # multi-tenant calls cannot leak cookies through the shared
-    # ``_GLOBAL_COOKIE_JAR``. Defaults to "" (legacy shared behavior) so
-    # single-tenant callers and tests see no change.
+    # Bind the cookie namespace for this crawl's lifetime so concurrent tenants
+    # cannot leak through the shared jar; "" keeps single-tenant callers unchanged.
     _cookie_token = _set_cookie_namespace(policy)
     try:
         state = _PipelineState(
@@ -500,7 +478,6 @@ def has_process_state() -> bool:
     memoized reading it worries about lives in ``cgroup_sense``, which is a
     ``ProcessStateOwner`` of its own and is asked directly.
     """
-    # ``_SHARED_HTTP_CACHE`` defines no ``__len__``, so ``bool()`` on it is a
-    # constant True -- the probe would report state after every reset and train
-    # the reader to ignore it. Read the entry mapping it already maintains.
+    # ``_SHARED_HTTP_CACHE`` defines no ``__len__``, so bool() is constant True;
+    # read the entry mapping instead, or the probe reports state after every reset.
     return bool(robots_cache) or bool(_SHARED_HTTP_CACHE._data)
