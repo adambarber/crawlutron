@@ -25,40 +25,20 @@ _JobT = TypeVar("_JobT")
 _logger = logging.getLogger(__name__)
 
 
-# The exception -> classification table, in precedence order: the first row
-# whose types match wins. Written as data rather than an if-ladder because this
-# function is the chokepoint every error in the crawl path passes through, and
-# an if-ladder had outgrown the function-length ceiling -- a ladder that cannot
-# hold its own contents is a ladder whose ordering has stopped being reviewable.
-# Order carries the semantics, so it is the one thing to preserve here:
-#   * ``DecompressionError`` (ours) subclasses ``ValueError``, so the
-#     ``payload_too_large`` row has to precede ``value_error`` or an oversized
-#     body would be reported as a caller error.
-#   * ``httpx.TimeoutException`` and ``httpx.TransportError`` both subclass
-#     ``httpx.HTTPError``, so the ``http_error`` catch-all has to come after the
-#     ``connection_error`` row or every transport failure would flatten into it.
-#   * ``socket.gaierror`` and ``ssl.SSLError`` are both ``OSError`` subclasses;
-#     keeping their rows above the broad fallbacks is what stops a name that
-#     would not resolve from being reported as a generic network error.
+# The exception -> classification table, first match wins. Order carries
+# semantics: subclasses must precede their catch-alls or be claimed by them.
 _CLASSIFICATION_BY_EXCEPTION: tuple[tuple[tuple[type[BaseException], ...], Classification], ...] = (
     ((BrowserPoolExhaustedError,), "browser_pool_exhausted"),
     # Capacity, not a page failure: the URL was never attempted, which is why it
     # stays distinct from the transport rows below and stays retryable.
     ((_CircuitBreakerOpen,), "circuit_breaker_open"),
     ((DecompressionTooLargeError,), "payload_too_large"),
-    # The server declared an encoding and then did not deliver a body that
-    # decodes under it. It subclasses ValueError only as an implementation
-    # detail of zlib's error, so without this row the caller-error catch-all
-    # below claimed it: a truncated response or an interfering proxy was
-    # reported as "value_error" -- a terminal code reading as "the caller asked
-    # for something invalid", which in a durable job marks the URL visited
-    # instead of retrying a fault that a second attempt often clears.
+    # The declared encoding did not decode; its ValueError base is a zlib
+    # detail, so without this row a transient fault reads as terminal.
     ((DecompressionError,), "http_error"),
     ((httpx.TooManyRedirects,), "too_many_redirects"),
-    # Name resolution never got off the host. This row is why ``dns_error`` is a
-    # live member: before it existed, a name that would not resolve was reported
-    # as "connection_error", a category error that also left the declared
-    # dns_error member with no producer anywhere in app/.
+    # Name resolution never got off the host; without this row it read as
+    # "connection_error" and the declared dns_error member had no producer.
     ((socket.gaierror, socket.herror), "dns_error"),
     (
         (
@@ -199,15 +179,12 @@ def engine_result_from_exception(
     # A capacity skip is not a dead page: the URL was never attempted, so the
     # frontier can re-queue rather than record a permanent failure.
     diagnostics: dict = {"retryable": retryable, "error_code": classification}
-    # A domain circuit opening is a scheduler capacity decision, not a page
-    # failure: callers and dashboards key off this marker to tell "the site is
-    # unreachable" from "we chose not to try".
+    # A domain circuit opening is scheduler capacity, not a page failure:
+    # dashboards key off it to tell "unreachable" from "not tried".
     if classification == "circuit_breaker_open":
         diagnostics["circuit_breaker"] = True
-    # Callers may merge strategy-specific diagnostics that are ALREADY
-    # redacted (e.g. the HTTP path's request_profile). The primitive owns
-    # classification and raw-text redaction; it must not silently drop
-    # diagnostics a caller built under the redaction contract.
+    # Callers may merge diagnostics that are ALREADY redacted; the primitive
+    # owns classification and redaction and must not drop them silently.
     if extra_diagnostics:
         diagnostics.update(extra_diagnostics)
     return _failed_engine_result(

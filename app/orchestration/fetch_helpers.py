@@ -29,12 +29,8 @@ from app.vocabulary.limits import (
     SITEMAP_MAX_URLS,
 )
 
-# Request headers as the discovery fetch takes them: a mapping it only ever
-# reads, or None for "send none". One declaration, because the fetch signatures
-# and the fetcher contract both spell it -- while they each spelled
-# ``dict[str, str]`` on their own, the sitemap path had to write
-# ``cond_headers or {}`` at its call site to satisfy the core, which is the rule
-# the core now owns.
+# Request headers as the discovery fetch takes them: a mapping it only
+# reads, or None for "send none" -- one declaration, owned by the core.
 type _RequestHeaders = Mapping[str, str] | None
 
 
@@ -203,9 +199,7 @@ async def _fetch_text(
 
 
 # Sitemap cache: one locked, bounded, TTL'd store (app.safety.bounded_ttl).
-#
-# The lock lives inside the chokepoint, so call sites can never forget it
-# (the class of bug that produced the robots-cache and DNS-cache races).
+# The lock lives inside the chokepoint, so no call site can forget it.
 _SITEMAP_CACHE: BoundedTTLCache[tuple[str, HostPolicy], tuple[list, str | None, str | None]] = (
     BoundedTTLCache(max_entries=SITEMAP_CACHE_MAX_ENTRIES, ttl=SITEMAP_CACHE_TTL_SECONDS)
 )
@@ -256,9 +250,8 @@ async def fetch_sitemap_urls(
             fetcher, current_url, cond_headers, timeout_seconds
         )
         if not_modified:
-            # 304: reuse the previously resolved URLs for this exact URL.
-            # get_stale (not get): the entry must be PRESENT, not fresh --
-            # the origin just confirmed the last-known set is still valid.
+            # 304: reuse the previously resolved URLs. get_stale, not get: the
+            # entry must be PRESENT, not fresh -- the origin confirmed the set.
             prev = _SITEMAP_CACHE.get_stale((current_url.raw, host_policy))
             if prev:
                 page_urls.update(prev[0])
@@ -267,10 +260,8 @@ async def fetch_sitemap_urls(
             return etag, last_modified
         locs = loc_pattern.findall(text)
         if "<sitemapindex" in text.lower():
-            # Bounded fan-out: never schedule more children than still
-            # needed to reach max_urls, and fetch them in capped chunks so a
-            # hostile index with tens of thousands of children cannot spawn
-            # a task (and a fetch) per child.
+            # Bounded fan-out: never schedule more children than still needed
+            # for max_urls, in capped chunks, so a huge index cannot spawn tasks.
             children = locs
             children = children[: max(0, max_urls - len(page_urls))]
             for offset in range(0, len(children), SITEMAP_INDEX_FANOUT):
@@ -290,9 +281,8 @@ async def fetch_sitemap_urls(
                         if t not in done:
                             t.cancel()
             return etag, last_modified
-        # Page sitemap: associate each <loc> with its neighboring <lastmod>.
-        # Use byte offsets so this works whether entries are wrapped in <url>
-        # blocks or listed as bare <loc> elements (some CMS emit the latter).
+        # Page sitemap: associate each <loc> with its neighboring <lastmod>,
+        # by byte offsets, so wrapped and bare entry shapes both parse.
         loc_items = [(m.start(), m.group(1)) for m in loc_pattern.finditer(text)]
         lastmod_items = [(m.start(), m.group(1).strip()) for m in lastmod_re.finditer(text)]
         for idx, (pos, loc) in enumerate(loc_items):

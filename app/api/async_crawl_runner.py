@@ -41,20 +41,8 @@ logger = logging.getLogger(__name__)
 # Module-level concurrency semaphore. Bounded so a flood of 202 responses
 # cannot spawn unbounded concurrent crawls and OOM the container.
 _WEBHOOK_CRAWL_CONCURRENCY = get_env_int("CRAWLUTRON_MAX_WEBHOOK_CONCURRENCY", 4, lo=1)
-# A lazily-built module-global asyncio.Semaphore binds to whichever event
-# loop first uses it, and asyncio's loop-bound primitives cannot be awaited from
-# a loop other than the one they were created on -- the same hazard
-# ``_LoopBoundPooledClient`` was built for in app.transport.http. The
-# instance therefore tracks the loop it was built for and is rebuilt when the
-# running loop changes (for example a test harness driving many asyncio.run
-# calls in sequence).
-#
-# The pooled instance stays in this module global, and the builder stays a
-# separate late-bound function, for the same reasons the pooled client does:
-# service teardown and the suites reset pooled state by assigning the global,
-# and a test that monkeypatches ``_build_async_crawl_semaphore`` must still be
-# observed. Nothing is constructed at import time, so importing this module
-# never touches an event loop.
+# The semaphore is loop-bound and rebuilt when the running loop changes (a
+# harness driving many asyncio.run calls); the builder stays late-bound.
 _async_crawl_semaphore: asyncio.Semaphore | None = None
 _async_crawl_semaphore_loop: asyncio.AbstractEventLoop | None = None
 
@@ -146,40 +134,21 @@ async def run_async_crawl(
 
             unified_results = response_model.results
             failed = sum(1 for item in unified_results if _failed(item))
-            # Single-shot jobs never enqueue a frontier, so "discovered" is
-            # undefined for them: report only what actually happened. The
-            # whole-site runner owns total_discovered (frontier-derived);
-            # fabricating it here would overload one field name with two
-            # different meanings.
+            # Single-shot jobs have no frontier, so "discovered" is undefined
+            # and only what happened is reported; the whole-site runner owns it.
             job.stats = {
                 "total_crawled": len(unified_results),
                 "total_failed": failed,
             }
             await job_store.asave(job)
-            # The terminal write is a compare-and-set and it can lose: pause_job
-            # compare-and-sets from RUNNING too, and whichever lands first wins.
-            # Its result is what decides whether this crawl is finished, so it
-            # is checked rather than discarded -- an unchecked CAS here is what
-            # let a paused job publish its results and read as 200 to a client
-            # polling GET /v1/crawl/{request_id}.
+            # The terminal write is a CAS that can lose to pause_job, so its
+            # result decides finished: an unchecked CAS let a paused job publish.
             published = await job_store.aset_status(
                 request_id, JobStatus.COMPLETED, expected=JobStatus.RUNNING
             )
             if not published:
-                # The crawl finished, so a job that is no longer RUNNING is not
-                # a statement about this crawl -- unless it was moved deliberately.
-                # `recover_orphaned_running_jobs` rewinds RUNNING to PENDING on
-                # startup on the assumption that nothing is in flight, and that
-                # assumption does not hold whenever a second app instance shares
-                # the store: the job is rewound under a runner that is still
-                # working, and the terminal write then loses against PENDING. Left
-                # there, the job is unreachable -- PENDING is never picked up
-                # again, and the client polls a completion that cannot arrive.
-                #
-                # So the runner reconciles: PAUSED and CANCELLED are a caller
-                # asking for something else and are left alone, and anything else
-                # is a control-plane state this crawl did not choose, so the
-                # results are published against the state the job is actually in.
+                # A second app instance can rewind the job to PENDING under a live
+                # runner; leave PAUSED/CANCELLED and publish against the real state.
                 stranded = await job_store.aload(request_id)
                 if stranded is not None and stranded.status not in {
                     JobStatus.PAUSED,
@@ -200,13 +169,8 @@ async def run_async_crawl(
                 except Exception:
                     logger.warning("crawl_result_store_failed", extra={"request_id": request_id})
 
-                # The webhook rides with the terminal write, in the success branch
-                # exactly as the failure branch below fires one after recording a
-                # terminal failure. That makes "a webhook arrived" mean "this job
-                # is finished" for every consumer, and it is the contract the
-                # delivery was already implying: announcing a completed crawl
-                # that was paused or cancelled mid-flight is how a caller ends up
-                # with a success notification for results it can never read back.
+                # The webhook rides with the terminal write in both branches, so it
+                # means "finished" -- announcing a paused crawl hands back a dead one.
                 if webhook_url:
                     from app.api.webhooks import post_webhook
 

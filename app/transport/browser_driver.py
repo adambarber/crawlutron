@@ -87,9 +87,8 @@ def _profile_float(profile: dict[str, Any], key: str, default: float, ceiling: f
     return _clamp_knob(max(0.0, value), ceiling)
 
 
-#: The numeric knobs a browser profile carries. Constrained rather than bound to
-#: ``float`` so ``_clamp_knob`` returns an ``int`` for the int readers: a
-#: ``float`` return would quietly widen every scroll step through a float.
+#: The numeric knobs a profile carries. Constrained rather than ``float``
+#: so ``_clamp_knob`` returns an int for int readers, not a widened float.
 _Knob = TypeVar("_Knob", int, float)
 
 
@@ -104,9 +103,8 @@ LAZY_SCROLL_STEPS = DEFAULT_LAZY_SCROLL_STEPS
 LAZY_SCROLL_DELAY_SECONDS = DEFAULT_LAZY_SCROLL_DELAY_SECONDS
 
 
-# Server-side clamp for caller-supplied action wait durations: a hostile
-# policy must not be able to park a render (or, pre-fix, the event loop)
-# for an arbitrary time.
+# Server-side clamp for caller action waits: a hostile policy must not
+# park a render (or the event loop) for an arbitrary time.
 MAX_ACTION_WAIT_SECONDS = 10.0
 
 
@@ -201,9 +199,8 @@ class BrowserDriver:
                 else get_env_int("CRAWLUTRON_MAX_BROWSER_RENDERS", DEFAULT_MAX_BROWSER_RENDERS, lo=1)
             )
         )
-        # A ``storage_state`` may only be honoured when the operator configured an
-        # allowlist to honour it against. Defaulting to the platform temp dir used
-        # to be that allowlist, and it is world-readable on most hosts.
+        # A storage_state is honoured only against an operator allowlist; the
+        # platform temp dir is not one -- it is world-readable on most hosts.
         self._cache_dir = cache_dir if settings is None else settings.cache_dir
 
         self._lazy_scroll_steps = (
@@ -407,14 +404,8 @@ class BrowserDriver:
             await self._async_sleep(0.1)
 
     async def flatten_shadow_dom(self, page: Any) -> None:
-        # Move the children of every open shadow root into its light-DOM host
-        # so that page.content() (and thus link/text extraction) includes shadow-DOM
-        # content. Closed shadow roots are not accessible and are left untouched.
-        # Nested shadow roots are handled by recursing into each shadow root before
-        # its children are moved.
-        # FIX: Collect shadow root children FIRST, then move in separate pass to
-        # avoid mutation during iteration (could cause duplicates, infinite loops,
-        # or HierarchyRequestError if moving a node into its own descendant).
+        # Move each open shadow root's children into its light-DOM host (closed
+        # roots are inaccessible); collect first, then move, to avoid mutation.
         with contextlib.suppress(Exception):  # flattening is best-effort; never fail a render over it
             await page.evaluate(
                 """() => {
@@ -602,10 +593,8 @@ class BrowserDriver:
                 continue
             action_type = str(action.get("type", "")).lower()
             if action_type not in BROWSER_ACTION_TYPES:
-                # The model boundary already refuses an unknown type, so reaching
-                # this is a route that bypassed it. Logged rather than skipped in
-                # silence: a caller whose action was dropped needs to know, and
-                # the alternative is the page loading with nothing done.
+                # The model boundary refuses an unknown type, so reaching this is a
+                # bypass; log it -- a silently dropped action is a no-op page load.
                 logger.warning(
                     "browser_action_skipped",
                     extra={"reason": "unknown_action_type", "action_type": action_type},
