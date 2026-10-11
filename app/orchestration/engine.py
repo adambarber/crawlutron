@@ -180,10 +180,7 @@ def _stale_seeds(
 _SPILL_PREFIX = "bc-spill-"
 
 # A spill is owned while any process holds an advisory lock on it -- a kernel
-# fact, not this process's memory; see :func:`_spill_is_unowned`.
-
-
-# Sweep cadence: one temp-dir scan per interval per process; None sweeps at once.
+# fact, not memory (see :func:`_spill_is_unowned`). Sweep: one scan per interval.
 _SPILL_GC_MIN_INTERVAL_SECONDS = 300.0
 _LAST_SPILL_GC_MONOTONIC: float | None = None
 

@@ -27,15 +27,12 @@ import io
 import json
 from typing import Any, Literal, get_args
 
-#: The formats a caller may name. Spelled out here because ``Literal`` requires
-#: literal members, and kept here because this is the module that has to
-#: dispatch on them. Everything else derives from it.
+#: The formats a caller may name. ``Literal`` needs literal members, and this
+#: module dispatches on them; everything else derives from this set.
 OutputFormat = Literal["json", "jsonl", "ndjson", "markdown", "csv"]
 
-#: Derived from the annotation above rather than written beside it. Two
-#: hand-kept copies of one set is the drift this project rejects elsewhere, and
-#: it was the state this module was in: the serializer's membership test and the
-#: model's annotation could disagree, and nothing tested that they did.
+#: Derived from the annotation above: a second hand-kept copy of one set is
+#: drift nothing tests, and it is what this module used to carry.
 SUPPORTED_OUTPUT_FORMATS: tuple[str, ...] = get_args(OutputFormat)
 
 
@@ -114,14 +111,8 @@ _CSV_COLUMNS = [
     "http_status",
 ]
 
-# CSV/Excel formula injection guard (#csv-injection). Spreadsheet apps execute
-# cells whose first character is one of ``= + - @`` (or TAB / CR) as a
-# formula. Crawled page content is attacker-influenced; a malicious page
-# whose title is ``=cmd|'/c calc'!A1`` would otherwise execute when the
-# caller opens the CSV. Prefixing with a single quote neutralizes the
-# formula while staying readable (most spreadsheets drop the leading quote
-# on display). URLs / numeric columns are exempt: ``=`` in a URL is just a
-# query separator.
+# CSV/Excel formula injection guard (#csv-injection): spreadsheets execute cells
+# starting with one of ``= + - @`` (or TAB / CR); a leading quote neutralizes them.
 _CSV_FORMULA_PREFIXES: tuple[str, ...] = ("=", "+", "-", "@", "\t", "\r")
 _CSV_NEUTRALIZE_COLUMNS: set[str] = {"error", "classification", "status"}
 

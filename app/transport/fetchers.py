@@ -191,9 +191,8 @@ async def _cffi_fetch(
     # Same release point as the http fetcher: any pooled client superseded by a
     # loop change (either kind) is closed here, on this live loop.
     await http_client_pool._drain_pending_client_closes()
-    # Shared session, built once per event loop instead of per request. The class
-    # is AsyncSession (curl_cffi>=0.7): AsyncClient does not exist, and naming it
-    # raises AttributeError and silently degrades every fetch to plain httpx.
+    # One shared session per event loop. The class is AsyncSession
+    # (curl_cffi>=0.7): AsyncClient does not exist, and naming it breaks every fetch.
     client = http_client_pool.get_cffi_session()
     try:
         started = time.monotonic()

@@ -109,8 +109,7 @@ def host_policy_reason(host: str, *, policy: HostPolicy) -> str | None:
 _PRIVATE_HOSTS = frozenset({"localhost", "host.docker.internal"})
 
 #: (raw env value, parsed decision) for CRAWLUTRON_ALLOW_PRIVATE_TARGETS.
-#: Value-keyed, not time-keyed: an env change, including a test monkeypatch,
-#: takes effect on the very next call; an unchanged value skips the parse.
+#: Value-keyed: an env change lands on the next call, an unchanged one skips it.
 _PRIVATE_TARGET_DECISION: tuple[str | None, bool] | None = None
 
 
@@ -129,9 +128,8 @@ def allow_private_targets() -> bool:
     decision = parse_bool_env("CRAWLUTRON_ALLOW_PRIVATE_TARGETS", default=False)
     _PRIVATE_TARGET_DECISION = (raw, decision)
     if decision:
-        # Warned at the decision, not at each call site: this runs on the
-        # per-fetch SSRF path, so a warning here would be a log flood. The memo
-        # makes it once per distinct env value.
+        # Warned at the decision, not per call: this is the per-fetch SSRF path,
+        # so the memo logs once per distinct env value instead of flooding.
         logging.getLogger(__name__).warning(
             "SSRF private-target guard DISABLED by CRAWLUTRON_ALLOW_PRIVATE_TARGETS=%r: "
             "caller-supplied URLs may now reach private, loopback, and link-local "
@@ -163,9 +161,8 @@ def _host_is_public(host: str) -> bool:
     """
     if host in _PRIVATE_HOSTS:
         return False
-    # A host that is not an address at all is a name, and what it resolves to is
-    # judged separately against ``is_public_ip_value`` once the resolver has
-    # answered. Only a literal that lands in a rejected range is refused.
+    # A host that is not an address is a name, judged against ``is_public_ip_value``
+    # once the resolver answers; only a literal IP in a rejected range is refused.
     return classify(host) in (AddressClass.NOT_AN_ADDRESS, AddressClass.PUBLIC)
 
 

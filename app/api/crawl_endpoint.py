@@ -105,16 +105,12 @@ async def crawl(
     """Execute a policy-driven crawl (sync or async webhook mode)."""
     with request_gate("crawl_request_rejected", logger=logger, reject=_crawl_rejection):
         if payload.output_format:
-            # Validate the format before the branch commits to sync or async
-            # the async path otherwise accepts a bad format and only
-            # fails inside a detached task the caller can no longer inspect.
+            # Validate the format before the branch commits to sync or async:
+            # the async path only fails inside a detached task, unseen by the caller.
             _serialize_or_reject([], payload.output_format)
         payload_dict = payload.model_dump(exclude_none=True)
-        # Gate the batch size at the boundary, before the 202 is ever
-        # returned. The async branch otherwise accepts an oversized batch and
-        # only fails it inside the detached background task, where the caller
-        # can no longer see why. Same chokepoint the engine uses, so sync and
-        # async cannot drift.
+        # Gate the batch size at the boundary, before the 202: the async branch
+        # fails oversized batches inside a detached task the caller cannot see.
         host_policy = HostPolicy.from_settings(settings)
         checked = checked_payload_urls(
             payload_dict,
@@ -131,12 +127,8 @@ async def crawl(
             if webhook_url:
                 await validate_webhook_url_async(webhook_url, host_policy=host_policy)
             request_id = new_request_id()
-            # The store's tier, not ``settings``: this policy is about to be
-            # written into that store, and a row is read back with the tier the
-            # store holds. Deriving a tier here from the same settings the
-            # store was built from is right by accident and wrong the moment
-            # they differ -- and then the policy the caller submitted and the
-            # one the job later runs disagree about every limit it omitted.
+            # The store's tier, not ``settings``: the row is read back with the
+            # store's tier, and two tier sources drift apart the moment they differ.
             await job_store.acreate_single_shot(
                 request_id, checked[0], read_policy(payload_dict.get("policy"), job_store.tier)
             )
