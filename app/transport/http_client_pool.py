@@ -151,10 +151,8 @@ def _build_async_client(settings: CrawlerSettings | None = None) -> httpx.AsyncC
         settings = _default_settings()
     client = httpx.AsyncClient(
         http2=True,
-        # Providers are operator-configured endpoints; any redirect must be
-        # treated as suspicious rather than silently followed (no per-hop
-        # re-validation on this client). The crawl fetcher does its
-        # own manual hops and never relies on this flag.
+        # Providers are operator-configured endpoints, so a redirect is suspicious
+        # and never followed here; the crawl fetcher performs its own hops.
         follow_redirects=False,
         timeout=Timeouts.defaults().as_httpx(),
         limits=httpx.Limits(
@@ -183,20 +181,14 @@ async def _safe_aclose(client):
         await close()
 
 
-# Superseded loop-bound pooled clients awaiting a live event loop to be closed
-# on. Shared by every pooled kind (httpx.AsyncClient and curl_cffi.AsyncSession
-# are the same resource: a connection pool bound to one loop), so one bounded
-# backlog and one reaper cover both.
-# Bounded so a stream of superseded clients cannot grow the list without
-# bound if drains are delayed.
+# Superseded loop-bound pooled clients awaiting a loop to close on -- one bounded
+# backlog and reaper cover both httpx and curl_cffi kinds.
 _PENDING_CLIENT_CLOSE: list[Any] = []
 _PENDING_CLIENT_CLOSE_MAX = 32
 _PENDING_CLIENT_CLOSE_LOCK = threading.Lock()
 
-# Close tasks scheduled from synchronous context. asyncio keeps only a weak
-# reference to a running task, so without a strong owner a teardown scheduled
-# during a lock-held rebuild can be garbage collected before it runs to
-# completion. Entries are evicted by each task's own done callback.
+# Close tasks scheduled from a synchronous context. asyncio holds tasks only
+# weakly, so a strong owner keeps them alive; each done callback evicts its entry.
 _INFLIGHT_CLIENT_CLOSES: set[asyncio.Future] = set()
 
 
@@ -316,23 +308,16 @@ def _schedule_client_close(client, *, is_closed: Callable[[Any], bool]) -> None:
     try:
         loop = asyncio.get_running_loop()
     except RuntimeError:
-        # No running loop to schedule on. ``asyncio.ensure_future`` would not
-        # raise here -- with no current loop it silently builds one, parks the
-        # task on it, and leaves a coroutine that is never awaited (a
-        # DeprecationWarning plus an "Exception ignored in: <coroutine object
-        # _safe_aclose>" at GC). Declining to schedule is the honest no-op: the
-        # queued reference is what guarantees the eventual close.
+        # No running loop: ensure_future would silently build one and strand the
+        # coroutine. Declining is honest -- the queued reference closes it.
         return
     if loop.is_closed():
-        # The swap raced a loop that is shutting down: ``create_task`` would
-        # raise "Event loop is closed" into the synchronous swap path. The
-        # client is dropped instead -- process teardown reclaims its sockets.
+        # A swap racing loop shutdown: create_task would raise into the synchronous
+        # swap path. The client is dropped; process teardown reclaims its sockets.
         return
     task = loop.create_task(_safe_aclose(client))
-    # Asyncio keeps only a weak reference to a running task, so a teardown
-    # scheduled from a synchronous rebuild could be garbage collected before it
-    # finished -- reproducing the leak this function exists to prevent. The done
-    # callback is what evicts again, so this set cannot grow without bound.
+    # asyncio holds tasks weakly, so a teardown scheduled from a synchronous
+    # rebuild needs a strong owner; the done callback evicts, bounding the set.
     _INFLIGHT_CLIENT_CLOSES.add(task)
     task.add_done_callback(_INFLIGHT_CLIENT_CLOSES.discard)
 
@@ -386,10 +371,8 @@ class _LoopBoundPooledClient:
     def _supersede(self, superseded: Any) -> None:
         """Track and best-effort-close a client that is being replaced."""
         _release_dropped_client(_queue_superseded_close(superseded), is_closed=self.is_closed)
-        # The descriptor decides reuse-safety for its own kind: curl_cffi's
-        # session publishes no ``is_closed`` flag, so a shared attribute probe
-        # with a "missing means closed" default would classify every session as
-        # already finished and never close it eagerly.
+        # The descriptor decides reuse-safety for its own kind: a shared probe with
+        # "missing means closed" would never close curl_cffi sessions.
         if not self.is_closed(superseded):
             _schedule_client_close(superseded, is_closed=self.is_closed)
 
@@ -439,10 +422,8 @@ class _LoopBoundPooledClient:
                 # else. A closed client owns no live sockets.
                 return self._rebuild(settings, None)
             if _loop_bound_to(current) is loop:
-                # Hot path (perf review 1.1): the pooled client is alive on the
-                # current loop, so no settings are consulted at all. Settings
-                # are pool configuration consumed only at construction; a
-                # reused client carries the limits it was built with.
+                # Hot path: a pooled client alive on the current loop is reused as
+                # is; settings are pool config consumed only at construction.
                 return current
             return self._rebuild(settings, current)
 
@@ -480,11 +461,8 @@ async def close_async_http_client() -> None:
     await _HTTP_CLIENT_SINGLETON.shutdown()
 
 
-# Shared curl_cffi TLS-impersonation session (one per running event loop).
-# A fresh AsyncSession per request rebuilt TLS state and the connection pool
-# every time; sharing it keeps warm connections and the impersonated
-# fingerprint across requests. Mirrors
-# get_async_http_client, including the loop-change rebuild.
+# One TLS-impersonation session per event loop, mirroring
+# get_async_http_client (loop-change rebuild included), keeping connections warm.
 _DEFAULT_CFFI_SESSION: Any | None = None
 _CFFI_SESSION_INIT_LOCK = threading.Lock()
 
@@ -502,16 +480,8 @@ def _build_cffi_session(settings: CrawlerSettings | None = None) -> Any:
     that needs them. Saying so in the signature is what lets this be a direct
     reference rather than a lambda discarding its argument.
     """
-    # discard_cookies=True: the session ships a requests-compatible jar
-    # that would otherwise absorb every Set-Cookie and replay domain-matching
-    # cookies on later requests INDEPENDENTLY of the namespaced
-    # _GLOBAL_COOKIE_JAR -- the exact cross-tenant leak cookie_namespace exists
-    # to prevent -- and a replayed jar can also clobber the namespaced
-    # Cookie: header the fetcher builds per request. With discarding on, the
-    # jar is born empty and stays empty, so cookies flow only through the
-    # namespaced chokepoint: out via _cookie_header_for_url, in via
-    # _store_set_cookies. Sending is unaffected; curl still honors the Cookie
-    # header we set explicitly.
+    # discard_cookies=True: the built-in jar would replay cookies outside the
+    # namespaced chokepoint -- a cross-tenant leak -- so it is born empty.
     session: cffi_requests.AsyncSession = cffi_requests.AsyncSession(
         impersonate=CFFI_IMPERSONATE_TARGET, discard_cookies=True
     )
@@ -587,9 +557,8 @@ def reset_process_state() -> None:
     """
     _discard_if_unowned_loop(close_async_http_client, "_DEFAULT_HTTP_CLIENT")
     _discard_if_unowned_loop(close_cffi_session, "_DEFAULT_CFFI_SESSION")
-    # A sync context cannot await ``aclose``, and the queue exists precisely so a
-    # request that cannot await hands the reference off. Dropping the queue lets GC
-    # reclaim the sockets once the loop that owns them exits.
+    # A sync context cannot await aclose; dropping the queue lets GC reclaim the
+    # sockets once the loop that owns them exits.
     with _PENDING_CLIENT_CLOSE_LOCK:
         _PENDING_CLIENT_CLOSE.clear()
 

@@ -31,14 +31,8 @@ def _is_private_or_loopback_ip(ip: str) -> bool:
     return not is_public_ip_value(ip)
 
 
-# Per-host DNS resolution cache. Crawling a single host thousands of times
-# would otherwise issue a blocking socket.getaddrinfo per fetch. The TTL is
-# deliberately short so DNS changes (and the rebinding window for SSRF) stay
-# bounded; the SSRF path re-validates resolved IPs on every fresh resolution.
-#
-# One locked, bounded, TTL'd store (app.safety.bounded_ttl): the whole-cache clear
-# beyond the cap and the manual lock both lived here before, and both
-# produced races. LRU eviction inside put() replaces the soft-cap clear.
+# Per-host DNS cache; the TTL is short so rebinds stay bounded, with IP
+# re-validation on every fresh resolution. One locked store: app.safety.bounded_ttl.
 _DNS_TTL = 60.0
 _DNS_CACHE_MAX = 4096
 _DNS_CACHE: BoundedTTLCache[str, list[str]] = BoundedTTLCache(max_entries=_DNS_CACHE_MAX, ttl=_DNS_TTL)
@@ -63,17 +57,12 @@ def _resolve_ips(hostname: str, *, use_cache: bool = True) -> list[str]:
         if cached is not None:
             return cached
     addrinfo = socket.getaddrinfo(hostname, None)
-    # The sockaddr's address slot is typed ``str | int | None`` (AF_INET6
-    # tuples carry a scope id in a later position, and the socket stub is
-    # intentionally loose), but a resolved address is always a string here;
-    # coerce per entry so the declared ``list[str]`` contract the SSRF check
-    # and the cache rely on is what the function actually delivers.
+    # The sockaddr slot is ``str | int | None`` (AF_INET6 scope id), but a resolved
+    # address is always a string here; coerce so the list[str] contract holds.
     ips = [str(entry[4][0]) for entry in addrinfo]
     if use_cache:
-        # Only the validation path populates the cache. The pinning path
-        # resolves fresh and must never persist an IP here -- otherwise a
-        # private/rebound IP seen during pinning would poison the shared
-        # validation cache and let the check later treat it as safe.
+        # Only the validation path populates the cache; the pinning path resolves
+        # fresh, or a rebound private IP would poison the shared validation cache.
         _DNS_CACHE.put(hostname, ips)
     return ips
 
@@ -91,10 +80,8 @@ def check_ssrf_protection(url: NormalizedUrl) -> None:
     try:
         ips = _resolve_ips(hostname)
     except socket.gaierror:
-        # An unresolvable hostname is not a valid public target; fail closed
-        # rather than silently allowing it. Previously this let unresolvable
-        # hostnames bypass the private-IP block and reach loopback via the pin
-        # fallback in resolve_and_pin_host.
+        # An unresolvable hostname is not a valid public target: fail closed rather
+        # than let it reach loopback via the pin fallback.
         raise ValueError(f"SSRF protection: cannot resolve hostname {hostname}") from None
     for ip in ips:
         if not is_public_ip_value(ip):
@@ -124,19 +111,15 @@ def resolve_and_pin_host(url: NormalizedUrl) -> tuple[str, str]:
 
     hostname = url.host
     if allow_private_targets():
-        # Local-dev escape hatch: bypass resolution but connect to the REAL
-        # hostname. Previously this hardcoded 127.0.0.1, which misrouted every
-        # fetch/webhook to loopback and broke virtual-host routing.
+        # Local-dev escape hatch: bypass resolution, connect to the real hostname.
         return hostname, hostname
     try:
-        # Resolve FRESH (no cache): the pinned IP governs the actual connection
-        # and must be re-validated against the SSRF blocklist on every call so a
-        # DNS rebind inside the cache TTL cannot bypass the check (TOCTOU).
+        # Resolve FRESH (no cache): the pin governs the connection, so it is
+        # re-validated every call and a rebind inside the TTL cannot bypass it.
         ips = _resolve_ips(hostname, use_cache=False)
     except socket.gaierror:
-        # Fail closed. Returning the hostname here let the client resolve it again
-        # at connect time with no validation applied, which is the open door
-        # check_ssrf_protection closes on the other side of this same lookup.
+        # Fail closed: returning the hostname lets the client re-resolve at connect
+        # time with no validation applied.
         raise ValueError(f"SSRF protection: cannot resolve hostname {hostname}") from None
     for ip in ips:
         if is_public_ip_value(ip):
@@ -234,11 +217,8 @@ class PinRule(Protocol):
     def __call__(self, url: NormalizedUrl, headers: dict[str, str]) -> tuple[str, dict[str, str]]: ...
 
 
-# Dedicated thread pool for blocking DNS resolution so hundreds of concurrent
-# fetches never block the event loop or contend with the default asyncio executor
-# (used for extraction and other blocking work). The pinning path resolves FRESH
-# on every call for SSRF safety, so without this the loop would stall on each
-# resolver call.
+# Dedicated thread pool for blocking DNS: concurrent fetches never stall the
+# event loop or contend with the default executor used for extraction.
 DNS_EXECUTOR = concurrent.futures.ThreadPoolExecutor(max_workers=32, thread_name_prefix="dns-resolve")
 
 
@@ -268,18 +248,8 @@ def _off_loop[**P, R](resolve: Callable[[], Callable[P, R]]) -> Callable[P, Awai
     return functools.wraps(resolve())(_run)
 
 
-# The fetch path's off-loop entry to the pin rule -- SSRF-safe request building,
-# including the blocking ``socket.getaddrinfo`` call, on a worker thread so the
-# event loop is never stalled by a resolver lookup.
-#
-# DERIVED from the rule rather than hand-written beside it. :func:`_off_loop`
-# keeps the builder's whole parameter list, so this binding has no signature of
-# its own to spell, and an off-loop pinned request is constructible exactly one
-# way: on this module's pool, with the arguments :func:`build_pinned_request`
-# declares. It used to be a second ``async def`` that restated that list beside
-# the builder -- two spellings of the pin rule that were free to disagree, and
-# the one rule in this module a caller could get subtly wrong without any test
-# noticing.
+# Off-loop entry to the pin rule -- SSRF-safe build, getaddrinfo included -- on a
+# worker thread, so a resolver lookup never stalls the event loop.
 build_pinned_request_async = _off_loop(lambda: build_pinned_request)
 
 
@@ -323,9 +293,8 @@ def _redirect_target(
         return None
     new_url = current_url.resolve(location)
     if new_url is None:
-        # ``resolve`` is quiet because discovery drops refused links; a
-        # redirect walk must refuse loudly instead -- reading the redirect
-        # body as the page would treat a refused hop as success.
+        # ``resolve`` is quiet because discovery drops refused links; a redirect
+        # walk refuses loudly, so a refused hop never reads as page success.
         raise ValueError(f"redirect target refused admission: {location!r}")
     if _crosses_origin(new_url, current_url):
         request_headers = {k: v for k, v in request_headers.items() if k.lower() not in _CREDENTIAL_HEADERS}
@@ -366,13 +335,8 @@ class _RedirectChain:
         # the mapping, and the caller's dict must not be rewritten underneath it.
         self.headers = dict(headers)
         self.hops = 0
-        # Off-loading belongs to the call site, not to the rule: a blocking rule
-        # goes to the pool whether it is this module's builder or a substituted
-        # one, so "pinning never stalls the loop" is a property the walk
-        # enforces rather than a property of which name happens to be bound.
-        # The rule arrives already resolved: ``None`` means "the real one" is a
-        # question :func:`apinned_hops` answers once, and a chain that held the
-        # sentinel would be re-deciding it on every construction.
+        # Off-loading belongs to the call site, not the rule (a substituted builder
+        # goes to the pool too); ``None`` resolves the real rule once, per chain.
         self._off_loop = _off_loop(lambda: pin)
 
     async def pin(self) -> tuple[str, dict[str, str]]:
