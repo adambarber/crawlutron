@@ -68,16 +68,11 @@ async def fetch_with_retries(
             transient_errors.append(classify_error_code(error))
             if attempt >= max_attempts:
                 raise
-            # Back off between attempts (capped exponential) so a failing
-            # or rate-limiting origin sees widening gaps instead of a tight
-            # hammering loop. The gap is bounded so a large retry budget can
-            # never park a URL beyond the per-retry ceiling.
+            # Capped exponential backoff so a failing origin sees widening
+            # gaps; the bound keeps a large retry budget from parking a URL.
             await asyncio.sleep(retry_backoff_seconds(attempt))
-    # ``max_attempts`` is floored at 1 above, so every call enters the loop and
-    # either returns a response or re-raises on its final attempt. This line is
-    # unreachable in practice; it is stated rather than left implicit because
-    # mypy cannot derive the loop's totality from the floor and would otherwise
-    # report a missing return that reads like a real fall-through.
+    # ``max_attempts`` is floored at 1, so every call returns or re-raises;
+    # stated because mypy cannot derive the loop's totality from the floor.
     raise AssertionError("unreachable: retry loop is total")
 
 
@@ -104,13 +99,8 @@ def looks_like_binary_body(body: bytes, content_type: str | None, url: Normalize
     }
 
 
-#: Every key a ``diagnostics["robots"]`` block carries, with the answer for a
-#: robots.txt that was never consulted. One declaration of the shape, because the
-#: four branches that build it used to write it out and they did not agree: the
-#: failure branch had no ``allowed`` and no ``crawl_delay_seconds`` key at all,
-#: so a consumer reading ``robots["allowed"]`` off a robots.txt that failed to
-#: fetch raised ``KeyError`` instead of learning that the answer is unknown.
-#: ``sitemaps`` is a list in the block; callers that pass one in pass a list.
+#: Every key a ``diagnostics["robots"]`` block carries, with the answer
+#: for a robots.txt never consulted: the branches must agree on the shape.
 _ROBOTS_DIAGNOSTICS: dict[str, Any] = {
     "url": None,
     "allowed": True,
@@ -160,10 +150,8 @@ async def discovery_diagnostics(
     if not robots_evaluated:
         diagnostics["robots"] = _robots_diagnostics("disabled")
     elif engine_robots_sitemaps is not None:
-        # The engine already fetched /robots.txt (for allow/deny checks) and
-        # extracted its Sitemap directives; reuse them instead of hitting the
-        # network a second time. An empty list is a valid signal (robots
-        # fetched, no Sitemap lines) and still means "do not re-fetch".
+        # Reuse the /robots.txt the engine already fetched (allow/deny and
+        # Sitemap directives); an empty list is a valid "no sitemaps" signal.
         robots_sitemaps = [
             admitted.raw
             for entry in engine_robots_sitemaps
@@ -177,10 +165,8 @@ async def discovery_diagnostics(
         if robots_url is None:
             return diagnostics
         try:
-            # The same sync-double tolerance the fetch_helpers chokepoint
-            # quarantines: the honest type is the coroutine, a sync double
-            # returns the result directly, and this local is where the seam
-            # says so.
+            # The fetch_helpers chokepoint's sync-double tolerance: the honest
+            # type is the coroutine; a sync double returns the result directly.
             robots_response: Any = http_fetcher(robots_url, headers, limits.timeout_seconds)
             if inspect.iscoroutine(robots_response):
                 robots_response = await robots_response

@@ -32,7 +32,7 @@ LIMIT = 2
 #: The measured long-run count per root, at the last wave. Exact equality both
 #: ways: a run fails, a trimmed tree demands the lower number in this commit.
 _BUDGETS = {
-    "app": 130,
+    "app": 112,
     "tests": 564,
 }
 

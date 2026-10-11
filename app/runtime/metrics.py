@@ -30,9 +30,8 @@ from app.models.engine_crawl_result import EngineCrawlResult
 if TYPE_CHECKING:
     from app.storage.coordination_counters import CoordinationCounters
 
-# Store keys. The Prometheus names differ from these, so the mapping is written
-# out once in `as_prometheus` rather than derived -- a derivation would have to
-# encode the "crawler_" prefix and the _total suffix rules as string surgery.
+# Store keys. The Prometheus names differ, so the mapping is written out
+# once in `as_prometheus` rather than derived from prefix/suffix surgery.
 _CRAWL_REQUESTS = "crawl_requests_total"
 _CRAWL_ACCEPTED = "crawl_requests_accepted_total"
 _CRAWL_RESULTS = "crawl_results_total"
@@ -50,9 +49,8 @@ _STRATEGY_PREFIX = "strategy:"
 _CLASSIFICATION_PREFIX = "classification:"
 _PROVIDER_PREFIX = "search_provider:"
 
-# Counter name -> the observable field callers read. Built once so a counter
-# cannot be recorded under one name and read under another, which is the drift
-# this class exists to prevent.
+# Counter name -> the observable field callers read, built once so a
+# counter cannot be recorded under one name and read under another.
 _COUNTERS = {
     _CRAWL_REQUESTS: "crawl_requests_total",
     _CRAWL_ACCEPTED: "crawl_requests_accepted_total",
@@ -68,9 +66,8 @@ _COUNTERS = {
     _THROTTLE_BATCHES: "resource_throttle_batches_total",
 }
 
-# Declared for the type checker and for readers: the counter fields are
-# properties over `_COUNTERS`, not dataclass fields, so a rename cannot leave a
-# field behind that nothing writes.
+# Declared for the checker and for readers: the counter fields are
+# properties over `_COUNTERS`, so a rename cannot orphan a writer.
 _COUNTER_FIELDS = frozenset(_COUNTERS.values())
 
 
@@ -86,10 +83,8 @@ class MetricsStore:
         self.resource_memory_utilization: float = 0.0
         self.resource_cpu_utilization: float = 0.0
 
-    # -- counter views -----------------------------------------------------
-    # Reads go through the store so they see every worker's contribution.
-    # Writes happen only in the observe/record methods below, so each counter's
-    # name and its delta live in exactly one place.
+    # Reads go through the store so they see every worker's contribution;
+    # writes happen only in observe/record, so name and delta live once.
 
     def _read(self, key: str) -> float:
         if self._counters is not None:

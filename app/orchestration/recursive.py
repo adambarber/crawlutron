@@ -33,14 +33,8 @@ from app.safety.safe_regex import BoundedPattern
 from app.vocabulary.limits import ENGINE_BATCH_CONCURRENCY_MULTIPLIER
 from app.vocabulary.taxonomy import is_transient_classification
 
-# A transiently-failed URL is not a dead page: our fetch died, or capacity was
-# the problem, so the page itself is still worth having. The recursive loop
-# re-queues such a task onto the frontier tail so the at-least-once contract
-# holds for a DNS blip and an exhausted renderer pool alike. The
-# cap stops a permanently unreachable host from spinning one URL forever: after
-# this many re-queues the URL fails for real and the crawl degrades instead of
-# livelocking. Which failures qualify is the taxonomy's call, not a local list
-# -- see ``app.vocabulary.taxonomy.is_transient_classification``.
+# A transiently-failed URL is not a dead page: the loop re-queues it onto
+# the frontier tail, and the cap keeps an unreachable host from spinning it.
 MAX_TRANSIENT_REQUEUES = 3
 
 
@@ -78,25 +72,18 @@ def requeue_transient(
     if count >= MAX_TRANSIENT_REQUEUES:
         return False
     attempts[task.normalized_url] = count + 1
-    # Depth stays unchanged: a retry is not a deeper crawl, and re-queueing at
-    # the tail preserves BFS order so an oversubscribed crawl does not starve
-    # the rest of the batch.
+    # Depth stays unchanged: a retry is not a deeper crawl, and the tail
+    # re-queue preserves BFS order so one batch cannot starve the rest.
     frontier.append((depth, task))
     return True
 
 
-# Self-managed concurrency ceiling (#self-tuning): the recursive dispatcher
-# ramps its per-batch concurrency up to this many base units while the resource
-# gate is open, then the gate's scale factor pulls it back under pressure. This
-# replaces a fixed operator-configured concurrency cap with automatic sizing to
-# the cgroup budget. Kept modest so a single batch cannot overshoot the hard
-# headroom before the next saturation check.
+# Self-managed concurrency ceiling (#self-tuning): per-batch concurrency ramps
+# while the gate is open, which pulls it back under pressure.
 RECURSIVE_RAMP_MAX: int = 128
 
-# How far into the frontier we look to decide whether the next batch is
-# predominantly cheap HTTP work. Matches the max achievable batch size
-# (ramp ceiling x concurrency multiplier) so we gauge the very batch we're about
-# to size.
+# How far into the frontier we look to call the next batch cheap-HTTP or
+# not; it matches the max achievable batch size we are about to size.
 _HTTP_HEAVY_LOOKAHEAD: int = RECURSIVE_RAMP_MAX * ENGINE_BATCH_CONCURRENCY_MULTIPLIER
 
 
