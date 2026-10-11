@@ -125,13 +125,8 @@ def _frontier_identity(value: Any, *, host_policy: HostPolicy) -> NormalizedUrl 
     if isinstance(raw_url, NormalizedUrl):
         return raw_url
     raw_url = str(raw_url)
-    # A refused target gets no identity. The owner returns None for both refusal
-    # reasons -- private_network_target and host_not_allowed -- and the raw
-    # string is not a consolation prize: it is exactly the value the policy just
-    # rejected, so falling back to it re-admits by another name. The sibling
-    # helpers here (``_candidate_stream``, ``normalize_sitemap_candidates``) both
-    # drop on None; this one used to hand the raw string back, which made it the
-    # only place in the module where a refusal and an acceptance looked alike.
+    # A refused target gets no identity: the raw string is the very value the
+    # policy rejected, so falling back to it re-admits by another name.
     identity = admit_or_none(raw_url, policy=host_policy)
     return identity
 
@@ -178,17 +173,12 @@ class AdmissionOutcome:
     accepted: int = 0
     # Candidates the page cap REFUSED. The page is not admitted and will not be.
     cap_blocked: int = 0
-    # Candidates admitted PAST the cap, which is a different event with an
-    # opposite meaning: nothing was refused. Only the requeue path sets this,
-    # and only because those pages were already admitted and possibly fetched
-    # before the cap was reached. The two are kept apart because a caller that
-    # reconciles this outcome against the frontier it can see cannot otherwise
-    # tell "refused" from "admitted anyway" -- one number claimed both.
+    # Candidates admitted PAST the cap: nothing was refused. Only the requeue
+    # path sets this, for pages already admitted (maybe fetched) before the cap.
     cap_overcommitted: int = 0
     robots_blocked: int = 0
-    # Candidates dropped because their canonical identity was already admitted
-    # (within this call or by the job's existing state). Counted separately from
-    # `cap_blocked` so a cap report never hides a dedupe decision.
+    # Candidates dropped because their canonical identity was already admitted;
+    # counted apart from cap_blocked so a cap report never hides a dedupe.
     duplicates_skipped: int = 0
 
 
@@ -240,8 +230,7 @@ async def admit_discovered_links[T](
         if identity is not None:
             reserved.add(identity)
     # Occupation is this set's size, never a caller's arithmetic: known ∪
-    # frontier is exactly committed + in-flight + queued, and a hand-passed
-    # count was blind to whichever term the caller's own variables missed.
+    # frontier is committed + in-flight + queued, so a hand-passed count was blind.
     current_occupied = len(reserved)
     accepted = 0
     cap_blocked = 0
@@ -271,9 +260,8 @@ async def admit_discovered_links[T](
                 break
         if not chunk:
             break
-        # Drop identities the job already admitted BEFORE any per-candidate
-        # work. A duplicate alias otherwise pays a robots fetch and a crawl-delay
-        # commit for a page that will never be crawled.
+        # Drop already-admitted identities BEFORE per-candidate work, or a
+        # duplicate alias pays a robots fetch and a crawl-delay commit for nothing.
         if reserved:
             before = len(chunk)
             chunk = [candidate for candidate in chunk if candidate.normalized_url not in reserved]
@@ -296,9 +284,8 @@ async def admit_discovered_links[T](
                 duplicates_skipped += 1
                 continue
             delay = None
-            # The crawl-delay lookup is a robots artifact: with robots disabled
-            # it must not run, or a crawl that explicitly disabled robots still
-            # fetched /robots.txt to learn a delay it never asked to honor.
+            # The crawl-delay lookup is a robots artifact: with robots disabled it
+            # must not run, or a crawl still fetches /robots.txt for a delay.
             if respect_robots and robots_crawl_delay is not None:
                 delay = await robots_crawl_delay(candidate.normalized_url)
             if delay is not None and delay > 0:

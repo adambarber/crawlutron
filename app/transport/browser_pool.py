@@ -29,17 +29,12 @@ from app.vocabulary.strategies import BROWSER_HEADED_WARMED, BROWSER_HEADLESS
 logger = logging.getLogger(__name__)
 
 
-# Default bound for BrowserPool.acquire. Renders carry their own
-# per-URL budget on top; this only stops a leaked renderer from hanging
-# waiters forever with no diagnostics.
+# Default bound for BrowserPool.acquire. Renders carry their own per-URL budget;
+# this only stops a leaked renderer from hanging waiters with no diagnostics.
 BROWSER_POOL_ACQUIRE_TIMEOUT_SECONDS: float = 60.0
 
 # --- RAM-budget-aware browser pool sizing ---
-# Each pooled renderer owns one persistent Camoufox process (~600-900 MiB RSS once
-# WebExtensions/Web Content are counted). Because uvicorn runs one pool PER WORKER
-# process, the only way to keep the TOTAL browser count bounded is a single worker
-# Browser-pool RAM-budget sizing now lives in app.runtime.resource_pressure.derive_browser_pool_size
-# (single source of truth shared with the httpx connection pool and the weighted admission).
+# Each renderer holds ~600-900 MiB; sizing lives in derive_browser_pool_size.
 
 
 class BrowserPool:
@@ -190,16 +185,8 @@ class PooledBrowserWorker:
 
     def __init__(self, pool: BrowserPool, *, strategy: CrawlStrategyName | None = None) -> None:
         self._pool = pool
-        # Explicit when the caller knows which chain entry it is rendering for;
-        # otherwise the pool's own renderer configuration supplies the real
-        # browser mode. Never an invented strategy name.
-        #
-        # Validated HERE, not at use. `CrawlStrategyName` includes the two HTTP
-        # strategies, so a browser worker could be built with
-        # `HTTP_DECLARED_CRAWLER` and emit it as a browser result's
-        # `selected_strategy`; a name outside the enum was accepted here and
-        # rejected much later by `CrawlResult.__post_init__`. An annotation is
-        # not a runtime check.
+        # Explicit when the caller names the chain entry; otherwise the pool's
+        # renderer config supplies the mode. Validated here, not at use.
         if strategy is not None and strategy not in _BROWSER_STRATEGIES:
             raise ValueError(
                 f"browser worker strategy must be one of {sorted(_BROWSER_STRATEGIES)}, got {strategy!r}"
@@ -209,20 +196,8 @@ class PooledBrowserWorker:
     def _configured_strategy(self) -> CrawlStrategyName:
         if self._strategy is not None:
             return self._strategy
-        # The pool publishes `browser_strategy` as the same `CrawlStrategyName`
-        # alias this returns, so the value reaching the return is a declared
-        # member and there is nothing here for a checker to narrow.
-        #
-        # This line carried a per-line pyright ignore (spelled without its
-        # leading `#` here on purpose -- prose that quotes a suppression
-        # directive IS one, which is how a comment in `app/api_models.py` had
-        # been silently muting a line for as long as it stood there) calling the
-        # finding a false positive, justified by a `reveal_type` probe of the
-        # *property*. The probe was true and said nothing about this function.
-        # What needed fixing was the constructor above, which accepted an HTTP
-        # strategy name and only had it rejected much later by
-        # `CrawlResult.__post_init__`; it validates there now, and the ignore has
-        # had no finding to suppress since.
+        # The pool publishes browser_strategy as the same CrawlStrategyName alias,
+        # so the returned value is a declared member and nothing needs narrowing.
         return self._pool.browser_strategy
 
     async def __call__(self, job: Any) -> CrawlResult:
@@ -235,25 +210,15 @@ class PooledBrowserWorker:
             try:
                 result = await renderer.render(job.url, job.options, policy=job.host_policy)
                 # The renderer does not know the pool's configured mode, so it
-                # leaves the slot empty; fill it here, at the one boundary that
-                # does, rather than letting the shaper guess a member. The slot
-                # is on the attempt the result holds, which is the only place a
-                # strategy is recorded now.
+                # leaves the slot empty; fill it here, at the one boundary that does.
                 if result.attempt.strategy is None:
                     result = replace(result, attempt=replace(result.attempt, strategy=strategy))
                 return result
             finally:
                 self._pool.release(renderer)
         except Exception as error:
-            # Acquire (or, if a future renderer ever raises out of render,
-            # that too) must not escape: the engine's browser consumer reads
-            # result.metadata/elapsed_ms (absent on EngineCrawlResult) and the
-            # render pipeline reads item["url"] (also absent), so an exception
-            # here used to land in the scheduler's blanket envelope, get
-            # misclassified as network_error, and lose the URL's at-least-once
-            # re-queue. Return the contracted CrawlResult shape instead,
-            # classified through the shared primitive so browser_pool_exhausted
-            # with retryable=True survives to the frontier layer.
+            # Acquire must not escape: an exception would land in the scheduler's
+            # blanket envelope and lose the re-queue, so return the contracted shape.
             return crawl_result_from_exception(
                 error=error,
                 url=job.url,

@@ -50,19 +50,12 @@ __all__ = [
     "validate_wire_policy",
 ]
 
-# "0 means the default page budget" is a meaning the model does not have: it
-# declares 0 as a legal value with a meaning of its own (unbounded, for the
-# whole-site runner). So the absent/zero translation happens before validation,
-# and only for that case. Named here because both the wire edge and the tests
-# need to agree on what the wire default is.
+# 0 is the model's own legal value (unbounded, whole-site runner), so the
+# absent/zero translation happens before validation and only for that case.
 DEFAULT_MAX_PAGES = 100
 
-# Keyed on the model's own field name, and total over it:
-# ``test_every_model_field_names_a_code`` is what keeps it that way. A code for a
-# field the model does not declare is unreachable, but a model field with no
-# code falls through to a bare ``invalid_policy`` -- the caller is told a policy
-# is wrong without being told which part of it, which is the direction that
-# costs a round trip. The gap direction is the one worth a test.
+# Keyed on the model's own field names (test_every_model_field_names_a_code keeps
+# it so): a field with no code reports a bare invalid_policy, not which part.
 _ERROR_CODE_BY_FIELD: dict[str, str] = {
     "schema_version": "invalid_policy",
     "strategies": "invalid_policy_strategies",
@@ -179,11 +172,8 @@ def _with_omitted_defaults(raw: dict[str, Any], tier: PolicyTier | None) -> dict
     the API layer is about to echo, and mutating it is how "we did not touch
     the caller's policy" stopped being true.
     """
-    # Absent and wrong-shaped are different. An absent ``limits`` is the
-    # overwhelmingly common case and still needs the operator tier applied to
-    # it; a ``limits`` that is present but not a mapping is a caller error the
-    # model should report. Collapsing the two skipped both, which is how a
-    # default request ended up with no page bound and no operator timeout.
+    # Absent needs the operator tier applied; present-but-wrong-shape is a caller
+    # error the model reports. Collapsing the two skipped both.
     if tier is None or (raw.get("limits") is not None and not isinstance(raw["limits"], Mapping)):
         return raw
     limits = dict(raw.get("limits") or {})
@@ -287,22 +277,8 @@ def _drop_rejected(raw: dict[str, Any], exc: ValidationError) -> dict[str, Any] 
     return candidate if dropped else None
 
 
-#: What a caller may hand the read edge: a policy that has already been through
-#: :func:`read_policy`, or the raw mapping a request payload still carries.
-#:
-#: :func:`read_policy` is total by design, so its input is not ``CrawlPolicy``
-#: and neither is anything that routes through it. Those edges used to claim
-#: ``CrawlPolicy`` and then call ``read_policy`` on it -- a body that contradicts
-#: its own annotation, invisible to a type checker. Tests found the truth by
-#: passing mappings and being flagged for it, and the fix at each call site was
-#: to widen the annotation until the checker stopped objecting, which is how a
-#: lie survives a type gate.
-#:
-#: Two forms, not ``Any``: ``read_policy`` distinguishes exactly these (a policy
-#: passes through, a mapping is validated and repaired), and naming them keeps
-#: the third case -- a string, a list, a made-up mapping like
-#: ``{"test": "policy"}`` -- an error at the call site instead of a silently
-#: repaired default policy three layers down.
+#: What the read edge accepts: a policy already through :func:`read_policy`, or
+#: the raw mapping a request payload carries -- two forms, never ``Any``.
 PolicyLike = CrawlPolicy | dict[str, Any]
 
 
@@ -395,20 +371,15 @@ def validate_wire_policy(raw: Any, tier: PolicyTier | None = None) -> CrawlPolic
         raise ValueError("invalid_policy") from None
     raw_limits = resolved.get("limits")
     if raw_limits is not None and not isinstance(raw_limits, Mapping):
-        # A caller sent something that is not a limits mapping. Nothing to
-        # translate, and reaching in here is what made a bad ``limits`` raise
-        # TypeError out of the validator. Hand the caller's value to the model
-        # untouched so it reports the shape itself, which lands on the same
-        # invalid_policy_limits answer.
+        # A caller sent a non-mapping limits: hand the value to the model untouched
+        # so it reports the shape, which lands on invalid_policy_limits.
         try:
             return CrawlPolicy.model_validate(_with_omitted_defaults(resolved, tier))
         except ValidationError as exc:
             raise ValueError(_code_for(exc)) from None
     limits = dict(raw_limits or {})
-    # A missing/zero max_pages must be bounded, never "unlimited". The
-    # model's own ge/le bounds a positive request; only the absent/zero/
-    # negative case is translated, because "0 means the default page budget"
-    # is a meaning the model does not have.
+    # A missing/zero/negative max_pages is bounded, never "unlimited": the model
+    # bounds a positive request itself, and 0 is its own legal meaning.
     requested_pages = limits.get("max_pages", 0)
     try:
         if int(requested_pages or 0) <= 0:
