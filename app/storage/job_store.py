@@ -59,15 +59,8 @@ class JobStatus(StrEnum):
 #: legal from. Named once so the sync method and its async twin cannot diverge.
 _Expected = JobStatus | frozenset[JobStatus]
 
-#: The states a job never leaves, and so the only ones a reader may treat as a
-#: final answer. Named once here, beside the enum, because "has this job
-#: finished?" is a question every status reader asks and the answer is a set
-#: rather than a comparison -- and because the tempting proxy for it is wrong.
-#: ``run_async_crawl`` writes ``job.results`` and only then flips the status, so
-#: "has it written results?" is true for a window during which the job is still
-#: running. A reader that answers with results reports a crawl as done while it
-#: is still in flight. PAUSED is deliberately absent: a paused job is stopped,
-#: not finished, and will resume.
+#: The states a job never leaves, so the only final answers a reader may trust.
+#: PAUSED is absent (stopped, not finished) and written results are not status.
 TERMINAL_STATUSES = frozenset({JobStatus.COMPLETED, JobStatus.FAILED, JobStatus.CANCELLED})
 
 
@@ -82,22 +75,13 @@ class FrontierEntry:
         return {"url": self.url.raw, "depth": self.depth}
 
 
-# A persisted row is ``json.loads`` of a TEXT column, so its collections are
-# whatever some earlier writer persisted: possibly absent, possibly a bare
-# string, possibly a list of dicts, possibly corrupt. ``object`` -- not ``Any``
-# -- is the honest annotation, and it is load-bearing rather than cosmetic: with
-# ``Any`` the isinstance narrowing below is invisible to a type checker, so a
-# change to the persisted shape would type-check and then misbehave at runtime.
+# A persisted row is ``json.loads`` of TEXT, so collections may be absent, bare
+# or corrupt. ``object`` not ``Any``: it keeps the isinstance narrowing visible.
 _PersistedJSON = object
 
 
-# The read edge is :func:`app.admission.policy.read_policy` and it has exactly one
-# name. This module used to export ``normalized_policy`` as its own copy of that
-# function, which made the shared read edge a two-home surface: importers picked
-# up whichever spelling their file already imported, and a future change to the
-# repair rules had two definitions to keep in step. The three limit readers
-# below stay here because job-path callers read a single bound at a time and
-# spelling the hop keeps that legible.
+# Policy reads go through app.admission.policy.read_policy -- one read edge.
+# The limit readers below spell one bound at a time for job-path legibility.
 
 
 def job_max_pages(policy: Any, tier: PolicyTier | None = None) -> int:
@@ -255,9 +239,8 @@ def normalize_job_collections(
     return normalized_visited, normalized_frontier, normalized_in_flight
 
 
-# Stats a job row always carries. ``total_discovered`` is deliberately NOT in
-# this tuple: it is frontier-derived, so only the whole-site runner may report
-# it, and a single-shot job has no frontier to derive it from.
+# Stats a row always carries. ``total_discovered`` is frontier-derived, so only
+# the whole-site runner may report it; a single-shot job has no frontier.
 _STATS_KEYS = ("total_crawled", "total_failed", "cap_truncated", "cap_overcommitted")
 
 
@@ -269,13 +252,8 @@ def _normalized_stats(value: Any) -> dict[str, int]:
     stats = _default_stats()
     if isinstance(value, dict):
         for key in (*_STATS_KEYS, "total_discovered"):
-            # ``total_discovered`` is frontier-derived and is reported only when
-            # the whole-site runner actually counted admissions. Seeding it to 0
-            # for every job kind makes a single-shot job -- which has no
-            # frontier, so the quantity is undefined rather than zero -- report
-            # a fabricated zero; that contract belongs to
-            # app/api/async_crawl_runner.py. A value already stored (whole-site
-            # rows) is preserved.
+            # ``total_discovered`` is reported only when the whole-site runner
+            # counted admissions; a stored value is preserved, never seeded zero.
             if key == "total_discovered" and key not in value:
                 continue
             raw = value.get(key, 0)
@@ -310,12 +288,8 @@ class CrawlJobState:
     error: str | None = None
     stats: dict[str, int] = field(default_factory=_default_stats)
     host_policy: HostPolicy = field(default_factory=HostPolicy.unrestricted, repr=False, compare=False)
-    # Which deployment wrote this row, so re-resolving its policy means the same
-    # thing here as it did on the read that loaded it. Held on the row rather
-    # than passed to each read because a job row outlives the request that
-    # created it: threading the tier through every read site is how every one of
-    # them ended up passing nothing, and a stored policy that omitted a limit
-    # then resolved to the model default instead of the operator's.
+    # Deployment tier held on the row: a job outlives its request, and a stored
+    # policy that omitted a limit must resolve as the operator's, not the default.
     tier: PolicyTier = field(default_factory=PolicyTier.model_defaults, repr=False, compare=False)
 
     def to_json(self) -> dict[str, Any]:
@@ -413,10 +387,8 @@ class CrawlJobState:
             host_policy=host_policy,
             tier=tier,
         )
-        # Full normalization pass on every read. from_json establishes the
-        # identity, and this re-derives it over the assembled collections
-        # (cross-list dedupe, shallowest depth) exactly once per load, so no
-        # writer can leave a row that reads as two identities for one page.
+        # from_json establishes identity; this re-derives it over the assembled
+        # collections once per load, so no writer can leave a row reading as two.
         normalize_job_state(job)
         return job
 
@@ -467,10 +439,8 @@ ON CONFLICT(job_id) DO UPDATE SET
 """
 
 
-# The status view: every field the job response exposes, and nothing that would
-# make reading it cost what reading the job costs. Shared by the single and the
-# list read so the two cannot drift -- a field added to one and not the other
-# would let the list quietly describe a different job than the detail view.
+# Every field the job response exposes, shared by single and list reads so the
+# two cannot drift into describing different jobs.
 _JOB_STATUS_PROJECTION = """
     SELECT job_id, root_url, status, created_at, updated_at, stats, error,
            COALESCE(kind, 'whole_site') AS kind,
@@ -756,28 +726,21 @@ class JobStore:
     def __init__(self, db_path: str | Path, *, policy: HostPolicy, tier: PolicyTier):
         self.db_path = Path(db_path)
         self._host_policy = policy
-        # The deployment's operator tier, required rather than defaulted: it is
-        # what makes a stored row that omitted a limit resolve to the same
-        # number the API path would have used, and an optional argument here was
-        # how the job path silently started answering with the model defaults
-        # instead.
+        # Operator tier required, not defaulted: a stored row that omitted a
+        # limit must resolve to the API path's number, not the model default.
         self.tier = tier
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         # Durability/concurrency settings come from the shared store
         # chokepoint (busy_timeout + WAL; confinement invariant).
         self._conn = connect_store(self.db_path, schema=StoreSchema.CRAWL_JOBS)
-        # Serialize all connection use across threads (sqlite3 connections are
-        # not safe for concurrent use even with check_same_thread=False), and
-        # across every other store instance and migration touching this file.
+        # Serialize all connection use: sqlite3 connections are unsafe across
+        # threads, and every other store instance and migration touches this file.
         self._lock = process_lock(store_lock_key(self.db_path))
         # Column-addressed rows: the schema grows by migration, so positional
-        # indexing for a later-added column would couple the read path to ALTER
-        # ordering. sqlite3.Row still supports row[n].
+        # indexing would couple reads to ALTER ordering.
         self._conn.row_factory = sqlite3.Row
-        # The append-only side of a job lives behind its own owner so the row
-        # stays a row: live state is rewritten wholesale each batch, history is
-        # only ever appended to, and conflating them is what made both cost
-        # the same thing.
+        # Live state is rewritten wholesale each batch, history only appended;
+        # the append-only side has its own owner so neither pays for the other.
         self._accumulators = JobAccumulators(self._conn)
 
     def _row_to_job(self, row) -> CrawlJobState:

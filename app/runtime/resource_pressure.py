@@ -36,10 +36,8 @@ _DEFAULT_CPU_HARD = 0.95
 # Manual CPU budget override removed; the discovered quota is the ceiling.
 _DEFAULT_CPU_BUDGET = None
 
-# Opt-in event-loop lag probe: feed loop-lag into
-# admission. Disabled by default so test suites and minimal deployments pay no
-# background-task cost; enable with CRAWLUTRON_LOOP_LAG_PROBE=1 in the
-# container. When disabled the probe reports zero lag and the gate is unaffected.
+# Opt-in event-loop lag probe feeding admission; off by default
+# (CRAWLUTRON_LOOP_LAG_PROBE=1) so tests and minimal deployments pay no task cost.
 LOOP_LAG_PROBE_ENABLED = parse_bool_env("CRAWLUTRON_LOOP_LAG_PROBE", default=False)
 _LOOP_LAG_SAMPLE_INTERVAL = 0.05
 _LOOP_LAG_OK_THRESHOLD = 0.05  # below this lag (s) -> full speed
@@ -116,9 +114,7 @@ class LoopLagProbe:
         return max(0.0, 1.0 - (self._lag - self._ok) / (self._hard - self._ok))
 
 
-# ---------------------------------------------------------------------------
-# CPU sensing (cgroup v2 -> v1 -> unbounded)
-# ---------------------------------------------------------------------------
+# --- CPU sensing (cgroup v2 -> v1 -> unbounded) ---
 
 
 def read_cpu_quota(cgroup_root: str = "/sys/fs/cgroup") -> float | None:
@@ -143,9 +139,8 @@ def read_cpu_quota(cgroup_root: str = "/sys/fs/cgroup") -> float | None:
                 return quota_v2 / period_v2
         return None
 
-    # Cgroup v1: cpu.cfs_quota_us / cpu.cfs_period_us; quota -1 means unlimited.
-    # Both reads are ``int | None`` (the files may be missing on a v2-only host),
-    # which is why the v2 branch above binds its own names.
+    # Cgroup v1 quota/period; quota -1 means unlimited. Reads are ``int | None``
+    # (files may be missing on a v2-only host), so the v2 branch binds its own names.
     quota = _read_int(os.path.join(cgroup_root, "cpu", "cpu.cfs_quota_us"))
     period = _read_int(os.path.join(cgroup_root, "cpu", "cpu.cfs_period_us"))
     if quota is None or quota < 0 or period is None or period <= 0:
@@ -180,9 +175,7 @@ def read_cpu_usage_seconds(cgroup_root: str = "/sys/fs/cgroup") -> float | None:
     return None
 
 
-# ---------------------------------------------------------------------------
-# CPU admission gate (rate-based)
-# ---------------------------------------------------------------------------
+# --- CPU admission gate (rate-based) ---
 
 
 class CpuGate(ResourceGauge):
@@ -278,9 +271,7 @@ class CpuGate(ResourceGauge):
         return self._last_usage is not None and self._last_wall is not None
 
 
-# ---------------------------------------------------------------------------
-# Combined gate over memory + CPU
-# ---------------------------------------------------------------------------
+# --- Combined gate over memory + CPU ---
 
 
 class ResourceGate:
@@ -325,12 +316,8 @@ class ResourceGate:
             usage_ratio=cpu_ratio,
         )
         self._poll_seconds = poll_seconds
-        # Event-loop lag is an independent throttle signal.
-        # The probe is opt-in (CRAWLUTRON_LOOP_LAG_PROBE) so tests
-        # and minimal deployments do not pay for a background task; when off it
-        # reports zero lag and leaves the gate untouched. Injected rather than
-        # read from the module global so a test can enable it without rebinding
-        # a name the rest of the tree also reads.
+        # Opt-in throttle signal (module probe above); injected, not global, so
+        # a test can enable it without rebinding a name the whole tree reads.
         self._lag_probe = LoopLagProbe()
         self._lag_probe_enabled = lag_probe_enabled
 
@@ -397,42 +384,14 @@ class ResourceGate:
         return self.batch_scale_factor()
 
 
-# ---------------------------------------------------------------------------
-# Two-tier weighted admission (replaces the stop-the-world pause)
-# ---------------------------------------------------------------------------
-# HTTP crawls are cheap (a few MiB of page + extraction state per in-flight
-# task); browser crawls are expensive (dominated by the persistent
-# browser-pool processes, which hold most of the cgroup RAM). The old
-# dispatcher called ``wait_while_saturated()`` and parked the ENTIRE crawl
-# while any resource was saturated -- which, with a fixed browser pool, meant
-# the cheap HTTP path was throttled to zero whenever browsers held memory.
-#
-# :class:`WeightedAdmission` instead grants, per batch, as many HTTP tasks as
-# fit the live RAM/CPU headroom, then up to a small browser-tier cap. If nothing
-# fits it yields briefly (backpressure) instead of parking the whole crawl, so
-# the HTTP path can scale to hundreds of concurrent pages while the browser tier
-# stays RAM-budgeted.
+# --- Two-tier weighted admission ---
 
 _HTTP_TASK_RAM_BYTES = get_env_int("CRAWLUTRON_HTTP_TASK_RAM_BYTES", 48 * 1024 * 1024, lo=0)
-# The 700 MiB default reservation sits BELOW the measured RSS range for a
-# live renderer (~600-900 MiB once WebExtensions/Web Content are counted; see
-# app/transport/browser_pool.py). That gap is deliberate, not an
-# oversight, and this comment exists so it is not "corrected" by reflex: the
-# reservation is the weight the weighted admission subtracts from the RAM
-# budget per browser task, and raising it toward the top of the measured range
-# lowers the number of concurrent browsers the admission will grant. Effective
-# browser concurrency is a capacity decision that trades throughput against the
-# hard container memory ceiling (docker-compose mem_limit; the failure mode is
-# an OOM kill of the whole service), so the number stays conservative while the
-# measured range straddles it. The right knob for that trade-off is here
-# (CRAWLUTRON_BROWSER_TASK_RAM_BYTES), not a change to the default.
+# Deliberately below the measured 600-900 MiB renderer RSS (see browser_pool.py):
+# it is the admission weight per browser task, so raising it lowers concurrency.
 _BROWSER_TASK_RAM_BYTES = get_env_int("CRAWLUTRON_BROWSER_TASK_RAM_BYTES", 700 * 1024 * 1024, lo=0)
-# Persistent markitdown workers (app.extraction.content._DocWorker): each imports
-# markitdown plus the PDF/Office parsers once and stays alive for the process, so
-# this is a FIXED reservation, not a per-task estimate. Measured footprint is
-# 100-300 MiB apiece depending on which parsers get touched; the conservative
-# end is the default because the container ceiling is hard (docker-compose
-# mem_limit) and the failure mode is an OOM kill of the whole service.
+# Fixed per-process reservation (markitdown + parsers load once, live forever);
+# conservative end of the measured 100-300 MiB because the ceiling OOM-kills.
 _DOC_TASK_RAM_BYTES = get_env_int("CRAWLUTRON_DOC_TASK_RAM_BYTES", 300 * 1024 * 1024, lo=0)
 # Default persistent markitdown worker count; mirrors the 3 GiB container
 # ceiling the compose pins. Overridable via CRAWLUTRON_EXTRACTION_DOC_WORKERS.
@@ -442,9 +401,7 @@ _MAX_HTTP_CONCURRENCY = get_env_int("CRAWLUTRON_MAX_HTTP_CONCURRENCY", 512, lo=1
 
 
 # --- Shared RAM-budget sizing (browser pool + httpx pool derive from this) ---
-# Both the browser pool and the HTTP connection pool size themselves from the cgroup
-# memory limit, centralized here (import-safe from settings) as the single source of
-# truth so the connection ceiling tracks the weighted admission's HTTP concurrency.
+# One source for both pools so the connection ceiling tracks admission's ceiling.
 _BROWSER_RAM_BYTES = get_env_int("CRAWLUTRON_BROWSER_RAM_BYTES", 700 * 1024 * 1024)
 BROWSER_RAM_FRACTION = get_env_float("CRAWLUTRON_BROWSER_RAM_FRACTION", 0.5, lo=0.0, hi=1.0)
 _MAX_DERIVED_POOL_SIZE = get_env_int("CRAWLUTRON_MAX_DERIVED_POOL_SIZE", 4)
@@ -506,9 +463,8 @@ def derive_browser_pool_size(limit_bytes: int | None = None) -> int:
         return max(1, explicit // workers)
     limit = limit_bytes if limit_bytes is not None else read_memory_stats().total_bytes
     if limit and limit > 0:
-        # The cap is a fleet ceiling, not a per-process one. Left undivided it
-        # is the worse half of the bug: a large container would let N workers
-        # each take the full cap, which is N times the number it names.
+        # A fleet ceiling, not per-process: undivided, N workers each take
+        # the full cap, which is N times the number it names.
         cap = max(1, _MAX_DERIVED_POOL_SIZE // workers)
         budget = int(limit * BROWSER_RAM_FRACTION) // workers
         size = max(1, budget // _BROWSER_RAM_BYTES)
@@ -583,13 +539,11 @@ class AdmissionPolicy:
     browser_pool_reserve_bytes: int
     max_http_concurrency: int
     max_browser_concurrency: int
-    # The persistent markitdown worker pool is a fixed RAM consumer like the
-    # browser pool; its reservation is surfaced separately so a caller can see
-    # the budget that is already spent before any task is admitted.
+    # The doc pool is a fixed RAM consumer like the browser pool; surfaced
+    # separately so a caller sees spend committed before any task is admitted.
     doc_pool_reserve_bytes: int = 0
-    # The fraction of RAM ``derive_browser_pool_size`` assumed the pool may
-    # hold. The browser tier must not shrink against its own reserved usage;
-    # only surplus usage beyond this fraction yields browser capacity.
+    # The RAM fraction derive_browser_pool_size assumed the pool may hold; the
+    # tier never shrinks against its own reserve, only surplus yields capacity.
     browser_ram_fraction: float = BROWSER_RAM_FRACTION
 
 
@@ -650,9 +604,13 @@ def default_admission_policy(gate: ResourceGate) -> WeightedAdmission:
 class WeightedAdmission:
     """RAM/CPU-weighted, two-tier batch admission.
 
-    HTTP tasks are admitted up to ``max_http_concurrency * headroom``; browser
-    tasks up to the (small) browser-tier cap. ``admit`` never blocks for long:
-    when nothing fits it yields :data:`_ADMIT_YIELD_SECONDS` of backpressure.
+    HTTP tasks are cheap (a few MiB each); browser tasks are expensive because
+    the persistent browser pool holds most of the cgroup RAM, so the tiers are
+    budgeted separately. HTTP tasks are admitted up to
+    ``max_http_concurrency * headroom``; browser tasks up to the (small)
+    browser-tier cap. ``admit`` never blocks for long: when nothing fits it
+    yields :data:`_ADMIT_YIELD_SECONDS` of backpressure instead of parking the
+    whole crawl.
     """
 
     def __init__(self, gate: ResourceGate, policy: AdmissionPolicy) -> None:
@@ -666,13 +624,8 @@ class WeightedAdmission:
         return max(0, int(self._p.max_http_concurrency * self.headroom_fraction()))
 
     def browser_capacity(self) -> int:
-        # Browsers hold most of the cgroup RAM, and that footprint is exactly
-        # what ``browser_pool_reserve_bytes`` reserved up front — so the tier
-        # must not shrink against its own reserved usage (double scaling).
-        # Capacity is full while usage stays within the fraction the pool
-        # sizing assumed, then ramps down to zero as the box exhausts, and the
-        # CPU gate applies on top. Never admit new browser renders when
-        # saturated.
+        # Full while usage stays within the fraction the pool sizing assumed,
+        # then ramps to zero as the box exhausts; never admit when saturated.
         ratio = self._gate.memory_ratio()
         span = max(1e-9, 1.0 - self._p.browser_ram_fraction)
         usable = min(max(0.0, (1.0 - ratio) / span), 1.0 - self._gate.cpu_ratio())

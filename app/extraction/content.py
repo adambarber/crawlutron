@@ -41,15 +41,8 @@ from app.models.discovered_link import DiscoveredLink
 from app.models.host_policy import HostPolicy
 from app.models.normalized_url import NormalizedUrl, admit_or_none
 
-# Lxml does not mark re-exports, so importing a name that IS present at runtime is
-# reported as a private import; `reportPrivateImportUsage` is off in
-# pyrightconfig.json for that reason. These carried
-# `reportAttributeAccessIssue` suppressions on the theory that lxml ships partial
-# stubs. They suppressed nothing, and `reportUnnecessaryTypeIgnoreComment` (now
-# on) reports them as unnecessary. Imported at the top because lxml is a declared
-# dependency: the two function-local imports these replace each carried a
-# `try/except ImportError` that returned "no content" for a package that cannot
-# be absent.
+# lxml re-exports read as private imports, so reportPrivateImportUsage is off
+# in pyrightconfig.json; imports are top-level because lxml is a dependency.
 from app.orchestration.doc_pool import DocExtractionPool, doc_task_hooks
 from app.runtime.resource_pressure import doc_worker_count
 from app.safety.validation import filter_js_endpoints
@@ -83,17 +76,8 @@ class Selectors:
         return self.css is not None or self.xpath is not None
 
 
-# Shared thread pool for extraction tasks to avoid thread leaks.
-# Bounded to 4 workers to limit resource consumption.
-#
-# Built on demand and torn down to ``None`` by
-# ``shutdown_doc_extraction_executor``, exactly as the process pool beside it
-# behaves: a shutdown means "not right now", not "this module is finished". An
-# executor built once at import and shut down in place is a tombstone -- every
-# later selector evaluation raises ``cannot schedule new futures after
-# shutdown`` -- and because the shutdown is wired into the app lifespan, any
-# caller that starts and stops the app once kills extraction for the rest of the
-# process.
+# Shared extraction pool, bounded to 4 workers; built on demand and torn down
+# to ``None`` by shutdown_doc_extraction_executor -- "not right now", not "finished".
 _EXTRACTION_EXECUTOR: concurrent.futures.ThreadPoolExecutor | None = None
 
 
@@ -112,21 +96,16 @@ def _extraction_executor() -> concurrent.futures.ThreadPoolExecutor:
     return _EXTRACTION_EXECUTOR
 
 
-# Document extraction (markitdown) runs in a PERSISTENT pool of worker
-# processes; the pool and its machinery live in app.orchestration.doc_pool. This module
-# owns the extraction pipeline, and holds one process-lifetime pool built from
-# the environment. Sized by doc_worker_count() (app.runtime.resource_pressure -- the
-# single home for the count) so memory stays within the container ceiling.
+# Document extraction runs in a persistent worker pool owned by
+# app.orchestration.doc_pool; sized via doc_worker_count() for the ceiling.
 
 
 def _document_extraction_enabled() -> bool:
     return parse_bool_env("CRAWLUTRON_EXTRACTION_DOC_ENABLED", default=True)
 
 
-# The production pool: real workers, the configured count, the environment's
-# opt-out. Every knob the pool has is a constructor argument rather than a
-# module name, so a caller that needs a different arrangement builds its own
-# pool instead of reaching into another module's state.
+# Real workers, configured count, environment opt-out -- every knob is a
+# constructor argument, so no caller reaches into another module's state.
 DOC_POOL = DocExtractionPool(
     worker_count=doc_worker_count,
     enabled=_document_extraction_enabled,
@@ -148,15 +127,8 @@ async def shutdown_doc_extraction_executor() -> None:
         executor.shutdown(wait=False)
 
 
-# The three extraction deadlines (one selector evaluation, one document task in
-# its worker, and the wait for a free worker slot) live in CrawlerSettings, which
-# is where they get their env mapping and their operators. They used to sit here
-# as module constants read once at import, which made a deadline no caller could
-# construct and put fourteen private patch sites in the suite for three numbers.
-
-# #mem-guard: a markitdown worker process shares the container cgroup; an
-# unbounded document can balloon it past the memory ceiling. Cap the input
-# size and allow deployments to disable subprocess extraction entirely.
+# Extraction deadlines live in CrawlerSettings (env-mapped, operator-tunable).
+# #mem-guard: workers share the cgroup -- cap input size, allow disabling extraction.
 EXTRACTION_DOC_MAX_INPUT_BYTES = get_env_int("CRAWLUTRON_EXTRACTION_DOC_MAX_BYTES", 20 * 1024 * 1024, lo=1)
 
 # Maximum extracted markdown size (chars) to prevent unbounded output.
@@ -274,15 +246,8 @@ def extract_content(
     narrowing. The same request against an HTML page does narrow, so the
     difference between the two is invisible on the wire otherwise.
     """
-    # ONE decision, read twice -- by the drop report below and by the dispatch
-    # after it. The predicate is not free: it decodes the whole body, strips and
-    # lowercases it, and on a binary/document response the two halves below
-    # disagree about nothing, so evaluating it twice was a second full decode per
-    # non-HTML request (a capped multi-megabyte PDF pays it twice) to learn the
-    # same thing. It was also unreadable as written: `elif not is_html(...)` and
-    # `if is_html(...)` below are the same question asked in opposite polarity,
-    # and nothing in the text said they had to agree. Now there is one answer and
-    # two consumers, so a report and a dispatch cannot describe different bodies.
+    # ONE decision, read twice (drop report + dispatch): the predicate decodes
+    # the whole body, so two evaluations meant two full decodes per non-HTML request.
     html_body = is_html(content_type, content)
     if selectors and not html_body:
         logger.warning(
@@ -317,26 +282,8 @@ def html_to_markdown(html_fragment: str) -> tuple[str | None, str | None]:
     return text, md
 
 
-# The selector pair is ONE contract with three entry points: ``extract_content``
-# (every strategy's funnel), ``extract_html`` (the trafilatura-only path) and
-# ``extract_selected`` (the DOM-targeting engine). It used to be four spellings:
-# those three signatures, plus the ``{"css_selector": ..., "xpath": ...}`` mapping
-# ``content_pipeline`` built and spread into two of them. Four copies of one fact
-# with a rule elsewhere forbidding disagreement between them.
-#
-# :class:`Selectors` is the collapse. ``content_pipeline`` builds one from policy
-# and hands it whole, so the pair is now stated once, in one type, and neither the
-# signatures nor the mapping that feeds them spell it. The win is not the removed
-# clone -- it is that "half a narrowing request" stopped being expressible. With
-# two optional names per function, ``css_selector=...`` alone was a valid call at
-# three signatures, accepted and then silently not honoured in full; there was no
-# spelling of the mistake to forbid, only a detector. As one value there is no
-# second parameter to forget.
-#
-# ``test_the_selector_pair_is_one_contract`` now proves the carrier rather than
-# the count: an extractor must take a ``selectors`` parameter and must not declare
-# either selector name itself, so a future fourth extractor cannot reintroduce the
-# pair as parameters and quietly pass a guard that only knew the old rule.
+# The selector pair is ONE contract with three entry points (extract_content,
+# extract_html, extract_selected); :class:`Selectors` states it once, whole.
 
 
 def extract_selected(
@@ -349,7 +296,10 @@ def extract_selected(
 ) -> ExtractedContent:
     """Mechanical DOM targeting: extract only the matched nodes as Markdown.
 
-    CSS selectors are resolved with BeautifulSoup; XPath expressions with lxml.
+    One selector contract shared with ``extract_content`` and ``extract_html``:
+    a :class:`Selectors` value, never loose ``css_selector``/``xpath`` parameters,
+    so half a narrowing request is not expressible. CSS selectors are resolved
+    with BeautifulSoup; XPath expressions with lxml.
     The matched subtree(s) are serialized and converted to Markdown, so callers
     can target a specific section (e.g. an agenda table) without Trafilatura's
     full-page boilerplate removal.
@@ -514,12 +464,8 @@ def extract_document(
         )
         return ExtractedContent(None, None)
 
-    # Serve the document from the persistent pool with a hard wall-clock
-    # timeout per task; on timeout -- or if the worker died mid-task -- the
-    # runaway worker is forcefully terminated and reaped so it cannot linger
-    # as a zombie, and its slot is respawned on the
-    # next acquisition. Pool size bounds concurrent processes so memory
-    # stays within the container ceiling.
+    # Pool task with a hard wall-clock timeout; on timeout or worker death the
+    # runaway is terminated and its slot respawned, bounding memory to the ceiling.
     worker = DOC_POOL.acquire(active.extraction_doc_acquire_timeout)
     if worker is None:
         # No slot within the acquire budget: degrade this document like every
@@ -544,10 +490,8 @@ def extract_document(
             try:
                 _, md = worker.conn.recv()
             except (EOFError, OSError):
-                # The worker died before sending (segfault on hostile
-                # input): poll() reports EOF as readable, then recv()
-                # raises. Graceful empty extraction, not an unhandled
-                # error -- and retire the slot on every death path.
+                # Worker died pre-send (segfault on hostile input): EOF reads as
+                # readable, then recv() raises. Empty extraction; retire the slot.
                 logger.warning("extraction_document_child_died")
                 DOC_POOL.retire(worker)
                 return ExtractedContent(None, None)
@@ -570,18 +514,10 @@ def extract_document(
     return ExtractedContent(md, md)
 
 
-# ---------------------------------------------------------------------------
-# Structured discovery diagnostics: links, frames, forms
-# ---------------------------------------------------------------------------
+# --- Structured discovery diagnostics: links, frames, forms ---
 
 
-# lxml parsing is invisible: the per-page parse budget is a real performance
-# property, and nothing but a count can show a parse that stopped happening or
-# started happening twice. The alternative -- replacing the parser and counting
-# calls -- would measure a patched function rather than the real one, and would
-# miss every parse the patch did not sit in front of. A lock because the
-# pipeline parses from worker threads and a racy tally would make that budget
-# flaky rather than merely imprecise.
+# Tally over the real parser, not a patched one; locked because worker threads parse.
 _parse_tally_lock = threading.Lock()
 _parse_tally = 0
 
@@ -770,10 +706,8 @@ def html_diagnostics(
     tree: Any | None = None,
 ) -> dict[str, Any]:
     diagnostics: dict[str, Any] = {}
-    # One parse, one guard. The two extractors used to take the raw html and
-    # each re-derive the walkable, which put the "is there a tree to walk"
-    # precondition -- the one that silently yields an empty diagnostic rather
-    # than an error -- in front of both of them, spelled twice.
+    # One parse, one guard: the walkable-tree precondition (empty diagnostic,
+    # not an error) is stated once, not spelled in front of both extractors.
     walkable = _walkable(html, source_url, tree)
     if walkable is None:
         return diagnostics
@@ -896,11 +830,8 @@ def extract_post_fetch_discovery(
         if include_js_endpoints
         else []
     )
-    # The page metadata rides the tree that was parsed for THIS call's
-    # diagnostics/links -- never a parse of its own. An empty dict means
-    # "no tree existed", and shaping falls back to its own single parse;
-    # a non-empty dict is authoritative and crosses the persistence
-    # boundary as plain JSON (the tree itself never leaves this function).
+    # Metadata rides the tree parsed for THIS call, never its own parse; an
+    # empty dict means "no tree" and shaping falls back to its single parse.
     llm_metadata: ExtractedPageMetadata = {}
     if include_metadata and tree is not None and final_url:
         llm_metadata = _llm_metadata_from_tree(tree, final_url)
@@ -915,9 +846,7 @@ def extract_post_fetch_discovery(
     }
 
 
-# ---------------------------------------------------------------------------
-# Katana-inspired advanced discovery
-# ---------------------------------------------------------------------------
+# --- Katana-inspired advanced discovery ---
 
 
 _JS_ENDPOINT_RE = re.compile(
