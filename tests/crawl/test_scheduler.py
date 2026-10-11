@@ -6,8 +6,8 @@ import time
 import pytest
 
 from app.models.crawl_job import CrawlJob
+from app.models.crawl_result import EngineCrawlResult
 from app.models.crawl_task import CrawlTask
-from app.models.engine_crawl_result import EngineCrawlResult
 from app.models.taxonomy import Classification
 from app.orchestration.result_helpers import TerminalResult
 from app.orchestration.scheduler import _COOLDOWN_PURGE_INTERVAL, DomainScheduler, jittered_delay
@@ -207,8 +207,6 @@ class TestObservedLatencyCrossesPipelines:
             original_url="https://example.com/x",
             normalized_url="https://example.com/x",
             final_url="https://example.com/x",
-            status="success",
-            classification="rendered",
             attempt=CrawlStrategyAttempt(
                 strategy="HTTP_DECLARED_CRAWLER",
                 status="success",
@@ -218,7 +216,6 @@ class TestObservedLatencyCrossesPipelines:
                 elapsed_ms=elapsed_ms,
             ),
             http_status=200,
-            error=None,
             diagnostics={"runtime": {"elapsed_ms": elapsed_ms}},
         )
 

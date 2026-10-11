@@ -232,6 +232,22 @@ async def _stored_response_payload(
     return None
 
 
+async def _stored_payload_or_not_found(
+    request_id: str,
+    job_store,
+    result_store,
+) -> JsonValue:
+    """The stored payload for ``request_id``, or a 404.
+
+    Both replay doors answer the same miss the same way, and the second copy of
+    the check is a second place the message shape can drift.
+    """
+    payload = await _stored_response_payload(request_id, job_store, result_store)
+    if payload is None:
+        raise http_error(404, "not_found", f"Unknown or expired request_id: {request_id}")
+    return payload
+
+
 async def get_crawl_result(
     request_id: str,
     job_store,
@@ -246,10 +262,7 @@ async def get_crawl_result(
     the cache does not own: the value discipline governs ingress (crawl results
     entering the response), not the replay of an already-shaped record.
     """
-    payload = await _stored_response_payload(request_id, job_store, result_store)
-    if payload is None:
-        raise http_error(404, "not_found", f"Unknown or expired request_id: {request_id}")
-    return JSONResponse(content=payload)
+    return JSONResponse(content=await _stored_payload_or_not_found(request_id, job_store, result_store))
 
 
 async def get_crawl_trace(
@@ -266,9 +279,7 @@ async def get_crawl_trace(
     translation layer -- including the URLs, which stay text because
     re-admitting them would need a policy the result cache does not own.
     """
-    payload = await _stored_response_payload(request_id, job_store, result_store)
-    if payload is None:
-        raise http_error(404, "not_found", f"Unknown or expired request_id: {request_id}")
+    payload = await _stored_payload_or_not_found(request_id, job_store, result_store)
     return TraceResponse.model_validate(payload)
 
 

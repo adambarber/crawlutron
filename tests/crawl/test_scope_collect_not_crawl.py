@@ -33,6 +33,11 @@ def _doc_pages():
     }
 
 
+def _crawled_urls(out) -> set[str]:
+    """The URLs the crawl actually fetched a page for."""
+    return {r.normalized_url.raw for r in out["results"]}
+
+
 async def _crawl_example_site(pages, **policy):
     """Crawl the example fixture site; return the (envelope, fetched urls) pair.
 
@@ -82,7 +87,7 @@ async def test_scope_records_out_of_scope_links_but_never_fetches_them():
         limits={"max_depth": 1, "max_pages": 10},
         scope_regex=r"^https?://example\.com(/|$)",
     )
-    crawled = {r.normalized_url.raw for r in out["results"]}
+    crawled = _crawled_urls(out)
     # expansion stayed in scope...
     assert crawled == {"http://example.com", "http://example.com/keep/x"}
     # ...and instagram was never fetched
@@ -103,7 +108,7 @@ async def test_skip_list_hosts_recorded_but_never_enqueued():
         "/local": (200, "<html>l</html>", "text/html"),
     }
     out, fetched = await _crawl_example_site(pages)
-    crawled = {r.normalized_url.raw for r in out["results"]}
+    crawled = _crawled_urls(out)
     assert crawled == {"http://example.com", "http://example.com/local"}
     assert not any("pinterest.com" in u or "x.com/" in u for u in fetched), fetched
     recorded = _recorded_discovered(out)
@@ -115,7 +120,7 @@ async def test_document_urls_recorded_but_not_fetched_by_default():
     # PDFs/CSVs/etc yield no HTML links: record their URLs when advertised,
     # but never spend bandwidth downloading them during URL discovery.
     out, fetched = await _crawl_example_site(_doc_pages())
-    crawled = {r.normalized_url.raw for r in out["results"]}
+    crawled = _crawled_urls(out)
     assert crawled == {"http://example.com", "http://example.com/local"}
     assert not any(u.endswith(".pdf") for u in fetched)
     assert "http://example.com/reports/2024-minutes.pdf" in _recorded_discovered(out)
@@ -127,7 +132,7 @@ async def test_document_urls_fetched_when_extraction_document_requested():
         {**_doc_pages(), "/reports/2024-minutes.pdf": (200, "%PDF-1.4 minutes", "application/pdf")},
         extraction="document",
     )
-    crawled = {r.normalized_url.raw for r in out["results"]}
+    crawled = _crawled_urls(out)
     assert "http://example.com/reports/2024-minutes.pdf" in crawled
 
 

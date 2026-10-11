@@ -7,6 +7,7 @@ from functools import partial
 
 from app.admission.policy import read_policy
 from app.api.site_map import build_site_map
+from app.models.normalized_url import NormalizedUrl
 from app.models.result_record import ProducerEnvelope
 from app.orchestration.engine import _parse_lastmod, _seed_is_fresh, _stale_seeds
 from app.orchestration.fetch_helpers import _SITEMAP_CACHE, fetch_sitemap_urls
@@ -40,22 +41,37 @@ def _resp(status, body="", etag=None, last_modified=None, ctype="application/xml
     )
 
 
-async def test_expired_entry_replays_its_validator_without_the_caller_asking():
-    """The expiry replay: the fetcher alone decides whether to re-send them."""
-    url = canonical("http://x.test/sitemap.xml")
+def _seed_expired_entry(url: NormalizedUrl, *, etag: str = "v1") -> None:
+    """An expired cached sitemap entry, seeded through the chokepoint seam."""
     _SITEMAP_CACHE.put(
         (url.raw, UNRESTRICTED_HOST_POLICY),
-        ([("http://x.test/p1", None)], "v1", None),
+        ([("http://x.test/p1", None)], etag, None),
         ttl=-1.0,
     )
+
+
+def _replay_recording_fetcher(*, fresh_etag: str = "v2"):
+    """A fetcher that records request headers and answers 304 on a replayed validator.
+
+    The expiry-replay shape: the origin says "not modified" only when the
+    request re-sends the validator it already holds, so a replay that never
+    happened gets a fresh body with ``fresh_etag`` instead.
+    """
     sent: list[dict[str, str]] = []
 
     def respond(u, headers):
         if headers.get("If-None-Match") == "v1":
             return _resp(304, etag="v1")
-        return _resp(200, "<x></x>", etag="v2")
+        return _resp(200, "<x></x>", etag=fresh_etag)
 
-    fetcher = request_fetcher(respond, record_headers=sent)
+    return request_fetcher(respond, record_headers=sent), sent
+
+
+async def test_expired_entry_replays_its_validator_without_the_caller_asking():
+    """The expiry replay: the fetcher alone decides whether to re-send them."""
+    url = canonical("http://x.test/sitemap.xml")
+    _seed_expired_entry(url)
+    fetcher, sent = _replay_recording_fetcher()
 
     out = await fetch_sitemap_urls(fetcher, url, 10, host_policy=UNRESTRICTED_HOST_POLICY)
 
@@ -67,20 +83,8 @@ async def test_expired_entry_replays_its_validator_without_the_caller_asking():
 
 async def test_304_reuses_cached_urls_without_reparsing():
     url = canonical("http://x.test/sitemap.xml")
-    # Seed an EXPIRED entry (negative ttl) through the chokepoint seam.
-    _SITEMAP_CACHE.put(
-        (url.raw, UNRESTRICTED_HOST_POLICY),
-        ([("http://x.test/p1", None)], "v1", None),
-        ttl=-1.0,
-    )
-    sent: list[dict[str, str]] = []
-
-    def respond(u, headers):
-        if headers.get("If-None-Match") == "v1":
-            return _resp(304, etag="v1")  # not modified
-        return _resp(200, "<x></x>", etag="v1")
-
-    fetcher = request_fetcher(respond, record_headers=sent)
+    _seed_expired_entry(url)
+    fetcher, sent = _replay_recording_fetcher(fresh_etag="v1")
 
     out = await fetch_sitemap_urls(
         fetcher,

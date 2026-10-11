@@ -11,6 +11,8 @@ A suggestion is a candidate for a human to accept, edit or reject. Nothing in
 this surface applies one: the service proposes rules, a caller owns host policy.
 """
 
+from typing import Any
+
 import pytest
 
 from app.storage.result_store import CrawlResultStore
@@ -36,6 +38,12 @@ async def _crawl_twice(client, url: str) -> None:
         await completed_crawl(client, make_crawl_payload(url))
 
 
+async def _suggestion_for(client, base_url) -> dict[str, Any]:
+    """The endpoint's suggestion for this test's host."""
+    body = (await client.get("/v1/policy-suggestions")).json()
+    return next(s for s in body["suggestions"] if s["host"] == canonical(base_url).site)
+
+
 async def test_a_repeatedly_blocked_host_is_suggested_with_its_evidence(client, base_url):
     await _crawl_twice(client, f"{base_url}/blocked")
 
@@ -44,7 +52,7 @@ async def test_a_repeatedly_blocked_host_is_suggested_with_its_evidence(client, 
     assert response.status_code == 200, response.text
     body = response.json()
     assert body["records_examined"] == 2
-    suggestion = next(s for s in body["suggestions"] if s["host"] == canonical(base_url).site)
+    suggestion = await _suggestion_for(client, base_url)
     assert suggestion["rule"] == "denied_hosts"
     assert suggestion["blocked_attempts"] == 2
     assert suggestion["observed_attempts"] == 2
@@ -70,9 +78,7 @@ async def test_one_blocked_attempt_is_reported_with_an_honest_count(client, base
     decides whether one observation is worth a rule."""
     await completed_crawl(client, make_crawl_payload(f"{base_url}/blocked"))
 
-    body = (await client.get("/v1/policy-suggestions")).json()
-
-    suggestion = next(s for s in body["suggestions"] if s["host"] == canonical(base_url).site)
+    suggestion = await _suggestion_for(client, base_url)
     assert suggestion["blocked_attempts"] == 1
 
 
@@ -80,9 +86,7 @@ async def test_a_blocked_attempt_among_good_ones_is_counted_against_the_host(cli
     await completed_crawl(client, make_crawl_payload(f"{base_url}/blocked"))
     await completed_crawl(client, make_crawl_payload(f"{base_url}/blog"))
 
-    body = (await client.get("/v1/policy-suggestions")).json()
-
-    suggestion = next(s for s in body["suggestions"] if s["host"] == canonical(base_url).site)
+    suggestion = await _suggestion_for(client, base_url)
     assert suggestion["blocked_attempts"] == 1
     assert suggestion["observed_attempts"] == 2
 

@@ -7,9 +7,8 @@ from typing import Any
 from app.admission.render_options import resolve_render_options
 from app.models.crawl_job import CrawlJob
 from app.models.crawl_policy import CrawlPolicy
-from app.models.crawl_result import CrawlStrategyAttempt
+from app.models.crawl_result import CrawlStrategyAttempt, EngineCrawlResult
 from app.models.crawl_worker import CrawlWorker
-from app.models.engine_crawl_result import EngineCrawlResult
 from app.models.host_policy import HostPolicy
 from app.models.normalized_url import NormalizedUrl
 from app.models.render_options import RenderOptions
@@ -138,8 +137,6 @@ def _build_browser_result(
         original_url=original_url,
         normalized_url=normalized_url,
         final_url=result.final_url,
-        status=result.status,
-        classification=result.classification,
         selected_strategy=strategy if result.status == "success" else None,
         attempt=attempt,
         http_status=None,
@@ -154,7 +151,6 @@ def _build_browser_result(
         **_discovery_result_fields(
             post_fetch,
             classification_evidence=[],
-            error=result.error,
         ),
         next_page_url=post_fetch["next_page_url"],
         validators={},

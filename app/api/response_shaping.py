@@ -29,12 +29,11 @@ from app.extraction.llm_format import (
 )
 from app.models.classification_evidence import ClassificationEvidence
 from app.models.content_validators import ContentValidators
-from app.models.crawl_result import CrawlResult, CrawlStrategyAttempt
+from app.models.crawl_result import CrawlResult, CrawlStrategyAttempt, EngineCrawlResult
 from app.models.crawl_status import CrawlStatus
 from app.models.crawl_strategy import CrawlStrategy
 from app.models.discovered_link import DiscoveredLink
 from app.models.discovered_link_response import DiscoveredLinkResponse as WireDiscoveredLink
-from app.models.engine_crawl_result import EngineCrawlResult
 from app.models.host_policy import HostPolicy
 from app.models.normalized_url import NormalizedUrl, admit_or_none
 from app.models.page_metadata_response import PageMetadataResponse

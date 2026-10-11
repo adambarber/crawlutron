@@ -378,26 +378,17 @@ async def _probe_site_map(monkeypatch, tmp_path):
     entirely.
     """
     from app.api.site_map import build_site_map
-    from app.models.engine_crawl_result import EngineCrawlResult
     from app.models.host_policy import HostPolicy
     from app.models.result_record import ProducerEnvelope
+    from tests._result_builders import engine_result
 
     allowed, denied = "https://allowed.test/feed", "https://denied.test/sitemap"
-    result = EngineCrawlResult(
-        original_url="https://denied.test/page",
+    result = engine_result(
+        "https://denied.test/page",
+        "site_error",
+        status="failed",
         normalized_url=None,
         final_url=None,
-        status="failed",
-        classification="site_error",
-        selected_strategy=None,
-        attempted_strategies=[],
-        http_status=None,
-        headers={},
-        content_type=None,
-        html=None,
-        text=None,
-        extraction_method=None,
-        quality_score=0.0,
         diagnostics={"discovery": {"feeds": [allowed, denied]}},
     )
     envelope: ProducerEnvelope = {

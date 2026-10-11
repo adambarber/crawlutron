@@ -11,7 +11,7 @@ from dataclasses import asdict, replace
 import httpx
 import pytest
 
-from app.models.engine_crawl_result import EngineCrawlResult
+from app.models.crawl_result import EngineCrawlResult
 from app.models.host_policy import HostPolicy
 from app.models.normalized_url import NormalizedUrl
 from app.orchestration.result_helpers import classify_error_code, engine_result_from_exception

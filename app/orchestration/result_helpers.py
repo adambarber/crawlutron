@@ -11,8 +11,7 @@ from typing import Any, TypeVar
 import httpx
 
 from app.models.browser_pool_exhausted import BrowserPoolExhaustedError
-from app.models.crawl_result import CrawlResult, CrawlStrategyAttempt
-from app.models.engine_crawl_result import EngineCrawlResult
+from app.models.crawl_result import CrawlResult, CrawlStrategyAttempt, EngineCrawlResult
 from app.models.normalized_url import NormalizedUrl
 from app.models.taxonomy import Classification, CrawlError, CrawlStrategyName
 from app.orchestration.scheduler_exceptions import _CircuitBreakerOpen
@@ -410,11 +409,8 @@ def build_engine_result(
     original_url: str,
     normalized_url: NormalizedUrl,
     final_url: NormalizedUrl | None,
-    status: ResultStatus,
-    classification: Classification,
     attempt: CrawlStrategyAttempt,
     http_status: int | None,
-    error: CrawlError | None,
     selected_strategy: CrawlStrategyName | None = None,
     headers: dict[str, str] | None = None,
     content_type: str | None = None,
@@ -434,7 +430,10 @@ def build_engine_result(
 ) -> EngineCrawlResult:
     """Construct an EngineCrawlResult from a pre-built attempt.
 
-    Many parameters have defaults for the common "empty result" case.
+    The outcome axes -- status, classification and error -- are DERIVED from
+    the attempt rather than accepted as parameters: the record re-declares
+    them as flat wire fields, and a funnel that also took them by keyword
+    held a second spelling of the same three values that nothing compared.
     """
     if headers is None:
         headers = {}
@@ -448,8 +447,8 @@ def build_engine_result(
         original_url=original_url,
         normalized_url=normalized_url,
         final_url=final_url,
-        status=status,
-        classification=classification,
+        status=attempt.status,
+        classification=attempt.classification,
         selected_strategy=selected_strategy,
         attempted_strategies=[attempt],
         http_status=http_status,
@@ -465,7 +464,7 @@ def build_engine_result(
         discovered_link_count=discovered_link_count,
         discovered_links_truncated=discovered_links_truncated,
         discovered_links=discovered_links,
-        error=error,
+        error=attempt.error,
         next_page_url=next_page_url,
         validators=validators or {},
         llm_metadata=llm_metadata,
@@ -518,11 +517,8 @@ def _terminal_engine_result(result: TerminalResult, *, status: ResultStatus) -> 
         original_url=result.original_url,
         normalized_url=result.normalized_url,
         final_url=result.final_url,
-        status=status,
-        classification=result.classification,
         attempt=attempt,
         http_status=result.http_status,
-        error=error,
         diagnostics=result.diagnostics or {},
     )
 
@@ -586,11 +582,8 @@ def binary_no_text_result(
         original_url=original_url,
         normalized_url=normalized_url,
         final_url=final_url,
-        status="failed",
-        classification="binary_no_text",
         attempt=attempt,
         http_status=http_status,
-        error="binary_no_text",
         headers=headers,
         content_type=content_type,
         extraction_method="binary_no_text",

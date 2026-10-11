@@ -38,7 +38,6 @@ from app.models.crawl_extraction_method import CrawlExtractionMethod
 from app.models.crawl_policy import CrawlPolicy
 from app.models.host_policy import HostPolicy
 from app.models.normalized_url import NormalizedUrl
-from app.models.taxonomy import CrawlError
 from app.safety.validation import filter_js_endpoints
 from app.vocabulary.extraction import (
     EXTRACTION_DOCUMENT,
@@ -167,7 +166,6 @@ def _discovery_result_fields(
     post_fetch: dict[str, Any],
     *,
     classification_evidence: list[dict[str, Any]],
-    error: CrawlError | None,
 ) -> dict[str, Any]:
     """The result fields both strategies take from one discovery envelope.
 
@@ -175,9 +173,8 @@ def _discovery_result_fields(
     The envelope's keys and the result field they feed are one decision, so it
     is written once: a discovered-links field that reached the HTTP result but
     not the browser result would be a divergence nothing else in the tree can
-    see. ``classification_evidence`` and ``error`` ride along because both
-    strategies pass them at the same point in the same block, and ``error`` is
-    the one field of the tail that is not read off the envelope.
+    see. ``classification_evidence`` rides along because both strategies pass
+    it at the same point in the same block.
     """
     return {
         "classification_evidence": classification_evidence,
@@ -185,7 +182,6 @@ def _discovery_result_fields(
         "discovered_links_truncated": post_fetch["discovered_links_truncated"],
         "discovered_links": post_fetch["discovered_links"],
         "llm_metadata": post_fetch["llm_metadata"] or None,
-        "error": error,
     }
 
 

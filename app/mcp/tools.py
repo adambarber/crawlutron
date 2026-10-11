@@ -13,6 +13,7 @@ import json
 import logging
 from collections.abc import Awaitable, Callable, Collection
 from dataclasses import dataclass
+from enum import StrEnum, auto
 from typing import Any
 
 from fastapi import HTTPException
@@ -121,7 +122,7 @@ def _tool_success(value: BaseModel | dict[str, Any]) -> ToolResult:
     return ToolResult(text=json.dumps(dump, default=json_default), structured=dump)
 
 
-async def _tool_result(coro) -> ToolResult:
+async def _tool_result(coro: Awaitable[BaseModel | dict[str, Any]]) -> ToolResult:
     """Cross the MCP boundary for one tool call: run it, or report it as an error.
 
     Every handler does the same two things -- await the endpoint, and turn an
@@ -165,11 +166,37 @@ def _delivery_refusal(payload: CrawlRequest) -> ToolResult | None:
     return None
 
 
-async def _handle_crawl(payload: CrawlRequest, settings, shutdown_event) -> ToolResult:
+#: One projection of a crawl response, chosen by the door the caller came through.
+class _Unified(StrEnum):
+    from_crawl = auto()
+    from_extract = auto()
+
+
+async def _guard_then_crawl(
+    payload: CrawlRequest,
+    settings,
+    shutdown_event,
+    projection: _Unified,
+) -> ToolResult:
+    """The delivery refusal check, then the crawl, in one place.
+
+    Both doors refuse webhook/async over MCP for the same reason, and the two
+    refusals spelled out twice are two places a new door can forget the check.
+    """
     refusal = _delivery_refusal(payload)
     if refusal is not None:
         return refusal
-    return await _tool_result(_crawled(payload, settings, shutdown_event))
+    return await _tool_result(_projected(_crawled(payload, settings, shutdown_event), projection))
+
+
+async def _projected(crawled: Awaitable[UnifiedCrawlResponse], projection: _Unified) -> BaseModel:
+    """The crawl response read through the door the caller came through."""
+    response = await crawled
+    return response if projection is _Unified.from_crawl else await _extracted(response)
+
+
+async def _handle_crawl(payload: CrawlRequest, settings, shutdown_event) -> ToolResult:
+    return await _guard_then_crawl(payload, settings, shutdown_event, _Unified.from_crawl)
 
 
 async def _extracted(response: UnifiedCrawlResponse) -> CrawlAndExtractResponse:
@@ -196,10 +223,7 @@ async def _extracted(response: UnifiedCrawlResponse) -> CrawlAndExtractResponse:
 
 
 async def _handle_crawl_and_extract(payload: CrawlRequest, settings, shutdown_event) -> ToolResult:
-    refusal = _delivery_refusal(payload)
-    if refusal is not None:
-        return refusal
-    return await _tool_result(_extracted(await _crawled(payload, settings, shutdown_event)))
+    return await _guard_then_crawl(payload, settings, shutdown_event, _Unified.from_extract)
 
 
 async def _handle_map(payload: MapRequest, settings, shutdown_event) -> ToolResult:

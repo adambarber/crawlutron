@@ -16,9 +16,8 @@ from app.admission.render_options import resolve_render_options
 from app.config.settings import CrawlerSettings
 from app.models.crawl_job import CrawlJob
 from app.models.crawl_policy import POLICY_SCHEMA_VERSION
-from app.models.crawl_result import CrawlResult
+from app.models.crawl_result import CrawlResult, EngineCrawlResult
 from app.models.crawl_worker import CrawlWorker
-from app.models.engine_crawl_result import EngineCrawlResult
 from app.models.host_policy import HostPolicy
 from app.models.normalized_url import NormalizedUrl
 from app.models.render_options import RenderOptions

@@ -11,8 +11,7 @@ from collections.abc import Callable
 from typing import Any
 
 # Declared before the import so the ImportError fallback below is the same type
-# as the symbol it stands in for. Without the annotation, assigning None is an
-# assignment error against the imported callable's signature.
+# as the symbol it stands in for; an unannotated None assignment is a type error.
 _charset_from_bytes: Callable[[bytes], Any] | None
 
 try:
@@ -71,10 +70,8 @@ def quality_score(
 ) -> float:
     if status != "success" or classification != "rendered":
         return 0.0
-    # The caller already measured text/html for diagnostics; reuse those exact
-    # lengths instead of re-stripping the same two strings (the frameset
-    # predicate below is deliberately NOT taken from the metrics dict: the
-    # diagnostics tag scan and this substring check disagree on malformed tags).
+    # Reuse the caller's measured html/text lengths instead of re-stripping; the
+    # frameset predicate is deliberately not taken from the metrics dict.
     if content_metrics is not None:
         text_length = content_metrics["visible_text_length"]
         html_length = content_metrics["html_length"]
@@ -97,9 +94,8 @@ def quality_score(
     return min(score, 1.0)
 
 
-# Single compiled pattern so content_metrics counts every tag of interest
-# in ONE linear scan of the HTML instead of four separate re.findall/re.search
-# passes. Each group is tallied as we walk the string once.
+# One compiled pattern so content_metrics counts every tag of interest in a
+# single linear scan instead of four separate passes.
 _CONTENT_TAG_RE = re.compile(r"<(a|iframe|frame|frameset|form)\b", re.IGNORECASE)
 
 

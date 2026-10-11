@@ -19,11 +19,8 @@ from urllib.parse import parse_qsl, urlencode, urljoin, urlparse, urlunparse
 from app.models.host_policy import HostPolicy, host_egress_reason, host_policy_reason
 from app.models.registrable_domain import registrable_domain
 
-#: Attribution/tracking query parameters that carry no content-identity
-#: information. Dropping them lets URLs that differ only by UTM/tracking tags
-#: canonicalize to the same key, preventing duplicate fetches of the same page.
-#: Bare ``ref`` is intentionally excluded: it is ambiguous and frequently a
-#: legitimate content parameter, so stripping it could collapse distinct pages.
+#: Tracking/attribution parameters that carry no content identity; dropping them
+#: canonicalizes UTM variants to one key. Bare ``ref`` stays: ambiguous, often content.
 _TRACKING_PARAM_EXACT = frozenset(
     {
         "gclid",
@@ -73,10 +70,8 @@ def _canonical_parts(url: str, *, policy: HostPolicy) -> tuple[str, str, str, st
     path = _strip_trailing_colon(parsed.path or "").rstrip("/")
     query = _strip_trailing_colon(parsed.query)
     if query:
-        # Drop known tracking/attribution parameters so URLs that differ only
-        # by UTM/tracking tags canonicalize to the same key and are not fetched
-        # as duplicate pages. Remaining params are sorted so URLs differing
-        # only in parameter order also canonicalize identically.
+        # Drop known tracking parameters so UTM-variants canonicalize to one key;
+        # the rest are sorted, so parameter order alone canonicalizes identically.
         pairs = [(k, v) for (k, v) in parse_qsl(query, keep_blank_values=True) if not _is_tracking_param(k)]
         pairs.sort()
         query = urlencode(pairs, doseq=True)
@@ -103,11 +98,8 @@ class NormalizedUrl:
         self._port = port
         self._path = path
         self._query = query
-        # The policy that admitted this value stays with it, so the object is
-        # complete: anything it needs to re-justify itself is on the value,
-        # not held by whichever caller happened to construct it. Containers
-        # (visited / frontier / caches) are per-job and a job runs one policy,
-        # so the carried policy is always the one that admitted each member.
+        # The policy that admitted this value travels with it, so the object can
+        # re-justify itself; per-job containers run one policy, so it is the right one.
         self._policy = policy
 
     @property

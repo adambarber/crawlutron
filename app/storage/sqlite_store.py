@@ -17,19 +17,8 @@ if TYPE_CHECKING:
 
 _BUSY_TIMEOUT_MS = 5000
 
-# `PRAGMA journal_mode=WAL` is a write to the database header, and converting a
-# file that is not yet WAL needs a lock no other connection holds. When
-# `uvicorn --workers` starts its children together, every one of them converts
-# the same fresh database in the same instant; SQLite grants the lock to one and
-# returns SQLITE_BUSY to the rest. `busy_timeout` does not cover this: measured
-# with four spawned processes, three of four children failed 0.000s into the
-# call, so the busy handler is never invoked. A retry is the only remedy for an
-# error the library declines to wait out.
-#
-# The budget covers the cascade, not one lock: a loser waits while the winner
-# runs its migrations, so the wait must outlast a peer's whole migration rather
-# than a single header write. Bounded, because an unbounded retry turns a hard
-# lock into a hang only an operator can clear.
+# `journal_mode=WAL` writes the header, so concurrent startups converting one fresh
+# file get SQLITE_BUSY that busy_timeout never sees; a bounded retry covers the wait.
 _WAL_RETRY_SECONDS = 15.0
 _WAL_RETRY_BACKOFF_SECONDS = 0.05
 
@@ -129,9 +118,8 @@ def _open_raw_store_connection(
 _PROCESS_LOCKS: dict[str, _TracedLock] = {}
 _PROCESS_LOCKS_GUARD = threading.Lock()
 
-#: A wait at least this long is worth a line. A store write against a migration
-#: in the same process is sub-millisecond; anything near this means the lock is
-#: held across real work, which is the thing worth seeing.
+#: A wait at least this long is worth a line: an in-process store write against
+#: a migration is sub-millisecond; more means the lock is held across real work.
 _LOCK_TRACE_ENV = "CRAWLUTRON_TRACE_STORE_LOCKS"
 _LOCK_TRACE_THRESHOLD = 0.05
 
@@ -244,10 +232,8 @@ def _trace_store_connection(
     if os.environ.get(_STORE_TRACE_ENV) != "1":
         return
     target = f"memory:{memory_name}" if memory_name is not None else store_lock_key(db_path)
-    # ``schema`` is a StoreSchema, but that name is TYPE_CHECKING-only here:
-    # manifest.py imports from this module, so importing it back is circular.
-    # The member carries its own value, and this formatter must not be the
-    # thing that decides whether a diagnostic run gets as far as a diagnosis.
+    # ``schema`` is TYPE_CHECKING-only here because manifest.py imports this
+    # module; the member carries its own value, so this formatter stays neutral.
     name = getattr(schema, "value", schema)
     print(
         f"store-connection pid={os.getpid()} thread={threading.current_thread().name} "

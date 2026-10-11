@@ -24,6 +24,39 @@ class TestResultHelpersEdges:
         assert result.content_type == "application/octet-stream"
 
 
+class TestFunnelDerivesAxes:
+    """The funnel takes the attempt and derives the axes from it.
+
+    The record's flat status, classification and error are the winning
+    attempt's values, so the funnel accepts no second spelling of them: a
+    caller cannot make the two records disagree about one outcome.
+    """
+
+    def test_the_funnel_derives_the_axis_values_from_the_attempt(self):
+        from app.models.crawl_result import CrawlStrategyAttempt
+        from app.orchestration.result_helpers import build_engine_result
+
+        attempt = CrawlStrategyAttempt(
+            strategy="HTTP_DECLARED_CRAWLER",
+            status="success",
+            classification="rendered",
+            http_status=200,
+            content_type="text/html",
+            elapsed_ms=12,
+            error=None,
+        )
+        result = build_engine_result(
+            original_url="http://a/",
+            normalized_url="http://a/",
+            final_url="http://a/final",
+            attempt=attempt,
+            http_status=200,
+        )
+        assert result.status == attempt.status
+        assert result.classification == attempt.classification
+        assert result.error == attempt.error
+
+
 class TestTerminalResultContract:
     """The three terminal builders differ only in status and error defaulting.
 

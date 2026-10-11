@@ -7,10 +7,9 @@ from dataclasses import dataclass, replace
 from typing import Any, cast, get_args
 
 from app.models.crawl_policy import CrawlPolicy
-from app.models.crawl_result import CrawlStrategyAttempt
+from app.models.crawl_result import CrawlStrategyAttempt, EngineCrawlResult
 from app.models.crawl_strategy import CrawlStrategy
 from app.models.crawl_worker import CrawlWorker
-from app.models.engine_crawl_result import EngineCrawlResult
 from app.models.host_policy import HostPolicy
 from app.models.http_fetcher import HttpFetcher
 from app.models.normalized_url import NormalizedUrl

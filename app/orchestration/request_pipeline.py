@@ -14,9 +14,9 @@ from app.admission.render_options import policy_wants_html
 from app.config.settings import CrawlerSettings
 from app.models.crawl_extraction_method import CrawlExtractionMethod
 from app.models.crawl_policy import POLICY_SCHEMA_VERSION, CrawlPolicy
+from app.models.crawl_result import EngineCrawlResult
 from app.models.crawl_task import CrawlTask
 from app.models.crawl_worker import CrawlWorker
-from app.models.engine_crawl_result import EngineCrawlResult
 from app.models.host_policy import HostPolicy
 from app.models.normalized_url import NormalizedUrl, admit_or_none
 from app.models.result_record import ProducerEnvelope

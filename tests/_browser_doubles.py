@@ -7,6 +7,7 @@ from app.transport.browser import BrowserRenderer
 from app.transport.browser_pool import (
     BROWSER_POOL_ACQUIRE_TIMEOUT_SECONDS,
     BrowserPool,
+    BrowserPoolExhaustedError,
     set_browser_pool,
 )
 from app.vocabulary.taxonomy import ResultStatus
@@ -59,6 +60,60 @@ class FakeBrowserPool(BrowserPool):
     async def close(self) -> None:
         self.closed = True
         await super().close()
+
+
+class RaisingRenderer:
+    """A renderer whose ``render`` raises: the worker's failure path under test."""
+
+    async def render(self, url, options, *, policy=None):
+        raise RuntimeError("renderer died")
+
+
+class NoRendererPool(BrowserPool):
+    """A pool that hands out no real renderer, with the pool half spelled once.
+
+    Every failure-path double overrides ``acquire`` and nothing else, so the
+    ``__init__``/``release``/``close`` trio is this class and each double
+    contributes its one ``acquire``. Subclasses rather than duck-typing, so
+    ``PooledBrowserWorker`` is handed something its own constructor accepts: a
+    plain object with the two methods the failure path calls is not a
+    ``BrowserPool``, and the annotation is the only thing that would notice.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(pool_size=1)
+
+    def release(self, renderer) -> None:
+        pass
+
+    async def close(self) -> None:
+        pass
+
+
+class ExhaustedPool(NoRendererPool):
+    """A real pool with no renderer: ``acquire`` always raises.
+
+    ``BrowserPool.__init__`` does no I/O -- it only builds the queue and the
+    lock -- so a real instance is as cheap as a stub, and every method the
+    worker does NOT reach on this path stays the production one:
+    ``browser_strategy`` is the inherited property, which already answers
+    ``BROWSER_HEADLESS`` for a pool built with no warmup URLs.
+    """
+
+    async def acquire(self, timeout: float | None = None) -> BrowserRenderer:
+        raise BrowserPoolExhaustedError("no renderer")
+
+
+class RaisingRendererPool(NoRendererPool):
+    """A pool that hands out :class:`RaisingRenderer`.
+
+    The pool half of the worker's failure path: ``acquire`` succeeds and the
+    render itself blows up, so a classified result has to come from the worker
+    rather than from the pool guard.
+    """
+
+    async def acquire(self, timeout: float | None = None) -> BrowserRenderer:
+        return RaisingRenderer()
 
 
 class PageCookieContext(Protocol):

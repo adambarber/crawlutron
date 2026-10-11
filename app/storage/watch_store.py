@@ -17,7 +17,6 @@ up front.
 
 from __future__ import annotations
 
-import asyncio
 import sqlite3
 from pathlib import Path
 
@@ -26,7 +25,7 @@ from app.models.normalized_url import NormalizedUrl
 from app.models.watch_outcome import WatchOutcome
 from app.models.watch_state import WatchState
 from app.models.watch_status import WatchStatus
-from app.storage.coordination_store import CoordinationStore
+from app.storage.coordination_store import CoordinationStore, atwin
 from app.storage.ids import new_watch_id
 from app.storage.migrations import StoreSchema
 
@@ -52,9 +51,8 @@ class WatchStore(CoordinationStore):
 
     def __init__(self, db_path: str | Path) -> None:
         super().__init__(db_path)
-        # Column-addressed rows, for JobStore's reason: the schema grows by
-        # migration, so positional indexing for a later-added column would couple
-        # the read path to ALTER ordering. sqlite3.Row still supports row[n].
+        # Column-addressed rows: the schema grows by migration, so positional
+        # indexing would couple the read path to ALTER ordering.
         self._conn.row_factory = sqlite3.Row
 
     def create(
@@ -179,63 +177,15 @@ class WatchStore(CoordinationStore):
             )
             self._conn.commit()
 
-    # One async twin per operation, each the same process lock the sync call
-    # takes -- so an async caller (the sweep, the API) never holds the event
-    # loop while that lock is held, and a twin can never race a direct call.
-    # Named as ``JobStore`` names its own, so both stores read the same way.
+    # One ``atwin`` twin per operation: the signature is declared once, by the
+    # sync method, and an async caller never holds the loop while the lock is.
 
-    async def acreate(
-        self,
-        url: NormalizedUrl,
-        /,
-        *,
-        interval_seconds: int,
-        now: float,
-        webhook_url: str | None = None,
-    ) -> WatchState:
-        """Async form of :meth:`create`."""
-        return await asyncio.to_thread(
-            self.create,
-            url,
-            interval_seconds=interval_seconds,
-            now=now,
-            webhook_url=webhook_url,
-        )
-
-    async def aget(self, watch_id: str) -> WatchState | None:
-        """Async form of :meth:`get`."""
-        return await asyncio.to_thread(self.get, watch_id)
-
-    async def alist_watches(self) -> list[WatchState]:
-        """Async form of :meth:`list_watches`."""
-        return await asyncio.to_thread(self.list_watches)
-
-    async def adelete(self, watch_id: str) -> bool:
-        """Async form of :meth:`delete`."""
-        return await asyncio.to_thread(self.delete, watch_id)
-
-    async def adue(self, now: float) -> list[WatchState]:
-        """Async form of :meth:`due`."""
-        return await asyncio.to_thread(self.due, now)
-
-    async def arecord_check(
-        self,
-        watch_id: str,
-        *,
-        outcome: WatchOutcome,
-        now: float,
-        next_check_at: float,
-        validators: ContentValidators,
-    ) -> None:
-        """Async form of :meth:`record_check`."""
-        await asyncio.to_thread(
-            self.record_check,
-            watch_id,
-            outcome=outcome,
-            now=now,
-            next_check_at=next_check_at,
-            validators=validators,
-        )
+    acreate = atwin(create)
+    arecord_check = atwin(record_check)
+    aget = atwin(get)
+    alist_watches = atwin(list_watches)
+    adelete = atwin(delete)
+    adue = atwin(due)
 
 
 def _row_to_state(row: sqlite3.Row) -> WatchState:

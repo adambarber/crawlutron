@@ -21,8 +21,8 @@ from app.admission.admission import (
     admit_discovered_links,
 )
 from app.admission.recursive_admission import RecursiveRunState, admit_recursive_batch
+from app.models.crawl_result import EngineCrawlResult
 from app.models.crawl_task import CrawlTask
-from app.models.engine_crawl_result import EngineCrawlResult
 from app.models.host_policy import HostPolicy
 from app.models.normalized_url import NormalizedUrl
 from app.orchestration.result_helpers import failed_result_for

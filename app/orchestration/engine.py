@@ -26,8 +26,8 @@ from app.admission.policy import PolicyTier
 from app.config.env import get_env_int
 from app.config.settings import CrawlerSettings
 from app.models.crawl_policy import CrawlPolicy
+from app.models.crawl_result import EngineCrawlResult
 from app.models.crawl_worker import CrawlWorker
-from app.models.engine_crawl_result import EngineCrawlResult
 from app.models.host_policy import HostPolicy
 from app.models.http_fetcher import HttpFetcher
 from app.models.normalized_url import NormalizedUrl

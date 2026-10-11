@@ -43,7 +43,7 @@ from httpx import ASGITransport, AsyncClient
 
 from app.admission.policy import PolicyLike, PolicyTier
 from app.models.crawl_policy import CrawlPolicy
-from app.models.engine_crawl_result import EngineCrawlResult
+from app.models.crawl_result import EngineCrawlResult
 from app.models.normalized_url import NormalizedUrl
 from app.models.result_record import ProducerEnvelope
 from app.models.taxonomy import Classification

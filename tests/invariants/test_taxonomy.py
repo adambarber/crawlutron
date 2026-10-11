@@ -680,7 +680,7 @@ STATUSES_PASSED_ARE_ENUM_MEMBERS = Rule(
     clean=lambda: (
         'def f():\n    return terminal_crawl_result(status="failed")\n',
         # A non-literal (a variable or the caller's own status field) passes.
-        "def f(s):\n    return build_engine_result(status=s)\n",
+        "def f(s):\n    return terminal_crawl_result(status=s)\n",
     ),
 )
 
@@ -964,8 +964,7 @@ def test_result_construction_enforces_membership_at_the_dataclass():
     """
     from dataclasses import asdict
 
-    from app.models.crawl_result import CrawlResult, CrawlStrategyAttempt
-    from app.models.engine_crawl_result import EngineCrawlResult
+    from app.models.crawl_result import CrawlResult, CrawlStrategyAttempt, EngineCrawlResult
     from tests._result_builders import engine_result
 
     # The all-member baseline, named once and DERIVED rather than restated. Every

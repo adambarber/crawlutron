@@ -18,6 +18,7 @@ from tests._assertions import (
     completed_crawl,
     poll_webhook_delivery,
 )
+from tests._browser_doubles import RaisingRendererPool
 from tests._fetcher_factories import make_crawl_payload
 from tests._job_harnesses import post_render_with_pool
 from tests._policy_factories import crawl_policy
@@ -342,27 +343,10 @@ class TestDiscoveryAndRenderApi:
         # the item to site_error/result_shaping_failed and the real
         # classification never reaches the caller.
         import app.api.render_endpoint as render_endpoint
-        from app.transport.browser_pool import BrowserPool, PooledBrowserWorker
-
-        class _FakeRenderer:
-            async def render(self, url, options, *, policy=None):
-                raise RuntimeError("renderer died")
-
-        class _RaisingPool(BrowserPool):
-            def __init__(self) -> None:
-                super().__init__(pool_size=1)
-
-            async def acquire(self, timeout=None):
-                return _FakeRenderer()
-
-            def release(self, renderer) -> None:
-                pass
-
-            async def close(self) -> None:
-                pass
+        from app.transport.browser_pool import PooledBrowserWorker
 
         monkeypatch.setattr(render_endpoint, "PooledBrowserWorker", lambda pool: PooledBrowserWorker(pool))
-        resp = await post_render_with_pool(self.client, _RaisingPool(), "http://127.0.0.1:1/x")
+        resp = await post_render_with_pool(self.client, RaisingRendererPool(), "http://127.0.0.1:1/x")
         assert resp.status_code == 200, resp.text
         item = resp.json()["results"][0]
         # The wire says why the render failed: the classification the shared

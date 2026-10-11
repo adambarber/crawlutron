@@ -3,9 +3,8 @@ from typing import Any
 from urllib.parse import urljoin
 
 from app.models.crawl_job import CrawlJob
-from app.models.crawl_result import CrawlResult, CrawlStrategyAttempt
+from app.models.crawl_result import CrawlResult, CrawlStrategyAttempt, EngineCrawlResult
 from app.models.discovered_link import DiscoveredLink
-from app.models.engine_crawl_result import EngineCrawlResult
 from app.models.normalized_url import NormalizedUrl, admit_or_none
 from app.models.registrable_domain import registrable_domain
 from app.models.render_options import RenderOptions
@@ -91,13 +90,16 @@ def engine_result(
     links = list(overrides.pop("discovered_links", []))
     # ``normalized_url``/``final_url`` are the record's value fields; callers
     # still name submission text, so admission lives here at the one builder
-    # rather than at every call site. None means "derive from ``url``".
-    normalized_text = overrides.pop("normalized_url", None)
+    # rather than at every call site. Omitting ``normalized_url`` derives it
+    # from ``url``; an explicit None is the field ABSENT, which the entry-point
+    # probes pin -- the record declares it Optional and the aggregation reads
+    # the absent case as "this record's URLs were never admitted".
+    normalized_text = overrides.pop("normalized_url", url)
     final_url_text = overrides.pop("final_url", None)
     derived = status_for_classification(classification) if status is None else status
     absent = EngineCrawlResult(
         original_url=_text(url),
-        normalized_url=canonical(normalized_text if normalized_text is not None else url),
+        normalized_url=canonical(normalized_text) if normalized_text is not None else None,
         final_url=canonical(final_url_text) if final_url_text is not None else None,
         status=derived,
         classification=classification,

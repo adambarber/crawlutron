@@ -51,9 +51,6 @@ class FakePage(ScriptedPage):
     async def _click(self, selector):
         self.calls.append(("click", selector))
 
-    async def route(self, pattern, handler):
-        self.route_calls.append((pattern, handler))
-
     def on(self, event, handler):
         self.calls.append(("on", event))
 

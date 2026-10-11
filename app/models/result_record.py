@@ -20,8 +20,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import NotRequired, TypedDict
 
-from app.models.crawl_result import CrawlResult
-from app.models.engine_crawl_result import EngineCrawlResult
+from app.models.crawl_result import CrawlResult, EngineCrawlResult
 
 AnyResult = EngineCrawlResult | CrawlResult
 """Either result record, for the code that genuinely handles both.

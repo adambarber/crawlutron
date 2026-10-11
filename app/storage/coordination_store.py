@@ -19,14 +19,20 @@ name it owns.
 
 from __future__ import annotations
 
+import asyncio
+import functools
 import sqlite3
+from collections.abc import Callable, Coroutine
 from pathlib import Path
-from typing import ClassVar
+from typing import Any, ClassVar, Concatenate, ParamSpec, TypeVar
 
 from app.storage.migrations.manifest import StoreSchema
 from app.storage.sqlite_store import connect_store, process_lock, store_lock_key
 
-__all__ = ["CoordinationStore"]
+__all__ = ["CoordinationStore", "atwin"]
+
+P = ParamSpec("P")
+R = TypeVar("R")
 
 
 class CoordinationStore:
@@ -43,16 +49,11 @@ class CoordinationStore:
 
     def __init__(self, db_path: str | Path) -> None:
         Path(db_path).parent.mkdir(parents=True, exist_ok=True)
-        # The store chokepoint owns the PRAGMAs and the migration; a store that
-        # opened its own connection could run the migration twice or drift the
-        # WAL setting, which is the whole defect class.
+        # The store chokepoint owns the PRAGMAs and the migration: a store that
+        # opened its own connection could run the migration twice, or drift WAL.
         self._conn: sqlite3.Connection = connect_store(db_path, schema=self.schema)
-        # The same file-wide lock the migration took, and not a private one: a
-        # per-instance lock excludes this store from nothing else, so a write
-        # here would run straight through a migration in flight on this file --
-        # and through a second store instance writing to it. Cross-process
-        # ordering remains SQLite's job, which is the entire reason these stores
-        # exist.
+        # The same file-wide lock the migration took, not a private one: a
+        # per-instance lock excludes this store from nothing.
         self._lock = process_lock(store_lock_key(db_path))
 
     def close(self) -> None:
@@ -64,3 +65,27 @@ class CoordinationStore:
         """
         with self._lock:
             self._conn.close()
+
+
+def atwin[Owner, **P, R](
+    sync: Callable[Concatenate[Owner, P], R],
+) -> Callable[Concatenate[Owner, P], Coroutine[Any, Any, R]]:
+    """The async twin of a store method, declared FROM the sync method.
+
+    The ``a``-prefixed twin is the house rule for a store method called from an
+    async context: the sync call runs on a worker thread through
+    ``asyncio.to_thread`` so the event loop never waits on the store lock.
+    Spelling the twin by hand gives the signature a second declaration, and
+    two declarations of one signature are free to drift -- so the twin is
+    derived from the sync method instead, which carries its parameters and its
+    return type, and a store declares each method once.
+    """
+
+    @functools.wraps(sync)
+    async def twin(self: Owner, /, *args: P.args, **kwargs: P.kwargs) -> R:
+        # Resolved through the instance at CALL time, not the captured function:
+        # a subclass override (the bus-publishing store) shadows it for the twin.
+        sync_now: Callable[..., R] = getattr(self, sync.__name__)
+        return await asyncio.to_thread(sync_now, *args, **kwargs)
+
+    return twin

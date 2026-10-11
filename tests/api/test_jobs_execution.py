@@ -973,6 +973,21 @@ class TestTheRunnerClaim:
         job_store.save(job)
         return job
 
+    @staticmethod
+    def _paused_after_claim(job_store):
+        """A seeded job claimed RUNNING then stopped PAUSED, engine installed.
+
+        The flip is the claim the two paths below exercise: the row is PENDING,
+        this process claims it, then stops it. What happens next differs per
+        path; the state setup does not.
+        """
+        job = TestTheRunnerClaim._seeded(job_store)
+        assert job_store.set_status(job.job_id, JobStatus.RUNNING, expected=JobStatus.PENDING)
+        assert job_store.set_status(job.job_id, JobStatus.PAUSED, expected=JobStatus.RUNNING)
+        engine = ScriptedExecute(results=[_canned_result(GRAPH_ROOT)])
+        job_runner.install_execute_crawl(engine)
+        return job, engine
+
     async def test_a_row_already_running_is_left_alone_by_a_second_runner(self, job_store):
         # The create/recovery entrance path: whoever loaded a RUNNING row is not
         # the owner, and an owner it did not become means no work.
@@ -989,11 +1004,7 @@ class TestTheRunnerClaim:
     async def test_resume_still_runs_the_row_it_flipped_itself(self, job_store):
         # The flip is the claim on this path, and only the process that performed
         # it may run the job -- which is what distinguishes it from the case above.
-        job = self._seeded(job_store)
-        assert job_store.set_status(job.job_id, JobStatus.RUNNING, expected=JobStatus.PENDING)
-        assert job_store.set_status(job.job_id, JobStatus.PAUSED, expected=JobStatus.RUNNING)
-        engine = ScriptedExecute(results=[_canned_result(GRAPH_ROOT)])
-        job_runner.install_execute_crawl(engine)
+        job, _engine = self._paused_after_claim(job_store)
 
         outcome = await job_runner.resume_job(
             job.job_id, job_store, CrawlerSettings.from_mapping({}), asyncio.Event()
@@ -1006,11 +1017,7 @@ class TestTheRunnerClaim:
     async def test_a_row_stopped_between_the_read_and_the_claim_is_not_crawled(self, job_store):
         # The runner read RUNNING; by the time it claimed, the row had stopped.
         # A stale read must not outvote what the store says now.
-        job = self._seeded(job_store)
-        assert job_store.set_status(job.job_id, JobStatus.RUNNING, expected=JobStatus.PENDING)
-        assert job_store.set_status(job.job_id, JobStatus.PAUSED, expected=JobStatus.RUNNING)
-        engine = ScriptedExecute(results=[_canned_result(GRAPH_ROOT)])
-        job_runner.install_execute_crawl(engine)
+        job, engine = self._paused_after_claim(job_store)
         raced = _RunnerReadRunsBeforeTheStore(job_store)
 
         await drive_job(job.job_id, raced)

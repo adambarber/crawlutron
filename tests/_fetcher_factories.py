@@ -5,7 +5,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 from app.admission.policy import CrawlPolicy, read_policy
-from app.models.engine_crawl_result import EngineCrawlResult
+from app.models.crawl_result import EngineCrawlResult
 from app.models.host_policy import HostPolicy
 from app.models.http_fetch_result import HttpFetchResult
 from app.models.normalized_url import NormalizedUrl

@@ -4,42 +4,30 @@ from collections import deque
 
 import pytest
 
-from app.transport.browser import BrowserRenderer
-from app.transport.browser_pool import BrowserPool, BrowserPoolExhaustedError
+from app.models.crawl_job import CrawlJob
+from app.models.crawl_result import CrawlResult
+from app.models.normalized_url import NormalizedUrl
+from app.models.render_options import RenderOptions
+from app.transport.browser_pool import BrowserPool, PooledBrowserWorker
 from app.vocabulary.strategies import BROWSER_HEADLESS
 from tests._assertions import assert_result_failed
+from tests._browser_doubles import ExhaustedPool, RaisingRendererPool
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY, canonical, crawl_policy
 
 
-class ExhaustedPool(BrowserPool):
-    """A real pool with no renderer: ``acquire`` always raises, ``close`` is a no-op.
+def _guard_job() -> CrawlJob:
+    """The job every guard test runs: index 0, one admitted URL, a one-second budget."""
+    return CrawlJob(
+        index=0,
+        url=NormalizedUrl("https://a.example/x", policy=UNRESTRICTED_HOST_POLICY),
+        options=RenderOptions(timeout_seconds=1),
+        host_policy=UNRESTRICTED_HOST_POLICY,
+    )
 
-    A SUBCLASS rather than a duck-typed stand-in, so ``PooledBrowserWorker`` is
-    handed something its own constructor accepts. It is typed ``BrowserPool``,
-    and a plain object with the two methods the failure path calls is not one --
-    the annotation was the only thing that could have noticed, and the pool
-    interface it stands for is ``acquire``/``release`` plus
-    ``browser_strategy``, which is all this overrides.
 
-    ``BrowserPool.__init__`` does no I/O -- it only builds the queue and the
-    lock -- so a real instance is as cheap as a stub, and every method the
-    worker does NOT reach on this path stays the production one. ``acquire`` and
-    ``close`` are the only two overridden; ``browser_strategy`` is the inherited
-    property, which already answers ``BROWSER_HEADLESS`` for a pool built with no
-    warmup URLs.
-    """
-
-    def __init__(self) -> None:
-        super().__init__(pool_size=1)
-
-    async def acquire(self, timeout: float | None = None) -> BrowserRenderer:
-        raise BrowserPoolExhaustedError("no renderer")
-
-    def release(self, renderer) -> None:
-        pass
-
-    async def close(self) -> None:
-        pass
+async def _run_worker(pool: BrowserPool, job: CrawlJob | None = None) -> CrawlResult:
+    """The real worker over one job against ``pool``."""
+    return await PooledBrowserWorker(pool)(job or _guard_job())
 
 
 @pytest.mark.asyncio
@@ -55,19 +43,7 @@ class TestBrowserWorkerGuard:
     async def test_pool_exhaustion_returns_result_not_raises(self):
         """A worker whose pool is exhausted must return a classified result so
         the at-least-once layer can re-queue it -- not raise to the scheduler."""
-        from app.models.crawl_job import CrawlJob
-        from app.models.normalized_url import NormalizedUrl
-        from app.models.render_options import RenderOptions
-        from app.transport.browser_pool import PooledBrowserWorker
-
-        worker = PooledBrowserWorker(ExhaustedPool())
-        job = CrawlJob(
-            index=0,
-            url=NormalizedUrl("https://a.example/x", policy=UNRESTRICTED_HOST_POLICY),
-            options=RenderOptions(timeout_seconds=1),
-            host_policy=UNRESTRICTED_HOST_POLICY,
-        )
-        result = await worker(job)
+        result = await _run_worker(ExhaustedPool())
 
         assert result.status == "failed"
         assert result.classification == "browser_pool_exhausted"
@@ -78,33 +54,8 @@ class TestBrowserWorkerGuard:
 
     async def test_worker_failure_returns_the_admitted_url_as_a_value(self):
         """The contracted url slot is a NormalizedUrl, never the page's text."""
-        from app.models.crawl_job import CrawlJob
-        from app.models.normalized_url import NormalizedUrl
-        from app.models.render_options import RenderOptions
-        from app.transport.browser_pool import BrowserPool, PooledBrowserWorker
-
-        class _RaisingRenderer:
-            async def render(self, url, options, *, policy=None):
-                raise RuntimeError("render died")
-
-        class _RaisingPool(BrowserPool):
-            def __init__(self) -> None:
-                super().__init__(pool_size=1)
-
-            async def acquire(self, timeout: float | None = None):
-                return _RaisingRenderer()
-
-            def release(self, renderer) -> None:
-                pass
-
-        worker = PooledBrowserWorker(_RaisingPool())
-        job = CrawlJob(
-            index=0,
-            url=NormalizedUrl("https://a.example/x", policy=UNRESTRICTED_HOST_POLICY),
-            options=RenderOptions(timeout_seconds=1),
-            host_policy=UNRESTRICTED_HOST_POLICY,
-        )
-        result = await worker(job)
+        job = _guard_job()
+        result = await _run_worker(RaisingRendererPool(), job)
 
         assert result.classification == "network_error"
         # The identity slot carries the admitted value through unchanged; a str

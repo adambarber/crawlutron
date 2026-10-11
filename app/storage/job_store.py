@@ -7,7 +7,6 @@ so they can survive process restarts.
 
 from __future__ import annotations
 
-import asyncio
 import json
 import logging
 import sqlite3
@@ -23,6 +22,7 @@ from app.admission.policy import stored_policy as _stored_policy
 from app.models.crawl_policy import CrawlPolicy
 from app.models.host_policy import HostPolicy
 from app.models.normalized_url import NormalizedUrl, admit_or_none
+from app.storage.coordination_store import atwin
 from app.storage.ids import new_job_id
 from app.storage.migrations import StoreSchema
 from app.storage.sqlite_store import connect_store, process_lock, store_lock_key
@@ -801,33 +801,6 @@ class JobStore:
         with self._lock:
             self._persist(job)
 
-    async def asave(self, job: CrawlJobState) -> None:
-        await asyncio.to_thread(self.save, job)
-
-    async def acreate(self, root_url: str, policy: CrawlPolicy) -> CrawlJobState:
-        return await asyncio.to_thread(self.create, root_url, policy)
-
-    async def acreate_single_shot(self, job_id: str, root_url: str, policy: CrawlPolicy) -> CrawlJobState:
-        return await asyncio.to_thread(self.create_single_shot, job_id, root_url, policy)
-
-    async def aset_status(self, job_id: str, new: JobStatus, *, expected: _Expected) -> bool:
-        return await asyncio.to_thread(self.set_status, job_id, new, expected=expected)
-
-    async def aload(self, job_id: str) -> CrawlJobState | None:
-        return await asyncio.to_thread(self.load, job_id)
-
-    async def adelete(self, job_id: str) -> bool:
-        return await asyncio.to_thread(self.delete, job_id)
-
-    async def alist_jobs(self) -> list[JobStatusView]:
-        return await asyncio.to_thread(self.list_jobs)
-
-    async def astatus(self, job_id: str) -> JobStatusView | None:
-        return await asyncio.to_thread(self.status_row, job_id)
-
-    async def aexists(self, job_id: str) -> bool:
-        return await asyncio.to_thread(self.exists, job_id)
-
     def _persist(self, job: CrawlJobState) -> None:
         """Write job state to SQLite. Caller must hold ``self._lock``.
 
@@ -948,3 +921,16 @@ class JobStore:
         """Close the database connection (thread-safe)."""
         with self._lock:
             self._conn.close()
+
+    # One async twin per operation: ``atwin`` runs the sync call on a worker
+    # thread, so the loop never waits on the store lock.
+
+    asave = atwin(save)
+    acreate = atwin(create)
+    acreate_single_shot = atwin(create_single_shot)
+    aset_status = atwin(set_status)
+    aload = atwin(load)
+    adelete = atwin(delete)
+    alist_jobs = atwin(list_jobs)
+    astatus = atwin(status_row)
+    aexists = atwin(exists)

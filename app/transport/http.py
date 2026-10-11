@@ -20,8 +20,7 @@ from app.extraction.document_text import format_extracted_document_text
 from app.models.crawl_extraction_method import CrawlExtractionMethod
 from app.models.crawl_policy import CrawlPolicy
 from app.models.crawl_policy_limits import CrawlPolicyLimits
-from app.models.crawl_result import CrawlStrategyAttempt
-from app.models.engine_crawl_result import EngineCrawlResult
+from app.models.crawl_result import CrawlStrategyAttempt, EngineCrawlResult
 from app.models.host_policy import HostPolicy
 from app.models.http_fetch_result import HttpFetchResult
 from app.models.normalized_url import NormalizedUrl
@@ -336,12 +335,9 @@ def _not_modified_result(ctx: _HttpStrategyContext, resp: _FetchedResponse) -> E
         diagnostics["conditional"] = dict(ctx.caller_conditional)
     return build_engine_result(
         **_response_result_fields(ctx, resp, attempt),
-        status=status,
-        classification=classification,
         selected_strategy=ctx.strategy,
         http_status=304,
         diagnostics=diagnostics,
-        error=None,
         validators=echoed_validators,
     )
 
@@ -582,8 +578,6 @@ async def _construct_http_result(
     html = extracted.html if ctx.include_html else None
     return build_engine_result(
         **_response_result_fields(ctx, resp, attempt),
-        status=status,
-        classification=classification,
         selected_strategy=ctx.strategy if status == "success" else None,
         http_status=resp.status_code,
         content_type=resp.content_type,
@@ -596,7 +590,6 @@ async def _construct_http_result(
         **_discovery_result_fields(
             post_fetch,
             classification_evidence=classification_evidence,
-            error=error_classification,
         ),
         next_page_url=next_page_url,
         validators=resp.validators(),

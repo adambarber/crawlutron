@@ -7,6 +7,7 @@ through the store and read back through the API.
 """
 
 import pytest
+from httpx import Response
 
 from app.models.content_validators import ContentValidators
 from app.models.watch_outcome import WatchOutcome
@@ -19,12 +20,14 @@ INTERVAL = 900
 WEBHOOK = "http://127.0.0.1:9/hook"
 
 
-async def test_registration_admits_the_url_and_schedules_the_first_check(watch_store):
+async def _register(watch_store, **payload) -> Response:
+    """One registration POST against the watch door, answered by the response."""
     async with watch_client(watch_store) as client:
-        response = await client.post(
-            "/v1/watches",
-            json={"url": TARGET, "interval_seconds": INTERVAL, "webhook_url": WEBHOOK},
-        )
+        return await client.post("/v1/watches", json=payload)
+
+
+async def test_registration_admits_the_url_and_schedules_the_first_check(watch_store):
+    response = await _register(watch_store, url=TARGET, interval_seconds=INTERVAL, webhook_url=WEBHOOK)
 
     assert response.status_code == 201, response.text
     body = response.json()
@@ -40,8 +43,7 @@ async def test_registration_admits_the_url_and_schedules_the_first_check(watch_s
 
 
 async def test_a_poll_only_watch_registers_with_no_webhook(watch_store):
-    async with watch_client(watch_store) as client:
-        response = await client.post("/v1/watches", json={"url": TARGET, "interval_seconds": INTERVAL})
+    response = await _register(watch_store, url=TARGET, interval_seconds=INTERVAL)
 
     assert response.status_code == 201, response.text
     assert response.json()["webhook_url"] is None
@@ -50,11 +52,7 @@ async def test_a_poll_only_watch_registers_with_no_webhook(watch_store):
 async def test_a_url_this_deployment_will_not_crawl_is_refused(watch_store, monkeypatch):
     block_private_targets(monkeypatch)
 
-    async with watch_client(watch_store) as client:
-        response = await client.post(
-            "/v1/watches",
-            json={"url": "http://127.0.0.1:9/", "interval_seconds": INTERVAL},
-        )
+    response = await _register(watch_store, url="http://127.0.0.1:9/", interval_seconds=INTERVAL)
 
     assert response.status_code == 422, response.text
     assert watch_store.list_watches() == []
@@ -64,19 +62,14 @@ async def test_a_webhook_this_deployment_cannot_deliver_to_is_refused(watch_stor
     """Refused at registration, not on the first change: the caller can fix it now."""
     block_private_targets(monkeypatch)
 
-    async with watch_client(watch_store) as client:
-        response = await client.post(
-            "/v1/watches",
-            json={"url": TARGET, "interval_seconds": INTERVAL, "webhook_url": WEBHOOK},
-        )
+    response = await _register(watch_store, url=TARGET, interval_seconds=INTERVAL, webhook_url=WEBHOOK)
 
     assert response.status_code == 422, response.text
     assert watch_store.list_watches() == []
 
 
 async def test_a_non_positive_interval_is_refused(watch_store):
-    async with watch_client(watch_store) as client:
-        response = await client.post("/v1/watches", json={"url": TARGET, "interval_seconds": 0})
+    response = await _register(watch_store, url=TARGET, interval_seconds=0)
 
     assert response.status_code == 422, response.text
 

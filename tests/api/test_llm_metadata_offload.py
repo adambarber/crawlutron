@@ -17,7 +17,7 @@ from app.api.response_shaping import (
     build_unified_crawl_response,
     build_unified_result,
 )
-from app.models.engine_crawl_result import EngineCrawlResult
+from app.models.crawl_result import EngineCrawlResult
 from tests._assertions import install_to_thread_spy
 from tests._result_builders import engine_result
 

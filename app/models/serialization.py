@@ -20,8 +20,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import MISSING, fields, is_dataclass
 from typing import Any, TypeVar, Union, cast, get_args, get_origin, get_type_hints
 
-from app.models.crawl_result import CrawlResult
-from app.models.engine_crawl_result import EngineCrawlResult
+from app.models.crawl_result import CrawlResult, EngineCrawlResult
 from app.models.host_policy import HostPolicy
 from app.models.normalized_url import NormalizedUrl
 
