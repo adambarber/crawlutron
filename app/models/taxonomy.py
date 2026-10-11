@@ -49,13 +49,11 @@ Classification = Literal[
     "network_error",
     "connection_error",
     "http_status_error",
-    # The per-URL budget overran: the host answered but the whole chain
-    # exceeded total_url_budget_seconds. A CrawlClassification member (see
-    # app/vocabulary/taxonomy.py) so it survives the strict enum at response shaping.
+    # The per-URL budget overran: the host answered but the chain exceeded
+    # total_url_budget_seconds. A member so it survives the strict enum.
     "url_budget_exceeded",
-    # Fetch-failure codes the HTTP strategy's error classifier emits; they are
-    # CrawlClassification members (see app.models.taxonomy) so they survive the
-    # strict enum field at response shaping.
+    # Fetch-failure codes the HTTP strategy's error classifier emits. Members
+    # so they survive the strict enum field at response shaping.
     "payload_too_large",
     "too_many_redirects",
     "http_error",
@@ -68,48 +66,26 @@ Classification = Literal[
     "unknown_error",
     "not_modified",
     # A browser renderer slot was unavailable within the acquire bound, so the
-    # URL was not attempted; the frontier re-queues it (at-least-once). A
-    # CrawlClassification member so it survives the strict enum at response
-    # shaping.
+    # URL was not attempted; the frontier re-queues it (at-least-once).
     "browser_pool_exhausted",
-    # A domain's circuit breaker was open, so the URL was not attempted: a
-    # scheduler capacity decision, not a page outcome. A CrawlClassification
-    # member for the same reason -- a non-member code would reach the strict
-    # enum and be downgraded to site_error, hiding the skip reason.
+    # A domain's circuit breaker was open: a scheduler capacity decision, not
+    # a page outcome -- a non-member code would be downgraded, hiding it.
     "circuit_breaker_open",
 ]
 
-# Pipeline conditions with no page-classification analogue: a capacity decision
-# and a config one. They are not page outcomes, so forcing them into
-# Classification would distort that taxonomy.
+# Pipeline conditions with no page-classification analogue (capacity, config):
+# they are not page outcomes, so forcing them in would distort the taxonomy.
 PIPELINE_ONLY_CRAWL_ERRORS = Literal[
-    # Deliberately not spelled like its ``robots_disallowed`` Classification
-    # member: this is the stable ERROR code, which may differ from the
-    # classification of the same event, and the taxonomy invariant asserts the
-    # two sets stay disjoint. ``request_pipeline._robots_disallowed`` sets the
-    # pair (``classification="robots_disallowed"``,
-    # ``error="robots_txt_disallowed"``); the two strings are not interchangeable.
+    # Deliberately NOT spelled like its robots_disallowed Classification
+    # member: this is the stable ERROR code, asserted disjoint from the set.
     "robots_txt_disallowed",
     "browser_worker_unavailable",
     "unsupported_strategy",
     "retries_exhausted",
 ]
 
-# The stable machine-readable failure code carried alongside ``classification``.
-# Documented at app/api/render.py:202 as a stable code callers can key on, so it
-# is a declared taxonomy rather than a free-form str: a code that is not listed
-# here cannot reach a result, and the membership sweep enforces it for free.
-# - page-outcome codes that are also Classification members: the builders route
-#   ``error=classification`` for these (result_helpers), so the two fields agree
-#   and the code is a stable key for callers.
-# - pipeline conditions with no page-classification analogue
-#   (``browser_worker_unavailable`` is a capacity decision, ``unsupported_strategy``
-#   a config one): they are not page outcomes and forcing them into Classification
-#   would distort that taxonomy.
-#
-# It is the UNION of the two, not a restatement of the first, and the union is
-# what makes it evaluable: mypy cannot compute `*get_args()` inside `Literal[...]`,
-# so a restatement had to be kept in step by a guard instead of derived.
+#: The stable failure code beside ``classification``: a declared union of the
+#: two groups (hand-maintained, since mypy cannot compute ``*get_args()``).
 CrawlError = Classification | PIPELINE_ONLY_CRAWL_ERRORS
 
 CrawlStrategyName = Literal[

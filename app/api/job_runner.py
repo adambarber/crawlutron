@@ -165,10 +165,8 @@ async def recover_orphaned_running_jobs(job_store: JobStore) -> int:
     recovered = 0
     for summary in await job_store.alist_jobs():
         if summary.get("status") == JobStatus.RUNNING.value:
-            # A job that cannot be resumed is given a terminal status here,
-            # while this is still the only place that knows the service has
-            # given up on it. Rewinding it instead would hand the next startup
-            # a row it has already decided to skip.
+            # A job that cannot be resumed gets its terminal status here, while
+            # this is the only place that knows the service gave up on it.
             retired = JobStatus.PENDING if _is_resumable_kind(summary["kind"]) else JobStatus.FAILED
             # Control-plane CAS: retires the row without rewriting its data;
             # save() no longer carries status anyway.
@@ -236,14 +234,12 @@ def _job_engine_payload(job: Any, batch: Sequence[FrontierEntry]) -> dict[str, A
     The runner owns the durable frontier; the engine is a single-page fetcher per
     batch. Two owners of one property was the defect, so engine recursion is off.
     """
-    # The payload is the engine's wire shape, and text is what that shape's
-    # ``urls`` carry: the entry's URL is an admitted value by construction, so
-    # the projection is the identity of the page, not a re-validation.
+    # The engine's wire shape carries text in ``urls``; the entry's URL is an
+    # admitted value by construction, so this projects identity, not validation.
     urls = [entry.url.raw for entry in batch]
     policy = read_policy(job.policy, job.tier)
-    # Model_copy is safe here specifically because max_depth=0 is a value the
-    # model declares and this line is ours, not a caller's: a single engine
-    # batch is one page deep by definition.
+    # Model_copy is safe because max_depth=0 is a declared value and this line
+    # is ours, not a caller's: one engine batch is one page deep by definition.
     policy = policy.model_copy(update={"limits": policy.limits.model_copy(update={"max_depth": 0})})
     return {
         "urls": urls,
@@ -274,12 +270,8 @@ async def _pace_delayed_batch(
         return
 
     def pace_result(job: CrawlTask) -> CrawlResult:
-        # The status is derived from the label rather than spelled beside it.
-        # A paced task never carries a payload, so this is the one result whose
-        # (classification, status) pair could sit here forever as two literals
-        # -- correct today, and silently wrong the day the taxonomy moves a
-        # default, with nothing in the suite able to see it. Asking the table is
-        # the same one-line change that keeps it true.
+        # The status is derived from the label, not spelled beside it: two literals
+        # go stale the day the taxonomy moves, and nothing in the suite sees it.
         classification: Classification = "rendered"
         return CrawlResult(
             url=job.normalized_url,
@@ -370,14 +362,8 @@ async def _run_job(
             if job is None:
                 return
 
-            # Index results by every URL they are known by, in TWO passes with
-            # different priority. A result's own `original_url` is what the
-            # caller submitted and is therefore authoritative for that entry;
-            # redirect aliases (final_url/normalized_url) only fill identities
-            # no result claimed for itself. A single first-writer-wins pass made
-            # a redirect steal another entry's slot: with batch [a, b] where `a`
-            # redirects to `b/`, the redirect result claimed b's identity first
-            # and b's real result was never recorded.
+            # Two passes by priority: ``original_url`` (the caller's submission)
+            # wins; redirect aliases only fill identities no result claimed.
             resolved: dict[NormalizedUrl, EngineCrawlResult] = {}
             for produced in items:
                 admitted_original = admit_or_none(produced.original_url, policy=job.host_policy)
@@ -417,35 +403,20 @@ async def _run_job(
                 job.transient_retries.pop(identity, None)
                 job.visited.add(identity)
                 if item is None:
-                    # The engine's batch came back without answering for this URL.
-                    # It is already in `visited`, so counting it and moving on left
-                    # the job's results unable to account for it -- total_crawled
-                    # said 2, one result existed, and nothing named the gap. The
-                    # batch's own shaping path already builds this envelope
-                    # (its docstring says it mirrors this runner's semantics,
-                    # which is the coupling that let the two drift), so the
-                    # runner uses it rather than inventing a second shape.
-                    # The page's own identity as the admitted value, not its
-                    # text or a two-key dict: the degradation reads attributes,
-                    # so a dict arrived there as an envelope with no URL -- and
-                    # the text form would force the envelope to drop the
-                    # identity, since the wire has no policy to re-admit with.
+                    # The batch's own shaping envelope names the unanswered URL, is
+                    # reused rather than reinvented, and carries the admitted value.
                     job.results.append(_failed_unified_result(identity).model_dump())
                     failed += 1
                     continue
                 if outcome == "transient":
-                    # The frozen dataclass's own constructor-for-substitute, so
-                    # the overridden fields are named and checked rather than
-                    # merged into an untyped dict on the way through.
+                    # The frozen dataclass's own substitute constructor: overridden
+                    # fields are named and checked, never merged through a plain dict.
                     item = replace(item, status="failed", error="retries_exhausted")
                 try:
                     unified = await abuild_unified_result(item)
                 except Exception:
-                    # Shaping is the batch's last line of defense and is not
-                    # meant to raise; if it does, this item is still this URL's
-                    # result and the job must still name it. Shaping degrades a
-                    # malformed item to this same terminal failure, so the two
-                    # paths now agree instead of one producing nothing.
+                    # Shaping is the batch's last line of defense and not meant to
+                    # raise; if it does, the job still names this URL's result here.
                     unified = _failed_unified_result(item)
                 job.results.append(unified.model_dump())
                 if item.status == "failed":
