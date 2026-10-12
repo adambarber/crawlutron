@@ -81,7 +81,7 @@ def _table_shadowing_offenders(rows) -> list[str]:
 
 
 def test_the_classification_table_has_no_shadowed_or_mid_table_catch_all_rows():
-    from app.orchestration.result_helpers import _CLASSIFICATION_BY_EXCEPTION
+    from app.orchestration.classification import _CLASSIFICATION_BY_EXCEPTION
 
     offenders = _table_shadowing_offenders(_CLASSIFICATION_BY_EXCEPTION)
     assert not offenders, (
@@ -274,8 +274,8 @@ def test_transience_home_detector_bites():
 #      (the render endpoints, which own the 503 transport response) -- never
 #      ad-hoc catch sites in the crawl path, which would re-derive retry
 #      semantics locally instead of reading the classification.
-#   3. classify_error_code must be defined in result_helpers (neutral home),
-#      never in a strategy module; strategies reach for it, they don't own it.
+#   3. classify_error_code must be defined in the classification module (neutral
+#      home), never in a strategy module; strategies reach for it, they don't own it.
 # ---------------------------------------------------------------------------
 
 # Classifications that a hand-rolled _failed_engine_result/build_engine_result
@@ -286,7 +286,7 @@ def test_transience_home_detector_bites():
 #   not_modified: a 304 cache hit (a *success*, built by the 304 path)
 # Everything else means a real exception was converted to a result by hand,
 # which is the drift the chokepoint exists to prevent.
-_ERROR_CHOKEPOINT_SANCTIONED = frozenset({"result_helpers.py"})
+_ERROR_CHOKEPOINT_SANCTIONED = frozenset({"classification.py"})
 
 
 _NON_EXCEPTION_CLASSIFICATIONS = frozenset(
@@ -413,14 +413,14 @@ def test_pool_exhaustion_catch_detector_bites():
 
 
 def test_classifier_lives_in_the_neutral_home():
-    """classify_error_code must be defined in result_helpers, not re-defined
-    in a strategy module (the old site, http.py, forced browser.py to import
-    across strategies)."""
+    """classify_error_code must be defined in the classification module, not
+    re-defined in a strategy module (the old site, http.py, forced browser.py
+    to import across strategies)."""
     for path, tree in app_trees(exclude=SANCTIONED | _ERROR_CHOKEPOINT_SANCTIONED):
         for node in functions(tree):
             if node.name == "classify_error_code":
                 raise AssertionError(
-                    offender_at(path, node, "classify_error_code defined outside result_helpers")
+                    offender_at(path, node, "classify_error_code defined outside the classification module")
                 )
 
 

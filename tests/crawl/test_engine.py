@@ -12,7 +12,7 @@ from app.models.crawl_policy_limits import CrawlPolicyLimits
 from app.models.crawl_result import CrawlResult
 from app.models.serialization import to_dict
 from app.orchestration.engine import payload_policy
-from app.orchestration.result_helpers import terminal_attempt
+from app.orchestration.render_result import terminal_attempt
 from app.orchestration.scheduler import DomainScheduler
 from app.transport.browser import BrowserRenderer
 from app.vocabulary.extraction import EXTRACTION_DOCUMENT, EXTRACTION_TRAFILATURA
@@ -319,7 +319,10 @@ class TestEngineScopeEdges:
     """Cover remaining branches in engine.py"""
 
     def test_crawl_chain_robots_disallowed(self):
-        from app.orchestration.result_helpers import TerminalResult, _skipped_engine_result
+        from app.orchestration.engine_result import (
+            TerminalResult,
+            _skipped_engine_result,
+        )
         from app.vocabulary.taxonomy import status_for_classification
 
         result = _skipped_engine_result(

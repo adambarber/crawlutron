@@ -15,8 +15,8 @@ What stays with the caller is policy: which extraction mode, which content
 type, the selector pair, the method label for the body/text mode, and the
 discovery switches. Those are exactly the parts the two strategies genuinely
 disagree about. This module must not fetch, decode a body (``body_decode``
-owns that), classify a page, or assemble a result (``result_helpers`` owns
-that).
+owns that), classify a page, or assemble a result (``engine_result`` and
+``render_result`` own that).
 """
 
 from __future__ import annotations

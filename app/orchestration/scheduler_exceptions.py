@@ -3,7 +3,7 @@
 These live here, alongside the error classifier, rather than in ``scheduler``:
 ``classify_error_code`` keys the taxonomy off the exception type, so the
 exception must be importable from the classifier without a cycle
-(``scheduler`` does not import ``result_helpers``). Keeping the type next to
+(``scheduler`` does not import ``classification``). Keeping the type next to
 the function that reads it is what makes the classification a property of the
 chokepoint instead of something each caller has to restate.
 """

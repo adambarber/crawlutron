@@ -513,7 +513,7 @@ class TaskRamBudget:
     a value the caller builds and this function hands on unchanged means the
     weights exist once, and a caller adding a weight edits a dataclass instead
     of two signatures that have to agree. The same move
-    ``app.orchestration.result_helpers.TerminalResult`` made for the terminal-result
+    ``app.orchestration.engine_result.TerminalResult`` made for the terminal-result
     constructors, for the same reason.
 
     Every field defaults to the env-read weight this module already reserves

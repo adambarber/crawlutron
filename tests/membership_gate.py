@@ -5,8 +5,8 @@ same class seen twice.
 
 The class
 ---------
-``app/orchestration/result_helpers.py`` is the chokepoint for building a result; the
-dataclasses it fills carry ``Literal`` annotations. The annotations are
+``app/orchestration/engine_result.py`` and ``render_result.py`` are the chokepoints for
+building a result; the dataclasses they fill carry ``Literal`` annotations. The annotations are
 *comments to the runtime*: ``CrawlResult`` is a plain frozen dataclass, so
 nothing rejects ``classification="url_budget_exceeded"`` until the value
 reaches the strict pydantic enum at response shaping, where a single non-member

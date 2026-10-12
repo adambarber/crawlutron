@@ -9,7 +9,7 @@ from app.models.crawl_job import CrawlJob
 from app.models.crawl_result import EngineCrawlResult
 from app.models.crawl_task import CrawlTask
 from app.models.taxonomy import Classification
-from app.orchestration.result_helpers import TerminalResult
+from app.orchestration.engine_result import TerminalResult
 from app.orchestration.scheduler import _COOLDOWN_PURGE_INTERVAL, DomainScheduler, jittered_delay
 from tests._policy_factories import canonical
 from tests._result_builders import make_job, make_result
@@ -180,7 +180,7 @@ class TestObservedLatencyCrossesPipelines:
     @staticmethod
     def _rendered_result(elapsed_ms: int):
         from app.models.crawl_result import CrawlResult
-        from app.orchestration.result_helpers import terminal_attempt
+        from app.orchestration.render_result import terminal_attempt
 
         return CrawlResult(
             url="https://example.com/x",
@@ -201,7 +201,7 @@ class TestObservedLatencyCrossesPipelines:
     @staticmethod
     def _crawled_result(elapsed_ms: int):
         from app.models.crawl_result import CrawlStrategyAttempt
-        from app.orchestration.result_helpers import build_engine_result
+        from app.orchestration.engine_result import build_engine_result
 
         return build_engine_result(
             original_url="https://example.com/x",
@@ -741,7 +741,7 @@ class TestSchedulerFailureAccountingIsAboutStatuses:
     @staticmethod
     def _terminal(job: CrawlJob, classification: Classification):
         """A real terminal result, with its status derived by the real chokepoint."""
-        from app.orchestration.result_helpers import _terminal_engine_result
+        from app.orchestration.engine_result import _terminal_engine_result
         from app.vocabulary.taxonomy import status_for_classification
 
         # Status is the outer function's own keyword, not a field of the shared

@@ -22,10 +22,10 @@ from app.models.host_policy import HostPolicy
 from app.models.normalized_url import NormalizedUrl
 from app.models.render_options import RenderOptions
 from app.models.result_record import RenderEnvelope
-from app.orchestration.result_helpers import (
-    classify_error_code,
+from app.orchestration.classification import classify_error_code
+from app.orchestration.engine_result import failed_result_for
+from app.orchestration.render_result import (
     crawl_result_from_engine_result,
-    failed_result_for,
     terminal_crawl_result,
 )
 from app.orchestration.scheduler import DomainScheduler

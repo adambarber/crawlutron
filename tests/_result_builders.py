@@ -9,7 +9,7 @@ from app.models.normalized_url import NormalizedUrl, admit_or_none
 from app.models.registrable_domain import registrable_domain
 from app.models.render_options import RenderOptions
 from app.models.taxonomy import Classification, CrawlError, CrawlStrategyName
-from app.orchestration.result_helpers import terminal_attempt
+from app.orchestration.render_result import terminal_attempt
 from app.vocabulary.strategies import HTTP_DECLARED_CRAWLER
 from app.vocabulary.taxonomy import ResultStatus
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY, canonical
@@ -144,7 +144,10 @@ def skipped_result(
     an error string the production builder never emits for that classification,
     which is exactly the drift the table exists to catch.
     """
-    from app.orchestration.result_helpers import TerminalResult, _skipped_engine_result
+    from app.orchestration.engine_result import (
+        TerminalResult,
+        _skipped_engine_result,
+    )
 
     return _skipped_engine_result(
         TerminalResult(

@@ -45,7 +45,7 @@ LITERAL_FIELDS = {
 def check_literal_fields(obj: Any) -> None:
     """Reject a non-member value on any Literal field of a result dataclass.
 
-    This is the construction-time chokepoint: ``result_helpers`` builds most
+    This is the construction-time chokepoint: ``engine_result`` builds most
     results, but a dataclass built anywhere else (engine.py, strategies, tests)
     previously escaped the only runtime guard. Checking in ``__post_init__``
     closes the class by construction -- no future direct build can carry an

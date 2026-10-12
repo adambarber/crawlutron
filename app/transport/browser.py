@@ -36,7 +36,11 @@ from app.models.host_policy import HostPolicy
 from app.models.normalized_url import NormalizedUrl
 from app.models.render_options import RenderOptions
 from app.models.taxonomy import Classification, CrawlError
-from app.orchestration.result_helpers import classify_error_code, terminal_attempt, terminal_crawl_result
+from app.orchestration.classification import classify_error_code
+from app.orchestration.render_result import (
+    terminal_attempt,
+    terminal_crawl_result,
+)
 from app.safety.json_safe import json_default
 from app.transport.browser_driver import BrowserDriver, async_sleep
 from app.transport.document import _default_document_text_extractor

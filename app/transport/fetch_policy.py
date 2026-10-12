@@ -17,7 +17,7 @@ from app.models.crawl_policy import CrawlPolicy
 from app.models.host_policy import HostPolicy
 from app.models.http_fetcher import HttpFetcher
 from app.models.normalized_url import NormalizedUrl
-from app.orchestration.result_helpers import classify_error_code
+from app.orchestration.classification import classify_error_code
 from app.transport.body_decode import decode_body
 from app.transport.decompression import decompress_body as _decompress_body
 from app.vocabulary.limits import DEFAULT_MAX_CONTENT_LENGTH_BYTES, DISCOVERY_BODY_MAX_BYTES

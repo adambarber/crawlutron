@@ -13,7 +13,7 @@ from app.models.host_policy import HostPolicy
 from app.models.normalized_url import NormalizedUrl
 from app.models.render_options import RenderOptions
 from app.models.taxonomy import CrawlStrategyName
-from app.orchestration.result_helpers import build_engine_result
+from app.orchestration.engine_result import build_engine_result
 from app.orchestration.worker import call_worker
 from app.transport.body_decode import quality_score
 from app.transport.content_pipeline import (

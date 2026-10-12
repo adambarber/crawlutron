@@ -25,7 +25,7 @@ from app.api.response_shaping import (
 )
 from app.models.crawl_result import CrawlResult, EngineCrawlResult
 from app.models.crawl_status import CrawlStatus
-from app.orchestration.result_helpers import terminal_attempt
+from app.orchestration.render_result import terminal_attempt
 from app.vocabulary.strategies import HTTP_DECLARED_CRAWLER
 from app.vocabulary.taxonomy import CrawlClassification, status_for_classification
 from tests._policy_factories import canonical

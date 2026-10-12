@@ -12,7 +12,7 @@ from app.extraction.classify import (
     classify_page,
     classify_page_with_evidence,
 )
-from app.orchestration.result_helpers import TerminalResult
+from app.orchestration.engine_result import TerminalResult
 from app.transport import browser as browser_mod
 from app.transport import http as http_mod
 from app.transport.browser import BrowserRenderer
@@ -557,7 +557,7 @@ class TestStatusAgreesWithClassification:
         ],
     )
     def test_exception_chokepoint_status_matches_the_table(self, classification):
-        from app.orchestration.result_helpers import engine_result_from_exception
+        from app.orchestration.engine_result import engine_result_from_exception
         from app.vocabulary.taxonomy import status_for_classification
 
         result = engine_result_from_exception(
@@ -582,7 +582,7 @@ class TestStatusAgreesWithClassification:
 
     def test_browser_retry_exhausted_status_matches_the_table(self):
         """The browser retry loop's terminal verdict for a navigation timeout."""
-        from app.orchestration.result_helpers import terminal_crawl_result
+        from app.orchestration.render_result import terminal_crawl_result
         from app.vocabulary.taxonomy import status_for_classification
 
         result = terminal_crawl_result(
@@ -608,7 +608,7 @@ class TestStatusAgreesWithClassification:
     def test_taxonomy_rejects_a_disagreeing_pair(self):
         """A pair neither the table default nor the documented context set allows
         must not be constructible at the terminal builder."""
-        from app.orchestration.result_helpers import _failed_engine_result
+        from app.orchestration.engine_result import _failed_engine_result
 
         with pytest.raises(ValueError, match="disagrees with the taxonomy status"):
             _failed_engine_result(

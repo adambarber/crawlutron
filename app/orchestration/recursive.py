@@ -25,7 +25,7 @@ from app.models.crawl_result import EngineCrawlResult
 from app.models.crawl_task import CrawlTask
 from app.models.host_policy import HostPolicy
 from app.models.normalized_url import NormalizedUrl
-from app.orchestration.result_helpers import failed_result_for
+from app.orchestration.engine_result import failed_result_for
 from app.orchestration.scheduler import DomainScheduler
 from app.runtime.metrics import get_metrics
 from app.runtime.resource_pressure import ResourceGate, WeightedAdmission, default_admission_policy

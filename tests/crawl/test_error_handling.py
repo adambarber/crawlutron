@@ -14,7 +14,8 @@ import pytest
 from app.models.crawl_result import EngineCrawlResult
 from app.models.host_policy import HostPolicy
 from app.models.normalized_url import NormalizedUrl
-from app.orchestration.result_helpers import classify_error_code, engine_result_from_exception
+from app.orchestration.classification import classify_error_code
+from app.orchestration.engine_result import engine_result_from_exception
 from app.transport.browser_pool import BrowserPoolExhaustedError
 from app.vocabulary.strategies import BROWSER_HEADED_WARMED, BROWSER_HEADLESS, HTTP_DECLARED_CRAWLER
 from tests._browser_doubles import _fake_browser
@@ -31,15 +32,16 @@ from tests.crawl._chain_policies import chain_policy
 # ---------------------------------------------------------------------------
 
 
-def test_classifier_lives_in_result_helpers_not_a_strategy_module():
-    """The classifier is strategy-neutral; browser.py must import it from result_helpers."""
+def test_classifier_lives_in_the_neutral_classification_module():
+    """The classifier is strategy-neutral; browser.py must import it from the module
+    that owns what a failure means."""
 
     import app.transport.browser as browser_mod
 
     source = inspect.getsource(browser_mod)
     assert "classify_error_code" in source
-    assert "from app.orchestration.result_helpers import classify_error_code" in source, (
-        "browser.py must import classify_error_code from app.orchestration.result_helpers, "
+    assert "from app.orchestration.classification import classify_error_code" in source, (
+        "browser.py must import classify_error_code from app.orchestration.classification, "
         "not reach across into the HTTP strategy module"
     )
 
@@ -166,7 +168,7 @@ class TestClassificationValueValidity:
 
 def _budget_item() -> dict:
     """An engine result dict as produced by engine_result_from_exception."""
-    from app.orchestration.result_helpers import engine_result_from_exception
+    from app.orchestration.engine_result import engine_result_from_exception
 
     result = engine_result_from_exception(
         error=TimeoutError("budget exhausted"),

@@ -25,7 +25,7 @@ from app.models.host_policy import HostPolicy
 from app.models.http_fetch_result import HttpFetchResult
 from app.models.normalized_url import NormalizedUrl
 from app.models.taxonomy import Classification, CrawlStrategyName
-from app.orchestration.result_helpers import (
+from app.orchestration.engine_result import (
     binary_no_text_result,
     build_engine_result,
     engine_result_from_exception,

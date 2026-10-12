@@ -1,7 +1,7 @@
 """HTTP fetch strategy behavior against a real local server (no mocks)."""
 
 from app.models.crawl_result import CrawlStrategyAttempt
-from app.orchestration.result_helpers import crawl_result_from_engine_result
+from app.orchestration.render_result import crawl_result_from_engine_result
 from app.transport.cache import HttpCache
 from app.transport.fetch_policy import looks_like_binary_body
 from app.transport.fetchers import default_http_fetcher

@@ -14,7 +14,7 @@ from app.models.host_policy import HostPolicy
 from app.models.http_fetcher import HttpFetcher
 from app.models.normalized_url import NormalizedUrl
 from app.models.taxonomy import Classification, CrawlError, CrawlStrategyName
-from app.orchestration.result_helpers import (
+from app.orchestration.engine_result import (
     TerminalResult,
     _failed_engine_result,
     engine_result_from_exception,

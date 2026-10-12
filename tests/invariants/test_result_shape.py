@@ -558,7 +558,7 @@ def test_envelope_detector_bites():
 # error= field of a wire-visible result.
 # ---------------------------------------------------------------------------
 
-_TERMINAL_RESULT_SANCTIONED = frozenset({"result_helpers.py"})
+_TERMINAL_RESULT_SANCTIONED = frozenset({"engine_result.py", "render_result.py", "classification.py"})
 
 
 _RESULT_ERROR_SINKS = frozenset({"CrawlResult", "terminal_crawl_result"})
@@ -952,8 +952,9 @@ def test_advertised_payload_detector_bites():
 
 # --- A result may not spell its own (status, classification) pair -------------
 #
-# app/orchestration/result_helpers.py is the chokepoint for building results, and both
-# of its terminal primitives call _enforce_status_classification first. That
+# app/orchestration/engine_result.py and render_result.py are the chokepoints for
+# building results, and each terminal primitive calls _enforce_status_classification
+# first. That
 # check is the whole point: it makes a result that asserts a status the taxonomy
 # would re-derive differently for the same label unrepresentable, because the
 # two axes are free parameters and nothing else holds them together.
@@ -969,12 +970,14 @@ def test_advertised_payload_detector_bites():
 _RESULT_CONSTRUCTORS = frozenset({"CrawlStrategyAttempt", "EngineCrawlResult"})
 
 
-_RESULT_CHOKEPOINT_MODULE = "app/orchestration/result_helpers.py"
+_RESULT_CHOKEPOINT_MODULES = frozenset(
+    {"app/orchestration/engine_result.py", "app/orchestration/render_result.py"}
+)
 
 
 def _literal_status_classification_pairs(tree: ast.AST, path: pathlib.Path) -> list[str]:
     """Flag a result built from a hand-written (status, classification) pair."""
-    if relative_posix(path) == _RESULT_CHOKEPOINT_MODULE:
+    if relative_posix(path) in _RESULT_CHOKEPOINT_MODULES:
         return []
     offenders: list[str] = []
     for node in call_nodes(tree):
@@ -994,9 +997,10 @@ RESULTS_DERIVE_THEIR_STATUS_FROM_THE_TAXONOMY = Rule(
     name="results-derive-their-status-from-the-taxonomy",
     find=_literal_status_classification_pairs,
     summary=(
-        f"Build results through {_RESULT_CHOKEPOINT_MODULE}, or derive one axis with "
-        "constants.status_for_classification, so _enforce_status_classification can see "
-        "the pair"
+        "Build results through one of the result primitives in "
+        + ", ".join(sorted(_RESULT_CHOKEPOINT_MODULES))
+        + ", or derive one axis with constants.status_for_classification, so "
+        "_enforce_status_classification can see the pair"
     ),
     excludes=SANCTIONED,
     bite=lambda: (
@@ -1030,7 +1034,7 @@ RESULTS_DERIVE_THEIR_STATUS_FROM_THE_TAXONOMY = Rule(
         # The same spelled pair inside the chokepoint module is the definition.
         Silent(
             "CrawlStrategyAttempt(strategy=s, status='failed', classification=label)\n",
-            at=REPO_ROOT / _RESULT_CHOKEPOINT_MODULE,
+            at=REPO_ROOT / "app/orchestration/engine_result.py",
         ),
     ),
 )

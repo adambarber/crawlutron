@@ -21,13 +21,13 @@ from app.models.host_policy import HostPolicy
 from app.models.normalized_url import NormalizedUrl, admit_or_none
 from app.models.result_record import ProducerEnvelope
 from app.orchestration import robots as robots_policy
-from app.orchestration.fetch_helpers import fetch_sitemap_urls
-from app.orchestration.recursive import RECURSIVE_RAMP_MAX, _spill_write, run_recursive_crawl
-from app.orchestration.result_helpers import (
+from app.orchestration.engine_result import (
     TerminalResult,
     _skipped_engine_result,
     engine_result_from_exception,
 )
+from app.orchestration.fetch_helpers import fetch_sitemap_urls
+from app.orchestration.recursive import RECURSIVE_RAMP_MAX, _spill_write, run_recursive_crawl
 from app.orchestration.robots import FetchAndDecode
 from app.orchestration.scheduler import DomainScheduler
 from app.orchestration.strategy_chain import execute_crawl_chain

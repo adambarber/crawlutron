@@ -124,7 +124,13 @@ _OWNER_PUBLIC_SURFACE_RATCHET = {
     # each spelling its own would be four statements of what a terminal result
     # carries. The chokepoint is the entry point; the count moved because the
     # chokepoint needs to be reachable.
-    "app/orchestration/result_helpers.py": (10, 9),
+    # The result-construction chokepoint was one module with three jobs; the
+    # split put the classifier (what a failure means), the engine funnels (a
+    # reportable record) and the render funnels (the wire shape) in their own
+    # modules. Each count is that module's real surface.
+    "app/orchestration/classification.py": (1, 1),
+    "app/orchestration/engine_result.py": (5, 4),
+    "app/orchestration/render_result.py": (4, 4),
     "app/transport/fetch_policy.py": (5, 5),
     "app/models/host_policy.py": (6, 5),
 }

@@ -363,23 +363,17 @@ DECLARED: dict[str, Declaration] = {
         "Not yet triaged.\n",
         ["test"],
     ),
-    "app.orchestration.result_helpers._CLASSIFICATION_BY_EXCEPTION": _d(
+    "app.orchestration.classification._CLASSIFICATION_BY_EXCEPTION": _d(
         _CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]
     ),
-    "app.orchestration.result_helpers._failed_engine_result": _d(
-        "unreviewed",
-        "Not yet triaged.\n",
-        ["test"],
+    "app.orchestration.engine_result._failed_engine_result": _d(
+        _CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]
     ),
-    "app.orchestration.result_helpers._skipped_engine_result": _d(
-        "unreviewed",
-        "Not yet triaged.\n",
-        ["test"],
+    "app.orchestration.engine_result._skipped_engine_result": _d(
+        _CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]
     ),
-    "app.orchestration.result_helpers._terminal_engine_result": _d(
-        "unreviewed",
-        "Not yet triaged.\n",
-        ["test"],
+    "app.orchestration.engine_result._terminal_engine_result": _d(
+        _CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]
     ),
     "app.orchestration.robots._RobotsPathMatcher": _d(
         "private type",

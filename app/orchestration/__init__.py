@@ -12,10 +12,10 @@ decides which queued job runs next and what a failure means for it,
 inputs, `fetch_helpers` and `robots` answer per-fetch questions, and `doc_pool`
 retires the persistent document-extraction workers.
 
-`result_helpers` is this layer's output boundary: it turns an engine outcome into
-the result record a caller receives, and classifies the exceptions that arrive
-instead. It sits here rather than in `app/extraction` because its input is the
-chain's verdict, not a page's bytes.
+`engine_result` and `render_result` are this layer's output boundary: they turn
+an engine outcome into the result record a caller receives, with
+`classification` deciding what a failure means. They sit here rather than in
+`app/extraction` because the input is the chain's verdict, not a page's bytes.
 
 `robots` and `robots_parse` are here rather than in `app/transport` because robots
 is a crawl-policy decision made per fetch, not a wire-format concern: the transport
