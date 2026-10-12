@@ -129,11 +129,15 @@ repos:
       # Cost is ~15s (pytest startup plus 2.8s of analysis) against a 110s suite,
       # which is the right order for a gate that catches a class of defect mypy
       # structurally cannot see here.
+      #
+      # Run serially: the file's cost is one memoized pyright subprocess that no
+      # parallelism shortens, while `-n auto` spends more spawning fourteen workers
+      # than the nine tests take to run. Measured 4.1s serial against 5.2s.
       - id: pyright
         name: pyright budget
         entry: >-
           bash -c 'for d in "$(git rev-parse --show-toplevel)/docker/browser-crawler" "$(git rev-parse --show-toplevel)"; do [ -x "$d/scripts/gate" ] && exec bash "$d/scripts/gate" "$@"; done; echo "scripts/gate not found in either layout" >&2; exit 1' gate
-          .venv/bin/python -m pytest tests/test_pyright_budget.py -q
+          .venv/bin/python -m pytest tests/test_pyright_budget.py -q -o addopts=""
         language: system
         files: *service_trigger
         pass_filenames: false
