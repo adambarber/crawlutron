@@ -425,16 +425,23 @@ class TestContentCacheCorruptEntry:
         assert cache.prune() == 1  # only key1 is expired and removable
 
     def test_content_cache_prune_os_error(self, tmp_path):
-        cache, clock = make_seeded_cache(tmp_path, "key1")
+        # An entry whose unlink raises must not abort the sweep: the other
+        # expired entries still get removed, which is the property.
+        cache, clock = make_seeded_cache(tmp_path, "key1", "key2")
         clock[0] = 1002.0
         with entry_replaced_by_directory(cache, "key1"):
-            cache.prune()
+            assert cache.prune() == 1
+        assert cache._path_for("key2").exists() is False
 
     def test_content_cache_clear_os_error(self):
+        # Same continuation contract as prune: an undeletable entry is skipped
+        # and the rest of the namespace is still emptied.
         with scoped_cache(default_ttl=60) as cache:
             cache.set("key1", {"data": "1"})
+            cache.set("key2", {"data": "2"})
             with entry_replaced_by_directory(cache, "key1"):
-                cache.clear()
+                assert cache.clear() == 1
+            assert cache._path_for("key2").exists() is False
 
 
 class TestSharedContentCache:

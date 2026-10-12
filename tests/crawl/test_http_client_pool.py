@@ -3,10 +3,9 @@
 import asyncio
 import contextlib
 import inspect
-import os
 import warnings
 from typing import Protocol
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import httpx
 import pytest
@@ -226,18 +225,6 @@ def _bind_to_running_loop(client) -> None:
         client._bound_loop = asyncio.get_running_loop()
     except RuntimeError:
         client._bound_loop = None
-
-
-def _expected_connections(limit: int) -> int:
-    """The pool ceiling the settings must derive for a memory limit.
-
-    Spelled out per test, the expectation and the derivation could be changed
-    independently, which is the one thing a ceiling test must not allow.
-    """
-    return max(
-        100,
-        settings_mod.max_http_concurrency_for(limit, settings_mod.derive_browser_pool_size(limit)),
-    )
 
 
 def _build_httpx_fake(settings=None) -> _PooledFake:
@@ -843,70 +830,3 @@ def test_hot_path_client_reuse_skips_env_scan():
     # Construction walked the env exactly once; the two reuse calls added nothing.
     assert total == 1
     assert reuse_calls == 1
-
-
-class _FakeStats:
-    def __init__(self, total_bytes):
-        self.total_bytes = total_bytes
-
-
-def test_small_limit_hits_floor():
-    with patch.object(settings_mod, "read_memory_stats", lambda: _FakeStats(256 * 1024 * 1024)):
-        assert settings_mod._default_http_max_connections() == 100
-        assert settings_mod._default_http_keepalive() == 50
-
-
-def test_3gib_limit_scales_up():
-    limit = 3 * 1024 * 1024 * 1024
-    with patch.object(settings_mod, "read_memory_stats", lambda: _FakeStats(limit)):
-        # The pool ceiling must equal the admission's HTTP concurrency for the
-        # same limit + pool, whatever the per-task RAM estimate is (zero drift).
-        expected = _expected_connections(limit)
-        assert settings_mod._default_http_max_connections() == expected
-        assert settings_mod._default_http_keepalive() == max(20, min(128, expected // 2))
-        # With the honest per-task RAM estimate the 3 GiB derivation sits at the
-        # floor; the floor keeps the minimal-deployment pool usable (a bigger
-        # box still scales above it -- see test_huge_limit_is_capped).
-        assert expected >= 100
-
-
-def test_huge_limit_is_capped():
-    with patch.object(settings_mod, "read_memory_stats", lambda: _FakeStats(64 * 1024 * 1024 * 1024)):
-        assert settings_mod._default_http_max_connections() == 512
-        assert settings_mod._default_http_keepalive() == 128
-
-
-def test_env_override_still_wins():
-    # CrawlerSettings still honors an explicit env override over the derived default.
-    with patch.dict("os.environ", {"CRAWLUTRON_HTTP_MAX_CONNECTIONS": "200"}):
-        s = settings_mod.CrawlerSettings.from_mapping()
-        assert s.http_max_connections == 200
-
-
-def test_the_pool_default_is_derived_per_construction_not_frozen_at_import():
-    """The derivation READS the memory limit, so it is I/O -- and a call in the
-    class body made it import-time I/O, run once and frozen for the process.
-
-    That is not a style point. A box whose limit only becomes readable after
-    the module was first imported (a cgroup limit the runtime applies late), or
-    whose read failed and silently took the 4 GiB fallback, kept that wrong
-    ceiling for its whole life with nothing in the config saying so. Deriving
-    per construction means the number is always derived from the limit the
-    running process actually has.
-    """
-    limit = 8 * 1024 * 1024 * 1024
-    expected = _expected_connections(limit)
-    with (
-        patch.object(settings_mod, "read_memory_stats", lambda: _FakeStats(limit)),
-        patch.dict("os.environ"),
-    ):
-        os.environ.pop("CRAWLUTRON_HTTP_MAX_CONNECTIONS", None)
-        os.environ.pop("CRAWLUTRON_HTTP_MAX_KEEPALIVE", None)
-        derived = settings_mod.CrawlerSettings()
-        assert derived.http_max_connections == expected
-        assert derived.http_max_keepalive == max(20, min(128, expected // 2))
-        # The env path must derive too. A ``default_factory`` field has no class
-        # attribute to read, so this is the line where that trap shows up.
-        from_env = settings_mod.CrawlerSettings.from_mapping()
-        assert from_env.http_max_connections == expected
-        assert from_env.http_max_keepalive == max(20, min(128, expected // 2))

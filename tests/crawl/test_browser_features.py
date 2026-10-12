@@ -145,8 +145,18 @@ class TestActionChain:
         async def boom(selector=None):
             raise RuntimeError("nope")
 
+        async def fine(selector=None):
+            page.calls.append(("hover", selector))
+
         page.click = boom
-        await BrowserDriver().run_action_chain(page, [{"type": "click", "selector": "#x"}])
+        page.hover = fine
+        await BrowserDriver().run_action_chain(
+            page,
+            [{"type": "click", "selector": "#x"}, {"type": "hover", "selector": "#after"}],
+        )
+
+        # One failed action must not cost the page its later actions.
+        assert ("hover", "#after") in page.calls
 
 
 class TestElementScreenshot:

@@ -83,7 +83,7 @@ class TestFetchDecodeDiscovery:
         assert status == 404
         assert headers == {"etag": '"1"'}
 
-    async def test_transport_failure_returns_all_none(self):
+    async def test_transport_failure_returns_no_body_or_status(self):
         fetcher = _raising_fetcher(ConnectionError("boom"))
         assert await _fetch_decode_discovery(fetcher, "http://e.com/r", {}, 5) == (None, None, None)
 

@@ -143,7 +143,7 @@ class TestReadPolicyIsTotal:
 
         assert [strategy.value for strategy in resolved.strategies] == ["BROWSER_HEADLESS"]
 
-    def test_the_callers_mapping_is_not_mutated(self):
+    def test_read_policy_leaves_the_callers_mapping_alone(self):
         """The API layer echoes this payload back, so repairing in place would
         change what the caller sent them."""
         raw = {"limits": {"max_retries": _OVER_MAX_RETRIES, "max_depth": 4}}
@@ -179,7 +179,7 @@ class TestValidateWirePolicyRejects:
         assert isinstance(validated, CrawlPolicy)
         assert validated.limits.max_depth == 2
 
-    def test_the_callers_mapping_is_not_mutated(self):
+    def test_validate_wire_policy_leaves_the_callers_mapping_alone(self):
         raw: dict[str, Any] = {"limits": {}}
 
         validate_wire_policy(raw)
