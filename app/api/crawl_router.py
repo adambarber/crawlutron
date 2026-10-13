@@ -144,9 +144,8 @@ async def get_crawl_result(
     job_store=Depends(get_job_store),
     result_store=Depends(get_result_store),
 ) -> Response:
-    # The handler replays the stored response model's own bytes (see its
-    # docstring), so the wire schema is documented via response_model while
-    # the honest runtime return is the replayed Response.
+    # The handler replays the stored response model's own bytes, so the wire schema is
+    # documented via response_model while the honest return is the replayed Response.
     return await get_crawl_result_handler(request_id, job_store=job_store, result_store=result_store)
 
 

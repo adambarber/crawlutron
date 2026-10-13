@@ -27,9 +27,8 @@ from app.models.watch_state import WatchState
 router = APIRouter(prefix="/v1/watches", tags=["Crawler"])
 
 
-# ``NoReturn`` for the same reason ``jobs_router`` declares it: this always
-# raises, and saying so lets the checker narrow past the call site instead of
-# leaving an ``assert ... is not None`` downstream to satisfy it.
+# ``NoReturn`` for the same reason jobs_router declares it: this always raises, so
+# the checker narrows past the call site instead of demanding a downstream assert.
 def _raise_not_found(watch_id: str) -> NoReturn:
     raise http_error(404, "not_found", f"Unknown watch_id: {watch_id}")
 
@@ -57,10 +56,8 @@ async def create_watch(
     try:
         url = NormalizedUrl(payload.url, policy=host_policy)
         if payload.webhook_url is not None:
-            # Refused here rather than on the first change: a webhook this
-            # deployment cannot deliver to is a configuration error the caller
-            # can fix now. Delivery validates again regardless -- the guard has
-            # to hold against a name that starts resolving elsewhere later.
+            # An undeliverable URL is a configuration error the caller fixes now; delivery
+            # validates again regardless, against a name resolving elsewhere later.
             await validate_webhook_url_async(payload.webhook_url, host_policy=host_policy)
     except ValueError as error:
         raise validation_http_error(error) from error

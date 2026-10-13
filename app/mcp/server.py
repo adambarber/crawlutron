@@ -198,10 +198,8 @@ async def _call_tool(
     try:
         payload = spec.request_model(**arguments)
     except (ValidationError, ValueError) as error:
-        # Every tool rejects a malformed call the same way, from the one place
-        # that knows the tool's request model, so a tool cannot be added that
-        # surfaces a pydantic error as a transport failure instead of an
-        # is_error result.
+        # that knows the tool's request model, so a tool cannot be added that surfaces a
+        # pydantic error as a transport failure instead of an is_error result.
         return result_response(
             request_id,
             {
@@ -239,9 +237,8 @@ async def handle_mcp_request(
         # HTTP that the server must act on; accept and drain.
         return 202, None
 
-    # JSON-RPC requires a request id to be an integer or string (never null);
-    # reject any other shape before it reaches the response builders, which echo
-    # the id verbatim.
+        # JSON-RPC requires a request id to be an integer or string (never null); reject any
+        # other shape before it reaches the response builders, which echo the id verbatim.
     request_id = body.get("id")
     if not isinstance(request_id, (int, str)):
         return 400, error_response(None, INVALID_REQUEST, "Request id must be an integer or string")

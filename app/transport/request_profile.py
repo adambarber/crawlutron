@@ -99,11 +99,8 @@ def _store_set_cookies(
     """
     if namespace is None:
         namespace = COOKIE_NAMESPACE.get()
-    # A transport multidict keeps repeated header names separate, which is the
-    # only reason to read Set-Cookie through it; a plain dict has nothing to
-    # keep separate, so it is read as-is. httpx.Headers arrives through the
-    # first branch too -- it satisfies the protocol -- so there is no
-    # httpx-specific case to keep in step with this one.
+        # only reason to read Set-Cookie through it; a plain dict is read as-is, and
+        # httpx.Headers satisfies the first branch too, so there is no httpx-specific case.
     if isinstance(response_headers, _TransportHeaders):
         set_cookies = response_headers.get_list("set-cookie")
     else:
@@ -202,9 +199,8 @@ def headers_for_strategy(
         headers["User-Agent"] = fp["user_agent"]
         is_browser_like = is_browser_like or "Mozilla" in fp["user_agent"]
     elif is_browser_like:
-        # Firefox identity: must match CFFI_IMPERSONATE_TARGET AND the Camoufox
-        # browser strategy so cookie-bootstrap sessions carry a consistent
-        # User-Agent across strategies.
+        # Firefox identity: must match CFFI_IMPERSONATE_TARGET AND the Camoufox browser
+        # strategy, so cookie-bootstrap sessions carry a consistent User-Agent across both.
         if strategy == HTTP_CFFI_IMPERSONATE:
             headers["User-Agent"] = (
                 "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:135.0) Gecko/20100101 Firefox/135.0"
@@ -241,8 +237,7 @@ def headers_for_strategy(
     if cookie_header:
         headers["Cookie"] = cookie_header
     headers.update(policy.headers)
-    # Origin-scoped credentials last: the value is attached only when this
-    # exact URL's origin holds one, and the redirect loop's credential scrub
-    # strips it on any cross-host hop (same chokepoint as cookies).
+    # Origin-scoped credentials last: attached only when this exact URL's origin holds one,
+    # and the redirect loop's scrub strips it on any cross-host hop (as with cookies).
     _apply_credentials(headers, url, policy.credentials)
     return headers

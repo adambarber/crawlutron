@@ -20,9 +20,8 @@ class _StreamingDecompressor(Protocol):
     def process(self, data: bytes | bytearray | memoryview[int], /) -> bytes: ...
 
 
-# The codings this process can undo. Membership is what makes the stacked path
-# safe: a header naming anything else is passed through whole, because there is
-# no ordering that decodes it correctly here.
+# safe: a header naming anything else is passed through whole, because there is no
+# ordering that decodes it correctly here.
 _DECODABLE_ENCODINGS = frozenset({"gzip", "x-gzip", "deflate", "br"})
 
 
@@ -170,10 +169,8 @@ def _decompress_brotli(body: bytes | bytearray | memoryview[int], max_output_byt
             decoded: bytes | bytearray = bounded.decompress(body, max_output_bytes + 1)
         elif decoder is not None and hasattr(decoder, "process"):
             streaming = cast(_StreamingDecompressor, decoder)
-            # Google-brotli streaming API: feed incrementally and stop past the
-            # cap. A single process(body) call would materialize the entire
-            # bomb in RAM. Stopping early leaves the output over the cap, which
-            # the caller's post-hoc check turns into DecompressionTooLargeError.
+            # Google-brotli streaming API: feed incrementally and stop past the cap,
+            # so the caller's post-hoc check turns over-cap output into the error.
             chunks = bytearray()
             step = 16_384
             for offset in range(0, len(body), step):

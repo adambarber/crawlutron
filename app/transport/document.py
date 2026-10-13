@@ -132,13 +132,8 @@ def _default_document_text_extractor(url: NormalizedUrl) -> str:
     retired with ``SafeUrl``.
     """
     try:
-        # The loop is owned on a private thread rather than with a bare
-        # ``asyncio.run``, because the one production caller already runs this
-        # whole function through ``asyncio.to_thread`` -- a running loop is
-        # therefore not the only way in here, and a test reaches it from async
-        # code. Every failure below is swallowed into empty text, so a
-        # ``RuntimeError`` from nesting loops would surface as a silently empty
-        # PDF rather than as the bug it is.
+        # the one production caller runs this through asyncio.to_thread, so a
+        # running loop is not the only way in, and a nested loop raises.
         with ThreadPoolExecutor(max_workers=1) as pool:
             pdf_bytes = pool.submit(asyncio.run, _afetch_document_bytes(url)).result()
     except Exception:  # fetch failure yields empty text

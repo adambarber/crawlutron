@@ -116,9 +116,8 @@ def validate_meta(params: dict[str, Any] | None, request_id: int | str) -> None:
                 "io.modelcontextprotocol/protocolVersion and clientCapabilities",
             ),
         )
-    # Both are checked for presence and shape here. Neither value is returned:
-    # the router re-reads the version to compare it against the header, so
-    # handing it back would be a second spelling of what the caller already has.
+        # Both are checked for presence and shape. Neither is returned: the router re-reads
+        # the version to compare it against the header, so a second spelling is a second copy.
     _require_meta_key(meta, META_PROTOCOL_VERSION, str, "a string", request_id)
     _require_meta_key(meta, META_CLIENT_CAPABILITIES, dict, "an object", request_id)
 

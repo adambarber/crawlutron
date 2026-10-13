@@ -10,17 +10,11 @@ from __future__ import annotations
 
 import time
 
-# cgroup reads are cheap individually but happen on every dispatch tick and on
-# every memory/CPU sample; caching them for a short window removes redundant
-# syscalls during a burst without making the gate stale. The window is
-# deliberately short.
+# Cached for a short window: cgroup reads happen on every dispatch tick and sample, and a
+# burst makes them redundant syscalls without a window -- so it is deliberately short.
 _CGROUP_READ_TTL_SECONDS = 0.1
-# The value type is ``str | None`` and nothing else: ``_read_text`` is the only
-# writer, and it stores either a stripped read or None. It was ``object``, which
-# is not a wider truth but a lost one -- the annotation then said nothing about
-# what a reader gets back, so returning it needed a `# type: ignore[return-value]`
-# to be legal and the callers' own `str | None` contract went unchecked. Declaring
-# the value is what let both checkers read the code instead of the suppression.
+# ``str | None`` and nothing else: ``object`` was a lost truth, not a wider one -- the
+# annotation said nothing about what a reader gets, so a suppression made it legal.
 _CGROUP_CACHE: dict[str, tuple[float, str | None]] = {}
 
 

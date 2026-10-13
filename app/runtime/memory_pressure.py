@@ -18,10 +18,8 @@ from dataclasses import dataclass
 
 from app.runtime.cgroup_sense import _read_int
 
-# Self-managed, no operator knob: the gate rides at TARGET and pauses at HARD.
-# Lowered from 0.92/0.97 to prevent first-batch burst overshoot (was spiking
-# to ~0.96 of 3GB). Target 0.85 leaves ~0.45 GiB headroom; hard 0.92 still
-# provides ~0.24 GiB safety margin before OOM.
+# Target 0.85 leaves ~0.45 GiB headroom against first-batch burst overshoot; the hard
+# ceiling still leaves a safety margin before OOM.
 _DEFAULT_TARGET = 0.85
 _DEFAULT_HARD = 0.92
 

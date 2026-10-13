@@ -90,8 +90,6 @@ class _ServiceFieldFilter(logging.Filter):
         return True
 
 
-# Marker on handlers this function owns, so a second call (uvicorn reload, a
-# re-import, or a test suite that already configures root) does not stack
 # duplicate JSON handlers on top of existing ones.
 _BC_OWNED_HANDLER = "_bc_service_handler"
 
@@ -125,9 +123,8 @@ def configure_service_logging(
     logger.setLevel(level)
     root = logging.getLogger()
     root.setLevel(level)
-    # The stream sink is installed once only: uvicorn's --log-config may have
-    # already attached a JSON stream handler at process start (before the app
-    # is imported), and it uses the same formatter, so recognize it by class.
+    # The stream sink is installed once only: uvicorn's --log-config may already have
+    # attached a JSON handler at process start using the same formatter.
     if not any(
         isinstance(handler, logging.StreamHandler)
         and not isinstance(handler, logging.handlers.RotatingFileHandler)

@@ -54,12 +54,8 @@ class HttpCache:
 
     def _evict_if_needed(self) -> None:
         if len(self._data) > self._max_entries:
-            # Fork/insert order is the same as this dict's iteration order, so
-            # drop the earliest-inserted entries (FIFO) to bound memory.
-            # The snapshot is bounded to the overflow itself:
-            # drawing `over` keys through islice avoids materializing the full
-            # key list (up to 100k) per store while still snapshotting before
-            # popping, so mutation never happens mid-iteration.
+            # drop the earliest-inserted entries (FIFO) to bound memory: the snapshot is
+            # bounded to the overflow, so a key list of up to 100k is never materialized.
             over = len(self._data) - self._max_entries
             for url in list(itertools.islice(self._data, over)):
                 self._data.pop(url, None)

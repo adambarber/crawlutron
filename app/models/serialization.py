@@ -80,13 +80,8 @@ def _build_guarded(value: Any, seen: set[int], build: Callable[[Any, set[int]], 
 
 
 def _to_jsonable_impl(value: Any, seen: set[int]) -> Any:
-    # Cyclic graphs (e.g. a DiscoveredLink whose parent/children point back to
-    # an ancestor) recurse forever without a check, and a RecursionError at
-    # serialization time is far from the code that caused it. Every arm below
-    # descends through _build_guarded, so the check cannot be forgotten by a
-    # new one. Primitives skip it: they cannot cycle, and small strings may be
-    # interned and share an id across the tree, so flagging them would truncate
-    # valid results.
+    # Every arm below descends through _build_guarded, so the cycle check cannot be
+    # forgotten by a new one; primitives skip it, since they cannot cycle.
     if isinstance(value, NormalizedUrl):
         return value.raw
     if is_dataclass(value) and not isinstance(value, type):
@@ -122,10 +117,8 @@ def from_wire[ResultT: Any](cls: type[ResultT], payload: Mapping[str, Any], *, p
     cannot, so it raises. That is what turns a producer that stopped writing a
     field into a loud failure here rather than a response quietly missing it.
     """
-    # The one cast in this module, and it is a limitation of the checker rather
-    # than a gap in the contract: pyright cannot call a value whose type is a
-    # TypeVar bound to the class parameter. What comes back IS `cls`, built from
-    # its own fields, with ``__post_init__`` having already validated them.
+    # pyright cannot call a value typed as a TypeVar bound to the class parameter. What
+    # comes back IS cls, built from its own fields, with __post_init__ already validating.
     return cast(ResultT, _rebuild_dataclass(cls, payload, policy=policy))
 
 

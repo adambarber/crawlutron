@@ -100,18 +100,8 @@ def _starting_strategies(
     copy of the slice that gets written instead stops being what production
     does, which is how a pinning regression ships with pinning tests green.
     """
-    # The policy holds the enum; the chain's currency is the name alias. Python
-    # cannot derive one static Literal from a runtime enum, so this narrowing is
-    # asserted rather than derived -- and _assert_strategy_names_agree() below
-    # is what makes asserting it honest.
-    #
-    # The conversion is a defence, not a validation: ``CrawlStrategyName`` is a
-    # Literal, so the read edge has already rejected a member that is not a
-    # strategy, and only an unvalidated escape (``model_copy(update=...)``)
-    # can put one here. When it does, the raise names the field and the member
-    # rather than repeating pydantic's value-only complaint, so a caller
-    # holding a dict-shaped policy learns WHICH field to fix -- the same
-    # contract every other policy rejection in this module answers with.
+    # A static Literal cannot be derived from a runtime enum, so this narrowing is
+    # asserted -- and _assert_strategy_names_agree() is what makes asserting it honest.
     ladder: list[CrawlStrategyName] = []
     for member in strategies:
         try:
@@ -248,9 +238,8 @@ class _ChainRun:
         cookie_header = get_browser_cookies_for(self.context.normalized_url.site)
         if not cookie_header:
             return None
-        # model_copy, not a dict round-trip: the only thing changing is one
-        # header, and headers is dict[str, str] built from validated values plus
-        # this cookie, so there is nothing here for validation to catch.
+            # headers is dict[str, str] built from validated values plus this cookie, so there
+            # is nothing here for validation to catch.
         retry_headers = {**self.context.policy.headers, "Cookie": cookie_header}
         retry_policy = self.context.policy.model_copy(update={"headers": retry_headers})
         retry_result = await self.with_policy(retry_policy).execute(HTTP_CFFI_IMPERSONATE)

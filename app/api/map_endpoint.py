@@ -27,13 +27,8 @@ async def map_site(
 ) -> dict:
     """Map ``payload.root_url`` to its discovered-link frontier."""
     with request_gate("map_request_rejected", logger=logger):
-        # Mapping is a discovery operation, so the caller's discovery block is
-        # overridden rather than honoured -- expressed on the model, not on the
-        # dumped dict. The dict was the last place a policy was still mutated
-        # key-by-key, and it only worked because ``execute_crawl`` reads through
-        # the shared read edge; building the override on the model means the
-        # engine receives a value pydantic itself validated, and there is no
-        # second spelling of "map forces discovery" left to drift.
+        # Built on the model, not the dumped dict: the dict was the last place a policy
+        # was still mutated key-by-key, and the engine receives what pydantic validated.
         policy = payload.policy.model_copy(
             update={
                 "discovery": DiscoveryConfig(robots=True, sitemaps=True, feeds=True),

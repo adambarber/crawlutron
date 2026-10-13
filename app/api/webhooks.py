@@ -59,25 +59,16 @@ async def deliver_pinned_webhook(
     Consolidated from ``run_and_deliver_webhook`` so the ``post_webhook``
     path shares the same TOCTOU-safe delivery code.
     """
-    # Re-admit and re-pin through the one rule (admission + DNS check + pin,
-    # composed in one place) rather than reimplementing urlparse/check/pin
-    # inline -- the manual composition is exactly the shape that produced the
-    # redirect findings. validate_webhook_url already ran at the edge; running
-    # the rule again here closes the TOCTOU between validation and delivery.
+    # one place) rather than urlparse/check/pin inline -- manual composition is the
+    # shape that produced the redirect findings, and this closes validation's window.
     from app.transport.pinned_transport import build_pinned_request_async
 
     connect_url, connect_headers = await build_pinned_request_async(
         NormalizedUrl(webhook_url, policy=host_policy), {}
     )
     request_headers = {"Content-Type": "application/json", **connect_headers}
-    # A fresh client per delivery is deliberate: the security
-    # posture REQUIRES a per-delivery parse+resolve+pin (line above; the
-    # F-webhook-toctou consolidation), and pooling connections across
-    # deliveries would either re-resolve by hostname (defeating the pin) or
-    # cache the IP across deliveries (reopening the rebinding window). The
-    # handshake cost is one-per-job-completion, and a pooled client would
-    # also inherit the aclose lifecycle discipline the crawl side had to
-    # build for close races. Not a duplication finding.
+    # Deliberate one-per-delivery cost: pooling would re-resolve by hostname (defeating
+    # the pin) or cache the IP across deliveries (reopening the rebinding window).
     async with httpx.AsyncClient(timeout=Timeouts.defaults().as_httpx()) as client:
         async with client.stream(
             "POST", connect_url, content=payload_bytes, headers=request_headers

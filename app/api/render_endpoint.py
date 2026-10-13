@@ -43,9 +43,7 @@ def _render_rejection(error: ValueError) -> HTTPException:
 async def render(payload: RenderRequest, settings: CrawlerSettings) -> UnifiedCrawlResponse:
     """Render ``payload`` URLs with the pooled browser worker."""
     with request_gate("render_request_rejected", logger=logger, reject=_render_rejection):
-        # Every render request needs the browser by definition: fail clean
-        # with a 503 when the pool is down (startup/shutdown window)
-        # instead of an AttributeError 500 from inside the worker.
+        # with a 503 when the pool is down (startup/shutdown) instead of an AttributeError 500.
         pool = get_browser_pool()
         if pool is None:
             raise browser_pool_unavailable()
@@ -63,11 +61,8 @@ async def render(payload: RenderRequest, settings: CrawlerSettings) -> UnifiedCr
             "render_request_completed",
             extra={"url_count": len(result.get("results", []))},
         )
-        # The render results go through the SAME per-item shape guard
-        # /v1/crawl uses (``arender_response_from_result`` passes
-        # ``render_result_to_unified`` as the adaptation step), so a result the
-        # adapter cannot read degrades
-        # to a terminal failure for that item instead of 500ing the response.
+        # the SAME per-item shape guard /v1/crawl uses, so a result the adapter cannot read
+        # degrades to a terminal failure for that item instead of 500ing the response.
         return await arender_response_from_result(result)
 
 

@@ -9,10 +9,7 @@ from __future__ import annotations
 
 from typing import Final
 
-# ---------------------------------------------------------------------------
-# Extraction methods (how retrieved bytes are parsed into text/markdown).
-# These are output-pipeline options, strictly orthogonal to fetch strategies.
-# ---------------------------------------------------------------------------
+# Extraction methods (how retrieved bytes are parsed into text/markdown):
 EXTRACTION_FULL: str = "full"
 EXTRACTION_TRAFILATURA: str = "trafilatura"
 EXTRACTION_DOCUMENT: str = "document"
@@ -30,9 +27,7 @@ EXTRACTION_DESCRIPTIONS: dict[str, str] = {
     "without the document or Trafilatura pipelines.",
 }
 
-# ---------------------------------------------------------------------------
-# extraction_method result codes (diagnostic/provenance labels in crawl results).
-# ---------------------------------------------------------------------------
+# extraction_method result codes (diagnostic/provenance labels in crawl results)
 EXTRACTION_METHOD_HTTP_HTML: str = "http_html"
 EXTRACTION_METHOD_HTTP_BODY: str = "http_body"
 EXTRACTION_METHOD_DOCUMENT: str = "document_extract"

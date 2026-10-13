@@ -27,12 +27,8 @@ from app.models.taxonomy import (
 )
 from app.vocabulary.taxonomy import ResultStatus, status_agrees_with_classification
 
-# Fields whose declared type is a Literal: a value that is not a member is a
-# shape lie, so the dataclasses validate them at construction. Kept here next to
-# the Literal definitions because the check and the types must move together,
-# and PUBLIC rather than private because the taxonomy gate reads it to decide
-# which dataclasses qualify -- a gate that had to re-derive this map would be a
-# second copy of it.
+# Kept next to the Literal definitions because the check and the types must move together,
+# and public because the taxonomy gate reads it rather than re-deriving a second copy.
 LITERAL_FIELDS = {
     "status": set(literal_members(ResultStatus)),
     "classification": set(literal_members(Classification)),

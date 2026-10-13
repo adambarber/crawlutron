@@ -18,12 +18,8 @@ holds the line.
 
 from app.vocabulary.identity import SERVICE_ID, SERVICE_VERSION
 
-# The version this server implements, and the only one it accepts. Named apart
 # from the list because the two are different claims -- what we speak, and what we
-# will tolerate being sent -- and because the error path for an unsupported
-# version has to quote the supported set back to the caller. Not exported: the
-# supported list is what other modules consume, and a name in ``__all__`` that
-# nothing imports is a claim about the surface rather than a part of it.
+# tolerate -- and the error path quotes the supported set back to the caller.
 MCP_PROTOCOL_VERSION = "2026-07-28"
 SUPPORTED_PROTOCOL_VERSIONS = [MCP_PROTOCOL_VERSION]
 MCP_SERVER_NAME = SERVICE_ID

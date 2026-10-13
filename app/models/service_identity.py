@@ -5,12 +5,8 @@ from typing import Final
 from app.models.crawl_policy import POLICY_SCHEMA_VERSION
 from app.vocabulary.identity import SERVICE_ID, SERVICE_VERSION
 
-#: The identity block every discovery response opens with. Two payloads were
-#: spelling the same three keys, and a top-level key reaching one endpoint and not
-#: the other is exactly the shape of bug this codebase shipped once -- a strict
-#: ``response_model`` DROPS it without complaint, so a raw-dict unit test stays
-#: green while the wire loses the field. One block means a fourth key is added in
-#: one place and cannot reach only some of the endpoints.
+#: One identity block for every discovery response: a top-level key reaching one
+#: endpoint and not the other is dropped silently, so a raw-dict test stays green.
 SERVICE_IDENTITY: Final[dict[str, str]] = {
     "service": SERVICE_ID,
     "version": SERVICE_VERSION,

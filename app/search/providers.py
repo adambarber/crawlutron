@@ -212,9 +212,8 @@ class _ApiKeyProvider:
     """
 
     name: str
-    # Declared here so `_results` has one shape to read; assigned per provider.
-    # A subclass that omits one fails loudly on the first result rather than
-    # silently reporting a blank title for every hit.
+    # Declared here so `_results` has one shape to read; a subclass that omits one fails
+    # loudly on the first result rather than reporting a blank title for every hit.
     _url_key: str
     _title_key: str
     _description_key: str
@@ -377,11 +376,8 @@ class DuckDuckGoProvider:
             )
         results: list[SearchResult] = []
         seen: set[str] = set()
-        # The parse is the only thing that can fail here, and it is the only
-        # thing that SHOULD fail here: this import used to sit inside the
-        # `except Exception` below, so a missing lxml was reported to the caller
-        # as "duckduckgo returned unparsable HTML" -- a provider's fault for a
-        # broken local environment. lxml is a declared dependency.
+        # the thing that SHOULD fail here: this import used to sit inside the
+        # `except Exception` below, so a missing lxml read as a fault.
         try:
             tree = lxml_html.fromstring(body)
         except Exception:

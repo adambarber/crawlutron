@@ -54,18 +54,8 @@ def get_watch_store(request: Request) -> WatchStore:
     return request.app.state.watch_store
 
 
-# One declaration per provider: the annotation an endpoint parameter carries.
-# ``Annotated`` rather than a default value, so the dependency is a declared
-# part of the signature instead of an invisible default a reader has to notice.
-#
-# The providers above declare their return types, and that is load-bearing
-# rather than decoration. These aliases are what an endpoint parameter
-# annotates with, so an unannotated provider makes the alias -- and every
-# endpoint it reaches -- carry ``Any``: the type checker then cannot see what
-# crosses the boundary at all, which is how a ``CrawlerSettings`` was handed
-# to a parameter declaring a ``PolicyTier`` and stayed invisible in a green
-# mypy run. The declaration lives here, once, at the single place state enters
-# the request.
+# One declaration per provider, Annotated rather than a default so the dependency is
+# declared: an unannotated provider makes the alias, and every endpoint, carry Any.
 SettingsDep = Annotated[CrawlerSettings, Depends(get_settings)]
 ShutdownEventDep = Annotated[asyncio.Event, Depends(get_shutdown_event)]
 JobStoreDep = Annotated[JobStore, Depends(get_job_store)]

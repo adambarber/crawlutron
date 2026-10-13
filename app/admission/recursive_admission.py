@@ -23,9 +23,8 @@ from app.vocabulary.strategies import BROWSER_STRATEGIES, HTTP_STRATEGIES
 
 logger = logging.getLogger(__name__)
 
-# One admitted item as it flows down the pipeline: (depth, task). Named once so
-# every stage boundary states the item shape by reference instead of re-spelling
-# ``tuple[int, CrawlTask]`` in each signature and each local annotation.
+# One admitted item as it flows down the pipeline: (depth, task), named once so every
+# stage boundary states the shape by reference instead of re-spelling it.
 type _Admitted = tuple[int, CrawlTask]
 
 

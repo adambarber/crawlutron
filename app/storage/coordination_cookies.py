@@ -30,9 +30,8 @@ from app.storage.migrations.manifest import StoreSchema
 
 __all__ = ["DEFAULT_MAX_HOSTS", "SharedCookieStore"]
 
-# Cap on distinct (namespace, host) slots. The jar is long-lived: without
-# eviction every crawled host accumulates forever. The DNS, robots and sitemap
-# caches are all bounded for the same reason.
+# The DNS, robots and sitemap caches are all bounded for the same reason: an unbounded
+# eviction accumulates every host forever.
 DEFAULT_MAX_HOSTS = 1024
 
 

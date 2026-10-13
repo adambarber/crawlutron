@@ -24,10 +24,8 @@ def error_envelope(code: str, message: str, details: dict | None = None) -> dict
     return {"code": code, "message": message, "details": details or {}}
 
 
-#: Synthetic code for an HTTPException whose detail is not envelope-shaped.
-#: Deliberately a *declared* code (not ``http_<status>``) so a non-conforming
-#: raise is greppable in the wire contract instead of masquerading as a
-#: status-derived one; the numeric status is carried in ``details``.
+#: Synthetic code for an HTTPException whose detail is not envelope-shaped: a
+#: declared code, not http_<status>, so details carries the numeric status.
 MALFORMED_DETAIL_CODE = "malformed_error_detail"
 
 

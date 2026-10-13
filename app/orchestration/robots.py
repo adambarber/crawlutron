@@ -42,10 +42,8 @@ async def _load_uncached(
     fetch_and_decode: FetchAndDecode,
     policy: HostPolicy,
 ) -> RobotsRules:
-    # ``resolve`` is the urljoin-and-admit pair, so the robots document's URL
-    # is an admitted value by construction. None -- a same-origin absolute
-    # path on an admitted page, so unreachable -- falls through to the
-    # failure arm below and fails closed like any unfetchable robots.txt.
+    # The value is admitted by construction. None -- a same-origin path on an admitted
+    # page, so unreachable -- fails closed like any unfetchable robots.txt.
     robots_url = target.resolve("/robots.txt")
     body, status = (
         (None, None)
@@ -206,14 +204,8 @@ def robots_allows(target_url: NormalizedUrl, rules: list[tuple[bool, str]]) -> b
     if target_url.query:
         path = f"{path}?{target_url.query}"
     host = target_url.host
-    # No allow-all shortcut for the empty `Disallow:` form. RFC 9309 2.2.2 makes
-    # an empty value a rule to IGNORE, not a verdict, so it is skipped with the
-    # other unmatched patterns below like any rule that cannot apply. Scanning
-    # for it up front and returning True on sight read that ignore as a verdict
-    # for the whole group: a file declaring `Disallow:` next to
-    # `Disallow: /private` -- both legal in one block -- allowed everything,
-    # including the path it had just named. A group whose ONLY rule is the empty
-    # form still allows everything, because the loop starts allowed and skips it.
+    # No allow-all shortcut for the empty `Disallow:` form: RFC 9309 2.2.2 makes it a
+    # rule to IGNORE, and returning True on sight read that as whole-group permission.
     allowed = True
     best_len = -1
     for is_allow, pattern in rules:

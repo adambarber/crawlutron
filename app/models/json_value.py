@@ -35,10 +35,8 @@ defect this whole exercise is about.
 
 from __future__ import annotations
 
-# PEP 695's ``type JsonValue = ...`` would say this in one line, but the
-# project's floor is 3.11 (``requires-python`` and ruff's ``target-version``)
-# and the ``type`` statement is 3.12. A string forward reference is the same
-# deferral one release earlier, so the recursion still resolves.
+# The project floor is 3.11, so the 3.12 type alias is written as a string forward
+# reference: the same deferral one release earlier, with the recursion still resolving.
 JsonValue = None | bool | int | float | str | list["JsonValue"] | dict[str, "JsonValue"]
 """Any value JSON can carry, and nothing else.
 

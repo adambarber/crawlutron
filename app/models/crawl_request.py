@@ -17,10 +17,8 @@ MAX_VALIDATORS_PER_REQUEST = 64
 
 
 class CrawlRequest(SingleUrlSourceRequest):
-    # `url`, `urls` and the exactly-one-of validator are inherited, not restated. This
-    # model used to redeclare all three, and the re-declared `Field` put its default in
-    # the first positional slot, the one shape
-    # `test_pydantic_defaults_stay_where_a_checker_can_see_them` exists to ban.
+    # model used to redeclare all three, and the re-declared Field put its default in the
+    # first positional slot -- the shape the checker-visibility gate exists to ban.
     model_config = ConfigDict(extra="forbid")
 
     policy: CrawlPolicy = Field(

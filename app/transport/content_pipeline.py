@@ -144,9 +144,8 @@ async def _discover_after_fetch(
     """
     flags = discovery_flags(policy)
     discovery_block = any(flags)
-    # A depth to spend is a reason to look for links even with no discovery
-    # channel on: a whole-site job is unbounded, and the links it follows are
-    # the whole reason it exists.
+    # channel on: a whole-site job is unbounded, and the links it follows are the whole
+    # reason it exists.
     want_links = discovery_block or policy.limits.max_depth > 0
     return await asyncio.to_thread(
         extract_post_fetch_discovery,

@@ -29,11 +29,8 @@ from app.storage.job_store import JobStatusView
 router = APIRouter(prefix="/v1/jobs", tags=["Crawler"])
 
 
-# ``NoReturn``, not ``None``: both of these always raise, and saying so is what
-# lets the type checker narrow past their call sites. They were annotated ``None``,
-# which is why three ``assert x is not None`` lines existed downstream to satisfy a
-# checker that could not see the raise -- a suppression at the call site hiding a
-# wrong signature at the definition.
+# ``NoReturn``, not ``None``: both of these always raise, and saying so lets the
+# checker narrow past the call site instead of demanding a downstream assert.
 def _raise_not_found(job_id: str) -> NoReturn:
     raise http_error(404, "not_found", f"Unknown job_id: {job_id}")
 
@@ -111,10 +108,8 @@ async def get_job(job_id: str, job_store: JobStoreDep) -> JobStatusResponse:
     return _build_job_status(row)
 
 
-# The same provider triple as ``create_job``, deliberately: creating a job and
-# controlling one need identical state. The equality is verified against both
-# live signatures (test_job_endpoints_declare_the_same_dependencies), not
-# against a second hand-kept list of names here.
+# The same provider triple as create_job, deliberately: the equality is verified
+# against both live signatures by the endpoints test, not a hand-kept list here.
 @router.post(
     "/{job_id}/control",
     summary="Control a running crawl job (pause/resume/cancel)",

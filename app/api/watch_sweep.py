@@ -142,9 +142,7 @@ class WatchSweeper:
             {
                 "url": watch.url,
                 "policy": _check_policy(),
-                # The engine reads validators keyed by URL and reads each value
-                # as the mapping it arrived as, so the declared model is dumped
-                # rather than hand-spelled -- the keys stay the spellings the
+                # dumped rather than hand-spelled: the keys stay the spellings the
                 # models and the pipeline already agree on.
                 "validators": {
                     watch.url: FetchValidators(
@@ -198,10 +196,8 @@ async def sweep_watches_forever(
         try:
             await sweeper.sweep_once(now=clock())
         except Exception:
-            # One watch that makes the crawl raise must not end the sweep. The
-            # alternative is a registry that quietly stops being checked --
-            # every watch still reads ACTIVE, every status endpoint still
-            # answers, and nothing anywhere reports a dead task.
+            # One watch that makes the crawl raise must not end the sweep: the alternative is
+            # a registry that quietly stops being checked, with nothing reporting a dead task.
             logger.exception("watch_sweep_pass_failed")
         try:
             await asyncio.wait_for(shutdown_event.wait(), timeout=interval_seconds)

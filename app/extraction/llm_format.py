@@ -12,12 +12,8 @@ from app.models.normalized_url import NormalizedUrl
 from app.models.page_metadata import PageMetadata
 from app.safety.bounded_io import truncate_html_input
 
-#: Every field's declared type, read from the record rather than transcribed, so
-#: a field added there is admitted here without a second edit. A bare ``str`` has
-#: no union members -- ``get_args(str)`` is empty and the hint IS the type -- so
-#: the bare case is kept whole and only ``None`` is stripped from a union,
-#: because ``total=False`` means absence is legal and admitting ``None`` would
-#: make every check pass.
+#: a field added there is admitted here without a second edit. A bare str has no union
+#: members -- the hint IS the type -- so only None is stripped from a union.
 _FIELD_TYPES: dict[str, type | tuple[type, ...]] = {}
 for _field, _hint in get_type_hints(PageMetadata).items():
     _members = get_args(_hint)
@@ -54,11 +50,8 @@ def extract_carried_metadata(value: Any) -> PageMetadata:
     return cast(PageMetadata, admitted)
 
 
-# Cap the HTML passed to lxml parsing for metadata extraction. lxml builds a
-# full DOM tree; a 50 MB body can balloon to ~200 MB+ of RAM during parsing.
-# Anything above a few MB is almost certainly above the practical meta-tag
-# density and is rejected. The value lives in app.safety.bounded_io; this site keeps
-# the reason THIS parse needs one.
+# Cap the HTML passed to lxml parsing for metadata extraction: a 50 MB body can balloon
+# to ~200 MB+ of RAM. The value lives in app.safety.bounded_io; this site keeps the why.
 
 
 def extract_llm_metadata(html: str, url: NormalizedUrl | None) -> PageMetadata:

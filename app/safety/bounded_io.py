@@ -32,11 +32,8 @@ async def read_capped_async(chunks: AsyncIterator[bytes], cap: int) -> bytes:
     return bytes(raw)
 
 
-#: Resource bound for handing a whole HTML document to an in-process text
-#: analysis. The two original consumers (the noise-stripping scanner and the
-#: lxml metadata extractor) each declared their own 4 MB cap with the same
-#: value and the same reasoning, reachable only under two names that read as
-#: unrelated. One number, one place.
+#: Resource bound for handing a whole HTML document to in-process text analysis: one
+#: number, one place, where the two consumers each declared their own 4 MB cap.
 MAX_HTML_INPUT_BYTES = 4 * 1024 * 1024
 
 

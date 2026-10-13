@@ -119,10 +119,8 @@ def rollback_step(conn) -> None:
         cursor.execute("ALTER TABLE crawl_jobs ADD COLUMN results TEXT NOT NULL DEFAULT '[]'")
     if "visited" not in columns:
         cursor.execute("ALTER TABLE crawl_jobs ADD COLUMN visited TEXT NOT NULL DEFAULT '[]'")
-    # The page history only exists in the tables this migration dropped, so a
-    # rollback cannot restore it. That is why the columns come back empty
-    # rather than pretending: a rollback is a repair action, and a job whose
-    # results are gone must look that way instead of looking complete.
+        # The page history only exists in the tables this migration dropped, so a rollback
+        # cannot restore it: a job whose results are gone must look that way.
     cursor.execute("UPDATE crawl_jobs SET results = '[]', visited = '[]'")
 
 

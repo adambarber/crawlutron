@@ -91,10 +91,8 @@ def capabilities_payload(settings: CrawlerSettings) -> dict[str, Any]:
             "proxy_rotation": False,
             "identity_rotation": False,
             "credential_injection": False,
-            # No field for defeating a bot-protection control: a Cloudflare
-            # interstitial is a challenge, so `captcha_solving: false` above
-            # already states it, and naming the capability in the payload is
-            # the advertisement the comment used to warn against.
+            # interstitial is a challenge, so captcha_solving: false states it already;
+            # naming the capability is the advertisement, not the warning.
             "robots_diagnostics": True,
             "sitemap_discovery": True,
             "feed_discovery": True,

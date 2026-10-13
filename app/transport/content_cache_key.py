@@ -41,9 +41,8 @@ def build_content_cache_key(
     cache poisoning). The cookie header participates in the key exactly so that
     differing credentials can never share a cache entry.
     """
-    # ``.raw`` is the admitted value's wire identity -- and the exact text the
-    # pre-flip key was built from, so every entry already on disk stays
-    # addressable after the object flip.
+    # pre-flip key was built from, so every entry already on disk stays addressable after
+    # the object flip.
     return ContentCache.make_key(
         "http",
         normalized_url.raw,
@@ -55,15 +54,8 @@ def build_content_cache_key(
     )
 
 
-# Bound the RAM consumed by in-flight page bodies. At high
-# global_concurrency the per-page cap shrinks so the whole active set cannot
-# exhaust the budget. Operators with known RAM headroom can override the budget.
-#
-# The budget is a container quantity, not a per-process one: it bounds the RAM the
-# FLEET holds, so it is divided by the worker count here, where it is read. This
-# is the last cgroup budget in app/ that was still undivided -- the browser pool,
-# the HTTP ceiling and the doc-worker count are all split, and this one bounded
-# the same memory through the same container and had escaped that sweep.
+# Bound the RAM consumed by in-flight page bodies, a container quantity divided by the
+# worker count where it is read. This was the last cgroup budget in app/ still undivided.
 _RAM_SAFETY_BYTES = get_env_int("CRAWLUTRON_CONTENT_RAM_BUDGET_BYTES", 1 * 1024 * 1024 * 1024, lo=1)
 _MIN_PER_PAGE_BYTES = 256 * 1024  # never shrink the cap below 256 KiB
 

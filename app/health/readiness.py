@@ -11,10 +11,8 @@ from pydantic import BaseModel, Field
 from app.models.readiness_response import ReadinessResponse
 from app.runtime.metrics import get_metrics
 
-# Self-managed saturation thresholds. These mirror the resource-gate ride
-# targets (app.runtime.memory_pressure._DEFAULT_TARGET / app.runtime.resource_pressure._DEFAULT_CPU_TARGET).
-# The service reports saturated (HTTP 503) when its own guard is riding its
-# ceiling, instead of a removed external concurrency knob.
+# The service reports saturated (HTTP 503) when its own guard rides its ceiling, instead
+# of a removed external concurrency knob.
 _MEMORY_SATURATION = 0.92
 _CPU_SATURATION = 0.90
 
@@ -88,10 +86,8 @@ class ReadinessState:
         )
 
 
-# Module-level singleton so routers outside this module (e.g. render, crawl,
-# map, jobs) can call ``begin_request`` / ``end_request`` without depending on
-# ``create_health_router`` being called first. ``create_health_router`` also
-# uses this instance so the readiness snapshot reflects the same counter.
+# A module-level singleton so routers outside this module call begin_request /
+# end_request without depending on create_health_router being called first.
 READINESS_STATE = ReadinessState()
 
 

@@ -158,12 +158,8 @@ def _refuse_unusable_action(action: Any, index: int, allowed: str) -> None:
         raise ValueError(
             f"browser_profile action type {action_type!r} is not permitted; allowed types are: {allowed}"
         )
-    # The chain cannot report this one. Its branch reads
-    # ``if action_type == "click" and selector:``, so a selector-less click
-    # is not an error there, it is a no-op, and the request returns 200 with
-    # a page that loaded and nothing done. Refusing here is the only place the
-    # caller learns why. ``selector: ""`` counts as absent for the same reason:
-    # it is falsy at the branch, so it behaves identically once it gets there.
+        # a selector-less click is a no-op there, so the request returns 200 with a page that
+        # loaded and did nothing; refusing here is the only place the caller learns why.
     if action_type in ACTIONS_REQUIRING_SELECTOR and not action.get("selector"):
         raise ValueError(
             f"browser_profile action at index {index} is of type {action_type!r}, which acts "

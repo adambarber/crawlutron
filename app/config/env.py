@@ -148,10 +148,8 @@ def _mapping_number[T: (int, float)](
 def get_mapping_int(
     mapping: Mapping[str, str],
     name: str,
-    # The set a config default can actually be, not `int`: it arrives from a
-    # settings mapping or an environment string, so it is a number, a string, or
-    # nothing. Coercion stays total in the body, so a wrongly-typed default is
-    # still absorbed rather than raised.
+    # settings mapping or environment string, so a number, a string, or nothing. Coercion
+    # stays total, so a wrongly-typed default is absorbed rather than raised.
     default: int | float | str | None,
     *,
     lo: int | None = None,

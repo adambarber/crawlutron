@@ -226,11 +226,7 @@ def make_ssrf_websocket_handler(*, policy: HostPolicy):
     return _ws_handler
 
 
-# The blocked/failed labels and the classification -> status table live in
-# app.vocabulary.taxonomy, so the HTTP and browser paths cannot disagree about a label.
-
-# Canonical defaults live in app.vocabulary.limits; these module names stay as the
-# settings-less fallback so existing references (the suite's scroll disabler) keep working.
+# the shared classifier taxonomy, so HTTP and browser cannot disagree about a label.
 _BROWSER_COOKIES_MAX = 500
 
 
@@ -574,10 +570,8 @@ class BrowserRenderer:
 
             extraction_method = "dom_text"
             final_url = NormalizedUrl(page.url, policy=policy)
-            # Re-validate the post-navigation URL: the site may have redirected to
-            # an internal host. Fail closed (already admitted as a NormalizedUrl above).
-
-            # PDF extraction fallback
+            # Re-validate the post-navigation URL: the site may have redirected to an internal
+            # host. Fail closed (already admitted as a NormalizedUrl above).
             if self._looks_like(final_url.raw) and not (text or "").strip():
                 # Blocking file read + parse: keep it off the event loop like every
                 # other document-extraction path.

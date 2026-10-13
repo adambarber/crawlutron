@@ -51,13 +51,8 @@ async def limit_request_body(request: Request, call_next, *, max_bytes: int = MA
         message = await original_receive()
         if message.get("type") != "http.request":
             return message
-        # Stay truncated for the rest of the stream. The app was already handed
-        # a final (more_body=False) truncated chunk, and the truncating chunk is
-        # not charged to ``bytes_delivered``, so a later receive() computing
-        # ``remaining = cap - bytes_delivered`` could still see a positive budget
-        # and admit bytes past the declared cap. Every receive past the cap
-        # returns an empty final chunk, which also keeps draining
-        # original_receive() so the ASGI server's socket buffer empties.
+            # The truncating chunk is not charged to bytes_delivered, so a later
+            # receive must not read a positive budget from it and admit more.
         if truncated:
             return {**message, "body": b"", "more_body": False}
         body = message.get("body", b"") or b""
