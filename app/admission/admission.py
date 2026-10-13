@@ -171,8 +171,9 @@ class AdmittedLink:
 @dataclass(frozen=True)
 class AdmissionOutcome:
     accepted: int = 0
-    # Candidates the page cap REFUSED. The page is not admitted and will not be.
-    cap_blocked: int = 0
+    # Whether the page cap REFUSED a candidate. The page is not admitted, and
+    # the first refusal stops the loop, so this is a flag and never a count.
+    cap_blocked: bool = False
     # Candidates admitted PAST the cap: nothing was refused. Only the requeue
     # path sets this, for pages already admitted (maybe fetched) before the cap.
     cap_overcommitted: int = 0
@@ -233,7 +234,7 @@ async def admit_discovered_links[T](
     # frontier is committed + in-flight + queued, so a hand-passed count was blind.
     current_occupied = len(reserved)
     accepted = 0
-    cap_blocked = 0
+    cap_blocked = False
     robots_blocked = 0
     duplicates_skipped = 0
     stopped = False
@@ -294,7 +295,7 @@ async def admit_discovered_links[T](
                 continue
             capacity = remaining_page_capacity(current_occupied, max_pages)
             if capacity is not None and capacity <= 0:
-                cap_blocked = 1
+                cap_blocked = True
                 stopped = True
                 break
             entry = make_entry(candidate)

@@ -941,7 +941,7 @@ class TestRequeueOvercommitContract:
         assert [entry.url.raw for entry in job.frontier] == ["https://c.test"]
         assert outcome.accepted == 1
         assert outcome.cap_overcommitted == 1
-        assert outcome.cap_blocked == 0, "admitting past the cap is not a refusal"
+        assert outcome.cap_blocked is False, "admitting past the cap is not a refusal"
         assert job.stats["cap_overcommitted"] == 1
 
     def test_requeue_under_the_cap_is_plain_admission_with_no_cap_signal(self):
@@ -954,7 +954,7 @@ class TestRequeueOvercommitContract:
         )
 
         assert outcome.accepted == 1
-        assert outcome.cap_blocked == 0
+        assert outcome.cap_blocked is False
         assert outcome.cap_overcommitted == 0
         assert "cap_overcommitted" not in job.stats
         assert "cap_truncated" not in job.stats
@@ -976,7 +976,7 @@ class TestRequeueOvercommitContract:
             commit_crawl_delay=lambda domain, delay: None,
         )
 
-        assert outcome.cap_blocked == 1, "the cap refused the second link"
+        assert outcome.cap_blocked is True, "the cap refused the second link"
         assert outcome.cap_overcommitted == 0, "a refusal is not an overcommit"
         assert [url.raw for url in frontier] == ["https://example.test/one"]
 
@@ -1015,7 +1015,7 @@ async def test_discovered_link_delay_commits_in_order_and_breaks_at_cap():
     )
 
     assert outcome.accepted == 1
-    assert outcome.cap_blocked == 1
+    assert outcome.cap_blocked is True
     assert [url.raw for url in frontier] == ["https://example.test/first"]
     assert [event for event in events if event[0] == "delay"] == [
         ("delay", "https://example.test/first"),
@@ -1047,7 +1047,7 @@ async def test_duplicate_canonical_spellings_do_not_consume_capacity():
         "https://example.test/child",
         "https://example.test/other",
     ]
-    assert outcome.cap_blocked == 1
+    assert outcome.cap_blocked is True
 
 
 async def test_admission_robots_work_stops_at_remaining_capacity():
@@ -1069,4 +1069,4 @@ async def test_admission_robots_work_stops_at_remaining_capacity():
 
     assert calls == ["https://example.test/page-0"]
     assert outcome.accepted == 0
-    assert outcome.cap_blocked == 1
+    assert outcome.cap_blocked is True

@@ -77,7 +77,8 @@ def test_jobstore_load_missing_returns_none(job_store):
     assert job_store.load("nonexistent") is None
 
 
-def test_crawljobstate_serialization():
+def test_crawljobstate_serialization(job_store):
+    store = job_store
     job = CrawlJobState(
         job_id="test123",
         root_url="http://example.com/",
@@ -88,13 +89,12 @@ def test_crawljobstate_serialization():
         results=[{"url": "http://example.com/", "status": "success"}],
         stats={"total_discovered": 3, "total_crawled": 1, "total_failed": 0},
     )
+    store.save(job)
 
-    json_data = job.to_json()
-    assert json_data["job_id"] == "test123"
-    assert json_data["status"] == "running"
-    assert set(json_data["visited"]) == {"http://example.com"}
-
-    loaded = CrawlJobState.from_json(json_data, host_policy=UNRESTRICTED_HOST_POLICY, tier=deployment_tier())
+    # The store round trip is the boundary production uses; a serializer with
+    # no production caller is not a round trip, it is a second answer.
+    loaded = store.load(job.job_id)
+    assert loaded is not None
     assert loaded.job_id == "test123"
     assert loaded.status == JobStatus.RUNNING
     assert loaded.frontier == [
@@ -358,12 +358,11 @@ def test_normalize_frontier_keeps_shallowest_duplicate_depth(tmp_path):
         FrontierEntry(canonical("https://example.test/child"), 4),
         FrontierEntry(canonical("https://example.test/child?utm_source=test"), 1),
     ]
-    job_store_data = job.to_json()
+    store.save(job)
 
-    loaded = CrawlJobState.from_json(
-        job_store_data, host_policy=UNRESTRICTED_HOST_POLICY, tier=deployment_tier()
-    )
+    loaded = store.load(job.job_id)
 
+    assert loaded is not None
     assert loaded.frontier == [FrontierEntry(canonical("https://example.test/child"), 1)]
 
 

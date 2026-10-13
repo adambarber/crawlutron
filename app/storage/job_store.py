@@ -12,7 +12,7 @@ import logging
 import sqlite3
 import time
 from collections.abc import Iterable
-from dataclasses import asdict, dataclass, field
+from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path
 from typing import Any, TypedDict
@@ -291,28 +291,6 @@ class CrawlJobState:
     # Deployment tier held on the row: a job outlives its request, and a stored
     # policy that omitted a limit must resolve as the operator's, not the default.
     tier: PolicyTier = field(default_factory=PolicyTier.model_defaults, repr=False, compare=False)
-
-    def to_json(self) -> dict[str, Any]:
-        """Serialize to JSON-serializable dict.
-
-        Normalizes first, so the serialized form carries canonical page identity
-        (the read boundary enforces it too, but a writer that emits an alias
-        makes every reader pay for it). This is affordable only because
-        admission happens once on the read edge:
-        durable URL set is re-serialized on every job loop iteration.
-        """
-        normalize_job_state(self)
-        data = asdict(self)
-        data.pop("host_policy", None)
-        data.pop("tier", None)
-        data["frontier"] = [_entry_payload(entry) for entry in self.frontier]
-        data["in_flight"] = [_entry_payload(entry) for entry in self.in_flight]
-        data["visited"] = sorted(url.raw for url in self.visited)
-        data["transient_retries"] = _retries_payload(self.transient_retries)
-        data["stats"] = _normalized_stats(self.stats)
-        data["status"] = self.status.value
-        data["kind"] = self.kind.value
-        return data
 
     @classmethod
     def from_json(cls, data: dict[str, Any], *, host_policy: HostPolicy, tier: PolicyTier) -> CrawlJobState:
