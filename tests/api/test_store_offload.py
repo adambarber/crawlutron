@@ -81,6 +81,10 @@ class LoopGuardJobStore(JobStore):
         _refuse_on_loop("JobStore.load")
         return super().load(job_id)
 
+    def reload_state(self, job_id):
+        _refuse_on_loop("JobStore.reload_state")
+        return super().reload_state(job_id)
+
     def delete(self, job_id):
         _refuse_on_loop("JobStore.delete")
         return super().delete(job_id)
@@ -384,6 +388,43 @@ class TestStatusReadNeverMaterializesTheCrawl:
         assert store.exists(job.job_id) is True
         assert store.exists("no-such-job") is False
         assert_no_history_read(reached, "the existence probe")
+
+    def test_the_batch_reload_does_not_read_the_page_history(self, seeded_store, monkeypatch):
+        """`reload_state` is the runner's per-batch read; it must stay cheap."""
+        store, job, reached = self._spying(seeded_store, monkeypatch)
+
+        reloaded = store.reload_state(job.job_id)
+
+        assert_no_history_read(reached, "the batch reload")
+        assert reloaded is not None
+
+    def test_the_batch_reload_still_carries_every_live_field(self, seeded_store, monkeypatch):
+        """Cheaper is only better when it is the same answer."""
+        store, job, _reached = self._spying(seeded_store, monkeypatch)
+        store.save(job)
+
+        reloaded = store.reload_state(job.job_id)
+        full = store.load(job.job_id)
+
+        assert reloaded is not None and full is not None
+        for field in (
+            "job_id",
+            "kind",
+            "root_url",
+            "status",
+            "frontier",
+            "in_flight",
+            "stats",
+            "transient_retries",
+            "host_policy",
+            "created_at",
+        ):
+            assert getattr(reloaded, field) == getattr(full, field), field
+
+    def test_the_batch_reload_of_an_absent_job_is_none(self, seeded_store):
+        store, _job = seeded_store
+
+        assert store.reload_state("no-such-job") is None
 
 
 def assert_no_history_read(reached, what: str) -> None:

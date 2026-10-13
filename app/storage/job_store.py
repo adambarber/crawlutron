@@ -753,7 +753,7 @@ class JobStore:
         # the append-only side has its own owner so neither pays for the other.
         self._accumulators = JobAccumulators(self._conn)
 
-    def _row_to_job(self, row) -> CrawlJobState:
+    def _row_to_job(self, row, *, with_accumulators: bool = True) -> CrawlJobState:
         job_id = row["job_id"]
         return CrawlJobState.from_json(
             {
@@ -763,8 +763,8 @@ class JobStore:
                 "policy": json.loads(row["policy"]),
                 "status": row["status"],
                 "frontier": json.loads(row["frontier"]),
-                "visited": self._accumulators.read_visited(job_id),
-                "results": self._accumulators.read_results(job_id),
+                "visited": self._accumulators.read_visited(job_id) if with_accumulators else [],
+                "results": self._accumulators.read_results(job_id) if with_accumulators else [],
                 "created_at": row["created_at"],
                 "updated_at": row["updated_at"],
                 "error": row["error"],
@@ -852,6 +852,30 @@ class JobStore:
     def load(self, job_id: str) -> CrawlJobState | None:
         """Load job state from SQLite. Returns None if not found.
 
+        The whole job: live state plus the page history and visited set. A
+        caller that only needs the live state pays for neither accumulator and
+        must say so -- :meth:`reload_state` is that call.
+        """
+        return self._read_row(job_id, with_accumulators=True)
+
+    def reload_state(self, job_id: str) -> CrawlJobState | None:
+        """The live state of a job, without its page history or visited set.
+
+        The batch loop reloads the job once per batch to pick up what the batch
+        wrote, and it keeps the accumulators in its own object across batches --
+        it is the one writer. Rebuilding them here cost the whole crawl per
+        batch: a 3,000-page job at batch size 8 decoded 3,000 payloads and
+        re-collected 3,000 URLs ~375 times, only to append one batch to them.
+
+        The accumulators come back empty on purpose. A caller that is already
+        holding them must keep its own, because the store's high-water mark
+        would otherwise see a shorter history and resync the table from scratch.
+        """
+        return self._read_row(job_id, with_accumulators=False)
+
+    def _read_row(self, job_id: str, *, with_accumulators: bool) -> CrawlJobState | None:
+        """The one row read both loaders share.
+
         The whole read -- row, page history, visited set -- happens under one
         hold of the lock, and it has to. Deserializing the state is no longer
         free: the history and the visited set live in their own tables, so it is
@@ -873,7 +897,7 @@ class JobStore:
             if row is None:
                 return None
             try:
-                return self._row_to_job(row)
+                return self._row_to_job(row, with_accumulators=with_accumulators)
             except (json.JSONDecodeError, ValueError, TypeError) as exc:
                 # Surface corruption instead of silently returning None so a
                 # broken row is observable in logs rather than masked.
@@ -940,6 +964,7 @@ class JobStore:
     acreate_single_shot = atwin(create_single_shot)
     aset_status = atwin(set_status)
     aload = atwin(load)
+    areload_state = atwin(reload_state)
     adelete = atwin(delete)
     alist_jobs = atwin(list_jobs)
     astatus = atwin(status_row)

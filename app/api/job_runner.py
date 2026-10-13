@@ -357,9 +357,12 @@ async def _run_job(
                 shutdown_event=shutdown_event,
             )
             items = result["results"]
-            job = await job_store.aload(job_id)
-            if job is None:
+            # Live state only: the runner is the job's single writer, and it
+            # carries its own accumulators so the high-water mark stays consistent.
+            reloaded = await job_store.areload_state(job_id)
+            if reloaded is None:
                 return
+            job = replace(reloaded, results=job.results, visited=job.visited)
 
             # Two passes by priority: ``original_url`` (the caller's submission)
             # wins; redirect aliases only fill identities no result claimed.
