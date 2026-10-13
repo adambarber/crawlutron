@@ -55,11 +55,15 @@ def remaining_page_capacity(admitted_count: int, max_pages: int) -> int | None:
 
 
 def compile_scope_pattern(scope_regex: Any) -> BoundedPattern | None:
-    """Compile a user-supplied scope regex for bounded matching, or refuse it.
+    """Compile a user-supplied scope regex for bounded matching.
 
-    THE definition: the crawl path (engine) and the durable admission path
-    (job links) both bound a caller-supplied ``scope_regex`` through here, so
-    a pattern one path refuses cannot be compiled by the other.
+    ``None`` means exactly one thing: no restriction was declared. A restriction
+    that IS declared but cannot compile raises instead, because every consumer
+    reads ``None`` as "allow everything" -- and a crawl the operator restricted
+    running unrestricted is the one outcome a scope policy must never produce.
+    The request boundary rejects invalid patterns with ``invalid_policy``, so
+    the row that reaches here compiled when it was written; the gap is the
+    resume, where the same row loads under today's rules.
 
     Defense in depth: static shape rejection is bypassable by
     construction -- the depth-3 nested-quantifier ``(((a|aa)))*`` defeated
@@ -73,8 +77,8 @@ def compile_scope_pattern(scope_regex: Any) -> BoundedPattern | None:
         return None
     try:
         return compile_untrusted(scope_regex, max_len=_MAX_SCOPE_PATTERN_LEN)
-    except (UnsafePattern, re.error):
-        return None
+    except (UnsafePattern, re.error) as exc:
+        raise ValueError(f"scope_regex does not compile: {exc}") from exc
 
 
 async def gather_robots_decisions(
