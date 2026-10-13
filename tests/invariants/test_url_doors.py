@@ -845,7 +845,9 @@ JOB_FRONTIER_GROWTH_ONLY_USES_FUNNEL = Rule(
     ),
     skip=frozenset({_ADMISSION_CHOKEPOINT}),
     kwargs_for=lambda relative: (
-        {"allowed_functions": frozenset({"normalize_job_state", "_persist"})}
+        {"allowed_functions": frozenset({"normalize_job_state"})}
+        if relative == "app/storage/job_store_state.py"
+        else {"allowed_functions": frozenset({"_persist"})}
         if relative == "app/storage/job_store.py"
         else {}
     ),
