@@ -19,7 +19,7 @@ import asyncio
 import logging
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any, TypeVar
+from typing import Any
 
 from app.extraction.llm_format import (
     PageMetadata as ExtractedPageMetadata,
@@ -48,7 +48,6 @@ _logger = logging.getLogger(__name__)
 
 #: The batch shaper is generic over its result shape so ``adapt`` and ``results``
 #: agree: browser results with an engine adapter are no longer expressible.
-_ResultT = TypeVar("_ResultT", bound=AnyResult)
 
 
 def format_crawl_item(item: EngineCrawlResult) -> tuple[str | None, ExtractedPageMetadata]:
