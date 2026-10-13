@@ -653,7 +653,7 @@ class JobAccumulators:
             return
         self._conn.executemany(
             'INSERT OR IGNORE INTO "crawl_job_results" (job_id, seq, payload) VALUES (?, ?, ?)',
-            ((job_id, seq, _json(result)) for seq, result in enumerate(results) if seq >= persisted),
+            ((job_id, seq, _json(result)) for seq, result in enumerate(results[persisted:], start=persisted)),
         )
 
     def _append_visited(self, job: CrawlJobState) -> None:
@@ -663,6 +663,11 @@ class JobAccumulators:
         every page seen so far; when there is growth the insert is OR IGNORE, so
         a page visited by two branches collapses to one row and the set
         semantics of the accumulator are the table's primary key.
+
+        The set is unordered, so "new" cannot be a slice: the URLs already
+        stored are read back as a set and differenced. Reading them is cheaper
+        than the insert it bounds, because that used to hand the driver every
+        URL the job had ever seen on every save.
         """
         job_id = job.job_id
         visited = job.visited
@@ -671,9 +676,14 @@ class JobAccumulators:
         ).fetchone()["n"]
         if len(visited) <= stored:
             return
+        already = {
+            row["url"]
+            for row in self._conn.execute('SELECT url FROM "crawl_job_visited" WHERE job_id = ?', (job_id,))
+        }
+        fresh = visited - already
         self._conn.executemany(
             'INSERT OR IGNORE INTO "crawl_job_visited" (job_id, url) VALUES (?, ?)',
-            ((job_id, url.raw) for url in visited),
+            ((job_id, url.raw) for url in fresh),
         )
 
 

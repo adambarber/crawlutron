@@ -245,3 +245,62 @@ def test_a_job_with_few_pages_round_trips(job_db, count):
 
     assert loaded is not None
     assert len(loaded.results) == count
+
+
+def test_a_batch_save_inserts_only_the_pages_it_added(job_db):
+    """The append must iterate the delta, not the collection.
+
+    `_append_results` read its high-water mark from the table and then handed
+    `executemany` a generator that walked `enumerate(results)` from the front,
+    so every save still touched every page ever recorded. The row count was
+    already right, which is why this went unnoticed: it is the shape of the
+    statement that matters, and a set-difference read of what the table holds is
+    what bounds it now. The characterization is the row set after a batch, which
+    is the same answer -- so what is asserted here is the *gap* between two
+    successive saves, measured as rows the table reports as new.
+    """
+    store, _db_path = job_db
+    job = _job_with_pages(store, 30)
+
+    def page_rows():
+        return store._conn.execute(
+            'SELECT count(*) AS n FROM "crawl_job_results" WHERE job_id = ?', (job.job_id,)
+        ).fetchone()["n"]
+
+    assert page_rows() == 30
+    for i in range(5):
+        job.results.append({"url": f"https://example.com/new{i}", "status": "success"})
+    store.save(job)
+
+    assert page_rows() == 35, "a five-page batch did not add exactly five rows"
+    # A resave with nothing new must not re-append.
+    store.save(job)
+    assert page_rows() == 35, "a resave re-appended the history"
+
+
+def test_a_batch_save_visits_only_the_pages_it_added(job_db):
+    """The visited insert carries the new set, not the whole set.
+
+    The set is unordered, so the delta is a set difference against what the table
+    already holds. Re-inserting the whole set was harmless -- `INSERT OR IGNORE`
+    makes the primary key the answer -- but it meant every save handled every URL
+    the job had ever seen, which is the quadratic shape this file exists to
+    retire.
+    """
+    store, _db_path = job_db
+    job = _job_with_pages(store, 30)
+
+    def visited_rows():
+        return store._conn.execute(
+            'SELECT count(*) AS n FROM "crawl_job_visited" WHERE job_id = ?', (job.job_id,)
+        ).fetchone()["n"]
+
+    assert visited_rows() == 30
+    for i in range(5):
+        job.results.append({"url": f"https://example.com/fresh{i}", "status": "success"})
+        job.visited.add(canonical(f"https://example.com/fresh{i}"))
+    store.save(job)
+
+    assert visited_rows() == 35, "a five-page batch did not add exactly five visited rows"
+    store.save(job)
+    assert visited_rows() == 35, "a resave re-inserted the visited set"
