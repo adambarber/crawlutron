@@ -82,27 +82,6 @@ async def resolve_browser_target(
     return pinned_url, ({"Host": host} if host else {})
 
 
-def _assert_safe_final_url(final_url: str, *, policy: HostPolicy) -> None:
-    """Re-validate the post-navigation URL.
-
-    The rendered site may have redirected the browser to an internal host. Fail
-    closed (raise ``ValueError``) rather than returning potentially-internal
-    content.
-    """
-    normalized = NormalizedUrl(final_url, policy=policy)
-    check_ssrf_protection(normalized)
-
-
-def _is_ssrf_blocked(url: str, *, policy: HostPolicy) -> bool:
-    """Return ``True`` if ``url`` resolves to an SSRF-unsafe target."""
-    try:
-        normalized = NormalizedUrl(url, policy=policy)
-        check_ssrf_protection(normalized)
-    except ValueError:
-        return True
-    return False
-
-
 # Subresource types with no crawlable text: aborted in reduced-resource mode.
 # Tracking/analytics hosts are never fetched (app.vocabulary.hosts, shared with enqueue refusal).
 _REDUCED_BLOCK_RESOURCE_TYPES = frozenset({"image", "font", "media"})

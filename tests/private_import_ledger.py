@@ -410,16 +410,6 @@ DECLARED: dict[str, Declaration] = {
     "app.transport.browser._BROWSER_COOKIES_MAX": _d(
         _CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]
     ),
-    "app.transport.browser._assert_safe_final_url": _d(
-        "unreviewed",
-        "Not yet triaged.\n",
-        ["test"],
-    ),
-    "app.transport.browser._is_ssrf_blocked": _d(
-        "unreviewed",
-        "Not yet triaged.\n",
-        ["test"],
-    ),
     "app.transport.browser._store_browser_cookies": _d(
         "unreviewed",
         "Not yet triaged.\n",

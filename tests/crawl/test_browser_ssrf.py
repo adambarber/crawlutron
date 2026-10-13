@@ -5,12 +5,7 @@ import pytest
 
 import app.transport.document as doc_mod
 import app.transport.pinned_transport as http_mod
-from app.transport.browser import (
-    _assert_safe_final_url,
-    _is_ssrf_blocked,
-    make_ssrf_route_handler,
-    resolve_browser_target,
-)
+from app.transport.browser import make_ssrf_route_handler, resolve_browser_target
 from app.transport.pinned_transport import build_pinned_request, build_pinned_request_async
 from tests._assertions import block_private_targets, host_resolves_to
 from tests._browser_doubles import (
@@ -124,18 +119,6 @@ async def test_browser_pin_resolve_does_not_run_on_the_event_loop(monkeypatch):
     )
 
 
-async def test_assert_safe_final_url_blocks_internal(monkeypatch):
-    monkeypatch.setenv("CRAWLUTRON_ALLOW_PRIVATE_TARGETS", "0")
-    with pytest.raises(ValueError):
-        _assert_safe_final_url("http://127.0.0.1:9/", policy=UNRESTRICTED_HOST_POLICY)
-    # A public IP literal is allowed.
-    _assert_safe_final_url("http://1.2.3.4/", policy=UNRESTRICTED_HOST_POLICY)
-
-
-# -------------------------------------------------------------------------- browser.py integration:
-# _render_with_browser navigates to the pinned IP and re-validates the post-navigation URL.
-
-
 async def test_render_navigates_to_pinned_ip_with_host_header(monkeypatch):
     page, result = await render_pinned(monkeypatch)
     # Navigate to the pinned IP, not the hostname (DNS-rebinding safe).
@@ -156,13 +139,6 @@ async def test_render_rejects_internal_redirect_target(monkeypatch):
 
 # -------------------------------------------------------------------------- route-level guard aborts
 # SSRF-unsafe requests (subresources + redirects)
-
-
-async def test_is_ssrf_blocked_classifies_targets(monkeypatch):
-    monkeypatch.setenv("CRAWLUTRON_ALLOW_PRIVATE_TARGETS", "0")
-    assert _is_ssrf_blocked("http://127.0.0.1:9/", policy=UNRESTRICTED_HOST_POLICY) is True
-    assert _is_ssrf_blocked("http://169.254.169.254/latest/", policy=UNRESTRICTED_HOST_POLICY) is True
-    assert _is_ssrf_blocked("http://1.2.3.4/", policy=UNRESTRICTED_HOST_POLICY) is False
 
 
 async def test_ssrf_route_handler_aborts_unsafe_and_continues_safe(monkeypatch):
