@@ -1,0 +1,290 @@
+"""Purges, delays and delivery failures never lose or double-count work."""
+
+import asyncio
+
+import pytest
+
+from app.models.crawl_job import CrawlJob
+from app.models.crawl_result import EngineCrawlResult
+from app.models.taxonomy import Classification
+from app.orchestration.engine_result import TerminalResult
+from app.orchestration.scheduler import DomainScheduler
+from tests._policy_factories import canonical
+from tests._result_builders import make_job, make_result
+from tests._scheduler_doubles import FailingSink, engine_envelope, make_scheduler, ok_worker, run_through
+from tests._timing_harnesses import recorder
+
+
+def test_run_still_purges_up_front():
+    """The batch entry point keeps its up-front purge so a long run cannot grow
+    the dicts without bound even when no 429 fires."""
+    scheduler = make_scheduler()
+    scheduler._domain_cooldowns["stale.test"] = 0.0  # already expired
+    assert "stale.test" in scheduler._domain_cooldowns
+    # The up-front purge fires before any job runs.
+    scheduler.purge_expired()
+    assert "stale.test" not in scheduler._domain_cooldowns
+
+
+class TestSchedulerResilience:
+    async def test_scheduler_continues_other_jobs_on_single_failure(self):
+        """One failing job must not cancel the others; results for the
+        successful jobs are still returned."""
+        scheduler = make_scheduler(global_limit=5, per_domain_limit=5)
+        jobs = [make_job(i, f"http://example.com/{i}") for i in range(3)]
+
+        async def failing_worker(job: CrawlJob) -> EngineCrawlResult:
+            if job.index == 1:
+                raise RuntimeError("transient failure")
+            return make_result(job.url.raw, job.domain)
+
+        results = await scheduler.run(jobs, failing_worker, failed_result=engine_envelope)
+        assert results is not None
+        # The failing job is not dropped: the chokepoint builds it a classified terminal envelope (reading the
+        # URL
+        assert len(results) == 3, results
+        assert results[1].status == "failed"
+        assert results[1].classification == "network_error"
+        assert results[1].normalized_url == canonical("http://example.com/1")
+        assert all(r.status == "success" for i, r in results.items() if i != 1)
+        assert {r.normalized_url for i, r in results.items() if i != 1} == {
+            canonical("http://example.com/0"),
+            canonical("http://example.com/2"),
+        }
+
+
+class _PerDomainDelayScheduler(DomainScheduler):
+    """Fixed delays that differ per domain (adaptive throttling off)."""
+
+    def current_delay(self, domain: str) -> float:
+        return 0.4 if domain == "example.com" else 0.0
+
+
+async def test_domain_delay_does_not_block_other_domains(monkeypatch):
+    """The per-domain delay is awaited inside the *domain* gate, not the global one.
+
+    The regression this pins: sleeping on the delay while holding a global
+    concurrency slot burns that slot on pure waiting, so every other domain
+    queues behind a wait that has nothing to do with them. Proved with a
+    handshake rather than a stopwatch: the slow domain's delay will not
+    *complete* until the fast domain's worker has run. With ``global_limit=1``
+    the two orderings are then distinguishable without any timing at all -- if
+    the delay held the only global slot the fast worker could never start, the
+    handshake could never be satisfied, and the wait fails naming exactly that.
+
+    The hosts must be registrable-distinct: ``domain`` is the registrable
+    domain, so two ``example.com`` hosts are one domain sharing one delay.
+    """
+    scheduler = make_scheduler(_PerDomainDelayScheduler, adaptive=False)
+    fast_started = asyncio.Event()
+    starved: list[str] = []
+    yield_to_loop = asyncio.sleep
+
+    async def _sleep(delay, *args, **kwargs):
+        del args, kwargs
+        if delay >= 0.2:
+            # Slow.example.com's 0.4s per-domain delay (jittered). It may not finish until the fast domain has
+            # been served.
+            try:
+                await asyncio.wait_for(fast_started.wait(), 2.0)
+            except TimeoutError:
+                starved.append("fast.example.org")
+            return
+        await yield_to_loop(0)
+
+    monkeypatch.setattr(asyncio, "sleep", _sleep)
+
+    async def worker(job):
+        if job.domain == "example.org":
+            fast_started.set()
+        await yield_to_loop(0)
+        return make_result(job.url.raw, job.domain)
+
+    jobs = [make_job(0, "http://slow.example.com/"), make_job(1, "http://fast.example.org/")]
+    await scheduler.run(jobs, worker, failed_result=engine_envelope)
+    assert not starved, (
+        "fast.example.org could not run until slow.example.com's per-domain delay "
+        "finished: the delay is being awaited while holding a GLOBAL concurrency "
+        "slot, so it burns that slot on pure waiting and starves every other domain"
+    )
+    assert fast_started.is_set(), "the fast domain was never served"
+
+
+async def test_zero_delay_requests_no_sleep_at_all(monkeypatch):
+    """The inverse: a domain configured with no delay must request no wait.
+
+    The suite's autouse patch now makes every sleep zero-second *and* yielding,
+    so "the delay was skipped" is no longer observable as elapsed time -- but
+    it is still observable as a request. A scheduler that turned a zero
+    configured delay into a positive sleep request would be inventing politeness
+    the operator never asked for, and paying it on every single job.
+    """
+    sleeps = recorder(monkeypatch)
+    scheduler = make_scheduler(adaptive=False)
+    jobs = [make_job(0, "https://example.com/a"), make_job(1, "https://example.com/b")]
+    await scheduler.run(jobs, ok_worker, failed_result=engine_envelope)
+    assert sleeps.delays == [0, 0], (
+        f"a zero-delay scheduler must request only zero-second yields, saw {sleeps.delays}"
+    )
+
+
+class TestDeliveryFailuresAreNotWorkerFailures:
+    """``on_result`` is a SINK, and a sink that raises says nothing about the work.
+
+    The callback is where a crawl spills a result to disk. When that spill
+    raised, delivery happened inside the worker's ``try``, so the scheduler
+    answered with ``record_failure`` and a fabricated ``failed_result`` envelope
+    delivered through the same broken sink -- three things wrong at once: a page
+    that succeeded was counted against its domain's circuit breaker (real
+    traffic for that domain then gets skipped), the caller was handed a failure
+    envelope for a page it had already fetched, and ``gather``'s
+    ``return_exceptions=True`` swallowed what was left with no log line at all.
+    """
+
+    async def test_a_raising_sink_does_not_trip_the_circuit_breaker(self, caplog):
+        scheduler = make_scheduler(adaptive=False)
+        jobs = [make_job(0, "https://example.com/a")]
+        sink = FailingSink(message="spill failed: disk full")
+
+        await run_through(sink, scheduler, jobs, caplog)
+
+        assert scheduler.domain_cooldowns == {}, (
+            "a failed RESULT SPILL was charged to the domain's circuit breaker; the page "
+            f"itself succeeded, so real traffic for that domain is now skipped: "
+            f"{scheduler.domain_cooldowns}"
+        )
+        assert any("on_result" in record.message for record in caplog.records), (
+            "the swallowed delivery failure left no log line, which is what made "
+            f"undiagnosable: {[record.message for record in caplog.records]}"
+        )
+
+    async def test_a_raising_sink_gets_exactly_one_call_per_job(self, caplog):
+        """No retry, and above all no fabricated envelope for a page that worked.
+
+        The old shape delivered a second result for the same job -- the
+        ``failed_result`` envelope -- which a spill-based sink would have
+        written to disk as though the crawl had failed.
+        """
+        scheduler = make_scheduler(adaptive=False)
+        jobs = [make_job(0, "https://example.com/a"), make_job(1, "https://example.com/b")]
+        sink = FailingSink()
+
+        await run_through(sink, scheduler, jobs, caplog)
+
+        assert sorted(sink.calls) == [(0, "success"), (1, "success")], (
+            f"the sink must see one real result per job and no fabricated envelope: {sink.calls}"
+        )
+        assert sink.delivered == [], f"every delivery was supposed to fail: {sink.delivered}"
+
+    async def test_one_job_sink_failure_does_not_cost_a_healthy_job_its_result(self, caplog):
+        """The healthy job's result still reaches a working sink on the next call."""
+        scheduler = make_scheduler(adaptive=False)
+        jobs = [make_job(0, "https://example.com/a"), make_job(1, "https://example.com/b")]
+        sink = FailingSink(fails={0})
+
+        await run_through(sink, scheduler, jobs, caplog)
+
+        assert sink.delivered == [(1, "success")], (
+            f"one job's failed spill must not swallow another job's result: {sink.delivered}"
+        )
+
+
+class TestSchedulerFailureAccountingIsAboutStatuses:
+    """A failure verdict is a STATUS; the reason is a CLASSIFICATION.
+
+    The success/failure branch tested membership in ``("failed",
+    "network_error")``, which reads as though a network fault got its own
+    accounting. It does not: ``network_error`` is a taxonomy member describing
+    WHY a page failed, and ``status_for_classification`` maps it ONTO
+    "failed" -- it is never a status itself, so the element could not match
+    anything. Meanwhile four of the six ResultStatus members matched neither
+    branch, and nothing noticed.
+
+    Total by construction now: the verdicts live in one table keyed by status,
+    and the exhaustiveness test fails if a status is added without one.
+    """
+
+    @staticmethod
+    def _terminal(job: CrawlJob, classification: Classification):
+        """A real terminal result, with its status derived by the real chokepoint."""
+        from app.orchestration.engine_result import _terminal_engine_result
+        from app.vocabulary.taxonomy import status_for_classification
+
+        # Status is the outer function's own keyword, not a field of the shared value: it is what the
+        # per-status constructors pin, and a CONTEXT_VARYING_STATUS classification needs one the table cannot
+        return _terminal_engine_result(
+            TerminalResult(
+                original_url=job.url.raw,
+                normalized_url=job.url.raw,
+                strategy=None,
+                classification=classification,
+                # ``error`` is a taxonomy code, not an optional: production's own envelope passes the
+                # classification through it, and a result carrying no error code is a shape no caller
+                error=classification,
+            ),
+            status=status_for_classification(classification),
+        )
+
+    async def test_a_network_fault_records_a_domain_failure(self):
+        """The reported case, through the real failure envelope, not a copy."""
+        import socket
+
+        scheduler = make_scheduler(circuit_cooldown=0.0)
+        job = make_job(0, "https://example.com/p")
+
+        async def failing_worker(job):
+            return engine_envelope(job, socket.gaierror("name resolution failed"))
+
+        results = await scheduler.run([job], failing_worker, failed_result=engine_envelope)
+        assert results is not None
+        result = results[job.index]
+        # Different axes: the status is the verdict, the classification the reason. Comparing one against the
+        # other is why the old tuple could not work.
+        assert result.status == "failed"
+        assert result.classification == "dns_error"
+        assert scheduler._domain_failures.get("example.com", 0) == 1
+
+    @pytest.mark.parametrize(
+        ("classification", "expected_failures", "why"),
+        [
+            ("navigation_timeout", 1, "attempts exhausted against the domain: a real fault"),
+            ("cookie_consent_required", 0, "a wall proves the host is alive"),
+            ("robots_disallowed", 0, "we chose not to fetch; not the host's doing"),
+            ("invalid_url", 0, "our own policy refusal, silent about the domain"),
+        ],
+    )
+    async def test_each_status_reaches_the_verdict_its_meaning_implies(
+        self, classification, expected_failures, why
+    ):
+        scheduler = make_scheduler(circuit_cooldown=0.0)
+        job = make_job(0, "https://example.com/p")
+
+        async def worker(job):
+            return self._terminal(job, classification)
+
+        await scheduler.run([job], worker, failed_result=engine_envelope)
+        assert scheduler._domain_failures.get("example.com", 0) == expected_failures, why
+
+    def test_status_accounting_is_total(self):
+        """Every ResultStatus member has a verdict, so none can arrive unhandled.
+
+        The branch this replaced tested membership in a two-element tuple, so
+        blocked, disallowed, retry_exhausted and skipped matched nothing, and a
+        status added to the taxonomy later would have silently joined them
+        rather than forcing a decision.
+        """
+        import typing
+
+        from app.orchestration.scheduler import _STATUS_ACCOUNTING
+        from app.vocabulary.taxonomy import ResultStatus
+
+        members = set(typing.get_args(ResultStatus))
+        assert members, "ResultStatus must be a Literal to be checkable"
+        assert not members - set(_STATUS_ACCOUNTING), (
+            f"a ResultStatus member has no domain-health verdict: {sorted(members - set(_STATUS_ACCOUNTING))}"
+        )
+        assert not set(_STATUS_ACCOUNTING) - members, (
+            "the accounting table names a status the taxonomy does not define: "
+            f"{sorted(set(_STATUS_ACCOUNTING) - members)}"
+        )
+        assert set(_STATUS_ACCOUNTING.values()) <= {"success", "failure", "none"}

@@ -32,7 +32,7 @@ Consequences worth knowing before adding to this package:
   ``DiscoveredLink`` and ``PageMetadata`` each declared twice with nothing
   connecting the two forms. A projection sits beside its owner at
   ``<stem>_response.py``, which is how the mirror invariant in
-  ``tests/invariants/test_result_shape.py`` finds the pair.
+  ``tests/invariants/test_wire_mirror.py`` finds the pair.
 - A module holding exactly one declaration is named for it, modulo a trailing
   ``Error``. A module holding several is named for the family -- ``crawl_worker.py``
   holds the sync and async forms of one worker -- and both are enforced by

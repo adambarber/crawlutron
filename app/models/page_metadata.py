@@ -13,7 +13,7 @@ class PageMetadata(TypedDict, total=False):
     key SET is therefore fixed even though the presence of any one key is not.
 
     Living at this stem is load-bearing, not cosmetic. The mirror invariant in
-    ``tests/invariants/test_result_shape.py`` pairs an owner with its projection
+    ``tests/invariants/test_wire_mirror.py`` pairs an owner with its projection
     by module name, so this file and ``page_metadata_response.py`` is the pair;
     a differently-named record would simply not be compared, which is how three
     wire fields survived with no producer.

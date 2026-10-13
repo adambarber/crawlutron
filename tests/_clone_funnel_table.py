@@ -124,6 +124,9 @@ FUNNELS = [
 FUNNEL_HOME_MODULES = frozenset(
     {
         "_fetcher_factories.py",
+        "_fetch_doubles.py",
+        "_fetch_scripted.py",
+        "_crawl_runners.py",
         # The fetchers, the crawls and the doubles are declared once, in the modules that own them. A copy in
         # any other module re-asserts the contract, and that is the drift these detectors exist to catch.
         "_assertions.py",
