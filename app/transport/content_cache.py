@@ -27,6 +27,8 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+from app.models.cache_envelope import CacheEnvelope
+from app.models.json_value import JsonValue
 from app.safety.atomic_write import atomic_write_text
 from app.vocabulary.limits import (
     CONTENT_CACHE_MAX_ENTRY_BYTES,
@@ -37,6 +39,11 @@ from app.vocabulary.limits import (
 
 def _default_clock() -> float:
     return time.time()
+
+
+#: An unparsable stored expiry resolves to before the clock, so every
+#: freshness comparison reads it as expired rather than raising.
+_UNPARSEABLE = float("-inf")
 
 
 class ContentCache:
@@ -176,7 +183,7 @@ class ContentCache:
         self._unlink_doomed(doomed)
 
     # -- public API ---------------------------------------------------------
-    def _read_envelope(self, key: str) -> dict[str, Any] | None:
+    def _read_envelope(self, key: str) -> CacheEnvelope | None:
         """Return the unexpired envelope for ``key`` (registering it in the LRU
         index), or ``None`` if missing, expired, or unreadable.
 
@@ -196,7 +203,7 @@ class ContentCache:
             raw = path.read_bytes()
         except OSError:
             raw = None
-        envelope: dict[str, Any] | None = None
+        envelope: CacheEnvelope | None = None
         if raw is not None:
             try:
                 envelope = json.loads(raw)
@@ -216,7 +223,7 @@ class ContentCache:
                     # accounting nor the freshness mirror may keep it.
                     self._drop_locked(key, doomed)
                     return None
-                expires = envelope.get("expires")
+                expires = self._expiry(envelope)
                 if expires is not None and self.clock() > expires:
                     # Free the byte accounting too: phantom bytes would keep
                     # ``_over_limits`` true and evict LIVE entries later.
@@ -235,13 +242,34 @@ class ContentCache:
                 if self._index_sizes.get(key) == len(raw):
                     # Remember the freshness metadata so later cached_at_of()
                     # calls are answered without re-reading the envelope.
-                    self._index_cached_at[key] = (envelope.get("expires"), envelope.get("cached_at"))
+                    self._index_cached_at[key] = (expires, envelope.get("cached_at"))
                     # Warm the RAM mirror under the same lock, gated on the
                     # exact bytes just read -- a cold read cannot smuggle multi-MB.
                     self._remember_memory_locked(key, envelope.get("value"), expires, len(raw))
                 return envelope
         finally:
             self._unlink_doomed(doomed)
+
+    @staticmethod
+    def _expiry(envelope: CacheEnvelope) -> float | None:
+        """The row's expiry as a comparable number, or ``None`` when it is not one.
+
+        The envelope is JSON, so a row can carry an ``expires`` that is a string
+        or a list and still parse. Every freshness test then compares the clock
+        against it, and a string raises ``TypeError`` -- through the disk read,
+        through the RAM mirror it warms, and through the freshness mirror. One
+        bad row made every later read of that key raise.
+
+        Such a row is corruption by the same standard as unparsable JSON, and
+        corruption here is a miss: the caller refetches rather than serve a value
+        whose freshness nobody can state.
+        """
+        raw = envelope.get("expires")
+        if raw is None:
+            return None
+        if isinstance(raw, bool) or not isinstance(raw, int | float):
+            return _UNPARSEABLE
+        return float(raw)
 
     def _memory_hit_locked(self, key: str) -> Any | None:
         """RAM-mirror probe (callers must hold ``self._lock``).
@@ -327,7 +355,7 @@ class ContentCache:
         envelope = self._read_envelope(key)
         return envelope.get("cached_at") if envelope is not None else None
 
-    def _entry_to_store(self, value: Any, ttl: int | None) -> tuple[dict[str, Any], float | None]:
+    def _entry_to_store(self, value: JsonValue, ttl: int | None) -> tuple[CacheEnvelope, float | None]:
         """Build the on-disk envelope for one write, and the expiry it resolved to.
 
         The envelope is this cache's stored contract, and the sync and async
@@ -462,7 +490,7 @@ class ContentCache:
                 # the next access) and repair its recorded size below.
                 surviving[path] = len(raw)
                 continue
-            expires = envelope.get("expires")
+            expires = self._expiry(envelope)
             if expires is not None and now > expires:
                 # The byte size rides the verdict: applied under the lock below,
                 # only against the entry these bytes still describe.

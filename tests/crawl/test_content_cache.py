@@ -408,12 +408,34 @@ class TestContentCacheOverwrite:
             cache.set("key", {"data": "second"})
             assert cache.get("key") == {"data": "second"}
 
+    def test_a_row_with_an_unparsable_expiry_is_a_miss_on_every_surface(self, tmp_path):
+        """A malformed ``expires`` must not raise, and must read as a miss.
 
-class TestContentCacheCorruptEntry:
-    def test_content_cache_get_corrupt_json(self):
-        with scoped_cache(default_ttl=60) as cache:
-            cache._path_for("testkey").write_text("{broken json")
-            assert cache.get("testkey") is None
+        The envelope parses as JSON, so the corruption check passes, and the
+        freshness test then compares the clock against whatever the row carried.
+        A row whose expiry is a string raised ``TypeError`` there -- through the
+        disk read, through the RAM mirror it warmed, and through the freshness
+        mirror -- so one bad row made every later read of that key raise.
+
+        The row is corrupt by the same standard as unparsable JSON, and
+        corruption here means a miss. Both surfaces are asserted because they
+        have separate answer paths: the freshness mirror answers from its own
+        metadata without reading the row, so a regression that serves one
+        surface but not the other must not pass.
+        """
+        import json
+
+        warm, _clock = make_seeded_cache(tmp_path, "key1")
+        path = warm._path_for("key1")
+        envelope = json.loads(path.read_text())
+        envelope["expires"] = "not-a-timestamp"
+        path.write_text(json.dumps(envelope))
+        # A second cache over the same directory is the cold reader: the warm
+        # one answers from its RAM mirror and never reaches the row.
+        cold, _clock2 = make_seeded_cache(tmp_path, default_ttl=60)
+
+        assert cold.get("key1") is None
+        assert cold.cached_at_of("key1") is None
 
     def test_content_cache_prune_corrupt_entry(self, tmp_path):
         cache, clock = make_seeded_cache(tmp_path, "key1")
