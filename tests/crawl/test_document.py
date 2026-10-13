@@ -97,11 +97,7 @@ class TestDocumentRedirectSsrf:
             if ":" in hostname:
                 return []
             if hostname in (self.PINNED_IP, "169.254.169.254"):
-                # No DNS table entry for a bare IP literal: if the code ever
-                # resolved a connect-URL host as if it were a hostname, the
-                # hop must fail loudly instead of silently succeeding. That
-                # is what makes the logical-vs-connection URL split
-                # observable.
+                # That is what makes the logical-vs-connection URL split observable.
                 raise socket.gaierror(8, "nodename nor servname provided")
             return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", (table.get(hostname, self.PINNED_IP), port))]
 
@@ -117,10 +113,8 @@ class TestDocumentRedirectSsrf:
             fetched.append(host)
             location = redirects.get(f"{host}{urlparse(str(request.url)).path}")
             if location is not None:
-                # Httpx hands a 30x back as a response rather than raising, and
-                # the shared chain reads the Location off it -- the opposite of
-                # urllib, where a redirect surfaced as HTTPError. Driving the
-                # real client is what makes that difference observable.
+                # Httpx hands a 30x back as a response rather than raising, and the shared chain reads the
+                # Location off it -- the opposite of urllib, where a redirect surfaced as HTTPError.
                 return MockResponse(302, {"Location": location})
             return MockResponse(200, content=pdf_bytes)
 
@@ -196,9 +190,6 @@ class TestDocumentRedirectSsrf:
             },
         )
         assert run.markdown == ""
-        # The walk did advance exactly one hop before the second was refused.
-        # Without this the assertion below would also hold if nothing had been
-        # fetched at all, which is exactly what a broken walk looks like.
         assert "hop1.test" in run.fetched
         assert "evil.test" not in run.fetched
 
@@ -214,8 +205,7 @@ class TestDocumentRedirectSsrf:
 
 async def test_document_extraction_with_uncompressed_bytearray_body(base_url):
     """Simulate fetcher delivering CSV body as bytearray (no content-encoding)."""
-    # csv served WITHOUT compression -> decompress_body returns the raw
-    # buffer unchanged, which is a bytearray
+    # csv served WITHOUT compression -> decompress_body returns the raw buffer unchanged, which is a bytearray
     fetcher = scripted_fetcher(status=200, ctype="text/csv", body=bytearray(b"name,age\nAlice,30\nBob,25"))
 
     result = await run_http_strategy(
@@ -244,9 +234,7 @@ class TestDocumentExtractionEdges:
         assert text == ""
 
     def test_oversized_pdf_body_yields_empty_text(self, base_url):
-        # The read itself is capped. /sample_table.pdf is a real PDF far
-        # larger than the shrunken cap, so the extractor must fail closed
-        # (empty text) instead of buffering the whole body.
+        # The read itself is capped.
         import app.extraction.content as extraction_mod
 
         original_cap = extraction_mod.EXTRACTION_DOC_MAX_INPUT_BYTES
@@ -303,9 +291,8 @@ class TestDocumentTextParserEdges:
         assert "Second sentence here." in out
 
     def test_heading_join_skipped(self):
-        # A heading must not absorb the paragraph under it. Asserting that the word
-        # survives proves nothing -- it survives either way -- so the assertion has to
-        # be about the record boundary between the two.
+        # A heading must not absorb the paragraph under it. Asserting that the word survives proves nothing --
+        # it survives either way -- so the assertion has to be about the record boundary between the two.
         out = format_extracted_document_text(
             "INTRODUCTION\nBody continues here",
             source_url="http://x/",
@@ -313,8 +300,8 @@ class TestDocumentTextParserEdges:
         assert out == "INTRODUCTION\n\nBody continues here"
 
     def test_long_sentence_is_not_a_heading_and_so_does_join(self):
-        # The other side of the same rule: all-caps-and-short is the test, so a long
-        # mixed-case sentence is prose and merges with what follows it.
+        # The other side of the same rule: all-caps-and-short is the test, so a long mixed-case sentence is
+        # prose and merges with what follows it.
         out = format_extracted_document_text(
             "a normal sentence that is far too long to be a heading\nand it continues here",
             source_url="http://x/",
@@ -329,28 +316,22 @@ class TestDocumentTextParserEdges:
         assert ", and more detail" in out
 
     def test_all_blank_input_yields_no_records(self):
-        # The line scan runs off the end rather than stopping at a blank line, and a
-        # document that is nothing but blanks produces nothing.
+        # The line scan runs off the end rather than stopping at a blank line, and a document that is nothing
+        # but blanks produces nothing.
         assert format_extracted_document_text("\n\n   \n", source_url="http://x/") == ""
 
     def test_item_marker_is_not_absorbed_as_an_item_title(self):
-        # Both title pickers have to apply the same exclusions. A bare section marker
-        # inside an item's title run, followed by the next item, is the shape that
-        # reaches the collector's marker branch -- and absorbing the marker there
-        # swallowed the sibling item whole, so it stopped being a record of its own.
+        # Both title pickers have to apply the same exclusions.
         out = format_extracted_document_text("1a.\nBuild the thing\n1.\n1b.\nShip it", source_url="http://x/")
         assert out == "1a. Build the thing\n\n1.\n\n1b. Ship it"
 
     def test_section_header_over_an_item_keeps_both_records(self):
-        # The neighbouring shape, for contrast: the header declines the marker as its
-        # title, so the marker becomes the sibling item's own record instead.
+        # The neighbouring shape, for contrast: the header declines the marker as its title, so the marker
+        # becomes the sibling item's own record instead.
         out = format_extracted_document_text("1.\n1a.\nBuild the thing", source_url="http://x/")
         assert out == "1.\n\n1a. Build the thing"
 
     def test_non_item_section_is_not_read_as_a_section_title(self):
-        # The item-title collector already refuses boilerplate as a title; the
-        # section-title path has to refuse it the same way, or the marker survives
-        # as a heading when reached through one path and vanishes through the other.
         out = format_extracted_document_text("1.\nPublic Participation\nBuild it", source_url="http://x/")
         assert out == "1.\n\nBuild it"
 
@@ -363,12 +344,12 @@ class TestDocumentTextParserEdges:
         assert "Item one" in out
 
     def test_item_marker_after_a_section_header_is_not_read_as_its_title(self):
-        # "1." followed by "1a." must not collapse into a section titled "1a."; the
-        # marker stays its own record and the header keeps its title.
+        # "1." followed by "1a." must not collapse into a section titled "1a."; the marker stays its own
+        # record and the header keeps its title.
         marked = format_extracted_document_text("1.\n1a.\nApprove the plan", source_url="http://x/")
         assert marked == "1.\n\n1a. Approve the plan"
-        # The same header over an ordinary line does take it as a title, which is
-        # what makes the marker case a decision rather than a formatting accident.
+        # The same header over an ordinary line does take it as a title, which is what makes the marker case a
+        # decision rather than a formatting accident.
         assert (
             format_extracted_document_text("1.\nApprove the plan", source_url="http://x/")
             == "1. Approve the plan"

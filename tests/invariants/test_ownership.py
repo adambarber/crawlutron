@@ -52,8 +52,8 @@ def _lock_bodies_with_awaits(tree: ast.AST, path: pathlib.Path) -> list[str]:
         if isinstance(node, ast.AsyncWith):
             continue  # asyncio.Lock bodies may await by design
         for item in node.items:
-            # `with self._lock:` / `with _CLOSE_LOCK:` / `with guard:` --
-            # a sync lock context. Any await inside is a loop-blocker.
+            # `with self._lock:` / `with _CLOSE_LOCK:` / `with guard:` -- a sync lock context. Any await
+            # inside is a loop-blocker.
             expr = item.context_expr
             referred = getattr(expr, "attr", None) or getattr(expr, "id", None)
             if referred is None:
@@ -115,9 +115,8 @@ LOCK_HELD_ACROSS_AN_AWAIT = Rule(
         "asynchronous wait outside the `with` and take only the lock inside it"
     ),
     bite=lambda: (
-        # A name stem, and a name bound to a threading lock-family constructor: the
-        # second is the one a rename tries to escape, since self._mutex is not a
-        # lock by name at all.
+        # A name stem, and a name bound to a threading lock-family constructor: the second is the one a rename
+        # tries to escape, since self._mutex is not a lock by name at all.
         Bites(
             "class C:\n    def __init__(self):\n        self._mutex = __import__('threading').Lock()\n"
             "    async def go(self):\n        with self._mutex:\n            await x()\n",
@@ -130,8 +129,8 @@ LOCK_HELD_ACROSS_AN_AWAIT = Rule(
         ),
     ),
     clean=lambda: (
-        # asyncio.Lock bodies may await -- that IS the sanctioned pattern, and the
-        # only reason the sweep reads `with` and skips `async with`.
+        # asyncio.Lock bodies may await -- that IS the sanctioned pattern, and the only reason the sweep reads
+        # `with` and skips `async with`.
         "import asyncio\n\nclass C:\n    def __init__(self):\n        self._lock = asyncio.Lock()\n"
         "    async def go(self):\n        async with self._lock:\n            await x()\n",
         # A context manager that is not a lock is not this rule's business.
@@ -150,8 +149,7 @@ def test_lock_detector_bites():
     LOCK_HELD_ACROSS_AN_AWAIT.check_bites()
 
 
-# ---------------------------------------------------------------------------
-# ContentCache mirror twins
+# --------------------------------------------------------------------------- ContentCache mirror twins
 # ---------------------------------------------------------------------------
 
 _CACHE_TWIN_METHODS = {"get", "aget", "set", "aset"}
@@ -205,15 +203,13 @@ def test_memory_cache_twin_detector_bites():
     MEMORY_CACHE_TWINS_MUST_GO_THROUGH_THE_LOCKED_HELPERS.check_bites()
 
 
-# ---------------------------------------------------------------------------
-# Lock ownership: a *_locked helper presumes the caller holds the lock
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------- Lock ownership: a *_locked
+# helper presumes the caller holds the lock
 
 
 def _is_locked_helper_name(name: str | None) -> bool:
-    # ``name is not None`` rather than ``bool(name)``: both reject the empty
-    # string, but only the first states the narrowing the two ``str`` methods
-    # below then rely on.
+    # ``name is not None`` rather than ``bool(name)``: both reject the empty string, but only the first states
+    # the narrowing the two ``str`` methods below then rely on.
     return name is not None and name.startswith("_") and name.endswith("_locked")
 
 
@@ -289,9 +285,8 @@ def test_locked_helper_lock_ownership_detector_bites():
     LOCKED_HELPERS_ARE_CALLED_UNDER_THE_LOCK.check_bites()
 
 
-# ---------------------------------------------------------------------------
-# Handle minting is single-sourced (entropy policy)
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------- Handle minting is single-sourced
+# (entropy policy)
 
 
 def _id_mint_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
@@ -341,9 +336,8 @@ def test_id_mint_detector_bites():
     HANDLE_MINTING_IS_SINGLE_SOURCED.check_bites()
 
 
-# ---------------------------------------------------------------------------
-# Robots politeness floor is committed only through the bounded setter
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------- Robots politeness floor is
+# committed only through the bounded setter
 
 
 def _unbounded_domain_delay_writes(tree: ast.AST, path: pathlib.Path) -> list[str]:
@@ -388,8 +382,8 @@ DOMAIN_POLITENESS_FLOOR_ONLY_VIA_THE_SETTER = Rule(
         count=2,
     ),
     clean=lambda: (
-        # The setter's clamped write and a read are both fine: the rule is about
-        # who may WRITE, and an augmented assignment is still a write.
+        # The setter's clamped write and a read are both fine: the rule is about who may WRITE, and an
+        # augmented assignment is still a write.
         "class S:\n    def set_domain_min_delay(self, d, s):\n"
         "        self._domain_min_delay[d] = min(s, 300.0)\n"
         "    def read(self, d):\n        return self._domain_min_delay.get(d, 0.0)\n",
@@ -406,16 +400,8 @@ def test_domain_delay_detector_bites():
     DOMAIN_POLITENESS_FLOOR_ONLY_VIA_THE_SETTER.check_bites()
 
 
-# ---------------------------------------------------------------------------
-# Age-based deletion must consult ownership, not just age
-# ---------------------------------------------------------------------------
-# A sweep, GC, evict, prune or clean function that unlinks a file is deleting
-# something a concurrent worker may still be reading. Age is not ownership: a
-# scratch file lives exactly as long as the work writing it, and a process-wide
-# sweep reaches every one of them. `_ResultSpill` learned this the hard way --
-# its sweep unlinked by age alone and documented the loss of a still-active
-# spill as acceptable, when the spill being deleted was the crawl's own
-# reassembled result. Deletion by age is fine; deletion by age alone is not.
+# --------------------------------------------------------------------------- Age-based deletion must consult
+# ownership, not just age
 _SWEEP_NAME_PARTS = ("gc", "sweep", "evict", "prune", "clean", "reap", "purge")
 
 
@@ -465,16 +451,15 @@ AGE_BASED_DELETION_CONSULTS_OWNERSHIP = Rule(
             "            os.unlink(name)\n",
             "unlinks without an ownership check",
         ),
-        # A method named for cleanup still has to ask; the name is a trigger, not
-        # a grant.
+        # A method named for cleanup still has to ask; the name is a trigger, not a grant.
         Bites(
             "class C:\n    def cleanup(self):\n        os.remove(self.path)\n",
             "unlinks without an ownership check",
         ),
     ),
     clean=lambda: (
-        # The guard has to be something the KERNEL can answer -- ownership another
-        # process can also see -- not a set this process happens to be holding.
+        # The guard has to be something the KERNEL can answer -- ownership another process can also see -- not
+        # a set this process happens to be holding.
         "def _gc_stale(max_age):\n"
         "    for name in os.listdir(tmp):\n"
         "        if not _spill_is_unowned(name):\n"
@@ -566,11 +551,6 @@ def test_async_crawl_semaphore_loop_binding_detector_bites():
     SEMAPHORE_GLOBALS_ARE_LOOP_BOUND.check_bites()
 
 
-# --- 4d: the doc pool reaps retired slots on every acquisition ---------------
-
-# Scoped to the class that owns doc workers, not to the bare method name:
-# ``acquire`` is a common name for taking a resource out of a pool, and three
-# unrelated modules define one that has no retired slots to reap.
 _DOC_POOL_CLASS = "DocExtractionPool"
 
 _DOC_POOL_ACQUIRER = "acquire"
@@ -675,18 +655,8 @@ def test_doc_pool_reap_detector_bites():
     DOC_POOL_ACQUIRER_REAPS_RETIRED_SLOTS.check_bites()
 
 
-# --- Response cookies enter the jar only through the fetch-completion tail -----
-#
-# The httpx and curl_cffi fetchers each carried their own copy of the tail that
-# decompresses, normalises headers and persists cookies, and the copies had
-# already drifted: httpx normalised the response headers into a dict and handed
-# *that* to the cookie helper, which is what knocked it off its documented
-# get_list path, while curl_cffi handed over the transport's own multidict.
-# Collapsing both into fetchers._finish_fetch is what removed the drift. These
-# two rules are the enforcement half: the jar has exactly one write door, and
-# that door is the shared tail. A third fetch path growing its own cookie
-# handling trips them at the line, not after a session is silently missing a
-# cookie.
+# These two rules are the enforcement half: the jar has exactly one write door, and that door is the shared
+# tail.
 
 _COOKIE_TAIL = "app/transport/fetchers.py"
 
@@ -735,10 +705,7 @@ RESPONSE_COOKIES_ENTER_VIA_THE_FETCH_TAIL = Rule(
         Bites("def nested():\n    jar.add_cookie_header(url, cookie)\n", "add_cookie_header() outside"),
     ),
     clean=lambda: (
-        # The sanctioned two-hop chain, spared at the paths that own it. Both
-        # halves are Silents rather than lookalike strings: each is sanctioned at
-        # ONE path and must fire at every other, so a string -- which is always run
-        # at the rule's single proof path -- would assert the opposite claim here.
+        # The sanctioned two-hop chain, spared at the paths that own it.
         Silent(
             "from app.transport.request_profile import _store_set_cookies\n"
             "def _finish_fetch(**kwargs):\n"
@@ -749,10 +716,8 @@ RESPONSE_COOKIES_ENTER_VIA_THE_FETCH_TAIL = Rule(
             "def _store_set_cookies(url, headers):\n    jar.add_cookie_header(url, c)\n",
             at=REPO_ROOT / _COOKIE_HELPER,
         ),
-        # The half that makes it a PATH-keyed rule: that very same fetch-tail
-        # source still fires anywhere else. A detector keyed on the function name
-        # alone would wave it through, which is the whole reason the rule is keyed
-        # on the path -- so this is a firing proof, not another exemption.
+        # The half that makes it a PATH-keyed rule: that very same fetch-tail source still fires anywhere
+        # else.
         Bites(
             "from app.transport.request_profile import _store_set_cookies\n"
             "def _finish_fetch(**kwargs):\n"
@@ -775,29 +740,17 @@ def test_cookie_tail_detector_bites():
     RESPONSE_COOKIES_ENTER_VIA_THE_FETCH_TAIL.check_bites()
 
 
-# --- browser instance release -------------------------------------------------
-# Both the per-attempt reset and the service-shutdown close have to forget the
-# same cached fields. Spelling that out twice is how one of them grows a stale
-# field the other never clears -- which is exactly what happened to
-# ``_browser_reused`` before _release_browser existed. Only the owner may
-# clear them, so a new field cannot be added to one path and forgotten on the
-# other.
+# --- browser instance release ------------------------------------------------- Both the per-attempt reset
+# and the service-shutdown close have to forget the same cached fields.
 _BROWSER_RELEASE_FIELDS = ("_browser_cm", "_browser", "_browser_reused")
 
 
-#: The file that owns the fields and the chokepoint today, and therefore the
-#: path the bite proof is planted at. Named separately from the sweep set below
-#: rather than picked out of it: ``Path`` hashes through the (per-process
-#: randomized) string hash, so ``next(iter(frozenset_of_paths))`` names a
-#: different file on different runs and the proof would bite at random.
+#: The file that owns the fields and the chokepoint today, and therefore the path the bite proof is planted
+#: at.
 _BROWSER_RELEASE_OWNER = REPO_ROOT / "app" / "transport" / "browser_driver.py"
 
 
-#: Both files, not one. The cached fields and the release chokepoint moved to
-#: the driver when the lifecycle split, so a single-path sweep pointed at the
-#: renderer reported green over a file that no longer contains any of them --
-#: a gate that enforces nothing and says nothing about having stopped. Sweeping
-#: the pair keeps the invariant whole across the split: a field reintroduced on
+#: Both files, not one. Sweeping the pair keeps the invariant whole across the split: a field reintroduced on
 #: either side is still caught by whichever file spells the clear.
 _BROWSER_RELEASE_OWNERS = frozenset({_BROWSER_RELEASE_OWNER, REPO_ROOT / "app" / "transport" / "browser.py"})
 
@@ -810,17 +763,16 @@ _BROWSER_RELEASE_EXEMPT = frozenset({"__init__"})
 
 
 def _browser_release_offenders(tree, path, *, owners, fields, chokepoint):
-    # Path == Path, not path.name: comparing a str against a Path is never
-    # equal, which would make the whole sweep silently yield nothing.
+    # Path == Path, not path.name: comparing a str against a Path is never equal, which would make the whole
+    # sweep silently yield nothing.
     if path not in owners:
         return
     for node in functions(tree):
         if node.name in (chokepoint, *_BROWSER_RELEASE_EXEMPT):
             continue
         for inner in ast.walk(node):
-            # Only clearing to None is a release. _acquire_browser assigns a
-            # real context manager and a real browser, which is the opposite
-            # of forgetting them.
+            # Only clearing to None is a release. _acquire_browser assigns a real context manager and a real
+            # browser, which is the opposite of forgetting them.
             cleared = (
                 [
                     t
@@ -879,8 +831,8 @@ BROWSER_RELEASE_ONLY_THROUGH_THE_CHOKEPOINT = Rule(
         at=_BROWSER_RELEASE_OWNER,
     ),
     clean=lambda: (
-        # __init__ putting the fields at their initial None is not a release, and
-        # neither is the chokepoint's own body.
+        # __init__ putting the fields at their initial None is not a release, and neither is the chokepoint's
+        # own body.
         Silent(_browser_release_source(), at=_ELSEWHERE),
         f"class R:\n    async def {_BROWSER_RELEASE_CHOKEPOINT}(self):\n        self._browser = None\n",
     ),
@@ -895,9 +847,7 @@ def test_browser_release_detector_bites():
     BROWSER_RELEASE_ONLY_THROUGH_THE_CHOKEPOINT.check_bites()
 
 
-#: The lock constructors a store must not hand itself. ``process_lock`` is the
-#: only sanctioned way to serialize writes to a store, and it is keyed by the
-#: database file, so every instance and every migration on that file shares one.
+#: The lock constructors a store must not hand itself.
 _PRIVATE_LOCK_NAMES = frozenset({"Lock", "RLock"})
 
 
@@ -993,12 +943,11 @@ STORES_SERIALIZE_ON_THE_FILES_PROCESS_LOCK = Rule(
         "    def __init__(self, db_path):\n"
         "        self._lock = process_lock(store_lock_key(db_path))\n"
         "        self._conn = connect_store(db_path, schema=schema)\n",
-        # A module-level guard is not a store's write lock, and banning it would
-        # be the rule being wrong rather than the code.
+        # A module-level guard is not a store's write lock, and banning it would be the rule being wrong
+        # rather than the code.
         "_PROCESS_LOCKS_GUARD = threading.Lock()\n",
-        # State no other process can reach. A private lock is the right answer
-        # here, which is the whole reason the rule is scoped to the connection
-        # chokepoint rather than banning the constructor.
+        # State no other process can reach. A private lock is the right answer here, which is the whole reason
+        # the rule is scoped to the connection chokepoint rather than banning the constructor.
         "class RobotsCache:\n    def __init__(self):\n        self._lock = threading.Lock()\n",
     ),
 )

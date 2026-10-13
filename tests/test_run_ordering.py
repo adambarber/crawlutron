@@ -38,17 +38,11 @@ from pathlib import Path
 
 import pytest
 
-# The root both path derivations start from: this file is `tests/<name>.py`, so
-# the service root is two parents up. Derived rather than imported so this gate
-# keeps working if the helper module it would import is itself the thing that
-# broke -- a gate whose liveness depends on the code it supervises cannot
-# supervise it.
+# The root both path derivations start from: this file is `tests/<name>.py`, so the service root is two
+# parents up.
 SERVICE_ROOT = Path(__file__).resolve().parent.parent
 
-#: Configs that decide what the gates run, and so can decide that a run does
-#: not vary. `pytest.ini` is the dangerous one: `addopts` is applied to every
-#: invocation that does not override it, so a flag there is a silent default
-#: rather than a visible command.
+#: Configs that decide what the gates run, and so can decide that a run does not vary.
 ORDER_PINNING_CONFIGS = (
     "pytest.ini",
     ".pre-commit-config.yaml",
@@ -57,11 +51,7 @@ ORDER_PINNING_CONFIGS = (
     ".github/workflows/ci.yml",
 )
 
-#: The ways a run can be pinned to a fixed order. `-p no:randomly` unloads the
-#: plugin outright; `--randomly-dont-reorganize` leaves it loaded and seeds it
-#: but keeps the declared order, so it varies `random.seed()` while varying no
-#: test ordering -- the subtler of the two, and the one a reader skims past.
-#: Split on whitespace so `no:randomly` cannot be written to hide from `no:`.
+#: The ways a run can be pinned to a fixed order.
 _ORDER_PINNING_FLAGS = ("no:randomly", "randomly-dont-reorganize", "randomly-dont-reset-seed")
 
 

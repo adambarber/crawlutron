@@ -41,11 +41,7 @@ from tests._job_harnesses import (
 from tests._policy_factories import canonical
 from tests._result_builders import _canned_result, _scripted_result_map
 
-#: The one link every admission test here expects to survive, and the root it is
-#: discovered from. Named because three tests spelled the URL and three spelled
-#: the settled shape that goes with it: a test that declared a different
-#: ``admitted`` and asserted a different ``visited`` passed, because neither
-#: number was derived from anything.
+#: The one link every admission test here expects to survive, and the root it is discovered from.
 ADMITTED = "https://example.test/included"
 ADMISSION_ROOT = "https://example.test/root"
 ADMITTED_ONLY_SCOPE = r"^https://example\.test/included$"
@@ -178,11 +174,8 @@ class TestWholeSiteAdmissionContract:
         async def fetch_robots(fetcher, url, headers, timeout_seconds):
             return "User-agent: *\nDisallow: /blocked\n", 200
 
-        # The public loader, not the private decode rule: this test drives the
-        # whole job through the API, so the gate is built inside
-        # JobAdmissionContext.create and the decode rule is not a thing the test
-        # holds. Patching the loader says the same thing about the same gate and
-        # names something the module actually publishes.
+        # The public loader, not the private decode rule: this test drives the whole job through the API, so
+        # the gate is built inside JobAdmissionContext.create and the decode rule is not a thing the test
         monkeypatch.setattr("app.admission.admission.load_robots_rules", _rules_from(fetch_robots))
         policy = self._policy(1, 2)
         policy["limits"]["respect_robots"] = True

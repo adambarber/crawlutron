@@ -55,9 +55,6 @@ async def test_wait_returns_when_below_hard():
 
 async def test_wait_releases_once_drained():
     # Starts saturated (>= hard), then drains below hard on the next sample.
-    # The sensor counts its own reads: re-sampling is the property, and
-    # asserting on the double's bookkeeping instead would couple the test to
-    # how the fake happens to hold its state.
     reads: list[float] = []
     series = iter([0.99, 0.10])
 
@@ -93,9 +90,6 @@ def test_leading_memory_signal_anticipates_climb(tmp_path, monkeypatch):
     def _fake_stats(*, cgroup_root):
         from app.runtime.memory_pressure import MemoryStats
 
-        # ``int`` because the field is bytes: a fraction here was a fraction of a
-        # byte, and the ratio the gauge computes is the same either way -- so the
-        # float was only ever a fiction about the unit.
         v = values[idx[0] % len(values)]
         idx[0] += 1
         return MemoryStats(total_bytes=100, used_bytes=int(v * 100))
@@ -104,8 +98,7 @@ def test_leading_memory_signal_anticipates_climb(tmp_path, monkeypatch):
     reset_process_state()
 
     ratios = [gate.leading_usage_ratio() for _ in range(len(values))]
-    # The leading estimate at the end should track above the raw 0.82 because
-    # the series is rising.
+    # The leading estimate at the end should track above the raw 0.82 because the series is rising.
     assert ratios[-1] >= 0.82
     # And the dispatch scale tightens as the climb is anticipated.
     scale_early = gate.batch_scale_factor()

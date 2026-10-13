@@ -66,9 +66,6 @@ class TestEngineCrawlRequest:
     @pytest.mark.skipif(not browser_available(), reason="no usable browser binary (camoufox/playwright)")
     async def test_crawl_request_http_failure_falls_back_to_browser(self, base_url):
 
-        # Fail page fetches but serve robots.txt: robots is per-origin
-        # , so a fake that also breaks robots would
-        # skip the crawl before the browser fallback is ever reached.
         # The intent here is page-fetch failure -> browser fallback.
         failing_fetcher = routed_fetcher(
             {"/robots.txt": (200, "User-agent: *\nAllow: /\n", "text/plain")},
@@ -172,14 +169,14 @@ class TestEngineChainEdges:
         assert d["url"] == "http://x/"
 
     def test_payload_policy_invalid_strategy(self):
-        # A real tier: the only production caller builds one from the active
-        # settings, so ``None`` was never a value this entry point accepts.
+        # A real tier: the only production caller builds one from the active settings, so ``None`` was never a
+        # value this entry point accepts.
         with pytest.raises(ValueError):
             payload_policy({"policy": {"strategies": ["BOGUS"]}}, PolicyTier.model_defaults())
 
     async def test_browser_strategy_document_extraction(self, base_url):
-        # Live origin: 's robots gate fail-closes connection-refused origins
-        # (127.0.0.1:1), so the subject here needs a server that 404s robots.
+        # Live origin: 's robots gate fail-closes connection-refused origins (127.0.0.1:1), so the subject
+        # here needs a server that 404s robots.
         result = await crawled_result(
             f"{base_url}/doc",
             policy={"strategies": [BROWSER_HEADLESS], "extraction": EXTRACTION_DOCUMENT},
@@ -222,9 +219,6 @@ class TestEngineChainEdges:
         must be failed as network_error instead of holding a slot."""
 
         # True tarpit: never returns until the caller's deadline cancels us.
-        # (A time-based sleep is monkeypatched to return instantly in this
-        # suite's fast mode, so model the poisoned-URL hang with the harness's
-        # ever-pending future instead -- which is what hanging_fetcher is.)
         result = await crawled_result(
             "http://example.com/slow",
             policy={
@@ -243,8 +237,8 @@ class TestEngineChainEdges:
             http_fetcher=hanging_fetcher(),
         )
         assert result.status == "failed"
-        # The budget's classification is precise (url_budget_exceeded), not the
-        # generic network_error tail the old hand-built result hard-coded.
+        # The budget's classification is precise (url_budget_exceeded), not the generic network_error tail the
+        # old hand-built result hard-coded.
         assert result.classification == "url_budget_exceeded"
         assert result.error == "url_budget_exceeded"
 
@@ -329,8 +323,8 @@ class TestEngineScopeEdges:
             TerminalResult(
                 original_url="http://example.com/page",
                 normalized_url="http://example.com/page",
-                # A disallow precedes any strategy attempt, so the recorded strategy
-                # is None, never a label that implies an HTTP fetch happened.
+                # A disallow precedes any strategy attempt, so the recorded strategy is None, never a label
+                # that implies an HTTP fetch happened.
                 strategy=None,
                 classification="robots_disallowed",
                 error="robots_txt_disallowed",

@@ -208,12 +208,12 @@ def test_no_pinned_url_leaks_into_final_url():
     offenders = []
     for path, tree in app_trees():
         for node in nodes_of(tree):
-            # Final_url = str(response.url)  (assignment)
+            # Final_url = str(response.url) (assignment)
             if isinstance(node, ast.Assign):
                 targets = [t.id for t in node.targets if isinstance(t, ast.Name) and t.id == "final_url"]
                 if targets and _is_response_url(node.value):
                     offenders.append(offender_at(path, node, "final_url = str(response.url)"))
-            # HttpFetchResult(final_url=str(response.url))  (keyword)
+            # HttpFetchResult(final_url=str(response.url)) (keyword)
             elif isinstance(node, ast.Call):
                 for kw in node.keywords:
                     if kw.arg == "final_url" and _is_response_url(kw.value):
@@ -268,8 +268,7 @@ def test_no_inline_pinned_url_composition():
     )
 
 
-# ---------------------------------------------------------------------------
-# Frontier raw-href sinks ()
+# --------------------------------------------------------------------------- Frontier raw-href sinks ()
 # ---------------------------------------------------------------------------
 
 
@@ -393,16 +392,16 @@ HOST_POLICY_IS_NEVER_OPTIONAL = Rule(
             "async def f(url, *, policy: HostPolicy = HostPolicy((), ())):\n    return url\n",
             "is a HostPolicy and is optional",
         ),
-        # A default on a *positional* HostPolicy is caught too, not just the
-        # keyword-only form the mutations used.
+        # A default on a *positional* HostPolicy is caught too, not just the keyword-only form the mutations
+        # used.
         Bites(
             "def g(policy: HostPolicy = HostPolicy((), ())):\n    pass\n",
             "is a HostPolicy and is optional",
         ),
     ),
     clean=lambda: (
-        # The required form is left alone, and so is a required parameter the rule
-        # does not key off -- it is the annotation that matters, not the name.
+        # The required form is left alone, and so is a required parameter the rule does not key off -- it is
+        # the annotation that matters, not the name.
         "async def h(url, *, policy: HostPolicy, host_policy: HostPolicy, other: str = 'x'):\n"
         "    return url\n",
     ),
@@ -454,24 +453,6 @@ def test_raw_href_frontier_detector_bites():
     FRONTIER_CARRIES_ONLY_LINK_VALIDATED_URLS.check_bites()
 
 
-# ---------------------------------------------------------------------------
-# A path validator returns a checked value, never the input it was handed
-# ---------------------------------------------------------------------------
-
-# `_validate_storage_state_path` returned the literals "default", "session" and
-# "persistent" as though they named sessions. They do not: Playwright types
-# `storage_state` as `Union[str, pathlib.Path] | Dict`, so a string is always
-# read as a FILE PATH, and the chokepoint whose documented job is stopping a
-# caller from reaching a path it should not was handing out three unvalidated
-# paths relative to the process working directory. The shape of that bug is
-# general: a function that allowlists by resolving and testing containment, then
-# returns one of its own parameters on some other branch -- so the allowlist
-# holds for most inputs and not for the ones that mattered.
-#
-# Detected against the containment check rather than the function name, because
-# the containment check is the thing whose bypass this is. A bare
-# constant-return check was tried first and was too weak: the shipped code
-# returned a Name, not a literal, so it passed the gate written for it.
 _CONTAINMENT_CALL = "relative_to"
 
 
@@ -530,8 +511,8 @@ PATH_VALIDATORS_RETURN_AN_ALLOWLISTED_VALUE_OR_NONE = Rule(
         "        except ValueError:\n"
         "            continue\n"
         "    return None\n",
-        # Without a containment check there is nothing to bypass, so a function that
-        # echoes its input is not this gate's business.
+        # Without a containment check there is nothing to bypass, so a function that echoes its input is not
+        # this gate's business.
         "def _label(name: str) -> str:\n    return name\n",
         # Returning a derived value, or None, is what the contract allows.
         "def _resolve(base: str, name: str) -> str | None:\n"
@@ -569,14 +550,7 @@ def test_resolved_call_name_handles_getattr_alias_and_static_name():
     assert all(resolved_call_name(source, call) == "ipaddress.ip_address" for call in attribute_calls)
 
 
-# ---------------------------------------------------------------------------
-# Normalize-or-None chokepoint
-#
-# The same three-line wrapper -- try NormalizedUrl(x, policy=...) except
-# ValueError: return None -- is admit_or_none's whole body. A re-inlined copy
-# at an egress door re-derives the discard policy locally; use the wrapper so
-# every door discards refused URLs the same way.
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------- Normalize-or-None chokepoint
 
 
 def _normalize_or_none_offenders(tree, path):
@@ -592,11 +566,8 @@ def _normalize_or_none_offenders(tree, path):
         for handler in node.handlers:
             if not (isinstance(handler.type, ast.Name) and handler.type.id == "ValueError"):
                 continue
-            # The re-inlined wrapper discards the exception: its body is a bare
-            # None, pass, or a raw fallback (``x`` returned unchanged). A site
-            # that re-raises, branches on the error text, or needs the
-            # normalized value for a second computation (registrable_domain,
-            # the error message) is a different contract and stays.
+            # The re-inlined wrapper discards the exception: its body is a bare None, pass, or a raw fallback
+            # (``x`` returned unchanged).
             body = handler.body
             if len(body) != 1:
                 continue
@@ -656,14 +627,8 @@ def test_normalize_or_none_detector_bites():
     NORMALIZE_OR_NONE_IS_NOT_REINLINED.check_bites()
 
 
-# ---------------------------------------------------------------------------
-# Unfiltered urljoin egress doors (H class)
-#
-# detect_pagination read an href out of attacker-controlled HTML and returned
-# urljoin(final_url, href) raw. The HTTP consumer filtered it before use, the
-# browser consumer did not, so a javascript: rel=next reached the response.
-# Filtering moved to the producer; this keeps the next door from reopening.
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------- Unfiltered urljoin egress doors
+# (H class) detect_pagination read an href out of attacker-controlled HTML and returned
 
 _EGRESS_FILTERS = frozenset({"admit_or_none", "resolve"})
 
@@ -808,9 +773,8 @@ def _frontier_expression(node: ast.AST) -> bool:
     return isinstance(node, ast.Attribute) and node.attr == "frontier"
 
 
-# The admission chokepoint owns the pattern it bans: admit_job_links is the one
-# function allowed to grow a frontier, so the sweep that bans direct growth
-# everywhere else has to skip the module that defines it.
+# The admission chokepoint owns the pattern it bans: admit_job_links is the one function allowed to grow a
+# frontier, so the sweep that bans direct growth everywhere else has to skip the module that defines it.
 _ADMISSION_CHOKEPOINT = "app/admission/admission.py"
 
 

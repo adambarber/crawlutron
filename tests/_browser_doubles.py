@@ -187,10 +187,7 @@ class BrowserFakePage:
         pass
 
     async def goto(self, url, wait_until="load", **kwargs):
-        # ``url`` is deliberately NOT updated here. On this double it is a
-        # *plant* -- the redirect tests set it to the internal host they want
-        # the render to be caught redirecting to, and a goto that assigned it
-        # would quietly overwrite the plant and let the render pass.
+        # ``url`` is deliberately NOT updated here.
         if "extra_http_headers" in kwargs:
             raise TypeError("unexpected keyword argument 'extra_http_headers'")
         self.goto_calls.append((url, kwargs))
@@ -217,9 +214,7 @@ class BrowserFakePage:
         return await self.on_wait_for_selector(selector, timeout=timeout, **kwargs)
 
 
-#: What the renderer reads out of a page, in the order it asks. A double that
-#: answers these is indistinguishable from a loaded page for everything the
-#: renderer does; anything beyond this list is a read the test cares about.
+#: What the renderer reads out of a page, in the order it asks.
 DEFAULT_PAGE_ANSWERS = {
     "readyState": "complete",
     "document.title": "Fake Title",
@@ -253,9 +248,7 @@ class ScriptedPage(BrowserFakePage):
     """
 
     def __init__(self, *, url="http://example.com/", answers=None, html=None, on_goto=None, **kwargs):
-        # Everything the base records is the base's to record. Restating the three
-        # call lists here was a second answer to "what does this double
-        # remember", and one new recorded read had to be added in two places.
+        # Everything the base records is the base's to record.
         super().__init__(url=url, **kwargs)
         self._answers = dict(DEFAULT_PAGE_ANSWERS if answers is None else answers)
         self._html = DEFAULT_PAGE_HTML if html is None else html
@@ -264,9 +257,8 @@ class ScriptedPage(BrowserFakePage):
         self.closed = False
 
     async def goto(self, url, wait_until="load", **kwargs):
-        # Unlike the base, this one *does* move: a scripted page stands in for a
-        # page that navigated, and the ``on_goto`` hook may inspect where it
-        # landed. The base leaves ``url`` alone because there it is a plant.
+        # Unlike the base, this one *does* move: a scripted page stands in for a page that navigated, and the
+        # ``on_goto`` hook may inspect where it landed
         self.url = url
         if self._on_goto is not None:
             await self._on_goto(self)
@@ -414,11 +406,7 @@ def build_pinned_renderer(page, monkeypatch=None, **overrides):
     return renderer
 
 
-#: The address a pinned-render test navigates to: a public IP literal, with the
-#: hostname restored as ``Host``. A private address is the one thing the SSRF
-#: guard refuses, so a public one is what makes these tests about the pin rather
-#: than about the guard. One literal, because every pinned-render arrangement
-#: asserting a different address is a test that quietly stopped testing the pin.
+#: The address a pinned-render test navigates to: a public IP literal, with the hostname restored as ``Host``.
 PINNED_PUBLIC_IP = ("http://1.2.3.4:80/", {"Host": "example.com"})
 
 

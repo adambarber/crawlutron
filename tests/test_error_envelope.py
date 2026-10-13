@@ -33,8 +33,8 @@ class TestErrorEnvelope:
         assert error_envelope("not_found", "nope") == {"code": "not_found", "message": "nope", "details": {}}
 
     def test_details_default_never_none(self):
-        # The handler unwrap does `detail.get("details") or {}`, but the wire
-        # contract is details-is-present; a None must not survive the factory.
+        # The handler unwrap does `detail.get("details") or {}`, but the wire contract is details-is-present;
+        # a None must not survive the factory.
         envelope = error_envelope("validation_error", "bad", None)
         assert envelope["details"] == {}
 
@@ -77,11 +77,8 @@ class TestErrorEnvelope:
             "details": {},
         }
         override = browser_pool_unavailable("exhausted: 4/4")
-        # Compared whole rather than indexed into: `HTTPException.detail` is
-        # annotated `str` upstream, but the envelope contract makes it the
-        # envelope dict, and
-        # asserting the full shape is this file's own convention -- the point is
-        # that an override changes one key and leaves the other two alone.
+        # Compared whole rather than indexed into: `HTTPException.detail` is annotated `str` upstream, but the
+        # envelope contract makes it the envelope dict, and asserting the full shape is this file's own
         assert override.detail == {
             "code": "browser_pool_unavailable",
             "message": "exhausted: 4/4",

@@ -38,10 +38,8 @@ async def test_http_fetcher_offloads_the_pin_rule_to_thread():
     pass one through, rather than building its own and ignoring the argument."""
     seen: dict = {}
 
-    # The spy redirects the connection at a closed loopback port, so the fetch
-    # reaches the transport and fails to connect. ConnectError rather than a
-    # blind Exception: a DNS or policy failure would raise a different type, and
-    # that difference is what makes this test about offloading at all.
+    # The spy redirects the connection at a closed loopback port, so the fetch reaches the transport and fails
+    # to connect.
     with pytest.raises(httpx.ConnectError):
         await default_http_fetcher(
             canonical("http://example.com/"),
@@ -53,10 +51,8 @@ async def test_http_fetcher_offloads_the_pin_rule_to_thread():
     assert seen, "the pin rule was never invoked"
     # The spy ran in a dedicated DNS worker thread, not the asyncio event loop.
     assert seen["thread"] is not threading.current_thread()
-    # On THIS module's pool specifically, not merely off the loop: the pool is
-    # sized so concurrent resolution does not contend with the default executor
-    # that blocking extraction runs on, and any other worker would pass a bare
-    # "not the loop thread" check while breaking that.
+    # On THIS module's pool specifically, not merely off the loop: the pool is sized so concurrent resolution
+    # does not contend with the default executor that blocking extraction runs on, and any other worker would
     assert seen["thread"].name.startswith("dns-resolve")
 
 

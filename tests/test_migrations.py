@@ -46,9 +46,7 @@ def _open_store(
         return SharedCookieStore(db_path)
     if schema is StoreSchema.WATCHES:
         return WatchStore(db_path)
-    # The parametrization above is derived from StoreSchema, so it grows
-    # whenever a schema is added. Defaulting here instead would silently
-    # migrate the wrong table and fail as a confusing missing-table assertion.
+    # The parametrization above is derived from StoreSchema, so it grows whenever a schema is added.
     raise AssertionError(f"no store opener declared for {schema.value}")
 
 
@@ -126,11 +124,8 @@ def _create_legacy_database(db_path: Path, schema: StoreSchema) -> None:
     table = CURRENT_SCHEMAS[schema]
     conn = sqlite3.connect(db_path)
     if schema is StoreSchema.CRAWL_JOBS:
-        # A genuine pre-0003 database carries the columns the current manifest
-        # dropped. Building it from CURRENT_SCHEMAS alone would produce a table
-        # no version of this service has ever written, so the stamping path
-        # would be exercised against a fiction. Order is irrelevant: every
-        # write below names its columns.
+        # A genuine pre-0003 database carries the columns the current manifest dropped. Order is irrelevant:
+        # every write below names its columns.
         table = replace(table, columns=(*table.columns, *LEGACY_COLUMNS[StoreSchema.CRAWL_JOBS]))
     conn.execute(create_table_sql(table))
     if schema is StoreSchema.CRAWL_JOBS:
@@ -220,8 +215,8 @@ def test_legacy_job_database_is_stamped_without_losing_rows_or_columns(tmp_path)
 
 def test_historical_canonicalized_column_is_removed_during_legacy_stamping(tmp_path):
     db_path = tmp_path / "historical-jobs.db"
-    # The fixture's legacy shape already carries `canonicalized`: it is a
-    # LEGACY_COLUMN, and a database from before 0002/0003 had all three.
+    # The fixture's legacy shape already carries `canonicalized`: it is a LEGACY_COLUMN, and a database from
+    # before 0002/0003 had all three.
     store, loaded = _stamped_legacy_job(db_path)
     after = sqlite3.connect(db_path)
     columns = set(_column_names(after, "crawl_jobs"))

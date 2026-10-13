@@ -8,8 +8,8 @@ from app.transport.pinned_transport import build_pinned_request
 from tests._assertions import block_private_targets
 from tests._policy_factories import canonical
 
-# The scripted resolver answers a public IPv4 host; the builder resolves the
-# hostname itself, so the test scripts the resolver rather than the network.
+# The scripted resolver answers a public IPv4 host; the builder resolves the hostname itself, so the test
+# scripts the resolver rather than the network.
 _PUBLIC = [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 80))]
 
 
@@ -48,9 +48,8 @@ class TestBuildPinnedRequest:
         assert "Host" not in headers
 
     def test_plain_http_brackets_ipv6_literal(self, monkeypatch):
-        # getaddrinfo can hand back a public IPv6 address; an unbracketed
-        # literal corrupts the URL netloc (its colons collide with port
-        # parsing) and urllib misroutes. Pinned URLs must bracket v6 literals.
+        # getaddrinfo can hand back a public IPv6 address; an unbracketed literal corrupts the URL netloc (its
+        # colons collide with port parsing) and urllib misroutes. Pinned URLs must bracket v6 literals.
         block_private_targets(monkeypatch)
         v6_addrs = [(socket.AF_INET6, socket.SOCK_STREAM, 6, "", ("2606:4700:4700::1111", 80, 0, 0))]
         with _resolve_as(v6_addrs):

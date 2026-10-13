@@ -86,9 +86,8 @@ def _run_kwargs(fetcher):
 
 class TestHttpStrategy:
     async def test_discovery_fetch_omits_page_conditional_headers(self):
-        # If-None-Match / If-Modified-Since belong to the HTML page
-        # request. Forwarding them to robots.txt/sitemap fetches invites false
-        # 304s -- discovery fetches get base headers only.
+        # If-None-Match / If-Modified-Since belong to the HTML page request. Forwarding them to
+        # robots.txt/sitemap fetches invites false 304s -- discovery fetches get base headers only.
         recorded: list[tuple[str, dict]] = []
 
         def respond(url, headers):
@@ -114,9 +113,8 @@ class TestHttpStrategy:
             assert "if-modified-since" not in lower
 
     async def test_html_diagnostics_skipped_without_discovery(self):
-        # html_diagnostics (frames/forms via lxml parse) must be skipped
-        # when discovery is not requested, to avoid a redundant HTML parse on
-        # every page of a content-only crawl.
+        # html_diagnostics (frames/forms via lxml parse) must be skipped when discovery is not requested, to
+        # avoid a redundant HTML parse on every page of a content-only crawl.
         html = "<html><body><iframe src='/x'></iframe></body></html>"
 
         fetcher = _html_fetcher(html)
@@ -129,9 +127,6 @@ class TestHttpStrategy:
         assert "frames" in r2.diagnostics
 
     async def test_http_strategy_extracts_html_markdown_content_only(self, base_url):
-        # Content-only crawl (no discovery, depth 0) skips link
-        # extraction entirely -- discovered_links comes back empty instead of
-        # paying an HTML parse per page nobody consumes.
         result = await _run(
             url=f"{base_url}/",
         )
@@ -206,11 +201,8 @@ class TestHttpStrategy:
         assert "Example Org" in response["results"][0].markdown
 
     async def test_js_endpoints_and_sitemap_discovery_gated_without_discovery(self):
-        # The heavier discovery-only extras -- JS-endpoint extraction and the
-        # remote sitemap/feed discovery fetches -- must be skipped when discovery
-        # is not requested, to avoid per-page regex scans and extra HTTP requests
-        # on content-only crawls. discovered_links / next_page_url stay on (they
-        # are standard result fields).
+        # The heavier discovery-only extras -- JS-endpoint extraction and the remote sitemap/feed discovery
+        # fetches -- must be skipped when discovery is not requested, to avoid per-page regex scans and extra
         html = (
             "<html><body>"
             "<a href='/page2'>next</a>"
@@ -226,9 +218,8 @@ class TestHttpStrategy:
         assert "discovery" not in r1.diagnostics
         # Content-only crawl: link extraction skipped entirely
         assert r1.discovered_link_count == 0
-        # Discovery requested -> js_endpoints extracted; the (remote)
-        # sitemap/feed discovery is performed, so the robots diagnostics block
-        # is populated (proving the gated function ran for this crawl).
+        # Discovery requested -> js_endpoints extracted; the (remote) sitemap/feed discovery is performed, so
+        # the robots diagnostics block is populated (proving the gated function ran for this crawl).
         r2 = await _run(
             policy=http_policy(discovery={"robots": True, "sitemaps": True, "feeds": True}), **kwargs
         )
@@ -238,9 +229,8 @@ class TestHttpStrategy:
 
 
 async def test_recursive_crawl_drops_sitewide_lists_from_page_diagnostics(monkeypatch):
-    # During recursive crawls, site-wide sitemap/feed URL lists are
-    # frontier seeds, not per-page payload -- returning them on every page's
-    # diagnostics wastes memory across thousands of pages.
+    # During recursive crawls, site-wide sitemap/feed URL lists are frontier seeds, not per-page payload --
+    # returning them on every page's diagnostics wastes memory across thousands of pages.
     import app.transport.fetch_policy as http_mod
 
     async def fake_diag(**kwargs):
@@ -272,8 +262,8 @@ class TestHttpStrategyRetry:
     async def test_http_strategy_with_cffi_retry(self):
         from app.transport.cache import HttpCache
 
-        # The cffi retry is the second step, so the sequence is the fixture:
-        # attempt one fails, attempt two succeeds.
+        # The cffi retry is the second step, so the sequence is the fixture: attempt one fails, attempt two
+        # succeeds.
         retry_fetcher = sequenced_fetcher(
             [
                 ConnectionError("first attempt fails"),
@@ -308,10 +298,7 @@ async def test_a_binary_body_result_keeps_its_attempt_type_for_the_render_adapte
     is the only version of this that could have caught it: asserting on the
     strategy's result alone passes happily with dicts in the list.
     """
-    # An archive: inside the detector's real contract (PK magic under a
-    # non-text content type). An image would not qualify -- image/png is
-    # deliberately outside the binary set -- so widening the fixture would have
-    # been quietly testing a policy change instead of the copy bug.
+    # An archive: inside the detector's real contract (PK magic under a non-text content type).
     archive = b"PK\x03\x04" + b"\x00" * 64
 
     binary_fetcher = scripted_fetcher(status=200, ctype="application/octet-stream", body=archive)

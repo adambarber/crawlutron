@@ -297,10 +297,8 @@ def _public_target_offenders(tree: ast.AST, path: pathlib.Path, prop: Property) 
 _BOOL_ENV_SPELLINGS = frozenset({"0", "1", "false", "true", "no", "yes", "off", "on"})
 
 
-# A bool env read is only guarded when the value was normalized first, so these
-# are the calls that make one normalized. `getattr(raw, "strip")` counts too:
-# it reaches the same method, and recognizing only the attribute form would
-# leave a one-token rewrite able to hide the comparison.
+# `getattr(raw, "strip")` counts too: it reaches the same method, and recognizing only the attribute form
+# would leave a one-token rewrite able to hide the comparison.
 _BOOL_ENV_NORMALIZATION_METHODS = frozenset({"strip", "lower", "casefold"})
 
 
@@ -467,17 +465,16 @@ def _call_leaf_names(tree: ast.AST, node: ast.AST):
             yield resolved_call_name(tree, child).rsplit(".", 1)[-1].lower()
 
 
-# `"{}/robots.txt".format(base)` and `"/robots.txt".join(...)` build a URL the
-# same way a BinOp or f-string does, so the URL literal detector must see them.
-# `getattr(x, "format")` reaches the same method through a token.
+# `"{}/robots.txt".format(base)` and `"/robots.txt".join(...)` build a URL the same way a BinOp or f-string
+# does, so the URL literal detector must see them.
 _STRING_CONSTRUCTOR_METHODS = frozenset({"format", "join"})
 
 
 _URL_CONSTRUCTOR_METHODS = frozenset({"resolve"})
 
 
-# How a line-oriented robots file gets torn into lines. A hand-rolled scanner
-# built on anything else is the duplicated robots parser this detector bans.
+# How a line-oriented robots file gets torn into lines. A hand-rolled scanner built on anything else is the
+# duplicated robots parser this detector bans.
 _ROBOTS_LINE_SPLIT_METHODS = frozenset({"splitlines", "partition"})
 
 
@@ -783,11 +780,7 @@ def test_property_registry_detector_bites():
     )
 
 
-#: A module that defines ``parse_bool_value`` twice -- the shape both registry
-#: proofs below are about. Named because each carried its own copy of the source
-#: and its own re-walk for the duplicate definitions, so a change to the synthetic
-#: definition had to be made twice to be made at all, and a change to the walk had
-#: to be made once and forgotten once.
+#: A module that defines ``parse_bool_value`` twice -- the shape both registry proofs below are about.
 DUPLICATE_DEF_SOURCE = (
     "def parse_bool_value(raw, default, *, env_name):\n"
     "    return default\n"
@@ -856,9 +849,6 @@ def test_public_target_detector_bites():
         _property("public-target"),
         _public_target_offenders,
         caught={
-            # All four alias forms live in ONE module on purpose: a detector
-            # that only inspected a module's first function would pass if each
-            # shape were proven in its own module.
             "all alias forms in one module": (
                 "import ipaddress\n"
                 "import ipaddress as ip\n"

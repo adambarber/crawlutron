@@ -74,11 +74,6 @@ class TestBrowserRenderer:
             },
         }
 
-        # An ``async def`` worker, not a sync lambda returning a coroutine: that
-        # shape is neither of the two ``call_worker`` accepts, so it reached the
-        # strategy as an un-awaited coroutine and surfaced as the confusing
-        # ``'coroutine' object has no attribute 'html'`` network error instead
-        # of a type error at the seam.
         async def browser_worker(job):
             return await self.renderer.render(job.url.raw, job.options, policy=job.host_policy)
 

@@ -61,8 +61,8 @@ class TestReadinessState:
         snap = state.snapshot()
         assert snap.active_requests == 0
 
-    # Each gate rides at its own target (memory 0.92, cpu 0.90); the values below
-    # are over-the-line readings, and they are the only data the property differs on.
+    # Each gate rides at its own target (memory 0.92, cpu 0.90); the values below are over-the-line readings,
+    # and they are the only data the property differs on.
     @pytest.mark.parametrize(
         ("gauge", "over_the_line"),
         [("resource_memory_utilization", 0.95), ("resource_cpu_utilization", 0.93)],
@@ -197,11 +197,7 @@ def test_cpu_gate_zero_at_hard_ceiling(monkeypatch):
     assert gate.batch_scale_factor() == 0.0
 
 
-# The two sub-gates a throttle can be asked about, named once. The wait
-# behaviour under test is the same for both, so every throttle test runs against
-# both -- which is only a guarantee while the pair lives in one declaration: two
-# tests each spelling their own list is how one of them ends up covering CPU
-# twice and memory not at all.
+# The two sub-gates a throttle can be asked about, named once.
 GATE_KINDS = (
     ("cpu", lambda: CpuGate(target=0.90)),
     ("memory", lambda: MemoryGate(target=0.92)),
@@ -281,8 +277,6 @@ def _pinned_resource_gate(monkeypatch, *, cpu_ratio, memory_ratio, max_wait_seco
 async def test_resource_gate_waits_while_either_saturated(monkeypatch):
     gate, waited = _pinned_resource_gate(monkeypatch, cpu_ratio=0.99, memory_ratio=0.0)
     # Memory idle, CPU saturated -> gate must still wait (either resource binds).
-    # No max_wait_seconds argument, on purpose: the bound under test is the one
-    # the helper pins, not one the test supplies to make the wait affordable.
     await gate.wait_while_saturated()
     assert waited, "ResourceGate returned without waiting while CPU was saturated"
     assert sum(waited) >= gate.memory.max_wait_seconds, (
@@ -312,9 +306,8 @@ async def test_resource_gate_explicit_budget_overrides_the_pinned_bound(monkeypa
 
 
 def test_resource_gate_scale_is_min_of_resources(monkeypatch):
-    # One holder per resource: the gate reads its sensors through the public
-    # `usage_ratio` seam, so flipping a reading is writing a number, not
-    # re-patching a private method six times.
+    # One holder per resource: the gate reads its sensors through the public `usage_ratio` seam, so flipping a
+    # reading is writing a number, not re-patching a private method six times.
     memory, cpu = [0.99], [0.0]
     gate = ResourceGate(memory_ratio=lambda: memory[0], cpu_ratio=lambda: cpu[0])
     # Memory at 99% -> scale 0; CPU idle -> scale 1. Combined must be 0.
@@ -466,9 +459,8 @@ def test_direct_reads_do_not_perturb_slope(monkeypatch):
     assert gate.leading_usage_ratio() == 0.5
 
 
-# ---------------------------------------------------------------------------
-# Pure helper: does the upcoming batch look HTTP-heavy?
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------- Pure helper: does the upcoming
+# batch look HTTP-heavy? ---------------------------------------------------------------------------
 
 
 def _http_heavy(pins: dict[str, str], domains: list[str], *, sample: int = 8) -> bool:
@@ -523,9 +515,8 @@ class TestBatchIsHttpHeavy:
         assert _batch_is_http_heavy(sched, frontier, sample=1) is False
 
 
-# ---------------------------------------------------------------------------
-# Dispatcher wiring: apply http_scale_factor for HTTP-heavy batches.
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------- Dispatcher wiring: apply
+# http_scale_factor for HTTP-heavy batches.
 class PinnedGate(ResourceGate):
     """A ResourceGate with fixed scales and fixed ratios, recording consultations.
 
@@ -559,9 +550,8 @@ class PinnedGate(ResourceGate):
         self.calls: list[str] = []
 
     async def wait_while_saturated(self, max_wait_seconds: float | None = None):
-        # The parameter is part of the signature this double stands in for.
-        # Dropping it would let a caller passing a budget through be type-checked
-        # against a gate that silently cannot receive one.
+        # The parameter is part of the signature this double stands in for. Dropping it would let a caller
+        # passing a budget through be type-checked against a gate that silently cannot receive one.
         self.calls.append("wait")
 
     def batch_scale_factor(self):
@@ -620,8 +610,8 @@ class TestDispatcherStrategyAwareScaling:
         gate = PinnedGate(batch=0.0, http=1.0)
         await _run_with_gate(sched, gate, jobs)
 
-        # The dispatcher consults http_scale_factor for an HTTP-heavy batch and
-        # uses its value (http=1.0) so both pages fit in one batch.
+        # The dispatcher consults http_scale_factor for an HTTP-heavy batch and uses its value (http=1.0) so
+        # both pages fit in one batch.
         assert "http" in gate.calls
         assert sched.runs == 1  # http scale 1.0 => both admitted at once
 
@@ -633,8 +623,8 @@ class TestDispatcherStrategyAwareScaling:
                 "browser_bound",
                 {"a.gov": BROWSER_HEADLESS, "b.gov": BROWSER_HEADLESS},
             ),
-            # No pins yet (cold start) -> conservative combined gate (safety):
-            # unpinned tasks may escalate to browser, so do not ignore memory.
+            # No pins yet (cold start) -> conservative combined gate (safety): unpinned tasks may escalate to
+            # browser, so do not ignore memory.
             ("cold_unpinned", {}),
         ],
     )
@@ -647,14 +637,11 @@ class TestDispatcherStrategyAwareScaling:
         assert "http" not in gate.calls
 
 
-# ---------------------------------------------------------------------------
-# Gate semantics: HTTP scale escapes the browser-held-memory bottleneck.
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------- Gate semantics: HTTP scale
+# escapes the browser-held-memory bottleneck.
 class TestHttpScaleEscapesMemory:
     def test_http_scale_ignores_memory_when_cpu_headroom(self, monkeypatch):
         """CpuGate.headroom_fraction()."""
-        # Memory near the hard ceiling (0.89, held by browser processes); its
-        # scale would be ~0.43 -- it would throttle cheap HTTP work.
         # CPU has ample headroom (0.20 -> headroom 1.0 > 0.5).
         gate = ResourceGate(
             target_mem=0.85,
@@ -667,8 +654,8 @@ class TestHttpScaleEscapesMemory:
         http_scale = gate.http_scale_factor()
         memory_scale = gate.memory.batch_scale_factor()
 
-        # HTTP work is NOT memory-bound: it rides the CPU scale, escaping the
-        # browser-held-memory bottleneck that throttles browser-bound batches.
+        # HTTP work is NOT memory-bound: it rides the CPU scale, escaping the browser-held-memory bottleneck
+        # that throttles browser-bound batches.
         assert http_scale > memory_scale
         assert memory_scale < 1.0  # memory gate would clamp browser work
         assert http_scale == pytest.approx(1.0, rel=0.01)
@@ -718,9 +705,7 @@ async def test_max_pages_zero_falls_back_to_default():
 
 
 async def test_max_pages_above_upper_bound_is_rejected_not_clamped():
-    # The model declares le=2000. This used to clamp, which meant the wire value
-    # and the effective behaviour described different contracts; a rejection says
-    # the same thing in both places.
+    # The model declares le=2000.
     with pytest.raises(ValueError, match="invalid_policy_limits"):
         payload_policy(
             {"url": "http://example.com/", "policy": {"limits": {"max_pages": 99999}}},
@@ -736,8 +721,8 @@ async def test_max_pages_positive_preserved():
 
 
 async def test_max_pages_zero_bounded_at_engine():
-    # Wide fixture: root links to 150 leaf pages. With max_pages=0 the crawl
-    # must be bounded (DEFAULT_MAX_PAGES=100), not crawl all 151 reachable pages.
+    # Wide fixture: root links to 150 leaf pages. With max_pages=0 the crawl must be bounded
+    # (DEFAULT_MAX_PAGES=100), not crawl all 151 reachable pages.
     pages = {
         "/": (200, "<html>" + "".join(f'<a href="/c{i}">c</a>' for i in range(150)) + "</html>", "text/html"),
     }
@@ -754,10 +739,6 @@ def _policy(limit=3 * 1024 * 1024 * 1024, pool_size=2, max_concurrent_pages=3, d
         limit,
         pool_size=pool_size,
         max_concurrent_pages=max_concurrent_pages,
-        # The real budget, not a test-local restatement of its fields: these
-        # four call sites assert the policy that production's dataclass builds,
-        # so a test that spelled the weights itself could pass against a
-        # dataclass that no longer reserved them.
         budget=TaskRamBudget(doc_workers=doc_workers),
     )
 
@@ -775,8 +756,8 @@ def _unreserved_bytes(policy) -> int:
 
 class TestPolicyDerivation:
     def test_browser_pool_reserve_subtracted_from_limit(self):
-        # 3 GiB limit, 2 browsers * 700 MiB reserve and the default doc pool,
-        # -> HTTP ceiling from the remainder.
+        # 3 GiB limit, 2 browsers * 700 MiB reserve and the default doc pool, -> HTTP ceiling from the
+        # remainder.
         p = _policy()
         assert p.browser_pool_reserve_bytes == 2 * _BROWSER_TASK_RAM_BYTES
         assert p.doc_pool_reserve_bytes == 2 * _DOC_TASK_RAM_BYTES
@@ -794,25 +775,22 @@ class TestPolicyDerivation:
         assert small.max_http_concurrency < big.max_http_concurrency
 
     def test_doc_pool_reserve_subtracted_from_limit(self):
-        # The persistent markitdown workers are a fixed RAM consumer exactly
-        # like the browser pool: each imports markitdown + the PDF/Office
-        # parsers once and stays alive. Admission that ignores them sizes HTTP
-        # concurrency from a budget that is already spent, which is the OOM
-        # path under a hard 3 GiB ceiling.
+        # The persistent markitdown workers are a fixed RAM consumer exactly like the browser pool: each
+        # imports markitdown + the PDF/Office parsers once and stays alive.
         p = _policy(doc_workers=2)
         assert p.doc_pool_reserve_bytes == 2 * _DOC_TASK_RAM_BYTES
         assert p.max_http_concurrency == max(1, _unreserved_bytes(p) // _HTTP_TASK_RAM_BYTES)
 
     def test_doc_pool_reserve_lowers_the_http_ceiling(self):
-        # The reserve must actually bite: admitting with doc workers must
-        # admit strictly fewer concurrent HTTP tasks than without them.
+        # The reserve must actually bite: admitting with doc workers must admit strictly fewer concurrent HTTP
+        # tasks than without them.
         without = _policy(doc_workers=0)
         with_docs = _policy(doc_workers=2)
         assert with_docs.max_http_concurrency < without.max_http_concurrency
 
     def test_default_policy_reserves_the_default_doc_pool(self):
-        # Default_admission_policy is the conservative fallback (3 GiB box);
-        # it must reserve the default doc worker count, not zero.
+        # Default_admission_policy is the conservative fallback (3 GiB box); it must reserve the default doc
+        # worker count, not zero.
         gate = ResourceGate()
         wa = default_admission_policy(gate)
         assert wa._p.doc_pool_reserve_bytes == 2 * _DOC_TASK_RAM_BYTES
@@ -835,8 +813,8 @@ class TestWeightedAdmission:
 
     async def test_admit_grants_all_when_headroom_full(self):
         a = WeightedAdmission(PinnedGate(mem=0.0, cpu=0.0), _policy())
-        # Request exactly the tier ceiling so the claim ("grants everything
-        # asked while headroom is full") tracks the sizing default, whatever it is.
+        # Request exactly the tier ceiling so the claim ("grants everything asked while headroom is full")
+        # tracks the sizing default, whatever it is.
         h, b = await a.admit(want_http=a._p.max_http_concurrency, want_browser=2)
         assert h == a._p.max_http_concurrency
         assert b == 2
@@ -856,8 +834,8 @@ class TestWeightedAdmission:
         assert h > 0
 
     async def test_admit_yields_briefly_when_fully_saturated(self):
-        # Saturated (headroom 0) with demand -> returns (0,0) after a short yield
-        # instead of parking the whole crawl indefinitely.
+        # Saturated (headroom 0) with demand -> returns (0,0) after a short yield instead of parking the whole
+        # crawl indefinitely.
         a = WeightedAdmission(PinnedGate(mem=1.0, cpu=1.0), _policy())
         t0 = asyncio.get_event_loop().time()
         h, b = await a.admit(want_http=5, want_browser=1)
@@ -872,15 +850,14 @@ class TestBrowserTierDoesNotDoubleScale:
     the pool sizing already assumed should yield browser capacity."""
 
     def test_full_capacity_while_within_the_reserved_fraction(self):
-        # Browsers using exactly the fraction derive_browser_pool_size assumed
-        # is the steady state, not pressure.
+        # Browsers using exactly the fraction derive_browser_pool_size assumed is the steady state, not
+        # pressure.
         a = WeightedAdmission(PinnedGate(mem=BROWSER_RAM_FRACTION, cpu=0.0), _policy())
         assert a.browser_capacity() == a._p.max_browser_concurrency
 
     def test_decays_only_for_usage_beyond_the_reserved_fraction(self):
         a = WeightedAdmission(PinnedGate(mem=BROWSER_RAM_FRACTION + 0.2, cpu=0.0), _policy())
-        # 20 points of surplus usage out of a 50-point ramp to exhaustion -> 60%
-        # of the tier still admits.
+        # 20 points of surplus usage out of a 50-point ramp to exhaustion -> 60% of the tier still admits.
         assert a.browser_capacity() == pytest.approx(a._p.max_browser_concurrency * 0.6, abs=1)
 
     def test_never_admits_when_saturated(self):
@@ -902,15 +879,15 @@ class TestHTTPTaskRamEstimate:
         assert _HTTP_TASK_RAM_BYTES >= 48 * 1024 * 1024
 
     def test_http_ceiling_uses_the_same_bytes_as_admission(self):
-        # Zero drift: the pool ceiling and the admission policy divide by the
-        # same per-task estimate, whatever the default is.
+        # Zero drift: the pool ceiling and the admission policy divide by the same per-task estimate, whatever
+        # the default is.
         p = _policy()
         free = (3 * 1024 * 1024 * 1024) - p.browser_pool_reserve_bytes - p.doc_pool_reserve_bytes
         assert p.max_http_concurrency == max(1, free // _HTTP_TASK_RAM_BYTES)
 
     def test_the_3gib_default_still_admits_a_working_floor(self):
-        # The minimal-deployment default (3 GiB, 2 browsers) must still admit
-        # enough concurrent HTTP fetches for hundreds of pages per minute.
+        # The minimal-deployment default (3 GiB, 2 browsers) must still admit enough concurrent HTTP fetches
+        # for hundreds of pages per minute.
         p = _policy()
         assert p.max_http_concurrency >= 16
 
@@ -961,12 +938,6 @@ class TestRequeueOvercommitContract:
             _requeue_context(),
         )
 
-        # The page was already fetched once and is being retried; refusing it now
-        # would strand work already paid for, so it is preserved. The expected
-        # URL is the canonical identity rather than the string passed in,
-        # because that is what the frontier holds -- asserting the literal would
-        # make this test fail for a normalization improvement and pass for a
-        # dedupe regression.
         assert [entry.url.raw for entry in job.frontier] == ["https://c.test"]
         assert outcome.accepted == 1
         assert outcome.cap_overcommitted == 1

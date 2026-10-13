@@ -37,15 +37,11 @@ async def test_render_value_error_reports_validation_error_code(monkeypatch, _po
     with pytest.raises(HTTPException) as exc_info:
         await render(payload, settings)
 
-    # Through the accessor the service itself uses. ``HTTPException.detail`` is
-    # declared ``str | None`` and carries an envelope dict here, so a direct
-    # index was reaching past what the type says is there; this is also the
-    # shape a client actually receives.
+    # Through the accessor the service itself uses.
     detail = error_envelope_from_detail(exc_info.value.detail, exc_info.value.status_code)
     assert detail["code"] == "validation_error", detail
     # The ValueError text stays as the human-readable message, not the code.
     assert detail["message"] == "batch_size_exceeded"
-    # The refusal hands its readiness slot back: the gate that converts the
-    # rejection also releases it, so /v1/render cannot hold a slot per bad
-    # request. /v1/crawl's equivalent is tests/api/test_request_gate.py.
+    # The refusal hands its readiness slot back: the gate that converts the rejection also releases it, so
+    # /v1/render cannot hold a slot per bad request. /v1/crawl's equivalent is tests/api/test_request_gate.py.
     assert READINESS_STATE.snapshot().active_requests == active_before

@@ -187,9 +187,8 @@ class TestLookalikes:
         reports every file in the repository, and the response to that is to
         delete the rule rather than fix it.
         """
-        # A deliberately over-eager detector: every `or`, whatever it joins.
-        # It passes a bite about `or` by construction, which is precisely why the
-        # looksalike is the half that catches it.
+        # A deliberately over-eager detector: every `or`, whatever it joins. It passes a bite about `or` by
+        # construction, which is precisely why the looksalike is the half that catches it.
         overeager = _urljoin_rule(find=_every_or, bite=lambda: "urljoin(a, b) or a\n")
         assert overeager.looksalikes() == ()  # no looksalikes declared yet
 

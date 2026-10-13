@@ -7,11 +7,7 @@ from app.orchestration.scheduler import DomainScheduler
 from app.orchestration.strategy_chain import _starting_strategies
 from app.vocabulary.strategies import BROWSER_HEADLESS, HTTP_CFFI_IMPERSONATE, HTTP_DECLARED_CRAWLER
 
-# The policy ladder as the enum members `_starting_strategies` validates, not as
-# the bare name strings. It takes `Iterable[CrawlStrategy]` because it calls
-# `CrawlStrategy(member)` on each entry to reject anything the policy could not
-# name; handing it strings worked only because the enum is a StrEnum, and the
-# validation it performs is the thing under test here.
+# The policy ladder as the enum members `_starting_strategies` validates, not as the bare name strings.
 LADDER: list[CrawlStrategy] = [
     CrawlStrategy(HTTP_DECLARED_CRAWLER),
     CrawlStrategy(HTTP_CFFI_IMPERSONATE),

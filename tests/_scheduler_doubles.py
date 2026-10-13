@@ -21,10 +21,7 @@ from app.orchestration.engine_result import failed_result_for
 from app.orchestration.scheduler import DomainScheduler
 from tests._result_builders import make_result
 
-# The two job shapes ``DomainScheduler.run`` is polymorphic over. The doubles here
-# serve both, so they are generic over exactly that pair -- a bound TypeVar
-# annotated with one of the two would have been a lie the scheduler's own
-# ``ScheduledJob`` docstring warns about.
+# The two job shapes ``DomainScheduler.run`` is polymorphic over.
 _EnvelopeJob = TypeVar("_EnvelopeJob", CrawlJob, CrawlTask)
 
 
@@ -40,11 +37,8 @@ def _job_url(job: CrawlJob | CrawlTask) -> str:
     return job.url.raw
 
 
-# The three knobs a scheduling test always wants and no scheduling test ever
-# wants spelled out: serial execution makes ordering observable, and a zero
-# fixed delay keeps the suite off a real wall clock. Everything else -- the
-# circuit threshold, the cooldown, the token bucket, the adaptive bounds -- stays
-# on production's default, read from the constructor this module calls.
+# The three knobs a scheduling test always wants and no scheduling test ever wants spelled out: serial
+# execution makes ordering observable, and a zero fixed delay keeps the suite off a real wall clock.
 _SERIAL_UNTHROTTLED = {"global_limit": 1, "per_domain_limit": 1, "delay_seconds": 0.0}
 
 

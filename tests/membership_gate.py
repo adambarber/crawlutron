@@ -56,18 +56,10 @@ from tests.chokepoint_walks import (
     real_members,
 )
 
-# The result dataclasses whose Literal-typed fields are the membership
-# contract. Direct construction of one anywhere in app/ is checked by the
-# sweep below as well -- the primitives are the sanctioned site, but the
-# AST sweep does not assume that is the only site, so a direct build cannot
-# escape membership checking just by not going through a primitive.
+# The result dataclasses whose Literal-typed fields are the membership contract.
 RESULT_DATACLASS_NAMES = frozenset({"CrawlResult", "EngineCrawlResult", "CrawlStrategyAttempt"})
 
-# The result primitives: the only functions that construct a wire-visible
-# result. Not a file list -- a name set, because the AST matches on name and a
-# primitive in a new module is a name nobody has to register here for the
-# field-derived sweep to cover it. Unioned with the dataclasses themselves so
-# a direct build is checked by the same sweep as a primitive call.
+# The result primitives: the only functions that construct a wire-visible result.
 RESULT_PRIMITIVES = (
     frozenset(
         {
@@ -85,10 +77,7 @@ RESULT_PRIMITIVES = (
     | RESULT_DATACLASS_NAMES
 )
 
-# Fields whose declared annotation is ``X | None``. ``None`` is the honest "no
-# value" label for these (strategy: "no strategy was attempted"; error/
-# extraction_method: "none produced"), and the wire model serializes it as
-# null -- it is not an invented member and must not be reported.
+# Fields whose declared annotation is ``X | None``.
 _OPTIONAL_FIELDS = frozenset({"strategy", "error", "extraction_method", "selected_strategy"})
 
 
@@ -170,19 +159,13 @@ def _primitive_keyword_calls(
     two implementations of a walk is how the two halves of a keyword detector
     end up disagreeing about ``**kwargs``.
     """
-    # The walker takes a name collection; ``arg_names`` is one, plus the
-    # ``dict`` form the field-set detectors pass (iterating a mapping yields its
-    # keys, which is exactly the name set). Normalized here so the walker's own
-    # declared union -- which does not include ``dict`` -- is not bypassed.
+    # The walker takes a name collection; ``arg_names`` is one, plus the ``dict`` form the field-set detectors
+    # pass (iterating a mapping yields its keys, which is exactly the name set).
     names = None if arg_names is None else ({arg_names} if isinstance(arg_names, str) else set(arg_names))
     return list(call_keyword_arguments(tree, function_names=RESULT_PRIMITIVES, keyword_names=names))
 
 
-#: The declared members of every ``Literal``-typed result field, keyed by field
-#: name. The map is derived from ``app/models`` rather than written down, so a
-#: Literal field nobody has listed is a gap in the model rather than a silent
-#: hole in the sweep -- which is why both field detectors name this type instead
-#: of repeating ``dict[str, set[str]]`` in their signatures.
+#: The declared members of every ``Literal``-typed result field, keyed by field name.
 type FieldMembers = dict[str, set[str]]
 
 
@@ -228,27 +211,11 @@ def generic_literal_field_offenders(tree: ast.AST, path: pathlib.Path, *, member
     ]
 
 
-# ---------------------------------------------------------------------------
-# Named-constant provenance (program 2)
-# ---------------------------------------------------------------------------
-
-# The wrong-namespace escape: a constant whose *name* belongs to one taxonomy
-# was consumed as a member of another. Value membership cannot see this,
-# because the historical collision was a constant whose value is ALSO a legal
-# member of the target field (EXTRACTION_METHOD_BINARY_NO_TEXT == "binary_no_text").
-# The namespace of the NAME is the property that was wrong, so that is what a
-# correct detector keys on.
-#
-# A name belongs to the extraction-method namespace when its stem is one of
-# these prefixes; the target field is the taxonomy the primitive's parameter
-# belongs to.
+# A name belongs to the extraction-method namespace when its stem is one of these prefixes; the target field
+# is the taxonomy the primitive's parameter belongs to.
 _EXTRACTION_CONSTANT_PREFIXES = ("EXTRACTION_METHOD_", "EXTRACTION_")
 
-# Which field each namespace must never feed. Extraction-method constants are
-# provenance labels for how bytes were parsed; the classification field is a
-# page outcome. The two axes are orthogonal by design (see
-# app/vocabulary/extraction.py: "These are output-pipeline options, strictly orthogonal to
-# fetch strategies"), and the historical defect was exactly their collision.
+# Which field each namespace must never feed.
 _NAMESPACE_FIELD_BANS: dict[tuple[str, ...], str] = {
     _EXTRACTION_CONSTANT_PREFIXES: "classification",
 }
@@ -304,30 +271,8 @@ def namespace_constant_offenders(tree: ast.AST, path: pathlib.Path, *, members: 
     return out
 
 
-# ---------------------------------------------------------------------------
-# The runtime gate: the one place the class actually dies
-# ---------------------------------------------------------------------------
-#
-# Every AST detector above is a property of *source text*: it can see a literal
-# or a name, and nothing more. The historical escape is exactly the shape that
-# defeats that: a local variable is assigned a wrong-namespace constant
-# (``classification = EXTRACTION_METHOD_BINARY_NO_TEXT``), then passed to the
-# primitive as ``classification=classification``. The kwarg is a bare Name, it
-# is not a module constant, and it is not a literal -- so the literal detector
-# sees nothing, the provenance detector sees nothing, and the value sails into
-# the strict enum at response shaping, which rejects the whole batch with a 500.
-#
-# The general property cannot be enforced by reading source text, because the
-# wrong value can arrive through any number of indirections. It CAN be enforced
-# at the boundary: the primitives are the chokepoint by construction (the AST
-# sweep above proves every site routes through them), so a membership check
-# inside the primitive sees every value regardless of how it got there.
-#
-# The gate is deliberately narrow: it checks membership of the declared Literal
-# for the fields that carry one, on the values that actually reach the
-# primitive. It raises ``NonMemberValue`` rather than coercing, because a
-# wrong value is a bug to fix at the producer, not a value to silently repair
-# (silently repairing it is how a taxonomy drift hides for a release).
+# --------------------------------------------------------------------------- The runtime gate: the one place
+# the class actually dies ---------------------------------------------------------------------------
 
 
 class NonMemberValue(AssertionError):
@@ -401,18 +346,8 @@ def assert_result_fields(
             assert_member(value, field=field, members=allowed, where=where)
 
 
-# ---------------------------------------------------------------------------
-# Test doubles that silently swallow signature drift (program 4)
-# ---------------------------------------------------------------------------
-
-# Production callables a test double is structurally imitating. A double that
-# accepts ``**kwargs`` and never routes them is invisible to a signature
-# change: the refactor that added the required ``failed_result`` kwarg to
-# ``DomainScheduler.run`` broke 24 tests silently for exactly this reason.
-#
-# Kept as (kind, call-name, params) triples rather than a file list: the sweep
-# matches a double by shape (it defines the method/callable a Protocol
-# requires), and a new Protocol is a new triple to add here.
+# --------------------------------------------------------------------------- Test doubles that silently
+# swallow signature drift (program 4)
 _PROTOCOL_METHODS = frozenset({"run"})
 
 
@@ -432,9 +367,8 @@ def _accepts_unused_kwargs(node: ast.FunctionDef | ast.AsyncFunctionDef) -> bool
             return False
         kwargs = [varkw]
     kwarg = kwargs[0]
-    # Routed: the double forwards it (``**kwargs`` at a call) or binds it by
-    # name (``kwargs=kwargs``, ``kwargs.get(...)``) -- either way the value
-    # reaches the real contract rather than the floor.
+    # Routed: the double forwards it (``**kwargs`` at a call) or binds it by name (``kwargs=kwargs``,
+    # ``kwargs.get(...)``) -- either way the value reaches the real contract rather than the floor.
     for sub in nodes_of(node):
         if isinstance(sub, ast.Call):
             for keyword in sub.keywords:
@@ -442,8 +376,8 @@ def _accepts_unused_kwargs(node: ast.FunctionDef | ast.AsyncFunctionDef) -> bool
                     if keyword.value.id == kwarg.arg:
                         return False
         if isinstance(sub, ast.Name) and sub.id == kwarg.arg and isinstance(sub.ctx, ast.Load):
-            # Any *read* of the kwargs name inside the body means the double at
-            # least consulted it (``kwargs.get(...)`` / ``kwargs[...]``).
+            # Any *read* of the kwargs name inside the body means the double at least consulted it
+            # (``kwargs.get(...)`` / ``kwargs[...]``).
             return False
     return True
 
@@ -500,29 +434,11 @@ def swallowing_test_double_offenders(tree: ast.AST, path: pathlib.Path) -> list[
     return out
 
 
-# ---------------------------------------------------------------------------
-# Alias-blindness: detectors must not key on a literal module name
-# ---------------------------------------------------------------------------
-
-# ``import re as _re`` followed by ``_re.compile(<pattern>)`` is invisible to a
-# detector that matches on the name ``re``. The historical detectors did match
-# on that name, so an alias was an escape hatch -- not a malicious one, but a
-# real one: app/orchestration/fetch_helpers.py carries that shape today (with safe
-# literal patterns), and a *dynamic* pattern behind the same alias would sail
-# past every guard. Keying on the import binding instead of the literal name
-# closes the class: whichever alias a module picks, the binding is resolved
-# first and the pattern check applies to it.
-#
-# The same class affects the sanctioned *chokepoint* functions
-# (decompress_body, admit_or_none, ...): ``from x import decompress_body
-# as dec`` then ``dec(...)`` is invisible to a detector that matches on the
-# literal import name. Resolving the import binding closes both at once, which
-# is why this is one mechanism rather than two.
+# --------------------------------------------------------------------------- Alias-blindness: detectors must
+# not key on a literal module name
 _STDALIAS_MODULES = frozenset({"re"})
 
-# Chokepoint functions whose call sites are guarded by name-matching detectors
-# elsewhere in this suite. A detector keyed on a literal name cannot see an
-# alias of that name, so the set of aliases is resolved from imports instead.
+# Chokepoint functions whose call sites are guarded by name-matching detectors elsewhere in this suite.
 _SANCTIONED_FUNC_MODULES: dict[str, frozenset[str]] = {
     "decompress_body": frozenset({"app.transport.decompression"}),
 }
@@ -607,23 +523,8 @@ def aliased_dynamic_pattern_re_offenders(tree: ast.AST, path: pathlib.Path) -> l
     return out
 
 
-# ---------------------------------------------------------------------------
-# Program 3 (audit): the generic alias-blindness detector
-# ---------------------------------------------------------------------------
-#
-# Every name-matching detector in this suite is blind to ``from x import y as
-# z``: it matches on the literal import name, and the alias is a different
-# spelling. The existing detectors were each patched to add the one alias then
-# present in the tree (``_decompress_body`` was added to ``_DECOMPRESS_FUNCS``),
-# which is exactly the per-representative habit this audit was written to find:
-# the list is extended after each new alias appears, so a future alias is
-# invisible until someone notices.
-#
-# The structural fix is to stop matching on spellings: resolve the import
-# binding and sweep the binding. ``_aliased_module_bindings`` does it for
-# ``re``; the detector below does it for every sanctioned chokepoint function
-# the suite guards, so a new alias is covered the day it is written rather than
-# the day someone extends a frozenset.
+# --------------------------------------------------------------------------- Program 3 (audit): the generic
+# alias-blindness detector --------------------------------------------------------------------------- Every
 
 
 def aliased_sanctioned_func_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
@@ -640,9 +541,8 @@ def aliased_sanctioned_func_offenders(tree: ast.AST, path: pathlib.Path) -> list
     aliases = _aliased_sanctioned_func_names(tree)
     if not aliases:
         return out
-    # The spellings each name-matching detector hard-codes today. An alias
-    # outside this set is invisible to the detector that guards the canonical
-    # name, which is the property this sweep reports.
+    # The spellings each name-matching detector hard-codes today. An alias outside this set is invisible to
+    # the detector that guards the canonical name, which is the property this sweep reports.
     known_spellings = {"decompress_body": frozenset({"decompress_body", "_decompress_body"})}
     for node in nodes_of(tree):
         if not isinstance(node, ast.Call):
@@ -667,30 +567,8 @@ def aliased_sanctioned_func_offenders(tree: ast.AST, path: pathlib.Path) -> list
     return out
 
 
-# ---------------------------------------------------------------------------
-# Program 5 (hunt): the ``error=`` field's undeclared taxonomy
-# ---------------------------------------------------------------------------
-#
-# ``CrawlResult.error`` / ``EngineCrawlResult.error`` / ``CrawlStrategyAttempt.error``
-# are declared ``str | None`` -- not a Literal. Every other axis on these
-# dataclasses that crosses a boundary is a Literal or an enum; ``error`` is the
-# one field where the annotation is the *only* guard, which is the exact shape
-# this project's history repeats.
-#
-# The field's own documentation says the value must be a "stable classification"
-# (app/api/render.py: the wire-visible error must be a stable classification,
-# never raw exception text). ``classify_error_code`` honors that -- every value
-# it returns is a ``Classification`` member. The hand-written literals are the
-# escape: ``"worker_failed"`` (render.py), ``"unsupported_strategy"`` and
-# ``"browser_worker_unavailable"`` (engine.py) are emitted into ``error=`` and
-# are NOT Classification members, so the comment's contract holds for the
-# classified path and silently fails for the hand-written one.
-#
-# This sweep reports a literal ``error=`` that is not a Classification member.
-# It is deliberately not a hard failure for the same reason the field is str:
-# no taxonomy has been declared for it, so a value being outside
-# Classification is not yet a *defined* defect -- it is a missing chokepoint,
-# which is the finding to report, not the instance to patch.
+# --------------------------------------------------------------------------- Program 5 (hunt): the ``error=``
+# field's undeclared taxonomy
 
 
 def error_field_taxonomy_offenders(

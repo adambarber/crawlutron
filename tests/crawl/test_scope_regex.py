@@ -11,10 +11,6 @@ from app.admission.admission import compile_scope_pattern as compile_scope_patte
 
 
 def test_nested_quantifiers_compile_and_match_bounded():
-    # N-1: static shape rejection is bypassable by construction, so these
-    # classic catastrophic shapes now COMPILE (valid syntax) and the safety
-    # guarantee moved to bounded execution: a hostile match raises
-    # RegexTimeout instead of hanging the crawl loop.
     from app.safety.safe_regex import RegexTimeout, match_bounded
 
     for evil in ["(a+)+$", "(a|a)+$", "(a*)*", "(?:a+)+b", "(a+)+c"]:

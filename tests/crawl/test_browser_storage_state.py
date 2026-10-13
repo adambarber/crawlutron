@@ -51,13 +51,7 @@ class TestStorageStatePathValidation:
         import logging
 
         r = BrowserRenderer()
-        # The refusal is raised by the driver's validator, so the record is
-        # emitted under that module's name. `logger=` here does NOT make this
-        # assertion load-bearing -- `at_level` sets that logger's level, and a
-        # level is permissive enough either way, so the stale name the split
-        # left behind was invisible to a passing test. Asserting on the record's
-        # `name` is what pins the emitter: it is the one thing that fails when a
-        # rename moves the log to a module this test no longer names.
+        # The refusal is raised by the driver's validator, so the record is emitted under that module's name.
         with caplog.at_level(logging.WARNING, logger="app.transport.browser_driver"):
             assert r.driver.validate_storage_state_path(f"{tempfile.gettempdir()}/storage.json") is None
 

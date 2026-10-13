@@ -90,11 +90,8 @@ class TestDefaultCoercionNeverBlowsUp:
         monkeypatch.delenv("CRAWLUTRON_TEST_FLOAT", raising=False)
         assert get_env_int("CRAWLUTRON_TEST_INT", None) == 0
         assert get_env_float("CRAWLUTRON_TEST_FLOAT", None) == 0.0
-        # "abc" rather than a synthetic object: an unparseable string is a real
-        # default (a typo'd env var or a hand-edited mapping) and is the case
-        # `_as_int_default` documents by name. `object()` stood in for "not a
-        # number" with a value no caller can actually produce, so the assertion
-        # proved the try/except rather than the contract.
+        # "abc" rather than a synthetic object: an unparseable string is a real default (a typo'd env var or a
+        # hand-edited mapping) and is the case `_as_int_default` documents by name.
         assert get_env_int("CRAWLUTRON_TEST_INT", "abc") == 0
 
     def test_valid_env_value_still_wins_over_default(self, monkeypatch):
@@ -108,8 +105,8 @@ class TestDefaultCoercionNeverBlowsUp:
         assert get_env_int("CRAWLUTRON_TEST_INT", 0, lo=1) == 1
 
     def test_rejects_infinite_env_value(self, monkeypatch):
-        # ``float("inf")`` parses cleanly but ``limit * inf`` overflows at
-        # int() — a malicious value must fall back, not wedge the boot.
+        # ``float("inf")`` parses cleanly but ``limit * inf`` overflows at int() — a malicious value must fall
+        # back, not wedge the boot.
         monkeypatch.setenv("CRAWLUTRON_TEST_FLOAT", "inf")
         assert get_env_float("CRAWLUTRON_TEST_FLOAT", 0.5) == 0.5
 
@@ -118,8 +115,8 @@ class TestDefaultCoercionNeverBlowsUp:
         assert get_env_float("CRAWLUTRON_TEST_FLOAT", 0.5) == 0.5
 
     def test_finite_huge_value_clamps_to_hi(self, monkeypatch):
-        # 1e308 is finite (passes isfinite) yet ``limit * 1e308`` overflows;
-        # only the declared bound keeps the arithmetic safe.
+        # 1e308 is finite (passes isfinite) yet ``limit * 1e308`` overflows; only the declared bound keeps the
+        # arithmetic safe.
         monkeypatch.setenv("CRAWLUTRON_TEST_FLOAT", "1e308")
         assert get_env_float("CRAWLUTRON_TEST_FLOAT", 0.5, lo=0.0, hi=1.0) == 1.0
 
@@ -191,9 +188,8 @@ class TestRetryAuthorityIsPerJob:
             validate_wire_policy({"limits": {"max_retries": requested}}, PolicyTier.model_defaults())
 
     def test_an_omitted_limit_resolves_to_the_deployment_default(self):
-        # One number for "nobody said": the model's own default and the
-        # deployment's must not be able to disagree, or an omitted limit
-        # answers differently depending on which read edge resolved it.
+        # One number for "nobody said": the model's own default and the deployment's must not be able to
+        # disagree, or an omitted limit answers differently depending on which read edge resolved it.
         assert read_policy({}).limits.max_retries == DEFAULT_MAX_RETRIES
         assert PolicyTier.model_defaults().max_retries == DEFAULT_MAX_RETRIES
         assert CrawlerSettings.from_mapping({}).default_max_retries == DEFAULT_MAX_RETRIES

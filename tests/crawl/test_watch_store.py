@@ -65,8 +65,8 @@ def test_due_selects_matured_watches_earliest_first(watch_store):
     due = watch_store.due(NOW + 120)
     assert [row.watch_id for row in due] == [early.watch_id]
 
-    # due is read-only: a sweep that dies before recording leaves the watch
-    # due, so a check is at-least-once rather than silently skipped.
+    # due is read-only: a sweep that dies before recording leaves the watch due, so a check is at-least-once
+    # rather than silently skipped.
     assert [row.watch_id for row in watch_store.due(NOW + 121)] == [early.watch_id]
 
     both = watch_store.due(NOW + 700)

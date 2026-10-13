@@ -75,9 +75,6 @@ from tests.chokepoint_walks import REPO_ROOT, calls_to_any, from_imports, functi
 
 INVARIANTS_ROOT = REPO_ROOT / "tests" / "invariants"
 
-#: Every detector in the suite ends in this, which is the only reason the count
-#: can be mechanical rather than a hand-maintained list -- a list would be a
-#: second declaration of the tree, and would let a new walk land uncounted.
 DETECTOR_SUFFIX = "_offenders"
 
 
@@ -87,10 +84,8 @@ class DetectorAudit:
 
     detectors: tuple[str, ...]
     declared: tuple[str, ...]
-    #: Suffix-matching functions that read no tree, so are not detectors: helpers
-    #: a walk composes, and factories that build one. Reported rather than
-    #: counted, because folding them into ``detectors`` is what let one number
-    #: mean three different things at once.
+    #: Suffix-matching functions that read no tree, so are not detectors: helpers a walk composes, and
+    #: factories that build one.
     not_detectors: tuple[str, ...] = ()
 
     @property

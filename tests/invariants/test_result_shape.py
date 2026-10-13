@@ -70,8 +70,8 @@ CACHE_ENVELOPE_IS_BUILT_BY_ONE_OWNER = Rule(
         "cache-envelope",
     ),
     clean=lambda: (
-        # A dict that merely mentions one envelope key is not an envelope, and
-        # flagging it would make the guard something people route around.
+        # A dict that merely mentions one envelope key is not an envelope, and flagging it would make the
+        # guard something people route around.
         'def f(expires, value):\n    return {"expires": expires, "value": value}\n',
     ),
 )
@@ -98,9 +98,8 @@ def test_cache_envelope_detector_bites():
     CACHE_ENVELOPE_IS_BUILT_BY_ONE_OWNER.check_bites()
 
 
-# ---------------------------------------------------------------------------
-# Crawl-response shaping chokepoint
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------- Crawl-response shaping
+# chokepoint ---------------------------------------------------------------------------
 
 
 def _crawl_response_construction_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
@@ -143,16 +142,8 @@ def test_crawl_response_chokepoint_detector_bites():
     CRAWL_RESPONSE_BUILT_ONLY_BY_THE_SHAPING_CHOKEPOINT.check_bites()
 
 
-# ---------------------------------------------------------------------------
-# The same chokepoint, two more edges
-#
-# ``abuild_unified_crawl_response`` is the response builder, but the drift that
-# actually shipped was never in the builder: it was in the ADAPTER -- the two
-# endpoints each read a raw producer envelope and passed four fields by name,
-# and a field added to one and forgotten on the other was dropped by the model
-# without a word. The rules below close both ends of that: the envelope is
-# adapted in one module, and its scalar fields are passed in one function.
-# ---------------------------------------------------------------------------
+# The rules below close both ends of that: the envelope is adapted in one module, and its scalar fields are
+# passed in one function. ---------------------------------------------------------------------------
 
 _ENVELOPE_OWNER_MODULE = "app/api/response_shaping.py"
 
@@ -163,23 +154,13 @@ _ENVELOPE_OWNER_FUNCTION = "_response_envelope"
 _ENVELOPE_BUILDERS = ("abuild_unified_crawl_response", "build_unified_crawl_response")
 
 
-# The only callers permitted to skip the owner's envelope read, each named with
-# the reason it is not the same shape as a wire endpoint's:
-#   app/api/async_crawl_runner.py -- the detached background runner. It answers a
-#     webhook instead of a caller and reads the envelope LENIENTLY
-#     (``result.get("submitted_count")``), because a producer that stopped
-#     stamping a key must fail a job, not raise out of a background task that
-#     has no caller to answer.
-#   app/mcp/tools.py -- the MCP crawl tool, which is the same adaptation as
-#     /v1/crawl and is still spelled out at its own call site. PENDING: it is
-#     outside app/api, so it is named here rather than migrated, and this entry
-#     is what a reviewer should delete once it goes through the owner.
+# The only callers permitted to skip the owner's envelope read, each named with the reason it is not the same
+# shape as a wire endpoint's: app/api/async_crawl_runner.py -- the detached background runner.
 _ENVELOPE_ADAPTER_EXEMPT = frozenset({"app/api/async_crawl_runner.py", "app/mcp/tools.py"})
 
 
-# Derived from the model, not transcribed: the rule is "every field the wire
-# model requires is passed by one function", so the field set has to come from
-# the model or this guard would check a list that can fall behind it.
+# Derived from the model, not transcribed: the rule is "every field the wire model requires is passed by one
+# function", so the field set has to come from the model or this guard would check a list that can fall
 _ENVELOPE_SCALAR_FIELDS = frozenset(UnifiedCrawlResponse.model_fields) - {"results"}
 
 
@@ -220,15 +201,15 @@ CRAWL_RESPONSE_ENVELOPE_IS_ADAPTED_BY_ONE_OWNER = Rule(
         ),
     ),
     clean=lambda: (
-        # The sanctioned adaptation, run at the owner's own module: the owner is
-        # exempt by path, and that exemption is the whole content of the rule.
+        # The sanctioned adaptation, run at the owner's own module: the owner is exempt by path, and that
+        # exemption is the whole content of the rule.
         Silent(
             "async def f(result):\n"
             "    return await aunified_response_from_result(result, adapt=render_result_to_unified)\n",
             at=REPO_ROOT / _ENVELOPE_OWNER_MODULE,
         ),
-        # The detached background runner reads the envelope LENIENTLY
-        # (``result.get("submitted_count")``) and is a named exempt producer.
+        # The detached background runner reads the envelope LENIENTLY (``result.get("submitted_count")``) and
+        # is a named exempt producer.
         Silent(
             "async def f(request_id):\n"
             "    return await abuild_unified_crawl_response([], "
@@ -312,14 +293,14 @@ CRAWL_RESPONSE_ENVELOPE_FIELDS_ARE_PASSED_BY_ONE_OWNER = Rule(
         at=_HAND_ROLLED_ENVELOPE_PROOF_PATH,
     ),
     clean=lambda: (
-        # A ``**stored`` deserialization splat carries no explicit scalar fields,
-        # so it is not a second spelling of the envelope's field list.
+        # A ``**stored`` deserialization splat carries no explicit scalar fields, so it is not a second
+        # spelling of the envelope's field list.
         Silent(
             "def get_crawl_result(stored):\n    return UnifiedCrawlResponse(**stored)\n",
             at=_HAND_ROLLED_ENVELOPE_PROOF_PATH,
         ),
-        # The owner's own build is the ONE sanctioned site; the fields are passed
-        # only there, so the identical source is silent at the owner module.
+        # The owner's own build is the ONE sanctioned site; the fields are passed only there, so the identical
+        # source is silent at the owner module.
         Silent(
             _hand_rolled_envelope_source(_ENVELOPE_OWNER_FUNCTION),
             at=REPO_ROOT / _ENVELOPE_OWNER_MODULE,
@@ -338,9 +319,8 @@ def test_crawl_response_envelope_fields_detector_bites():
     CRAWL_RESPONSE_ENVELOPE_FIELDS_ARE_PASSED_BY_ONE_OWNER.check_bites()
 
 
-# ---------------------------------------------------------------------------
-# Job-row accumulator chokepoint (write amplification)
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------- Job-row accumulator chokepoint
+# (write amplification) ---------------------------------------------------------------------------
 
 
 def _job_row_accumulator_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
@@ -359,11 +339,8 @@ def _job_row_accumulator_offenders(tree: ast.AST, path: pathlib.Path) -> list[st
     if "migrations" in path.parts:
         return []
     banned = {column.name for column in LEGACY_COLUMNS[StoreSchema.CRAWL_JOBS]}
-    # Word boundaries, because the dropped names are substrings of the live
-    # ones: `results_count` and `visited_size` are output ALIASES of the
-    # accumulator subqueries, and `crawl_job_results` is the table itself.
-    # Underscore is a word character, so none of those can match -- only a
-    # column named exactly the banned word does.
+    # Word boundaries, because the dropped names are substrings of the live ones: `results_count` and
+    # `visited_size` are output ALIASES of the accumulator subqueries, and `crawl_job_results` is the table
     pattern = re.compile(r"\b(" + "|".join(sorted(banned)) + r")\b")
     offenders: list[str] = []
     for node in string_literals(tree):
@@ -385,9 +362,8 @@ CRAWL_JOBS_ACCUMULATORS_ARE_NEVER_ROW_COLUMNS = Rule(
         "visited",
     ),
     clean=lambda: (
-        # The live shape: subqueries over the accumulator tables aliased back to
-        # names that CONTAIN the dropped columns. A substring match would reject
-        # this, which is why the detector matches whole words.
+        # The live shape: subqueries over the accumulator tables aliased back to names that CONTAIN the
+        # dropped columns. A substring match would reject this, which is why the detector matches whole words.
         "def f(conn, job):\n"
         '    conn.execute("UPDATE crawl_jobs SET frontier = ?", (job.frontier,))\n'
         "    conn.execute('INSERT INTO \"crawl_job_results\" (job_id, seq, payload) VALUES (?, ?, ?)')\n"
@@ -408,9 +384,8 @@ def test_job_row_accumulator_detector_bites():
     CRAWL_JOBS_ACCUMULATORS_ARE_NEVER_ROW_COLUMNS.check_bites()
 
 
-# ---------------------------------------------------------------------------
-# Render-options construction chokepoint
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------- Render-options construction
+# chokepoint ---------------------------------------------------------------------------
 
 
 def _render_options_construction_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
@@ -443,10 +418,8 @@ RENDER_OPTIONS_BUILT_ONLY_BY_THE_RESOLVER = Rule(
         "built outside resolve_render_options",
     ),
     clean=lambda: (
-        # The resolver's own construction is the ONE sanctioned build site, and the
-        # exemption is a PATH exemption -- so it has to be proved at the real path. At
-        # a synthetic path the same source fires, which is the whole point: the
-        # exemption is narrow enough to not generalize, and this asserts that.
+        # The resolver's own construction is the ONE sanctioned build site, and the exemption is a PATH
+        # exemption -- so it has to be proved at the real path.
         Silent(
             "def f(request, defaults):\n    return RenderOptions(**kwargs)\n",
             at=REPO_ROOT / "app" / "crawl" / "render_options.py",
@@ -465,12 +438,7 @@ def test_render_options_chokepoint_detector_bites():
     RENDER_OPTIONS_BUILT_ONLY_BY_THE_RESOLVER.check_bites()
 
 
-# ---------------------------------------------------------------------------
-# Error-envelope shape
-# ---------------------------------------------------------------------------
-
-# app/api/exceptions.py owns the envelope; it is the sanctioned definition
-# (exclude matches by file *name*, matching app_trees' own semantics).
+# --------------------------------------------------------------------------- Error-envelope shape
 ENVELOPE_SANCTIONED = SANCTIONED | {"exceptions.py"}
 
 
@@ -518,9 +486,8 @@ _HAND_ROLLED_ERROR_ENVELOPES_FORBIDDEN = Rule(
     summary="Use app.api.exceptions.http_error/browser_pool_unavailable",
     excludes=ENVELOPE_SANCTIONED,
     bite=lambda: (
-        # Four offenders from one source: two bare HTTPException builds, one
-        # detail= envelope literal, one three-key dict. Counted exactly, because a
-        # detector that reported one here would be hiding which shapes it still sees.
+        # Four offenders from one source: two bare HTTPException builds, one detail= envelope literal, one
+        # three-key dict.
         Trips(
             "raise HTTPException(status_code=404, detail={'code': 'not_found', 'message': 'gone'})\n"
             "response = {'code': 'pending', 'message': 'm', 'details': {}}\n"
@@ -547,16 +514,7 @@ def test_envelope_detector_bites():
     _HAND_ROLLED_ERROR_ENVELOPES_FORBIDDEN.check_bites()
 
 
-# ---------------------------------------------------------------------------
-# Raw exception text never reaches the wire (information disclosure)
-#
-# render.py built the worker-failure result with ``error=str(error)`` from a
-# caught exception, and ``to_dict`` is pure serialization -- so the raw text
-# (DNS names, filesystem paths, secrets) reached the /v1/render body verbatim.
-# ``terminal_crawl_result`` is the sanctioned construction site and takes an
-# already-classified error; this keeps raw text from drifting back into any
-# error= field of a wire-visible result.
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------- Raw exception text never
 
 _TERMINAL_RESULT_SANCTIONED = frozenset({"engine_result.py", "render_result.py", "classification.py"})
 
@@ -597,8 +555,8 @@ NO_RAW_EXCEPTION_TEXT_IN_RESULT_ERROR_FIELD = Rule(
     summary="classify via classify_error_code, never raw exception text",
     excludes=SANCTIONED | _TERMINAL_RESULT_SANCTIONED,
     bite=lambda: (
-        # ``str(exc)`` on a direct result construction, and the same through the
-        # sanctioned primitive -- both sinks carry the raw text verbatim.
+        # ``str(exc)`` on a direct result construction, and the same through the sanctioned primitive -- both
+        # sinks carry the raw text verbatim.
         Bites("def f(exc):\n    return CrawlResult(error=str(exc))\n", "raw exception text"),
         Bites("def f(exc):\n    return terminal_crawl_result(error=str(exc))\n", "raw exception text"),
         # An f-string interpolating the exception is the leak in disguise.
@@ -622,34 +580,8 @@ def test_raw_exception_error_detector_bites():
     NO_RAW_EXCEPTION_TEXT_IN_RESULT_ERROR_FIELD.check_bites()
 
 
-# --- A wire model may not silently drop a domain model's field ---------------
-#
-# app/models/taxonomy.py holds the internal dataclasses and the pydantic response models
-# are the ones under app/models/ (app/api_models.py is the caller-supplied
-# side). `DiscoveredLink` was declared in both -- the wire twin is now
-# field names, and *nothing* connects the two: response_shaping converts
-# generically by attribute, and a strict pydantic response model DROPS any key
-# it does not declare. So adding a field to the dataclass and forgetting the
-# BaseModel is not a type error and not a test failure -- the field stops
-# existing on the wire, and everything downstream reads a default. That is the
-# CapabilitiesResponse failure mode this project already shipped once, which
-# is why the pair gets a gate rather than a comment asking people to keep two
-# lists in step.
-#
-# Written as a rule over whatever pair exists rather than a hardcoded name, so
-# the next twin is covered without a second edit here.
-#
-# The pair is found by MODULE STEM, not by class name. Class-name equality
-# worked only while both halves shared a name, and the package moved on from
-# that: `DiscoveredLink` and `DiscoveredLinkResponse` are the same record, and
-# intersecting their names finds nothing -- so a field added to one and not the
-# other was invisible. The stems are the one link that survives two names being
-# named for different things, and they cost no declaration to maintain.
-#
-# Not every record has a projection, and requiring one would be wrong: the 19
-# internal records without a twin are internal precisely because the wire never
-# sees them. So the rule compares the pairs that exist rather than demanding a
-# twin per record -- which also means the pair count is a gate in itself.
+# --- A wire model may not silently drop a domain model's field --------------- app/models/taxonomy.py holds
+# the internal dataclasses and the pydantic response models are the ones under app/models/
 _WIRE_MODEL_DIR = "app/models"
 
 
@@ -822,8 +754,8 @@ def test_wire_mirror_detector_bites():
     assert len(drifted) == 1, drifted
     assert "Link.score" in drifted[0] and "nowhere internally" in drifted[0], drifted
 
-    # A bare @dataclass, a subscripted BaseModel[str] base and a total=False
-    # TypedDict are three spellings of "declares a key set"; all must be matched.
+    # A bare @dataclass, a subscripted BaseModel[str] base and a total=False TypedDict are three spellings of
+    # "declares a key set"; all must be matched.
     assert _wire_mirror_drift(
         _synthetic_pair(
             "@dataclass\nclass Link:\n    url: str\n    host: str\n    depth: int\n",
@@ -845,23 +777,8 @@ def test_wire_mirror_detector_bites():
     assert drifted == ["Link.favicon is declared on the wire and nowhere internally"], drifted
 
 
-# --- An advertised payload key may not be dropped by its response model -------
-#
-# The two discovery endpoints build a dict by hand and hand it to FastAPI with a
-# strict `response_model=`. Pydantic DROPS every key the model does not declare,
-# so advertising a new block is not a type error and not a test failure -- the key
-# stops existing on the wire while every test that calls the payload function
-# directly stays green, because those tests never go through the model. This
-# project has shipped that once: `crawl_timing` was advertised and absent from
-# the endpoint, and was caught only by curling the live service.
-#
-# The gate above covers the other twin, a domain dataclass and its response
-# model. This covers the shape that actually shipped the bug: a hand-written dict
-# literal beside a model that is maintained by hand. Both have to be edited for
-# the payload to be correct, and nothing checked that they agreed.
-#
-# The pair is declared as data so adding a third advertised endpoint is one line
-# here, and so the real tree and the bites proof below exercise the same code.
+# --- An advertised payload key may not be dropped by its response model ------- The two discovery endpoints
+# build a dict by hand and hand it to FastAPI with a strict `response_model=`.
 
 _ADVERTISED_PAYLOADS = (
     ("app/discovery/capabilities.py", "capabilities_payload", "CapabilitiesResponse"),
@@ -937,35 +854,20 @@ def test_advertised_payload_detector_bites():
     assert "'extra'" in reported[0] and "dropped by Capabilities" in reported[0], reported
     assert "'limits'" in reported[1], reported
 
-    # A declared field the payload never sends is not drift in this direction: the
-    # model is the stricter of the two and a required field is caught by FastAPI.
+    # A declared field the payload never sends is not drift in this direction: the model is the stricter of
+    # the two and a required field is caught by FastAPI.
     assert not _undeclared_advertised_keys(
         ast.parse("def payload():\n    return {'service': 'x'}\n"), wire, "payload", "Capabilities"
     )
 
-    # A payload assembled statement by statement defeats static extraction, and
-    # going quiet on that shape would be the very defect this gate exists to stop.
+    # A payload assembled statement by statement defeats static extraction, and going quiet on that shape
+    # would be the very defect this gate exists to stop.
     assembled = ast.parse("def payload():\n    d = {}\n    d['service'] = 'x'\n    return d\n")
     with pytest.raises(AssertionError, match="dict literal"):
         _undeclared_advertised_keys(assembled, wire, "payload", "Capabilities")
 
 
 # --- A result may not spell its own (status, classification) pair -------------
-#
-# app/orchestration/engine_result.py and render_result.py are the chokepoints for
-# building results, and each terminal primitive calls _enforce_status_classification
-# first. That
-# check is the whole point: it makes a result that asserts a status the taxonomy
-# would re-derive differently for the same label unrepresentable, because the
-# two axes are free parameters and nothing else holds them together.
-#
-# A caller that builds a result itself can sidestep all of it by naming both
-# axes as literals. The pair it writes is legal on the day it is written, which
-# is exactly why nothing reports it, and the day the taxonomy moves a default
-# the result is quietly wrong with no failure anywhere. Deriving one axis from
-# status_for_classification, or copying both off an existing result, keeps the
-# property -- which is what the browser strategy does. Naming both is how the
-# property gets lost.
 
 _RESULT_CONSTRUCTORS = frozenset({"CrawlStrategyAttempt", "EngineCrawlResult"})
 
@@ -1018,8 +920,8 @@ RESULTS_DERIVE_THEIR_STATUS_FROM_THE_TAXONOMY = Rule(
             'models.EngineCrawlResult(url=u, status="failed", classification="blocked")\n',
             "hand-written",
         ),
-        # And the chokepoint exemption is keyed on the module, not on a name: a
-        # spelled pair anywhere else still fires even under the same function name.
+        # And the chokepoint exemption is keyed on the module, not on a name: a spelled pair anywhere else
+        # still fires even under the same function name.
         Bites(
             "def make():\n    return EngineCrawlResult(url=u, status='failed', classification='blocked')\n",
             "hand-written",
@@ -1050,24 +952,8 @@ def test_result_status_pair_detector_bites():
     RESULTS_DERIVE_THEIR_STATUS_FROM_THE_TAXONOMY.check_bites()
 
 
-# ---------------------------------------------------------------------------
-# The content pipeline: one dispatch, one discovery call, one projection
-#
-# The browser and HTTP strategies each carried the same three-way extraction
-# dispatch, the same offloaded post-fetch discovery call, and the same block of
-# discovered-links result fields. All three now live in
-# app/transport/content_pipeline.py, and `_discovery_result_fields` is
-# the one place a discovery envelope becomes result fields.
-#
-# The projection was a correctness risk rather than cosmetics: a field threaded
-# into the HTTP result but not the browser one is a divergence between the two
-# answers to the same page, and nothing in the tree can see it -- both results
-# are individually well-formed. So the two sweeps below are tree-wide rather
-# than file-scoped: a guard that only looked at the two modules it was written
-# for would keep passing while a third strategy grew its own copy, which is the
-# same empty-sweep failure the other chokepoint guards in this file were written
-# against.
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------- The content pipeline: one
+# dispatch, one discovery call, one projection The browser and HTTP strategies each carried the same
 
 _CONTENT_PIPELINE_OWNER = frozenset({"content_pipeline.py"})
 
@@ -1084,9 +970,8 @@ _EXTRACTION_ENTRY_POINTS = frozenset(
 )
 
 
-# The terminal-result builders, not the model: result_helpers constructing
-# EngineCrawlResult is where the discovered-links fields are DEFINED, which is
-# a different thing from a call site spelling them.
+# The terminal-result builders, not the model: result_helpers constructing EngineCrawlResult is where the
+# discovered-links fields are DEFINED, which is a different thing from a call site spelling them.
 _RESULT_BUILDERS = frozenset(
     {
         "binary_no_text_result",
@@ -1160,8 +1045,8 @@ EXTRACTION_IS_DISPATCHED_BY_THE_CONTENT_PIPELINE_ALONE = Rule(
     excludes=SANCTIONED | _CONTENT_PIPELINE_OWNER,
     premise=_assert_owner_extraction_still_fires,
     bite=lambda: (
-        # The offloaded extractor AND the bare extractor call are two dispatch
-        # shapes, so a source carrying both is worth exactly two findings.
+        # The offloaded extractor AND the bare extractor call are two dispatch shapes, so a source carrying
+        # both is worth exactly two findings.
         Bites(
             "from app.extraction.content import extract_html, normalized_extraction\n"
             "async def f(decoded, final_url):\n"
@@ -1276,9 +1161,8 @@ def test_discovery_result_projection_has_exactly_one_definition():
     assert "app/transport/content_pipeline.py" in definitions[0], definitions
 
 
-# ---------------------------------------------------------------------------
-# One declaration of what a result is
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------- One declaration of what a result
+# is ---------------------------------------------------------------------------
 
 
 def _taxonomy_members(enum: type[StrEnum]) -> set[str]:

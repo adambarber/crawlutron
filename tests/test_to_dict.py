@@ -42,8 +42,8 @@ def test_to_dict_json_safe_and_no_deepcopy():
     # Nested dataclass converted to a plain dict.
     assert isinstance(d["links"][0], dict)
     assert d["links"][0]["url"] == "http://a"
-    # Mutating the returned structure must NOT leak into the source dataclass
-    # (containers are rebuilt, leaves shared).
+    # Mutating the returned structure must NOT leak into the source dataclass (containers are rebuilt, leaves
+    # shared).
     d["meta"]["k2"] = "w"
     assert "k2" not in res.meta
 
@@ -54,8 +54,8 @@ def test_to_dict_non_dataclass_passthrough():
 
 
 def test_to_dict_handles_cyclic_link_graph():
-    # A DiscoveredLink-style graph where a node's parent points back to an
-    # ancestor must serialize without infinite recursion.
+    # A DiscoveredLink-style graph where a node's parent points back to an ancestor must serialize without
+    # infinite recursion.
     from dataclasses import dataclass, field
 
     @dataclass
@@ -78,10 +78,8 @@ def test_to_dict_handles_cyclic_link_graph():
 
 
 def test_to_dict_breaks_a_cyclic_dict_graph():
-    # The dataclass test above breaks its cycle on re-entering a *dataclass*, so
-    # the dict and sequence branches each carried their own copy of the cycle
-    # guard with nothing pinning them. A self-referential mapping is the shape
-    # that exercises the dict branch's guard on its own.
+    # The dataclass test above breaks its cycle on re-entering a *dataclass*, so the dict and sequence
+    # branches each carried their own copy of the cycle guard with nothing pinning them.
     node: dict = {"name": "a"}
     node["self"] = node
 
@@ -98,9 +96,8 @@ def test_to_dict_breaks_a_cyclic_sequence_graph():
     assert d == {"items": [None]}
 
 
-# ---------------------------------------------------------------------------
-# from_wire: the derived inverse, so a result's key set is spelled ONCE
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------- from_wire: the derived inverse,
+# so a result's key set is spelled ONCE
 
 
 def test_a_result_survives_the_serialization_round_trip_unchanged():

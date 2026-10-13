@@ -33,8 +33,8 @@ async def test_recursive_crawl_fetches_links_concurrently():
         path = url.path or "/"
         return (200, _page_html(path), "text/html")
 
-    # The harness owns the overlap counter and the scheduling point that makes
-    # overlap observable; this test owns what each path answers.
+    # The harness owns the overlap counter and the scheduling point that makes overlap observable; this test
+    # owns what each path answers.
     fetcher = concurrent_fetcher(respond)
 
     payload = {
@@ -44,8 +44,8 @@ async def test_recursive_crawl_fetches_links_concurrently():
     settings = CrawlerSettings.from_mapping(
         {
             "CRAWLUTRON_GLOBAL_CONCURRENCY": "8",
-            # Same-host links are additionally bounded by the per-domain gate;
-            # raise it so concurrency is observable for this single-domain site.
+            # Same-host links are additionally bounded by the per-domain gate; raise it so concurrency is
+            # observable for this single-domain site.
             "CRAWLUTRON_PER_DOMAIN_CONCURRENCY": "4",
         }
     )

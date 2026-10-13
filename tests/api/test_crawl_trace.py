@@ -36,8 +36,8 @@ async def test_a_trace_reports_every_attempted_strategy(async_client, base_url):
     page = trace["results"][0]
     assert page["normalized_url"] == canonical(base_url).raw
     assert page["status"] == "success"
-    # The spans are the crawl's own attempt list, so the strategy that ran and
-    # the verdict it reached are the ones the response reported.
+    # The spans are the crawl's own attempt list, so the strategy that ran and the verdict it reached are the
+    # ones the response reported.
     assert [span["strategy"] for span in page["attempted_strategies"]] == [HTTP_DECLARED_CRAWLER]
     assert page["attempted_strategies"][0]["http_status"] == 200
     assert page["attempted_strategies"][0]["elapsed_ms"] >= 0

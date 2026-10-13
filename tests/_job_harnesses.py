@@ -53,32 +53,13 @@ from app.storage.job_store import _Expected as _Expected
 from tests._policy_factories import canonical, job_store
 from tests._result_builders import _canned_result
 
-#: Hang guard for the store waits. Deliberately NOT ``HANG_GUARD_SECONDS``: that
-#: one guards waits for a task the SAME loop has already scheduled, and such a
-#: task either runs on the next turn or never. This guard is for a task in
-#: another thread -- the runner's ``asyncio.to_thread`` worker on a box with
-#: four agent sessions, which was delayed long enough to blow the 5.0s deadline
-#: this replaced (62.9s of user CPU inside a 271.5s run). A progressing job
-#: writes nothing for seconds at a time under that load, so 5.0s here is not a
-#: hang guard, it is the same starvation trap wearing a different name. The
-#: terminal path does not rely on it at all -- it joins the runner task, which
-#: has no clock in it -- so this bound only ever fires on a store that is not
-#: being written to by anything.
+#: Hang guard for the store waits. Deliberately NOT ``HANG_GUARD_SECONDS``: that one guards waits for a task
+#: the SAME loop has already scheduled, and such a task either runs on the next turn or never.
 STORE_HANG_GUARD_SECONDS = 30.0
 
-#: The statuses a job settles in, as the store spells them. Derived from the
-#: store's own set rather than restated here: "has this job finished?" is a
-#: question every status reader asks, and a second hand-written answer is how
-#: this one drifted in the first place. It used to omit CANCELLED, which cost a
-#: cancelled job the thirty-second hang guard and then an assertion it had
-#: already satisfied.
+#: The statuses a job settles in, as the store spells them.
 _SETTLED_STATUSES = frozenset(status.value for status in TERMINAL_STATUSES)
 
-#: The subset of those a wait may *join the runner task* for. Strictly smaller
-#: than settled, and the difference is load-bearing: joining a cancelled job
-#: waits for the very thing the test is about to interrupt. This answers "may I
-#: join?" and nothing else -- the previous name claimed to answer "is it done?"
-#: while excluding CANCELLED, which is how one set came to serve two questions.
 _JOINABLE_STATUSES = _SETTLED_STATUSES - {JobStatus.CANCELLED.value}
 
 
@@ -135,8 +116,8 @@ class _StoreListener:
         try:
             self.loop.call_soon_threadsafe(self.event.set)
         except RuntimeError:
-            # The awaiting loop is already closed: the test is over and there is
-            # nobody left to wake. Dropping the signal is the only correct move.
+            # The awaiting loop is already closed: the test is over and there is nobody left to wake. Dropping
+            # the signal is the only correct move.
             pass
 
     def close(self) -> None:
@@ -164,9 +145,8 @@ class InstrumentedJobStore(JobStore):
     def __init__(self, db_path: str | pathlib.Path, *, policy: HostPolicy, tier: PolicyTier) -> None:
         super().__init__(db_path, policy=policy, tier=tier)
         self.status_bus = _StatusBus()
-        # Bound off the CLASS, not off ``self``: by this point ``self.set_status``
-        # already resolves to the override below, and capturing that would make
-        # every publish an infinite recursion.
+        # Bound off the CLASS, not off ``self``: by this point ``self.set_status`` already resolves to the
+        # override below, and capturing that would make every publish an infinite recursion.
         self._real_set_status: Callable[..., bool] = JobStore.set_status.__get__(self)
         self._real_save: Callable[[CrawlJobState], None] = JobStore.save.__get__(self)
 
@@ -256,8 +236,8 @@ def make_crawled_job_store(tmpdir: str, pages: int) -> tuple[JobStore, CrawlJobS
 
     store = make_job_store(tmpdir)
     job = store.create("http://example.test/a", CrawlPolicy())
-    # Visited holds admitted values now; results stay the persisted wire
-    # dicts the store actually keeps, naming each page by its raw identity.
+    # Visited holds admitted values now; results stay the persisted wire dicts the store actually keeps,
+    # naming each page by its raw identity.
     job.visited = {canonical(f"http://example.test/p/{i}") for i in range(pages)}
     job.results = [{"url": url.raw, "status": "success"} for url in job.visited]
     store.save(job)
@@ -281,9 +261,6 @@ async def run_job_control_test(
 async def _execution_urls(payload_dict, hang: asyncio.Event | None):
     if hang is not None and not hang.is_set():
         await hang.wait()
-    # The payload is the engine's wire shape, so its URLs are text; the real
-    # seam admits them before any result is built, and the double must cross
-    # the same boundary or it is recording a shape production never sends.
     urls = payload_dict.get("urls") or [payload_dict.get("url")]
     return [canonical(url) for url in urls]
 
@@ -326,18 +303,11 @@ class ScriptedExecute:
     ):
         if (scripts is None) == (results is None):
             raise AssertionError("ScriptedExecute takes exactly one of scripts= or results=")
-        # Keys are URL identities: caller-spelled text is admitted here (so a
-        # key like "http://example.test" matches its canonical identity), and
-        # results-mode keys are the funnel's projected originals, which are
-        # canonical by construction. Lookup keys arrive as values.
+        # Keys are URL identities: caller-spelled text is admitted here (so a key like "http://example.test"
         if scripts is not None:
             self._scripts = {canonical(url).raw: list(seq) for url, seq in scripts.items()}
         else:
             self._scripts = {r.original_url: [r] for r in results or []}
-        # A real ``ResultStatus``, not a classification: the result record
-        # validates its own taxonomy, and "rendered" is one -- so the default
-        # used to be a status the engine never emits, invisible while the
-        # double produced an unvalidated dict.
         self._default: Classification = "rendered" if scripts is not None else "site_error"
         self._hang = hang
         self.attempts: dict[str, int] = {}
@@ -594,8 +564,8 @@ async def run_seeded_job(job, job_store, execute):
     from app.api import job_runner
 
     job_runner.install_execute_crawl(execute)
-    # A row a crash left RUNNING restarts the way the service restarts it: the
-    # recovery rewind first, because the runner's claim only accepts PENDING.
+    # A row a crash left RUNNING restarts the way the service restarts it: the recovery rewind first, because
+    # the runner's claim only accepts PENDING.
     await job_runner.recover_orphaned_running_jobs(job_store)
     await drive_job(job.job_id, job_store)
     return await run_to_terminal(job_store, job.job_id)

@@ -29,8 +29,8 @@ from tests.chokepoint_walks import (
 from tests.rules import Bites, Rule, Silent, Trips
 
 
-#: Every rule in this file governs ``tests/``, not ``app/``. One owner for the
-#: answer, so the rules below cannot disagree about the tree they sweep.
+#: Every rule in this file governs ``tests/``, not ``app/``. One owner for the answer, so the rules below
+#: cannot disagree about the tree they sweep.
 def _tests_tree(*, exclude: frozenset[str]) -> tuple[tuple[pathlib.Path, ast.Module], ...]:
     """The test tree, swept whole.
 
@@ -43,36 +43,7 @@ def _tests_tree(*, exclude: frozenset[str]) -> tuple[tuple[pathlib.Path, ast.Mod
     return trees_under(TESTS_DIR)
 
 
-# ===========================================================================
-# NO TEST MAY MUTATE THE PRODUCTION TREE
-#
-# `tests/test_jscpd_gate.py` proved the jscpd `ignore` glob by planting two
-# clone pairs at FIXED paths inside the live `app/` tree and unlinking them in a
-# `finally`. That made `app/` a directory that MOVES while the suite runs, and
-# anything that walks it concurrently becomes a list-then-read race: it globs
-# the file list, the probe disappears, and `read_text` raises. Measured with 6
-# concurrent copies of that file against 6 concurrent copies of this one, 10
-# tests failed with `FileNotFoundError: .../app/storage/migrations/zz_probe_clone.py`
-# -- and the victims were the tree-wide chokepoint detectors (await-in-lock,
-# bare `re.compile`, `regex` import), so they reported nothing for the entire run
-# while appearing green. A detector that cannot see the tree cannot hold it.
-#
-# So the class closes mechanically rather than one file at a time: this sweep
-# reads every module under tests/ and reports any call that can mutate a path
-# under app/. It is a name-and-shape check over statically resolvable
-# expressions; a path handed in as a parameter and written by a caller outside
-# tests/ is invisible to it, which is why a name it DOES resolve is a hard
-# failure and not a warning.
-#
-# The sanctioned way to get a real production path SHAPE is to mirror the
-# layout under `tmp_path` and point the code under test at the mirror. A
-# `tmp_path / "app"` fixture is deliberately NOT this rule: a scratch directory
-# a test builds itself is not the production tree.
-# ===========================================================================
-
-# A path built from one of these is anchored at the service root, so the
-# segment joined onto it next names a real tree. Aliases a module binds to one
-# of them are absorbed below, so `ROOT = HERE.parent` is the same anchor.
+# =========================================================================== NO TEST MAY MUTATE THE
 _SERVICE_ROOT_NAMES = frozenset({"REPO_ROOT", "SERVICE_ROOT", "HERE", "ROOT"})
 
 
@@ -80,14 +51,13 @@ _SERVICE_ROOT_NAMES = frozenset({"REPO_ROOT", "SERVICE_ROOT", "HERE", "ROOT"})
 _APP_ROOTED_NAMES = frozenset({"APP_ROOT", "TRANSPORT_DIR"})
 
 
-# Qualifiers whose mutating call takes the path as an ARGUMENT
-# (`os.remove(p)`, `shutil.rmtree(p)`) instead of as its receiver.
+# Qualifiers whose mutating call takes the path as an ARGUMENT (`os.remove(p)`, `shutil.rmtree(p)`) instead of
+# as its receiver.
 _FS_MODULE_QUALIFIERS = frozenset({"os", "shutil", "pathlib", "io", "posixpath", "ntpath"})
 
 
-# Calls that change the filesystem. `str.replace` and `list.remove` are in here
-# too, which costs nothing: a call is only reported when its target resolves
-# into app/, and a string is not a path into app/.
+# Calls that change the filesystem. `str.replace` and `list.remove` are in here too, which costs nothing: a
+# call is only reported when its target resolves into app/, and a string is not a path into app/.
 _MUTATING_METHODS = frozenset(
     {
         "unlink",
@@ -143,15 +113,9 @@ _MUTATING_FUNCTIONS = frozenset(
 )
 
 
-# An `open()` is a write only with a mode that says so; a mode this cannot read
-# is treated as a read, because `Path.read_text`/`open(p).read()` on an app/
-# module is a legitimate thing for a detector test to do.
 _WRITE_MODE_CHARS = ("w", "a", "x", "+")
 
 
-# Alias chains (`ROOT = HERE.parent`, `APP = REPO_ROOT / "app"`) are resolved
-# to a fixed point rather than recursively; four passes is far past the longest
-# chain a module can express in one scope and bounds the walk either way.
 _BINDING_PASSES = 4
 
 
@@ -184,8 +148,8 @@ def _path_components(expr: ast.expr) -> list[ast.expr] | None:
     if isinstance(expr, ast.Call):
         name = getattr(expr.func, "attr", None) or getattr(expr.func, "id", None)
         if name in {"Path", "PurePath"} and expr.args:
-            # `Path(APP_ROOT / "x")` is the same path as `APP_ROOT / "x"`, so
-            # the wrapped expression is flattened rather than boxed.
+            # `Path(APP_ROOT / "x")` is the same path as `APP_ROOT / "x"`, so the wrapped expression is
+            # flattened rather than boxed.
             return _path_components(expr.args[0])
         if name == "join" and expr.args:
             head = _path_components(expr.args[0])
@@ -329,12 +293,11 @@ TESTS_MUST_NOT_MUTATE_APP = Rule(
         "and the detectors that lose it report nothing while looking green"
     ),
     bite=lambda: (
-        # The real offender -- a fixed path under the live tree, written and unlinked
-        # from a test -- so the sweep has to catch the exact spelling in the tree, not a
-        # paraphrase of it. Two findings in one shape, so the count is part of the claim.
+        # The real offender -- a fixed path under the live tree, written and unlinked from a test -- so the
+        # sweep has to catch the exact spelling in the tree, not a paraphrase of it.
         Bites(PLANTED_MUTATION, marker="mutates the production tree", count=2),
-        # The qualified spellings, which take the path as an argument instead of as a
-        # receiver, and the aliased ones where the root is bound before it is used.
+        # The qualified spellings, which take the path as an argument instead of as a receiver, and the
+        # aliased ones where the root is bound before it is used.
         Trips(
             "from pathlib import Path\n"
             "from chokepoint_walks import APP_ROOT\n"
@@ -361,8 +324,8 @@ TESTS_MUST_NOT_MUTATE_APP = Rule(
         ),
     ),
     clean=lambda: (
-        # A test's own scratch tree is not the production tree, and `read_text` on an
-        # app/ module is a legitimate thing for a detector test to do.
+        # A test's own scratch tree is not the production tree, and `read_text` on an app/ module is a
+        # legitimate thing for a detector test to do.
         MIRRORED_SCRATCH_TREE,
     ),
 )
@@ -389,58 +352,8 @@ def test_tree_detectors_bite():
     TESTS_MUST_NOT_MUTATE_APP.check_bites()
 
 
-# ===========================================================================
-# NO TEST REACHES A SIBLING HELPER BY BARE NAME
-# ===========================================================================
-
-
-# ===========================================================================
-# THE CHOKEPOINT OWNS ITS TRAVERSAL (one snapshot, shared by every detector)
-#
-# `app_trees` was a generator that re-globbed, re-read and re-parsed all 105 app/
-# modules on every call, and each of the ~7 tree-walking detectors called it, so
-# one session paid for the same parse about seven times over. Measured on
-# tests/invariants/ alone: 37.7s of a 49.4s file, led by
-# test_property_registry_fingerprints_are_observed 8.06s,
-# test_documented_browser_knobs_have_consumers 7.49s,
-# test_robots_policy_has_one_implementation 7.45s, test_bool_env_has_one_implementation
-# 5.28s, test_public_target_has_one_implementation 3.95s,
-# test_property_registry_rejects_deleted_fingerprint 3.63s and
-# test_url_returning_helpers_require_host_policy 1.83s.
-#
-# The cost was the smaller half of the defect. Because every walk observed the
-# tree at a DIFFERENT INSTANT, "list the files" and "read the files" were two
-# moments, and anything that appeared or vanished between them raised
-# FileNotFoundError inside a detector instead of being reported -- the
-# list-then-read race that tests/test_jscpd_gate.py used to cause whenever it
-# planted a file in app/ beside a chokepoint sweep. Same root cause, one fix:
-# the traversal is executed once per exclude set and every detector is handed
-# the same ast.Module objects.
-#
-# The three tests below demonstrate that by execution. None of them writes to
-# app/ -- the sweep above forbids it -- so the race is reproduced by making the
-# filesystem refuse to answer, which is what a vanished file looks like from
-# inside a list-then-read walk.
-#
-# ONE NODE SEQUENCE PER ROOT, which is the same fix one level deeper. Owning
-# the snapshot removed the re-GLOB and the re-READ; the re-WALK underneath it
-# was still there, and it was the larger half: 40 detectors and 91 `ast.walk`
-# sites over ~105 modules meant forty passes over every node where one would
-# do. `chokepoint_walks.nodes_of` materializes `tuple(ast.walk(root))` once per
-# root and every detector iterates that, so a detector's own logic is untouched
-# and what is removed is the walk it would have repeated. Sub-walks -- a
-# detector narrowing to one function and walking that -- are memoized on the
-# same terms, and they are where the sharing pays most, because the same
-# function body is walked by many detectors.
-#
-# The last two tests below are the receipt for that. A memo is the easiest
-# possible way to make forty detectors fast and blind at once: return an empty
-# tuple for an unwalked root and every one of them reports nothing, every one
-# of them stays green, and the suite is faster. So they check identity (one
-# materialization, shared), element-wise equality against a FRESH `ast.walk`
-# (the same objects in the same order, not a subset or a re-ordering), and
-# coverage of every module in the snapshot (no root is silently absent).
-# ===========================================================================
+# Measured on tests/invariants/ alone: 37.7s of a 49.4s file, led by
+# test_property_registry_fingerprints_are_observed 8.06s, test_documented_browser_knobs_have_consumers
 
 
 def _app_reads(monkeypatch) -> list[pathlib.Path]:
@@ -477,9 +390,8 @@ def _imported_modules(tree: ast.AST) -> Iterator[tuple[ast.AST, str]]:
     for from_node in from_imports(tree):
         if from_node.module:
             yield from_node, from_node.module
-    # A distinct name from the loop above: the two are separate traversals of
-    # the same tree, and one binding for both meant the second yield carried the
-    # first loop's node type.
+    # A distinct name from the loop above: the two are separate traversals of the same tree, and one binding
+    # for both meant the second yield carried the first loop's node type.
     for plain_node in plain_imports(tree):
         for alias in plain_node.names:
             yield plain_node, alias.name
@@ -593,14 +505,11 @@ def _private_leak_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
     ]
 
 
-#: ``app/api/render.py``: in ``app.api``, so anything under ``app.orchestration`` is
-#: outside its package. Chosen over the default synthetic proof path because that
-#: path sits in ``app`` itself, where a single underscore-prefixed import from
-#: ``app.orchestration`` would be a sibling reach and the bite would prove nothing.
+#: ``app/api/render.py``: in ``app.api``, so anything under ``app.orchestration`` is outside its package.
 _RENDER_PROOF_PATH = REPO_ROOT / "app" / "api" / "render.py"
 
-#: A real sibling of ``transport.content_pipeline``, so the private import in the
-#: clean proof resolves inside one package and must stay quiet.
+#: A real sibling of ``transport.content_pipeline``, so the private import in the clean proof resolves inside
+#: one package and must stay quiet.
 _TRANSPORT_SIBLING_PROOF_PATH = REPO_ROOT / "app" / "transport" / "browser_result.py"
 
 
@@ -613,11 +522,7 @@ PRIVATE_NAME_LEAKS_PACKAGE = Rule(
     ),
     scope=lambda *, exclude: trees_under(APP_ROOT),
     bite=lambda: Bites(
-        # Names that do NOT exist in app/. A bite planted with a live name stops
-        # biting the moment that name is promoted -- which is the fix for every
-        # offender this rule found -- so the proof silently became vacuous
-        # halfway through the migration and only a rename exposed it. A synthetic
-        # name cannot be promoted, so the proof outlives the tree it describes.
+        # Names that do NOT exist in app/.
         "from app.transport.http import _unpromoted_strategy_result\n"
         "from app.safety.validation import _unpromoted_private_target_gate\n",
         marker="which is outside the",
@@ -626,9 +531,6 @@ PRIVATE_NAME_LEAKS_PACKAGE = Rule(
     ),
     clean=lambda: (
         # A sibling in the defining package: private, and reachable only from here.
-        # Proved at a NAMED module rather than the default proof path, because the
-        # whole content of this rule is a package comparison -- run it in a module
-        # that is not inside the boundary and the quiet is the other claim.
         Silent(
             "from app.transport.content_pipeline import _unpromoted_sibling_detail\n",
             at=_TRANSPORT_SIBLING_PROOF_PATH,
@@ -676,8 +578,8 @@ TEST_HELPERS_IMPORTED_BY_PACKAGE_PATH = Rule(
     scope=_tests_tree,
     bite=lambda: Bites(PLANTED_BARE_IMPORT, marker="imports the test helper", count=3),
     clean=lambda: (
-        # Package, stdlib and third-party forms name a module that is not a test file, so
-        # the rule cannot degenerate into "no unqualified imports".
+        # Package, stdlib and third-party forms name a module that is not a test file, so the rule cannot
+        # degenerate into "no unqualified imports".
         "from __future__ import annotations\n"
         "from pathlib import Path\n"
         "import httpx\n"
@@ -737,8 +639,8 @@ def test_the_app_tree_is_read_once_however_many_detectors_walk_it(monkeypatch):
     """
     reads = _app_reads(monkeypatch)
     for _ in range(3):
-        # Consumed, not merely called: a walk nobody iterates reads nothing, and
-        # this test has to be able to see a re-walk.
+        # Consumed, not merely called: a walk nobody iterates reads nothing, and this test has to be able to
+        # see a re-walk.
         tuple(app_trees())
         tuple(app_python_files())
     assert len(reads) <= len(app_python_files()), (
@@ -778,9 +680,8 @@ def test_the_path_list_and_the_parsed_trees_are_one_traversal(monkeypatch):
     assert len(reads) == 0, f"listing the tree parsed {len(reads)} modules it did not need parsed"
     trees = app_trees()
     assert [path for path, _tree in trees] == list(paths), "the trees are not the files that were listed"
-    # Exactly one read per module when this test took the snapshot, and none at
-    # all when an earlier test in the session already did: both are "once", and
-    # the assertion has to hold whichever order the session ran in.
+    # Exactly one read per module when this test took the snapshot, and none at all when an earlier test in
+    # the session already did: both are "once", and the assertion has to hold whichever order the session ran
     assert len(reads) in (0, len(trees)), (
         f"{len(reads)} reads for {len(trees)} modules; the snapshot is read once, not once per caller"
     )
@@ -856,43 +757,8 @@ def test_a_narrowed_walk_is_shared_too():
     )
 
 
-# ===========================================================================
-# NO PUBLIC PRIMITIVE IN THE VOCABULARY LAYER MAY GO UNREFERENCED
-#
-# The suite has a convention rather than a registry for this: a leading
-# underscore means "mine, not yours". That works only while public names are
-# actually referenced, because a public name in a shared-vocabulary module
-# reads as sanctioned -- it is the spelling the module's own docstring teaches
-# the next author to reach for. `chokepoint_walks.py` published five walkers
-# with no caller, and `matching.py` advertised three properties of a composition
-# API for nine symbols nothing constructed. Both headers were right about the
-# vocabulary and wrong about the API, which is the expensive shape: a reader who
-# trusts the header writes a detector through `all_of(...)` and lands in code no
-# gate, bite or drift check will ever exercise, because nothing uses it and
-# nothing notices.
-#
-# `matching.py` turned out to be worse than unused. It was a vestigial
-# architecture -- a matcher protocol that `Rule` inherited but never used,
-# because `find` returning offender strings had already replaced it -- so the
-# gate deleted the module rather than its dead half.
-#
-# So the property is the boolean the underscore already encodes: a public name
-# in the vocabulary layer that no module outside it names is dead code, or a
-# helper that was never marked private. Both have the same mechanical fix --
-# delete it, or prefix it -- so one rule covers both, and it cannot be tuned
-# because there is no number in it.
-#
-# Nineteen names were in this state when the rule landed: fifteen dead outright
-# and four alive but mislabelled -- used only inside their own module, so public
-# in name and private in fact. Two of the dead ones (`rule_ids`, `registry_ids`)
-# were leftovers from the pre-`Registry` design and referenced nothing at all,
-# including their own file.
-# ===========================================================================
-
-#: The modules a test author is told to reach into. Named rather than derived
-#: from a directory: these are the shared vocabulary, and a directory sweep would
-#: also catch the fixture factories, whose doubles are legitimately built and
-#: referenced by exactly one consumer each.
+# =========================================================================== NO PUBLIC PRIMITIVE IN THE
+# VOCABULARY LAYER MAY GO UNREFERENCED The suite has a convention rather than a registry for this: a leading
 _VOCABULARY_LAYER = frozenset(
     {
         "chokepoint_walks.py",
@@ -1034,15 +900,14 @@ VOCABULARY_PRIMITIVES_ARE_REFERENCED = Rule(
         at=REPO_ROOT / "tests" / "chokepoint_walks.py",
     ),
     clean=lambda: (
-        # A leading underscore is the whole declaration, so a private helper at the
-        # same path as the offender must be spared. Placed at a second vocabulary
-        # module because "correct" and "correct in this module" are different claims.
+        # A leading underscore is the whole declaration, so a private helper at the same path as the offender
+        # must be spared.
         Silent(
             "def _mine(tree):\n    return []\n",
             at=REPO_ROOT / "tests" / "rules.py",
         ),
-        # And the sweep is a named list, not a directory walk: a fixture factory's
-        # public double has one consumer and is not the false memory this catches.
+        # And the sweep is a named list, not a directory walk: a fixture factory's public double has one
+        # consumer and is not the false memory this catches.
         Silent(
             "def script_walker(tree, path):\n    return []\n",
             at=REPO_ROOT / "tests" / "_fetcher_factories.py",
@@ -1076,15 +941,7 @@ def test_vocabulary_primitive_detector_bites():
     VOCABULARY_PRIMITIVES_ARE_REFERENCED.check_bites()
 
 
-# ===========================================================================
-# The retired vocabulary bucket (#149)
-# ===========================================================================
-
-#: The module the vocabulary split retires. Every import has to name a topic
-#: module instead, so this name stops being importable the day the split lands --
-#: which is the only way "every import names a topic" is a fact rather than a
-#: promise in a commit message. Until then it is a ratchet that reports every
-#: site the split has to repoint.
+# =========================================================================== The retired vocabulary bucket
 _RETIRED_VOCABULARY = "app.constants"
 
 _RETIRED_VOCABULARY_IMPORTED = (
@@ -1116,15 +973,15 @@ RETIRED_VOCABULARY_IS_NOT_IMPORTABLE = Rule(
     ),
     scope=lambda *, exclude: trees_under(APP_ROOT),
     bite=lambda: Bites(
-        # Both spellings, because a fix that repoints `from app.constants import X` and
-        # leaves `import app.constants` is a site that still reads as the old layout.
+        # Both spellings, because a fix that repoints `from app.constants import X` and leaves `import
+        # app.constants` is a site that still reads as the old layout.
         "from app.constants import UNSORTED_TOPIC_NAME\nimport app.constants as bucket\n",
         marker="name the topic",
         count=2,
     ),
     clean=lambda: (
-        # A name that merely ENDS in constants is not the retired module, and neither
-        # is a stdlib or third-party import of the same shape.
+        # A name that merely ENDS in constants is not the retired module, and neither is a stdlib or
+        # third-party import of the same shape.
         "from app.vocabulary.taxonomy import CrawlClassification\n"
         "from app.constants_helpers import helper\n"
         "import constants\nfrom constants import value\n",

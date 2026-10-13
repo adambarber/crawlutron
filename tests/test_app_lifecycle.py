@@ -88,9 +88,7 @@ class TestMultiWorkerInvariants:
         app = _booted_app(monkeypatch, workers="4")
 
         async with app.router.lifespan_context(app):
-            # A refusal anywhere on the startup path raises before the yield, so
-            # being inside the block is the boot assertion. The store the jar
-            # landed on is the multi-worker claim itself.
+            # The store the jar landed on is the multi-worker claim itself.
             assert isinstance(app.state.cookie_jar.store, SharedCookieStore)
 
     def test_the_worker_count_reaches_the_production_budget_wiring(self, monkeypatch):
@@ -161,8 +159,6 @@ class TestAppLifecycleEdges:
         assert (app.main) is not None
 
     async def test_render_endpoint_value_error(self, async_client):
-        # ASGI harness runs no lifespan, so the pool is None; 's guard
-        # answers 503 browser_pool_unavailable before URL validation.
         # Own the premise explicitly: ordering must never decide it.
         assert_pool_unavailable(await post_render_with_pool(async_client, None, "invalid"))
 
@@ -191,8 +187,8 @@ class TestAppLifecycleEdges:
     async def test_job_endpoints_not_found(self, async_client):
         resp = await async_client.get("/v1/jobs/nonexistent")
         assert resp.status_code == 404
-        # Execution contract: control resolves the row first — a
-        # missing job is 404, not the (reversed) 501 refusal.
+        # Execution contract: control resolves the row first — a missing job is 404, not the (reversed) 501
+        # refusal.
         resp = await async_client.post("/v1/jobs/nonexistent/control", json={"action": "cancel"})
         assert resp.status_code == 404
         resp = await async_client.delete("/v1/jobs/nonexistent")
@@ -238,9 +234,8 @@ class TestShutdownEventBelongsToOneLifespanRun:
 
         async with app.router.lifespan_context(app):
             second = app.state.shutdown_event
-            # Read the liveness inside the block. The teardown signals the event
-            # on the way out, so asserting after the block would pass against a
-            # dead event for the wrong reason.
+            # Read the liveness inside the block. The teardown signals the event on the way out, so asserting
+            # after the block would pass against a dead event for the wrong reason.
             second_is_live = not second.is_set()
 
         assert second is not first, "the lifespan reused the previous run's event object"

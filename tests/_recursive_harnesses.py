@@ -151,9 +151,7 @@ async def drive_recursive_crawl(
     return RecursiveRun(spill=the_spill, scheduler=the_scheduler, gate=the_gate)
 
 
-#: ``run_recursive_crawl``'s own signature, read once at import. Every keyword the
-#: harness forwards is bound against this, so the harness cannot drift from the
-#: contract it exists to funnel -- there is no second list to forget to update.
+#: ``run_recursive_crawl``'s own signature, read once at import.
 _CRAWL_SIGNATURE = inspect.signature(run_recursive_crawl)
 
 

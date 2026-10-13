@@ -42,16 +42,16 @@ def robots_entry_key(origin: str) -> tuple[str, HostPolicy]:
     wrote entries the read path could never find, so the purge assertions
     passed against a cache shaped unlike the one they are standing in for.
     """
-    # ``robots_origin`` retired with the flip: the canonical origin of a raw
-    # origin text is now the admitted value's own ``.origin``.
+    # ``robots_origin`` retired with the flip: the canonical origin of a raw origin text is now the admitted
+    # value's own ``.origin``.
     return (NormalizedUrl(origin, policy=UNRESTRICTED_HOST_POLICY).origin, UNRESTRICTED_HOST_POLICY)
 
 
 class TestRobotsCacheLocking:
     def test_robots_cache_lock_is_present(self):
 
-        # The chokepoint moved the lock INSIDE the cache: the module no longer
-        # carries a bare dict + lock pair that callers must compose correctly.
+        # The chokepoint moved the lock INSIDE the cache: the module no longer carries a bare dict + lock pair
+        # that callers must compose correctly.
         cache = engine_mod.robots_cache
         assert hasattr(cache, "_lock")
         assert isinstance(cache._lock, type(threading.Lock()))
@@ -77,10 +77,8 @@ class TestTokenizer:
 
 class TestGroupAccumulator:
     def test_group_materializes_only_on_a_consumed_directive(self):
-        # The only group that exists is one carrying a consumed directive; a
-        # foreign UA line alone contributes nothing. Agent lists accumulate
-        # across non-consumed lines (a shipped quirk of both old scanners),
-        # so selection must be what keeps foreign blocks out — pinned next.
+        # The only group that exists is one carrying a consumed directive; a foreign UA line alone contributes
+        # nothing.
         text = "User-agent: baiduspider\nSitemap: https://x/a\n\nUser-agent: crawlutron\nDisallow: /priv\n"
         groups = _groups(text, lambda k, v: k in ("allow", "disallow"))
         assert len(groups) == 1
@@ -88,9 +86,7 @@ class TestGroupAccumulator:
         assert parse_robots_rules(text, token=TOKEN) == [(False, "/priv")]
 
     def test_foreign_directives_never_claim_selection(self):
-        # The pre-RFC-9309 union bug: a Baiduspider ``Disallow: /`` was
-        # blocking our crawler site-wide. With no group ours, fallback is
-        # the star group — and here there is none, so nothing is blocked.
+        # With no group ours, fallback is the star group — and here there is none, so nothing is blocked.
         text = "User-agent: baiduspider\nDisallow: /\n"
         assert parse_robots_rules(text, token=TOKEN) == []
 
@@ -118,8 +114,8 @@ class TestSelection:
         assert best == [("disallow", "/long")]
 
     def test_foreign_agents_never_claim_our_token(self):
-        # Matching the *token*, not the full UA string, and only substrings
-        # of it — a URL or version fragment must not select a group.
+        # Matching the *token*, not the full UA string, and only substrings of it — a URL or version fragment
+        # must not select a group.
         text = "User-agent: https://bot.example/crawlutron/9\nDisallow: /x\n\nUser-agent: *\nDisallow: /*\n"
         best, star = select_robots_values(_groups(text, lambda k, v: True), TOKEN)
         assert best is None
@@ -133,9 +129,8 @@ class TestSelection:
 
 class TestRulesParser:
     def test_empty_disallow_is_an_answer_not_a_star_fallback(self):
-        # ``Disallow:`` (empty) opens the matched group and records the
-        # empty path — the linear-time matcher interprets it as allow-all.
-        # Crucially it does NOT fall through to the star block's rules.
+        # ``Disallow:`` (empty) opens the matched group and records the empty path — the linear-time matcher
+        # interprets it as allow-all. Crucially it does NOT fall through to the star block's rules.
         text = "User-agent: *\nDisallow: /*\n\nUser-agent: crawlutron\nDisallow:\n"
         assert parse_robots_rules(text, token=TOKEN) == [(False, "")]
 
@@ -158,24 +153,19 @@ class TestCrawlDelayParser:
         assert parse_robots_crawl_delay(text, token=TOKEN) == 3.0
 
     def test_matched_group_with_only_invalid_delay_falls_back_to_star(self):
-        # The shipped quirk: the group materializes (non-empty garbage
-        # value) yet yields no number, and selection returns the star
-        # delay rather than "no politeness floor".
         text = "User-agent: *\nCrawl-delay: 3\n\nUser-agent: crawlutron\nCrawl-delay: soon\n"
         assert parse_robots_crawl_delay(text, token=TOKEN) == 3.0
 
     def test_inf_and_overflow_delays_are_dropped(self):
-        # 1e999 overflows float to inf; a hostile robots.txt must not be
-        # able to install a non-finite politeness floor. The parser rejects
-        # non-finite numbers outright (the scheduler clamps finite ones).
+        # 1e999 overflows float to inf; a hostile robots.txt must not be able to install a non-finite
+        # politeness floor. The parser rejects non-finite numbers outright (the scheduler clamps finite ones).
         for raw in ("1e999", "inf", "nan"):
             text = f"User-agent: crawlutron\nCrawl-delay: {raw}\n"
             assert parse_robots_crawl_delay(text, token=TOKEN) is None, raw
 
     def test_huge_finite_delay_is_parsed_verbatim(self):
-        # The parser does not clamp: bounding the wait is the scheduler's
-        # enforcement job (chokepoint), so a finite value passes through
-        # untouched and the scheduler clamps it at the write.
+        # The parser does not clamp: bounding the wait is the scheduler's enforcement job (chokepoint), so a
+        # finite value passes through untouched and the scheduler clamps it at the write.
         text = "User-agent: crawlutron\nCrawl-delay: 1e9\n"
         assert parse_robots_crawl_delay(text, token=TOKEN) == 1e9
 
@@ -186,8 +176,8 @@ class TestSitemapParser:
         assert parse_robots_sitemaps(text) == ["https://a/s.xml", "https://b/s.xml"]
 
     def test_uses_the_shared_tokenizer(self):
-        # A regression that re-rolls its own splitlines() scan would still pass
-        # the value assertions above; this pins the consolidation itself.
+        # A regression that re-rolls its own splitlines() scan would still pass the value assertions above;
+        # this pins the consolidation itself.
         from app.orchestration import robots_parse
 
         src = _module_source(robots_parse)
@@ -208,9 +198,8 @@ def _module_source(module) -> str:
 
 @pytest.mark.parametrize("token", [TOKEN.capitalize(), TOKEN])
 def test_agent_matching_is_case_insensitive(token):
-    # The file declares the agent in upper case while the query arrives mixed and
-    # lower, so all three spellings are one token. A matcher that compared
-    # literally would pass the lower param and fail the mixed one.
+    # The file declares the agent in upper case while the query arrives mixed and lower, so all three
+    # spellings are one token
     text = f"User-agent: {TOKEN.upper()}\nDisallow: /x\n"
     assert parse_robots_rules(text, token=token) == [(False, "/x")]
 
@@ -230,13 +219,8 @@ def test_dollar_anchor_is_end_anchored():
 
 
 def test_an_empty_disallow_is_ignored_and_does_not_override_a_sibling_rule():
-    # RFC 9309 2.2.2: the most specific match is the one with the most octets,
-    # and a path-pattern is "/" *UTF8-char-noctl while `empty-pattern` is a
-    # separate zero-octet form. A zero-octet rule is never the most specific
-    # match and cannot match a path, so it contributes no match at all and the
-    # group's other rules still govern. It does NOT "override a prior
-    # Disallow" -- that is not a rule the RFC contains, and reading it that way
-    # let this matcher allow a path the same block had just named.
+    # RFC 9309 2.2.2: the most specific match is the one with the most octets, and a path-pattern is "/"
+    # *UTF8-char-noctl while `empty-pattern` is a separate zero-octet form.
     rules = [(False, "/"), (False, "")]
     assert robots_allows(canonical("http://x.example/anything/at/all"), rules) is False
     # With no other rule to match, nothing is found and the URI is allowed.
@@ -274,8 +258,8 @@ def test_pathological_wildcard_rule_matches_in_linear_time():
     path = "/" + "b" * 2000 + "a"
 
     assert matcher.match(path) is False
-    # CPU seconds, not wall clock: the claim is about the matcher's work, and a
-    # wall clock also reports how loaded the box was. See `cpu_seconds`.
+    # CPU seconds, not wall clock: the claim is about the matcher's work, and a wall clock also reports how
+    # loaded the box was. See `cpu_seconds`.
     elapsed = cpu_seconds(lambda: matcher.match(path))
     assert elapsed < 0.5, f"wildcard match cost {elapsed:.6f}s of CPU (backtracking?)"
 
@@ -362,9 +346,8 @@ async def test_purge_handles_production_shaped_entries():
     em.robots_cache.clear()
     try:
         for i in range(ROBOTS_CACHE_MAX_ENTRIES + 1):
-            # Stale entries (ttl -1) stay present under the chokepoint's
-            # purge-only-deletion semantics; the is that a
-            # full cache must not crash purging during a real crawl.
+            # Stale entries (ttl -1) stay present under the chokepoint's purge-only-deletion semantics; the is
+            # that a full cache must not crash purging during a real crawl.
             em.robots_cache.put(robots_entry_key(f"http://purge-{i}.test"), ([], [], None), ttl=-1.0)
 
         fetcher = routed_fetcher(
@@ -396,8 +379,8 @@ def test_failure_ttl_is_60s_not_600s():
 
     em.robots_cache.clear()
     try:
-        # Pin the stored per-entry TTL by inspecting BoundedTTLCache internals.
-        # A 500 response writes rules=[(False,"/")], ttl=min(600,60)=60.
+        # Pin the stored per-entry TTL by inspecting BoundedTTLCache internals. A 500 response writes
+        # rules=[(False,"/")], ttl=min(600,60)=60.
         em.robots_cache.put(robots_entry_key("http://fail-ttl.test"), ([(False, "/")], [], None), ttl=60.0)
         entries = em.robots_cache._entries
         cached = entries.get(robots_entry_key("http://fail-ttl.test"))
@@ -421,9 +404,8 @@ async def test_robots_cache_shared_across_requests():
     calls = {"robots": 0}
 
     def make_fetcher():
-        # A fresh fetcher per request is the point of this test -- the sharing
-        # under test lives in the robots cache, not in the fetcher -- so what
-        # each call gets is the same routing with a shared counter behind it.
+        # A fresh fetcher per request is the point of this test -- the sharing under test lives in the robots
+        # cache, not in the fetcher -- so what each call gets is the same routing with a shared counter behind
         def count_robots(url, headers):
             if url.raw.endswith("/robots.txt"):
                 calls["robots"] += 1
@@ -489,8 +471,8 @@ class TestRobotsFailClosed:
         assert item.status == "success"
 
     async def test_group_selection_uses_product_token(self):
-        # "github" appears in the full User-Agent URL but not in the product
-        # token: the github group must not apply to us; the * group allows.
+        # "github" appears in the full User-Agent URL but not in the product token: the github group must not
+        # apply to us; the * group allows.
         body = "User-agent: github\nDisallow: /\nUser-agent: *\nAllow: /\n"
         item = await _crawl_page("robots-token.test", _make_fetcher(200, body))
         assert item.status == "success"

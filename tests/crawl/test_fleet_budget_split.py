@@ -135,13 +135,12 @@ def test_the_content_length_budget_is_split_across_workers(monkeypatch):
     monkeypatch.setattr(cck, "_RAM_SAFETY_BYTES", budget)
     uncapped = CrawlPolicyLimits()
 
-    # 16 MiB across one worker clears the 10 MiB per-page default, so the
-    # default binds and is reported undivided.
+    # 16 MiB across one worker clears the 10 MiB per-page default, so the default binds and is reported
+    # undivided.
     monkeypatch.setenv("CRAWLUTRON_WORKERS", "1")
     assert cck._effective_max_content_length(uncapped, global_concurrency=1) == 10 * 1024 * 1024
 
-    # Below the default the budget is the binding constraint, and each worker
-    # takes its share of it.
+    # Below the default the budget is the binding constraint, and each worker takes its share of it.
     for workers in (2, 4, 8):
         monkeypatch.setenv("CRAWLUTRON_WORKERS", str(workers))
         each = cck._effective_max_content_length(uncapped, global_concurrency=1)

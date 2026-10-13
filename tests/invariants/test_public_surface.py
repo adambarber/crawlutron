@@ -26,20 +26,7 @@ from tests.property_registry import Property
 
 _PUBLIC_SURFACE_PROPERTY = Property(
     name="one-public-door",
-    # Deliberately not in PROPERTY_REGISTRY, and deliberately not pointing at an
-    # app module. The registry models "this app module owns this property", and
-    # this constraint has no owner: `one-public-door` is enforced over the 13
-    # modules of _OWNER_PUBLIC_SURFACE_RATCHET at once, each declaring its own
-    # __all__ and adding no new entry point. Naming sqlite_store.py as the owner
-    # was the original mistake -- it is one module of thirteen, and the claim is
-    # false. The registry's owner check requires definition_site's symbol to be
-    # declared in owner_symbols AND to resolve inside app/, so a descriptor whose
-    # definition site is a test-tree detector cannot be registered without
-    # asserting an ownership that does not exist.
-    #
-    # This object exists only because assert_property_detector_bites takes a
-    # Property and reads its .name for the failure text. It is a detector
-    # descriptor, not a registry entry.
+    # Deliberately not in PROPERTY_REGISTRY, and deliberately not pointing at an app module.
     owner_module="tests/invariants/test_registry.py",
     owner_symbols=("_public_surface_offenders",),
     definition_site="tests/invariants/test_registry.py:_public_surface_offenders",
@@ -48,59 +35,11 @@ _PUBLIC_SURFACE_PROPERTY = Property(
 )
 
 
-# Values are (declared public symbols, executable entry points). Public data
-# classes, exceptions, type aliases, and constants remain part of the contract,
-# but only functions and classes with their own methods are alternate ways in.
-#
-# app/safety/bounded_io.py LOWERED to (4, 2): read_capped_sync is gone. It existed only
-# for the document extractor's urllib path, and that path is now the shared pinned
-# httpx transport like every other fetch, so the module has one reader rather
-# than a sync one and an async one that nothing used side by side.
-#
-# app/api/response_shaping.py RAISED to (9, 8) for the same reason: `EnvelopeOptions`
-# is the one record the sync and async envelope builders both take, and it exists
-# because the two builders each restated the same six optional parameters in
-# their signatures -- six more places to add an option and forget one, and the
-# copy-paste gate was holding the pair as a same-file clone. Folding them into a record is what
-# made the builders agree by construction; a narrower budget would push the
-# options back out into two hand-maintained lists.
-#
-# app/safety/validation.py RAISED to (17, 11) for `in_range`. The int face of the env
-# chokepoint could not REFUSE an out-of-range value -- only clamp it -- because
-# the `validate`/`validate_event` pair that says "warn and use the fallback"
-# existed on the float face and had never been exposed on the int face. So an
-# operator who configured a deployment value outside its contract got a
-# different number in silence, while the code's own comment promised "falls back
-# here, loudly". `in_range` is the predicate that pair consumes; it is the
-# module's job because a range is a validation fact and a second copy of it in
-# settings.py is what the drifted literal `hi=120` already was once. Declared in
-# `__all__` rather than left module-private, because a private name imported
-# across a module boundary is a public name with a lie on it.
-#
-# The entry-point half then DROPPED 13 -> 11, and that is the more interesting
-# half: `get_env_int`/`get_env_float` are no longer second copies of the
-# mapping faces' signatures, they are the mapping faces bound to `os.environ`.
-# Adding `validate`/`validate_event` to one face had pushed the other face's
-# restated parameter list past the clone gate, which is the gate correctly
-# catching a signature that was maintained in two places. Two faces of one
-# chokepoint should be one declaration, not two.
-# One adapter per producer shape, which is what took response_shaping from
-# (10, 9) to (11, 10): the crawl pipeline's envelope carries engine results and
-# the render worker's carries browser results, so the adapter that reads an
-# envelope has to be told which record it is shaping. One function taking both
-# would have to accept either record AND a matching callable, and the only way
-# to write that is a cast -- the `Any`-on-both-sides pairing the result records
-# exist to remove. Two adapters, one shared `_envelope_options`, and each one
-# reachable only through the endpoint that has the matching envelope.
+# Values are (declared public symbols, executable entry points).
 _OWNER_PUBLIC_SURFACE_RATCHET = {
     "app/admission/admission.py": (19, 13),
-    # RAISED to (14, 11) then LOWERED to (7, 6), (5, 5), (4, 4), then (2, 2):
-    # HostPolicy and registrable_domain moved to app/models, then the env family
-    # to app/config/env.py, then the egress verdict to app/models/host_policy.py, then
-    # the normalizer to app/models/normalized_url.py. The NormalizedUrl
-    # convergence then retired the public_url_or_none family outright, leaving
-    # only the two facts that are still validation's to own: the resolved-address
-    # publicness predicate and the JS-endpoint egress filter.
+    # RAISED to (14, 11) then LOWERED to (7, 6), (5, 5), (4, 4), then (2, 2): HostPolicy and
+    # registrable_domain
     "app/safety/validation.py": (2, 2),
     "app/config/env.py": (7, 5),
     "app/api/response_shaping.py": (11, 10),
@@ -111,23 +50,11 @@ _OWNER_PUBLIC_SURFACE_RATCHET = {
     "app/transport/decompression.py": (3, 1),
     "app/admission/credentials.py": (3, 3),
     "app/admission/render_options.py": (2, 2),
-    # RAISED to (2, 2): `payload_policy` was `_payload_policy` until the layout
-    # put its only production caller (the engine) in another package. The
-    # private-name rule prescribes promoting a name another package needs rather
-    # than importing it across the boundary, so the chokepoint became reachable
-    # and its count moved with it.
+    # RAISED to (2, 2): `payload_policy` was `_payload_policy` until the layout put its only production caller
+    # (the engine) in another package.
     "app/admission/payload_helpers.py": (2, 2),
-    # RAISED to (10, 9): terminal_attempt became public when CrawlResult stopped
-    # copying four axes out of the attempt it holds. Three call sites outside
-    # this module build that attempt -- the render endpoint's paced-task result,
-    # the browser strategy's success path, and the shared test builders -- and
-    # each spelling its own would be four statements of what a terminal result
-    # carries. The chokepoint is the entry point; the count moved because the
-    # chokepoint needs to be reachable.
-    # The result-construction chokepoint was one module with three jobs; the
-    # split put the classifier (what a failure means), the engine funnels (a
-    # reportable record) and the render funnels (the wire shape) in their own
-    # modules. Each count is that module's real surface.
+    # RAISED to (10, 9): terminal_attempt became public when CrawlResult stopped copying four axes out of the
+    # attempt it holds.
     "app/orchestration/classification.py": (1, 1),
     "app/orchestration/engine_result.py": (5, 4),
     "app/orchestration/render_result.py": (4, 4),
@@ -136,9 +63,8 @@ _OWNER_PUBLIC_SURFACE_RATCHET = {
 }
 
 
-# Dynamic-pattern re.* calls: a non-literal first arg is a pattern built from
-# attacker-influenced text (the ReDoS shape). `re.search(LITERAL, text)` is
-# safe -- only a dynamic PATTERN is the hazard.
+# Dynamic-pattern re.* calls: a non-literal first arg is a pattern built from attacker-influenced text (the
+# ReDoS shape). `re.search(LITERAL, text)` is safe -- only a dynamic PATTERN is the hazard.
 _RE_DYNAMIC_METHODS = frozenset({"compile", "search", "match", "fullmatch", "sub", "findall", "split"})
 
 
@@ -149,9 +75,8 @@ def _owned_public_symbols(tree: ast.Module) -> set[str]:
             if not node.name.startswith("_"):
                 public.add(node.name)
         elif isinstance(node, ast.TypeAlias):
-            # ``type X = ...`` (PEP 695) is a declaration of X at module level, and
-            # is what replaced ``X: TypeAlias = ...``. It moved to its own AST node
-            # in 3.12, so the floor raising made this branch load-bearing.
+            # ``type X = ...`` (PEP 695) is a declaration of X at module level, and is what replaced ``X:
+            # TypeAlias = ...``
             if not node.name.id.startswith("_"):
                 public.add(node.name.id)
         elif isinstance(node, (ast.Assign, ast.AnnAssign)):
@@ -245,24 +170,13 @@ def test_public_surface_detector_bites():
     )
 
 
-# ---------------------------------------------------------------------------
-# app/models: one home per declaration, and that home is the file's name
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------- app/models: one home per
+# declaration, and that home is the file's name
 
 _MODELS_ROOT = REPO_ROOT / "app" / "models"
 
 
-# The two modules here that hold a concern rather than a type. Both are named in
-# ``app/models/__init__.py``, which says why: ``taxonomy.py`` holds the
-# classification vocabulary because those declarations mutually reference each
-# other and splitting them would put a name in a file that cannot be read without
-# the file it is defined in; ``serialization.py`` holds the two directions
-# derived from a record's field list, which is a pair about every model rather
-# than a model. Every other module is named for the declaration it holds.
-#
-# The list is checked against the tree in both directions, so an entry that
-# stops being true is a red run rather than a comment that has quietly become a
-# lie.
+# The two modules here that hold a concern rather than a type.
 _MODELS_CONCERN_MODULES = frozenset({"taxonomy.py", "serialization.py"})
 
 
@@ -332,8 +246,8 @@ def _models_home_offenders(root: pathlib.Path = _MODELS_ROOT) -> list[str]:
         if path.name == "__init__.py":
             continue
         declared_types = _declared_types(ast.parse(path.read_text(encoding="utf-8")))
-        # A private class is not a name a reader goes looking up, for the same reason
-        # a module constant is not; only public declarations pick the module's name.
+        # A private class is not a name a reader goes looking up, for the same reason a module constant is
+        # not; only public declarations pick the module's name.
         public_types = {name for name in declared_types if not name.startswith("_")}
         sole = len(public_types) == 1 and path.name not in _MODELS_CONCERN_MODULES
         for declared in sorted(public_types):
@@ -405,9 +319,7 @@ def test_models_typing_detectors_bite(tmp_path):
         "HttpFetchResult lives in records.py; a reader looking up HttpFetchResult opens http_fetch_result.py"
     ]
 
-    # Every alias form is covered, not just the class. A rule that governs the
-    # declaration a reader is most likely to look up and quietly ignores the
-    # other three is worse than no rule, because it reads as settled.
+    # Every alias form is covered, not just the class
     for source in (
         "class DiscoveredLink:\n    pass\n",
         "type DiscoveredLink = str\n",
@@ -418,8 +330,8 @@ def test_models_typing_detectors_bite(tmp_path):
             "DiscoveredLink lives in records.py; a reader looking up DiscoveredLink opens discovered_link.py"
         ], source
 
-    # Two homes for one declaration is the failure the split was for, and it is
-    # invisible to the naming check -- each copy sits in a correctly named file.
+    # Two homes for one declaration is the failure the split was for, and it is invisible to the naming check
+    # -- each copy sits in a correctly named file.
     (tmp_path / "records.py").unlink()
     (tmp_path / "discovered_link.py").write_text("class DiscoveredLink:\n    pass\n")
     (tmp_path / "crawl_task.py").write_text(

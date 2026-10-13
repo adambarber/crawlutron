@@ -37,9 +37,8 @@ class TestContract:
         # ``expires_at > now`` as fresh, so the boundary itself is expired
         assert cache.get("a") is None
         clock["now"] -= 0.01
-        # The engines' dicts keep expired entries present (purge-only
-        # deletion, relied on by the sitemap 304 path); rewinding the clock
-        # must resurrect the still-stored entry.
+        # The engines' dicts keep expired entries present (purge-only deletion, relied on by the sitemap 304
+        # path); rewinding the clock must resurrect the still-stored entry.
         assert cache.get("a") == 1
         clock["now"] += 10.01
         assert cache.purge_expired() == 1

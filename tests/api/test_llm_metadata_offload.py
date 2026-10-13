@@ -124,9 +124,8 @@ async def test_sync_and_async_envelope_builders_agree_on_the_submitted_count(sub
         items, adapt=build_unified_result, options=EnvelopeOptions(request_id="r", submitted_count=submitted)
     )
     assert async_.model_dump() == sync.model_dump()
-    # None means "the caller could not say", which the wire answers as the
-    # batch it is reporting; anything else is the caller's number verbatim,
-    # including a count that disagrees with the batch on purpose.
+    # None means "the caller could not say", which the wire answers as the batch it is reporting; anything
+    # else is the caller's number verbatim, including a count that disagrees with the batch on purpose.
     assert async_.submitted_count == (len(items) if submitted is None else submitted)
 
 

@@ -125,11 +125,8 @@ class TestHttpStrategyEdges:
             http_fetcher=unreachable_fetcher,
             cache=cache,
         )
-        # A bare httpx.RequestError is the generic httpx-level tail of the
-        # classifier (more specific branches map to connection_error/tls_error
-        # etc.), so it lands on http_error. The old sink hardcoded
-        # network_error and masked this; the shared primitive surfaces the
-        # real code now.
+        # A bare httpx.RequestError is the generic httpx-level tail of the classifier (more specific branches
+        # map to connection_error/tls_error etc.), so it lands on http_error.
         assert result.classification == "http_error"
 
     async def test_http_strategy_result_httpx_http_status_error(self):
@@ -137,10 +134,8 @@ class TestHttpStrategyEdges:
 
         cache = HttpCache()
 
-        # A real request/response pair, because ``HTTPStatusError`` carries both
-        # and the strategy reads ``.response`` off it. Stand-ins left ``request``
-        # as ``None`` and the response as an object that was not a response, so
-        # the error a test built was not the error httpx raises.
+        # A real request/response pair, because ``HTTPStatusError`` carries both and the strategy reads
+        # ``.response`` off it.
         request = httpx.Request("GET", "http://error.example.com/")
         response = httpx.Response(
             500, headers={"content-type": "text/plain"}, content=b"error", request=request
@@ -188,11 +183,8 @@ async def test_http_strategy_rejects_non_mapping_request_profile():
     async def fetcher(*args, **kwargs):
         raise AssertionError("fetcher must not run for an invalid request profile")
 
-    # The rejecting edge, not ``read_policy``: a wire payload is validated by
-    # ``validate_wire_policy``, and ``read_policy`` is total by contract -- it
-    # repairs a bad field with its default and never raises. Asking the total
-    # edge to reject is asking it to break its own contract, and the answer
-    # would prove nothing about what a caller is told.
+    # The rejecting edge, not ``read_policy``: a wire payload is validated by ``validate_wire_policy``, and
+    # ``read_policy`` is total by contract -- it repairs a bad field with its default and never raises.
     for profile in ("hello", ["hello"]):
         with pytest.raises(ValueError, match="^invalid_policy_profile$"):
             policy = validate_wire_policy(
@@ -253,10 +245,7 @@ async def test_stateful_request_profile_is_resolved_once_for_headers_and_diagnos
         http_fetcher=fetcher,
     )
 
-    # One snapshot, taken at the read edge. If anything re-read the profile the
-    # StatefulProfile would answer "generic_crawler" the second time, and the
-    # headers would disagree with the diagnostics -- which is the defect this
-    # profile was built to make visible.
+    # One snapshot, taken at the read edge.
     assert result.diagnostics["request_profile"] == {
         "user_agent_family": "desktop_chrome",
         "cookie_jar": "none",

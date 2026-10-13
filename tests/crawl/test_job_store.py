@@ -229,10 +229,7 @@ def test_load_missing_returns_none_no_warning(tmp_path, caplog):
 
 def test_load_logs_warning_on_corruption(tmp_path, caplog):
     store = _store_test_job_store_serialization(tmp_path)
-    # A job whose stored page history is not valid JSON. The history moved out
-    # of the job row into its own table (migration 0003); what is under test is
-    # unchanged, namely that a corrupt record surfaces a warning instead of
-    # being silently swallowed into a missing job.
+    # A job whose stored page history is not valid JSON.
     store._conn.execute(
         """
         INSERT INTO crawl_jobs

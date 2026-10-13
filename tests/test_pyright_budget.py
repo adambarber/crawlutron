@@ -57,60 +57,7 @@ from tests.chokepoint_walks import (
 SERVICE_ROOT = pathlib.Path(__file__).resolve().parent.parent
 _THIS_MODULE = sys.modules[__name__]
 
-# Fourteen on first run. Eleven were fixed or suppressed with a documented
-# reason. The four that remain are:
-#
-#   2  engine.py       the regex.Pattern / re.Pattern lie. Both sides of the
-#                      diagnostic render as `Pattern[str] | None`, which is why
-#                      mypy -- reading `regex` as untyped and degrading it to
-#                      Any -- cannot see it. engine.py is mid-split in wave 1.
-#   1  browser_pool    a FALSE POSITIVE, verified with a reveal_type probe on a
-#                      `BrowserPool` parameter: pyright reports the property as
-#                      the exact four-member Literal, so the value reaching the
-#                      return is a declared member. It mis-resolves `self._pool`
-#                      at that one site, and does not honour a per-line
-#                      `# pyright: ignore[reportReturnType]` there. Left in the
-#                      budget deliberately rather than worked around in code: the
-#                      alternative is restructuring a lazy property that must stay
-#                      lazy, because reading it before the pool initializes is the
-#                      path that labels a worker which failed before acquire.
-#   1  engine.py       counted above; two sites, one root cause.
-#
-# engine.py's two clear the moment wave 1's split lands, and the tight-budget
-# test below fails the moment they do, which is how every other ratchet here
-# closes. Zero is the target and nothing else is acceptable at the end.
-# Fourteen on first run. Thirteen were fixed or suppressed with a documented
-# reason. The fourteenth was misdiagnosed twice before it was fixed correctly,
-# and the way it was misdiagnosed is the part worth keeping:
-#
-# It was first called a false positive on the strength of a `reveal_type` probe
-# that showed the `browser_strategy` PROPERTY is the exact four-member Literal.
-# That was true, and it said nothing about the other branch. The real defect was
-# the constructor: `strategy` is annotated `CrawlStrategyName`, which includes
-# the two HTTP strategies, so a browser worker could be constructed with
-# `HTTP_DECLARED_CRAWLER` and emit it as a browser result's `selected_strategy`.
-# A name outside the enum was worse -- accepted at construction, rejected much
-# later by `CrawlResult.__post_init__` as a ValueError from a property nobody
-# reading that constructor would predict. An annotation is not a runtime check.
-#
-# So: probing one branch of a function and generalising to the whole function is
-# how a real defect gets filed as a tool bug. The budget is zero and the gate
-# stays at zero.
-#
-# The last eight suppressions are gone, and so is the reason this file needed a
-# second question asked of it. Not one of the eight had been suppressing anything:
-# five in `app/api_models.py` (a worktree at 7d0aed1, the commit that added them,
-# reports zero `reportArgumentType` findings there), two on the `lxml.etree`
-# imports (quiet because `reportPrivateImportUsage` is off, not because lxml ships
-# partial stubs), and one on `browser_pool._configured_strategy` (quiet since the
-# worker constructor began validating the strategy it is handed). One of the
-# eight was not a suppression at all but a prose sentence quoting one.
-#
-# That is a whole class of finding this budget could not see, because a
-# suppression that suppresses nothing leaves the count at zero and the
-# explanation still attached. Two rules in pyrightconfig.json make it visible,
-# and test_pyright_detects_its_own_suppressions_decaying asserts they are on --
-# with either off, the tree looks identical from here.
+# Fourteen on first run. The four that remain are: 2 engine.py the regex.Pattern / re.Pattern lie.
 BUDGET = 0
 
 
@@ -306,40 +253,8 @@ def test_pyright_config_targets_the_running_interpreter() -> None:
     )
 
 
-# ---------------------------------------------------------------------------
-# Keeping pyright's view of the models TRUE.
-#
-# This is not another check for annotation lies; it protects the checker itself.
-# Pyright 1.1.406 synthesises a pydantic model's __init__ from the annotation
-# and the assigned value, and reads a positional Field default as NO default --
-# so `etag: str | None = Field(None, description=...)` was reported as a
-# REQUIRED parameter while the interpreter accepted the call without it.
-# Verified directly rather than inferred: a probe constructing
-# `UnifiedCrawlResult(original_url=..., status=..., classification=...)` drew
-# fifteen "Arguments missing" errors from a model where thirty-two of its fields
-# have defaults.
-#
-# The consequence was architectural, not cosmetic. A direct `Model(...)` call
-# drew a wall of false reportCallIssue errors and a dict literal drew none,
-# because nothing type-checks a dict against a model -- so model construction
-# routed through `dict[str, Any]` throughout the service. The dicts were the
-# load-bearing workaround for a checker that misreported the signature, and a
-# dict is exactly where a key can be dropped without a trace. That is how
-# `metadata={}` shipped a /v1/render whose PageMetadata.title no input could
-# fill: four of the six keys the browser worker produced were filtered away by
-# name, and every field of the model has a default, so a dict omitting one was a
-# valid dict.
-#
-# The declared default therefore has to sit where a checker can see it:
-# `Annotated[T, Field(description=...)] = default`, or a bare `= default` when
-# the Field call carries nothing else. Both produce a byte-identical OpenAPI
-# schema, which is why this is a pure type-fidelity change and not a wire change.
-#
-# Without this gate, one comfortable `Field(None, description=...)` re-breaks the
-# checker's view of every model in the service and floods a BUDGET=0 gate with
-# findings that are all wrong -- the state this codebase was in, with six
-# `# pyright: ignore` suppressions in pyrightconfig.json's shadow.
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------- Keeping pyright's view of the
+# models TRUE. This is not another check for annotation lies; it protects the checker itself.
 
 
 def _annotated_field_calls(annotation: ast.expr | None) -> Iterator[ast.Call]:
@@ -389,11 +304,6 @@ def _positional_field_default_offenders(tree: ast.Module, path: pathlib.Path | N
             if any(key.arg == "default_factory" for key in call.keywords):
                 continue
             if call.args:
-                # Annotated rather than inferred: the two arms below bind
-                # different things (a positional expression, or the keyword's
-                # value which is absent when there is no ``default=``), and
-                # binding the first arm alone left the variable typed as
-                # always-present.
                 default: ast.expr | None = call.args[0]
             else:
                 default = next((key.value for key in call.keywords if key.arg == "default"), None)
@@ -435,9 +345,6 @@ def test_pydantic_default_visibility_detector_bites() -> None:
         "class M(BaseModel):\n"
         '    robots: bool = Field(default=True, description="Honor robots.txt.")\n'
     )
-    # The spelling the detector used to be blind to: the default sits inside the
-    # Annotated metadata while the assignment repeats it, so one default is stated
-    # twice and either statement can be edited alone.
     inside_annotated = (
         "from typing import Annotated\n"
         "from pydantic import BaseModel, Field\n"
@@ -456,8 +363,8 @@ def test_pydantic_default_visibility_detector_bites() -> None:
     assert_stays_clean(
         _positional_field_default_offenders,
         (
-            # The form the fix produces: the default sits where pyright reads it,
-            # on the assignment, stated once.
+            # The form the fix produces: the default sits where pyright reads it, on the assignment, stated
+            # once.
             "from typing import Annotated\n"
             "from pydantic import BaseModel, Field\n"
             "class M(BaseModel):\n"
@@ -468,8 +375,8 @@ def test_pydantic_default_visibility_detector_bites() -> None:
             "from pydantic import BaseModel, Field\n"
             "class M(BaseModel):\n"
             '    url: str = Field(..., description="Root URL.")\n',
-            # default_factory is resolved by pyright, so it is a different
-            # question and must not be swept up in this one.
+            # default_factory is resolved by pyright, so it is a different question and must not be swept up
+            # in this one.
             "from pydantic import BaseModel, Field\n"
             "class M(BaseModel):\n"
             "    links: list[str] = Field(default_factory=list, description='d')\n",

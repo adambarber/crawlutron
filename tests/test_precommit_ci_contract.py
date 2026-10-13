@@ -16,55 +16,29 @@ from scripts.executables import BASH, GIT, require_executable, require_repo_tool
 
 SERVICE_ROOT = Path(__file__).resolve().parents[1]
 CONFIG_PATH = SERVICE_ROOT / ".pre-commit-config.yaml"
-# The developer Makefile. It is the one place outside CI that a person runs a
-# gate by hand, which makes it the most likely place for a gate to acquire a
-# second spelling: CI is held to the config by the tests below, and nothing was
-# holding the Makefile to anything.
+# The developer Makefile.
 MAKEFILE_PATH = SERVICE_ROOT / "Makefile"
 WORKFLOW_PATH = SERVICE_ROOT / ".github" / "workflows" / "ci.yml"
 EXPECTATIONS_PATH = SERVICE_ROOT / "jscpd-expectations.json"
-# The config as the workflow must name it. The workflow is a repository-root
-# `.github/workflows/ci.yml` and is written for the layout where this service IS
-# the repository, so the config it names is this service's own file at the root
-# of that repository. Deriving the expected string from SERVICE_ROOT keeps this
-# test correct in both layouts: the workflow and this file are copied verbatim on
-# extraction, and the one thing that must never reappear is a
-# `docker/browser-crawler/` prefix, which stops naming anything the moment the
-# service becomes its own repository. `relative_to` is not a no-op assertion: if
-# the config ever moved off the service root, this would say so.
+# The config as the workflow must name it.
 WORKFLOW_ROOT_CONFIG = CONFIG_PATH.relative_to(SERVICE_ROOT).as_posix()
 ENFORCEMENT_COMMAND = f"pre-commit run --all-files --config {WORKFLOW_ROOT_CONFIG}"
-# Every job that reports a result the aggregate must depend on. test-browser is
-# here because it is no longer `if: workflow_dispatch`: while it carried that
-# condition GitHub reported a *skipped* job as a success, so the aggregate saw a
-# green it had not earned and the browser suite could never fail a build.
+# Every job that reports a result the aggregate must depend on.
 REPORTING_JOBS = {"enforcement", "test-fast", "test-browser"}
-# GitHub's template form for an errexit shell. The required aggregate is a chain
-# of `test` lines, so its exit code is its last line's without errexit.
+# GitHub's template form for an errexit shell. The required aggregate is a chain of `test` lines, so its exit
+# code is its last line's without errexit.
 ERREXIT_SHELL = "bash -e {0}"
-# Every file the gates read to decide what to enforce. A commit that edits one of
-# them must run the enforcement: the config that decides what is checked cannot
-# itself be the one change that skips the check.
+# Every file the gates read to decide what to enforce. A commit that edits one of them must run the
+# enforcement: the config that decides what is checked cannot itself be the one change that skips the check.
 ENFORCEMENT_INPUTS = (
     "app/config/settings.py",
     "tests/test_jscpd_gate.py",
-    # The duplication gate's own implementation. A commit that edits it changes
-    # what every root is measured against, so it belongs beside the config that
-    # names the floor -- the same "the thing that decides cannot itself be the
-    # change that skips the check" case `scripts/gate` is named for below.
+    # The duplication gate's own implementation.
     "scripts/jscpd_gate.py",
     "scripts/module_graph.py",
-    # The Makefile is a gate entry point: `make lint` and `make typecheck` run
-    # hooks out of the config. A commit that edits it can silently retarget or
-    # repoint a gate, so it belongs in the set of edits that must re-run
-    # enforcement. It was absent while the file still declared its own ruff and
-    # mypy commands, which is how those copies survived the contract tests.
+    # The Makefile is a gate entry point: `make lint` and `make typecheck` run hooks out of the config.
     "Makefile",
-    # The gate entry point itself. Every hook resolves to this file, so a commit
-    # that edits it changes what all five gates actually run -- exactly the
-    # "the config that decides what is checked cannot itself be the one change
-    # that skips the check" case, and the reason it is named here rather than
-    # left to the trigger to notice.
+    # The gate entry point itself.
     "scripts/gate",
     ".pre-commit-config.yaml",
     ".jscpd.json",
@@ -76,23 +50,15 @@ ENFORCEMENT_INPUTS = (
     "requirements-dev.txt",
     ".github/workflows/ci.yml",
 )
-# The single trigger pattern every hook shares, held as one YAML anchor
-# (`*service_trigger`) in .pre-commit-config.yaml so the copies cannot drift.
-# It matches any file that belongs to this service in either layout — nested
-# under the parent repo as docker/browser-crawler/*, or at the repository root
-# once extracted — and excludes the parent repo's other docker services.
+# The single trigger pattern every hook shares, held as one YAML anchor (`*service_trigger`) in
+# .pre-commit-config.yaml so the copies cannot drift.
 ENFORCEMENT_TRIGGER_PATTERN = r"^(docker/browser-crawler/|(?!docker/))"
-# The committed gate entry point every hook resolves to, and the shape of the
-# entry that resolves it. See scripts/gate for why the lookup cannot move into
-# the helper: the helper sits at two different relative paths in the two layouts
-# and pre-commit always runs hooks from the repository root.
+# The committed gate entry point every hook resolves to, and the shape of the entry that resolves it.
 GATE_HELPER = SERVICE_ROOT / "scripts" / "gate"
 GATE_HELPER_PATH = "scripts/gate"
 GATE_ENTRY_END = "' gate "
-# The one-line `bash -c` prologue every entry must open with, pinned byte for
-# byte so the five copies cannot drift. YAML has no string interpolation, so
-# this cannot be an anchor the way `*service_trigger` is; checking it is the
-# substitute.
+# The one-line `bash -c` prologue every entry must open with, pinned byte for byte so the five copies cannot
+# drift.
 GATE_ENTRY_PROLOGUE = (
     "bash -c 'for d in "
     '"$(git rev-parse --show-toplevel)/docker/browser-crawler" '
@@ -100,13 +66,8 @@ GATE_ENTRY_PROLOGUE = (
     f'do [ -x "$d/{GATE_HELPER_PATH}" ] && exec bash "$d/{GATE_HELPER_PATH}" "$@"; '
     f'done; echo "{GATE_HELPER_PATH} not found in either layout" >&2; exit 1\''
 )
-# A syntactically valid config carrying a second, quoted jscpd hook that would
-# pass a lax threshold. Nothing distinguishes it from the real config to a
-# reader of the raw text except the quotes.
-# This fixture's own `files` pattern, which is deliberately NOT
-# ENFORCEMENT_TRIGGER_PATTERN: the point is a second hook that would scan the
-# same files, and borrowing the shared anchor here would make the fixture depend
-# on a constant it is meant to be a hand-written example of.
+# A syntactically valid config carrying a second, quoted jscpd hook that would pass a lax threshold. Nothing
+# distinguishes it from the real config to a reader of the raw text except the quotes.
 _FIXTURE_FILES = r"^(docker/browser-crawler/)?.*\.py$"
 
 
@@ -208,8 +169,8 @@ def _assert_no_config_exclude(config: str) -> None:
     if exclude is None:
         return
     assert isinstance(exclude, str), "the pre-commit config exclude must be a string pattern"
-    # `.*` matches every file — total disable.
-    # `*.py` matches every Python file — disables every Python-scoped hook.
+    # `.*` matches every file — total disable. `*.py` matches every Python file — disables every Python-scoped
+    # hook.
     if exclude in (".*", "*.py", ".*.py$"):
         raise ValueError(
             f"config exclude={exclude!r} disables every hook; "
@@ -442,18 +403,8 @@ def test_ci_runs_every_precommit_hook_through_one_surface() -> None:
 
     entry = _entry(jscpd)
     assert ".venv/bin/python -m scripts.jscpd_gate all" in entry
-    # The floor is on the command line rather than inside the gate so the
-    # command stays the one place a reviewer looks to see what duplication costs.
-    # One floor for every root: the split it replaced existed only while a
-    # loose test floor was hiding production duplication, and a second number
-    # would be a second thing to ratchet.
-    #
-    # The numbers are read from the hook rather than spelled here. This assertion
-    # used to carry its own copy of the pair, which is a fourth restatement of a
-    # number that lives in the entry it is checking: lowering the floor would
-    # have left the config correct and this test red, and raising it would have
-    # done the reverse. Asserting the shape -- a floor is stated, it is one pair,
-    # and it is the enforced one -- is what survives a floor change.
+    # The floor is on the command line rather than inside the gate so the command stays the one place a
+    # reviewer looks to see what duplication costs
     floor = re.search(r"--min-lines (\d+) --min-tokens (\d+) --threshold (\S+)", entry)
     assert floor is not None, f"the entry states no single floor triple: {entry!r}"
     assert floor.group(1) == str(gate.configured_floor()[0])
@@ -530,18 +481,8 @@ def assert_no_hook_command_rerun(workflow: str, hook_tools) -> None:
                 )
 
 
-# How a gate tool may be spelled in a Makefile recipe, as a pattern rather than
-# a literal string. The interpreter prefix is deliberately not part of the match:
-# `$(PYTHON) -m ruff` and `.venv/bin/python -m ruff` are the same gate, and
-# pinning either spelling would let the other through -- which is the exact shape
-# of the drift this detects, since the two copies differed in their prefix and in
-# their arguments at once.
-#
-# `pytest` is absent on purpose. The hooks run pytest SUBSETS (the pyright budget
-# test, the safety invariants), while `make test` runs the whole suite, which is
-# CI's separate test surface rather than a duplicate of a hook. Requiring that to
-# delegate by id would be wrong, so the rule is scoped to the tools a hook owns
-# outright.
+# How a gate tool may be spelled in a Makefile recipe, as a pattern rather than a literal string. `pytest` is
+# absent on purpose.
 GATE_TOOL_PATTERNS = (
     r"-m\s+ruff\b",
     r"-m\s+mypy\b",
@@ -551,10 +492,8 @@ GATE_TOOL_PATTERNS = (
 )
 
 
-# How a Makefile recipe names a hook: either the resolved binary (`pre-commit`)
-# or the Makefile's own indirection to it. The variable is written `PRE_COMMIT`
-# and closed with `)`, so a pattern for the bare word would never match it and
-# every delegation would read as no delegation at all.
+# How a Makefile recipe names a hook: either the resolved binary (`pre-commit`) or the Makefile's own
+# indirection to it.
 MAKEFILE_HOOK_ID = re.compile(r"(?:\$\(PRE_COMMIT\)|\bpre-commit)\s+run\s+(\S+)")
 
 
@@ -664,10 +603,7 @@ def _evasive_workflow(evasion: str) -> str:
             1,
         )
     elif evasion == "expression-continue-on-error":
-        # GitHub evaluates `continue-on-error` as an expression. `yaml.safe_load`
-        # turns `${{ true }}` into the STRING "${{ true }}", which `is not True`,
-        # so a `is not True` check lets it through — then GitHub runs the job as
-        # successful and `needs.X.result` is hollow.
+        # GitHub evaluates `continue-on-error` as an expression.
         mutated = workflow.replace(
             "      - name: Run all configured hooks\n",
             "      - name: Run all configured hooks\n        continue-on-error: ${{ true }}\n",
@@ -680,10 +616,7 @@ def _evasive_workflow(evasion: str) -> str:
             "needs: [lint, typecheck, enforcement, test-fast]", "needs: [lint, typecheck, test-fast]", 1
         )
     elif evasion == "dropped-reporting-job":
-        # Drop a REPORTING job (not the aggregate) from `needs:` and its
-        # result assertion. This is the narrower-shape lie: the required
-        # aggregate still depends on enforcement, and every remaining need
-        # is asserted, but one reporting job is now invisible to it.
+        # Drop a REPORTING job (not the aggregate) from `needs:` and its result assertion.
         mutated = workflow.replace(
             "needs: [lint, typecheck, enforcement, test-fast]", "needs: [lint, enforcement, test-fast]", 1
         )
@@ -735,8 +668,8 @@ def test_the_aggregate_script_is_what_fails_not_just_what_it_says() -> None:
         _render_results(script, dict.fromkeys(needs, "success") | {"enforcement": "failure"})
     )
     assert failed.returncode != 0, "a failed enforcement job must fail the required aggregate"
-    # The same script under a shell without errexit reports success, which is why
-    # the declared shell above is a gate and not a style preference.
+    # The same script under a shell without errexit reports success, which is why the declared shell above is
+    # a gate and not a style preference.
     without_errexit = subprocess.run(
         [
             require_executable(BASH),
@@ -810,8 +743,8 @@ def test_every_gate_fires_on_every_enforcement_input() -> None:
     for hook_id, block in hooks:
         pattern = _field(block, "files")
         for name in ENFORCEMENT_INPUTS:
-            # Both layouts: nested under the parent repo, and at the repository
-            # root once the service is extracted.
+            # Both layouts: nested under the parent repo, and at the repository root once the service is
+            # extracted.
             for candidate in (f"docker/browser-crawler/{name}", name):
                 assert re.search(pattern, candidate), f"hook {hook_id} does not fire on {candidate}"
 
@@ -949,27 +882,23 @@ def _run_gate_entry_in_layout(repo: Path, layout: str) -> tuple[Path, subprocess
     real files rather than re-typed stand-ins, so a helper that stops doing its
     job cannot pass this by agreeing with a copy of itself.
     """
-    # `browser-crawler` here is the pre-extraction layout the hook's prologue
-    # still probes for, not this project's name; the nested branch exists to
-    # prove the helper resolves there too.
+    # `browser-crawler` here is the pre-extraction layout the hook's prologue still probes for, not this
+    # project's name; the nested branch exists to prove the helper resolves there too.
     service_root = repo / "docker" / "browser-crawler" if layout == "nested" else repo
     subprocess.run([require_executable(GIT), "init", "-q", str(repo)], check=True, capture_output=True)
     (service_root / "scripts").mkdir(parents=True)
     (service_root / "scripts" / "gate").write_text(GATE_HELPER.read_text(encoding="utf-8"), encoding="utf-8")
     (service_root / "scripts" / "gate").chmod(0o755)
-    # The helper execs the command it is handed; the synthetic service has no
-    # venv of its own, so the command names the stub interpreter directly.
+    # The helper execs the command it is handed; the synthetic service has no venv of its own, so the command
+    # names the stub interpreter directly.
     (service_root / ".venv" / "bin").mkdir(parents=True)
     interpreter = service_root / ".venv" / "bin" / "python"
     interpreter.write_text('#!/bin/sh\nexec python3 "$@"\n', encoding="utf-8")
     interpreter.chmod(0o755)
     subprocess.run([require_executable(GIT), "-C", str(repo), "add", "-A"], check=True, capture_output=True)
 
-    # pre-commit runs an entry as `shlex.split(entry)` with the repository root
-    # as the working directory, so the first four tokens -- program, -c, the
-    # dual-layout script, and the gate's own $0 name -- are exactly what has to
-    # work. Only the command AFTER them is swapped for one this synthetic
-    # service can satisfy (it prints its cwd, which is the whole question).
+    # pre-commit runs an entry as `shlex.split(entry)` with the repository root as the working directory, so
+    # the first four tokens -- program, -c, the dual-layout script, and the gate's own $0 name -- are exactly
     prologue = shlex.split(_entry(_hook_blocks(CONFIG_PATH.read_text(encoding="utf-8"))[0][1]))[:4]
     assert prologue[:2] == ["bash", "-c"], f"unexpected entry shape: {prologue!r}"
     completed = subprocess.run(

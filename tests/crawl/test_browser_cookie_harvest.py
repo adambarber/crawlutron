@@ -24,9 +24,8 @@ def _page_with_context():
 
 class _FakeContext:
     async def cookies(self, url):
-        # A scheduling point, not a duration: the point of the test is that the
-        # harvest is AWAITED, so the assertion is on what the synchronous store
-        # read sees after the await returns.
+        # A scheduling point, not a duration: the point of the test is that the harvest is AWAITED, so the
+        # assertion is on what the synchronous store read sees after the await returns.
         await asyncio.sleep(0)
         return [{"name": "sess", "value": "abc123"}]
 
@@ -63,10 +62,7 @@ class TestCookieHarvestCompletes:
 class _WedgedContext:
     """Cookies() that never resolves (simulates a wedged transport)."""
 
-    # The declared return is what this WOULD answer if it ever did. Left
-    # undeclared, the signature inferred ``Coroutine[..., None]`` and the class
-    # stopped satisfying the ``PageCookieContext`` contract production reads it
-    # through -- a wedged context is a slow one, not a differently-shaped one.
+    # The declared return is what this WOULD answer if it ever did.
     async def cookies(self, url: str | None = None) -> list[dict[str, str]]:
         await asyncio.Event().wait()
         raise AssertionError("unreachable: this coroutine never resolves")
@@ -92,13 +88,8 @@ class TestHarvestWaitBounded:
                 monkeypatch,
                 driver=FakeBrowserDriver(page, harvest_timeout=0.05, on_close=record_close),
             )
-            # The cap is the thing under test, so the driver reports the short
-            # deadline rather than the five-second default. The deadline is
-            # enforced with ``asyncio.wait_for``, which is loop-time based and
-            # therefore unaffected by the suite's zero-second sleep patch -- the
-            # old version needed real sleeps purely to let the five-second
-            # default expire, which is a slow way to assert "the cap fired". The
-            # resolution path itself is covered by ``harvest_timeout_for``.
+            # The cap is the thing under test, so the driver reports the short deadline rather than the
+            # five-second default.
 
             async def call_finally():
                 await renderer._render_with_page_unlocked(
@@ -145,9 +136,8 @@ class TestActionChainFailuresAreVisible:
                 budget_seconds=5.0,
             )
 
-        # The module logs structured records (``extra=``), which is what the
-        # JSONL sink emits, so the evidence is in the fields rather than the
-        # message.
+        # The module logs structured records (``extra=``), which is what the JSONL sink emits, so the evidence
+        # is in the fields rather than the message.
         failures = [r for r in caplog.records if r.__dict__.get("action") == "wait"]
         assert failures, f"an action failure left no structured record: {caplog.records!r}"
         fields = failures[0].__dict__
@@ -175,8 +165,8 @@ class TestActionChainIsOneBoundedHold:
         observed: list[float | None] = []
 
         async def never_appears(selector, timeout=None, **kwargs):
-            # Records the budget each action was allowed, then wedges: the
-            # realistic shape of an SPA that never grows the awaited element.
+            # Records the budget each action was allowed, then wedges: the realistic shape of an SPA that
+            # never grows the awaited element.
             observed.append(timeout)
             await asyncio.Event().wait()
 
@@ -186,8 +176,8 @@ class TestActionChainIsOneBoundedHold:
             {"type": "wait", "selector": "#two", "timeout": 60_000},
             {"type": "wait", "selector": "#three", "timeout": 60_000},
         ]
-        # 0.05s stands in for the per-URL budget: the deadline is enforced with
-        # loop-time-based wait_for, which the suite's sleep patch cannot fake.
+        # 0.05s stands in for the per-URL budget: the deadline is enforced with loop-time-based wait_for,
+        # which the suite's sleep patch cannot fake.
         with caplog.at_level("WARNING"):
             await asyncio.wait_for(
                 driver.run_action_chain(page, actions, url="http://example.com/page", budget_seconds=0.05),

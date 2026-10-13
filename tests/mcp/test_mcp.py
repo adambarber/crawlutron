@@ -27,9 +27,8 @@ _META = {
 
 
 def _body(method: str, *, params: dict | None = None, request_id: int = 1) -> dict:
-    # ``_META`` is copied per call so a test that mutates a request's _meta
-    # (e.g. to probe a mismatched protocol version) cannot poison sibling tests
-    # through a shared mutable module-level dict.
+    # ``_META`` is copied per call so a test that mutates a request's _meta (e.g. to probe a mismatched
+    # protocol version) cannot poison sibling tests through a shared mutable module-level dict.
     return {
         "jsonrpc": "2.0",
         "id": request_id,
@@ -145,8 +144,8 @@ class TestRequestMetadataValidation:
         await _assert_header_mismatch(async_client, body=body)  # header stays 2026-07-28
 
     async def test_missing_meta_rejected(self, async_client):
-        # An absent _meta block is InvalidParams, not a header mismatch: the
-        # headers agree with each other, they just have nothing to agree about.
+        # An absent _meta block is InvalidParams, not a header mismatch: the headers agree with each other,
+        # they just have nothing to agree about.
         await _assert_header_mismatch(
             async_client,
             body={"jsonrpc": "2.0", "id": 1, "method": "server/discover", "params": {}},
@@ -163,11 +162,6 @@ class TestRequestMetadataValidation:
     async def test_meta_key_rejection_separates_absent_from_wrong_type(
         self, async_client, key, label, wrong_type
     ):
-        # Telling a client that forgot the key from one that sent the wrong
-        # shape is the whole point of the reason string, and it was asserted by
-        # no test and spelled out once per key in the validator -- so one of the
-        # two arms could have stopped distinguishing them, or stopped agreeing
-        # with the other, with the suite green.
         cases = (
             ("delete", f"Missing required _meta key: {key}"),
             (wrong_type, f"Invalid _meta key (must be {label}): {key}"),
@@ -284,9 +278,8 @@ class TestToolsCall:
 
     @pytest.mark.usefixtures("browser_pool_stub")
     async def test_crawl_tool_crawls_the_url(self, async_client, base_url):
-        # No policy supplied: the full default strategy chain (direct HTTP,
-        # CFFI impersonation, headless + headed browser) must be accepted over
-        # MCP; the engine picks the first working strategy.
+        # No policy supplied: the full default strategy chain (direct HTTP, CFFI impersonation, headless +
+        # headed browser) must be accepted over MCP; the engine picks the first working strategy.
         sc = await _tool_call(async_client, "crawl", {"url": f"{base_url}/"})
         assert sc["success"] is True
         assert sc["results"][0]["classification"] in ("success", "rendered")

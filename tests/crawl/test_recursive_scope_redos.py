@@ -22,8 +22,8 @@ CATASTROPHIC = "(a+)+$"
 
 
 async def test_recursive_scope_regex_uses_safe_compilation(monkeypatch):
-    # If the recursive loop applied the pattern with re.search(scope_regex, link),
-    # this guard would trigger (the old, ReDoS-prone code path).
+    # If the recursive loop applied the pattern with re.search(scope_regex, link), this guard would trigger
+    # (the old, ReDoS-prone code path).
     orig = re.search
 
     def _guarded(pattern, *args, **kwargs):
@@ -33,19 +33,16 @@ async def test_recursive_scope_regex_uses_safe_compilation(monkeypatch):
     monkeypatch.setattr(re, "search", _guarded)
 
     pages = site_linking_to("/a", "/b")
-    # Catastrophic-but-valid pattern: bounded matching (N-1) runs it with
-    # a wall-clock budget instead of rejecting it at compile. It genuinely
-    # matches /a (ends in "a") and not /b, so scope filtering now WORKS
-    # where the old reject-on-shape guard silently dropped the filter.
+    # It genuinely matches /a (ends in "a") and not /b, so scope filtering now WORKS where the old
+    # reject-on-shape guard silently dropped the filter.
     urls = set(await crawled_urls(pages, limits=LINKED_PAIR_LIMITS, policy={"scope_regex": CATASTROPHIC}))
     assert "http://example.com/a" in urls
     assert "http://example.com/b" not in urls
 
 
 async def test_recursive_scope_regex_timeout_fails_closed(monkeypatch):
-    # A pathological pattern that defeats the regex engine's optimizer must
-    # raise RegexTimeout, which the scope filter treats as out-of-scope
-    # (fail-closed): the crawl completes, nothing hangs.
+    # A pathological pattern that defeats the regex engine's optimizer must raise RegexTimeout, which the
+    # scope filter treats as out-of-scope (fail-closed): the crawl completes, nothing hangs.
     from app.safety.safe_regex import RegexTimeout
 
     calls = {"n": 0}
@@ -54,9 +51,8 @@ async def test_recursive_scope_regex_timeout_fails_closed(monkeypatch):
         calls["n"] += 1
         raise RegexTimeout("test-induced budget expiry")
 
-    # The bounded scope check is deduped into app.admission.scope_match, so
-    # match_bounded is invoked there; patching that one seam now guards both
-    # the recursive loop and the sitemap-seed filter.
+    # The bounded scope check is deduped into app.admission.scope_match, so match_bounded is invoked there;
+    # patching that one seam now guards both the recursive loop and the sitemap-seed filter.
     monkeypatch.setattr("app.admission.scope_match.match_bounded", _always_timeout)
     pages = site_linking_to("/a", "/b")
     out = await crawled_results(pages, limits=LINKED_PAIR_LIMITS, policy={"scope_regex": r"^/keep/"})

@@ -69,8 +69,8 @@ def test_benign_stays_rendered():
     )
 
 
-# Labels that are not in the taxonomy at all: this is exactly where the two
-# historical implementations disagreed.
+# Labels that are not in the taxonomy at all: this is exactly where the two historical implementations
+# disagreed.
 UNRECOGNIZED_LABELS = ("totally_new_label", "some_future_block", "")
 
 
@@ -107,9 +107,7 @@ def test_the_status_resolver_is_defined_once_not_per_strategy():
         "BrowserRenderer reintroduced a per-instance status resolver"
     )
 
-    # The call sites must route through the shared name, not a local copy. The
-    # browser binds it once in the renderer's constructor rather than calling it
-    # inline, so what proves "routed through the shared table" there is the import.
+    # The call sites must route through the shared name, not a local copy.
     for module in (http_mod, browser_mod):
         source = inspect.getsource(module)
         assert "status_for_classification" in source, (
@@ -120,28 +118,8 @@ def test_the_status_resolver_is_defined_once_not_per_strategy():
         )
 
 
-# The classification groupings are set OPERATIONS over one another, not one
-# transcription of the taxonomy per grouping. Two properties enforce that, and
-# they need two different detectors because they fail in different ways.
-#
-# 1. A grouping may not embed string literals, and must reach the taxonomy
-#    through enum member references -- directly or by composing another
-#    grouping. A hand-copied ``{"rate_limited", "access_denied"}`` is correct
-#    until the taxonomy grows, and then it is silently short.
-#
-# 2. A member may not be SPELLED in two groupings. This is the half that a value
-#    assertion cannot see and the half that actually bit: the relation tests
-#    cannot tell a derived set from a transcribed one, because a set that
-#    happens to be correct today is identical under ``in``, ``<=`` and ``==``.
-#    What was wrong with the four hand-written lists is that only some of them
-#    were operations. ``HTTP_BLOCKED`` was a union, so a new blocked label
-#    reached it for free; ``NON_TRANSIENT`` re-listed the same eleven labels, so
-#    the same new label had to be added there by hand and nothing failed when it
-#    was not. A frozenset missing a member is still a valid frozenset.
-#
-# The walk is tree-wide over app/ rather than scoped to ``app/vocabulary``: a
-# grouping declared in a second module is the same drift at a different address,
-# and a check that reads one file cannot see it.
+# The classification groupings are set OPERATIONS over one another, not one transcription of the taxonomy per
+# grouping.
 _GROUPING_ASSIGNMENTS = frozenset(
     {
         "BROWSER_BLOCKED_CLASSIFICATIONS",
@@ -346,8 +324,7 @@ def test_unknown_classification_has_one_documented_default(browser_resolver):
     for label in UNRECOGNIZED_LABELS:
         status = status_for_classification(label)
         assert status == browser_resolver(label) == UNKNOWN_CLASSIFICATION_STATUS
-        # The safe default may never be "success": an unrecognized label has
-        # not produced verified content.
+        # The safe default may never be "success": an unrecognized label has not produced verified content.
         assert status != "success"
 
 
@@ -453,10 +430,8 @@ def test_strip_is_linear_under_pathological_unclosed_script_flood():
     assert t_big < t_small * 7, (
         f"super-linear blowup: {t_small:.6f}s -> {t_big:.6f}s (ratio {t_big / t_small:.1f}x for 4x input)"
     )
-    # Absolute ceiling, set from the measured ~2ns/byte: a linear pass over 4MB
-    # costs ~8ms, while the quadratic this guards against costs minutes. 50ms
-    # is 6x the headroom a slower instruction set needs and still well under
-    # the regression it exists to catch.
+    # Absolute ceiling, set from the measured ~2ns/byte: a linear pass over 4MB costs ~8ms, while the
+    # quadratic this guards against costs minutes.
     assert t_big < 0.05, f"linear scan too slow: {t_big:.6f}s of CPU for ~4MB"
 
 
@@ -541,8 +516,8 @@ class TestStatusAgreesWithClassification:
     asserted one status and ``status_for_classification`` re-derived the
     "blocked" default for the same label."""
 
-    # The exception chokepoint's labels: it builds a terminal failure, and the
-    # table used to hand back "blocked" for every one of them.
+    # The exception chokepoint's labels: it builds a terminal failure, and the table used to hand back
+    # "blocked" for every one of them.
     @pytest.mark.parametrize(
         "classification",
         [
@@ -616,13 +591,9 @@ class TestStatusAgreesWithClassification:
                     original_url="http://example.com/",
                     normalized_url="http://example.com/",
                     strategy=None,
-                    # robots_disallowed's taxonomy status is "skipped", so a builder
-                    # asserting "failed" for it is exactly the disagreement the guard
-                    # exists to reject.
+                    # robots_disallowed's taxonomy status is "skipped", so a builder asserting "failed" for it
+                    # is exactly the disagreement the guard exists to reject.
                     classification="robots_disallowed",
-                    # A real taxonomy member (the construction gate rejects a
-                    # non-member before the agreement guard is reached); the
-                    # disagreement under test is status-vs-classification.
                     error="robots_disallowed",
                 )
             )
@@ -640,9 +611,6 @@ def test_capabilities_advertises_exactly_the_taxonomy():
 
 class TestClassificationComments:
     def test_html_without_script_style_signal(self):
-        # Regression guard for the HTML-comment classification bypass fix:
-        # a block signature inside an HTML comment must NOT be detected
-        # (comments are not user-visible and are attacker-controllable).
         classification, evidence = classify_page_with_evidence(
             "<html><!-- access denied --></html>",
             "clean visible text",
@@ -650,8 +618,8 @@ class TestClassificationComments:
         assert classification == "rendered"
 
     def test_html_visible_signal_detected(self):
-        # Visible (non-comment) block signals in the HTML body must still be
-        # detected via the html_without_script_style haystack.
+        # Visible (non-comment) block signals in the HTML body must still be detected via the
+        # html_without_script_style haystack.
         classification, evidence = classify_page_with_evidence(
             "<html><body>access denied</body></html>",
             None,
@@ -663,13 +631,13 @@ class TestClassificationComments:
 class TestClassifyHtmlComments:
     def test_comment_only_signal_is_not_classified(self):
         html = "<html><!-- access denied --></html>"
-        # The signature lives ONLY inside an HTML comment (not user-visible).
-        # It must NOT force a block classification.
+        # The signature lives ONLY inside an HTML comment (not user-visible). It must NOT force a block
+        # classification.
         assert classify_page(html, "clean visible text") == "rendered"
 
     def test_html_comment_cannot_spoof_any_signature(self):
-        # A comment containing every block signature must still yield "rendered"
-        # when the visible content is benign.
+        # A comment containing every block signature must still yield "rendered" when the visible content is
+        # benign.
         comment = (
             "<!-- "
             + " ".join(

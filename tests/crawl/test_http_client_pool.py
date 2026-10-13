@@ -95,8 +95,8 @@ class TestPendingClientCloseCap:
         mocks = [MagicMock(name=f"client-{i}") for i in range(http_mod._PENDING_CLIENT_CLOSE_MAX)]
         with http_mod._PENDING_CLIENT_CLOSE_LOCK:
             http_mod._PENDING_CLIENT_CLOSE.extend(mocks)
-        # The fix must drop the oldest reference without calling
-        # ``asyncio.ensure_future`` (which has no running loop in this context).
+        # The fix must drop the oldest reference without calling ``asyncio.ensure_future`` (which has no
+        # running loop in this context).
         oldest = mocks[0]
         with http_mod._PENDING_CLIENT_CLOSE_LOCK:
             # Simulate the cap path
@@ -198,10 +198,6 @@ class _PooledFake:
     def __init__(self, closer: str, *, publishes_is_closed: bool) -> None:
         setattr(self, closer, self._closed)
         self.closed = False
-        # Annotated rather than left to the first assignment: without it the
-        # attribute's type is ``None``, and every site that binds a live loop
-        # afterwards -- which is what the pool's whole loop-identity question is
-        # about -- was an error.
         self._bound_loop: asyncio.AbstractEventLoop | None = None
         if publishes_is_closed:
             # Only the kind that really has the flag may carry it.
@@ -234,8 +230,8 @@ def _build_httpx_fake(settings=None) -> _PooledFake:
 
 
 def _build_cffi_fake(settings=None) -> _PooledFake:
-    # Curl_cffi's AsyncSession publishes no is_closed attribute, so neither may
-    # this fake: see the class docstring.
+    # Curl_cffi's AsyncSession publishes no is_closed attribute, so neither may this fake: see the class
+    # docstring.
     session = _PooledFake("close", publishes_is_closed=False)
     try:
         session._bound_loop = asyncio.get_running_loop()
@@ -244,8 +240,8 @@ def _build_cffi_fake(settings=None) -> _PooledFake:
     return session
 
 
-# Every loop-bound pooled client: (the seam keyword that supplies its builder,
-# its public getter, the fake that builder should hand out).
+# Every loop-bound pooled client: (the seam keyword that supplies its builder, its public getter, the fake
+# that builder should hand out).
 SINGLETONS = [
     pytest.param("http", "get_async_http_client", _build_httpx_fake, id="httpx_client"),
     pytest.param("cffi", "get_cffi_session", _build_cffi_fake, id="cffi_session"),
@@ -268,8 +264,8 @@ def _supersede_without_loop(
 
     first = asyncio.run(_on_a_live_loop())
     assert first is not None
-    # The loop that owned ``first`` is closed, and nothing is running now, so
-    # the rebuild below happens with no loop to schedule a best-effort close on.
+    # The loop that owned ``first`` is closed, and nothing is running now, so the rebuild below happens with
+    # no loop to schedule a best-effort close on.
     second = getattr(http_mod, getter)()
     assert second is not None
     assert second is not first, "loop change must rebuild the pooled client"
@@ -338,9 +334,8 @@ def test_pending_close_queue_dedupes_and_stays_bounded(seam, getter, fake, stub_
     with http_mod._PENDING_CLIENT_CLOSE_LOCK:
         queued = list(http_mod._PENDING_CLIENT_CLOSE)
 
-    # Every acquisition ran on its own loop, so each one superseded its
-    # predecessor: cap+7 supersessions must have been squeezed down to the cap,
-    # keeping the most recent ones.
+    # Every acquisition ran on its own loop, so each one superseded its predecessor: cap+7 supersessions must
+    # have been squeezed down to the cap, keeping the most recent ones.
     assert len(queued) <= cap, f"pending-close backlog grew past the cap: {len(queued)} > {cap}"
     assert acquired[-1] not in queued, "the current pooled client must not be queued for close"
     assert acquired[-2] in queued, f"{getter} dropped the client it just superseded"
@@ -351,10 +346,7 @@ def test_pending_close_queue_dedupes_and_stays_bounded(seam, getter, fake, stub_
     for item in queued:
         assert queued.count(item) == 1, f"{getter} double-queued a superseded client"
 
-    # Dedupe specifically: the queue helper is the thing that promises it, so
-    # re-presenting an already-queued client through the same kind must not add
-    # a second reference (a double-entry would let one client be closed twice
-    # and would eat two cap slots).
+    # Dedupe specifically: the queue helper is the thing that promises it, so re-presenting an already-queued
     still_queued = queued[0]
     before = len(queued)
     assert http_mod._queue_superseded_close(still_queued) is None
@@ -651,9 +643,8 @@ def test_httpx_kind_keeps_its_eager_close_after_the_gate_moves(stub_builder):
     """Inverse: moving the gate to the descriptor predicate must not cost the
     pooled httpx client the eager close it already had.
     """
-    # The double list is not read here: the scenario hands the same client back
-    # through the getter, and ``first`` is that client. Installed for the
-    # builder, not for the list.
+    # The double list is not read here: the scenario hands the same client back through the getter, and
+    # ``first`` is that client. Installed for the builder, not for the list.
     install_httpx_double(stub_builder)
 
     first, second = asyncio.run(run_loop_rebind_scenario(http_mod.get_async_http_client))
@@ -675,11 +666,6 @@ def test_already_closed_pooled_client_is_not_re_closed_on_the_live_loop(stub_bui
     False is positive evidence that nothing was scheduled, and it is evidence
     about the client rather than about one chosen route to closing it.
     """
-    # The double the builder built, kept so the scenario reads the same object
-    # production will: the getter is typed as handing back a real
-    # ``httpx.AsyncClient``, whose ``is_closed`` is a read-only property and
-    # which has no ``closed`` at all -- the two assignments below are on a
-    # double, and naming it is what says so.
     built = install_httpx_double(stub_builder)
 
     async def _scenario():
@@ -689,10 +675,8 @@ def test_already_closed_pooled_client_is_not_re_closed_on_the_live_loop(stub_bui
         tracked.is_closed = True  # someone else already closed it
         tracked.closed = False  # would flip only if a teardown were scheduled
         second = http_mod.get_async_http_client()
-        # One yield is enough for a scheduled teardown to run: the task is
-        # put on the ready queue by ensure_future, and this hands the loop
-        # back exactly once, so the coroutine starts and (itself yielding
-        # once) finishes.
+        # One yield is enough for a scheduled teardown to run: the task is put on the ready queue by
+        # ensure_future, and this hands the loop back exactly once, so the coroutine starts and (itself
         await asyncio.sleep(0)
         return first, second
 
@@ -714,12 +698,8 @@ def test_a_third_pooled_kind_is_not_left_out_by_the_httpx_attribute_shape():
     """
     import threading
 
-    # The descriptor keeps its pooled instance in the module global named by
-    # ``slot``, so a slot has to name a global that exists. This borrows the
-    # curl_cffi one rather than inventing a third: nothing in this test asks
-    # for the cffi pool, and the module's fixture releases the slot at teardown.
-    # Adding a name to the module for the convenience of a test is how the slot
-    # list and its test-support grew together in the first place.
+    # The descriptor keeps its pooled instance in the module global named by ``slot``, so a slot has to name a
+    # global that exists.
     third = http_mod._LoopBoundPooledClient(
         slot="_DEFAULT_CFFI_SESSION",
         build=lambda settings: _ThirdKind(),
@@ -764,13 +744,6 @@ def test_superseded_client_is_closed_on_loop_change(stub_builder):
 
 
 def test_get_async_http_client_avoids_deprecated_get_event_loop(monkeypatch):
-    # Prove the code path no longer depends on the deprecated get_event_loop:
-    # make it raise and confirm the client is still obtainable (it must use
-    # get_running_loop instead).
-    # The construction path is forced by the fixture, which released the pooled
-    # client before this body ran; naming the module global to null it again is
-    # what this used to do, and it made the test depend on a name the module
-    # keeps for its own bookkeeping.
     monkeypatch.setattr(
         asyncio,
         "get_event_loop",
@@ -794,17 +767,8 @@ def test_get_async_http_client_reuses_same_instance():
 
 
 def test_hot_path_client_reuse_skips_env_scan():
-    # Throughput (perf review 1.1): the per-fetch get_async_http_client() call
-    # must not pay a full CrawlerSettings.from_mapping() env walk when the
-    # pooled client is alive on the current loop. Settings are pool config
-    # that is consumed only at construction, so a reuse call consults env zero
-    # times while a construction call consults it exactly once.
-    #
-    # The env walk is counted by watching ``CrawlerSettings.from_mapping`` rather
-    # than the module's own ``_default_settings``, which is a private name this
-    # test had to reach into. Counting at the derivation is the stronger claim
-    # anyway: it would catch the walk being paid by any route, where counting one
-    # private helper would not.
+    # Throughput (perf review 1.1): the per-fetch get_async_http_client() call must not pay a full
+    # CrawlerSettings.from_mapping() env walk when the pooled client is alive on the current loop.
     scans = {"count": 0}
     original = settings_mod.CrawlerSettings.from_mapping
 

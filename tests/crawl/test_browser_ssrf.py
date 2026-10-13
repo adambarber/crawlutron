@@ -23,16 +23,13 @@ from tests._browser_doubles import (
 )
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY, canonical
 
-# --------------------------------------------------------------------------
-# document.py: SSRF gate on urlopen
+# -------------------------------------------------------------------------- document.py: SSRF gate on urlopen
 # --------------------------------------------------------------------------
 
 
 async def test_document_extractor_blocks_internal_url(monkeypatch):
-    # The document fetch must refuse a loopback target, and refuse it
-    # loudly -- a refused target is not the same outcome as an empty PDF.
-    # The refusal is inherited at admission: the extractor's input is an
-    # admitted value, so a refused target can never degrade to empty text.
+    # The document fetch must refuse a loopback target, and refuse it loudly -- a refused target is not the
+    # same outcome as an empty PDF.
     monkeypatch.setenv("CRAWLUTRON_ALLOW_PRIVATE_TARGETS", "0")
     with pytest.raises(ValueError):
         doc_mod._default_document_text_extractor(canonical("http://127.0.0.1:9/secret.pdf"))
@@ -74,9 +71,8 @@ async def test_document_extractor_invokes_ssrf_check(monkeypatch):
     assert seen.get("url") == canonical("http://example.com/x.pdf")
 
 
-# --------------------------------------------------------------------------
-# browser.py helpers: pinning + post-navigation re-validation
-# --------------------------------------------------------------------------
+# -------------------------------------------------------------------------- browser.py helpers: pinning +
+# post-navigation re-validation --------------------------------------------------------------------------
 
 
 async def test_resolve_browser_target_pins_ip_and_preserves_host():
@@ -136,18 +132,16 @@ async def test_assert_safe_final_url_blocks_internal(monkeypatch):
     _assert_safe_final_url("http://1.2.3.4/", policy=UNRESTRICTED_HOST_POLICY)
 
 
-# --------------------------------------------------------------------------
-# browser.py integration: _render_with_browser navigates to the pinned IP and
-# re-validates the post-navigation URL.
-# --------------------------------------------------------------------------
+# -------------------------------------------------------------------------- browser.py integration:
+# _render_with_browser navigates to the pinned IP and re-validates the post-navigation URL.
 
 
 async def test_render_navigates_to_pinned_ip_with_host_header(monkeypatch):
     page, result = await render_pinned(monkeypatch)
     # Navigate to the pinned IP, not the hostname (DNS-rebinding safe).
     assert page.goto_calls[0][0] == "http://1.2.3.4:80/"
-    # Should use set_extra_http_headers, NOT extra_http_headers param;
-    # the pinned Host is cleared right after navigation.
+    # Should use set_extra_http_headers, NOT extra_http_headers param; the pinned Host is cleared right after
+    # navigation.
     assert page.set_extra_http_headers_calls == [{"Host": "example.com"}, {}]
     assert result.status == "success"
 
@@ -160,9 +154,8 @@ async def test_render_rejects_internal_redirect_target(monkeypatch):
         await render_bare(renderer)
 
 
-# --------------------------------------------------------------------------
-# route-level guard aborts SSRF-unsafe requests (subresources + redirects)
-# --------------------------------------------------------------------------
+# -------------------------------------------------------------------------- route-level guard aborts
+# SSRF-unsafe requests (subresources + redirects)
 
 
 async def test_is_ssrf_blocked_classifies_targets(monkeypatch):

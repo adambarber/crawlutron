@@ -16,8 +16,8 @@ from pathlib import Path
 from tests.chokepoint_walks import REPO_ROOT, app_trees, offender_at
 from tests.rules import Bites, Rule
 
-# ---------------------------------------------------------------------------
-# Container protocols on app classes
+# --------------------------------------------------------------------------- Container protocols on app
+# classes
 
 _CONTAINER_PROTOCOL_BASES = frozenset(
     {

@@ -118,16 +118,15 @@ async def _drain_running_crawls(*, guard: float = 10.0) -> None:
     from app.storage.job_store import JobStatus
 
     def running() -> list[str]:
-        # ``list_jobs`` is the status view, not the state, so this reads the
-        # row dict rather than materialising every result payload to ask a
-        # question about the status column.
+        # ``list_jobs`` is the status view, not the state, so this reads the row dict rather than
+        # materialising every result payload to ask a question about the status column.
         return [row["job_id"] for row in job_store.list_jobs() if row["status"] == JobStatus.RUNNING.value]
 
     try:
         await await_until(running, "a crawl was still RUNNING when its test finished")
     except AssertionError:
-        # A stuck crawl is reported, not raised: raising here would mask the
-        # assertion of the test that actually caused it.
+        # A stuck crawl is reported, not raised: raising here would mask the assertion of the test that
+        # actually caused it.
         pass
 
 

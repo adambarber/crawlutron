@@ -88,35 +88,16 @@ from tests._ratchet import (
 )
 from tests.chokepoint_walks import app_trees, nodes_of
 
-# Every collector in this file reads the same app tree, and they are called
-# once per metric per test that reads a number: the budget test reads both
-# `offenders()` and `measurement()`, the tight test reads `measurement()`, and
-# the determinism test reads `offenders()` twice -- and `measurement()` itself
-# calls `offenders()` for the three count metrics. That is the same redundant
-# re-glob, re-read and re-parse of all 106 modules the a962c7b commit removed
-# from the chokepoint suite in the file next door; `app_trees` is that same
-# owned snapshot, and `nodes_of` shares the walk underneath it. The count is
-# left out on purpose: it is a property of how many tests read a number, so
-# quoting one here is a number that rots the next time a test is added, and
-# rotted arithmetic in a comment is worse than none.
-#
-# `exclude=frozenset()` is load-bearing, not decoration: the default excludes
-# app/safety/safe_regex.py, and these budgets are measured over EVERY app module. A
-# dropped module would lower the offender count and quietly buy budget.
+# Every collector in this file reads the same app tree, and they are called once per metric per test that
+# reads a number: the budget test reads both `offenders()` and `measurement()`, the tight test reads
 _ALL_APP: frozenset[str] = frozenset()
 
 FUNCTION_LENGTH = 60
 ABC_SIZE = 30
 BLOCK_LENGTH = 40
 
-# What the tree is currently allowed to hold: offender counts for three
-# metrics, and the size of the worst class for the fourth. The counts are the
-# measurements at 0a87dd2; `largest class` is 550, recorded when the browser
-# split put it there. They are the whole mechanism: a wave that splits a file
-# lowers the value it is allowed to have, in the same commit that did the
-# splitting. Lowering a budget below the true count fails the suite, so a
-# budget cannot be quietly inflated -- the code has to actually get smaller
-# first.
+# What the tree is currently allowed to hold: offender counts for three metrics, and the size of the worst
+# class for the fourth.
 _BUDGETS = {
     "function length": 31,
     "abc size": 5,
@@ -124,13 +105,8 @@ _BUDGETS = {
     "block length": 11,
 }
 
-# The complexity approximation counts every node that introduces a branch, which
-# is the sweep's own compound-statement vocabulary plus the three that can
-# appear without opening a block. Derived rather than re-spelled: the two lists
-# agreeing is a fact nobody maintains, and the first time one of them gains a
-# node the metrics gate silently stops counting a construct the duplication sweep
-# is already measuring. ``ast.comprehension`` is counted separately below, as
-# ``conditions``.
+# The complexity approximation counts every node that introduces a branch, which is the sweep's own
+# compound-statement vocabulary plus the three that can appear without opening a block.
 _BRANCH_NODES = COMPOUND_NODES + (ast.ExceptHandler, ast.Assert, ast.BoolOp)
 
 
@@ -153,12 +129,8 @@ def _span(node: ast.stmt, body: list[ast.stmt]) -> int:
 
 def _abc_size(node: ast.AST) -> int:
     nodes = list(nodes_of(node))
-    # `AnnAssign` counts. A function with thirty `x: int = ...` statements is
-    # not less complex than one with thirty `x = ...`; the distinction is
-    # whether the author wrote a type, not whether the code branches. An earlier
-    # version counted only `Assign`, so annotating every local scored ABC 0 --
-    # the metric could be driven to zero by adding type hints, which is the
-    # opposite of what a complexity budget is for.
+    # `AnnAssign` counts. A function with thirty `x: int = ...` statements is not less complex than one with
+    # thirty `x = ...`; the distinction is whether the author wrote a type, not whether the code branches.
     assignments = sum(1 for item in nodes if isinstance(item, (ast.Assign, ast.AnnAssign)))
     branches = sum(1 for item in nodes if isinstance(item, _BRANCH_NODES))
     conditions = sum(1 for item in nodes if isinstance(item, ast.comprehension))
@@ -196,9 +168,8 @@ def _outer_blocks(tree: ast.AST) -> list[tuple[int, int, str]]:
     return kept
 
 
-# Where each metric stops counting. ``largest class`` has no such line: its
-# budget IS its limit, so the gate and the work list cannot disagree about what
-# counts as too big.
+# Where each metric stops counting. ``largest class`` has no such line: its budget IS its limit, so the gate
+# and the work list cannot disagree about what counts as too big.
 _METRIC_LIMITS = {
     "function length": FUNCTION_LENGTH,
     "abc size": ABC_SIZE,
@@ -336,11 +307,7 @@ def test_metric_budgets_have_never_risen() -> None:
     regression, and no amount of history helps a metric that has none yet.
     """
     service_root = pathlib.Path(__file__).resolve().parent.parent
-    # Git paths are repo-root-relative, not service-relative. Getting this wrong
-    # makes every `git show` fail, `history` come back empty, and the whole
-    # check pass vacuously -- which is exactly what the first version of this
-    # test did. The `assert history` below is the guard against that class of
-    # silent no-op ever recurring.
+    # Git paths are repo-root-relative, not service-relative.
     root = pathlib.Path(
         subprocess.run(
             [require_executable(GIT), "rev-parse", "--show-toplevel"],
@@ -386,11 +353,7 @@ def test_metric_budgets_have_never_risen() -> None:
     )
     regressions = []
     for name, entries in history.items():
-        # `entries` is newest-first, so each adjacent pair runs (newer, older).
-        # A regression is the newer value being HIGHER than the older one, i.e.
-        # the budget went up over time. Note the direction: reading this as
-        # (older, newer) inverts the test and makes a correctly falling ratchet
-        # look like four regressions.
+        # `entries` is newest-first, so each adjacent pair runs (newer, older). the budget went up over time.
         for (newer, newer_value), (_, older) in zip(entries, entries[1:], strict=False):
             if newer_value > older:
                 regressions.append(f"  {name}: rose from {older} to {newer_value} in {newer}")

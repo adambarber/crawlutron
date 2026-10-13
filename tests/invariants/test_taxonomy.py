@@ -33,27 +33,8 @@ from tests.chokepoint_walks import (
 )
 from tests.rules import Bites, Rule
 
-# ---------------------------------------------------------------------------
-# The ordered classification table: order is semantics, so it is checked
-# ---------------------------------------------------------------------------
-
-# The table in result_helpers maps an exception to a stable error code by walking
-# rows in order and taking the first isinstance hit. That makes the row ORDER a
-# semantic, not a formatting detail -- and until now the only statement of it was
-# the comment block above the table, which no tool could hold to. A row added
-# below a superclass row is silently dead: the superclass claims every instance
-# first, so the specific verdict is unreachable and the only symptom is a wrong
-# error code on a wire.
-#
-# `DecompressionError` is the case that proves it. It subclasses ValueError and
-# had no row of its own, so the caller-error catch-all claimed it -- a corrupt
-# response body was reported as `value_error`, a terminal code reading as "the
-# caller asked for something invalid", which in a durable job marks the URL
-# visited rather than retrying a fault a second attempt often clears. Nothing in
-# the suite failed, because the code was a legal member of the taxonomy the whole
-# time; it was simply being answered by the wrong row.
-
-# Types broad enough to swallow a taxonomy decision if they are not last.
+# --------------------------------------------------------------------------- The ordered classification
+# table: order is semantics, so it is checked
 _CATCH_ALL_EXCEPTIONS: tuple[type[BaseException], ...] = (ValueError, OSError, Exception)
 
 
@@ -99,9 +80,7 @@ def test_table_shadowing_detector_bites():
     class Deeper(Sub):
         pass
 
-    # The shape that lost DecompressionError's verdict: no row of its own, so the
-    # catch-all answers for it. Nothing to report -- there is no dead row, just a
-    # type nobody has decided about, which is what the missing-row test is for.
+    # The shape that lost DecompressionError's verdict: no row of its own, so the catch-all answers for it.
     orphans = [((ValueError,), "value_error")]
     assert not _table_shadowing_offenders(orphans)
 
@@ -109,8 +88,8 @@ def test_table_shadowing_detector_bites():
     below_super = [((ValueError,), "value_error"), ((Sub,), "value_error")]
     assert any("can never fire" in o for o in _table_shadowing_offenders(below_super))
 
-    # A specific row ABOVE its superclass: live, and the superclass is the
-    # catch-all, which is allowed to be last.
+    # A specific row ABOVE its superclass: live, and the superclass is the catch-all, which is allowed to be
+    # last.
     correct = [((Deeper,), "http_error"), ((Sub,), "tls_error"), ((ValueError,), "value_error")]
     assert not _table_shadowing_offenders(correct)
 
@@ -134,20 +113,8 @@ def test_table_shadowing_detector_bites():
     )
 
 
-# ---------------------------------------------------------------------------
-# Classification transience: one verdict, owned by the taxonomy
-# ---------------------------------------------------------------------------
-
-# The redefinition chokepoint: a module-level collection named like a
-# transience/retry verdict, anywhere in app/ except the taxonomy itself. A
-# fourth hand-list is exactly how this drifted the first three times -- each site
-# answered "is this transient?" locally, and the local answers disagreed.
-#
-# Scoped to collections whose names end in a verdict suffix, so a local *budget*
-# is not mistaken for a local *answer*: MAX_TRANSIENT_REQUEUES is a cap on how
-# many times the recursive loop may re-try, which is legitimately the caller's
-# own number, and it is the collection shape plus the name that makes something
-# a second opinion about the taxonomy.
+# --------------------------------------------------------------------------- Classification transience: one
+# verdict, owned by the taxonomy ---------------------------------------------------------------------------
 _TRANSIENCE_HOME_SANCTIONED = frozenset({"constants.py"})
 
 
@@ -172,8 +139,8 @@ _TRANSIENCE_COLLECTIONS = (
 )
 
 
-# A named alias to the taxonomy's own set is a re-export, not a second opinion:
-# that is the one legitimate spelling here.
+# A named alias to the taxonomy's own set is a re-export, not a second opinion: that is the one legitimate
+# spelling here.
 _TRANSIENCE_REEXPORTS = frozenset(
     {
         "TRANSIENT_CLASSIFICATIONS",
@@ -230,19 +197,14 @@ TRANSIENCE_VERDICT_HAS_ONE_HOME = Rule(
         "re-answers the taxonomy's transience verdict",
     ),
     clean=lambda: (
-        # Same shape spelled as a call: the detector keys on the collection-
-        # valued assignment, and a ``frozenset()`` literal is a call, so a set-
-        # shaped verdict name is expected to fire whether written as a literal
-        # or as a call -- this one reads a ``Call`` value and so is not caught.
         "RETRYABLE_CLASSIFICATIONS = frozenset()\n",
-        # A named alias to the taxonomy's own set is a re-export, not a second
-        # opinion: that is the one legitimate spelling here.
+        # A named alias to the taxonomy's own set is a re-export, not a second opinion: that is the one
+        # legitimate spelling here.
         "from app.vocabulary.taxonomy import TRANSIENT_CLASSIFICATIONS\n",
         "from app.vocabulary.taxonomy import is_transient_classification as is_transient\n",
         "TRANSIENT_CLASSIFICATIONS = TRANSIENT_CLASSIFICATIONS\n",
-        # A local *budget* is not a local *answer*: MAX_TRANSIENT_REQUEUES caps
-        # how many times the recursive loop may re-try, which is legitimately
-        # the caller's own number.
+        # A local *budget* is not a local *answer*: MAX_TRANSIENT_REQUEUES caps how many times the recursive
+        # loop may re-try, which is legitimately the caller's own number.
         "MAX_TRANSIENT_REQUEUES = 3\n",
         "RETRYABLE_ERROR_TYPES = frozenset()\n",
     ),
@@ -260,32 +222,7 @@ def test_transience_home_detector_bites():
     TRANSIENCE_VERDICT_HAS_ONE_HOME.check_bites()
 
 
-# ---------------------------------------------------------------------------
-# Error-handling chokepoint drift detectors
-#
-# A strategy that raises (rather than returning a classified result) falls to
-# the scheduler's blanket envelope and is misclassified, or in on_result mode
-# silently drops the page. Three invariants keep that from drifting back:
-#
-#   1. engine_result_from_exception is the only place a strategy exception may
-#      become a result (no hand-rolled failed-result construction with a
-#      hardcoded classification outside the two legitimate config guards).
-#   2. BrowserPoolExhaustedError may only be caught by sanctioned sites
-#      (the render endpoints, which own the 503 transport response) -- never
-#      ad-hoc catch sites in the crawl path, which would re-derive retry
-#      semantics locally instead of reading the classification.
-#   3. classify_error_code must be defined in the classification module (neutral
-#      home), never in a strategy module; strategies reach for it, they don't own it.
-# ---------------------------------------------------------------------------
-
-# Classifications that a hand-rolled _failed_engine_result/build_engine_result
-# may legitimately carry without going through the exception chokepoint:
-#   browser_crash / unsupported_strategy: the engine's config guards -- there
-#     is no exception to classify, the worker was never built
-#   binary_no_text: a fetched page whose body has no extractable text
-#   not_modified: a 304 cache hit (a *success*, built by the 304 path)
-# Everything else means a real exception was converted to a result by hand,
-# which is the drift the chokepoint exists to prevent.
+# --------------------------------------------------------------------------- Error-handling chokepoint
 _ERROR_CHOKEPOINT_SANCTIONED = frozenset({"classification.py"})
 
 
@@ -315,9 +252,8 @@ def _hand_rolled_failed_result_offenders(tree, path):
                 status = kw.value.value
         if status in (None,) or status in _NON_EXCEPTION_CLASSIFICATIONS:
             continue
-        # The engine's unsupported-strategy guard and the scheduler's
-        # circuit-breaker guard are policy decisions, not caught exceptions:
-        # they carry their own taxonomy code in the error field.
+        # The engine's unsupported-strategy guard and the scheduler's circuit-breaker guard are policy
+        # decisions, not caught exceptions: they carry their own taxonomy code in the error field.
         if status == "unknown_error" and _has_error_field(node, "unsupported_strategy"):
             continue
         if status == "network_error" and _has_error_field(node, "circuit_breaker_open"):
@@ -343,9 +279,6 @@ HAND_ROLLED_FAILED_RESULTS_GO_THROUGH_THE_CHOKEPOINT = Rule(
         "route through engine_result_from_exception",
     ),
     clean=lambda: (
-        # browser_crash is one of the engine's config guards -- no exception to
-        # classify, the worker was never built -- so it may legitimately carry
-        # a hardcoded code without going through the chokepoint.
         'def f():\n    return _failed_engine_result(\n        classification="browser_crash",\n    )\n',
     ),
 )
@@ -424,33 +357,15 @@ def test_classifier_lives_in_the_neutral_home():
                 )
 
 
-# ---------------------------------------------------------------------------
-# Value-validity chokepoint (the meta-fix)
-#
-# The suite polices *routing* (a failed result must be built through the
-# chokepoint primitives) but never *value validity*: nothing verified the
-# classification string flowing through the primitive was a legal enum member.
-# That is how url_budget_exceeded shipped -- a genuinely distinct signal passed
-# as known_classification=, the lenient internal dataclass accepted it, and the
-# strict enum at response shaping rejected the whole batch with a 500. The
-# routing tests were green the entire time.
-#
-# This detector closes the class, not the instance: any classification handed
-# to the primitives as a literal must be a CrawlClassification member.
-# ---------------------------------------------------------------------------
+# This detector closes the class, not the instance: any classification handed to the primitives as a literal
+# must be a CrawlClassification member.
 
 _CLASSIFICATION_VALUE_SOURCES = ("classification", "known_classification")
 
 
 _RESULT_PRIMITIVES = (
-    # Derived, not transcribed: the per-field detectors that used to live here
-    # matched on a six-name hand-kept list and silently omitted three live
-    # primitives plus every direct dataclass construction. The generic sweep
-    # in tests/membership_gate.py reads the registry from the models, so a
-    # primitive added tomorrow is covered the day it lands. These tuples stay
-    # only as the per-field detectors' public surface; the registry is the
-    # source of truth and this is its shadow, kept in sync by the
-    # subsumption assert below.
+    # The generic sweep in tests/membership_gate.py reads the registry from the models, so a primitive added
+    # tomorrow is covered the day it lands.
     "_failed_engine_result",
     "build_engine_result",
     "engine_result_from_exception",
@@ -521,9 +436,8 @@ CLASSIFICATIONS_PASSED_ARE_ENUM_MEMBERS = Rule(
             'def f():\n    return _failed_engine_result(classification="totally_made_up")\n',
             "CrawlClassification member",
         ),
-        # The terminal-CrawlResult chokepoint is covered too: the render path builds
-        # terminal results through it, so an unknown literal there reaches the wire
-        # through the same lenient dataclass that let url_budget_exceeded ship.
+        # The terminal-CrawlResult chokepoint is covered too: the render path builds terminal results through
+        # it, so an unknown literal there reaches the wire through the same lenient dataclass that let
         Bites(
             'def f():\n    return terminal_crawl_result(classification="made_up_render_code")\n',
             "CrawlClassification member",
@@ -544,20 +458,7 @@ def test_non_member_classification_detector_bites():
     CLASSIFICATIONS_PASSED_ARE_ENUM_MEMBERS.check_bites()
 
 
-# ---------------------------------------------------------------------------
-# Strategy-label validity chokepoint (the sibling of the value-validity one)
-#
-# The same class of bug hit the strategy axis: the browser pool worker labeled
-# its terminal result ``strategy="BROWSER_DECLARED_CRAWLER"`` -- a string that
-# is not a CrawlStrategy member -- while the scheduler's worker-exception
-# envelope and the engine's budget-timeout envelope both passed ``strategy=""``.
-# The internal CrawlStrategyName Literal and the strict CrawlStrategy enum on
-# the wire model reject both values; the only reason anything worked at all was
-# a pair of ``# type: ignore[arg-type]`` at the CrawlStrategyAttempt
-# construction sites plus _shape_all's silent catch, which threw away the real
-# classification and replaced it with site_error. A non-member strategy literal
-# must never reach a result primitive again.
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------- Strategy-label validity
 
 _STRATEGY_VALUE_SOURCES = ("strategy",)
 
@@ -606,8 +507,7 @@ STRATEGIES_PASSED_ARE_ENUM_MEMBERS = Rule(
     ),
     excludes=SANCTIONED,
     bite=lambda: (
-        # An invented member name -- exactly the shape that shipped on the browser
-        # worker's failure path.
+        # An invented member name -- exactly the shape that shipped on the browser worker's failure path.
         Bites(
             'def f():\n    return engine_result_from_exception(strategy="BROWSER_DECLARED_CRAWLER")\n',
             "CrawlStrategy member",
@@ -692,17 +592,6 @@ def test_result_primitives_emit_real_status_members():
 def test_non_member_status_detector_bites():
     STATUSES_PASSED_ARE_ENUM_MEMBERS.check_bites()
 
-
-# --- 4e (optional): the attempt dataclass is pinned at its construction site ---
-#
-# ``CrawlStrategyName`` is now a true Literal (the strategy constants in
-# ``app/vocabulary/strategies.py`` are ``Final``, so ``Literal["HTTP_DECLARED_CRAWLER", ...]``
-# resolves and mypy enforces the ``strategy=`` arg-type at every
-# ``CrawlStrategyAttempt`` construction site statically. That replaced the six
-# ``# type: ignore[arg-type]`` comments the producers used to carry. This
-# detector is now belt-and-suspenders with mypy: it stays because it runs at
-# pytest time and flags a literal that slips past the checker, but the static
-# gate is the real chokepoint now.
 
 _ATTEMPT_CLASS = "CrawlStrategyAttempt"
 
@@ -855,22 +744,7 @@ def test_crawl_error_is_the_pipeline_additions_over_classification():
     )
 
 
-# ===========================================================================
-# GENERIC value-membership chokepoint (program 1)
-#
-# The detectors above were written one per escaped field: classification after
-# url_budget_exceeded, strategy after BROWSER_DECLARED_CRAWLER, status after
-# the terminal-result widening. Each is a list nobody extends, so the class
-# re-emerged at every field not on the list. The replacement is one generic
-# sweep: the (dataclass, field, Literal) triples are read from app/models at
-# test time, so a field added to a result dataclass tomorrow is covered the day
-# it lands rather than the day someone remembers to name it.
-#
-# The old per-field detectors are kept below as *proof* the generic one is
-# strictly stronger -- each is subsumed by the generic sweep, which is what
-# makes deleting the per-field list safe. They are asserts on the generic
-# detector's coverage, not on a hand-kept field list.
-# ===========================================================================
+# Each is a list nobody extends, so the class re-emerged at every field not on the list.
 
 
 def test_result_primitives_emit_only_declared_literal_members():
@@ -967,27 +841,10 @@ def test_result_construction_enforces_membership_at_the_dataclass():
     from app.models.crawl_result import CrawlResult, CrawlStrategyAttempt, EngineCrawlResult
     from tests._result_builders import engine_result
 
-    # The all-member baseline, named once and DERIVED rather than restated. Every
-    # axis this test exercises is Literal-typed, so a construction that is spelled
-    # twice with one field overridden is the *only* honest way to show that the
-    # gate is about the overridden field and nothing else -- the previous version
-    # restated the whole block per axis and then read the override back out of the
-    # kwargs with ``kwargs.get(field, "success")``, which reads as though the
-    # defaults were chosen per test rather than being the shared baseline.
-    #
-    # ``engine_result(url, "rendered")`` is that baseline exactly: every optional
-    # field absent, and status taken from the production classification mapping,
-    # which answers "success" for a rendered page. Spelling the same 14 fields
-    # here instead was a second statement of which values are members, in the one
-    # file whose job is to prove membership -- the worst place for a copy to live.
+    # The all-member baseline, named once and DERIVED rather than restated.
     member_engine_result = asdict(engine_result("http://a/", "rendered"))
-    # Built, not spelled. A hand-written block of nine member values was a second
-    # statement of which strings are members -- unverified, in the one file whose
-    # job is to prove membership -- and a dict literal infers `int | str | None`
-    # per value, so the splat below was unchecked at every field. Constructing the
-    # result directly hands each value to the field's own type, so the all-member
-    # build is checked against the taxonomy it is a sample of. `asdict` is what
-    # makes the override splat below splat.
+    # Built, not spelled. Constructing the result directly hands each value to the field's own type, so the
+    # all-member build is checked against the taxonomy it is a sample of.
     member_crawl_result = CrawlResult(
         url="http://a/",
         attempt=CrawlStrategyAttempt(
@@ -1006,10 +863,8 @@ def test_result_construction_enforces_membership_at_the_dataclass():
     )
     member_crawl_result_fields = asdict(member_crawl_result)
 
-    # A direct construction with all-member values is accepted: the gate must
-    # not reject legitimate direct builds (tests and the primitives both do it).
-    # The construction above is that check -- every field was checked against its
-    # own type to get here.
+    # A direct construction with all-member values is accepted: the gate must not reject legitimate direct
+    # builds (tests and the primitives both do it).
     CrawlStrategyAttempt(
         strategy="BROWSER_HEADLESS",
         status="success",
@@ -1028,24 +883,12 @@ def test_result_construction_enforces_membership_at_the_dataclass():
         with pytest.raises(ValueError, match=f".{field}="):
             EngineCrawlResult(**{**member_engine_result, field: invented})
     # CrawlError axis: a stable code outside the declared taxonomy is rejected.
-    # The axis lives on the attempt the result holds, so that is where the
-    # override is spelled -- reaching for a top-level `error=` would be a
-    # constructor argument this record does not have.
     with pytest.raises(ValueError, match=r"\.error="):
         CrawlStrategyAttempt(**{**member_crawl_result_fields["attempt"], "error": "worker_failed"})
 
 
-# ===========================================================================
-# NAMED-CONSTANT provenance (program 2)
-#
-# A literal detector is blind to a Name. The historical defect was exactly
-# that shape: EXTRACTION_METHOD_BINARY_NO_TEXT -- a constant from the
-# extraction-method namespace -- was assigned into a classification field. Its
-# *value* ("binary_no_text") collides with a real classification member, so
-# even resolving the name to its value cannot detect it: the collision is the
-# defect. The signal that is actually wrong is the constant's NAMESPACE, so
-# that is what the detector keys on.
-# ===========================================================================
+# =========================================================================== NAMED-CONSTANT provenance
+# (program 2) A literal detector is blind to a Name.
 
 
 def test_result_primitives_take_taxonomy_constants_not_foreign_namespaces():
@@ -1088,9 +931,8 @@ def test_wrong_namespace_detector_bites():
     assert not namespace_constant_offenders(param, REPO_ROOT / "app" / "_synthetic.py", members=members)
 
 
-# ---------------------------------------------------------------------------
-# The runtime gate (program 1+2 closure): the class dies at the boundary
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------- The runtime gate (program 1+2
+# closure): the class dies at the boundary
 
 
 def test_the_membership_gate_rejects_a_non_member_value():
@@ -1125,8 +967,7 @@ def test_the_gate_sees_the_local_variable_indirection_the_ast_detectors_cannot()
     classification_members = members["classification"]
 
     async def scenario() -> None:
-        # `classification` is a local whose provenance no AST walk can resolve
-        # from the call site alone.
+        # `classification` is a local whose provenance no AST walk can resolve from the call site alone.
         classification = "totally_made_up"
         from tests.membership_gate import assert_result_fields
 
@@ -1161,19 +1002,8 @@ def test_the_gate_would_have_caught_the_shipped_defect():
         )
 
 
-# ---------------------------------------------------------------------------
-# The construction check has exactly one owner
-#
-# ``check_literal_fields`` is a module-level function and the result dataclasses
-# each had to reach it through their own ``__post_init__``. That trampoline was
-# the second thing to keep in sync: the check is one function, but a result
-# dataclass added tomorrow would validate nothing while reading exactly like the
-# ones that do. It is now inherited from ``models.LiteralChecked``, so the check
-# is part of the class rather than something it remembers to ask for -- and
-# "inherited" is a claim the tree can check, which is what these two do:
-# a caller of the check outside the owner is a second copy of it, and a result
-# dataclass that does not inherit the owner is a class with no check.
-# ---------------------------------------------------------------------------
+# It is now inherited from ``models.LiteralChecked``, so the check is part of the class rather than something
+# it remembers to ask for -- and "inherited" is a claim the tree can check, which is what these
 
 
 def _literal_check_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
@@ -1296,9 +1126,6 @@ def test_every_taxonomy_literal_dataclass_inherits_the_construction_check():
     for name, cls in sorted(declared_types().items()):
         if not (isinstance(cls, type) and is_dataclass(cls)):
             continue
-        # Field names first: a dataclass with no taxonomy-named field cannot be
-        # one of these, and asking for its resolved hints would evaluate a
-        # TYPE_CHECKING-only annotation (CrawlJob's HostPolicy) for nothing.
         named = [field for field in cls.__dataclass_fields__ if field in LITERAL_FIELDS]
         if not named:
             continue
@@ -1316,10 +1143,5 @@ def test_every_taxonomy_literal_dataclass_inherits_the_construction_check():
         "no taxonomy Literal field was enumerated, so the sweep is a no-op:"
         f" LITERAL_FIELDS={sorted(LITERAL_FIELDS)}"
     )
-    # CrawlResult is deliberately ABSENT. It no longer declares a taxonomy
-    # Literal of its own: the render result holds the attempt it was rendered
-    # by, and status/classification/error/selected_strategy are properties
-    # reaching into it, so the record that declares those axes and the record
-    # that checks them are the same object. Naming CrawlResult here would be
-    # asserting a field it no longer has.
+    # CrawlResult is deliberately ABSENT.
     assert set(checked) == {"CrawlStrategyAttempt", "EngineCrawlResult"}, sorted(checked)

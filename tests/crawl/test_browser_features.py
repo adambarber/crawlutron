@@ -43,9 +43,7 @@ class FakePage(ScriptedPage):
         self.calls = []
         self.elements = {}
         self.responses = []
-        # Where each interaction call goes. A test that wants one to blow up
-        # replaces the ENTRY rather than the method: assigning over a method left
-        # the object claiming a method it no longer had.
+        # Where each interaction call goes.
         self.click = self._click
 
     async def _click(self, selector):
@@ -69,9 +67,8 @@ class FakePage(ScriptedPage):
         return self.elements.setdefault(selector, FakeElement(selector))
 
     async def screenshot(self, **k):
-        # ``**k`` to match :meth:`BrowserFakePage.screenshot`; the page-level flag
-        # is read out of it rather than named, so a signature narrowed to
-        # ``full_page`` cannot reject the other kwargs the renderer passes.
+        # ``**k`` to match :meth:`BrowserFakePage.screenshot`; the page-level flag is read out of it rather
+        # than named, so a signature narrowed to ``full_page`` cannot reject the other kwargs the renderer
         self.calls.append(("screenshot", k.get("full_page", False)))
         return b"fakepngbytes"
 
@@ -186,8 +183,8 @@ class TestBrowserReuse:
         await _render(renderer)
         await renderer.close()
         assert renderer.driver.browser is None
-        # The handle going away is the observable; the context manager actually
-        # being exited is the part that would otherwise leak a browser process.
+        # The handle going away is the observable; the context manager actually being exited is the part that
+        # would otherwise leak a browser process.
         assert cm.exits == 1
 
     async def test_render_still_succeeds_with_fake_browser(self):

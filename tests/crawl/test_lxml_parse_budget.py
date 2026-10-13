@@ -114,9 +114,8 @@ async def test_shaping_never_reparses_engine_produced_items(parse_budget):
 
     result = await _run({"limits": {"max_depth": 1}}, html=META_HTML)
     item = replace(result, markdown=result.markdown or "# hello")
-    # The carried payload still has to survive the persistence boundary as plain
-    # JSON -- that is what the spill writes, and this is the assertion that the
-    # carried block is serializable at all.
+    # The carried payload still has to survive the persistence boundary as plain JSON -- that is what the
+    # spill writes, and this is the assertion that the carried block is serializable at all.
     json.dumps(to_dict(item))
     parse_budget.mark()
     _markdown, metadata = format_crawl_item(item)

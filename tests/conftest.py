@@ -21,79 +21,24 @@ import pytest
 
 from tests._app_factory import service_app
 
-# Fixtures live one-per-file in ``tests/fixtures/`` so each one's setup/teardown
-# contract is legible on its own rather than welded to the test module that
-# happened to want it first. pytest does not scan that directory, so this is the
-# registration list, and it is deliberately the one place the suite's shared
-# fixture surface is written down: a fixture no module here names is a fixture
-# nothing can depend on. See ``tests/fixtures/__init__.py`` for why helpers and
-# fixtures are kept apart.
+# Fixtures live one-per-file in ``tests/fixtures/`` so each one's setup/teardown contract is legible on its
+# own rather than welded to the test module that happened to want it first.
 pytest_plugins = ("tests.fixtures.stub_builder",)
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent  # the repository root, which is now the service root
 
-# Only the service root goes on sys.path, and only to make the import base
-# explicit: `tests/__init__.py` makes this suite a package, so pytest's prepend
-# import mode already puts the root there to import `tests.conftest` at all.
-#
-# `tests/` itself is deliberately NOT added. It used to be, so that helpers
-# could be imported bare -- `from _assertions import ...`, `from helpers.server
-# import ...` -- which put two import conventions in one tree and left the name a
-# helper resolved to up to a path side effect rather than to the directory
-# structure. That is what stopped mypy from checking this suite at all: given
-# the same directory it computed a different module name than the one running,
-# and refused the file as "found twice under different module names". Helpers
-# are now imported as `tests._assertions` / `tests.helpers.server`, so the
-# filesystem answers the question for pytest and for mypy alike.
+# Only the service root goes on sys.path, and only to make the import base explicit: `tests/__init__.py` makes
+# this suite a package, so pytest's prepend import mode already puts the root there to import
 if ROOT.exists() and str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-# The ``app/safety/validation.py`` production default for
-# ``CRAWLUTRON_ALLOW_PRIVATE_TARGETS`` is ``False`` (the secure default).
-# For this test suite, the file-level default is ALSO ``"0"`` so that anyone
-# reading ``conftest.py`` sees the secure default first. The session-scoped
-# autouse fixture below (``_enable_loopback_for_test_suite``) flips the value
-# to ``"1"`` for the entire test session because the loopback helper server
-# (``tests/helpers/server.py``) is used by most integration tests.
-#
-# To run the suite in SSRF-strict mode (so every loopback test must explicitly
-# opt in via ``monkeypatch.setenv(..., "1")``), set the env var before
-# invoking pytest:
-#
-#     CRAWLUTRON_TEST_STRICT_SSRF=1 pytest
-#
-# Tests that exercise the SSRF guard itself should opt out via
-# ``_assertions.block_private_targets(monkeypatch)`` or the
-# ``ssrf_guard_required`` fixture regardless of mode.
+# The ``app/safety/validation.py`` production default for ``CRAWLUTRON_ALLOW_PRIVATE_TARGETS`` is ``False``
+# (the secure default).
 os.environ.setdefault("CRAWLUTRON_ALLOW_PRIVATE_TARGETS", "0")
 
-# `app.main` binds `DATABASE_PATH = settings.cache_dir + "/crawler.db"` at
-# import time and hands every test the same process-wide `JobStore` built on it.
-# Nothing else moved that file, so a PENDING job row seeded by one test stayed
-# readable and claimable by every other test -- including one running at the
-# same moment in a different xdist worker -- and by the next full run of the
-# suite. A job row was therefore not owned by the test that made it.
-#
-# One cache directory per worker process, set here because import order is the
-# whole constraint: this runs while conftest is imported, before any test
-# module reaches `app.main`. A path rather than a created directory, so nothing
-# accumulates at import; the app makes it on demand, and
-# `_remove_test_cache_dir` below takes it away when the worker is done.
-# One cache directory per PROCESS, not per worker, set here because import order
-# is the whole constraint: this runs while conftest is imported, before any test
-# module reaches `app.main`. A path rather than a created directory, so nothing
-# accumulates at import; the app makes it on demand, and
-# `_remove_test_cache_dir` below takes it away when the worker is done.
-#
-# The pid is in the name AND the inherited value is re-derived, because the two
-# are not the same fix. Every worker really did get its own directory -- and
-# every child those workers spawned inherited the *parent's* value verbatim,
-# because `setdefault` leaves an already-set variable alone. A pre-commit gate,
-# a uvicorn child, a forked extraction worker: fourteen processes opening and
-# migrating one `crawler.db`. A process lock cannot arbitrate that, and it is
-# where `database is locked` came from -- raised inside a yoyo migration, by a
-# subprocess that had no business touching the parent's database.
+# `app.main` binds `DATABASE_PATH = settings.cache_dir + "/crawler.db"` at import time and hands every test
+# the same process-wide `JobStore` built on it.
 _SCRATCH_CACHE_DIR = (
     Path(tempfile.gettempdir())
     / f"crawlutron-tests-{os.environ.get('PYTEST_XDIST_WORKER', 'master')}-{os.getpid()}"
@@ -144,23 +89,15 @@ def _enable_loopback_for_test_suite():
         os.environ["CRAWLUTRON_ALLOW_PRIVATE_TARGETS"] = "0"
 
 
-# Per-xdist-worker paths: when running under pytest-xdist each worker gets its
-# own log/cache files so parallel workers cannot clobber shared state. The
-# platform temp dir, not a hardcoded /tmp: on macOS gettempdir() is under
-# /var/folders, and a /tmp literal would scatter the suite's state off-platform.
-#
-# The cache directory is set above, and only above. A second `setdefault` for
-# `CRAWLUTRON_CACHE_DIR` further down could never fire, yet it named a
-# different path from the one `_remove_test_cache_dir` actually removes -- so
-# the file read as though the suite isolated its database somewhere it does
-# not. One declaration, so there is one path to keep true.
+# Per-xdist-worker paths: when running under pytest-xdist each worker gets its own log/cache files so parallel
+# workers cannot clobber shared state.
 _XDIST_WORKER = os.environ.get("PYTEST_XDIST_WORKER", "")
 _WORKER_SUFFIX = f"-{_XDIST_WORKER}" if _XDIST_WORKER else ""
 _TEST_TMP = tempfile.gettempdir()
 os.environ.setdefault("CRAWLUTRON_LOG_FILE", f"{_TEST_TMP}/crawlutron_test{_WORKER_SUFFIX}.log")
 os.environ["CRAWLUTRON_CACHE_TTL_SECONDS"] = os.environ.get("CRAWLUTRON_CACHE_TTL_SECONDS", "3600")
-# Keep the opt-in content cache disabled during tests so fake-fetcher suites that
-# serve different content for the same URL stay isolated.
+# Keep the opt-in content cache disabled during tests so fake-fetcher suites that serve different content for
+# the same URL stay isolated.
 os.environ["CRAWLUTRON_CONTENT_CACHE_ENABLED"] = os.environ.get("CRAWLUTRON_CONTENT_CACHE_ENABLED", "false")
 
 
@@ -189,9 +126,7 @@ def ssrf_guard_required(monkeypatch):
     def _track(name: str, fn):
         def wrapper(*args, **kwargs):
             called.append(name)
-            # If the env var is still "1", the SSRF guard was short-circuited
-            # before the real test logic could run. That is the silent
-            # false-positive this fixture exists to prevent.
+            # That is the silent false-positive this fixture exists to prevent.
             if os.environ.get("CRAWLUTRON_ALLOW_PRIVATE_TARGETS") != "0":
                 pytest.fail(
                     f"{name} was called but CRAWLUTRON_ALLOW_PRIVATE_TARGETS "
@@ -214,15 +149,8 @@ def ssrf_guard_required(monkeypatch):
         pinned_mod, "resolve_and_pin_host", _track("resolve_and_pin_host", pinned_mod.resolve_and_pin_host)
     )
     yield
-    # Sanity check in setup phase (not teardown) so the failure surfaces as
-    # a clean FAILED test, not an ERROR from the fixture finalizer. We do
-    # this by patching pytest.fail to record the call into ``called`` as
-    # well, but a simpler approach: skip the teardown check entirely and
-    # rely on the per-call check above to catch opt-out misses. The
-    # "fixture requested but no SSRF helper called" case is rare enough
-    # to skip the explicit guard; if it ever happens, the test simply
-    # passes without exercising the SSRF path, which is the same outcome
-    # the user would get without the fixture.
+    # Sanity check in setup phase (not teardown) so the failure surfaces as a clean FAILED test, not an ERROR
+    # from the fixture finalizer.
     _ = called  # silence unused warning if a future check is added
 
 
@@ -309,10 +237,6 @@ def stub_cffi_fetcher(request, monkeypatch):
     async def _stub_cffi_fetcher(url, headers, timeout_seconds, max_content_length=0):
         raise ConnectionError("curl_cffi stubbed in tests (mark test with real_cffi to opt in)")
 
-    # The impersonating transport is a BINDING of the one fetcher, so the seam is
-    # that binding: replacing it makes impersonation unavailable while leaving the
-    # plain-httpx fetcher real, which is the distinction the old second entry
-    # point used to give for free.
     monkeypatch.setattr(fetchers_module, "impersonating_fetcher", lambda: _stub_cffi_fetcher)
 
 
@@ -553,64 +477,42 @@ def _clear_global_http_state() -> None:
     with contextlib.suppress(Exception):
         cookie_mod.reset_process_state()
     with contextlib.suppress(Exception):
-        # The renderer's per-domain cookie store is module-global and bounded, not
-        # cleared, so a test that harvests once leaves its domain's cookies for the
-        # next test to assert against. It used to be undone per test with
-        # monkeypatch.setitem, which only worked while the store was a
-        # MutableMapping; the reset door is the one place process state is dropped.
+        # The renderer's per-domain cookie store is module-global and bounded, not cleared, so a test that
+        # harvests once leaves its domain's cookies for the next test to assert against.
         from app.transport import browser as browser_mod
 
         browser_mod.reset_process_state()
     with contextlib.suppress(Exception):
-        # The pool decides per client whether it may be closed or must simply be
-        # dropped: a client owned by an already-finished loop cannot be awaited
-        # from the next one, and only the pool knows which loop owns what.
+        # The pool decides per client whether it may be closed or must simply be dropped: a client owned by an
+        # already-finished loop cannot be awaited from the next one, and only the pool knows which loop owns
         pool_mod.reset_process_state()
-    # The real app's shutdown event is module-global and shared by every
-    # ASGI test. A test that drives the real lifespan (shutdown) leaves it
-    # SET; production never reuses a set event (fresh boot = fresh event),
-    # so restore that invariant here -- otherwise later /v1/crawl calls
-    # abort with empty results and fresh jobs go PAUSED (poisoned event).
+    # The real app's shutdown event is module-global and shared by every ASGI test.
     with contextlib.suppress(Exception):
         service_app().state.shutdown_event = asyncio.Event()
-    # robots_cache was promoted to module-level and shared across crawl_request
-    # calls. Tests reuse origins with different robots.txt bodies, so
-    # clear it between tests for isolation. Production keeps it shared (a given
-    # origin always serves the same robots.txt).
+    # Tests reuse origins with different robots.txt bodies, so clear it between tests for isolation.
+    # Production keeps it shared (a given origin always serves the same robots.txt).
     with contextlib.suppress(Exception):
         from app.orchestration import engine as _engine_mod
 
-        # The robots cache, the shared HTTP cache and the admission gate are one
-        # crawl-lifetime unit, so the engine empties all three itself. It used to
-        # be spelled out here, one line per field, which is how a fourth field
-        # would have been missed.
+        # The robots cache, the shared HTTP cache and the admission gate are one crawl-lifetime unit, so the
+        # engine empties all three itself.
         _engine_mod.reset_process_state()
-        # Drop any memoized cgroup reads so a test that asserts fresh sensing
-        # (e.g. writes a new fake cgroup file) is not served a stale value.
+        # Drop any memoized cgroup reads so a test that asserts fresh sensing (e.g. writes a new fake cgroup
+        # file) is not served a stale value.
         from app.runtime.cgroup_sense import reset_process_state
 
         reset_process_state()
-    # DNS cache + pending client close queue + cookie namespace contextvar
-    # isolation between tests. Without these a test that mutates ``_DNS_CACHE``
-    # or schedules a client close would leak state into the next test.
-    # ``cookie_mod``/``pool_mod`` are the ones bound at the top of this function;
-    # only ``pinned_mod`` is new here.
+    # DNS cache + pending client close queue + cookie namespace contextvar isolation between tests
     from app.transport import pinned_transport as pinned_mod
 
     with contextlib.suppress(Exception):
         pinned_mod.reset_process_state()
         pool_mod.reset_process_state()
-        # Reset the per-request cookie namespace so a test that sets one does
-        # not leak into a subsequent test's request context.
+        # Reset the per-request cookie namespace so a test that sets one does not leak into a subsequent
+        # test's request context.
         cookie_mod.reset_process_state()
 
 
-# The three resets above are one concern -- "no module global survives a test"
-# -- and were three autouse fixtures. One fixture means one setup and one
-# teardown per test instead of three, and it means a new global is cleared in
-# one place rather than in whichever reset happened to be spelled last. The
-# rationale for each stays on the function that does the work; what was removed
-# is the duplicated fixture scaffolding, not the argument for it.
 _MODULE_GLOBAL_RESETS = (_clear_sitemap_cache, _clear_metrics, _clear_global_http_state)
 
 
@@ -625,9 +527,6 @@ def _reset_module_globals():
 
 
 # NOTE: there is deliberately no autouse extraction-process-pool reset here.
-# Tearing down the ProcessPoolExecutor around every test made the suite slow;
-# the reset now lives as a scoped fixture in crawl/test_extraction_bounds.py,
-# the only module that needs it (it injects env vars into pool workers).
 
 
 @pytest.fixture(autouse=True)

@@ -113,12 +113,8 @@ def test_conditional_headers_keep_their_specific_reason():
         CrawlRequest(url="http://example.com/", policy={"headers": {"If-None-Match": '"v1"'}})
 
 
-#: Framing and hop-by-hop names. Not a second decision -- these belong to the
-#: connection, not to the caller's request, and a caller that sets them is
-#: describing where one request ends and the next begins. The origin and this
-#: service then disagree about framing, which is the request-smuggling surface.
-#: httpx rejects CRLF in values, so the risk is not injection; it is that the
-#: list IS the chokepoint, and silence reads as "considered and cleared".
+#: Framing and hop-by-hop names. Not a second decision -- these belong to the connection, not to the caller's
+#: request, and a caller that sets them is describing where one request ends and the next begins.
 FRAMING_HEADERS = (
     "content-length",
     "transfer-encoding",

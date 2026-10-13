@@ -94,26 +94,14 @@ def _vocabulary_modules() -> tuple[ModuleType, ...]:
     )
 
 
-# app/safety/safe_regex.py is the sanctioned regex wrapper (stdlib `re` for
-# literals; the third-party `regex` engine for bounded execution). It owns
-# the banned primitives, so a full-tree walk excludes it. A test that must
-# also exempt its own chokepoint module passes `exclude=SANCTIONED | {"..."}`.
+# app/safety/safe_regex.py is the sanctioned regex wrapper (stdlib `re` for literals; the third-party `regex`
+# engine for bounded execution). It owns the banned primitives, so a full-tree walk excludes it.
 SANCTIONED = frozenset({"safe_regex.py"})
 
-# The node sequence of every root any detector has walked, keyed by the root's
-# identity. Weak so a synthetic tree a property test built for one assertion is
-# released with the test that built it, rather than pinned for the session: a
-# strong dict here would grow with every planted tree and hold a whole parsed
-# module per case. `ast.AST` supports weak references, and identity is the
-# right key -- a re-parse of an unchanged file compares equal everywhere a
-# detector looks, so only identity distinguishes "I already walked this" from
-# "this is a different tree that happens to look the same".
+# The node sequence of every root any detector has walked, keyed by the root's identity.
 _NODES_BY_ROOT: weakref.WeakKeyDictionary[ast.AST, tuple[ast.AST, ...]] = weakref.WeakKeyDictionary()
 
-# The same sequence, narrowed to one node kind, keyed by kind then root. Split
-# out from _NODES_BY_ROOT because the value's element type depends on the kind,
-# and a mapping whose value type depends on its key is a TypeVar wearing a
-# table.
+# The same sequence, narrowed to one node kind, keyed by kind then root.
 _NODES_BY_KIND: weakref.WeakKeyDictionary[ast.AST, dict[str, tuple[ast.AST, ...]]] = (
     weakref.WeakKeyDictionary()
 )
@@ -145,13 +133,8 @@ def nodes_of(root: ast.AST) -> tuple[ast.AST, ...]:
     return cached
 
 
-# ``id(node) -> parent`` for every node of one root, keyed by the root's
-# identity on the same weak terms as _NODES_BY_ROOT. A detector asking "what
-# encloses this node?" was rebuilding that whole map for every candidate it
-# examined rather than once per tree, which made each such check quadratic in
-# the size of the module. The cost was measurable: the env-knob detector runs
-# this per string constant, and one tests/invariants/ run spent 82M of its 115M
-# node visits inside this one dict comprehension.
+# ``id(node) -> parent`` for every node of one root, keyed by the root's identity on the same weak terms as
+# _NODES_BY_ROOT.
 _PARENTS_BY_ROOT: weakref.WeakKeyDictionary[ast.AST, dict[int, ast.AST]] = weakref.WeakKeyDictionary()
 
 
@@ -237,10 +220,8 @@ def _narrow(root: ast.AST, kind: str, *types: type[ast.AST]) -> tuple[ast.AST, .
     return found
 
 
-# The narrow walks below are a detector's vocabulary, named for what a rule asks
-# of the tree rather than for the ast class that happens to answer it. Each
-# returns the node kind it filtered to, so a detector reads node.func / node.args
-# / node.value without re-asserting what the walk already proved.
+# The narrow walks below are a detector's vocabulary, named for what a rule asks of the tree rather than for
+# the ast class that happens to answer it.
 def call_nodes(root: ast.AST) -> tuple[ast.Call, ...]:
     """Every call in `root`, in walk order. The busiest walk in the suite."""
     return tuple(node for node in _narrow(root, "call", ast.Call) if isinstance(node, ast.Call))
@@ -964,10 +945,6 @@ def call_keyword_arguments(
         else ({keyword_names} if isinstance(keyword_names, str) else set(keyword_names))
     )
     for node in calls_to_any(tree, names):
-        # One pair per DISTINCT keyword name: Python itself rejects a repeated
-        # keyword, so a call carrying two is un-compilable source, and emitting
-        # an offender per occurrence would over-report against the one-per-call
-        # behavior these detectors had before they were unified.
         seen_keywords: set[str | None] = set()
         for keyword in node.keywords:
             if keyword.arg is None or keyword.arg in seen_keywords:
@@ -1080,8 +1057,8 @@ def _import_bindings(tree: ast.AST) -> dict[str, str]:
             value = node.value
             if value is None:
                 continue
-            # Two candidate spellings, and the second is the fallback for an
-            # empty first -- including for a call, which resolves to nothing.
+            # Two candidate spellings, and the second is the fallback for an empty first -- including for a
+            # call, which resolves to nothing.
             named = "" if isinstance(value, ast.Call) else _resolved_expr(value, bindings)
             canonical = named or _static_string(value, bindings)
             if not canonical:

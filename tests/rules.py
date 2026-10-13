@@ -37,18 +37,10 @@ from dataclasses import dataclass, field
 
 from tests.chokepoint_walks import REPO_ROOT, SANCTIONED, app_trees, relative_posix
 
-#: Where a bite proof's synthetic module is pretended to live. The path is part of
-#: what a detector may legitimately inspect (a rule scoped to one directory reads
-#: it), so it has to name a real directory rather than a bare basename, and it has
-#: to be absolute because offenders are reported relative to the repo root.
-#: Individual rules override it with :attr:`Rule.proof_path` when a detector
-#: resolves imports or package structure relative to where the module sits.
+#: Where a bite proof's synthetic module is pretended to live.
 _SYNTHETIC = REPO_ROOT / "app" / "_synthetic.py"
 
-#: ``(tree, path, **per_module) -> offender strings``. The trailing keyword
-#: arguments are the ones a rule supplies through :attr:`Rule.kwargs_for`; a
-#: detector that takes none simply ignores them, which is what lets a plain
-#: two-argument walk be swept through the same path as a parameterized one.
+#: ``(tree, path, **per_module) -> offender strings``.
 Detector = Callable[..., Iterable[str]]
 
 
@@ -224,8 +216,8 @@ class Rule:
     skip: frozenset[str] = frozenset()
     kwargs_for: Callable[[str], dict[str, object]] | None = None
     proof_path: pathlib.Path = _SYNTHETIC
-    #: What a detector may legitimately inspect is passed as ``(*, exclude)``, so the
-    #: ``...`` is load-bearing: a positional reading rejected every scope in the tree.
+    #: What a detector may legitimately inspect is passed as ``(*, exclude)``, so the ``...`` is load-bearing:
+    #: a positional reading rejected every scope in the tree.
     scope: Callable[..., Iterable[tuple[pathlib.Path, ast.Module]]] | None = None
 
     def __post_init__(self) -> None:

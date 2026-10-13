@@ -22,9 +22,8 @@ import pathlib
 from tests.chokepoint_walks import app_trees, call_nodes, nodes_of, offender, offender_at
 from tests.invariants._shared import assert_trees_clean
 
-# Dynamic-pattern re.* calls: a non-literal first arg is a pattern built from
-# attacker-influenced text (the ReDoS shape). `re.search(LITERAL, text)` is
-# safe -- only a dynamic PATTERN is the hazard.
+# Dynamic-pattern re.* calls: a non-literal first arg is a pattern built from attacker-influenced text (the
+# ReDoS shape). `re.search(LITERAL, text)` is safe -- only a dynamic PATTERN is the hazard.
 _RE_DYNAMIC_METHODS = frozenset({"compile", "search", "match", "fullmatch", "sub", "findall", "split"})
 
 

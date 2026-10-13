@@ -149,8 +149,8 @@ class TestContentCacheDiskIOOffTheLock:
 
             return wrapper
 
-        # Read_text/read_bytes both: _read_envelope is the single chokepoint for
-        # full reads, and the guard must hold whichever syscall it uses.
+        # Read_text/read_bytes both: _read_envelope is the single chokepoint for full reads, and the guard
+        # must hold whichever syscall it uses.
         monkeypatch.setattr(cc.Path, "read_text", guard("read_text", cc.Path.read_text))
         monkeypatch.setattr(cc.Path, "read_bytes", guard("read_bytes", cc.Path.read_bytes))
         monkeypatch.setattr(cc.Path, "stat", guard("stat", cc.Path.stat))
@@ -194,11 +194,8 @@ class TestContentCacheDiskIOOffTheLock:
         async def scenario() -> bool:
             reading = asyncio.ensure_future(cache.aget("big"))
             await _wait_for(read_started, reason="the envelope read never started")
-            # A loop-side lock holder (aset's index commit) must be able to
-            # finish while the envelope read is still in flight. Yield the loop
-            # until it has, rather than sleeping a hopeful tenth of a second and
-            # asking whether it had: the writer either finished or it did not,
-            # and the read is held open for the whole window either way.
+            # A loop-side lock holder (aset's index commit) must be able to finish while the envelope read is
+            # still in flight.
             writer = asyncio.ensure_future(cache.aset("other", {"v": 1}))
             try:
                 await asyncio.wait_for(asyncio.shield(writer), timeout=1.0)
@@ -249,14 +246,14 @@ class TestContentCacheDiskIOOffTheLock:
         """
         now, cache = _clocked_cache(tmp_path)
         cache.set("k", {"body": "a" * 100}, ttl=10)  # expires 1010
-        # The refresh a concurrent writer landed during the scan: a longer
-        # payload so the recorded byte size differs, and a TTL still live.
+        # The refresh a concurrent writer landed during the scan: a longer payload so the recorded byte size
+        # differs, and a TTL still live.
         now[0] = 1005.0
         cache.set("k", {"body": "b" * 200}, ttl=900)  # expires 1905
         now[0] = 1020.0  # the OLD envelope is expired, the new one is live
 
-        # Prune's glob reads the bytes as they were just before the refresh:
-        # an expired verdict computed from superseded bytes.
+        # Prune's glob reads the bytes as they were just before the refresh: an expired verdict computed from
+        # superseded bytes.
         stale = json.dumps({"expires": 1010.0, "value": {"body": "a" * 100}, "cached_at": 1000.0}).encode()
         assert len(stale) != cache._index_sizes["k"], "the refresh must change the byte size"
         serve_stale = _serve_stale_envelope(monkeypatch, cache, stale)
@@ -285,18 +282,11 @@ class TestContentCacheDiskIOOffTheLock:
         cache._memory_cache.clear()
         cache._index_cached_at.clear()  # force the metadata to be re-read from disk
 
-        # Bytes that no longer match the recorded entry: a write landed between
-        # the read and the index commit. The stale envelope claims to never
-        # expire and to have been cached at 1.0.
+        # The stale envelope claims to never expire and to have been cached at 1.0.
         stale = json.dumps({"expires": None, "value": {"v": "stale"}, "cached_at": 1.0}).encode()
         assert len(stale) != cache._index_sizes["k"]
         serve_stale = _serve_stale_envelope(monkeypatch, cache, stale)
         assert cache.cached_at_of("k") == 1.0  # served the bytes that were read
-        # But the superseded read must not enter the freshness mirror: a
-        # fabricated cached_at=1.0 and a stale expires=None (which makes a live
-        # entry look never-expiring) both answer later lookups from metadata the
-        # slow path would have expired -- the mirror contract the value-mirror
-        # write already enforces.
         assert "k" not in cache._index_cached_at, (
             f"a superseded read poisoned the freshness mirror: {cache._index_cached_at.get('k')!r}"
         )
@@ -330,9 +320,8 @@ class TestJobRunnerSavesOffTheEventLoop:
 
         def slow_save(j):
             saved.append(j.status)
-            # The blocking work JobStore.save does: json.dumps of every row
-            # field plus the SQLite commit. Only the event loop can advance
-            # liveness, so a save run ON the loop sees zero progress.
+            # The blocking work JobStore.save does: json.dumps of every row field plus the SQLite commit. Only
+            # the event loop can advance liveness, so a save run ON the loop sees zero progress.
             observed[0] = liveness.wait_for_progress()
             real_save(j)
 
@@ -349,9 +338,8 @@ class TestJobRunnerSavesOffTheEventLoop:
         assert progress >= liveness.needed, (
             f"the event loop made {progress} heartbeat ticks while a job-store save ran"
         )
-        # Two-plane contract: the data save ran (recorded below) off the
-        # loop, and the shutdown pause is a pure CONTROL write -- a CAS,
-        # observed on the row, never carried by save() anymore.
+        # Two-plane contract: the data save ran (recorded below) off the loop, and the shutdown pause is a
+        # pure CONTROL write -- a CAS, observed on the row, never carried by save() anymore.
         assert saved, "the runner's write-ahead data save never ran"
         assert loaded_job(store, job.job_id).status is JobStatus.PAUSED
 
@@ -383,19 +371,18 @@ class TestAsyncCrawlRunnerSavesOffTheEventLoop:
         real_save = store.save
 
         def slow_save(j):
-            # The blocking work JobStore.save does: json.dumps of every row
-            # field plus the SQLite commit. Only the event loop can advance
-            # liveness, so a save run ON the loop sees zero progress.
+            # The blocking work JobStore.save does: json.dumps of every row field plus the SQLite commit. Only
+            # the event loop can advance liveness, so a save run ON the loop sees zero progress.
             observed[0] = max(observed[0], liveness.wait_for_progress())
             real_save(j)
 
-        # ``asave`` delegates to ``save`` off-thread, so patching the sync
-        # method covers every save the runner makes.
+        # ``asave`` delegates to ``save`` off-thread, so patching the sync method covers every save the runner
+        # makes.
         monkeypatch.setattr(store, "save", slow_save)
 
         async def _fake_execute(*args, **kwargs):
-            # A completed crawl drives the COMPLETED save too, not just the
-            # RUNNING one, and avoids any real network work.
+            # A completed crawl drives the COMPLETED save too, not just the RUNNING one, and avoids any real
+            # network work.
             return {"results": [], "submitted_count": 0}
 
         monkeypatch.setattr("app.api.async_crawl_runner.execute_crawl", _fake_execute)
@@ -419,8 +406,7 @@ class TestAsyncCrawlRunnerSavesOffTheEventLoop:
         assert progress >= liveness.needed, (
             f"the event loop made {progress} heartbeat ticks while the async crawl runner saved a job row"
         )
-        # The job reached COMPLETED through the offloaded save, so the store is
-        # not just skipping the work.
+        # The job reached COMPLETED through the offloaded save, so the store is not just skipping the work.
         assert loaded_job(store, job.job_id).status == JobStatus.COMPLETED
 
 
@@ -443,8 +429,8 @@ class TestSpillAssemblyOffTheEventLoop:
         pages = {"/": (200, "<html><body>hello</body></html>", "text/html")}
 
         async def scenario() -> dict:
-            # The crawl is scheduled, not awaited inline: the point is what the
-            # event loop does while the spilled results are read back.
+            # The crawl is scheduled, not awaited inline: the point is what the event loop does while the
+            # spilled results are read back.
             crawl = asyncio.ensure_future(crawled_results(pages, limits={"max_depth": 1, "max_pages": 5}))
             return await asyncio.wait_for(crawl, timeout=15)
 
@@ -463,8 +449,7 @@ class TestSpillAssemblyOffTheEventLoop:
         cache.set("k", {"v": "old"})
         cache._memory_cache.clear()
 
-        # Bytes that no longer match the recorded entry: a write landed between
-        # the read and the index commit.
+        # Bytes that no longer match the recorded entry: a write landed between the read and the index commit.
         stale = json.dumps({"expires": None, "value": {"v": "stale"}, "cached_at": 1.0}).encode()
         assert len(stale) != cache._index_sizes["k"]
         _serve_stale_envelope(monkeypatch, cache, stale)  # toggle stays on: whole read is stale

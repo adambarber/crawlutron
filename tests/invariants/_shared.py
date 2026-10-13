@@ -155,12 +155,8 @@ def _enclosing_calls(tree: ast.AST, target: str) -> list[tuple[ast.Call, str]]:
     ]
 
 
-# The scope-regex compiler: ONE definition of "compile a user-supplied scope
-# pattern, fail closed, bound the length". It had two -- a public one in
-# admission and a private one in engine -- that differed in their except
-# clause, and the length bound was a second module constant with the same name
-# and the same value. One definition, one bound, and the fail-closed arms of
-# both.
+# The scope-regex compiler: ONE definition of "compile a user-supplied scope pattern, fail closed, bound the
+# length". One definition, one bound, and the fail-closed arms of both.
 _SCOPE_COMPILER_NAMES = frozenset({"compile_scope_pattern", "_compile_scope_regex_safe"})
 
 
@@ -195,15 +191,8 @@ def _declared_public_symbols(tree: ast.Module) -> set[str] | None:
     return set(declared)
 
 
-# ---------------------------------------------------------------------------
-# Chokepoint drift detectors for the fix tiers
-#
-# Each behavioral test below pins what the code DOES today; these pin the
-# CHOKEPOINT so a future edit that bypasses it turns the suite red instead of
-# silently reintroducing the defect. Same shape as the detectors above: an AST
-# walk over app/, a synthetic *_bites companion proving the predicate fires,
-# and no hand-maintained exemption list.
-# ---------------------------------------------------------------------------
+# Same shape as the detectors above: an AST walk over app/, a synthetic *_bites companion proving the
+# predicate fires, and no hand-maintained exemption list.
 
 
 def _enclosing_defs(node: ast.AST, root: ast.AST) -> list[str]:
@@ -296,11 +285,8 @@ def _module_name(path: pathlib.Path) -> str:
     return relative.replace("/", ".")
 
 
-#: A module-level symbol ``_module_definition_index`` records. The walk admits
-#: exactly these three kinds, and every caller reads ``.name`` off what it gets
-#: back -- so the index said ``ast.AST`` and each consumer had to re-assert the
-#: shape the index had already guaranteed. Naming the three keeps the guarantee
-#: where it is established.
+#: A module-level symbol ``_module_definition_index`` records. Naming the three keeps the guarantee where it
+#: is established.
 type DefinitionNode = ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef
 
 

@@ -32,9 +32,7 @@ from tests.chokepoint_walks import (
     resolved_expr_name,
 )
 
-# There is ONE concrete fetcher. The impersonating transport is a binding of it
-# (`impersonating_fetcher`), not a second function, so the contract's parameters
-# are spelled once in the whole tree and there is no twin to keep in step.
+# There is ONE concrete fetcher.
 _CONCRETE_FETCHERS = [pytest.param(default_http_fetcher, id="default_http_fetcher")]
 
 
@@ -84,39 +82,15 @@ _POSITIONAL = frozenset({inspect.Parameter.POSITIONAL_ONLY, inspect.Parameter.PO
 _KEYWORD_ONLY = frozenset({inspect.Parameter.KEYWORD_ONLY})
 
 
-# What a production fetcher is this call PLUS: the keyword-only arguments the
-# engine binds and the call site never passes. Typed here rather than read off a
-# second Protocol, because that Protocol was the duplication -- the
-# four positional parameters written twice, kept in step only by comparing each
-# half against something else. ``HttpFetcher`` is the single declaration of the
-# shared shape; what each fetcher adds on top of it is a fact about that fetcher,
-# so it is stated once, here, next to the check that enforces it.
-#
-# ``impersonate`` and ``pin`` both default, and which parameters are
-# optional is the axis a name-only comparison cannot see. The SSRF axis itself
-# retired with ``policy``: the fetcher's first parameter is a ``NormalizedUrl``
-# now, so the host policy cannot be omitted at a fetcher call at all -- the
-# value was admitted under it before the call was possible, and unparsed text
-# is a type error. What the defaulting comparison still guards is drift the
-# type checker cannot see: mypy is one-directional on protocols (an
-# implementation may accept more than the contract asks for), so a fetcher
-# silently widening what a caller may omit passes every name-based check.
+# What a production fetcher is this call PLUS: the keyword-only arguments the engine binds and the call site
+# never passes.
 _BOUND_KEYWORDS = ("impersonate", "pin")
-# ``pin`` is optional for a reason the safety edge above does not cover, and the
-# distinction is the whole reason it is allowed to be optional at all. A
-# defaulted policy parameter would substitute a DIFFERENT, possibly permissive
-# value for one the caller must choose; ``pin``'s default of ``None`` is not a
-# substitute for anything -- it means "use the real rule", so omitting it is
-# the safe direction and the parameter cannot be silently lost into a weaker
-# fetch. That is what makes it a binding rather than a hole, and it is why the
-# guard below compares defaulting and still lets this one through.
+# ``pin`` is optional for a reason the safety edge above does not cover, and the distinction is the whole
+# reason it is allowed to be optional at all.
 _BOUND_KEYWORD_OPTIONAL = frozenset({"impersonate", "pin"})
 
-# The shape every production fetcher must have: HttpFetcher's own positional
-# parameters, read off the Protocol so a rename there is a rename here, plus the
-# two bound keywords typed above. Derived in one place because it is compared
-# against every coroutine in app/ and a copy of it would be a second thing to
-# keep in step.
+# The shape every production fetcher must have: HttpFetcher's own positional parameters, read off the Protocol
+# so a rename there is a rename here, plus the two bound keywords typed above.
 _FETCHER_POSITIONALS = _parameters_of_kind(_unbound_call(HttpFetcher), _POSITIONAL)
 _EXPECTED_SHAPE = {
     "positional": tuple(param.name for param in _FETCHER_POSITIONALS),
@@ -239,9 +213,6 @@ def _concrete_fetchers_in_app() -> list[tuple[str, str, ast.AsyncFunctionDef]]:
             returns = node.returns
             if not (isinstance(returns, ast.Name) and returns.id == "HttpFetchResult"):
                 continue
-            # A function whose first parameter IS a fetcher is a dispatcher,
-            # not a fetcher: it invokes the callable it was handed, so the
-            # engine cannot bind it by name as a fetcher implementation.
             first_args = [*node.args.posonlyargs, *node.args.args]
             first = first_args[0].annotation if first_args else None
             if isinstance(first, ast.Name) and first.id == "HttpFetcher":
@@ -321,10 +292,6 @@ def test_the_contract_guard_sees_defaulting_not_just_names():
     )
 
     # Same parameter names, same order, same coroutine-ness -- only the defaulting differs.
-    # The signature is assembled from _EXPECTED_SHAPE rather than written out, because a
-    # hand-spelled copy of the bound keywords is the very second spelling this test
-    # exists to prevent: growing the contract by one would fail this assertion for the
-    # wrong reason, and leave the next reader believing the guard checks more than it does.
     rest = ", ".join(f"{name}=None" for name in _EXPECTED_SHAPE["keyword_only"])
     mutated = ast.parse(
         f"async def f(url, headers, timeout_seconds=10, max_content_length=1, *, {rest}): ...\n"
@@ -427,10 +394,8 @@ class TestNormalizedUrlIsAValueNotAString:
     def test_the_type_is_a_value_not_a_newtype_over_str(self):
         from app.models.normalized_url import NormalizedUrl
 
-        # The attribute a ``NewType`` carries at runtime is what a reader looks
-        # for first; its absence is the design. Reading it through ``vars()``
-        # rather than as an attribute, because mypy does not declare
-        # ``__supertype__`` on the class it builds.
+        # The attribute a ``NewType`` carries at runtime is what a reader looks for first; its absence is the
+        # design.
         assert "__supertype__" not in vars(NormalizedUrl)
         assert not issubclass(NormalizedUrl, str)
 
@@ -450,11 +415,8 @@ class TestNormalizedUrlIsAValueNotAString:
         from app.models.normalized_url import NormalizedUrl
         from app.models.serialization import to_dict
 
-        # Both cross a boundary: ``DiscoveredLink`` is rebuilt from the spill
-        # file, and ``CrawlTask`` is persisted. The FIELD holds the admitted
-        # value; ``to_dict`` is the edge that lends it text, and asserting the
-        # projection (not just the annotation) is what proves the round trip
-        # can actually be written.
+        # Both cross a boundary: ``DiscoveredLink`` is rebuilt from the spill file, and ``CrawlTask`` is
+        # persisted.
         assert get_type_hints(DiscoveredLink)["normalized_url"] is NormalizedUrl
         assert get_type_hints(CrawlTask)["normalized_url"] is NormalizedUrl
         task = CrawlTask(
@@ -473,8 +435,8 @@ class TestNormalizedUrlIsAValueNotAString:
 
         monkeypatch.setenv("CRAWLUTRON_ALLOW_PRIVATE_TARGETS", "0")
         policy = HostPolicy.unrestricted()
-        # A host the policy refuses has no value: there is no way to hold an
-        # unadmitted URL in this type at all.
+        # A host the policy refuses has no value: there is no way to hold an unadmitted URL in this type at
+        # all.
         with pytest.raises(ValueError, match="private_network_target"):
             NormalizedUrl("http://localhost/x", policy=policy)
         with pytest.raises(ValueError, match="unsupported_scheme"):
@@ -485,9 +447,6 @@ class TestNormalizedUrlIsAValueNotAString:
         from app.models.normalized_url import NormalizedUrl
 
         value = NormalizedUrl("https://Deep.Sub.Example.co.uk:443/p/", policy=HostPolicy.unrestricted())
-        # The three answers a URL carries, read off the value rather than
-        # recomputed at each use -- which is what the scheduler's per-host and
-        # per-site gates key on, and why they cannot disagree with each other.
         assert value.raw == "https://deep.sub.example.co.uk/p"
         assert value.host == "deep.sub.example.co.uk"
         assert value.site == "example.co.uk"

@@ -75,8 +75,8 @@ async def test_expired_entry_replays_its_validator_without_the_caller_asking():
 
     out = await fetch_sitemap_urls(fetcher, url, 10, host_policy=UNRESTRICTED_HOST_POLICY)
 
-    # The prior etag rode on the request, the origin answered 304, and the
-    # cached set was reused -- which only happens if the replay fired.
+    # The prior etag rode on the request, the origin answered 304, and the cached set was reused -- which only
+    # happens if the replay fired.
     assert any(h.get("If-None-Match") == "v1" for h in sent), sent
     assert out == {("http://x.test/p1", None)}
 
@@ -172,10 +172,6 @@ class TestSitemapFanoutBound:
 
         monkeypatch.setattr(asyncio, "create_task", counting_create_task)
 
-        # A scheduling point, not a duration: what this test measures is how
-        # many child fetches the fan-out is willing to have in flight at once,
-        # and one loop yield is enough for every admitted child to be inside
-        # that window. The counter is the harness's; the routing is the test's.
         def respond(u, headers):
             nonlocal child_fetches
             if u.raw == url.raw:
@@ -199,8 +195,8 @@ class TestSitemapFanoutBound:
         # Enqueue-time cap: never schedule more children than still needed.
         assert child_fetches <= 20
         assert tasks_created <= 20
-        # Bounded concurrency: chunks, not one task per child, as the
-        # harness counted the overlap rather than this test restating it.
+        # Bounded concurrency: chunks, not one task per child, as the harness counted the overlap rather than
+        # this test restating it.
         assert fetcher.peak() <= 16
 
 
@@ -319,10 +315,6 @@ _CRAWL_URL = "http://seed-batch.test/"
 
 
 # The sitemap seed-batch policy: same chain, HTML main-text extraction only.
-# It was a second name for ``_policy`` -- the same policy dict with one field
-# changed -- and the two disagreed about shape: this one returned a mapping
-# while ``_cache_with_fresh`` reads ``policy.strategies`` off its argument, so
-# every caller of this one had to know which kind it was being handed.
 _POLICY_SEED_BATCH = partial(_policy, extraction="trafilatura")
 
 
@@ -349,9 +341,8 @@ class TestStaleSeedBatch:
         cache = _cache_with_fresh(tmp_path, "http://seed-batch.test/ok", "2020-01-01", _POLICY_SEED_BATCH())
         policy = _POLICY_SEED_BATCH()
 
-        # An unadmittable loc ("" here) never reaches this helper any more:
-        # the resolve chokepoint drops it at extraction, reported as skipped.
-        # Fail-open is still proven by the never-cached candidate below.
+        # An unadmittable loc ("" here) never reaches this helper any more: the resolve chokepoint drops it at
+        # extraction, reported as skipped. Fail-open is still proven by the never-cached candidate below.
         stale_set = _stale_seeds(
             [(canonical("http://seed-batch.test/never-cached"), "2020-01-01")],
             cache,
@@ -380,8 +371,8 @@ class TestSeedingIsOffLoop:
         cache = _cache_with_fresh(tmp_path, fresh_url, "2020-01-01T00:00:00Z", derived)
         fetched: list[str] = []
 
-        # The fresh-seed sitemap body is named, not inlined in a three-branch
-        # fetcher: what this test is about is which URLs get fetched at all.
+        # The fresh-seed sitemap body is named, not inlined in a three-branch fetcher: what this test is about
+        # is which URLs get fetched at all.
         fresh_sitemap = (
             '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'
             f"<url><loc>{fresh_url}</loc><lastmod>2020-01-01T00:00:00Z</lastmod></url>"
@@ -399,8 +390,8 @@ class TestSeedingIsOffLoop:
         await crawl_request(payload, http_fetcher=fetcher, content_cache=cache)
 
         assert "_stale_seeds" in seen, "freshness filtering was not offloaded off the loop"
-        # The fresh seed was skipped: only robots.txt, the sitemap and the
-        # crawled origin were fetched -- never the cached page itself.
+        # The fresh seed was skipped: only robots.txt, the sitemap and the crawled origin were fetched --
+        # never the cached page itself.
         assert fresh_url not in fetched
 
 
@@ -509,9 +500,6 @@ def test_build_site_map_empty():
 
 
 def test_build_site_map_resolves_relative_paths():
-    # Origin-relative paths must resolve against the root instead of
-    # leaking verbatim -- the SiteMapResponse contract promises normalized
-    # public URLs.
     crawl_response = _crawl_response(
         "http://x.example/dir/",
         links=["/page1", "http://x.example/abs"],
@@ -521,10 +509,7 @@ def test_build_site_map_resolves_relative_paths():
     assert all(not u.startswith("/") for u in m["all_urls"])
 
 
-# ---------------------------------------------------------------------------
-# future-skew bound on sitemap <lastmod> (reject garbage at the parse
-# chokepoint; degradation direction is re-fetch, never "fresher than now").
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------- future-skew bound on sitemap
 
 
 def _iso_offset(seconds: float) -> str:

@@ -215,9 +215,6 @@ def test_acquire_returns_promptly_when_a_worker_is_released(fake_pool):
 
     def _call() -> None:
         waiter_entered.set()
-        # The configured bound, not a short one: the claim is that a release
-        # wakes the waiter, and that only holds if the waiter was still waiting
-        # when the release landed.
         box["worker"] = pool.acquire(settings_with().extraction_doc_acquire_timeout)
 
     thread = threading.Thread(target=_call, daemon=True)
@@ -252,8 +249,8 @@ def test_extract_document_degrades_when_no_worker_can_be_acquired(fake_pool, mon
     stuck.busy = True
     settings = settings_with(extraction_doc_acquire_timeout=0.25)
 
-    # The extraction result's own type, so the two reads below are checks about
-    # a document-shaped value rather than about `object` having attributes.
+    # The extraction result's own type, so the two reads below are checks about a document-shaped value rather
+    # than about `object` having attributes.
     result_box: dict[str, ExtractedContent] = {}
 
     def _call() -> None:
@@ -319,12 +316,8 @@ def test_acquire_budget_starts_after_the_lock_not_before_it(fake_pool):
     worker = stub_worker(6060)
     pool_lock = threading.Condition(threading.Lock())
 
-    # The pool lock is instrumented so the test can PROVE the precondition
-    # it is asserting about: the acquirer has to be inside the lock, with
-    # the slot still busy, at the moment its budget is computed. Without
-    # that, an acquirer that happened to enter after the holder freed the
-    # slot would collect the worker with a budget it never spent and the
-    # test would pass against the it exists to catch.
+    # The pool lock is instrumented so the test can PROVE the precondition it is asserting about: the acquirer
+    # has to be inside the lock, with the slot still busy, at the moment its budget is computed.
     acquirer_thread: dict[str, int] = {}
     acquirer_inside = threading.Event()
 
@@ -349,18 +342,13 @@ def test_acquire_budget_starts_after_the_lock_not_before_it(fake_pool):
     holder_done = threading.Event()
 
     def _hold_then_free() -> None:
-        # Hold the pool lock past the acquirer's budget: this is the
-        # blocked-behind-a-slow-retirement window. The slot is deliberately
-        # STILL busy at release, so an acquirer that enters must wait.
-        # ``Event.wait`` rather than ``time.sleep``: the suite patches the
-        # latter to a no-op, and the lock has to be held for real seconds or
-        # the budget is never actually exceeded.
+        # Hold the pool lock past the acquirer's budget: this is the blocked-behind-a-slow-retirement window.
+        # The slot is deliberately STILL busy at release, so an acquirer that enters must wait.
         with pool_lock:
             holder_ready.set()
             threading.Event().wait(bound * 2)
-        # The acquirer is now inside the lock with the slot still busy and
-        # its budget already elapsed -- exactly the failure point. Only
-        # now is the slot freed and the waiter notified, like a real release.
+        # The acquirer is now inside the lock with the slot still busy and its budget already elapsed --
+        # exactly the failure point. Only now is the slot freed and the waiter notified, like a real release.
         assert acquirer_inside.wait(timeout=10), "the acquirer never entered the pool lock"
         pool.release(worker)
         holder_done.set()
@@ -452,8 +440,8 @@ class TestLifespanDocPoolTeardown:
         app = service_app()
 
         async with app.router.lifespan_context(app):
-            # Startup does not touch the document pool, and the worker must
-            # still be live inside the app: the teardown is a shutdown concern.
+            # Startup does not touch the document pool, and the worker must still be live inside the app: the
+            # teardown is a shutdown concern.
             assert worker.proc.terminated is False, "startup retired a document worker"
             assert pool.pids() == [worker.proc.pid], "the seeded worker is not in the pool"
 
@@ -552,16 +540,16 @@ def test_doc_timeout_kills_and_pool_recovers(monkeypatch):
         hung_pids = ext_mod.DOC_POOL.pids()
 
         monkeypatch.delenv("TEST_MARKITDOWN_HANG")
-        # A normal deadline for recovery: the respawned worker must boot (spawn
-        # platforms) before the task timeout starts mattering again.
+        # A normal deadline for recovery: the respawned worker must boot (spawn platforms) before the task
+        # timeout starts mattering again.
         recovered = ext_mod.extract_document(
             b"%PDF-1.4 fake",
             "http://example.com/ok.pdf",
             settings=settings_with(extraction_doc_timeout=10.0),
         )
         assert recovered.markdown == "## Hello Markdown"
-        # The hung worker was killed and its slot respawned: exactly one
-        # replacement construction, pool back at one live worker.
+        # The hung worker was killed and its slot respawned: exactly one replacement construction, pool back
+        # at one live worker.
         assert constructions() == 2
         live_pids = ext_mod.DOC_POOL.pids()
         assert len(live_pids) == 1

@@ -23,25 +23,8 @@ from tests.chokepoint_walks import (
 from tests.invariants._shared import app_names
 from tests.rules import Bites, Rule, Trips
 
-# ---------------------------------------------------------------------------
-# The admission sizing weights are one value
-#
-# ``build_admission_policy`` and ``max_http_concurrency_for`` each took the same
-# four sizing weights as keyword-only parameters, and the duplication was
-# those two signatures rather than any logic. The weights are now one frozen
-# ``resource_pressure.TaskRamBudget`` that the caller builds and the policy
-# function hands on unchanged.
-#
-# The drift this guards is a caller going back to the flat list. Nothing about
-# the arithmetic stops that: a ``doc_workers=2`` keyword would work again the
-# moment the parameter was re-added, and the weight would be reserved outside the
-# budget the policy is built from -- the two lists drifting apart again, which is
-# the shape the consolidation removed. So the budget is the only way in, and
-# this says so over the whole tree rather than over the two modules involved.
-# ---------------------------------------------------------------------------
-
-# The four weights, read from the dataclass rather than transcribed: a weight
-# added to TaskRamBudget is covered here the day it lands.
+# The weights are now one frozen ``resource_pressure.TaskRamBudget`` that the caller builds and the policy
+# function hands on unchanged. The drift this guards is a caller going back to the flat list.
 _ADMISSION_POLICY = "build_admission_policy"
 
 
@@ -131,27 +114,13 @@ def test_admission_budget_detector_bites():
     ADMISSION_BUDGET_ARRIVES_AS_A_BUDGET.check_bites()
 
 
-# ---------------------------------------------------------------------------
-# Endpoint readiness gate (the rejection tail)
-#
-# ``request_gate`` (app/api/main_helpers.py) owns the whole gated tail: admit,
-# reject (operator warning + the shared 4xx), release. Spelled per endpoint the
-# three obligations were independently droppable, and the expensive one to lose
-# is the release -- a rejected request that skips ``end_request`` holds its
-# readiness slot for the life of the process. Pinning the counters to one module
-# makes "an endpoint cannot forget to release" structural: a new gated endpoint
-# has to enter the gate, and a re-spelled tail has no chokepoint to drift from.
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------- Endpoint readiness gate (the
+# rejection tail) ``request_gate`` (app/api/main_helpers.py) owns the whole gated tail: admit, reject
 
 _READINESS_GATE_EXEMPT = (
     # The owner itself.
     "app/api/main_helpers.py",
-    # PENDING: the fourth gated endpoint, outside app/api. It admits and releases
-    # the same slot but has no ValueError rejection to delegate -- it answers 503
-    # and 502 from provider failures, which is not what request_gate converts --
-    # so it takes the counters directly. Migrating it means teaching the gate
-    # those codes or splitting admission from rejection; either way the entry
-    # below should go with the migration.
+    # PENDING: the fourth gated endpoint, outside app/api.
     "app/search/endpoint.py",
 )
 
@@ -175,8 +144,7 @@ READINESS_SLOTS_GO_THROUGH_THE_GATE = Rule(
     skip=_READINESS_GATE_EXEMPT,
     bite=lambda: (
         Bites("def f():\n    readiness_state.begin_request()\n", "begin_request"),
-        # The release is the expensive one to lose, in both its spellings: a finally
-        # and a return.
+        # The release is the expensive one to lose, in both its spellings: a finally and a return.
         Bites(
             "def f():\n    try:\n        pass\n    finally:\n        readiness_state.end_request()\n",
             "end_request",
@@ -201,16 +169,8 @@ def test_readiness_counter_detector_bites():
     READINESS_SLOTS_GO_THROUGH_THE_GATE.check_bites()
 
 
-# ---------------------------------------------------------------------------
-# Whole-site frontier must not drain on transient failure
-# ---------------------------------------------------------------------------
-
-
-# Both accepted spellings of a transience gate, kept as one tuple so the
-# detector and its failure message cannot drift apart. The accessor is the
-# preferred seam; the set is what the accessor consults, so a direct membership
-# test is legitimate rather than a bypass. A third spelling must be added here
-# deliberately, not discovered by a test going red.
+# --------------------------------------------------------------------------- Whole-site frontier must not
+# drain on transient failure ---------------------------------------------------------------------------
 _TRANSIENCE_GATE_NAMES = ("is_transient_classification", "TRANSIENT_CLASSIFICATIONS")
 
 
@@ -276,10 +236,8 @@ WHOLE_SITE_VISIT_IS_TRANSIENT_GATED = Rule(
         marker="is_transient_classification",
     ),
     clean=lambda: (
-        # The accessor, bare and qualified: the import style is the module's choice
-        # and must not decide whether the gate is recognised. The set is what the
-        # accessor consults, so a direct membership test is legitimate rather than a
-        # bypass.
+        # The accessor, bare and qualified: the import style is the module's choice and must not decide
+        # whether the gate is recognised.
         "def run(job, outcome):\n    for url in batch:\n"
         "        if is_transient_classification(outcome):\n            continue\n"
         "        job.visited.add(url)\n",
@@ -308,17 +266,13 @@ def test_whole_site_visited_gate_detector_bites():
     WHOLE_SITE_VISIT_IS_TRANSIENT_GATED.check_bites()
 
 
-# The store-offload invariant: inside an async def, a store is reached through
-# its async twin. The sink is a direct call to a SYNCHRONOUS store method; the
-# requirement is that no async frame in app/ makes one. Tree-wide, because the
-# next handler, runner, or lifespan step is where it comes back.
+# The store-offload invariant: inside an async def, a store is reached through its async twin. The sink is a
+# direct call to a SYNCHRONOUS store method; the requirement is that no async frame in app/ makes one.
 _STORE_CLASSES = ("JobStore", "CrawlResultStore", "WatchStore")
 
 
-# The two stores are injected unannotated (FastAPI ``Depends``, lifespan
-# globals, runner arguments), so a type-annotation-only resolution would see
-# nothing. These names are the project's own convention for the injected
-# receiver; a frame that binds one of them holds a store.
+# The two stores are injected unannotated (FastAPI ``Depends``, lifespan globals, runner arguments), so a
+# type-annotation-only resolution would see nothing.
 _CONVENTIONAL_STORE_NAMES = {
     "job_store": "JobStore",
     "result_store": "CrawlResultStore",
@@ -436,8 +390,8 @@ STORE_CALLS_ON_THE_LOOP = Rule(
         "async def get_crawl_result(job_store, result_store):\n"
         "    stored = await result_store.aget(request_id)\n"
         "    job = await job_store.aload(request_id)\n",
-        # A sync frame is not the hazard: startup recovery before the loop exists
-        # and test setup are both entitled to the synchronous methods.
+        # A sync frame is not the hazard: startup recovery before the loop exists and test setup are both
+        # entitled to the synchronous methods.
         "def seed(job_store):\n    return job_store.load(job_id)\n",
     ),
 )
@@ -458,12 +412,7 @@ def test_sync_store_call_detector_bites():
     STORE_CALLS_ON_THE_LOOP.check_bites()
 
 
-#: The driver's method that runs a scripted action chain. Named once and f-string
-#: into every message below: this rule keys on a method name in the production
-#: tree, and when the lifecycle split renamed it the key, the three messages and
-#: the two proof sources were left pointing at a method that no longer existed --
-#: so the rule scanned the tree, matched nothing, and reported a green that meant
-#: nothing. One constant makes the rename a one-line edit.
+#: The driver's method that runs a scripted action chain. One constant makes the rename a one-line edit.
 _ACTION_CHAIN = "run_action_chain"
 
 
@@ -543,11 +492,7 @@ def test_action_chain_budget_detector_bites():
     ACTION_CHAIN_ALWAYS_CARRIES_A_BUDGET.check_bites()
 
 
-# The scheduler's delivery sink is not a worker step. A pipeline that hands the
-# scheduler an ``on_result`` sink (or wraps one locally) must deliver AFTER the
-# worker's try/except, or a sink that raises is answered as a failed page: the
-# domain's breaker is charged, a fabricated envelope is delivered through the
-# same broken sink, and gather discards what is left silently.
+# The scheduler's delivery sink is not a worker step.
 _SINK_PARAM_NAME = "on_result"
 
 
@@ -573,9 +518,8 @@ def _sink_call_in_try_body(tree: ast.AST, path: pathlib.Path) -> list[str]:
         for statement in node.body:
             if not isinstance(statement, ast.Try):
                 continue
-            # Only the try BODY: a delivery in an ``except`` handler is the
-            # required worker-failure path, and one in ``finally``/``else`` is
-            # already outside the protected region.
+            # Only the try BODY: a delivery in an ``except`` handler is the required worker-failure path, and
+            # one in ``finally``/``else`` is already outside the protected region.
             for protected in statement.body:
                 for inner in nodes_of(protected):
                     if not (isinstance(inner, ast.Call) and isinstance(inner.func, ast.Name)):
@@ -600,8 +544,8 @@ DELIVERY_NEVER_RUNS_INSIDE_THE_WORKER_TRY = Rule(
     find=_sink_call_in_try_body,
     summary="Delivery raised from a worker handler",
     bite=lambda: (
-        # The handler delivery is REQUIRED (that is the worker's failure path);
-        # only the try-body one is the defect, so the count is 1 and not 2.
+        # The handler delivery is REQUIRED (that is the worker's failure path); only the try-body one is the
+        # defect, so the count is 1 and not 2.
         Bites(
             "async def run(self, jobs, worker, on_result=None):\n"
             "    async def deliver(index, result):\n"

@@ -100,8 +100,8 @@ async def test_an_unchanged_origin_is_revalidated_conditionally_and_announces_no
 
     outcomes = await sweeper.sweep_once(now=NOW + INTERVAL)
 
-    # A 304 is the whole point of the validators: the check cost a request and
-    # no body, and nothing downstream heard about it.
+    # A 304 is the whole point of the validators: the check cost a request and no body, and nothing downstream
+    # heard about it.
     assert outcomes == [WatchOutcome.NOT_MODIFIED]
     reloaded = watch_store.get(watch.watch_id)
     assert reloaded.validators.etag == EtagHandler.etag
@@ -226,8 +226,8 @@ async def test_a_pass_that_raises_does_not_end_the_sweep(watch_store, monkeypatc
             settings=CrawlerSettings.from_mapping(),
             shutdown_event=stop,
             interval_seconds=0.0,
-            # The watch is due one interval out, so the clock has to reach it:
-            # a pass with nothing due never reaches the crawl at all.
+            # The watch is due one interval out, so the clock has to reach it: a pass with nothing due never
+            # reaches the crawl at all.
             clock=lambda: INTERVAL,
         ),
         timeout=30,

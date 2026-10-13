@@ -21,8 +21,8 @@ import pytest
 
 from app.models.address_class import AddressClass, classify, is_loopback_bind
 
-# One representative per class. Order matters: the classifier returns the first
-# match, so this table doubles as the precedence document.
+# One representative per class. Order matters: the classifier returns the first match, so this table doubles
+# as the precedence document.
 BY_CLASS = [
     (AddressClass.LOOPBACK, ["127.0.0.1", "127.0.0.53", "::1"]),
     (AddressClass.PRIVATE, ["10.0.0.1", "172.16.0.1", "192.168.1.1"]),

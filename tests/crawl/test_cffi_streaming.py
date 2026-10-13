@@ -20,9 +20,7 @@ from tests._timing_harnesses import await_until
 from tests._transport_doubles import real_cffi_fetch_outcome
 from tests.helpers.server import SilentHandler, spawn_threaded_server
 
-# The impersonating transport, bound once for this module. It used to be a local
-# wrapper function called from nine places, each re-deciding that "the cffi
-# fetcher" meant the impersonating binding -- the same value spelled nine times.
+# The impersonating transport, bound once for this module.
 _DEFAULT_CFFI_FETCHER = impersonating_fetcher()
 
 
@@ -31,9 +29,8 @@ class TestCffiImpersonateStrategy:
         from app.transport.cache import HttpCache
         from app.transport.http import http_strategy_result
 
-        # A real HttpFetchResult, not a local class that has the same five
-        # attributes: the strategy reads a production model, so a stand-in with
-        # a matching shape can pass while the model drifts.
+        # A real HttpFetchResult, not a local class that has the same five attributes: the strategy reads a
+        # production model, so a stand-in with a matching shape can pass while the model drifts.
         cffi_fetcher = scripted_fetcher(
             status=200, ctype="text/html", body=b"<html><body>content</body></html>"
         )
@@ -51,10 +48,7 @@ class TestCffiImpersonateStrategy:
 
 class TestCffiFetcherLiveFetch:
     async def test_http_cffi_import_fallback(self):
-        # Live impersonated fetch. curl_cffi's socket/timer watchdog needs the
-        # event loop to make real progress, which is why this used to need real
-        # sleeps -- the suite's zero-second patch used to be a no-op that never
-        # yielded at all. It yields now, so the transfer progresses.
+        # Live impersonated fetch. It yields now, so the transfer progresses.
         from tests.helpers.server import spawn_server
 
         server = spawn_server()
@@ -99,8 +93,8 @@ class _Response:
         self.awaited = False
 
     async def aclose(self):
-        # Flips only if the caller actually waits for the close to run, which
-        # is the behaviour the stall/cap paths deliberately avoid.
+        # Flips only if the caller actually waits for the close to run, which is the behaviour the stall/cap
+        # paths deliberately avoid.
         self.awaited = True
 
 
@@ -171,8 +165,8 @@ async def test_request_exception_from_the_queue_releases_the_handle(
     result = await _DEFAULT_CFFI_FETCHER(canonical(url), {}, 5, 4096)
 
     assert result.status_code == 200, "the documented httpx fallback must still serve"
-    # Served by the local server, so this is the fallback and not the scripted cffi
-    # session: the assertion is about the handle, and it needs the fetch to finish.
+    # Served by the local server, so this is the fallback and not the scripted cffi session: the assertion is
+    # about the handle, and it needs the fetch to finish.
     assert counting_server.hits == 1, "the fallback did not serve the page"
     assert released == [response], "the error path left the streamed response handle unreleased"
     assert response.awaited is False, "abandoning must not await a live producer"
@@ -299,19 +293,15 @@ def test_cffi_stream_timeout_honored_on_stalled_body(monkeypatch) -> None:
         server.server_close()
 
     if isinstance(outcome, FetchFailed):
-        # Any transport-error class is contract-fine (ReadError, Timeout,
-        # ConnectionError...): the point is a bounded failure, not a hang.
+        # Any transport-error class is contract-fine (ReadError, Timeout, ConnectionError...): the point is a
+        # bounded failure, not a hang.
         assert outcome.error, outcome
     else:
-        # cffi returned; it must NOT be a 200-with-body (the stalled body
-        # must surface as 413/timeout mapping, not a successful fetch).
+        # cffi returned; it must NOT be a 200-with-body (the stalled body must surface as 413/timeout mapping,
+        # not a successful fetch).
         assert outcome.status_code != 200, "stalled body reported as a 200 success"
 
-    # The load-bearing assertion. Both arms above are satisfiable by a server
-    # that died before serving, which is exactly what this handler used to do:
-    # every request reset, the reset surfaced as the accepted error class, and
-    # the test reported the timeout honored without a body ever being withheld.
-    # At least one, not exactly one: the impersonated fetcher retries a read
+    # The load-bearing assertion. At least one, not exactly one: the impersonated fetcher retries a read
     # timeout, so the withheld body is requested more than once.
     assert server.hits >= 1, "the stall handler was never reached, so nothing was withheld"
 
@@ -341,8 +331,8 @@ class _FakeCffiResponse:
         self.url = "http://example.test/page"
         self.headers: dict[str, str] = {}  # no content-length: chunked-style body
         self.elapsed = 0.01
-        # The fetcher consumes queue items directly (the aiter_content
-        # wrapper is bypassed because its aclose wedges on aborted streams).
+        # The fetcher consumes queue items directly (the aiter_content wrapper is bypassed because its aclose
+        # wedges on aborted streams).
         self.queue = _FeedOnDemandQueue(body, chunk_size)
 
     @property
@@ -356,17 +346,15 @@ class _FakeCffiResponse:
 
 
 class _FakeCffiClient:
-    #: The most recent client built, or ``None`` when none has been. Annotated
-    #: because a class attribute initialized to ``None`` is otherwise typed as
-    #: exactly that -- and the very next statement assigns a client to it.
+    #: The most recent client built, or ``None`` when none has been.
     last_instance: "_FakeCffiClient | None" = None
 
     def __init__(self, body: bytes, **kwargs):
         self._body = body
         #: Set by ``get``; ``None`` until this client has answered a request.
         self.response: _FakeCffiResponse | None = None
-        # Session acquisition is now construction (shared session),
-        # not per-request __aenter__; record here so construction counts.
+        # Session acquisition is now construction (shared session), not per-request __aenter__; record here so
+        # construction counts.
         type(self).last_instance = self
 
     async def __aenter__(self):
@@ -404,9 +392,8 @@ class TestCffiStreamingCap:
         assert result.status_code == 413
 
     async def test_real_client_class_exists(self):
-        # Detection-gap guard: the cffi path once referenced AsyncClient,
-        # which does not exist in curl_cffi>=0.7, so every impersonated
-        # fetch silently fell back to plain httpx. Pin the real API.
+        # Detection-gap guard: the cffi path once referenced AsyncClient, which does not exist in
+        # curl_cffi>=0.7, so every impersonated fetch silently fell back to plain httpx. Pin the real API.
 
         assert hasattr(cffi_requests, "AsyncSession")
 
@@ -442,10 +429,8 @@ async def test_cffi_session_reused_across_requests(base_url, monkeypatch):
 
     constructions = 0
 
-    # Subclassing ``cffi_requests.AsyncSession`` directly rather than a variable
-    # bound to it: the base is resolved when this statement runs, and the test
-    # patches the module attribute afterwards, so the counter still wraps the
-    # real session.
+    # Subclassing ``cffi_requests.AsyncSession`` directly rather than a variable bound to it: the base is
+    # resolved when this statement runs, and the test patches the module attribute afterwards, so the counter
     class _CountingSession(cffi_requests.AsyncSession):
         def __init__(self, *args, **kwargs):
             nonlocal constructions

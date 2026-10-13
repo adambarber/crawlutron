@@ -123,9 +123,7 @@ async def test_recursive_link_robots_checks_run_concurrently():
     await _drive(jobs, worker, allows, crawl_delay, max_depth=1)
     assert state["calls"] >= 6  # seed batch screen + 5 discovered links
     assert state["max_in_flight"] == 5
-    # Seam-specific: the discovered-link screen (admission) must be the one
-    # doing the overlapping work. A single all-calls max would also be met by
-    # the frontier-batch screen that runs later over the same five URLs.
+    # Seam-specific: the discovered-link screen (admission) must be the one doing the overlapping work
     assert state["first_screen_max"] == 5, (
         "the discovered links of one page were not robots-screened with overlap: "
         f"the admission screen ran them one at a time (first-screen overlap "
@@ -153,9 +151,8 @@ async def test_nonrecursive_robots_checks_run_concurrently(monkeypatch):
 
             return _Resp()
 
-        # A second name from the robots class above: they are two branches of one
-        # responder, and one name for both meant the second definition shadowed
-        # the first for anything that read it.
+        # A second name from the robots class above: they are two branches of one responder, and one name for
+        # both meant the second definition shadowed the first for anything that read it.
         class _PageResp:
             status_code = 200
             headers = {"content-type": "text/html"}

@@ -33,9 +33,8 @@ from tests.chokepoint_walks import (
 from tests.invariants._shared import _enclosing_defs
 from tests.rules import Bites, Rule, Silent
 
-# ---------------------------------------------------------------------------
-# Search-provider result normalization
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------- Search-provider result
+# normalization ---------------------------------------------------------------------------
 
 
 def _provider_loop_reinlines(tree: ast.AST, path: pathlib.Path) -> list[str]:
@@ -74,8 +73,8 @@ PROVIDER_DEDUPE_LOOP_LIVES_IN_THE_COLLECTOR = Rule(
     find=_provider_loop_reinlines,
     summary="Use app.search.providers._collect_results",
     bite=lambda: Bites(
-        # The keyed-provider copy: seen:set + isinstance(item, dict) guard +
-        # SearchResult construction in one function, re-inlined off the collector.
+        # The keyed-provider copy: seen:set + isinstance(item, dict) guard + SearchResult construction in one
+        # function, re-inlined off the collector.
         "async def search(self, query, limit, timeout_seconds):\n"
         "    results = []\n"
         "    seen: set[str] = set()\n"
@@ -87,9 +86,6 @@ PROVIDER_DEDUPE_LOOP_LIVES_IN_THE_COLLECTOR = Rule(
         "dedupe loop re-inlined outside _collect_results",
     ),
     clean=lambda: (
-        # DDG walks lxml nodes instead of provider dicts, so it has no dict guard
-        # and the sink never reaches it -- the scope boundary is the whole reason
-        # one collector can be mandatory for keyed providers and irrelevant here.
         "async def search(self, query, limit, timeout_seconds):\n"
         "    results = []\n"
         "    seen: set[str] = set()\n"
@@ -111,26 +107,23 @@ def test_provider_loop_detector_bites():
     PROVIDER_DEDUPE_LOOP_LIVES_IN_THE_COLLECTOR.check_bites()
 
 
-# The names of the one selector contract, and the single parameter that carries
-# them; see ``app/extraction/content.py`` for why they are one value rather than
-# two parameters on three signatures.
+# The names of the one selector contract, and the single parameter that carries them; see
+# ``app/extraction/content.py`` for why they are one value rather than two parameters on three signatures.
 _SELECTOR_PARAMS = ("css_selector", "xpath")
 
 
-#: The single parameter that carries the pair, and therefore the shape a
-#: narrowing function is expected to have.
+#: The single parameter that carries the pair, and therefore the shape a narrowing function is expected to
+#: have.
 _SELECTOR_CARRIER_PARAM = "selectors"
 
 
-#: The one place the two names are spelled: the ``Selectors`` dataclass. Its
-#: generated ``__init__`` is what the sweep sees, so that is the name checked.
+#: The one place the two names are spelled: the ``Selectors`` dataclass. Its generated ``__init__`` is what
+#: the sweep sees, so that is the name checked.
 _SELECTOR_CARRIER_DECLARANT = "__init__"
 
 
-#: The content cache key legitimately declares both names: it does not narrow a
-#: caller's request, it keys one, and a key built from half the narrowing inputs
-#: is a different key. Named rather than inferred from the parameter names,
-#: because a rule that infers is a rule that stops applying when the code moves.
+#: The content cache key legitimately declares both names: it does not narrow a caller's request, it keys one,
+#: and a key built from half the narrowing inputs is a different key.
 _SELECTOR_KEY_BUILDER = "build_content_cache_key"
 
 
@@ -194,8 +187,7 @@ THE_SELECTOR_PAIR_IS_ONE_CONTRACT = Rule(
         "class Selectors:\n    css: str | None = None\n    xpath: str | None = None\n",
         # An extractor carrying the pair as the one value.
         "def extract_html(html, url, selectors=None) -> ExtractedContent:\n    ...\n",
-        # A key builder legitimately requires both: it keys a request rather
-        # than narrowing one.
+        # A key builder legitimately requires both: it keys a request rather than narrowing one.
         "def build_content_cache_key(url, strategy, headers, extraction, css_selector, xpath):\n    ...\n",
         # A function that takes no selector is somebody else's business.
         "def extract_document(body, url) -> ExtractedContent:\n    ...\n",
@@ -318,8 +310,8 @@ KEYED_PROVIDERS_INHERIT_THE_SHARED_RESPONSE_FLOW = Rule(
         "    _items_path = ('results',)\n"
         "    def _call(self, query, limit):\n"
         "        return _ProviderCall('POST', url, json_body={'api_key': self._api_key})\n",
-        # A provider that does not inherit the keyed flow (DuckDuckGo) is not
-        # this guard's business; the loop guard above owns its shape.
+        # A provider that does not inherit the keyed flow (DuckDuckGo) is not this guard's business; the loop
+        # guard above owns its shape.
         "class DuckDuckGoProvider:\n"
         "    name = 'duckduckgo'\n"
         "    async def search(self, query, limit, timeout_seconds):\n"
@@ -350,8 +342,7 @@ def test_keyed_provider_flow_detector_bites():
     KEYED_PROVIDERS_INHERIT_THE_SHARED_RESPONSE_FLOW.check_bites()
 
 
-# ---------------------------------------------------------------------------
-# robots.txt scanning
+# --------------------------------------------------------------------------- robots.txt scanning
 # ---------------------------------------------------------------------------
 
 _ROBOTS_SCANNER_SANCTIONED = "iter_robots_fields"
@@ -415,9 +406,8 @@ def test_robots_scanner_detector_bites():
     ROBOTS_LINE_SCANNER_LIVES_IN_ONE_PLACE.check_bites()
 
 
-# ---------------------------------------------------------------------------
-# Test-fake construction: sanctioned builders over hand-built fakes
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------- Test-fake construction:
+# sanctioned builders over hand-built fakes
 
 _FAKE_BUILDER_SANCTIONED = frozenset({"_fetcher_factories.py"})
 
@@ -480,8 +470,8 @@ def _poll_loop_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
         )
         if not (has_while_true and "iscoroutine" in src and "wait_for" in src):
             return []
-        # The sanctioned _assertions.poll_until terminates with pytest.fail. A
-        # docstring may *claim* a fail; only a real call node counts.
+        # The sanctioned _assertions.poll_until terminates with pytest.fail. A docstring may *claim* a fail;
+        # only a real call node counts.
         if any(name == "fail" or name.endswith(".fail") for name in _call_node_names(node)):
             return []
         return [offender_at(path, node, "use _testkit.poll_until instead of a hand-rolled poll loop")]
@@ -529,24 +519,8 @@ def test_poll_loop_detector_bites():
     TESTS_USE_THE_SANCTIONED_POLLER.check_bites()
 
 
-# ---------------------------------------------------------------------------
-# dataclass copying: replace, not asdict-and-rebuild
-# ---------------------------------------------------------------------------
-
-# ``asdict`` is a *serialization* primitive: it recurses through the field tree
-# and hands back plain dicts, so a frozen nested dataclass (a CrawlStrategyAttempt)
-# becomes a dict with the same keys. Unpacking that into a constructor call to
-# "copy with one field changed" therefore rebuilds an object whose nested fields
-# no longer match their declared types. The copy compares equal field-for-field,
-# type-checks clean under a lax annotation, and raises AttributeError the first
-# time a consumer reaches for an attribute -- which the render adapter does on
-# its first read, long after the copy was made.
-#
-# The distinction the detector draws is not asdict-allowed-or-banned: genuine
-# serialization is a legitimate use and job_store.to_json() is one. It is
-# *where the result goes*. Unpacked into a constructor call, asdict is always the
-# copy mistake; anything else, it is doing its real job. So the sink is the
-# constructor, and no file needs an exemption to keep using asdict properly.
+# --------------------------------------------------------------------------- dataclass copying: replace, not
+# asdict-and-rebuild ---------------------------------------------------------------------------
 
 
 def _is_asdict_call(node: ast.expr) -> bool:
@@ -619,16 +593,6 @@ def test_asdict_rebuild_detector_bites():
     ASDICT_IS_NEVER_UNPACKED_INTO_A_CONSTRUCTOR.check_bites()
 
 
-# ---------------------------------------------------------------------------
-# JS-endpoint egress door: the filter must not be reinlined
-#
-# ``filter_js_endpoints`` is the single place a scraped JS endpoint survives or
-# is dropped. Both call sites used to carry the inline comprehension
-# (``{**endpoint, "url": clean.raw} for ... if (clean := admit_or_none(...))
-# is not None``) -- the shape that silently disappears the moment a consumer is
-# added in a hurry. This pins the comprehension to the chokepoint itself.
-# ---------------------------------------------------------------------------
-
 _JS_ENDPOINTS_FILTER_SANCTIONED = frozenset({"validation.py"})
 
 
@@ -659,8 +623,8 @@ def _reinline_js_endpoints_filter_offenders(tree: ast.AST, path: pathlib.Path) -
 _JS_EGRESS_ELSEWHERE = REPO_ROOT / "app" / "transport" / "content_cache.py"
 
 
-# The chokepoint's own comprehension really is the matched shape: the file
-# exemption is what keeps the real tree clean, not a predicate that misses it.
+# The chokepoint's own comprehension really is the matched shape: the file exemption is what keeps the real
+# tree clean, not a predicate that misses it.
 _JS_ENDPOINTS_VALIDATION_SOURCE = (
     "def filter_js_endpoints(endpoints, *, resolve_against=None, policy=None):\n"
     "    return [\n"
@@ -683,8 +647,8 @@ JS_ENDPOINTS_FILTER_IS_NOT_REINLINED = Rule(
             '           if (c := admit_or_none(e["url"])) is not None]\n',
             "filter_js_endpoints",
         ),
-        # The detector genuinely matches the chokepoint's OWN comprehension too:
-        # the exemption is the path, not a predicate that happens to miss it.
+        # The detector genuinely matches the chokepoint's OWN comprehension too: the exemption is the path,
+        # not a predicate that happens to miss it.
         Bites(
             _JS_ENDPOINTS_VALIDATION_SOURCE,
             "filter_js_endpoints",
@@ -693,8 +657,8 @@ JS_ENDPOINTS_FILTER_IS_NOT_REINLINED = Rule(
     ),
     clean=lambda: (
         "def f(endpoints, base):\n    return filter_js_endpoints(endpoints, resolve_against=base)\n",
-        # The very same chokepoint comprehension stays clean at its own path:
-        # validation.py is where the filter legitimately lives.
+        # The very same chokepoint comprehension stays clean at its own path: validation.py is where the
+        # filter legitimately lives.
         Silent(_JS_ENDPOINTS_VALIDATION_SOURCE, at=REPO_ROOT / "app" / "safety" / "validation.py"),
     ),
 )
@@ -755,8 +719,7 @@ ROBOTS_PATTERN_COMPILE_LIVES_BEHIND_THE_PER_HOST_CACHE = Rule(
         "site's matchers from a global cache"
     ),
     bite=lambda: (
-        # A direct caller -- exactly the shape that reintroduces a global,
-        # attacker-keyed matcher cache.
+        # A direct caller -- exactly the shape that reintroduces a global, attacker-keyed matcher cache.
         Bites(
             "def f(pattern):\n    return _compile_robots_pattern(pattern)\n",
             "per-host cache",
@@ -795,8 +758,8 @@ def test_robots_pattern_compile_detector_bites():
 _COMMENT_CLONE_MIN_LINES = 3
 
 
-# Emitted after every comment-only line, and around indentation: none of them
-# says anything about prose, so only a token that carries code ends a block.
+# Emitted after every comment-only line, and around indentation: none of them says anything about prose, so
+# only a token that carries code ends a block.
 _COMMENT_TRANSPARENT = frozenset(
     {tokenize.NL, tokenize.NEWLINE, tokenize.INDENT, tokenize.DEDENT, tokenize.ENDMARKER, tokenize.ENCODING}
 )
@@ -905,18 +868,18 @@ def test_comment_clone_detector_bites():
     # Two lines is a section rule, not a WHY to centralize.
     two_lines = "# first line of the note\n# second line\n"
     assert not detect(f"x = 1\n{two_lines}y = 2\n{two_lines}"), "a two-line rule is below the floor"
-    # A blank line ends a block, so two paragraphs stay two paragraphs instead of
-    # one welded run -- which would match nothing, including its own twin.
+    # A blank line ends a block, so two paragraphs stay two paragraphs instead of one welded run -- which
+    # would match nothing, including its own twin.
     assert not detect(f"{repeated}\n{other}"), "a blank line must end a comment block"
     assert [line for line, _ in _comment_blocks(f"{repeated}\n{other}")] == [1, 5]
-    # Identical prose is still a duplicate across a blank line: the rule about
-    # blocks decides what counts as one note, not whether prose may repeat.
+    # Identical prose is still a duplicate across a blank line: the rule about blocks decides what counts as
+    # one note, not whether prose may repeat.
     assert detect(f"{repeated}\n{repeated}"), "identical prose is a duplicate however it is separated"
-    # Normalized on whitespace, so a re-indented copy -- how these forks actually
-    # arrive -- still matches rather than hiding behind the extra spaces.
+    # Normalized on whitespace, so a re-indented copy -- how these forks actually arrive -- still matches
+    # rather than hiding behind the extra spaces.
     assert detect(f"x = 1\n{repeated}y = 2\n{detached}"), "a re-indented copy is still a clone"
-    # A fork usually arrives by pasting between modules, so the same block in two
-    # different files is one finding, and both sites have to be named.
+    # A fork usually arrives by pasting between modules, so the same block in two different files is one
+    # finding, and both sites have to be named.
     across = _duplicated_comment_runs(
         [
             (REPO_ROOT / "app" / "a.py", f"x = 1\n{repeated}"),

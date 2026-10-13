@@ -33,8 +33,8 @@ def test_utf8_text_with_c3_lead_not_flagged():
 
 
 def test_utf8_text_with_e3_lead_not_flagged():
-    # A 3-byte UTF-8 sequence led by 0xE3 (e.g. a CJK codepoint) must not be
-    # misclassified as a binary magic number.
+    # A 3-byte UTF-8 sequence led by 0xE3 (e.g. a CJK codepoint) must not be misclassified as a binary magic
+    # number.
     assert looks_like_binary_body(b"\xe3\x80\x80rest", None, canonical("http://x/page")) is False
 
 

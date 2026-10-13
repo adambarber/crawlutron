@@ -34,8 +34,7 @@ def _pragma_exec_offenders() -> list[str]:
     return found
 
 
-# ---------------------------------------------------------------------------
-# Dynamic PRAGMA identifiers
+# --------------------------------------------------------------------------- Dynamic PRAGMA identifiers
 # ---------------------------------------------------------------------------
 
 
@@ -91,8 +90,8 @@ def _is_identifier_chokepoint(node: ast.expr) -> bool:
         return False
     if not (isinstance(node.func, ast.Name) and node.func.id == "_validated_identifier"):
         return False
-    # `_validated_identifier(str(row[1]))` is the same guarantee: the argument is
-    # coerced, then allowlisted, before it is ever spliced into a statement.
+    # `_validated_identifier(str(row[1]))` is the same guarantee: the argument is coerced, then allowlisted,
+    # before it is ever spliced into a statement.
     return True
 
 
@@ -282,8 +281,6 @@ def test_dynamic_pragma_detector_bites():
     assert not _unvalidated_interpolations(inline, _pragma_sql(inline_call), inline_call)
 
     # Live shape 2: allowlisted into a local, then the local is interpolated.
-    # sqlite_store.py does this twice (index_list, index_info) and an
-    # inline-only check would have failed both.
     hoisted = ast.parse(
         "def f(conn, table, index_name):\n"
         "    table = _validated_identifier(table)\n"
@@ -302,8 +299,8 @@ def test_dynamic_pragma_detector_bites():
     constant_call = _snippet_call(constant_source, fn=1)
     assert not _unvalidated_interpolations(constant, _pragma_sql(constant_call), constant_call)
 
-    # But hoisting a raw parameter into a local is not laundering: the binding
-    # has to be the chokepoint itself, not any assignment at all.
+    # But hoisting a raw parameter into a local is not laundering: the binding has to be the chokepoint
+    # itself, not any assignment at all.
     laundered_source = (
         "def f(conn, table):\n"
         "    table = str(table)\n"

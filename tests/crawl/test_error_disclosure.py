@@ -54,10 +54,7 @@ def test_classify_error_codes_map_to_stable_values():
 async def test_http_strategy_result_hides_raw_dns_error():
     res = await _run(socket.gaierror("[Errno -2] Name or service not known"))
     assert res.status == "failed"
-    # Stable code, never the raw message. dns_error is its own label because a
-    # name that never resolved is a distinct diagnosis from a refused connection,
-    # and reporting one as the other is what left it a taxonomy member with no
-    # producer.
+    # Stable code, never the raw message.
     assert res.error == "dns_error"
     assert res.error != "[Errno -2] Name or service not known"
     # Raw exception text must NOT be returned anywhere in the API diagnostics.
@@ -125,8 +122,8 @@ def test_both_failure_primitives_log_the_same_server_side_payload(caplog):
     assert engine_record.funcName == render_record.funcName == "_classify_and_log"
     # Distinct event names, so the two layers stay tellable apart in the stream.
     assert {r.msg for r in caplog.records} == {"strategy_result_error", "render_result_error"}
-    # The raw detail is in the log and not on the wire: that asymmetry is the
-    # whole reason the field exists, on both paths.
+    # The raw detail is in the log and not on the wire: that asymmetry is the whole reason the field exists,
+    # on both paths.
     for record, result, expected_strategy in (
         (engine_record, engine, "HTTP_DECLARED_CRAWLER"),
         (render_record, render, "BROWSER_HEADLESS"),
@@ -138,23 +135,19 @@ def test_both_failure_primitives_log_the_same_server_side_payload(caplog):
         assert "/app/" not in json.dumps(to_dict(result), default=str)
 
 
-# One representative exception per branch of classify_error_code, paired
-# with the stable code that branch emits. Every one of these codes is stored
-# verbatim into CrawlStrategyAttempt.classification.
+# One representative exception per branch of classify_error_code, paired with the stable code that branch
+# emits. Every one of these codes is stored verbatim into CrawlStrategyAttempt.classification.
 _ERROR_CODE_CASES = (
     (DecompressionTooLargeError("big"), "payload_too_large"),
     (httpx.TooManyRedirects("loop"), "too_many_redirects"),
     (httpx.HTTPError("base httpx failure"), "http_error"),
-    # Inverse cases: codes that were already valid enum members must stay that
-    # way -- extending the taxonomy must not regress them.
+    # Inverse cases: codes that were already valid enum members must stay that way -- extending the taxonomy
+    # must not regress them.
     (httpx.ConnectError("down"), "connection_error"),
     (ValueError("bad"), "value_error"),
     (RuntimeError("unknown"), "network_error"),
 )
 
-# The three codes adds to the taxonomy: known-dead fetch outcomes that must
-# land in the ONE status table (and as "failed", matching the status the
-# strategy already reported) instead of falling through to the default.
 _NEW_ERROR_CODES = (
     "payload_too_large",
     "too_many_redirects",
@@ -183,8 +176,7 @@ class TestEmittedErrorCodesAreValidClassifications:
             assert attempt.classification == expected_code, (
                 f"{type(exc).__name__} classified as {attempt.classification!r}, expected {expected_code!r}"
             )
-            # The response-shaping gate: this is where a non-member code rejects
-            # and 422s the whole batch.
+            # The response-shaping gate: this is where a non-member code rejects and 422s the whole batch.
             shaped = StrategyAttempt(
                 strategy=attempt.strategy,
                 status=attempt.status,

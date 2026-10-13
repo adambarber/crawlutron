@@ -75,8 +75,8 @@ def _clear():
 
 
 def test_get_browser_pool_returns_none_before_initialize():
-    # Contract: calling getters before startup must NOT silently construct a
-    # BrowserPool with settings-unaware default size. It must be None.
+    # Contract: calling getters before startup must NOT silently construct a BrowserPool with settings-unaware
+    # default size. It must be None.
     _clear()
     assert get_browser_pool() is None
     _clear()
@@ -130,8 +130,8 @@ def test_explicit_override_rejects_garbage(monkeypatch):
 
 @pytest.mark.parametrize("raw", ["0", "-5", "  "])
 def test_nonpositive_or_blank_override_falls_through(monkeypatch, raw):
-    # An override that cannot mean a pool size (zero, negative, blank) is
-    # garbage, not a clamp-to-1 request: derivation owns the sizing.
+    # An override that cannot mean a pool size (zero, negative, blank) is garbage, not a clamp-to-1 request:
+    # derivation owns the sizing.
     monkeypatch.setenv("CRAWLUTRON_BROWSER_POOL_SIZE", raw)
     monkeypatch.setattr(rp, "read_memory_stats", lambda: _Mem(3 * 1024**3))
     assert bp._derive_browser_pool_size() == 2
@@ -291,9 +291,7 @@ class TestWorkerExtractorErrorDegrades:
             _page(query_selector=_record_then_fail), ["h1"]
         )
         assert result == [], "a best-effort per-element capture must swallow the failure"
-        # The empty result is true of any implementation unless the loop is
-        # known to have run. Passing an empty selector list made this test
-        # assert nothing at all, and it had been green for exactly that reason.
+        # The empty result is true of any implementation unless the loop is known to have run.
         assert calls == ["query_selector"], "the selector was never attempted"
 
     async def test_driver_flatten_shadow_dom_error(self):
@@ -377,11 +375,8 @@ class TestCloseLeavesNoStaleRendererToAcquire:
 
     @staticmethod
     def _pool(pool_size: int = 2) -> BrowserPool:
-        # A real BrowserRenderer never launches a browser at construction, so the
-        # pool, its renderers and the whole queue lifecycle are exercised for
-        # real; nothing renders here, so no browser factory is ever called and
-        # none needs supplying. (The renderer no longer accepts one anyway --
-        # controlling the browser means building a driver and passing it.)
+        # A real BrowserRenderer never launches a browser at construction, so the pool, its renderers and the
+        # whole
         return BrowserPool(pool_size=pool_size)
 
     async def test_acquire_after_a_recycle_returns_a_live_renderer(self):

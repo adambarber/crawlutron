@@ -17,11 +17,7 @@ from starlette.requests import Request
 
 from app.api import crawl_endpoint
 
-#: The ASGI scope a ``Request`` is built from. ``await_or_client_gone`` only
-#: ever asks a request whether the client is gone, but the doubles below are real
-#: requests rather than objects that merely have that one method: the parameter is
-#: typed ``Request``, and a stand-in shaped like it -- but not one -- is exactly
-#: the kind of lie that lets a real attribute read slip through untyped.
+#: The ASGI scope a ``Request`` is built from.
 _SCOPE = {"type": "http", "method": "POST", "path": "/v1/crawl", "headers": [], "query_string": b""}
 
 
@@ -58,11 +54,8 @@ async def test_disconnect_cancels_the_running_crawl():
 
     async def _slow_crawl():
         try:
-            # Never resolves on its own: the disconnect poll is the only thing
-            # that can end this crawl, which is exactly what the test asserts.
-            # (It used to be a five-second sleep, which under the suite's
-            # zero-second patch became a five-second nothing -- the crawl
-            # finished before the first poll and the halt path was never taken.)
+            # Never resolves on its own: the disconnect poll is the only thing that can end this crawl, which
+            # is exactly what the test asserts.
             await asyncio.Event().wait()
             return "done"
         except asyncio.CancelledError:

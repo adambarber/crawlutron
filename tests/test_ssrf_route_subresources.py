@@ -87,10 +87,8 @@ async def test_http_subresource_still_connects_to_the_fresh_pinned_ip(monkeypatc
     assert route.decision == "continue"
     assert route.continued_url == "http://1.2.3.4/x"
     assert route.continued_headers == {"Host": "1.2.3.4"}
-    # The pin governs the connection, so each request resolves again rather
-    # than reusing a cached IP: a rebind inside the cache TTL cannot slip past
-    # a connection that never looked. HTTPS is the case that does share, and the
-    # test above is what says so.
+    # The pin governs the connection, so each request resolves again rather than reusing a cached IP: a rebind
+    # inside the cache TTL cannot slip past a connection that never looked.
     lookups_after_first = len(lookups)
     await handler(FakeRoute(), FakeRequest("http://1.2.3.4/y", "document"))
     assert len(lookups) > lookups_after_first, (

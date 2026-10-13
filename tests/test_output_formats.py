@@ -11,12 +11,8 @@ from app.extraction.output_formats import (
     serialize_results,
 )
 
-# The two result shapes the serialization table is built from. Module level so
-# the table reads as formats-over-bodies rather than as four bodies spelling
-# the same result four times. `Any` is the value type, not the container: each
-# body is one job's serialized fields, and `serialize_results` takes exactly
-# `list[dict[str, Any]]`, so leaving it unannotated only let mypy join the two
-# heterogeneous dicts down to `list[object]` and reject the call.
+# The two result shapes the serialization table is built from. Module level so the table reads as
+# formats-over-bodies rather than as four bodies spelling the same result four times.
 _TEXT_RESULT: list[dict[str, Any]] = [{"url": "http://x/", "text": "content"}]
 _MARKDOWN_RESULT: list[dict[str, Any]] = [{"url": "http://x/", "markdown": "# Title\n\nContent"}]
 
@@ -216,8 +212,7 @@ def test_serialize_results_csv_neutralizes_attacker_content():
     assert media_type == "text/csv; charset=utf-8"
     # The formula trigger must be preceded by a single quote.
     assert ",'=cmd" in body
-    # And the raw unescaped formula must NOT appear (it would mean the
-    # attacker payload was emitted unquoted).
+    # And the raw unescaped formula must NOT appear (it would mean the attacker payload was emitted unquoted).
     assert (
         "'" not in body.split("\n")[1].split(",")[1]
         or "=cmd" not in body.split("\n")[1].split(",")[1]
@@ -246,10 +241,7 @@ class TestOutputFormatsEdges:
         result = _default(obj)
         assert result == {"attr": "value"}
 
-    # One body per shape, named once. The line-oriented formats differ only in
-    # the name the caller passes and the media type that comes back, so the
-    # table is a list of names over two bodies -- spelling the body per row made
-    # a format rename four edits and a body change four more.
+    # One body per shape, named once.
     @pytest.mark.parametrize(
         ("fmt", "results", "needle", "media_type"),
         [
@@ -331,9 +323,8 @@ class TestTheSerializerCoversTheVocabulary:
             if not isinstance(node, ast.If) or not isinstance(node.test, ast.Compare):
                 continue
             comparison = node.test
-            # ``fmt == "json"`` and ``fmt in ("jsonl", "ndjson")`` are both
-            # dispatches; ``fmt not in SUPPORTED_OUTPUT_FORMATS`` is the admission
-            # check and is deliberately not one, which the op filter excludes.
+            # ``fmt == "json"`` and ``fmt in ("jsonl", "ndjson")`` are both dispatches; ``fmt not in
+            # SUPPORTED_OUTPUT_FORMATS`` is the admission check and is deliberately not one, which the op
             if not (
                 isinstance(comparison.left, ast.Name)
                 and comparison.left.id == "fmt"

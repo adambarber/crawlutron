@@ -75,8 +75,8 @@ class TestFetchDecodeDiscovery:
         assert headers == {"content-type": "text/plain", "etag": '"1"'}
 
     async def test_non_two_hundred_returns_no_body_but_status_and_headers(self):
-        # The body is absent, but status + headers survive so the sitemap path
-        # can still read ETag/Last-Modified off a 404/5xx.
+        # The body is absent, but status + headers survive so the sitemap path can still read
+        # ETag/Last-Modified off a 404/5xx.
         fetcher = _fetcher(_FakeResp(404, {"etag": '"1"'}, b""))
         text, status, headers = await _fetch_decode_discovery(fetcher, "http://e.com/r", {}, 5)
         assert text is None
@@ -105,8 +105,8 @@ class TestFetchDecodeDiscovery:
         assert status == 200
 
     async def test_decompression_cap_returns_headers_without_body(self):
-        # A gzip bomb past the cap: no text, but status + headers survive so the
-        # sitemap path keeps its validators instead of losing them to the bomb.
+        # A gzip bomb past the cap: no text, but status + headers survive so the sitemap path keeps its
+        # validators instead of losing them to the bomb.
         fetcher = _fetcher(
             _FakeResp(
                 200,

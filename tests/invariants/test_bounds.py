@@ -30,17 +30,8 @@ from tests.chokepoint_walks import (
 )
 from tests.rules import Bites, Registry, Rule, Trips
 
-# ---------------------------------------------------------------------------
-# An extractor's text is coerced to a string in exactly one place
-# ---------------------------------------------------------------------------
-
-# ``extract_document``/``extract_html``/``extract_content`` each had the same
-# ``extracted.text or ""`` tail spelled at their call site. That coercion is what
-# keeps an extractor's ``None`` text from reaching a result at all, so a branch
-# that omitted it produced a None that only surfaced further downstream.
-# ``extraction.normalized_extraction`` is the owner; it lives beside
-# ``ExtractedContent`` because the coercion is a fact about extractor output, not
-# about any one strategy's result builder.
+# That coercion is what keeps an extractor's ``None`` text from reaching a result at all, so a branch that
+# omitted it produced a None that only surfaced further downstream.
 
 
 def _inline_extraction_normalizations(tree: ast.AST, path: pathlib.Path) -> list[str]:
@@ -71,21 +62,8 @@ EXTRACTION_TEXT_NORMALIZATION = Rule(
 )
 
 
-# ---------------------------------------------------------------------------
-# A bounded HTML input has exactly one cap
-# ---------------------------------------------------------------------------
-
-# Two modules independently declared a 4 MB cap on the HTML they would scan --
-# `_MAX_HTML_NOISE_INPUT_BYTES` in classify.py and
-# `_MAX_LLM_FORMAT_HTML_INPUT_BYTES` in llm_format.py -- with the same value and
-# the same rationale ("a hostile origin will hand you gigabytes"), reached by two
-# names that no reader could see were the same policy. Raising one cap silently
-# left the other, so the guarantee a reviewer believed was enforced per-consumer
-# was actually enforced for whichever module happened to be edited. The shape is
-# the same as every other drift-prone twin here: a resource bound is a policy, and
-# a policy with two declarations is a policy that will disagree with itself. The
-# cap now lives once in app/safety/bounded_io.py next to the stream caps that share its
-# purpose, and this rule keeps the second copy from reappearing.
+# The shape is the same as every other drift-prone twin here: a resource bound is a policy, and a policy with
+# two declarations is a policy that will disagree with itself.
 
 
 def _html_input_cap_name(target: ast.expr, value: ast.expr | None) -> str | None:
@@ -127,8 +105,8 @@ HTML_INPUT_CAP = Rule(
         "declares a second HTML input byte cap; import MAX_HTML_INPUT_BYTES from "
         "app/safety/bounded_io.py and call truncate_html_input instead"
     ),
-    # app/safety/bounded_io.py is exempt because it IS the chokepoint that owns the cap
-    # alongside the stream caps.
+    # app/safety/bounded_io.py is exempt because it IS the chokepoint that owns the cap alongside the stream
+    # caps.
     excludes=SANCTIONED | {"bounded_io.py"},
     bite=lambda: (
         # The two historical spellings, verbatim.
@@ -151,8 +129,7 @@ HTML_INPUT_CAP = Rule(
 )
 
 
-# ---------------------------------------------------------------------------
-# Decompression bomb guard
+# --------------------------------------------------------------------------- Decompression bomb guard
 # ---------------------------------------------------------------------------
 
 _DECOMPRESS_FUNCS = frozenset({"decompress_body", "_decompress_body"})
@@ -227,11 +204,8 @@ DECOMPRESS_CAP = Rule(
 )
 
 
-# ---------------------------------------------------------------------------
-# Decompression reaches only through the capped chokepoint
-# ---------------------------------------------------------------------------
-
-# The codecs app/transport/decompression.py imports to implement decompress_body.
+# --------------------------------------------------------------------------- Decompression reaches only
+# through the capped chokepoint ---------------------------------------------------------------------------
 _DECOMPRESS_CODECS = frozenset({"gzip", "zlib", "brotli"})
 
 
@@ -295,10 +269,7 @@ DECOMPRESS_BYPASS = Rule(
     summary="touches gzip/zlib/brotli directly instead of via decompression.decompress_body()",
     excludes=SANCTIONED | _DECOMPRESS_SANCTIONED,
     bite=lambda: (
-        # Two offenders from one source: the import AND the call are each a bypass, so
-        # a source that imports the codec but routes through decompress_body has to
-        # report 1, not 2 -- the count is what proves the detector is not just
-        # keying on the import.
+        # Two offenders from one source: the import AND the call are each a bypass, so a source that imports
         Trips(
             "import gzip\n"
             "def f(raw, hdr):\n"
@@ -315,24 +286,8 @@ DECOMPRESS_BYPASS = Rule(
 )
 
 
-# ---------------------------------------------------------------------------
-# A discovery response is read through _Discovery, never off the tuple
-#
-# The duplicated pair at fetch_helpers.py was the two discovery-fetch
-# signatures, but
-# the rule underneath them was never owned: what a discovery response *means*.
-# The load-bearing part of that is ``headers: dict | None``, where None is the
-# transport-failure marker. ``_Discovery``'s accessors are total over it, so a
-# consumer cannot reach a ``.get`` on a missing map. Take the header map back and
-# the guard has to be re-derived by hand -- which is the shape that was actually
-# duplicated, three hand-written projections of one positional 3-tuple each
-# repeating the ``is None`` + status test. Nothing but this guard stops the
-# fourth projection from landing.
-# ---------------------------------------------------------------------------
-
-# The fetch that returns a _Discovery. The other two discovery helpers project
-# that response to caller shapes, so naming this one is what makes the rule
-# about the RESULT rather than about a call site.
+# The load-bearing part of that is ``headers: dict | None``, where None is the transport-failure marker.
+# ``_Discovery``'s accessors are total over it, so a consumer cannot reach a ``.get`` on a missing map.
 _DISCOVERY_FETCH = "_fetch_decode_discovery"
 
 
@@ -341,9 +296,8 @@ _DISCOVERY_CHOKEPOINT = "app/orchestration/fetch_helpers.py"
 
 
 def _is_discovery_fetch(value: ast.AST | None) -> bool:
-    # The result is normally reached through ``await``, so the assignment's value
-    # is the Await node and the call is inside it. Unwrapping one layer is what
-    # keeps the detector from being clean on a tree that does the banned thing.
+    # The result is normally reached through ``await``, so the assignment's value is the Await node and the
+    # call is inside it.
     if isinstance(value, ast.Await):
         value = value.value
     if not isinstance(value, ast.Call):
@@ -410,9 +364,8 @@ DISCOVERY_RESPONSE = Rule(
 )
 
 
-# ---------------------------------------------------------------------------
-# Header ints are guarded: a hostile header must never crash a fetch
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------- Header ints are guarded: a
+# hostile header must never crash a fetch
 
 
 def _is_int_or_float_call(call: ast.Call) -> bool:
@@ -533,17 +486,8 @@ def test_every_rule_bites():
     RULES.check_all_bite()
 
 
-# ---------------------------------------------------------------------------
-# Advertise only the encodings this process can decode
-# ---------------------------------------------------------------------------
-
-# Request headers named `br` unconditionally while the brotli decoder is an
-# OPTIONAL dependency -- app/transport/decompression supports two incompatible
-# brotli APIs precisely because either may be the one installed. So on a host
-# without it, every brotli-capable server was told to return a body the process
-# would then refuse, and the crawl failed on a request we chose to make that
-# way. Advertising an encoding is a promise about what this process can decode,
-# so it is checked against the decoder set rather than trusted per call site.
+# --------------------------------------------------------------------------- Advertise only the encodings
+# this process can decode ---------------------------------------------------------------------------
 _ALWAYS_DECODABLE_ENCODINGS = {"gzip", "deflate", "identity"}
 
 
@@ -551,9 +495,6 @@ _ENCODING_TOKEN = re.compile(r"^[a-z0-9\-_+.]+$")
 
 
 # A comma-joined list is only an encoding list if it MENTIONS a real encoding.
-# Without this anchor the check reads English: api_models.py field descriptions
-# like "dom_text, etc., http_html" are comma-joined, lowercase and token-shaped,
-# and a gate that cries wolf on those gets ignored on the day it matters.
 _KNOWN_ENCODINGS = {
     "gzip",
     "x-gzip",
@@ -588,9 +529,8 @@ def _undecodable_encoding_offenders(tree, path, *, decodable: set[str] | None = 
     """
     if decodable is None:
         decodable = _decodable_encoding_tokens()
-    # Keyed by (line, token): ast.walk yields a dict's value Constant both under
-    # its key and as a node in its own right, so without this one bad header
-    # reports twice and the count stops meaning anything.
+    # Keyed by (line, token): ast.walk yields a dict's value Constant both under its key and as a node in its
+    # own right, so without this one bad header reports twice and the count stops meaning anything.
     seen: dict[tuple[int, str], str] = {}
 
     def check(node, value: str) -> None:
@@ -622,14 +562,8 @@ def _undecodable_encoding_offenders(tree, path, *, decodable: set[str] | None = 
     return [seen[key] for key in sorted(seen)]
 
 
-# This one rule keeps a hand-written gate and bite rather than joining RULES
-# above, and the reason is the shape of its proof rather than its size. Every
-# other rule's bite runs against one fixed configuration. This one's proof is
-# about the *check*: it feeds the detector a decoder set without brotli and
-# requires `br` to fire, then feeds a set *with* brotli and requires the same
-# literal to be spared. One configuration cannot express both, and pinning the
-# set at the call site so the rule could be registered would mean the thing
-# being proved is the thing the rule encodes.
+# This one rule keeps a hand-written gate and bite rather than joining RULES above, and the reason is the
+# shape of its proof rather than its size. Every other rule's bite runs against one fixed configuration.
 
 
 def test_no_request_header_advertises_an_undecodable_encoding():
@@ -647,8 +581,8 @@ def test_no_request_header_advertises_an_undecodable_encoding():
 
 def test_undecodable_encoding_detector_bites():
     synthetic = REPO_ROOT / "app" / "_synthetic.py"
-    # A decodable set that omits brotli, to exercise the check itself. It is a
-    # stand-in for the check's input, not a deployment this project supports.
+    # A decodable set that omits brotli, to exercise the check itself. It is a stand-in for the check's input,
+    # not a deployment this project supports.
     without_brotli = {"gzip", "deflate", "identity"}
 
     # The shape that shipped: br named unconditionally, as a plain literal.
@@ -659,17 +593,16 @@ def test_undecodable_encoding_detector_bites():
     indirect = ast.parse('ENCODING = "gzip, deflate, br"\nHEADERS = {"Accept-Encoding": ENCODING}\n')
     assert len(_undecodable_encoding_offenders(indirect, synthetic, decodable=without_brotli)) == 1
 
-    # The same literal is clean once the decoder is in the set, which is what
-    # makes the verdict about the set and not about the spelling.
+    # The same literal is clean once the decoder is in the set, which is what makes the verdict about the set
+    # and not about the spelling.
     assert not _undecodable_encoding_offenders(bad, synthetic, decodable={*without_brotli, "br"})
 
     # A genuinely undecodable token is caught even with brotli present.
     zstd = ast.parse('HEADERS = {"Accept-Encoding": "gzip, zstd"}\n')
     assert len(_undecodable_encoding_offenders(zstd, synthetic, decodable={*without_brotli, "br"})) == 1
 
-    # A header value the detector cannot read as a literal is not a finding: the
-    # check is about advertised encodings, and a computed value advertises none
-    # that this gate can name.
+    # A header value the detector cannot read as a literal is not a finding: the check is about advertised
+    # encodings, and a computed value advertises none that this gate can name.
     computed = ast.parse(
         'ENCODING = "gzip, deflate"\n'
         "if available():\n"
@@ -678,8 +611,8 @@ def test_undecodable_encoding_detector_bites():
     )
     assert not _undecodable_encoding_offenders(computed, synthetic, decodable=without_brotli)
 
-    # Not an encoding list at all: another comma-joined header is not this gate's
-    # business, and neither is English prose that happens to be comma-joined.
+    # Not an encoding list at all: another comma-joined header is not this gate's business, and neither is
+    # English prose that happens to be comma-joined.
     other = ast.parse(
         'HEADERS = {"Accept": "text/html,application/xml;q=0.9"}\n'
         'OTHER = "dom_text, etc., http_html"\n'

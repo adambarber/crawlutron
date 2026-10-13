@@ -65,9 +65,8 @@ def test_group_evaluation_matches_the_rfc_oracle_on_generated_compositions(seed:
     rng = random.Random(seed)
     checked = 0
     while checked < 200:
-        # The empty form has to appear for the oracle to have anything to say, and
-        # it has to appear ALONGSIDE real rules, which is the composition that
-        # let a named path be allowed.
+        # The empty form has to appear for the oracle to have anything to say, and it has to appear ALONGSIDE
+        # real rules, which is the composition that let a named path be allowed.
         rules = [(False, "")]
         for _ in range(rng.randint(0, 3)):
             is_allow = rng.random() < 0.5
@@ -76,10 +75,7 @@ def test_group_evaluation_matches_the_rfc_oracle_on_generated_compositions(seed:
                 rules.append((is_allow, ""))
             rules.append((is_allow, pattern))
         generated = "/" + "".join(rng.choice(["a", "b", "/"]) for _ in range(rng.randint(0, 3)))
-        # The oracle judges the matcher, so both must read the same text: the
-        # ADMITTED path. Judging the raw generated string instead would fold
-        # the normalizer's path rewrites (/b// -> /b) into the parity claim,
-        # which this suite is not about.
+        # The oracle judges the matcher, so both must read the same text: the ADMITTED path.
         url = canonical(f"http://x.example{generated}")
         path = url.path or "/"
 
@@ -90,14 +86,14 @@ def test_group_evaluation_matches_the_rfc_oracle_on_generated_compositions(seed:
 
 def test_the_group_oracle_catches_the_allow_all_shortcut_it_exists_to_replace():
     """Bites proof: the oracle must disagree with the behavior it replaced."""
-    # A group that names a path AND carries the empty form. The reference denies
-    # the path; the shortcut allowed everything.
+    # A group that names a path AND carries the empty form. The reference denies the path; the shortcut
+    # allowed everything.
     rules = [(False, ""), (False, "/a")]
     assert _reference_allows(rules, "/a/b") is False
     assert _allow_all_shortcut(rules) is True
 
-    # A group whose only rule is the empty form: no match, so allowed -- and here
-    # the shortcut agrees, which is why it looked harmless in isolation.
+    # A group whose only rule is the empty form: no match, so allowed -- and here the shortcut agrees, which
+    # is why it looked harmless in isolation.
     assert _reference_allows([(False, "")], "/a/b") is True
     assert _allow_all_shortcut([(False, "")]) is True
 

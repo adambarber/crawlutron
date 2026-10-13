@@ -62,10 +62,6 @@ class TestNormalizationGuardMemoization:
 
         monkeypatch.setattr(host_policy, "parse_bool_env", counting_bool)
         # Spy on the classification primitive rather than on ``ipaddress``.
-        # Which module performs the parse is a placement decision; what these
-        # tests claim is that the verdict is computed once and never
-        # recomputed, and the classifier call is the boundary at which that
-        # work is observable.
         monkeypatch.setattr(host_policy, "classify", counting_classify)
         return counts
 
@@ -81,8 +77,8 @@ class TestNormalizationGuardMemoization:
         # The guard really ran on the first call, then nothing re-ran on the second.
         assert env_after_first >= 1
         assert ip_after_first >= 1
-        # The second identical call consulted env and the IP classifier zero
-        # extra times: both decisions are memoized.
+        # The second identical call consulted env and the IP classifier zero extra times: both decisions are
+        # memoized.
         assert counts["env"] == env_after_first
         assert counts["ip"] == ip_after_first
 

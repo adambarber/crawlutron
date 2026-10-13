@@ -171,11 +171,8 @@ def test_resolve_and_pin_host_escape_hatch_survives_resolution_failure(monkeypat
 
 
 async def test_pinned_hop_never_targets_loopback_for_unresolvable(monkeypatch):
-    # Defense-in-depth: even if a caller skips the SSRF check, pinning must not
-    # point at 127.0.0.1 for an attacker-influenced, unresolvable hostname.
-    # Driven through the redirect walk rather than by naming the builder, so the
-    # test shows the refusal actually reaching the fetch -- a private call could
-    # only show that the rule raises, not that anything built on it is stopped.
+    # Defense-in-depth: even if a caller skips the SSRF check, pinning must not point at 127.0.0.1 for an
+    # attacker-influenced, unresolvable hostname.
     _unresolvable_host(monkeypatch)
     with pytest.raises(ValueError):
         await anext(
@@ -208,9 +205,7 @@ def test_pinned_builder_surfaces_unresolvable_host_as_an_ssrf_refusal(monkeypatc
 class TestSSRFProtection:
     @pytest.mark.parametrize("private_ip", ["127.0.0.1", "192.168.1.1"])
     def test_check_ssrf_protection_blocks_private_targets(self, monkeypatch, private_ip):
-        # The live hazard shape: an admitted public NAME whose DNS answer is
-        # private. A literal private IP never gets this far -- the constructor
-        # refuses it -- so the check's own refusal is observable on resolution.
+        # The live hazard shape: an admitted public NAME whose DNS answer is private
         with host_resolves_to(monkeypatch, private_ip), pytest.raises(ValueError):
             check_ssrf_protection(canonical("http://example.com/"))
 
@@ -323,8 +318,7 @@ class TestFrontierIdentityRefusesRejectedTargets:
         from app.admission.admission import _frontier_identity
 
         got = _frontier_identity("https://example.gov/page/", host_policy=HostPolicy.unrestricted())
-        # The identity is the admitted value, and its text is the page's
-        # durable identity.
+        # The identity is the admitted value, and its text is the page's durable identity.
         assert got is not None and got.raw == "https://example.gov/page", (
             f"a public target lost its identity: {got!r}"
         )
@@ -355,8 +349,8 @@ class TestSsrfDnsPinning:
 def test_ssrf_fixture_passes_when_opted_out(monkeypatch):
     """The happy path: opt out, then exercise the helper. Should pass."""
     monkeypatch.setenv("CRAWLUTRON_ALLOW_PRIVATE_TARGETS", "0")
-    # Call the real helper; it will fail to resolve but the call itself
-    # counts as "exercised", which is what the fixture checks.
+    # Call the real helper; it will fail to resolve but the call itself counts as "exercised", which is what
+    # the fixture checks.
     with contextlib.suppress(Exception):
         http_mod.check_ssrf_protection(canonical("http://example.invalid/"))
 
@@ -366,8 +360,7 @@ def test_ssrf_fixture_fails_when_opt_out_missing(monkeypatch):
     """If the test forgets to opt out, the fixture must fail with a clear
     message naming the missing opt-out.
     """
-    # Deliberately do NOT set CRAWLUTRON_ALLOW_PRIVATE_TARGETS=0.
-    # The fixture must catch this.
+    # Deliberately do NOT set CRAWLUTRON_ALLOW_PRIVATE_TARGETS=0. The fixture must catch this.
     import os
 
     monkeypatch.delenv("CRAWLUTRON_ALLOW_PRIVATE_TARGETS", raising=False)
@@ -376,11 +369,8 @@ def test_ssrf_fixture_fails_when_opt_out_missing(monkeypatch):
         http_mod.check_ssrf_protection(canonical("http://example.invalid/"))
 
 
-# Note: a test that requests ``ssrf_guard_required`` but never touches
-# ``check_ssrf_protection`` or ``resolve_and_pin_host`` simply passes
-# without exercising the SSRF path. The fixture catches opt-out misses
-# in the per-call wrapper, which fires during the test body and is
-# catchable via ``pytest.raises``.
+# Note: a test that requests ``ssrf_guard_required`` but never touches ``check_ssrf_protection`` or
+# ``resolve_and_pin_host`` simply passes without exercising the SSRF path.
 
 
 def test_allow_private_returns_original_hostname_not_loopback(monkeypatch):
@@ -393,8 +383,8 @@ def test_allow_private_returns_original_hostname_not_loopback(monkeypatch):
 
 
 def test_allow_private_preserves_host_for_webhook_style_urls(monkeypatch):
-    # A non-loopback host under local dev mode stays as-is (so webhooks and
-    # fetches to the real hostname are not misrouted to 127.0.0.1).
+    # A non-loopback host under local dev mode stays as-is (so webhooks and fetches to the real hostname are
+    # not misrouted to 127.0.0.1).
     monkeypatch.setenv("CRAWLUTRON_ALLOW_PRIVATE_TARGETS", "1")
     hostname, pinned = resolve_and_pin_host(canonical("https://hooks.svc.local/path"))
     assert hostname == "hooks.svc.local"
@@ -406,8 +396,8 @@ def test_shared_public_target_verdict_matches_reserved_range_corpus(monkeypatch)
     from app.models.host_policy import host_egress_reason, reset_private_target_memo
     from app.safety.validation import is_public_ip_value
 
-    # The corpus claim is about the host verdict, so the escape hatch must be
-    # off: with it on, host_egress_reason admits everything by design.
+    # The corpus claim is about the host verdict, so the escape hatch must be off: with it on,
+    # host_egress_reason admits everything by design.
     monkeypatch.setenv("CRAWLUTRON_ALLOW_PRIVATE_TARGETS", "0")
     reset_private_target_memo()
 

@@ -42,18 +42,15 @@ def _page_resp(url):
     return make_fetch(url=url, final_url=url, body=HTML.encode(), ctype="text/html")
 
 
-#: What the post-fetch block finds in ``HTML``, stated once. Both strategy
-#: builders run that block and hand back the same discoveries, so the
-#: expectation belongs with the page rather than with either path through it.
+#: What the post-fetch block finds in ``HTML``, stated once.
 EXPECTED_LINKS = frozenset(
     canonical(url) for url in ("http://example.com/p1", "http://example.com/p2", "http://example.com/next")
 )
 EXPECTED_JS_ENDPOINTS = [{"url": "http://example.com/api/data"}]
 NEXT_PAGE_URL = "http://example.com/next"
 
-#: The visible text the browser worker reports for ``HTML``: enough words for
-#: the extractor to classify the page, and enough of them to be an extraction
-#: rather than a title.
+#: The visible text the browser worker reports for ``HTML``: enough words for the extractor to classify the
+#: page, and enough of them to be an extraction rather than a title.
 BROWSER_TEXT = "page one page two next page body copy"
 
 
@@ -137,9 +134,8 @@ async def test_no_lxml_tree_escapes_to_loop(monkeypatch):
 def test_html_diagnostics_omit_policy_blocked_frame_and_private_form(monkeypatch):
     monkeypatch.setenv("CRAWLUTRON_ALLOW_PRIVATE_TARGETS", "0")
     html = '<iframe src="https://blocked.test/frame"></iframe><form action="http://127.0.0.1/admin"></form>'
-    # The source carries the policy under test: its own ``resolve`` is the
-    # filter, so admitting it under an unrestricted policy would defeat the
-    # very contract this test pins.
+    # The source carries the policy under test: its own ``resolve`` is the filter, so admitting it under an
+    # unrestricted policy would defeat the very contract this test pins.
     policy = HostPolicy.from_strings("allowed.test", "blocked.test")
     source = NormalizedUrl("https://allowed.test/page", policy=policy)
     result = extract_post_fetch_discovery(
@@ -159,8 +155,8 @@ async def test_discovery_feeds_are_policy_filtered():
         '<link rel="alternate" type="application/atom+xml" href="http://127.0.0.1/feed">'
         '<link rel="alternate" type="application/rss+xml" href="https://allowed.test/feed">'
     )
-    # The page value carries the job policy: its own ``resolve`` is what keeps
-    # the blocked-host and private feeds out of the answer.
+    # The page value carries the job policy: its own ``resolve`` is what keeps the blocked-host and private
+    # feeds out of the answer.
     result = await discovery_diagnostics(
         normalized_url=NormalizedUrl(
             "https://allowed.test/page", policy=HostPolicy.from_strings("allowed.test", "blocked.test")
@@ -209,8 +205,8 @@ async def test_browser_result_carries_the_shared_builder_shape(monkeypatch):
     assert result.http_status is None
     assert result.headers == {}
     assert result.content_type is None
-    # A render carries no origin validators (no etag/last-modified); the field
-    # must be an empty dict, never None or absent.
+    # A render carries no origin validators (no etag/last-modified); the field must be an empty dict, never
+    # None or absent.
     assert result.validators == {}
     assert result.error is None
     assert result.html == HTML

@@ -211,19 +211,11 @@ async def test_malformed_gzip_is_rejected_by_strategy():
 
     result = await _run_http(fetcher)
     assert result.status == "failed"
-    # The body is the server's fault, not the caller's. DecompressionError
-    # subclasses ValueError only because that is what zlib's error happens to
-    # be, and letting the caller-error catch-all claim it reported a corrupt
-    # response as "value_error" -- terminal, and reading as "the caller asked
-    # for something invalid", which in a durable job marks the URL visited
-    # rather than retrying a fault a second attempt often clears.
+    # The body is the server's fault, not the caller's.
     assert result.error == "http_error"
     assert result.html is None
     assert result.text is None
 
-    # The sibling row keeps its own verdict: over the cap is payload_too_large
-    # and answers 413, a real stream expanding past a cap rather than a
-    # pass-through body that never had a size check applied to it.
     with pytest.raises(DecompressionTooLargeError):
         decompress_body(gzip.compress(b"x" * 4096), "gzip", max_output_bytes=8)
 
@@ -237,8 +229,8 @@ class TestNotModifiedResponse:
         )
 
         cache = HttpCache()
-        # The cache is value-keyed: seed it with the admitted value the
-        # strategy will read under, or the conditional GET silently misses.
+        # The cache is value-keyed: seed it with the admitted value the strategy will read under, or the
+        # conditional GET silently misses.
         cache.store(NormalizedUrl("http://example.com/", policy=HostPolicy.unrestricted()), {"etag": "v1"})
         result = await run_http_strategy(
             url="http://example.com/",

@@ -49,8 +49,8 @@ def _collect(items):
 
 class TestProviderParsing:
     async def test_tavily_parses_results_and_filters_private_urls(self, fake_provider_http, monkeypatch):
-        # The suite defaults to private-targets ON for the loopback fixture
-        # server; this test exercises the SSRF hygiene on results, so opt out.
+        # The suite defaults to private-targets ON for the loopback fixture server; this test exercises the
+        # SSRF hygiene on results, so opt out.
         from tests._assertions import block_private_targets
 
         block_private_targets(monkeypatch)
@@ -385,9 +385,8 @@ class _FakeStreamResponse:
     """
 
     def __init__(self, body, encoding: str | None = "utf-8"):
-        # ``body`` is bytes for a single yield, or an iterable of chunks for
-        # multi-chunk streams (the cap tests drip unbounded input) — the real
-        # httpx surface yields chunks, so the fake does too.
+        # ``body`` is bytes for a single yield, or an iterable of chunks for multi-chunk streams (the cap
+        # tests drip unbounded input) — the real httpx surface yields chunks, so the fake does too.
         if isinstance(body, (bytes, bytearray)):
             body = [bytes(body)]
         self._chunks = body

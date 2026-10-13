@@ -15,8 +15,7 @@ def test_parallelism_defaults():
     # Faster single-domain crawling without being reckless.
     assert s.per_domain_concurrency == 2
     assert s.per_domain_delay_ms == 500
-    # Adaptive throttling capped so a slow server cannot serialize crawls to
-    # a 30s-per-request crawl.
+    # Adaptive throttling capped so a slow server cannot serialize crawls to a 30s-per-request crawl.
     assert s.adaptive_max_delay == 10.0
 
 
@@ -147,14 +146,13 @@ def test_small_limit_hits_floor():
 def test_3gib_limit_scales_up():
     limit = 3 * 1024 * 1024 * 1024
     with patch.object(settings_mod, "read_memory_stats", lambda: _FakeStats(limit)):
-        # The pool ceiling must equal the admission's HTTP concurrency for the
-        # same limit + pool, whatever the per-task RAM estimate is (zero drift).
+        # The pool ceiling must equal the admission's HTTP concurrency for the same limit + pool, whatever the
+        # per-task RAM estimate is (zero drift).
         expected = _expected_connections(limit)
         assert settings_mod._default_http_max_connections() == expected
         assert settings_mod._default_http_keepalive() == max(20, min(128, expected // 2))
-        # With the honest per-task RAM estimate the 3 GiB derivation sits at the
-        # floor; the floor keeps the minimal-deployment pool usable (a bigger
-        # box still scales above it -- see test_huge_limit_is_capped).
+        # With the honest per-task RAM estimate the 3 GiB derivation sits at the floor; the floor keeps the
+        # minimal-deployment pool usable (a bigger box still scales above it -- see
         assert expected >= 100
 
 
@@ -193,8 +191,8 @@ def test_the_pool_default_is_derived_per_construction_not_frozen_at_import():
         derived = settings_mod.CrawlerSettings()
         assert derived.http_max_connections == expected
         assert derived.http_max_keepalive == max(20, min(128, expected // 2))
-        # The env path must derive too. A ``default_factory`` field has no class
-        # attribute to read, so this is the line where that trap shows up.
+        # The env path must derive too. A ``default_factory`` field has no class attribute to read, so this is
+        # the line where that trap shows up.
         from_env = settings_mod.CrawlerSettings.from_mapping()
         assert from_env.http_max_connections == expected
         assert from_env.http_max_keepalive == max(20, min(128, expected // 2))

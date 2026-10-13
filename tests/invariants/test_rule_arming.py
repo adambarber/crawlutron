@@ -50,9 +50,8 @@ from collections.abc import Iterator, Sequence
 from tests.chokepoint_walks import REPO_ROOT
 from tests.invariants._shared import app_names
 
-#: One declared rule, as the three things this audit needs: what it is called,
-#: the node holding its detector's body, and its module's string constants so a
-#: factored key can be resolved to its value.
+#: One declared rule, as the three things this audit needs: what it is called, the node holding its detector's
+#: body, and its module's string constants so a factored key can be resolved to its value.
 ArmedRule = tuple[str, ast.AST, dict[str, str]]
 
 
@@ -113,12 +112,7 @@ def declared_rules() -> Iterator[ArmedRule]:
                 yield (str(name), _detector_body(find, functions), constants)
 
 
-#: A bare identifier, and one that is private. The shape is the whole point:
-#: a detector keys on spellings, so `"_store_set_cookies() outside "` (a
-#: sentence in a failure message that happens to mention one) and `"_"` (an
-#: underscore count in `startswith`) are both strings that are not keys. Both
-#: were reported by the first cut of this audit, which is the whole argument for
-#: checking the shape rather than the prefix.
+#: A bare identifier, and one that is private.
 _PRIVATE_IDENTIFIER = re.compile(r"_[A-Za-z][A-Za-z_0-9]*\Z")
 
 

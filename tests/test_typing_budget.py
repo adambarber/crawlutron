@@ -73,17 +73,7 @@ _METRIC = "undeclared record"
 
 _BUDGETS = {_METRIC: 210}
 
-# A record is anything whose key set a caller might depend on. `dict[str, str]`
-# is deliberately absent as a FORM: it appears in the tree dozens of times and is
-# correct every time, because an open key set with a typed value is the honest
-# description of a header map. What marks an undeclared record is `Any` in the
-# value position -- a place where the record was a model and stopped being one --
-# or a bare container that declares nothing at all.
-#
-# Membership is decided on the annotation's SPINE, not on every name inside it.
-# `Callable[[Any, set[int]], Any]` mentions a set, but it is a callable and not a
-# record; a naive name scan counts it as one and inflates the budget with
-# positions that need no key set declared.
+# A record is anything whose key set a caller might depend on.
 _RECORD_ROOTS = frozenset(
     {"dict", "Dict", "list", "List", "tuple", "Tuple", "Mapping", "MutableMapping", "Sequence"}
 )
@@ -230,8 +220,8 @@ def test_the_collector_classifies_records_the_way_the_remedy_assumes() -> None:
     measured = {source for _metric, _line, source in candidates(parsed)}
     assert measured == set(), f"collector flagged annotations that declare or are honest: {sorted(measured)}"
 
-    # A `JsonValue` ALIASED as a dict is a declared record. This is the shape the
-    # remedy asks for, and the collector must not keep counting it forever.
+    # A `JsonValue` ALIASED as a dict is a declared record. This is the shape the remedy asks for, and the
+    # collector must not keep counting it forever.
     aliased = ast.parse(
         "def view(v: dict[str, JsonValue]) -> None: ...\ndef w(v: dict[str, str]) -> None: ..."
     )
@@ -246,8 +236,8 @@ def test_the_collector_classifies_records_the_way_the_remedy_assumes() -> None:
     # A bare container declares nothing at all, and needs no `Any` to admit it.
     assert list(candidates(ast.parse("def a(v: dict) -> None: ..."))), "a bare dict is the purest case"
 
-    # A callable's own arguments are not a record. `Callable[[Any, set[int]], Any]`
-    # mentions a set and is still a callable.
+    # A callable's own arguments are not a record. `Callable[[Any, set[int]], Any]` mentions a set and is
+    # still a callable.
     callable_only = ast.parse("def a(fn: Callable[[Any, set[int]], Any]) -> None: ...")
     assert list(candidates(callable_only)) == [], "spine, not every name inside the annotation"
 

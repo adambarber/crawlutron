@@ -131,12 +131,7 @@ def test_job_engine_payload_chokepoint_detector_bites():
     JOB_ENGINE_PAYLOAD_USES_SINGLE_BUILDER.check_bites()
 
 
-# The strategy chain's raise-chokepoint. A strategy is a STEP in a ladder, so
-# a step that raises must become a classified failed result and the ladder
-# must move on; the sink is a direct call to a strategy runner, and the
-# requirement is that it sits inside a try with an ``except Exception``.
-# Tree-wide, because a second module may grow a strategy runner and reach for
-# the chain's helpers.
+# The strategy chain's raise-chokepoint.
 _STRATEGY_RUNNERS = frozenset({"_run_http_strategy", "_run_browser_strategy"})
 
 
@@ -205,8 +200,8 @@ STRATEGY_RUNNERS_ARE_CALLED_UNDER_A_GUARD = Rule(
             "invoked outside a try/except Exception",
             count=2,
         ),
-        # A narrow handler is not a guard: a bare except TypeError lets every
-        # other raise through, which is the shape the bug shipped as.
+        # A narrow handler is not a guard: a bare except TypeError lets every other raise through, which is
+        # the shape the bug shipped as.
         Bites(
             "async def _execute_strategy(context, strategy):\n"
             "    try:\n"
@@ -215,9 +210,7 @@ STRATEGY_RUNNERS_ARE_CALLED_UNDER_A_GUARD = Rule(
             "        return None\n",
             "invoked outside a try/except Exception",
         ),
-        # The runner reached as a METHOD is the same sink. A detector that matched
-        # only a bare name goes blind at the moment the runner becomes a method --
-        # which is a refactor that looks like it cannot weaken the invariant.
+        # The runner reached as a METHOD is the same sink.
         Bites(
             "class Run:\n"
             "    async def execute(self, strategy):\n"
@@ -321,10 +314,8 @@ def _environment_reader_reference(
         isinstance(node, ast.Constant)
         and isinstance(expression, ast.Expr)
         and expression.value is node
-        # The block-owning statement kinds, named rather than ``ast.stmt``: "is
-        # this the first statement of a block" asks for a body, and only some
-        # statements have one. ``ast.stmt`` says none of them do, so the check
-        # had to be written against a type that could not answer it.
+        # The block-owning statement kinds, named rather than ``ast.stmt``: "is this the first statement of a
+        # block" asks for a body, and only some statements have one.
         and scope is not None
         and is_body_owner(scope)
         and scope.body
@@ -354,8 +345,8 @@ def _environment_reader_reference(
         return None
     if is_alias_lookup:
         return alias_value
-    # ast.Constant.value is the full literal union, so a prefix test is a claim
-    # about the value being a str, not about the node being a Constant.
+    # ast.Constant.value is the full literal union, so a prefix test is a claim about the value being a str,
+    # not about the node being a Constant.
     if isinstance(node.value, str) and node.value.startswith("CRAWLUTRON_"):
         return node.value
     return None
@@ -525,12 +516,8 @@ _DOC_REFERENCE_EXCLUSIONS = {
 _SKIP_DIRECTORIES = frozenset({".git", ".venv", "work", "node_modules", ".pytest_cache", "__pycache__"})
 
 _BACKTICKED_PATH = re.compile(
-    # A directory must carry its trailing slash: an optional one would let
-    # bare prose such as ``and/or`` read as a path claim, and a gate that
-    # reports noise gets disabled rather than obeyed. A file may end at its
-    # extension or carry a suffix -- a line number or a symbol -- because the
-    # claim being checked is that the FILE exists, and requiring ``:\\d+``
-    # let ``app/crawl/sqlite_store.py:connect_store`` through unnoticed.
+    # A directory must carry its trailing slash: an optional one would let bare prose such as ``and/or`` read
+    # as a path claim, and a gate that reports noise gets disabled rather than obeyed.
     r"^[\w][\w./-]*/[\w./-]*(?:/|(?:\.(?:py|md|toml|json|ya?ml|ini|cfg|txt|in|sh)(?::[\w.]+)?))$"
 )
 _BACKTICKED_REPO_DOCUMENT = re.compile(r"^[\w][\w-]*\.md$")
@@ -563,14 +550,7 @@ def _markdown_documents() -> list[str]:
     return sorted(
         str(document.relative_to(REPO_ROOT))
         for document in REPO_ROOT.rglob("*.md")
-        # Relative parts, never absolute ones: the skip list names directories
-        # of THIS repository (`docs/work/`), and matching it against the
-        # absolute path drops every document on any checkout that happens to
-        # live under a directory with one of those names. GitHub Actions
-        # checks out to /home/runner/work/<repo>/<repo>, so the `work` entry
-        # alone excluded the entire tree and the doc gate passed by examining
-        # nothing -- a gate that is green because it looked at zero files is
-        # worse than one that is red, because it is silently disarmed.
+        # Relative parts, never absolute ones: the skip list names directories of THIS repository
         if not _SKIP_DIRECTORIES.intersection(document.relative_to(REPO_ROOT).parts)
     )
 
@@ -735,18 +715,8 @@ def test_live_doc_reference_detector_bites(tmp_path):
     offenders = _broken_doc_reference_offenders(root=tmp_path, documents=["README.md"])
     assert "README.md points at `DOES_NOT_EXIST.md`, which does not exist" in offenders
 
-    # A directory carries no extension, and a symbol suffix is not a line
-    # number -- both shapes a reader is still told to open, and both of which
-    # a module move breaks exactly as a renamed file does. The predicate once
-    # required a final extension and a trailing `:\\d+`, so a live document
-    # kept pointing at `app/crawl/migrations/` and at
-    # `app/crawl/sqlite_store.py:connect_store` while this gate reported a
-    # clean tree.
-    #
-    # The suffix arm claims only that the FILE exists. Whether the symbol
-    # inside it exists is issue #89's question and needs a different gate;
-    # resolving `app/main.py:real_name_real_symbol` here would drag symbol
-    # resolution into a detector whose thesis is navigation.
+    # A directory carries no extension, and a symbol suffix is not a line number -- both shapes a reader is
+    # still told to open, and both of which a module move breaks exactly as a renamed file does.
     for claim in ("app/does_not_exist_dir/", "app/does_not_exist.py:connect_store"):
         (tmp_path / "README.md").write_text(
             document.read_text(encoding="utf-8") + f"\nSee `{claim}`.\n",
@@ -842,8 +812,7 @@ DDL_IS_CONFINED_TO_THE_MIGRATIONS_PACKAGE = Rule(
         "they are ordered and reversible; a DDL statement anywhere else is a "
         "schema change that ships without a migration"
     ),
-    # The scan needs every module including the sanctioned wrappers, not the
-    # default SANCTIONED exclusion.
+    # The scan needs every module including the sanctioned wrappers, not the default SANCTIONED exclusion.
     scope=lambda *, exclude: app_trees(exclude=frozenset()),
     bite=lambda: Bites(
         "def bypass(conn):\n"
@@ -854,8 +823,8 @@ DDL_IS_CONFINED_TO_THE_MIGRATIONS_PACKAGE = Rule(
         count=3,
     ),
     clean=lambda: (
-        # The migrations package is where DDL is allowed, so this shape is spared
-        # there and must fire at every other module.
+        # The migrations package is where DDL is allowed, so this shape is spared there and must fire at every
+        # other module.
         Silent(
             "def apply(conn):\n    conn.execute('CREATE TABLE x (id TEXT)')\n",
             at=REPO_ROOT / "app" / "storage" / "migrations" / "0001_crawl_jobs_initial.py",
@@ -872,14 +841,8 @@ def test_ddl_detector_bites():
     DDL_IS_CONFINED_TO_THE_MIGRATIONS_PACKAGE.check_bites()
 
 
-# --- MCP tool request models --------------------------------------------------
-# The MCP dispatcher used to hand each handler the raw ``arguments`` dict and
-# let the handler validate, while the *advertised* inputSchema was a separate
-# hand-written JSON schema. Two descriptions of one contract, neither derived
-# from the other -- and the advertised one claimed additionalProperties: False
-# for a request model that in fact ignores extras. Now the registration names
-# the pydantic model, the schema is derived from it, and the dispatcher
-# validates. This guard keeps all three attached to one another.
+# Two descriptions of one contract, neither derived from the other -- and the advertised one claimed
+# additionalProperties: False for a request model that in fact ignores extras.
 _MCP_TOOLS_MODULE = "app/mcp/tools.py"
 
 
@@ -909,10 +872,8 @@ def _mcp_unvalidated_tool_offenders(tree, path, *, tools_module):
                 )
 
 
-#: The module's own basename, compared by the detector to each swept file's
-#: ``path.name``. The old scan passed the full repo-relative path, which never
-#: matched a basename -- sweeping nothing and reporting green. Passing the
-#: basename is what actually confines the rule to app/mcp/tools.py.
+#: The module's own basename, compared by the detector to each swept file's ``path.name``. The old scan passed
+#: the full repo-relative path, which never matched a basename -- sweeping nothing and reporting
 _MCP_TOOLS_BASENAME = "tools.py"
 
 
@@ -1073,9 +1034,6 @@ def test_protocol_constant_production_detector_bites():
     )
     assert not both, both
     # The vacuous direction: a registry the sweep cannot read is not a clean bill.
-    # Two different reasons, two different messages -- a module that never parsed
-    # and a module whose __all__ is computed were reported by the same sentence,
-    # which told a reader to go looking for a computed __all__ that was not there.
     unreadable = ast.parse("__all__ = compute()\n")
     for source, reason in (
         (unreadable, "the protocol registry is not one literal __all__"),
@@ -1152,9 +1110,8 @@ def test_cycle_guard_detector_bites():
 
 
 def test_cycle_guard_detector_respects_the_owner_parameter():
-    # An owner by another name is still a second place, so the rule is about being
-    # the one sanctioned function rather than about a literal spelling. Stated as a
-    # direct detector call because the Rule layer hands one owner to every proof.
+    # An owner by another name is still a second place, so the rule is about being the one sanctioned function
+    # rather than about a literal spelling.
     assert _cycle_guard_offenders(
         ast.parse("def other(value, seen):\n    return _entered(value, seen)\n"),
         REPO_ROOT / "app" / "models.py",
@@ -1221,12 +1178,10 @@ THE_META_KEY_REJECTION_REASON_IS_AUTHORED_ONCE = Rule(
         ),
     ),
     clean=lambda: (
-        # The one place the sentence legitimately lives: the owner function both
-        # keys check through.
+        # The one place the sentence legitimately lives: the owner function both keys check through.
         f"def {_META_REASON_OWNER}(meta, key, expected, label, request_id):\n"
         f'    return f"{_META_WRONG_TYPE_FRAGMENT}{{label}}): {{key}})"\n',
-        # Unrelated reasons are not the contract, so they must not be swept up
-        # with it.
+        # Unrelated reasons are not the contract, so they must not be swept up with it.
         'def validate_meta(meta):\n    raise ProtocolValidationError("Missing _meta block")\n',
         'def validate_meta(meta):\n    reason = f"Missing required _meta key: {key}"\n',
     ),

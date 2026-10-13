@@ -59,8 +59,8 @@ class TestJsonLdExtraction:
             "</head><body><p>x</p></body></html>"
         )
         meta = extract_llm_metadata(html, canonical("https://example.com"))
-        # Title, meta, JSON-LD, canonical, favicon, language all read from
-        # ONE lxml parse instead of 8+ independent regex scans.
+        # Title, meta, JSON-LD, canonical, favicon, language all read from ONE lxml parse instead of 8+
+        # independent regex scans.
         assert budget.parses == 1
         assert meta["title"] == "Test Page"
         assert meta["canonical_url"] == "https://example.com/c"

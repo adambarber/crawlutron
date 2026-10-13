@@ -27,9 +27,8 @@ from tests._worker_doubles import (
 )
 from tests.crawl._chain_policies import chain_policy
 
-# ---------------------------------------------------------------------------
-# Classification: the taxonomy is the single source of "what went wrong"
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------- Classification: the taxonomy is
+# the single source of "what went wrong"
 
 
 def test_classifier_lives_in_the_neutral_classification_module():
@@ -65,9 +64,8 @@ def test_pool_exhausted_is_a_taxonomy_member():
     assert CrawlClassification.browser_pool_exhausted.value == "browser_pool_exhausted"
 
 
-# ---------------------------------------------------------------------------
-# The primitive: one exception -> one terminal result
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------- The primitive: one exception ->
+# one terminal result ---------------------------------------------------------------------------
 
 
 def test_primitive_builds_classified_failed_result():
@@ -178,9 +176,6 @@ def _budget_item() -> dict:
         known_classification="url_budget_exceeded",
         extra_diagnostics={"url_budget_seconds": 30},
     )
-    # The engine result itself, not a dict re-typed from it: this builder used
-    # to spell the record a second time, which is the same drift this whole
-    # change removed, in the test that asserts the degradation.
     return result
 
 
@@ -226,15 +221,8 @@ class TestShapeAllGuardsPerItem:
 
         good = _budget_item()
         bad = replace(good, classification_evidence=[{"detail": object()}])
-        # The bad item is a real result whose OPEN payload the wire model
-        # rejects, so shaping genuinely raises on it. It used to be a dict with
-        # an out-of-taxonomy status, back when `_coerce_status` read one as
-        # `failed` instead of raising -- which this test also once hid, by
-        # asserting through a `raise AssertionError` that the `except
-        # Exception: pass` on the next line swallowed. A record cannot carry an
-        # out-of-taxonomy status at all now; the guard's job moved to the field
-        # that is still unvalidated, and the degradation is asserted below
-        # against the real response.
+        # The bad item is a real result whose OPEN payload the wire model rejects, so shaping genuinely raises
+        # on it.
 
         response = await abuild_unified_crawl_response(
             [good, bad],
@@ -246,11 +234,7 @@ class TestShapeAllGuardsPerItem:
         assert response.results[1].status == "failed"
 
     def test_fallback_status_and_classification_agree(self):
-        # The fallback hardcodes status="failed" and picks the classification
-        # independently. A consumer re-deriving status from classification
-        # (what CLASSIFICATION_STATUS_BY_LABEL exists to allow) must see the
-        # same value the fallback set, or the two paths describe different
-        # outcomes for the same item.
+        # The fallback hardcodes status="failed" and picks the classification independently.
         from app.api.response_shaping import _failed_unified_result
         from app.vocabulary.taxonomy import status_for_classification
 
@@ -258,13 +242,8 @@ class TestShapeAllGuardsPerItem:
         assert status_for_classification(result.classification) == result.status
 
 
-# ---------------------------------------------------------------------------
-# The chain guard: a strategy that RAISES is a failed STEP, not a dead URL
-# ---------------------------------------------------------------------------
-
-
-#: A browser worker's success shape: the suite's rendered result, which is what
-#: a real Camoufox render hands the chain.
+# --------------------------------------------------------------------------- The chain guard: a strategy that
+# RAISES is a failed STEP, not a dead URL
 _rendered = _fake_browser(
     html="<html><body><main>rendered page body</main></body></html>",
     text="rendered page body",
@@ -306,8 +285,8 @@ class TestStrategyChainGuardsRaisingStrategies:
         assert len(attempts) == 2, "the ladder must continue past a raising step"
         assert result.status == "success"
         assert result.selected_strategy == BROWSER_HEADED_WARMED
-        # The raising step is recorded as an ATTEMPT, with the classification the
-        # shared primitive derived -- that is what a consumer reads the ladder from.
+        # The raising step is recorded as an ATTEMPT, with the classification the shared primitive derived --
+        # that is what a consumer reads the ladder from.
         assert [(a.strategy, a.classification) for a in result.attempted_strategies] == [
             (BROWSER_HEADLESS, "network_error"),
             (BROWSER_HEADED_WARMED, "rendered"),
@@ -326,8 +305,7 @@ class TestStrategyChainGuardsRaisingStrategies:
 
         assert result.status == "failed"
         assert result.classification == "network_error"
-        # The stable code on the wire, and the primitive's redaction contract
-        # holds at this call site too.
+        # The stable code on the wire, and the primitive's redaction contract holds at this call site too.
         assert result.error == "network_error"
         assert "internal-host.local" not in str(asdict(result))
 

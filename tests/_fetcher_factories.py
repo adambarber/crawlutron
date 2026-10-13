@@ -51,16 +51,7 @@ def make_fetch(
     )
 
 
-#: What a route may answer with. An exception is raised, an ``HttpFetchResult``
-#: is returned verbatim, a ``(status, body, ctype)`` triple or a kwargs dict is
-#: turned into a real ``HttpFetchResult`` by :func:`make_fetch`.
-#:
-#: What a route may answer with. Left as ``Any`` deliberately: the set is
-#: caller-supplied, and the four shapes named below plus the fetch-result-shaped
-#: object ``answer_is_response`` passes through are exactly why a union here
-#: would be a claim about callers rather than about this module. What IS pinned
-#: is the answer's OUTPUT -- ``_answer`` returns a real ``HttpFetchResult``, and
-#: so does a fetcher double.
+#: What a route may answer with.
 Route = Any
 
 
@@ -103,12 +94,6 @@ class FetcherDouble:
     calls: list[str]
     peak: Callable[[], int]
     inflight: Callable[[], int]
-    #: The headers this double was called with, in order. A separate member from
-    #: ``calls`` because the two are different facts: ``calls`` is which URLs
-    #: were fetched, this is what was sent with each. :func:`request_fetcher`
-    #: used to publish its header log AS ``calls``, so a test reading it was
-    #: reading a list of header dicts through a name that says URLs -- and the
-    #: other seam's log was nowhere.
     headers: list[dict[str, str]]
 
     def __init__(
@@ -147,8 +132,8 @@ class FetcherDouble:
         and never ``urlparse(url)``; a respond written against text is
         responding to a request production never made.
         """
-        # ``calls`` speaks text: it is what tests assert membership in, and the
-        # wire form of the value is the text the request was made to.
+        # ``calls`` speaks text: it is what tests assert membership in, and the wire form of the value is the
+        # text the request was made to.
         self.calls.append(url.raw)
         self.headers.append(dict(sent_headers))
         if self._record_cap is not None:
@@ -156,15 +141,11 @@ class FetcherDouble:
         result = self._answer(url, sent_headers, timeout, max_content_length)
         if inspect.isawaitable(result):
             result = await result
-        # The flag says which of the two answer shapes this factory produces, and
-        # each arm now says so out loud. It used to be a boolean the type of the
-        # answer could not follow, so a ``Route`` handed to a response factory (or
-        # the reverse) was returned as though it were the other -- and the caller
-        # read ``.status_code`` off a route spec, or a strategy unpacked a
-        # response as a triple.
+        # The flag says which of the two answer shapes this factory produces, and each arm now says so out
+        # loud.
         if self._answer_is_response:
-            # The answer already IS the fetch result, so it goes back untouched.
-            # A round trip through ``_answer`` would be a second reading of it.
+            # The answer already IS the fetch result, so it goes back untouched. A round trip through
+            # ``_answer`` would be a second reading of it.
             return result
         return _answer(result, url)
 
@@ -323,8 +304,8 @@ def sequenced_fetcher(
     state = {"n": 0}
 
     def answer(url, *_):
-        # The harness owns the position, not the caller's list: a test that
-        # never asks for the call log still gets a sequence that advances.
+        # The harness owns the position, not the caller's list: a test that never asks for the call log still
+        # gets a sequence that advances.
         index = state["n"]
         state["n"] += 1
         if index >= len(steps):
@@ -398,9 +379,8 @@ def concurrent_fetcher(
         state["inflight"] += 1
         state["peak"] = max(state["peak"], state["inflight"])
         try:
-            # ``_yield``, not ``_``: ``*_args`` above already binds the rest of
-            # the arguments, and a bare ``_`` loop variable is a second name for
-            # a value the enclosing call still needs.
+            # ``_yield``, not ``_``: ``*_args`` above already binds the rest of the arguments, and a bare
+            # ``_`` loop variable is a second name for a value the enclosing call still needs.
             for _yield in range(yield_times):
                 await asyncio.sleep(0)
             return respond(url, sent_headers)
@@ -479,10 +459,7 @@ def xml_page(body: str) -> tuple[int, str, str]:
     return (200, body, "application/xml")
 
 
-# Deep enough to follow the seed's links, wide enough that the page cap is never
-# what a test is measuring. Named because several recursive tests stated the same
-# two numbers, and a test that meant to change the cap could not tell which of
-# them it was editing.
+# Deep enough to follow the seed's links, wide enough that the page cap is never what a test is measuring.
 LINKED_PAIR_LIMITS = {"max_depth": 1, "max_pages": 10}
 
 
@@ -531,10 +508,8 @@ async def crawled_urls(pages: dict[str, Any], **kwargs: Any) -> list[str]:
     only asserts membership wraps this in ``set()``.
     """
     out = await crawled_results(pages, **kwargs)
-    # A result whose URL never normalized was not crawled to a URL, so it is not
-    # one of these. Projecting it as `str | None` would push that possibility onto
-    # every caller, and a caller comparing a `str | None` to a canonical URL is
-    # the comparison that quietly stops meaning anything.
+    # Projecting it as `str | None` would push that possibility onto every caller, and a caller comparing a
+    # `str | None` to a canonical URL is the comparison that quietly stops meaning anything.
     return [r.normalized_url.raw for r in out["results"] if r.normalized_url is not None]
 
 
@@ -568,8 +543,8 @@ def cache_with_etag(url: str, etag: str = "v1") -> HttpCache:
     keyed by and the cache object one decision instead of three.
     """
     cache = HttpCache()
-    # Value-keyed cache: admit under the same policy the harness admits
-    # request URLs with, or the conditional GET silently misses.
+    # Value-keyed cache: admit under the same policy the harness admits request URLs with, or the conditional
+    # GET silently misses.
     cache.store(canonical(url), {"etag": etag})
     return cache
 
@@ -638,10 +613,7 @@ async def crawl_homepage_async(
     return await run_crawl_async(payload, cache=cache, browser_worker=browser_worker)
 
 
-#: The origin every chain test crawls. Named because a chain test's URL is
-#: almost never what it is about -- the ladder, the classification, the
-#: redaction -- and it was spelled at every call site, so the scheduler's
-#: per-domain limit was keyed on a domain half the tests spelled differently.
+#: The origin every chain test crawls.
 EXAMPLE_URL = "http://example.com/"
 
 
@@ -796,16 +768,8 @@ async def invoke_http_strategy(
     cap_capture: list[int] | None = None,
 ) -> Any:
     if dedupe_patch:
-        # Lazy on purpose, and the reason is measured: `import trafilatura` costs
-        # roughly 400ms because it transitively pulls dateparser, ua_parser,
-        # browserforge, onnxruntime, mammoth, lxml and PIL. Every test module in
-        # the tree imports this one, so a module-level import charged that 400ms
-        # to every xdist worker for the sake of the handful of tests that ask
-        # for `dedupe_patch` -- and the suite's own profile said the fixed
-        # per-worker import cost, not the test bodies, was where the CPU went.
-        # The seam only needs the module when it is actually patching it, which
-        # is what the other helpers here already do (`_spawn_fetch`,
-        # `run_http_strategy`, `run_default_http_fetcher`).
+        # Lazy on purpose, and the reason is measured: `import trafilatura` costs roughly 400ms because it
+        # transitively pulls dateparser, ua_parser, browserforge, onnxruntime, mammoth, lxml and PIL.
         import trafilatura.core
 
         monkeypatch.setattr(trafilatura.core, "duplicate_test", lambda *a, **k: False)

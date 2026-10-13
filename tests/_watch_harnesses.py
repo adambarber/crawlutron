@@ -23,10 +23,8 @@ def watch_client(store) -> AsyncClient:
     """An AsyncClient over ``/v1/watches``, backed by ``store``."""
     app = FastAPI()
     app.include_router(watch_router)
-    # The error envelope is part of the surface under test, so the handlers
-    # that shape it are read off the real app rather than restated here: a
-    # harness that spelled them out would keep answering with the old shape
-    # after the service changed.
+    # The error envelope is part of the surface under test, so the handlers that shape it are read off the
+    # real app rather than restated here: a harness that spelled them out would keep answering with the old
     for exception_class, handler in service_app().exception_handlers.items():
         app.add_exception_handler(exception_class, handler)
     app.dependency_overrides[get_watch_store] = lambda: store

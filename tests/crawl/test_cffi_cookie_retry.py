@@ -6,8 +6,8 @@ from tests._browser_doubles import _fake_browser
 from tests._fetcher_factories import request_fetcher, run_chain
 from tests.crawl._chain_policies import chain_policy
 
-#: A browser worker's success shape, which is what the strategy chain needs
-#: back once the cffi hop has the cookies.
+#: A browser worker's success shape, which is what the strategy chain needs back once the cffi hop has the
+#: cookies.
 _rendered = _fake_browser(html="<html>rendered</html>", text="rendered")
 
 
@@ -18,10 +18,7 @@ async def test_browser_cookies_replayed_through_cffi():
 
     calls = []
 
-    # The plain HTTP strategy always denies; the cffi one only succeeds once
-    # the browser cookies are replayed. Both answers are functions of the
-    # Cookie header, so both are request_fetcher responses -- and the tag each
-    # call is recorded under is what the test reads back.
+    # The plain HTTP strategy always denies; the cffi one only succeeds once the browser cookies are replayed.
     denied = (403, b"denied", "text/plain")
 
     def respond_http(url, headers):

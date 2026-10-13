@@ -45,12 +45,6 @@ import asyncio
 import time
 from collections.abc import Awaitable, Callable
 
-# Bound on how long a wait may observe NOTHING before it calls the test a hang.
-# Measured, not guessed: the slowest edge-driven wait observed across a full
-# top-level `pytest -q` sweep is well under a second on this box, and the one
-# real starvation incident produced a job that was still progressing -- it
-# simply had not been scheduled yet, which is the case an event-driven wait
-# now rides out instead of racing.
 HANG_GUARD_SECONDS = 5.0
 
 

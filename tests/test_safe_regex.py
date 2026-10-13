@@ -70,20 +70,14 @@ class TestMatchBounded:
 
     def test_pathological_pattern_times_out_instead_of_hanging(self):
         # The N-1 class: nested quantifiers meeting a non-matching tail.
-        # Under stdlib re the depth-3 shape .*(((a|aa)))*b is catastrophic
-        # (0.136s measured at just 24 chars, doubling per character); the
-        # regex engine optimizes that exact shape, so this test pins the
-        # bound with an optimizer-resistant variant of the same class.
         self._assert_bounded_timeout(r"^(a|aa)+((a|aa)+)*x", "a" * 60 + "!")
 
     def test_timeout_bounds_exponential_backtracking(self):
-        # A shape the regex engine cannot optimize away: (a|aa)+b against a
-        # non-matching run of a's backtracks exponentially. Bounded, it must
-        # raise RegexTimeout at ~the budget instead of hanging.
+        # A shape the regex engine cannot optimize away: (a|aa)+b against a non-matching run of a's backtracks
+        # exponentially.
         self._assert_bounded_timeout(r"(a|aa)+b", "a" * 80 + "c")
 
     def test_matching_input_unaffected_by_timeout(self):
-        # Same pattern, matching input: completes immediately (the bound
-        # must not degrade legitimate matches).
+        # Same pattern, matching input: completes immediately (the bound must not degrade legitimate matches).
         compiled = compile_untrusted(r"(a|aa)+b")
         assert match_bounded(compiled, "a" * 80 + "b", timeout=0.05)

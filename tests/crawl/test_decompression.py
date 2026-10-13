@@ -15,14 +15,8 @@ _CAP = 10_000_000
 
 
 def test_cap_is_required_keyword():
-    # The uncapped branch existed only as a default; making the
-    # cap mandatory turns "forgot to bound a bomb" into a TypeError.
-    #
-    # The call is made through a mapping of arguments on purpose. Spelling it
-    # out positionally is a call with a missing required keyword, which is
-    # exactly what a type checker reports statically -- so the runtime check
-    # this test exists for (that the argument is enforced, not merely
-    # annotated) can only be reached by not spelling the signature out.
+    # The uncapped branch existed only as a default; making the cap mandatory turns "forgot to bound a bomb"
+    # into a TypeError. The call is made through a mapping of arguments on purpose.
     uncapped: dict[str, Any] = {"body": gzip.compress(b"hello"), "content_encoding": "gzip"}
     with pytest.raises(TypeError):
         decompress_body(**uncapped)
@@ -64,11 +58,8 @@ def test_concatenated_gzip_members_are_decoded():
 
 
 def test_decode_body_no_longer_decompresses():
-    # Decompression lives at the chokepoint, not inside the text decoder;
-    # the headers parameter existed only to double-decompress uncapped.
-    # As above: the extra ``headers`` positional is the defect under test, so
-    # the call is made through an argument mapping rather than restating a
-    # signature the type checker can already reject.
+    # Decompression lives at the chokepoint, not inside the text decoder; the headers parameter existed only
+    # to double-decompress uncapped.
     with_headers: dict[str, Any] = {
         "body": gzip.compress(b"hello world"),
         "content_type": "text/html",
@@ -110,22 +101,14 @@ def test_decompression_gzip():
 def test_http_charset_decode_error():
     from app.transport.body_decode import decode_body
 
-    # Charset rides on the content-type only; a stray value can never
-    # reach the decoder as a headers argument (the parameter is gone).
+    # Charset rides on the content-type only; a stray value can never reach the decoder as a headers argument
+    # (the parameter is gone).
     result = decode_body(b"hello", "text/plain; charset=invalid_charset")
     assert isinstance(result, str)
 
 
-# --------------------------------------------------------------------------
-# Stacked Content-Encoding
-#
-# A header may name several codings, applied left to right, so decoding runs
-# right to left. The previous selection was a substring test over the whole
-# header value that picked ONE branch and returned: ``gzip, br`` had its gzip
-# layer removed and left the brotli layer in place as if it were the body, and
-# ``br, gzip`` was gunzipped on the outside. Both report a successful fetch of
-# bytes that were never the resource.
-# --------------------------------------------------------------------------
+# -------------------------------------------------------------------------- Stacked Content-Encoding A header
+# may name several codings, applied left to right, so decoding runs right to left.
 
 
 def _stack(*codings: str) -> bytes:
@@ -191,8 +174,8 @@ def test_decode_declared_latin1():
 
 
 def test_decode_invalid_bytes_does_not_raise():
-    # Invalid UTF-8 bytes with a utf-8 declaration must still return a string
-    # (via charset-normalizer or the lossy fallback), never raise.
+    # Invalid UTF-8 bytes with a utf-8 declaration must still return a string (via charset-normalizer or the
+    # lossy fallback), never raise.
     body = b"\xff\xfe\xc0not valid utf8"
     out = decode_body(body, "text/html; charset=utf-8")
     assert isinstance(out, str)
@@ -308,16 +291,12 @@ def test_brotli_bomb_is_bounded():
 
 
 def test_brotli_feeds_incrementally(monkeypatch):
-    # The google-brotli streaming API must be fed in chunks
-    # so the full output is never materialized before the cap is checked.
     # A single process() call with the whole input means unbounded RAM.
 
     calls: list[int] = []
 
-    # Subclassing ``brotli.Decompressor`` directly, not a variable bound to it:
-    # the base class is resolved when this statement runs, and the monkeypatch
-    # below replaces the module attribute afterwards, so the spy still wraps the
-    # real implementation.
+    # Subclassing ``brotli.Decompressor`` directly, not a variable bound to it: the base class is resolved
+    # when this statement runs, and the monkeypatch below replaces the module attribute afterwards, so the spy
     class SpyDecompressor(brotli.Decompressor):
         def process(self, data):
             calls.append(len(data))
@@ -326,8 +305,8 @@ def test_brotli_feeds_incrementally(monkeypatch):
     monkeypatch.setattr(brotli, "Decompressor", SpyDecompressor)
     import os
 
-    # Incompressible input: the wire form stays large so any reasonable
-    # chunking splits it across several process() calls.
+    # Incompressible input: the wire form stays large so any reasonable chunking splits it across several
+    # process() calls.
     payload = os.urandom(200_000)
     bomb = brotli.compress(payload)
     assert len(bomb) > 65_536

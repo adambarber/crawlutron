@@ -20,10 +20,7 @@ from app.models.credential import Credential
 from app.transport.request_profile import _apply_credentials
 from tests._policy_factories import canonical
 
-#: The settings a payload-policy test runs against: the defaults with nothing
-#: overridden. A module constant rather than a factory because it is immutable
-#: and identical at every call site -- an environment default leaking in here
-#: would be a second variable in a test about credential keying.
+#: The settings a payload-policy test runs against: the defaults with nothing overridden.
 MODEL_DEFAULTS_TIER = PolicyTier.model_defaults()
 
 
@@ -41,17 +38,14 @@ class TestWireModel:
         assert policy.credentials["https://private.example"].token == "t"
 
     def test_policy_rejects_non_origin_keys(self):
-        # A path/query key can never match a per-hop origin lookup: reject,
-        # never silently normalize a caller's intent into a different scope.
+        # A path/query key can never match a per-hop origin lookup: reject, never silently normalize a
+        # caller's intent into a different scope.
         with pytest.raises(ValueError):
             CrawlPolicy(credentials={"https://private.example/secret": {"kind": "bearer", "token": "t"}})
 
 
 class TestApplyCredentials:
     def _credentials(self):
-        # Credential models, not raw mappings: production hands
-        # apply_credentials the validated model, and a test that passed
-        # mappings was exercising a shape the header path no longer has.
         return {
             "https://private.example": Credential(kind="bearer", token="tok"),
             "http://legacy.example:8080": Credential(kind="basic", username="u", password="p"),

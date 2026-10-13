@@ -78,8 +78,8 @@ def test_concurrent_read_and_eviction_does_not_raise(clean_cookie_store):
     def _racy_read() -> None:
         try:
             old_shape.get(victim)
-            # The seam: pre-fix, this is the gap the GIL may or may not fill.
-            # Scheduling the eviction here makes the race certain.
+            # The seam: pre-fix, this is the gap the GIL may or may not fill. Scheduling the eviction here
+            # makes the race certain.
             reader_in_window.set()
             eviction_landed.wait(timeout=5)
             old_shape.move_to_end(victim)
@@ -97,9 +97,7 @@ def test_concurrent_read_and_eviction_does_not_raise(clean_cookie_store):
     for thread in race_threads:
         thread.start()
     for thread in race_threads:
-        # ``join`` is called for its effect and returns nothing; asserting on
-        # its return was asserting on ``None`` and said nothing about whether
-        # the thread finished. The liveness check below is the real one.
+        # The liveness check below is the real one.
         thread.join(timeout=10)
     assert not any(thread.is_alive() for thread in race_threads), "the scheduled race wedged"
 
@@ -108,15 +106,8 @@ def test_concurrent_read_and_eviction_does_not_raise(clean_cookie_store):
         f"the unsynchronized read raised {old_error[0]!r}, not the expected KeyError"
     )
 
-    # --- 2: the guarded store serializes the read, deterministically --------
-    # The discriminator is the store's own lock, not GIL timing: the read path
-    # must take that lock, and it must be able to get it once the holder
-    # releases. Both facts are observable without a stopwatch -- one from a
-    # recording lock that counts acquisitions, one from an event handshake
-    # between the probe and the reader. The previous version asserted "the
-    # reader had not finished after 200ms", which is a bet about thread
-    # scheduling that a store with NO lock would often satisfy by accident, and
-    # that a slow box could break for no reason at all.
+    # --- 2: the guarded store serializes the read, deterministically -------- The discriminator is the
+    # store's own lock, not GIL timing: the read path must take that lock, and it must be able to get it once
     store = clean_cookie_store
 
     class _RecordingLock(DelegatingLock):
@@ -152,12 +143,8 @@ def test_concurrent_read_and_eviction_does_not_raise(clean_cookie_store):
     def _hold_the_lock() -> None:
         with recording:
             lock_taken.set()
-            # Held until the main thread has seen the reader start, so the read
-            # is genuinely concurrent with a lock holder. This used to be
-            # `read_done.wait(timeout=5)`, which is a deadlock the test then
-            # waited out: the reader cannot finish until the probe lets go, and
-            # the probe was waiting for the reader. Five seconds per run, and
-            # nothing was being asserted for any of it.
+            # Held until the main thread has seen the reader start, so the read is genuinely concurrent with a
+            # lock holder.
             probe_release.wait(timeout=5)
 
     def _guarded_read() -> None:
@@ -177,9 +164,6 @@ def test_concurrent_read_and_eviction_does_not_raise(clean_cookie_store):
     patch.undo()
 
     assert not probe.is_alive() and not reader.is_alive(), "the guarded read wedged"
-    # ``Thread.ident`` is None only before ``start``, and this reader was
-    # started above; a real join of the started thread is what makes that a
-    # checked fact rather than an assumption.
     assert reader.ident is not None
     assert recording.acquisitions.get(reader.ident, 0) > 0, (
         "the read path never took the store lock: reads are unsynchronized and the eviction race is wide open"

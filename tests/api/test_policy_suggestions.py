@@ -56,8 +56,8 @@ async def test_a_repeatedly_blocked_host_is_suggested_with_its_evidence(client, 
     assert suggestion["rule"] == "denied_hosts"
     assert suggestion["blocked_attempts"] == 2
     assert suggestion["observed_attempts"] == 2
-    # The evidence a reviewer is being asked to trust is the crawler's own:
-    # the classification that fired and the signature that matched it.
+    # The evidence a reviewer is being asked to trust is the crawler's own: the classification that fired and
+    # the signature that matched it.
     assert "access_denied" in suggestion["classifications"]
     assert suggestion["signatures"]
     assert suggestion["evidence"][0]["context"]

@@ -37,8 +37,8 @@ async def test_registration_admits_the_url_and_schedules_the_first_check(watch_s
     assert body["status"] == "active"
     assert body["last_outcome"] is None
     assert body["validators"] == {"etag": None, "last_modified": None}
-    # One registration stamps both, so the first check is exactly one interval
-    # out -- not one interval plus however long the handler took to answer.
+    # One registration stamps both, so the first check is exactly one interval out -- not one interval plus
+    # however long the handler took to answer.
     assert body["next_check_at"] == pytest.approx(body["created_at"] + INTERVAL)
 
 

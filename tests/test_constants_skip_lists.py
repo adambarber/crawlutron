@@ -24,8 +24,7 @@ class TestAnalyticsSkipListBoundaries:
             assert is_analytics_host(canonical(url)), url
 
     def test_government_content_host_is_never_skipped(self):
-        # Cdc.gov was in the skip list, silently dropping an entire
-        # government domain from every crawl.
+        # Cdc.gov was in the skip list, silently dropping an entire government domain from every crawl.
         assert "cdc.gov" not in ANALYTICS_HOST_SUFFIXES
         assert not is_analytics_host(canonical("https://www.cdc.gov/flu/weekly/index.htm"))
         assert not is_analytics_host(canonical("https://cdc.gov/data.csv"))

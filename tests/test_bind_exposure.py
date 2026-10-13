@@ -22,14 +22,10 @@ import pytest
 
 from app.main import _warn_if_bound_off_loopback
 
-# Addresses a request can never leave the machine over. The whole 127/8 block
-# qualifies, not just 127.0.0.1: a deployment that binds 127.0.0.53 is still
-# loopback-only and should not be told it is exposed.
+# Addresses a request can never leave the machine over. The whole 127/8 block qualifies, not just 127.0.0.1: a
+# deployment that binds 127.0.0.53 is still loopback-only and should not be told it is exposed.
 LOOPBACK = ["127.0.0.1", "127.0.0.53", "::1", "localhost"]
 
-# Everything a network peer can reach, including the ranges that are not valid
-# public egress targets -- which is the whole point of asking the bind question
-# separately instead of reusing the egress verdict.
 ROUTABLE = ["0.0.0.0", "::", "10.0.0.5", "192.168.1.10", "example.internal"]
 
 
@@ -48,8 +44,8 @@ def test_routable_bind_warns_that_nothing_authenticates_the_caller(caplog, host)
     assert caplog.records, f"{host} is routable and startup said nothing"
     message = caplog.text
     assert "no caller authentication" in message, f"the warning does not say what is exposed: {message}"
-    # The mitigation is the part an operator can act on. A warning naming the
-    # risk without naming the fix is a worry, not a guard.
+    # The mitigation is the part an operator can act on. A warning naming the risk without naming the fix is a
+    # worry, not a guard.
     assert host in message, f"the warning does not say which address: {message}"
     assert "127.0.0.1" in message, f"the warning does not say how to keep it local: {message}"
 

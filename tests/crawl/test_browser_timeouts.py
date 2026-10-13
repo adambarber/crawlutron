@@ -39,8 +39,8 @@ class TestWaitActionClamp:
             ),
             pytest.param(
                 0,
-                # Playwright treats timeout=0 as "no timeout", so the floor is
-                # what keeps the wait bounded rather than the caller's value.
+                # Playwright treats timeout=0 as "no timeout", so the floor is what keeps the wait bounded
+                # rather than the caller's value.
                 lambda seen: len(seen) == 1 and seen[0] >= 1,
                 id="zero-is-floored-not-disabling",
             ),
@@ -60,25 +60,15 @@ class TestWaitActionClamp:
 class _HangingPage(BrowserFakePage):
     async def goto(self, url, wait_until="load", **kwargs):
         self.goto_calls.append((url, kwargs))
-        # A navigation that never resolves. Sleeping five real seconds was how
-        # this used to be "slow"; an Event nothing ever sets is slower than any
-        # budget the render could be given, so the ONLY thing that can end the
-        # wait is the navigation deadline the options carry.
+        # A navigation that never resolves.
         await asyncio.Event().wait()
 
 
 class TestNavigationTimeout:
     async def test_navigation_honors_timeout_seconds(self, monkeypatch):
         page, renderer = pinned_page_renderer(monkeypatch, _HangingPage())
-        # The deadline is enforced with asyncio.wait_for, which is loop-time
-        # based, so the suite's zero-second sleep patch does not weaken it. The
-        # caller's own guard is what makes a deadline that stopped firing a
-        # FAILURE rather than a hang: a goto that never returns would
-        # otherwise wedge the run instead of reporting.
-        # Seconds as an int, which is what the policy model carries and what
-        # the renderer floors at one. A fractional value was reaching past the
-        # contract only to be raised back to 1.0 by ``max(1.0,...)``, so the
-        # deadline this test asserts on was never the one it asked for.
+        # The deadline is enforced with asyncio.wait_for, which is loop-time based, so the suite's zero-second
+        # sleep patch does not weaken it.
         options = RenderOptions(timeout_seconds=1, max_retries=0)
         result = await asyncio.wait_for(
             renderer.render(

@@ -92,10 +92,8 @@ class TestValidationHelpers:
         ]
 
     def test_payload_urls_dedupes_on_admitted_identity(self) -> None:
-        # ``NormalizedUrl`` admission already treats fragment / trailing-slash /
-        # tracking-param / param-order variants as the SAME page. The batch chokepoint
-        # must dedup on that identity, not the raw string -- otherwise a request
-        # carrying both ``.../x`` and ``.../x/?utm_source=tw`` crawls one page twice.
+        # ``NormalizedUrl`` admission already treats fragment / trailing-slash / tracking-param / param-order
+        # variants as the SAME page.
         urls = [
             "https://a.gov/x",
             "https://a.gov/x/#section",  # fragment dropped -> same page
@@ -194,32 +192,23 @@ class TestFetchRetries:
         state = {"n": 0}
         answer = make_fetch(status=200, body=b"ok", final_url="http://x/")
 
-        # ``max_content_length`` defaults, because ``HttpFetcher`` says a caller
-        # may omit it: a double that required the fourth argument was not
-        # substitutable for the fetcher this function is handed.
         async def _flaky(url, headers, timeout_seconds, max_content_length=10_485_760):
             state["n"] += 1
             if state["n"] < 3:
                 raise ConnectionError("transient")
             return answer
 
-        # A real ``HttpFetchResult``, not a bare string: this is handed to
-        # ``fetch_with_retries`` as an ``HttpFetcher``, and a fetcher that
-        # answered with something the contract does not allow proved the retry
-        # loop passes its answer through -- which it does -- by asserting on a
-        # shape production can never produce.
         response, meta = await fetch_with_retries(_flaky, "http://x/", {}, 5, 2)
         assert response is answer
         assert meta["attempts"] == 3
-        # Gaps happen only between attempts (2 retries -> 2 waits), increasing
-        # and within the ceiling.
+        # Gaps happen only between attempts (2 retries -> 2 waits), increasing and within the ceiling.
         assert sleeps == pytest.approx([0.25, 0.5])
 
 
 class TestPureParsing:
     def test_range_action_expands_across_letters(self) -> None:
-        # "1a - 1c" covers three items, and every one of them is stamped with the
-        # action. The observable claim is per-item: each record carries the suffix.
+        # "1a - 1c" covers three items, and every one of them is stamped with the action. The observable claim
+        # is per-item: each record carries the suffix.
         out = format_extracted_document_text(
             "1a - 1c Approve\n1a.\nAlpha\n1b.\nBeta\n1c.\nGamma",
             source_url="http://x/",
@@ -229,9 +218,8 @@ class TestPureParsing:
         )
 
     def test_range_with_mismatched_item_numbers_is_honoured_literally(self) -> None:
-        # "1a - 5a" is a typo in the source document rather than a range: the two
-        # halves are stamped and nothing in between is invented. 2a sits between them
-        # on purpose, so the test fails if a literal pair were expanded into 1a..5a.
+        # "1a - 5a" is a typo in the source document rather than a range: the two halves are stamped and
+        # nothing in between is invented.
         out = format_extracted_document_text(
             "1a - 5a Approve\n1a.\nAlpha\n2a.\nBravo\n5a.\nDelta",
             source_url="http://x/",
@@ -254,9 +242,8 @@ class TestPureParsing:
         assert "Approve" in out
 
     def test_should_join_document_paragraph_heading(self) -> None:
-        # Kept as the negative half of the heading rule from the pure-parsing side.
-        # The heading and the prose stay two records, so the heading did not absorb
-        # what followed it.
+        # Kept as the negative half of the heading rule from the pure-parsing side. The heading and the prose
+        # stay two records, so the heading did not absorb what followed it.
         out = format_extracted_document_text("Section A\nsome prose", source_url="http://x/")
         assert out == "Section A\n\nsome prose"
 
@@ -287,13 +274,8 @@ class TestPureParsing:
 
 
 # The three discovery probes turned on together, as one named policy fragment.
-# Every site that asks for full discovery used to re-spell the same three
-# booleans, and the interesting half of those tests is the diagnostics, not
-# which probes were enabled.
 DISCOVERY_ALL_ON = {"robots": True, "sitemaps": True, "feeds": True}
 # The page every discovery test below is fetched from, advertising one feed.
-# The ``type`` is what makes the alternate link a FEED rather than a generic
-# one, so a test that wants discovery to report a feed names that here once.
 FEED_ADVERTISING_PAGE = (
     200,
     b'<html><body><link rel="alternate" type="application/rss+xml"'
@@ -301,8 +283,8 @@ FEED_ADVERTISING_PAGE = (
     "text/html",
 )
 
-# The URL the default single-page drive fetches, and therefore the one a caller
-# has to differ from for ``final_url`` to mean anything.
+# The URL the default single-page drive fetches, and therefore the one a caller has to differ from for
+# ``final_url`` to mean anything.
 _PAGE_URL = "http://example.com/"
 
 
@@ -338,11 +320,7 @@ async def _run_http_result(
             )
         )
 
-    # A policy partial merges as a raw dict and is read once, the way the wire
-    # merges it. Mutating the model in place is not an option now that
-    # ``make_base_policy`` returns a validated CrawlPolicy: there is no
-    # re-validation on a mutated field, so an override could leave the policy
-    # holding a value its own bounds would have rejected.
+    # A policy partial merges as a raw dict and is read once, the way the wire merges it.
     base = make_base_policy()
     pol = read_policy({**base.model_dump(), **policy}) if policy else base
     return await http_strategy_result(
@@ -391,10 +369,8 @@ class TestHttpStrategyResult:
             assert (await self._run(status=status)).classification == classification, status
 
     async def test_network_error_handler(self) -> None:
-        # A raw ConnectionError classifies specifically as connection_error, not
-        # the generic network_error tail: the old broad-except sink hardcoded
-        # network_error and masked the real code; the shared primitive now
-        # surfaces it.
+        # A raw ConnectionError classifies specifically as connection_error, not the generic network_error
+        # tail: the old broad-except sink hardcoded network_error and masked the real code; the shared
         assert_result_failed(await self._run(fetcher=raise_fetcher), "connection_error")
 
     async def test_binary_body_short_circuits(self) -> None:
@@ -431,8 +407,8 @@ class TestHttpStrategyResult:
 
         _result, diagnostics = await _diagnostics_for_failed_probes(feed_fetcher)
         assert diagnostics["robots"].get("error") is not None
-        # The feed the page advertises is still discovered: a failed robots or
-        # sitemap probe costs a diagnostic, not the discovery pass.
+        # The feed the page advertises is still discovered: a failed robots or sitemap probe costs a
+        # diagnostic, not the discovery pass.
         assert diagnostics["discovery"]["feeds"] is not None
 
 
@@ -452,9 +428,7 @@ class TestExecuteCrawlChain:
         ).classification == "browser_crash"
 
     async def test_unsupported_strategy(self) -> None:
-        # A strategy outside CrawlStrategyName is rejected at construction of the
-        # attempt: the strategy axis is a Literal, so an invalid value cannot
-        # reach a result and callers see a ValueError naming the field.
+        # A strategy outside CrawlStrategyName is rejected at construction of the attempt: the strategy axis
         with pytest.raises(ValueError, match=r"\.strategy="):
             await run_chain(
                 fetcher=ok_fetcher,
@@ -466,8 +440,8 @@ class TestCrawlRequest:
     async def test_batch_size_exceeded(self) -> None:
         settings = CrawlerSettings.from_mapping()
         payload = {
-            # Distinct URLs: the cap counts unique URLs (exact duplicates
-            # collapse in _payload_urls before this check).
+            # Distinct URLs: the cap counts unique URLs (exact duplicates collapse in _payload_urls before
+            # this check).
             "urls": [f"http://example.com/{i}" for i in range(settings.max_batch_size + 1)],
             "policy": {"strategies": [HTTP_DECLARED_CRAWLER]},
         }
@@ -583,8 +557,8 @@ class TestFetchHelperUtilities:
         assert any("https://ok/x" in getattr(link, "url", str(link)) for link in links)
 
     def test_public_participation_breaks_item_title_collection(self) -> None:
-        # A boilerplate section marker ends the title run rather than joining it, so
-        # the marker is dropped and the text after it is not mistaken for more title.
+        # A boilerplate section marker ends the title run rather than joining it, so the marker is dropped and
+        # the text after it is not mistaken for more title.
         out = format_extracted_document_text(
             "1a.\nBuild\nPublic Participation\nNext item", source_url="http://x/"
         )
@@ -700,8 +674,8 @@ class TestFetchHelpersEdges:
             canonical("http://e.com/"),
         )
         assert "User-Agent" in headers
-        # Firefox identity (matching the firefox135 impersonation) sends no
-        # Sec-CH-UA client hints -- those are Chromium-only.
+        # Firefox identity (matching the firefox135 impersonation) sends no Sec-CH-UA client hints -- those
+        # are Chromium-only.
         assert "sec-ch-ua" not in {k.lower() for k in headers}
         assert "Firefox" in headers["User-Agent"]
 
@@ -771,9 +745,7 @@ class TestAcceptEncodingAdvertisesOnlyWhatWeCanDecode:
         assert "br" in headers["Accept-Encoding"]
 
     def test_every_advertised_encoding_is_always_decodable(self):
-        # A real round-trip through the real decompressor for every token the
-        # header names. This is the invariant the old two tests gestured at
-        # without checking: the claim on the wire and the decoder must agree.
+        # A real round-trip through the real decompressor for every token the header names
         import gzip
         import zlib
 
@@ -788,8 +760,8 @@ class TestAcceptEncodingAdvertisesOnlyWhatWeCanDecode:
             assert decompress_body(compressed, encoding, max_output_bytes=1024) == payload
 
     def test_the_header_advertises_only_decodable_encodings(self):
-        # The negative direction: the list is not merely "includes br", it names
-        # nothing outside the decoder set, so a future token cannot slip in.
+        # The negative direction: the list is not merely "includes br", it names nothing outside the decoder
+        # set, so a future token cannot slip in.
         from app.transport.decompression import _DECODABLE_ENCODINGS
 
         headers = headers_for_strategy(

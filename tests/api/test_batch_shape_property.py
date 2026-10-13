@@ -35,10 +35,8 @@ SEEDS = range(12)
 BATCH_MIN, BATCH_MAX = 1, 12
 HEALTHY_PROBABILITY = 0.5
 
-# Real classifications the engine legitimately emits at these status tiers,
-# deliberately excluding site_error so "healthy items keep their real
-# classification" also pins "healthy items are never reclassified to
-# site_error" (the silent-reclassification half of the original bug).
+# Real classifications the engine legitimately emits at these status tiers, deliberately excluding site_error
+# so "healthy items keep their real classification" also pins "healthy items are never
 HEALTHY_CLASSIFICATIONS = (
     "rendered",
     "not_modified",
@@ -73,9 +71,8 @@ def _healthy(index: int, classification: str) -> EngineCrawlResult:
         classification,
         final_url=url,
         selected_strategy=HTTP_DECLARED_CRAWLER,
-        # A declared CrawlError member, not a free-form string: the record
-        # refuses an error outside its own Literal, which is a check the dict
-        # form never got and this property never asked for.
+        # A declared CrawlError member, not a free-form string: the record refuses an error outside its own
+        # Literal, which is a check the dict form never got and this property never asked for.
         error=None if success else classification,
         http_status=200,
         text=f"body {index}",
@@ -255,14 +252,11 @@ class TestPoisonDegradesLoudly:
 
     def test_poison_error_field_carries_a_stable_marker(self):
         """Callers can tell 'we could not shape this' from a real site failure."""
-        # A dict missing every required key is the per-item guard's subject: the
-        # declared item type is a result dict, and a dict the shaper cannot read
-        # is what "malformed" means here. A ``None`` item degrades through the
-        # same ``except`` and to the same marker, but it is not an item the
-        # signature admits, so the probe stays inside the contract it is pinning.
+        # A dict missing every required key is the per-item guard's subject: the declared item type is a
+        # result dict, and a dict the shaper cannot read is what "malformed" means here.
         shaped = build_unified_crawl_response([{}]).results
         assert shaped[0].error == "result_shaping_failed"
-        # The fallback is best-effort by attribute, so a real result still
-        # reports which URL failed rather than degrading to an empty one.
+        # The fallback is best-effort by attribute, so a real result still reports which URL failed rather
+        # than degrading to an empty one.
         shaped_url = build_unified_crawl_response([engine_result("https://x.example/a", "rendered")]).results
         assert shaped_url[0].original_url == "https://x.example/a"

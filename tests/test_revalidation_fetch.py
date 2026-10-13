@@ -69,9 +69,7 @@ class TestRevalidationFetchesOnce:
         assert first.status == "success"
         assert fetcher.calls == 1, fetcher.calls
 
-        # Second crawl: cache hit with a validator. The origin returns 200
-        # (content "changed"), so the revalidation response is used directly.
-        # The bug re-fetched unconditionally here, giving 3 fetches total.
+        # Second crawl: cache hit with a validator.
         second = await run_http_strategy(
             url=url, policy=self._policy(), http_fetcher=fetcher, cache=cache, content_cache=content_cache
         )

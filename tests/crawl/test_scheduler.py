@@ -41,8 +41,8 @@ class TestScheduler:
         base = scheduler._delay_seconds
         delays = [jittered_delay(base) for _ in range(50)]
         assert all(0.7 <= d <= 1.3 for d in delays), delays
-        # A zero base must not sleep at all, whatever the jitter draws. This
-        # branch is the reason the band is not applied unconditionally.
+        # A zero base must not sleep at all, whatever the jitter draws. This branch is the reason the band is
+        # not applied unconditionally.
         assert jittered_delay(0.0) == 0.0
 
     def test_set_domain_cooldown_is_in_future(self):
@@ -80,9 +80,8 @@ class TestScheduler:
             )
             return make_result(ran_job.url.raw, ran_job.domain)
 
-        # The delivery channel decides the return: with no sink, ``run`` hands
-        # back the index-keyed mapping (the docstring's "otherwise" branch). The
-        # guard is the contract, stated where the call that relies on it is made.
+        # The delivery channel decides the return: with no sink, ``run`` hands back the index-keyed mapping
+        # (the docstring's "otherwise" branch).
         results = await scheduler.run([job], worker, failed_result=engine_envelope)
         assert results is not None
         assert results[0].status == "success"
@@ -95,8 +94,8 @@ class TestScheduler:
         jobs = [make_job(i, f"http://example.com/{i}") for i in range(3)]
         results = await scheduler.run(jobs, ok_worker, failed_result=engine_envelope)
         assert results is not None
-        # Run reports a job.index -> result mapping so callers align each result
-        # with its own job regardless of completion order.
+        # Run reports a job.index -> result mapping so callers align each result with its own job regardless
+        # of completion order.
         assert sorted(results) == [0, 1, 2]
         assert [results[i].normalized_url for i in sorted(results)] == [
             canonical(f"http://example.com/{i}") for i in range(3)
@@ -229,8 +228,8 @@ class TestObservedLatencyCrossesPipelines:
     def test_a_result_with_no_observation_leaves_the_delay_alone(self, build_result):
         s = _adaptive_scheduler()
         s._record_result_health("example.com", build_result(0))
-        # Same baseline the sibling test asserts for an unlearned domain: the
-        # configured fixed delay, unchanged because nothing was observed.
+        # Same baseline the sibling test asserts for an unlearned domain: the configured fixed delay,
+        # unchanged because nothing was observed.
         assert s.current_delay("example.com") == 1.0
 
 
@@ -265,22 +264,14 @@ class TestCircuitBreakerSpillsOnResult:
             normalized_url=canonical("http://example.com/"),
             domain="example.com",
         )
-        # The bug raises TypeError inside gather with return_exceptions=True,
-        # so run() returns normally but delivers nothing.
-        # The delivery channel decides the return: with no sink, ``run`` hands
-        # back the index-keyed mapping (the docstring's "otherwise" branch). The
-        # guard is the contract, stated where the call that relies on it is made.
+        # The delivery channel decides the return: with no sink, ``run`` hands back the index-keyed mapping
+        # (the docstring's "otherwise" branch).
         returned = await scheduler.run([job], worker, on_result=on_result, failed_result=engine_envelope)
 
         assert returned is None, "on_result mode must return None"
         assert len(spilled) == 1, f"expected 1 spilled result, got {len(spilled)}"
         index, result = spilled[0]
         assert index == 0
-        # The classification and the error agree: a breaker-open skip is a
-        # capacity decision, not a transport failure, so the taxonomy field
-        # callers key on must say so (it used to report "network_error" while
-        # error/diagnostics said "circuit_breaker_open", making the two
-        # indistinguishable from a real network failure).
         assert result.status == "failed", result
         assert result.classification == "circuit_breaker_open", result
         assert result.error == "circuit_breaker_open", result
@@ -318,9 +309,8 @@ class TestSchedulerCircuitBreaker:
 class TestSchedulerLatencyEma:
     def test_scheduler_record_latency_invalid(self):
         scheduler = make_scheduler()
-        # A negative latency is a broken measurement, not a fast one: recording
-        # it would pull the EMA under every delay actually observed and let the
-        # domain through faster than anything it has been timed at.
+        # A negative latency is a broken measurement, not a fast one: recording it would pull the EMA under
+        # every delay actually observed and let the domain through faster than anything it has been timed at.
         scheduler.record_latency("example.com", -1.0)
         assert "example.com" not in scheduler._domain_latency_ema
 
@@ -460,8 +450,8 @@ class TestSchedulerPolicies:
         sched = make_scheduler(global_limit=10, per_domain_limit=10)
 
         async def worker(job: CrawlJob) -> EngineCrawlResult:
-            # Make index 0 wait until job 1 has been delivered, so streaming
-            # order is observable without a real sleep.
+            # Make index 0 wait until job 1 has been delivered, so streaming order is observable without a
+            # real sleep.
             if job.index == 0:
                 await release_slow.wait()
             return make_result(job.url.raw, job.domain)
@@ -477,8 +467,8 @@ class TestSchedulerPolicies:
         assert ret is None
         # Every job was delivered exactly once.
         assert sorted(on_result_order) == list(range(6))
-        # A fast job is delivered before the (gated) slow job -> results stream
-        # as they complete rather than being held until the whole batch finishes.
+        # A fast job is delivered before the (gated) slow job -> results stream as they complete rather than
+        # being held until the whole batch finishes.
         assert on_result_order.index(1) < on_result_order.index(0)
 
     async def test_run_returns_results_keyed_by_index_without_on_result(self):
@@ -493,8 +483,8 @@ class TestSchedulerPolicies:
         assert ret is not None
         # Results are keyed by job index so callers align them with their own job.
         assert sorted(ret) == [0, 1, 2, 3]
-        # Canonical, not the seed text: the job's URL is an admitted value, so the
-        # trailing slash the seed carried is gone by the time it is a job member.
+        # Canonical, not the seed text: the job's URL is an admitted value, so the trailing slash the seed
+        # carried is gone by the time it is a job member.
         assert [ret[i].normalized_url for i in sorted(ret)] == [
             canonical(f"http://h{i}.example.com") for i in range(4)
         ]
@@ -513,9 +503,8 @@ class TestCooldownPurgeCadence:
         scheduler = make_scheduler()
         for i in range(250):
             scheduler.set_domain_cooldown(f"d{i}.test", 5.0)
-        # 250 sets on a 100-set interval: the cadence is amortized, not 1:1.
-        # The interval is production's, so the bound is derived rather than
-        # repeated: 250 sets over 100-set intervals is three purges.
+        # 250 sets on a 100-set interval: the cadence is amortized, not 1:1. The interval is production's, so
+        # the bound is derived rather than repeated: 250 sets over 100-set intervals is three purges.
         assert calls["n"] == 250 // _COOLDOWN_PURGE_INTERVAL
 
     def test_expired_cooldowns_are_still_reclaimed(self, monkeypatch):
@@ -568,11 +557,8 @@ class TestSchedulerResilience:
 
         results = await scheduler.run(jobs, failing_worker, failed_result=engine_envelope)
         assert results is not None
-        # The failing job is not dropped: the chokepoint builds it a classified
-        # terminal envelope (reading the URL pair off whichever shape the job
-        # carries -- CrawlJob has only ``url``), so the caller never observes a
-        # missing slot and improvises a result off the raw error. The other
-        # jobs are unaffected.
+        # The failing job is not dropped: the chokepoint builds it a classified terminal envelope (reading the
+        # URL
         assert len(results) == 3, results
         assert results[1].status == "failed"
         assert results[1].classification == "network_error"
@@ -614,11 +600,8 @@ async def test_domain_delay_does_not_block_other_domains(monkeypatch):
     async def _sleep(delay, *args, **kwargs):
         del args, kwargs
         if delay >= 0.2:
-            # Slow.example.com's 0.4s per-domain delay (jittered). It may not
-            # finish until the fast domain has been served. The starvation is
-            # recorded rather than raised because ``run`` gathers with
-            # return_exceptions=True, which would swallow an exception raised
-            # from inside a worker's own await chain.
+            # Slow.example.com's 0.4s per-domain delay (jittered). It may not finish until the fast domain has
+            # been served.
             try:
                 await asyncio.wait_for(fast_started.wait(), 2.0)
             except TimeoutError:
@@ -744,19 +727,16 @@ class TestSchedulerFailureAccountingIsAboutStatuses:
         from app.orchestration.engine_result import _terminal_engine_result
         from app.vocabulary.taxonomy import status_for_classification
 
-        # Status is the outer function's own keyword, not a field of the shared
-        # value: it is what the per-status constructors pin, and a
-        # CONTEXT_VARYING_STATUS classification needs one the table cannot
-        # derive. See _terminal_engine_result.
+        # Status is the outer function's own keyword, not a field of the shared value: it is what the
+        # per-status constructors pin, and a CONTEXT_VARYING_STATUS classification needs one the table cannot
         return _terminal_engine_result(
             TerminalResult(
                 original_url=job.url.raw,
                 normalized_url=job.url.raw,
                 strategy=None,
                 classification=classification,
-                # ``error`` is a taxonomy code, not an optional: production's own
-                # envelope passes the classification through it, and a result
-                # carrying no error code is a shape no caller produces.
+                # ``error`` is a taxonomy code, not an optional: production's own envelope passes the
+                # classification through it, and a result carrying no error code is a shape no caller
                 error=classification,
             ),
             status=status_for_classification(classification),
@@ -775,8 +755,8 @@ class TestSchedulerFailureAccountingIsAboutStatuses:
         results = await scheduler.run([job], failing_worker, failed_result=engine_envelope)
         assert results is not None
         result = results[job.index]
-        # Different axes: the status is the verdict, the classification the reason.
-        # Comparing one against the other is why the old tuple could not work.
+        # Different axes: the status is the verdict, the classification the reason. Comparing one against the
+        # other is why the old tuple could not work.
         assert result.status == "failed"
         assert result.classification == "dns_error"
         assert scheduler._domain_failures.get("example.com", 0) == 1

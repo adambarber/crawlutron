@@ -42,8 +42,8 @@ class TestPayloadPolicyCarriesAdvertisedLimits:
         assert policy.limits.max_rps == 0.0
 
     def test_max_rps_out_of_range_rejected(self):
-        # CrawlPolicyLimits bounds max_rps to [0, 100]; out-of-range requests
-        # must be rejected, not silently clamped into a different contract.
+        # CrawlPolicyLimits bounds max_rps to [0, 100]; out-of-range requests must be rejected, not silently
+        # clamped into a different contract.
         with pytest.raises(ValueError):
             _normalized_policy(limits={"max_rps": 500})
 
@@ -52,9 +52,8 @@ class TestPayloadPolicyCarriesAdvertisedLimits:
         assert policy.limits.max_content_length_bytes == 1024
 
     def test_max_content_length_above_ceiling_rejected(self):
-        # An explicit cap must not be a caller-controlled RAM/decompression
-        # override: over the hard ceiling it is rejected, like max_rps, never
-        # silently clamped into a different contract.
+        # An explicit cap must not be a caller-controlled RAM/decompression override: over the hard ceiling it
+        # is rejected, like max_rps, never silently clamped into a different contract.
         from app.vocabulary.limits import MAX_CONTENT_LENGTH_BYTES
 
         with pytest.raises(ValueError):
@@ -76,9 +75,8 @@ class TestPayloadPolicyCarriesAdvertisedLimits:
             CrawlPolicyLimits(max_content_length_bytes=MAX_CONTENT_LENGTH_BYTES + 1)
 
     def test_max_content_length_default_keeps_ram_scaling(self):
-        # Default (absent) must remain 0 = "not explicitly set", so the
-        # concurrency-scaled RAM budget in _effective_max_content_length
-        # keeps working. Only an explicit value overrides it.
+        # Default (absent) must remain 0 = "not explicitly set", so the concurrency-scaled RAM budget in
+        # _effective_max_content_length keeps working. Only an explicit value overrides it.
         policy = _normalized_policy()
         assert policy.limits.max_content_length_bytes == 0
 
@@ -118,8 +116,8 @@ class TestPydanticDefaultPreservesRamScaling:
 
 class TestMaxContentLengthBytesActuallyEnforced:
     async def test_crawl_enforces_explicit_content_cap(self, base_url, monkeypatch):
-        # The advertised limit must bite end-to-end: normalization keeps it
-        # and the fetcher fails the page with HTTP 413.
+        # The advertised limit must bite end-to-end: normalization keeps it and the fetcher fails the page
+        # with HTTP 413.
         from app.orchestration.engine import crawl_request
         from app.vocabulary.strategies import HTTP_DECLARED_CRAWLER
 

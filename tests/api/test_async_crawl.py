@@ -10,17 +10,8 @@ from tests._fetcher_factories import make_crawl_payload
 from tests._job_harnesses import loaded_job, single_shot_job
 from tests.helpers.server import WEBHOOK_RECEIVED
 
-# The client + origin + cleared webhook sink come from the shared fixture, so
-# this module does not re-declare the arrangement in a `setup` method.
-#
-# The alias-then-rebind is not ceremony. Every test below takes the fixture as a
-# parameter named `crawl_api`, so binding that name at module scope collides with
-# each of them and F811 rejects the import outright. Binding under a name nothing
-# shadows, then publishing it once, is what keeps the fixture resolvable here.
-# The alternative is to move the fixture into ``conftest.py``, which is worth
-# doing the moment a second module wants it -- and not before, because until then
-# it would put a fixture used by one file into the global namespace of all of
-# them.
+# The client + origin + cleared webhook sink come from the shared fixture, so this module does not re-declare
+# the arrangement in a `setup` method. The alias-then-rebind is not ceremony.
 crawl_api = _crawl_api
 
 
@@ -53,19 +44,14 @@ class TestAsyncCrawlApi:
         override_settings(denied_hosts="blocked.test")
         response = await crawl_api.client.post(
             "/v1/crawl",
-            # Not the helper server's root: the subject here is a host the
-            # policy denies, so the payload names it directly.
+            # Not the helper server's root: the subject here is a host the policy denies, so the payload names
+            # it directly.
             json=make_crawl_payload("https://blocked.test/secret", async_mode=True),
         )
 
         assert response.status_code == 422
         assert response.json()["code"] == "validation_error"
         assert response.json()["details"]["errors"][0]["msg"] == "host_denied"
-        # Scoped to the blocked host rather than to a count of every job in the
-        # store: job_store is a process-global, and a background job submitted
-        # by another test can register between two reads of it, which made this
-        # assertion fail only under some xdist distributions. The claim under
-        # test is "this blocked target created no job", so ask exactly that.
         assert not [
             job for job in job_store.list_jobs() if job["root_url"].startswith("https://blocked.test")
         ], "a policy-blocked target created a job"
@@ -159,9 +145,7 @@ class TestAsyncCrawlApi:
         """Job stats must count failed results, not hardcode zero."""
         from app.main import job_store
 
-        # One page fetches fine, one 404s (failed). A dead host would not
-        # work here: robots fetch errors fail closed to
-        # robots_disallowed/skipped instead of reaching the fetch.
+        # One page fetches fine, one 404s (failed).
         request_id, _ = await submit_async_crawl(
             crawl_api.client,
             crawl_api.batch_payload(["/", "/no-such-page-xyz"], async_mode=True),
@@ -221,9 +205,8 @@ class TestAsyncCrawlApi:
 
         counter = CountingSemaphore(1)
         monkeypatch.setattr(async_crawl_runner, "_build_async_crawl_semaphore", lambda: counter)
-        # The runner caches one semaphore per event loop and only rebuilds it
-        # when the loop changes. Clearing the cache is what makes the patch
-        # visible to the first crawl of this test rather than the second.
+        # The runner caches one semaphore per event loop and only rebuilds it when the loop changes. Clearing
+        # the cache is what makes the patch visible to the first crawl of this test rather than the second.
         monkeypatch.setattr(async_crawl_runner, "_async_crawl_semaphore", None, raising=False)
         monkeypatch.setattr(async_crawl_runner, "_async_crawl_semaphore_loop", None, raising=False)
 
@@ -246,11 +229,8 @@ class TestAsyncCrawlJobStoreIntegration:
         with single_shot_job() as (_store, job):
             assert job.job_id == "test-id"
             assert job.kind == JobKind.SINGLE_SHOT
-            # Roots are stored in canonical page-identity form:
-            # NormalizedUrl admission is the single source of truth for page
-            # identity, so the submitted trailing slash is normalized away.
-            # Storing the raw spelling is what let one page occupy two
-            # frontier/visited identities (cap underfill, duplicate crawl).
+            # Roots are stored in canonical page-identity form: NormalizedUrl admission is the single source
+            # of truth for page identity, so the submitted trailing slash is normalized away.
             assert job.root_url == "http://example.com"
             assert job.status == JobStatus.PENDING
             assert job.frontier == []
@@ -323,9 +303,7 @@ class TestAsyncCrawlShutdownOwnership:
 
         monkeypatch.setattr("app.api.async_crawl_runner.run_async_crawl", blocked_crawl)
 
-        # A 202 is a promise that the work outlives the request. Handed to a
-        # Starlette background task instead, the crawl is awaited inside the
-        # request cycle, so the call does not return until the crawl is done.
+        # A 202 is a promise that the work outlives the request
         body = await asyncio.wait_for(
             accepted_crawl(crawl_api.client, crawl_api.payload(async_mode=True)),
             timeout=5,

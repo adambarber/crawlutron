@@ -24,17 +24,15 @@ from tests._job_harnesses import post_render_with_pool
 from tests._policy_factories import crawl_policy
 from tests.helpers.server import WEBHOOK_RECEIVED
 
-#: Discovery turned fully on. Three tests assert on what robots, sitemaps and
-#: feeds contributed, and spelling the triple at each is how one of them kept
-#: asking for feeds the fixture never served.
+#: Discovery turned fully on. Three tests assert on what robots, sitemaps and feeds contributed, and spelling
+#: the triple at each is how one of them kept asking for feeds the fixture never served.
 DISCOVERY_ALL = {"robots": True, "sitemaps": True, "feeds": True}
 
-#: A scope the loopback fixture cannot match -- the point of the scope tests is
-#: that the discovered links are *outside* it.
+#: A scope the loopback fixture cannot match -- the point of the scope tests is that the discovered links are
+#: *outside* it.
 EXAMPLE_SCOPE = r"^https://example\.com"
 
-#: Room for 100 links and one level of depth, so the scope is the only thing
-#: deciding what comes back.
+#: Room for 100 links and one level of depth, so the scope is the only thing deciding what comes back.
 WIDE_LIMITS = {"max_discovered_links": 100, "max_depth": 1}
 
 
@@ -114,15 +112,7 @@ class TestCrawlApi(_AsgiEndpointTests):
         assert resp.status_code == 422
 
     async def test_v1_crawl_scope_regex_records_out_of_scope_links(self):
-        # The scope regex restricts frontier expansion only. The crawler still
-        # EXTRACTS every advertised link it sees on the page (collect-not-crawl),
-        # and the discovered_links list may contain links that fail the scope
-        # check. Callers downstream use the scope to decide whether to enqueue
-        # a discovered link; the service does NOT silently drop them.
-        #
-        # Here the fixture serves on 127.0.0.1 (loopback), so the in-page
-        # links cannot match ``^https://example\.com``; every discovered link
-        # is therefore out of scope and is still reported back to the caller.
+        # The scope regex restricts frontier expansion only.
         payload = make_crawl_payload(
             f"{self.base}/",
             policy=crawl_policy([HTTP_DECLARED_CRAWLER], scope_regex=EXAMPLE_SCOPE, limits=WIDE_LIMITS),
@@ -146,9 +136,8 @@ class TestCrawlApi(_AsgiEndpointTests):
         }
         body = await accepted_crawl(self.client, payload)
         assert "status_url" in body
-        # The accepted envelope is a promise that the work outlives the
-        # request, so the delivery is polled for rather than assumed to have
-        # already happened by the time the 202 came back.
+        # The accepted envelope is a promise that the work outlives the request, so the delivery is polled for
+        # rather than assumed to have already happened by the time the 202 came back.
         delivered = await poll_webhook_delivery(WEBHOOK_RECEIVED)
         assert delivered["submitted_count"] == 1
         assert "results" in delivered
@@ -220,9 +209,8 @@ class TestDiscoveryAndRenderApi:
         assert "max_active_requests" in body
 
     async def test_readiness_uses_live_gate_not_stale_gauges(self):
-        # Saturation must come from the live resource gate. No crawl
-        # has run here, so the metrics gauges are stale zeros -- a sampler
-        # reporting saturation must still yield 503.
+        # Saturation must come from the live resource gate. No crawl has run here, so the metrics gauges are
+        # stale zeros -- a sampler reporting saturation must still yield 503.
         from app.health.readiness import READINESS_STATE
 
         READINESS_STATE.set_utilization_sampler(lambda: (0.99, 0.0))
@@ -256,22 +244,13 @@ class TestDiscoveryAndRenderApi:
         assert resp.submitted_count == 1
 
     async def test_v1_render_invalid_payload_rejected(self):
-        # With a typed request body, a malformed body shape is rejected by
-        # FastAPI with 422 before reaching the handler.
+        # With a typed request body, a malformed body shape is rejected by FastAPI with 422 before reaching
+        # the handler.
         resp = await self.client.post("/v1/render", json={"options": "not-a-dict"})
         assert resp.status_code == 422
 
     async def test_v1_render_exhausted_pool_returns_503(self, monkeypatch):
-        # When every renderer is wedged, the request surfaces as 503, not
-        # a hang or a 500.
-        #
-        # The fake mirrors the production worker's contract: pool exhaustion is
-        # caught and returned as a classified terminal CrawlResult, never
-        # raised (a raised exhaustion used to escape to the scheduler, whose
-        # envelope is the wrong shape for the render pipeline). So the 503 is
-        # reached through the real failure path -- render_request reading the
-        # browser_pool_exhausted classification off the result -- and not
-        # through the incidental route the old raising fake exploited.
+        # When every renderer is wedged, the request surfaces as 503, not a hang or a 500.
         import app.api.render_endpoint as render_endpoint
         from app.orchestration.render_result import crawl_result_from_exception
         from app.transport.browser_pool import BrowserPoolExhaustedError
@@ -297,20 +276,8 @@ class TestDiscoveryAndRenderApi:
         assert_pool_unavailable(await post_render_with_pool(self.client, object(), "http://127.0.0.1:1/x"))
 
     async def test_v1_render_worker_exception_returns_shaped_failure_not_500(self, monkeypatch):
-        # A render worker that raises a plain Exception (not pool exhaustion)
-        # lands in the scheduler's blanket envelope, which is an
-        # EngineCrawlResult -- the right shape for /v1/crawl, wrong for this
-        # pipeline: render_result_to_unified reads item["url"], which that
-        # shape does not carry, so the response used to die with a KeyError
-        # and surface as a 500. The render pipeline normalizes the shape at its
-        # single receive point and routes the endpoint through the same
-        # per-item shaping guard /v1/crawl has, so the failure degrades to a
-        # correctly-shaped terminal result instead.
-        #
-        # PooledBrowserWorker catches every Exception itself, so this is latent
-        # for the production worker -- but the getattr fix silenced mypy's
-        # only static signal of the polymorphism, so nothing else catches a
-        # future caller that lets one escape.
+        # The render pipeline normalizes the shape at its single receive point and routes the endpoint through
+        # the same per-item shaping guard /v1/crawl has, so the failure degrades to a correctly-shaped
         import app.api.render_endpoint as render_endpoint
 
         secret = "SECRET_TOKEN_ABC123_INTERNAL_PATH=/etc"
@@ -331,17 +298,11 @@ class TestDiscoveryAndRenderApi:
         item = body["results"][0]
         assert item["original_url"] == "http://127.0.0.1:1/x", item
         assert item["status"] == "failed", item
-        # RuntimeError classifies to the stable network_error code, and the
-        # raw text never reaches the wire.
+        # RuntimeError classifies to the stable network_error code, and the raw text never reaches the wire.
         assert item["classification"] == "network_error", item
         assert secret not in resp.text, f"raw exception text leaked into the response: {resp.text!r}"
 
     async def test_v1_render_reports_the_real_failure_for_a_worker_exception(self, monkeypatch):
-        # The production worker, with only the renderer faked: when render
-        # raises, the worker's own failure path builds the result, so a URL
-        # handed to the wire as text instead of the admitted value degrades
-        # the item to site_error/result_shaping_failed and the real
-        # classification never reaches the caller.
         import app.api.render_endpoint as render_endpoint
         from app.transport.browser_pool import PooledBrowserWorker
 
@@ -349,14 +310,14 @@ class TestDiscoveryAndRenderApi:
         resp = await post_render_with_pool(self.client, RaisingRendererPool(), "http://127.0.0.1:1/x")
         assert resp.status_code == 200, resp.text
         item = resp.json()["results"][0]
-        # The wire says why the render failed: the classification the shared
-        # chokepoint gave the exception, not the shaping guard's fallback.
+        # The wire says why the render failed: the classification the shared chokepoint gave the exception,
+        # not the shaping guard's fallback.
         assert item["classification"] == "network_error", item
         assert item["error"] != "result_shaping_failed", item
 
     async def test_v1_render_without_pool_returns_503(self):
-        # A None browser pool (startup/shutdown window) must surface as
-        # a clean 503, not an AttributeError 500 from inside the worker.
+        # A None browser pool (startup/shutdown window) must surface as a clean 503, not an AttributeError 500
+        # from inside the worker.
         resp = await post_render_with_pool(self.client, None, "http://127.0.0.1:1/x")
         assert resp.status_code == 503
         assert resp.json()["code"] == "browser_pool_unavailable"
@@ -377,8 +338,8 @@ class TestDiscoveryAndRenderApi:
 
         class _FakeRenderer:
             async def render(self, url, options, *, policy=None):
-                # The real renderer does not know the pool's configured mode, so
-                # it returns a result without one -- the worker fills the slot.
+                # The real renderer does not know the pool's configured mode, so it returns a result without
+                # one -- the worker fills the slot.
                 return CrawlResult(
                     url=url,
                     attempt=terminal_attempt(
@@ -440,11 +401,7 @@ class TestDiscoveryAndRenderApi:
         assert resp.json()["code"] == "validation_error"
 
     async def test_validation_exception_handler_returns_422(self):
-        # The handler itself, not the one in the app's registry. The registry is
-        # typed as holding ``Response | Awaitable[Response]`` per exception type,
-        # which is true and says nothing about any one of them -- so reaching
-        # through it could not say whether this handler is async, and the
-        # registration it is registered under is the other test's subject.
+        # The handler itself, not the one in the app's registry.
         from app.api.exceptions import validation_exception_handler
 
         scope = {"type": "http", "method": "POST", "path": "/v1/crawl", "headers": [], "query_string": b""}
@@ -475,8 +432,8 @@ class TestMapApi(_AsgiEndpointTests):
         assert resp.status_code == 200, resp.text
         body = resp.json()
         assert "all_urls" in body
-        # Sitemap advertises /page1 and /page2, resolved to absolute URLs
-        # against the origin (SiteMapResponse contract).
+        # Sitemap advertises /page1 and /page2, resolved to absolute URLs against the origin (SiteMapResponse
+        # contract).
         assert f"{self.base}/page2" in body["all_urls"]
         # Robots points at /sitemap.xml
         assert f"{self.base}/sitemap.xml" in body["sitemaps"]
@@ -494,10 +451,8 @@ class TestShadowDomApi(_AsgiEndpointTests):
     @pytest.mark.browser
     @pytest.mark.skipif(not browser_available(), reason="no usable browser binary (camoufox/playwright)")
     async def test_v1_crawl_shadow_dom_flattened(self):
-        # The ASGI harness runs no lifespan, so the pool is None; a real
-        # browser-strategy crawl needs a live pool. Initialize (real
-        # camoufox) and close it in a finally so no browsers leak into
-        # later tests.
+        # The ASGI harness runs no lifespan, so the pool is None; a real browser-strategy crawl needs a live
+        # pool. Initialize (real camoufox) and close it in a finally so no browsers leak into later tests.
         from app.transport.browser_pool import close_browser_pool, initialize_browser_pool
 
         await initialize_browser_pool()
@@ -576,8 +531,8 @@ class TestJobApi(_AsgiEndpointTests):
         return job.job_id
 
     async def test_v1_jobs_create_runs_and_list_get(self):
-        # Create starts a background runner; with the fixture server the job
-        # completes a real whole-site crawl through the shared engine.
+        # Create starts a background runner; with the fixture server the job completes a real whole-site crawl
+        # through the shared engine.
         resp = await self.client.post(
             "/v1/jobs",
             json={
@@ -641,8 +596,8 @@ class TestJobApi(_AsgiEndpointTests):
         assert resp_after.json()["status"] == expected_status
 
     async def test_v1_jobs_control_transitions_persisted_row(self):
-        # Directly-persisted (never-run) rows are PENDING: pause implies an
-        # active run (409). Cancel is valid from pending (aborts before start).
+        # Directly-persisted (never-run) rows are PENDING: pause implies an active run (409). Cancel is valid
+        # from pending (aborts before start).
         job_id = await self._seed_job(f"{self.base}/")
         resp_pause = await self.client.post(f"/v1/jobs/{job_id}/control", json={"action": "pause"})
         assert resp_pause.status_code == 409, resp_pause.text
@@ -652,8 +607,8 @@ class TestJobApi(_AsgiEndpointTests):
         assert resp_cancel.status_code == 200, resp_cancel.text
         assert resp_cancel.json()["status"] == "cancelled"
 
-        # Unknown actions stay 422 (shape validation precedes dispatch), and the
-        # cancelled row is still cancelled -- the rejection is side-effect free.
+        # Unknown actions stay 422 (shape validation precedes dispatch), and the cancelled row is still
+        # cancelled -- the rejection is side-effect free.
         await self._assert_unknown_action_refused_without_side_effect(job_id, "cancelled")
 
     async def test_v1_jobs_delete_of_persisted_row(self):
@@ -670,7 +625,4 @@ class TestJobApi(_AsgiEndpointTests):
     async def test_v1_jobs_invalid_action(self):
         job_id = await self._seed_job(f"{self.base}/")
 
-        # Exact code is the wire contract (jobs_router declares
-        # "invalid_action"); the rejection must also leave the persisted
-        # row exactly as it was -- a side-effect-free refusal.
         await self._assert_unknown_action_refused_without_side_effect(job_id, "pending")

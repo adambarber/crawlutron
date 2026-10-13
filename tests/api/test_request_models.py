@@ -68,11 +68,8 @@ class TestWebhookUrlValidation:
             assert resp.status_code == 422
 
 
-#: The models FastAPI binds a request body to. Everything reachable from one of
-#: these is caller-supplied, which is the property that decides ``extra``.
-#: Derived by NAME on purpose: these are the shapes a route hands to the
-#: framework, and they have to be listed here because a route's binding is a
-#: runtime fact the model layer cannot see.
+#: The models FastAPI binds a request body to. Everything reachable from one of these is caller-supplied,
+#: which is the property that decides ``extra``.
 _BOUND_REQUEST_BODIES = (
     "CrawlRequest",
     "JobCreateRequest",
@@ -84,10 +81,7 @@ _BOUND_REQUEST_BODIES = (
 )
 
 
-#: Both wire-model homes now live in ``app.models``, one record per file, so a
-#: walk that read only the request models would see no response model at all --
-#: which is what the response-side tests below were written to cover. Derived from
-#: the package, so a model is covered the day its file is written.
+#: Derived from the package, so a model is covered the day its file is written.
 def _wire_model_modules() -> tuple[ModuleType, ...]:
     package = importlib.import_module("app.models")
     names = (m.name for m in pkgutil.iter_modules(package.__path__))
@@ -122,11 +116,7 @@ def _caller_supplied() -> set[str]:
         reachable |= frontier
         nxt: set[str] = set()
         for name in frontier:
-            # Inheritance is an edge too. ``_SingleUrlSourceRequest`` is never a
-            # FIELD of a bound request body -- it is their BASE CLASS -- so a
-            # field-only walk classifies it as output-side and exempts it, which
-            # is precisely the wrong answer: a caller constructs it directly, and
-            # it already carries a validator that can raise.
+            # Inheritance is an edge too.
             for base in models[name].__mro__[1:]:
                 if base is not BaseModel and base.__name__ in models:
                     nxt.add(base.__name__)
@@ -283,8 +273,8 @@ class TestRequestCollectionsAreBounded:
     beside the tests that pin them rather than being spread across the model.
     """
 
-    #: Longest caller-supplied URL list accepted in one request. A whole-site
-    #: job is the unbounded path -- it exists precisely so this is bounded.
+    #: Longest caller-supplied URL list accepted in one request. A whole-site job is the unbounded path -- it
+    #: exists precisely so this is bounded.
     MAX_URLS = 500
     #: Most validators in one request. Each is a conditional-request header pair.
     MAX_VALIDATORS = 64
@@ -318,8 +308,8 @@ class TestRequestCollectionsAreBounded:
         from app.models.crawl_request import CrawlRequest
 
         at_ceiling = {f"https://example.com/{i}": {"if_none_match": "x"} for i in range(self.MAX_VALIDATORS)}
-        # A url source is required alongside it -- unrelated to the cap, but the
-        # model will not validate a validators map on its own.
+        # A url source is required alongside it -- unrelated to the cap, but the model will not validate a
+        # validators map on its own.
         assert (
             len(CrawlRequest(url="https://example.com/0", validators=at_ceiling).validators)
             == self.MAX_VALIDATORS
@@ -516,9 +506,8 @@ class TestBrowserProfileVocabularyIsClosed:
             for node in ast.walk(tree):
                 if not isinstance(node, ast.Call):
                     continue
-                # profile.get("k") puts the key first; _profile_int(profile, "k", …)
-                # puts the profile first. Both read a literal key, but not from the
-                # same argument position.
+                # profile.get("k") puts the key first; _profile_int(profile, "k", …) puts the profile first.
+                # Both read a literal key, but not from the same argument position.
                 func = node.func
                 name = func.attr if isinstance(func, ast.Attribute) else getattr(func, "id", "")
                 if name != "get" and not name.startswith("_profile_"):
@@ -653,9 +642,8 @@ class TestTheRendererAgreesWithTheVocabulary:
             if not isinstance(node, ast.If):
                 continue
             test = node.test
-            # A guarded branch reads ``action_type == "click" and selector``, so its
-            # test is a BoolOp whose first value is the comparison; an unguarded one
-            # reads ``action_type == "wait_seconds"`` and the test IS the comparison.
+            # A guarded branch reads ``action_type == "click" and selector``, so its test is a BoolOp whose
+            # first value
             guarded = isinstance(test, ast.BoolOp)
             comparison = test.values[0] if guarded else test
             if not (
@@ -732,8 +720,8 @@ class TestRequestProfileVocabularyIsClosed:
         from app.models.crawl_policy import CrawlPolicy
 
         field = CrawlPolicy.model_fields["request_profile"]
-        # ``.get`` rather than ``getattr(..., "keys")``: a dict's own ``keys``
-        # attribute would satisfy the getattr and hand back the bound method.
+        # ``.get`` rather than ``getattr(..., "keys")``: a dict's own ``keys`` attribute would satisfy the
+        # getattr and hand back the bound method.
         declared = (field.json_schema_extra or {}).get("keys")
         assert declared, "request_profile does not declare its key set"
 
@@ -1000,16 +988,16 @@ class TestCallerKnobsBehindClosedKeysAreCeilinged:
     these.
     """
 
-    #: Longest scroll a lazy-load pass will take, in steps. Deep pages still load
-    #: in a few dozen; this is past the point of usefulness, not the point of cost.
+    #: Longest scroll a lazy-load pass will take, in steps. Deep pages still load in a few dozen; this is past
+    #: the point of usefulness, not the point of cost.
     MAX_LAZY_SCROLL_STEPS = 50
     #: Longest per-step scroll pause, in seconds.
     MAX_LAZY_SCROLL_DELAY_SECONDS = 5.0
-    #: Longest cookie-harvest wait, in seconds. The harvest runs in a finally
-    #: block on a pooled renderer, so this is a hold on a shared resource.
+    #: Longest cookie-harvest wait, in seconds. The harvest runs in a finally block on a pooled renderer, so
+    #: this is a hold on a shared resource.
     MAX_COOKIE_HARVEST_TIMEOUT_SECONDS = 5.0
-    #: Most element screenshots in one render. Each is a full base64 PNG in the
-    #: result metadata, so this bounds the response as well as the render.
+    #: Most element screenshots in one render. Each is a full base64 PNG in the result metadata, so this
+    #: bounds the response as well as the render.
     MAX_SCREENSHOT_SELECTORS = 16
 
     def test_scroll_steps_over_the_ceiling_are_refused(self):
@@ -1081,8 +1069,8 @@ class TestCallerKnobsBehindClosedKeysAreCeilinged:
             MAX_COOKIE_HARVEST_TIMEOUT_SECONDS
         )
 
-        # The knob still moves inside the ceiling: a clamp that pinned every
-        # value to the ceiling would pass the same assertions.
+        # The knob still moves inside the ceiling: a clamp that pinned every value to the ceiling would pass
+        # the same assertions.
         assert driver.scroll_config_for({"lazy_scroll_steps": 7}) == (7, 0.5)
         assert driver.harvest_timeout_for({}) == 2.0
 
@@ -1109,9 +1097,8 @@ class TestStrategyLadderIsBounded:
     it worthless.
     """
 
-    #: Most ladder entries in one request. The vocabulary is three strategies and
-    #: cookie replay needs a repeat or two after a browser render, so this is
-    #: several times more than any useful ladder.
+    #: Most ladder entries in one request. The vocabulary is three strategies and cookie replay needs a repeat
+    #: or two after a browser render, so this is several times more than any useful ladder.
     MAX_STRATEGIES = 16
 
     def test_a_ladder_at_the_ceiling_is_accepted(self):

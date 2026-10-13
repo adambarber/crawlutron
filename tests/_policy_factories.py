@@ -78,14 +78,12 @@ BOOL_ENV_CASES = (
     ("garbage", True),
 )
 
-# The minimal-deployment profile: a short per-request timeout and little room
-# for discovered links, because a box this small is the one where admitting a
-# hundred extra pages is what matters.
+# The minimal-deployment profile: a short per-request timeout and little room for discovered links, because a
+# box this small is the one where admitting a hundred extra pages is what matters.
 _CRAWL_LIMITS = {"timeout_seconds": 5, "max_retries": 0, "max_discovered_links": 10}
 
-# The live-server profile: a generous per-request timeout and room for the
-# links a real page actually links to. A fixture that timed out or stopped at
-# ten links would report a transport problem for a policy that was too tight.
+# The live-server profile: a generous per-request timeout and room for the links a real page actually links
+# to.
 _STRATEGY_LIMITS = {"timeout_seconds": 10, "max_retries": 0, "max_discovered_links": 50}
 
 

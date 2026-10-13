@@ -145,10 +145,8 @@ class TestAsyncCrawlTerminalCasControlsWhatIsPublished:
         self, job_store, tmp_path
     ):
         result_store, post_webhook = await self._displaced_crawl(job_store, tmp_path, JobStatus.PENDING)
-        # `recover_orphaned_running_jobs` rewinds RUNNING to PENDING on startup
-        # on the assumption that nothing is in flight. When a second app
-        # instance shares the store that assumption is false, and a job left at
-        # PENDING is never picked up again -- so the client polls forever.
+        # `recover_orphaned_running_jobs` rewinds RUNNING to PENDING on startup on the assumption that nothing
+        # is in flight.
         assert result_store.get(self.REQUEST_ID) is not None, (
             "the terminal write lost to PENDING and the results were dropped, so this job can never complete"
         )
@@ -209,10 +207,8 @@ class TestWebhookValidationRunsOffLoop:
         block_private_targets(monkeypatch)
         resolver_threads = _spy_resolver_threads(monkeypatch)
 
-        # Stage only the HTTP answer: the pin must still run,
-        # and pinning is pure (no I/O), so no network call is attempted. The
-        # client is a real httpx.AsyncClient over a scripted transport, so the
-        # delivery POST, the streaming read and the close are all real.
+        # Stage only the HTTP answer: the pin must still run, and pinning is pure (no I/O), so no network call
+        # is attempted.
         delivered = record_webhook_delivery(monkeypatch)
 
         await deliver_pinned_webhook(

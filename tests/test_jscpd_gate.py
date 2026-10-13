@@ -77,12 +77,8 @@ def _stub_report(
 ) -> list[list[str]]:
     commands: list[list[str]] = []
 
-    # The gate resolves a reported name back to a root against the filesystem, so
-    # the stub has to make its synthetic files exist -- for exactly the roots the
-    # duplicates were declared under, so a name in two declared roots is as
-    # ambiguous here as it would be on disk. Anything the test did not declare
-    # falls through to the real filesystem, which is what keeps an ambiguity like
-    # `zz_tree_filler.py` a real one.
+    # Anything the test did not declare falls through to the real filesystem, which is what keeps an ambiguity
+    # like `zz_tree_filler.py` a real one.
     declared = {
         tuple(duplicate[side]["name"].split("/"))
         for duplicate in duplicates
@@ -114,8 +110,7 @@ def _stub_report(
             return next(root for root in roots if name == root or name.startswith(root + "/"))
 
         if len(roots) == 1:
-            # One root per invocation: only pairs inside it are reported, named
-            # relative to it.
+            # One root per invocation: only pairs inside it are reported, named relative to it.
             scoped = [
                 {
                     **duplicate,
@@ -126,8 +121,8 @@ def _stub_report(
                 if _inside(duplicate["firstFile"]["name"]) and _inside(duplicate["secondFile"]["name"])
             ]
         else:
-            # The cross-tree pass: pairs that SPAN roots, named without their root
-            # so they are unattributable until the gate resolves them.
+            # The cross-tree pass: pairs that SPAN roots, named without their root so they are unattributable
+            # until the gate resolves them.
             scoped = [
                 {
                     **duplicate,
@@ -140,11 +135,8 @@ def _stub_report(
                 if _straddles(duplicate)
             ]
         if isinstance(sources, dict):
-            # One root per invocation is scored at that root's own count, which is
-            # what makes "this tree scanned nothing" detectable. The cross-tree
-            # invocation reads the same files a second time and its count is
-            # deliberately not added to the gate's total, so any positive count
-            # satisfies the floor it checks.
+            # One root per invocation is scored at that root's own count, which is what makes "this tree
+            # scanned nothing" detectable.
             found = sources[roots[0]] if len(roots) == 1 else sources.get(".", max(sources.values()))
         else:
             found = sources
@@ -178,8 +170,8 @@ def _run_against_empty_tree(monkeypatch, tmp_path, **kwargs) -> list[list[str]]:
     return commands
 
 
-#: The scan roots this file's stubs understand, read from the gate so a root
-#: added to the gate is a root these stubs model without a second edit.
+#: The scan roots this file's stubs understand, read from the gate so a root added to the gate is a root these
+#: stubs model without a second edit.
 _KNOWN_ROOTS = frozenset(root for roots in gate.PROFILE_PATHS.values() for root in roots)
 
 
@@ -240,17 +232,14 @@ def _mirrored_service_tree(tmp_path: Path, payload: str) -> Path:
     `tmp_path` itself lives under `/tmp`, not only on a macOS tmp dir.
     """
     mirror = tmp_path / "service"
-    # Two production files with identical content, plus the same content again
-    # under the excluded migrations subtree.
+    # Two production files with identical content, plus the same content again under the excluded migrations
+    # subtree.
     for relative in (PROBE_SOURCE, f"app/{_PROBE_BASENAME}", f"app/storage/migrations/{_PROBE_BASENAME}"):
         planted = mirror / relative
         planted.parent.mkdir(parents=True, exist_ok=True)
         planted.write_text(payload, encoding="utf-8")
-    # One module per remaining root: enough for the gate's "analyzed 0 sources"
-    # check, and a single file per root cannot form a pair of its own. It is the
-    # real module rather than a stub because jscpd only counts a file as a
-    # source once it holds enough tokens -- a file of trivial assignments is
-    # scored as 0 sources however many lines it has.
+    # One module per remaining root: enough for the gate's "analyzed 0 sources" check, and a single file per
+    # root cannot form a pair of its own.
     for tree in ("tests", "scripts"):
         filler = mirror / tree / "zz_tree_filler.py"
         filler.parent.mkdir(parents=True, exist_ok=True)
@@ -339,9 +328,6 @@ def test_a_clone_spanning_two_trees_fails(monkeypatch, tmp_path, capsys) -> None
     assert gate._run(_args()) == 1
     error = capsys.readouterr().err
     assert "[cross]" in error
-    # Both sides named, each with the root that actually holds it -- the gate has
-    # to re-attach the root jscpd stripped, or a cross-tree report would be
-    # unactionable.
     assert "app/orchestration/recursive.py" in error
     assert "tests/_recursive_harnesses.py" in error
 
@@ -437,8 +423,8 @@ def test_jscpd_command_resolves_the_service_copy(monkeypatch, tmp_path) -> None:
         assert command[0] == require_repo_tool(gate.SERVICE_ROOT, "jscpd")
         assert "--fail-on-empty" in command
         assert command[command.index("--threshold") + 1] == "0"
-    # The floor each command carries is checked across all roots by
-    # test_one_floor_is_applied_to_every_root; per-root floors no longer exist.
+    # The floor each command carries is checked across all roots by test_one_floor_is_applied_to_every_root;
+    # per-root floors no longer exist.
 
 
 @pytest.mark.parametrize("directory", ("app", "tests", "scripts"))
@@ -457,10 +443,8 @@ def test_missing_sanctioned_clone_fails(monkeypatch, tmp_path) -> None:
     assert gate.main() == 1
 
 
-# One property: an expectation the gate cannot act on must fail the run, and the
-# only field that varies is the one carrying the defect. The legacy profile shape
-# is the same claim about a different key, so it is a row here rather than a
-# second copy of the arrange-and-assert.
+# One property: an expectation the gate cannot act on must fail the run, and the only field that varies is the
+# one carrying the defect.
 @pytest.mark.parametrize(
     ("field", "value"),
     [
@@ -753,12 +737,7 @@ def test_migrations_clones_are_not_reported_but_production_clones_are(monkeypatc
 
     mirror = _mirrored_service_tree(tmp_path, payload)
     _write_expectations(mirror / "expectations.json", [])
-    # The real `.jscpd.json` is NOT redirected: the ignore list is the thing
-    # under test. The venv is a property of the machine, not of the scanned
-    # tree, so the mirror borrows the real one when there is one and the gate
-    # falls back to PATH when there is not. TREE_ROOTS keeps its production
-    # values; only the source floor moves, because this tree is four files
-    # instead of three hundred.
+    # The real `.jscpd.json` is NOT redirected: the ignore list is the thing under test.
     if (gate.SERVICE_ROOT / ".venv").exists():
         (mirror / ".venv").symlink_to(gate.SERVICE_ROOT / ".venv", target_is_directory=True)
     monkeypatch.setattr(gate, "SERVICE_ROOT", mirror)

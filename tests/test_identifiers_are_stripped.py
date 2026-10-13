@@ -26,23 +26,13 @@ import pytest
 
 ROOT = Path(__file__).resolve().parent.parent
 
-#: (label, pattern). Each is a review-era marker that was never a real symbol.
-#:
-#: The first two are not dead patterns. They match nothing inside the scanned
-#: scope only because every real marker here was written in a composite style the
-#: pattern does not cover -- the item letter sitting after a slash rather than
-#: immediately after the parenthesis, optionally with a second lettered item
-#: beside it, or spelled out in words instead of letters. Each pattern is kept
-#: because it is the shape that actually occurs, and the composite forms below
-#: cover the other shapes rather than leaving them ungated. Every pattern is
-#: asserted to still match something in the exempt records, so one that stops
-#: matching anything at all is caught rather than sitting in the tuple as
-#: decoration.
+#: (label, pattern). The first two are not dead patterns. Each pattern is kept because it is the shape that
+#: actually occurs, and the composite forms below cover the other shapes rather than leaving them ungated.
 FORBIDDEN = (
     ("milestone item", re.compile(r"\(M\d+\)")),
     ("review item", re.compile(r"\((?:p|H|h)\d+\)")),
-    # A lettered item after a slash, optionally followed by a second one: the
-    # shape that was live in tests/ and invisible to the two patterns above.
+    # A lettered item after a slash, optionally followed by a second one: the shape that was live in tests/
+    # and invisible to the two patterns above.
     ("composite item", re.compile(r"\b[A-Z]\d+\s*/\s*[A-Z]\d*\b")),
     # The same reference written out in words rather than letters.
     ("option reference", re.compile(r"\bOption\s*\d+\s*/\s*Item\s*\d+")),
@@ -64,16 +54,8 @@ def test_the_census_is_not_empty():
     assert len(SCANNED) > 100, f"scan found only {len(SCANNED)} files"
 
 
-#: One sample per pattern, which is not a sample of content in the tree -- it is a
-#: proof that the pattern is a live regex. A pattern with a typo in it matches
-#: nothing anywhere and the gate passes forever while looking like coverage,
-#: which is the failure this table exists to make impossible. A pattern that has
-#: fired and been cleaned (the tier and fix forms) is still a real shape, so it
-#: stays with its sample.
-#:
-#: Each sample is joined from its letter and its number rather than written as a
-#: whole. This file is inside the scan, so a complete literal here would be the
-#: gate reporting its own fixtures.
+#: One sample per pattern, which is not a sample of content in the tree -- it is a proof that the pattern is a
+#: live regex.
 MUST_MATCH = {
     "milestone item": "(" + "M" + "1)",
     "review item": "(" + "H" + "3)",

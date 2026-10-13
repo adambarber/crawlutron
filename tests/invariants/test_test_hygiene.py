@@ -35,22 +35,8 @@ from tests.chokepoint_walks import (
 from tests.invariants._shared import assert_trees_clean
 from tests.rules import Bites, Rule
 
-# ---------------------------------------------------------------------------
-# Collectible tests: a test pytest cannot see is a test that never runs
-# ---------------------------------------------------------------------------
-
-# pytest collects a test function only when it sits at module level or is a
-# direct method of a ``Test*`` class AND its name matches the configured
-# ``python_functions`` pattern. A ``test``-spelled def anywhere else -- or a
-# near-miss name like ``testresolve_...``, which pytest silently skips while
-# every reader assumes it runs -- is parsed, imported, and then ignored, so the
-# suite stays green while the coverage it appeared to provide is gone.
-#
-# This is not hypothetical. A test added in the middle of a test class, dedented
-# to column 0, does not raise IndentationError -- the methods that followed it
-# are absorbed as nested defs inside it, where nothing calls them. One green run
-# of 1914 tests was nine tests short of the truth, and the only reason it was
-# caught is that the count was compared against HEAD rather than assumed.
+# --------------------------------------------------------------------------- Collectible tests: a test pytest
+# cannot see is a test that never runs
 
 
 def _collection_prefix() -> str:
@@ -89,9 +75,8 @@ def _uncollectible_tests(tree: ast.Module, path: pathlib.Path) -> list[str]:
             continue
         if id(test_def) in legal_owners:
             continue
-        # A different name from the module-level scan above: the two loops are
-        # unrelated passes over the same tree, and reusing the binding made the
-        # second one look at the first loop's node.
+        # A different name from the module-level scan above: the two loops are unrelated passes over the same
+        # tree, and reusing the binding made the second one look at the first loop's node.
         owners = [
             parent.name
             for parent in ast.walk(tree)
@@ -131,8 +116,8 @@ EVERY_TEST_FUNCTION_IS_ONE_PYTEST_CAN_COLLECT = Rule(
             "class TestOuter:\n    def helper(self):\n        def test_inner(self):\n            pass\n",
             "nested inside helper()",
         ),
-        # A near-miss name: a direct method of a Test* class that pytest still
-        # never collects, because the name does not match python_functions.
+        # A near-miss name: a direct method of a Test* class that pytest still never collects, because the
+        # name does not match python_functions.
         Bites(
             "class TestThings:\n    def testresolve_near_miss(self):\n        pass\n",
             "collected pattern",
@@ -161,10 +146,8 @@ def test_uncollectible_test_detector_bites():
     EVERY_TEST_FUNCTION_IS_ONE_PYTEST_CAN_COLLECT.check_bites()
 
 
-# ===========================================================================
-# ALIAS-BLINDNESS (program 3): detectors must resolve import bindings, not
-# match on a literal module name
-# ===========================================================================
+# =========================================================================== ALIAS-BLINDNESS (program 3):
+# detectors must resolve import bindings, not match on a literal module name
 
 
 def test_dynamic_pattern_re_calls_under_any_alias():
@@ -238,9 +221,8 @@ def test_sanctioned_func_alias_detector_bites():
     assert not aliased_sanctioned_func_offenders(unrelated, REPO_ROOT / "app" / "_synthetic.py")
 
 
-# ===========================================================================
-# TEST DOUBLES THAT SWALLOW SIGNATURE DRIFT (program 4)
-# ===========================================================================
+# =========================================================================== TEST DOUBLES THAT SWALLOW
+# SIGNATURE DRIFT (program 4) ===========================================================================
 
 
 def test_doubles_do_not_accept_and_drop_kwargs():
@@ -391,8 +373,8 @@ SCHEDULER_DOUBLES_BIND_FAILED_RESULT = Rule(
             + ", *, failed_result=None, **kwargs):\n"
             + "        return {}\n"
         ),
-        # A ``run`` with no scheduler-shaped signature at all is not a scheduler
-        # double, so it is not the property's business.
+        # A ``run`` with no scheduler-shaped signature at all is not a scheduler double, so it is not the
+        # property's business.
         "def run(a, b, **kwargs):\n    return 1\n",
     ),
     scope=lambda *, exclude: trees_under(TESTS_DIR),
@@ -408,9 +390,8 @@ def test_no_existing_double_swallows_failed_result():
     SCHEDULER_DOUBLES_BIND_FAILED_RESULT.scan()
 
 
-# ===========================================================================
-# Program 5 (hunt): the error= field's undeclared taxonomy
-# ===========================================================================
+# =========================================================================== Program 5 (hunt): the error=
+# field's undeclared taxonomy ===========================================================================
 
 
 def test_error_field_values_are_classification_members():

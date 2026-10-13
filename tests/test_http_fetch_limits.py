@@ -25,19 +25,14 @@ def _make_server():
     class Handler(SilentHandler):
         def do_GET(self):
             if self.path in ("/bomb", "/ok"):
-                # The bomb and the ordinary body differ only in what they carry,
-                # so they go out through the one response shape: a per-path copy
-                # of these headers is a place for the two to stop being the same
-                # response, and the bomb's size would no longer be the only
-                # difference between them.
                 self.send_body(
                     200,
                     bomb_compressed if self.path == "/bomb" else ok_compressed,
                     **{"Content-Encoding": "gzip", "Content-Type": "text/plain"},
                 )
             elif self.path == "/chunked_huge":
-                # No Content-Length -> chunked; stream a large raw body. This one
-                # cannot use send_body, which sets a content-length.
+                # No Content-Length -> chunked; stream a large raw body. This one cannot use send_body, which
+                # sets a content-length.
                 self.send_response(200)
                 self.send_header("Content-Type", "text/plain")
                 self.end_headers()
@@ -107,8 +102,8 @@ async def test_gzip_bomb_rejected_with_413():
         # Cap well below the bomb's expanded size.
         assert_capped(await _fetch_with_cap(port, "/bomb", 100_000))
 
-        # A normal (small) gzipped response is decompressed correctly and the
-        # content-encoding header is stripped so it isn't decoded twice.
+        # A normal (small) gzipped response is decompressed correctly and the content-encoding header is
+        # stripped so it isn't decoded twice.
         res2 = await _fetch_with_cap(port, "/ok", 1_000_000)
         assert res2.status_code == 200
         assert res2.body == b"hello world"

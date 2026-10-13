@@ -34,15 +34,15 @@ from tests.chokepoint_walks import REPO_ROOT
 #: The most consecutive full-line ``#`` comments a block may run.
 LIMIT = 2
 
-#: The measured long-run count per root, at the last wave. Exact equality both
-#: ways: a run fails, a trimmed tree demands the lower number in this commit.
+#: The measured long-run count per root, at the last wave. Exact equality both ways: a run fails, a trimmed
+#: tree demands the lower number in this commit.
 _BUDGETS = {
     "app": 0,
-    "tests": 564,
+    "tests": 0,
 }
 
-#: A block's last line may not stop mid-clause: connectives, trailing commas and
-#: dangling dashes are a cut clause. A trailing run of 3+ dashes is a banner, kept.
+#: A block's last line may not stop mid-clause: connectives, trailing commas and dangling dashes are a cut
+#: clause. A trailing run of 3+ dashes is a banner, kept.
 _DANGLING_END = re.compile(
     r"(,|(?<!-)--| (and|or|but|so|which|that|the|a|an|of|to|with|without|"
     r"not|as|by|for|from|in|into|on|at|per|than|then|when|while|because|"

@@ -33,10 +33,8 @@ from tests.chokepoint_walks import (
 )
 from tests.rules import Registry, Rule
 
-#: The calls that refuse -- return None -- instead of keying a bad URL.
-#: ``admit_or_none`` is the module-level door; ``resolve`` is the value's own
-#: admission of a reference against its embedded policy. Both must stay
-#: fallback-free: the None IS the verdict, and ``or <raw>`` overrules it.
+#: ``admit_or_none`` is the module-level door; ``resolve`` is the value's own admission of a reference against
+#: its embedded policy.
 _REFUSING_NAMES = frozenset({"admit_or_none", "resolve"})
 
 
@@ -124,13 +122,13 @@ def test_admitted_raw_is_the_durable_identity():
     from app.models.normalized_url import NormalizedUrl
     from tests._policy_factories import UNRESTRICTED_HOST_POLICY
 
-    # The canonical public form, with the noise the normalizer strips
-    # (default port, empty path, fragment) removed, IS the stored identity.
+    # The canonical public form, with the noise the normalizer strips (default port, empty path, fragment)
+    # removed, IS the stored identity.
     admitted = NormalizedUrl("https://Example.COM:443/a/b/?b=2&a=1#frag", policy=UNRESTRICTED_HOST_POLICY)
     assert admitted.raw == "https://example.com/a/b?a=1&b=2"
 
-    # Identity is stable across constructions of the same URL, which is what
-    # set/dict keying by the value depends on.
+    # Identity is stable across constructions of the same URL, which is what set/dict keying by the value
+    # depends on.
     again = NormalizedUrl("https://example.com/a/b?a=1&b=2", policy=UNRESTRICTED_HOST_POLICY)
     assert admitted == again
     assert hash(admitted) == hash(again)

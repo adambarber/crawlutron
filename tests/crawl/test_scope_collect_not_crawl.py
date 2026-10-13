@@ -15,9 +15,8 @@ from tests._fetcher_factories import site_fetcher, tap_fetcher
 
 
 def _recording_fetcher(pages):
-    # The real site fetcher answers; the tap only records. The subject of every
-    # test in this file is which URLs get enqueued, so the fetcher must not be a
-    # second implementation of the site.
+    # The real site fetcher answers; the tap only records. The subject of every test in this file is which
+    # URLs get enqueued, so the fetcher must not be a second implementation of the site.
     return tap_fetcher(site_fetcher(pages))
 
 
@@ -117,8 +116,8 @@ async def test_skip_list_hosts_recorded_but_never_enqueued():
 
 
 async def test_document_urls_recorded_but_not_fetched_by_default():
-    # PDFs/CSVs/etc yield no HTML links: record their URLs when advertised,
-    # but never spend bandwidth downloading them during URL discovery.
+    # PDFs/CSVs/etc yield no HTML links: record their URLs when advertised, but never spend bandwidth
+    # downloading them during URL discovery.
     out, fetched = await _crawl_example_site(_doc_pages())
     crawled = _crawled_urls(out)
     assert crawled == {"http://example.com", "http://example.com/local"}

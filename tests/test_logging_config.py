@@ -29,8 +29,8 @@ def service_sink(tmp_path):
     saved_handlers = root.handlers[:]
     saved_level = root.level
     log_file = tmp_path / "service.jsonl"
-    # Drop handlers an earlier import attached (app.main configures one at
-    # import time from the environment) so this test owns a dedicated sink.
+    # Drop handlers an earlier import attached (app.main configures one at import time from the environment)
+    # so this test owns a dedicated sink.
     root.handlers[:] = [h for h in root.handlers if not getattr(h, _BC_OWNED_HANDLER, False)]
     try:
         configure_service_logging(service_name="crawlutron", log_level="info", log_file_path=str(log_file))

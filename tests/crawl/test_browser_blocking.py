@@ -52,10 +52,8 @@ class _BlockingResolver:
         return ("http://1.2.3.4:80/", {"Host": "example.com"})
 
 
-# ============================================================
-# Finding 1: Route handler must PIN subresources to validated IP
-# to prevent DNS-rebinding TOCTOU (SSRF)
-# ============================================================
+# ============================================================ Finding 1: Route handler must PIN subresources
+# to validated IP to prevent DNS-rebinding TOCTOU (SSRF)
 
 
 async def test_ssrf_route_handler_pins_safe_subresource(monkeypatch):
@@ -170,10 +168,8 @@ async def test_pinterest_aborted_with_and_without_www():
 
 
 async def test_cdcgov_aborted_with_and_without_www():
-    # Cdc.gov is a government CONTENT host, not tracking infrastructure.
-    # It was removed from ANALYTICS_HOST_SUFFIXES (data poisoning); the
-    # route handler must let it through. Suffix match still covers apex
-    # and subdomains alike for hosts that ARE on the list (see pinterest).
+    # Cdc.gov is a government CONTENT host, not tracking infrastructure. Suffix match still covers apex and
+    # subdomains alike for hosts that ARE on the list (see pinterest).
     await assert_route_decision(
         ssrf_route_handler(),
         ("https://cdc.gov/foo", "https://www.cdc.gov/bar", "https://data.cdc.gov/baz"),
@@ -182,8 +178,8 @@ async def test_cdcgov_aborted_with_and_without_www():
 
 
 async def test_xcom_aborted_regardless_of_mode():
-    # X.com (X/Twitter) is on the hard-skip tracking list: aborted in every mode,
-    # including bare-apex and www subdomain forms.
+    # X.com (X/Twitter) is on the hard-skip tracking list: aborted in every mode, including bare-apex and www
+    # subdomain forms.
     await assert_route_decision(
         ssrf_route_handler(),
         ("https://x.com/i/web/status/1", "https://www.x.com/home"),
@@ -240,8 +236,8 @@ async def test_response_handler_caps_entries_and_payload_size():
         await handler(_FakeResponse(f"https://x/{i}", big))
 
     assert len(collected) == 10, f"entry cap not enforced: {len(collected)}"
-    # Each kept payload is capped at max_payload_chars (8192); oversized ones
-    # are flagged truncated rather than stored whole.
+    # Each kept payload is capped at max_payload_chars (8192); oversized ones are flagged truncated rather
+    # than stored whole.
     assert all(
         e.get("payload_truncated") or len((e.get("payload") or {}).get("blob", "")) <= 8192 for e in collected
     )

@@ -3,9 +3,8 @@
 import sys
 from pathlib import Path
 
-# Resolve the app root from this file's location so the tests are independent of
-# the CWD they are launched from (repo root or any subdirectory both work).
-# tests/crawl -> repository root.
+# Resolve the app root from this file's location so the tests are independent of the CWD they are launched
+# from (repo root or any subdirectory both work). tests/crawl -> repository root.
 _APP_ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -25,8 +24,8 @@ def test_engine_fallback_limit_matches():
     sys.path.insert(0, str(_APP_ROOT))
     from app.vocabulary.limits import DEFAULT_MAX_CONTENT_LENGTH_BYTES
 
-    # The 10MB default lives in ONE place (app.vocabulary.limits) and is referenced by
-    # the http strategy instead of being hard-coded a second time.
+    # The 10MB default lives in ONE place (app.vocabulary.limits) and is referenced by the http strategy
+    # instead of being hard-coded a second time.
     assert DEFAULT_MAX_CONTENT_LENGTH_BYTES == 10 * 1024 * 1024
     src = (_APP_ROOT / "app/transport/content_cache_key.py").read_text()
     assert "DEFAULT_MAX_CONTENT_LENGTH_BYTES" in src

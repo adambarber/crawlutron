@@ -40,9 +40,8 @@ from tests.chokepoint_walks import REPO_ROOT
 # Total lines, less blank lines, less comment-only lines.
 MAX_CODE_LINES = 1000
 
-# All three trees, not just app/: a ceiling that only watched production code
-# would let the test suite grow without limit, and the test suite is where the
-# duplication and the drift live.
+# All three trees, not just app/: a ceiling that only watched production code would let the test suite grow
+# without limit, and the test suite is where the duplication and the drift live.
 ROOTS = ("app", "tests", "scripts")
 
 

@@ -81,9 +81,8 @@ def test_every_job_endpoint_declares_its_providers_through_an_alias():
     assert aliases, "app.api.dependencies declares no provider aliases"
 
     for route in jobs_router.router.routes:
-        # An APIRouter registers APIRoutes, but the attribute holding them is
-        # typed as BaseRoute, which declares no ``endpoint`` -- so the route
-        # type is the fact, and it is asserted rather than assumed.
+        # An APIRouter registers APIRoutes, but the attribute holding them is typed as BaseRoute, which
+        # declares no ``endpoint`` -- so the route type is the fact, and it is asserted rather than assumed.
         assert isinstance(route, APIRoute), f"the jobs router registered a {type(route).__name__}"
         for name, param in inspect.signature(route.endpoint, eval_str=True).parameters.items():
             where = f"{route.endpoint.__name__}.{name}"
@@ -91,8 +90,8 @@ def test_every_job_endpoint_declares_its_providers_through_an_alias():
                 f"{where} uses an invisible default; a provider belongs in the annotation"
             )
             for meta in getattr(param.annotation, "__metadata__", ()):
-                # ``Depends()`` with no argument carries no callable, so there is
-                # no dependency to name an alias for.
+                # ``Depends()`` with no argument carries no callable, so there is no dependency to name an
+                # alias for.
                 if isinstance(meta, DependsParam) and meta.dependency is not None:
                     assert any(param.annotation is alias for alias in aliases), (
                         f"{where} wires {meta.dependency.__name__} outside a declared alias"
@@ -109,8 +108,8 @@ def test_creating_and_controlling_a_job_need_the_same_providers():
 
     def _providers(handler) -> dict[str, Callable[..., Any]]:
         declared: dict[str, Callable[..., Any]] = {}
-        # Eval_str: the router module defers its annotations (PEP 563), so the
-        # alias objects are only reachable after the string is resolved.
+        # Eval_str: the router module defers its annotations (PEP 563), so the alias objects are only
+        # reachable after the string is resolved.
         for name, param in inspect.signature(handler, eval_str=True).parameters.items():
             for meta in getattr(param.annotation, "__metadata__", ()):
                 if isinstance(meta, DependsParam) and meta.dependency is not None:
@@ -136,8 +135,8 @@ class TestCrashRecovery:
     """
 
     async def test_crash_recovery_requeues_the_in_flight_batch(self, job_store):
-        # Persisted state exactly as a hard kill during the first engine call leaves it:
-        # root popped (frontier empty), recorded as in_flight, nothing visited, RUNNING.
+        # Persisted state exactly as a hard kill during the first engine call leaves it: root popped (frontier
+        # empty), recorded as in_flight, nothing visited, RUNNING.
         job = job_store.create(GRAPH_ROOT, CrawlPolicy())
         job.frontier = []
         job.in_flight = [FrontierEntry(url=canonical(GRAPH_ROOT), depth=0)]
@@ -175,8 +174,8 @@ class TestCrashRecovery:
         assert finished.stats["total_discovered"] == 0
 
     async def test_normal_completion_clears_in_flight(self, client, job_store):
-        # A healthy run must not leave a stale in_flight that would double-crawl on a
-        # later resume: the batch is cleared in the same save that records its results.
+        # A healthy run must not leave a stale in_flight that would double-crawl on a later resume: the batch
+        # is cleared in the same save that records its results.
         job = await run_scripted_api_job(client, job_store, GRAPH_ROOT, results=_root_child_results())
         assert job.visited == {canonical(GRAPH_ROOT), canonical(GRAPH_CHILD)}
         assert job.in_flight == []
@@ -224,13 +223,7 @@ class TestCrashRecovery:
 class TestWholeSiteJobExecution:
     def test_engine_payload_builder_disables_recursion_and_preserves_limits(self, job_store):
         root = GRAPH_ROOT
-        # The limit block is stated once and the one field this test is about is
-        # the only thing that varies. Restated per call it is how a limit got
-        # "preserved" in the name of the test while the expectation quietly
-        # changed the value it was preserving. Named keywords rather than a
-        # splatted dict: the values are heterogeneous (an int depth, a float
-        # rps), so a mapping carries a union the checker cannot spread back onto
-        # ``job_limits``' parameters.
+        # The limit block is stated once and the one field this test is about is the only thing that varies.
 
         def limits(*, max_depth: int = 2) -> dict:
             return job_limits(
@@ -250,16 +243,13 @@ class TestWholeSiteJobExecution:
         payload = job_runner._job_engine_payload(job, batch)
         assert payload == {
             "urls": [root, GRAPH_CHILD],
-            # Depth zero and nothing else moved: this builder exists to stop the
-            # per-call max_depth from re-expanding a whole-site job's frontier.
+            # Depth zero and nothing else moved: this builder exists to stop the per-call max_depth from
+            # re-expanding a whole-site job's frontier.
             "policy": read_policy(limits(max_depth=0)),
             "url": root,
             "headers": {},
             "request_profile": {},
         }
-        # ``job.policy`` is the stored wire shape (a row is JSON), so the claim
-        # is read-edge to read-edge: what the row holds must resolve to the
-        # policy the job was created with.
         assert read_policy(job.policy) == read_policy(limits())
 
     async def test_run_job_uses_engine_payload_builder(self, client, job_store):
@@ -341,8 +331,8 @@ class TestWholeSiteJobExecution:
         assert len(job.results) == 2
 
     async def test_total_failed_counts_once_per_failed_item(self, client, job_store):
-        # Batch 2 submits b and c, both fail: the per-item `failed` counter is
-        # cumulative, so adding it inside the loop once reported 1+2=3.
+        # Batch 2 submits b and c, both fail: the per-item `failed` counter is cumulative, so adding it inside
+        # the loop once reported 1+2=3.
         job = await run_scripted_api_job(
             client,
             job_store,
@@ -429,8 +419,8 @@ class TestTransientFailureRequeue:
         root = GRAPH_ROOT
         engine = ScriptedExecute(_flaky(root, "network_error", "dns_error", lands_on=_canned_result(root)))
         job = await run_api_job(client, job_store, root, engine)
-        # The two early failures must not have finalized the page; the crawl
-        # retried and the single committed outcome is the eventual success.
+        # The two early failures must not have finalized the page; the crawl retried and the single committed
+        # outcome is the eventual success.
         assert job.status == JobStatus.COMPLETED
         assert engine.attempts[root] == 3
         assert job.visited == {canonical(root)}
@@ -443,8 +433,8 @@ class TestTransientFailureRequeue:
         root = GRAPH_ROOT
         engine = ScriptedExecute(_flaky(root, "network_error"))
         job = await run_api_job(client, job_store, root, engine)
-        # A permanently-flaky page is attempted exactly the cap (not forever, not
-        # once), then recorded as a terminal failure so the whole-site job can end.
+        # A permanently-flaky page is attempted exactly the cap (not forever, not once), then recorded as a
+        # terminal failure so the whole-site job can end.
         assert job.status == JobStatus.COMPLETED
         assert engine.attempts[root] == self._CAP
         assert job.visited == {canonical(root)}
@@ -526,8 +516,8 @@ class TestTransientFailureRequeue:
             GRAPH_ROOT,
             ScriptedExecute(results=[_canned_result(GRAPH_ROOT, raw_links=[empty], links=[])]),
         )
-        # The string link rides in a second result so a regression that queues
-        # raw values is observable before completion too.
+        # The string link rides in a second result so a regression that queues raw values is observable before
+        # completion too.
         assert await _wait_status(job_store, job_id, {"completed", "failed"}) == "completed"
         job = job_store.load(job_id)
         assert "http://evil.test/x" not in job.visited
@@ -657,8 +647,8 @@ class TestWholeSiteRedirectedUrlResolution:
 
         async def fake_execute_crawl(payload, *, settings=None, shutdown_event=None, **kwargs):
             call_count["n"] += 1
-            # The engine reports the item keyed by its own URLs; the frontier
-            # URL is the ORIGINAL (pre-redirect) one.
+            # The engine reports the item keyed by its own URLs; the frontier URL is the ORIGINAL
+            # (pre-redirect) one.
             return {
                 "results": [
                     engine_result(
@@ -680,8 +670,8 @@ class TestWholeSiteRedirectedUrlResolution:
 
         finished = job_store.load(job_id)
         assert finished is not None
-        # The content must land in job.results exactly once (success), not be
-        # re-queued until retries exhaust and then dropped.
+        # The content must land in job.results exactly once (success), not be re-queued until retries exhaust
+        # and then dropped.
         assert len(finished.results) == 1, f"results={finished.results}"
         assert finished.results[0]["status"] == "success", finished.results[0]
         assert finished.stats.get("total_failed", 0) == 0, finished.stats
@@ -768,9 +758,8 @@ class TestJobStateWaitContract:
         runner = drive_job(job_id, job_store)
         try:
             waiter = asyncio.ensure_future(_wait_status(job_store, job_id, {"completed", "failed"}))
-            # One turn is enough and not a guess: the waiter task cannot run at
-            # all until the loop is handed back, and once it runs it reads a
-            # `pending` row whose claim is still gated.
+            # One turn is enough and not a guess: the waiter task cannot run at all until the loop is handed
+            # back, and once it runs it reads a `pending` row whose claim is still gated.
             await asyncio.sleep(0)
             assert not waiter.done(), "the wait returned before the job moved"
             assert job_store.load(job_id).status is JobStatus.PENDING
@@ -868,9 +857,8 @@ class TestJobControlOverRunner:
         del_resp = await client.delete(f"/v1/jobs/{job_id}")
         assert del_resp.status_code == 200
         release.set()
-        # The delete cancels the runner task; the wait is on the registry, not
-        # on a pause that might or might not be long enough for the
-        # cancellation to be delivered.
+        # The delete cancels the runner task; the wait is on the registry, not on a pause that might or might
+        # not be long enough for the cancellation to be delivered.
         await await_until(
             lambda: not job_runner.is_running(job_id),
             "the deleted job is still registered as running",
@@ -896,9 +884,6 @@ class TestJobControlTransitions:
 
         job = job_store.create("http://example.com/", CrawlPolicy())
         if seed_terminal:
-            # Through the control plane, not ``save``: ``save`` no longer writes
-            # status, so seeding a terminal state any other way would leave the
-            # row PENDING and the test would be asserting the wrong transition.
             job_store.set_status(job.job_id, JobStatus.RUNNING, expected=JobStatus.PENDING)
             job_store.set_status(job.job_id, JobStatus.COMPLETED, expected=JobStatus.RUNNING)
         await run_job_control_test(service_app(), job_store, job.job_id, action, expected)
@@ -908,8 +893,8 @@ class TestJobControlTransitions:
         await self._control("invalid_action", 422)
 
     async def test_main_job_control_cancel_completed(self):
-        # Cancel from a terminal state is a state conflict (409), not a
-        # shape error (422) — the request shape is valid, the transition isn't.
+        # Cancel from a terminal state is a state conflict (409), not a shape error (422) — the request shape
+        # is valid, the transition isn't.
         await self._control("cancel", 409, seed_terminal=True)
 
     async def test_main_job_control_resume_not_paused(self):
@@ -934,9 +919,6 @@ class TestEveryVisitedUrlHasAnEnvelope:
         from tests._job_harnesses import _execution_payload, _execution_urls
 
         async def _execute(payload_dict, *, settings, shutdown_event):
-            # Batch 1 submits /a, which discovers /gone; batch 2 submits /gone and
-            # this time the engine answers with nothing for it -- the shape that
-            # used to produce an unnameable gap in the job's results.
             urls = await _execution_urls(payload_dict, None)
             answered = [u for u in urls if not u.raw.endswith("/gone")]
             results = [_canned_result(u, links=["http://example.test/gone"]) for u in answered]
@@ -989,8 +971,8 @@ class TestTheRunnerClaim:
         return job, engine
 
     async def test_a_row_already_running_is_left_alone_by_a_second_runner(self, job_store):
-        # The create/recovery entrance path: whoever loaded a RUNNING row is not
-        # the owner, and an owner it did not become means no work.
+        # The create/recovery entrance path: whoever loaded a RUNNING row is not the owner, and an owner it
+        # did not become means no work.
         job = self._seeded(job_store)
         assert job_store.set_status(job.job_id, JobStatus.RUNNING, expected=JobStatus.PENDING)
         engine = ScriptedExecute(results=[_canned_result(GRAPH_ROOT)])
@@ -1002,8 +984,8 @@ class TestTheRunnerClaim:
         assert job_store.load(job.job_id).status is JobStatus.RUNNING
 
     async def test_resume_still_runs_the_row_it_flipped_itself(self, job_store):
-        # The flip is the claim on this path, and only the process that performed
-        # it may run the job -- which is what distinguishes it from the case above.
+        # The flip is the claim on this path, and only the process that performed it may run the job -- which
+        # is what distinguishes it from the case above.
         job, _engine = self._paused_after_claim(job_store)
 
         outcome = await job_runner.resume_job(
@@ -1015,8 +997,8 @@ class TestTheRunnerClaim:
         assert job_store.load(job.job_id).visited == {canonical(GRAPH_ROOT)}
 
     async def test_a_row_stopped_between_the_read_and_the_claim_is_not_crawled(self, job_store):
-        # The runner read RUNNING; by the time it claimed, the row had stopped.
-        # A stale read must not outvote what the store says now.
+        # The runner read RUNNING; by the time it claimed, the row had stopped. A stale read must not outvote
+        # what the store says now.
         job, engine = self._paused_after_claim(job_store)
         raced = _RunnerReadRunsBeforeTheStore(job_store)
 

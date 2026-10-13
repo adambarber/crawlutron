@@ -31,8 +31,8 @@ class TestDNSRebindingProtection:
         """The HTTP fetcher must connect to the pinned IP and forward the
         original Host header (so virtual-host routing is preserved)."""
         block_private_targets(monkeypatch)
-        # A real pooled client over a scripted transport: what is asserted below
-        # is the request httpx actually built, not a stand-in's account of it.
+        # A real pooled client over a scripted transport: what is asserted below is the request httpx actually
+        # built, not a stand-in's account of it.
         requested: list[httpx.Request] = []
         client = scripted_transport_client(
             [MockResponse(200, {"content-type": "text/html"}, b"<html></html>")],

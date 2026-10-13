@@ -170,8 +170,8 @@ class TestKatanaDiscovery:
         assert endpoints == [{"url": "/api/x"}]
 
     def test_extract_js_endpoints_empty_html(self):
-        # The helper is a thin untyped wrapper that defaults host_policy, so
-        # None is a supported input rather than a suppressed type error.
+        # The helper is a thin untyped wrapper that defaults host_policy, so None is a supported input rather
+        # than a suppressed type error.
         assert extract_js_endpoints("") == []
         assert extract_js_endpoints(None) == []
 
@@ -181,8 +181,8 @@ class TestKatanaDiscovery:
         assert endpoints == []
 
     def test_extract_html_markdownify_fallback(self):
-        # Trafilatura rejects an empty body; the markdownify fallback runs
-        # (and may still yield nothing, falling through to plain-text).
+        # Trafilatura rejects an empty body; the markdownify fallback runs (and may still yield nothing,
+        # falling through to plain-text).
         result = extract_html("<html><body></body></html>", None)
         assert isinstance(result, ExtractedContent)
 
@@ -203,9 +203,7 @@ class TestKatanaDiscovery:
         assert detect_pagination(html, canonical("https://example.com/")) is None
 
     def test_detect_pagination_drops_non_http_href(self):
-        # The href is attacker-controlled HTML: a non-http(s) rel=next must not
-        # escape into next_page_url. Egress filtering belongs at the producer
-        # so every consumer is covered, not just the ones that remember.
+        # The href is attacker-controlled HTML: a non-http(s) rel=next must not escape into next_page_url
         for bad in ("javascript:alert(1)", "data:text/html,<x>", "mailto:a@b.c"):
             html = f'<a rel="next" href="{bad}">next</a>'
             assert detect_pagination(html, canonical("https://example.com/list")) is None
@@ -217,8 +215,8 @@ class TestKatanaDiscovery:
         ) == canonical("https://example.com/p2")
 
     def test_detect_pagination_protocol_relative_resolves(self):
-        # //evil.com/x resolves against the page URL to https, so it survives
-        # the scheme filter exactly like the HTTP path already allowed.
+        # //evil.com/x resolves against the page URL to https, so it survives the scheme filter exactly like
+        # the HTTP path already allowed.
         assert detect_pagination(
             '<a rel="next" href="//example.com/p2">n</a>', canonical("https://example.com/list")
         ) == canonical("https://example.com/p2")
@@ -295,11 +293,6 @@ class TestExtractionMethods:
         calls = []
 
         def fake_html(html, url, css_selector=None, xpath=None):
-            # The selector pair is part of the real `extract_html` contract:
-            # `extract_content` owns the HTML branch and hands the pair down
-            # rather than dispatching on it itself, so a double that did not
-            # accept it would be modelling a narrower function than the one
-            # production routes through.
             calls.append("html")
             return ExtractedContent("html", "html")
 
@@ -354,9 +347,8 @@ async def test_extract_document_timeout_is_enforced(monkeypatch):
     environment, so the suite's in-process sleep patch is irrelevant to it --
     which is why this test never actually needed real sleeps.
     """
-    # The worker subprocess hangs; a deadline short enough to notice is the
-    # whole point of the test, so it is passed in rather than written onto the
-    # module the call lives in.
+    # The worker subprocess hangs; a deadline short enough to notice is the whole point of the test, so it is
+    # passed in rather than written onto the module the call lives in.
     monkeypatch.setenv("TEST_MARKITDOWN_HANG", "1")
     monkeypatch.setenv("CRAWLUTRON_TEST_HOOKS", "1")
     settings = settings_with(extraction_doc_timeout=0.01)
@@ -375,10 +367,8 @@ async def test_extract_document_child_death_returns_empty(monkeypatch):
     monkeypatch.setenv("CRAWLUTRON_TEST_HOOKS", "1")
     assert_extraction_empty(extract_document(b"%PDF-1.4 fake", "http://example.com/x.pdf"))
 
-    # Is per worker, not process-global: the pool is persistent and sized
-    # above one, so an idle worker from an earlier extraction legitimately
-    # stays alive. The dead worker must be reaped (no zombie) and no worker
-    # may be left orphaned mid-task.
+    # Is per worker, not process-global: the pool is persistent and sized above one, so an idle worker from an
+    # earlier extraction legitimately stays alive.
     for alive, reaped, busy in ext_mod.DOC_POOL.health():
         assert not busy, "worker left marked busy after a child death"
         assert alive or reaped, "zombie worker left in the pool after a child death"
@@ -425,16 +415,14 @@ async def test_extract_document_normal_works():
     result = extract_document(b"name,score\nada,10\n", "http://example.com/data.csv")
 
     assert result.markdown is not None
-    # "ada" only reaches the reply if markitdown really read these bytes, and
-    # it only gets read in a worker subprocess.
+    # "ada" only reaches the reply if markitdown really read these bytes, and it only gets read in a worker
+    # subprocess.
     assert "ada" in result.markdown
     assert ext_mod.DOC_POOL.pids(), "no worker process served the conversion"
 
 
-# ============================================================
-# Document extraction runs in a process that is
+# ============================================================ Document extraction runs in a process that is
 # forcefully killed on timeout (no lingering zombie / stalled pool).
-# ============================================================
 
 
 async def test_extract_document_process_pool_isolation(monkeypatch):
@@ -468,8 +456,7 @@ async def test_extract_document_process_pool_normal_works():
 
     # Don't set TEST_MARKITDOWN_HANG - normal operation.
     result = extract_document(b"%PDF-1.4 fake", "http://example.com/x.pdf")
-    # With fake bytes, markitdown returns something (or None for unparseable);
-    # the key is it doesn't crash.
+    # With fake bytes, markitdown returns something (or None for unparseable); the key is it doesn't crash.
     assert isinstance(result, ext_mod.ExtractedContent)
 
 
@@ -490,10 +477,7 @@ async def test_extract_document_recovers_after_timeout(monkeypatch):
     assert hung.text is None
     monkeypatch.delenv("TEST_MARKITDOWN_HANG", raising=False)
 
-    # Second call (same process / shared semaphore) must succeed. Use a normal
-    # timeout so the worker subprocess has time to spawn + import on spawn
-    # platforms (macOS) -- the point is that the killed first worker did not
-    # stall the bounded extraction concurrency.
+    # Second call (same process / shared semaphore) must succeed.
     monkeypatch.setenv("TEST_MARKITDOWN_OUTPUT", "## Recovered")
     monkeypatch.setenv("CRAWLUTRON_TEST_HOOKS", "1")
     recovered = extract_document(
@@ -720,9 +704,8 @@ class TestExtractionEdges:
 
 class TestExtractionGaps:
     def test_nested_anchor(self):
-        # Real HTML parsers (lxml) flatten illegally-nested anchors into
-        # siblings, so both distinct hrefs are discovered as separate links
-        # rather than the inner one being swallowed by the outer.
+        # Real HTML parsers (lxml) flatten illegally-nested anchors into siblings, so both distinct hrefs are
+        # discovered as separate links rather than the inner one being swallowed by the outer.
         links, _, _ = extract_discovered_links(
             '<a href="/x">outer <a href="/y">inner</a></a>',
             canonical("http://e.com/"),
@@ -829,8 +812,8 @@ def test_selector_on_non_html_is_reported_not_silently_dropped(caplog):
     assert record.css_selector == "#agenda", record.__dict__
     assert record.content_type == "application/pdf", record.__dict__
 
-    # The same call against HTML does narrow, and so must NOT warn -- otherwise
-    # this passes by warning unconditionally and proves nothing.
+    # The same call against HTML does narrow, and so must NOT warn -- otherwise this passes by warning
+    # unconditionally and proves nothing.
     caplog.clear()
     html = "<html><body><div id='agenda'>item one</div><p>filler</p></body></html>"
     with caplog.at_level(logging.WARNING, logger="app.extraction.content"):
@@ -848,12 +831,7 @@ def test_selector_on_non_html_is_reported_not_silently_dropped(caplog):
     assert "extraction_selector_ignored_non_html" not in caplog.text, caplog.text
 
 
-# Issue #77. These ten are contracts in their own right -- each has a signature, a
-# docstring and tests of its own -- and none of them is reachable from outside the
-# module because they were named private. The four existing public entry points are
-# *compositions* of these, so "just call extract_content instead" is not a migration:
-# it cannot express a classifier case, and it drags a whole extraction run in to
-# assert one predicate.
+# Issue #77.
 EXTRACTION_STAGE_CONTRACTS = (
     "is_html",
     "looks_like_document",

@@ -187,8 +187,8 @@ class TestGcNeverUnlinksASpillStillInUse:
         spill = _ResultSpill()
         path = spill.path
         spill.close()
-        # Close() unlinks an owned spill, so recreate one to stand in for a
-        # spill abandoned by a worker that died without closing it.
+        # Close() unlinks an owned spill, so recreate one to stand in for a spill abandoned by a worker that
+        # died without closing it.
         with open(path, "w", encoding="utf-8") as handle:
             handle.write('{"i":0}\n')
         self._age(path, 7200)

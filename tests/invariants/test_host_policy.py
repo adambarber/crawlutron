@@ -46,10 +46,8 @@ _HOST_POLICY_VALIDATORS = frozenset(
     }
 )
 
-#: Method calls that admit under the receiver's OWN embedded policy, so no
-#: policy argument appears at the call site. ``NormalizedUrl.resolve`` is the
-#: one such door on URL values in this tree (``Path.resolve`` hits the same
-#: leaf but its result is type-invalid as a URL, so it cannot launder one).
+#: Method calls that admit under the receiver's OWN embedded policy, so no policy argument appears at the call
+#: site.
 _HOST_POLICY_SELF_VALIDATED_CALLS = frozenset({"resolve"})
 
 
@@ -62,17 +60,7 @@ _HOST_POLICY_URL_FIELDS = frozenset({"url", "raw", "href", "location", "normaliz
 _HOST_POLICY_NAMES = frozenset({"policy", "host_policy"})
 
 
-#: Attribute spellings that hold a ``HostPolicy``. Separate from
-#: ``_HOST_POLICY_NAMES`` because a *parameter* called ``policy`` conventionally
-#: receives one of these objects when it is handed to a URL validator, while an
-#: *attribute* called ``_policy`` is usually the crawl policy dict -- so the
-#: attribute rule cannot be the looser one.
-#:
-#: ``_host_policy`` had to be here. The ``self.`` branch below matched
-#: ``self.policy`` and ``self.host_policy`` only, and this codebase writes
-#: ``self._host_policy`` throughout: the rule had never once fired on a method
-#: that validated through the instance's own policy, because it could not see
-#: one. A leading underscore does not change what the attribute holds.
+#: Attribute spellings that hold a ``HostPolicy``.
 _HOST_POLICY_ATTRS = frozenset({"policy", "host_policy", "_host_policy"})
 
 
@@ -184,9 +172,6 @@ def _host_policy_expression_state(
     if isinstance(node, ast.Constant):
         return isinstance(node.value, str) and node.value.lower().startswith(("http://", "https://")), False
     if isinstance(node, ast.Attribute) and _reads_url_field(node.value, node.attr, url_names):
-        # Reading a URL field (``.raw`` included) off a name the walk already
-        # knows is policy-validated is the sanctioned text projection: the
-        # value was admitted before the text was taken, so the text is clean.
         receiver_validated = isinstance(node.value, ast.Name) and node.value.id in validated_names
         return True, receiver_validated
     if (
@@ -216,10 +201,8 @@ def _host_policy_expression_state(
             )
         return False, False
     if isinstance(node, (ast.IfExp, ast.BoolOp)):
-        # A ternary is only as safe as its unsafe branch, and so is ``a or b``:
-        # URL-shaped if any branch is, validated only when EVERY URL-shaped
-        # branch is. A non-URL branch (``... else None``) is neutral, not a
-        # bypass -- it cannot carry a URL at all.
+        # A ternary is only as safe as its unsafe branch, and so is ``a or b``: URL-shaped if any branch is,
+        # validated only when EVERY URL-shaped branch is. A non-URL branch (``...
         branches = (node.body, node.orelse) if isinstance(node, ast.IfExp) else tuple(node.values)
         states = [
             _host_policy_expression_state(tree, branch, url_names, validated_names, policy_names)
@@ -277,12 +260,8 @@ def _url_return_shapes(function: ast.AST, tree: ast.AST) -> bool:
         return False
     arguments = (*function.args.posonlyargs, *function.args.args, *function.args.kwonlyargs)
     url_names = {argument.arg for argument in arguments if _url_parameter_name(argument.arg)}
-    # A parameter annotated ``NormalizedUrl`` arrives admitted: the value
-    # object's constructor is the sole validation chokepoint, so the policy
-    # was applied at the caller before this function was entered. The walk
-    # gives such a parameter the same "validated" verdict it gives a value
-    # admitted inside the body, so ``.raw``/``.host``/... reads off it count
-    # as the sanctioned text projection instead of an unvalidated URL.
+    # The walk gives such a parameter the same "validated" verdict it gives a value admitted inside the body,
+    # so ``.raw``/``.host``/...
     admitted = {
         argument.arg
         for argument in arguments
@@ -433,10 +412,7 @@ URL_RETURNING_HELPERS_REQUIRE_HOST_POLICY = Rule(
         "from app.models.normalized_url import admit_or_none\n"
         "def rebuild(parts, *, policy: HostPolicy):\n"
         "    return admit_or_none(urlunsplit(parts), policy=policy)\n",
-        # A parameter annotated NormalizedUrl is admitted at its own
-        # construction boundary -- the sole chokepoint -- so projecting .raw
-        # from it inside a helper is the sanctioned text projection, not a
-        # policy bypass. The policy travels with the type, not a parameter.
+        # A parameter annotated NormalizedUrl is admitted at its own construction boundary -- the sole
         "def connect(url: NormalizedUrl, headers: dict[str, str]):\n    return url.raw, dict(headers)\n",
     ),
 )

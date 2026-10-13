@@ -155,8 +155,8 @@ class LoopGuardWatchStore(WatchStore):
         _refuse_on_loop("WatchStore.record_check")
         return super().record_check(watch_id, **kwargs)
 
-    # Inherited from ``CoordinationStore`` rather than written here, and still
-    # covered: the base's ``close`` takes the same file-wide lock as a write.
+    # Inherited from ``CoordinationStore`` rather than written here, and still covered: the base's ``close``
+    # takes the same file-wide lock as a write.
     def close(self):
         _refuse_on_loop("WatchStore.close")
         return super().close()
@@ -209,13 +209,8 @@ class TestJobEndpointsStayOffTheLoop:
     """
 
     async def test_the_whole_job_endpoint_surface_stays_off_the_loop(self, jobs_client, loop_guard_store):
-        # The crawl is held open across every assertion. Without it this test
-        # raced its own background task: POST /v1/jobs starts the runner, the
-        # fake engine returned instantly, and the job reached COMPLETED before
-        # the cancel arrived -- so ``control`` answered 409 and the suite went
-        # red at random under full-suite load while passing in isolation. A test
-        # that only fails when the machine is busy is asserting on timing, not
-        # on the off-the-loop behaviour it is named for.
+        # The crawl is held open across every assertion. A test that only fails when the machine is busy is
+        # asserting on timing, not on the off-the-loop behaviour it is named for.
         hang = asyncio.Event()
         job_runner.reset_job_runner()
         job_runner.install_execute_crawl(ScriptedExecute(results=[_canned_result(_ROOT)], hang=hang))
@@ -241,8 +236,8 @@ class TestJobEndpointsStayOffTheLoop:
             assert deleted.status_code == 200, deleted.text
             assert await _off_loop(loop_guard_store.load, job_id) is None
         finally:
-            # Release the held crawl before the store fixture tears down, or the
-            # background task outlives the loop and writes to a closed DB.
+            # Release the held crawl before the store fixture tears down, or the background task outlives the
+            # loop and writes to a closed DB.
             hang.set()
             job_runner.reset_job_runner()
 
@@ -292,9 +287,8 @@ class TestWatchSurfaceStaysOffTheLoop:
             settings=CrawlerSettings.from_mapping({}),
         )
 
-        # A refused connection is the whole check: this test is about where the
-        # store is read and written, and nothing else has to succeed for the
-        # verdict to be recorded.
+        # A refused connection is the whole check: this test is about where the store is read and written, and
+        # nothing else has to succeed for the verdict to be recorded.
         outcomes = await sweeper.sweep_once(now=60.0)
 
         assert outcomes, "the due watch was not checked at all"
@@ -449,10 +443,6 @@ class TestSingleShotResultStoreStaysOffTheLoop:
         from app.api.crawl_endpoint import get_crawl_result
 
         await _off_loop(loop_guard_store.create_single_shot, "req-1", _ROOT, {"strategies": []})
-        # Completed, not fresh: this test is about *where* the read happens, and
-        # a still-pending job would make it a test of the status contract as
-        # well -- two questions, one assertion, and the second one was
-        # answering the wrong way.
         await _off_loop(loop_guard_store.set_status, "req-1", JobStatus.COMPLETED, expected=JobStatus.PENDING)
         await _off_loop(result_store.put, "req-1", _stored_response("req-1"))
 

@@ -29,8 +29,8 @@ def _spy_on_every_teardown(monkeypatch, http_closer) -> list[str]:
 
         return _close
 
-    # Start from the neutraliser: the set of closers the lifespan reaches is
-    # production's list, and this test only over-runs the four it is counting.
+    # Start from the neutraliser: the set of closers the lifespan reaches is production's list, and this test
+    # only over-runs the four it is counting.
     stub_heavy_teardown(monkeypatch)
     monkeypatch.setattr(http_mod, "close_async_http_client", http_closer)
     monkeypatch.setattr(http_mod, "close_cffi_session", _record("cffi"))

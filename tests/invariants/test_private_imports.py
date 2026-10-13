@@ -45,15 +45,12 @@ from tests.rules import Registry, Rule
 
 _TESTS_DIR = REPO_ROOT / "tests"
 
-# Conftest is where the harness reaches the process lifecycle it started, and it is
-# the one file whose imports are plumbing rather than assertions. It is still gated
-# -- an undeclared weld there is just as invisible -- but it is where the declared
-# lifecycle rows legitimately live, so the name is worth naming in the failure text.
+# Conftest is where the harness reaches the process lifecycle it started, and it is the one file whose imports
+# are plumbing rather than assertions.
 _LIFECYCLE_OWNER = "conftest"
 
-# The three spellings by which the suite substitutes a private name. All three are in
-# live use: ``monkeypatch.setattr`` (112 sites), ``unittest.mock.patch.object`` (3)
-# and ``monkeypatch.delattr`` (1).
+# The three spellings by which the suite substitutes a private name. All three are in live use:
+# ``monkeypatch.setattr`` (112 sites), ``unittest.mock.patch.object`` (3) and ``monkeypatch.delattr`` (1).
 _PATCH_CALLS = frozenset({"setattr", "object", "delattr"})
 
 
@@ -133,17 +130,14 @@ PRIVATE_IMPORT_LEDGER = Rule(
     ),
     scope=lambda *, exclude: trees_under(_TESTS_DIR),
     bite=lambda: (
-        # An undeclared weld: the gate is the only thing standing between this and
-        # a test whose import is invisible to a reviewer of the module it reaches.
-        # The name has to be one the ledger does not already hold, or the proof
-        # fires on nothing -- which is the failure this rule is meant to prevent.
+        # An undeclared weld: the gate is the only thing standing between this and a test whose import is
+        # invisible to a reviewer of the module it reaches.
         "from app.transport.browser import _undeclared_probe_name\n",
-        # And the `import x.y` / `x.y._name` form, which reaches the same private
-        # name through a module object instead of a from-import.
+        # And the `import x.y` / `x.y._name` form, which reaches the same private name through a module object
+        # instead of a from-import.
         "import app.orchestration.engine\n\nassert app.orchestration.engine._undeclared_probe\n",
-        # And the string form, which is how the suite actually substitutes most of
-        # what it reaches: the private name is a literal argument, so a detector
-        # reading imports and attribute reads sees nothing at all.
+        # And the string form, which is how the suite actually substitutes most of what it reaches: the
+        # private name is a literal argument, so a detector reading imports and attribute reads sees nothing
         "import app.orchestration.engine as engine\n\n"
         'monkeypatch.setattr(engine, "_undeclared_probe_name", lambda: None)\n',
     ),
@@ -154,11 +148,10 @@ PRIVATE_IMPORT_LEDGER = Rule(
         "from app.extraction.content import shutdown_doc_extraction_executor\n",
         # A name from outside app/ is not this rule's business.
         "from tests.private_import_ledger import LEDGER\n",
-        # A public name through a bound module object is the same name publicly,
-        # so it needs no row either.
+        # A public name through a bound module object is the same name publicly, so it needs no row either.
         "import app.extraction.content as extraction\n\nvalue = extraction.extract_content\n",
-        # And the same exemption for the string form: a private name on a *test*
-        # module, patched by string, is the suite substituting its own double.
+        # And the same exemption for the string form: a private name on a *test* module, patched by string, is
+        # the suite substituting its own double.
         "import tests.membership_gate as gate\n\n"
         'monkeypatch.setattr(gate, "_local_probe_name", lambda: None)\n',
     ),
@@ -201,8 +194,7 @@ def test_ledger_rows_all_correspond_to_a_real_import():
     )
 
 
-# ---------------------------------------------------------------------------
-# app/ reaching into app/
+# --------------------------------------------------------------------------- app/ reaching into app/
 # ---------------------------------------------------------------------------
 
 _APP_DIR = REPO_ROOT / "app"
@@ -287,9 +279,8 @@ def test_app_weld_rows_all_correspond_to_a_real_reach():
     )
 
 
-# ---------------------------------------------------------------------------
-# the harness reaches through a door, not through the state object
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------- the harness reaches through a
+# door, not through the state object
 
 _CONFTEST = _TESTS_DIR / "conftest.py"
 

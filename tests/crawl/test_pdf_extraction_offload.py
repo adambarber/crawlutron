@@ -61,8 +61,8 @@ async def _render_pdf(monkeypatch):
     renderer = _build_pdf_renderer(monkeypatch, page)
 
     def blocking_pdf_extractor(url) -> str:
-        # The extractor seam takes the admitted value: the value object
-        # carries the policy, and a downloader projects .raw itself.
+        # The extractor seam takes the admitted value: the value object carries the policy, and a downloader
+        # projects .raw itself.
         assert url == _PDF_VALUE
         return "extracted pdf text"
 

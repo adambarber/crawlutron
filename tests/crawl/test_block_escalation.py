@@ -30,8 +30,8 @@ class TestBlockAutoEscalation:
                 "bot_challenge_detected",
                 id="cloudflare",
             ),
-            # The regression guard: a busy CAPTCHA interstitial still carries
-            # text, so quality_score may be > 0 and escalation must still happen.
+            # The regression guard: a busy CAPTCHA interstitial still carries text, so quality_score may be >
+            # 0 and escalation must still happen.
             pytest.param(
                 b"<html><body><h1>Verify you are human</h1><p>Some boilerplate text.</p></body></html>",
                 b"<html><body>The actual article body.</body></html>",
@@ -43,11 +43,8 @@ class TestBlockAutoEscalation:
     async def test_challenge_page_escalates_to_next_strategy(
         self, base_policy, challenge_body, real_body, blocked_classification
     ):
-        # First strategy hits a challenge page; second (escalated) gets real
-        # content. Stated as a sequence so the transition is the fixture. The
-        # three bodies are three shapes of the same page (plain CAPTCHA, provider
-        # interstitial, CAPTCHA carrying text), so the escalation rule is stated
-        # once and the data says which page it was proved on.
+        # First strategy hits a challenge page; second (escalated) gets real content. Stated as a sequence so
+        # the transition is the fixture.
         fetcher = sequenced_fetcher(
             [
                 (200, challenge_body, "text/html"),

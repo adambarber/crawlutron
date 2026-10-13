@@ -5,11 +5,6 @@ import pytest
 from tests.chokepoint_walks import TESTS_DIR, local_nodes, nodes_of, trees_under
 
 FUNCTION_TYPES = (ast.FunctionDef, ast.AsyncFunctionDef)
-# A funnel is not always a function: a `multiprocessing.Process` stand-in is a
-# class, and the walk has to reach classes or a class-shaped funnel cannot be
-# detected at all -- the declaration file agrees with itself that it holds
-# nothing, which is the same failure mode as the walk stopping at the first
-# `def`.
 NESTABLE_TYPES = (*FUNCTION_TYPES, ast.ClassDef)
 
 FUNNELS = [
@@ -134,15 +129,11 @@ FUNNELS = [
 ]
 
 # Modules that are allowed to *implement* a funnel rather than route through it.
-# The fetcher contract in particular is declared once, in the module that owns
-# the factories; a copy anywhere else re-asserts production's own defaults and
-# is the drift this file exists to catch.
 FUNNEL_HOME_MODULES = frozenset(
     {
         "_fetcher_factories.py",
-        # The fetchers, the crawls and the doubles are declared once, in the
-        # modules that own them. A copy in any other module re-asserts the
-        # contract, and that is the drift these detectors exist to catch.
+        # The fetchers, the crawls and the doubles are declared once, in the modules that own them. A copy in
+        # any other module re-asserts the contract, and that is the drift these detectors exist to catch.
         "_assertions.py",
         "_process_doubles.py",
         "_lifespan_doubles.py",
@@ -431,8 +422,8 @@ def _lifespan_teardown(node):
     forgot. ``stub_heavy_teardown`` derives the set instead.
     """
     if _has_call(node, "stub_heavy_teardown"):
-        # Specialising the neutraliser is routing through it, not inlining it:
-        # the set of closers still came from the chokepoint.
+        # Specialising the neutraliser is routing through it, not inlining it: the set of closers still came
+        # from the chokepoint.
         return False
     return any(
         isinstance(child, ast.Call)
@@ -540,10 +531,7 @@ def _clone_funnel_offenders():
             for name, owner, _source in FUNNELS:
                 if node.name == owner or not DETECTORS[name](node):
                     continue
-                # Only the innermost scope that matches is reported. A method
-                # inside a class fires on both nodes, and naming the class too
-                # sends a reader to the class body instead of to the line that
-                # has to change.
+                # Only the innermost scope that matches is reported.
                 if any(DETECTORS[name](inner) for inner, _ in scopes[index + 1 :]):
                     continue
                 offenders.append(f"{path.relative_to(TESTS_DIR)}:{node.lineno}:{name}")

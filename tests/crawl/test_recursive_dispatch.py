@@ -17,11 +17,8 @@ from tests._policy_factories import canonical
 from tests._recursive_harnesses import ContentionFreeGate, drive_recursive_crawl, make_crawl_task
 from tests._result_builders import engine_result, make_engine_result
 
-# The root seed as written, and the value the engine actually holds for it.
-# These are not the same string: normalization strips that trailing slash. The
-# seed used to spell the raw form into `normalized_url`, so the task the worker
-# received was a state the engine cannot produce, and every assertion below was
-# pinned to it. Naming both makes the distinction something a test can see.
+# The root seed as written, and the value the engine actually holds for it. These are not the same string:
+# normalization strips that trailing slash. Naming both makes the distinction something a test can see.
 _ROOT = "http://a/"
 _ROOT_CANONICAL = canonical(_ROOT)
 
@@ -172,10 +169,8 @@ async def test_dispatches_single_page_and_consults_gate():
     spill, scheduler, gate = await _run(jobs, worker)
     assert len(spill.writes) == 1
     assert scheduler.runs == 1
-    # Admission is per-batch weighted, not a stop-the-world pause: the gate is
-    # consulted for a scale and the batch is dispatched anyway. Asserting the
-    # consultation (rather than the absence of a wait that production never
-    # performs) is the part that can actually fail.
+    # Admission is per-batch weighted, not a stop-the-world pause: the gate is consulted for a scale and the
+    # batch is dispatched anyway.
     assert gate.consultations >= 1
     assert gate.scale == 1.0
 
@@ -199,8 +194,8 @@ async def test_expands_frontier_from_discovered_links():
 
 
 async def test_gate_scale_shrinks_batch_but_still_crawls_all():
-    # scale 0.0 forces batch_size to its floor (>=1); every discovered page must
-    # still be crawled, just across more scheduler runs.
+    # scale 0.0 forces batch_size to its floor (>=1); every discovered page must still be crawled, just across
+    # more scheduler runs.
     spill, scheduler, _ = await _run([_task(_ROOT)], _expanding_worker(), gate=ContentionFreeGate(0.0))
     assert len(spill.writes) == 3
     assert scheduler.runs >= 2  # shrunk batches => multiple scheduler runs
@@ -273,10 +268,8 @@ async def test_robots_disallows_initial_job_as_skip(recording_worker):
     assert set(spill.writes[i].normalized_url for i in spill.writes) == {canonical("http://a/blocked")}
 
 
-# ---------------------------------------------------------------------------
-# Result alignment: the spill index must match the job that produced the
-# result, even when tiers interleave or a job fails.
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------- Result alignment: the spill
+# index must match the job that produced the result, even when tiers interleave or a job fails.
 def assert_spill_keeps_job_pairing(spill, jobs) -> None:
     """Every job's result is in its own spill slot, under its own URL.
 
@@ -390,9 +383,8 @@ async def test_in_flight_pages_count_against_the_cap_at_expansion():
         respect_robots=True,
     )
 
-    # Page 3 is the falsifier: the write cap holds under the old reading too
-    # (the dispatch loop rechecks it per batch), so the breach shows one
-    # level earlier -- a page the cap refuses must never reach robots.
+    # Page 3 is the falsifier: the write cap holds under the old reading too (the dispatch loop rechecks it
+    # per batch), so the breach shows one level earlier -- a page the cap refuses must never reach robots.
     assert "http://a/3" not in probed
     assert {r.normalized_url for r in spill.writes.values()} == {
         canonical("http://a/0"),
@@ -419,9 +411,8 @@ async def test_in_flight_pages_count_against_the_cap_at_expansion():
                 job.normalized_url,
                 "browser_pool_exhausted",
                 error="browser_pool_exhausted",
-                # Links from an eternally-exhausted URL are expanded only when
-                # its result is recorded, so the real page rides on the seed's
-                # final permanent failure, not on any re-queue.
+                # Links from an eternally-exhausted URL are expanded only when its result is recorded, so the
+                # real page rides on the seed's final permanent failure, not on any re-queue.
                 discovered_links=[_link("http://a/real")],
             )
         return make_engine_result(job.normalized_url)
@@ -432,15 +423,11 @@ async def test_in_flight_pages_count_against_the_cap_at_expansion():
         jobs,
         worker,
         max_depth=2,
-        # Budget admits the seed's final permanent failure plus exactly one real
-        # page and nothing spare: each phantom re-queue increment consumes a
-        # slot, so under the bug the loop exits before /real is ever popped.
         max_pages=total_attempts,
     )
 
     statuses = {r.normalized_url: r.status for r in spill.writes.values()}
-    # The real page must have been crawled despite the retry budget: it is
-    # discovered only when the seed's permanent failure is finally recorded,
-    # which happens at the tail of the loop.
+    # The real page must have been crawled despite the retry budget: it is discovered only when the seed's
+    # permanent failure is finally recorded, which happens at the tail of the loop.
     assert statuses.get(canonical("http://a/real")) == "success", statuses
     assert statuses.get(canonical("http://a/seed")) == "failed", statuses

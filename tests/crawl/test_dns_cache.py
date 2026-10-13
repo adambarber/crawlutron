@@ -64,8 +64,8 @@ def test_ssrf_check_uses_cache_and_still_blocks_private(monkeypatch):
         "socket.getaddrinfo",
         return_value=[(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("127.0.0.1", 80))],
     ):
-        # The reason matters as much as the type: this has to be the private-address
-        # refusal, not any incidental ValueError the parse could raise.
+        # The reason matters as much as the type: this has to be the private-address refusal, not any
+        # incidental ValueError the parse could raise.
         with pytest.raises(ValueError, match="resolves to private/loopback IP"):
             http_mod.check_ssrf_protection(canonical(f"http://{host}/"))
 
@@ -75,8 +75,8 @@ class TestDnsCacheLocking:
         from app.safety.bounded_ttl import BoundedTTLCache
         from app.transport import pinned_transport as http_mod
 
-        # The chokepoint moved the lock INSIDE the cache: the module no longer
-        # carries a bare dict + lock pair that callers must compose correctly.
+        # The chokepoint moved the lock INSIDE the cache: the module no longer carries a bare dict + lock pair
+        # that callers must compose correctly.
         assert isinstance(http_mod._DNS_CACHE, BoundedTTLCache)
         assert isinstance(http_mod._DNS_CACHE._lock, type(threading.Lock()))
 
@@ -93,8 +93,7 @@ class TestDnsCacheLocking:
 
         errors = run_thread_fanout(worker)
         assert not errors, errors
-        # Cache is consistent (not corrupted by concurrent mutation) and the
-        # winning write is readable.
+        # Cache is consistent (not corrupted by concurrent mutation) and the winning write is readable.
         resolved = http_mod._DNS_CACHE.peek(host)
         assert resolved is not None, "a resolved host must be in the cache"
         assert set(resolved) == {"127.0.0.1"}

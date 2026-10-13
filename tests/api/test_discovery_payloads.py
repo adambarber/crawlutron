@@ -129,8 +129,8 @@ class TestAgentHintsPayload:
         assert "async_mode" in guidance
         assert "same page" in guidance
 
-    # EXAMPLE_POLICIES is imported by the module header; keep a reference so
-    # linting does not flag the re-export while the payload tests cover content.
+    # EXAMPLE_POLICIES is imported by the module header; keep a reference so linting does not flag the
+    # re-export while the payload tests cover content.
     _example_policies = EXAMPLE_POLICIES
 
 
@@ -209,10 +209,8 @@ class TestDiscoveryPayload:
         advertised METHOD /path must resolve against the real app."""
         from app.main import app as service
 
-        # The app mounts its routers via _IncludedRouter, so app.routes does
-        # not expose APIRoute objects; the OpenAPI schema is the surface the
-        # recommendation list mirrors and the one a discovering agent resolves
-        # against.
+        # The app mounts its routers via _IncludedRouter, so app.routes does not expose APIRoute objects; the
+        # OpenAPI schema is the surface the recommendation list mirrors and the one a discovering agent
         live = {
             f"{method.upper()} {route}"
             for route, operations in service.openapi()["paths"].items()

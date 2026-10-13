@@ -36,8 +36,8 @@ def test_negative_deltas_decrement_and_missing_names_read_zero(tmp_path):
     counters.add("crawl_total", 5)
     counters.add("crawl_total", -2)
     assert counters.get("crawl_total") == 3
-    # An unseen name is zero, not None: /metrics must render a full series
-    # rather than omit names that only some workers have touched.
+    # An unseen name is zero, not None: /metrics must render a full series rather than omit names that only
+    # some workers have touched.
     assert counters.get("never_recorded") == 0
 
 

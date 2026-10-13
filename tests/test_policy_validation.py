@@ -104,30 +104,29 @@ class TestPolicyValidation:
         assert NormalizedUrl("http://16843009/", policy=UNRESTRICTED_HOST_POLICY).raw == "http://16843009"
 
     def test_wrapping_integer_to_loopback_blocked(self, monkeypatch):
-        # Oversized integers wrap mod 2**32 on resolvers: this one lands on
-        # 127.0.0.1 and must be rejected, not passed through as a hostname.
+        # Oversized integers wrap mod 2**32 on resolvers: this one lands on 127.0.0.1 and must be rejected,
+        # not passed through as a hostname.
         monkeypatch.setenv("CRAWLUTRON_ALLOW_PRIVATE_TARGETS", "0")
         with pytest.raises(ValueError):
             NormalizedUrl("http://6425673729/", policy=UNRESTRICTED_HOST_POLICY)
 
     def test_registrable_domain_multi_level_suffixes(self):
-        # The hand-rolled 7-entry suffix set collapsed every unlisted
-        # two-part suffix to itself (a.co.jp and b.co.jp both -> co.jp),
-        # sharing gates across unrelated sites. The real PSL keeps them distinct.
+        # The hand-rolled 7-entry suffix set collapsed every unlisted two-part suffix to itself (a.co.jp and
+        # b.co.jp both -> co.jp), sharing gates across unrelated sites. The real PSL keeps them distinct.
         assert registrable_domain("a.co.jp") == "a.co.jp"
         assert registrable_domain("b.co.jp") == "b.co.jp"
         assert registrable_domain("www.example.com.br") == "example.com.br"
         assert registrable_domain("shop.example.gov.in") == "example.gov.in"
 
     def test_registrable_domain_falls_back_without_dataset(self, monkeypatch):
-        # The heuristic fallback must keep working when the dataset is
-        # absent (import safety), even though correctness needs the PSL.
+        # The heuristic fallback must keep working when the dataset is absent (import safety), even though
+        # correctness needs the PSL.
         import sys
 
         import app.models.registrable_domain as suffix_module
 
-        # NOTE: the loader caches the failed None and monkeypatch cannot restore a
-        # never-existing attribute, so save/restore or the cache poisons later tests.
+        # NOTE: the loader caches the failed None and monkeypatch cannot restore a never-existing attribute,
+        # so save/restore or the cache poisons later tests.
         had_psl = "_PSL" in vars(suffix_module)
         old_psl = vars(suffix_module).get("_PSL")
         try:

@@ -18,8 +18,8 @@ from tests.invariants._shared import DefinitionNode, _module_definition_index
 
 _DECISION_NAMES = frozenset(
     {
-        # The constructor is the admission chokepoint since the value object
-        # took over from the egress helpers: calling it IS the decision.
+        # The constructor is the admission chokepoint since the value object took over from the egress
+        # helpers: calling it IS the decision.
         "NormalizedUrl",
         "_validated_url",
         "admit_or_none",
@@ -253,10 +253,7 @@ async def _probe_crawl_endpoint(monkeypatch, tmp_path):
             CrawlRequest(url=_BLOCKED_URL),
             _denied_settings(),
             job_store,
-            # A real result store, not ``object()``. The gate refuses before it
-            # reaches this, and that is the claim under test -- so a stand-in
-            # made true an accident rather than a fact: the call had to be
-            # type-correct for "never touched" to mean anything.
+            # A real result store, not ``object()``.
             CrawlResultStore(tmp_path / "host-policy-results.db"),
             asyncio.Event(),
         ),
@@ -278,8 +275,7 @@ async def _probe_crawl_executor(monkeypatch, tmp_path):
         crawl_executor.execute_crawl(
             {"url": _BLOCKED_URL},
             settings=_denied_settings(),
-            # A real event: the guard refuses before it reads this, and the
-            # parameter is required.
+            # A real event: the guard refuses before it reads this, and the parameter is required.
             shutdown_event=asyncio.Event(),
         ),
         effects,
@@ -305,8 +301,8 @@ async def _probe_jobs_router(monkeypatch, tmp_path):
             JobCreateRequest(root_url=_BLOCKED_URL),
             job_store=job_store,
             settings=_denied_settings(),
-            # A real event: the handler refuses before it reads this, and the
-            # parameter is a required ``asyncio.Event``.
+            # A real event: the handler refuses before it reads this, and the parameter is a required
+            # ``asyncio.Event``.
             shutdown_event=asyncio.Event(),
         ),
         effects,
@@ -430,10 +426,8 @@ async def _probe_async_runner(monkeypatch, tmp_path):
     from app.api import async_crawl_runner
 
     effects = _effects()
-    # The REAL stores, not doubles: a hand-rolled `type("Store", ...)` drifted
-    # the moment a call site moved to the async twin and reported a contract
-    # change as an AttributeError, which is noise, not a finding. A real store
-    # on a tmp path also proves the refusal happens with nothing persisted.
+    # The REAL stores, not doubles: a hand-rolled `type("Store", ...)` drifted the moment a call site moved to
+    # the async twin and reported a contract change as an AttributeError, which is noise, not a finding.
     from app.storage.result_store import CrawlResultStore
     from tests._job_harnesses import make_job_store
 
@@ -650,9 +644,6 @@ async def test_render_probe_fails_when_policy_enforcement_is_removed(monkeypatch
     from app.api import render
 
     def allow(url, *, policy):
-        # The VALUE shape render reads ``.raw``/``.site`` off, with the host
-        # check removed -- a bare string is no longer a stand-in for an admitted
-        # URL, so the double has to admit the denied host rather than skip it.
         from app.models.host_policy import HostPolicy
         from app.models.normalized_url import NormalizedUrl
 

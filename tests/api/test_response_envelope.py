@@ -63,9 +63,8 @@ async def test_the_owner_reports_each_producers_own_version():
     ]
 
 
-#: The keys the browser worker puts in ``CrawlResult.metadata``, pinned so a new
-#: worker key becomes a deliberate decision here rather than a silent
-#: pass-through into ``diagnostics``.
+#: The keys the browser worker puts in ``CrawlResult.metadata``, pinned so a new worker key becomes a
+#: deliberate decision here rather than a silent pass-through into ``diagnostics``.
 _BROWSER_METADATA_KEYS = frozenset(
     {"title", "content_length", "browser_reused", "challenge_resolved", "extraction_method"}
 )

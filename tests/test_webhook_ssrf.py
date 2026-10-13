@@ -97,9 +97,8 @@ class TestWebhookDeliveryPinning:
 
         from app.api.webhooks import _max_webhook_size, deliver_pinned_webhook
 
-        # ``host_resolves_to`` also stands the private-target escape hatch down,
-        # so the rejection this test wants is the policy's answer and not an
-        # accident of what the machine's resolver returned.
+        # ``host_resolves_to`` also stands the private-target escape hatch down, so the rejection this test
+        # wants is the policy's answer and not an accident of what the machine's resolver returned.
         big_body = b"x" * (_max_webhook_size() + 1)
         delivered = record_webhook_delivery(monkeypatch, body=big_body)
         with host_resolves_to(monkeypatch, "8.8.8.8"):

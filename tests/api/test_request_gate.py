@@ -96,11 +96,8 @@ async def test_rejected_crawl_hands_its_slot_back_and_still_counts_the_error(cap
     metrics = get_metrics()
     before_active, before_errors = _active(), metrics.crawl_errors_total
 
-    # Real dependencies, not ``object()``. The gate refuses before it reaches
-    # any of them, and that is the claim under test -- so passing a stand-in
-    # made true an accident rather than a fact: the call had to be type-correct
-    # for "never touched" to mean anything. A store also asserts what the
-    # production ``crawl`` signature promises it will be handed.
+    # Real dependencies, not ``object()``. A store also asserts what the production ``crawl`` signature
+    # promises it will be handed.
     with tempfile.TemporaryDirectory() as tmpdir:
         with caplog.at_level(logging.WARNING), pytest.raises(HTTPException) as exc_info:
             await crawl(
@@ -112,10 +109,7 @@ async def test_rejected_crawl_hands_its_slot_back_and_still_counts_the_error(cap
             )
 
     assert exc_info.value.status_code == 422
-    # Through the accessor the service itself uses, rather than indexing
-    # ``detail``: ``HTTPException.detail`` is declared ``str | None`` and carries
-    # an envelope dict here, so a direct index was reaching past what the type
-    # says is there. This is the shape a client actually receives.
+    # This is the shape a client actually receives.
     envelope = error_envelope_from_detail(exc_info.value.detail, exc_info.value.status_code)
     assert envelope["code"] == "validation_error"
     assert envelope["details"] == {"errors": [{"msg": "batch_size_exceeded"}]}

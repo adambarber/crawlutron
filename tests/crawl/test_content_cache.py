@@ -320,9 +320,8 @@ async def test_crawl_request_serves_recursive_pages_from_content_cache(tmp_path)
     """Recursive crawl_request reuses the content cache for seed AND discovered pages."""
     from urllib.parse import urlparse
 
-    # ``calls`` is the chokepoint's own URL log: this test is about what the
-    # content cache serves, so it needs to see which fetches reached the
-    # network, not to build a second site_fetcher to ask.
+    # ``calls`` is the chokepoint's own URL log: this test is about what the content cache serves, so it needs
+    # to see which fetches reached the network, not to build a second site_fetcher to ask.
     fetched_urls: list[str] = []
 
     pages = {
@@ -418,15 +417,15 @@ class TestContentCacheCorruptEntry:
 
     def test_content_cache_prune_corrupt_entry(self, tmp_path):
         cache, clock = make_seeded_cache(tmp_path, "key1")
-        # The corrupt file carries the name prune would compute, so a prune that
-        # cannot read it must skip it rather than count it as removed.
+        # The corrupt file carries the name prune would compute, so a prune that cannot read it must skip it
+        # rather than count it as removed.
         cache._path_for("badkey").write_text("not valid json")
         clock[0] = 1002.0  # advance past the TTL
         assert cache.prune() == 1  # only key1 is expired and removable
 
     def test_content_cache_prune_os_error(self, tmp_path):
-        # An entry whose unlink raises must not abort the sweep: the other
-        # expired entries still get removed, which is the property.
+        # An entry whose unlink raises must not abort the sweep: the other expired entries still get removed,
+        # which is the property.
         cache, clock = make_seeded_cache(tmp_path, "key1", "key2")
         clock[0] = 1002.0
         with entry_replaced_by_directory(cache, "key1"):
@@ -434,8 +433,8 @@ class TestContentCacheCorruptEntry:
         assert cache._path_for("key2").exists() is False
 
     def test_content_cache_clear_os_error(self):
-        # Same continuation contract as prune: an undeletable entry is skipped
-        # and the rest of the namespace is still emptied.
+        # Same continuation contract as prune: an undeletable entry is skipped and the rest of the namespace
+        # is still emptied.
         with scoped_cache(default_ttl=60) as cache:
             cache.set("key1", {"data": "1"})
             cache.set("key2", {"data": "2"})
@@ -478,8 +477,7 @@ def test_max_entries_enforces_bound(tmp_path):
     cache.set("d", 4)
     # Total cached entries should be 3
     assert len(list(cache.cache_dir.iterdir())) == 3
-    # All remaining gets should work or return None (evicted)
-    # At least one of a,b,c was evicted; d is present
+    # All remaining gets should work or return None (evicted) At least one of a,b,c was evicted; d is present
     assert cache.get("d") == 4
     # Verify we didn't lose all old entries (at least 2 of a,b,c remain)
     remaining = sum(1 for k in ("a", "b", "c") if cache.get(k) is not None)
@@ -678,8 +676,7 @@ class TestContentCacheByteBudget:
         accounting update) by stat'ing the surviving file."""
         cache = _make_cache(tmp_path, max_entry_bytes=10_000)
         cache.set("k", {"body": "v" * 300}, ttl=60)
-        # Simulate crash residue: index entry survives, its recorded size
-        # and the total were lost.
+        # Simulate crash residue: index entry survives, its recorded size and the total were lost.
         cache._index_sizes.clear()
         cache._index_total_bytes = 0
         assert cache.prune() == 0
@@ -786,8 +783,7 @@ class TestExpiredEntryFreesByteAccounting:
         now[0] = 2000.0
         assert cache.get("a") is None, "expired entry must read as None"
 
-        # The expired read must free A's byte accounting (via _drop_locked),
-        # not just the index entry.
+        # The expired read must free A's byte accounting (via _drop_locked), not just the index entry.
         assert cache._index_total_bytes == total_before - size_a, (
             f"phantom bytes: total {cache._index_total_bytes} != "
             f"{total_before - size_a} (expired entry's {size_a} bytes still counted)"
@@ -804,8 +800,8 @@ class TestExpiredEntryFreesByteAccounting:
         now[0] = 1000.0  # keep B and C unexpired for the assertions
 
         cache.set("c", "x" * 100)
-        # B is live and must not be sacrificed to phantom A bytes. Clear the
-        # RAM mirror so the assertion reads the disk-backed index, not RAM.
+        # B is live and must not be sacrificed to phantom A bytes. Clear the RAM mirror so the assertion reads
+        # the disk-backed index, not RAM.
         cache._memory_cache.clear()
         assert cache.get("b") == "x" * 100, "live LRU entry evicted by phantom bytes"
 
@@ -934,8 +930,8 @@ class TestCachedAtReadsMetadataWithoutDeserializingTheValue:
         cache, clock = make_seeded_cache(tmp_path, "k", default_ttl=60, value={"data": "value"})
         cached_at = cache.cached_at_of("k")
 
-        # The restarted instance reads the same time base, or the entry it finds
-        # is expired before it is ever looked at.
+        # The restarted instance reads the same time base, or the entry it finds is expired before it is ever
+        # looked at.
         reopened = reopen_cache(tmp_path, default_ttl=60, clock=lambda: clock[0])
         with watching_envelope_reads(reopened) as reads:
             # Cold mirror: one full read is unavoidable and correct.
@@ -1002,8 +998,8 @@ class TestContentCacheUnlinkDiscipline:
         key = cache.make_key("hot")
         cache.set(key, {"v": 1})
 
-        # Evict exactly as _enforce_limits does, but leave the unlink pending
-        # so the re-registration can land inside the deferral window.
+        # Evict exactly as _enforce_limits does, but leave the unlink pending so the re-registration can land
+        # inside the deferral window.
         doomed: list[tuple[str | None, Path]] = []
         with cache._lock:
             cache._drop_locked(key, doomed)

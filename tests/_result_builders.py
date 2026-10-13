@@ -88,12 +88,8 @@ def engine_result(
     if "discovered_link_count" in overrides:
         raise TypeError("discovered_link_count is derived from discovered_links; pass only the links")
     links = list(overrides.pop("discovered_links", []))
-    # ``normalized_url``/``final_url`` are the record's value fields; callers
-    # still name submission text, so admission lives here at the one builder
-    # rather than at every call site. Omitting ``normalized_url`` derives it
-    # from ``url``; an explicit None is the field ABSENT, which the entry-point
-    # probes pin -- the record declares it Optional and the aggregation reads
-    # the absent case as "this record's URLs were never admitted".
+    # ``normalized_url``/``final_url`` are the record's value fields; callers still name submission text, so
+    # admission lives here at the one builder rather than at every call site.
     normalized_text = overrides.pop("normalized_url", url)
     final_url_text = overrides.pop("final_url", None)
     derived = status_for_classification(classification) if status is None else status

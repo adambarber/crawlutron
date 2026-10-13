@@ -25,8 +25,8 @@ def _settings(*, allowed: str = "", denied: str = "") -> CrawlerSettings:
     )
 
 
-#: One link deep, ten pages, no robots: the shallowest policy that still
-#: exercises discovery, which is the half of these crawls under test.
+#: One link deep, ten pages, no robots: the shallowest policy that still exercises discovery, which is the
+#: half of these crawls under test.
 ONE_HOP_LIMITS = {"max_depth": 1, "max_pages": 10, "respect_robots": False}
 
 

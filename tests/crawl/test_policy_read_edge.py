@@ -36,8 +36,8 @@ from app.config.settings import CrawlerSettings
 from app.models.crawl_policy import CrawlPolicy
 from app.models.crawl_policy_limits import CrawlPolicyLimits
 
-# A field the model will reject on its own, used wherever a test needs "this row
-# has exactly one bad field" without hand-writing an invalid value inline.
+# A field the model will reject on its own, used wherever a test needs "this row has exactly one bad field"
+# without hand-writing an invalid value inline.
 _OVER_MAX_RETRIES = 999
 
 

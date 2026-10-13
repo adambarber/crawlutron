@@ -40,8 +40,8 @@ def test_save_to_file_is_atomic_on_failure():
         with patch("json.dumps", side_effect=boom):
             with contextlib.suppress(Boom):
                 jar.export_to_file(target)
-        # On failure the original target must be untouched (atomic rename only
-        # happens after a successful write).
+        # On failure the original target must be untouched (atomic rename only happens after a successful
+        # write).
         with open(target, encoding="utf-8") as f:
             assert json.load(f) == {"old": True}
     finally:
@@ -54,9 +54,7 @@ def test_save_to_file_persists_and_no_temp_leftovers():
     jar.add_cookie_header(canonical("http://x.example/p"), "sess=abc; Path=/")
     with cookie_file(jar, "ck_persist_test.json") as target:
         assert read_cookie_file(target) == {"x.example": {"sess": "abc"}}
-    # No leftover.tmp files in the directory. Checked after the context exits
-    # because the export's temp file is written beside the target, and the
-    # teardown that removes the target is the last thing that could strand one.
+    # No leftover.tmp files in the directory.
     leftovers = [n for n in os.listdir(tempfile.gettempdir()) if n.startswith(".cookiejar.")]
     assert not leftovers
 
@@ -120,10 +118,7 @@ class TestCookieJarHeaderHandling:
     def test_http_cookie_invalid(self):
         from app.transport.cookie_jar import _GLOBAL_COOKIE_JAR
 
-        # Call with an invalid cookie header - should not raise. The header is
-        # a string, not a mapping: an empty ``{}`` was only "not a string" for as
-        # long as the jar did not read it, and a jar that started reading it
-        # would have been handed a dict.
+        # Call with an invalid cookie header - should not raise.
         _GLOBAL_COOKIE_JAR.add_cookie_header(canonical("http://x.example/"), "http://example.com/")
 
 
