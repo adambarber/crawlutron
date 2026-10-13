@@ -7,6 +7,8 @@ refuse to compile pathological patterns and bound the number of links scanned.
 
 import contextlib
 
+import pytest
+
 from app.admission.admission import compile_scope_pattern as compile_scope_pattern
 
 
@@ -24,11 +26,13 @@ def test_nested_quantifiers_compile_and_match_bounded():
 
 
 def test_safe_compile_rejects_overlong_pattern():
-    assert compile_scope_pattern("a" * 300) is None
+    with pytest.raises(ValueError):
+        compile_scope_pattern("a" * 300)
 
 
 def test_safe_compile_rejects_unparseable_pattern():
-    assert compile_scope_pattern("(((a") is None
+    with pytest.raises(ValueError):
+        compile_scope_pattern("(((a")
 
 
 def test_safe_compile_accepts_normal_pattern():
