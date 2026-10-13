@@ -73,9 +73,9 @@ jobs:
     # reflects a real browser rather than a double. The suite costs ~20s here
     # and a Camoufox fetch, which is cheap enough to pay on every push.
     #
-    # It runs `-o addopts=` on purpose: the fast suite's default marker set
-    # deselects `browser`, and clearing addopts is what makes the full
-    # collection reachable from here at all.
+    # It widens the marker filter instead of clearing addopts: the fast suite's
+    # default marker set deselects `browser`, and `-m "not slow"` reaches it while
+    # leaving the rest of the configuration intact.
     steps:
       - uses: actions/checkout@v4
         with:

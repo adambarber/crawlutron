@@ -212,14 +212,15 @@ max-branches = 31
 max-statements = 87
 # PLR0911 (returns) and PLR0913 (arguments) are still unselected. Their maxima
 # are 10 and 24, against the 9 and 21 that a 10%-under ratchet would demand, and
-# both are the same two functions: extraction.py:530 and result_helpers.py:341.
-# Those are de-fanged in the extraction and result-helper waves, and both rules
-# turn on in the same commit that fixes them.
+# both are exceeded by the same handful of long functions, the largest being
+# app/runtime/metrics.py's `_exposition` and app/main.py's `_lifespan`, which the
+# orchestration and extractor waves split. Both rules turn on in the same commit
+# that brings those functions under the ratchet.
 
 [tool.ruff.lint.per-file-ignores]
-# Every `app/` entry that used to live here has been paid for and removed, and
-# `scripts/` never needed one. The list is now tests-only, and it is the honest
-# residue: rules that cannot apply to a pytest suite at all.
+# rules that cannot apply to a pytest suite at all. Each directory that carries
+# exemptions declares its own, so a rule relaxed for tests is not silently relaxed for
+# the scripts tree as well.
 #
 # Each was a blanket family mute -- "S" and "B" disabled all 30-odd bandit and
 # bugbear rules for the whole test tree, including the ones that catch real
