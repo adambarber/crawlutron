@@ -125,3 +125,26 @@ def test_reset_clears_the_shared_store_not_just_local_fields(tmp_path):
     first.reset()
 
     assert "crawler_crawl_results_total 0.0" in second.as_prometheus()
+
+
+def test_a_late_bind_carries_counters_recorded_before_it(tmp_path):
+    """The bind must add to the shared store, never replace what it finds.
+
+    The lifespan attaches the shared store after the process is already running,
+    so a worker that served requests during boot has counters the new store does
+    not have. A bind that treats a non-empty store as "already propagated" drops
+    them for the life of the process, which is invisible in a single-worker test
+    and wrong in every deployment that restarts a worker.
+    """
+    metrics = MetricsStore()
+    metrics.observe_crawl(results=[engine_result("http://example.com/before", "rendered")])
+
+    shared = CoordinationCounters(str(tmp_path / "late-bind.db"))
+    peer = MetricsStore()
+    peer.bind_counters(shared)
+    peer.observe_crawl(results=[engine_result("http://example.com/peer", "rendered")])
+
+    metrics.bind_counters(shared)
+
+    total = shared.snapshot()["crawl_results_total"]
+    assert total == 2.0, f"the pre-bind counter was dropped: {total} instead of 2"

@@ -228,8 +228,13 @@ class MetricsStore:
         counters a sibling worker recorded before this one finished booting must
         be carried over rather than dropped -- otherwise worker 3's early
         requests vanish from the totals for the life of the process.
+
+        The local counters are carried over unconditionally. A shared store that
+        already holds values is not evidence this process's counters reached it:
+        those values can be a sibling's, and the values this process recorded
+        before the bind exist in exactly the deployments that bind late.
         """
-        if self._counters is not None or counters.snapshot():
+        if self._counters is not None:
             self._counters = counters
             return
         carried = self._local
