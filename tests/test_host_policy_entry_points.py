@@ -1,8 +1,6 @@
 from __future__ import annotations
 
-import ast
 import asyncio
-import pathlib
 from collections import defaultdict
 from collections.abc import Mapping, MutableMapping
 from typing import Any
@@ -11,161 +9,8 @@ import httpx
 import pytest
 from fastapi import HTTPException
 
-from app.models.host_policy import HOST_POLICY_ENTRY_POINTS
 from app.storage.result_store import CrawlResultStore
-from tests.chokepoint_walks import REPO_ROOT, app_trees, local_nodes, nodes_of, resolved_call_name
-from tests.invariants._shared import DefinitionNode, _module_definition_index
-
-_DECISION_NAMES = frozenset(
-    {
-        # The constructor is the admission chokepoint since the value object took over from the egress
-        # helpers: calling it IS the decision.
-        "NormalizedUrl",
-        "_validated_url",
-        "admit_or_none",
-        "checked_payload_urls",
-        "filter_js_endpoints",
-        "validate_webhook_url",
-        "validate_webhook_url_async",
-    }
-)
-_MODULE_PREFIXES = ("app.api.", "app.mcp.")
-
-
-def _module_name(path: pathlib.Path) -> str:
-    relative = path.relative_to(REPO_ROOT).as_posix()
-    if relative.endswith("/__init__.py"):
-        return relative[: -len("/__init__.py")].replace("/", ".")
-    return relative[:-3].replace("/", ".")
-
-
-def _call_edges(
-    modules: tuple[tuple[pathlib.Path, ast.Module], ...],
-    index: dict[str, list[tuple[pathlib.Path, ast.Module, DefinitionNode]]],
-) -> dict[str, set[str]]:
-    edges: dict[str, set[str]] = {name: set() for name in index}
-    for name, candidates in index.items():
-        if len(candidates) != 1:
-            continue
-        _path, tree, node = candidates[0]
-        for child in local_nodes(node):
-            if not isinstance(child, ast.Call):
-                continue
-            resolved = resolved_call_name(tree, child)
-            target = index.get(resolved, [])
-            if not target and isinstance(child.func, ast.Name):
-                matches = [
-                    (candidate_name, candidate)
-                    for candidate_name, candidate in index.items()
-                    if len(candidate) == 1
-                    and candidate[0][1] is tree
-                    and getattr(candidate[0][2], "name", None) == child.func.id
-                ]
-                if len(matches) == 1:
-                    target = matches[0][1]
-            if len(target) == 1 and target[0][2] is not node:
-                target_name = next(
-                    candidate_name
-                    for candidate_name, candidate in index.items()
-                    if len(candidate) == 1 and candidate[0] is target[0]
-                )
-                edges[name].add(target_name)
-    return edges
-
-
-def _mcp_handlers(tree: ast.Module) -> set[str]:
-    handlers: set[str] = set()
-    for node in nodes_of(tree):
-        if not isinstance(node, ast.Call):
-            continue
-        for keyword in node.keywords:
-            if keyword.arg == "handler" and isinstance(keyword.value, ast.Name):
-                handlers.add(keyword.value.id)
-    return handlers
-
-
-def _has_policy_reference(tree: ast.Module, node: ast.AST) -> bool:
-    for child in nodes_of(node):
-        if isinstance(child, ast.Name) and child.id == "HostPolicy":
-            return True
-        if isinstance(child, ast.Attribute) and child.attr == "HostPolicy":
-            return True
-        if (
-            isinstance(child, ast.Call)
-            and resolved_call_name(tree, child).rsplit(".", 1)[-1] in _DECISION_NAMES
-        ):
-            return True
-    return False
-
-
-def discover_host_policy_entry_points(
-    modules: tuple[tuple[pathlib.Path, ast.Module], ...],
-) -> set[str]:
-    index = _module_definition_index(modules)
-    edges = _call_edges(modules, index)
-    reverse: dict[str, set[str]] = {name: set() for name in index}
-    for caller, callees in edges.items():
-        for callee in callees:
-            reverse[callee].add(caller)
-    reachable: set[str] = set()
-    pending = [name for name in index if name.rsplit(".", 1)[-1] in _DECISION_NAMES]
-    while pending:
-        name = pending.pop()
-        if name in reachable:
-            continue
-        reachable.add(name)
-        pending.extend(reverse.get(name, ()))
-    discovered: set[str] = set()
-    for name, candidates in index.items():
-        if len(candidates) != 1:
-            continue
-        path, tree, node = candidates[0]
-        module = _module_name(path)
-        if (
-            not module.startswith(_MODULE_PREFIXES)
-            or name in reachable
-            and name.rsplit(".", 1)[-1] in _DECISION_NAMES
-        ):
-            continue
-        leaf = name.rsplit(".", 1)[-1]
-        handler_names = _mcp_handlers(tree)
-        if leaf.startswith("_") and leaf not in handler_names:
-            continue
-        if leaf not in handler_names and not _has_policy_reference(tree, node):
-            continue
-        if name in reachable or leaf in handler_names:
-            discovered.add(f"{path.relative_to(REPO_ROOT).as_posix()}:{leaf}")
-    return discovered
-
-
-def _app_modules() -> tuple[tuple[pathlib.Path, ast.Module], ...]:
-    return app_trees(exclude=frozenset())
-
-
-def _table_entries() -> set[str]:
-    return set(HOST_POLICY_ENTRY_POINTS)
-
-
-def test_host_policy_entry_table_matches_ast_discovery():
-    assert discover_host_policy_entry_points(_app_modules()) == _table_entries()
-
-
-def test_host_policy_discovery_rejects_undeclared_entry_point():
-    modules = _app_modules() + (
-        (
-            REPO_ROOT / "app/api/_undeclared_entry.py",
-            ast.parse(
-                "from app.models.host_policy import HostPolicy\n"
-                "from app.models.normalized_url import admit_or_none\n"
-                "def undeclared_entry(url, *, policy: HostPolicy):\n"
-                "    return admit_or_none(url, policy=policy)\n"
-            ),
-        ),
-    )
-    discovered = discover_host_policy_entry_points(modules)
-    assert "app/api/_undeclared_entry.py:undeclared_entry" in discovered
-    assert discovered - _table_entries()
-
+from tests.invariants.test_host_policy_entry_points import _table_entries
 
 _BLOCKED_URL = "https://blocked.test/secret"
 
@@ -351,28 +196,11 @@ async def _probe_watch_router(monkeypatch, tmp_path):
 
 
 async def _probe_site_map(monkeypatch, tmp_path):
-    """A denied host must not reach the output by the path where the policy is the
-    only filter.
+    """A denied host must not reach the output where policy is the only filter.
 
-    Every other probe here proves a refusal by catching one. This entry point
-    FILTERS instead of raising -- its own docstring promises a denied URL is
-    "dropped rather than leaked raw" -- so the claim to prove is the output.
-
-    The shape is a record with NO normalized root, which is what routes the
-    aggregation through ``admit_or_none`` at all. With a root present, discovered
-    links are RESOLVED against it and a link the crawl already normalized is
-    returned untouched: re-admitting every one of the thousands a page yields
-    would repeat a decision the crawl already made under the same policy. So the
-    policy is reachable exactly when the root is absent -- a record whose URLs were
-    never admitted -- and that is the branch this pins. The record's own type
-    declares both URL fields Optional, so this is a shape it can hold; every
-    builder in the tree happens to fill them.
-
-    It is also a differential: the scope permits both hosts, so the denied one is
-    absent only because the policy was consulted. A probe asserting only "the list
-    came back empty" would pass just as well for a function that ignored the policy
-    entirely.
-    """
+    Other probes prove refusal by catching one; this entry point filters
+    instead of raising, so the claim to prove is the output -- and the shape
+    with NO normalized root is exactly where aggregation consults policy."""
     from app.api.site_map import build_site_map
     from app.models.host_policy import HostPolicy
     from app.models.result_record import ProducerEnvelope
@@ -397,9 +225,6 @@ async def _probe_site_map(monkeypatch, tmp_path):
         envelope,
         host_policy=HostPolicy.from_strings("allowed.test", "denied.test"),
     )
-    assert mapped["url"] is None, mapped
-    assert allowed in mapped["all_urls"], mapped
-    assert denied not in mapped["all_urls"], mapped
     assert mapped["url"] is None, mapped
     assert allowed in mapped["all_urls"], mapped
     assert denied not in mapped["all_urls"], mapped
