@@ -7,7 +7,7 @@ import httpx
 import pytest
 from pydantic import ValidationError
 
-from app.models.crawl_policy import MAX_BROWSER_ACTIONS
+from app.models.crawl_policy_vocabulary import MAX_BROWSER_ACTIONS
 from app.models.crawl_request import CrawlRequest
 from app.vocabulary.browser import (
     ACTIONS_REQUIRING_SELECTOR,
