@@ -273,7 +273,7 @@ DECLARED: dict[str, Declaration] = {
         "Not yet triaged.\n",
         ["test"],
     ),
-    "app.admission.admission._frontier_identity": _d(
+    "app.admission.admission_links._frontier_identity": _d(
         "unreviewed",
         "Not yet triaged.\n",
         ["test"],

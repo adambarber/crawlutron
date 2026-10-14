@@ -21,7 +21,7 @@ the production read edge answered a different question than the test's did.
 import pathlib
 from typing import Any
 
-from app.admission.admission import admit_discovered_links
+from app.admission.admission_links import admit_discovered_links
 from app.admission.policy import PolicyTier, read_policy
 from app.config.settings import CrawlerSettings
 from app.models.crawl_policy import CrawlPolicy

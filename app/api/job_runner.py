@@ -37,9 +37,9 @@ from app.admission.admission import (
     job_max_pages,
     record_cap_overcommitted,
     record_cap_truncated,
-    remaining_page_capacity,
     requeue_admitted_pages,
 )
+from app.admission.admission_links import remaining_page_capacity
 from app.admission.policy import read_policy
 from app.api.crawl_executor import execute_crawl as _real_execute_crawl
 from app.api.response_shaping import _failed_unified_result, abuild_unified_result

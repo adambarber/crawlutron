@@ -9,7 +9,7 @@ import contextlib
 
 import pytest
 
-from app.admission.admission import compile_scope_pattern as compile_scope_pattern
+from app.admission.admission_links import compile_scope_pattern as compile_scope_pattern
 
 
 def test_nested_quantifiers_compile_and_match_bounded():

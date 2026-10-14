@@ -139,8 +139,8 @@ def test_scope_regex_compiler_has_exactly_one_definition():
     bounds = [label for label in found if "length bound" in label]
     assert len(compilers) == 1, f"scope-regex compiler duplicated again: {compilers}"
     assert len(bounds) == 1, f"scope-regex length bound duplicated again: {bounds}"
-    assert "app/admission/admission.py" in compilers[0], compilers
-    assert "app/admission/admission.py" in bounds[0], bounds
+    assert "app/admission/admission_links.py" in compilers[0], compilers
+    assert "app/admission/admission_links.py" in bounds[0], bounds
 
 
 def test_scope_regex_compiler_detector_bites():
@@ -166,7 +166,7 @@ def _frontier_expression(node: ast.AST) -> bool:
 
 # The admission chokepoint owns the pattern it bans: admit_job_links is the one function allowed to grow a
 # frontier, so the sweep that bans direct growth everywhere else has to skip the module that defines it.
-_ADMISSION_CHOKEPOINT = "app/admission/admission.py"
+_ADMISSION_CHOKEPOINT = "app/admission/admission_links.py"
 
 
 def _direct_frontier_growth_offenders(
@@ -234,7 +234,7 @@ JOB_FRONTIER_GROWTH_ONLY_USES_FUNNEL = Rule(
         "replacement, alias or slice mutation elsewhere re-opens the funnel every "
         "other entry point is collapsed through"
     ),
-    skip=frozenset({_ADMISSION_CHOKEPOINT}),
+    skip=frozenset({"app/admission/admission.py"}),  # admit_job_links lives here
     kwargs_for=lambda relative: (
         {"allowed_functions": frozenset({"normalize_job_state"})}
         if relative == "app/storage/job_store_state.py"

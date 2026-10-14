@@ -20,7 +20,7 @@ from collections.abc import Iterable
 from datetime import UTC, datetime
 from typing import Any, cast
 
-from app.admission.admission import compile_scope_pattern
+from app.admission.admission_links import compile_scope_pattern
 from app.admission.payload_helpers import checked_payload_urls, payload_policy
 from app.admission.policy import PolicyTier
 from app.config.env import get_env_int

@@ -16,10 +16,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field, replace
 from typing import Any, cast
 
-from app.admission.admission import (
-    AdmittedLink,
-    admit_discovered_links,
-)
+from app.admission.admission_links import AdmittedLink, admit_discovered_links
 from app.admission.recursive_admission import RecursiveRunState, admit_recursive_batch
 from app.models.crawl_result import EngineCrawlResult
 from app.models.crawl_task import CrawlTask

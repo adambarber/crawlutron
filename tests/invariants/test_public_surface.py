@@ -37,7 +37,8 @@ _PUBLIC_SURFACE_PROPERTY = Property(
 
 # Values are (declared public symbols, executable entry points).
 _OWNER_PUBLIC_SURFACE_RATCHET = {
-    "app/admission/admission.py": (19, 13),
+    "app/admission/admission.py": (9, 9),
+    "app/admission/admission_links.py": (10, 4),
     # RAISED to (14, 11) then LOWERED to (7, 6), (5, 5), (4, 4), then (2, 2): HostPolicy and
     # registrable_domain
     "app/safety/validation.py": (2, 2),

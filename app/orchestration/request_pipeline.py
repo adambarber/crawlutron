@@ -8,7 +8,8 @@ from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field, replace
 from typing import Any, cast
 
-from app.admission.admission import gather_robots_decisions, normalize_sitemap_candidates
+from app.admission.admission import normalize_sitemap_candidates
+from app.admission.admission_links import gather_robots_decisions
 from app.admission.policy import DiscoveryFlags, discovery_flags
 from app.admission.render_options import policy_wants_html
 from app.config.settings import CrawlerSettings

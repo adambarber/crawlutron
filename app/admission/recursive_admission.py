@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from itertools import islice
 from typing import Any, NamedTuple, Protocol
 
-from app.admission.admission import gather_robots_decisions
+from app.admission.admission_links import gather_robots_decisions
 from app.models.crawl_result import EngineCrawlResult
 from app.models.crawl_task import CrawlTask
 from app.models.host_policy import HostPolicy

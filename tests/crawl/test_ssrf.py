@@ -265,7 +265,7 @@ class TestFrontierIdentityRefusesRejectedTargets:
     @pytest.mark.parametrize("target", REJECTED)
     def test_private_target_is_not_given_an_identity(self, monkeypatch, target):
         block_private_targets(monkeypatch)
-        from app.admission.admission import _frontier_identity
+        from app.admission.admission_links import _frontier_identity
 
         assert _frontier_identity(target, host_policy=HostPolicy.unrestricted()) is None
 
@@ -284,7 +284,7 @@ class TestFrontierIdentityRefusesRejectedTargets:
         production paths and this helper takes its identity definitionally.
         """
         block_private_targets(monkeypatch)
-        from app.admission.admission import _frontier_identity
+        from app.admission.admission_links import _frontier_identity
 
         target = "http://169.254.169.254/latest/meta-data/"
         policy = HostPolicy.unrestricted()
@@ -302,7 +302,7 @@ class TestFrontierIdentityRefusesRejectedTargets:
         owner refuses. If only the first is honoured the guard is half a guard.
         """
         block_private_targets(monkeypatch)
-        from app.admission.admission import _frontier_identity
+        from app.admission.admission_links import _frontier_identity
 
         policy = HostPolicy.from_strings("example.com", "")
         assert _frontier_identity("http://evil.test/x", host_policy=policy) is None
@@ -315,7 +315,7 @@ class TestFrontierIdentityRefusesRejectedTargets:
         ``return None`` on line 114.
         """
         block_private_targets(monkeypatch)
-        from app.admission.admission import _frontier_identity
+        from app.admission.admission_links import _frontier_identity
 
         got = _frontier_identity("https://example.gov/page/", host_policy=HostPolicy.unrestricted())
         # The identity is the admitted value, and its text is the page's durable identity.
