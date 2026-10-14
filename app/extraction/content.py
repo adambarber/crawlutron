@@ -25,6 +25,7 @@ from app.extraction.documents import (
 )
 from app.extraction.llm_format import text_from_html
 from app.extraction.trees import (
+    _FrameCollector,
     _walkable,
     forms_from,
     frames_from,
@@ -56,6 +57,7 @@ __all__ = [
     "normalized_extraction",
     "parse_count",
     "parse_html_tree",
+    "_FrameCollector",
     "_walkable",
     "shutdown_doc_extraction_executor",
     "text_from_html",

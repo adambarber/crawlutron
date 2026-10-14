@@ -28,7 +28,9 @@ from app.orchestration.render_result import (
 )
 from app.transport.browser_cookies import (
     _BROWSER_COOKIES_BY_DOMAIN,
+    _BROWSER_COOKIES_MAX,
     _harvest_session_cookies,
+    _store_browser_cookies,
     get_browser_cookies_for,
     has_process_state,
     reset_process_state,
@@ -44,6 +46,8 @@ from app.transport.browser_targets import (
 __all__ = [
     "BrowserRenderer",
     "_BROWSER_COOKIES_BY_DOMAIN",
+    "_BROWSER_COOKIES_MAX",
+    "_store_browser_cookies",
     "get_browser_cookies_for",
     "has_process_state",
     "make_response_handler",
