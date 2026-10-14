@@ -27,21 +27,17 @@ from app.safety.bounded_ttl import BoundedTTLCache
 from app.transport.cache import HttpCache
 from app.transport.fetch_policy import discovery_diagnostics
 from app.vocabulary.identity import SERVICE_ID
-from app.vocabulary.strategies import HTTP_DECLARED_CRAWLER
 from tests._fetcher_factories import routed_fetcher
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY, canonical, crawl_policy
 from tests._timing_harnesses import cpu_seconds
+from tests.crawl.test_robots_crawler import _fake_fetcher
 
 
 def robots_entry_key(origin: str) -> tuple[str, HostPolicy]:
     """The key production writes a robots cache entry under.
 
-    ``load_robots_rules`` reads ``(canonical_origin, policy)`` and
-    ``_load_uncached`` writes the same pair, so the cache is keyed by a tuple.
-    Seeding it with a bare origin string -- which is what these tests did --
-    wrote entries the read path could never find, so the purge assertions
-    passed against a cache shaped unlike the one they are standing in for.
-    """
+    load_robots_rules reads and ``_load_uncached`` writes the same
+    ``(canonical_origin, policy)`` pair; a bare origin is never a cache key."""
     # ``robots_origin`` retired with the flip: the canonical origin of a raw origin text is now the admitted
     # value's own ``.origin``.
     return (NormalizedUrl(origin, policy=UNRESTRICTED_HOST_POLICY).origin, UNRESTRICTED_HOST_POLICY)
@@ -249,10 +245,8 @@ def test_disallow_root_blocks_everything():
 def test_pathological_wildcard_rule_matches_in_linear_time():
     """A robots rule packed with overlapping wildcards must not backtrack.
 
-    ``/*a*`` repeated against a long no-match path drove the old regex into
-    exponential backtracking (8.5s for 30 wildcards x 2000 chars). The
-    matcher is linear, so doubling BOTH dimensions must stay fast.
-    """
+    Old regex backtracking took 8.5s for 30 wildcards x 2000 chars; the
+    matcher is linear, so doubling both dimensions must stay fast."""
     pattern = "/*a*" * 30
     matcher = _robots_pattern_to_regex("example.com", pattern)
     path = "/" + "b" * 2000 + "a"
@@ -280,10 +274,10 @@ def test_pathological_pattern_match_parity_with_simple_cases():
 
 
 def test_pattern_cache_is_bound_per_host_so_one_site_cannot_evict_another():
-    """-E: the matcher cache used to be a process-global LRU keyed only on the
-    pattern string, so a hostile robots.txt spraying distinct patterns evicted
-    legitimate sites' matchers. Binding the key per host confines eviction to
-    the offending site: it can only evict its own entries."""
+    """The matcher cache is bound per host so one site cannot evict another.
+
+    A hostile robots.txt with distinct patterns can only evict its own
+    entries, never a legitimate site's cached matcher."""
     # Warm a legitimate site's matcher.
     legit = _robots_pattern_to_regex("good.example", "/allowed/*")
 
@@ -331,15 +325,10 @@ def test_purge_removes_only_expired_production_tuples():
 async def test_purge_handles_production_shaped_entries():
     """A full robots cache must not crash purging during a real crawl.
 
-    Production stores a ``RobotsRules`` 3-tuple -- ``(rules, sitemaps,
-    crawl_delay)`` -- under a ``(canonical_origin, policy)`` key. Both halves of
-    that shape used to be wrong here at once: the value was written as a
-    4-tuple that ``_purge_robots_cache`` unpacked one field short, and the key
-    was a bare origin string the read path never looked under. Purging a full
-    cache raised ``ValueError`` instead of evicting."""
+    Production stores the 3-tuple under a (origin, policy) key; both halves
+    of that shape used to be wrong here at once, raising on purge."""
 
     import app.orchestration.engine as em
-    from app.config.settings import CrawlerSettings
     from app.orchestration.engine import crawl_request
     from app.orchestration.robots import ROBOTS_CACHE_MAX_ENTRIES
 
@@ -431,53 +420,6 @@ async def test_robots_cache_shared_across_requests():
     assert calls["robots"] == 1, f"robots.txt fetched {calls['robots']} times"
 
 
-def _make_fetcher(robots_status: int, robots_body: str = ""):
-    return routed_fetcher(
-        {"/robots.txt": (robots_status, robots_body, "text/plain")},
-        default=(200, b"<html><body>hi</body></html>", "text/html"),
-    )
-
-
-def _policy():
-    return {
-        "strategies": [HTTP_DECLARED_CRAWLER],
-        "limits": {
-            "timeout_seconds": 10,
-            "max_retries": 0,
-            "max_discovered_links": 10,
-            "respect_robots": True,
-        },
-    }
-
-
-async def _crawl_page(host: str, fetcher):
-    settings = CrawlerSettings.from_mapping()
-    result = await crawl_request(
-        {"url": f"http://{host}/page", "policy": _policy()},
-        settings=settings,
-        http_fetcher=fetcher,
-    )
-    return result["results"][0]
-
-
-class TestRobotsFailClosed:
-    async def test_robots_5xx_disallows(self):
-        item = await _crawl_page("robots-fail.test", _make_fetcher(500))
-        assert item.classification == "robots_disallowed"
-        assert item.status != "success"
-
-    async def test_robots_404_allows(self):
-        item = await _crawl_page("robots-absent.test", _make_fetcher(404))
-        assert item.status == "success"
-
-    async def test_group_selection_uses_product_token(self):
-        # "github" appears in the full User-Agent URL but not in the product token: the github group must not
-        # apply to us; the * group allows.
-        body = "User-agent: github\nDisallow: /\nUser-agent: *\nAllow: /\n"
-        item = await _crawl_page("robots-token.test", _make_fetcher(200, body))
-        assert item.status == "success"
-
-
 def test_robots_pattern_to_regex_is_cached():
     p1 = _robots_pattern_to_regex("example.com", "/admin/*")
     p2 = _robots_pattern_to_regex("example.com", "/admin/*")
@@ -493,21 +435,6 @@ def test_robots_allows_does_not_recompile_per_call():
     unique_patterns = {p for _, p in rules}
     # Each unique pattern compiled at most once, not 50 times.
     assert spy.call_count <= len(unique_patterns), spy.call_count
-
-
-def _fake_fetcher(calls):
-    return routed_fetcher(
-        {
-            "/robots.txt": (200, "User-agent: *\nDisallow: /secret\n", "text/plain"),
-            "sitemap": (
-                200,
-                "<urlset><loc>https://x.test/p1</loc><lastmod>2024-05-05</lastmod></urlset>",
-                "application/xml",
-            ),
-        },
-        calls=calls,
-        default=(200, b"<html></html>", "text/html"),
-    )
 
 
 async def _run_diag(calls, *, engine_robots_sitemaps):
@@ -547,41 +474,3 @@ async def test_discovery_fetches_robots_when_no_sitemaps_passed():
     assert diag["robots"]["evaluation"] == "evaluated"
     assert diag["robots"]["reused_from_engine"] is False
     assert diag["discovery"]["sitemap_urls"] == ["https://x.test/p1"]
-
-
-class TestEmptyDisallowDoesNotEraseItsGroup:
-    """RFC 9309 2.2.2: an empty ``Disallow`` value is a rule to ignore, not a verdict."""
-
-    def test_an_empty_disallow_does_not_erase_the_other_rules_in_its_group(self):
-        """The matcher used to allow-all on sight of an empty ``Disallow``.
-
-        It scanned the whole group for the empty form and returned True without
-        reading the rules that followed, so a file declaring ``Disallow:`` next
-        to ``Disallow: /private`` -- both legal in the same block -- allowed
-        everything, including the path it had just named.
-        """
-        both = parse_robots_rules(
-            "User-agent: *\nDisallow:\nDisallow: /private\n", token=HTTP_DECLARED_CRAWLER
-        )
-        assert both == [(False, ""), (False, "/private")]
-        assert robots_allows(canonical("https://example.com/private/secret"), both) is False
-        assert robots_allows(canonical("https://example.com/public"), both) is True
-
-    def test_a_group_whose_only_rule_is_the_empty_disallow_allows_everything(self):
-        """The form keeps the meaning it has on its own.
-
-        A group that declares nothing but ``Disallow:`` allows everything, which
-        is also exactly what the per-rule loop yields when it skips empty
-        patterns -- so the shortcut was never needed to express it.
-        """
-        only_empty = parse_robots_rules("User-agent: *\nDisallow:\n", token=HTTP_DECLARED_CRAWLER)
-        assert only_empty == [(False, "")]
-        assert robots_allows(canonical("https://example.com/private/secret"), only_empty) is True
-
-    def test_an_allow_still_beats_a_longer_disallow_in_the_same_group(self):
-        both = parse_robots_rules(
-            "User-agent: *\nDisallow:\nDisallow: /private\nAllow: /private/ok\n",
-            token=HTTP_DECLARED_CRAWLER,
-        )
-        assert robots_allows(canonical("https://example.com/private/ok"), both) is True
-        assert robots_allows(canonical("https://example.com/private/other"), both) is False
