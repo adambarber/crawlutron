@@ -1,41 +1,7 @@
-"""Generic value-membership and provenance enforcement for result primitives.
+"""Value-membership and provenance enforcement for result primitives.
 
-Programs 1 and 2 of the chokepoint review, in one module because they are the
-same class seen twice.
-
-The class
----------
-``app/orchestration/engine_result.py`` and ``render_result.py`` are the chokepoints for
-building a result; the dataclasses they fill carry ``Literal`` annotations. The annotations are
-*comments to the runtime*: ``CrawlResult`` is a plain frozen dataclass, so
-nothing rejects ``classification="url_budget_exceeded"`` until the value
-reaches the strict pydantic enum at response shaping, where a single non-member
-rejects the whole batch with a 500. Two escapes shipped that way and were each
-closed by a *per-field* detector written after the fact -- one for
-``classification``, one for ``strategy``. A per-field detector is a list a
-nobody extends, so the class re-emerged at every field not on the list.
-
-This module closes the class on the field axis, in two halves.
-
-1. Generic literal membership (:func:`generic_literal_field_offenders`).
-   Enumerates ``(dataclass, field, declared Literal)`` from ``app/models`` at
-   test time and checks every literal handed to a result primitive against the
-   union of that field's members. Nothing here names ``classification`` or
-   ``strategy``; a new Literal field in a result dataclass is covered the day
-   it is added.
-
-2. Named-constant provenance (:func:`namespace_constant_offenders`).
-   A literal detector is blind to ``classification=SOME_CONSTANT`` -- the
-   historical escape was exactly that shape: ``EXTRACTION_METHOD_BINARY_NO_TEXT``
-   is a real module constant whose *value* ("binary_no_text") is a legal
-   classification member, so even value resolution admits it. The defect is
-   that a constant from the *extraction namespace* was used as a
-   *classification*. This checks the name's namespace, which is the property
-   that was actually wrong; value resolution alone cannot see it, because the
-   collision is precisely what makes the bug invisible to a value check.
-
-Both halves sweep the whole ``app/`` tree via ``app_trees()``.
-"""
+The result dataclasses' Literals are comments to the runtime until shaping
+rejects a non-member with a 500; the sweeps below cover every Literal field."""
 
 from __future__ import annotations
 
@@ -84,22 +50,8 @@ _OPTIONAL_FIELDS = frozenset({"strategy", "error", "extraction_method", "selecte
 def literal_typed_field_members() -> FieldMembers:
     """Every Literal field across the result dataclasses, as ``field -> members``.
 
-    Enumerated from ``app.models`` at test time: the union over the dataclasses
-    is used so a field name shared by two classes (``status`` and
-    ``classification`` are on all three) is checked against one set rather than
-    three. Nothing in this module or its tests transcribes a field list -- the
-    list *is* the models, which is what keeps a new field covered instead of
-    remembered.
-
-    Membership comes from ``app.models.taxonomy.literal_members`` rather than
-    ``typing.get_args``, and the filter is "has members" rather than "origin is
-    ``Literal``", because a taxonomy alias is allowed to be composed. ``error``
-    is ``Classification | PIPELINE_ONLY_CRAWL_ERRORS`` and ``strategy`` is
-    ``CrawlStrategyName | None``; under the old filter both have a Union origin,
-    so both were skipped -- not reported, just absent, which is the shape of
-    defect this module exists to prevent. ``literal_members`` is total over
-    compositions, so a field is covered by virtue of declaring members at all.
-    """
+    The list *is* the models: members come from literal_members over
+    ``app.models``, so a new field is covered the day it is added."""
     from app.models import taxonomy
     from tests.model_index import resolve_declared_type
 
@@ -118,10 +70,7 @@ def literal_typed_field_members() -> FieldMembers:
 def _module_constants(tree: ast.AST) -> dict[str, str]:
     """Map ``SOME_CONSTANT`` -> string value for the module parsed as ``tree``.
 
-    Used by the provenance check to recognize a name that resolves at all: a
-    bare ``Name`` that is not a module constant is a parameter or an import and
-    is what callers should write.
-    """
+    A bare Name that is not a module constant is a parameter or import."""
     values: dict[str, str] = {}
     for node in nodes_of(tree):
         if not isinstance(node, (ast.Assign, ast.AnnAssign)):
@@ -145,20 +94,8 @@ def _primitive_keyword_calls(
 ) -> list[tuple[ast.Call, ast.keyword]]:
     """Yield ``(call, keyword)`` for every keyword of a result-primitive call.
 
-    The keyword-level detectors all walk the same shape -- a call whose
-    ``func`` is a bare name in ``RESULT_PRIMITIVES`` -- and disagree only
-    about what the keyword VALUE means (literal membership, constant
-    namespace, error-code provenance). This is the one walk; if the set of
-    calls that count as primitive calls drifts, it drifts for every
-    detector at once instead of only the one someone edited.
-
-    The walk itself is :func:`call_keyword_arguments` -- the same one the
-    non-primitive keyword detectors use -- with this module's registry as the
-    name set. Only the "which calls" question is local; "which keywords of
-    them" was a second implementation of a rule that already had an owner, and
-    two implementations of a walk is how the two halves of a keyword detector
-    end up disagreeing about ``**kwargs``.
-    """
+    The keyword-level detectors all walk this one call shape; drifts hit every
+    detector at once instead of only the one someone edited."""
     # The walker takes a name collection; ``arg_names`` is one, plus the ``dict`` form the field-set detectors
     # pass (iterating a mapping yields its keys, which is exactly the name set).
     names = None if arg_names is None else ({arg_names} if isinstance(arg_names, str) else set(arg_names))
@@ -174,12 +111,8 @@ def _named_primitive_keyword_calls(
 ) -> Iterator[tuple[ast.Call, str, ast.expr]]:
     """``_primitive_keyword_calls``, each keyword paired with its name and value.
 
-    The underlying walk already drops ``**kwargs`` -- a keyword with no name is
-    not a member of any field's set -- but it hands back an ``ast.keyword``,
-    whose ``arg`` is declared ``str | None``, so every detector that keyed a
-    field's member set by that name had to re-assert a fact the walk already
-    guarantees. Three of the four were doing exactly that.
-    """
+    The walk drops ``**kwargs``, so the ``arg`` assertion here is a guarantee
+    the detectors can rely on instead of re-asserting per call site."""
     for call, keyword in _primitive_keyword_calls(tree, arg_names=arg_names):
         assert keyword.arg is not None, ast.unparse(keyword)
         yield call, keyword.arg, keyword.value
@@ -188,15 +121,8 @@ def _named_primitive_keyword_calls(
 def generic_literal_field_offenders(tree: ast.AST, path: pathlib.Path, *, members: FieldMembers) -> list[str]:
     """Flag a literal handed to a result primitive outside its declared Literal.
 
-    Generic over fields: ``members`` comes from
-    :func:`literal_typed_field_members`, so the sweep covers ``status`` and
-    ``classification`` (and any future Literal field) without naming either.
-    A non-Literal field (``error``, ``extraction_method``) is not in the map and
-    is not checked here -- ``error`` has its own provenance story below. Which
-    values count as spelled non-members is
-    :func:`chokepoint_walks.non_member_literals`, shared with the ``error``
-    sweep and with the detectors in ``tests/invariants/``.
-    """
+    Generic over fields: members come from the models, so ``status`` is covered
+    without being named; ``error`` has its own provenance story below."""
     return [
         offender(
             path,
@@ -224,10 +150,8 @@ _NAMESPACE_FIELD_BANS: dict[tuple[str, ...], str] = {
 def _namespace_violation(name: str, field: str) -> tuple[str, ...] | None:
     """The prefix set whose constants must never feed ``field``, or None.
 
-    A name is only reported when its prefix is *banned from the field it is
-    passed to*: an extraction constant passed as ``extraction_method=`` is the
-    intended use and never reported.
-    """
+    An extraction constant passed as ``extraction_method=`` is intended use and
+    is never reported."""
     for prefixes, banned_field in _NAMESPACE_FIELD_BANS.items():
         if field != banned_field:
             continue
@@ -239,14 +163,8 @@ def _namespace_violation(name: str, field: str) -> tuple[str, ...] | None:
 def namespace_constant_offenders(tree: ast.AST, path: pathlib.Path, *, members: FieldMembers) -> list[str]:
     """Flag a constant from a foreign taxonomy passed as a Literal field.
 
-    Catches ``_failed_engine_result(classification=EXTRACTION_METHOD_BINARY_NO_TEXT)``:
-    a Name whose resolution belongs to the extraction-method namespace being
-    consumed as a classification. The value happens to be a legal
-    classification member, so a value-membership check admits it -- the name's
-    namespace is the only signal that the constant was reached for the wrong
-    reason. Names that are not module constants (parameters, imports) are what
-    a correct call site writes and pass without comment.
-    """
+    The value collides with a legal member, so only the name's namespace
+    identifies the wrong-fields constant as wrong."""
     constants = _module_constants(tree)
     out: list[str] = []
     for node, field, value in _named_primitive_keyword_calls(tree, arg_names=members):
@@ -278,21 +196,15 @@ def namespace_constant_offenders(tree: ast.AST, path: pathlib.Path, *, members: 
 class NonMemberValue(AssertionError):
     """A value crossed a result-primitive boundary outside its declared Literal.
 
-    A distinct exception class (not bare ``AssertionError``) so a failing test
-    reports the *chokepoint* firing instead of a generic assertion, and so an
-    unrelated ``assert`` in a primitive's body can never be mistaken for the
-    membership contract.
-    """
+    A named class (not bare AssertionError) so the gate firing is distinct from
+    an unrelated assert in the primitive's own body."""
 
 
 def assert_member(value: object, *, field: str, members: frozenset[str], where: str) -> None:
     """Verify ``value`` is a member of the ``Literal`` declared for ``field``.
 
-    ``members`` is the field's declared value set. Non-``str`` values are a
-    type error the static checker owns, not this gate's contract; a non-member
-    string raises :class:`NonMemberValue` naming the site, which is the message
-    that points at the producer rather than the primitive.
-    """
+    Non-``str`` is the static checker's type error, not this gate's; a
+    non-member raises :class:`NonMemberValue` naming the site."""
     if not isinstance(value, str):
         raise NonMemberValue(f"{where}: {field} expected a member of its Literal, got {type(value).__name__}")
     if value not in members:
@@ -305,10 +217,7 @@ def assert_member(value: object, *, field: str, members: frozenset[str], where: 
 def assert_optional_member(value: object, *, field: str, members: frozenset[str], where: str) -> None:
     """As :func:`assert_member` but ``None`` is admitted.
 
-    ``CrawlStrategyAttempt.strategy`` and ``EngineCrawlResult.selected_strategy``
-    are ``CrawlStrategyName | None``: "no strategy was attempted" is an honest
-    label rather than an invented member, and the wire model serializes null.
-    """
+    The ``| None`` fields (strategy, selected_strategy) serialise null honestly."""
     if value is None:
         return
     assert_member(value, field=field, members=members, where=where)
@@ -317,10 +226,7 @@ def assert_optional_member(value: object, *, field: str, members: frozenset[str]
 def field_member_sets() -> dict[str, frozenset[str]]:
     """The runtime form of :func:`literal_typed_field_members`.
 
-    Frozen so a caller cannot mutate the set the gate checks against; the gate
-    reads the same models the AST sweep does, so the two halves cannot disagree
-    about what is a member.
-    """
+    Frozen so the gate and the AST sweep cannot disagree about membership."""
     return {name: frozenset(members) for name, members in literal_typed_field_members().items()}
 
 
@@ -329,13 +235,8 @@ def assert_result_fields(
 ) -> None:
     """Check every Literal-typed key of a primitive's keyword payload.
 
-    ``payload`` is the kwargs the primitive was called with. Only fields the
-    models declare as Literals are checked, and only when present in the
-    payload -- a field with a default the primitive itself supplies is trusted
-    to the primitive's own construction (``status="failed"`` in
-    ``_failed_engine_result``), which is checked by the AST sweep over the
-    primitive's own source rather than re-asserted per call.
-    """
+    Fields the primitive itself supplies with a default are trusted to its own
+    construction; the AST sweep checks the primitive's source instead."""
     for field, value in payload.items():
         allowed = members.get(field)
         if allowed is None:
@@ -354,12 +255,8 @@ _PROTOCOL_METHODS = frozenset({"run"})
 def _accepts_unused_kwargs(node: ast.FunctionDef | ast.AsyncFunctionDef) -> bool:
     """True when ``**kwargs`` is accepted and never routed anywhere.
 
-    A double that forwards ``**kwargs`` to the real callable (``real.run(...,
-    **kwargs)``) is NOT blind -- it passes the parameter through, so a signature
-    change surfaces at the real call. The blind shape is the one that accepts
-    and drops: the double silently implements an outdated contract and CI stays
-    green while the production caller's new required kwarg vanishes.
-    """
+    A double that forwards or reads its ``**kwargs`` passes the parameter
+    through; the blind shape silently implements an outdated contract."""
     kwargs = [a for a in node.args.kwonlyargs if a.arg == "kwargs"]
     if not kwargs:
         varkw = node.args.kwarg
@@ -384,13 +281,7 @@ def _accepts_unused_kwargs(node: ast.FunctionDef | ast.AsyncFunctionDef) -> bool
 
 def _is_test_double_signature(node: ast.FunctionDef | ast.AsyncFunctionDef) -> bool:
     """A ``def run(...)`` (or ``__call__``) is a double shape when it takes a
-    worker/callback positional and keyword-only args -- the Protocol shape.
-
-    ``DomainScheduler.run``'s signature is
-    ``(jobs, worker, on_result=None, *, ..., failed_result=...)``. A double of
-    it carries ``jobs``/``worker`` positionals and keyword-only params; a
-    same-named method on an unrelated class does not, so it stays unflagged.
-    """
+    worker/callback positional and keyword-only args -- the Protocol shape."""
     positional = [a.arg for a in node.args.posonlyargs + node.args.args if a.arg not in {"self", "cls"}]
     if node.name == "run":
         # The scheduler Protocol's two positional members.
@@ -404,12 +295,8 @@ def _is_test_double_signature(node: ast.FunctionDef | ast.AsyncFunctionDef) -> b
 def swallowing_test_double_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
     """Flag a Protocol-shaped test double that accepts ``**kwargs`` and drops it.
 
-    The class of failure this forecloses: a production callable's signature
-    gains a required parameter, and every double that imitated it keeps
-    passing CI because ``**kwargs`` accepted the new argument and discarded it.
-    The test then exercises a double of a contract that no longer exists, which
-    is the project's signature failure mode -- green while wrong.
-    """
+    The signature failure mode: a production callable gains a required
+    parameter and every imitating double keeps passing CI, green while wrong."""
     if "tests" not in path.parts:
         return []
     out: list[str] = []
@@ -447,10 +334,8 @@ _SANCTIONED_FUNC_MODULES: dict[str, frozenset[str]] = {
 def _aliased_module_bindings(tree: ast.AST) -> set[str]:
     """Local names bound to an import of a module in ``_STDALIAS_MODULES``.
 
-    ``import re`` binds ``re``; ``import re as _re`` binds ``_re``. Returning
-    both means the detector below catches a dynamic pattern under either form,
-    and the old literal-name check is subsumed rather than duplicated.
-    """
+    Both spellings (``re`` and ``re as _re``) are captured, so the detector
+    catches a dynamic pattern under either form."""
     bound: set[str] = set()
     for node in nodes_of(tree):
         if isinstance(node, ast.Import):
@@ -463,13 +348,8 @@ def _aliased_module_bindings(tree: ast.AST) -> set[str]:
 def _aliased_sanctioned_func_names(tree: ast.AST) -> dict[str, set[str]]:
     """Every local alias of a sanctioned chokepoint function, by canonical name.
 
-    ``from app.transport.decompression import decompress_body`` binds
-    ``decompress_body``; ``... as dec`` binds ``dec``. The detectors that guard
-    chokepoint call sites match on the literal import name, so an alias is an
-    escape hatch in the same way ``import re as _re`` is. This resolves the
-    binding so a detector can sweep every alias of every sanctioned function
-    from one map instead of a per-detector list of spellings.
-    """
+    Resolved here so one map sweeps every spelling; a literal-name detector is
+    blind to an alias, which is the escape hatch this closes."""
     aliases: dict[str, set[str]] = {}
     for node in nodes_of(tree):
         if not isinstance(node, ast.ImportFrom):
@@ -490,13 +370,8 @@ _DYNAMIC_RE_METHODS = frozenset({"compile", "search", "match", "fullmatch", "sub
 def aliased_dynamic_pattern_re_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
     """Flag ``re.<method>(<non-literal pattern>)`` under ANY import alias.
 
-    This subsumes the two existing name-anchored detectors
-    (``_dynamic_pattern_re_calls`` and ``_no_direct_regex_engine_import``'s
-    call shape): it resolves the module binding first, so ``import re as _re``
-    cannot rename its way out of the sweep. Only the *pattern* argument is
-    checked -- ``re.search(LITERAL, text)`` is safe, a dynamic PATTERN is the
-    ReDoS hazard.
-    """
+    Resolves the module binding first, so ``import re as _re`` cannot rename
+    its way out of the ReDoS sweep; only the pattern argument is checked."""
     aliases = _aliased_module_bindings(tree)
     if not aliases:
         return []
@@ -529,14 +404,7 @@ def aliased_dynamic_pattern_re_offenders(tree: ast.AST, path: pathlib.Path) -> l
 
 def aliased_sanctioned_func_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
     """Flag a call to a sanctioned chokepoint through an alias the spelling
-    lists do not contain.
-
-    This is the audit of the name-matching detectors, not a duplicate: it
-    reports any alias the hand-kept lists missed, which is how the
-    one-representative habit is caught rather than patched. Only calls are
-    checked, and only for functions whose call-site shape is guarded elsewhere
-    -- an unguarded chokepoint is a different finding.
-    """
+    lists do not contain; unguarded chokepoints are a different finding."""
     out: list[str] = []
     aliases = _aliased_sanctioned_func_names(tree)
     if not aliases:
@@ -575,17 +443,8 @@ def error_field_taxonomy_offenders(
     tree: ast.AST, path: pathlib.Path, *, members: frozenset[str] | None = None
 ) -> list[str]:
     """Flag a literal ``error=`` handed to a result primitive that is not a
-    Classification member.
-
-    ``members`` defaults to the live ``CrawlError`` members -- the *union* of
-    the classification and error-code taxonomies, which is what makes
-    ``CrawlError`` a taxonomy rather than a restatement of one of them. The
-    default is resolved, not transcribed. A
-    non-literal value is what a correct caller writes and passes without
-    comment; ``None`` is the honest "no error" label and is admitted -- that
-    admission is :func:`chokepoint_walks.spelled_non_member`, not a branch
-    here.
-    """
+    Classification member. ``members`` defaults to the live ``CrawlError``
+    taxonomy; ``None`` is the honest "no error" label."""
     if members is None:
         members = real_members("CrawlError")
     return [
