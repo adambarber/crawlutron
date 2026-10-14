@@ -17,7 +17,7 @@ LIMIT = 500
 _BUDGETS = {
     "app": 0,
     "tests": 1,
-    "scripts": 1,
+    "scripts": 0,
 }
 
 

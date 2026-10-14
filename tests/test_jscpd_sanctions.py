@@ -6,6 +6,7 @@ import json
 
 import pytest
 
+from scripts import _jscpd_pair_resolution as res
 from scripts import jscpd_gate as gate
 from tests.test_jscpd_floors import _configure_scan_config
 from tests.test_jscpd_gate import (
@@ -59,8 +60,8 @@ def test_migrations_clones_are_not_reported_but_production_clones_are(monkeypatc
     # The real `.jscpd.json` is NOT redirected: the ignore list is the thing under test.
     if (gate.SERVICE_ROOT / ".venv").exists():
         (mirror / ".venv").symlink_to(gate.SERVICE_ROOT / ".venv", target_is_directory=True)
-    monkeypatch.setattr(gate, "SERVICE_ROOT", mirror)
-    monkeypatch.setattr(gate, "EXPECTATIONS_PATH", mirror / "expectations.json")
+    monkeypatch.setattr(res, "SERVICE_ROOT", mirror)
+    monkeypatch.setattr(res, "EXPECTATIONS_PATH", mirror / "expectations.json")
     monkeypatch.setattr(gate, "MIN_SOURCES", {"all": 1})
 
     assert gate._run(_args()) == 1
@@ -91,7 +92,7 @@ def test_unowned_ignore_list_fails_before_any_scan(monkeypatch, tmp_path, drift)
 def test_python_source_globs_are_never_a_sanctioned_exception(glob) -> None:
     """The ignore list exists to skip caches and vendored trees, never source."""
     with pytest.raises(ValueError, match="Python source|whole tree"):
-        gate._reject_source_masking([glob])
+        res._reject_source_masking([glob])
 
 
 @pytest.mark.parametrize(
@@ -114,7 +115,7 @@ def test_jscpd_json_rejects_unknown_keys(tmp_path, unsanctioned) -> None:
         encoding="utf-8",
     )
     with pytest.raises(ValueError, match="unknown keys"):
-        gate._validate_scan_config(config)
+        res._validate_scan_config(config)
 
 
 def test_jscpd_json_accepts_only_ignore(tmp_path) -> None:
@@ -124,7 +125,7 @@ def test_jscpd_json_accepts_only_ignore(tmp_path) -> None:
         json.dumps({"ignore": gate.SANCTIONED_IGNORE_GLOBS}),
         encoding="utf-8",
     )
-    gate._validate_scan_config(config)
+    res._validate_scan_config(config)
 
 
 def test_the_test_suite_reads_the_floor_the_hook_runs() -> None:
@@ -193,7 +194,7 @@ def test_a_floor_the_hook_does_not_state_is_unreadable_rather_than_defaulted(mon
     )
     assert "--min-tokens" not in (tmp_path / "config.yaml").read_text(encoding="utf-8")
     assert stripped
-    monkeypatch.setattr(gate, "PRECOMMIT_CONFIG_PATH", tmp_path / "config.yaml")
+    monkeypatch.setattr(res, "PRECOMMIT_CONFIG_PATH", tmp_path / "config.yaml")
     with pytest.raises(ValueError, match="declares no --min-tokens"):
         gate.configured_floor()
 
@@ -216,7 +217,7 @@ def test_every_sanctioned_pair_names_a_guard_that_exists_and_pins_its_fragment()
     the entry fails as unsanctioned rather than continuing to vouch for a fragment
     that no longer exists.
     """
-    sanctioned = [pair["id"] for pair in gate._expected_pairs()]
+    sanctioned = [pair["id"] for pair in res._expected_pairs()]
     assert not sanctioned, (
         f"duplicate pairs are sanctioned again: {sanctioned}. A sanction is a standing licence "
         "to duplicate; if a guard genuinely requires two spellings, that is a chokepoint to "
@@ -226,10 +227,10 @@ def test_every_sanctioned_pair_names_a_guard_that_exists_and_pins_its_fragment()
         "fetcher declares them instead of spelled a second time in app/models/taxonomy.py. See "
         "app/extraction/content.py Selectors for the one that remains."
     )
-    for pair in gate._expected_pairs():
+    for pair in res._expected_pairs():
         guard = pair["guard"]
         path, _, node = guard.partition("::")
-        assert node in gate._test_names(gate.SERVICE_ROOT / path), (
+        assert node in res._test_names(gate.SERVICE_ROOT / path), (
             f"{pair['id']} names a guard that is not there"
         )
         assert len(pair["fragment_sha256"]) == 64, f"{pair['id']} has no content pin"
@@ -262,7 +263,6 @@ def test_one_line_of_code_between_two_import_runs_keeps_the_pair_under_judgement
     """
     fragment = """from app.vocabulary.taxonomy import ResultStatus
 from app.models.crawl_result import CrawlResult
-
 
 def build(status: ResultStatus) -> CrawlResult:
     return CrawlResult(status=status)

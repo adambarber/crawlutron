@@ -6,6 +6,7 @@ import hashlib
 import json
 import sys
 
+from scripts import _jscpd_pair_resolution as res
 from scripts import jscpd_gate as gate
 from tests.test_jscpd_gate import (
     _CONFIGURED_MIN_LINES,
@@ -46,9 +47,9 @@ def _configure_scan_config(monkeypatch, tmp_path, ignore: list[str]) -> list[lis
     """Point the gate at a tampered .jscpd.json and record whether jscpd was ever run."""
     config = tmp_path / "jscpd.json"
     config.write_text(json.dumps({"ignore": ignore}), encoding="utf-8")
-    monkeypatch.setattr(gate, "CONFIG_PATH", config)
+    monkeypatch.setattr(res, "CONFIG_PATH", config)
     _write_expectations(tmp_path / "expectations.json", [])
-    monkeypatch.setattr(gate, "EXPECTATIONS_PATH", tmp_path / "expectations.json")
+    monkeypatch.setattr(res, "EXPECTATIONS_PATH", tmp_path / "expectations.json")
     monkeypatch.setattr(
         sys,
         "argv",
@@ -60,14 +61,14 @@ def _configure_scan_config(monkeypatch, tmp_path, ignore: list[str]) -> list[lis
         commands.append(command)
         raise AssertionError("jscpd must not run against an unvalidated scan config")
 
-    monkeypatch.setattr(gate.subprocess, "run", run)
+    monkeypatch.setattr(res.subprocess, "run", run)
     return commands
 
 
 def test_checked_in_scan_config_is_owned_by_the_gate() -> None:
     """`.jscpd.json` is enforcement configuration, so the gate validates it."""
     assert gate.CONFIG_PATH == gate.SERVICE_ROOT / ".jscpd.json"
-    gate._validate_scan_config(gate.CONFIG_PATH)
+    res._validate_scan_config(gate.CONFIG_PATH)
 
 
 def _at(first: tuple[str, int, int], second: tuple[str, int, int], fragment: str = "duplicate") -> dict:
@@ -80,7 +81,6 @@ def _at(first: tuple[str, int, int], second: tuple[str, int, int], fragment: str
 
 
 DECLARED_FIRST = ("app/new.py", 10, 20)
-
 
 DECLARED_SECOND = ("app/other.py", 30, 40)
 
@@ -125,7 +125,7 @@ def _gate_says(monkeypatch, tmp_path, capsys, *pairs: dict) -> str:
     """Run the gate over a report holding one clone, with these expectations."""
     expectations = tmp_path / "expectations.json"
     _write_expectations(expectations, list(pairs))
-    monkeypatch.setattr(gate, "EXPECTATIONS_PATH", expectations)
+    monkeypatch.setattr(res, "EXPECTATIONS_PATH", expectations)
     _stub_report(monkeypatch, [_duplicate()])
     monkeypatch.setattr(sys, "argv", _GATE_ARGV)
     assert gate.main() == 1

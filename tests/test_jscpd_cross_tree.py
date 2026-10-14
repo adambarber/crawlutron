@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pytest
 
+from scripts import _jscpd_pair_resolution as res
 from scripts import jscpd_gate as gate
 from scripts.executables import require_repo_tool
 from tests.test_jscpd_gate import (
@@ -52,7 +53,7 @@ def _stubbed_scan(duplicates: list[dict], sources: int = 400) -> dict[str, objec
 
 
 def _without_cross_tree_scan(monkeypatch, duplicates: list[dict], sources: int = 400) -> None:
-    monkeypatch.setattr(gate, "_cross_tree_scan", lambda floor, args: _stubbed_scan(duplicates, sources))
+    monkeypatch.setattr(res, "_cross_tree_scan", lambda floor, args: _stubbed_scan(duplicates, sources))
 
 
 def test_a_clone_spanning_two_trees_fails(monkeypatch, tmp_path, capsys) -> None:

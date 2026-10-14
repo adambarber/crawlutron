@@ -8,6 +8,7 @@ import json
 import sys
 from pathlib import Path
 
+from scripts import _jscpd_pair_resolution as res
 from scripts import jscpd_gate as gate
 
 
@@ -91,7 +92,7 @@ def _stub_report(
             return False
         return relative in declared or Path.is_file(path)
 
-    monkeypatch.setattr(gate, "_IS_FILE", _is_file)
+    monkeypatch.setattr(res, "_IS_FILE", _is_file)
 
     def run(command, **_kwargs):
         commands.append(command)
@@ -150,7 +151,7 @@ def _stub_report(
         (output / "jscpd-report.json").write_text(json.dumps(report), encoding="utf-8")
         return type("Completed", (), {"returncode": 0, "stdout": "", "stderr": ""})()
 
-    monkeypatch.setattr(gate.subprocess, "run", run)
+    monkeypatch.setattr(res.subprocess, "run", run)
     return commands
 
 
@@ -163,7 +164,7 @@ def _run_against_empty_tree(monkeypatch, tmp_path, **kwargs) -> list[list[str]]:
     once rather than re-spelled per test.
     """
     _write_expectations(tmp_path / "expectations.json", [])
-    monkeypatch.setattr(gate, "EXPECTATIONS_PATH", tmp_path / "expectations.json")
+    monkeypatch.setattr(res, "EXPECTATIONS_PATH", tmp_path / "expectations.json")
     commands = _stub_report(monkeypatch, [], **kwargs)
     assert gate._run(_args()) == 0
     return commands
@@ -269,7 +270,7 @@ _GATE_ARGV = [
 def _configure(monkeypatch, tmp_path, pair: dict, duplicate: list[dict]) -> list[list[str]]:
     expectations = tmp_path / "expectations.json"
     _write_expectations(expectations, [pair])
-    monkeypatch.setattr(gate, "EXPECTATIONS_PATH", expectations)
+    monkeypatch.setattr(res, "EXPECTATIONS_PATH", expectations)
     commands = _stub_report(monkeypatch, duplicate)
     monkeypatch.setattr(sys, "argv", _GATE_ARGV)
     return commands
@@ -285,5 +286,5 @@ def _expect_nothing_sanctioned(monkeypatch, tmp_path, duplicates, **report) -> N
     """
     expectations = tmp_path / "expectations.json"
     _write_expectations(expectations, [])
-    monkeypatch.setattr(gate, "EXPECTATIONS_PATH", expectations)
+    monkeypatch.setattr(res, "EXPECTATIONS_PATH", expectations)
     _stub_report(monkeypatch, duplicates, **report)
