@@ -59,13 +59,8 @@ else:
 def _remove_test_cache_dir():
     """Delete this worker's scratch cache directory once the session is over.
 
-    Guarded on identity rather than on the env var: if the operator pointed
-    ``CRAWLUTRON_CACHE_DIR`` somewhere real, that directory is not the suite's
-    to delete, and the teardown must be the one thing in this file that cannot
-    destroy their data. The comparison is against the value this process
-    installed, which is why a child that re-derived its own still cleans up
-    after itself.
-    """
+    Guarded on identity: if the operator pointed CRAWLUTRON_CACHE_DIR
+    somewhere real, that directory is not the suite's to delete."""
     yield
     if os.environ.get("CRAWLUTRON_CACHE_DIR") == str(_SCRATCH_CACHE_DIR):
         shutil.rmtree(_SCRATCH_CACHE_DIR, ignore_errors=True)
@@ -76,12 +71,10 @@ _TEST_STRICT_SSRF = os.environ.get("CRAWLUTRON_TEST_STRICT_SSRF", "0") == "1"
 
 @pytest.fixture(scope="session", autouse=True)
 def _enable_loopback_for_test_suite():
-    """Enable private targets (loopback crawling) for the entire test session.
+    """Enable private targets (loopback crawling) for the test session.
 
-    This is the **only** path that flips the secure default for the suite. If
-    ``CRAWLUTRON_TEST_STRICT_SSRF=1`` is set, this fixture is a no-op and
-    every test that needs to crawl loopback must explicitly set the env var.
-    """
+    The only path that flips the secure default; strict-SSRF runs leave it on
+    and each loopback test opts in per test."""
     if not _TEST_STRICT_SSRF:
         os.environ["CRAWLUTRON_ALLOW_PRIVATE_TARGETS"] = "1"
     yield
@@ -103,23 +96,9 @@ os.environ["CRAWLUTRON_CONTENT_CACHE_ENABLED"] = os.environ.get("CRAWLUTRON_CONT
 
 @pytest.fixture
 def ssrf_guard_required(monkeypatch):
-    """Mark a test that exercises ``check_ssrf_protection`` or
-    ``resolve_and_pin_host`` and assert that it opted OUT of the test
-    default ``CRAWLUTRON_ALLOW_PRIVATE_TARGETS=1``.
-
-    The suite defaults to private-targets ON so the loopback helper server
-    works; tests that intentionally probe the SSRF guard MUST opt back in
-    via ``_assertions.block_private_targets(monkeypatch)`` or
-    ``monkeypatch.setenv("CRAWLUTRON_ALLOW_PRIVATE_TARGETS", "0")``.
-    Failure to opt out is a silent false-positive: the SSRF code path is
-    short-circuited before the actual guard runs.
-
-    Usage:
-        @pytest.mark.usefixtures("ssrf_guard_required")
-        def test_my_ssrf_check(monkeypatch):
-            monkeypatch.setenv("CRAWLUTRON_ALLOW_PRIVATE_TARGETS", "0")
-            check_ssrf_protection(...)
-    """
+    """Mark a test that exercises an SSRF guard and assert it opted out of
+    the test default CRAWLUTRON_ALLOW_PRIVATE_TARGETS=1; otherwise the guard
+    short-circuits before the real path runs."""
     called: list[str] = []
     from app.transport import pinned_transport as pinned_mod
 
@@ -161,32 +140,14 @@ _ORIGINAL_ASYNCIO_SLEEP = asyncio.sleep
 async def _fast_asyncio_sleep(delay, *args, **kwargs):
     """A zero-second async sleep: it waits for nothing, but it still yields.
 
-    The previous version of this returned without ever suspending, so awaiting
-    it cost *zero* scheduling points. That is only safe for a sleep whose sole
-    purpose is a delay, and production code is full of sleeps that are also
-    scheduling points: ``await_or_client_gone`` polls the client-disconnect flag
-    with ``await asyncio.sleep(poll_interval)``, a per-domain gate releases
-    through one, a semaphore's barging check depends on one. Under a
-    never-suspending patch those loops become a hot spin that never hands the
-    loop back, so the coroutine they are waiting for can never run and the
-    test hangs rather than failing.
-
-    Yielding once through the real ``asyncio.sleep(0)`` keeps that whole class
-    of loop-shaped behaviour intact at zero wall-clock cost: the requested
-    duration is discarded, the scheduling point is not. Everything that used to
-    need ``real_sleeps`` merely to get a yield can now drop it.
-    """
+    A never-suspending patch turns yield-point sleeps into hot spins that hang
+    the suite; yielding once through the real sleep keeps that intact."""
     del delay, args, kwargs
     await _ORIGINAL_ASYNCIO_SLEEP(0)
 
 
 def pytest_collection_modifyitems(config, items):
-    """Auto-skip browser-marked tests when no real browser is installed.
-
-    Keeps ``pytest -m browser`` (and the full run) green on machines without
-    Camoufox/Playwright instead of failing mid-suite. When a browser is present
-    the marker is left intact so the tests actually execute.
-    """
+    """Auto-skip browser-marked tests when no real browser is installed."""
     from tests._assertions import browser_available
 
     if browser_available():
@@ -201,20 +162,8 @@ def pytest_collection_modifyitems(config, items):
 def fast_sleeps():
     """Patch time.sleep and asyncio.sleep to be zero-second by default.
 
-    By default the test suite runs with sleeps that cost no wall-clock time, so
-    delay routines (scheduler delays, retry backoffs, browser lazy-scroll
-    waits) do not slow tests down. ``asyncio.sleep`` becomes a sleep of zero
-    seconds that still yields -- see ``_fast_asyncio_sleep``.
-
-    There is deliberately no ``real_sleeps`` escape hatch any more. A fixture
-    that restores wall-clock time cannot be excluded by ``-m "not slow"`` (it is
-    a parameter, not a marker), so it silently opted 100+ tests into depending
-    on how loaded the developer's box was; and for the concurrency assertions it
-    was the *instrument*, not the noise. Where elapsed time genuinely is the
-    property, the test now drives the boundary through a controlled trigger or
-    an injected clock, and the handful of probes that must observe real elapsed
-    time say so in their own docstring and are marked ``slow``.
-    """
+    No ``real_sleeps`` escape hatch: it silently opted tests into depending on
+    box load; where elapsed time is the property, the test drives the boundary."""
     with patch("time.sleep", lambda *a, **k: None), patch("asyncio.sleep", _fast_asyncio_sleep):
         yield
 
@@ -223,13 +172,8 @@ def fast_sleeps():
 def stub_cffi_fetcher(request, monkeypatch):
     """Replace the real curl_cffi TLS-impersonation fetcher in tests.
 
-    Stream-mode curl_cffi 0.16 has no plain timeout (it relies on a
-    LOW_SPEED abort), and its internal watchdog busy-spins the GIL under
-    the fast_sleeps patch, wedging the entire pytest process. Real cffi
-    behavior is exercised in subprocess-isolated tests and in live tests
-    marked ``real_cffi``; everything else gets a fast connection error,
-    matching the pre-streaming failure semantics the suite was built on.
-    """
+    Stream-mode curl_cffi busy-spins the GIL under fast_sleeps; real cffi
+    runs only in subprocess-isolated and ``real_cffi``-marked tests."""
     if request.node.get_closest_marker("real_cffi"):
         return
     import app.transport.fetchers as fetchers_module
@@ -268,17 +212,8 @@ async def async_client():
 def override_settings():
     """Point ``app.state.crawler_settings`` at a fresh instance for a test.
 
-    ``CrawlerSettings`` is a frozen dataclass, so per-test overrides build a
-    new instance from ``os.environ`` plus ``CRAWLUTRON_*`` overrides and
-    restore the original after the test.
-
-    This is also the suite's only spelling of "env plus overrides becomes
-    settings". Several test files used to carry a private module-level
-    ``_settings(**overrides)`` copy of the same four lines; a test that needs a
-    settings object with no other effect now requests this fixture and uses the
-    instance it returns, so there is one place that decides how an override key
-    becomes an environment variable.
-    """
+    The suite's only spelling of "env plus overrides becomes settings";
+    test files used to carry private module-level copies of the same lines."""
     from app.config.settings import CrawlerSettings
     from tests._app_factory import service_app
 
@@ -333,12 +268,8 @@ def _cleanup_extraction_executors():
 def recording_worker():
     """``(seen, worker)``: a recursive-crawl worker that records its job URLs.
 
-    Several dispatch and robots tests assert *which* jobs reached the worker --
-    a robots-skipped URL must never appear, a batch's repeated URL must be
-    crawled once. Each of those spelled the same two-line worker, and a copy
-    that drops the ``seen.append`` turns the assertion into a vacuous truth
-    over an empty list.
-    """
+    Several dispatch and robots tests assert *which* jobs reached the worker;
+    a copy that drops the ``seen.append`` turns that into a vacuous truth."""
     from app.models.normalized_url import NormalizedUrl
     from tests._result_builders import make_engine_result
 
@@ -379,11 +310,8 @@ def watch_store(tmp_path):
 def client(job_store):
     """An AsyncClient over the jobs app, backed by this test's own ``job_store``.
 
-    Lives here rather than in either test module because two of them need it, and
-    a fixture defined in one module is invisible to the other. ``job_store``
-    came from here too; the local copy that shadowed it only unwrapped
-    ``tmp_path`` a second time, and hid this docstring while doing it.
-    """
+    Lives here rather than in either test module because both need it; the
+    local copy that shadowed the fixture only rewrapped tmp_path."""
     from httpx import ASGITransport, AsyncClient
 
     from tests._job_harnesses import _make_app
@@ -394,11 +322,8 @@ def client(job_store):
 def _served(handler_cls):
     """Serve one handler class on an ephemeral port, then tear it down.
 
-    The teardown is the part every real-server fixture gets wrong, so it is
-    written once: a fixture that shuts the socket down in its own body can
-    differ from one that does not, and a leaked handler thread outlives the
-    test that started it.
-    """
+    The teardown is written once: a leaked handler thread outlives the test
+    that started it."""
     from tests.helpers.server import spawn_threaded_server
 
     server = spawn_threaded_server(handler_cls)
@@ -443,12 +368,8 @@ def _clear_sitemap_cache() -> None:
 def _clear_metrics() -> None:
     """Reset the process-local metrics store.
 
-    ``get_metrics()`` returns the module-level singleton accumulated by
-    crawl_request / the engine. Without a reset, metric assertions become
-    order-dependent (e.g. a later test could observe non-zero utilization left
-    by an earlier recursive crawl). Resetting in place keeps every test hermetic
-    while preserving the object identity that ``engine``/``main`` obtain via ``get_metrics()``.
-    """
+    Without it, metric assertions become order-dependent: a later test could
+    observe utilization left by an earlier crawl."""
     from app.runtime.metrics import get_metrics
 
     get_metrics().reset()
@@ -457,18 +378,8 @@ def _clear_metrics() -> None:
 def _clear_global_http_state() -> None:
     """Reset crawler global singletons.
 
-    Tests drive many short-lived ``asyncio.run`` loops; without this the pooled
-    httpx client keeps sockets bound to dead loops (pytest's unraisable-warning
-    plugin then fails a random later test with ResourceWarning), the global
-    cookie jar leaks Set-Cookie state, and the shared HTTP cache / admission
-    gate leak crawl state across tests. Resetting here keeps tests
-    order-independent and is a prerequisite for pytest-xdist safety.
-
-    The http client close is loop-aware: if an event loop is already running
-    (async tests) we drop the reference and let GC reclaim it rather than
-    calling ``asyncio.run`` from inside a running loop (which raises and was
-    previously swallowed, leaving the client un-reset).
-    """
+    Dead-loop-bound pooled clients leak sockets, cookies and cache state across
+    tests; the close is loop-aware (drop for GC) to avoid running a second loop."""
     import asyncio
 
     from app.transport import cookie_jar as cookie_mod
@@ -533,27 +444,8 @@ def _reset_module_globals():
 async def owned_job_runtime():
     """Hand every test the job runtime, and take it back at the end.
 
-    ``app.api.job_runner`` keeps its task registry in a module-level dict and
-    the app keeps its shutdown event in ``app.state``, so both are shared by
-    every test in a worker process. A crawl started by one test therefore
-    stayed visible to the next, and a test that shut the world down did it for
-    its neighbours as well.
-
-    The event is minted per test here as well as per lifespan run in
-    ``app.main``, because ``async_client`` drives the app over an ASGI
-    transport without running its lifespan -- so the dependency
-    ``get_shutdown_event`` resolves has to be supplied by whoever owns the
-    test, and that is this fixture.
-
-    Leaving a crawl running is only legitimate until the test that started it
-    ends. Teardown is the one point where that is unconditionally true for every
-    test, so it is where the reset belongs, rather than in each test module that
-    happens to remember to call ``reset_job_runner()`` itself.
-
-    Async rather than sync because cancelling a task and awaiting its exit are
-    different acts, and only the second one proves the task is gone. Cancelling
-    without awaiting leaves it holding the store the next test opens.
-    """
+    The task registry and shutdown event are module-global: a crawl from one
+    test stayed visible to the next. Teardown is where the reset belongs."""
     from app.api import job_runner
     from tests._app_factory import service_app
 
