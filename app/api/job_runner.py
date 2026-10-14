@@ -26,7 +26,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import Awaitable, Callable, Coroutine, Sequence
+from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import replace
 from typing import Any
 
@@ -42,6 +42,18 @@ from app.admission.admission import (
 from app.admission.admission_links import remaining_page_capacity
 from app.admission.policy import read_policy
 from app.api.crawl_executor import execute_crawl as _real_execute_crawl
+from app.api.job_lifecycle import (
+    cancel_job_task,
+    is_running,
+    reset_job_runner,
+    shutdown_job_runner,
+    start_job,
+    start_tracked_task,
+)
+from app.api.job_recovery import (
+    recover_and_start_pending_jobs,
+    recover_orphaned_running_jobs,
+)
 from app.api.response_shaping import _failed_unified_result
 from app.api.unified_shaping import abuild_unified_result
 from app.models.crawl_result import CrawlResult, EngineCrawlResult
@@ -53,7 +65,6 @@ from app.orchestration.render_result import terminal_attempt
 from app.orchestration.robots import FetchAndDecode
 from app.storage.job_store import (
     FrontierEntry,
-    JobKind,
     JobStatus,
     JobStore,
     normalize_job_state,
@@ -63,11 +74,13 @@ from app.vocabulary.taxonomy import is_transient_classification, status_for_clas
 
 logger = logging.getLogger(__name__)
 
-# Frontier batch size per engine call. Bounds per-call result memory the
-# same way the webhook runner bounds whole-crawl memory.
+
 BATCH_SIZE = 8
 
+
 ExecuteCrawl = Callable[..., Awaitable[ProducerEnvelope]]
+
+
 _execute_crawl: ExecuteCrawl = _real_execute_crawl
 
 
@@ -103,104 +116,6 @@ async def arecord_terminal_failure(job_store: JobStore, job_id: str, error: str)
 def reset_execute_crawl() -> None:
     global _execute_crawl
     _execute_crawl = _real_execute_crawl
-
-
-_tasks: dict[str, asyncio.Task] = {}
-
-
-def is_running(job_id: str) -> bool:
-    task = _tasks.get(job_id)
-    return task is not None and not task.done()
-
-
-async def shutdown_job_runner() -> None:
-    """Cancel all running job tasks and await their exit."""
-    for task in list(_tasks.values()):
-        task.cancel()
-    for job_id, task in list(_tasks.items()):
-        try:
-            await task
-        except asyncio.CancelledError:
-            pass
-        except Exception:
-            logger.warning("job_runner_shutdown_task_error", extra={"job_id": job_id})
-    _tasks.clear()
-
-
-def reset_job_runner() -> None:
-    """Best-effort synchronous teardown for test fixtures (no await needed)."""
-    for task in list(_tasks.values()):
-        task.cancel()
-    _tasks.clear()
-    reset_execute_crawl()
-
-
-def _is_resumable_kind(kind: str) -> bool:
-    """Whether a job of this kind can be resumed from its persisted frontier.
-
-    One definition, read by both recovery seams, because the two used to
-    disagree: the rewind accepted every kind while the startup scan resumed
-    only whole-site jobs. A single-shot job killed mid-flight was therefore
-    marked recoverable and then never recovered -- PENDING indefinitely, and a
-    ``202 "pending"`` to every client that polled for it, from an endpoint
-    that is otherwise authoritative.
-
-    A seam that cannot resume must not rewind. It has to retire the row.
-
-    ``kind`` is a ``str`` and never an absent one. It was ``str | None`` with
-    ``None`` treated as resumable, which is the fail-open half of the shipped bug
-    the status view documents: a projection that stopped selecting the key made
-    every job look whole-site. The SQL coalesces the column to ``'whole_site'``
-    for rows written before it existed, so no branch here can produce a null kind
-    and the case is gone rather than handled.
-    """
-    return kind == JobKind.WHOLE_SITE.value
-
-
-async def recover_orphaned_running_jobs(job_store: JobStore) -> int:
-    """Retire crash orphans: rewind the resumable, fail the rest.
-
-    Async: the lifespan calls it with a live loop, and it reads every job row.
-    """
-    recovered = 0
-    for summary in await job_store.alist_jobs():
-        if summary.get("status") == JobStatus.RUNNING.value:
-            # A job that cannot be resumed gets its terminal status here, while
-            # this is the only place that knows the service gave up on it.
-            retired = JobStatus.PENDING if _is_resumable_kind(summary["kind"]) else JobStatus.FAILED
-            # Control-plane CAS: retires the row without rewriting its data;
-            # save() no longer carries status anyway.
-            if await job_store.aset_status(summary["job_id"], retired, expected=JobStatus.RUNNING):
-                recovered += 1
-    return recovered
-
-
-async def recover_and_start_pending_jobs(
-    job_store: JobStore,
-    settings: Any,
-    shutdown_event: asyncio.Event,
-) -> int:
-    """Lifespan startup: retire crash orphans, then run every PENDING job.
-
-    Whole-site jobs resume from their persisted frontier; returns the number
-    of runner tasks started. Jobs of any other kind reach the scan already
-    terminal -- `recover_orphaned_running_jobs` fails the orphans it cannot
-    resume -- so the kind check here is a guard against a row seeded
-    straight into PENDING, not the orphan path.
-    """
-    await recover_orphaned_running_jobs(job_store)
-    started = 0
-    for summary in await job_store.alist_jobs():
-        if summary.get("status") != JobStatus.PENDING.value:
-            continue
-        if not _is_resumable_kind(summary["kind"]):
-            continue
-        job = await job_store.aload(summary["job_id"])
-        if job is None:
-            continue
-        start_job(job.job_id, job_store, settings, shutdown_event)
-        started += 1
-    return started
 
 
 def _pop_frontier(job: Any) -> list[FrontierEntry]:
@@ -442,51 +357,6 @@ async def _run_job(
         await arecord_terminal_failure(job_store, job_id, str(exc))
 
 
-def start_tracked_task(
-    job_id: str,
-    factory: Callable[[], Coroutine[Any, Any, Any]],
-) -> asyncio.Task:
-    """Spawn ``factory()`` as the task that owns ``job_id``, or return the live one.
-
-    One registry means one shutdown drain and one cancel path. The factory is
-    called only once a slot is free, so a job that is already running does not
-    leave a coroutine constructed and never awaited.
-
-    Taking a factory rather than a coroutine is what lets the async crawl come
-    through here too. Handed to a Starlette background task instead, it was
-    awaited inside the request cycle -- so the 202 did not return until the
-    crawl finished, and the drain in ``app/main.py`` could not see it either.
-    """
-    existing = _tasks.get(job_id)
-    if existing is not None and not existing.done():
-        return existing
-    task = asyncio.create_task(factory())
-    _tasks[job_id] = task
-    task.add_done_callback(lambda t: _tasks.pop(job_id, None))
-    return task
-
-
-def start_job(
-    job_id: str,
-    job_store: JobStore,
-    settings: Any,
-    shutdown_event: asyncio.Event,
-    *,
-    preclaimed: bool = False,
-) -> asyncio.Task:
-    """Spawn (or return) the runner task; preclaimed rows were flipped by the caller."""
-    return start_tracked_task(
-        job_id, lambda: _run_job(job_id, job_store, settings, shutdown_event, preclaimed=preclaimed)
-    )
-
-
-def cancel_job_task(job_id: str) -> None:
-    """Cancel a running job task (delete path); state row untouched."""
-    task = _tasks.get(job_id)
-    if task is not None and not task.done():
-        task.cancel()
-
-
 async def _transition(
     job_store: JobStore,
     job_id: str,
@@ -549,8 +419,10 @@ __all__ = [
     "is_running",
     "pause_job",
     "recover_orphaned_running_jobs",
+    "recover_and_start_pending_jobs",
     "reset_job_runner",
     "resume_job",
     "shutdown_job_runner",
     "start_job",
+    "start_tracked_task",
 ]

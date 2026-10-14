@@ -357,9 +357,9 @@ async def _join_runner_task(job_id: str) -> bool:
     Returns True when a task was joined, so the caller knows the state may have
     moved without an edge having been observed.
     """
-    from app.api import job_runner
+    from app.api import job_lifecycle
 
-    task = job_runner._tasks.get(job_id)
+    task = job_lifecycle._tasks.get(job_id)
     if task is None or task.done():
         return False
     await asyncio.wait({task})
