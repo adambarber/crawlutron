@@ -1,409 +1,57 @@
-"""Resource-adaptive admission control: every bounded resource, not just memory.
-
-:class:`app.runtime.memory_pressure.MemoryGate` senses the memory ceiling and throttles
-crawl-batch dispatch against it, with no operator knob. This module extends
-that to the other bounded resources the service runs under: the cgroup CPU
-quota, which the kernel would otherwise throttle from behind the crawler's back,
-and the event loop, whose lag is the first place queueing delay shows up.
-
-CPU is a *rate*, not a level, so :class:`CpuGate` keeps a small history and
-reports utilization as (delta CPU-time / delta wall-time) divided by the
-allocated CPU quota. That yields a stable fraction-of-budget even though CPU
-usage is inherently a sliding window.
-"""
+"""Resource-adaptive admission control: CPU, loop lag, workers, policy."""
 
 from __future__ import annotations
 
 import asyncio
-import os
-import time
-from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any
 
-from app.config.env import get_env_float, get_env_int, parse_bool_env
-from app.runtime.cgroup_sense import _read_int, _read_text
-from app.runtime.memory_pressure import (
-    MemoryGate,
-    ResourceGauge,
-    read_memory_stats,
-)
+from app.config.env import get_env_float, get_env_int
+from app.runtime.memory_pressure import read_memory_stats
+from app.runtime.pressure_gates import CpuGate, ResourceGate
+from app.runtime.pressure_probes import LoopLagProbe, read_cpu_quota, read_cpu_usage_seconds
 
-# Self-managed, no operator knob (mirrors app/runtime/memory_pressure.py): the gate
-# rides at TARGET and pauses at HARD against the cgroup quota it discovers.
-_DEFAULT_CPU_TARGET = 0.90
-_DEFAULT_CPU_HARD = 0.95
-# Manual CPU budget override removed; the discovered quota is the ceiling.
-_DEFAULT_CPU_BUDGET = None
-
-# Opt-in event-loop lag probe feeding admission; off by default
-# (CRAWLUTRON_LOOP_LAG_PROBE=1) so tests and minimal deployments pay no task cost.
-LOOP_LAG_PROBE_ENABLED = parse_bool_env("CRAWLUTRON_LOOP_LAG_PROBE", default=False)
-_LOOP_LAG_SAMPLE_INTERVAL = 0.05
-_LOOP_LAG_OK_THRESHOLD = 0.05  # below this lag (s) -> full speed
-_LOOP_LAG_HARD_THRESHOLD = 0.30  # at/above this lag (s) -> full throttle
-_LOOP_LAG_SMOOTHING = 0.25
-
-
-class LoopLagProbe:
-    """Best-effort event-loop lag sensor.
-
-    A lightweight background tick measures how far the loop falls behind its
-    scheduled cadence. A saturated loop (many concurrent coroutines, blocking
-    callbacks) lags, an independent pressure signal from CPU/memory: the cgroup
-    quota can look fine while the single event loop is the bottleneck. The gate
-    multiplies its scale by :meth:`factor` so lag alone can shed load.
-    """
-
-    def __init__(
-        self,
-        *,
-        interval: float = _LOOP_LAG_SAMPLE_INTERVAL,
-        ok_threshold: float = _LOOP_LAG_OK_THRESHOLD,
-        hard_threshold: float = _LOOP_LAG_HARD_THRESHOLD,
-        smoothing: float = _LOOP_LAG_SMOOTHING,
-    ):
-        self._interval = interval
-        self._ok = ok_threshold
-        self._hard = hard_threshold
-        self._smoothing = smoothing
-        self._lag = 0.0
-        self._task: asyncio.Task | None = None
-
-    def start(self) -> None:
-        """Begin sampling on the current running loop (idempotent)."""
-        try:
-            loop = asyncio.get_running_loop()
-        except RuntimeError:
-            # No running loop (e.g. import time): never implicitly create
-            # one; the owner starts the probe explicitly once a loop runs.
-            return
-        if self._task is not None and not self._task.done():
-            return
-        self._task = loop.create_task(self._run())
-
-    def stop(self) -> None:
-        if self._task is not None and not self._task.done():
-            self._task.cancel()
-        self._task = None
-
-    async def _run(self) -> None:
-        try:
-            while True:
-                t0 = time.monotonic()
-                await asyncio.sleep(self._interval)
-                elapsed = time.monotonic() - t0
-                lag = max(0.0, elapsed - self._interval)
-                self._lag = self._lag * (1.0 - self._smoothing) + lag * self._smoothing
-        except asyncio.CancelledError:
-            return
-        except (RuntimeError, Exception):
-            # Loop closed or other failure: stop sampling, report zero lag.
-            self._lag = 0.0
-            return
-
-    def get(self) -> float:
-        return self._lag
-
-    def factor(self) -> float:
-        """Scale multiplier from current lag: 1.0 below ``ok``, 0.0 at/above ``hard``."""
-        if self._lag <= self._ok:
-            return 1.0
-        if self._lag >= self._hard:
-            return 0.0
-        return max(0.0, 1.0 - (self._lag - self._ok) / (self._hard - self._ok))
-
-
-# --- CPU sensing (cgroup v2 -> v1 -> unbounded) ---
-
-
-def read_cpu_quota(cgroup_root: str = "/sys/fs/cgroup") -> float | None:
-    """Allocated CPUs for this cgroup (quota / period).
-
-    Returns None when the CPU controller is unlimited or unavailable, so callers
-    know there is no CPU ceiling to enforce against.
-    """
-    # cgroup v2: "quota period", e.g. "200000 100000" -> 2.0 CPUs; "max 100000" -> unlimited.
-    v2 = _read_text(os.path.join(cgroup_root, "cpu.max"))
-    if v2 is not None:
-        parts = v2.split()
-        if len(parts) >= 2:
-            quota_s, period_s = parts[0], parts[1]
-            if quota_s == "max":
-                return None
-            try:
-                quota_v2, period_v2 = int(quota_s), int(period_s)
-            except ValueError:
-                return None
-            if period_v2 > 0:
-                return quota_v2 / period_v2
-        return None
-
-    # Cgroup v1 quota/period; quota -1 means unlimited. Reads are ``int | None``
-    # (files may be missing on a v2-only host), so the v2 branch binds its own names.
-    quota = _read_int(os.path.join(cgroup_root, "cpu", "cpu.cfs_quota_us"))
-    period = _read_int(os.path.join(cgroup_root, "cpu", "cpu.cfs_period_us"))
-    if quota is None or quota < 0 or period is None or period <= 0:
-        return None
-    return quota / period
-
-
-def read_cpu_usage_seconds(cgroup_root: str = "/sys/fs/cgroup") -> float | None:
-    """Cumulative CPU time (seconds) consumed by this cgroup.
-
-    v2: ``cpu.stat`` ``usage_usec``; v1: ``cpuacct.usage`` (ns). None if absent.
-    """
-    # cgroup v2
-    stat = _read_text(os.path.join(cgroup_root, "cpu.stat"))
-    if stat is not None:
-        for line in stat.splitlines():
-            if line.startswith("usage_usec"):
-                parts = line.split()
-                if len(parts) == 2:
-                    try:
-                        return int(parts[1]) / 1_000_000.0
-                    except ValueError:
-                        return None
-        return None
-
-    # Cgroup v1
-    usage_ns = _read_int(os.path.join(cgroup_root, "cpuacct", "cpuacct.usage"))
-    if usage_ns is None:
-        usage_ns = _read_int(os.path.join(cgroup_root, "cpu", "cpuacct.usage"))
-    if usage_ns is not None:
-        return usage_ns / 1_000_000_000.0
-    return None
-
-
-# --- CPU admission gate (rate-based) ---
-
-
-class CpuGate(ResourceGauge):
-    """Admission gate driven by CPU utilization relative to the cgroup quota.
-
-    Utilization is a *rate*: we keep the last (usage, wall) sample and report
-    (delta CPU seconds / delta wall seconds) / quota. Below ``target`` the gate
-    returns scale 1.0; between target and hard it scales down linearly; at or
-    above hard dispatchers wait until utilization drains below the ceiling.
-    When the cgroup is CPU-unbounded and no ``cpu_budget`` is configured the
-    gate reports None and never throttles: no measured ceiling, no defence.
-    """
-
-    _default_target = _DEFAULT_CPU_TARGET
-    _default_hard = _DEFAULT_CPU_HARD
-
-    def __init__(
-        self,
-        target: float | None = None,
-        *,
-        sample_seconds: float = 0.25,
-        min_window_seconds: float = 0.05,
-        cpu_budget: float | None = None,
-        **kwargs: Any,
-    ):
-        super().__init__(target=target, **kwargs)
-        self.sample_seconds = sample_seconds
-        self.min_window_seconds = min_window_seconds
-        self._cpu_budget = cpu_budget if cpu_budget is not None else _DEFAULT_CPU_BUDGET
-        self._last_usage: float | None = None
-        self._last_wall: float | None = None
-        self._ratio: float = 0.0
-        self._quota: float | None = None
-        self._quota_loaded: bool = False
-
-    def _quota_cpus(self) -> float | None:
-        """Allocated CPUs: the cgroup quota, or a manual budget if unbounded."""
-        if not self._quota_loaded:
-            self._quota = read_cpu_quota(self.cgroup_root)
-            self._quota_loaded = True
-        if self._quota is None:
-            return self._cpu_budget
-        return self._quota
-
-    def _sample(self) -> float | None:
-        """Current utilization fraction vs quota, or None if unbounded.
-
-        Updates the rolling sample only when at least ``min_window_seconds`` of
-        wall time has elapsed, so back-to-back calls do not produce a noisy rate.
-        """
-        quota = self._quota_cpus()
-        if quota is None or quota <= 0:
-            return None
-        usage = read_cpu_usage_seconds(self.cgroup_root)
-        now = time.monotonic()
-        if usage is None:
-            return None
-        if self._last_usage is None or self._last_wall is None:
-            self._last_usage = usage
-            self._last_wall = now
-            return self._ratio  # 0.0 on first sight
-        dt = now - self._last_wall
-        if dt < self.min_window_seconds:
-            return self._ratio
-        du = usage - self._last_usage
-        instant = (du / dt) / quota if dt > 0 else self._ratio
-        # Exponential smoothing absorbs scheduler bursts without erasing signal.
-        self._ratio = instant if self._ratio == 0.0 else self._ratio * 0.5 + instant * 0.5
-        self._last_usage = usage
-        self._last_wall = now
-        return self._ratio
-
-    def _read_usage(self) -> float:
-        r = self._sample()
-        return 0.0 if r is None else r
-
-    def cpu_ratio(self) -> float:
-        """Latest utilization fraction vs quota (0.0 when unbounded)."""
-        return self.usage_ratio()
-
-    def is_warm(self) -> bool:
-        """Whether the gate has a real utilization sample yet.
-
-        True when the cgroup is CPU-unbounded (no ceiling to defend, so the full
-        concurrency multiplier is always safe) or once at least one rate sample
-        has been taken. False only on a cold start with a real CPU ceiling --
-        exactly when the first recursive batch should ramp conservatively instead
-        of launching ``global_concurrency * multiplier`` parallel fetches, which
-        can briefly exceed a tight CPU quota before the gate engages.
-        """
-        if self._quota_cpus() is None:
-            return True
-        return self._last_usage is not None and self._last_wall is not None
-
-
-# --- Combined gate over memory + CPU ---
-
-
-class ResourceGate:
-    """Combined admission gate over memory + CPU.
-
-    Dispatchers wait while *either* resource is saturated, and the batch-scale
-    factor is the *minimum* across resources, so the most-contended resource
-    sets the pace. This is the single gate the crawl engine consults before each
-    recursive batch dispatch.
-    """
-
-    def __init__(
-        self,
-        *,
-        target_mem: float | None = None,
-        target_cpu: float | None = None,
-        cgroup_root: str = "/sys/fs/cgroup",
-        poll_seconds: float = 0.1,
-        max_wait_seconds: float = 30.0,
-        sample_seconds: float = 0.25,
-        cpu_budget: float | None = None,
-        clock: Callable[[], float] = time.monotonic,
-        memory_ratio: Callable[[], float] | None = None,
-        cpu_ratio: Callable[[], float] | None = None,
-        lag_probe_enabled: bool = LOOP_LAG_PROBE_ENABLED,
-    ):
-        self.memory = MemoryGate(
-            target=target_mem,
-            poll_seconds=poll_seconds,
-            max_wait_seconds=max_wait_seconds,
-            cgroup_root=cgroup_root,
-            clock=clock,
-            usage_ratio=memory_ratio,
-        )
-        self.cpu = CpuGate(
-            target=target_cpu,
-            poll_seconds=poll_seconds,
-            max_wait_seconds=max_wait_seconds,
-            cgroup_root=cgroup_root,
-            sample_seconds=sample_seconds,
-            cpu_budget=cpu_budget,
-            usage_ratio=cpu_ratio,
-        )
-        self._poll_seconds = poll_seconds
-        # Opt-in throttle signal (module probe above); injected, not global, so
-        # a test can enable it without rebinding a name the whole tree reads.
-        self._lag_probe = LoopLagProbe()
-        self._lag_probe_enabled = lag_probe_enabled
-
-    def start_lag_probe(self) -> None:
-        """Start the loop-lag sampler on the running loop.
-
-        Called from lifespan startup, not __init__: the module-level gate is
-        constructed at import time with no running loop, so an __init__-time
-        start silently never schedules and lag reads 0.0 forever. Idempotent.
-        """
-        if self._lag_probe_enabled:
-            self._lag_probe.start()
-
-    def memory_ratio(self) -> float:
-        return self.memory.usage_ratio()
-
-    def cpu_ratio(self) -> float:
-        return self.cpu.usage_ratio()
-
-    def close(self) -> None:
-        """Stop the optional loop-lag probe (call on shutdown)."""
-        self._lag_probe.stop()
-
-    def batch_scale_factor(self) -> float:
-        base = min(self.memory.batch_scale_factor(), self.cpu.batch_scale_factor())
-        # A lagging event loop is its own bottleneck regardless of cgroup CPU;
-        # shed load proportionally when it falls behind its scheduled cadence.
-        return base * self._lag_probe.factor()
-
-    async def wait_while_saturated(self, max_wait_seconds: float | None = None) -> None:
-        """Block while *either* resource is saturated, bounded by the budget.
-
-        One injected ``clock``, handed to both sub-gates, bounds this wait and
-        theirs; it is read back off ``memory`` because that is the gate the
-        budget comes from, so the two cannot come from different sources. See
-        ``ResourceGauge.wait_while_saturated`` for why it is injectable at all.
-        """
-        budget = self.memory.max_wait_seconds if max_wait_seconds is None else max_wait_seconds
-        deadline = self.memory.clock() + budget
-        while True:
-            mem_r = self.memory.usage_ratio()
-            cpu_r = self.cpu.usage_ratio()
-            if mem_r < self.memory.hard and cpu_r < self.cpu.hard:
-                return
-            if self.memory.clock() >= deadline:
-                return
-            await asyncio.sleep(self._poll_seconds)
-
-    def http_scale_factor(self) -> float:
-        """Scale factor for HTTP-only (browser-free) tasks.
-
-        HTTP fetches add little memory and no browser process. When the CPU has
-        ample headroom (> 50%), HTTP work is *not* bound by the memory held by
-        browser processes of other domains -- it rides the CPU-implied scale,
-        using the spare CPU headroom. Only when CPU is itself the tight resource
-        does it fall back to the combined memory+CPU gate.
-        """
-        cpu_headroom = self.cpu.headroom_fraction()
-        if cpu_headroom > 0.5:
-            # CPU has ample headroom -> HTTP tasks ride the CPU scale, escaping
-            # the browser-held-memory bottleneck that throttles browser batches.
-            return self.cpu.batch_scale_factor()
-        # CPU is tight -> HTTP tasks respect combined pressure
-        return self.batch_scale_factor()
+__all__ = [
+    "CpuGate",
+    "LoopLagProbe",
+    "read_cpu_quota",
+    "read_cpu_usage_seconds",
+]
 
 
 # --- Two-tier weighted admission ---
 
 _HTTP_TASK_RAM_BYTES = get_env_int("CRAWLUTRON_HTTP_TASK_RAM_BYTES", 48 * 1024 * 1024, lo=0)
+
+
 # Deliberately below the measured 600-900 MiB renderer RSS (see browser_pool.py):
 # it is the admission weight per browser task, so raising it lowers concurrency.
 _BROWSER_TASK_RAM_BYTES = get_env_int("CRAWLUTRON_BROWSER_TASK_RAM_BYTES", 700 * 1024 * 1024, lo=0)
+
+
 # Fixed per-process reservation (markitdown + parsers load once, live forever);
 # conservative end of the measured 100-300 MiB because the ceiling OOM-kills.
 _DOC_TASK_RAM_BYTES = get_env_int("CRAWLUTRON_DOC_TASK_RAM_BYTES", 300 * 1024 * 1024, lo=0)
+
+
 # Default persistent markitdown worker count; mirrors the 3 GiB container
 # ceiling the compose pins. Overridable via CRAWLUTRON_EXTRACTION_DOC_WORKERS.
 _DEFAULT_DOC_WORKERS = 2
+
+
 _ADMIT_YIELD_SECONDS = get_env_float("CRAWLUTRON_ADMIT_YIELD_SECONDS", 0.05, lo=0.0)
+
+
 _MAX_HTTP_CONCURRENCY = get_env_int("CRAWLUTRON_MAX_HTTP_CONCURRENCY", 512, lo=1)
 
 
 # --- Shared RAM-budget sizing (browser pool + httpx pool derive from this) ---
 # One source for both pools so the connection ceiling tracks admission's ceiling.
 _BROWSER_RAM_BYTES = get_env_int("CRAWLUTRON_BROWSER_RAM_BYTES", 700 * 1024 * 1024)
+
+
 BROWSER_RAM_FRACTION = get_env_float("CRAWLUTRON_BROWSER_RAM_FRACTION", 0.5, lo=0.0, hi=1.0)
+
+
 _MAX_DERIVED_POOL_SIZE = get_env_int("CRAWLUTRON_MAX_DERIVED_POOL_SIZE", 4)
 
 
