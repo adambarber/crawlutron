@@ -127,28 +127,26 @@ def _docstring_nodes(tree: ast.Module) -> list[ast.Expr]:
 def over_line_docstrings(tree: ast.Module, line_limit: int) -> list[tuple[int, int, str]]:
     """Every docstring longer than ``line_limit`` content lines, from ONE tree.
 
-    The docstring's raw text decides -- its logical lines, stripped of nothing
-    but the quoting -- so a dedent or a line-wrapped closing quote never moves
-    a docstring across the cap. ``(start, end, kind)`` names the offending
-    node and its holder.
+    Only real docstring positions count -- a string at a module, function or
+    class body's head. Content lines exclude the quoting, so a line-wrapped
+    closing quote never moves a docstring across the cap.
     """
-    holders: dict[int, str] = {}
-    for node in ast.walk(tree):
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
-            holders[node.lineno] = node.name
-    body = tree.body
+    holders = [tree] + [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
+    ]
     over: list[tuple[int, int, str]] = []
-    for node in _docstring_nodes(tree):
-        text = node.value.value
-        if text.startswith('"""') or text.startswith("'''"):
-            text = text[3:-3]
-        if len(text.splitlines()) <= line_limit:
+    for holder in holders:
+        text = ast.get_docstring(holder)
+        if text is None:
             continue
-        if body and node is body[0]:
-            kind = "module"
-        else:
-            kind = holders.get(node.lineno, "<expr>")
-        over.append((node.lineno, node.end_lineno or node.lineno, kind))
+        content = [line for line in text.splitlines() if line.strip()]
+        if len(content) <= line_limit:
+            continue
+        doc_node = holder.body[0] if holder is not tree else tree.body[0]
+        kind = "module" if holder is tree else holder.name
+        over.append((doc_node.lineno, doc_node.end_lineno or doc_node.lineno, kind))
     return sorted(over)
 
 

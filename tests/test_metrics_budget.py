@@ -99,9 +99,9 @@ BLOCK_LENGTH = 40
 # What the tree is currently allowed to hold: offender counts for three metrics, and the size of the worst
 # class for the fourth.
 _BUDGETS = {
-    "function length": 31,
+    "function length": 30,
     "abc size": 5,
-    "largest class": 454,
+    "largest class": 369,
     "block length": 11,
 }
 

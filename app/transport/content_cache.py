@@ -1,19 +1,7 @@
-"""In-container disk content cache (no sidecar / external service).
+"""Disk content cache: JSON-enveloped, TTL'd, thread-safe, no sidecar.
 
-This complements :mod:`app.transport.cache.HttpCache` (which stores only
-``ETag``/``Last-Modified`` metadata for :rfc:`7232` conditional re-requests).
-``ContentCache`` persists the actual fetched response on local disk so repeated
-crawls of an unchanged URL avoid re-downloading (and, if callers choose to cache
-extracted content, re-extracting) the page.
-
-Design notes:
-* Self-contained: only the Python stdlib (``json`` + ``hashlib`` + a file per
-  entry). No Redis / Memcached sidecar required; mount a volume at the cache
-  directory for cross-restart persistence.
-* TTL via an injectable clock so tests stay deterministic without real sleeps.
-* Thread-safe (one lock per instance) and JSON-enveloped so values are
-  arbitrary JSON-serializable objects.
-"""
+Persists fetched responses so unchanged URLs skip re-download; pairs with the
+ETag-only ``HttpCache``. TTL uses an injectable clock for deterministic tests."""
 
 from __future__ import annotations
 
@@ -98,12 +86,8 @@ class ContentCache:
 
     def _drop_locked(self, key: str, doomed: list[tuple[str | None, Path]]) -> None:
         """Remove one entry from the index, byte accounting and RAM.
-
-        Caller must hold ``self._lock``. The on-disk file is appended to
-        ``doomed`` as a ``(key, path)`` pair for unlinking after the lock is
-        released — disk I/O must never hold the lock, since the event-loop
-        thread contends on it (``aget``/``aset``).
-        """
+        Caller holds ``self._lock``; the doomed file unlinks after release,
+        because disk I/O never holds the lock."""
         old_path = self._index.pop(key, None)
         freed = self._index_sizes.pop(key, 0)
         self._index_total_bytes = max(0, self._index_total_bytes - freed)
@@ -116,15 +100,8 @@ class ContentCache:
 
     def _unlink_doomed(self, doomed: list[tuple[str | None, Path]]) -> int:
         """Unlink evicted/expired files after the lock is released.
-
-        Re-validate under the lock first: a key re-set after its eviction
-        reuses this exact path (``_path_for`` is deterministic), so unlinking
-        blindly would destroy a live entry. A still-registered path is spared;
-        ``key is None`` marks a file no index entry owns and it is spared when
-        any live entry points at its path (a concurrent write revived it).
-
-        Returns the number of files actually removed.
-        """
+        Re-validate under the lock: a re-set key reuses this exact path, and
+        ``key is None`` files are spared when a live entry owns the path."""
         removed = 0
         for key, path in doomed:
             with self._lock:
@@ -150,26 +127,9 @@ class ContentCache:
         return over_count or over_bytes
 
     def _enforce_limits(self) -> None:
-        """Evict least-recently-used entries using the in-memory index.
-
-        Enforces both the entry-count cap and the total byte budget.
-        Runs in O(overflow) unlinks with no directory glob/stat, unlike the
-        previous implementation that listed and stat() every cache file on each
-        write.
-
-        Callers invoke this OUTSIDE ``self._lock``, so this method takes the
-        lock itself. That leaves a window between the caller's write section
-        ending and this method acquiring the lock, in which a concurrent thread
-        can read the just-written entry and find the index over budget --
-        ``_over_limits`` reports True for a moment. That is benign: the entry is
-        valid and consistent, and only the eviction is one step behind.
-
-        The window is described here rather than at the write call sites because
-        it is this method's acquisition that closes it, and two copies of the
-        note were previously being kept in step by hand -- and had already
-        drifted into describing a lock release that never happens (``_lock`` is
-        not reentrant, so a caller holding it here would deadlock).
-        """
+        """Evict LRU entries past the count or byte caps.
+        O(overflow) unlinks, no glob/stat; invoked OUTSIDE the lock. The
+        window where a reader sees an index over budget is benign."""
         doomed: list[tuple[str | None, Path]] = []
         with self._lock:
             while self._index and self._over_limits():
@@ -179,20 +139,9 @@ class ContentCache:
 
     # -- public API ---------------------------------------------------------
     def _read_envelope(self, key: str) -> CacheEnvelope | None:
-        """Return the unexpired envelope for ``key`` (registering it in the LRU
-        index), or ``None`` if missing, expired, or unreadable.
-
-        Shared by :meth:`get`, :meth:`aget` and :meth:`cached_at_of` so the
-        envelope-read + TTL-expiry logic lives in exactly one place.
-
-        The file is read and parsed OUTSIDE ``self._lock``: the event-loop
-        thread contends on that lock (``aget``/``aset``), and a multi-MB
-        ``read_bytes`` + ``json.loads`` is exactly the work that must not hold
-        it. Only the RAM state — index membership, LRU recency, the freshness
-        mirror, byte accounting and the RAM value mirror — is touched under the
-        lock, the same collect-under-lock / act-after-release split as
-        ``_enforce_limits``/``_unlink_doomed``.
-        """
+        """The unexpired envelope for ``key`` (LRU-registered), else ``None``.
+        Reads + parses OUTSIDE the lock (multi-MB work the loop thread must
+        not hold); only RAM state is touched under it."""
         path = self._path_for(key)
         try:
             raw = path.read_bytes()
@@ -248,11 +197,7 @@ class ContentCache:
     def _memory_hit_locked(self, key: str) -> Any | None:
         """RAM-mirror probe (callers must hold ``self._lock``).
 
-        Returns the cached value on a fresh hit (bumping RAM + disk-index LRU
-        recency), ``None`` on miss or expiry. The single home of the probe so
-        the sync and async paths cannot drift. ``None`` is never a stored
-        value: envelopes without a value are misses, not members.
-        """
+        Value on a fresh hit (bumping RAM + disk recency), ``None`` on miss."""
         if key not in self._memory_cache:
             return None
         expires, value = self._memory_cache[key]
@@ -267,10 +212,9 @@ class ContentCache:
         return value
 
     def _remember_memory_locked(self, key: str, value: Any, expires: float | None, size: int) -> None:
-        """Store into the RAM mirror under the serialized-size gate
-        and the entry-count cap — the single home of the store so no path can
-        lose either bound. Oversized values are dropped, never mirrored.
-        """
+        """Store into the RAM mirror under the size gate and count cap.
+
+        Oversized values are dropped, never mirrored."""
         if value is None or size >= self._MEMORY_CACHE_MAX_SIZE:
             # A large value must not linger in the small-value cache.
             self._memory_cache.pop(key, None)
@@ -282,24 +226,15 @@ class ContentCache:
 
     def _memory_probe(self, key: str) -> Any | None:
         """The RAM-mirror probe with ``self._lock`` taken.
-
-        ``_memory_hit_locked`` is already the single home of the probe's rules,
-        but each reader still spelled the acquire-probe-test-return dance itself,
-        so the part worth having in one place was declared twice: a reader that
-        probes without the lock is a data race against ``_enforce_limits``, and a
-        copy of the dance is where that mistake would appear. The sync and async
-        readers differ only in whether the on-disk fallback is awaited, which is
-        one line each rather than a copy of the locked read.
-        """
+        ``_memory_hit_locked`` owns the rules; this spells the lock dance
+        once, where a missing lock would be the data race."""
         with self._lock:
             return self._memory_hit_locked(key)
 
     def get(self, key: str, ttl: int | None = None) -> Any | None:
-        """Return the cached value if present and unexpired, else ``None``.
+        """The cached value if present and unexpired, else ``None``.
 
-        Checks the in-memory value cache first; on a miss (or an expired memory
-        entry) it falls back to the on-disk envelope.
-        """
+        Memory first, then the on-disk envelope."""
         hit = self._memory_probe(key)
         if hit is not None:
             return hit
@@ -307,19 +242,9 @@ class ContentCache:
         return None if envelope is None else envelope.get("value")
 
     def cached_at_of(self, key: str, ttl: int | None = None) -> float | None:
-        """Return the ``cached_at`` timestamp for a valid (unexpired) entry.
-
-        Returns ``None`` if the key is missing, expired, or unreadable. Used by
-        sitemap lastmod freshness checks to decide whether a cached page is
-        newer than the sitemap's advertised last-modified time.
-
-        Freshness is answered from the ``(expires, cached_at)`` metadata mirror
-        so a multi-MB envelope is never read and JSON-parsed just to read a
-        timestamp. A mirror miss, or an entry the mirror shows as expired, is
-        routed through :meth:`_read_envelope` -- the single chokepoint for full
-        reads and for every index mutation -- so the fast path can never answer
-        from metadata the slow path would have expired or evicted.
-        """
+        """``cached_at`` for a valid (unexpired) entry, else ``None``.
+        Served from the ``(expires, cached_at)`` mirror so a multi-MB
+        envelope is never read for a timestamp."""
         with self._lock:
             entry = self._index_cached_at.get(key)
             if entry is not None:
@@ -330,19 +255,9 @@ class ContentCache:
         return envelope.get("cached_at") if envelope is not None else None
 
     def _entry_to_store(self, value: JsonValue, ttl: int | None) -> tuple[CacheEnvelope, float | None]:
-        """Build the on-disk envelope for one write, and the expiry it resolved to.
-
-        The envelope is this cache's stored contract, and the sync and async
-        write paths were each building it independently -- so a field added for
-        one was invisible to the other, and an entry written through the other
-        path would not carry it. One owner, so the two cannot disagree about
-        what an entry looks like on disk.
-
-        Also one clock read per write. ``expires`` and ``cached_at`` came from
-        separate ``clock()`` calls, so ``cached_at`` recorded a later instant
-        than the one the expiry was derived from -- which is the instant a
-        caller compares its remote last-modified signal against.
-        """
+        """The on-disk envelope for one write, and its expiry.
+        One owner keeps the stored contract undivided across sync/async, and
+        one clock read keeps ``cached_at`` aligned with ``expires``."""
         effective_ttl = self.default_ttl if ttl is None else ttl
         # cached_at records when this entry was written so callers can compare a
         # remote "last modified" signal against our local fetch time.
@@ -376,11 +291,9 @@ class ContentCache:
         self._enforce_limits()
 
     async def aget(self, key: str, ttl: int | None = None) -> Any | None:
-        """Async ``get``: offload the (potentially large) on-disk envelope read
-        and JSON parse to a worker thread so the event loop is never stalled.
-        The read itself runs outside
-        ``self._lock`` (see ``_read_envelope``), so a concurrent ``aset`` is
-        not queued behind it."""
+        """Async ``get``: offload the envelope read + JSON parse off the loop.
+        Runs outside ``self._lock``, so a concurrent ``aset`` is not queued
+        behind it."""
         hit = self._memory_probe(key)
         if hit is not None:
             return hit
@@ -389,10 +302,9 @@ class ContentCache:
         return None if envelope is None else envelope.get("value")
 
     async def aset(self, key: str, value: Any, ttl: int | None = None) -> None:
-        """Async ``set`` with the same byte-budget contract: the value
-        is serialized in a worker thread first, the size decision is made
-        under the lock before any index or disk mutation, and the large disk
-        write is offloaded so the event loop is never stalled."""
+        """Async ``set`` with the same byte-budget contract.
+
+        Serialize off the loop, decide size under the lock, write off-loop."""
         # Built off the loop with the serialize: it is pure, and the envelope is
         # the sync path's own contract (``_entry_to_store``).
         envelope, expires = await asyncio.to_thread(self._entry_to_store, value, ttl)
@@ -421,18 +333,9 @@ class ContentCache:
         self._enforce_limits()
 
     def _commit_entry_locked(self, key: str, path: Path, size: int) -> None:
-        """Record ``key``'s new path and size in the index, and the byte delta.
-
-        The index, the per-entry sizes, the running byte total, and the LRU
-        order are one accounting fact with four fields, and a reader of the
-        total (``_enforce_limits``) trusts all four to agree. Written inline
-        once at each commit site, it was two places to update and the async
-        path had to add a comment explaining why it re-read the prior size
-        under this same lock -- a property of the accounting, not of asynchrony,
-        stated only where someone was already thinking about it.
-
-        Callers must hold ``self._lock``.
-        """
+        """Record ``key``'s path and size in the index, and the byte delta.
+        Index, per-entry sizes, running total and LRU order are one accounting
+        fact with four fields; callers must hold ``self._lock``."""
         old_size = self._index_sizes.get(key, 0)
         self._index[key] = path
         self._index.move_to_end(key)

@@ -1,9 +1,7 @@
 """Low-level pieces of the disk content cache: envelope math and file work.
 
-``ContentCache`` composes these so its sync/async twins never re-derive an
-envelope, an expiry, or a prune scan; each helper owns one part of the disk
-contract.
-"""
+``ContentCache`` composes these; each helper owns one part of the disk
+contract."""
 
 from __future__ import annotations
 
@@ -21,13 +19,10 @@ UNPARSEABLE_EXPIRY = float("-inf")
 
 
 def resolve_expiry(envelope: CacheEnvelope) -> float | None:
-    """The row's expiry as a comparable number, or ``None`` when it is not one.
+    """The row's expiry as a comparable number, or ``None`` when not one.
 
-    The envelope is JSON, so a row can carry an ``expires`` that is a string
-    or a list and still parse. A string would raise ``TypeError`` through the
-    disk read, the RAM mirror it warms, and the freshness mirror, so such a
-    row is corruption, and corruption here is a miss.
-    """
+    Wrong-typed JSON ``expires`` would raise ``TypeError`` through every
+    freshness read; corruption here is a miss."""
     raw = envelope.get("expires")
     if raw is None:
         return None

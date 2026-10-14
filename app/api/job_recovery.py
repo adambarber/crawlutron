@@ -12,22 +12,8 @@ from app.storage.job_store import JobKind, JobStatus, JobStore
 def _is_resumable_kind(kind: str) -> bool:
     """Whether a job of this kind can be resumed from its persisted frontier.
 
-    One definition, read by both recovery seams, because the two used to
-    disagree: the rewind accepted every kind while the startup scan resumed
-    only whole-site jobs. A single-shot job killed mid-flight was therefore
-    marked recoverable and then never recovered -- PENDING indefinitely, and a
-    ``202 "pending"`` to every client that polled for it, from an endpoint
-    that is otherwise authoritative.
-
-    A seam that cannot resume must not rewind. It has to retire the row.
-
-    ``kind`` is a ``str`` and never an absent one. It was ``str | None`` with
-    ``None`` treated as resumable, which is the fail-open half of the shipped bug
-    the status view documents: a projection that stopped selecting the key made
-    every job look whole-site. The SQL coalesces the column to ``'whole_site'``
-    for rows written before it existed, so no branch here can produce a null kind
-    and the case is gone rather than handled.
-    """
+    One definition for both recovery seams; ``kind`` is never absent (the
+    SQL coalesces the column to ``'whole_site'``)."""
     return kind == JobKind.WHOLE_SITE.value
 
 
@@ -56,12 +42,7 @@ async def recover_and_start_pending_jobs(
 ) -> int:
     """Lifespan startup: retire crash orphans, then run every PENDING job.
 
-    Whole-site jobs resume from their persisted frontier; returns the number
-    of runner tasks started. Jobs of any other kind reach the scan already
-    terminal -- `recover_orphaned_running_jobs` fails the orphans it cannot
-    resume -- so the kind check here is a guard against a row seeded
-    straight into PENDING, not the orphan path.
-    """
+    Whole-site jobs resume from their persisted frontier."""
     await recover_orphaned_running_jobs(job_store)
     started = 0
     for summary in await job_store.alist_jobs():

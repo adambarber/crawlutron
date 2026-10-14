@@ -48,17 +48,10 @@ def start_tracked_task(
     job_id: str,
     factory: Callable[[], Coroutine[Any, Any, Any]],
 ) -> asyncio.Task:
-    """Spawn ``factory()`` as the task that owns ``job_id``, or return the live one.
+    """Spawn ``factory()`` as the task owning ``job_id``, or return live one.
 
-    One registry means one shutdown drain and one cancel path. The factory is
-    called only once a slot is free, so a job that is already running does not
-    leave a coroutine constructed and never awaited.
-
-    Taking a factory rather than a coroutine is what lets the async crawl come
-    through here too. Handed to a Starlette background task instead, it was
-    awaited inside the request cycle -- so the 202 did not return until the
-    crawl finished, and the drain in ``app/main.py`` could not see it either.
-    """
+    One registry means one drain and one cancel path; the factory runs only
+    once a slot is free."""
     existing = _tasks.get(job_id)
     if existing is not None and not existing.done():
         return existing
@@ -76,12 +69,10 @@ def start_job(
     *,
     preclaimed: bool = False,
 ) -> asyncio.Task:
-    """Spawn (or return) the runner task; preclaimed rows were flipped by the caller.
+    """Spawn (or return) the runner task; preclaimed rows were flipped by caller.
 
-    The runner lives in :mod:`app.api.job_runner`; importing it here, at call
-    time, breaks the recovery→runner cycle while the leaf registry stays free
-    of orchestrator dependencies at import time.
-    """
+    The runner lives in :mod:`app.api.job_runner`; the import here is at call
+    time, breaking the recovery→runner cycle without a registry-side dep."""
     from app.api.job_runner import _run_job
 
     return start_tracked_task(

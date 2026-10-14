@@ -1,26 +1,7 @@
 """Background whole-site job runner for ``/v1/jobs``.
 
-Consumes the persisted frontier of a whole-site job in persistent batches:
-every transition (pause, resume, cancel, crash) leaves the store in a
-state that can be resumed later. Batches call the shared
-:func:`app.api.crawl_executor.execute_crawl` (seam: ``install_execute_crawl``
-for tests), so jobs run through the exact same engine as ``/v1/crawl``.
-
-Design notes
-------------
-* One :class:`asyncio.Task` per running job, tracked in a module registry.
-* ``pause`` flips the store row to PAUSED; the task sees it between batches
-  and exits without touching the row (frontier/visited retained).
-* ``cancel`` flips to CANCELLED; the task also drops the in-memory task
-  handle. Visited/frontier state is retained for auditability.
-* ``delete`` on a running job cancels its task before removing the row.
-* Crash recovery: :func:`recover_orphaned_running_jobs` rewinds RUNNING
-  rows to PENDING at startup; lifespan then auto-starts PENDING jobs.
-
-The registry accessors are async-safe: control transitions happen in the
-request handlers (store writes are lock-guarded in JobStore), while the
-runner task only transitions between batches.
-"""
+Consumes the persisted frontier in persistent batches through the shared
+engine; every transition leaves the store resumable."""
 
 from __future__ import annotations
 
@@ -91,20 +72,10 @@ def install_execute_crawl(fn: ExecuteCrawl) -> None:
 
 
 async def arecord_terminal_failure(job_store: JobStore, job_id: str, error: str) -> None:
-    """Stamp ``error`` on a running job and flip it to FAILED.
+    """Stamp ``error`` on a RUNNING job and flip it to FAILED.
 
-    A job that has already left RUNNING -- cancelled, paused, finished -- is
-    left exactly as it is. Recording the failure anyway is not a cosmetic
-    inconsistency: a cancel that lands while a batch is in flight would find
-    its own error message overwritten by the batch's, so the job reports
-    *why it failed* when the operator asked for it to stop.
-
-    Written twice, and the two copies had already disagreed about this: the
-    whole-site runner re-checked the status before writing and the async
-    webhook runner did not, so the same cancel was honoured on the sync path
-    and silently overwritten on the async one. The status guard belongs to the
-    rule rather than to whichever caller remembered it, so it is here.
-    """
+    A job past RUNNING is left as-is, so a late batch failure never
+    overwrites an operator's cancel/pause."""
     job = await job_store.aload(job_id)
     if job is None or job.status is not JobStatus.RUNNING:
         return
@@ -366,20 +337,8 @@ async def _transition(
 ) -> str:
     """Flip a job's status and say why if the flip did not happen.
 
-    Every status-changing control needs the same three-way answer -- applied,
-    no such job, or a job in a state it cannot leave -- and needs it to mean
-    the same thing everywhere. It was spelled per control instead, and the
-    copies had already diverged: ``resume_job`` read it one way (triage first,
-    then act) and ``pause_job``/``cancel_job`` another (act, then triage),
-    which is the shape of a bug waiting for the next state transition added to
-    only one of them. Here the answer is produced once, so a fourth control
-    cannot get it wrong.
-
-    ``missing`` is distinguished from ``conflict`` by re-reading the row
-    rather than by the store's refusal, because the two refusals look the same
-    to a caller otherwise: a typo'd id and a job already cancelled are both
-    ``aset_status`` returning False.
-    """
+    One three-way answer -- applied, missing, conflict -- produced once, not
+    per control. Missing is told from conflict by re-reading the row."""
     if await job_store.aset_status(job_id, to, expected=expected):
         return "ok"
     return "missing" if await job_store.aload(job_id) is None else "conflict"
