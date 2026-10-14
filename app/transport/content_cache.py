@@ -21,7 +21,6 @@ import asyncio
 import hashlib
 import json
 import threading
-import time
 from collections import OrderedDict
 from collections.abc import Callable
 from pathlib import Path
@@ -29,21 +28,17 @@ from typing import Any
 
 from app.models.cache_envelope import CacheEnvelope
 from app.models.json_value import JsonValue
-from app.safety.atomic_write import atomic_write_text
+from app.transport.content_cache_internals import (
+    atomic_write,
+    default_clock,
+    resolve_expiry,
+    scan_cache_dir,
+)
 from app.vocabulary.limits import (
     CONTENT_CACHE_MAX_ENTRY_BYTES,
     CONTENT_CACHE_MAX_TOTAL_BYTES,
     DEFAULT_CACHE_TTL_SECONDS,
 )
-
-
-def _default_clock() -> float:
-    return time.time()
-
-
-#: An unparsable stored expiry resolves to before the clock, so every
-#: freshness comparison reads it as expired rather than raising.
-_UNPARSEABLE = float("-inf")
 
 
 class ContentCache:
@@ -55,7 +50,7 @@ class ContentCache:
         *,
         default_ttl: float = DEFAULT_CACHE_TTL_SECONDS,
         namespace: str = "content",
-        clock: Callable[[], float] = _default_clock,
+        clock: Callable[[], float] = default_clock,
         max_entries: int = 10000,
         max_entry_bytes: int = CONTENT_CACHE_MAX_ENTRY_BYTES,
         max_total_bytes: int | None = CONTENT_CACHE_MAX_TOTAL_BYTES,
@@ -72,7 +67,7 @@ class ContentCache:
         self.max_total_bytes = max_total_bytes
         # The single disk-write seam: a caller that must watch, fail or relocate
         # writes hands over a callable -- no test rebinds a private method.
-        self.write_data = self._write_data if write_data is None else write_data
+        self.write_data = atomic_write if write_data is None else write_data
         # Parallel byte accounting for the LRU index: entry count alone
         # cannot bound disk use when one envelope holds a multi-MB body.
         self._index_sizes: dict[str, int] = {}
@@ -223,7 +218,7 @@ class ContentCache:
                     # accounting nor the freshness mirror may keep it.
                     self._drop_locked(key, doomed)
                     return None
-                expires = self._expiry(envelope)
+                expires = resolve_expiry(envelope)
                 if expires is not None and self.clock() > expires:
                     # Free the byte accounting too: phantom bytes would keep
                     # ``_over_limits`` true and evict LIVE entries later.
@@ -249,27 +244,6 @@ class ContentCache:
                 return envelope
         finally:
             self._unlink_doomed(doomed)
-
-    @staticmethod
-    def _expiry(envelope: CacheEnvelope) -> float | None:
-        """The row's expiry as a comparable number, or ``None`` when it is not one.
-
-        The envelope is JSON, so a row can carry an ``expires`` that is a string
-        or a list and still parse. Every freshness test then compares the clock
-        against it, and a string raises ``TypeError`` -- through the disk read,
-        through the RAM mirror it warms, and through the freshness mirror. One
-        bad row made every later read of that key raise.
-
-        Such a row is corruption by the same standard as unparsable JSON, and
-        corruption here is a miss: the caller refetches rather than serve a value
-        whose freshness nobody can state.
-        """
-        raw = envelope.get("expires")
-        if raw is None:
-            return None
-        if isinstance(raw, bool) or not isinstance(raw, int | float):
-            return _UNPARSEABLE
-        return float(raw)
 
     def _memory_hit_locked(self, key: str) -> Any | None:
         """RAM-mirror probe (callers must hold ``self._lock``).
@@ -465,38 +439,10 @@ class ContentCache:
         self._index_sizes[key] = size
         self._index_total_bytes += size - old_size
 
-    def _write_data(self, path: Path, data: str) -> None:
-        """The real writer, and the default behind ``write_data``: persist a
-        pre-serialized envelope. ``aset`` sizes the exact bytes before writing;
-        ``set`` keeps its synchronous inline write."""
-        atomic_write_text(path, data)
-
     def prune(self) -> int:
         """Delete expired entries; return the number removed."""
         now = self.clock()
-        # Glob + read + parse OUTSIDE the lock: this is the multi-MB work and
-        # the event-loop thread contends on self._lock. Reconcile under it below.
-        expired: list[tuple[Path, int]] = []
-        surviving: dict[Path, int] = {}
-        for path in self.cache_dir.glob(f"{self.namespace}.*.json"):
-            try:
-                raw = path.read_bytes()
-            except OSError:
-                continue
-            try:
-                envelope = json.loads(raw)
-            except ValueError:
-                # Corrupt but present: keep the file (the read path drops it on
-                # the next access) and repair its recorded size below.
-                surviving[path] = len(raw)
-                continue
-            expires = self._expiry(envelope)
-            if expires is not None and now > expires:
-                # The byte size rides the verdict: applied under the lock below,
-                # only against the entry these bytes still describe.
-                expired.append((path, len(raw)))
-            else:
-                surviving[path] = len(raw)
+        expired, surviving = scan_cache_dir(self.cache_dir, self.namespace, resolve_expiry, now)
 
         doomed: list[tuple[str | None, Path]] = []
         with self._lock:
