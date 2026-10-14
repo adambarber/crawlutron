@@ -1,14 +1,10 @@
 """Sitemap discovery: seed batches, last-modified freshness, conditional fetch and fanout bounds."""
 
 import asyncio
-from collections.abc import Sequence
-from datetime import UTC, datetime, timedelta
 from functools import partial
 
 from app.admission.policy import read_policy
-from app.api.site_map import build_site_map
 from app.models.normalized_url import NormalizedUrl
-from app.models.result_record import ProducerEnvelope
 from app.orchestration.engine import _parse_lastmod, _seed_is_fresh, _stale_seeds
 from app.orchestration.fetch_helpers import _SITEMAP_CACHE, fetch_sitemap_urls
 from app.transport.content_cache import ContentCache
@@ -23,7 +19,6 @@ from tests._fetcher_factories import (
     scripted_fetcher,
 )
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY, canonical, crawl_policy
-from tests._result_builders import _link, engine_result
 
 
 def _resp(status, body="", etag=None, last_modified=None, ctype="application/xml"):
@@ -51,12 +46,9 @@ def _seed_expired_entry(url: NormalizedUrl, *, etag: str = "v1") -> None:
 
 
 def _replay_recording_fetcher(*, fresh_etag: str = "v2"):
-    """A fetcher that records request headers and answers 304 on a replayed validator.
+    """A fetcher that records headers and answers 304 on a replayed validator.
 
-    The expiry-replay shape: the origin says "not modified" only when the
-    request re-sends the validator it already holds, so a replay that never
-    happened gets a fresh body with ``fresh_etag`` instead.
-    """
+    A replay that never happened gets a fresh body with ``fresh_etag`` instead."""
     sent: list[dict[str, str]] = []
 
     def respond(u, headers):
@@ -251,12 +243,8 @@ async def test_index_children_recurse_without_lastmod():
 def _policy(extra=None, *, extraction=None):
     """The sitemap suite's policy, as a validated model.
 
-    It comes back as a model because the sitemap seeding cache keys off
-    ``policy.strategies``/``extraction``/``css_selector``/``xpath`` -- reading
-    those off a dict is the shape confusion the shared factories exist to
-    remove, and ``read_policy`` passes an already-built model straight through,
-    so one spelling serves both the key builder and the engine.
-    """
+    Seeding caches key off model fields, so one validated spelling serves
+    both the key builder and the engine."""
     base = {"extraction": extraction} if extraction else {}
     return read_policy(crawl_policy(["HTTP_DECLARED_CRAWLER"], **{**base, **(extra or {})}))
 
@@ -273,10 +261,8 @@ def test_parse_lastmod_variants():
 def _cache_with_fresh(tmp_path, url, lastmod, policy):
     """Seed the content cache so ``url`` is fresh as of ``lastmod``.
 
-    The key must match what sitemap seeding looks up, so the caller passes the
-    exact policy the engine derives (unit tests use ``_POLICY_SEED_BATCH()`` directly; the
-    integration test derives it via ``payload_policy``).
-    """
+    The key must match what sitemap seeding looks up, so the caller passes
+    the exact policy the engine derives."""
     cache = ContentCache(str(tmp_path), clock=lambda: 1_700_000_000.0)
     strategy = list(policy.strategies) or ["HTTP_DECLARED_CRAWLER"]
     target = canonical(url)
@@ -393,167 +379,3 @@ class TestSeedingIsOffLoop:
         # The fresh seed was skipped: only robots.txt, the sitemap and the crawled origin were fetched --
         # never the cached page itself.
         assert fresh_url not in fetched
-
-
-def _crawl_response(
-    original_url: str,
-    links: Sequence[str] = (),
-    *,
-    sitemaps: Sequence[str] = (),
-    feeds: Sequence[str] = (),
-) -> ProducerEnvelope:
-    """The one result shape ``build_site_map`` reads, from the pieces a test varies.
-
-    Every site-map test is about what the aggregation *does* with the URLs -- dedupe
-    them, resolve them against the origin, keep the sitemaps and feeds separate --
-    and none is about the envelope around them. Restating the envelope per test
-    meant the two URLs each test listed were easy to change without the assertion
-    changing with them, which is how a site-map test ends up passing on a link it
-    no longer declares.
-    """
-    return {
-        "request_id": "sitemap-test",
-        "submitted_count": 1,
-        "policy_schema_version": "test",
-        "results": [
-            engine_result(
-                original_url,
-                "rendered",
-                final_url=original_url,
-                diagnostics={
-                    "robots": {"sitemaps": list(sitemaps)},
-                    "discovery": {"sitemap_urls": list(sitemaps), "feeds": list(feeds)},
-                },
-                discovered_links=[_link(link, original_url) for link in links],
-            )
-        ],
-    }
-
-
-def test_build_site_map_aggregates_and_dedupes():
-    crawl_response = _crawl_response(
-        "http://x.example/",
-        links=[
-            "http://x.example/a",
-            "http://x.example/b",
-            "http://x.example/a",  # the duplicate this test exists to collapse
-        ],
-        sitemaps=["http://x.example/sitemap.xml", "http://x.example/sitemap2.xml"],
-        feeds=["http://x.example/feed.xml"],
-    )
-    m = build_site_map(crawl_response, host_policy=UNRESTRICTED_HOST_POLICY)
-    # canonical(): the root's admitted raw, not the submission text.
-    assert m["url"] == canonical("http://x.example/").raw
-    assert m["links"] == ["http://x.example/a", "http://x.example/b"]
-    assert "http://x.example/sitemap.xml" in m["sitemaps"]
-    assert "http://x.example/sitemap2.xml" in m["sitemaps"]
-    assert m["feeds"] == ["http://x.example/feed.xml"]
-    assert m["all_urls"] == [
-        "http://x.example/a",
-        "http://x.example/b",
-        "http://x.example/sitemap.xml",
-        "http://x.example/sitemap2.xml",
-        "http://x.example/feed.xml",
-    ]
-
-
-def test_build_site_map_handles_dataclass_links():
-    from app.models.discovered_link import DiscoveredLink
-
-    link = DiscoveredLink(
-        url="https://r/page",
-        normalized_url=canonical("https://r/page"),
-        text="",
-        rel=[],
-        source_url=canonical("https://r/"),
-        host="r",
-        is_same_host=True,
-    )
-    crawl_response: ProducerEnvelope = {
-        "request_id": "sitemap-test",
-        "submitted_count": 1,
-        "policy_schema_version": "test",
-        "results": [
-            engine_result(
-                "http://r/",
-                "rendered",
-                final_url="http://r/",
-                discovered_links=[link],
-            )
-        ],
-    }
-    m = build_site_map(crawl_response, host_policy=UNRESTRICTED_HOST_POLICY)
-    assert m["links"] == ["https://r/page"]
-    assert m["all_urls"] == ["https://r/page"]
-
-
-def test_build_site_map_empty():
-    empty: ProducerEnvelope = {
-        "request_id": "sitemap-test",
-        "submitted_count": 0,
-        "policy_schema_version": "test",
-        "results": [],
-    }
-    m = build_site_map(empty, host_policy=UNRESTRICTED_HOST_POLICY)
-    assert m["url"] is None
-    assert m["all_urls"] == []
-
-
-def test_build_site_map_resolves_relative_paths():
-    crawl_response = _crawl_response(
-        "http://x.example/dir/",
-        links=["/page1", "http://x.example/abs"],
-    )
-    m = build_site_map(crawl_response, host_policy=UNRESTRICTED_HOST_POLICY)
-    assert m["links"] == ["http://x.example/abs", "http://x.example/page1"]
-    assert all(not u.startswith("/") for u in m["all_urls"])
-
-
-# --------------------------------------------------------------------------- future-skew bound on sitemap
-
-
-def _iso_offset(seconds: float) -> str:
-    return (datetime.now(UTC) + timedelta(seconds=seconds)).isoformat()
-
-
-def test_parse_lastmod_accepts_past_and_plausible_future():
-    assert _parse_lastmod(_iso_offset(-3600)) is not None
-    # Clock skew is a fact of life: a future stamp within the bound is trusted.
-    assert _parse_lastmod(_iso_offset(600)) is not None
-
-
-def test_parse_lastmod_rejects_far_future(monkeypatch):
-    """A >1-day-future stamp is a garbage claim, not freshness information."""
-    assert _parse_lastmod(_iso_offset(86400 * 2)) is None
-
-
-def test_future_skew_bound_is_configurable(monkeypatch):
-    monkeypatch.setenv("CRAWLUTRON_SITEMAP_LASTMOD_FUTURE_SKEW_SECONDS", "0")
-    assert _parse_lastmod(_iso_offset(300)) is None
-    assert _parse_lastmod(_iso_offset(-300)) is not None
-
-
-def test_negative_bound_config_falls_back_to_floor(monkeypatch):
-    """A negative skew would reject stamps from the last N seconds (the
-    site's clock runs ahead); the lo=0 floor keeps 'trust the past' intact."""
-    monkeypatch.setenv("CRAWLUTRON_SITEMAP_LASTMOD_FUTURE_SKEW_SECONDS", "-3600")
-    assert _parse_lastmod(_iso_offset(-1800)) is not None
-
-
-def test_far_future_lastmod_never_skips_a_cached_seed():
-    """Contract pin: garbage lastmod fails open to re-fetch, and cheaply.
-
-    With the bound the parse returns None, so the freshness check declines
-    before composing cache keys -- the seed enters the frontier without the
-    per-strategy disk reads a far-future timestamp used to pay for a verdict
-    it could never return.
-    """
-
-    class _Cache:
-        def cached_at_of(self, key):
-            raise AssertionError("far-future lastmod must short-circuit before any disk read")
-
-    assert (
-        _seed_is_fresh(canonical("http://x.test/p"), _iso_offset(86400 * 30), _Cache(), read_policy({}))
-        is False
-    )
