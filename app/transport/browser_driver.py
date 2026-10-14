@@ -1,169 +1,47 @@
-"""The browser, and the page work a render performs, in one substitutable place.
+"""The live browser: launching, recycling, tabs and driver steps.
 
-The seam is a boundary, not a file split. Everything here touches a LIVE browser
-or a live page: launching it, recycling it, opening a tab, and doing page work
-(ready-state, action chains, lazy scroll, shadow-DOM flattening, cookie consent,
-teardown). :class:`~app.transport.browser.BrowserRenderer` keeps the other
-half -- what a render IS: navigate, extract, classify, screenshot, fail.
-
-The boundary exists because the two halves are substituted for different reasons.
-A render is driven by a caller, so it is worth faking in a test; a real browser
-is not, so it was reached only through the renderer's own private methods.
-``build_pinned_renderer`` rebound ten of them on the class to manufacture a seam
-the type never offered -- and no AST gate can see that, because the target is the
-class rather than a name.
-
-``BrowserRenderer`` takes ``driver=``. The default builds the real one from the
-settings it always read; a test passes a driver whose page steps do nothing and
-whose ``open_page`` returns the page it was built with. Browser recycling lives
-here rather than in the renderer because it bounds the growth of a long-lived
-browser process, which is what this class owns.
-
-The action vocabulary is NOT here. It is ``app.vocabulary.browser``
-(``BROWSER_ACTION_TYPES`` and friends), because ``CrawlPolicy`` reads the same
-set at the model boundary and two hand-maintained lists that must agree is the
-bug this module used to be able to cause.
-"""
+``BrowserRenderer`` takes ``driver=``; a test passes a driver whose page steps
+do nothing. The action vocabulary lives in ``app.vocabulary.browser``."""
 
 from __future__ import annotations
 
 import asyncio
-import base64
 import contextlib
 import logging
-import os
 import time
 from collections.abc import Callable
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, TypeVar
+from typing import TYPE_CHECKING, Any
 
-from camoufox.async_api import AsyncCamoufox
-
-from app.config.env import get_env_int, parse_bool_value
-from app.vocabulary.browser import BROWSER_ACTION_TYPES
-from app.vocabulary.limits import (
-    DEFAULT_COOKIE_HARVEST_TIMEOUT_SECONDS,
-    DEFAULT_LAZY_SCROLL_DELAY_SECONDS,
-    DEFAULT_LAZY_SCROLL_STEPS,
-    DEFAULT_MAX_BROWSER_RENDERS,
+from app.config.env import get_env_int
+from app.transport.driver_config import (
+    LAZY_SCROLL_DELAY_SECONDS,
+    LAZY_SCROLL_STEPS,
+    MAX_ACTION_WAIT_SECONDS,
+    _action_wait_ms,
+    _create_camoufox_browser,
+    async_sleep,
+    browser_kwargs,
+    harvest_timeout_for,
+    headless_enabled,
+    page_kwargs,
+    scroll_config_for,
+    validate_storage_state_path,
 )
+from app.transport.driver_pages import (
+    auto_accept_cookie_consent,
+    capture_element_screenshots,
+    flatten_shadow_dom,
+    safe_close_page,
+)
+from app.vocabulary.browser import BROWSER_ACTION_TYPES
+from app.vocabulary.limits import DEFAULT_COOKIE_HARVEST_TIMEOUT_SECONDS, DEFAULT_MAX_BROWSER_RENDERS
 
 if TYPE_CHECKING:
     from app.config.settings import CrawlerSettings
 
+
 logger = logging.getLogger(__name__)
-
-
-def _profile_int(profile: dict[str, Any], key: str, default: int, ceiling: int | None = None) -> int:
-    """Read a non-negative int knob from a browser_profile (never raises).
-
-    ``ceiling`` clamps a caller-supplied value on the way through. Without one
-    this is ``max(0, value)``, which is why ``lazy_scroll_steps: 10**12`` used to
-    be honoured: a closed key set says which keys exist, and says nothing about
-    how large their values may be. Clamping here rather than only at the model is
-    the point -- by the time a profile reaches a renderer it is a dict, so the
-    validator is no longer in the path.
-    """
-    try:
-        value = int(profile.get(key, default))
-    except (TypeError, ValueError):
-        return default
-    return _clamp_knob(max(0, value), ceiling)
-
-
-def _profile_float(profile: dict[str, Any], key: str, default: float, ceiling: float | None = None) -> float:
-    """Read a non-negative float knob from a browser_profile (never raises).
-
-    The float sibling of :func:`_profile_int`, and bounded for the same reason:
-    ``cookie_harvest_timeout_seconds`` became the ``wait_for`` timeout holding a
-    pooled renderer, with nothing above it but a wall-clock budget.
-    """
-    try:
-        value = float(profile.get(key, default))
-    except (TypeError, ValueError):
-        return default
-    if value != value:  # NaN: keep the default rather than poisoning waits
-        return default
-    return _clamp_knob(max(0.0, value), ceiling)
-
-
-#: The numeric knobs a profile carries. Constrained rather than ``float``
-#: so ``_clamp_knob`` returns an int for int readers, not a widened float.
-_Knob = TypeVar("_Knob", int, float)
-
-
-def _clamp_knob[Knob: (int, float)](value: Knob, ceiling: Knob | None) -> Knob:
-    """Hold a knob at its ceiling when it has one, and pass it through when it does not."""
-    return value if ceiling is None else min(value, ceiling)
-
-
-LAZY_SCROLL_STEPS = DEFAULT_LAZY_SCROLL_STEPS
-
-
-LAZY_SCROLL_DELAY_SECONDS = DEFAULT_LAZY_SCROLL_DELAY_SECONDS
-
-
-# Server-side clamp for caller action waits: a hostile policy must not
-# park a render (or the event loop) for an arbitrary time.
-MAX_ACTION_WAIT_SECONDS = 10.0
-
-
-def _action_wait_ms(action: dict[str, Any]) -> int:
-    """Clamp a caller-supplied ``wait`` timeout the way ``wait_seconds`` is.
-
-    Unbounded values park the render for as long as the caller likes, and 0
-    disables Playwright's timeout entirely instead of meaning "immediately".
-    Garbage falls back to the 5s default rather than failing the action.
-    """
-    try:
-        requested_ms = int(action.get("timeout", 5000))
-    except (TypeError, ValueError):
-        requested_ms = 5000
-    return max(1, min(requested_ms, int(MAX_ACTION_WAIT_SECONDS * 1000)))
-
-
-def _refuse_storage_state_without_cache_dir(storage_state: str) -> None:
-    """Log why a ``storage_state`` was dropped because no ``cache_dir`` is set.
-
-    The caller owns the return value; this owns the explanation. A separate
-    chokepoint for one reason: this is the only refusal in the validator that is
-    not "that path is not allowed". The configured-``cache_dir`` rejections stay
-    silent, because there the allowlist exists and the answer is simply no. With
-    no ``cache_dir`` no allowlist was ever configured, and that is the actionable
-    fact -- so this one names the setting instead of letting the caller return a
-    bare ``None`` indistinguishable from a path merely outside the allowlist.
-
-    The allowlist this replaced was the platform temp dir, which is not operator
-    control: it is world-readable on most hosts, so any local user could seed a
-    file another tenant's render then loads as its session. Losing a local dev's
-    ``storage_state`` is the cost; that is a diagnostic and a config line, against
-    a deployment's session otherwise.
-    """
-    logger.warning(
-        "browser_storage_state_no_cache_dir",
-        extra={
-            "storage_state": str(storage_state),
-            "detail": (
-                "no cache_dir is configured, so there is no allowlist to check this path "
-                "against and the storage_state is dropped; set CRAWLUTRON_CACHE_DIR to a "
-                "directory this deployment owns and place the file there"
-            ),
-        },
-    )
-    return None
-
-
-async def async_sleep(sleep: Callable[[float], None], seconds: float) -> None:
-    """Sleep without blocking the event loop, through an injected clock.
-
-    Both halves of a render need to wait -- the renderer between retries, the
-    driver between scroll steps and action waits -- and the wait must never
-    freeze the loop a render is running on. One implementation, two callers:
-    duplicated here it would be two places to keep honest about ``to_thread``.
-    """
-    if seconds <= 0:
-        return
-    await asyncio.to_thread(sleep, seconds)
 
 
 class BrowserDriver:
@@ -268,82 +146,22 @@ class BrowserDriver:
 
     def _create_camoufox_browser(self, **kwargs: Any):
         """Factory for AsyncCamoufox browser."""
-        return AsyncCamoufox(**kwargs)
+        return _create_camoufox_browser(**kwargs)
 
     def headless_enabled(self) -> bool:
-        return parse_bool_value(
-            os.environ.get("CRAWLUTRON_HEADLESS"),
-            default=True,
-            env_name="CRAWLUTRON_HEADLESS",
-        )
+        return headless_enabled()
 
     def validate_storage_state_path(self, storage_state: str) -> str | None:
-        """Validate storage_state path is safe (no traversal, under allowed dirs).
-
-        Returns a path that is safe to hand to Playwright, or None.
-
-        Every return value is a real path under an operator-controlled
-        directory. Playwright types ``storage_state`` as ``Union[str,
-        pathlib.Path] | Dict`` -- "can be a path to a file or a dictionary" --
-        so a string here is ALWAYS read as a file path and there is no
-        named-session form to support. This used to wave through the literals
-        "default", "session" and "persistent" as if they named sessions, which
-        made the chokepoint that exists to stop a caller reaching a path it
-        should not instead hand out three unvalidated paths relative to the
-        process working directory.
-
-        The allowlist is exactly the operator's ``cache_dir`` and nothing else.
-        The platform temp dir is NOT an implicit root: it is world-readable on
-        most hosts, so treating it as trusted would let any local user seed a
-        file another tenant's render then loads as its session. See
-        :func:`_refuse_storage_state_without_cache_dir` for the no-``cache_dir``
-        case, which fails closed rather than substituting a guess.
-        """
-        from pathlib import Path
-
-        # For file paths, ensure they live under an operator-controlled dir.
-        with contextlib.suppress(Exception):
-            path = Path(storage_state).resolve()
-            if not self._cache_dir:
-                _refuse_storage_state_without_cache_dir(storage_state)
-                return None
-            path.relative_to(Path(self._cache_dir).resolve())
-            return str(path)
-        return None
+        """A storage_state path under the cache dir, or None."""
+        return validate_storage_state_path(storage_state, self._cache_dir)
 
     def browser_kwargs(self, browser_profile: dict[str, Any] | None) -> dict[str, Any]:
-        """Launch-only kwargs for the Camoufox/Playwright browser factory.
-
-        Persistent cookies are passed via ``storage_state`` so cookies from a
-        previous session are retained across recursive page loads."""
-        kwargs: dict[str, Any] = {
-            "headless": self.headless_enabled(),
-            "humanize": True,
-        }
-
-        profile = browser_profile or {}
-
-        if profile.get("resource_mode") == "reduced":
-            kwargs["args"] = ["--blink-settings=imagesEnabled=false"]
-
-        storage_state = profile.get("storage_state")
-        if storage_state:
-            # Validate storage_state path to prevent path traversal
-            safe_path = self.validate_storage_state_path(storage_state)
-            if safe_path:
-                kwargs["storage_state"] = safe_path
-            else:
-                logger.warning("invalid_storage_state_path", extra={"path": str(storage_state)})
-
-        return kwargs
+        """Launch-only kwargs for the Camoufox/Playwright browser factory."""
+        return browser_kwargs(browser_profile, self._cache_dir)
 
     def page_kwargs(self, browser_profile: dict[str, Any] | None) -> dict[str, Any]:
         """Page/context kwargs, applied at ``browser.new_page`` time."""
-        profile = browser_profile or {}
-        viewport = profile.get("viewport")
-        if viewport == "mobile":
-            return {"viewport": {"width": 390, "height": 844}}
-        return {"viewport": {"width": 1365, "height": 768}}
+        return page_kwargs(browser_profile)
 
     async def _acquire_browser(self, browser_profile: dict[str, Any] | None) -> Any:
         """Return a reused browser instance, launching one on first use.
@@ -386,16 +204,6 @@ class BrowserDriver:
             with contextlib.suppress(Exception):  # best-effort teardown
                 await cm.__aexit__(None, None, None)
 
-    @staticmethod
-    async def safe_close_page(page: Any) -> None:
-        """Best-effort page teardown so rendered tabs/processes are not leaked."""
-        if page is None:
-            return
-        with contextlib.suppress(Exception):  # best-effort teardown
-            close = getattr(page, "close", None)
-            if close is not None:
-                await close()
-
     async def wait_for_ready_state(self, page: Any) -> None:
         for _ in range(10):
             state = await page.evaluate("() => document.readyState")
@@ -404,127 +212,11 @@ class BrowserDriver:
             await self._async_sleep(0.1)
 
     async def flatten_shadow_dom(self, page: Any) -> None:
-        # Move each open shadow root's children into its light-DOM host (closed
-        # roots are inaccessible); collect first, then move, to avoid mutation.
-        with contextlib.suppress(Exception):  # flattening is best-effort; never fail a render over it
-            await page.evaluate(
-                """() => {
-                    const collect = (root, acc) => {
-                        const els = root.querySelectorAll ? root.querySelectorAll('*'): [];
-                        for (const el of els) {
-                            acc.push(el);
-                            if (el.shadowRoot && el.shadowRoot.mode === 'open') {
-                                collect(el.shadowRoot, acc);
-                            }
-                        }
-                    };
-                    const all = [];
-                    collect(document, all);
-                    // Phase 1: Collect all (host, child) pairs to move
-                    const moves = [];
-                    for (const el of all) {
-                        const sr = el.shadowRoot;
-                        if (sr && sr.mode === 'open') {
-                            const kids = Array.from(sr.childNodes);
-                            for (const k of kids) {
-                                if (k.nodeType === 1) {
-                                    // Deep-clone to avoid mutation issues
-                                    moves.push({host: el, child: document.importNode(k, true)});
-                                }
-                            }
-                        }
-                    }
-                    // Phase 2: Apply all moves
-                    for (const {host, child} of moves) {
-                        try {
-                            host.appendChild(child);
-                        } catch (e) {
-                            // Ignore HierarchyRequestError etc. (best-effort)
-                        }
-                    }
-                    return true;
-                }"""
-            )
+        await flatten_shadow_dom(page)
 
     async def auto_accept_cookie_consent(self, page: Any, enabled: bool) -> bool:
-        """Auto-click cookie consent accept buttons (best-effort, opt-in).
-
-        Clicking "Accept All" on the caller's behalf is an action with legal
-        weight, so it never happens implicitly: callers must pass
-        ``browser_profile.auto_accept_cookie_consent = true``. Returns True if
-        a consent button was clicked, False otherwise.
-        """
-        if not enabled:
-            return False
-        try:
-            # Common cookie consent button selectors and text patterns
-            consent_selectors = [
-                # Generic button/anchor with common accept text
-                'button:has-text("Accept All")',
-                'button:has-text("Accept all")',
-                'button:has-text("Accept All Cookies")',
-                'button:has-text("Accept all cookies")',
-                'button:has-text("I Accept")',
-                'button:has-text("I Agree")',
-                'button:has-text("Allow All")',
-                'button:has-text("Allow all")',
-                'button:has-text("Continue")',
-                'button:has-text("Got it")',
-                'button:has-text("OK")',
-                'button:has-text("Ok")',
-                'a:has-text("Accept All")',
-                'a:has-text("Accept all")',
-                'a:has-text("I Accept")',
-                'a:has-text("I Agree")',
-                # Common ID/class patterns
-                'button[id*="accept"]',
-                'button[class*="accept"]',
-                'button[id*="consent"]',
-                'button[class*="consent"]',
-                'button[id*="cookie"]',
-                'button[class*="cookie"]',
-                "#onetrust-accept-btn-handler",
-                ".cc-btn.cc-allow",
-                ".cookie-consent-accept",
-                '[data-testid="cookie-accept"]',
-                '[data-cy="accept-cookies"]',
-            ]
-
-            for selector in consent_selectors:
-                with contextlib.suppress(Exception):
-                    element = await page.query_selector(selector)
-                    if element:
-                        # Check if element is visible
-                        is_visible = await element.is_visible()
-                        if is_visible:
-                            await element.click()
-                            await self._async_sleep(0.5)  # Brief wait for consent to register
-                            return True
-            # Fallback: evaluate JS to find buttons by text content
-            clicked = await page.evaluate("""() => {
-                const acceptTexts = [
-                    'accept all', 'accept all cookies', 'i accept', 'i agree',
-                    'allow all', 'allow all cookies', 'continue', 'got it', 'ok'
-                ];
-                const buttons = document.querySelectorAll('button, a, input[type="button"],
-                input[type="submit"]');
-                for (const btn of buttons) {
-                    const text = (btn.innerText || btn.value || btn.textContent || '').toLowerCase().trim();
-                    if (acceptTexts.some(t => text.includes(t))) {
-                        // Check if visible
-                        const style = window.getComputedStyle(btn);
-                        if (style.display !== 'none' && style.visibility !== 'hidden' && style.opacity !==
-                        '0') {
-                            btn.click();
-                            return true;
-                        }
-                    }
-                }
-                return false;
-            }""")
-            return bool(clicked)
-        except Exception:
-            return False
+        """Auto-click cookie consent buttons when the caller opts in."""
+        return await auto_accept_cookie_consent(page, enabled, self._sleep)
 
     async def run_action_chain(
         self,
@@ -647,15 +339,11 @@ class BrowserDriver:
 
     async def capture_element_screenshots(self, page: Any, selectors: list[str]) -> list[dict[str, Any]]:
         """Capture targeted element screenshots as base64."""
-        shots: list[dict[str, Any]] = []
-        for selector in selectors:
-            with contextlib.suppress(Exception):  # best-effort per-element capture
-                element = await page.query_selector(selector)
-                if element is None:
-                    continue
-                data = base64.b64encode(await element.screenshot()).decode("ascii")
-                shots.append({"selector": selector, "screenshot": data})
-        return shots
+        return await capture_element_screenshots(page, selectors)
+
+    async def safe_close_page(self, page: Any) -> None:
+        """Best-effort page teardown."""
+        await safe_close_page(page)
 
     async def lazy_load_scroll(self, page: Any, browser_profile: dict[str, Any] | None = None) -> None:
         """Scroll to the bottom repeatedly to trigger lazy-loaded content."""
@@ -668,41 +356,12 @@ class BrowserDriver:
             await self._async_sleep(delay)
 
     def harvest_timeout_for(self, browser_profile: dict[str, Any] | None) -> float:
-        """Resolve the cookie-harvest wait bound: policy profile beats settings.
-
-        Ceilinged because this is the ``wait_for`` timeout on a *pooled* renderer
-        held from a finally block, so an unbounded value is a hold on a shared
-        resource rather than on the caller's own budget.
-        """
-        from app.vocabulary.limits import MAX_COOKIE_HARVEST_TIMEOUT_SECONDS
-
-        profile = browser_profile or {}
-        return _profile_float(
-            profile,
-            "cookie_harvest_timeout_seconds",
-            self._harvest_timeout_seconds,
-            MAX_COOKIE_HARVEST_TIMEOUT_SECONDS,
-        )
+        """Cookie-harvest wait bound: policy profile beats settings."""
+        return harvest_timeout_for(browser_profile, self._harvest_timeout_seconds)
 
     def scroll_config_for(self, browser_profile: dict[str, Any] | None) -> tuple[int, float]:
-        """Resolve lazy-scroll steps/delay: policy profile beats settings.
-
-        Ceilinged for the same reason as the harvest, one step further out: this
-        runs directly below the budgeted action chain, and 10**12 steps is a
-        render that never returns.
-        """
-        from app.vocabulary.limits import MAX_LAZY_SCROLL_DELAY_SECONDS, MAX_LAZY_SCROLL_STEPS
-
-        profile = browser_profile or {}
-        return (
-            _profile_int(profile, "lazy_scroll_steps", self._lazy_scroll_steps, MAX_LAZY_SCROLL_STEPS),
-            _profile_float(
-                profile,
-                "lazy_scroll_delay_seconds",
-                self._lazy_scroll_delay_seconds,
-                MAX_LAZY_SCROLL_DELAY_SECONDS,
-            ),
-        )
+        """Lazy-scroll steps/delay: policy profile beats settings."""
+        return scroll_config_for(browser_profile, self._lazy_scroll_steps, self._lazy_scroll_delay_seconds)
 
     async def _async_sleep(self, seconds: float) -> None:
         """Wait between page steps, off the event loop. See :func:`async_sleep`."""
