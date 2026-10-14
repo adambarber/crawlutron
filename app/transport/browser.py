@@ -1,32 +1,17 @@
-"""Browser render strategy (Camoufox/Playwright) with SOTA discovery hooks.
-
-Owns the :class:`BrowserRenderer` which drives a headless/full browser to
-render JavaScript-heavy pages. Beyond basic DOM extraction it now also:
-
-* intercepts XHR/fetch JSON responses (Katana-style dynamic endpoint discovery),
-* performs lazy-load infinite-scroll to trigger deferred content, and
-* optionally captures a full-page screenshot as base64 for debugging.
-"""
+"""Browser rendering: a headless browser for JavaScript-heavy pages."""
 
 from __future__ import annotations
 
 import asyncio
 import base64
-import json
 import logging
 import os
-import threading
 import time
-from collections import OrderedDict
 from collections.abc import (
     Awaitable,
     Callable,
 )
 from typing import TYPE_CHECKING, Any, Literal
-
-if TYPE_CHECKING:
-    pass
-
 
 from app.config.env import get_env_float, get_env_int
 from app.config.settings import CrawlerSettings
@@ -41,258 +26,42 @@ from app.orchestration.render_result import (
     terminal_attempt,
     terminal_crawl_result,
 )
-from app.safety.json_safe import json_default
-from app.transport.browser_driver import BrowserDriver, async_sleep
-from app.transport.document import _default_document_text_extractor
-from app.transport.pinned_transport import (
-    build_pinned_request,
-    build_pinned_request_async,
-    check_ssrf_protection,
+from app.transport.browser_cookies import (
+    _BROWSER_COOKIES_BY_DOMAIN,
+    _harvest_session_cookies,
+    get_browser_cookies_for,
+    has_process_state,
+    reset_process_state,
 )
-from app.vocabulary.hosts import is_analytics_host as _is_analytics_url
+from app.transport.browser_driver import BrowserDriver, async_sleep
+from app.transport.browser_targets import (
+    make_response_handler,
+    make_ssrf_route_handler,
+    make_ssrf_websocket_handler,
+    resolve_browser_target,
+)
+
+__all__ = [
+    "BrowserRenderer",
+    "_BROWSER_COOKIES_BY_DOMAIN",
+    "get_browser_cookies_for",
+    "has_process_state",
+    "make_response_handler",
+    "make_ssrf_route_handler",
+    "make_ssrf_websocket_handler",
+    "reset_process_state",
+    "resolve_browser_target",
+]
+from app.transport.document import _default_document_text_extractor
+from app.transport.pinned_transport import build_pinned_request, build_pinned_request_async
 from app.vocabulary.limits import DEFAULT_CHALLENGE_WAIT_SECONDS, DEFAULT_MAX_CONCURRENT_PAGES
 from app.vocabulary.taxonomy import ResultStatus, status_for_classification
 
+if TYPE_CHECKING:
+    pass
+
+
 logger = logging.getLogger(__name__)
-
-
-async def resolve_browser_target(
-    url: NormalizedUrl,
-    *,
-    pin: Callable[..., Awaitable[tuple[str, dict[str, str]]]],
-) -> tuple[str, dict[str, str]]:
-    """SSRF-check + IP-pin ``url`` for browser navigation.
-
-    Returns ``(pinned_url, extra_http_headers)``. The browser is told to connect
-    to the single resolved IP (preventing DNS-rebinding) while preserving the
-    original ``Host`` header. Raises ``ValueError`` if the target is unsafe --
-    the value's own policy decides whether the target is reachable at all.
-
-    Async because pinning resolves DNS, and a render is not the only thing on
-    the loop: called synchronously this ran ``socket.getaddrinfo`` inline, so every
-    other in-flight crawl waited out the resolver once per rendered page.
-
-    ``pin`` is a required argument, not a keyword with a default. It is the rule
-    that decides whether this crawl may reach the URL at all, so a caller that
-    forgot to pass one would silently fall back to a weaker rule; the type is
-    declared here rather than imported so the dependency is visible at the call.
-    """
-    pinned_url, request_headers = await pin(url, {})
-    host = request_headers.get("Host")
-    return pinned_url, ({"Host": host} if host else {})
-
-
-# Subresource types with no crawlable text: aborted in reduced-resource mode.
-# Tracking/analytics hosts are never fetched (app.vocabulary.hosts, shared with enqueue refusal).
-_REDUCED_BLOCK_RESOURCE_TYPES = frozenset({"image", "font", "media"})
-
-
-def make_ssrf_route_handler(
-    resource_mode: str | None = None,
-    *,
-    include_screenshot: bool = False,
-    policy: HostPolicy,
-    pin: Callable[..., tuple[str, dict[str, str]]],
-):
-    """Playwright route handler that aborts requests to SSRF-unsafe hosts.
-
-    Registered via ``page.route`` so the main navigation, server-side
-    redirects, and every subresource load (images/scripts/XHR) is checked
-    against the SSRF blocklist. Requests that resolve to internal/loopback/
-    reserved addresses are aborted before the browser connects.
-
-    The SSRF check involves synchronous DNS resolution (socket.getaddrinfo).
-    To avoid blocking the event loop, the check runs in a thread pool via
-    ``asyncio.to_thread``.
-
-    Plain-HTTP requests keep the FRESH (uncached) pinned IP, which governs the
-    actual connection: a rebind inside the resolver cache TTL must not slip
-    onto the wire. HTTPS requests are validated through the
-    same cached check the websocket handler uses: ``build_pinned_request``
-    keeps the original hostname there (real certificates carry no IP address
-    SAN, so a pin would only break SNI/cert verification), making an uncached
-    pin resolve per subresource pure cost with no security gain. HTTPS stays
-    blocklist-checked before the browser connects.
-    """
-
-    async def _handler(route, request):
-        # Re-pin the IP per subresource request (DNS-rebinding TOCTOU): raises on
-        # private/loopback, returns (pinned_url, {Host: hostname}) to preserve routing.
-        request_scheme = request.url.split(":", 1)[0].lower()
-        if request_scheme not in ("http", "https", ""):
-            # Data:, blob:, about:, javascript: never touch the network via DNS;
-            # let the browser handle them locally instead of aborting.
-            await route.continue_()
-            return
-        # The browser-observed URL is a live-text boundary: admitted here, once,
-        # inline; an unadmittable URL reaches the same "unsafe target" abort below.
-        try:
-            admitted = NormalizedUrl(request.url, policy=policy)
-        except ValueError:
-            await route.abort()
-            return
-        # Tracking/analytics requests carry no crawlable content; drop them
-        # unconditionally so they never consume bandwidth or trigger SSRF resolution.
-        if _is_analytics_url(admitted):
-            await route.abort()
-            return
-        # Abort presentation subresources: a text crawler never needs them (~70%
-        # of render bandwidth); permitted only when a screenshot is requested.
-        if getattr(request, "resource_type", "") in _REDUCED_BLOCK_RESOURCE_TYPES and not include_screenshot:
-            await route.abort()
-            return
-        try:
-            # Annotated once for both branches: mypy cannot widen the https
-            # branch's empty literal to the dict type the http pin rule returns.
-            host_headers: dict[str, str]
-            if request_scheme == "https":
-                # https discards the pinned IP (TLS SNI/certs need the hostname), so
-                # validate via the cached TTL'd check: one resolve per host, fail-closed.
-                await asyncio.to_thread(check_ssrf_protection, admitted)
-                pinned_url, host_headers = request.url, {}
-            else:
-                pinned_url, host_headers = await asyncio.to_thread(
-                    pin,
-                    admitted,
-                    {},
-                )
-        except Exception:
-            # Fail closed: DNS timeout, resolver errors, anything unexpected ->
-            # abort rather than let an unchecked connection proceed.
-            await route.abort()
-            return
-        overrides = {}
-        if host_headers.get("Host"):
-            overrides["Host"] = host_headers["Host"]
-        # Omit headers= when empty: Playwright treats an explicit dict as a full
-        # replacement, so {} would wipe UA/cookies/accept off every HTTPS subresource.
-        if overrides:
-            await route.continue_(url=pinned_url, headers=overrides)
-        else:
-            await route.continue_(url=pinned_url)
-
-    return _handler
-
-
-def make_ssrf_websocket_handler(*, policy: HostPolicy):
-    """Playwright websocket-route handler blocking SSRF-unsafe WS targets.
-
-    page.route does not intercept WebSocket upgrades; without this a hostile
-    page could open a WebSocket to an internal host around the route guard.
-    Validation reuses check_ssrf_protection with ws/wss mapped to http/https.
-    """
-
-    async def _ws_handler(ws):
-        url = getattr(ws, "url", "") or ""
-        scheme = url.split(":", 1)[0].lower()
-        if scheme not in ("ws", "wss"):
-            return  # not a websocket target
-        http_equivalent = ("https" if scheme == "wss" else "http") + url[len(scheme) :]
-        try:
-            normalized = await asyncio.to_thread(
-                NormalizedUrl,
-                http_equivalent,
-                policy=policy,
-            )
-            await asyncio.to_thread(check_ssrf_protection, normalized)
-        except Exception:
-            close = getattr(ws, "close", None)
-            if close is not None:
-                result = close()
-                if asyncio.iscoroutine(result):
-                    await result
-
-    return _ws_handler
-
-
-# the shared classifier taxonomy, so HTTP and browser cannot disagree about a label.
-_BROWSER_COOKIES_MAX = 500
-
-
-class _LockedDomainCookieStore:
-    """LRU cookie store whose every read and mutation is internally guarded.
-
-    The store is module-global and genuinely concurrent: the render path writes
-    harvested cookies while the crawl engine reads them for the cffi
-    cookie-bootstrap retry, from different tasks and threads. Every operation
-    acquires ``_lock`` for its whole duration, so an unsynchronized access is
-    not a state a caller can construct and the eviction cannot interleave with a
-    read.
-
-    It implements no container protocol. It used to subclass
-    ``MutableMapping``, and ten of its thirteen methods existed to honour that
-    promise to callers outside ``app/`` -- no production path reached any of
-    them, and ``no-unclaimed-container-protocol`` now holds that line.
-    """
-
-    __slots__ = ("_data", "_lock", "_max_entries")
-
-    def __init__(self, max_entries: int) -> None:
-        # OrderedDict: insertion order doubles as the eviction order (plain
-        # dict has no move_to_end/popitem(last=False)).
-        self._data: OrderedDict[str, str] = OrderedDict()
-        self._lock = threading.Lock()
-        self._max_entries = max_entries
-
-    def store(self, domain: str, header: str) -> None:
-        """Record a harvested cookie header, evicting LRU entries past the cap.
-
-        Assignment and eviction happen under one acquisition, so a concurrent
-        reader can never observe the store over the cap, and the entry being
-        written cannot be the one evicted by its own insert.
-        """
-        with self._lock:
-            # Deliberately not move_to_end: re-storing a known domain updates
-            # the value in place, matching plain-mapping semantics.
-            self._data[domain] = header
-            while len(self._data) > self._max_entries:
-                self._data.popitem(last=False)
-
-    def touch_get(self, domain: str) -> str | None:
-        """Look up a domain and mark it most-recently-used when present.
-
-        Membership check, touch and value read are one critical section: this
-        is the operation that used to race ``popitem`` eviction.
-        """
-        with self._lock:
-            value = self._data.get(domain)
-            if value is not None:
-                self._data.move_to_end(domain)
-            return value
-
-    def clear(self) -> None:
-        with self._lock:
-            self._data.clear()
-
-    def __len__(self) -> int:
-        with self._lock:
-            return len(self._data)
-
-
-_BROWSER_COOKIES_BY_DOMAIN = _LockedDomainCookieStore(_BROWSER_COOKIES_MAX)
-
-
-def reset_process_state() -> None:
-    """Drop every cookie the renderer has accumulated for a domain.
-
-    The store is process-wide and bounded, not cleared, so a browser test that
-    renders once leaves its domain's cookies for the next test to assert against.
-    """
-    _BROWSER_COOKIES_BY_DOMAIN.clear()
-
-
-def has_process_state() -> bool:
-    """Whether any domain's cookies are held right now."""
-    return len(_BROWSER_COOKIES_BY_DOMAIN) > 0
-
-
-def _store_browser_cookies(domain: str, header: str) -> None:
-    """Record a harvested cookie header, evicting the LRU entry past the cap."""
-    _BROWSER_COOKIES_BY_DOMAIN.store(domain, header)
-
-
-def get_browser_cookies_for(domain: str) -> str | None:
-    return _BROWSER_COOKIES_BY_DOMAIN.touch_get(domain)
 
 
 class BrowserRenderer:
@@ -390,28 +159,6 @@ class BrowserRenderer:
         """
         return self._warmup_urls
 
-    async def _harvest_session_cookies(self, page: Any, url: NormalizedUrl) -> None:
-        """Capture the page's cookies into the per-domain bootstrap store.
-
-        Must run BEFORE the page/context is closed -- Camoufox destroys the
-        context with the last page, leaving ``browser.contexts`` empty -- and
-        must COMPLETE before returning: the cffi retry reads the store
-        synchronously right after the render, so a fire-and-forget task would
-        usually lose the race and retry cookieless. Harvest failures never
-        break the render itself.
-        """
-        try:
-            context = getattr(page, "context", None)
-            if context is None:
-                return
-            cookies = await context.cookies(url.raw)
-            header = "; ".join(f"{c['name']}={c['value']}" for c in cookies if c.get("name"))
-            if header:
-                _store_browser_cookies(url.site, header)
-                logger.info("browser_cookies_harvested", extra={"domain": url.site, "count": len(cookies)})
-        except Exception as error:
-            logger.debug("browser_cookies_harvest_failed", extra={"error": str(error)})
-
     async def render(
         self,
         url: NormalizedUrl,
@@ -502,7 +249,7 @@ class BrowserRenderer:
         try:
             # Katana-style XHR/fetch interception.
             intercepted_xhr: list[dict[str, Any]] = []
-            page.on("response", self.make_response_handler(intercepted_xhr))
+            page.on("response", make_response_handler(intercepted_xhr))
 
             # Warmup URLs (no Host header needed). The driver's goto takes
             # text -- .raw projects at that external-API edge.
@@ -602,7 +349,7 @@ class BrowserRenderer:
             # root); a wedged context.cookies() falls back cookieless after a bounded wait.
             try:
                 await asyncio.wait_for(
-                    self._harvest_session_cookies(page, url),
+                    _harvest_session_cookies(page, url),
                     timeout=self._driver.harvest_timeout_for(options.browser_profile or {}),
                 )
             except TimeoutError:
@@ -611,49 +358,6 @@ class BrowserRenderer:
             # Increment render count for ALL attempts (success or failure) so
             # browser recycle logic bounds total attempts per browser instance.
             self._driver.note_render()
-
-    @staticmethod
-    def make_response_handler(collected: list[dict[str, Any]]) -> Callable[[Any], Awaitable[None]]:
-        # XHR bounds: 10 entries x 8KB payload (50 x 64KB held ~3.2MB per page);
-        # URLs are page-controlled too, so each entry's URL is bounded on the same terms.
-        max_entries = 10
-        max_payload_chars = 8192
-        max_url_chars = 2048
-
-        async def on_response(response: Any) -> None:
-            if len(collected) >= max_entries:
-                return  # hostile pages can fire thousands of JSON responses
-            headers = response.headers or {}
-            content_type = ""
-            if isinstance(headers, dict):
-                for key, value in headers.items():
-                    if str(key).lower() == "content-type":
-                        content_type = str(value)
-                        break
-            if "application/json" not in content_type:
-                return
-            url = str(getattr(response, "url", ""))
-            entry: dict[str, Any] = {
-                "url": url[:max_url_chars],
-                "content_type": content_type,
-                "status": getattr(response, "status", None),
-                "payload": None,
-            }
-            if len(url) > max_url_chars:
-                entry["url_truncated"] = True
-            try:
-                # ACCEPTED RESIDUAL: the browser already materialized this body, so
-                # the 8KB cap applies after one transient parse; bounding it drops real JSON.
-                payload = await response.json()
-            except Exception:  # payload capture is best-effort
-                payload = None
-            if payload is not None and len(json.dumps(payload, default=json_default)) > max_payload_chars:
-                entry["payload_truncated"] = True
-            else:
-                entry["payload"] = payload
-            collected.append(entry)
-
-        return on_response
 
     async def extract_with_challenge_wait(
         self, page: Any, options: RenderOptions

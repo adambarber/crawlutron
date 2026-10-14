@@ -410,6 +410,9 @@ DECLARED: dict[str, Declaration] = {
     "app.transport.browser._BROWSER_COOKIES_MAX": _d(
         _CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]
     ),
+    "app.transport.browser_cookies._harvest_session_cookies": _d(
+        _IMPLEMENTATION_STEP.kind, _IMPLEMENTATION_STEP.reason, ["test"]
+    ),
     "app.transport.browser._store_browser_cookies": _d(
         "unreviewed",
         "Not yet triaged.\n",

@@ -10,6 +10,7 @@ from app.transport.browser_pool import (
     BrowserPoolExhaustedError,
     set_browser_pool,
 )
+from app.transport.browser_targets import make_response_handler
 from app.vocabulary.taxonomy import ResultStatus
 
 ROUTE_ARG_UNSET = object()
@@ -130,7 +131,7 @@ class PageCookieContext(Protocol):
 class FakePageContext:
     """A page context that holds no cookies.
 
-    ``BrowserRenderer._harvest_session_cookies`` reads ``page.context.cookies``,
+    ``_harvest_session_cookies`` reads ``page.context.cookies``,
     so a page double with no context is a double the renderer cannot ask -- and
     the two ways tests were getting around that (assigning ``page.context`` after
     construction) put a member on the object that its own type did not declare.
@@ -679,10 +680,9 @@ def blocking_pinned_request(thread_ids: list[int], delay: float = 0.05):
 
 
 def response_handler_double(url: str, payload=None, error=None):
-    from app.transport.browser import BrowserRenderer
 
     collected: list[dict] = []
-    handler = BrowserRenderer.make_response_handler(collected)
+    handler = make_response_handler(collected)
     response_url = url
 
     class FakeResponse:
