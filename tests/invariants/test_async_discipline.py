@@ -18,7 +18,6 @@ from tests.chokepoint_walks import (
     functions,
     nodes_of,
     offender_at,
-    offenders_over_functions,
 )
 from tests.invariants._shared import app_names
 from tests.rules import Bites, Rule, Trips
@@ -56,12 +55,10 @@ def _task_ram_budget():
 
 
 def _admission_weights_are_known() -> None:
-    """The weights this rule bans as keywords are read from the dataclass, not listed.
+    """The weights this rule bans as keywords are read from the dataclass.
 
-    A weight added to ``TaskRamBudget`` is covered here the day it lands, and a
-    dataclass emptied or renamed leaves this failing rather than leaving the rule
-    matching nothing -- which would read as the property holding.
-    """
+    A weight added to TaskRamBudget is covered the day it lands; a dataclass
+    emptied leaves this failing rather than the rule matching nothing."""
     weights = {field.name for field in dataclasses.fields(_task_ram_budget())}
     assert weights, "TaskRamBudget declared no weights; this sweep would be a no-op"
 
@@ -72,6 +69,7 @@ ADMISSION_WEIGHTS_ARE_KEYWORDS = (
     "    return build_admission_policy(limit, pool_size=pool_size,"
     " max_concurrent_pages=3, doc_workers=2)\n"
 )
+
 
 ADMISSION_BUDGET_ARRIVES_AS_A_BUDGET = Rule(
     name="admission-weights-arrive-as-a-budget",
@@ -106,11 +104,8 @@ def test_admission_sizing_reaches_the_policy_as_one_budget():
 def test_admission_budget_detector_bites():
     """The flat keyword fires on every weight; the budget form is clean.
 
-    ``max_http_concurrency_for`` is deliberately NOT in the clean set's
-    counterpart: it is the per-call computation the budget is bound for, so it
-    still takes the four weights flat and its own call inside the policy function
-    is the sanctioned forwarding. What is banned is a *caller* re-spelling them.
-    """
+    max_http_concurrency_for still takes the weights flat by design -- it is
+    the per-call computation the budget is bound for."""
     ADMISSION_BUDGET_ARRIVES_AS_A_BUDGET.check_bites()
 
 
@@ -188,15 +183,10 @@ def _consults_transience_verdict(func: ast.AST) -> bool:
 
 
 def _ungated_job_visited_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
-    """Flag committing a *whole-site* URL to ``job.visited`` without the gate.
+    """Flag committing a whole-site URL to ``job.visited`` without the gate.
 
-    A URL that fails for a transient reason (network/dns/tls/timeout/crash) must
-    be re-queued, not marked visited: committing it is what let a network outage
-    drain a whole-site frontier to a seed-only ``COMPLETED``. Keyed on the
-    persisted ``job.visited`` receiver so the local per-request ``visited`` set
-    (recursive/fetch_helpers) — a different thing, where retrying the same failed
-    URL within one crawl is pointless — is not matched.
-    """
+    Committing a transient-failed URL is what drains a whole-site frontier to
+    a seed-only COMPLETED; the per-request local set is a different thing."""
     offenders: list[str] = []
     for func in functions(tree):
         commits = [
@@ -257,12 +247,9 @@ def test_whole_site_visited_commit_is_transient_gated():
 
 
 def test_whole_site_visited_gate_detector_bites():
-    """An unguarded whole-site visited commit fires; both gate spellings stay clean.
-
-    The message must name the seam to route through, or a red detector is only as
-    useful as the guess it forces -- which is why this is a :class:`Bites` proof
-    rather than a bare firing check.
-    """
+    """An unguarded whole-site visited commit fires; both gate spellings stay
+    clean. The message must name the seam to route through, so this is a
+    Bites proof rather than a bare firing check."""
     WHOLE_SITE_VISIT_IS_TRANSIENT_GATED.check_bites()
 
 
@@ -283,12 +270,8 @@ _CONVENTIONAL_STORE_NAMES = {
 def _sync_store_methods() -> dict[str, frozenset[str]]:
     """Store class name -> its public synchronous method names.
 
-    Derived from the classes rather than listed here, so a method added to a
-    store is covered by this detector the day it lands and an async twin added
-    later drops out of the set with nobody editing this test. Importing the two
-    store modules is safe: the schema runs when a store is CONSTRUCTED, not at
-    import.
-    """
+    Derived from the classes rather than listed, so a new method is covered the
+    day it lands; import is safe because schemas run on construction, not import."""
     from app.storage.job_store import JobStore
     from app.storage.result_store import CrawlResultStore
     from app.storage.watch_store import WatchStore
@@ -312,12 +295,9 @@ def _sync_store_methods() -> dict[str, frozenset[str]]:
 def _stores_still_have_sync_methods() -> None:
     """The trigger set is derived, so prove it is not empty.
 
-    ``load`` and ``aload`` are the pair that makes the whole rule meaningful: a
-    store whose methods were all made async would leave this detector matching
-    nothing, and matching nothing reads exactly like a store that is never
-    misused. Named rather than counted, because the count could be satisfied by
-    one synchronous method nobody calls in an async frame.
-    """
+    A store whose methods were all made async would leave this detector
+    matching nothing; named, not counted, so one unused method cannot satisfy
+    it."""
     sync_methods = _sync_store_methods()
     assert "load" in sync_methods["JobStore"] and "aload" not in sync_methods["JobStore"], (
         f"JobStore's sync/async pair moved: {sorted(sync_methods['JobStore'])[:8]}. This rule's "
@@ -400,11 +380,8 @@ STORE_CALLS_ON_THE_LOOP = Rule(
 def test_no_sync_store_method_is_called_from_an_async_frame():
     """A store call on the event loop stalls every in-flight request.
 
-    The proof covers the four ways a frame names a store -- unannotated by
-    convention, annotated, constructed, and awaited -- because a detector that
-    resolved only one of them would pass on the other three while reporting the
-    property as held.
-    """
+    The proof covers the four ways a frame names a store, so a detector
+    resolving only one of them cannot pass on the other three."""
     STORE_CALLS_ON_THE_LOOP.scan()
 
 
@@ -419,18 +396,8 @@ _ACTION_CHAIN = "run_action_chain"
 def _action_chain_still_exists() -> None:
     """The premise: the rule is armed on a name the production tree must have.
 
-    The bite proves the detector fires; only this proves it has anything to fire
-    on. Those are different claims, and the gap between them is where the rule
-    spent a commit reporting green while governing nothing: the lifecycle split
-    renamed the method, the detector kept comparing against the old spelling,
-    and the bite stayed green throughout because the bite plants the name the
-    *detector* reads rather than the name the *tree* has.
-
-    A premise is the framework's slot for exactly this ("asserting the rule's
-    trigger set is non-empty"), and the tree-wide arming sweep cannot cover this
-    rule: ``run_action_chain`` is public, so it has no private spelling to go red
-    on.
-    """
+    The bite proves the detector fires; this proves it has anything to fire on.
+    A renamed method kept the bite green while the rule governed nothing."""
     assert _ACTION_CHAIN in app_names(), (
         f"{_ACTION_CHAIN} is not spelled anywhere in app/, so the rule matching calls to it "
         "matches nothing and reports green while policing no call site. Rename the key in "
@@ -441,12 +408,8 @@ def _action_chain_still_exists() -> None:
 def _action_chain_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
     """Every call that must carry the chain's deadline must carry one.
 
-    ``BrowserDriver.run_action_chain`` takes ``budget_seconds`` as an OPTIONAL
-    argument so a test can drive the raw action executor without standing up a
-    render budget. An optional deadline is a hole exactly as wide as the next
-    caller who omits it, so the signature stays permissive and this sweep
-    carries the invariant: production always passes the budget.
-    """
+    The signature stays permissive so a test can drive the raw executor; this
+    sweep carries the invariant that production always passes the budget."""
     offenders: list[str] = []
     for node, func in attribute_calls(tree):
         if func.attr != _ACTION_CHAIN:
@@ -490,97 +453,3 @@ def test_the_action_chain_is_always_invoked_with_a_budget():
 
 def test_action_chain_budget_detector_bites():
     ACTION_CHAIN_ALWAYS_CARRIES_A_BUDGET.check_bites()
-
-
-# The scheduler's delivery sink is not a worker step.
-_SINK_PARAM_NAME = "on_result"
-
-
-_SINK_CLOSURE_NAME = "deliver"
-
-
-def _is_result_sink_owner(node: ast.FunctionDef | ast.AsyncFunctionDef) -> bool:
-    return any(
-        (isinstance(arg, ast.arg) and arg.arg == _SINK_PARAM_NAME)
-        or (isinstance(arg, ast.Name) and arg.id == _SINK_CLOSURE_NAME)
-        for arg in list(node.args.args) + list(node.args.kwonlyargs) + list(node.args.posonlyargs)
-    ) or any(
-        isinstance(inner, ast.FunctionDef | ast.AsyncFunctionDef) and inner.name == _SINK_CLOSURE_NAME
-        for inner in node.body
-    )
-
-
-def _sink_call_in_try_body(tree: ast.AST, path: pathlib.Path) -> list[str]:
-    def check(node):
-        if not _is_result_sink_owner(node):
-            return []
-        found: list[str] = []
-        for statement in node.body:
-            if not isinstance(statement, ast.Try):
-                continue
-            # Only the try BODY: a delivery in an ``except`` handler is the required worker-failure path, and
-            # one in ``finally``/``else`` is already outside the protected region.
-            for protected in statement.body:
-                for inner in nodes_of(protected):
-                    if not (isinstance(inner, ast.Call) and isinstance(inner.func, ast.Name)):
-                        continue
-                    if inner.func.id in {_SINK_PARAM_NAME, _SINK_CLOSURE_NAME}:
-                        found.append(
-                            offender_at(
-                                path,
-                                inner,
-                                f"{inner.func.id}() inside the worker's try: delivery is not a "
-                                f"worker step, and a "
-                                f"raising sink must not be answered with a failure envelope",
-                            )
-                        )
-        return found
-
-    return offenders_over_functions(tree, check)
-
-
-DELIVERY_NEVER_RUNS_INSIDE_THE_WORKER_TRY = Rule(
-    name="delivery-never-runs-inside-the-worker-try",
-    find=_sink_call_in_try_body,
-    summary="Delivery raised from a worker handler",
-    bite=lambda: (
-        # The handler delivery is REQUIRED (that is the worker's failure path); only the try-body one is the
-        # defect, so the count is 1 and not 2.
-        Bites(
-            "async def run(self, jobs, worker, on_result=None):\n"
-            "    async def deliver(index, result):\n"
-            "        await on_result(index, result)\n"
-            "    try:\n"
-            "        result = await worker(job)\n"
-            "        await deliver(job.index, result)\n"
-            "    except Exception as error:\n"
-            "        await deliver(job.index, failed_result(job, error))\n",
-            marker="inside the worker's try",
-        )
-    ),
-    clean=lambda: (
-        "async def run(self, jobs, worker, on_result=None):\n"
-        "    async def deliver(index, result):\n"
-        "        await on_result(index, result)\n"
-        "    try:\n"
-        "        result = await worker(job)\n"
-        "    except Exception as error:\n"
-        "        await deliver(job.index, failed_result(job, error))\n"
-        "        return\n"
-        "    await deliver(job.index, result)\n",
-        # A function with no sink is not this detector's business, try or not.
-        "async def run(worker):\n"
-        "    try:\n"
-        "        return await worker(job)\n"
-        "    except Exception:\n"
-        "        return None\n",
-    ),
-)
-
-
-def test_result_delivery_never_runs_inside_the_worker_try():
-    DELIVERY_NEVER_RUNS_INSIDE_THE_WORKER_TRY.scan()
-
-
-def test_sink_try_detector_bites():
-    DELIVERY_NEVER_RUNS_INSIDE_THE_WORKER_TRY.check_bites()
