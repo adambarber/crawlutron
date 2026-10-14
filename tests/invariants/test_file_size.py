@@ -16,7 +16,7 @@ LIMIT = 500
 #: Files over the ceiling per root. Exact both ways; a split wave lowers it here.
 _BUDGETS = {
     "app": 0,
-    "tests": 6,
+    "tests": 5,
     "scripts": 1,
 }
 

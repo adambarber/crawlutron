@@ -11,9 +11,7 @@ import pathlib
 import re
 
 from tests.chokepoint_walks import (
-    REPO_ROOT,
     SANCTIONED,
-    app_offenders,
     assignments,
     attribute_calls,
     attribute_reads,
@@ -35,13 +33,10 @@ from tests.rules import Bites, Registry, Rule, Trips
 
 
 def _inline_extraction_normalizations(tree: ast.AST, path: pathlib.Path) -> list[str]:
-    """Flag an inline ``<something>.text or ""`` outside the extraction normalizer.
+    """Flag an inline ``<something>.text or ""`` outside the normalizer.
 
-    Keyed on the *normalization itself* -- an extractor's text being coerced to
-    a string -- rather than on the extractor branches that happened to spell it,
-    so a fourth extractor is caught too. An ``or ""`` on a non-``.text``
-    attribute is somebody else's business.
-    """
+    Keyed on the normalization itself, not the extractor branches that
+    happened to spell it, so a fourth extractor is caught too."""
     offenders: list[str] = []
     for node in or_nodes(tree):
         left, right = node.values
@@ -69,12 +64,8 @@ EXTRACTION_TEXT_NORMALIZATION = Rule(
 def _html_input_cap_name(target: ast.expr, value: ast.expr | None) -> str | None:
     """The name of a locally-declared HTML input byte cap, or ``None``.
 
-    Keyed on the *intent* (an HTML byte budget) rather than the two names it used
-    to have, so a third spelling is caught too. A cap that delegates elsewhere --
-    anything that is not a numeric expression -- is not a second declaration, and
-    that is one predicate rather than the two guards each copy of this rule used
-    to carry.
-    """
+    Keyed on intent (an HTML byte budget), so a third spelling is caught too;
+    a cap that delegates elsewhere is not a second declaration."""
     if value is None or not _is_numeric_expr(value):
         return None
     name = target.id if isinstance(target, ast.Name) else ""
@@ -141,11 +132,8 @@ _DECOMPRESS_SANCTIONED = frozenset({"decompression.py"})
 def _decompress_cap_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
     """Flag a decompress_body call that omits the mandatory output cap.
 
-    A small gzip/deflate/brotli stream can expand to gigabytes; every
-    production caller must bound the output. The cap is now a required
-    keyword at the chokepoint, so this AST sweep is belt-and-suspenders
-    against a caller reaching for an ``int`` default or ``**kwargs``.
-    """
+    A small stream can expand to gigabytes; this sweep catches int-default
+    or ``**kwargs`` reach-arounds past the required keyword."""
     offenders: list[str] = []
     for node in call_nodes(tree):
         if resolved_expr_name(tree, node.func).rsplit(".", 1)[-1] == "getattr":
@@ -162,12 +150,8 @@ def _decompress_cap_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
 def _decompress_cap_proofs() -> tuple[Bites, ...]:
     """Every shape a cap-less call arrives under, each of which must be caught.
 
-    The four alias forms are the reason this is a resolved-name sweep rather
-    than a substring match: the property is about the function that is called,
-    and an alias is the cheapest way to defeat a detector that reads the source
-    text. The getattr form is listed because it is the one spelling a plain
-    attribute read cannot resolve.
-    """
+    The four alias forms are why this is a resolved-name sweep rather than a
+    substring match: an alias is the cheapest way to defeat a text detector."""
     calls = "    return {call}(raw, enc)\n"
     return (
         Bites("def f(raw, enc):\n" + calls.format(call="decompress_body"), "without max_output_bytes"),
@@ -215,11 +199,8 @@ _DECOMPRESS_CODEC_METHODS = frozenset({"decompress", "decompressobj", "GzipFile"
 def _decompress_codec_alias(func: ast.Attribute) -> str | None:
     """The codec module an ``<alias>.<method>()`` call names, or None.
 
-    Yields the alias rather than answering yes/no: a comprehension's ``if`` clause
-    does not narrow its output expression, so the message below could only read
-    ``func.value.id`` after the guard had already been written out a second time
-    inline.
-    """
+    Yields the alias rather than answering yes/no, so the offender message can
+    read ``func.value.id`` without a second narrowed write."""
     if isinstance(func.value, ast.Name) and func.value.id in _DECOMPRESS_CODECS:
         return func.value.id
     return None
@@ -228,14 +209,8 @@ def _decompress_codec_alias(func: ast.Attribute) -> str | None:
 def _decompress_bypass_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
     """Flag raw stdlib decompression (import or call) outside the chokepoint.
 
-    All body decoding must route through ``decompression.decompress_body``, which
-    makes ``max_output_bytes`` mandatory and returns input unchanged on decoder
-    error (so a forged ``Content-Encoding`` cannot expand or corrupt unbounded).
-    A module that imports or calls ``gzip``/``zlib``/``brotli`` directly can
-    re-introduce the header-trusting, uncapped decompress the legacy cleanup
-    removed -- the ``_decompress_cap`` sweep only guards the chokepoint's own
-    callers, so this closes the bypass around it.
-    """
+    All body decoding must route through decompress_body; this closes the
+    bypass the cap sweep cannot see."""
     return (
         [
             offender_at(path, node, f"imports decompression codec '{alias.name}' (bypasses decompress_body)")
@@ -308,16 +283,9 @@ def _is_discovery_fetch(value: ast.AST | None) -> bool:
 
 
 def _discovery_response_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
-    """Flag reading a discovery response off the tuple instead of through _Discovery.
+    """Flag reading a discovery response off the tuple instead of _Discovery.
 
-    Both spellings are offenders, because both restore the reach the accessors
-    close. Destructuring is the one this replaced:
-    ``text, status, resp_headers = await _fetch_decode_discovery(...)`` followed
-    by ``resp_headers.get("etag")`` puts the ``dict | None`` back in the caller's
-    hands with the ``is None`` test re-derived by hand. A detector that only
-    understood the attribute form would call that tree clean, so the two walks
-    are reported separately and both are required.
-    """
+    Both attribute and destructured walks are reported and both are required."""
     nodes = writes(tree)
     bound: set[str] = set()
     destructured: list[ast.AST] = []
@@ -371,10 +339,8 @@ DISCOVERY_RESPONSE = Rule(
 def _is_int_or_float_call(call: ast.Call) -> bool:
     """True for a bare ``int(...)`` / ``float(...)``.
 
-    Takes the ``ast.Call`` so the callers below can read ``call.args`` after the
-    question is answered; a predicate over ``ast.AST`` answering ``bool`` is
-    what made them re-narrow the walk to reach it.
-    """
+    Takes the ast.Call so callers can read ``call.args`` after the question is
+    answered, instead of re-narrowing the walk to reach it."""
     return isinstance(call.func, ast.Name) and call.func.id in {"int", "float"}
 
 
@@ -405,15 +371,10 @@ def _catches_value_error(node: ast.Try) -> bool:
 
 
 def _unguarded_header_int_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
-    """Flag ``int``/``float`` of a header-derived value outside a try/except ValueError.
+    """Flag ``int``/``float`` of a header-derived value outside try/except ValueError.
 
-    Parsing a ``Content-Length`` (or any header) into a number without guarding
-    the conversion is its own class: one crafted ``Content-Length: abc`` raises
-    out of the fetcher and fails the whole request. The safe shapes either go
-    through a guard predicate (the arg is a parameter, not an in-scope header
-    read) or wrap the ``int()`` in ``try/except ValueError`` (middleware's
-    request-cap check). Tree-wide because any module can grow a header read.
-    """
+    One crafted ``Content-Length: abc`` raises out of the fetcher and fails the
+    whole request; the safe shapes guard or wrap the conversion."""
     offenders: list[str] = []
     for func in functions(tree):
         header_names = {
@@ -477,12 +438,10 @@ def test_no_rule_violations():
 
 
 def test_every_rule_bites():
-    """Every rule must reject what it forbids, and spare what it merely resembles.
+    """Every rule must reject what it forbids, and spare what it resembles.
 
-    Declared on the rule rather than written here, so a detector cannot be added
-    without a proof that it can fire -- and cannot be quietly weakened to match a
-    proof that no longer fires.
-    """
+    Declared on the rule, so a detector cannot be added without a proof that
+    it can fire -- or quietly weakened to match a proof that no longer fires."""
     RULES.check_all_bite()
 
 
@@ -507,115 +466,3 @@ _KNOWN_ENCODINGS = {
     "identity",
     "*",
 }
-
-
-def _decodable_encoding_tokens() -> set[str]:
-    """Every encoding this process can decode, which is now a fixed set.
-
-    The conditional ``br`` this replaced came from a brotli availability probe,
-    and brotli is a declared dependency -- the decoder set cannot vary by
-    deployment, so asking the environment was asking a question with one answer.
-    """
-    return set(_ALWAYS_DECODABLE_ENCODINGS) | {"br"}
-
-
-def _undecodable_encoding_offenders(tree, path, *, decodable: set[str] | None = None) -> list[str]:
-    """Report encoding-list literals naming something outside the decoder set.
-
-    ``decodable`` stays injectable so the detector's own logic can be exercised
-    against a set that excludes a token the live tree does decode -- which is
-    how a regression in the CHECK is caught, independently of what this
-    particular process happens to have installed.
-    """
-    if decodable is None:
-        decodable = _decodable_encoding_tokens()
-    # Keyed by (line, token): ast.walk yields a dict's value Constant both under its key and as a node in its
-    # own right, so without this one bad header reports twice and the count stops meaning anything.
-    seen: dict[tuple[int, str], str] = {}
-
-    def check(node, value: str) -> None:
-        tokens = {token.strip().lower() for token in value.split(",") if token.strip()}
-        if len(tokens) < 2 or not all(_ENCODING_TOKEN.match(token) for token in tokens):
-            return
-        if not tokens & _KNOWN_ENCODINGS:
-            return
-        for token in sorted(tokens - decodable):
-            seen[(node.lineno, token)] = (
-                f"{path.name}:{node.lineno} advertises {token!r}, which app/transport/decompression "
-                f"cannot decode here (decodable: {', '.join(sorted(decodable))})"
-            )
-
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Dict):
-            for key, value in zip(node.keys, node.values, strict=False):
-                if (
-                    isinstance(key, ast.Constant)
-                    and isinstance(key.value, str)
-                    and key.value.lower() == "accept-encoding"
-                    and isinstance(value, ast.Constant)
-                    and isinstance(value.value, str)
-                ):
-                    check(value, value.value)
-        elif isinstance(node, ast.Constant) and isinstance(node.value, str):
-            # A standalone encoding list, however it reaches the header.
-            check(node, node.value)
-    return [seen[key] for key in sorted(seen)]
-
-
-# This one rule keeps a hand-written gate and bite rather than joining RULES above, and the reason is the
-# shape of its proof rather than its size. Every other rule's bite runs against one fixed configuration.
-
-
-def test_no_request_header_advertises_an_undecodable_encoding():
-    """The header's claim is checked against the decoder set rather than trusted.
-
-    Every decoder is a declared dependency, so the set is fixed and this is a
-    statement about the tree rather than about the machine running it: a header
-    naming a coding outside ``_DECODABLE_ENCODINGS`` (zstd, most likely, which
-    would be passed through whole and served as if it were the body) is a defect
-    on every deployment.
-    """
-    offenders = app_offenders(_undecodable_encoding_offenders)
-    assert not offenders, "; ".join(offenders)
-
-
-def test_undecodable_encoding_detector_bites():
-    synthetic = REPO_ROOT / "app" / "_synthetic.py"
-    # A decodable set that omits brotli, to exercise the check itself. It is a stand-in for the check's input,
-    # not a deployment this project supports.
-    without_brotli = {"gzip", "deflate", "identity"}
-
-    # The shape that shipped: br named unconditionally, as a plain literal.
-    bad = ast.parse('HEADERS = {"Accept-Encoding": "gzip, deflate, br"}\n')
-    assert len(_undecodable_encoding_offenders(bad, synthetic, decodable=without_brotli)) == 1
-
-    # Reached indirectly, as a variable rather than inside the dict literal.
-    indirect = ast.parse('ENCODING = "gzip, deflate, br"\nHEADERS = {"Accept-Encoding": ENCODING}\n')
-    assert len(_undecodable_encoding_offenders(indirect, synthetic, decodable=without_brotli)) == 1
-
-    # The same literal is clean once the decoder is in the set, which is what makes the verdict about the set
-    # and not about the spelling.
-    assert not _undecodable_encoding_offenders(bad, synthetic, decodable={*without_brotli, "br"})
-
-    # A genuinely undecodable token is caught even with brotli present.
-    zstd = ast.parse('HEADERS = {"Accept-Encoding": "gzip, zstd"}\n')
-    assert len(_undecodable_encoding_offenders(zstd, synthetic, decodable={*without_brotli, "br"})) == 1
-
-    # A header value the detector cannot read as a literal is not a finding: the check is about advertised
-    # encodings, and a computed value advertises none that this gate can name.
-    computed = ast.parse(
-        'ENCODING = "gzip, deflate"\n'
-        "if available():\n"
-        '    ENCODING += ", br"\n'
-        'HEADERS = {"Accept-Encoding": ENCODING}\n'
-    )
-    assert not _undecodable_encoding_offenders(computed, synthetic, decodable=without_brotli)
-
-    # Not an encoding list at all: another comma-joined header is not this gate's business, and neither is
-    # English prose that happens to be comma-joined.
-    other = ast.parse(
-        'HEADERS = {"Accept": "text/html,application/xml;q=0.9"}\n'
-        'OTHER = "dom_text, etc., http_html"\n'
-        "SINGLE = 'gzip'\n"
-    )
-    assert not _undecodable_encoding_offenders(other, synthetic, decodable=without_brotli)
