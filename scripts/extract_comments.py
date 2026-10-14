@@ -115,6 +115,52 @@ def _is_docstring_node(node: ast.stmt) -> bool:
     )
 
 
+def _docstring_nodes(tree: ast.Module) -> list[ast.Expr]:
+    """Every docstring node, from ONE walk.
+
+    The extract's line records and the gate's length decision both consume
+    this list, so the walk lives here and nowhere else.
+    """
+    return [node for node in ast.walk(tree) if _is_docstring_node(node)]
+
+
+def over_line_docstrings(tree: ast.Module, line_limit: int) -> list[tuple[int, int, str]]:
+    """Every docstring longer than ``line_limit`` content lines, from ONE tree.
+
+    The docstring's raw text decides -- its logical lines, stripped of nothing
+    but the quoting -- so a dedent or a line-wrapped closing quote never moves
+    a docstring across the cap. ``(start, end, kind)`` names the offending
+    node and its holder.
+    """
+    holders: dict[int, str] = {}
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            holders[node.lineno] = node.name
+    body = tree.body
+    over: list[tuple[int, int, str]] = []
+    for node in _docstring_nodes(tree):
+        text = node.value.value
+        if text.startswith('"""') or text.startswith("'''"):
+            text = text[3:-3]
+        if len(text.splitlines()) <= line_limit:
+            continue
+        if body and node is body[0]:
+            kind = "module"
+        else:
+            kind = holders.get(node.lineno, "<expr>")
+        over.append((node.lineno, node.end_lineno or node.lineno, kind))
+    return sorted(over)
+
+
+def _docstring_records(tree: ast.Module, lines: list[str]) -> list[tuple[int, int, str]]:
+    """One record per docstring source line, from the same walk the gate uses."""
+    records: list[tuple[int, int, str]] = []
+    for node in _docstring_nodes(tree):
+        for offset, line in enumerate(lines[node.lineno - 1 : node.end_lineno]):
+            records.append((node.lineno + offset, -1, line.rstrip()))
+    return records
+
+
 def _python_records(path: pathlib.Path, *, include_docstrings: bool) -> Iterator[tuple[int, int, str]]:
     """Yield ``(row, col, text)`` for Python comments and docstrings.
 
@@ -133,16 +179,11 @@ def _python_records(path: pathlib.Path, *, include_docstrings: bool) -> Iterator
         # its comments are still reported above, and the docstrings are the
         # part this project can live without reading.
         try:
-            tree: ast.Module | None = ast.parse(source)
+            tree = ast.parse(source)
         except SyntaxError:
             tree = None
         if tree is not None:
-            lines = source.splitlines()
-            for node in ast.walk(tree):
-                if not _is_docstring_node(node):
-                    continue
-                for offset, line in enumerate(lines[node.lineno - 1 : node.end_lineno]):
-                    records.append((node.lineno + offset, -1, line.rstrip()))
+            records.extend(_docstring_records(tree, source.splitlines()))
     records.sort()
     return iter(records)
 

@@ -26,13 +26,26 @@ adds a predicate, not a second copy of the scan.
 
 from __future__ import annotations
 
+import ast
 import re
 from collections.abc import Callable
 
+from scripts.extract_comments import over_line_docstrings
 from tests.chokepoint_walks import REPO_ROOT
 
 #: The most consecutive full-line ``#`` comments a block may run.
 LIMIT = 2
+
+#: Compile-time, runtime and test docstrings may run no longer than three lines.
+DOC_LIMIT = 3
+
+#: The measured over-length docstring count per root, at the last wave.
+#: Exact equality both ways: new long docstrings fail; a trimmed tree lowers it.
+_DOC_BUDGETS = {
+    "app": 643,
+    "tests": 1294,
+    "scripts": 34,
+}
 
 #: The measured long-run count per root, at the last wave. Exact equality both ways: a run fails, a trimmed
 #: tree demands the lower number in this commit.
@@ -117,6 +130,20 @@ def _root_runs(root: str) -> dict[str, list[tuple[int, int]]]:
     return _root_findings(root, long_comment_runs)
 
 
+def _root_docstrings(root: str) -> dict[str, list[tuple[int, int, str]]]:
+    """Every over-limit docstring under one root, as ``{file: [(start, end, kind)]}``.
+
+    The extractor owns the walk; this gate parses once per file, applies the
+    length decision, and checks the root's budget.
+    """
+
+    def collect(source: str) -> list[tuple[int, int, str]]:
+        tree = ast.parse(source)
+        return over_line_docstrings(tree, DOC_LIMIT)
+
+    return _root_findings(root, collect)
+
+
 def _root_all_blocks(root: str) -> dict[str, list[tuple[int, int, str]]]:
     """Every dangling block under one root, as ``{file: [(start, end, text)]}``."""
     return _root_findings(root, dangling_comment_blocks)
@@ -162,6 +189,23 @@ def test_every_root_is_at_its_declared_comment_budget() -> None:
                 f"{root}: {total} long comment runs, budget declares {budget} ({detail}). "
                 "A new run must be cut to two lines or moved to a docstring; a trimmed "
                 "tree must lower the budget in the same commit."
+            )
+    assert not failures, "\n".join(failures)
+
+
+def test_every_root_is_at_its_declared_docstring_budget() -> None:
+    """No over-limit docstring lands, and no rewrite is left unclaimed."""
+    failures: list[str] = []
+    for root, budget in _DOC_BUDGETS.items():
+        found = _root_docstrings(root)
+        total = sum(len(items) for items in found.values())
+        if total != budget:
+            worst = sorted(found.items(), key=lambda kv: -len(kv[1]))[:3]
+            detail = "; ".join(f"{name}: {len(items)}" for name, items in worst)
+            failures.append(
+                f"{root}: {total} docstrings over {DOC_LIMIT} lines, budget declares {budget} "
+                f"({detail}). A new over-limit docstring fails; a rewritten tree must "
+                "lower the budget in the same commit."
             )
     assert not failures, "\n".join(failures)
 
