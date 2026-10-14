@@ -42,7 +42,8 @@ from app.admission.admission import (
 from app.admission.admission_links import remaining_page_capacity
 from app.admission.policy import read_policy
 from app.api.crawl_executor import execute_crawl as _real_execute_crawl
-from app.api.response_shaping import _failed_unified_result, abuild_unified_result
+from app.api.response_shaping import _failed_unified_result
+from app.api.unified_shaping import abuild_unified_result
 from app.models.crawl_result import CrawlResult, EngineCrawlResult
 from app.models.crawl_task import CrawlTask
 from app.models.normalized_url import NormalizedUrl, admit_or_none
