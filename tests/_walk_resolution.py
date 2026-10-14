@@ -1,3 +1,5 @@
+"""Callee and import resolution: names behind calls."""
+
 import ast
 from collections.abc import Callable, Iterable, Iterator
 from functools import lru_cache

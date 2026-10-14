@@ -1,5 +1,7 @@
 """Results derive their status from the taxonomy, never by hand."""
 
+from __future__ import annotations
+
 import ast
 import pathlib
 

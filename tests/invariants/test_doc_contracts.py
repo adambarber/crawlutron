@@ -1,5 +1,7 @@
 """Documents point at paths that exist; manifests set no dead knob."""
 
+from __future__ import annotations
+
 import pathlib
 import re
 

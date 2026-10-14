@@ -1,3 +1,5 @@
+"""File-tree walks with exemptions and offender sweeps."""
+
 import ast
 import pathlib
 import tokenize

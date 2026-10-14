@@ -1,5 +1,7 @@
 """Transient failures requeue; the runner lifecycle survives restarts."""
 
+from __future__ import annotations
+
 import asyncio
 from unittest.mock import MagicMock
 

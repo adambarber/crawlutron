@@ -1,5 +1,7 @@
 """Whole-site jobs run the real router and runner with a faked engine seam."""
 
+from __future__ import annotations
+
 import asyncio
 import inspect
 from collections.abc import Callable

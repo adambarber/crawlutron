@@ -1,5 +1,7 @@
 """Registry checks that span modules: detectors resolve imported helpers."""
 
+from __future__ import annotations
+
 import ast
 
 from tests.chokepoint_walks import REPO_ROOT, nodes_of

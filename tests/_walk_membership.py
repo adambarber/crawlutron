@@ -1,3 +1,5 @@
+"""Membership checks: literals, models and vocabularies."""
+
 import ast
 import pathlib
 from collections.abc import Container, Iterable, Iterator

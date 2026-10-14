@@ -1,5 +1,7 @@
 """Result error fields carry declared shapes, never raw exception text."""
 
+from __future__ import annotations
+
 import ast
 import pathlib
 

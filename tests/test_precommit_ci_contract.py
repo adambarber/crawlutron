@@ -1,5 +1,7 @@
 """The pre-commit config is the single CI enforcement surface."""
 
+from __future__ import annotations
+
 import subprocess
 from pathlib import Path
 

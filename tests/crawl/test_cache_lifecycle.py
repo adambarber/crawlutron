@@ -1,5 +1,7 @@
 """Memory tier, entry lifecycle and unlink discipline hold."""
 
+from __future__ import annotations
+
 import shutil
 import threading
 from pathlib import Path

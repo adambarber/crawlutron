@@ -203,9 +203,10 @@ class TestKatanaDiscovery:
 async def test_extract_document_skips_oversized_input(monkeypatch):
     """#mem-guard: markitdown workers must never receive unbounded input."""
     import app.extraction.content as ex
+    import app.extraction.documents as docex
 
     acquisitions = doc_worker_acquisitions(monkeypatch)
-    monkeypatch.setattr(ex, "EXTRACTION_DOC_MAX_INPUT_BYTES", 100)
+    monkeypatch.setattr(docex, "EXTRACTION_DOC_MAX_INPUT_BYTES", 100)
 
     out = await asyncio.to_thread(ex.extract_document, b"x" * 101, "http://x.test/big.pdf")
     assert out.text is None and out.markdown is None

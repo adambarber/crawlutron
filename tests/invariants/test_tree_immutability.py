@@ -1,5 +1,7 @@
 """The test suite never mutates the production tree it inspects."""
 
+from __future__ import annotations
+
 import ast
 import pathlib
 

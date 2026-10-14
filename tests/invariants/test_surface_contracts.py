@@ -1,5 +1,7 @@
 """DDL stays in migrations; every MCP tool declares its validating model."""
 
+from __future__ import annotations
+
 import ast
 import pathlib
 import re

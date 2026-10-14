@@ -1,5 +1,7 @@
 """The bool-env registry: boolean parsing has one implementation."""
 
+from __future__ import annotations
+
 import ast
 import pathlib
 

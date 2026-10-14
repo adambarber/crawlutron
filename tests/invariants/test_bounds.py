@@ -56,7 +56,7 @@ EXTRACTION_TEXT_NORMALIZATION = Rule(
     name="extraction-text-normalization",
     find=_inline_extraction_normalizations,
     summary="normalizes extraction text inline instead of through extraction.normalized_extraction",
-    excludes=SANCTIONED | {"content.py"},  # the module that OWNS normalized_extraction
+    excludes=SANCTIONED | {"discovery.py"},  # the module that OWNS normalized_extraction
     bite=lambda: Bites('def f(e):\n    return e.text or ""\n', "extraction-text-normalization"),
     clean=lambda: ('def f(d):\n    return d.label or ""\n',),
 )

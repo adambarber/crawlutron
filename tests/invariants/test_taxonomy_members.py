@@ -1,5 +1,7 @@
 """Passed classifications, strategies, statuses and attempts are enum members."""
 
+from __future__ import annotations
+
 import ast
 import pathlib
 

@@ -1,5 +1,7 @@
 """Every consumed browser knob is documented, and every documented knob is consumed."""
 
+from __future__ import annotations
+
 import ast
 import pathlib
 import re

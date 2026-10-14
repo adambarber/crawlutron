@@ -1,5 +1,7 @@
 """One floor per root; thin scans and lax floors fail."""
 
+from __future__ import annotations
+
 import hashlib
 import json
 import sys

@@ -1,5 +1,7 @@
 """Byte budgets hold: caps, eviction and expiry free accounting."""
 
+from __future__ import annotations
+
 import json
 
 import pytest

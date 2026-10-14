@@ -2,6 +2,8 @@
 
 Entry checks: dedup keys, body caps, scope matchers."""
 
+from __future__ import annotations
+
 import ast
 import pathlib
 

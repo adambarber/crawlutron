@@ -1,5 +1,7 @@
 """Sanctions name existing guards; imports and prose are not clones."""
 
+from __future__ import annotations
+
 import json
 
 import pytest

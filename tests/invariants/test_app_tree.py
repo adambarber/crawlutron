@@ -1,5 +1,7 @@
 """Every detector walks the same trees and the same nodes, once."""
 
+from __future__ import annotations
+
 import ast
 import pathlib
 

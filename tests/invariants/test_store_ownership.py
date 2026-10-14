@@ -1,5 +1,7 @@
 """Browser and store state release through their chokepoints."""
 
+from __future__ import annotations
+
 import ast
 import pathlib
 

@@ -1,5 +1,7 @@
 """Pool slots are reaped; cookies enter through the fetch tail."""
 
+from __future__ import annotations
+
 import ast
 import pathlib
 

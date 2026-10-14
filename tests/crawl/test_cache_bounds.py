@@ -1,5 +1,7 @@
 """Entry bounds hold: overwrite, sharing, max entries and LRU."""
 
+from __future__ import annotations
+
 import json
 
 from app.transport.content_cache import ContentCache

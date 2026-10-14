@@ -1,5 +1,7 @@
 """Literal field checks have one owner; literal dataclasses inherit it."""
 
+from __future__ import annotations
+
 import ast
 import pathlib
 

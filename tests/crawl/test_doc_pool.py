@@ -14,6 +14,7 @@ import time
 import pytest
 
 import app.extraction.content as ext_mod
+import app.extraction.documents as docex
 import app.orchestration.doc_pool as doc_pool_mod
 from app.extraction.content import ExtractedContent
 from app.orchestration.doc_pool import DocExtractionPool, DocWorker, terminate_doc_process
@@ -59,7 +60,7 @@ def _seeded(monkeypatch, *workers: DocWorker, lock=None) -> tuple[DocExtractionP
     for worker in held:
         pool.release(worker)
     spawner.asked.clear()
-    monkeypatch.setattr(ext_mod, "DOC_POOL", pool)
+    monkeypatch.setattr(docex, "DOC_POOL", pool)
     return pool, spawner
 
 
@@ -68,11 +69,11 @@ def fake_pool(monkeypatch):
     """Stub the production pool's collaborators and restore it afterwards."""
     monkeypatch.setenv("CRAWLUTRON_EXTRACTION_DOC_WORKERS", "1")
     monkeypatch.setenv("CRAWLUTRON_TEST_HOOKS", "1")
-    saved_pool = ext_mod.DOC_POOL
+    saved_pool = docex.DOC_POOL
     try:
         yield monkeypatch
     finally:
-        ext_mod.DOC_POOL = saved_pool
+        docex.DOC_POOL = saved_pool
 
 
 def _acquire_the_replacement(pool: DocExtractionPool, spawner: StubSpawner, pid: int, bound: float = 0.3):
@@ -469,11 +470,11 @@ def _counted_spawns(monkeypatch):
         return real_spawn()
 
     monkeypatch.setattr(
-        ext_mod,
+        docex,
         "DOC_POOL",
         DocExtractionPool(
             spawn=counting_spawn,
-            worker_count=ext_mod.doc_worker_count,
+            worker_count=docex.doc_worker_count,
             enabled=lambda: True,
         ),
     )
@@ -484,7 +485,7 @@ def _use_single_worker(monkeypatch):
     monkeypatch.setenv("CRAWLUTRON_EXTRACTION_DOC_WORKERS", "1")
     monkeypatch.setenv("CRAWLUTRON_TEST_HOOKS", "1")
     monkeypatch.setenv("TEST_MARKITDOWN_OUTPUT", "## Hello Markdown")
-    ext_mod.DOC_POOL.teardown()
+    docex.DOC_POOL.teardown()
 
 
 def _restore_pool():
@@ -492,7 +493,7 @@ def _restore_pool():
         os.environ.pop(var, None)
     os.environ.pop("CRAWLUTRON_TEST_HOOKS", None)
     os.environ.pop("CRAWLUTRON_EXTRACTION_DOC_WORKERS", None)
-    ext_mod.DOC_POOL.teardown()
+    docex.DOC_POOL.teardown()
 
 
 def test_doc_workers_persist_across_documents(monkeypatch):
@@ -504,7 +505,7 @@ def test_doc_workers_persist_across_documents(monkeypatch):
             result = ext_mod.extract_document(b"%PDF-1.4 fake", "http://example.com/x.pdf")
             assert result.markdown == "## Hello Markdown"
         assert constructions() == 1
-        assert len(ext_mod.DOC_POOL.pids()) == 1
+        assert len(docex.DOC_POOL.pids()) == 1
     finally:
         _restore_pool()
 
@@ -514,9 +515,9 @@ def test_doc_worker_pids_stable_across_tasks(monkeypatch):
     _use_single_worker(monkeypatch)
     try:
         ext_mod.extract_document(b"%PDF-1.4 fake", "http://example.com/a.pdf")
-        first = ext_mod.DOC_POOL.pids()
+        first = docex.DOC_POOL.pids()
         ext_mod.extract_document(b"%PDF-1.4 fake", "http://example.com/b.pdf")
-        second = ext_mod.DOC_POOL.pids()
+        second = docex.DOC_POOL.pids()
         assert first == second
         assert all(pid > 0 for pid in first)
     finally:
@@ -537,7 +538,7 @@ def test_doc_timeout_kills_and_pool_recovers(monkeypatch):
         )
         assert time.monotonic() - started < 5.0
         assert result.text is None and result.markdown is None
-        hung_pids = ext_mod.DOC_POOL.pids()
+        hung_pids = docex.DOC_POOL.pids()
 
         monkeypatch.delenv("TEST_MARKITDOWN_HANG")
         # A normal deadline for recovery: the respawned worker must boot (spawn platforms) before the task
@@ -551,7 +552,7 @@ def test_doc_timeout_kills_and_pool_recovers(monkeypatch):
         # The hung worker was killed and its slot respawned: exactly one replacement construction, pool back
         # at one live worker.
         assert constructions() == 2
-        live_pids = ext_mod.DOC_POOL.pids()
+        live_pids = docex.DOC_POOL.pids()
         assert len(live_pids) == 1
         assert live_pids != hung_pids
     finally:

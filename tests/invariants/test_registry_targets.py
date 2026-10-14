@@ -1,5 +1,7 @@
 """The public-target registry: one implementation, observed everywhere."""
 
+from __future__ import annotations
+
 import ast
 import pathlib
 

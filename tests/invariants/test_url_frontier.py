@@ -1,5 +1,7 @@
 """Frontier links, host policies and path returns stay validated."""
 
+from __future__ import annotations
+
 import ast
 import pathlib
 

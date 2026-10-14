@@ -1,5 +1,7 @@
 """Job control, status shape and visited envelopes stay consistent."""
 
+from __future__ import annotations
+
 import asyncio
 import threading
 from dataclasses import replace

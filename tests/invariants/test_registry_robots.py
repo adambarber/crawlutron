@@ -1,5 +1,7 @@
 """The robots-policy registry: one shared parser, one policy."""
 
+from __future__ import annotations
+
 import ast
 import pathlib
 from functools import cache

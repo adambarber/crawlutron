@@ -1,5 +1,7 @@
 """Wire models mirror every domain field; advertised keys are declared."""
 
+from __future__ import annotations
+
 import ast
 import pathlib
 from enum import StrEnum

@@ -1,5 +1,7 @@
 """The duplication gate wrapper fails closed on thin scans."""
 
+from __future__ import annotations
+
 import argparse
 import hashlib
 import json

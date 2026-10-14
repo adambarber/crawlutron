@@ -1,3 +1,5 @@
+"""Detector assertions: bite once, fire once, stay clean."""
+
 import ast
 import pathlib
 

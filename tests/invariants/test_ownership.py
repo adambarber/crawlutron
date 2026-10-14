@@ -2,6 +2,8 @@
 
 Locks and caches: no await under a lock, no twin without the helper."""
 
+from __future__ import annotations
+
 import ast
 import pathlib
 

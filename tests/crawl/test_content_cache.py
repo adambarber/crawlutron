@@ -1,5 +1,7 @@
 """Content cache: TTL, disk persistence, memory mirror, byte budget and unlink discipline."""
 
+from __future__ import annotations
+
 import contextlib
 import sys
 from collections.abc import Iterator

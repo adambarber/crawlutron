@@ -1,5 +1,7 @@
 """Clones spanning trees fail; sanctions pin fragments by hash."""
 
+from __future__ import annotations
+
 import pytest
 
 from scripts import jscpd_gate as gate

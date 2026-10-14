@@ -1,5 +1,7 @@
 """CI runs every pre-commit hook through one surface, without reruns."""
 
+from __future__ import annotations
+
 import json
 import re
 import subprocess

@@ -1,5 +1,7 @@
 """Every hook shares one trigger and resolves the root in both layouts."""
 
+from __future__ import annotations
+
 import re
 import shlex
 import subprocess

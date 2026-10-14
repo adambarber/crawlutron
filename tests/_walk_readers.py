@@ -1,3 +1,5 @@
+"""Call, assignment and function readers over one tree."""
+
 import ast
 from collections.abc import Iterable, Iterator
 from functools import cache

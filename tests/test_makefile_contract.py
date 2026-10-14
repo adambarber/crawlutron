@@ -1,5 +1,7 @@
 """The Makefile invokes gates by hook id, never by restated command."""
 
+from __future__ import annotations
+
 import re
 import subprocess
 

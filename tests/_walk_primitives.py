@@ -1,3 +1,5 @@
+"""Walk primitives: scopes, parents, line numbers and offenders."""
+
 import ast
 import pathlib
 import weakref

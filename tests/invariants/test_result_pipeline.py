@@ -1,5 +1,7 @@
 """Extraction and discovery reach the tree only through the content pipeline."""
 
+from __future__ import annotations
+
 import ast
 import pathlib
 

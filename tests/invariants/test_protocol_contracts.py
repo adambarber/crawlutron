@@ -1,5 +1,7 @@
 """Protocol constants are produced; guards and rejections are authored once."""
 
+from __future__ import annotations
+
 import ast
 from collections.abc import Iterable
 from pathlib import Path

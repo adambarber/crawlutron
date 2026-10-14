@@ -1,5 +1,7 @@
 """Construction enforces membership; the gate rejects non-members."""
 
+from __future__ import annotations
+
 import ast
 
 import pytest

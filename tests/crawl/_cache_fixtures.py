@@ -1,5 +1,7 @@
 """Shared content-cache fixtures: scoped caches and watch doubles."""
 
+from __future__ import annotations
+
 import contextlib
 import tempfile
 from collections.abc import Iterator

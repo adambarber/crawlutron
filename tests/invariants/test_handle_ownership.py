@@ -1,5 +1,7 @@
 """Handles, floors, sweeps and semaphores have one owner."""
 
+from __future__ import annotations
+
 import ast
 import pathlib
 

@@ -1,5 +1,7 @@
 """Joined URLs are egress-filtered; the frontier grows through the funnel."""
 
+from __future__ import annotations
+
 import ast
 import pathlib
 

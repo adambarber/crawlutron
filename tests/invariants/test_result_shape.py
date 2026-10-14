@@ -3,6 +3,8 @@
 Envelopes, job rows and render options each have one constructing chokepoint.
 """
 
+from __future__ import annotations
+
 import ast
 import pathlib
 import re
