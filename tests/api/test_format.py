@@ -1,6 +1,6 @@
 """Unified output formatting: every crawl strategy funnels through one path."""
 
-from app.api.response_shaping import format_crawl_item
+from app.api.unified_shaping import format_crawl_item
 from tests._result_builders import engine_result
 
 

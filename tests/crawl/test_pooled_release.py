@@ -256,6 +256,7 @@ def test_a_third_pooled_kind_is_not_left_out_by_the_httpx_attribute_shape():
         is_closed=lambda client: False,
         lock=threading.Lock(),
         consults_settings=False,
+        namespace=vars(http_mod),
     )
 
     first, second = asyncio.run(run_loop_rebind_scenario(third.get))

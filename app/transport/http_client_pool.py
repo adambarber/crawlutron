@@ -123,6 +123,9 @@ _CFFI_SESSION_SINGLETON = _LoopBoundPooledClient(
     # The session carries no pool limits (the per-request timeout travels on
     # each get()), so a rebuild must not pay a settings/env walk.
     consults_settings=False,
+    # The pooled instance lives in a global of THIS module, so this
+    # descriptor's slot resolves against it rather than the base module.
+    namespace=globals(),
 )
 
 

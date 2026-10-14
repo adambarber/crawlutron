@@ -209,7 +209,7 @@ class _LoopBoundPooledClient:
     the one unit production releases them as.
     """
 
-    __slots__ = ("build", "consults_settings", "is_closed", "lock", "slot")
+    __slots__ = ("build", "consults_settings", "is_closed", "lock", "slot", "namespace")
 
     def __init__(
         self,
@@ -219,22 +219,26 @@ class _LoopBoundPooledClient:
         is_closed: Callable[[Any], bool],
         lock: threading.Lock,
         consults_settings: bool,
+        namespace: dict[str, Any] | None = None,
     ) -> None:
         self.slot = slot
         self.build = build
         self.is_closed = is_closed
         self.lock = lock
         self.consults_settings = consults_settings
+        # The pooled instance lives in the module global named by ``slot``; the
+        # facade owns that global, so the singleton passes its own globals in.
+        self.namespace = globals() if namespace is None else namespace
 
     # -- pooled instance: the module global named by ``slot`` ----------------
 
     @property
     def current(self) -> Any:
         """The pooled client as the module global holds it (late-bound)."""
-        return globals()[self.slot]
+        return self.namespace[self.slot]
 
     def _set_current(self, value: Any) -> None:
-        globals()[self.slot] = value
+        self.namespace[self.slot] = value
 
     def _supersede(self, superseded: Any) -> None:
         """Track and best-effort-close a client that is being replaced."""

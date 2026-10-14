@@ -1,17 +1,7 @@
-"""Unified response shaping for ``/v1/crawl`` and ``/v1/render``.
+"""Unified response shaping: engine results and render output to unified dicts.
 
-These pure-data transformation helpers were extracted from ``app/main.py``
-so the routers (which own HTTP plumbing) and the response shapers (which
-own the unified-schema mapping) live in different modules.
-
-Public surface:
-    :func:`format_crawl_item` — unified (markdown, metadata) formatter.
-    :func:`build_unified_result` — engine-result dict → UnifiedCrawlResult.
-    :func:`render_result_to_unified` — browser-render result dict → unified dict.
-    :func:`build_unified_crawl_response` — wrap a list of results.
-    :func:`frontier_link_url` — the only frontier/visited-eligible link field
-        (validated ``normalized_url``; raw hrefs are unqueue-able).
-"""
+The pure-data mapping lives in :mod:`app.api.unified_shaping`; this module
+keeps the response envelope builders around them."""
 
 from __future__ import annotations
 

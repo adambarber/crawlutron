@@ -108,7 +108,7 @@ async def test_shaping_never_reparses_engine_produced_items(parse_budget):
     """The shaping ceiling for engine items went 1 -> 0: it reads the record."""
     import json
 
-    from app.api.response_shaping import format_crawl_item
+    from app.api.unified_shaping import format_crawl_item
     from app.extraction.llm_format import extract_llm_metadata
     from app.models.serialization import to_dict
 
@@ -133,7 +133,7 @@ async def test_engine_item_without_a_tree_still_shapes_once(parse_budget):
     the metadata to force its own parse would REGRESS the single-shot
     budget (test_single_shot_parses_no_tree), so the fallback stays.
     """
-    from app.api.response_shaping import format_crawl_item
+    from app.api.unified_shaping import format_crawl_item
 
     result = await _run({}, html=META_HTML)
     assert result.llm_metadata is None  # no tree existed to read from

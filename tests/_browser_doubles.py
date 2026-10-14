@@ -4,6 +4,7 @@ from app.transport.browser import BrowserRenderer
 from app.transport.browser_targets import make_response_handler
 from app.vocabulary.taxonomy import ResultStatus
 from tests._browser_page_doubles import (
+    DEFAULT_PAGE_ANSWERS,
     DEFAULT_PAGE_HTML,
     BrowserFakeContextManager,
     BrowserFakePage,
@@ -30,25 +31,6 @@ __all__ = [
     "RaisingRendererPool",
     "owned_browser_pool",
 ]
-
-
-#: What the renderer reads out of a page, in the order it asks.
-DEFAULT_PAGE_ANSWERS = {
-    "readyState": "complete",
-    "document.title": "Fake Title",
-    "innerText": "Visible body text",
-    "scrollTo": None,
-    "document.body": "Visible body text",
-}
-
-
-DEFAULT_PAGE_ANSWERS = {
-    "readyState": "complete",
-    "document.title": "Fake Title",
-    "innerText": "Visible body text",
-    "scrollTo": None,
-    "document.body": "Visible body text",
-}
 
 
 __all__ = [
