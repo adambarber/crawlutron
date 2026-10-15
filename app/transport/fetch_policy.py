@@ -10,14 +10,16 @@ import asyncio
 import contextlib
 import inspect
 import re
+from collections.abc import Iterable
 from typing import Any
 
-from app.admission.policy import discovery_flags
+from app.admission.policy import DiscoveryFlags, discovery_flags
 from app.models.crawl_policy import CrawlPolicy
 from app.models.host_policy import HostPolicy
 from app.models.http_fetcher import HttpFetcher
 from app.models.normalized_url import NormalizedUrl
 from app.orchestration.classification import classify_error_code
+from app.orchestration.robots_parse import parse_robots_crawl_delay, parse_robots_sitemaps
 from app.transport.body_decode import decode_body
 from app.transport.decompression import decompress_body as _decompress_body
 from app.vocabulary.limits import DEFAULT_MAX_CONTENT_LENGTH_BYTES, DISCOVERY_BODY_MAX_BYTES
@@ -131,6 +133,137 @@ def _robots_diagnostics(evaluation: str, **overrides: Any) -> dict[str, Any]:
     return {**_ROBOTS_DIAGNOSTICS, "sitemaps": [], "evaluation": evaluation, **overrides}
 
 
+async def _fetch_robots_text(
+    http_fetcher: Any, robots_url: NormalizedUrl, headers: dict[str, str], timeout_seconds: int
+) -> str:
+    """Fetch + decode one robots.txt body, tolerating a sync test double."""
+    robots_response: Any = http_fetcher(robots_url, headers, timeout_seconds)
+    if inspect.iscoroutine(robots_response):
+        robots_response = await robots_response
+    robots_headers = {key.lower(): value for key, value in robots_response.headers.items()}
+    return decode_body(
+        _decompress_body(
+            robots_response.body,
+            robots_headers.get("content-encoding", ""),
+            max_output_bytes=DISCOVERY_BODY_MAX_BYTES,
+        ),
+        robots_headers.get("content-type"),
+    )
+
+
+async def _fetch_robot_directives(
+    *,
+    normalized_url: NormalizedUrl,
+    http_fetcher: Any,
+    headers: dict[str, str],
+    timeout_seconds: int,
+) -> tuple[float | None, list[str]]:
+    """Fetch /robots.txt and fold its crawl-delay and Sitemap directives.
+
+    Returns ``(crawl_delay, sitemaps)``; a failed fetch raises so the caller can
+    classify it into a single error ``robots`` block."""
+    robots_url = normalized_url.resolve("/robots.txt")
+    if robots_url is None:
+        raise ValueError("no in-scope /robots.txt")
+    robots_text = await _fetch_robots_text(http_fetcher, robots_url, headers, timeout_seconds)
+    crawl_delay = parse_robots_crawl_delay(robots_text)
+    sitemaps = _resolve_sitemap_urls(parse_robots_sitemaps(robots_text), normalized_url)
+    return crawl_delay, sitemaps
+
+
+def _resolve_sitemap_urls(candidates: Iterable[str], normalized_url: NormalizedUrl) -> list[str]:
+    """The candidates that resolve in this request's scope, as raw URLs."""
+    return [admitted.raw for entry in candidates if (admitted := normalized_url.resolve(entry)) is not None]
+
+
+async def _diagnose_robots(
+    *,
+    normalized_url: NormalizedUrl,
+    headers: dict[str, str],
+    http_fetcher: Any,
+    timeout_seconds: int,
+    flags: DiscoveryFlags,
+    engine_robots_sitemaps: list[str] | None,
+    robots_evaluated: bool,
+) -> tuple[dict[str, Any] | None, list[str]]:
+    """Resolve the ``robots`` block and reusable sitemap list for diagnostics.
+
+    A ``None`` first value means the caller should not set the ``robots`` key."""
+    robots_sitemaps: list[str] = []
+    if not robots_evaluated:
+        return _robots_diagnostics("disabled"), robots_sitemaps
+    if engine_robots_sitemaps is not None:
+        robots_sitemaps = _resolve_sitemap_urls(engine_robots_sitemaps, normalized_url)
+        return _robots_diagnostics(
+            "cached", sitemaps=robots_sitemaps, reused_from_engine=True
+        ), robots_sitemaps
+    if not flags.robots:
+        return None, robots_sitemaps
+    try:
+        crawl_delay, robots_sitemaps = await _fetch_robot_directives(
+            normalized_url=normalized_url,
+            http_fetcher=http_fetcher,
+            headers=headers,
+            timeout_seconds=timeout_seconds,
+        )
+        robots_url = normalized_url.resolve("/robots.txt")
+        return _robots_diagnostics(
+            "evaluated",
+            url=robots_url.raw if robots_url is not None else None,
+            crawl_delay_seconds=crawl_delay,
+            sitemaps=robots_sitemaps,
+        ), robots_sitemaps
+    except Exception as error:
+        robots_url = normalized_url.resolve("/robots.txt")
+        return _robots_diagnostics(
+            "evaluated",
+            url=robots_url.raw if robots_url is not None else None,
+            error=classify_error_code(error),
+        ), robots_sitemaps
+
+
+async def _collect_sitemaps(
+    *,
+    normalized_url: NormalizedUrl,
+    http_fetcher: Any,
+    host_policy: HostPolicy,
+    timeout_seconds: int,
+    candidate_urls: list[str],
+) -> tuple[list[str], dict[str, Any]]:
+    """Fetch one or more sitemaps down to ``(loc, lastmod)`` pairs."""
+    locs: list[str] = []
+    lastmod: dict[str, Any] = {}
+    from app.orchestration.fetch_helpers import fetch_sitemap_urls
+
+    for sitemap_url in (a for a in (normalized_url.resolve(e) for e in candidate_urls) if a is not None):
+        with contextlib.suppress(Exception):
+            found_locs = await fetch_sitemap_urls(
+                http_fetcher, sitemap_url, timeout_seconds, host_policy=host_policy
+            )
+            for loc, timestamp in found_locs:
+                locs.append(loc.raw)
+                if timestamp:
+                    lastmod[loc.raw] = timestamp
+    return locs, lastmod
+
+
+def _collect_feeds(html: str | None, normalized_url: NormalizedUrl) -> list[str]:
+    """The alternate rel=feed URLs named in ``html`` that resolve in scope."""
+    feeds: list[str] = []
+    for match in re.finditer(
+        r"<link\b[^>]*rel=['\"][^'\"]*alternate[^'\"]*['\"][^>]*>", html or "", flags=re.IGNORECASE
+    ):
+        tag = match.group(0)
+        if "rss" not in tag.lower() and "atom" not in tag.lower():
+            continue
+        href_match = re.search(r"href=['\"]([^'\"]+)['\"]", tag, flags=re.IGNORECASE)
+        if href_match:
+            feed = normalized_url.resolve(href_match.group(1))
+            if feed is not None:
+                feeds.append(feed.raw)
+    return feeds
+
+
 async def discovery_diagnostics(
     *,
     normalized_url: NormalizedUrl,
@@ -145,94 +278,32 @@ async def discovery_diagnostics(
     flags = discovery_flags(policy)
     limits = policy.limits
     diagnostics: dict[str, Any] = {}
-    safe_source = normalized_url
-    robots_sitemaps: list[str] = []
-    if not robots_evaluated:
-        diagnostics["robots"] = _robots_diagnostics("disabled")
-    elif engine_robots_sitemaps is not None:
-        # Reuse the /robots.txt the engine already fetched (allow/deny and
-        # Sitemap directives); an empty list is a valid "no sitemaps" signal.
-        robots_sitemaps = [
-            admitted.raw
-            for entry in engine_robots_sitemaps
-            if (admitted := safe_source.resolve(entry)) is not None
-        ]
-        diagnostics["robots"] = _robots_diagnostics(
-            "cached", sitemaps=robots_sitemaps, reused_from_engine=True
-        )
-    elif flags.robots:
-        robots_url = safe_source.resolve("/robots.txt")
-        if robots_url is None:
-            return diagnostics
-        try:
-            # The fetch_helpers chokepoint's sync-double tolerance: the honest
-            # type is the coroutine; a sync double returns the result directly.
-            robots_response: Any = http_fetcher(robots_url, headers, limits.timeout_seconds)
-            if inspect.iscoroutine(robots_response):
-                robots_response = await robots_response
-            robots_headers = {key.lower(): value for key, value in robots_response.headers.items()}
-            robots_text = decode_body(
-                _decompress_body(
-                    robots_response.body,
-                    robots_headers.get("content-encoding", ""),
-                    max_output_bytes=DISCOVERY_BODY_MAX_BYTES,
-                ),
-                robots_headers.get("content-type"),
-            )
-            crawl_delay = None
-            for line in robots_text.splitlines():
-                key, _, value = line.partition(":")
-                if key.strip().lower() == "crawl-delay":
-                    try:
-                        crawl_delay = int(value.strip())
-                    except ValueError:
-                        crawl_delay = None
-                elif key.strip().lower() == "sitemap":
-                    safe_sitemap = safe_source.resolve(value.strip())
-                    if safe_sitemap is not None:
-                        robots_sitemaps.append(safe_sitemap.raw)
-            diagnostics["robots"] = _robots_diagnostics(
-                "evaluated",
-                url=robots_url.raw,
-                crawl_delay_seconds=crawl_delay,
-                sitemaps=robots_sitemaps,
-            )
-        except Exception as error:
-            diagnostics["robots"] = _robots_diagnostics(
-                "evaluated", url=robots_url.raw, error=classify_error_code(error)
-            )
+    robots_diag, robots_sitemaps = await _diagnose_robots(
+        normalized_url=normalized_url,
+        flags=flags,
+        timeout_seconds=limits.timeout_seconds,
+        headers=headers,
+        http_fetcher=http_fetcher,
+        engine_robots_sitemaps=engine_robots_sitemaps,
+        robots_evaluated=robots_evaluated,
+    )
+    if robots_diag is not None:
+        diagnostics["robots"] = robots_diag
     sitemap_urls: list[str] = []
     if flags.sitemaps:
         candidate_sitemaps = robots_sitemaps or ["/sitemap.xml"]
-        from app.orchestration.fetch_helpers import fetch_sitemap_urls
-
-        admitted_sitemaps = (safe_source.resolve(entry) for entry in candidate_sitemaps)
-        for sitemap_url in (a for a in admitted_sitemaps if a is not None):
-            with contextlib.suppress(Exception):
-                # Recursively resolves sitemap indexes down to (loc, lastmod) pairs.
-                found_locs = await fetch_sitemap_urls(
-                    http_fetcher,
-                    sitemap_url,
-                    limits.timeout_seconds,
-                    host_policy=host_policy,
-                )
-                for loc, lastmod in found_locs:
-                    sitemap_urls.append(loc.raw)
-                    if lastmod:
-                        diagnostics.setdefault("sitemap_lastmod", {})[loc.raw] = lastmod
+        sitemap_urls, sitemap_lastmod = await _collect_sitemaps(
+            normalized_url=normalized_url,
+            http_fetcher=http_fetcher,
+            host_policy=host_policy,
+            timeout_seconds=limits.timeout_seconds,
+            candidate_urls=candidate_sitemaps,
+        )
+        if sitemap_lastmod:
+            diagnostics["sitemap_lastmod"] = sitemap_lastmod
     feeds: list[str] = []
     if flags.feeds:
-        for match in re.finditer(
-            r"<link\b[^>]*rel=['\"][^'\"]*alternate[^'\"]*['\"][^>]*>", html or "", flags=re.IGNORECASE
-        ):
-            tag = match.group(0)
-            if "rss" not in tag.lower() and "atom" not in tag.lower():
-                continue
-            href_match = re.search(r"href=['\"]([^'\"]+)['\"]", tag, flags=re.IGNORECASE)
-            if href_match:
-                feed = safe_source.resolve(href_match.group(1))
-                if feed is not None:
-                    feeds.append(feed.raw)
+        feeds = _collect_feeds(html, normalized_url)
     if sitemap_urls or feeds:
         diagnostics["discovery"] = {"sitemap_urls": sitemap_urls, "feeds": feeds}
     return diagnostics

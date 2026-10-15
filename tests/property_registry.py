@@ -115,8 +115,62 @@ PROPERTY_REGISTRY = (
                 symbol="discovery_diagnostics",
                 fingerprint="robots_url",
                 reason=(
-                    "This legacy diagnostics-only fallback reports discovery metadata when the engine "
+                    "This diagnostics-only fallback reports discovery metadata when the engine "
                     "has no cached sitemap hints; it is not a policy decision or cache owner."
+                ),
+            ),
+            _Suppression(
+                module="app/transport/fetch_policy.py",
+                symbol="_fetch_robot_directives",
+                fingerprint="parse_robots_rules_call",
+                reason=(
+                    "The diagnostics fallback resolves /robots.txt through the shared "
+                    "line-oriented parser for reporting only, never deciding policy."
+                ),
+            ),
+            _Suppression(
+                module="app/transport/fetch_policy.py",
+                symbol="_fetch_robot_directives",
+                fingerprint="parse_robots_rules_definition",
+                reason=(
+                    "The diagnostics-only robots read reuses the shared parser components; it "
+                    "reports sitemaps and crawl-delay and never decides policy or owns a cache."
+                ),
+            ),
+            _Suppression(
+                module="app/transport/fetch_policy.py",
+                symbol="_diagnose_robots",
+                fingerprint="parse_robots_rules_call",
+                reason=(
+                    "The diagnostics robots block reaches the shared read below; it reports "
+                    "only and never decides policy."
+                ),
+            ),
+            _Suppression(
+                module="app/transport/fetch_policy.py",
+                symbol="_diagnose_robots",
+                fingerprint="parse_robots_rules_definition",
+                reason=(
+                    "The diagnostics robots block resolves to the shared read below; it reports "
+                    "only and never decides policy."
+                ),
+            ),
+            _Suppression(
+                module="app/transport/fetch_policy.py",
+                symbol="discovery_diagnostics",
+                fingerprint="parse_robots_rules_call",
+                reason=(
+                    "The diagnostics fallback resolves /robots.txt through the shared "
+                    "parser for reporting only."
+                ),
+            ),
+            _Suppression(
+                module="app/transport/fetch_policy.py",
+                symbol="discovery_diagnostics",
+                fingerprint="parse_robots_rules_definition",
+                reason=(
+                    "The diagnostics fallback reaches the shared read for reporting only; "
+                    "it is not a policy decision or cache owner."
                 ),
             ),
             _Suppression(

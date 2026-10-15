@@ -99,10 +99,10 @@ BLOCK_LENGTH = 40
 # What the tree is currently allowed to hold: offender counts for three metrics, and the size of the worst
 # class for the fourth.
 _BUDGETS = {
-    "function length": 30,
-    "abc size": 5,
+    "function length": 28,
+    "abc size": 3,
     "largest class": 369,
-    "block length": 11,
+    "block length": 9,
 }
 
 # The complexity approximation counts every node that introduces a branch, which is the sweep's own
