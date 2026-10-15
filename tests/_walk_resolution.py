@@ -9,28 +9,18 @@ from tests._walk_readers import assignment_targets, call_nodes, local_calls
 
 
 def _call_leaf_name(call: ast.Call) -> str:
-    """The bare name a call is made through: ``uuid4()`` -> ``uuid4``, ``uuid.uuid4()`` -> ``uuid4``.
+    """The bare name a call is made through: ``uuid4()`` -> ``uuid4``.
 
-    ``getattr(call.func, "id", None) or getattr(call.func, "attr", None)`` is how a
-    detector asks "is this a call to uuid4/HTTPException" without caring whether the
-    module imported the name or reached it through a module. Spelled out it is one
-    line, and it was written out separately by every detector that asked, which is
-    how one of them ended up comparing against ``None``.
-    """
+    How a detector asks "is this a call to uuid4" without caring whether the
+    name was imported directly or reached through a module."""
     return getattr(call.func, "id", None) or getattr(call.func, "attr", None) or ""
 
 
 def bare_callee(node: ast.AST) -> str | None:
     """The bare function name ``node`` calls, or None when it is not such a call.
 
-    ``int(x)``, ``uuid4()`` and ``_persist(...)`` are spelled
-    ``ast.Call(func=ast.Name)``. A detector that wants only those has to test the
-    shape itself, and detectors kept testing it themselves: the ``isinstance``
-    pair this replaces was written out separately by each one, which is how the
-    jscpd gate came to flag the same five lines in two files. Unlike
-    :func:`_call_leaf_name` this does not fall back to an attribute callee, so
-    ``obj.int(x)`` is not a match.
-    """
+    ``int(x)`` (an ``ast.Call`` of an ``ast.Name``) and not ``obj.int(x)``
+    (attribute callee) -- the shape a detector tested itself, five lines twice."""
     if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
         return node.func.id
     return None
@@ -39,36 +29,18 @@ def bare_callee(node: ast.AST) -> str | None:
 def calls_named_leaf(tree: ast.AST, names: frozenset[str] | set[str]) -> Iterator[ast.Call]:
     """Yield calls whose leaf callee name is one of ``names``.
 
-    :func:`calls_to_any` keys on the callee *expression* (a bare ``Name``), which
-    is the right question for a helper a module imported directly and the wrong
-    one for a chokepoint reached as ``module.name()``. Detectors for the second
-    shape each re-derived the leaf name, so this is that derivation, once.
-    """
+    :func:`calls_to_any` keys on the callee expression, which is the wrong
+    shape for a chokepoint reached as ``module.name()``; this is that."""
     for call in call_nodes(tree):
         if _call_leaf_name(call) in names:
             yield call
 
 
 def string_argument(call: ast.Call, index: int = 0) -> str | None:
-    """The ``index``-th positional argument of ``call`` if it is a string literal, else ``None``.
+    """The ``index``-th positional argument of ``call`` if it is a string literal.
 
-    Half the detectors in this tree are "find the call and look at what it was
-    handed" -- ``x.get("selector")``, ``conn.execute("PRAGMA journal_mode=...")``,
-    ``foo("some_name")``. Each wrote out the same four lines to do it:
-
-        and node.args
-        and isinstance(node.args[0], ast.Constant)
-        and isinstance(node.args[0].value, str)
-
-    Which is three lines of clone per detector and, worse, four chances to spell
-    the narrowing slightly differently. Detectors here are also expected to prove
-    they bite, and a four-line guard in the middle of one is a thing to retype
-    rather than reason about.
-
-    ``None`` for a non-literal rather than a truthiness check on the value,
-    because ``""`` is a legitimate string argument and a caller asking "is this
-    the empty string?" should not have to defeat this helper to ask it.
-    """
+    Half the detectors are "find the call and look at what it was handed";
+    ``None`` for a non-literal, so ``""`` stays a legitimate argument."""
     if len(call.args) <= index:
         return None
     argument = call.args[index]
@@ -84,9 +56,7 @@ def single_target_name_assignments(
     """Yield ``(node, name)`` for single-target Name assignments whose value matches.
 
     ``a, b = ...`` and ``obj.x = ...`` are deliberately not yielded: both callers
-    are asking "which plain local names hold this kind of value", and a
-    multi-target or attribute target is a different question.
-    """
+    ask "which plain local names hold this kind of value"."""
     for node in nodes:
         if not isinstance(node, ast.Assign) or len(node.targets) != 1:
             continue
@@ -98,11 +68,8 @@ def single_target_name_assignments(
 def local_call_leaf_names(tree: ast.AST, node: ast.AST) -> Iterator[tuple[str, ast.Call]]:
     """Yield ``(lowercased_leaf_name, call)`` for every call inside ``node``.
 
-    ``resolved_call_name(tree, call).rsplit(".", 1)[-1].lower()`` is how a detector
-    asks "is this a call to strip/lower/format/parse" without caring which module
-    imported it. Spelled out it is four lines, and it was written out separately
-    by every detector that asked.
-    """
+    How a detector asks "is this a call to strip/lower/format" without caring
+    which module imported it."""
     for call in local_calls(node):
         yield resolved_call_name(tree, call).rsplit(".", 1)[-1].lower(), call
 
@@ -110,10 +77,8 @@ def local_call_leaf_names(tree: ast.AST, node: ast.AST) -> Iterator[tuple[str, a
 def _getattr_literal_name(call: ast.Call) -> str | None:
     """The attribute name of ``getattr(obj, "name")`` when it is a literal string.
 
-    ``getattr(x, "strip")`` and ``x.strip()`` name the same method, and a detector
-    that recognizes only the second is blind to the first. Returned lowercased so
-    the caller compares against a lowercase name set.
-    """
+    ``getattr(x, "strip")`` and ``x.strip()`` name the same method; returned
+    lowercased for a lowercase name-set comparison."""
     if len(call.args) >= 2 and isinstance(call.args[1], ast.Constant):
         value = call.args[1].value
         if isinstance(value, str):
@@ -128,11 +93,8 @@ def _calls_naming_method(
 ) -> Iterator[ast.Call]:
     """Yield calls inside ``node`` that reach one of ``method_names``.
 
-    Reaches a method two ways on purpose: a direct call (``s.strip()``) and a
-    literal-named ``getattr`` (``getattr(s, "strip")()``). Aliasing a method
-    through a variable is out of reach for any AST-only check and is not claimed
-    to be.
-    """
+    Direct calls and literal-named ``getattr`` both count; aliasing through a
+    variable is out of reach for an AST-only check and is not claimed."""
     for name, call in local_call_leaf_names(tree, node):
         if name in method_names:
             yield call
@@ -148,12 +110,8 @@ def has_method_call(tree: ast.AST, node: ast.AST, method_names: frozenset[str]) 
 def calls_to_any(tree: ast.AST, function_names) -> Iterator[ast.Call]:
     """Yield direct calls whose callee is any of ``function_names``.
 
-    The set-valued sibling of :func:`calls_named`. Several detectors track a set
-    of names they *discovered* -- aliases, a builder propagated through
-    assignments -- rather than one literal, and restating the
-    ``isinstance(node.func, ast.Name) and node.func.id in names`` filter inline
-    is how two detectors end up carrying the same scan shape twice.
-    """
+    The set-valued sibling of :func:`calls_named`: the ``ast.Name`` filter
+    restated inline is how two detectors carry the same scan shape twice."""
     for node in nodes_of(tree):
         if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in function_names:
             yield node
@@ -162,13 +120,8 @@ def calls_to_any(tree: ast.AST, function_names) -> Iterator[ast.Call]:
 def named_calls_to_any(tree: ast.AST, function_names) -> Iterator[tuple[ast.Call, str]]:
     """:func:`calls_to_any`, paired with the callee's name.
 
-    ``calls_to_any`` already filters on ``isinstance(node.func, ast.Name)``, so
-    the name is always right there -- but ``Call.func`` is declared as the whole
-    expression type, so a detector that wanted to *report* the callee had to
-    re-assert that same narrowing, and three of them in the result-shape sweep
-    were each carrying a copy. The assertion lives here, once, and a detector
-    that reports a name it did not actually match is the failure this removes.
-    """
+    ``Call.func`` is declared as the whole expression type, so the narrowing is
+    re-asserted here once instead of per detector reporting the callee."""
     for call in calls_to_any(tree, function_names):
         assert isinstance(call.func, ast.Name), ast.unparse(call.func)
         yield call, call.func.id
@@ -187,13 +140,8 @@ def call_keyword_arguments(
 ) -> Iterator[tuple[ast.Call, ast.keyword]]:
     """Yield ``(call, keyword)`` for selected keywords of direct calls to named functions.
 
-    The one walk behind "what was spelled at these call sites". ``keyword_names``
-    of ``None`` selects every named keyword (``**kwargs`` carries ``arg is None``
-    and is never selectable -- it has no name to be a member of). Callers that
-    only want the value use :func:`call_keyword_values`; callers that need the
-    keyword's own name -- a Literal field's member set is keyed by it -- come
-    here, because re-walking to recover the name is how two detectors end up
-    matching a value against the wrong axis.
+    ``keyword_names`` of ``None`` selects every named keyword (``**kwargs``
+    carries ``arg is None`` and is never selectable).
     """
     names = {function_names} if isinstance(function_names, str) else function_names
     keywords = (
