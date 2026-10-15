@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import os
 import time
+from collections.abc import Awaitable, Callable
 
 from app.config.env import parse_bool_env
 from app.runtime.cgroup_sense import read_int, read_text
@@ -55,11 +56,15 @@ class LoopLagProbe:
         ok_threshold: float = _LOOP_LAG_OK_THRESHOLD,
         hard_threshold: float = _LOOP_LAG_HARD_THRESHOLD,
         smoothing: float = _LOOP_LAG_SMOOTHING,
+        clock: Callable[[], float] = time.monotonic,
+        sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
     ):
         self._interval = interval
         self._ok = ok_threshold
         self._hard = hard_threshold
         self._smoothing = smoothing
+        self._clock = clock
+        self._sleep = sleep
         self._lag = 0.0
         self._task: asyncio.Task | None = None
 
@@ -83,9 +88,9 @@ class LoopLagProbe:
     async def _run(self) -> None:
         try:
             while True:
-                t0 = time.monotonic()
-                await asyncio.sleep(self._interval)
-                elapsed = time.monotonic() - t0
+                t0 = self._clock()
+                await self._sleep(self._interval)
+                elapsed = self._clock() - t0
                 lag = max(0.0, elapsed - self._interval)
                 self._lag = self._lag * (1.0 - self._smoothing) + lag * self._smoothing
         except asyncio.CancelledError:

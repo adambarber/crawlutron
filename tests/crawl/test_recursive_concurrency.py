@@ -47,6 +47,10 @@ async def test_recursive_crawl_fetches_links_concurrently():
             # Same-host links are additionally bounded by the per-domain gate; raise it so concurrency is
             # observable for this single-domain site.
             "CRAWLUTRON_PER_DOMAIN_CONCURRENCY": "4",
+            # The scheduler's politeness delay would serialize the fetches this
+            # test exists to observe; it drives the throttle off.
+            "CRAWLUTRON_ADAPTIVE_THROTTLING": "0",
+            "CRAWLUTRON_PER_DOMAIN_DELAY_MS": "0",
         }
     )
     response = await crawl_request(payload, settings=settings, http_fetcher=fetcher)

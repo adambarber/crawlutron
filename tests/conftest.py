@@ -25,6 +25,19 @@ from tests._app_factory import service_app
 # own rather than welded to the test module that happened to want it first.
 pytest_plugins = ("tests.fixtures.stub_builder",)
 
+# The real asyncio.sleep, kept so the zero-second patch below can still yield.
+_ORIGINAL_ASYNCIO_SLEEP = asyncio.sleep
+
+
+async def _fast_asyncio_sleep(delay, *args, **kwargs):
+    """A zero-second async sleep: it waits for nothing, but it still yields.
+
+    A never-suspending patch turns yield-point sleeps into hot spins that hang
+    the suite; yielding once through the real sleep keeps that intact."""
+    del delay, args, kwargs
+    await _ORIGINAL_ASYNCIO_SLEEP(0)
+
+
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent  # the repository root, which is now the service root
 
@@ -133,19 +146,6 @@ def ssrf_guard_required(monkeypatch):
     _ = called  # silence unused warning if a future check is added
 
 
-# The real asyncio.sleep, kept so the zero-second patch below can still yield.
-_ORIGINAL_ASYNCIO_SLEEP = asyncio.sleep
-
-
-async def _fast_asyncio_sleep(delay, *args, **kwargs):
-    """A zero-second async sleep: it waits for nothing, but it still yields.
-
-    A never-suspending patch turns yield-point sleeps into hot spins that hang
-    the suite; yielding once through the real sleep keeps that intact."""
-    del delay, args, kwargs
-    await _ORIGINAL_ASYNCIO_SLEEP(0)
-
-
 def pytest_collection_modifyitems(config, items):
     """Auto-skip browser-marked tests when no real browser is installed."""
     from tests._assertions import browser_available
@@ -159,11 +159,13 @@ def pytest_collection_modifyitems(config, items):
 
 
 @pytest.fixture(autouse=True)
-def fast_sleeps():
-    """Patch time.sleep and asyncio.sleep to be zero-second by default.
+def fast_sleeps(request):
+    """Zero ``time.sleep`` and ``asyncio.sleep`` unless the test opts out.
 
-    No ``real_sleeps`` escape hatch: it silently opted tests into depending on
-    box load; where elapsed time is the property, the test drives the boundary."""
+    Timing-true tests carry the ``real_sleeps`` marker instead."""
+    if request.node.get_closest_marker("real_sleeps"):
+        yield
+        return
     with patch("time.sleep", lambda *a, **k: None), patch("asyncio.sleep", _fast_asyncio_sleep):
         yield
 

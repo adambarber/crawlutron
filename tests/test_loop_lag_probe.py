@@ -69,9 +69,9 @@ async def test_probe_reports_the_overshoot_it_observed(monkeypatch, overshoot):
     an exponential moving average's convergence, and the value settles no
     matter how many iterations run.
 
-    The clock is injected rather than slept against on purpose: the suite
-    patches ``time.sleep`` and ``asyncio.sleep`` to zero across every test, so
-    a real stall here would silently measure nothing.
+    The clock is injected rather than slept against on purpose: a real stall
+    here would silently measure nothing, and the probe owns its clock and
+    sleep seams instead of a suite-wide patch depending on them.
 
     ``overshoot=0.0`` carries the healthy case in the same parameter set, which
     is why it is here rather than in a test of its own: lag is the overshoot
@@ -86,9 +86,18 @@ async def test_probe_reports_the_overshoot_it_observed(monkeypatch, overshoot):
     interval = 0.1
     step = interval + overshoot
     calls = itertools.count()
-    monkeypatch.setattr(rp.time, "monotonic", lambda: (next(calls) // 2) * step)
 
-    probe = LoopLagProbe(interval=interval, smoothing=1.0)
+    # Each clock read advances the scripted time by ``step``, so the probe's
+    # two reads per iteration span ``interval + overshoot``: lag reads as the overshoot.
+    def scripted_clock() -> float:
+        return next(calls) * step
+
+    async def scripted_sleep(seconds: float) -> None:
+        # Yield once; the scripted clock supplies the elapsed reading.
+        await asyncio.sleep(0)
+        del seconds
+
+    probe = LoopLagProbe(interval=interval, smoothing=1.0, clock=scripted_clock, sleep=scripted_sleep)
     probe.start()
     try:
         for _ in range(20):
