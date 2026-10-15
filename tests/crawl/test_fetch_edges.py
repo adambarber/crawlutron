@@ -327,7 +327,7 @@ class TestAcceptEncodingAdvertisesOnlyWhatWeCanDecode:
     """Asking for an encoding we cannot decode is a self-inflicted failure.
 
     ``Accept-Encoding`` must not name a coding outside
-    ``app.transport.decompression._DECODABLE_ENCODINGS``: a server told to send a body
+    ``app.transport.decompression.DECODABLE_ENCODINGS``: a server told to send a body
     this process will then refuse or pass through whole fails the crawl on a
     request we chose to make that way.
 
@@ -363,10 +363,10 @@ class TestAcceptEncodingAdvertisesOnlyWhatWeCanDecode:
     def test_the_header_advertises_only_decodable_encodings(self):
         # The negative direction: the list is not merely "includes br", it names nothing outside the decoder
         # set, so a future token cannot slip in.
-        from app.transport.decompression import _DECODABLE_ENCODINGS
+        from app.transport.decompression import DECODABLE_ENCODINGS
 
         headers = headers_for_strategy(
             HTTP_DECLARED_CRAWLER, read_policy({"headers": {}}), canonical("http://e.com/")
         )
         advertised = {token.strip() for token in headers["Accept-Encoding"].split(",")}
-        assert advertised <= _DECODABLE_ENCODINGS
+        assert advertised <= DECODABLE_ENCODINGS

@@ -181,7 +181,7 @@ if FastAPI is not None:
 
             jar = CookieJar(SharedCookieStore(DATABASE_PATH))
             jar.import_file_into(settings.cookie_jar_path)
-            cookie_jar_module._GLOBAL_COOKIE_JAR = jar
+            cookie_jar_module.set_global_cookie_jar(jar)
             # Published like ``shutdown_event`` below: what the process is using
             # is otherwise answerable only via the module global the lifespan assigned.
             _app.state.cookie_jar = jar

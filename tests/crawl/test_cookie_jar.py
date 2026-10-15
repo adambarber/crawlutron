@@ -12,7 +12,7 @@ import os
 import tempfile
 from unittest.mock import patch
 
-from app.transport.cookie_jar import CookieJar
+from app.transport.cookie_jar import CookieJar, global_cookie_jar
 from tests._cookie_helpers import cookie_file, read_cookie_file
 from tests._policy_factories import canonical
 from tests._thread_fanout import run_thread_fanout
@@ -74,9 +74,9 @@ def test_concurrent_cookie_writes_do_not_raise():
 
 def _cookie_jar_max_hosts() -> int:
     """The jar's LRU cap, read from the module that owns it."""
-    from app.transport.cookie_jar import _COOKIE_JAR_MAX_HOSTS
+    from app.transport.cookie_jar import COOKIE_JAR_MAX_HOSTS
 
-    return _COOKIE_JAR_MAX_HOSTS
+    return COOKIE_JAR_MAX_HOSTS
 
 
 def _jar_with_hosts(count: int):
@@ -116,10 +116,8 @@ def test_cookie_jar_read_refreshes_host_recency():
 
 class TestCookieJarHeaderHandling:
     def test_http_cookie_invalid(self):
-        from app.transport.cookie_jar import _GLOBAL_COOKIE_JAR
-
         # Call with an invalid cookie header - should not raise.
-        _GLOBAL_COOKIE_JAR.add_cookie_header(canonical("http://x.example/"), "http://example.com/")
+        global_cookie_jar().add_cookie_header(canonical("http://x.example/"), "http://example.com/")
 
 
 class _RecordingResponse:

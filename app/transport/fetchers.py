@@ -21,7 +21,7 @@ from app.models.normalized_url import NormalizedUrl
 from app.transport import http_client_pool, pinned_transport, pooled_clients
 from app.transport.decompression import DecompressionError, DecompressionTooLargeError
 from app.transport.decompression import decompress_body as _decompress_body
-from app.transport.request_profile import TransportHeaders, _store_set_cookies
+from app.transport.request_profile import TransportHeaders, store_set_cookies
 from app.transport.timeouts import Timeouts
 from app.vocabulary.limits import DEFAULT_MAX_CONTENT_LENGTH_BYTES
 
@@ -137,7 +137,7 @@ def _finish_fetch(
     multidict -- rather than from the normalised dict below. httpx's
     ``Headers.items()`` comma-joins duplicate keys, so normalising first
     collapses a multi-cookie response into one ``"a=1; Path=/, b=2; Path=/"``
-    entry and forces ``_store_set_cookies`` off its documented ``get_list``
+    entry and forces ``store_set_cookies`` off its documented ``get_list``
     path. The jar re-splits such a value today, but only when the first cookie
     carries its own attributes, and a comma-joined cookie value is a
     documented corruption risk in its own right.
@@ -154,7 +154,7 @@ def _finish_fetch(
         )
     except DecompressionTooLargeError:
         return too_large()
-    _store_set_cookies(final_url, response_headers)
+    store_set_cookies(final_url, response_headers)
     headers = {key.lower(): value for key, value in response_headers.items()}
     # Already decompressed above; drop the header to avoid a second pass.
     headers.pop("content-encoding", None)

@@ -33,7 +33,7 @@ COOKIE_NAMESPACE: contextvars.ContextVar[str] = contextvars.ContextVar(
 
 # Cap on distinct (namespace, host) cookie slots: the jar is module-global and
 # long-lived, and it is defined once by the shared store, never re-declared here.
-_COOKIE_JAR_MAX_HOSTS = DEFAULT_MAX_HOSTS
+COOKIE_JAR_MAX_HOSTS = DEFAULT_MAX_HOSTS
 
 
 class CookieJar:
@@ -88,7 +88,7 @@ class CookieJar:
         eviction.
         """
         self._cookies.move_to_end(ns_key)
-        while len(self._cookies) > _COOKIE_JAR_MAX_HOSTS:
+        while len(self._cookies) > COOKIE_JAR_MAX_HOSTS:
             self._cookies.popitem(last=False)
 
     def add_cookie_header(self, url: NormalizedUrl, set_cookie_header: str, *, namespace: str = "") -> None:
@@ -225,6 +225,17 @@ class CookieJar:
 
 # Module-level cookie jar for persistent cross-request cookie storage.
 _GLOBAL_COOKIE_JAR = CookieJar()
+
+
+def global_cookie_jar() -> CookieJar:
+    """The process-wide jar shared with request profiles; swap for tests."""
+    return _GLOBAL_COOKIE_JAR
+
+
+def set_global_cookie_jar(jar: CookieJar) -> None:
+    """Rebind the process-wide jar; the lifespan installs the disk-backed one."""
+    global _GLOBAL_COOKIE_JAR
+    _GLOBAL_COOKIE_JAR = jar
 
 
 def reset_process_state() -> None:

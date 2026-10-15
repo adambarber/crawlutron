@@ -13,9 +13,6 @@ from tests._private_import_decl import (
 )
 
 DECLARED: dict[str, Declaration] = {
-    "app.transport.cookie_jar._GLOBAL_COOKIE_JAR": _d(
-        _CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test", "app"]
-    ),
     "app.transport.document._extract_pdf_bytes_to_markdown": _d(
         "unreviewed",
         "Not yet triaged.\n",
@@ -111,11 +108,6 @@ DECLARED: dict[str, Declaration] = {
         ["test"],
     ),
     "app.transport.request_profile._select_fingerprint": _d(
-        "unreviewed",
-        "Not yet triaged.\n",
-        ["test"],
-    ),
-    "app.transport.request_profile._store_set_cookies": _d(
         "unreviewed",
         "Not yet triaged.\n",
         ["test"],

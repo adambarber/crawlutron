@@ -63,14 +63,6 @@ DECLARED: dict[str, Declaration] = {
     "app.transport.content_cache.ContentCache._remember_memory_locked": _d(
         _PRIVATE_TYPE.kind, _PRIVATE_TYPE.reason, ["test"]
     ),
-    "app.transport.decompression._DECODABLE_ENCODINGS": _d(
-        _CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]
-    ),
-    "app.transport.decompression._decompress_bounded": _d(
-        "unreviewed",
-        "Not yet triaged.\n",
-        ["test"],
-    ),
     "app.orchestration.engine._LAST_SPILL_GC_MONOTONIC": _d(
         _CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]
     ),
@@ -115,9 +107,6 @@ DECLARED: dict[str, Declaration] = {
         _CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]
     ),
     "app.orchestration.engine.robots_cache._lock": _d(
-        _CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]
-    ),
-    "app.orchestration.fetch_helpers._SITEMAP_CACHE": _d(
         _CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]
     ),
     "app.orchestration.fetch_helpers._fetch_decode_discovery": _d(
@@ -195,8 +184,5 @@ DECLARED: dict[str, Declaration] = {
         "unreviewed",
         "Not yet triaged.\n",
         ["test", "app"],
-    ),
-    "app.transport.cookie_jar._COOKIE_JAR_MAX_HOSTS": _d(
-        _CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]
     ),
 }

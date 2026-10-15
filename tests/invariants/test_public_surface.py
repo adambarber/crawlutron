@@ -49,7 +49,7 @@ _OWNER_PUBLIC_SURFACE_RATCHET = {
     "app/safety/safe_regex.py": (7, 2),
     "app/orchestration/robots.py": (12, 3),
     "app/safety/bounded_io.py": (4, 2),
-    "app/transport/decompression.py": (3, 1),
+    "app/transport/decompression.py": (5, 2),
     "app/admission/credentials.py": (3, 3),
     "app/admission/render_options.py": (2, 2),
     # RAISED to (2, 2): `payload_policy` was `_payload_policy` until the layout put its only production caller

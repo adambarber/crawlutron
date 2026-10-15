@@ -200,8 +200,8 @@ async def _fetch_text(
 
 # Sitemap cache: one locked, bounded, TTL'd store (app.safety.bounded_ttl).
 # The lock lives inside the chokepoint, so no call site can forget it.
-_SITEMAP_CACHE: BoundedTTLCache[tuple[str, HostPolicy], tuple[list, str | None, str | None]] = (
-    BoundedTTLCache(max_entries=SITEMAP_CACHE_MAX_ENTRIES, ttl=SITEMAP_CACHE_TTL_SECONDS)
+SITEMAP_CACHE: BoundedTTLCache[tuple[str, HostPolicy], tuple[list, str | None, str | None]] = BoundedTTLCache(
+    max_entries=SITEMAP_CACHE_MAX_ENTRIES, ttl=SITEMAP_CACHE_TTL_SECONDS
 )
 
 
@@ -252,7 +252,7 @@ async def fetch_sitemap_urls(
         if not_modified:
             # 304: reuse the previously resolved URLs. get_stale, not get: the
             # entry must be PRESENT, not fresh -- the origin confirmed the set.
-            prev = _SITEMAP_CACHE.get_stale((current_url.raw, host_policy))
+            prev = SITEMAP_CACHE.get_stale((current_url.raw, host_policy))
             if prev:
                 page_urls.update(prev[0])
             return etag, last_modified
@@ -294,13 +294,13 @@ async def fetch_sitemap_urls(
         return etag, last_modified
 
     cache_key = (sitemap_url.raw, host_policy)
-    fresh = _SITEMAP_CACHE.get(cache_key)
+    fresh = SITEMAP_CACHE.get(cache_key)
     if fresh is not None:
         # Fresh: serve directly (get() already LRU-touched).
         return set(fresh[0])
     # get() hides an expired entry, so read it stale: its validators drive the
     # replay, and leaving it in place lets a 304 in recurse() reuse its URLs.
-    stale = _SITEMAP_CACHE.get_stale(cache_key)
+    stale = SITEMAP_CACHE.get_stale(cache_key)
     if conditional is None and stale:
         if stale[1]:
             conditional = {"If-None-Match": stale[1]}
@@ -312,7 +312,7 @@ async def fetch_sitemap_urls(
         root_etag, root_lm = (stale[1] if stale else None), (stale[2] if stale else None)
     # Store through the chokepoint: LRU recency refresh and bounded eviction
     # happen inside put(), under its lock (no more manual popitem loop).
-    _SITEMAP_CACHE.put(cache_key, (list(page_urls), root_etag, root_lm))
+    SITEMAP_CACHE.put(cache_key, (list(page_urls), root_etag, root_lm))
     return page_urls
 
 
@@ -322,9 +322,9 @@ def reset_process_state() -> None:
     The cache is process-wide and its TTL is hours, so a test that crawls a sitemap
     once sees the same document for the rest of the session unless it clears this.
     """
-    _SITEMAP_CACHE.clear()
+    SITEMAP_CACHE.clear()
 
 
 def has_process_state() -> bool:
     """Whether any sitemap document is cached right now."""
-    return bool(_SITEMAP_CACHE)
+    return bool(SITEMAP_CACHE)

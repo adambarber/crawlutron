@@ -22,7 +22,16 @@ class _StreamingDecompressor(Protocol):
 
 # safe: a header naming anything else is passed through whole, because there is no
 # ordering that decodes it correctly here.
-_DECODABLE_ENCODINGS = frozenset({"gzip", "x-gzip", "deflate", "br"})
+DECODABLE_ENCODINGS = frozenset({"gzip", "x-gzip", "deflate", "br"})
+
+
+__all__ = [
+    "DECODABLE_ENCODINGS",
+    "DecompressionError",
+    "DecompressionTooLargeError",
+    "decompress_bounded",
+    "decompress_body",
+]
 
 
 class DecompressionError(ValueError):
@@ -42,7 +51,7 @@ def _passthrough(body: bytes | bytearray | memoryview) -> bytes:
     return body if isinstance(body, bytes) else bytes(body)
 
 
-def _decompress_bounded(
+def decompress_bounded(
     make_decompressor,
     compressed: bytes,
     max_output_bytes: int,
@@ -95,7 +104,7 @@ def _decode_one(body: bytes | bytearray | memoryview, coding: str, max_output_by
     # Concatenated members are legal gzip and not legal deflate, which is the
     # only thing the two zlib windings differ by.
     gzip_like = coding in ("gzip", "x-gzip")
-    return _decompress_bounded(
+    return decompress_bounded(
         lambda: zlib.decompressobj(16 + zlib.MAX_WBITS) if gzip_like else zlib.decompressobj(),
         _passthrough(body),
         max_output_bytes,
@@ -134,7 +143,7 @@ def decompress_body(
     """
     codings = [part.strip() for part in content_encoding.lower().split(",")]
     codings = [coding for coding in codings if coding and coding != "identity"]
-    if not codings or not set(codings) <= _DECODABLE_ENCODINGS:
+    if not codings or not set(codings) <= DECODABLE_ENCODINGS:
         return _passthrough(body)
     decoded: bytes | bytearray | memoryview = body
     for coding in reversed(codings):
@@ -183,6 +192,3 @@ def _decompress_brotli(body: bytes | bytearray | memoryview[int], max_output_byt
     except Exception as error:
         raise DecompressionError("invalid brotli stream") from error
     return decoded
-
-
-__all__ = ["DecompressionError", "DecompressionTooLargeError", "decompress_body"]

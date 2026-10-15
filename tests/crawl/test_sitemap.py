@@ -6,7 +6,7 @@ from functools import partial
 from app.admission.policy import read_policy
 from app.models.normalized_url import NormalizedUrl
 from app.orchestration.engine import _parse_lastmod, _seed_is_fresh, _stale_seeds
-from app.orchestration.fetch_helpers import _SITEMAP_CACHE, fetch_sitemap_urls
+from app.orchestration.fetch_helpers import SITEMAP_CACHE, fetch_sitemap_urls
 from app.transport.content_cache import ContentCache
 from app.transport.content_cache_key import build_content_cache_key
 from app.transport.request_profile import headers_for_strategy
@@ -38,7 +38,7 @@ def _resp(status, body="", etag=None, last_modified=None, ctype="application/xml
 
 def _seed_expired_entry(url: NormalizedUrl, *, etag: str = "v1") -> None:
     """An expired cached sitemap entry, seeded through the chokepoint seam."""
-    _SITEMAP_CACHE.put(
+    SITEMAP_CACHE.put(
         (url.raw, UNRESTRICTED_HOST_POLICY),
         ([("http://x.test/p1", None)], etag, None),
         ttl=-1.0,
@@ -90,13 +90,13 @@ async def test_304_reuses_cached_urls_without_reparsing():
     assert any(h.get("If-None-Match") == "v1" for h in sent)
     # Cache TTL was refreshed (entry still present, not re-parsed).
     assert (
-        _SITEMAP_CACHE.peek((url.raw, UNRESTRICTED_HOST_POLICY)) is not None
+        SITEMAP_CACHE.peek((url.raw, UNRESTRICTED_HOST_POLICY)) is not None
     )  # TTL refreshed, entry fresh again
 
 
 async def test_etag_captured_and_stored_on_200():
     url = canonical("http://x.test/sitemap.xml")
-    _SITEMAP_CACHE.discard((url.raw, UNRESTRICTED_HOST_POLICY))
+    SITEMAP_CACHE.discard((url.raw, UNRESTRICTED_HOST_POLICY))
     xml = """<?xml version="1.0"?>
     <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
       <url><loc>http://x.test/p1</loc><lastmod>2024-01-01</lastmod></url>
@@ -115,7 +115,7 @@ async def test_etag_captured_and_stored_on_200():
     out = await fetch_sitemap_urls(fetcher, url, 10, host_policy=UNRESTRICTED_HOST_POLICY)
     assert (canonical("http://x.test/p1"), "2024-01-01") in out
     # The new etag/last-modified are stored so the next crawl can send a 304 check.
-    cached = _SITEMAP_CACHE.peek((url.raw, UNRESTRICTED_HOST_POLICY))
+    cached = SITEMAP_CACHE.peek((url.raw, UNRESTRICTED_HOST_POLICY))
     assert cached is not None, "the fetch must have stored its conditional-request headers"
     assert cached[1] == "v2"
     assert cached[2] == "Wed, 01 Jan 2024 00:00:00 GMT"
@@ -151,7 +151,7 @@ def _child_xml(i: int) -> str:
 class TestSitemapFanoutBound:
     async def test_child_scheduling_capped_by_remaining_need(self, monkeypatch):
         url = canonical("http://fanout.test/sitemap.xml")
-        _SITEMAP_CACHE.discard((url.raw, UNRESTRICTED_HOST_POLICY))
+        SITEMAP_CACHE.discard((url.raw, UNRESTRICTED_HOST_POLICY))
         index_body = _index_xml(200)
         child_fetches = 0
         tasks_created = 0
@@ -182,7 +182,7 @@ class TestSitemapFanoutBound:
                 host_policy=UNRESTRICTED_HOST_POLICY,
             )
         finally:
-            _SITEMAP_CACHE.discard((url.raw, UNRESTRICTED_HOST_POLICY))
+            SITEMAP_CACHE.discard((url.raw, UNRESTRICTED_HOST_POLICY))
         assert len(out) == 20
         # Enqueue-time cap: never schedule more children than still needed.
         assert child_fetches <= 20

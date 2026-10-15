@@ -9,7 +9,7 @@ import pytest
 
 from app.transport import decompression as decompression_mod
 from app.transport.body_decode import decode_body
-from app.transport.decompression import DecompressionTooLargeError, _decompress_bounded, decompress_body
+from app.transport.decompression import DecompressionTooLargeError, decompress_body, decompress_bounded
 
 _CAP = 10_000_000
 
@@ -255,7 +255,7 @@ def test_bounded_decompressor_reads_only_remaining_cap():
             return b""
 
     with pytest.raises(DecompressionTooLargeError):
-        _decompress_bounded(FakeDecompressor, b"payload", 10, allow_concatenated=False)
+        decompress_bounded(FakeDecompressor, b"payload", 10, allow_concatenated=False)
     assert requested == [11]
 
 

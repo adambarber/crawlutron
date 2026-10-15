@@ -49,7 +49,7 @@ def _cookie_header_for_url(profile: Mapping[str, Any], url: NormalizedUrl) -> st
     # Persistent cookies from prior responses (optionally namespaced via the
     # profile or the per-request cookie namespace contextvar).
     namespace = cookie_namespace_for(profile) or COOKIE_NAMESPACE.get()
-    jar_header = cookie_jar._GLOBAL_COOKIE_JAR.cookie_header_for(url, namespace=namespace)
+    jar_header = cookie_jar.global_cookie_jar().cookie_header_for(url, namespace=namespace)
     if jar_header:
         parts.append(jar_header)
 
@@ -78,7 +78,7 @@ class TransportHeaders(Protocol):
     def items(self) -> Iterable[tuple[str, str]]: ...
 
 
-def _store_set_cookies(
+def store_set_cookies(
     url: NormalizedUrl,
     response_headers: TransportHeaders | dict[str, str],
     *,
@@ -106,7 +106,7 @@ def _store_set_cookies(
     else:
         set_cookies = [v for k, v in response_headers.items() if k.lower() == "set-cookie"]
     for cookie in set_cookies:
-        cookie_jar._GLOBAL_COOKIE_JAR.add_cookie_header(url, cookie, namespace=namespace)
+        cookie_jar.global_cookie_jar().add_cookie_header(url, cookie, namespace=namespace)
 
 
 _BUILTIN_USER_AGENTS = [

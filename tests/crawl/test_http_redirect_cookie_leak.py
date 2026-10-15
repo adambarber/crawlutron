@@ -2,7 +2,7 @@ from http.server import BaseHTTPRequestHandler
 
 from app.transport import cookie_jar
 from app.transport.cookie_jar import CookieJar
-from app.transport.request_profile import _store_set_cookies
+from app.transport.request_profile import store_set_cookies
 from tests._fetcher_factories import run_default_http_fetcher
 from tests._policy_factories import canonical
 from tests._transport_doubles import MockResponse, patch_http_fetcher_transport
@@ -98,7 +98,7 @@ class _TwoCookieHandler(BaseHTTPRequestHandler):
 async def test_http_fetcher_persists_every_set_cookie_header():
     """Every Set-Cookie on a response must reach the jar, not just the last.
 
-    ``_store_set_cookies`` is documented to capture each Set-Cookie separately
+    ``store_set_cookies`` is documented to capture each Set-Cookie separately
     and does so via ``get_list("set-cookie")``, which returns one entry per
     header. The httpx fetcher used to bypass that: it built a dict comprehension
     of the response headers and handed *that* to the helper, and because
@@ -117,28 +117,22 @@ async def test_http_fetcher_persists_every_set_cookie_header():
     helper's own multi-header guarantee is pinned separately below and passed
     happily while the caller defeated it.
     """
-    from app.transport import cookie_jar as cookie_mod
     from tests.helpers.server import spawn_threaded_server
 
     server = spawn_threaded_server(_TwoCookieHandler)
     url = f"http://127.0.0.1:{server.server_port}/"
-    jar = CookieJar()
-    old_jar = cookie_mod._GLOBAL_COOKIE_JAR
-    cookie_mod._GLOBAL_COOKIE_JAR = jar
-    try:
-        await run_default_http_fetcher(url)
-    finally:
-        cookie_mod._GLOBAL_COOKIE_JAR = old_jar
-        server.shutdown()
-        server.server_close()
+    await run_default_http_fetcher(url)
+    server.shutdown()
+    server.server_close()
 
+    jar = cookie_jar.global_cookie_jar()
     cookie_header = jar.cookie_header_for(canonical(url))
     assert "session=abc" in cookie_header, cookie_header
     assert "csrf=xyz" in cookie_header, cookie_header
 
 
 def test_store_set_cookies_handles_multiple_set_cookie_headers():
-    """_store_set_cookies must capture all Set-Cookie headers, not just one.
+    """store_set_cookies must capture all Set-Cookie headers, not just one.
 
     In httpx 0.28+, Headers.items() returns comma-joined values for duplicate
     keys. Using get_list("set-cookie") gives each header separately.
@@ -148,10 +142,10 @@ def test_store_set_cookies_handles_multiple_set_cookie_headers():
     was 8 lines of try/finally guarding state the fixture already guarantees
     is clean on entry.
     """
-    jar = cookie_jar._GLOBAL_COOKIE_JAR
+    jar = cookie_jar.global_cookie_jar()
 
     headers = _TransportHeadersDouble()
-    _store_set_cookies(canonical("http://example.com/"), headers)
+    store_set_cookies(canonical("http://example.com/"), headers)
 
     assert headers.get_list_calls == ["set-cookie"]
     cookie_header = jar.cookie_header_for(canonical("http://example.com/"))

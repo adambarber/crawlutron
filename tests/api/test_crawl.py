@@ -7,6 +7,7 @@ import time
 import pytest
 
 from app.models.crawl_policy import CrawlPolicy
+from app.transport.cookie_jar import global_cookie_jar
 from app.vocabulary.strategies import HTTP_DECLARED_CRAWLER
 from tests._assertions import (
     accepted_crawl,
@@ -239,13 +240,11 @@ class TestCookiePersistenceApi:
         self.base = base_url
         self.cookie_file = tmp_path / "cookie_jar.json"
         # ASGITransport doesn't run FastAPI lifespan, so manually manage the global cookie jar
-        from app.transport.cookie_jar import _GLOBAL_COOKIE_JAR
-
-        _GLOBAL_COOKIE_JAR.import_from_file(str(self.cookie_file))
+        global_cookie_jar().import_from_file(str(self.cookie_file))
         WEBHOOK_RECEIVED.clear()
         yield
         # Save cookies on teardown
-        _GLOBAL_COOKIE_JAR.export_to_file(str(self.cookie_file))
+        global_cookie_jar().export_to_file(str(self.cookie_file))
 
     async def test_cookie_persistence_across_requests(self):
         # First request: sets a cookie
