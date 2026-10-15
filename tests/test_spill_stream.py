@@ -1,4 +1,4 @@
-"""_ResultSpill.load_ordered single-pass reassembly contract."""
+"""ResultSpill.load_ordered single-pass reassembly contract."""
 
 import fcntl
 import inspect
@@ -7,13 +7,13 @@ import os
 import time
 
 from app.models.serialization import to_dict
-from app.orchestration.engine import _ResultSpill
+from app.orchestration.engine import ResultSpill
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY
 from tests._result_builders import engine_result
 
 
 def _spilled(index: int) -> str:
-    """One real spill line: ``to_dict`` of a real result, under ``_ResultSpill``.
+    """One real spill line: ``to_dict`` of a real result, under ``ResultSpill``.
 
     The spill's contract is that what ``write`` serialized comes back equal, and
     ``load_ordered`` rebuilds through ``from_wire``. A toy payload cannot
@@ -27,7 +27,7 @@ class TestLoadOrderedContract:
     """Load_ordered assembles results in one pass, in submission order."""
 
     def test_shuffled_writes_reassemble_in_submission_order(self):
-        spill = _ResultSpill()
+        spill = ResultSpill()
         try:
             for i in (5, 0, 3, 1, 4, 2):
                 spill._fh.write(_spilled(i) + "\n")
@@ -39,7 +39,7 @@ class TestLoadOrderedContract:
             spill.close()
 
     def test_sparse_indices_keep_every_result_in_position(self):
-        spill = _ResultSpill()
+        spill = ResultSpill()
         try:
             for i in (0, 2, 9):
                 spill._fh.write(_spilled(i) + "\n")
@@ -54,14 +54,14 @@ class TestLoadOrderedContract:
             spill.close()
 
     def test_empty_spill_returns_empty_list(self):
-        spill = _ResultSpill()
+        spill = ResultSpill()
         try:
             assert spill.load_ordered(policy=UNRESTRICTED_HOST_POLICY) == []
         finally:
             spill.close()
 
     def test_single_pass_no_tuple_rows_or_full_sort(self):
-        src = inspect.getsource(_ResultSpill.load_ordered)
+        src = inspect.getsource(ResultSpill.load_ordered)
         assert "rows" not in src
         assert ".sort(" not in src
 
@@ -89,20 +89,20 @@ class TestSpillGcCadence:
             return real_listdir(path)
 
         monkeypatch.setattr(engine_mod.os, "listdir", counting_listdir)
-        monkeypatch.setattr(engine_mod, "_LAST_SPILL_GC_MONOTONIC", None)
+        monkeypatch.setattr(engine_mod, "spill_gc_last_run", None)
         return scans
 
     def test_first_construction_scans_and_following_ones_do_not(self, monkeypatch):
         import app.orchestration.engine as engine_mod
 
         scans = self._spy(monkeypatch)
-        spills = [_ResultSpill(), _ResultSpill(), _ResultSpill()]
+        spills = [ResultSpill(), ResultSpill(), ResultSpill()]
         try:
             assert scans["n"] == 1
         finally:
             for spill in spills:
                 spill.close()
-        assert engine_mod._LAST_SPILL_GC_MONOTONIC is not None
+        assert engine_mod.spill_gc_last_run is not None
 
     def test_scan_resumes_once_the_interval_elapsed(self, monkeypatch):
         import time
@@ -110,14 +110,14 @@ class TestSpillGcCadence:
         import app.orchestration.engine as engine_mod
 
         scans = self._spy(monkeypatch)
-        spill = _ResultSpill()
+        spill = ResultSpill()
         assert scans["n"] == 1
         monkeypatch.setattr(
             engine_mod,
-            "_LAST_SPILL_GC_MONOTONIC",
-            time.monotonic() - (engine_mod._SPILL_GC_MIN_INTERVAL_SECONDS + 1),
+            "spill_gc_last_run",
+            time.monotonic() - (engine_mod.SPILL_GC_MIN_INTERVAL_SECONDS + 1),
         )
-        spill2 = _ResultSpill()
+        spill2 = ResultSpill()
         try:
             assert scans["n"] == 2
         finally:
@@ -128,9 +128,9 @@ class TestSpillGcCadence:
 class TestSpillFileOwnership:
     def test_result_spill_close_deletes_owned_file(self):
         """Auto-created spill files are removed on close."""
-        from app.orchestration.engine import _ResultSpill
+        from app.orchestration.engine import ResultSpill
 
-        spill = _ResultSpill()  # auto-owned path
+        spill = ResultSpill()  # auto-owned path
         path = spill.path
         assert os.path.exists(path)
         spill.close()
@@ -140,11 +140,11 @@ class TestSpillFileOwnership:
         """Caller-supplied spill paths are NOT removed on close."""
         import tempfile
 
-        from app.orchestration.engine import _ResultSpill
+        from app.orchestration.engine import ResultSpill
 
         target = os.path.join(tempfile.gettempdir(), "spill_keep_test.json")
         try:
-            spill = _ResultSpill(target)
+            spill = ResultSpill(target)
             spill.close()
             assert os.path.exists(target), "Caller-owned spill file was wrongly deleted"
         finally:
@@ -169,12 +169,12 @@ class TestGcNeverUnlinksASpillStillInUse:
         os.utime(path, (old, old))
 
     def test_a_live_spill_survives_a_sweep_that_would_otherwise_collect_it(self):
-        spill = _ResultSpill()
+        spill = ResultSpill()
         try:
             spill._fh.write(_spilled(0) + "\n")
             self._age(spill.path, 7200)
 
-            spill._gc_stale_spills(1.0)
+            spill.gc_stale_spills(1.0)
 
             assert os.path.exists(spill.path), "GC unlinked a spill still in use"
             assert [r.original_url for r in spill.load_ordered(policy=UNRESTRICTED_HOST_POLICY)] == [
@@ -184,7 +184,7 @@ class TestGcNeverUnlinksASpillStillInUse:
             spill.close()
 
     def test_an_abandoned_spill_is_still_reclaimed(self):
-        spill = _ResultSpill()
+        spill = ResultSpill()
         path = spill.path
         spill.close()
         # Close() unlinks an owned spill, so recreate one to stand in for a spill abandoned by a worker that
@@ -193,15 +193,15 @@ class TestGcNeverUnlinksASpillStillInUse:
             handle.write('{"i":0}\n')
         self._age(path, 7200)
         try:
-            _ResultSpill()._gc_stale_spills(1.0)
+            ResultSpill().gc_stale_spills(1.0)
             assert not os.path.exists(path), "GC kept a spill nobody owns"
         finally:
             if os.path.exists(path):
                 os.unlink(path)
 
     def test_the_sweep_skips_only_the_spills_that_are_actually_in_use(self):
-        live = _ResultSpill()
-        abandoned = _ResultSpill()
+        live = ResultSpill()
+        abandoned = ResultSpill()
         live_path, abandoned_path = live.path, abandoned.path
         live._fh.write(_spilled(0) + "\n")
         abandoned.close()
@@ -210,7 +210,7 @@ class TestGcNeverUnlinksASpillStillInUse:
         self._age(live_path, 7200)
         self._age(abandoned_path, 7200)
         try:
-            live._gc_stale_spills(1.0)
+            live.gc_stale_spills(1.0)
             assert os.path.exists(live_path), "a live spill was collected"
             assert not os.path.exists(abandoned_path), "an abandoned spill was kept"
         finally:
@@ -231,7 +231,7 @@ class TestGcNeverUnlinksASpillStillInUse:
         A distinct open file description holding the lock reproduces exactly
         the kernel state a second process creates, without spawning one.
         """
-        seed = _ResultSpill()
+        seed = ResultSpill()
         path = seed.path
         seed.close()
         with open(path, "w", encoding="utf-8") as handle:
@@ -241,7 +241,7 @@ class TestGcNeverUnlinksASpillStillInUse:
             fcntl.flock(foreign.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
             self._age(path, 7200)
 
-            _ResultSpill()._gc_stale_spills(1.0)
+            ResultSpill().gc_stale_spills(1.0)
 
             assert os.path.exists(path), "GC unlinked a spill another process owns"
         finally:

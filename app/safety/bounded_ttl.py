@@ -78,6 +78,26 @@ class BoundedTTLCache[K, V]:
         """
         return self._entry_if_fresh(key, touch=True, allow_stale=True)
 
+    def _locked_entry(self, key: K) -> tuple[float, V] | None:
+        """The stored (expires_at, value) under the lock, without a touch."""
+        with self._lock:
+            entry = self._entries.get(key)
+            if entry is None:
+                return None
+            return entry
+
+    def time_until_expiry(self, key: K) -> float | None:
+        """The entry's remaining TTL, or None when absent/expired.
+
+        Lets a reader confirm a stored expiry without touching the entry
+        table's layout.
+        """
+        entry = self._locked_entry(key)
+        if entry is None:
+            return None
+        expires_at, _value = entry
+        return expires_at - self._clock() if expires_at > self._clock() else None
+
     def put(self, key: K, value: V, *, ttl: float | None = None) -> None:
         """Insert/refresh under the lock, evicting LRU beyond max_entries."""
         now = self._clock()

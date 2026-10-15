@@ -71,7 +71,7 @@ async def test_auto_spill_deleted_after_successful_request(monkeypatch):
 
     def spy_mkstemp(*args, **kwargs):
         fd, path = real_mkstemp(*args, **kwargs)
-        if kwargs.get("prefix", args[0] if args else "").startswith(engine._SPILL_PREFIX):
+        if kwargs.get("prefix", args[0] if args else "").startswith(engine.SPILL_PREFIX):
             created.append(path)
         return fd, path
 
@@ -87,10 +87,10 @@ async def test_stale_spills_garbage_collected_on_next_crawl(monkeypatch):
 
     # The cadence gate skips a temp-dir sweep inside the interval; reset the stamp so this crawl is the one
     # that performs the sweep the test exists to observe.
-    monkeypatch.setattr(engine, "_LAST_SPILL_GC_MONOTONIC", None)
+    monkeypatch.setattr(engine, "spill_gc_last_run", None)
 
-    stale = os.path.join(tempfile.gettempdir(), engine._SPILL_PREFIX + "stale.ndjson")
-    fresh = os.path.join(tempfile.gettempdir(), engine._SPILL_PREFIX + "fresh.ndjson")
+    stale = os.path.join(tempfile.gettempdir(), engine.SPILL_PREFIX + "stale.ndjson")
+    fresh = os.path.join(tempfile.gettempdir(), engine.SPILL_PREFIX + "fresh.ndjson")
     for path in (stale, fresh):
         with open(path, "w") as fh:
             fh.write("{}\n")

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import re
-import threading
 from typing import Any
 from unittest.mock import patch
 
@@ -47,11 +46,12 @@ class TestRobotsCacheLocking:
     def test_robots_cache_lock_is_present(self):
 
         # The chokepoint moved the lock INSIDE the cache: the module no longer carries a bare dict + lock pair
-        # that callers must compose correctly.
+        # that callers must compose correctly. The shared cache is that audited type.
+        from app.safety.bounded_ttl import BoundedTTLCache
+
         cache = engine_mod.robots_cache
-        assert hasattr(cache, "_lock")
-        assert isinstance(cache._lock, type(threading.Lock()))
-        assert hasattr(cache, "put") and hasattr(cache, "purge_expired")
+        assert isinstance(cache, BoundedTTLCache)
+        assert hasattr(cache, "put") and hasattr(cache, "purge_expired") and hasattr(cache, "peek")
 
 
 TOKEN = SERVICE_ID
@@ -306,7 +306,7 @@ def test_purge_removes_only_expired_production_tuples():
     import time
 
     import app.orchestration.engine as em
-    from app.orchestration.engine import _purge_robots_cache
+    from app.orchestration.engine import purge_robots_cache
 
     assert isinstance(em.robots_cache, BoundedTTLCache)
     em.robots_cache.clear()
@@ -315,7 +315,7 @@ def test_purge_removes_only_expired_production_tuples():
         # Expired entry: ttl-1 (engines treat expires_at > now as fresh).
         em.robots_cache.put(robots_entry_key("http://old.test"), ([], [], None), ttl=-1.0)
         em.robots_cache.put(robots_entry_key("http://fresh.test"), ([], [], None), ttl=600.0)
-        assert _purge_robots_cache(now) == 1
+        assert purge_robots_cache(now) == 1
         assert em.robots_cache.get(robots_entry_key("http://old.test")) is None
         assert em.robots_cache.get(robots_entry_key("http://fresh.test")) is not None
     finally:
@@ -362,20 +362,18 @@ async def test_purge_handles_production_shaped_entries():
 
 def test_failure_ttl_is_60s_not_600s():
     """G3 pin: robots transport failure writes ttl=60s, not the 600s default."""
-    import time
 
     import app.orchestration.engine as em
 
     em.robots_cache.clear()
     try:
-        # Pin the stored per-entry TTL by inspecting BoundedTTLCache internals. A 500 response writes
-        # rules=[(False,"/")], ttl=min(600,60)=60.
-        em.robots_cache.put(robots_entry_key("http://fail-ttl.test"), ([(False, "/")], [], None), ttl=60.0)
-        entries = em.robots_cache._entries
-        cached = entries.get(robots_entry_key("http://fail-ttl.test"))
-        assert cached is not None, "the fetch wrote a robots entry; the cache must hold it"
-        expires_at, value = cached
-        delta = (expires_at - time.monotonic()) if expires_at else float("inf")
+        # Pin the stored per-entry TTL: a 500 response writes rules=[(False,"/")]
+        # with ttl=min(600,60)=60 seconds.
+        key = robots_entry_key("http://fail-ttl.test")
+        em.robots_cache.put(key, ([(False, "/")], [], None), ttl=60.0)
+        assert em.robots_cache.peek(key) == ([(False, "/")], [], None)
+        delta = em.robots_cache.time_until_expiry(key)
+        assert delta is not None, "the fetch wrote a robots entry; the cache must hold it"
         # 60s TTL at write time → delta ≈ 60, never the 600s default.
         assert delta > 45.0 and delta < 90.0
     finally:

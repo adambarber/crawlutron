@@ -99,7 +99,7 @@ def test_seed_freshness_uses_real_default_strategies():
     real default chain -- not the placeholder ["HTTP"], whose cache keys
     can never match anything actually stored."""
     from app.models.crawl_extraction_method import CrawlExtractionMethod
-    from app.orchestration.engine import _parse_lastmod, _seed_is_fresh
+    from app.orchestration.engine import parse_lastmod, seed_is_fresh
     from app.transport.content_cache_key import build_content_cache_key
     from app.transport.request_profile import headers_for_strategy
     from app.vocabulary.strategies import HTTP_DECLARED_CRAWLER
@@ -115,13 +115,13 @@ def test_seed_freshness_uses_real_default_strategies():
         None,
         None,
     )
-    cached_at = _parse_lastmod("2024-06-01")
+    cached_at = parse_lastmod("2024-06-01")
 
     class _StubCache:
         def cached_at_of(self, key):
             return cached_at if key == expected_key else None
 
-    assert _seed_is_fresh(url, "2024-01-01", _StubCache(), read_policy(policy)) is True
+    assert seed_is_fresh(url, "2024-01-01", _StubCache(), read_policy(policy)) is True
 
 
 class TestCrawlRequestWebhook:

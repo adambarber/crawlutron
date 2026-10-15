@@ -4,7 +4,7 @@ from datetime import UTC, datetime, timedelta
 from app.admission.policy import read_policy
 from app.api.site_map import build_site_map
 from app.models.result_record import ProducerEnvelope
-from app.orchestration.engine import _parse_lastmod, _seed_is_fresh
+from app.orchestration.engine import parse_lastmod, seed_is_fresh
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY, canonical
 from tests._result_builders import _link, engine_result
 
@@ -125,27 +125,27 @@ def _iso_offset(seconds: float) -> str:
 
 
 def test_parse_lastmod_accepts_past_and_plausible_future():
-    assert _parse_lastmod(_iso_offset(-3600)) is not None
+    assert parse_lastmod(_iso_offset(-3600)) is not None
     # Clock skew is a fact of life: a future stamp within the bound is trusted.
-    assert _parse_lastmod(_iso_offset(600)) is not None
+    assert parse_lastmod(_iso_offset(600)) is not None
 
 
 def test_parse_lastmod_rejects_far_future(monkeypatch):
     """A >1-day-future stamp is a garbage claim, not freshness information."""
-    assert _parse_lastmod(_iso_offset(86400 * 2)) is None
+    assert parse_lastmod(_iso_offset(86400 * 2)) is None
 
 
 def test_future_skew_bound_is_configurable(monkeypatch):
     monkeypatch.setenv("CRAWLUTRON_SITEMAP_LASTMOD_FUTURE_SKEW_SECONDS", "0")
-    assert _parse_lastmod(_iso_offset(300)) is None
-    assert _parse_lastmod(_iso_offset(-300)) is not None
+    assert parse_lastmod(_iso_offset(300)) is None
+    assert parse_lastmod(_iso_offset(-300)) is not None
 
 
 def test_negative_bound_config_falls_back_to_floor(monkeypatch):
     """A negative skew would reject stamps from the last N seconds (the
     site's clock runs ahead); the lo=0 floor keeps 'trust the past' intact."""
     monkeypatch.setenv("CRAWLUTRON_SITEMAP_LASTMOD_FUTURE_SKEW_SECONDS", "-3600")
-    assert _parse_lastmod(_iso_offset(-1800)) is not None
+    assert parse_lastmod(_iso_offset(-1800)) is not None
 
 
 def test_far_future_lastmod_never_skips_a_cached_seed():
@@ -159,6 +159,6 @@ def test_far_future_lastmod_never_skips_a_cached_seed():
             raise AssertionError("far-future lastmod must short-circuit before any disk read")
 
     assert (
-        _seed_is_fresh(canonical("http://x.test/p"), _iso_offset(86400 * 30), _Cache(), read_policy({}))
+        seed_is_fresh(canonical("http://x.test/p"), _iso_offset(86400 * 30), _Cache(), read_policy({}))
         is False
     )

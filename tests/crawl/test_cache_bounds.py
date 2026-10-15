@@ -74,9 +74,9 @@ class TestContentCacheOverwrite:
 
 class TestSharedContentCache:
     def test_engine_shared_content_cache(self):
-        from app.orchestration.engine import _get_shared_content_cache
+        from app.orchestration.engine import get_shared_content_cache
 
-        cache = _get_shared_content_cache()
+        cache = get_shared_content_cache()
         assert isinstance(cache, ContentCache)
 
 

@@ -112,7 +112,6 @@ async def test_engine_and_job_single_flight_each_collapse_same_origin_misses():
 
 
 async def test_owner_preserves_404_and_5xx_ttl_semantics():
-    import time
 
     import app.orchestration.robots as owner
 
@@ -143,10 +142,12 @@ async def test_owner_preserves_404_and_5xx_ttl_semantics():
     assert failure == ([(False, "/")], [], None)
     assert failure_again == ([(False, "/")], [], None)
     assert calls == 2
-    missing_expires_at, _missing_value = owner.robots_cache._entries[("https://missing.test", policy)]
-    assert missing_expires_at - time.monotonic() == pytest.approx(ROBOTS_CACHE_TTL_SECONDS, abs=5)
-    expires_at, _value = owner.robots_cache._entries[("https://failure.test", policy)]
-    assert expires_at - time.monotonic() == pytest.approx(ROBOTS_FAILURE_TTL_SECONDS, abs=5)
+    assert owner.robots_cache.time_until_expiry(("https://missing.test", policy)) == pytest.approx(
+        ROBOTS_CACHE_TTL_SECONDS, abs=5
+    )
+    assert owner.robots_cache.time_until_expiry(("https://failure.test", policy)) == pytest.approx(
+        ROBOTS_FAILURE_TTL_SECONDS, abs=5
+    )
 
 
 async def test_respect_false_does_not_fetch_robots_even_when_discovery_requests_it():

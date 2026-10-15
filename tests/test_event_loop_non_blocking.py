@@ -20,7 +20,7 @@ import pytest
 import app.transport.content_cache as cc
 from app.api.job_runner import run_job
 from app.models.crawl_policy import CrawlPolicy
-from app.orchestration.engine import _ResultSpill
+from app.orchestration.engine import ResultSpill
 from app.storage.job_store import JobStatus
 from app.transport.content_cache import ContentCache
 from tests._fetcher_factories import crawled_results
@@ -418,13 +418,13 @@ class TestSpillAssemblyOffTheEventLoop:
     async def test_load_ordered_does_not_block_the_event_loop(self, monkeypatch) -> None:
         liveness = _LoopLiveness()
         observed: list[int] = [-1]  # loop progress seen by the blocking read-back
-        real_load = _ResultSpill.load_ordered
+        real_load = ResultSpill.load_ordered
 
         def slow_load(self, *, policy):
             observed[0] = liveness.wait_for_progress()
             return real_load(self, policy=policy)
 
-        monkeypatch.setattr(_ResultSpill, "load_ordered", slow_load)
+        monkeypatch.setattr(ResultSpill, "load_ordered", slow_load)
 
         pages = {"/": (200, "<html><body>hello</body></html>", "text/html")}
 

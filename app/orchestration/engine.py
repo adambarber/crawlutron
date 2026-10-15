@@ -48,6 +48,8 @@ RobotsMatcher = _robots_policy.RobotsMatcher
 load_robots_rules = _robots_policy.load_robots_rules
 cached_sitemaps = _robots_policy.cached_sitemaps
 
+# The shared admission gate; read it via resource_gate() so the reference
+# cannot be captured before reset_process_state() swaps the instance.
 _resource_gate = ResourceGate()
 
 # Shared conditional cache so repeated crawls can leverage 304 responses.
@@ -58,7 +60,12 @@ _SHARED_HTTP_CACHE = HttpCache()
 _SHARED_CONTENT_CACHE: ContentCache | None = None
 
 
-def _get_shared_content_cache() -> ContentCache:
+def resource_gate() -> ResourceGate:
+    """The process admission gate the engine reserves against."""
+    return _resource_gate
+
+
+def get_shared_content_cache() -> ContentCache:
     global _SHARED_CONTENT_CACHE
     if _SHARED_CONTENT_CACHE is None:
         settings = CrawlerSettings.from_mapping()
@@ -69,7 +76,7 @@ def _get_shared_content_cache() -> ContentCache:
     return _SHARED_CONTENT_CACHE
 
 
-def _purge_robots_cache(now: float | None = None) -> int:
+def purge_robots_cache(now: float | None = None) -> int:
     return robots_cache.purge_expired(now=now)
 
 
@@ -92,7 +99,7 @@ def _utc_timestamp(dt: datetime | None) -> float | None:
     return dt.timestamp()
 
 
-def _parse_lastmod(lastmod: str | None) -> float | None:
+def parse_lastmod(lastmod: str | None) -> float | None:
     """Parse a sitemap <lastmod> (ISO-8601 or RFC-822) into epoch seconds.
 
     A stamp further in the future than
@@ -128,14 +135,14 @@ def _parse_lastmod(lastmod: str | None) -> float | None:
     return ts
 
 
-def _seed_is_fresh(url: NormalizedUrl, lastmod: str | None, content_cache: Any, policy: CrawlPolicy) -> bool:
+def seed_is_fresh(url: NormalizedUrl, lastmod: str | None, content_cache: Any, policy: CrawlPolicy) -> bool:
     """True if ``url`` is cached and the sitemap ``lastmod`` is not newer than
     our cache timestamp, i.e. our cached copy is fresh and the crawl can skip
     re-fetching it.
     """
     if content_cache is None or not lastmod:
         return False
-    lastmod_ts = _parse_lastmod(lastmod)
+    lastmod_ts = parse_lastmod(lastmod)
     if lastmod_ts is None:
         return False
     extraction = policy.extraction
@@ -162,7 +169,7 @@ def _seed_is_fresh(url: NormalizedUrl, lastmod: str | None, content_cache: Any, 
     return False
 
 
-def _stale_seeds(
+def stale_seeds(
     candidates: Iterable[tuple[NormalizedUrl, str | None]],
     content_cache: Any,
     policy: CrawlPolicy,
@@ -170,22 +177,22 @@ def _stale_seeds(
     """Batch the sitemap freshness filter (call from a worker thread).
 
     Each verdict reads and parses the candidate's envelope from disk, so a big
-    sitemap must not pay that cost on the event loop: :func:`_seed_is_fresh`
+    sitemap must not pay that cost on the event loop: :func:`seed_is_fresh`
     stays fail-open (unreadable/expired/missing entries are not fresh, so the
     URL is still crawled) and the key composition is untouched.
     """
-    return {url for url, lastmod in candidates if _seed_is_fresh(url, lastmod, content_cache, policy)}
+    return {url for url, lastmod in candidates if seed_is_fresh(url, lastmod, content_cache, policy)}
 
 
-_SPILL_PREFIX = "bc-spill-"
+SPILL_PREFIX = "bc-spill-"
 
 # A spill is owned while any process holds an advisory lock on it -- a kernel
-# fact, not memory (see :func:`_spill_is_unowned`). Sweep: one scan per interval.
-_SPILL_GC_MIN_INTERVAL_SECONDS = 300.0
-_LAST_SPILL_GC_MONOTONIC: float | None = None
+# fact, not memory (see :func:`spill_is_unowned`). Sweep: one scan per interval.
+SPILL_GC_MIN_INTERVAL_SECONDS = 300.0
+spill_gc_last_run: float | None = None
 
 
-def _spill_is_unowned(path: str) -> bool:
+def spill_is_unowned(path: str) -> bool:
     """True when no live process holds ``path``'s ownership lock.
 
     Taking the lock IS the test. The kernel grants it only when no other open
@@ -212,7 +219,7 @@ def _spill_is_unowned(path: str) -> bool:
         os.close(probe)
 
 
-class _ResultSpill:
+class ResultSpill:
     """Append-only NDJSON spill of page results.
 
     Each completed page is serialized to disk the moment its batch finishes, so
@@ -233,7 +240,7 @@ class _ResultSpill:
         # path in), so ``self.path`` is always a str a reader can open.
         resolved: str
         if self._own:
-            fd, resolved = tempfile.mkstemp(prefix=_SPILL_PREFIX, suffix=".ndjson")
+            fd, resolved = tempfile.mkstemp(prefix=SPILL_PREFIX, suffix=".ndjson")
             # An exception between mkstemp and fdopen would leak the raw fd
             # AND the on-disk file. Close the fd if fdopen fails.
             try:
@@ -257,17 +264,14 @@ class _ResultSpill:
         # Serialize writes (the file handle is shared) while the (potentially
         # large) json.dumps is offloaded off the event loop.
         self._write_lock = asyncio.Lock()
-        global _LAST_SPILL_GC_MONOTONIC
+        global spill_gc_last_run
         now_mono = time.monotonic()
-        if (
-            _LAST_SPILL_GC_MONOTONIC is None
-            or now_mono - _LAST_SPILL_GC_MONOTONIC >= _SPILL_GC_MIN_INTERVAL_SECONDS
-        ):
+        if spill_gc_last_run is None or now_mono - spill_gc_last_run >= SPILL_GC_MIN_INTERVAL_SECONDS:
             # Cadence gate: the sweep is O(dir) and ran per crawl request; the None
             # stamp guarantees the first construction in a process scans anyway.
-            _LAST_SPILL_GC_MONOTONIC = now_mono
+            spill_gc_last_run = now_mono
             with contextlib.suppress(Exception):
-                self._gc_stale_spills(gc_age_seconds)
+                self.gc_stale_spills(gc_age_seconds)
 
     def _claim_ownership(self) -> None:
         """Hold this spill's ownership lock for as long as the spill is open.
@@ -283,7 +287,7 @@ class _ResultSpill:
         except OSError:
             logger.warning("spill %s could not be locked for ownership", self.path)
 
-    def _gc_stale_spills(self, max_age: float) -> None:
+    def gc_stale_spills(self, max_age: float) -> None:
         """Delete spill files older than ``max_age`` that no live process owns.
 
         Age alone is not permission to unlink. A spill is reassembled by opening
@@ -294,7 +298,7 @@ class _ResultSpill:
         ``gc_age_seconds`` is ordinary rather than exotic, and the temp dir is
         shared with every other process on the host, so the sweep asks the
         kernel whether each candidate is still owned
-        (:func:`_spill_is_unowned`) rather than consulting a live set only this
+        (:func:`spill_is_unowned`) rather than consulting a live set only this
         process can see.
 
         Unlinking an unowned file is still safe on Unix (a reader holding the fd
@@ -307,10 +311,10 @@ class _ResultSpill:
         except OSError:
             return
         for name in names:
-            if not name.startswith(_SPILL_PREFIX):
+            if not name.startswith(SPILL_PREFIX):
                 continue
             candidate = os.path.join(tempfile.gettempdir(), name)
-            if not _spill_is_unowned(candidate):
+            if not spill_is_unowned(candidate):
                 continue
             try:
                 if now - os.path.getmtime(candidate) > max_age:
@@ -433,10 +437,10 @@ async def crawl_request(
             webhook_url=webhook_url,
             spill_path=spill_path,
             dependencies=_PipelineDependencies(
-                get_content_cache=_get_shared_content_cache,
-                make_spill=_ResultSpill,
+                get_content_cache=get_shared_content_cache,
+                make_spill=ResultSpill,
                 compile_scope_regex_safe=compile_scope_pattern,
-                stale_seeds=_stale_seeds,
+                stale_seeds=stale_seeds,
                 fetch_and_decode=fetch_and_decode,
                 shared_http_cache=_SHARED_HTTP_CACHE,
                 resource_gate=resource_gate if resource_gate is not None else _resource_gate,
@@ -461,7 +465,11 @@ def reset_process_state() -> None:
     robots_cache.clear()
     global _SHARED_HTTP_CACHE, _resource_gate
     _SHARED_HTTP_CACHE = HttpCache()
-    _resource_gate = ResourceGate()
+    # The shared admission gate; read it via resource_gate() so the reference
+
+
+# cannot be captured before reset_process_state() swaps the instance.
+_resource_gate = ResourceGate()
 
 
 def has_process_state() -> bool:

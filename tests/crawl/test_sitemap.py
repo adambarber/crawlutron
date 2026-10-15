@@ -5,7 +5,7 @@ from functools import partial
 
 from app.admission.policy import read_policy
 from app.models.normalized_url import NormalizedUrl
-from app.orchestration.engine import _parse_lastmod, _seed_is_fresh, _stale_seeds
+from app.orchestration.engine import parse_lastmod, seed_is_fresh, stale_seeds
 from app.orchestration.fetch_helpers import SITEMAP_CACHE, fetch_sitemap_urls
 from app.transport.content_cache import ContentCache
 from app.transport.content_cache_key import build_content_cache_key
@@ -250,12 +250,12 @@ def _policy(extra=None, *, extraction=None):
 
 
 def test_parse_lastmod_variants():
-    assert _parse_lastmod("2024-01-15") is not None
-    assert _parse_lastmod("2024-01-15T10:30:00Z") is not None
-    assert _parse_lastmod("Mon, 15 Jan 2024 10:30:00 GMT") is not None
-    assert _parse_lastmod("") is None
-    assert _parse_lastmod(None) is None
-    assert _parse_lastmod("not-a-date") is None
+    assert parse_lastmod("2024-01-15") is not None
+    assert parse_lastmod("2024-01-15T10:30:00Z") is not None
+    assert parse_lastmod("Mon, 15 Jan 2024 10:30:00 GMT") is not None
+    assert parse_lastmod("") is None
+    assert parse_lastmod(None) is None
+    assert parse_lastmod("not-a-date") is None
 
 
 def _cache_with_fresh(tmp_path, url, lastmod, policy):
@@ -283,18 +283,18 @@ def test_seed_is_fresh(tmp_path):
     cache = _cache_with_fresh(tmp_path, url.raw, "2020-01-01T00:00:00Z", _policy())
 
     # Sitemap older than our cache -> cached copy is fresh -> skip
-    assert _seed_is_fresh(url, "2020-01-01T00:00:00Z", cache, _policy()) is True
+    assert seed_is_fresh(url, "2020-01-01T00:00:00Z", cache, _policy()) is True
     # Sitemap newer than our cache -> stale -> fetch
-    assert _seed_is_fresh(url, "2025-01-01T00:00:00Z", cache, _policy()) is False
+    assert seed_is_fresh(url, "2025-01-01T00:00:00Z", cache, _policy()) is False
     # No lastmod -> fetch
-    assert _seed_is_fresh(url, None, cache, _policy()) is False
+    assert seed_is_fresh(url, None, cache, _policy()) is False
     # Not cached at all -> fetch
     not_cached = canonical("http://example.com/other")
-    assert _seed_is_fresh(not_cached, "2020-01-01T00:00:00Z", cache, _policy()) is False
+    assert seed_is_fresh(not_cached, "2020-01-01T00:00:00Z", cache, _policy()) is False
 
 
 def test_seed_is_fresh_requires_cache():
-    assert _seed_is_fresh(canonical("http://example.com/x"), "2020-01-01T00:00:00Z", None, _policy()) is False
+    assert seed_is_fresh(canonical("http://example.com/x"), "2020-01-01T00:00:00Z", None, _policy()) is False
 
 
 _CRAWL_URL = "http://seed-batch.test/"
@@ -313,7 +313,7 @@ class TestStaleSeedBatch:
         cache = _cache_with_fresh(tmp_path, fresh, "2020-01-01T00:00:00Z", _POLICY_SEED_BATCH())
         policy = _POLICY_SEED_BATCH()
 
-        stale_set = _stale_seeds(
+        stale_set = stale_seeds(
             [(canonical(fresh), "2020-01-01T00:00:00Z"), (canonical(stale), "2025-01-01T00:00:00Z")],
             cache,
             read_policy(policy),
@@ -329,7 +329,7 @@ class TestStaleSeedBatch:
 
         # An unadmittable loc ("" here) never reaches this helper any more: the resolve chokepoint drops it at
         # extraction, reported as skipped. Fail-open is still proven by the never-cached candidate below.
-        stale_set = _stale_seeds(
+        stale_set = stale_seeds(
             [(canonical("http://seed-batch.test/never-cached"), "2020-01-01")],
             cache,
             read_policy(policy),
@@ -375,7 +375,7 @@ class TestSeedingIsOffLoop:
 
         await crawl_request(payload, http_fetcher=fetcher, content_cache=cache)
 
-        assert "_stale_seeds" in seen, "freshness filtering was not offloaded off the loop"
+        assert "stale_seeds" in seen, "freshness filtering was not offloaded off the loop"
         # The fresh seed was skipped: only robots.txt, the sitemap and the crawled origin were fetched --
         # never the cached page itself.
         assert fresh_url not in fetched
