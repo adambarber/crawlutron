@@ -257,7 +257,7 @@ KEYED_PROVIDERS_INHERIT_THE_SHARED_RESPONSE_FLOW = Rule(
             "    def _call(self, query, limit):\n"
             "        return _ProviderCall('GET', url)\n"
             "    async def _request(self, query, limit, timeout_seconds):\n"
-            "        return await _provider_http('GET', url)\n",
+            "        return await provider_http('GET', url)\n",
             "re-spells the shared provider flow in _request()",
         ),
         Bites(

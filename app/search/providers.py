@@ -77,7 +77,7 @@ class SearchProvider(Protocol):
     async def search(self, query: str, limit: int, timeout_seconds: float) -> list[SearchResult]: ...
 
 
-async def _provider_http(
+async def provider_http(
     method: str,
     url: str,
     *,
@@ -89,8 +89,8 @@ async def _provider_http(
 ) -> tuple[int, str]:
     """Issue a provider request over the shared pooled HTTP client.
 
-    Module-level so tests can patch ``app.search.providers._provider_http``
-    to inject fixture responses without touching the providers themselves.
+    Module-level so tests can patch ``provider_http`` to inject fixture
+    responses without touching the providers themselves.
     """
     client = get_async_http_client()
     timeout = Timeouts.for_request(timeout_seconds).as_httpx()
@@ -242,7 +242,7 @@ class _ApiKeyProvider:
     async def _request(self, query: str, limit: int, timeout_seconds: float) -> tuple[int, str]:
         """Issue this provider's request over the shared pooled client."""
         call = self._call(query, limit)
-        return await _provider_http(
+        return await provider_http(
             call.method,
             call.url,
             params=call.params,
@@ -356,7 +356,7 @@ class DuckDuckGoProvider:
         self._host_policy = host_policy
 
     async def search(self, query: str, limit: int, timeout_seconds: float) -> list[SearchResult]:
-        status, body = await _provider_http(
+        status, body = await provider_http(
             "POST",
             _DUCKDUCKGO_URL,
             data={"q": query},

@@ -237,7 +237,7 @@ def override_settings():
 
 @pytest.fixture
 def fake_provider_http(monkeypatch):
-    """Patch ``app.search.providers._provider_http`` with a scripted response.
+    """Patch ``app.search.providers.provider_http`` with a scripted response.
 
     Returns a callable that installs ``(status, body)`` and optionally records
     the kwargs of every provider HTTP call into ``capture``.
@@ -249,7 +249,7 @@ def fake_provider_http(monkeypatch):
                 capture.append({"method": method, "url": url, **kwargs})
             return status, body
 
-        monkeypatch.setattr("app.search.providers._provider_http", _fake)
+        monkeypatch.setattr("app.search.providers.provider_http", _fake)
         return _fake
 
     return _patch

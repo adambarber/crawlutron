@@ -26,9 +26,4 @@ DECLARED: dict[str, Declaration] = {
         _CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]
     ),
     "app.models.registrable_domain._PSL": _d(_CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]),
-    "app.search.providers._provider_http": _d(
-        "unreviewed",
-        "Not yet triaged.\n",
-        ["test"],
-    ),
 }

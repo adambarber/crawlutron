@@ -1,6 +1,6 @@
 """POST /v1/search behavior: provider parsing, SSRF hygiene, selection, and the endpoint.
 
-Provider HTTP is injected via ``app.search.providers._provider_http`` so no
+Provider HTTP is injected via ``app.search.providers.provider_http`` so no
 real network is touched; the endpoint runs over the ASGI transport against the
 real FastAPI app.
 """
@@ -20,7 +20,6 @@ from app.search.providers import (
     SearchProviderUnavailable,
     SerperProvider,
     TavilyProvider,
-    _provider_http,
     collect_results,
     configured_search_providers,
     get_search_provider,
@@ -279,7 +278,7 @@ class TestSearchEndpoint:
                 {"results": [{"title": f"R{i}", "url": f"https://example.gov/{i}"} for i in range(asked)]}
             )
 
-        monkeypatch.setattr("app.search.providers._provider_http", _honoring_provider)
+        monkeypatch.setattr("app.search.providers.provider_http", _honoring_provider)
         resp = await async_client.post("/v1/search", json={"query": "x", "limit": 10})
         assert resp.status_code == 200
         assert capture[0]["json_body"]["max_results"] == 3
@@ -348,7 +347,7 @@ class TestSearchEndpoint:
 
 
 class TestProviderHttpCaps:
-    """_provider_http must bound provider response bodies before parsing."""
+    """provider_http must bound provider response bodies before parsing."""
 
     async def test_search_body_under_cap_passes_through(self):
         import app.search.providers as providers_mod
@@ -356,7 +355,9 @@ class TestProviderHttpCaps:
         small = json.dumps({"results": []}).encode()
         client = _FakeStreamClient(_FakeStreamResponse(small))
         with mock.patch.object(providers_mod, "get_async_http_client", return_value=client):
-            status, body = await _provider_http("GET", "http://example.test/", timeout_seconds=5.0)
+            status, body = await providers_mod.provider_http(
+                "GET", "http://example.test/", timeout_seconds=5.0
+            )
         assert status == 200
         assert json.loads(body) == {"results": []}
 
@@ -370,16 +371,16 @@ class TestProviderHttpCaps:
         client = _FakeStreamClient(_FakeStreamResponse(_drip()))
         with mock.patch.object(providers_mod, "get_async_http_client", return_value=client):
             with pytest.raises(SearchProviderError, match="[Ee]xceed"):
-                await _provider_http("GET", "http://example.test/", timeout_seconds=5.0)
+                await providers_mod.provider_http("GET", "http://example.test/", timeout_seconds=5.0)
 
 
 class _FakeStreamResponse:
     """httpx-faithful stream response.
 
-    Mirrors the REAL httpx attribute surface _provider_http relies on —
+    Mirrors the REAL httpx attribute surface provider_http relies on —
     ``encoding`` (never ``charset``), ``status_code``, ``aiter_bytes`` — per
     the rule that fakes must mirror the real client surface. The
-    shared ``fake_provider_http`` fixture patches _provider_http wholesale,
+    shared ``fake_provider_http`` fixture patches provider_http wholesale,
     which left this decode path with zero coverage and shipped a reference
     to an attribute httpx does not have (500 on every real search request).
     """
@@ -416,7 +417,7 @@ class _FakeStreamClient:
 
 
 async def _provider_decode(monkeypatch, body: bytes, encoding):
-    """Drive the real ``_provider_http`` decode path over a faked response.
+    """Drive the real ``provider_http`` decode path over a faked response.
 
     The provider, the request and the return pair are fixed here so a decode
     test states only the encoding it is about; the decode itself is production's.
@@ -425,11 +426,11 @@ async def _provider_decode(monkeypatch, body: bytes, encoding):
 
     fake = _FakeStreamClient(_FakeStreamResponse(body, encoding=encoding))
     monkeypatch.setattr(providers_module, "get_async_http_client", lambda: fake)
-    return await providers_module._provider_http("GET", "http://provider.test/search", timeout_seconds=2.0)
+    return await providers_module.provider_http("GET", "http://provider.test/search", timeout_seconds=2.0)
 
 
 async def test_provider_http_decodes_via_httpx_encoding(monkeypatch):
-    """Real _provider_http decode path: httpx exposes ``encoding``, not ``charset``."""
+    """Real provider_http decode path: httpx exposes ``encoding``, not ``charset``."""
     status, text = await _provider_decode(monkeypatch, b'{"data": []}', "utf-8")
     assert status == 200
     assert text == '{"data": []}'
