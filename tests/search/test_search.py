@@ -20,8 +20,8 @@ from app.search.providers import (
     SearchProviderUnavailable,
     SerperProvider,
     TavilyProvider,
-    _collect_results,
     _provider_http,
+    collect_results,
     configured_search_providers,
     get_search_provider,
 )
@@ -29,13 +29,13 @@ from tests._assertions import one_search_result, provider_results
 
 
 def _collect(items):
-    """``_collect_results`` with this file's uniform provider key names.
+    """``collect_results`` with this file's uniform provider key names.
 
     Every provider spells the same three keys, so the call shape is a constant
     of these tests rather than a decision each one repeats -- and a copy that
     drops ``description_key`` silently asserts against a blank description.
     """
-    return _collect_results(
+    return collect_results(
         items,
         url_key="url",
         title_key="title",
@@ -206,14 +206,14 @@ class TestCollectResults:
         assert results[0].description == ""
 
     def test_clips_whitespace_and_long_fields(self):
-        from app.search.providers import _MAX_TEXT_LENGTH
+        from app.search.providers import MAX_TEXT_LENGTH
 
         results = _collect(
-            [{"url": "https://example.gov/x", "title": " a  b ", "content": "z" * (_MAX_TEXT_LENGTH + 50)}]
+            [{"url": "https://example.gov/x", "title": " a  b ", "content": "z" * (MAX_TEXT_LENGTH + 50)}]
         )
         assert results[0].title == "a b"
         assert results[0].description.endswith("…")
-        assert len(results[0].description) == _MAX_TEXT_LENGTH + 1  # ellipsis adds one
+        assert len(results[0].description) == MAX_TEXT_LENGTH + 1  # ellipsis adds one
 
     def test_none_items_iterable_is_empty(self):
         assert _collect(None) == []

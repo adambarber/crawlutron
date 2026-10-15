@@ -55,11 +55,11 @@ _OWNER_PUBLIC_SURFACE_RATCHET = {
     "app/admission/render_options.py": (2, 2),
     # RAISED to (2, 2): `payload_policy` was `_payload_policy` until the layout put its only production caller
     # (the engine) in another package.
-    "app/admission/payload_helpers.py": (2, 2),
+    "app/admission/payload_helpers.py": (3, 3),
     # RAISED to (10, 9): terminal_attempt became public when CrawlResult stopped copying four axes out of the
     # attempt it holds.
-    "app/orchestration/classification.py": (2, 2),
-    "app/orchestration/engine_result.py": (5, 4),
+    "app/orchestration/classification.py": (3, 2),
+    "app/orchestration/engine_result.py": (8, 7),
     "app/orchestration/render_result.py": (4, 4),
     "app/transport/fetch_policy.py": (5, 5),
     "app/models/host_policy.py": (6, 5),

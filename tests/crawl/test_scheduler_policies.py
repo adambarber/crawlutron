@@ -5,7 +5,7 @@ import time
 
 from app.models.crawl_job import CrawlJob
 from app.models.crawl_result import EngineCrawlResult
-from app.orchestration.scheduler import _COOLDOWN_PURGE_INTERVAL, DomainScheduler
+from app.orchestration.scheduler import COOLDOWN_PURGE_INTERVAL, DomainScheduler
 from tests._policy_factories import canonical
 from tests._result_builders import make_job, make_result
 from tests._scheduler_doubles import engine_envelope, make_scheduler, trip_circuit
@@ -55,9 +55,9 @@ class TestSchedulerPolicies:
     """Cover remaining branches in scheduler.py"""
 
     def test_token_bucket_basic(self):
-        from app.orchestration.scheduler import _TokenBucket
+        from app.orchestration.scheduler import TokenBucket
 
-        bucket = _TokenBucket(rate=10.0, capacity=5)
+        bucket = TokenBucket(rate=10.0, capacity=5)
         wait = bucket.consume(1.0)
         assert wait == 0.0
         wait = bucket.consume(4.0)
@@ -66,9 +66,9 @@ class TestSchedulerPolicies:
         assert wait > 0.0
 
     def test_token_bucket_refill(self):
-        from app.orchestration.scheduler import _TokenBucket
+        from app.orchestration.scheduler import TokenBucket
 
-        bucket = _TokenBucket(rate=100.0, capacity=10)
+        bucket = TokenBucket(rate=100.0, capacity=10)
         bucket.consume(10.0)
         # Manually refill tokens as if 0.1s passed (at 100 tokens/s, that's 10 more)
         bucket.tokens = 10.0
@@ -149,11 +149,11 @@ class TestSchedulerPolicies:
     def test_set_domain_min_delay_is_capped_at_the_politeness_ceiling(self):
         """A huge (finite) robots Crawl-delay must not install an
         unbounded politeness floor — the scheduler clamps it at the write."""
-        from app.orchestration.scheduler import _MAX_COOLDOWN_WAIT
+        from app.orchestration.scheduler import MAX_COOLDOWN_WAIT
 
         scheduler = make_scheduler(global_limit=10, per_domain_limit=10)
         scheduler.set_domain_min_delay("example.com", 1e12)
-        assert scheduler.current_delay("example.com") == _MAX_COOLDOWN_WAIT
+        assert scheduler.current_delay("example.com") == MAX_COOLDOWN_WAIT
 
     def test_set_domain_min_delay_ignores_non_finite(self):
         """Inf/nan must never become a stored politeness floor."""
@@ -229,7 +229,7 @@ class TestCooldownPurgeCadence:
             scheduler.set_domain_cooldown(f"d{i}.test", 5.0)
         # 250 sets on a 100-set interval: the cadence is amortized, not 1:1. The interval is production's, so
         # the bound is derived rather than repeated: 250 sets over 100-set intervals is three purges.
-        assert calls["n"] == 250 // _COOLDOWN_PURGE_INTERVAL
+        assert calls["n"] == 250 // COOLDOWN_PURGE_INTERVAL
 
     def test_expired_cooldowns_are_still_reclaimed(self, monkeypatch):
         """Amortizing must not let expired entries accumulate indefinitely:
@@ -241,7 +241,7 @@ class TestCooldownPurgeCadence:
         scheduler.set_domain_cooldown("old.test", 10.0)
         fake_now[0] = 1100.0  # the first cooldown has elapsed
         # Burn past the interval so the amortized purge fires.
-        for i in range(_COOLDOWN_PURGE_INTERVAL + 1):
+        for i in range(COOLDOWN_PURGE_INTERVAL + 1):
             scheduler.set_domain_cooldown(f"d{i}.test", 5.0)
         assert "old.test" not in scheduler._domain_cooldowns
         assert scheduler._domain_cooldowns, "fresh cooldowns were dropped"

@@ -81,10 +81,10 @@ class TestTerminalResultContract:
     def test_failed_engine_result_fields(self):
         from app.orchestration.engine_result import (
             TerminalResult,
-            _failed_engine_result,
+            failed_engine_result,
         )
 
-        result = _failed_engine_result(
+        result = failed_engine_result(
             TerminalResult(
                 original_url="http://a/",
                 normalized_url="http://a/",

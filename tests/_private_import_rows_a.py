@@ -57,31 +57,6 @@ DECLARED: dict[str, Declaration] = {
         ["test"],
     ),
     "app.storage.job_store._Expected": _d(_CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]),
-    "app.admission.payload_helpers._payload_urls": _d(
-        "unreviewed",
-        "Not yet triaged.\n",
-        ["test"],
-    ),
-    "app.admission.policy._ERROR_CODE_BY_FIELD": _d(
-        _CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]
-    ),
-    "app.admission.recursive_admission._batch_is_http_heavy": _d(
-        "unreviewed",
-        "Not yet triaged.\n",
-        ["test"],
-    ),
-    "app.orchestration.classification._CLASSIFICATION_BY_EXCEPTION": _d(
-        _CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]
-    ),
-    "app.orchestration.engine_result._failed_engine_result": _d(
-        _CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]
-    ),
-    "app.orchestration.engine_result._skipped_engine_result": _d(
-        _CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]
-    ),
-    "app.orchestration.engine_result._terminal_engine_result": _d(
-        _CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]
-    ),
     "app.orchestration.robots._RobotsPathMatcher": _d(
         "private type",
         "A private class nothing outside the module constructs -- production only ever builds a\n"

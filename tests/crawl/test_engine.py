@@ -315,11 +315,11 @@ class TestEngineScopeEdges:
     def test_crawl_chain_robots_disallowed(self):
         from app.orchestration.engine_result import (
             TerminalResult,
-            _skipped_engine_result,
+            skipped_engine_result,
         )
         from app.vocabulary.taxonomy import status_for_classification
 
-        result = _skipped_engine_result(
+        result = skipped_engine_result(
             TerminalResult(
                 original_url="http://example.com/page",
                 normalized_url="http://example.com/page",

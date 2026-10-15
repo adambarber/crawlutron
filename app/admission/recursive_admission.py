@@ -118,7 +118,7 @@ def _pinned_strategy(scheduler: _PinProvider, task: CrawlTask) -> str | None:
     return scheduler.get_pinned_strategy(task.domain)
 
 
-def _batch_is_http_heavy(
+def batch_is_http_heavy(
     scheduler: _PinProvider,
     frontier: Sequence[tuple[int, CrawlTask]],
     sample: int,
@@ -182,7 +182,7 @@ async def _resource_admitted_batch(ctx: _BatchContext) -> list[_Admitted]:
     metrics.resource_memory_utilization = run.resource_gate.memory_ratio()
     metrics.resource_cpu_utilization = run.resource_gate.cpu_ratio()
     http_scale = getattr(run.resource_gate, "http_scale_factor", None)
-    if http_scale is not None and _batch_is_http_heavy(
+    if http_scale is not None and batch_is_http_heavy(
         run.scheduler, state.frontier, run.http_heavy_lookahead
     ):
         scale = http_scale()
@@ -263,4 +263,4 @@ async def admit_recursive_batch(
     return await _robots_admitted_batch(ctx, await _resource_admitted_batch(ctx))
 
 
-__all__ = ["admit_recursive_batch"]
+__all__ = ["admit_recursive_batch", "batch_is_http_heavy"]

@@ -29,11 +29,11 @@ RESULT_DATACLASS_NAMES = frozenset({"CrawlResult", "EngineCrawlResult", "CrawlSt
 RESULT_PRIMITIVES = (
     frozenset(
         {
-            "_failed_engine_result",
+            "failed_engine_result",
             "build_engine_result",
             "engine_result_from_exception",
-            "_skipped_engine_result",
-            "_terminal_engine_result",
+            "skipped_engine_result",
+            "terminal_engine_result",
             "binary_no_text_result",
             "crawl_result_from_exception",
             "crawl_result_from_engine_result",

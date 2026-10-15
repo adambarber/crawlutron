@@ -24,7 +24,7 @@ def _validated_url(url: str, *, host_policy: HostPolicy) -> str:
         raise ValueError(reason) from error
 
 
-def _payload_urls(payload: dict[str, Any], *, host_policy: HostPolicy) -> list[str]:
+def payload_urls(payload: dict[str, Any], *, host_policy: HostPolicy) -> list[str]:
     """Extract the request URL batch, collapsing duplicates by page identity.
 
     ``NormalizedUrl`` is the single source of truth for what counts
@@ -76,7 +76,7 @@ def checked_payload_urls(
     oversized batch past the ceiling.
     """
     if urls is None:
-        urls = _payload_urls(payload, host_policy=host_policy)
+        urls = payload_urls(payload, host_policy=host_policy)
     else:
         for url in urls:
             if not isinstance(url, str):
@@ -109,4 +109,4 @@ def payload_policy(payload: dict[str, Any], tier: PolicyTier) -> CrawlPolicy:
     return validate_wire_policy(payload.get("policy") or {}, tier)
 
 
-__all__ = ["checked_payload_urls", "payload_policy"]
+__all__ = ["checked_payload_urls", "payload_policy", "payload_urls"]

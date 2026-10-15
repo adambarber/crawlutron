@@ -26,10 +26,10 @@ from app.vocabulary.taxonomy import is_transient_classification
 
 _logger = logging.getLogger(__name__)
 
-__all__ = ["classify_and_log", "classify_error_code"]
+__all__ = ["CLASSIFICATION_BY_EXCEPTION", "classify_and_log", "classify_error_code"]
 
 
-_CLASSIFICATION_BY_EXCEPTION: tuple[tuple[tuple[type[BaseException], ...], Classification], ...] = (
+CLASSIFICATION_BY_EXCEPTION: tuple[tuple[tuple[type[BaseException], ...], Classification], ...] = (
     ((BrowserPoolExhaustedError,), "browser_pool_exhausted"),
     # Capacity, not a page failure: the URL was never attempted, which is why it
     # stays distinct from the transport rows below and stays retryable.
@@ -82,7 +82,7 @@ def classify_error_code(exc: BaseException) -> Classification:
     boundaries for a shared taxonomy decision.
 
     The mapping itself is the ordered table
-    :data:`_CLASSIFICATION_BY_EXCEPTION`; the unrecognized case falls through to
+    :data:`CLASSIFICATION_BY_EXCEPTION`; the unrecognized case falls through to
     ``network_error``.
 
     Every row returns a :data:`Classification` taxonomy member; the return type
@@ -90,7 +90,7 @@ def classify_error_code(exc: BaseException) -> Classification:
     ``EngineCrawlResult`` get a statically-enforced classification instead of an
     unproven string.
     """
-    for types, classification in _CLASSIFICATION_BY_EXCEPTION:
+    for types, classification in CLASSIFICATION_BY_EXCEPTION:
         if isinstance(exc, types):
             return classification
     return "network_error"

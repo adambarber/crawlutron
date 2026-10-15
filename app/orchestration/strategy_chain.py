@@ -16,8 +16,8 @@ from app.models.normalized_url import NormalizedUrl
 from app.models.taxonomy import Classification, CrawlError, CrawlStrategyName
 from app.orchestration.engine_result import (
     TerminalResult,
-    _failed_engine_result,
     engine_result_from_exception,
+    failed_engine_result,
 )
 from app.orchestration.scheduler import DomainScheduler
 from app.transport.browser_result import browser_strategy_result
@@ -151,7 +151,7 @@ class _ChainRun:
         is a second declaration of the identity, which is the duplication
         ``TerminalResult``'s own docstring says it was built to remove.
         """
-        return _failed_engine_result(
+        return failed_engine_result(
             TerminalResult(
                 original_url=self.context.original_url,
                 normalized_url=self.context.normalized_url,

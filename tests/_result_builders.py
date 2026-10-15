@@ -131,7 +131,7 @@ def skipped_result(
     error: CrawlError,
     normalized_url: str | None = None,
 ):
-    """A ``_skipped_engine_result`` for `url`, built through the real primitive.
+    """A ``skipped_engine_result`` for `url`, built through the real primitive.
 
     The skipped-result builders are one per classification site in production, and
     a test that wants to check the builder's status against the classification
@@ -142,10 +142,10 @@ def skipped_result(
     """
     from app.orchestration.engine_result import (
         TerminalResult,
-        _skipped_engine_result,
+        skipped_engine_result,
     )
 
-    return _skipped_engine_result(
+    return skipped_engine_result(
         TerminalResult(
             original_url=url,
             normalized_url=canonical(normalized_url or url),

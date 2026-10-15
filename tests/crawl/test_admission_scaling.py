@@ -4,7 +4,7 @@ import time
 
 import pytest
 
-from app.admission.recursive_admission import _batch_is_http_heavy
+from app.admission.recursive_admission import batch_is_http_heavy
 from app.runtime.memory_pressure import batch_scale
 from app.runtime.resource_pressure import ResourceGate
 from app.vocabulary.strategies import BROWSER_HEADLESS, HTTP_DECLARED_CRAWLER
@@ -100,14 +100,14 @@ def _http_heavy(pins: dict[str, str], domains: list[str], *, sample: int = 8) ->
     and its verdict and nothing else.
     """
     frontier = [(0, make_crawl_task(0, d)) for d in domains]
-    return _batch_is_http_heavy(_Scheduler(pins), frontier, sample=sample)
+    return batch_is_http_heavy(_Scheduler(pins), frontier, sample=sample)
 
 
 class TestBatchIsHttpHeavy:
     def test_all_http_pinned(self):
         sched = _Scheduler({f"site{i}.gov": HTTP_DECLARED_CRAWLER for i in range(4)})
         frontier = [(0, make_crawl_task(0, f"site{i}.gov")) for i in range(4)]
-        assert _batch_is_http_heavy(sched, frontier, sample=8) is True
+        assert batch_is_http_heavy(sched, frontier, sample=8) is True
 
     def test_majority_http_pinned(self):
         # 2 of 3 pinned HTTP; the 3rd unpinned (not yet proven cheap)
@@ -139,7 +139,7 @@ class TestBatchIsHttpHeavy:
         sched = _Scheduler({"a.gov": HTTP_DECLARED_CRAWLER})
         # First task unpinned, second pinned HTTP; sample=1 looks only at first
         frontier = [(0, make_crawl_task(0, "z.gov")), (0, make_crawl_task(0, "a.gov"))]
-        assert _batch_is_http_heavy(sched, frontier, sample=1) is False
+        assert batch_is_http_heavy(sched, frontier, sample=1) is False
 
 
 # --------------------------------------------------------------------------- Dispatcher wiring: apply

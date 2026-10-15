@@ -106,7 +106,7 @@ _Result = TypeVar("_Result", bound=SchedulerResult)
 SchedulerWorker = Callable[[_Job], Awaitable[_Result]]
 
 
-class _TokenBucket:
+class TokenBucket:
     """Token bucket rate limiter: refills at ``rate`` tokens/sec, caps at ``capacity``."""
 
     def __init__(self, rate: float, capacity: int = 5) -> None:
@@ -129,15 +129,15 @@ class _TokenBucket:
 
 
 # Upper bound on how long any single job will sleep on a domain cooldown.
-_MAX_COOLDOWN_WAIT = 300.0
+MAX_COOLDOWN_WAIT = 300.0
 
 # Purge the cooldown/circuit mappings at most once per this many sets, so a
 # 429-heavy crawl does not rebuild both dicts per result. ``run`` purges up front.
-_COOLDOWN_PURGE_INTERVAL = 100
+COOLDOWN_PURGE_INTERVAL = 100
 
 # What each ResultStatus means for DOMAIN health: success/blocked keep the
 # host healthy, failed/retry_exhausted fault it, skipped/disallowed say nothing.
-_STATUS_ACCOUNTING: dict[str, str] = {
+STATUS_ACCOUNTING: dict[str, str] = {
     "success": "success",
     "blocked": "success",
     "failed": "failure",
@@ -191,7 +191,7 @@ class DomainScheduler:
         self._circuit_trip_count: dict[str, int] = defaultdict(int)
 
         # Token buckets per domain for RPS rate limiting
-        self._token_buckets: dict[str, _TokenBucket] = {}
+        self._token_buckets: dict[str, TokenBucket] = {}
 
         # Circuit breaker: consecutive failures per domain
         self._domain_failures: dict[str, int] = defaultdict(int)
@@ -219,19 +219,19 @@ class DomainScheduler:
         if seconds > 0:
             self._domain_cooldowns[domain] = time.time() + seconds
         self._sets_since_purge += 1
-        if self._sets_since_purge >= _COOLDOWN_PURGE_INTERVAL:
+        if self._sets_since_purge >= COOLDOWN_PURGE_INTERVAL:
             self._sets_since_purge = 0
             self.purge_expired()
 
     def _record_result_health(self, domain: str, result: SchedulerResult) -> None:
-        """Apply a result's domain-health verdict. See _STATUS_ACCOUNTING.
+        """Apply a result's domain-health verdict. See STATUS_ACCOUNTING.
 
         Its own method because it is one decision, not part of running a job:
         inlined it pushed the enclosing ``async with`` in run_one too long to
         read, and the verdict it reads is the whole
         question of what a status means for a domain's health.
         """
-        accounting = _STATUS_ACCOUNTING.get(result.status, "none")
+        accounting = STATUS_ACCOUNTING.get(result.status, "none")
         if accounting == "failure":
             self.record_failure(domain)
             return
@@ -336,7 +336,7 @@ class DomainScheduler:
         chokepoint where a delay becomes a scheduler wait.
         """
         if seconds and seconds > 0 and math.isfinite(seconds):
-            clamped = min(float(seconds), _MAX_COOLDOWN_WAIT)
+            clamped = min(float(seconds), MAX_COOLDOWN_WAIT)
             self._domain_min_delay[domain] = max(self._domain_min_delay.get(domain, 0.0), clamped)
 
     def purge_expired(self) -> None:
@@ -401,7 +401,7 @@ class DomainScheduler:
                 if now < cooldown_expiry:
                     # Cap the wait: a hostile Retry-After must not park this
                     # gather for years; beyond the cap the origin re-asserts.
-                    await asyncio.sleep(min(cooldown_expiry - now, _MAX_COOLDOWN_WAIT))
+                    await asyncio.sleep(min(cooldown_expiry - now, MAX_COOLDOWN_WAIT))
 
             # Circuit breaker: if open, skip the network request entirely.
             if self.is_circuit_open(job.domain):
@@ -417,7 +417,7 @@ class DomainScheduler:
             if self._max_rps > 0:
                 bucket = self._token_buckets.get(job.domain)
                 if bucket is None:
-                    bucket = _TokenBucket(rate=self._max_rps)
+                    bucket = TokenBucket(rate=self._max_rps)
                     self._token_buckets[job.domain] = bucket
                 wait_seconds = bucket.consume(1.0)
                 if wait_seconds > 0:

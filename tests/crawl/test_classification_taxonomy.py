@@ -416,10 +416,10 @@ class TestStatusAgreesWithClassification:
     def test_taxonomy_rejects_a_disagreeing_pair(self):
         """A pair neither the table default nor the documented context set allows
         must not be constructible at the terminal builder."""
-        from app.orchestration.engine_result import _failed_engine_result
+        from app.orchestration.engine_result import failed_engine_result
 
         with pytest.raises(ValueError, match="disagrees with the taxonomy status"):
-            _failed_engine_result(
+            failed_engine_result(
                 TerminalResult(
                     original_url="http://example.com/",
                     normalized_url="http://example.com/",

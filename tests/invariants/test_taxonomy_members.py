@@ -24,10 +24,10 @@ _CLASSIFICATION_VALUE_SOURCES = ("classification", "known_classification")
 _RESULT_PRIMITIVES = (
     # The generic sweep in tests/membership_gate.py reads the registry from the models, so a primitive added
     # tomorrow is covered the day it lands.
-    "_failed_engine_result",
+    "failed_engine_result",
     "build_engine_result",
     "engine_result_from_exception",
-    "_skipped_engine_result",
+    "skipped_engine_result",
     "crawl_result_from_exception",
     "terminal_crawl_result",
 )
@@ -91,7 +91,7 @@ CLASSIFICATIONS_PASSED_ARE_ENUM_MEMBERS = Rule(
     excludes=SANCTIONED,
     bite=lambda: (
         Bites(
-            'def f():\n    return _failed_engine_result(classification="totally_made_up")\n',
+            'def f():\n    return failed_engine_result(classification="totally_made_up")\n',
             "CrawlClassification member",
         ),
         # The terminal-CrawlResult chokepoint is covered too: the render path builds terminal results through
@@ -102,7 +102,7 @@ CLASSIFICATIONS_PASSED_ARE_ENUM_MEMBERS = Rule(
         ),
     ),
     clean=lambda: (
-        "def f(cls):\n    return _failed_engine_result(classification=cls.url_budget_exceeded)\n",
+        "def f(cls):\n    return failed_engine_result(classification=cls.url_budget_exceeded)\n",
         "def f(cls):\n    return terminal_crawl_result(classification=cls.site_error)\n",
     ),
 )
@@ -172,15 +172,15 @@ STRATEGIES_PASSED_ARE_ENUM_MEMBERS = Rule(
         ),
         # The empty string is the same lie in cheaper clothing.
         Bites(
-            'def f():\n    return _failed_engine_result(strategy="")\n',
+            'def f():\n    return failed_engine_result(strategy="")\n',
             "CrawlStrategy member",
         ),
     ),
     clean=lambda: (
         # None is admitted: it is the honest "no strategy attempted" label.
-        "def f():\n    return _failed_engine_result(strategy=None)\n",
+        "def f():\n    return failed_engine_result(strategy=None)\n",
         # A real member literal and a non-literal both pass without comment.
-        'def f():\n    return _skipped_engine_result(strategy="BROWSER_HEADLESS")\n',
+        'def f():\n    return skipped_engine_result(strategy="BROWSER_HEADLESS")\n',
         "def f(s):\n    return crawl_result_from_exception(strategy=s)\n",
     ),
 )

@@ -25,7 +25,7 @@ from pydantic import ValidationError
 
 from app.admission import policy as policy_module
 from app.admission.policy import (
-    _ERROR_CODE_BY_FIELD,
+    ERROR_CODE_BY_FIELD,
     PolicyTier,
     discovery_flags,
     read_policy,
@@ -209,7 +209,7 @@ class TestErrorCodeTable:
         caller is told a policy is wrong without being told which part. Four
         fields were in that state and nothing tested it.
         """
-        assert set(CrawlPolicy.model_fields) - set(_ERROR_CODE_BY_FIELD) == set()
+        assert set(CrawlPolicy.model_fields) - set(ERROR_CODE_BY_FIELD) == set()
 
     def test_a_deeper_failure_reports_its_own_block_not_the_outer_one(self):
         """A bad ``limits.max_depth`` is a limits problem, even when a

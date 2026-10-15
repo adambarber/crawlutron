@@ -22,7 +22,7 @@ def _provider_loop_reinlines(tree: ast.AST, path: pathlib.Path) -> list[str]:
     """
     offenders: list[str] = []
     for node in nodes_of(tree):
-        if not isinstance(node, ast.AsyncFunctionDef | ast.FunctionDef) or node.name == "_collect_results":
+        if not isinstance(node, ast.AsyncFunctionDef | ast.FunctionDef) or node.name == "collect_results":
             continue
         subs = list(nodes_of(node))
         assigns_seen = any(
@@ -39,14 +39,14 @@ def _provider_loop_reinlines(tree: ast.AST, path: pathlib.Path) -> list[str]:
             for s in subs
         )
         if assigns_seen and builds_result and guards_dict:
-            offenders.append(offender_at(path, node, "dedupe loop re-inlined outside _collect_results"))
+            offenders.append(offender_at(path, node, "dedupe loop re-inlined outside collect_results"))
     return offenders
 
 
 PROVIDER_DEDUPE_LOOP_LIVES_IN_THE_COLLECTOR = Rule(
     name="provider-dedupe-loop-lives-in-the-collector",
     find=_provider_loop_reinlines,
-    summary="Use app.search.providers._collect_results",
+    summary="Use app.search.providers.collect_results",
     bite=lambda: Bites(
         # The keyed-provider copy: seen:set + isinstance(item, dict) guard + SearchResult construction in one
         # function, re-inlined off the collector.
@@ -58,7 +58,7 @@ PROVIDER_DEDUPE_LOOP_LIVES_IN_THE_COLLECTOR = Rule(
         "            continue\n"
         "        results.append(SearchResult(url=item.get('url')))\n"
         "    return results\n",
-        "dedupe loop re-inlined outside _collect_results",
+        "dedupe loop re-inlined outside collect_results",
     ),
     clean=lambda: (
         "async def search(self, query, limit, timeout_seconds):\n"

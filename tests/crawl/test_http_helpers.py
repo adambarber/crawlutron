@@ -5,7 +5,7 @@ from typing import Any
 
 import pytest
 
-from app.admission.payload_helpers import _payload_urls
+from app.admission.payload_helpers import payload_urls
 from app.admission.policy import PolicyTier, read_policy
 from app.api.render import render_options_for
 from app.config.settings import CrawlerSettings
@@ -44,20 +44,20 @@ from tests._policy_factories import canonical, make_base_policy
 class TestValidationHelpers:
     def test_payload_urls_errors(self) -> None:
         with pytest.raises(ValueError, match=r"^invalid_urls$"):
-            _payload_urls(
+            payload_urls(
                 {"urls": "notalist"},
                 host_policy=HostPolicy.unrestricted(),
             )
         with pytest.raises(ValueError, match=r"^missing_url$"):
-            _payload_urls({}, host_policy=HostPolicy.unrestricted())
-        assert _payload_urls({"url": "http://x/"}, host_policy=HostPolicy.unrestricted()) == ["http://x/"]
-        assert _payload_urls(
+            payload_urls({}, host_policy=HostPolicy.unrestricted())
+        assert payload_urls({"url": "http://x/"}, host_policy=HostPolicy.unrestricted()) == ["http://x/"]
+        assert payload_urls(
             {"urls": ["http://x/", "http://y/"]},
             host_policy=HostPolicy.unrestricted(),
         ) == ["http://x/", "http://y/"]
 
     def test_payload_urls_dedupes_exact_duplicates(self) -> None:
-        assert _payload_urls(
+        assert payload_urls(
             {"urls": ["http://x/", "http://x/", "http://y/", "http://x/"]},
             host_policy=HostPolicy.unrestricted(),
         ) == [
@@ -77,7 +77,7 @@ class TestValidationHelpers:
             "https://a.gov/y?b=2&a=1",  # param order only -> same page
             "https://a.gov/z",
         ]
-        assert _payload_urls(
+        assert payload_urls(
             {"urls": urls},
             host_policy=HostPolicy.unrestricted(),
         ) == [

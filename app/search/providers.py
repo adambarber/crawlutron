@@ -40,7 +40,7 @@ _DUCKDUCKGO_REDIRECT = "//duckduckgo.com/l/"
 
 # Result text from a search engine is untrusted; truncate titles/snippets so a
 # hostile provider cannot push unbounded strings into responses.
-_MAX_TEXT_LENGTH = 2000
+MAX_TEXT_LENGTH = 2000
 
 _DUCKDUCKGO_UA = (
     "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"
@@ -113,7 +113,7 @@ async def _provider_http(
 
 def _clip(text: str) -> str:
     text = " ".join(text.split())
-    return text if len(text) <= _MAX_TEXT_LENGTH else text[:_MAX_TEXT_LENGTH].rstrip() + "…"
+    return text if len(text) <= MAX_TEXT_LENGTH else text[:MAX_TEXT_LENGTH].rstrip() + "…"
 
 
 def _normalize_url(raw: str, *, policy: HostPolicy) -> str | None:
@@ -127,7 +127,7 @@ def _normalize_url(raw: str, *, policy: HostPolicy) -> str | None:
     return str(normalized) if normalized is not None else None
 
 
-def _collect_results(
+def collect_results(
     items: object,
     *,
     url_key: str,
@@ -276,7 +276,7 @@ class _ApiKeyProvider:
         payload = _parse_json(body)
         if status != 200:
             raise SearchProviderError(_provider_message(self.name, status, payload))
-        return _collect_results(
+        return collect_results(
             self._items_of(payload),
             url_key=self._url_key,
             title_key=self._title_key,

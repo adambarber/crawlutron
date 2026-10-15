@@ -27,7 +27,10 @@ __all__ = [
     "binary_no_text_result",
     "build_engine_result",
     "engine_result_from_exception",
+    "failed_engine_result",
     "failed_result_for",
+    "skipped_engine_result",
+    "terminal_engine_result",
 ]
 
 
@@ -81,7 +84,7 @@ def engine_result_from_exception(
     # owns classification and redaction and must not drop them silently.
     if extra_diagnostics:
         diagnostics.update(extra_diagnostics)
-    return _failed_engine_result(
+    return failed_engine_result(
         TerminalResult(
             original_url=original_url,
             normalized_url=normalized_url,
@@ -229,7 +232,7 @@ class TerminalResult:
     attempt_elapsed_ms: int = 0
 
 
-def _terminal_engine_result(result: TerminalResult, *, status: ResultStatus) -> EngineCrawlResult:
+def terminal_engine_result(result: TerminalResult, *, status: ResultStatus) -> EngineCrawlResult:
     """Construct a terminal (no payload) EngineCrawlResult with one attempt.
 
     The three terminal outcomes -- failed, blocked, skipped -- differ only in
@@ -258,10 +261,10 @@ def _terminal_engine_result(result: TerminalResult, *, status: ResultStatus) -> 
     )
 
 
-def _failed_engine_result(result: TerminalResult) -> EngineCrawlResult:
+def failed_engine_result(result: TerminalResult) -> EngineCrawlResult:
     """Construct a failed EngineCrawlResult with a single attempt.
 
-    One of two per-status names over :func:`_terminal_engine_result`, and the
+    One of two per-status names over :func:`terminal_engine_result`, and the
     duplication between them is irreducible in Python: ``status`` is
     keyword-only and must stay supplied, because ``CONTEXT_VARYING_STATUS``
     classifications legitimately need a status other than the table default, so
@@ -278,18 +281,18 @@ def _failed_engine_result(result: TerminalResult) -> EngineCrawlResult:
     checked -- and it is why a third copy of this forwarding call, inlined in
     :func:`_classify_and_build`, was the one that actually needed removing.
     """
-    return _terminal_engine_result(result, status="failed")
+    return terminal_engine_result(result, status="failed")
 
 
-def _skipped_engine_result(result: TerminalResult) -> EngineCrawlResult:
+def skipped_engine_result(result: TerminalResult) -> EngineCrawlResult:
     """Construct a skipped EngineCrawlResult (e.g., robots_disallowed).
 
-    The sibling of :func:`_failed_engine_result`; see that one for why these
+    The sibling of :func:`failed_engine_result`; see that one for why these
     two are two functions rather than one bound status.
     """
     # A skipped page never carries a final URL or an HTTP status, and the
     # shared value defaults both to None, so the forward is total.
-    return _terminal_engine_result(result, status="skipped")
+    return terminal_engine_result(result, status="skipped")
 
 
 def binary_no_text_result(

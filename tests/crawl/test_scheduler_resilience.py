@@ -207,12 +207,12 @@ class TestSchedulerFailureAccountingIsAboutStatuses:
     @staticmethod
     def _terminal(job: CrawlJob, classification: Classification):
         """A real terminal result, with its status derived by the real chokepoint."""
-        from app.orchestration.engine_result import _terminal_engine_result
+        from app.orchestration.engine_result import terminal_engine_result
         from app.vocabulary.taxonomy import status_for_classification
 
         # Status is the outer function's own keyword, not a field of the shared value: it is what the
         # per-status constructors pin, and a CONTEXT_VARYING_STATUS classification needs one the table cannot
-        return _terminal_engine_result(
+        return terminal_engine_result(
             TerminalResult(
                 original_url=job.url.raw,
                 normalized_url=job.url.raw,
@@ -275,16 +275,16 @@ class TestSchedulerFailureAccountingIsAboutStatuses:
         """
         import typing
 
-        from app.orchestration.scheduler import _STATUS_ACCOUNTING
+        from app.orchestration.scheduler import STATUS_ACCOUNTING
         from app.vocabulary.taxonomy import ResultStatus
 
         members = set(typing.get_args(ResultStatus))
         assert members, "ResultStatus must be a Literal to be checkable"
-        assert not members - set(_STATUS_ACCOUNTING), (
-            f"a ResultStatus member has no domain-health verdict: {sorted(members - set(_STATUS_ACCOUNTING))}"
+        assert not members - set(STATUS_ACCOUNTING), (
+            f"a ResultStatus member has no domain-health verdict: {sorted(members - set(STATUS_ACCOUNTING))}"
         )
-        assert not set(_STATUS_ACCOUNTING) - members, (
+        assert not set(STATUS_ACCOUNTING) - members, (
             "the accounting table names a status the taxonomy does not define: "
-            f"{sorted(set(_STATUS_ACCOUNTING) - members)}"
+            f"{sorted(set(STATUS_ACCOUNTING) - members)}"
         )
-        assert set(_STATUS_ACCOUNTING.values()) <= {"success", "failure", "none"}
+        assert set(STATUS_ACCOUNTING.values()) <= {"success", "failure", "none"}

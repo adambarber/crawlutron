@@ -24,7 +24,7 @@ _CANONICALIZER = frozenset({"NormalizedUrl", "_validated_url", "admit_or_none"})
 def _raw_batch_dedup_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
     """Flag ``dict.fromkeys`` batch dedup that keys on raw values.
 
-    The url-batch dedup at ``_payload_urls`` must collapse duplicates by
+    The url-batch dedup at ``payload_urls`` must collapse duplicates by
     admitted page identity (``NormalizedUrl`` admission) -- not the raw
     string -- or a request carrying both ``.../x`` and ``.../x/?utm_source=tw``
     crawls one page twice. Every ordered-dedup via ``dict.fromkeys`` must sit
@@ -68,11 +68,11 @@ BATCH_DEDUP_KEYS_ON_ADMITTED_IDENTITY = Rule(
         "both .../x and .../x/?utm_source=tw crawls one page twice"
     ),
     bite=lambda: Bites(
-        "def _payload_urls(payload):\n    return list(dict.fromkeys(payload['urls']))\n",
+        "def payload_urls(payload):\n    return list(dict.fromkeys(payload['urls']))\n",
         "dedups a batch with dict.fromkeys, not the canonicalizer",
     ),
     clean=lambda: (
-        "def _payload_urls(payload):\n"
+        "def payload_urls(payload):\n"
         "    return [u for u in dict.fromkeys(payload['urls']) if _validated_url(u)]\n",
     ),
 )

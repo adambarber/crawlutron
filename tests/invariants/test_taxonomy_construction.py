@@ -124,14 +124,14 @@ def test_generic_membership_detector_bites():
 
     members = literal_typed_field_members()
     assert members, "no Literal fields were enumerated; the generic sweep is a no-op"
-    bad = ast.parse('def f():\n    return _failed_engine_result(classification="totally_made_up")\n')
+    bad = ast.parse('def f():\n    return failed_engine_result(classification="totally_made_up")\n')
     hits = generic_literal_field_offenders(bad, REPO_ROOT / "app" / "_synthetic.py", members=members)
     assert len(hits) == 1 and "totally_made_up" in hits[0], hits
     # A real member literal passes.
-    good = ast.parse('def f():\n    return _failed_engine_result(classification="network_error")\n')
+    good = ast.parse('def f():\n    return failed_engine_result(classification="network_error")\n')
     assert not generic_literal_field_offenders(good, REPO_ROOT / "app" / "_synthetic.py", members=members)
     # A non-literal (the shape a correct caller writes) passes without comment.
-    var = ast.parse("def f(c):\n    return _failed_engine_result(classification=c)\n")
+    var = ast.parse("def f(c):\n    return failed_engine_result(classification=c)\n")
     assert not generic_literal_field_offenders(var, REPO_ROOT / "app" / "_synthetic.py", members=members)
 
 
@@ -143,7 +143,7 @@ def test_generic_membership_subsumes_the_per_field_detectors():
     names (``_RESULT_PRIMITIVES`` below). Three live primitives that set
     classification/status/strategy were never on it -- ``binary_no_text_result``
     (which sets all three), ``crawl_result_from_engine_result``, and
-    ``_terminal_engine_result`` -- and neither were the direct dataclass
+    ``terminal_engine_result`` -- and neither were the direct dataclass
     constructions at five sites that bypass the primitives entirely. The
     derived registry has twelve entries and is closed by construction.
 
@@ -158,10 +158,10 @@ def test_generic_membership_subsumes_the_per_field_detectors():
     assert "status" in members and "failed" in members["status"]
     # The six-name list the per-field detectors transcribed.
     transcribed = {
-        "_failed_engine_result",
+        "failed_engine_result",
         "build_engine_result",
         "engine_result_from_exception",
-        "_skipped_engine_result",
+        "skipped_engine_result",
         "crawl_result_from_exception",
         "terminal_crawl_result",
     }
@@ -171,7 +171,7 @@ def test_generic_membership_subsumes_the_per_field_detectors():
         == {
             "binary_no_text_result",
             "crawl_result_from_engine_result",
-            "_terminal_engine_result",
+            "terminal_engine_result",
         }
         | RESULT_DATACLASS_NAMES
     ), (
@@ -269,7 +269,7 @@ def test_wrong_namespace_detector_bites():
     bad = ast.parse(
         'EXTRACTION_METHOD_BINARY_NO_TEXT = "binary_no_text"\n'
         "def f():\n"
-        "    return _failed_engine_result(classification=EXTRACTION_METHOD_BINARY_NO_TEXT)\n"
+        "    return failed_engine_result(classification=EXTRACTION_METHOD_BINARY_NO_TEXT)\n"
     )
     hits = namespace_constant_offenders(bad, REPO_ROOT / "app" / "_synthetic.py", members=members)
     assert len(hits) == 1 and "EXTRACTION_METHOD_" in hits[0], hits
@@ -281,7 +281,7 @@ def test_wrong_namespace_detector_bites():
     )
     assert not namespace_constant_offenders(ok, REPO_ROOT / "app" / "_synthetic.py", members=members)
     # A parameter (what a correct caller writes) is not a constant: passes.
-    param = ast.parse("def f(cls):\n    return _failed_engine_result(classification=cls.site_error)\n")
+    param = ast.parse("def f(cls):\n    return failed_engine_result(classification=cls.site_error)\n")
     assert not namespace_constant_offenders(param, REPO_ROOT / "app" / "_synthetic.py", members=members)
 
 

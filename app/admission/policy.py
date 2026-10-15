@@ -56,7 +56,7 @@ DEFAULT_MAX_PAGES = 100
 
 # Keyed on the model's own field names (test_every_model_field_names_a_code keeps
 # it so): a field with no code reports a bare invalid_policy, not which part.
-_ERROR_CODE_BY_FIELD: dict[str, str] = {
+ERROR_CODE_BY_FIELD: dict[str, str] = {
     "schema_version": "invalid_policy",
     "strategies": "invalid_policy_strategies",
     "extraction": "invalid_policy_extraction",
@@ -213,8 +213,8 @@ def _code_for(exc: ValidationError) -> str:
                 if isinstance(detail.get("input"), str)
                 else "invalid_policy_strategies"
             )
-        elif field in _ERROR_CODE_BY_FIELD:
-            code = _ERROR_CODE_BY_FIELD[field]
+        elif field in ERROR_CODE_BY_FIELD:
+            code = ERROR_CODE_BY_FIELD[field]
         else:
             continue
         ranked.append((len(loc), code))

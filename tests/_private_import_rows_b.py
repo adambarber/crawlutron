@@ -126,22 +126,6 @@ DECLARED: dict[str, Declaration] = {
         ["test"],
     ),
     "app.models.registrable_domain._PSL": _d(_CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]),
-    "app.orchestration.scheduler._COOLDOWN_PURGE_INTERVAL": _d(
-        _CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]
-    ),
-    "app.orchestration.scheduler._MAX_COOLDOWN_WAIT": _d(
-        _CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]
-    ),
-    "app.orchestration.scheduler._STATUS_ACCOUNTING": _d(
-        _CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]
-    ),
-    "app.orchestration.scheduler._TokenBucket": _d(_PRIVATE_TYPE.kind, _PRIVATE_TYPE.reason, ["test"]),
-    "app.search.providers._MAX_TEXT_LENGTH": _d(_CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]),
-    "app.search.providers._collect_results": _d(
-        "unreviewed",
-        "Not yet triaged.\n",
-        ["test"],
-    ),
     "app.search.providers._provider_http": _d(
         "unreviewed",
         "Not yet triaged.\n",

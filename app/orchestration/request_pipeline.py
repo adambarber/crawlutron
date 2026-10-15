@@ -24,8 +24,8 @@ from app.models.result_record import ProducerEnvelope
 from app.orchestration import robots as robots_policy
 from app.orchestration.engine_result import (
     TerminalResult,
-    _skipped_engine_result,
     engine_result_from_exception,
+    skipped_engine_result,
 )
 from app.orchestration.fetch_helpers import fetch_sitemap_urls
 from app.orchestration.recursive import RECURSIVE_RAMP_MAX, _spill_write, run_recursive_crawl
@@ -206,7 +206,7 @@ async def _robots_delay(state: _PipelineState, target_url: NormalizedUrl) -> flo
 
 
 def _robots_disallowed(state: _PipelineState, job: CrawlTask) -> EngineCrawlResult:
-    return _skipped_engine_result(
+    return skipped_engine_result(
         TerminalResult(
             original_url=job.original_url,
             normalized_url=job.normalized_url,

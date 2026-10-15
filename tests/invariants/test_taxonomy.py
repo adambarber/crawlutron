@@ -50,9 +50,9 @@ def _table_shadowing_offenders(rows) -> list[str]:
 
 
 def test_the_classification_table_has_no_shadowed_or_mid_table_catch_all_rows():
-    from app.orchestration.classification import _CLASSIFICATION_BY_EXCEPTION
+    from app.orchestration.classification import CLASSIFICATION_BY_EXCEPTION
 
-    offenders = _table_shadowing_offenders(_CLASSIFICATION_BY_EXCEPTION)
+    offenders = _table_shadowing_offenders(CLASSIFICATION_BY_EXCEPTION)
     assert not offenders, (
         "the ordered table is matched first-hit-wins, so these rows can never fire "
         "or would swallow later verdicts -- order the specific rows first: " + ", ".join(offenders)
@@ -232,7 +232,7 @@ def _hand_rolled_failed_result_offenders(tree, path):
     chokepoint and the engine's two config guards (no browser worker / unknown
     strategy -- those have no exception to classify)."""
     for node in call_nodes(tree):
-        if bare_callee(node) not in ("_failed_engine_result", "build_engine_result"):
+        if bare_callee(node) not in ("failed_engine_result", "build_engine_result"):
             continue
         status = None
         for kw in node.keywords:
@@ -261,13 +261,13 @@ HAND_ROLLED_FAILED_RESULTS_GO_THROUGH_THE_CHOKEPOINT = Rule(
     excludes=SANCTIONED,
     bite=lambda: Bites(
         "def f():\n"
-        "    return _failed_engine_result(\n"
+        "    return failed_engine_result(\n"
         '        classification="network_error", error="worker_exception",\n'
         "    )\n",
         "route through engine_result_from_exception",
     ),
     clean=lambda: (
-        'def f():\n    return _failed_engine_result(\n        classification="browser_crash",\n    )\n',
+        'def f():\n    return failed_engine_result(\n        classification="browser_crash",\n    )\n',
     ),
 )
 

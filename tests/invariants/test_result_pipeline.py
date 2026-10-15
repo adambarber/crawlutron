@@ -42,10 +42,10 @@ _RESULT_BUILDERS = frozenset(
     {
         "binary_no_text_result",
         "engine_result_from_exception",
-        "_failed_engine_result",
+        "failed_engine_result",
         "build_engine_result",
-        "_skipped_engine_result",
-        "_terminal_engine_result",
+        "skipped_engine_result",
+        "terminal_engine_result",
     }
 )
 
