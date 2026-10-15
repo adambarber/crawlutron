@@ -26,23 +26,8 @@ ROUTE_ARG_UNSET = object()
 class FakeBrowserDriver:
     """A stand-in for :class:`BrowserDriver` -- a duck type, NOT a subclass.
 
-    Substituted as one object instead of the ten private ``BrowserRenderer``
-    methods this used to need rebound: the driver is the boundary the renderer
-    was missing, so a test that wants the renderer's orchestration against a
-    non-browser page now hands it a driver and says nothing else.
-
-    ``open_page`` returns the page it was constructed with -- there is no fake
-    *browser* any more, because nothing above the driver ever saw one.
-
-    It is deliberately a hand-written duck type rather than a subclass, and the
-    docstring used to call it "a real ``BrowserDriver`` collaborator", which is
-    the one description it is not: the renderer's parameter is annotated
-    ``BrowserDriver | None`` and this is not a ``BrowserDriver``, so the
-    annotation is a lie the type checker cannot see (mypy does not cover
-    ``tests/``). Anything the renderer calls that this does not implement fails
-    loudly with ``AttributeError``, which is the intended trade: a missing method
-    on the double must not read as a passing test.
-    """
+    One object instead of the ten private methods once rebound; a missing
+    method fails loudly with ``AttributeError``."""
 
     def __init__(self, page, *, harvest_timeout=0.0, on_close=None):
         self.page = page
@@ -102,10 +87,8 @@ async def _never_pdf(url):
 def _always_success(classification: str) -> ResultStatus:
     """Every page these renderers fetch classifies as rendered.
 
-    The real resolver maps a classification to the status the result carries; a
-    test about the render rather than the taxonomy would otherwise re-derive that
-    mapping, and a literal is the whole of what it needs.
-    """
+    A test about the render rather than the taxonomy would otherwise
+    re-derive the classification mapping; a literal is all it needs."""
     del classification
     return "success"
 
@@ -136,14 +119,8 @@ PINNED_PUBLIC_IP = ("http://1.2.3.4:80/", {"Host": "example.com"})
 def stub_pinned_request(pinned: tuple[str, dict[str, str]] = PINNED_PUBLIC_IP):
     """A stand-in for the off-loop pin entry, shaped like the real binding.
 
-    ``build_pinned_request_async`` is a binding produced by ``_off_loop``, not a
-    ``def``, so an arrangement that replaces it has to supply a coroutine function
-    or the call site stops being awaitable. Returning one built here -- rather
-    than a ``lambda`` at each site -- is what lets the rendered-URL tests keep
-    asserting a fixed pin: the alternative is the real resolver, which decides
-    what ``example.com`` happens to point at today and has nothing to do with the
-    pin under test.
-    """
+    The real builder is a coroutine produced by ``_off_loop``; returning one
+    built here keeps the tests on a fixed pin, not the live resolver."""
 
     async def _stub(url, headers: dict[str, str]):
         return pinned[0], {**headers, **pinned[1]}
@@ -155,9 +132,7 @@ def pinned_page_renderer(monkeypatch, page=None, *, pinned=PINNED_PUBLIC_IP):
     """A ``BrowserRenderer`` whose browser hands out `page` and pins every request.
 
     A plain :class:`BrowserFakePage` unless the test has a reason to want a
-    different one -- one that never returns from ``goto``, one that landed on
-    loopback -- in which case it passes its own.
-    """
+    different one -- e.g. one never returning from ``goto``."""
 
     page = BrowserFakePage() if page is None else page
     renderer = build_pinned_renderer(page, pin=stub_pinned_request(pinned))
@@ -269,11 +244,8 @@ def _fake_browser(html=None, text="doc", metadata=None, status="success", classi
 def ssrf_route_handler(resource_mode=None, *, include_screenshot: bool = False, pin=None):
     """The production SSRF route handler, over the unrestricted test policy.
 
-    The policy argument is the only difference between this and calling
-    ``make_ssrf_route_handler`` directly, and it is the difference that keeps
-    these tests about the blocklist rather than about the guard: a test that
-    wants the guard's own verdict builds its own handler and calls it directly.
-    """
+    The policy argument is the only difference from calling the factory
+    directly, and it keeps these tests about the blocklist, not the guard."""
     from app.transport.browser import make_ssrf_route_handler
     from app.transport.pinned_transport import build_pinned_request
     from tests._policy_factories import UNRESTRICTED_HOST_POLICY
@@ -289,11 +261,8 @@ def ssrf_route_handler(resource_mode=None, *, include_screenshot: bool = False, 
 def assert_continued(route, *, url: str | None = None) -> None:
     """The route handler continued the request, at `url` if one is named.
 
-    ``url`` is optional because the two things a continue can be wrong about are
-    independent: the decision, and which URL it continued to. Naming the
-    expected URL where there is one keeps the pinned-IP hop from being asserted
-    by a test that only meant to check the decision.
-    """
+    ``url`` is optional because the decision and the continued URL are
+    independent claims."""
     assert route.decision == "continue", route.decision
     if url is not None:
         assert route.continued_url == url, route.continued_url
@@ -308,13 +277,8 @@ async def assert_route_decision(
 ) -> None:
     """The handler must reach ``decision`` for every URL in ``urls``.
 
-    A host is on or off a blocklist by SUFFIX, so a tracking host is only proved
-    blocked when the apex form, ``www.`` and a deeper subdomain have all been
-    asked -- which is why these are lists of URLs rather than single requests.
-    The handler is passed in rather than built here so a test that varies the
-    mode or the policy says so once, at the call site, instead of the loop
-    growing a parameter per variation.
-    """
+    A host is on or off a blocklist by SUFFIX, so the apex form, ``www.`` and a
+    deeper subdomain are all asked -- hence lists, not single requests."""
     for url in urls:
         route = FakeRoute()
         await handler(route, FakeRequest(url, resource_type))
@@ -324,17 +288,8 @@ async def assert_route_decision(
 async def run_route_with_pinner(url, *, pinned=None, raises=None, resource_type="document"):
     """Run the SSRF route handler over one request with a stubbed pin rule.
 
-    The pinner is a seam the handler reaches through ``asyncio.to_thread``, so a
-    test about the guard's *verdict* substitutes it rather than resolving a real
-    host. ``pinned`` is what the stub returns and ``raises`` is what it raises
-    instead; supplying neither pins to the request's own URL with no header
-    overrides, which is the shape the https/no-Host-override case needs.
-
-    Returns the :class:`FakeRoute` the handler decided on, because the decision,
-    the continued URL and the continued headers are what each test is about --
-    and because a helper that returned only the verdict would force every caller
-    to re-derive the route object to assert the rest.
-    """
+    ``pinned`` is what the stub returns, ``raises`` what it raises instead;
+    returns the :class:`FakeRoute` the handler decided on."""
     if raises is not None:
 
         def pin(url, headers):
@@ -354,20 +309,8 @@ async def run_route_with_pinner(url, *, pinned=None, raises=None, resource_type=
 def scripted_renderer(browser, cm=None, *, sleep=None):
     """A ``BrowserRenderer`` whose browser factory hands back `browser`.
 
-    ``sleep`` is stubbed to a no-op by default because both suites that need a
-    renderer are about *what the render orchestrates*, never about how long it
-    waited; a suite that genuinely wants the delay passes its own.
-
-    ``cm`` is for the reuse assertions: a test that counts how many times the
-    context manager was entered has to be holding the one the factory returns, so
-    it passes its own. Left out, a fresh wrapper is made per acquire -- which is
-    the right default for a test that does not care.
-
-    Two suites each wrote this lambda, along with the four imports behind it, and
-    they agreed by accident. A renderer built with a real sleep made the
-    page-cap test take its cap in wall-clock, which is the one measurement it
-    explicitly is not.
-    """
+    ``sleep`` is a no-op by default; ``cm`` is for reuse assertions that
+    count context-manager entries."""
     from app.transport.browser_driver import BrowserDriver
 
     def _sleep(_seconds):
@@ -386,11 +329,7 @@ async def render_bare(renderer, url: str = "http://example.com/"):
     """One render at the empty browser profile over `renderer`, as a raw call.
 
     ``_render_with_browser`` rather than ``render``: these tests are about what
-    the browser half registers and refuses, and the public entry point is the
-    thing that decides when the pool is consulted. The empty profile and the
-    unrestricted policy are the baseline -- what is under test is what the render
-    adds to it, so those two are the same in every one of these calls.
-    """
+    the browser half registers and refuses, not the pool-consulted entry."""
     from app.models.render_options import RenderOptions
     from tests._policy_factories import UNRESTRICTED_HOST_POLICY, canonical
 
@@ -433,10 +372,8 @@ def response_handler_double(url: str, payload=None, error=None):
 async def run_blocking_document_route():
     """Drive one document route through the handler and report the resolver thread.
 
-    The pin records the thread it ran on, which is the property: a synchronous
-    resolve that runs inline stalls every other crawl in the process for the length
-    of a DNS lookup.
-    """
+    The pin records the thread it ran on: an inline resolve stalls every other
+    crawl for the length of a DNS lookup."""
     import threading
 
     from app.transport.browser import make_ssrf_route_handler
