@@ -1,20 +1,7 @@
-"""``app/admission/policy.py`` — the one read edge between a policy and the model.
+"""``app/admission/policy.py`` — the two read edges between policy and model.
 
-Two edges, deliberately not the same function: :func:`read_policy` is total
-and repairs, :func:`validate_wire_policy` is the API edge and rejects. These
-tests exist because the difference between those two is the whole design and
-nothing else in the tree states it — the repair in particular was once "give
-back the declared defaults", which is total in the formal sense and actively
-dangerous in the practical one.
-
-The defect that shaped the repair: ``read_policy`` caught ``ValidationError``
-and returned ``CrawlPolicy()``. A row with one bad field therefore came back
-with *every* field defaulted, which is the widening direction for every limit
-at once (``max_pages=0`` is unbounded for ``/v1/jobs``) and silently dropped
-fields the caller had deliberately chosen -- a narrower timeout, an explicit
-strategy chain, the browser profile. A read edge that cannot raise cannot
-report the problem, so the repair has to be right rather than loud.
-"""
+``read_policy`` is total and repairs; ``validate_wire_policy`` rejects. The
+repair is field-scoped, not a whole-policy default."""
 
 from __future__ import annotations
 
@@ -52,12 +39,8 @@ class TestReadPolicyRepairsOnlyWhatFailed:
     def test_the_fields_the_caller_got_right_survive_the_rejection(self):
         """The defect: one bad bound returned defaults for the whole policy.
 
-        Asserted as behaviour rather than as a diff, because the property is
-        the interesting part: a *narrower* stated timeout and an explicit
-        single-strategy chain both have to outlive a bad retry count, or a
-        typo silently widens the crawl instead of costing the caller the one
-        field they got wrong.
-        """
+        A narrower timeout and a chosen strategy chain both have to outlive a
+        bad retry count, or a typo widens the crawl instead of costing one field."""
         resolved = read_policy(
             {
                 "strategies": ["BROWSER_HEADLESS"],
@@ -79,10 +62,8 @@ class TestReadPolicyRepairsOnlyWhatFailed:
     def test_a_legacy_row_with_a_zero_bound_keeps_its_other_limits(self):
         """Rows the previous release persisted are inputs, not hypotheticals.
 
-        That write edge never bounded ``timeout_seconds``, so ``0`` is on disk
-        in real job rows today. The model rejects it (it is below ``ge=1``), and
-        a rejected timeout must not cost the row its depth and page bound.
-        """
+        The old write edge never bounded ``timeout_seconds``, so ``0`` is on
+        disk in real rows; a rejected timeout must not cost the other limits."""
         resolved = read_policy(
             {
                 "strategies": ["BROWSER_HEADLESS"],
@@ -96,11 +77,8 @@ class TestReadPolicyRepairsOnlyWhatFailed:
     def test_a_rejected_list_member_drops_the_whole_list(self):
         """Not the single element: removing one renumbers the rest.
 
-        ``strategies`` is an ordered execution chain, so an element dropped
-        from the middle would silently promote the next strategy into that
-        position. The list is the unit the model rejected, so it is the unit
-        that goes.
-        """
+        ``strategies`` is an ordered execution chain, so a dropped middle
+        element silently promotes the next strategy into that position."""
         resolved = read_policy(
             {
                 "strategies": ["HTTP_DECLARED_CRAWLER", "NOT_A_STRATEGY", "BROWSER_HEADLESS"],
@@ -135,10 +113,8 @@ class TestReadPolicyIsTotal:
     def test_a_limits_that_is_not_a_mapping_keeps_the_other_fields(self):
         """Wrong-shaped is not the same as unreadable.
 
-        A bad ``limits`` used to be a ``TypeError`` out of the validator, which
-        the API turned into a 500 where the caller owed a 400. It must stay a
-        field-level rejection here, so the strategy chain beside it survives.
-        """
+        A bad ``limits`` used to raise ``TypeError`` and 500; it must stay a
+        field-level rejection, so the strategy chain beside it survives."""
         resolved = read_policy({"limits": "not a mapping", "strategies": ["BROWSER_HEADLESS"]})
 
         assert [strategy.value for strategy in resolved.strategies] == ["BROWSER_HEADLESS"]
@@ -190,9 +166,7 @@ class TestValidateWirePolicyRejects:
         """ "0 means the default page budget" is a wire meaning, not a model one.
 
         The model declares ``0`` as unbounded (the whole-site runner relies on
-        it), so the absent/zero translation happens on the wire edge only --
-        otherwise the runner's own unbounded jobs would be capped.
-        """
+        it), so the absent/zero translation happens only on the wire edge."""
         assert validate_wire_policy({"limits": {}}).limits.max_pages == policy_module.DEFAULT_MAX_PAGES
         assert read_policy({"limits": {}}).limits.max_pages == 0
 
@@ -204,11 +178,8 @@ class TestErrorCodeTable:
     def test_every_model_field_names_a_code(self):
         """Gap direction is the one that bites.
 
-        A code for a field the model does not declare is unreachable; a model
-        field with no code falls through to a bare ``invalid_policy``, so the
-        caller is told a policy is wrong without being told which part. Four
-        fields were in that state and nothing tested it.
-        """
+        A model field with no code falls through to ``invalid_policy`` -- told
+        wrong without being told which part; four fields were in that state."""
         assert set(CrawlPolicy.model_fields) - set(ERROR_CODE_BY_FIELD) == set()
 
     def test_a_deeper_failure_reports_its_own_block_not_the_outer_one(self):
@@ -240,11 +211,8 @@ class TestOperatorTier:
     def test_the_tier_is_bounded_by_the_same_declaration_the_model_uses(self):
         """An operator cannot install a value a caller would be rejected for.
 
-        Otherwise the deployment is a hole in the model: a per-request bound
-        stops meaning anything for anyone who sets the env var. Read from the
-        annotation rather than a restated copy of the bound, because a second
-        copy of a number is one that will drift.
-        """
+        Otherwise the deployment is a hole in the model; the bound is read from
+        the annotation rather than a restated copy that drifts."""
         tier = self._tier(
             CRAWLUTRON_DEFAULT_TIMEOUT_SECONDS="500",
             CRAWLUTRON_DEFAULT_MAX_RETRIES="50",
@@ -254,13 +222,10 @@ class TestOperatorTier:
         assert _within_model_bounds("max_retries", tier.max_retries)
 
     def test_both_edges_resolve_the_same_omitted_limit(self):
-        """The invariant itself, as the two call sites actually make the call.
+        """The two call sites answer the same deployment with one policy.
 
-        ``read_policy`` took the settings as an optional argument, so every
-        job-path read passed nothing and answered with the model default while
-        ``/v1/crawl`` answered with the operator tier -- same deployment, same
-        policy, two different numbers, and no test comparing them.
-        """
+        The settings argument once let the job path use the model default while
+        ``/v1/crawl`` used the operator tier -- no test compared them."""
         tier = self._tier(CRAWLUTRON_DEFAULT_TIMEOUT_SECONDS="77")
         stored_row = read_policy({}, tier).model_dump()
 
@@ -284,11 +249,8 @@ class TestDiscoveryFlags:
     def test_a_rejected_discovery_block_does_not_enable_anything(self):
         """The failure mode this function exists to stop.
 
-        The block used to default every channel to on, so a row written before
-        the field existed turned on robots/sitemap/feed crawling the caller
-        never asked for. A block the model rejects must land on off, not on a
-        default that grants.
-        """
+        The block used to default every channel to on for rows written before
+        the field existed; a rejected block must land on off, not a grant."""
         resolved = read_policy({"discovery": {"not_a_channel": True}, "limits": {"max_depth": 2}})
 
         assert discovery_flags(resolved) == (False, False, False)
@@ -311,20 +273,16 @@ class TestStoredPolicy:
     def test_a_corrupt_row_stores_the_repaired_policy_not_the_corrupt_text(self):
         """What goes on disk is what the model accepts.
 
-        The pre-migration version forwarded whatever it was handed, so a row
-        the read edge would have to repair was written out again on every save
-        and the repair ran on every load instead of once.
-        """
+        The old version forwarded whatever it was handed, so the repair ran on
+        every load instead of once."""
         assert stored_policy({"limits": {"max_retries": _OVER_MAX_RETRIES}}) == CrawlPolicy().model_dump()
 
 
 def test_read_policy_does_not_call_model_validate_with_a_raw_model() -> None:
     """Guard against the total edge quietly becoming a raising one.
 
-    ``read_policy`` is called from the job runner's control loop, where an
-    exception is a crashed job rather than a rejected request. The totality is
-    the contract; this fails the day a future edit lets an exception escape.
-    """
+    ``read_policy`` runs on the job control loop, where an exception crashes
+    the job rather than the request; totality is the contract."""
     for raw in (None, 17, "text", ["a"], {"limits": "nope"}, {"limits": {"max_depth": -1}}):
         try:
             read_policy(raw)
