@@ -27,20 +27,8 @@ from tests.api.test_store_offload import _ROOT
 class TestStatusReadNeverMaterializesTheCrawl:
     """A status read must not read the pages it is only going to count.
 
-    ``GET /v1/jobs/{id}`` returns counts -- frontier/visited/results sizes, a
-    few scalars. The page history lives in two append-only tables, so those
-    counts are an index probe. But ``load`` deserializes every result payload
-    and every visited URL to build a ``CrawlJobState``, and the response then
-    throws all of it away after calling ``len()`` on it. On a long job that is
-    the entire crawl, read and JSON-decoded, per call, on the endpoint a client
-    polls while its own crawl is running.
-
-    The spy is a wrapper on the production accumulator methods, not a
-    replacement: the real reads still execute, so a pass is evidence about the
-    status path rather than about a double. It sits on the accumulator rather
-    than on ``load`` because that also catches a status read that reaches for
-    the history directly and skips ``load`` entirely.
-    """
+    Counts are index probes; a full load decodes the whole crawl. The spy
+    wraps the accumulator methods (not ``load``) so the real reads still run."""
 
     _PAGES = 200
 
@@ -79,21 +67,15 @@ class TestStatusReadNeverMaterializesTheCrawl:
     def _spying(self, seeded_store, monkeypatch):
         """``(store, job, reached)`` with the history readers already instrumented.
 
-        Every test in this class is "this read must not touch the history", so the
-        instrumentation is part of the arrangement rather than of each test. Stated
-        per test, the spy loop was the shared thing and the assertion was the
-        variable one, which is backwards.
-        """
+        Every test here asserts the same property, so the instrumentation is
+        arrangement, not test body."""
         store, job = seeded_store
         return store, job, self._spy_on_history_reads(monkeypatch, store)
 
     def test_a_full_load_still_reads_the_history(self, seeded_store, monkeypatch):
         """The guard above is only meaningful if the full read still does.
 
-        Without this the spy could be a no-op wrapper and the first test would
-        pass for the wrong reason -- a spy that never fires proves nothing
-        about the path it claims to watch.
-        """
+        Otherwise the spy could be a no-op and prove nothing about the path."""
         store, job = seeded_store
         reached = self._spy_on_history_reads(monkeypatch, store)
 
@@ -152,23 +134,17 @@ class TestStatusReadNeverMaterializesTheCrawl:
 
 
 def assert_no_history_read(reached, what: str) -> None:
-    """`what` read none of the page history, and the message says which read.
+    """``reached`` is empty and the failure names which read fired.
 
-    These are the tests that make the O(1) status projection worth having, and
-    they all fail the same way: ``reached`` is not empty. A bare ``assert reached
-    == []`` cannot say which of the three read paths regressed, and in a 2000-test
-    run "reached" alone is not enough to find the test.
-    """
+    A bare ``assert reached == []`` cannot say which path regressed."""
     assert reached == [], f"{what} materialized the crawl: {reached}"
 
 
 class TestStartupRecoveryStaysOffTheLoop:
     """Startup recovery runs inside the lifespan, so it has a loop to block.
 
-    ``recover_orphaned_running_jobs`` rewound RUNNING rows and
-    ``recover_and_start_pending_jobs`` listed every job and read each one back,
-    all synchronously, on the loop that had just finished booting the service.
-    """
+    The rewound RUNNING rows reschedule through the lifecycle; the harness
+    pins that the recovery never blocks the loop that just booted the service."""
 
     async def test_recovery_rewinds_and_starts_without_touching_the_loop(self, loop_guard_store):
         from app.api.job_runner import recover_and_start_pending_jobs
@@ -226,10 +202,8 @@ class TestSingleShotResultStoreStaysOffTheLoop:
 def _stored_response(request_id: str) -> dict:
     """The payload the result store holds for one finished crawl.
 
-    Three tests read a stored response and one writes one; each used to spell
-    the five keys out, and a copy that dropped ``policy_schema_version`` asserts
-    against a model that fills it in rather than against the stored shape.
-    """
+    One spelling keeps the four readers and writer asserting the same shape
+    (a past copy dropped ``policy_schema_version``)."""
     return {
         "request_id": request_id,
         "results": [],
@@ -242,11 +216,8 @@ def _stored_response(request_id: str) -> dict:
 async def _job_with_results_written(store, job_id: str) -> None:
     """Put a single-shot job into the state the runner passes through mid-flight.
 
-    ``run_async_crawl`` persists ``job.results`` and only then flips the status
-    to ``COMPLETED``, so this is a state a real job genuinely occupies, not a
-    contrived one. Both halves of the status contract need it, and spelling it
-    out twice is how the two tests would drift into testing different things.
-    """
+    ``run_async_crawl`` persists results before the terminal write, so both
+    halves of the status contract need this shared arrangement."""
     await _off_loop(store.set_status, job_id, JobStatus.RUNNING, expected=JobStatus.PENDING)
     job = await _off_loop(store.load, job_id)
     job.results = [_stored_response(job_id)]
@@ -257,10 +228,7 @@ class TestStatusEndpointAnswersOnlyForTerminalJobs:
     """A 200 from ``GET /v1/crawl/{request_id}`` means the job is finished.
 
     An endpoint keyed on results alone answers 200 inside the gap between the
-    runner's two writes, and a client that polls to 200 and then reads the job
-    store finds a job still marked ``running`` -- told the crawl was done, and
-    handed one that had not stopped.
-    """
+    runner's two writes, and the client would read a job still marked running."""
 
     async def test_a_running_job_that_has_written_results_is_still_pending(
         self, loop_guard_store, result_store
@@ -277,15 +245,10 @@ class TestStatusEndpointAnswersOnlyForTerminalJobs:
     async def test_a_stored_result_does_not_answer_200_for_a_running_job(
         self, loop_guard_store, result_store
     ):
-        """The result store cannot be the thing that decides the answer.
+        """The result store cannot decide the answer.
 
-        ``run_async_crawl`` publishes to the result store *after* its terminal
-        status write, but that write is a compare-and-set whose result it does
-        not check: a job paused between the two is published anyway. Keyed on
-        the store alone -- which is what the endpoint's first branch does --
-        that job answers 200 while the job store still says ``running``. That
-        is the failure this class exists to prevent, reached by the other door.
-        """
+        The runner's terminal write is an unchecked CAS, so a paused job is
+        published anyway; keyed on the store alone the endpoint answers 200."""
         from app.api.crawl_endpoint import get_crawl_result
 
         await _off_loop(loop_guard_store.create_single_shot, "req-5", _ROOT, {"strategies": []})
@@ -299,12 +262,8 @@ class TestStatusEndpointAnswersOnlyForTerminalJobs:
     async def test_a_stored_result_does_not_answer_200_for_a_paused_job(self, loop_guard_store, result_store):
         """The reachable form of the same hole: pause wins the race, publish loses it.
 
-        ``pause_job`` compare-and-sets from ``RUNNING``, and ``run_async_crawl``
-        compare-and-sets to ``COMPLETED`` from ``RUNNING``. Whichever lands
-        first wins; when pause does, the runner's terminal write fails and the
-        payload is still published. A paused job is stopped, not finished, so
-        the answer is still 202.
-        """
+        Both transitions compare-and-set from ``RUNNING``; whichever lands
+        first wins, and a paused job is stopped, not finished (so 202)."""
         from app.api.crawl_endpoint import get_crawl_result
 
         await _off_loop(loop_guard_store.create_single_shot, "req-6", _ROOT, {"strategies": []})
@@ -345,13 +304,8 @@ class TestStatusEndpointAnswersOnlyForTerminalJobs:
 async def _await_terminal_status(store: JobStore, job_id: str) -> str:
     """Poll the status off-loop until it is terminal.
 
-    The store forbids on-loop reads, so the harness cannot use the edge-driven
-    ``_wait_status`` (it reads on the loop). The bound here is the same hang
-    guard the job harness documents; a job that is progressing reaches a
-    terminal status on its own, and one that is not should fail loudly.
-    Callers assert which terminal status they wanted -- the set is only what
-    ends the wait, so it is read from the enum rather than restated here.
-    """
+    The store forbids on-loop reads, so the hang-guarded poll reads the
+    terminal set from the enum rather than restating it."""
     for _ in range(int(30.0 / 0.005)):
         job = await _off_loop(store.load, job_id)
         if job is not None and job.status in TERMINAL_STATUSES:
@@ -378,9 +332,8 @@ def test_the_guard_itself_bites():
 def _sync_surface(store_class: type) -> set[str]:
     """The store's public SYNCHRONOUS methods -- the ones the guard must cover.
 
-    The ``a``-prefixed twins are excluded deliberately: they are the compliant
-    path, and covering them would be covering the fix instead of the hazard.
-    """
+    The ``a``-prefixed twins are the compliant path; covering them would be
+    covering the fix instead of the hazard."""
     return {
         name
         for name in dir(store_class)
@@ -393,10 +346,8 @@ def _sync_surface(store_class: type) -> set[str]:
 def test_the_stores_live_where_the_guard_expects() -> None:
     """The guard overrides the methods the twins delegate to.
 
-    If a store method is renamed, the guard silently stops covering it and
-    these tests keep passing while the production path regresses. Assert the
-    override set against the store's own public surface instead.
-    """
+    If a store method is renamed the guard silently stops covering it; assert
+    the override set against the store's own public surface instead."""
     guarded = {
         name
         for name, value in vars(LoopGuardJobStore).items()
