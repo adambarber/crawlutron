@@ -1,11 +1,9 @@
 """Agent hints discovery endpoint."""
 
-from typing import Any
-
 from fastapi import APIRouter
 
 from app.api.policy_defaults import BROWSER_FALLBACK_POLICY, DOCUMENT_EXTRACTION_POLICY
-from app.models.agent_hints_response import AgentHintsResponse
+from app.models.agent_hints_response import AgentHintsPayload, AgentHintsResponse
 from app.models.crawl_extraction_method import CrawlExtractionMethod
 from app.models.crawl_strategy import CrawlStrategy
 from app.vocabulary.extraction import EXTRACTION_TRAFILATURA
@@ -79,7 +77,7 @@ GUIDANCE = [
     "Keep Chonkie downstream of extracted text rather than part of retrieval strategy selection.",
 ]
 
-EXAMPLE_POLICIES = {
+EXAMPLE_POLICIES: dict[str, object] = {
     "browser_fallback": BROWSER_FALLBACK_POLICY,
     "document_extraction": DOCUMENT_EXTRACTION_POLICY,
     "trafilatura_only": {
@@ -102,7 +100,7 @@ EXAMPLE_POLICIES = {
 }
 
 
-def agent_hints_payload() -> dict[str, Any]:
+def agent_hints_payload() -> AgentHintsPayload:
     return {
         "service": SERVICE_ID,
         "strategies": {
@@ -119,7 +117,7 @@ def create_agent_hints_router() -> APIRouter:
     router = APIRouter(tags=["Discovery"])
 
     @router.get("/v1/agent-hints", response_model=AgentHintsResponse)
-    async def agent_hints() -> dict[str, Any]:
+    async def agent_hints() -> AgentHintsPayload:
         """Provide crawler guidance for agents."""
         return agent_hints_payload()
 

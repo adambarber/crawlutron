@@ -1,12 +1,10 @@
 """Capabilities discovery endpoint."""
 
-from typing import Any
-
 from fastapi import APIRouter, Depends
 
 from app.api.dependencies import get_settings
 from app.config.settings import CrawlerSettings
-from app.models.capabilities_response import CapabilitiesResponse
+from app.models.capabilities_response import CapabilitiesPayload, CapabilitiesResponse
 from app.models.crawl_extraction_method import CrawlExtractionMethod
 from app.models.crawl_strategy import CrawlStrategy
 from app.models.service_identity import SERVICE_IDENTITY
@@ -43,9 +41,11 @@ OUTPUT_FIELDS = [
 ]
 
 
-def capabilities_payload(settings: CrawlerSettings) -> dict[str, Any]:
+def capabilities_payload(settings: CrawlerSettings) -> CapabilitiesPayload:
     return {
-        **SERVICE_IDENTITY,
+        "service": SERVICE_IDENTITY["service"],
+        "version": SERVICE_IDENTITY["version"],
+        "policy_schema_version": SERVICE_IDENTITY["policy_schema_version"],
         "supported_strategies": [strategy.value for strategy in CrawlStrategy],
         "supported_extractions": [method.value for method in CrawlExtractionMethod],
         "supported_classifications": [classification.value for classification in CrawlClassification],
@@ -128,7 +128,7 @@ def create_capabilities_router() -> APIRouter:
     router = APIRouter(tags=["Discovery"])
 
     @router.get("/v1/capabilities", response_model=CapabilitiesResponse)
-    async def capabilities(settings: CrawlerSettings = Depends(get_settings)) -> dict[str, Any]:
+    async def capabilities(settings: CrawlerSettings = Depends(get_settings)) -> CapabilitiesPayload:
         """Describe crawler capabilities."""
         return capabilities_payload(settings)
 

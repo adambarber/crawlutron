@@ -15,6 +15,7 @@ from app.config.settings import CrawlerSettings
 from app.models.discovery_config import DiscoveryConfig
 from app.models.host_policy import HostPolicy
 from app.models.map_request import MapRequest
+from app.models.site_map_response import SiteMapPayload
 from app.vocabulary.limits import MAX_DISCOVERED_LINKS
 
 logger = logging.getLogger(__name__)
@@ -24,7 +25,7 @@ async def map_site(
     payload: MapRequest,
     settings=None,  # injected via Depends(get_settings)
     shutdown_event: asyncio.Event | None = None,  # injected via Depends(get_shutdown_event)
-) -> dict:
+) -> SiteMapPayload:
     """Map ``payload.root_url`` to its discovered-link frontier."""
     with request_gate("map_request_rejected", logger=logger):
         # Built on the model, not the dumped dict: the dict was the last place a policy

@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import json
 import logging
-from collections.abc import Awaitable, Callable, Collection
+from collections.abc import Awaitable, Callable, Collection, Mapping
 from dataclasses import dataclass
 from enum import StrEnum, auto
 from typing import Any
@@ -117,12 +117,12 @@ def _tool_error(error: HTTPException | ValueError) -> ToolResult:
     return ToolResult(text=message, is_error=True)
 
 
-def _tool_success(value: BaseModel | dict[str, Any]) -> ToolResult:
+def _tool_success(value: BaseModel | Mapping[str, object]) -> ToolResult:
     dump = value.model_dump() if isinstance(value, BaseModel) else value
     return ToolResult(text=json.dumps(dump, default=json_default), structured=dump)
 
 
-async def _tool_result(coro: Awaitable[BaseModel | dict[str, Any]]) -> ToolResult:
+async def _tool_result(coro: Awaitable[BaseModel | Mapping[str, object]]) -> ToolResult:
     """Cross the MCP boundary for one tool call: run it, or report it as an error.
 
     Every handler does the same two things -- await the endpoint, and turn an

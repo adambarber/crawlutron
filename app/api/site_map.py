@@ -10,15 +10,14 @@ the frontier (e.g. to drive their own recursive crawl or sitemap generation).
 
 from __future__ import annotations
 
-from typing import Any
-
 from app.api.response_shaping import frontier_link_url
 from app.models.host_policy import HostPolicy
 from app.models.normalized_url import admit_or_none
 from app.models.result_record import ProducerEnvelope
+from app.models.site_map_response import SiteMapPayload
 
 
-def build_site_map(crawl_response: ProducerEnvelope, *, host_policy: HostPolicy) -> dict[str, Any]:
+def build_site_map(crawl_response: ProducerEnvelope, *, host_policy: HostPolicy) -> SiteMapPayload:
     """Aggregate discovered URLs from a crawl response into a site map.
 
     Returns a dict with:

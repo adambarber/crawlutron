@@ -1,8 +1,18 @@
 from __future__ import annotations
 
-from typing import Annotated
+from typing import Annotated, TypedDict
 
 from pydantic import BaseModel, Field
+
+
+class SiteMapPayload(TypedDict):
+    """The raw site-map record, before pydantic validation."""
+
+    url: str | None
+    links: list[str]
+    sitemaps: list[str]
+    feeds: list[str]
+    all_urls: list[str]
 
 
 class SiteMapResponse(BaseModel):
