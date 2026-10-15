@@ -7,7 +7,7 @@ import pytest
 
 from app.admission.payload_helpers import _payload_urls
 from app.admission.policy import PolicyTier, read_policy
-from app.api.render import _render_options
+from app.api.render import render_options_for
 from app.config.settings import CrawlerSettings
 from app.extraction.document_text import format_extracted_document_text
 from app.extraction.trees import FrameCollector, frames_from, walkable
@@ -88,7 +88,7 @@ class TestValidationHelpers:
 
     def test_render_options_error(self) -> None:
         with pytest.raises(ValueError, match=r"^invalid_options$"):
-            _render_options({"options": "bad"}, CrawlerSettings.from_mapping())
+            render_options_for({"options": "bad"}, CrawlerSettings.from_mapping())
 
     def test_payload_policy_errors(self) -> None:
         tier = PolicyTier.model_defaults()

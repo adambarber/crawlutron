@@ -7,7 +7,7 @@ import pytest
 
 from app.extraction.output_formats import (
     SUPPORTED_OUTPUT_FORMATS,
-    _csv_neutralize,
+    csv_neutralize,
     serialize_results,
 )
 
@@ -109,30 +109,30 @@ def test_unsupported_format_raises():
 
 class TestOutputFormatDefaults:
     def test_output_formats_default_with_dict(self):
-        from app.extraction.output_formats import _default
+        from app.extraction.output_formats import jsonify
 
         # Object with model_dump method
         class FakeObj:
             def model_dump(self):
                 return {"serialized": "true"}
 
-        result = _default(FakeObj())
+        result = jsonify(FakeObj())
         assert result == {"serialized": "true"}
 
     def test_output_formats_default_dict_method(self):
-        from app.extraction.output_formats import _default
+        from app.extraction.output_formats import jsonify
 
         class DictObj:
             def dict(self):
                 return {"from_dict": "value"}
 
-        result = _default(DictObj())
+        result = jsonify(DictObj())
         assert result == {"from_dict": "value"}
 
     def test_output_formats_default_str_fallback(self):
-        from app.extraction.output_formats import _default
+        from app.extraction.output_formats import jsonify
 
-        result = _default(42)
+        result = jsonify(42)
         assert result == "42"
 
 
@@ -147,62 +147,62 @@ class TestOutputFormatSerialization:
 
 class TestOutputFormatSafeCoercion:
     def test_output_formats_safe_json(self):
-        from app.extraction.output_formats import _safe
+        from app.extraction.output_formats import safe_value
 
         val = {"nested": [1, 2, 3]}
-        result = _safe(val)
+        result = safe_value(val)
         assert isinstance(result, str)
 
     def test_output_formats_safe_none(self):
-        from app.extraction.output_formats import _safe
+        from app.extraction.output_formats import safe_value
 
-        result = _safe(None)
+        result = safe_value(None)
         assert result == ""
 
     def test_output_formats_safe_string(self):
-        from app.extraction.output_formats import _safe
+        from app.extraction.output_formats import safe_value
 
-        result = _safe("hello")
+        result = safe_value("hello")
         assert result == "hello"
 
     def test_output_formats_safe_int(self):
-        from app.extraction.output_formats import _safe
+        from app.extraction.output_formats import safe_value
 
-        result = _safe(42)
+        result = safe_value(42)
         assert result == "42"
 
 
 def test_csv_neutralize_quotes_equals_prefix():
     """= prefix is the most common formula trigger; must be quoted."""
-    assert _csv_neutralize("=cmd|'/c calc'!A1", "error") == "'=cmd|'/c calc'!A1"
+    assert csv_neutralize("=cmd|'/c calc'!A1", "error") == "'=cmd|'/c calc'!A1"
 
 
 def test_csv_neutralize_handles_all_dangerous_prefixes():
     for prefix in ("+", "-", "@"):
         value = f"{prefix}payload"
-        assert _csv_neutralize(value, "error") == f"'{value}"
+        assert csv_neutralize(value, "error") == f"'{value}"
     # TAB and CR are also dangerous; the literal-escape strings we pass.
     for prefix in ("\t", "\r"):
         value = f"{prefix}payload"
-        assert _csv_neutralize(value, "error") == f"'{value}"
+        assert csv_neutralize(value, "error") == f"'{value}"
 
 
 def test_csv_neutralize_passes_safe_values():
     """Plain text and non-prefixed values must be returned unchanged."""
-    assert _csv_neutralize("plain text", "error") == "plain text"
-    assert _csv_neutralize("404 not found", "error") == "404 not found"
-    assert _csv_neutralize("see https://x/?q=test", "error") == "see https://x/?q=test"
+    assert csv_neutralize("plain text", "error") == "plain text"
+    assert csv_neutralize("404 not found", "error") == "404 not found"
+    assert csv_neutralize("see https://x/?q=test", "error") == "see https://x/?q=test"
 
 
 def test_csv_neutralize_skips_non_neutralized_columns():
     """URL columns are returned unchanged so existing analyses still work."""
-    assert _csv_neutralize("=foo", "original_url") == "=foo"
-    assert _csv_neutralize("=foo", "normalized_url") == "=foo"
-    assert _csv_neutralize("=foo", "final_url") == "=foo"
+    assert csv_neutralize("=foo", "original_url") == "=foo"
+    assert csv_neutralize("=foo", "normalized_url") == "=foo"
+    assert csv_neutralize("=foo", "final_url") == "=foo"
 
 
 def test_csv_neutralize_handles_empty_value():
-    assert _csv_neutralize("", "error") == ""
+    assert csv_neutralize("", "error") == ""
 
 
 def test_serialize_results_csv_neutralizes_attacker_content():
@@ -231,14 +231,14 @@ class TestOutputFormatsEdges:
     """Cover remaining branches in output_formats.py"""
 
     def test_serialize_default_fallback(self):
-        from app.extraction.output_formats import _default
+        from app.extraction.output_formats import jsonify
 
         class CustomObj:
             def __init__(self):
                 self.attr = "value"
 
         obj = CustomObj()
-        result = _default(obj)
+        result = jsonify(obj)
         assert result == {"attr": "value"}
 
     # One body per shape, named once.

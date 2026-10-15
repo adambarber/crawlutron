@@ -33,7 +33,7 @@ from app.orchestration.worker import call_worker
 from app.storage.ids import new_request_id
 
 
-def _render_options(payload: dict[str, Any], settings: CrawlerSettings) -> RenderOptions:
+def render_options_for(payload: dict[str, Any], settings: CrawlerSettings) -> RenderOptions:
     options = payload.get("options") or {}
     if not isinstance(options, dict):
         raise ValueError("invalid_options")
@@ -84,7 +84,7 @@ async def render_request(
     )
     urls = [NormalizedUrl(u, policy=host_policy) for u in submitted]
 
-    options = _render_options(payload, active_settings)
+    options = render_options_for(payload, active_settings)
     started = time.monotonic()
     jobs: list[CrawlJob] = []
 
@@ -183,4 +183,4 @@ async def render_request(
     return response
 
 
-__all__ = ["_render_options", "render_request"]
+__all__ = ["render_options_for", "render_request"]

@@ -43,7 +43,8 @@ _OWNER_PUBLIC_SURFACE_RATCHET = {
     # registrable_domain
     "app/safety/validation.py": (2, 2),
     "app/config/env.py": (7, 5),
-    "app/api/response_shaping.py": (6, 5),
+    # RAISED to (7, 6): failed_unified_result is the single failure projection.
+    "app/api/response_shaping.py": (7, 6),
     "app/api/unified_shaping.py": (5, 5),
     "app/storage/sqlite_store.py": (9, 7),
     "app/safety/safe_regex.py": (7, 2),

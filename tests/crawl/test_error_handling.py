@@ -235,10 +235,10 @@ class TestShapeAllGuardsPerItem:
 
     def test_fallback_status_and_classification_agree(self):
         # The fallback hardcodes status="failed" and picks the classification independently.
-        from app.api.response_shaping import _failed_unified_result
+        from app.api.response_shaping import failed_unified_result
         from app.vocabulary.taxonomy import status_for_classification
 
-        result = _failed_unified_result({"normalized_url": "https://example.org/a"})
+        result = failed_unified_result({"normalized_url": "https://example.org/a"})
         assert status_for_classification(result.classification) == result.status
 
 

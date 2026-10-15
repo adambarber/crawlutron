@@ -162,7 +162,7 @@ def _shape_all[ResultT: AnyResult](
                 "response shaping failed for one item; degrading it to a terminal failure",
                 exc_info=True,
             )
-            shaped.append(_failed_unified_result(item))
+            shaped.append(failed_unified_result(item))
     return shaped
 
 
@@ -195,7 +195,7 @@ def _peek_failed_fields(item: Any) -> dict[str, Any]:
         return {}
 
 
-def _failed_unified_result(item: Any) -> UnifiedCrawlResult:
+def failed_unified_result(item: Any) -> UnifiedCrawlResult:
     """A shape failure becomes a terminal failure for that item, not the batch.
 
     Mirrors the job runner's semantics (``failed += 1`` on a dropped item).
@@ -311,6 +311,7 @@ async def arender_response_from_result(result: RenderEnvelope) -> UnifiedCrawlRe
 __all__ = [
     "EnvelopeOptions",
     "abuild_unified_crawl_response",
+    "failed_unified_result",
     "arender_response_from_result",
     "aunified_response_from_result",
     "build_unified_crawl_response",

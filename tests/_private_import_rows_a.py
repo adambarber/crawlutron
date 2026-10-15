@@ -30,26 +30,6 @@ DECLARED: dict[str, Declaration] = {
         ["test"],
     ),
     "app.api.job_lifecycle._tasks": _d(_CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]),
-    "app.api.main_helpers._build_job_status": _d(
-        "unreviewed",
-        "Not yet triaged.\n",
-        ["test"],
-    ),
-    "app.api.render._render_options": _d(
-        "unreviewed",
-        "Not yet triaged.\n",
-        ["test"],
-    ),
-    "app.api.response_shaping._failed_unified_result": _d(
-        "unreviewed",
-        "Not yet triaged.\n",
-        ["test"],
-    ),
-    "app.api.webhooks._max_webhook_size": _d(
-        "unreviewed",
-        "Not yet triaged.\n",
-        ["test"],
-    ),
     "app.extraction.classify._strip_html_noise": _d(
         "unreviewed",
         "Not yet triaged.\n",

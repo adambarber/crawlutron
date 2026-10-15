@@ -16,7 +16,7 @@ from app.admission.payload_helpers import checked_payload_urls
 from app.api import job_runner
 from app.api.dependencies import JobStoreDep, SettingsDep, ShutdownEventDep
 from app.api.exceptions import http_error, validation_http_error
-from app.api.main_helpers import _build_job_status
+from app.api.main_helpers import build_job_status
 from app.models.error_response import ErrorResponse
 from app.models.host_policy import HostPolicy
 from app.models.job_control_request import JobControlRequest
@@ -89,7 +89,7 @@ async def create_job(
 )
 async def list_jobs(job_store: JobStoreDep) -> JobListResponse:
     jobs = await job_store.alist_jobs()
-    return JobListResponse(jobs=[_build_job_status(row) for row in jobs])
+    return JobListResponse(jobs=[build_job_status(row) for row in jobs])
 
 
 @router.get(
@@ -105,7 +105,7 @@ async def get_job(job_id: str, job_store: JobStoreDep) -> JobStatusResponse:
     row = await job_store.astatus(job_id)
     if row is None:
         _raise_not_found(job_id)
-    return _build_job_status(row)
+    return build_job_status(row)
 
 
 # The same provider triple as create_job, deliberately: the equality is verified
@@ -152,7 +152,7 @@ async def control_job(
     row = await job_store.astatus(job_id)
     # `aexists` above established the row, and the control path only reads it.
     row = cast("JobStatusView", row)
-    return _build_job_status(row)
+    return build_job_status(row)
 
 
 @router.delete(

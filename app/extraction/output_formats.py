@@ -11,7 +11,7 @@ underlying data shape:
 * ``csv``      -> flat tabular view of the most useful columns
 
 All serializers are pure and JSON-safe (pydantic models and arbitrary objects
-are reduced to dicts/strings via ``_default``).
+are reduced to dicts/strings via ``jsonify``).
 
 This module owns the vocabulary. ``OutputFormat`` is the only place the set is
 written out -- ``Literal`` cannot be built from a runtime tuple -- and
@@ -36,16 +36,16 @@ OutputFormat = Literal["json", "jsonl", "ndjson", "markdown", "csv"]
 SUPPORTED_OUTPUT_FORMATS: tuple[str, ...] = get_args(OutputFormat)
 
 
-def _default(obj: Any) -> Any:
+def jsonify(obj: Any) -> Any:
     """Output fallback -- now the shared app.safety.json_safe chokepoint."""
     from app.safety.json_safe import json_default
 
     return json_default(obj)
 
 
-def _safe(val: Any) -> str:
+def safe_value(val: Any) -> str:
     if isinstance(val, (dict, list)):
-        return json.dumps(val, ensure_ascii=False, default=_default)
+        return json.dumps(val, ensure_ascii=False, default=jsonify)
     return "" if val is None else str(val)
 
 
@@ -59,11 +59,11 @@ def serialize_results(results: list[dict[str, Any]], fmt: str | None) -> tuple[s
         raise ValueError(f"unsupported_output_format: {fmt}")
     if fmt == "json":
         return (
-            json.dumps(results, ensure_ascii=False, indent=2, default=_default),
+            json.dumps(results, ensure_ascii=False, indent=2, default=jsonify),
             "application/json",
         )
     if fmt in ("jsonl", "ndjson"):
-        lines = [json.dumps(r, ensure_ascii=False, default=_default) for r in results]
+        lines = [json.dumps(r, ensure_ascii=False, default=jsonify) for r in results]
         return "\n".join(lines), "application/x-ndjson"
     if fmt == "markdown":
         return _to_markdown(results), "text/markdown; charset=utf-8"
@@ -76,22 +76,22 @@ def _to_markdown(results: list[dict[str, Any]]) -> str:
     sections: list[str] = []
     for r in results:
         url = r.get("final_url") or r.get("normalized_url") or r.get("original_url") or "unknown"
-        lines = [f"# {_safe(url)}", ""]
-        lines.append(f"- status: {_safe(r.get('status'))}")
-        lines.append(f"- classification: {_safe(r.get('classification'))}")
-        lines.append(f"- selected_strategy: {_safe(r.get('selected_strategy'))}")
-        lines.append(f"- quality_score: {_safe(r.get('quality_score'))}")
+        lines = [f"# {safe_value(url)}", ""]
+        lines.append(f"- status: {safe_value(r.get('status'))}")
+        lines.append(f"- classification: {safe_value(r.get('classification'))}")
+        lines.append(f"- selected_strategy: {safe_value(r.get('selected_strategy'))}")
+        lines.append(f"- quality_score: {safe_value(r.get('quality_score'))}")
         if r.get("error"):
-            lines.append(f"- error: {_safe(r.get('error'))}")
+            lines.append(f"- error: {safe_value(r.get('error'))}")
         md = r.get("markdown")
         if md:
             lines.append("")
             lines.append("## Content")
             lines.append("")
-            lines.append(_safe(md))
+            lines.append(safe_value(md))
         lines.append("")
         lines.append("```json")
-        lines.append(json.dumps(r, ensure_ascii=False, indent=2, default=_default))
+        lines.append(json.dumps(r, ensure_ascii=False, indent=2, default=jsonify))
         lines.append("```")
         lines.append("")
         sections.append("\n".join(lines))
@@ -114,17 +114,17 @@ _CSV_COLUMNS = [
 # CSV/Excel formula injection guard (#csv-injection): spreadsheets execute cells
 # starting with one of ``= + - @`` (or TAB / CR); a leading quote neutralizes them.
 _CSV_FORMULA_PREFIXES: tuple[str, ...] = ("=", "+", "-", "@", "\t", "\r")
-_CSV_NEUTRALIZE_COLUMNS: set[str] = {"error", "classification", "status"}
+CSV_NEUTRALIZE_COLUMNS: set[str] = {"error", "classification", "status"}
 
 
-def _csv_neutralize(value: str, column: str) -> str:
+def csv_neutralize(value: str, column: str) -> str:
     """Escape a CSV cell that might trigger formula execution in a spreadsheet.
 
     Only columns that flow attacker-controlled page content are neutralized
     (per-column allowlist); URLs and numeric columns are returned unchanged
     so existing analyses still work.
     """
-    if column not in _CSV_NEUTRALIZE_COLUMNS or not value:
+    if column not in CSV_NEUTRALIZE_COLUMNS or not value:
         return value
     if value[0] in _CSV_FORMULA_PREFIXES:
         # Leading single-quote neutralizes formulas in Excel/Sheets/Numbers
@@ -140,7 +140,7 @@ def _to_csv(results: list[dict[str, Any]]) -> str:
     for r in results:
         row: dict[str, str] = {}
         for c in _CSV_COLUMNS:
-            value = _safe(r.get(c))
-            row[c] = _csv_neutralize(value, c)
+            value = safe_value(r.get(c))
+            row[c] = csv_neutralize(value, c)
         writer.writerow(row)
     return buf.getvalue()

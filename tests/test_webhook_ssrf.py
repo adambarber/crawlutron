@@ -95,11 +95,11 @@ class TestWebhookDeliveryPinning:
         bounded_io cap and survive an oversized body without raising."""
         import logging
 
-        from app.api.webhooks import _max_webhook_size, deliver_pinned_webhook
+        from app.api.webhooks import deliver_pinned_webhook, max_webhook_size
 
         # ``host_resolves_to`` also stands the private-target escape hatch down, so the rejection this test
         # wants is the policy's answer and not an accident of what the machine's resolver returned.
-        big_body = b"x" * (_max_webhook_size() + 1)
+        big_body = b"x" * (max_webhook_size() + 1)
         delivered = record_webhook_delivery(monkeypatch, body=big_body)
         with host_resolves_to(monkeypatch, "8.8.8.8"):
             with caplog.at_level(logging.WARNING, logger="app.api.webhooks"):
@@ -121,15 +121,15 @@ def test_webhook_size_cap_honors_a_live_env_override(monkeypatch):
     from app.api import webhooks
 
     monkeypatch.setenv("CRAWLUTRON_MAX_WEBHOOK_SIZE", "1234")
-    assert webhooks._max_webhook_size() == 1234, "the override was not honored"
+    assert webhooks.max_webhook_size() == 1234, "the override was not honored"
 
     # A later change to the same env var is reflected without a reload.
     monkeypatch.setenv("CRAWLUTRON_MAX_WEBHOOK_SIZE", "4321")
-    assert webhooks._max_webhook_size() == 4321, "a cached value shadowed the new override"
+    assert webhooks.max_webhook_size() == 4321, "a cached value shadowed the new override"
 
     # Removing the override restores the default, not a stale cached value.
     monkeypatch.delenv("CRAWLUTRON_MAX_WEBHOOK_SIZE")
-    assert webhooks._max_webhook_size() == 10_485_760
+    assert webhooks.max_webhook_size() == 10_485_760
 
 
 def test_webhook_size_cap_keeps_the_unit_floor(monkeypatch):
@@ -138,7 +138,7 @@ def test_webhook_size_cap_keeps_the_unit_floor(monkeypatch):
     from app.api import webhooks
 
     monkeypatch.setenv("CRAWLUTRON_MAX_WEBHOOK_SIZE", "0")
-    assert webhooks._max_webhook_size() == 1
+    assert webhooks.max_webhook_size() == 1
 
     monkeypatch.setenv("CRAWLUTRON_MAX_WEBHOOK_SIZE", "not-an-int")
-    assert webhooks._max_webhook_size() == 10_485_760, "a garbage value must fall back, not raise"
+    assert webhooks.max_webhook_size() == 10_485_760, "a garbage value must fall back, not raise"

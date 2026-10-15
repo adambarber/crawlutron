@@ -20,7 +20,7 @@ from app.runtime.metrics import get_metrics
 from app.storage.job_store import JobStatusView
 
 
-def _build_job_status(view: JobStatusView) -> JobStatusResponse:
+def build_job_status(view: JobStatusView) -> JobStatusResponse:
     """Build a JobStatusResponse from a store status view.
 
     Takes the view rather than a ``CrawlJobState`` so the counts come from the
@@ -90,4 +90,4 @@ def request_gate(
         readiness_state.end_request()
 
 
-__all__ = ["_build_job_status", "record_crawl_completion", "request_gate"]
+__all__ = ["build_job_status", "record_crawl_completion", "request_gate"]

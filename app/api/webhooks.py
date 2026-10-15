@@ -76,11 +76,11 @@ async def deliver_pinned_webhook(
             try:
                 # The webhook RESPONSE is attacker-controlled: drain it through
                 # the bounded_io cap instead of buffering it in RAM.
-                await read_capped_async(response.aiter_bytes(), _max_webhook_size())
+                await read_capped_async(response.aiter_bytes(), max_webhook_size())
             except BodyTooLarge:
                 logger.warning(
                     "webhook_response_too_large",
-                    extra={"limit_bytes": _max_webhook_size()},
+                    extra={"limit_bytes": max_webhook_size()},
                 )
 
 
@@ -99,7 +99,7 @@ def _parse_webhook_size(raw: str | None) -> int:
     return get_mapping_int(mapping, "CRAWLUTRON_MAX_WEBHOOK_SIZE", _WEBHOOK_SIZE_DEFAULT, lo=1)
 
 
-def _max_webhook_size() -> int:
+def max_webhook_size() -> int:
     """The outbound webhook payload/response size cap.
 
     Read 2-3 times per delivery, this used to re-read and re-parse
@@ -132,7 +132,7 @@ async def post_webhook(
     here: ``json.dumps`` serializes a dict, and a ``Mapping`` need not be one.
     """
     payload_bytes = json.dumps(dict(payload)).encode("utf-8")
-    if len(payload_bytes) > _max_webhook_size():
+    if len(payload_bytes) > max_webhook_size():
         logger.warning(
             "webhook_payload_too_large",
             extra={"url": webhook_url, "size": len(payload_bytes)},
@@ -189,6 +189,7 @@ async def validate_webhook_url_async(webhook_url: str, *, host_policy: HostPolic
 
 __all__ = [
     "deliver_pinned_webhook",
+    "max_webhook_size",
     "post_webhook",
     "validate_webhook_url",
     "validate_webhook_url_async",

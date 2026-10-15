@@ -35,7 +35,7 @@ from app.api.job_recovery import (
     recover_and_start_pending_jobs,
     recover_orphaned_running_jobs,
 )
-from app.api.response_shaping import _failed_unified_result
+from app.api.response_shaping import failed_unified_result
 from app.api.unified_shaping import abuild_unified_result
 from app.models.crawl_result import CrawlResult, EngineCrawlResult
 from app.models.crawl_task import CrawlTask
@@ -294,7 +294,7 @@ async def run_job(
                 if item is None:
                     # The batch's own shaping envelope names the unanswered URL, is
                     # reused rather than reinvented, and carries the admitted value.
-                    job.results.append(_failed_unified_result(identity).model_dump())
+                    job.results.append(failed_unified_result(identity).model_dump())
                     failed += 1
                     continue
                 if outcome == "transient":
@@ -306,7 +306,7 @@ async def run_job(
                 except Exception:
                     # Shaping is the batch's last line of defense and not meant to
                     # raise; if it does, the job still names this URL's result here.
-                    unified = _failed_unified_result(item)
+                    unified = failed_unified_result(item)
                 job.results.append(unified.model_dump())
                 if item.status == "failed":
                     failed += 1

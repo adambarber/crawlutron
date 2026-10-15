@@ -41,6 +41,7 @@ def test_webhook_module_has_no_dependency_wiring_state():
         assert not hasattr(wm, name), f"dead-island name reappeared: {name}"
     assert set(wm.__all__) == {
         "deliver_pinned_webhook",
+        "max_webhook_size",
         "post_webhook",
         "validate_webhook_url",
         "validate_webhook_url_async",
@@ -83,7 +84,7 @@ def test_build_job_status_handles_single_shot_jobs(tmp_path):
     case the dataclass could not: a job whose accumulators were genuinely
     never written to.
     """
-    from app.api.main_helpers import _build_job_status
+    from app.api.main_helpers import build_job_status
     from app.models.job_status_response import JobStatusResponse
     from tests._job_harnesses import make_job_store
 
@@ -92,7 +93,7 @@ def test_build_job_status_handles_single_shot_jobs(tmp_path):
 
     row = store.status_row(job.job_id)
     assert row is not None
-    status = _build_job_status(row)
+    status = build_job_status(row)
 
     assert isinstance(status, JobStatusResponse)
     assert status.frontier_size == 0
