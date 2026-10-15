@@ -5,8 +5,6 @@ from __future__ import annotations
 from tests._private_import_decl import (
     _CHOKEPOINT_STATE,
     _LIFECYCLE_DRAIN_PENDING_CLIENT_CLOSES,
-    _OWNED_POOL_MACHINERY,
-    _PRIVATE_TYPE,
     _SUBSTITUTED_COLLABORATOR,
     Declaration,
     _d,
@@ -36,39 +34,17 @@ DECLARED: dict[str, Declaration] = {
         "Not yet triaged.\n",
         ["test"],
     ),
-    "app.transport.fetchers._release_stream_noblock": _SUBSTITUTED_COLLABORATOR,
-    "app.transport.pooled_clients._LoopBoundPooledClient": _d(
-        _PRIVATE_TYPE.kind, _PRIVATE_TYPE.reason, ["test"]
-    ),
-    "app.transport.pooled_clients._NoStoreCookieJar": _d(_PRIVATE_TYPE.kind, _PRIVATE_TYPE.reason, ["test"]),
-    "app.transport.pooled_clients._PENDING_CLIENT_CLOSE": _d(
-        _CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]
-    ),
-    "app.transport.pooled_clients._PENDING_CLIENT_CLOSE_LOCK": _d(
-        _CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]
-    ),
-    "app.transport.pooled_clients._PENDING_CLIENT_CLOSE_MAX": _d(
-        _CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]
-    ),
-    "app.transport.pooled_clients._build_async_client": _SUBSTITUTED_COLLABORATOR,
-    "app.transport.pooled_cffi._build_cffi_session": _SUBSTITUTED_COLLABORATOR,
     "app.transport.pooled_clients._drain_pending_client_closes": _d(
         _LIFECYCLE_DRAIN_PENDING_CLIENT_CLOSES.kind,
         _LIFECYCLE_DRAIN_PENDING_CLIENT_CLOSES.reason,
-        ["test", "app"],
+        ["app"],
     ),
-    "app.transport.pooled_clients._queue_superseded_close": _SUBSTITUTED_COLLABORATOR,
-    "app.transport.pooled_clients._release_dropped_client": _OWNED_POOL_MACHINERY,
-    "app.transport.pooled_clients._schedule_client_close": _OWNED_POOL_MACHINERY,
-    "app.transport.pinned_transport._CREDENTIAL_HEADERS": _d(
-        _CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]
+    "app.transport.pooled_clients._NoStoreCookieJar": _d(
+        "unreviewed",
+        "Not yet triaged.\n",
+        ["test"],
     ),
-    "app.transport.pinned_transport._DNS_CACHE": _d(
-        _CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]
-    ),
-    "app.transport.pinned_transport._DNS_CACHE._lock": _d(
-        _CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]
-    ),
+    "app.transport.fetchers._release_stream_noblock": _SUBSTITUTED_COLLABORATOR,
     "app.transport.pinned_transport._MAX_REDIRECT_HOPS": _d(
         _CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]
     ),
@@ -88,11 +64,6 @@ DECLARED: dict[str, Declaration] = {
         ["test"],
     ),
     "app.transport.pinned_transport._redirect_target": _d(
-        "unreviewed",
-        "Not yet triaged.\n",
-        ["test"],
-    ),
-    "app.transport.pinned_transport._resolve_ips": _d(
         "unreviewed",
         "Not yet triaged.\n",
         ["test"],

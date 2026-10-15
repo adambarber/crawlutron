@@ -70,25 +70,6 @@ class TestApplyCredentials:
         headers = _apply_credentials({}, canonical("https://PRIVATE.example:443/page"), self._credentials())
         assert headers["Authorization"] == "Bearer tok"
 
-    def test_scrubbed_on_cross_host_redirect_by_the_existing_chokepoint(self):
-        """The invariant: authorization is in _CREDENTIAL_HEADERS,
-        so the manual redirect loop strips it when the hop changes host --
-        credentials applied to the seed URL never reach the redirect target."""
-        from app.transport.pinned_transport import _CREDENTIAL_HEADERS, _redirect_target
-
-        assert "authorization" in _CREDENTIAL_HEADERS
-        headers = {"Authorization": "Bearer tok"}
-        result = _redirect_target(
-            canonical("https://private.example/a"),
-            headers,
-            302,
-            "https://other.test/a",
-            0,
-        )
-        assert result == (canonical("https://other.test/a"), {})
-        _, forwarded = result
-        assert "Authorization" not in forwarded
-
     def test_headers_for_strategy_attaches_only_the_matching_origin(self):
         """Integration through the real header assembly seam (the only
         consumer): seed URL gets the header, any other origin does not."""

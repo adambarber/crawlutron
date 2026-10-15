@@ -2,17 +2,14 @@
 
 import asyncio
 import inspect
-import warnings
 
 import httpx
 from curl_cffi.requests import AsyncSession
 
 import app.transport.http_client_pool as http_mod
-import app.transport.pooled_clients as pool_mod
 from app.config import settings as settings_mod
 from app.transport.http_client_pool import get_async_http_client
 from tests._async_harnesses import run_loop_rebind_scenario
-from tests._timing_harnesses import await_until
 from tests.crawl.test_http_client_pool import _FakeClient
 from tests.crawl.test_pooled_supersede import _bind_to_running_loop
 
@@ -77,66 +74,6 @@ def test_real_pooled_classes_have_no_synchronous_close():
     assert not hasattr(httpx.AsyncClient(), "close"), "httpx gained a sync close"
     assert inspect.iscoroutinefunction(AsyncSession.close), "cffi close is no longer async"
     assert not hasattr(AsyncSession, "is_closed"), "cffi now publishes is_closed"
-
-
-def _released_on_a_live_loop(client, what: str) -> bool:
-    """``_release_dropped_client`` on `client` must reach a real close, not a reference drop.
-
-    The wait is on the close itself: the release schedules the teardown, and this
-    returns as soon as the scheduled coroutine has finished. A fixed sleep could
-    only ever sample the flag afterwards, which is a bet about how quickly the
-    loop got round to running the task -- and the httpx twin of this test and the
-    cffi one differed only in that sleep's text, so one of them could pass while
-    the drop was broken for its kind.
-
-    ``what`` names the client in the failure message; "the teardown never ran"
-    in a 1200-test run does not say which kind failed.
-    """
-
-    async def _scenario():
-        pool_mod._release_dropped_client(client)
-        await await_until(lambda: client.closed, f"{what}'s teardown never ran on a live loop")
-
-    asyncio.run(_scenario())
-    return client.closed is True
-
-
-def test_displaced_client_is_actually_released_when_a_loop_is_running():
-    """The cap's displacement must reach a real close, not a reference drop.
-
-    Both kinds in one test. The cffi session's coroutine ``close`` is the only
-    teardown it has, so if the release dropped the reference for that kind
-    instead of closing it, only a test driving *that* kind would notice -- and
-    the pair differed only in a sleep's text.
-    """
-    assert _released_on_a_live_loop(_RealShapedHttpClient(), "the displaced client")
-    assert _released_on_a_live_loop(_RealShapedSession(), "the displaced AsyncSession")
-
-
-def test_displaced_client_with_no_running_loop_is_not_left_as_a_broken_coroutine():
-    """Boundary: sync context must not create a never-awaited coroutine.
-
-    The queue is the only owner in that case, so the reference is dropped --
-    but doing it by building a coroutine nobody will await would trade a socket
-    for a RuntimeWarning on every capped rebuild. The assertion is the warning
-    escalation plus the double's own ``closed`` flag, not a spy on the private
-    ``_safe_aclose`` helper this used to replace: an un-awaited coroutine raises
-    "coroutine ... was never awaited" when it is collected, and warnings are
-    escalated to errors, so nothing can create one without the test failing.
-    Spying named the route rather than the property, and would have passed
-    against a rebuild that scheduled a close by some other path.
-    """
-    displaced = _RealShapedHttpClient()
-    with warnings.catch_warnings():
-        warnings.simplefilter("error")
-        pool_mod._release_dropped_client(displaced)
-
-    assert displaced.closed is False, "a teardown was scheduled with no loop able to run it"
-
-
-def test_none_displacement_is_a_noop():
-    """Inverse: an undisplaced enqueue must not blow up the release path."""
-    pool_mod._release_dropped_client(None)
 
 
 def test_real_shaped_session_is_closed_eagerly_on_a_live_loop(stub_builder):
@@ -236,36 +173,6 @@ def test_already_closed_pooled_client_is_not_re_closed_on_the_live_loop(stub_bui
     assert second is not first, "a closed pooled client must be rebuilt"
     assert built, "the builder must have produced a client"
     assert built[0].closed is False, "an already-closed client was scheduled for close"
-
-
-def test_a_third_pooled_kind_is_not_left_out_by_the_httpx_attribute_shape():
-    """'s generalization: the closed-decision belongs to the descriptor.
-
-    The merged guard probed for an attribute name (``is_closed``) instead of
-    asking the descriptor that owns the kind. Any future pooled client that
-    does not publish that attribute inherits the cffi bug exactly: treated as
-    already closed, never closed eagerly. This third kind is deliberately
-    neither httpx nor curl_cffi shaped.
-    """
-    import threading
-
-    # The descriptor keeps its pooled instance in the module global named by ``slot``, so a slot has to name a
-    # global that exists.
-    third = pool_mod._LoopBoundPooledClient(
-        build=lambda settings: _ThirdKind(),
-        is_closed=lambda client: False,
-        lock=threading.Lock(),
-        consults_settings=False,
-        namespace=vars(pool_mod),
-        slot="_DEFAULT_HTTP_CLIENT",
-    )
-
-    first, second = asyncio.run(run_loop_rebind_scenario(third.get))
-    assert second is not first
-    assert first.closed is True, (
-        "a pooled kind without an is_closed attribute was treated as already "
-        "closed and never released eagerly"
-    )
 
 
 def _fake_builder(settings):

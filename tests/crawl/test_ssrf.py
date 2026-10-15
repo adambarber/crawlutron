@@ -233,9 +233,9 @@ class TestSSRFProtection:
         persists across tests, so without isolation a prior test that resolved
         the same host would serve this call from cache (0 getaddrinfo calls).
         """
-        from app.transport.pinned_transport import _DNS_CACHE
+        from app.transport.pinned_transport import reset_process_state
 
-        _DNS_CACHE.clear()
+        reset_process_state()
         with host_resolves_to(monkeypatch, "8.8.8.8") as resolved:
             check_ssrf_protection(canonical("http://example.com:8080/"))
         assert resolved == ["example.com"]

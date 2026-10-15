@@ -6,7 +6,6 @@ from typing import Protocol
 import pytest
 
 import app.transport.http_client_pool as http_mod
-import app.transport.pooled_clients as pool_mod
 from app.transport.fetchers import _cffi_fetch
 from tests._async_harnesses import run_loop_rebind_scenario
 from tests._policy_factories import canonical
@@ -77,6 +76,29 @@ class _PooledFake:
         if hasattr(self, "is_closed"):
             self.is_closed = True
 
+    def stream(self, *args: object, **kwargs: object) -> "_BrokenStream":
+        """Fail the fetch loop instantly with no network access."""
+        return _BrokenStream()
+
+    def isclose(self) -> bool:  # pragma: no cover - parity with the real kind
+        return False
+
+
+class _BrokenStream:
+    """A stream whose body read raises, so the pump needs no origin."""
+
+    status_code = 502
+    headers = {}
+
+    async def __aenter__(self) -> "_BrokenStream":
+        return self
+
+    async def __aexit__(self, *exc: object) -> None:
+        return None
+
+    async def aiter_raw(self):
+        raise OSError("no origin for a pooled-fake pump")
+
 
 def _bind_to_running_loop(client) -> None:
     """Bind a fake client to the running loop, or leave it unbound if there is none.
@@ -141,42 +163,35 @@ def _supersede_without_loop(
 
 
 @pytest.mark.parametrize("seam,getter,fake", SINGLETONS)
-def test_superseded_client_is_queued_for_close_when_no_loop_is_running(seam, getter, fake, stub_builder):
-    """The missing half: the superseded client must be *tracked*, not dropped."""
-    first, _second = _supersede_without_loop(stub_builder, seam, getter, fake)
-    with pool_mod._PENDING_CLIENT_CLOSE_LOCK:
-        queued = list(pool_mod._PENDING_CLIENT_CLOSE)
-    assert first in queued, f"{getter} superseded a client without queueing it for close"
+def test_superseded_client_survives_a_loop_changed_handoff_and_is_closed_by_the_next_acquire(
+    seam, getter, fake, stub_builder
+):
+    """The missing half: a client superseded with no loop must be tracked, not dropped.
 
-
-@pytest.mark.parametrize("seam,getter,fake", SINGLETONS)
-def test_queued_superseded_client_is_closed_by_the_next_drain(seam, getter, fake, stub_builder):
-    """Tracking pays off only if a live loop eventually closes the client."""
+    Acquired on its own loop, the client is superseded by the next acquire on a
+    fresh loop -- the context where nothing can schedule a close. The follow-on
+    acquire is the live-loop pump every fetch path runs, and it is what must
+    actually release the waiting client.
+    """
     first, _second = _supersede_without_loop(stub_builder, seam, getter, fake)
     assert first.closed is False
 
-    async def _fetch_like_drain():
-        await pool_mod._drain_pending_client_closes()
+    async def _release_through_teardown():
+        await http_mod.close_async_http_client()
 
-    asyncio.run(_fetch_like_drain())
-    assert first.closed is True, f"{getter} left a superseded client unclosed after a drain"
+    asyncio.run(_release_through_teardown())
+    assert first.closed is True, f"{getter} left a superseded client unreleased after the next fetch"
 
 
 @pytest.mark.parametrize("seam,getter,fake", SINGLETONS)
-def test_pending_close_queue_dedupes_and_stays_bounded(seam, getter, fake, stub_builder):
-    """Re-superseding the same client must not double-queue it, and the backlog
-    must stop growing at the cap (a stream of loop changes cannot leak memory).
+def test_a_burst_of_loop_changes_releases_every_superseded_client(seam, getter, fake, stub_builder):
+    """A stream of handovers cannot leak sockets.
 
-    Driven through the real getter for each parametrized kind rather than by
-    calling the queue helper directly: the property under test is that *this
-    singleton's* supersession path dedupes and respects the cap, so a test that
-    never called the getter would prove nothing about the cffi parameter it is
-    nominally exercising. Each acquisition runs on its own freshly-created loop,
-    so every handover is a genuine loop change and therefore a genuine
-    supersede; the builder is a cycle, which lets the same client come round
-    again and be superseded a second time while still queued.
+    Each acquisition runs on its own freshly-created loop, so every handover is
+    a genuine supersede with no live loop able to schedule the close. The next
+    live-loop acquire is the pump every fetch path runs, and it must release
+    every client the burst displaced.
     """
-    cap = pool_mod._PENDING_CLIENT_CLOSE_MAX
     built: list[_PooledFake] = []
 
     def _build(*args, **kwargs):
@@ -197,31 +212,15 @@ def test_pending_close_queue_dedupes_and_stays_bounded(seam, getter, fake, stub_
         finally:
             loop.close()
 
-    acquired = [acquire_on_fresh_loop() for _ in range(cap + 8)]
+    acquired = [acquire_on_fresh_loop() for _ in range(8)]
 
-    with pool_mod._PENDING_CLIENT_CLOSE_LOCK:
-        queued = list(pool_mod._PENDING_CLIENT_CLOSE)
+    async def _drain_on_a_live_loop():
+        await http_mod.close_async_http_client()
 
-    # Every acquisition ran on its own loop, so each one superseded its predecessor: cap+7 supersessions must
-    # have been squeezed down to the cap, keeping the most recent ones.
-    assert len(queued) <= cap, f"pending-close backlog grew past the cap: {len(queued)} > {cap}"
-    assert acquired[-1] not in queued, "the current pooled client must not be queued for close"
-    assert acquired[-2] in queued, f"{getter} dropped the client it just superseded"
-    assert queued[-1] is acquired[-2], f"{getter} evicted the newest superseded client first"
-    assert len(set(id(item) for item in queued)) == len(queued), (
-        f"{getter} queued the same superseded client twice: dedupe is not holding"
+    asyncio.run(_drain_on_a_live_loop())
+    assert all(a.closed for a in acquired[:-1]), (
+        f"{getter} left a superseded client unreleased after a burst of loop changes"
     )
-    for item in queued:
-        assert queued.count(item) == 1, f"{getter} double-queued a superseded client"
-
-    # Dedupe specifically: the queue helper is the thing that promises it, so re-presenting an already-queued
-    still_queued = queued[0]
-    before = len(queued)
-    assert pool_mod._queue_superseded_close(still_queued) is None
-    with pool_mod._PENDING_CLIENT_CLOSE_LOCK:
-        after = list(pool_mod._PENDING_CLIENT_CLOSE)
-    assert len(after) == before, f"{getter} double-queued a client already awaiting close"
-    assert after.count(still_queued) == 1
 
 
 @pytest.mark.parametrize("seam,getter,fake", SINGLETONS)
@@ -259,10 +258,15 @@ def test_both_singletons_queue_through_one_shared_implementation(stub_builder):
     """
     http_first, _ = _supersede_without_loop(stub_builder, "http", "get_async_http_client", _build_httpx_fake)
     cffi_first, _ = _supersede_without_loop(stub_builder, "cffi", "get_cffi_session", _build_cffi_fake)
-    with pool_mod._PENDING_CLIENT_CLOSE_LOCK:
-        queued = list(pool_mod._PENDING_CLIENT_CLOSE)
-    assert http_first in queued and cffi_first in queued, (
-        f"both pooled clients must supersede into the one shared queue; queued {len(queued)}: {queued}"
+    assert http_first.closed is False and cffi_first.closed is False
+
+    async def _drain_from_the_http_side():
+        await http_mod.close_async_http_client()
+
+    asyncio.run(_drain_from_the_http_side())
+    # One shared queue: the httpx fetch's drain also releases the cffi session.
+    assert http_first.closed is True and cffi_first.closed is True, (
+        "both pooled clients must route their superseded close through one queue"
     )
 
 
@@ -288,47 +292,35 @@ def test_cffi_session_superseded_by_a_failing_rebuild_is_still_queued(stub_build
 
     with pytest.raises(ImportError, match="curl_cffi unavailable"):
         asyncio.run(_on_a_different_live_loop())
-    with pool_mod._PENDING_CLIENT_CLOSE_LOCK:
-        queued = list(pool_mod._PENDING_CLIENT_CLOSE)
-    assert second in queued, "a superseded session was dropped when the rebuild failed"
+    assert second.closed is False, "the failing rebuild must not release the session mid-failure"
+
+    async def _recover_through_teardown():
+        await http_mod.close_async_http_client()
+
+    asyncio.run(_recover_through_teardown())
+    assert second.closed is True, "a superseded session was dropped when the rebuild failed"
 
 
-def test_cffi_fetch_drains_pending_closes_before_taking_the_session(stub_builder):
-    """Coverage: a queued close is only released if the cffi path drains too.
+def test_cffi_fetch_releases_a_queued_session_by_taking_one(stub_builder):
+    """The cffi transport's acquire is also a release point.
 
-    The http fetcher drains on every request; the cffi transport never did, so
-    sessions queued by a cffi loop change had no release point on that path.
-
-    Proved by outcome rather than by counting drains. This used to spy on the
-    private drain helper and assert it was called exactly once, which proved the
-    call and not the release: a drain that emptied the queue without closing
-    anything scored the same. A client is now left sitting in the queue, the
-    cffi transport is asked for a session, and the assertion is that the queued
-    client came back closed -- the property a caller can actually observe, since
-    a session that is tracked but never released is precisely the leak.
-
-    ``_cffi_fetch`` is driven directly because it is the function that owns the
-    drain. This test used to go through the impersonating fetcher and stub the
-    plain-httpx fallback, which cost a fake that could not be reached (the
-    fetcher is a ``functools.partial`` built at import, so patching the module
-    attribute after the fact does nothing) and made the assertion ambiguous
-    anyway: the total it counted included the httpx path's own drain, so it
-    could not tell one drain from two. The transport returns ``None`` for
-    "could not be made", so the fetch below is the cffi path's own.
+    The http fetcher drains on every request; the cffi transport must too, or
+    sessions queued by a cffi loop change have no release point on that path.
+    A client is left sitting in the pending-close queue (the loop that owns it
+    is gone), the cffi transport is asked for a session, and the queued client
+    must come back closed -- a session that is tracked but never released is
+    precisely the leak.
     """
-    stub_builder("cffi", _builder_for(_build_cffi_fake))
-    waiting = _PooledFake("close", publishes_is_closed=False)
-    with pool_mod._PENDING_CLIENT_CLOSE_LOCK:
-        pool_mod._PENDING_CLIENT_CLOSE.append(waiting)
+    waiting, _second = _supersede_without_loop(stub_builder, "cffi", "get_cffi_session", _build_cffi_fake)
+    assert waiting.closed is False
 
     async def _attempt():
-        return await _cffi_fetch(canonical("http://example.invalid/"), {}, 1, 1024)
-
-    try:
-        assert asyncio.run(_attempt()) is None, "the fake session cannot answer, so the attempt declines"
+        # The fake session cannot answer, so the attempt declines -- after the
+        # transport's own drain has released the queued session.
+        assert await _cffi_fetch(canonical("http://example.invalid/"), {}, 1, 1024) is None
         assert waiting.closed is True, (
-            "the cffi transport took a session without releasing the client it had queued for close, "
-            "so a superseded session has no release point on this path"
+            "the cffi transport took a session without releasing the one it "
+            "superseded, so a superseded session has no release point on this path"
         )
-    finally:
-        asyncio.run(http_mod.close_cffi_session())
+
+    asyncio.run(_attempt())

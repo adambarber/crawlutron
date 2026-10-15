@@ -223,9 +223,10 @@ async def test_cffi_session_does_not_replay_cookies_it_received(base_url):
     becomes tenant B's ``Cookie:`` header when the jar replays by domain.
     """
     pytest.importorskip("curl_cffi")
-    from app.transport.pooled_cffi import _build_cffi_session
+    from app.transport import http_client_pool
 
-    session = _build_cffi_session()
+    http_client_pool.reset_process_state()
+    session = http_client_pool.get_cffi_session()
     try:
         await session.get(base_url + "/set-cookie")
         replayed = await session.get(base_url + "/check-cookie")
@@ -243,9 +244,9 @@ async def test_shared_httpx_client_does_not_replay_cookies_it_received(base_url)
     ``get_async_http_client`` serves every declared-crawler fetch and outlives
     them all, so its jar accumulates across tenants for the life of the process.
     """
-    from app.transport.pooled_clients import _build_async_client
+    from app.transport.http_client_pool import get_async_http_client
 
-    client = _build_async_client(None)
+    client = get_async_http_client()
     try:
         await client.get(base_url + "/set-cookie")
         replayed = await client.get(base_url + "/check-cookie")
