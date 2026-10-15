@@ -151,16 +151,16 @@ if FastAPI is not None:
     async def _lifespan(_app: FastAPI):
         # Startup: initialize the browser pool, then load the cookie jar.
         from .health.readiness import READINESS_STATE
-        from .orchestration.engine import _resource_gate
+        from .orchestration.engine import resource_gate
 
         # Readiness saturation comes from the live resource gate, not the
         # metrics gauges (which only recursive crawls refresh).
         READINESS_STATE.set_utilization_sampler(
-            lambda: (_resource_gate.memory_ratio(), _resource_gate.cpu_ratio())
+            lambda: (resource_gate().memory_ratio(), resource_gate().cpu_ratio())
         )
         # The module-level gate is built at import time with no running
         # loop, so its lag probe must start here.
-        _resource_gate.start_lag_probe()
+        resource_gate().start_lag_probe()
 
         # Before anything is listening: the exposure is a property of the bind,
         # true from the first moment, so stated before the first request.
@@ -236,10 +236,10 @@ if FastAPI is not None:
         # Imported here, not at module scope: this pulls in the markitdown stack,
         # which CLI/MCP callers that never render a PDF must not pay for.
         from .extraction.content import shutdown_doc_extraction_executor
-        from .orchestration.engine import _resource_gate
+        from .orchestration.engine import resource_gate
 
         async def _close_gate() -> None:
-            _resource_gate.close()
+            resource_gate().close()
 
         # Every step is attempted and failures surface only after the last: a
         # close() that raises partway leaks every pool below it (and its subprocesses).
@@ -251,7 +251,7 @@ if FastAPI is not None:
                 # The lazy document-extraction workers are the one pool nothing
                 # above touches; without this their subprocesses outlive shutdown.
                 ("shutdown_doc_extraction_executor", shutdown_doc_extraction_executor),
-                ("_resource_gate.close", _close_gate),
+                ("resource_gate.close", _close_gate),
             )
         )
         # Symmetry with set_utilization_sampler(...): release the closed

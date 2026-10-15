@@ -465,11 +465,8 @@ def reset_process_state() -> None:
     robots_cache.clear()
     global _SHARED_HTTP_CACHE, _resource_gate
     _SHARED_HTTP_CACHE = HttpCache()
-    # The shared admission gate; read it via resource_gate() so the reference
-
-
-# cannot be captured before reset_process_state() swaps the instance.
-_resource_gate = ResourceGate()
+    # The shared admission gate, reset with the caches; see :func:`resource_gate`.
+    _resource_gate = ResourceGate()
 
 
 def has_process_state() -> bool:
