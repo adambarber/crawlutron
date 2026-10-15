@@ -11,7 +11,7 @@ import itertools
 
 import pytest
 
-import app.runtime.resource_pressure as rp
+import app.runtime.pressure_probes as rp
 from app.runtime.resource_pressure import LoopLagProbe, ResourceGate
 
 

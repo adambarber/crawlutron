@@ -152,7 +152,7 @@ async def fetch_and_decode(
     return resp.text, resp.status
 
 
-async def _single_flight[K, T](
+async def single_flight[K, T](
     inflight: dict[K, asyncio.Task[T]],
     key: K,
     factory: Callable[[], Awaitable[T]],

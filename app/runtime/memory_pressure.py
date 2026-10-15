@@ -16,7 +16,7 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass
 
-from app.runtime.cgroup_sense import _read_int
+from app.runtime.cgroup_sense import read_int
 
 # Target 0.85 leaves ~0.45 GiB headroom against first-batch burst overshoot; the hard
 # ceiling still leaves a safety margin before OOM.
@@ -43,14 +43,14 @@ def read_memory_stats(cgroup_root: str = "/sys/fs/cgroup") -> MemoryStats:
     total_ram = _total_system_ram()
 
     # cgroup v2
-    v2_max = _read_int(os.path.join(cgroup_root, "memory.max"))
-    v2_cur = _read_int(os.path.join(cgroup_root, "memory.current"))
+    v2_max = read_int(os.path.join(cgroup_root, "memory.max"))
+    v2_cur = read_int(os.path.join(cgroup_root, "memory.current"))
     if v2_max is not None and v2_cur is not None:
         return MemoryStats(total_bytes=v2_max, used_bytes=v2_cur)
 
     # cgroup v1
-    v1_max = _read_int(os.path.join(cgroup_root, "memory", "memory.limit_in_bytes"))
-    v1_cur = _read_int(os.path.join(cgroup_root, "memory", "memory.usage_in_bytes"))
+    v1_max = read_int(os.path.join(cgroup_root, "memory", "memory.limit_in_bytes"))
+    v1_cur = read_int(os.path.join(cgroup_root, "memory", "memory.usage_in_bytes"))
     if v1_max is not None and v1_cur is not None and 0 < v1_max < total_ram:
         return MemoryStats(total_bytes=v1_max, used_bytes=v1_cur)
 

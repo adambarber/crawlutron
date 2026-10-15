@@ -89,9 +89,9 @@ class TestEngineCrawlRequest:
             http_fetcher=failing_fetcher,
             browser_worker=browser_worker,
         )
-        assert result["status"] == "success"
-        assert result["classification"] == "rendered"
-        assert "Example Org" in result["markdown"]
+        assert result.status == "success"
+        assert result.classification == "rendered"
+        assert "Example Org" in (result.markdown or "")
 
 
 def test_seed_freshness_uses_real_default_strategies():

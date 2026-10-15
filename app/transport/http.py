@@ -18,9 +18,9 @@ from app.transport import body_decode, fetch_policy
 from app.transport.cache import HttpCache
 from app.transport.content_cache import ContentCache
 from app.transport.content_pipeline import (
-    _discover_after_fetch,
-    _discovery_result_fields,
-    _post_fetch_diagnostics,
+    discover_after_fetch,
+    discovery_result_fields,
+    post_fetch_diagnostics,
 )
 from app.transport.http_cache import (
     _not_modified_result,
@@ -34,17 +34,17 @@ from app.transport.http_classify import (
     _request_profile_diagnostics,
 )
 from app.transport.http_response import (
-    _ExtractedHttpContent,
-    _FetchedResponse,
-    _HttpStrategyContext,
-    _response_result_fields,
+    ExtractedHttpContent,
+    FetchedResponse,
+    HttpStrategyContext,
+    response_result_fields,
 )
 from app.transport.strategy_request import StrategyRequest
 from app.vocabulary.extraction import EXTRACTION_DOCUMENT
 from app.vocabulary.taxonomy import status_for_classification
 
 
-async def _fetch_http_phase(ctx: _HttpStrategyContext) -> tuple[Any, dict[str, Any]]:
+async def _fetch_http_phase(ctx: HttpStrategyContext) -> tuple[Any, dict[str, Any]]:
     """Fetch a response with the strategy retry policy."""
     return await fetch_policy.fetch_with_retries(
         ctx.http_fetcher,
@@ -56,7 +56,7 @@ async def _fetch_http_phase(ctx: _HttpStrategyContext) -> tuple[Any, dict[str, A
     )
 
 
-def _binary_result_if_needed(ctx: _HttpStrategyContext, resp: _FetchedResponse) -> EngineCrawlResult | None:
+def _binary_result_if_needed(ctx: HttpStrategyContext, resp: FetchedResponse) -> EngineCrawlResult | None:
     """Return the terminal no-text result for a binary response."""
     if ctx.extraction == EXTRACTION_DOCUMENT or not fetch_policy.looks_like_binary_body(
         resp.body, resp.content_type, resp.final_url
@@ -78,9 +78,9 @@ def _binary_result_if_needed(ctx: _HttpStrategyContext, resp: _FetchedResponse) 
 
 
 async def _construct_http_result(
-    ctx: _HttpStrategyContext,
-    resp: _FetchedResponse,
-    extracted: _ExtractedHttpContent,
+    ctx: HttpStrategyContext,
+    resp: FetchedResponse,
+    extracted: ExtractedHttpContent,
 ) -> EngineCrawlResult:
     """Run discovery shaping and construct the successful strategy result."""
     classification, classification_evidence = _classify_extracted_content(ctx, resp, extracted)
@@ -94,7 +94,7 @@ async def _construct_http_result(
     }
     # "Any channel on", not "the block exists": with channels off by default,
     # an all-off block is the empty mapping that ``is not None`` now distinguishes.
-    post_fetch = await _discover_after_fetch(
+    post_fetch = await discover_after_fetch(
         html=extracted.html,
         final_url=resp.final_url,
         js_base_url=ctx.normalized_url,
@@ -127,7 +127,7 @@ async def _construct_http_result(
             discovery_diag.pop("sitemap_urls", None)
             discovery_diag.pop("feeds", None)
     next_page_url = post_fetch["next_page_url"]
-    diagnostics.update(_post_fetch_diagnostics(post_fetch, resp.final_url, ctx.host_policy))
+    diagnostics.update(post_fetch_diagnostics(post_fetch, resp.final_url, ctx.host_policy))
 
     quality = body_decode.quality_score(
         status,
@@ -158,7 +158,7 @@ async def _construct_http_result(
     )
     html = extracted.html if ctx.include_html else None
     return build_engine_result(
-        **_response_result_fields(ctx, resp, attempt),
+        **response_result_fields(ctx, resp, attempt),
         selected_strategy=ctx.strategy if status == "success" else None,
         http_status=resp.status_code,
         content_type=resp.content_type,
@@ -168,7 +168,7 @@ async def _construct_http_result(
         extraction_method=extracted.extraction_method,
         quality_score=quality,
         diagnostics=diagnostics,
-        **_discovery_result_fields(
+        **discovery_result_fields(
             post_fetch,
             classification_evidence=classification_evidence,
         ),
@@ -177,7 +177,7 @@ async def _construct_http_result(
     )
 
 
-def _http_error_result(ctx: _HttpStrategyContext, error: Exception) -> EngineCrawlResult:
+def _http_error_result(ctx: HttpStrategyContext, error: Exception) -> EngineCrawlResult:
     """Build the redacted terminal result for a strategy exception."""
     elapsed_ms = int((time.monotonic() - ctx.started) * 1000)
     return engine_result_from_exception(
@@ -205,7 +205,7 @@ async def http_strategy_result(
     global_concurrency: int | None = None,
 ) -> EngineCrawlResult:
     """Coordinate the named HTTP fetch phases and return one crawl result."""
-    ctx = _HttpStrategyContext(
+    ctx = HttpStrategyContext(
         original_url=request.original_url,
         normalized_url=request.normalized_url,
         strategy=request.strategy,
@@ -224,7 +224,7 @@ async def http_strategy_result(
     try:
         if ctx.response is None:
             ctx.response, ctx.retry_diagnostics = await _fetch_http_phase(ctx)
-        resp = _FetchedResponse.of(ctx.response)
+        resp = FetchedResponse.of(ctx.response)
         not_modified = _not_modified_result(ctx, resp)
         if not_modified is not None:
             return not_modified

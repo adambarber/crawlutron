@@ -12,16 +12,16 @@ from app.models.taxonomy import Classification
 from app.orchestration.engine_result import build_engine_result
 from app.transport import content_cache_key, fetch_policy, request_profile
 from app.transport.http_response import (
-    _FetchedResponse,
-    _HttpStrategyContext,
-    _rebuild_response,
-    _response_result_fields,
-    _serialize_response,
+    FetchedResponse,
+    HttpStrategyContext,
+    rebuild_response,
+    response_result_fields,
+    serialize_response,
 )
 from app.vocabulary.taxonomy import status_for_classification
 
 
-def _resolve_http_limits(ctx: _HttpStrategyContext) -> None:
+def _resolve_http_limits(ctx: HttpStrategyContext) -> None:
     """Resolve request validators, limits, headers, and extraction settings."""
     validators = ctx.caller_validators or {}
     for source, header in (
@@ -51,7 +51,7 @@ def _resolve_http_limits(ctx: _HttpStrategyContext) -> None:
     ctx.include_html = policy_wants_html(ctx.policy)
 
 
-async def _revalidate_content_cache(ctx: _HttpStrategyContext) -> None:
+async def _revalidate_content_cache(ctx: HttpStrategyContext) -> None:
     """Serve or revalidate a disk content-cache entry when one is available."""
     if ctx.content_cache is None:
         return
@@ -72,7 +72,7 @@ async def _revalidate_content_cache(ctx: _HttpStrategyContext) -> None:
     if not validator and ctx.caller_conditional:
         validator = dict(ctx.caller_conditional)
     if not validator:
-        ctx.response = _rebuild_response(cached, ctx)
+        ctx.response = rebuild_response(cached, ctx)
         ctx.content_hit = True
         ctx.retry_diagnostics = {"attempts": 0, "transient_errors": [], "content_cache": "hit"}
         return
@@ -89,14 +89,14 @@ async def _revalidate_content_cache(ctx: _HttpStrategyContext) -> None:
         ctx.max_content_length,
     )
     if ctx.response.status_code == 304:
-        ctx.response = _rebuild_response(cached, ctx)
+        ctx.response = rebuild_response(cached, ctx)
         ctx.retry_diagnostics = {**ctx.retry_diagnostics, "content_cache": "hit_revalidated"}
         ctx.revalidated_304 = True
     else:
         ctx.retry_diagnostics = {**ctx.retry_diagnostics, "content_cache": "revalidated_fresh"}
 
 
-def _not_modified_result(ctx: _HttpStrategyContext, resp: _FetchedResponse) -> EngineCrawlResult | None:
+def _not_modified_result(ctx: HttpStrategyContext, resp: FetchedResponse) -> EngineCrawlResult | None:
     """Build the terminal result for a negotiated HTTP 304 response."""
     echoed_validators = resp.validators(ctx.caller_conditional)
     sent_conditional = any(key in ctx.request_headers for key in ("If-None-Match", "If-Modified-Since"))
@@ -123,7 +123,7 @@ def _not_modified_result(ctx: _HttpStrategyContext, resp: _FetchedResponse) -> E
     if ctx.caller_conditional:
         diagnostics["conditional"] = dict(ctx.caller_conditional)
     return build_engine_result(
-        **_response_result_fields(ctx, resp, attempt),
+        **response_result_fields(ctx, resp, attempt),
         selected_strategy=ctx.strategy,
         http_status=304,
         diagnostics=diagnostics,
@@ -131,7 +131,7 @@ def _not_modified_result(ctx: _HttpStrategyContext, resp: _FetchedResponse) -> E
     )
 
 
-async def _store_http_caches(ctx: _HttpStrategyContext, resp: _FetchedResponse) -> None:
+async def _store_http_caches(ctx: HttpStrategyContext, resp: FetchedResponse) -> None:
     """Store origin validators and fresh content after a successful fetch."""
     if ctx.cache is not None and (resp.headers.get("etag") or resp.headers.get("last-modified")):
         ctx.cache.store(ctx.normalized_url, dict(resp.headers))
@@ -139,4 +139,4 @@ async def _store_http_caches(ctx: _HttpStrategyContext, resp: _FetchedResponse) 
         return
     if resp.status_code < 300 and resp.status_code != 304:
         with contextlib.suppress(Exception):
-            await ctx.content_cache.aset(ctx.ckey, _serialize_response(resp.raw))
+            await ctx.content_cache.aset(ctx.ckey, serialize_response(resp.raw))

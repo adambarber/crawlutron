@@ -81,10 +81,10 @@ def extract_llm_metadata(html: str, url: NormalizedUrl | None) -> PageMetadata:
     tree = parse_html_tree(html)
     if tree is None:
         return metadata
-    return _llm_metadata_from_tree(tree, url)
+    return llm_metadata_from_tree(tree, url)
 
 
-def _llm_metadata_from_tree(tree: Any, url: NormalizedUrl | None) -> PageMetadata:
+def llm_metadata_from_tree(tree: Any, url: NormalizedUrl | None) -> PageMetadata:
     """Read the page-metadata fields from an ALREADY-parsed lxml tree.
 
     Shared by the fallback parse above and the engine's discovery stage, so

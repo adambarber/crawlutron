@@ -191,7 +191,7 @@ async def _seed_job_sitemaps(job: Any, context: JobAdmissionContext) -> None:
     job.stats["total_discovered"] = job.stats.get("total_discovered", 0) + outcome.accepted
 
 
-async def _run_job(
+async def run_job(
     job_id: str,
     job_store: JobStore,
     settings: Any,
@@ -378,6 +378,7 @@ __all__ = [
     "is_running",
     "pause_job",
     "recover_orphaned_running_jobs",
+    "run_job",
     "recover_and_start_pending_jobs",
     "reset_job_runner",
     "resume_job",

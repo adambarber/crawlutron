@@ -55,7 +55,7 @@ _DISCOVERY_RESULT_FIELDS = frozenset(
 )
 
 
-_DISCOVERY_PROJECTION = "_discovery_result_fields"
+_DISCOVERY_PROJECTION = "discovery_result_fields"
 
 
 def _extraction_reach_past_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
@@ -151,7 +151,7 @@ def _respelled_discovery_result_fields_offenders(tree: ast.AST, path: pathlib.Pa
     """Flag discovered-links result fields spelled at a result-builder call.
 
     ``**`` spread is the sanctioned shape and is not a keyword, so a strategy
-    that routes the envelope through ``_discovery_result_fields`` reports
+    that routes the envelope through ``discovery_result_fields`` reports
     nothing; a strategy that re-spells one field reports that field.
     """
     offenders: list[str] = []
@@ -163,7 +163,7 @@ def _respelled_discovery_result_fields_offenders(tree: ast.AST, path: pathlib.Pa
                     path,
                     node,
                     f"{callee} spells {', '.join(spelled)}; "
-                    f"spread content_pipeline._discovery_result_fields instead",
+                    f"spread content_pipeline.discovery_result_fields instead",
                 )
             )
     return offenders
@@ -172,7 +172,7 @@ def _respelled_discovery_result_fields_offenders(tree: ast.AST, path: pathlib.Pa
 DISCOVERED_LINK_RESULT_FIELDS_COME_FROM_THE_PIPELINE = Rule(
     name="discovered-link-result-fields-come-from-the-pipeline",
     find=_respelled_discovery_result_fields_offenders,
-    summary=("project the discovery envelope through content_pipeline._discovery_result_fields"),
+    summary=("project the discovery envelope through content_pipeline.discovery_result_fields"),
     excludes=SANCTIONED | _CONTENT_PIPELINE_OWNER,
     bite=lambda: (
         # The historical shape: the block spelled at the result call.
@@ -183,14 +183,14 @@ DISCOVERED_LINK_RESULT_FIELDS_COME_FROM_THE_PIPELINE = Rule(
             "        discovered_links=post_fetch['discovered_links'],\n"
             "        error=error,\n"
             "    )\n",
-            "_discovery_result_fields",
+            "discovery_result_fields",
         ),
     ),
     clean=lambda: (
         # The sanctioned spread is not a spelling of individual fields.
         "def build(post_fetch, error):\n"
         "    return build_engine_result(\n"
-        "        **_discovery_result_fields(post_fetch, classification_evidence=[], error=error),\n"
+        "        **discovery_result_fields(post_fetch, classification_evidence=[], error=error),\n"
         "        next_page_url=post_fetch['next_page_url'],\n"
         "    )\n",
         # A discovered-links field that is not a result field is somebody else's.

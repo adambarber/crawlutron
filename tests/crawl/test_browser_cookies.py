@@ -5,8 +5,10 @@ from collections import OrderedDict
 
 import pytest
 
+import app.transport.browser_cookies as browser_cookies
 from app.transport import browser as browser_mod
-from app.transport.browser import _BROWSER_COOKIES_MAX, _store_browser_cookies, get_browser_cookies_for
+from app.transport.browser import get_browser_cookies_for
+from app.transport.browser_cookies import BROWSER_COOKIES_MAX, store_browser_cookies
 from tests._lock_doubles import DelegatingLock
 
 
@@ -19,7 +21,7 @@ def clean_cookie_store():
     whose whole purpose is to be reset, leaving it empty is the cleaner end state
     and needs no surface the production path does not already have.
     """
-    store = browser_mod._BROWSER_COOKIES_BY_DOMAIN
+    store = browser_cookies.BROWSER_COOKIES_BY_DOMAIN
     browser_mod.reset_process_state()
     try:
         yield store
@@ -35,7 +37,7 @@ def test_public_helpers_reach_the_guarded_store(clean_cookie_store):
     is not that the store *has* a lock -- it is that the helpers it is reached
     through cannot be holding a different, unguarded mapping.
     """
-    _store_browser_cookies("guarded.example", "sess=1")
+    store_browser_cookies("guarded.example", "sess=1")
     assert get_browser_cookies_for("guarded.example") == "sess=1"
 
 
@@ -64,13 +66,13 @@ def test_concurrent_read_and_eviction_does_not_raise(clean_cookie_store):
        has no lock to hold, so this half is red against the pre-fix store on
        that fact alone.
     """
-    for i in range(_BROWSER_COOKIES_MAX):
-        _store_browser_cookies(f"d{i}.example", f"k{i}=v")
+    for i in range(BROWSER_COOKIES_MAX):
+        store_browser_cookies(f"d{i}.example", f"k{i}=v")
     # The front-most key: the one popitem(last=False) drops first.
     victim = "d0.example"
 
     # --- 1: the unsynchronized shape, with the read window held open --------
-    old_shape = OrderedDict((f"d{i}.example", f"k{i}=v") for i in range(_BROWSER_COOKIES_MAX))
+    old_shape = OrderedDict((f"d{i}.example", f"k{i}=v") for i in range(BROWSER_COOKIES_MAX))
     old_error: list[BaseException] = []
     reader_in_window = threading.Event()
     eviction_landed = threading.Event()
@@ -89,7 +91,7 @@ def test_concurrent_read_and_eviction_does_not_raise(clean_cookie_store):
     def _evict() -> None:
         reader_in_window.wait(timeout=5)
         old_shape["brand.new.example"] = "v"
-        while len(old_shape) > _BROWSER_COOKIES_MAX:
+        while len(old_shape) > BROWSER_COOKIES_MAX:
             old_shape.popitem(last=False)  # drops the victim the reader is about to touch
         eviction_landed.set()
 
@@ -177,11 +179,11 @@ def test_read_touches_lru_so_a_read_key_survives_eviction(clean_cookie_store):
     A read refreshes recency, so the key survives the next eviction while the
     front-most untouched key is the one dropped.
     """
-    for i in range(_BROWSER_COOKIES_MAX):
-        _store_browser_cookies(f"d{i}.example", f"k{i}=v")
+    for i in range(BROWSER_COOKIES_MAX):
+        store_browser_cookies(f"d{i}.example", f"k{i}=v")
     oldest = "d0.example"
     assert get_browser_cookies_for(oldest) == "k0=v"
-    _store_browser_cookies("new.example", "new=v")
+    store_browser_cookies("new.example", "new=v")
 
     assert get_browser_cookies_for(oldest) == "k0=v", "read must keep the key warm"
     assert get_browser_cookies_for("d1.example") is None, "untouched front must be evicted"
@@ -197,19 +199,19 @@ def test_missing_domain_read_is_none_not_keyerror(clean_cookie_store):
 
 def test_cookie_cache_capped(clean_cookie_store):
     for i in range(600):
-        _store_browser_cookies(f"d{i}.example", f"k{i}=v")
+        store_browser_cookies(f"d{i}.example", f"k{i}=v")
     # Oldest entries were evicted; newest retained.
     assert get_browser_cookies_for("d599.example") == "k599=v"
     assert get_browser_cookies_for("d0.example") is None
 
 
 def test_lru_keeps_recently_used(clean_cookie_store):
-    for i in range(_BROWSER_COOKIES_MAX + 50):
-        _store_browser_cookies(f"d{i}.example", f"k{i}=v")
+    for i in range(BROWSER_COOKIES_MAX + 50):
+        store_browser_cookies(f"d{i}.example", f"k{i}=v")
     # Touch an older-but-not-oldest entry; it should survive the next eviction.
-    get_browser_cookies_for(f"d{_BROWSER_COOKIES_MAX}.example")
-    _store_browser_cookies("new.example", "new=v")
-    assert get_browser_cookies_for(f"d{_BROWSER_COOKIES_MAX}.example") == f"k{_BROWSER_COOKIES_MAX}=v"
+    get_browser_cookies_for(f"d{BROWSER_COOKIES_MAX}.example")
+    store_browser_cookies("new.example", "new=v")
+    assert get_browser_cookies_for(f"d{BROWSER_COOKIES_MAX}.example") == f"k{BROWSER_COOKIES_MAX}=v"
 
 
 @pytest.mark.real_cffi
@@ -221,7 +223,7 @@ async def test_cffi_session_does_not_replay_cookies_it_received(base_url):
     becomes tenant B's ``Cookie:`` header when the jar replays by domain.
     """
     pytest.importorskip("curl_cffi")
-    from app.transport.http_client_pool import _build_cffi_session
+    from app.transport.pooled_cffi import _build_cffi_session
 
     session = _build_cffi_session()
     try:
@@ -241,7 +243,7 @@ async def test_shared_httpx_client_does_not_replay_cookies_it_received(base_url)
     ``get_async_http_client`` serves every declared-crawler fetch and outlives
     them all, so its jar accumulates across tenants for the life of the process.
     """
-    from app.transport.http_client_pool import _build_async_client
+    from app.transport.pooled_clients import _build_async_client
 
     client = _build_async_client(None)
     try:

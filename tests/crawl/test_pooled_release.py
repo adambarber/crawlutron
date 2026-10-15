@@ -8,6 +8,7 @@ import httpx
 from curl_cffi.requests import AsyncSession
 
 import app.transport.http_client_pool as http_mod
+import app.transport.pooled_clients as pool_mod
 from app.config import settings as settings_mod
 from app.transport.http_client_pool import get_async_http_client
 from tests._async_harnesses import run_loop_rebind_scenario
@@ -93,7 +94,7 @@ def _released_on_a_live_loop(client, what: str) -> bool:
     """
 
     async def _scenario():
-        http_mod._release_dropped_client(client)
+        pool_mod._release_dropped_client(client)
         await await_until(lambda: client.closed, f"{what}'s teardown never ran on a live loop")
 
     asyncio.run(_scenario())
@@ -128,14 +129,14 @@ def test_displaced_client_with_no_running_loop_is_not_left_as_a_broken_coroutine
     displaced = _RealShapedHttpClient()
     with warnings.catch_warnings():
         warnings.simplefilter("error")
-        http_mod._release_dropped_client(displaced)
+        pool_mod._release_dropped_client(displaced)
 
     assert displaced.closed is False, "a teardown was scheduled with no loop able to run it"
 
 
 def test_none_displacement_is_a_noop():
     """Inverse: an undisplaced enqueue must not blow up the release path."""
-    http_mod._release_dropped_client(None)
+    pool_mod._release_dropped_client(None)
 
 
 def test_real_shaped_session_is_closed_eagerly_on_a_live_loop(stub_builder):
@@ -250,13 +251,13 @@ def test_a_third_pooled_kind_is_not_left_out_by_the_httpx_attribute_shape():
 
     # The descriptor keeps its pooled instance in the module global named by ``slot``, so a slot has to name a
     # global that exists.
-    third = http_mod._LoopBoundPooledClient(
-        slot="_DEFAULT_CFFI_SESSION",
+    third = pool_mod._LoopBoundPooledClient(
         build=lambda settings: _ThirdKind(),
         is_closed=lambda client: False,
         lock=threading.Lock(),
         consults_settings=False,
-        namespace=vars(http_mod),
+        namespace=vars(pool_mod),
+        slot="_DEFAULT_HTTP_CLIENT",
     )
 
     first, second = asyncio.run(run_loop_rebind_scenario(third.get))

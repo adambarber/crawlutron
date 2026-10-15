@@ -27,13 +27,12 @@ from app.orchestration.render_result import (
     terminal_crawl_result,
 )
 from app.transport.browser_cookies import (
-    _BROWSER_COOKIES_BY_DOMAIN,
-    _BROWSER_COOKIES_MAX,
-    _harvest_session_cookies,
-    _store_browser_cookies,
+    BROWSER_COOKIES_MAX,
     get_browser_cookies_for,
+    harvest_session_cookies,
     has_process_state,
     reset_process_state,
+    store_browser_cookies,
 )
 from app.transport.browser_driver import BrowserDriver, async_sleep
 from app.transport.browser_targets import (
@@ -45,9 +44,8 @@ from app.transport.browser_targets import (
 
 __all__ = [
     "BrowserRenderer",
-    "_BROWSER_COOKIES_BY_DOMAIN",
-    "_BROWSER_COOKIES_MAX",
-    "_store_browser_cookies",
+    "BROWSER_COOKIES_MAX",
+    "store_browser_cookies",
     "get_browser_cookies_for",
     "has_process_state",
     "make_response_handler",
@@ -56,7 +54,7 @@ __all__ = [
     "reset_process_state",
     "resolve_browser_target",
 ]
-from app.transport.document import _default_document_text_extractor
+from app.transport.document import default_document_text_extractor
 from app.transport.pinned_transport import build_pinned_request, build_pinned_request_async
 from app.vocabulary.limits import DEFAULT_CHALLENGE_WAIT_SECONDS, DEFAULT_MAX_CONCURRENT_PAGES
 from app.vocabulary.taxonomy import ResultStatus, status_for_classification
@@ -99,7 +97,7 @@ class BrowserRenderer:
                 )
         else:
             self._challenge_wait_seconds = challenge_wait_seconds
-        self._pdf_text_extractor = pdf_text_extractor or _default_document_text_extractor
+        self._pdf_text_extractor = pdf_text_extractor or default_document_text_extractor
         # The two renderer-owned predicates a test steers (page yield, PDF);
         # overridable collaborators, so a test substitutes behaviour, not internals.
         self._extract = extract or self.extract_with_challenge_wait
@@ -353,7 +351,7 @@ class BrowserRenderer:
             # root); a wedged context.cookies() falls back cookieless after a bounded wait.
             try:
                 await asyncio.wait_for(
-                    _harvest_session_cookies(page, url),
+                    harvest_session_cookies(page, url),
                     timeout=self._driver.harvest_timeout_for(options.browser_profile or {}),
                 )
             except TimeoutError:

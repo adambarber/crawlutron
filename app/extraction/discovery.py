@@ -10,7 +10,7 @@ from app.extraction.documents import ExtractedContent
 from app.extraction.llm_format import (
     PageMetadata as ExtractedPageMetadata,
 )
-from app.extraction.llm_format import _llm_metadata_from_tree
+from app.extraction.llm_format import llm_metadata_from_tree
 from app.extraction.trees import html_diagnostics, parse_html_tree
 from app.models.discovered_link import DiscoveredLink
 from app.models.host_policy import HostPolicy
@@ -132,7 +132,7 @@ def extract_post_fetch_discovery(
     # empty dict means "no tree" and shaping falls back to its single parse.
     llm_metadata: ExtractedPageMetadata = {}
     if include_metadata and tree is not None and final_url:
-        llm_metadata = _llm_metadata_from_tree(tree, final_url)
+        llm_metadata = llm_metadata_from_tree(tree, final_url)
     return {
         "diagnostics": diagnostics,
         "discovered_links": discovered_links,

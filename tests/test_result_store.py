@@ -38,12 +38,7 @@ def test_max_entries_prunes_oldest():
     clock, _ = _clock()
     store = CrawlResultStore(":memory:", ttl_seconds=3600, max_entries=3, clock=clock)
     for i in range(5):
-        clock() and None
         store.put(f"crawl_{i}", _payload(str(i)))
-        # ensure strictly increasing stored_at
-        for _ in range(1):
-            pass
-    # with a static clock, stored_at ties are possible; use distinct payloads check instead:
     kept = [store.get(f"crawl_{i}") is not None for i in range(5)]
     assert sum(kept) == 3, kept
 

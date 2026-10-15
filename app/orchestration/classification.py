@@ -20,20 +20,20 @@ import httpx
 
 from app.models.browser_pool_exhausted import BrowserPoolExhaustedError
 from app.models.taxonomy import Classification, CrawlStrategyName
-from app.orchestration.scheduler_exceptions import _CircuitBreakerOpen
+from app.orchestration.scheduler_exceptions import CircuitBreakerOpen
 from app.transport.decompression import DecompressionError, DecompressionTooLargeError
 from app.vocabulary.taxonomy import is_transient_classification
 
 _logger = logging.getLogger(__name__)
 
-__all__ = ["classify_error_code"]
+__all__ = ["classify_and_log", "classify_error_code"]
 
 
 _CLASSIFICATION_BY_EXCEPTION: tuple[tuple[tuple[type[BaseException], ...], Classification], ...] = (
     ((BrowserPoolExhaustedError,), "browser_pool_exhausted"),
     # Capacity, not a page failure: the URL was never attempted, which is why it
     # stays distinct from the transport rows below and stays retryable.
-    ((_CircuitBreakerOpen,), "circuit_breaker_open"),
+    ((CircuitBreakerOpen,), "circuit_breaker_open"),
     ((DecompressionTooLargeError,), "payload_too_large"),
     # The declared encoding did not decode; its ValueError base is a zlib
     # detail, so without this row a transient fault reads as terminal.
@@ -96,7 +96,7 @@ def classify_error_code(exc: BaseException) -> Classification:
     return "network_error"
 
 
-def _classify_and_log(
+def classify_and_log(
     error: BaseException,
     *,
     event: str,

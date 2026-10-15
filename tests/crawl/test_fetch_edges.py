@@ -7,8 +7,9 @@ import pytest
 
 from app.admission.policy import read_policy
 from app.config.settings import CrawlerSettings
-from app.extraction.content import _walkable, forms_from
+from app.extraction.content import forms_from
 from app.extraction.document_text import format_extracted_document_text
+from app.extraction.trees import walkable
 from app.orchestration.engine import crawl_request
 from app.safety.validation import HostPolicy
 from app.transport.cache import HttpCache
@@ -133,7 +134,7 @@ class TestCrawlRequest:
 
 class TestFetchHelperUtilities:
     def test_form_collector_select_textarea_button(self) -> None:
-        walkable = _walkable(
+        walked = walkable(
             "<form action='/submit' method='post'>"
             "<input type='text' name='q' value='a'>"
             "<select name='s'><option value='1'>x</option></select>"
@@ -143,8 +144,8 @@ class TestFetchHelperUtilities:
             canonical("http://x/"),
             None,
         )
-        assert walkable is not None
-        forms = forms_from(walkable)
+        assert walked is not None
+        forms = forms_from(walked)
         assert len(forms) == 1
         tags = {c["tag"] for c in forms[0]["controls"]}
         assert {"input", "select", "textarea", "button"} <= tags

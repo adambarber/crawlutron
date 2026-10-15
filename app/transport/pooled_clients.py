@@ -1,9 +1,12 @@
+"""Pooled client lifecycle shared by the HTTP facade: build once per loop, supersede cleanly."""
+
 from __future__ import annotations
 
 import asyncio
 import contextlib
 import threading
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from http.cookiejar import CookieJar as _StdlibCookieJar
 from typing import TYPE_CHECKING, Any, Protocol, TypeVar, cast
 
@@ -46,7 +49,7 @@ def _build_async_client(settings: CrawlerSettings | None = None) -> httpx.AsyncC
 
 # Superseded loop-bound pooled clients awaiting a loop to close on -- one bounded
 # backlog and reaper cover both httpx and curl_cffi kinds.
-_PENDING_CLIENT_CLOSE: list[Any] = []
+_PENDING_CLIENT_CLOSE: list[object] = []
 
 
 _PENDING_CLIENT_CLOSE_MAX = 32
@@ -430,3 +433,63 @@ async def _safe_aclose(client):
 
 
 T = TypeVar("T")
+
+
+def _discard_if_unowned_loop(close: Callable[[], Any], slot: str, namespace: dict[str, Any]) -> None:
+    """Release ``slot``'s object, closing it only when no loop owns it.
+
+    ``namespace`` is the module holding the pooled object, so one helper serves
+    every pool module instead of each keeping a globals()-bound copy.
+    """
+    if namespace[slot] is None:
+        return
+    try:
+        loop = asyncio.get_event_loop()
+    except RuntimeError:
+        namespace[slot] = None
+        return
+    if loop.is_running():
+        namespace[slot] = None
+    else:
+        loop.run_until_complete(close())
+
+
+def reset_process_state() -> None:
+    """Release every process-wide object this module holds.
+
+    The two lazily-created clients and the pending-close queue are one unit: a
+    queue holding references to a client that has been released outlives the loop
+    that could have drained it, so resetting one without the others leaves a
+    state production never reaches.
+    """
+    if _DEFAULT_HTTP_CLIENT is not None:
+        _discard_if_unowned_loop(close_async_http_client, "_DEFAULT_HTTP_CLIENT", globals())
+    with _PENDING_CLIENT_CLOSE_LOCK:
+        _PENDING_CLIENT_CLOSE.clear()
+
+
+def http_singleton() -> _LoopBoundPooledClient:
+    """The pooled httpx descriptor, for builder substitution at the shared seam."""
+    return _HTTP_CLIENT_SINGLETON
+
+
+def has_process_state() -> bool:
+    """Whether a lazily-created client or a queued close reference is still held."""
+    return _DEFAULT_HTTP_CLIENT is not None or bool(_PENDING_CLIENT_CLOSE)
+
+
+@contextmanager
+def swap_pooled_builders(swaps: list[tuple[Any, Callable[[CrawlerSettings | None], Any]]]) -> Iterator[None]:
+    """Rebind the given pooled singletons' builders, restored on the way out.
+
+    The builders are the one part of the pools a caller can legitimately
+    supply; the previous builder returns when the block exits, even on error.
+    """
+    saved = [(singleton, singleton.build) for singleton, _ in swaps]
+    for singleton, builder in swaps:
+        singleton.build = builder
+    try:
+        yield
+    finally:
+        for singleton, original in saved:
+            singleton.build = original

@@ -12,8 +12,15 @@ from app.models.normalized_url import NormalizedUrl
 logger = logging.getLogger(__name__)
 
 
-# the shared classifier taxonomy, so HTTP and browser cannot disagree about a label.
-_BROWSER_COOKIES_MAX = 500
+__all__ = [
+    "BROWSER_COOKIES_BY_DOMAIN",
+    "BROWSER_COOKIES_MAX",
+    "harvest_session_cookies",
+    "store_browser_cookies",
+]
+
+
+BROWSER_COOKIES_MAX = 500
 
 
 class _LockedDomainCookieStore:
@@ -76,7 +83,7 @@ class _LockedDomainCookieStore:
             return len(self._data)
 
 
-_BROWSER_COOKIES_BY_DOMAIN = _LockedDomainCookieStore(_BROWSER_COOKIES_MAX)
+BROWSER_COOKIES_BY_DOMAIN = _LockedDomainCookieStore(BROWSER_COOKIES_MAX)
 
 
 def reset_process_state() -> None:
@@ -85,24 +92,24 @@ def reset_process_state() -> None:
     The store is process-wide and bounded, not cleared, so a browser test that
     renders once leaves its domain's cookies for the next test to assert against.
     """
-    _BROWSER_COOKIES_BY_DOMAIN.clear()
+    BROWSER_COOKIES_BY_DOMAIN.clear()
 
 
 def has_process_state() -> bool:
     """Whether any domain's cookies are held right now."""
-    return len(_BROWSER_COOKIES_BY_DOMAIN) > 0
+    return len(BROWSER_COOKIES_BY_DOMAIN) > 0
 
 
-def _store_browser_cookies(domain: str, header: str) -> None:
+def store_browser_cookies(domain: str, header: str) -> None:
     """Record a harvested cookie header, evicting the LRU entry past the cap."""
-    _BROWSER_COOKIES_BY_DOMAIN.store(domain, header)
+    BROWSER_COOKIES_BY_DOMAIN.store(domain, header)
 
 
 def get_browser_cookies_for(domain: str) -> str | None:
-    return _BROWSER_COOKIES_BY_DOMAIN.touch_get(domain)
+    return BROWSER_COOKIES_BY_DOMAIN.touch_get(domain)
 
 
-async def _harvest_session_cookies(page: Any, url: NormalizedUrl) -> None:
+async def harvest_session_cookies(page: Any, url: NormalizedUrl) -> None:
     """Capture the page's cookies before the context closes.
 
     Runs synchronously: the retry reads the store right after the render."""
@@ -113,7 +120,7 @@ async def _harvest_session_cookies(page: Any, url: NormalizedUrl) -> None:
         cookies = await context.cookies(url.raw)
         header = "; ".join(f"{c['name']}={c['value']}" for c in cookies if c.get("name"))
         if header:
-            _store_browser_cookies(url.site, header)
+            store_browser_cookies(url.site, header)
             logger.info("browser_cookies_harvested", extra={"domain": url.site, "count": len(cookies)})
     except Exception as error:
         logger.debug("browser_cookies_harvest_failed", extra={"error": str(error)})

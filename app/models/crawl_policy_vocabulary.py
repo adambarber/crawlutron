@@ -3,10 +3,18 @@ from __future__ import annotations
 from typing import Any
 from urllib.parse import urlsplit
 
+from app.models.json_value import JsonValue
 from app.vocabulary.request_profiles import REQUEST_PROFILE_KEYS
 
+__all__ = [
+    "REQUEST_PROFILE_KEYS_JSON",
+    "close_browser_profile_vocabulary",
+    "close_request_profile_vocabulary",
+    "narrows_credential_scope",
+]
 
-def _close_browser_profile_vocabulary(profile: dict[str, Any]) -> dict[str, Any]:
+
+def close_browser_profile_vocabulary(profile: dict[str, JsonValue]) -> dict[str, JsonValue]:
     """Refuse inert keys and inert actions in ``browser_profile``, and say what is allowed.
 
     This model was ``dict[str, Any]`` with exactly one key checked
@@ -66,7 +74,7 @@ def _close_browser_profile_vocabulary(profile: dict[str, Any]) -> dict[str, Any]
     return profile
 
 
-def _refuse_over_ceiling_knobs(profile: dict[str, Any]) -> None:
+def _refuse_over_ceiling_knobs(profile: dict[str, JsonValue]) -> None:
     """Refuse a closed key whose value is larger than the work it buys is worth.
 
     The vocabulary is closed, which is a claim about which keys exist and nothing
@@ -109,7 +117,7 @@ def _refuse_over_ceiling_knobs(profile: dict[str, Any]) -> None:
 def _refuse_unusable_action(action: Any, index: int, allowed: str) -> None:
     """Refuse one action the renderer would accept and then do nothing about.
 
-    Split out of :func:`_close_browser_profile_vocabulary` so the three
+    Split out of :func:`close_browser_profile_vocabulary` so the three
     refusals read as the three distinct failures they are, rather than as one
     long loop body. ``allowed`` is the already-formatted list of permitted types,
     passed in so this stays a check on one action rather than a place the
@@ -150,7 +158,7 @@ def _refuse_unusable_action(action: Any, index: int, allowed: str) -> None:
         )
 
 
-def _close_request_profile_vocabulary(profile: dict[str, Any]) -> dict[str, Any]:
+def close_request_profile_vocabulary(profile: dict[str, JsonValue]) -> dict[str, JsonValue]:
     """Refuse inert keys and malformed values in ``request_profile``, and say what is allowed.
 
     This model was ``dict[str, Any]`` with no constraints at all, while its
@@ -201,7 +209,7 @@ def _close_request_profile_vocabulary(profile: dict[str, Any]) -> dict[str, Any]
     return profile
 
 
-def _refuse_malformed_profile_values(profile: dict[str, Any]) -> None:
+def _refuse_malformed_profile_values(profile: dict[str, JsonValue]) -> None:
     """Refuse a value of the wrong shape behind a permitted key.
 
     Split from the vocabulary check because the two answer different questions:
@@ -239,7 +247,7 @@ def _refuse_malformed_profile_values(profile: dict[str, Any]) -> None:
         _refuse_malformed_cookie_map(profile, MAX_PROFILE_COOKIE_HOSTS, MAX_PROFILE_COOKIE_PAIRS)
 
 
-def _refuse_malformed_pool(profile: dict[str, Any], key: str, ceiling: int) -> None:
+def _refuse_malformed_pool(profile: dict[str, JsonValue], key: str, ceiling: int) -> None:
     """Refuse a header pool that is not a bounded list of strings.
 
     Split out so the two refusals read as the two failures they are: the wrong
@@ -256,7 +264,7 @@ def _refuse_malformed_pool(profile: dict[str, Any], key: str, ceiling: int) -> N
             raise ValueError(f"request_profile {key} entries must be strings, got {type(entry).__name__}")
 
 
-def _refuse_malformed_cookie_map(profile: dict[str, Any], host_ceiling: int, pair_ceiling: int) -> None:
+def _refuse_malformed_cookie_map(profile: dict[str, JsonValue], host_ceiling: int, pair_ceiling: int) -> None:
     """Refuse a static cookie map that is unbounded or malformed.
 
     Without these a 200,000-host map parsed into one policy, and because
@@ -296,7 +304,7 @@ def _refuse_malformed_cookie_map(profile: dict[str, Any], host_ceiling: int, pai
                 )
 
 
-def _narrows_credential_scope(key: str) -> bool:
+def narrows_credential_scope(key: str) -> bool:
     """True when a credential key names less than a whole origin.
 
     A key that cannot reach every path on its host is a narrower scope than
@@ -316,4 +324,4 @@ MAX_BROWSER_ACTIONS = 64
 MAX_HEADERS_PER_REQUEST = 64
 
 
-_REQUEST_PROFILE_KEYS_JSON: dict[str, Any] = {"keys": sorted(REQUEST_PROFILE_KEYS)}
+REQUEST_PROFILE_KEYS_JSON: dict[str, Any] = {"keys": sorted(REQUEST_PROFILE_KEYS)}

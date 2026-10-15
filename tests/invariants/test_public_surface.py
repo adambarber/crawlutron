@@ -57,7 +57,7 @@ _OWNER_PUBLIC_SURFACE_RATCHET = {
     "app/admission/payload_helpers.py": (2, 2),
     # RAISED to (10, 9): terminal_attempt became public when CrawlResult stopped copying four axes out of the
     # attempt it holds.
-    "app/orchestration/classification.py": (1, 1),
+    "app/orchestration/classification.py": (2, 2),
     "app/orchestration/engine_result.py": (5, 4),
     "app/orchestration/render_result.py": (4, 4),
     "app/transport/fetch_policy.py": (5, 5),

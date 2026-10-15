@@ -233,10 +233,10 @@ def extract_selected(
     return ExtractedContent(md or text, md or text)
 
 
-_PDF_MAGIC = b"%PDF"
+PDF_MAGIC = b"%PDF"
 
 
-_DOC_EXTENSIONS = (
+DOC_EXTENSIONS = (
     ".pdf",
     ".doc",
     ".docx",

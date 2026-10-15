@@ -93,9 +93,9 @@ async def _afetch_document_bytes(url: NormalizedUrl, pin: pinned_transport.PinRu
     """
     from app.extraction.content import EXTRACTION_DOC_MAX_INPUT_BYTES
     from app.safety.bounded_io import read_capped_async
-    from app.transport import http_client_pool, pinned_transport
+    from app.transport import http_client_pool, pinned_transport, pooled_clients
 
-    await http_client_pool._drain_pending_client_closes()
+    await pooled_clients._drain_pending_client_closes()
     client = http_client_pool.get_async_http_client()
     timeout = Timeouts.defaults().as_httpx()
     async for chain, pinned_url, hop_headers in pinned_transport.apinned_hops(url, {}, pin=pin):
@@ -110,7 +110,7 @@ async def _afetch_document_bytes(url: NormalizedUrl, pin: pinned_transport.PinRu
     raise AssertionError("apinned_hops raises on a body that neither returned nor advanced")
 
 
-def _default_document_text_extractor(url: NormalizedUrl) -> str:
+def default_document_text_extractor(url: NormalizedUrl) -> str:
     """Default document text extractor: fetch the URL and extract Markdown.
 
     Used by the browser strategy for ``.pdf`` final URLs. Injectable via

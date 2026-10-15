@@ -9,9 +9,9 @@ from app.extraction.content import is_html
 from app.extraction.document_text import format_extracted_document_text
 from app.models.taxonomy import Classification
 from app.transport import body_decode
-from app.transport.content_pipeline import _run_extraction
+from app.transport.content_pipeline import run_extraction
 from app.transport.decompression import decompress_body as _decompress_body
-from app.transport.http_response import _ExtractedHttpContent, _FetchedResponse, _HttpStrategyContext
+from app.transport.http_response import ExtractedHttpContent, FetchedResponse, HttpStrategyContext
 from app.vocabulary.extraction import (
     EXTRACTION_DOCUMENT,
     EXTRACTION_METHOD_HTTP_BODY,
@@ -20,7 +20,7 @@ from app.vocabulary.extraction import (
 )
 
 
-async def _extract_http_phase(ctx: _HttpStrategyContext, resp: _FetchedResponse) -> _ExtractedHttpContent:
+async def _extract_http_phase(ctx: HttpStrategyContext, resp: FetchedResponse) -> ExtractedHttpContent:
     """Decode the body, run the selected extractor, and measure content.
 
     ``is_html`` is :func:`app.extraction.content.is_html`, the same predicate the
@@ -42,7 +42,7 @@ async def _extract_http_phase(ctx: _HttpStrategyContext, resp: _FetchedResponse)
     body_text = body_decode.decode_body(decompressed, resp.content_type)
     html_body = is_html(resp.content_type, body_text)
     html = body_text if html_body else None
-    extracted = await _run_extraction(
+    extracted = await run_extraction(
         extraction=ctx.extraction,
         content=decompressed,
         decoded=body_text,
@@ -57,7 +57,7 @@ async def _extract_http_phase(ctx: _HttpStrategyContext, resp: _FetchedResponse)
         text = format_extracted_document_text(text, source_url=resp.final_url)
         markdown = text
 
-    return _ExtractedHttpContent(
+    return ExtractedHttpContent(
         decompressed=decompressed,
         body_text=body_text,
         content_type=resp.content_type,
@@ -78,9 +78,9 @@ def _request_profile_diagnostics(profile: dict[str, Any]) -> dict[str, str]:
 
 
 def _classify_extracted_content(
-    ctx: _HttpStrategyContext,
-    resp: _FetchedResponse,
-    extracted: _ExtractedHttpContent,
+    ctx: HttpStrategyContext,
+    resp: FetchedResponse,
+    extracted: ExtractedHttpContent,
 ) -> tuple[Classification, list[dict[str, Any]]]:
     """Apply status overrides to the page classifier's evidence."""
     classification, evidence = classify_page_with_evidence(extracted.html, extracted.text)

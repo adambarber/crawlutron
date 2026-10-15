@@ -73,10 +73,10 @@ def start_job(
 
     The runner lives in :mod:`app.api.job_runner`; the import here is at call
     time, breaking the recovery→runner cycle without a registry-side dep."""
-    from app.api.job_runner import _run_job
+    from app.api.job_runner import run_job
 
     return start_tracked_task(
-        job_id, lambda: _run_job(job_id, job_store, settings, shutdown_event, preclaimed=preclaimed)
+        job_id, lambda: run_job(job_id, job_store, settings, shutdown_event, preclaimed=preclaimed)
     )
 
 

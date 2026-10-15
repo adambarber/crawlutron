@@ -182,7 +182,7 @@ async def _join_runner_task(job_id: str) -> bool:
     """Await the runner task for ``job_id`` if one is registered and live.
 
     For a terminal wait this is the exact event the caller is waiting on:
-    ``_run_job`` returns when it has finished, and it does not return at a time
+    ``run_job`` returns when it has finished, and it does not return at a time
     of our choosing. A starved box *delays* that task; it does not end it early,
     so a task join is immune to the whole class of failure this replaced --
     there is no deadline in this path to race.
@@ -236,7 +236,7 @@ async def _wait_for(job_store, job_id: str, satisfied, *, join_task: bool):
 
     Subscribe first, then read, then wait -- in that order, and the read comes
     before the wait because the state can already be what the caller asked for
-    (a caller that drove ``_run_job`` in-line reaches this only once the job is
+    (a caller that drove ``run_job`` in-line reaches this only once the job is
     finished). Clearing the event after the read is what makes the wait
     lossless: a write that lands after the clear has its ``call_soon_threadsafe``
     callback queued, so the very next suspension runs it and the wait returns; a

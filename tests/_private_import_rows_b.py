@@ -16,11 +16,6 @@ DECLARED: dict[str, Declaration] = {
     "app.transport.cookie_jar._GLOBAL_COOKIE_JAR": _d(
         _CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test", "app"]
     ),
-    "app.transport.document._default_document_text_extractor": _d(
-        "unreviewed",
-        "Not yet triaged.\n",
-        ["test"],
-    ),
     "app.transport.document._extract_pdf_bytes_to_markdown": _d(
         "unreviewed",
         "Not yet triaged.\n",
@@ -45,31 +40,29 @@ DECLARED: dict[str, Declaration] = {
         ["test"],
     ),
     "app.transport.fetchers._release_stream_noblock": _SUBSTITUTED_COLLABORATOR,
-    "app.transport.http_client_pool._LoopBoundPooledClient": _d(
+    "app.transport.pooled_clients._LoopBoundPooledClient": _d(
         _PRIVATE_TYPE.kind, _PRIVATE_TYPE.reason, ["test"]
     ),
-    "app.transport.http_client_pool._NoStoreCookieJar": _d(
-        _PRIVATE_TYPE.kind, _PRIVATE_TYPE.reason, ["test"]
-    ),
-    "app.transport.http_client_pool._PENDING_CLIENT_CLOSE": _d(
+    "app.transport.pooled_clients._NoStoreCookieJar": _d(_PRIVATE_TYPE.kind, _PRIVATE_TYPE.reason, ["test"]),
+    "app.transport.pooled_clients._PENDING_CLIENT_CLOSE": _d(
         _CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]
     ),
-    "app.transport.http_client_pool._PENDING_CLIENT_CLOSE_LOCK": _d(
+    "app.transport.pooled_clients._PENDING_CLIENT_CLOSE_LOCK": _d(
         _CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]
     ),
-    "app.transport.http_client_pool._PENDING_CLIENT_CLOSE_MAX": _d(
+    "app.transport.pooled_clients._PENDING_CLIENT_CLOSE_MAX": _d(
         _CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]
     ),
-    "app.transport.http_client_pool._build_async_client": _SUBSTITUTED_COLLABORATOR,
-    "app.transport.http_client_pool._build_cffi_session": _SUBSTITUTED_COLLABORATOR,
-    "app.transport.http_client_pool._drain_pending_client_closes": _d(
+    "app.transport.pooled_clients._build_async_client": _SUBSTITUTED_COLLABORATOR,
+    "app.transport.pooled_cffi._build_cffi_session": _SUBSTITUTED_COLLABORATOR,
+    "app.transport.pooled_clients._drain_pending_client_closes": _d(
         _LIFECYCLE_DRAIN_PENDING_CLIENT_CLOSES.kind,
         _LIFECYCLE_DRAIN_PENDING_CLIENT_CLOSES.reason,
         ["test", "app"],
     ),
-    "app.transport.http_client_pool._queue_superseded_close": _SUBSTITUTED_COLLABORATOR,
-    "app.transport.http_client_pool._release_dropped_client": _OWNED_POOL_MACHINERY,
-    "app.transport.http_client_pool._schedule_client_close": _OWNED_POOL_MACHINERY,
+    "app.transport.pooled_clients._queue_superseded_close": _SUBSTITUTED_COLLABORATOR,
+    "app.transport.pooled_clients._release_dropped_client": _OWNED_POOL_MACHINERY,
+    "app.transport.pooled_clients._schedule_client_close": _OWNED_POOL_MACHINERY,
     "app.transport.pinned_transport._CREDENTIAL_HEADERS": _d(
         _CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]
     ),

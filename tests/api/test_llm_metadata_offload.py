@@ -12,11 +12,10 @@ import pytest
 from app.api.response_shaping import (
     EnvelopeOptions,
     abuild_unified_crawl_response,
-    abuild_unified_result,
-    aformat_crawl_item,
     build_unified_crawl_response,
     build_unified_result,
 )
+from app.api.unified_shaping import abuild_unified_result, aformat_crawl_item
 from app.models.crawl_result import EngineCrawlResult
 from tests._assertions import install_to_thread_spy
 from tests._result_builders import engine_result

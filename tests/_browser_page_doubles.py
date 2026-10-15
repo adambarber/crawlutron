@@ -27,7 +27,7 @@ class PageCookieContext(Protocol):
 class FakePageContext:
     """A page context that holds no cookies.
 
-    ``_harvest_session_cookies`` reads ``page.context.cookies``,
+    ``harvest_session_cookies`` reads ``page.context.cookies``,
     so a page double with no context is a double the renderer cannot ask -- and
     the two ways tests were getting around that (assigning ``page.context`` after
     construction) put a member on the object that its own type did not declare.

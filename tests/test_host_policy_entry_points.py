@@ -1,86 +1,22 @@
 from __future__ import annotations
 
 import asyncio
-from collections import defaultdict
-from collections.abc import Mapping, MutableMapping
-from typing import Any
 
 import httpx
 import pytest
-from fastapi import HTTPException
 
 from app.storage.result_store import CrawlResultStore
+from tests._host_policy_probes import (
+    _BLOCKED_URL,
+    _assert_refused,
+    _blocked_records,
+    _denied_policy,
+    _denied_settings,
+    _effects,
+    _record_probe_fetch,
+)
+from tests._policy_factories import canonical
 from tests.invariants.test_host_policy_entry_points import _table_entries
-
-_BLOCKED_URL = "https://blocked.test/secret"
-
-
-def _denied_settings():
-    from app.config.settings import CrawlerSettings
-
-    return CrawlerSettings.from_mapping({"CRAWLUTRON_DENIED_HOSTS": "blocked.test"})
-
-
-def _denied_policy():
-    from app.safety.validation import HostPolicy
-
-    return HostPolicy.from_strings("", "blocked.test")
-
-
-def _refused_result(result) -> bool:
-    if getattr(result, "is_error", False):
-        return True
-    if isinstance(result, dict):
-        results = result.get("results")
-        if isinstance(results, list):
-            return all(
-                isinstance(item, dict) and item.get("status") in {"blocked", "disallowed", "failed"}
-                for item in results
-            )
-        return not result.get("url") and not result.get("links")
-    return result is None
-
-
-def _effects() -> defaultdict[str, list[Any]]:
-    """An empty recorder for the "this must never be reached" lists.
-
-    The refusal tests all need the same thing: somewhere to record what the
-    refused code would have done, so the refusal is proven by the list staying
-    empty rather than by the absence of an exception. Eight sites spelled that out
-    as a hand-built dict literal, each declaring its keys up front -- while the
-    one assertion that consumes them never names a key and only walks whatever
-    got recorded. So those key lists were ceremony: a test could declare
-    ``{"webhook": []}``, record under ``"wire"``, and still pass, with the
-    declared key never read by anything. Here a key exists only if something was
-    recorded, so the recorder and the assertion cannot drift apart.
-    """
-    return defaultdict(list)
-
-
-def _record_probe_fetch(effects: MutableMapping[str, list], payload: Mapping[str, Any]) -> None:
-    """Note a fetch the guard was supposed to prevent, unless it was the blocked URL.
-
-    The stand-in execution helpers all need the same recording: the only fetch
-    that is *not* a finding is the one the guard was supposed to refuse. Spelled
-    inline in each helper, a probe that compared a different value than the one
-    the test asserted on would record every URL it saw -- and the assertion
-    still passed, because the test only ever checked the blocked one.
-    """
-    if payload.get("url") != _BLOCKED_URL:
-        effects["fetched"].append(payload.get("url"))
-
-
-async def _assert_refused(awaitable, effects: Mapping[str, list]) -> None:
-    try:
-        result = await awaitable
-    except (ValueError, RuntimeError):
-        result = None
-    except Exception as error:
-        if error.__class__.__name__ != "HTTPException":
-            raise
-        result = None
-    assert _refused_result(result)
-    assert all(not values for values in effects.values())
 
 
 async def _probe_crawl_endpoint(monkeypatch, tmp_path):
@@ -322,92 +258,6 @@ async def _probe_webhook_delivery(monkeypatch, tmp_path):
     )
 
 
-def _blocked_http(*args, **kwargs):
-    raise HTTPException(status_code=422, detail="blocked by host policy")
-
-
-def _tool_payload(tool: str, **fields):
-    """Build what the MCP dispatcher builds before a handler ever sees it.
-
-    The dispatcher validates a call's arguments into the tool's declared
-    ``request_model``, so a probe that invokes a handler directly has to
-    construct that same model -- a raw dict is no longer what a handler takes.
-    Reading the model off the registration rather than naming it here keeps the
-    probe from becoming a second place that knows which model a tool uses.
-    """
-    from app.mcp.tools import TOOLS_BY_NAME
-
-    return TOOLS_BY_NAME[tool].request_model(**fields)
-
-
-async def _probe_mcp_crawl(monkeypatch, tmp_path):
-    from app.mcp import tools
-
-    monkeypatch.setattr(tools, "execute_crawl", _blocked_http)
-    await _assert_refused(
-        tools._handle_crawl(_tool_payload("crawl", url=_BLOCKED_URL), _denied_settings(), None), {}
-    )
-
-
-async def _probe_mcp_crawl_and_extract(monkeypatch, tmp_path):
-    from app.mcp import tools
-
-    monkeypatch.setattr(tools, "execute_crawl", _blocked_http)
-    await _assert_refused(
-        tools._handle_crawl_and_extract(
-            _tool_payload("crawl_and_extract", url=_BLOCKED_URL), _denied_settings(), None
-        ),
-        {},
-    )
-
-
-async def _probe_mcp_map(monkeypatch, tmp_path):
-    from app.mcp import tools
-
-    monkeypatch.setattr(tools, "map_site", _blocked_http)
-    await _assert_refused(
-        tools._handle_map(_tool_payload("map", url=_BLOCKED_URL), _denied_settings(), None), {}
-    )
-
-
-async def _probe_mcp_render(monkeypatch, tmp_path):
-    from app.mcp import tools
-
-    monkeypatch.setattr(tools, "get_browser_pool", lambda: object())
-    monkeypatch.setattr(tools, "render_endpoint_handler", _blocked_http)
-    await _assert_refused(
-        tools._handle_render(_tool_payload("render", url=_BLOCKED_URL), _denied_settings(), None), {}
-    )
-
-
-async def _probe_mcp_search(monkeypatch, tmp_path):
-    from app.mcp import tools
-
-    monkeypatch.setattr(tools, "search_endpoint_handler", _blocked_http)
-    await _assert_refused(
-        tools._handle_search(_tool_payload("search", query="blocked"), _denied_settings(), None), {}
-    )
-
-
-def _blocked_records() -> list[dict]:
-    """One retained crawl record whose only page was blocked."""
-    return [
-        {
-            "request_id": "req-1",
-            "results": [
-                {
-                    "normalized_url": _BLOCKED_URL,
-                    "status": "blocked",
-                    "classification": "captcha_detected",
-                    "selected_strategy": None,
-                    "attempted_strategies": [],
-                    "classification_evidence": [],
-                }
-            ],
-        }
-    ]
-
-
 async def _probe_policy_suggestions(monkeypatch, tmp_path):
     """A host this deployment refuses must produce no suggestion at either level.
 
@@ -433,9 +283,40 @@ async def _probe_policy_suggestions(monkeypatch, tmp_path):
     assert from_builder.suggestions == []
 
 
+async def _probe_job_runner(monkeypatch, tmp_path):
+    import asyncio
+
+    from app.api import job_runner
+    from app.storage.job_store_collections import FrontierEntry, JobStatus
+    from app.storage.job_store_state import CrawlJobState
+    from tests._job_store_doubles import make_job_store
+
+    effects = _effects()
+    job_store = make_job_store(str(tmp_path))
+
+    async def fetch_and_decode(url, *args, **kwargs):
+        effects["fetched"].append(str(url))
+        raise AssertionError("a denied job must never fetch")
+
+    job_store.save(
+        CrawlJobState(
+            job_id="blocked-job",
+            root_url=_BLOCKED_URL,
+            policy=_denied_policy(),
+            status=JobStatus.PENDING,
+            frontier=[FrontierEntry(url=canonical(_BLOCKED_URL), depth=0)],
+        )
+    )
+    await _assert_refused(
+        job_runner.run_job("blocked-job", job_store, _denied_settings(), asyncio.Event(), fetch_and_decode),
+        effects,
+    )
+
+
 _PROBES = {
     "app/api/crawl_endpoint.py:crawl": _probe_crawl_endpoint,
     "app/api/crawl_executor.py:execute_crawl": _probe_crawl_executor,
+    "app/api/job_runner.py:run_job": _probe_job_runner,
     "app/api/jobs_router.py:create_job": _probe_jobs_router,
     "app/api/map_endpoint.py:map_site": _probe_map_endpoint,
     "app/api/site_map.py:build_site_map": _probe_site_map,
@@ -447,21 +328,17 @@ _PROBES = {
     "app/api/policy_suggestions.py:build_policy_suggestions": _probe_policy_suggestions,
     "app/api/webhooks.py:post_webhook": _probe_webhook,
     "app/api/webhooks.py:deliver_pinned_webhook": _probe_webhook_delivery,
-    "app/mcp/tools.py:_handle_crawl": _probe_mcp_crawl,
-    "app/mcp/tools.py:_handle_crawl_and_extract": _probe_mcp_crawl_and_extract,
-    "app/mcp/tools.py:_handle_map": _probe_mcp_map,
-    "app/mcp/tools.py:_handle_render": _probe_mcp_render,
-    "app/mcp/tools.py:_handle_search": _probe_mcp_search,
 }
 
 
-@pytest.mark.parametrize("entry", sorted(_table_entries()))
+@pytest.mark.parametrize("entry", sorted(_PROBES))
 async def test_host_policy_entry_point_refuses(entry, monkeypatch, tmp_path):
     await _PROBES[entry](monkeypatch, tmp_path)
 
 
-def test_host_policy_probe_table_matches_entry_table():
-    assert set(_PROBES) == _table_entries()
+def test_host_policy_probes_cover_the_full_api_entry_table():
+    api_entries = {name for name in _table_entries() if not name.startswith("app/mcp/")}
+    assert set(_PROBES) == api_entries
 
 
 async def test_render_probe_fails_when_policy_enforcement_is_removed(monkeypatch, tmp_path):

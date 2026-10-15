@@ -18,10 +18,10 @@ from curl_cffi.requests.models import STREAM_END
 from app.models.http_fetch_result import HttpFetchResult
 from app.models.http_fetcher import HttpFetcher
 from app.models.normalized_url import NormalizedUrl
-from app.transport import http_client_pool, pinned_transport
+from app.transport import http_client_pool, pinned_transport, pooled_clients
 from app.transport.decompression import DecompressionError, DecompressionTooLargeError
 from app.transport.decompression import decompress_body as _decompress_body
-from app.transport.request_profile import _store_set_cookies, _TransportHeaders
+from app.transport.request_profile import TransportHeaders, _store_set_cookies
 from app.transport.timeouts import Timeouts
 from app.vocabulary.limits import DEFAULT_MAX_CONTENT_LENGTH_BYTES
 
@@ -73,7 +73,7 @@ async def default_http_fetcher(
         attempted = await _cffi_fetch(url, headers, timeout_seconds, max_content_length, pin=pin)
         if attempted is not None:
             return attempted
-    await http_client_pool._drain_pending_client_closes()
+    await pooled_clients._drain_pending_client_closes()
     client = http_client_pool.get_async_http_client()
     started = time.monotonic()
     timeout = Timeouts.for_request(timeout_seconds).as_httpx()
@@ -117,7 +117,7 @@ def _finish_fetch(
     final_url: NormalizedUrl,
     status_code: int,
     raw: bytes | bytearray,
-    response_headers: _TransportHeaders,
+    response_headers: TransportHeaders,
     max_content_length: int,
     elapsed_ms: int,
     too_large: Callable[[], HttpFetchResult],
@@ -190,7 +190,7 @@ async def _cffi_fetch(
     """
     # Same release point as the http fetcher: any pooled client superseded by a
     # loop change (either kind) is closed here, on this live loop.
-    await http_client_pool._drain_pending_client_closes()
+    await pooled_clients._drain_pending_client_closes()
     # One shared session per event loop. The class is AsyncSession
     # (curl_cffi>=0.7): AsyncClient does not exist, and naming it breaks every fetch.
     client = http_client_pool.get_cffi_session()

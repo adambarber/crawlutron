@@ -9,7 +9,7 @@ from collections.abc import Awaitable, Callable
 from secrets import SystemRandom
 from typing import Protocol, TypeVar
 
-from app.orchestration.scheduler_exceptions import _CircuitBreakerOpen
+from app.orchestration.scheduler_exceptions import CircuitBreakerOpen
 from app.vocabulary.taxonomy import ResultStatus
 
 logger = logging.getLogger(__name__)
@@ -409,7 +409,7 @@ class DomainScheduler:
                 # a direct dict write once raised, was swallowed, and the job vanished.
                 await deliver(
                     job.index,
-                    failed_result(job, _CircuitBreakerOpen(self._domain_cooldowns.get(job.domain))),
+                    failed_result(job, CircuitBreakerOpen(self._domain_cooldowns.get(job.domain))),
                 )
                 return
 

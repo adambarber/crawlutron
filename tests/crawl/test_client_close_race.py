@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import asyncio
 
-from app.transport import http_client_pool as http_mod
+from app.transport import pooled_clients as pool_mod
 from tests._timing_harnesses import await_until
 
 
@@ -40,7 +40,7 @@ def test_schedule_client_close_survives_a_closed_loop(monkeypatch):
 
     async def _drive() -> None:
         client = _ClosingClient()
-        http_mod._schedule_client_close(client, is_closed=lambda c: False)  # must not raise
+        pool_mod._schedule_client_close(client, is_closed=lambda c: False)  # must not raise
         assert client.closed is False  # nothing was scheduled on a dead loop
 
     asyncio.run(_drive())
@@ -57,7 +57,7 @@ def test_schedule_client_close_schedules_on_a_live_loop():
 
     async def _drive() -> None:
         client = _ClosingClient()
-        http_mod._schedule_client_close(client, is_closed=lambda c: False)
+        pool_mod._schedule_client_close(client, is_closed=lambda c: False)
         await await_until(
             lambda: client.closed,
             "the scheduled aclose never ran on a live loop",

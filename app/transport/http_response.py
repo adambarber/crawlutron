@@ -19,7 +19,7 @@ from app.transport.content_cache import ContentCache
 
 
 @dataclass
-class _HttpStrategyContext:
+class HttpStrategyContext:
     original_url: str
     normalized_url: NormalizedUrl
     strategy: CrawlStrategyName
@@ -51,7 +51,7 @@ class _HttpStrategyContext:
 
 
 @dataclass
-class _ExtractedHttpContent:
+class ExtractedHttpContent:
     decompressed: bytes | bytearray
     body_text: str
     content_type: str | None
@@ -64,7 +64,7 @@ class _ExtractedHttpContent:
 
 
 @dataclass(frozen=True)
-class _FetchedResponse:
+class FetchedResponse:
     """One fetched response, and the header view every phase reads it through.
 
     The owner of "how this module keys a response's headers". It exists because
@@ -97,7 +97,7 @@ class _FetchedResponse:
     content_type: str | None
 
     @classmethod
-    def of(cls, response: Any) -> _FetchedResponse:
+    def of(cls, response: Any) -> FetchedResponse:
         """Bind ``response`` to its headers, keyed for lookup."""
         headers = {key.lower(): value for key, value in response.headers.items()}
         return cls(response, headers, headers.get("content-type"))
@@ -138,7 +138,7 @@ class _FetchedResponse:
         }
 
 
-def _serialize_response(resp: Any) -> dict[str, Any]:
+def serialize_response(resp: Any) -> dict[str, Any]:
     """Capture a fetcher response into a JSON-serializable envelope."""
     return {
         "status_code": int(resp.status_code),
@@ -149,7 +149,7 @@ def _serialize_response(resp: Any) -> dict[str, Any]:
     }
 
 
-def _rebuild_response(data: dict[str, Any], ctx: _HttpStrategyContext) -> HttpFetchResult:
+def rebuild_response(data: dict[str, Any], ctx: HttpStrategyContext) -> HttpFetchResult:
     """Reconstruct a response object from a cached envelope.
 
     The envelope is this module's own dump: URL fields were serialized as
@@ -167,8 +167,8 @@ def _rebuild_response(data: dict[str, Any], ctx: _HttpStrategyContext) -> HttpFe
     )
 
 
-def _response_result_fields(
-    ctx: _HttpStrategyContext, resp: _FetchedResponse, attempt: CrawlStrategyAttempt
+def response_result_fields(
+    ctx: HttpStrategyContext, resp: FetchedResponse, attempt: CrawlStrategyAttempt
 ) -> dict[str, Any]:
     """The result fields every response-derived engine result repeats.
 

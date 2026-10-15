@@ -27,13 +27,13 @@ async def test_document_extractor_blocks_internal_url(monkeypatch):
     # same outcome as an empty PDF.
     monkeypatch.setenv("CRAWLUTRON_ALLOW_PRIVATE_TARGETS", "0")
     with pytest.raises(ValueError):
-        doc_mod._default_document_text_extractor(canonical("http://127.0.0.1:9/secret.pdf"))
+        doc_mod.default_document_text_extractor(canonical("http://127.0.0.1:9/secret.pdf"))
 
 
 async def test_document_extractor_invokes_ssrf_check(monkeypatch):
     """The document fetch must gate the URL before any socket opens.
 
-    The gate is the fetch walk's first pin: ``_default_document_text_extractor``
+    The gate is the fetch walk's first pin: ``default_document_text_extractor``
     fetches through ``apinned_hops``, and the walk pins before anything
     connects. A scripted client keeps the test off the network while the
     recording gate proves the property: a hand-rolled loop that skipped the
@@ -62,7 +62,7 @@ async def test_document_extractor_invokes_ssrf_check(monkeypatch):
             ),
         ),
     ):
-        doc_mod._default_document_text_extractor(canonical("http://example.com/x.pdf"))
+        doc_mod.default_document_text_extractor(canonical("http://example.com/x.pdf"))
     assert seen.get("url") == canonical("http://example.com/x.pdf")
 
 

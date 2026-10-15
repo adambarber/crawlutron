@@ -57,7 +57,7 @@ def _cookie_header_for_url(profile: Mapping[str, Any], url: NormalizedUrl) -> st
 
 
 @runtime_checkable
-class _TransportHeaders(Protocol):
+class TransportHeaders(Protocol):
     """A transport's own header multidict, which keeps duplicate values.
 
     The two transports disagree about what a header map is -- httpx's is
@@ -80,7 +80,7 @@ class _TransportHeaders(Protocol):
 
 def _store_set_cookies(
     url: NormalizedUrl,
-    response_headers: _TransportHeaders | dict[str, str],
+    response_headers: TransportHeaders | dict[str, str],
     *,
     namespace: str | None = None,
 ) -> None:
@@ -91,7 +91,7 @@ def _store_set_cookies(
     ``namespace`` isolates cookies for multi-tenant callers; when not
     provided, the per-request cookie namespace contextvar is used.
 
-    The parameter names ``_TransportHeaders`` because the body branches on it:
+    The parameter names ``TransportHeaders`` because the body branches on it:
     the ``isinstance`` below is the whole reason that protocol exists, and a
     signature that omitted it made that branch unreachable to any checker -- so
     the one caller shape the function was written to accept was the one it
@@ -101,7 +101,7 @@ def _store_set_cookies(
         namespace = COOKIE_NAMESPACE.get()
         # only reason to read Set-Cookie through it; a plain dict is read as-is, and
         # httpx.Headers satisfies the first branch too, so there is no httpx-specific case.
-    if isinstance(response_headers, _TransportHeaders):
+    if isinstance(response_headers, TransportHeaders):
         set_cookies = response_headers.get_list("set-cookie")
     else:
         set_cookies = [v for k, v in response_headers.items() if k.lower() == "set-cookie"]

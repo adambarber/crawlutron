@@ -72,7 +72,7 @@ class _Walkable:
     tree: Any
 
 
-def _walkable(html: str | None, source_url: NormalizedUrl | None, tree: Any | None) -> _Walkable | None:
+def walkable(html: str | None, source_url: NormalizedUrl | None, tree: Any | None) -> _Walkable | None:
     """What a diagnostic extractor needs before it can look at anything, or ``None``.
 
     Three facts, and each one is a precondition the extractors all share: there is
@@ -93,7 +93,7 @@ def _walkable(html: str | None, source_url: NormalizedUrl | None, tree: Any | No
     return None if parsed is None else _Walkable(source_url=source_url, tree=parsed)
 
 
-class _FrameCollector:
+class FrameCollector:
     """Back-compat collector: parse once with lxml and collect frame/iframe srcs."""
 
     def __init__(self, source_url: NormalizedUrl) -> None:
@@ -208,11 +208,11 @@ def html_diagnostics(
     diagnostics: dict[str, Any] = {}
     # One parse, one guard: the walkable-tree precondition (empty diagnostic,
     # not an error) is stated once, not spelled in front of both extractors.
-    walkable = _walkable(html, source_url, tree)
-    if walkable is None:
+    walked = walkable(html, source_url, tree)
+    if walked is None:
         return diagnostics
-    frames = frames_from(walkable, source_url)
-    forms = forms_from(walkable)
+    frames = frames_from(walked, source_url)
+    forms = forms_from(walked)
     if frames:
         diagnostics["frames"] = frames
     if forms:

@@ -7,18 +7,18 @@ import os
 import time
 
 from app.config.env import parse_bool_env
-from app.runtime.cgroup_sense import _read_int, _read_text
+from app.runtime.cgroup_sense import read_int, read_text
 
 # Self-managed, no operator knob (mirrors app/runtime/memory_pressure.py): the gate
 # rides at TARGET and pauses at HARD against the cgroup quota it discovers.
-_DEFAULT_CPU_TARGET = 0.90
+DEFAULT_CPU_TARGET = 0.90
 
 
-_DEFAULT_CPU_HARD = 0.95
+DEFAULT_CPU_HARD = 0.95
 
 
 # Manual CPU budget override removed; the discovered quota is the ceiling.
-_DEFAULT_CPU_BUDGET = None
+DEFAULT_CPU_BUDGET = None
 
 
 # Opt-in event-loop lag probe feeding admission; off by default
@@ -117,7 +117,7 @@ def read_cpu_quota(cgroup_root: str = "/sys/fs/cgroup") -> float | None:
     know there is no CPU ceiling to enforce against.
     """
     # cgroup v2: "quota period", e.g. "200000 100000" -> 2.0 CPUs; "max 100000" -> unlimited.
-    v2 = _read_text(os.path.join(cgroup_root, "cpu.max"))
+    v2 = read_text(os.path.join(cgroup_root, "cpu.max"))
     if v2 is not None:
         parts = v2.split()
         if len(parts) >= 2:
@@ -134,8 +134,8 @@ def read_cpu_quota(cgroup_root: str = "/sys/fs/cgroup") -> float | None:
 
     # Cgroup v1 quota/period; quota -1 means unlimited. Reads are ``int | None``
     # (files may be missing on a v2-only host), so the v2 branch binds its own names.
-    quota = _read_int(os.path.join(cgroup_root, "cpu", "cpu.cfs_quota_us"))
-    period = _read_int(os.path.join(cgroup_root, "cpu", "cpu.cfs_period_us"))
+    quota = read_int(os.path.join(cgroup_root, "cpu", "cpu.cfs_quota_us"))
+    period = read_int(os.path.join(cgroup_root, "cpu", "cpu.cfs_period_us"))
     if quota is None or quota < 0 or period is None or period <= 0:
         return None
     return quota / period
@@ -147,7 +147,7 @@ def read_cpu_usage_seconds(cgroup_root: str = "/sys/fs/cgroup") -> float | None:
     v2: ``cpu.stat`` ``usage_usec``; v1: ``cpuacct.usage`` (ns). None if absent.
     """
     # cgroup v2
-    stat = _read_text(os.path.join(cgroup_root, "cpu.stat"))
+    stat = read_text(os.path.join(cgroup_root, "cpu.stat"))
     if stat is not None:
         for line in stat.splitlines():
             if line.startswith("usage_usec"):
@@ -160,9 +160,9 @@ def read_cpu_usage_seconds(cgroup_root: str = "/sys/fs/cgroup") -> float | None:
         return None
 
     # Cgroup v1
-    usage_ns = _read_int(os.path.join(cgroup_root, "cpuacct", "cpuacct.usage"))
+    usage_ns = read_int(os.path.join(cgroup_root, "cpuacct", "cpuacct.usage"))
     if usage_ns is None:
-        usage_ns = _read_int(os.path.join(cgroup_root, "cpu", "cpuacct.usage"))
+        usage_ns = read_int(os.path.join(cgroup_root, "cpu", "cpuacct.usage"))
     if usage_ns is not None:
         return usage_ns / 1_000_000_000.0
     return None

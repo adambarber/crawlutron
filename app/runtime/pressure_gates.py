@@ -9,9 +9,9 @@ from typing import Any
 
 from app.runtime.memory_pressure import MemoryGate, ResourceGauge
 from app.runtime.pressure_probes import (
-    _DEFAULT_CPU_BUDGET,
-    _DEFAULT_CPU_HARD,
-    _DEFAULT_CPU_TARGET,
+    DEFAULT_CPU_BUDGET,
+    DEFAULT_CPU_HARD,
+    DEFAULT_CPU_TARGET,
     LOOP_LAG_PROBE_ENABLED,
     LoopLagProbe,
     read_cpu_quota,
@@ -32,8 +32,8 @@ class CpuGate(ResourceGauge):
     gate reports None and never throttles: no measured ceiling, no defence.
     """
 
-    _default_target = _DEFAULT_CPU_TARGET
-    _default_hard = _DEFAULT_CPU_HARD
+    _default_target = DEFAULT_CPU_TARGET
+    _default_hard = DEFAULT_CPU_HARD
 
     def __init__(
         self,
@@ -47,7 +47,7 @@ class CpuGate(ResourceGauge):
         super().__init__(target=target, **kwargs)
         self.sample_seconds = sample_seconds
         self.min_window_seconds = min_window_seconds
-        self._cpu_budget = cpu_budget if cpu_budget is not None else _DEFAULT_CPU_BUDGET
+        self._cpu_budget = cpu_budget if cpu_budget is not None else DEFAULT_CPU_BUDGET
         self._last_usage: float | None = None
         self._last_wall: float | None = None
         self._ratio: float = 0.0

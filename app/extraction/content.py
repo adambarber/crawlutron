@@ -10,10 +10,10 @@ from app.extraction.discovery import (
     normalized_extraction,
 )
 from app.extraction.documents import (
-    _DOC_EXTENSIONS,
-    _PDF_MAGIC,
+    DOC_EXTENSIONS,
     DOC_POOL,
     EXTRACTION_DOC_MAX_INPUT_BYTES,
+    PDF_MAGIC,
     ExtractedContent,
     Selectors,
     extract_document,
@@ -25,13 +25,13 @@ from app.extraction.documents import (
 )
 from app.extraction.llm_format import text_from_html
 from app.extraction.trees import (
-    _FrameCollector,
-    _walkable,
+    FrameCollector,
     forms_from,
     frames_from,
     html_diagnostics,
     parse_count,
     parse_html_tree,
+    walkable,
 )
 from app.models.normalized_url import NormalizedUrl
 
@@ -57,8 +57,8 @@ __all__ = [
     "normalized_extraction",
     "parse_count",
     "parse_html_tree",
-    "_FrameCollector",
-    "_walkable",
+    "FrameCollector",
+    "walkable",
     "shutdown_doc_extraction_executor",
     "text_from_html",
 ]
@@ -85,9 +85,9 @@ def looks_like_document(content_type: str | None, body: bytes | str, url: Normal
     if "html" in ct:
         return False
     lower_url = (url.raw if url is not None else "").split("?")[0].lower()
-    if any(lower_url.endswith(ext) for ext in _DOC_EXTENSIONS):
+    if any(lower_url.endswith(ext) for ext in DOC_EXTENSIONS):
         return True
-    if isinstance(body, bytes) and body.startswith(_PDF_MAGIC):
+    if isinstance(body, bytes) and body.startswith(PDF_MAGIC):
         return True
     if ct in ("application/json", "text/csv", "application/xml", "text/xml", "application/epub+zip"):
         return True

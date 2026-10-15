@@ -90,9 +90,9 @@ async def run_scripted_api_job(
 
 
 def drive_job(job_id, job_store, settings=None, shutdown_event=None):
-    """Run ``_run_job`` for one already-persisted job; return the task.
+    """Run ``run_job`` for one already-persisted job; return the task.
 
-    ``_run_job``'s call shape -- id, store, settings, shutdown event -- is what
+    ``run_job``'s call shape -- id, store, settings, shutdown event -- is what
     every runner-lifecycle test ends on, and ``CrawlerSettings.from_mapping({})``
     was spelled out at each site. A settings default that changes, or a fourth
     argument, is then a four-edit change, and one of the four is this harness:
@@ -105,7 +105,7 @@ def drive_job(job_id, job_store, settings=None, shutdown_event=None):
     from app.config.settings import CrawlerSettings
 
     return asyncio.ensure_future(
-        job_runner._run_job(
+        job_runner.run_job(
             job_id,
             job_store,
             CrawlerSettings.from_mapping({}) if settings is None else settings,

@@ -7,11 +7,11 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from app.models.crawl_extraction_method import CrawlExtractionMethod
 from app.models.crawl_policy_limits import CrawlPolicyLimits
 from app.models.crawl_policy_vocabulary import (
-    _REQUEST_PROFILE_KEYS_JSON,
     MAX_HEADERS_PER_REQUEST,
-    _close_browser_profile_vocabulary,
-    _close_request_profile_vocabulary,
-    _narrows_credential_scope,
+    REQUEST_PROFILE_KEYS_JSON,
+    close_browser_profile_vocabulary,
+    close_request_profile_vocabulary,
+    narrows_credential_scope,
 )
 from app.models.crawl_strategy import CrawlStrategy
 from app.models.credential import Credential
@@ -108,7 +108,7 @@ class CrawlPolicy(BaseModel):
         "user_agent_family (for example desktop_chrome), user_agents, accept_languages, "
         "fingerprint_seed, fingerprint_rotation, cookie_jar, and cookies for public sessions. Applied only "
         "to direct HTTP strategies and echoed in diagnostics.",
-        json_schema_extra=_REQUEST_PROFILE_KEYS_JSON,
+        json_schema_extra=REQUEST_PROFILE_KEYS_JSON,
     )
     browser_profile: dict[str, Any] = Field(
         default_factory=dict,
@@ -166,12 +166,12 @@ class CrawlPolicy(BaseModel):
     @field_validator("browser_profile")
     @classmethod
     def _close_the_browser_profile_vocabulary(cls, profile: dict[str, Any]) -> dict[str, Any]:
-        return _close_browser_profile_vocabulary(profile)
+        return close_browser_profile_vocabulary(profile)
 
     @field_validator("request_profile")
     @classmethod
     def _close_the_request_profile_vocabulary(cls, profile: dict[str, Any]) -> dict[str, Any]:
-        return _close_request_profile_vocabulary(profile)
+        return close_request_profile_vocabulary(profile)
 
     @field_validator("credentials", mode="before")
     @classmethod
@@ -220,7 +220,7 @@ class CrawlPolicy(BaseModel):
         canonical: dict[str, Any] = {}
         spelling: dict[str, str] = {}
         for key, credential in value.items():
-            if not isinstance(key, str) or _narrows_credential_scope(key):
+            if not isinstance(key, str) or narrows_credential_scope(key):
                 raise ValueError("credentials key must be a bare origin: scheme://host[:port]")
             origin = origin_of(key)
             if origin in canonical:

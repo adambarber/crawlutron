@@ -11,7 +11,7 @@ from contextlib import contextmanager
 
 from app.models.normalized_url import NormalizedUrl
 from app.transport import browser as browser_mod
-from app.transport.browser_cookies import _harvest_session_cookies
+from app.transport.browser_cookies import harvest_session_cookies
 from app.transport.browser_driver import BrowserDriver
 from tests._browser_doubles import BrowserFakePage, FakeBrowserDriver, ScriptedPage, build_pinned_renderer
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY, canonical
@@ -34,7 +34,7 @@ class _FakeContext:
 def isolated_browser_cookies(url: NormalizedUrl):
     """Detach the module-global cookie slot for ``url``'s domain, then restore it.
 
-    ``_BROWSER_COOKIES_BY_DOMAIN`` is process-global and keyed by registrable
+    ``BROWSER_COOKIES_BY_DOMAIN`` is process-global and keyed by registrable
     domain, so a test that harvests or refuses to harvest against
     ``http://harvest-race.test/page`` is reading and writing state that outlives
     it. Detachment used to pop one key and put it back, and the restore was the
@@ -53,7 +53,7 @@ class TestCookieHarvestCompletes:
     async def test_harvest_visible_to_immediate_retry(self):
         url = canonical("http://harvest-race.test/page")
         with isolated_browser_cookies(url) as domain:
-            await _harvest_session_cookies(_page_with_context(), url)
+            await harvest_session_cookies(_page_with_context(), url)
             # The synchronous read the cffi retry performs must see cookies NOW.
             assert browser_mod.get_browser_cookies_for(domain) == "sess=abc123"
 

@@ -18,7 +18,7 @@ from pathlib import Path
 import pytest
 
 import app.transport.content_cache as cc
-from app.api.job_runner import _run_job
+from app.api.job_runner import run_job
 from app.models.crawl_policy import CrawlPolicy
 from app.orchestration.engine import _ResultSpill
 from app.storage.job_store import JobStatus
@@ -305,7 +305,7 @@ class TestContentCacheDiskIOOffTheLock:
 
 
 class TestJobRunnerSavesOffTheEventLoop:
-    """``_run_job`` calls ``JobStore.save`` twice per batch; the JSON
+    """``run_job`` calls ``JobStore.save`` twice per batch; the JSON
     serialization of the whole row and the SQLite commit are blocking work and
     must not run on the event loop."""
 
@@ -330,7 +330,7 @@ class TestJobRunnerSavesOffTheEventLoop:
         shutdown.set()  # exit at the first batch boundary, before any crawl
 
         async def scenario() -> int:
-            runner = asyncio.ensure_future(_run_job(job.job_id, store, None, shutdown))
+            runner = asyncio.ensure_future(run_job(job.job_id, store, None, shutdown))
             await asyncio.wait_for(runner, timeout=15)
             return observed[0]
 
@@ -347,12 +347,12 @@ class TestJobRunnerSavesOffTheEventLoop:
 class TestAsyncCrawlRunnerSavesOffTheEventLoop:
     """``run_async_crawl`` must not serialize+commit the job row on the loop.
 
-    ``_run_job`` (the whole-site runner above) already offloads its saves via
+    ``run_job`` (the whole-site runner above) already offloads its saves via
     ``asyncio.to_thread(job_store.save,...)``. The async single-shot runner
     called ``job_store.save`` directly at its RUNNING / COMPLETED / FAILED
     transitions -- same store, contradictory discipline, and the full response
     body was serialized and written while the loop stalled. The blind spot
-    survived because the guard above drives only ``_run_job``; this one drives
+    survived because the guard above drives only ``run_job``; this one drives
     ``run_async_crawl`` itself, so the async path cannot regress unnoticed
     again.
     """

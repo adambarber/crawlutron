@@ -13,7 +13,7 @@ from typing import Any
 from app.models.crawl_result import CrawlResult, CrawlStrategyAttempt, EngineCrawlResult
 from app.models.normalized_url import NormalizedUrl
 from app.models.taxonomy import Classification, CrawlError, CrawlStrategyName
-from app.orchestration.classification import _classify_and_log
+from app.orchestration.classification import classify_and_log
 from app.vocabulary.taxonomy import ResultStatus
 
 __all__ = [
@@ -166,7 +166,7 @@ def crawl_result_from_exception(
     ``metadata`` so the render layer can answer 503 for capacity exhaustion and
     the at-least-once frontier layer can re-queue the URL.
     """
-    classification, retryable = _classify_and_log(
+    classification, retryable = classify_and_log(
         error,
         event="render_result_error",
         strategy=strategy,

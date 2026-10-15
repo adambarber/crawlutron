@@ -150,7 +150,7 @@ def test_no_store_cookie_jar_inherits_the_stdlib_jar_not_the_storing_one():
     """
     import http.cookiejar
 
-    from app.transport import http_client_pool as pool_mod
+    from app.transport import pooled_clients as pool_mod
     from app.transport.cookie_jar import CookieJar
 
     assert issubclass(pool_mod._NoStoreCookieJar, http.cookiejar.CookieJar)
@@ -160,7 +160,7 @@ def test_no_store_cookie_jar_inherits_the_stdlib_jar_not_the_storing_one():
 
 def test_no_store_cookie_jar_never_stores_a_set_cookie():
     """The inert jar must stay empty after a response carries a Set-Cookie."""
-    from app.transport.http_client_pool import _NoStoreCookieJar
+    from app.transport.pooled_clients import _NoStoreCookieJar
 
     jar = _NoStoreCookieJar()
     assert jar.extract_cookies(_RecordingResponse(), _RecordingRequest()) is None

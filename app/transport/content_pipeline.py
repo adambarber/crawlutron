@@ -48,7 +48,7 @@ from app.vocabulary.extraction import (
 
 
 @dataclass(frozen=True)
-class _ExtractedContent:
+class ExtractedContent:
     """What one extraction contributes to a crawl result.
 
     Frozen because it is a settled fact about a finished extraction, not a
@@ -61,7 +61,7 @@ class _ExtractedContent:
     extraction_method: str
 
 
-async def _run_extraction(
+async def run_extraction(
     *,
     extraction: CrawlExtractionMethod,
     content: str | bytes,
@@ -71,7 +71,7 @@ async def _run_extraction(
     policy: CrawlPolicy,
     default_method: str,
     html: bool,
-) -> _ExtractedContent:
+) -> ExtractedContent:
     """Run the configured extractor for one body, off the event loop.
 
     The three modes are dispatched here, once, so a fourth mode is a change to
@@ -104,17 +104,17 @@ async def _run_extraction(
     elif extraction == EXTRACTION_TRAFILATURA:
         if not html:
             # No HTML, nothing for trafilatura to read: no text, no markdown.
-            return _ExtractedContent("", None, EXTRACTION_METHOD_TRAFILATURA)
+            return ExtractedContent("", None, EXTRACTION_METHOD_TRAFILATURA)
         extracted = await asyncio.to_thread(extract_html, decoded, final_url, selectors)
         method = EXTRACTION_METHOD_TRAFILATURA
     else:
         extracted = await asyncio.to_thread(extract_content, content, content_type, final_url, selectors)
         method = default_method
     text, markdown = normalized_extraction(extracted)
-    return _ExtractedContent(text=text, markdown=markdown, extraction_method=method)
+    return ExtractedContent(text=text, markdown=markdown, extraction_method=method)
 
 
-async def _discover_after_fetch(
+async def discover_after_fetch(
     *,
     html: str | None,
     final_url: NormalizedUrl | None,
@@ -161,7 +161,7 @@ async def _discover_after_fetch(
     )
 
 
-def _discovery_result_fields(
+def discovery_result_fields(
     post_fetch: dict[str, Any],
     *,
     classification_evidence: list[dict[str, Any]],
@@ -184,7 +184,7 @@ def _discovery_result_fields(
     }
 
 
-def _post_fetch_diagnostics(
+def post_fetch_diagnostics(
     post_fetch: dict[str, Any],
     final_url: NormalizedUrl | None,
     host_policy: HostPolicy,
@@ -211,4 +211,10 @@ def _post_fetch_diagnostics(
     return diagnostics
 
 
-__all__: list[str] = []
+__all__ = [
+    "ExtractedContent",
+    "discover_after_fetch",
+    "discovery_result_fields",
+    "post_fetch_diagnostics",
+    "run_extraction",
+]

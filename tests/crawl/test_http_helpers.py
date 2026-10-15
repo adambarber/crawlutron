@@ -9,8 +9,8 @@ from app.admission.payload_helpers import _payload_urls
 from app.admission.policy import PolicyTier, read_policy
 from app.api.render import _render_options
 from app.config.settings import CrawlerSettings
-from app.extraction.content import _FrameCollector, _walkable, frames_from
 from app.extraction.document_text import format_extracted_document_text
+from app.extraction.trees import FrameCollector, frames_from, walkable
 from app.orchestration.engine import payload_policy
 from app.safety.validation import HostPolicy
 from app.transport.fetch_policy import (
@@ -227,13 +227,13 @@ class TestPureParsing:
             '<iframe src="javascript:alert(1)"></iframe>'
             '<iframe src="http://same.example/f"></iframe>'
         )
-        walkable = _walkable(
+        walked = walkable(
             html,
             canonical("http://same.example/"),
             None,
         )
-        assert walkable is not None
-        frames = frames_from(walkable, canonical("http://same.example/"))
+        assert walked is not None
+        frames = frames_from(walked, canonical("http://same.example/"))
         assert len(frames) == 1
 
     def test_extract_discovered_links_skips_bad_scheme(self) -> None:
@@ -242,7 +242,7 @@ class TestPureParsing:
         assert len(links) == 1
 
     def test_frame_collector_ignores_frames_without_src(self) -> None:
-        collector = _FrameCollector(canonical("http://x/"))
+        collector = FrameCollector(canonical("http://x/"))
         collector.feed('<frame></frame><iframe src="http://x/f"></iframe>')
         assert len(collector.frames) == 1
 

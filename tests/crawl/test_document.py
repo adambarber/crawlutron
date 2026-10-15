@@ -12,12 +12,11 @@ from app.transport.document import (
     _extract_pdf_bytes_to_markdown,
     _format_table,
     _pdf_to_markdown,
+    default_document_text_extractor,
 )
-from tests._extraction_helpers import (
-    _default_document_text_extractor,
-    format_extracted_document_text,
-)
+from tests._extraction_helpers import format_extracted_document_text
 from tests._fetcher_factories import run_http_strategy, scripted_fetcher
+from tests._policy_factories import canonical
 
 FIXTURE = Path(__file__).resolve().parent.parent / "fixtures" / "sample_table.pdf"
 
@@ -58,7 +57,7 @@ class TestPdfTablePreservation:
 
     async def test_default_document_text_extractor_fetches_real_pdf_url(self, base_url):
         url = f"{base_url}/sample_table.pdf"
-        md = _default_document_text_extractor(url)
+        md = default_document_text_extractor(canonical(url))
         assert "Alice" in md
         assert "Department" in md
         assert "|" in md
@@ -132,7 +131,7 @@ class TestDocumentRedirectSsrf:
         test states only the question it has of the run.
         """
         fetched, connect_urls = self._install_fakes(monkeypatch, FIXTURE.read_bytes(), redirects or {})
-        markdown = _default_document_text_extractor(url or self.PDF_PATH)
+        markdown = default_document_text_extractor(canonical(url or self.PDF_PATH))
         return _ExtractionRun(fetched, connect_urls, markdown)
 
     def test_redirect_to_internal_host_is_not_followed(self, monkeypatch):
@@ -227,10 +226,10 @@ class TestDocumentExtractionEdges:
         assert _format_table([]) == ""
 
     def test_extract_unreachable_url(self):
-        assert _default_document_text_extractor("http://127.0.0.1:1/nowhere.pdf") == ""
+        assert default_document_text_extractor(canonical("http://127.0.0.1:1/nowhere.pdf")) == ""
 
     def test_extract_broken_pdf_from_server(self, base_url):
-        text = _default_document_text_extractor(base_url + "/broken.pdf")
+        text = default_document_text_extractor(canonical(base_url + "/broken.pdf"))
         assert text == ""
 
     def test_oversized_pdf_body_yields_empty_text(self, base_url):
@@ -240,7 +239,7 @@ class TestDocumentExtractionEdges:
         original_cap = extraction_mod.EXTRACTION_DOC_MAX_INPUT_BYTES
         extraction_mod.EXTRACTION_DOC_MAX_INPUT_BYTES = 64
         try:
-            text = _default_document_text_extractor(base_url + "/sample_table.pdf")
+            text = default_document_text_extractor(canonical(base_url + "/sample_table.pdf"))
         finally:
             extraction_mod.EXTRACTION_DOC_MAX_INPUT_BYTES = original_cap
         assert text == ""

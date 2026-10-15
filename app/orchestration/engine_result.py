@@ -16,7 +16,7 @@ from typing import Any, TypeVar
 from app.models.crawl_result import CrawlStrategyAttempt, EngineCrawlResult
 from app.models.normalized_url import NormalizedUrl
 from app.models.taxonomy import Classification, CrawlError, CrawlStrategyName
-from app.orchestration.classification import _classify_and_log
+from app.orchestration.classification import classify_and_log
 from app.vocabulary.taxonomy import ResultStatus
 
 _JobT = TypeVar("_JobT")
@@ -63,7 +63,7 @@ def engine_result_from_exception(
     which raises bare ``TimeoutError`` and whose real classification is
     ``url_budget_exceeded``. It must be a taxonomy member.
     """
-    classification, retryable = _classify_and_log(
+    classification, retryable = classify_and_log(
         error,
         event="strategy_result_error",
         strategy=strategy,

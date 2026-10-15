@@ -74,7 +74,7 @@ LAZY_SCROLL_DELAY_SECONDS = DEFAULT_LAZY_SCROLL_DELAY_SECONDS
 MAX_ACTION_WAIT_SECONDS = 10.0
 
 
-def _action_wait_ms(action: dict[str, Any]) -> int:
+def ACTION_WAIT_MS(action: dict[str, Any]) -> int:
     """Clamp a caller-supplied ``wait`` timeout the way ``wait_seconds`` is.
 
     Unbounded values park the render for as long as the caller likes, and 0
@@ -132,7 +132,7 @@ async def async_sleep(sleep: Callable[[float], None], seconds: float) -> None:
     await asyncio.to_thread(sleep, seconds)
 
 
-def _create_camoufox_browser(**kwargs: Any):
+def create_camoufox_browser(**kwargs: Any):
     """Factory for AsyncCamoufox browser."""
     return AsyncCamoufox(**kwargs)
 

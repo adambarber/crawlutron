@@ -3,15 +3,9 @@
 import asyncio
 import functools
 
-import pytest
-from httpx import ASGITransport, AsyncClient
-
 from app.storage.job_store import JobStore
 from app.storage.result_store import CrawlResultStore
 from app.storage.watch_store import WatchStore
-from tests._job_harnesses import _make_app
-from tests._policy_factories import UNRESTRICTED_HOST_POLICY, deployment_tier
-from tests._watch_harnesses import watch_client
 
 
 class LoopGuardJobStore(JobStore):
@@ -122,31 +116,9 @@ class LoopGuardWatchStore(WatchStore):
         return super().close()
 
 
-@pytest.fixture
-def loop_guard_store(tmp_path) -> LoopGuardJobStore:
-    return LoopGuardJobStore(tmp_path / "jobs.db", policy=UNRESTRICTED_HOST_POLICY, tier=deployment_tier())
-
-
-@pytest.fixture
-def result_store(tmp_path) -> LoopGuardResultStore:
-    return LoopGuardResultStore(tmp_path / "results.db")
-
-
-@pytest.fixture
-def loop_guard_watch_store(tmp_path) -> LoopGuardWatchStore:
-    return LoopGuardWatchStore(tmp_path / "watches.db")
-
-
-@pytest.fixture
-def watches_client(loop_guard_watch_store):
-    return watch_client(loop_guard_watch_store)
-
-
-@pytest.fixture
-def jobs_client(loop_guard_store):
-    app = _make_app(loop_guard_store)
-    transport = ASGITransport(app=app)
-    return AsyncClient(transport=transport, base_url="http://test")
+async def _off_loop(func, *args, **kwargs):
+    """Call a store method the way production must: off the loop."""
+    return await asyncio.to_thread(functools.partial(func, *args, **kwargs))
 
 
 def _refuse_on_loop(name: str) -> None:
@@ -155,14 +127,3 @@ def _refuse_on_loop(name: str) -> None:
     except RuntimeError:
         return
     raise AssertionError(f"sync store method {name} ran on the event loop; the async twin owns that call")
-
-
-async def _off_loop(func, *args, **kwargs):
-    """Call a store method the way production must: off the loop.
-
-    The test's own reads go through here too, and that is the point -- a store
-    that forbids on-loop access also forbids it to the test, so no assertion can
-    accidentally pass because the harness read the row the compliant way while
-    production did not.
-    """
-    return await asyncio.to_thread(functools.partial(func, *args, **kwargs))

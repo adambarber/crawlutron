@@ -52,9 +52,9 @@ OWNERS: tuple[str, ...] = (
     "app.runtime.cgroup_sense",
     "app.orchestration.engine",
     "app.orchestration.fetch_helpers",
-    "app.transport.browser",
+    "app.transport.browser_cookies",
     "app.transport.cookie_jar",
-    "app.transport.http_client_pool",
+    "app.transport.pooled_clients",
     "app.transport.pinned_transport",
 )
 

@@ -253,7 +253,7 @@ APP_PRIVATE_WELDS = Rule(
         # A module's own private name is what private means.
         "def helper():\n    return _internal_step()\n",
         # A declared lifecycle drain.
-        "from app.transport import http_client_pool as pool\n\npool._drain_pending_client_closes()\n",
+        "from app.transport import pooled_clients as pool\n\npool._drain_pending_client_closes()\n",
     ),
 )
 

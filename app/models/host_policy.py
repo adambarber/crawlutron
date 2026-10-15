@@ -74,6 +74,7 @@ class HostPolicy:
 HOST_POLICY_ENTRY_POINTS = (
     "app/api/crawl_endpoint.py:crawl",
     "app/api/crawl_executor.py:execute_crawl",
+    "app/api/job_runner.py:run_job",
     "app/api/jobs_router.py:create_job",
     "app/api/map_endpoint.py:map_site",
     "app/api/render.py:render_request",

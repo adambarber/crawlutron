@@ -6,6 +6,7 @@ from typing import Protocol
 import pytest
 
 import app.transport.http_client_pool as http_mod
+import app.transport.pooled_clients as pool_mod
 from app.transport.fetchers import _cffi_fetch
 from tests._async_harnesses import run_loop_rebind_scenario
 from tests._policy_factories import canonical
@@ -143,8 +144,8 @@ def _supersede_without_loop(
 def test_superseded_client_is_queued_for_close_when_no_loop_is_running(seam, getter, fake, stub_builder):
     """The missing half: the superseded client must be *tracked*, not dropped."""
     first, _second = _supersede_without_loop(stub_builder, seam, getter, fake)
-    with http_mod._PENDING_CLIENT_CLOSE_LOCK:
-        queued = list(http_mod._PENDING_CLIENT_CLOSE)
+    with pool_mod._PENDING_CLIENT_CLOSE_LOCK:
+        queued = list(pool_mod._PENDING_CLIENT_CLOSE)
     assert first in queued, f"{getter} superseded a client without queueing it for close"
 
 
@@ -155,7 +156,7 @@ def test_queued_superseded_client_is_closed_by_the_next_drain(seam, getter, fake
     assert first.closed is False
 
     async def _fetch_like_drain():
-        await http_mod._drain_pending_client_closes()
+        await pool_mod._drain_pending_client_closes()
 
     asyncio.run(_fetch_like_drain())
     assert first.closed is True, f"{getter} left a superseded client unclosed after a drain"
@@ -175,7 +176,7 @@ def test_pending_close_queue_dedupes_and_stays_bounded(seam, getter, fake, stub_
     supersede; the builder is a cycle, which lets the same client come round
     again and be superseded a second time while still queued.
     """
-    cap = http_mod._PENDING_CLIENT_CLOSE_MAX
+    cap = pool_mod._PENDING_CLIENT_CLOSE_MAX
     built: list[_PooledFake] = []
 
     def _build(*args, **kwargs):
@@ -198,8 +199,8 @@ def test_pending_close_queue_dedupes_and_stays_bounded(seam, getter, fake, stub_
 
     acquired = [acquire_on_fresh_loop() for _ in range(cap + 8)]
 
-    with http_mod._PENDING_CLIENT_CLOSE_LOCK:
-        queued = list(http_mod._PENDING_CLIENT_CLOSE)
+    with pool_mod._PENDING_CLIENT_CLOSE_LOCK:
+        queued = list(pool_mod._PENDING_CLIENT_CLOSE)
 
     # Every acquisition ran on its own loop, so each one superseded its predecessor: cap+7 supersessions must
     # have been squeezed down to the cap, keeping the most recent ones.
@@ -216,9 +217,9 @@ def test_pending_close_queue_dedupes_and_stays_bounded(seam, getter, fake, stub_
     # Dedupe specifically: the queue helper is the thing that promises it, so re-presenting an already-queued
     still_queued = queued[0]
     before = len(queued)
-    assert http_mod._queue_superseded_close(still_queued) is None
-    with http_mod._PENDING_CLIENT_CLOSE_LOCK:
-        after = list(http_mod._PENDING_CLIENT_CLOSE)
+    assert pool_mod._queue_superseded_close(still_queued) is None
+    with pool_mod._PENDING_CLIENT_CLOSE_LOCK:
+        after = list(pool_mod._PENDING_CLIENT_CLOSE)
     assert len(after) == before, f"{getter} double-queued a client already awaiting close"
     assert after.count(still_queued) == 1
 
@@ -258,8 +259,8 @@ def test_both_singletons_queue_through_one_shared_implementation(stub_builder):
     """
     http_first, _ = _supersede_without_loop(stub_builder, "http", "get_async_http_client", _build_httpx_fake)
     cffi_first, _ = _supersede_without_loop(stub_builder, "cffi", "get_cffi_session", _build_cffi_fake)
-    with http_mod._PENDING_CLIENT_CLOSE_LOCK:
-        queued = list(http_mod._PENDING_CLIENT_CLOSE)
+    with pool_mod._PENDING_CLIENT_CLOSE_LOCK:
+        queued = list(pool_mod._PENDING_CLIENT_CLOSE)
     assert http_first in queued and cffi_first in queued, (
         f"both pooled clients must supersede into the one shared queue; queued {len(queued)}: {queued}"
     )
@@ -287,8 +288,8 @@ def test_cffi_session_superseded_by_a_failing_rebuild_is_still_queued(stub_build
 
     with pytest.raises(ImportError, match="curl_cffi unavailable"):
         asyncio.run(_on_a_different_live_loop())
-    with http_mod._PENDING_CLIENT_CLOSE_LOCK:
-        queued = list(http_mod._PENDING_CLIENT_CLOSE)
+    with pool_mod._PENDING_CLIENT_CLOSE_LOCK:
+        queued = list(pool_mod._PENDING_CLIENT_CLOSE)
     assert second in queued, "a superseded session was dropped when the rebuild failed"
 
 
@@ -317,8 +318,8 @@ def test_cffi_fetch_drains_pending_closes_before_taking_the_session(stub_builder
     """
     stub_builder("cffi", _builder_for(_build_cffi_fake))
     waiting = _PooledFake("close", publishes_is_closed=False)
-    with http_mod._PENDING_CLIENT_CLOSE_LOCK:
-        http_mod._PENDING_CLIENT_CLOSE.append(waiting)
+    with pool_mod._PENDING_CLIENT_CLOSE_LOCK:
+        pool_mod._PENDING_CLIENT_CLOSE.append(waiting)
 
     async def _attempt():
         return await _cffi_fetch(canonical("http://example.invalid/"), {}, 1, 1024)

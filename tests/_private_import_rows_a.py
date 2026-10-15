@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from tests._private_import_decl import (
     _CHOKEPOINT_STATE,
-    _IMPLEMENTATION_STEP,
     _PRIVATE_TYPE,
     _SUBSTITUTED_CAP,
     _SUBSTITUTED_COLLABORATOR,
@@ -30,11 +29,6 @@ DECLARED: dict[str, Declaration] = {
         "Not yet triaged.\n",
         ["test"],
     ),
-    "app.api.job_runner._run_job": _d(
-        "unreviewed",
-        "Not yet triaged.\n",
-        ["test"],
-    ),
     "app.api.job_lifecycle._tasks": _d(_CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]),
     "app.api.main_helpers._build_job_status": _d(
         "unreviewed",
@@ -52,11 +46,6 @@ DECLARED: dict[str, Declaration] = {
         ["test"],
     ),
     "app.api.webhooks._max_webhook_size": _d(
-        "unreviewed",
-        "Not yet triaged.\n",
-        ["test"],
-    ),
-    "app.runtime.cgroup_sense._read_int": _d(
         "unreviewed",
         "Not yet triaged.\n",
         ["test"],
@@ -122,13 +111,12 @@ DECLARED: dict[str, Declaration] = {
     "app.orchestration.engine.robots_cache._entries": _d(
         _CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]
     ),
+    "app.transport.browser_cookies.BROWSER_COOKIES_BY_DOMAIN._lock": _d(
+        _CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]
+    ),
     "app.orchestration.engine.robots_cache._lock": _d(
         _CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]
     ),
-    "app.extraction.content._FrameCollector": _d(
-        _IMPLEMENTATION_STEP.kind, _IMPLEMENTATION_STEP.reason, ["test"]
-    ),
-    "app.extraction.content._walkable": _d(_IMPLEMENTATION_STEP.kind, _IMPLEMENTATION_STEP.reason, ["test"]),
     "app.orchestration.fetch_helpers._SITEMAP_CACHE": _d(
         _CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]
     ),
@@ -194,23 +182,6 @@ DECLARED: dict[str, Declaration] = {
     ),
     "app.storage.sqlite_store._BUSY_TIMEOUT_MS": _SUBSTITUTED_CAP,
     "app.storage.sqlite_store._WAL_RETRY_SECONDS": _SUBSTITUTED_CAP,
-    "app.transport.browser._BROWSER_COOKIES_BY_DOMAIN": _d(
-        _CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]
-    ),
-    "app.transport.browser._BROWSER_COOKIES_BY_DOMAIN._lock": _d(
-        _CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]
-    ),
-    "app.transport.browser._BROWSER_COOKIES_MAX": _d(
-        _CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]
-    ),
-    "app.transport.browser_cookies._harvest_session_cookies": _d(
-        _IMPLEMENTATION_STEP.kind, _IMPLEMENTATION_STEP.reason, ["test"]
-    ),
-    "app.transport.browser._store_browser_cookies": _d(
-        "unreviewed",
-        "Not yet triaged.\n",
-        ["test"],
-    ),
     "app.transport.browser_driver.BrowserDriver._dispatch_action": _d(
         _PRIVATE_TYPE.kind, _PRIVATE_TYPE.reason, ["test"]
     ),

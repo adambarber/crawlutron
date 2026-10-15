@@ -28,7 +28,7 @@ def has_process_state() -> bool:
     return bool(_CGROUP_CACHE)
 
 
-def _read_text(path: str) -> str | None:
+def read_text(path: str) -> str | None:
     """Read a cgroup scalar file, returning None on any access error.
 
     Results are memoized for :data:`_CGROUP_READ_TTL_SECONDS`.
@@ -48,12 +48,12 @@ def _read_text(path: str) -> str | None:
     return value
 
 
-def _read_int(path: str) -> int | None:
+def read_int(path: str) -> int | None:
     """Read a cgroup integer file; empty / ``max`` / non-integer -> None.
 
     Results are memoized for :data:`_CGROUP_READ_TTL_SECONDS`.
     """
-    text = _read_text(path)
+    text = read_text(path)
     if text is None:
         return None
     if not text or text == "max":

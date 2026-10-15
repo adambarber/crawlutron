@@ -11,8 +11,8 @@ from collections.abc import Awaitable, Callable
 from app.models.host_policy import HostPolicy
 from app.models.http_fetcher import HttpFetcher
 from app.models.normalized_url import NormalizedUrl
-from app.orchestration.fetch_helpers import _single_flight
 from app.orchestration.fetch_helpers import fetch_and_decode as default_fetch_and_decode
+from app.orchestration.fetch_helpers import single_flight
 from app.orchestration.robots_parse import (
     parse_robots_crawl_delay,
     parse_robots_rules,
@@ -85,7 +85,7 @@ async def load_robots_rules(
     if cached is not None:
         return cached
     decode = default_fetch_and_decode if fetch_and_decode is None else fetch_and_decode
-    return await _single_flight(
+    return await single_flight(
         _inflight,
         cache_key,
         lambda: _load_uncached(target, fetcher, timeout_seconds, decode, policy),

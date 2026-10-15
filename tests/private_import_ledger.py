@@ -19,7 +19,7 @@ convention, and conventions decay. What the bluntness buys is that a new weld
 cannot land without somebody writing down why it is acceptable.
 
 One table, not two, because a name can be reached from both sides -- and
-``app.transport.http_client_pool._drain_pending_client_closes`` is, by a
+``app.transport.pooled_clients._drain_pending_client_closes`` is, by a
 test and by two production modules -- and one name is one declaration whichever
 hand reaches for it. The ``side`` field records who reaches, not what they are
 allowed to.

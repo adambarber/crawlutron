@@ -15,13 +15,13 @@ from typing import TYPE_CHECKING, Any
 
 from app.config.env import get_env_int
 from app.transport.driver_config import (
+    ACTION_WAIT_MS,
     LAZY_SCROLL_DELAY_SECONDS,
     LAZY_SCROLL_STEPS,
     MAX_ACTION_WAIT_SECONDS,
-    _action_wait_ms,
-    _create_camoufox_browser,
     async_sleep,
     browser_kwargs,
+    create_camoufox_browser,
     harvest_timeout_for,
     headless_enabled,
     page_kwargs,
@@ -66,7 +66,7 @@ class BrowserDriver:
         harvest_timeout_seconds: float = DEFAULT_COOKIE_HARVEST_TIMEOUT_SECONDS,
         settings: CrawlerSettings | None = None,
     ) -> None:
-        self._browser_factory = browser_factory or self._create_camoufox_browser
+        self._browser_factory = browser_factory or self.create_camoufox_browser
         self._sleep = sleep
         self._max_browser_renders = (
             max_browser_renders
@@ -144,9 +144,9 @@ class BrowserDriver:
         """Drop the cached browser. Best-effort, and safe to call more than once."""
         await self._release_browser()
 
-    def _create_camoufox_browser(self, **kwargs: Any):
+    def create_camoufox_browser(self, **kwargs: Any):
         """Factory for AsyncCamoufox browser."""
-        return _create_camoufox_browser(**kwargs)
+        return create_camoufox_browser(**kwargs)
 
     def headless_enabled(self) -> bool:
         return headless_enabled()
@@ -329,7 +329,7 @@ class BrowserDriver:
         elif action_type == "scroll_bottom":
             await page.evaluate("() => window.scrollTo(0, document.body.scrollHeight)")
         elif action_type == "wait" and selector:
-            await page.wait_for_selector(selector, timeout=_action_wait_ms(action))
+            await page.wait_for_selector(selector, timeout=ACTION_WAIT_MS(action))
         elif action_type == "wait_seconds":
             await self._async_sleep(min(float(action.get("seconds", 1)), MAX_ACTION_WAIT_SECONDS))
         elif action_type == "execute_js":

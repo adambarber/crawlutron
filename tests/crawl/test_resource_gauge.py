@@ -2,7 +2,7 @@
 
 import pytest
 
-from app.runtime.cgroup_sense import _read_int, reset_process_state
+from app.runtime.cgroup_sense import read_int, reset_process_state
 from app.runtime.memory_pressure import MemoryGate, ResourceGauge
 from app.runtime.resource_pressure import LoopLagProbe, ResourceGate
 
@@ -72,12 +72,12 @@ def test_cgroup_read_cache_memoizes_within_ttl(tmp_path):
     p = tmp_path / "val"
     p.write_text("100")
     reset_process_state()
-    assert _read_int(str(p)) == 100
+    assert read_int(str(p)) == 100
     # Mutate on disk; within the TTL the cached value is returned.
     p.write_text("200")
-    assert _read_int(str(p)) == 100
+    assert read_int(str(p)) == 100
     reset_process_state()
-    assert _read_int(str(p)) == 200
+    assert read_int(str(p)) == 200
 
 
 def test_leading_memory_signal_anticipates_climb(tmp_path, monkeypatch):

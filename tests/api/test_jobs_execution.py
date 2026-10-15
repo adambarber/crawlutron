@@ -106,7 +106,7 @@ def test_creating_and_controlling_a_job_need_the_same_providers():
 class TestCrashRecovery:
     """A process killed mid-engine-call must not silently drop the in-flight batch.
 
-    ``_run_job`` write-aheads the frontier pop (so the reload-each-iteration loop
+    ``run_job`` write-aheads the frontier pop (so the reload-each-iteration loop
     can't refetch the same batch), which means the persisted state right after a
     crash is: the batch removed from ``frontier`` but not yet recorded to
     ``visited``/``results``. Recovery must re-queue that batch and re-crawl it

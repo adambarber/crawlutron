@@ -9,7 +9,7 @@ chokepoint instead of something each caller has to restate.
 """
 
 
-class _CircuitBreakerOpen(RuntimeError):
+class CircuitBreakerOpen(RuntimeError):
     """Raised internally when a domain's breaker is open and the job is skipped.
 
     The classifier maps this to ``circuit_breaker_open`` so the failure is

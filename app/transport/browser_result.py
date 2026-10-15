@@ -17,11 +17,11 @@ from app.orchestration.engine_result import build_engine_result
 from app.orchestration.worker import call_worker
 from app.transport.body_decode import quality_score
 from app.transport.content_pipeline import (
-    _discover_after_fetch,
-    _discovery_result_fields,
-    _ExtractedContent,
-    _post_fetch_diagnostics,
-    _run_extraction,
+    ExtractedContent,
+    discover_after_fetch,
+    discovery_result_fields,
+    post_fetch_diagnostics,
+    run_extraction,
 )
 from app.transport.strategy_request import StrategyRequest
 from app.vocabulary.extraction import EXTRACTION_METHOD_DOM_TEXT
@@ -54,14 +54,14 @@ async def _extract_browser_content(
     content: str | None,
     result: Any,
     policy: CrawlPolicy,
-) -> _ExtractedContent:
+) -> ExtractedContent:
     if not content:
-        return _ExtractedContent(
+        return ExtractedContent(
             text="",
             markdown=None,
             extraction_method=result.metadata.get("extraction_method") or EXTRACTION_METHOD_DOM_TEXT,
         )
-    return await _run_extraction(
+    return await run_extraction(
         extraction=policy.extraction,
         content=content,
         decoded=content,
@@ -80,7 +80,7 @@ async def _discover_browser_content(
     policy: CrawlPolicy,
     host_policy: HostPolicy,
 ) -> dict[str, Any]:
-    return await _discover_after_fetch(
+    return await discover_after_fetch(
         html=result.html,
         final_url=result.final_url,
         js_base_url=result.final_url,
@@ -92,7 +92,7 @@ async def _discover_browser_content(
 
 def _browser_diagnostics(
     result: Any,
-    content: _ExtractedContent,
+    content: ExtractedContent,
     policy: CrawlPolicy,
     host_policy: HostPolicy,
     post_fetch: dict[str, Any],
@@ -110,7 +110,7 @@ def _browser_diagnostics(
         value = result.metadata.get(key)
         if value:
             diagnostics[key] = value
-    diagnostics.update(_post_fetch_diagnostics(post_fetch, result.final_url, host_policy))
+    diagnostics.update(post_fetch_diagnostics(post_fetch, result.final_url, host_policy))
     return diagnostics
 
 
@@ -120,7 +120,7 @@ def _build_browser_result(
     normalized_url: NormalizedUrl,
     strategy: CrawlStrategyName,
     result: Any,
-    content: _ExtractedContent,
+    content: ExtractedContent,
     diagnostics: dict[str, Any],
     post_fetch: dict[str, Any],
 ) -> EngineCrawlResult:
@@ -148,7 +148,7 @@ def _build_browser_result(
         extraction_method=content.extraction_method,
         quality_score=quality_score(result.status, result.classification, content.text, result.html, None),
         diagnostics=diagnostics,
-        **_discovery_result_fields(
+        **discovery_result_fields(
             post_fetch,
             classification_evidence=[],
         ),
