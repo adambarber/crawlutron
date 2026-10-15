@@ -15,7 +15,7 @@ session. Server behaviour per the 2026-07-28 specification:
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import Any, cast
 from urllib.parse import urlsplit
 
 from pydantic import ValidationError
@@ -40,6 +40,7 @@ from app.mcp.protocol import (
     result_response,
     validate_meta,
 )
+from app.models.json_value import JsonValue
 
 logger = logging.getLogger(__name__)
 
@@ -63,7 +64,7 @@ def origin_allowed(origin: str | None) -> bool:
     return (parts.hostname or "").lower() in _LOOPBACK_HOSTS
 
 
-def discover_result() -> dict[str, Any]:
+def discover_result() -> dict[str, JsonValue]:
     return {
         "resultType": "complete",
         "supportedVersions": list(SUPPORTED_PROTOCOL_VERSIONS),
@@ -80,12 +81,12 @@ def discover_result() -> dict[str, Any]:
     }
 
 
-def tools_list_result() -> dict[str, Any]:
+def tools_list_result() -> dict[str, JsonValue]:
     from app.mcp.tools import TOOL_SPECS
 
-    tools = []
+    tools: list[dict[str, JsonValue]] = []
     for spec in TOOL_SPECS:
-        definition = {
+        definition: dict[str, JsonValue] = {
             "name": spec.name,
             "title": spec.title,
             "description": spec.description,
@@ -96,7 +97,7 @@ def tools_list_result() -> dict[str, Any]:
         tools.append(definition)
     return {
         "resultType": "complete",
-        "tools": tools,
+        "tools": cast(JsonValue, tools),
         "ttlMs": DEFAULT_TTL_MS,
         "cacheScope": CACHE_SCOPE,
     }
@@ -105,7 +106,7 @@ def tools_list_result() -> dict[str, Any]:
 def _validate_transport(
     request_id: int | str,
     method: Any,
-    params: dict[str, Any],
+    params: dict[str, JsonValue],
     protocol_version_header: str | None,
     method_header: str | None,
     name_header: str | None,
@@ -135,7 +136,8 @@ def _validate_transport(
             ),
         )
     validate_meta(params, request_id)
-    meta_version = (params.get("_meta") or {}).get(META_PROTOCOL_VERSION)
+    meta = params.get("_meta")
+    meta_version = (meta if isinstance(meta, dict) else {}).get(META_PROTOCOL_VERSION)
     if meta_version != protocol_version_header:
         raise ProtocolValidationError(
             400,
@@ -180,11 +182,13 @@ def _validate_transport(
 
 async def call_tool(
     request_id: int | str,
-    params: dict[str, Any],
+    body: dict[str, JsonValue],
     settings,
     shutdown_event,
-) -> dict[str, Any]:
+) -> JsonValue:
     from app.mcp.tools import TOOLS_BY_NAME, validation_message
+
+    params = cast(dict[str, Any], body)
 
     name = params.get("name")
     if not isinstance(name, str):
@@ -220,14 +224,14 @@ async def call_tool(
 
 
 async def handle_mcp_request(
-    body: dict[str, Any],
+    body: dict[str, JsonValue],
     *,
     protocol_version_header: str | None,
     method_header: str | None,
     name_header: str | None,
     settings,
     shutdown_event,
-) -> tuple[int, dict[str, Any] | None]:
+) -> tuple[int, JsonValue | None]:
     """Process one JSON-RPC message; returns ``(http_status, payload_or_None)``.
 
     A ``None`` payload means the request was accepted as a notification (202).

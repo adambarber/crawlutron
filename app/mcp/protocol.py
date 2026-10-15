@@ -19,6 +19,7 @@ from app.mcp.constants import (
     META_PROTOCOL_VERSION,
     META_SERVER_INFO,
 )
+from app.models.json_value import JsonValue
 
 
 class ProtocolValidationError(Exception):
@@ -28,21 +29,29 @@ class ProtocolValidationError(Exception):
     router can respond without re-deriving the error shape.
     """
 
-    def __init__(self, status_code: int, payload: dict[str, Any]) -> None:
-        super().__init__(str((payload.get("error") or {}).get("message", "validation error")))
+    def __init__(self, status_code: int, payload: JsonValue) -> None:
+        if isinstance(payload, dict):
+            error = payload.get("error")
+            if isinstance(error, dict):
+                message = error.get("message", "validation error")
+            else:
+                message = "validation error"
+        super().__init__(str(message))
         self.status_code = status_code
         self.payload = payload
 
 
-def server_info() -> dict[str, str]:
+def server_info() -> JsonValue:
     """The ``Implementation`` identity servers include in every result's meta."""
     return {"name": MCP_SERVER_NAME, "version": MCP_SERVER_VERSION}
 
 
-def result_response(request_id: int | str, result: dict[str, Any]) -> dict[str, Any]:
+def result_response(request_id: int | str, result: JsonValue) -> JsonValue:
     """Wrap a result dict in a JSON-RPC result response with ``serverInfo`` meta."""
-    result.setdefault("_meta", {})
-    result["_meta"].setdefault(META_SERVER_INFO, server_info())
+    if isinstance(result, dict):
+        meta = result.setdefault("_meta", {})
+        if isinstance(meta, dict):
+            meta.setdefault(META_SERVER_INFO, server_info())
     return {"jsonrpc": "2.0", "id": request_id, "result": result}
 
 
@@ -50,7 +59,7 @@ def error_response(
     request_id: int | str | None,
     code: int,
     message: str,
-    data: Any = None,
+    data: JsonValue = None,
 ) -> dict[str, Any]:
     """Build a JSON-RPC error response (``id`` omitted for malformed requests)."""
     payload: dict[str, Any] = {
@@ -65,7 +74,7 @@ def error_response(
 
 
 def _require_meta_key(
-    meta: dict[str, Any], key: str, expected: type[Any], label: str, request_id: int | str
+    meta: dict[str, JsonValue], key: str, expected: type[Any], label: str, request_id: int | str
 ) -> Any:
     """Return ``meta[key]``, or reject with the reason naming what was wrong.
 
@@ -98,14 +107,14 @@ def _require_meta_key(
     return value
 
 
-def validate_meta(params: dict[str, Any] | None, request_id: int | str) -> None:
+def validate_meta(params: JsonValue | None, request_id: int | str) -> None:
     """Reject requests missing the per-request metadata this revision requires.
 
     Raises :class:`ProtocolValidationError` (HTTP 400, ``-32602``) when the
     request body does not declare ``protocolVersion`` and ``clientCapabilities``
     in ``_meta``.
     """
-    meta = (params or {}).get("_meta")
+    meta = (params if isinstance(params, dict) else {}).get("_meta")
     if not isinstance(meta, dict):
         raise ProtocolValidationError(
             400,
