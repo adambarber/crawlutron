@@ -25,11 +25,8 @@ def _blocked(ip):
 def _teredo_hiding(client: str, server: str = "192.0.2.1") -> str:
     """A Teredo address (``2001::/32``) whose reachable half is ``client``.
 
-    Teredo reverses the client IPv4 in the low 32 bits, so a private target can
-    be smuggled through a syntactically public IPv6 literal. Built here rather
-    than pasted so the test data cannot drift from the encoding the stdlib
-    actually decodes.
-    """
+    Teredo reverses the client IPv4 in the low bits, so a private target can
+    ride a public literal; built, not pasted, to match the stdlib decode."""
     server_bits = int(ipaddress.IPv4Address(server))
     client_bits = int(ipaddress.IPv4Address(client)) ^ 0xFFFFFFFF
     packed = (0x20010000 << 96) | (server_bits << 64) | client_bits
@@ -71,22 +68,16 @@ def test_public_ips_still_allowed():
 def test_ipv4_mapped_ipv6_cgnat_is_blocked():
     """An IPv4-mapped IPv6 wrapper around a CGNAT address must not slip past.
 
-    ``::ffff:100.64.0.1`` is not caught by the stdlib range predicates
-    (``is_private`` is False for the mapped form of 100.64/10 on this
-    interpreter), and the explicit CGNAT branch only fired for bare IPv4, so
-    the mapped wrapper was classified as a public target (SSRF bypass).
-    """
+    ``is_private`` is False for the mapped form and the CGNAT branch fired only
+    for bare IPv4, so the wrapper read as public -- an SSRF bypass."""
     assert _blocked("::ffff:100.64.0.1") is True
 
 
 def test_ipv6_embedded_ipv4_is_classified_like_the_bare_ipv4():
     """Every IPv6-embedded IPv4 form must get the verdict of the IPv4 it hides.
 
-    Covers IPv4-mapped (``::ffff:``), 6to4 (``2002::/16``) and Teredo
-    (``2001::/32``). On interpreters whose stdlib range tables already catch
-    the embedded address these are defence in depth; on the rest they were the
-    whole bypass.
-    """
+    IPv4-mapped, 6to4 and Teredo; defence in depth where the stdlib already
+    catches them, the whole bypass where it does not."""
     for ipv6, ipv4 in [
         ("::ffff:127.0.0.1", "127.0.0.1"),
         ("::ffff:10.1.2.3", "10.1.2.3"),
@@ -114,17 +105,8 @@ def _fail_resolution(host, *args, **kwargs):
 def _unresolvable_host(monkeypatch, *, allow_private: str = "0") -> None:
     """Establish the unresolvable-host precondition every pinning test needs.
 
-    Two facts, always together: DNS resolution fails, and the private-target
-    escape hatch is set to the stated value. Stating them per test meant five
-    copies of the same precondition, and a test that set only one of the two
-    would still have run -- which is the failure this chokepoint removes, since
-    the hatch defaults on and silently turns the fail-closed assertions into
-    passthrough ones.
-
-    ``allow_private`` exists only for the test that proves the hatch is the sole
-    exception; everything else takes the default, so a test that means "closed"
-    cannot spell it wrongly.
-    """
+    DNS failure and the escape-hatch value always travel together, so a
+    fail-closed test cannot silently run with the hatch on (it defaults on)."""
     monkeypatch.setattr(socket, "getaddrinfo", _fail_resolution)
     monkeypatch.setenv("CRAWLUTRON_ALLOW_PRIVATE_TARGETS", allow_private)
 
@@ -138,18 +120,8 @@ def test_check_ssrf_protection_blocks_unresolvable_host(monkeypatch):
 def test_resolve_and_pin_host_fails_closed_when_resolution_fails(monkeypatch):
     """An unresolvable host must be refused, not handed back for re-resolution.
 
-    Returning ``(hostname, hostname)`` here does not merely avoid loopback: it
-    gives the HTTP client permission to resolve the name a THIRD time, at connect
-    time, with no validation applied to the answer. ``check_ssrf_protection``
-    validated the IPs it saw, and this discards them, so an attacker who can make
-    the pin-time lookup fail gets a connection to an address nothing checked.
-    That is the rebinding this function exists to prevent, reached by breaking
-    the pin instead of racing it.
-
-    The refusal is a ValueError for the same reason the no-public-IP branch below
-    raises one: both mean "this hostname cannot be safely connected to", and both
-    are surfaced to callers as an ordinary SSRF refusal rather than a crash.
-    """
+    Re-resolving at connect validates nothing -- the rebinding this function
+    prevents; the refusal is the same ValueError the no-public-IP branch raises."""
     _unresolvable_host(monkeypatch)
     with pytest.raises(ValueError, match="cannot resolve hostname"):
         http_mod.resolve_and_pin_host(canonical("http://nonexistent.invalid/"))
@@ -158,13 +130,8 @@ def test_resolve_and_pin_host_fails_closed_when_resolution_fails(monkeypatch):
 def test_resolve_and_pin_host_escape_hatch_survives_resolution_failure(monkeypatch):
     """The local-dev escape hatch is the ONLY path that returns an unpinned host.
 
-    ``allow_private_targets()`` exists so a developer can crawl a service on
-    their own machine, which necessarily means an unresolvable-on-the-internet
-    name. It is a deliberate, environment-gated bypass -- so it is pinned to the
-    env var and only the env var. If a future change made this the fallback for
-    an ordinary DNS failure, the test below would keep passing while the bypass
-    quietly became the default.
-    """
+    A deliberate, environment-gated bypass pinned to the env var alone, so it
+    cannot quietly become the fallback for ordinary DNS failures."""
     _unresolvable_host(monkeypatch, allow_private="1")
     hostname, pinned_ip = http_mod.resolve_and_pin_host(canonical("http://service.local/"))
     assert (hostname, pinned_ip) == ("service.local", "service.local")
@@ -185,18 +152,8 @@ async def test_pinned_hop_never_targets_loopback_for_unresolvable(monkeypatch):
 def test_pinned_builder_surfaces_unresolvable_host_as_an_ssrf_refusal(monkeypatch):
     """The caller-visible contract: an unresolvable host is refused, not crashed on.
 
-    ``build_pinned_request`` is the public entry point every pinned fetch goes
-    through, and it is the thing a caller actually catches. Pinning ``resolve_and_pin_host``
-    fixed the low-level helper; this pins that the refusal reaches the caller as the
-    ordinary ValueError it has always been -- the same refusal
-    ``check_ssrf_protection`` raises, with the same message -- and not as a
-    ``socket.gaierror`` escaping a layer that documents raising ValueError.
-
-    The assertion is deliberately on the message, not merely the type: a bare
-    ``pytest.raises(ValueError)`` would also pass if an unrelated ValueError were
-    raised from somewhere else in the builder, which is what a silent regression
-    here would look like.
-    """
+    The refusal is the ordinary ValueError (same message as the SSRF check),
+    not a ``socket.gaierror`` leaking from a layer that documents ValueError."""
     _unresolvable_host(monkeypatch)
     with pytest.raises(ValueError, match="SSRF protection: cannot resolve hostname"):
         http_mod.build_pinned_request(canonical("http://nonexistent.invalid/"), {})
@@ -229,10 +186,8 @@ class TestSSRFProtection:
     def test_hostname_resolved_only_once(self, monkeypatch):
         """The SSRF check must resolve the hostname exactly once.
 
-        Clears the process-global DNS cache first: the resolution cache
-        persists across tests, so without isolation a prior test that resolved
-        the same host would serve this call from cache (0 getaddrinfo calls).
-        """
+        The process-global DNS cache is cleared first, so a prior test cannot
+        serve this call from cache and report 0 getaddrinfo calls."""
         from app.transport.pinned_transport import reset_process_state
 
         reset_process_state()
@@ -244,16 +199,8 @@ class TestSSRFProtection:
 class TestFrontierIdentityRefusesRejectedTargets:
     """A rejected target must get no identity, not a fallback one.
 
-    ``frontier_identity`` is the admission seam's dedupe helper. It asks the
-    owner for a canonical identity and, when the owner returns ``None``, used to
-    hand back the raw string. That silently converted a refusal into an
-    admission: the cloud-metadata address, a loopback port and a host outside an
-    allow-list all came back with non-``None`` identities, so they were
-    persisted, scheduled and reported as accepted (202) before the engine ever
-    validated them. Every other admission boundary drops the same inputs -- the
-    sitemap fetch admits each ``<loc>`` where it reads it -- so falling back to
-    a raw identity here would be a divergence, not a policy.
-    """
+    The raw fallback silently admitted a refusal (202) before the engine
+    validated it; every other boundary drops the same inputs."""
 
     REJECTED = [
         "http://169.254.169.254/latest/meta-data/",
@@ -272,17 +219,8 @@ class TestFrontierIdentityRefusesRejectedTargets:
     def test_every_raw_text_shape_is_covered(self, monkeypatch):
         """The refusal must not depend on which shape the raw text arrived in.
 
-        ``frontier_identity`` accepts a bare string, a dict and any object
-        with ``normalized_url`` -- the three shapes that can still carry
-        unadmitted text. A guard that only pins the string case leaves the
-        other two open.
-
-        ``FrontierEntry`` (and the ``(key, entry)`` tuples wrapping it) is not
-        in this list: its ``url`` is an admitted value by construction -- the
-        storage read edge refuses bad rows before an entry can hold one -- so
-        an entry carrying a rejected target is unconstructable through
-        production paths and this helper takes its identity definitionally.
-        """
+        Bare string, dict or ``normalized_url``-bearing object -- a guard for
+        one shape leaves the others open; ``FrontierEntry`` is safe by construction."""
         block_private_targets(monkeypatch)
         from app.admission.admission_links import frontier_identity
 
@@ -310,10 +248,8 @@ class TestFrontierIdentityRefusesRejectedTargets:
     def test_a_public_target_still_gets_its_identity(self, monkeypatch):
         """The other direction: returning ``None`` always would pass the above.
 
-        An identity is the whole point of this helper, so the guard has to reject
-        the refused and admit the allowed. This is what stops the fix from being
-        ``return None`` on line 114.
-        """
+        The guard must admit the allowed too; this stops the fix from being
+        ``return None`` on line 114."""
         block_private_targets(monkeypatch)
         from app.admission.admission_links import frontier_identity
 
