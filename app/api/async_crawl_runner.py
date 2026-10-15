@@ -40,7 +40,7 @@ logger = logging.getLogger(__name__)
 
 # Module-level concurrency semaphore. Bounded so a flood of 202 responses
 # cannot spawn unbounded concurrent crawls and OOM the container.
-_WEBHOOK_CRAWL_CONCURRENCY = get_env_int("CRAWLUTRON_MAX_WEBHOOK_CONCURRENCY", 4, lo=1)
+WEBHOOK_CRAWL_CONCURRENCY = get_env_int("CRAWLUTRON_MAX_WEBHOOK_CONCURRENCY", 4, lo=1)
 # The semaphore is loop-bound and rebuilt when the running loop changes (a
 # harness driving many asyncio.run calls); the builder stays late-bound.
 _async_crawl_semaphore: asyncio.Semaphore | None = None
@@ -54,7 +54,7 @@ def _build_async_crawl_semaphore() -> asyncio.Semaphore:
     ``_get_async_crawl_semaphore``) so tests can patch the builder and have a
     rebuild observe it, mirroring the pooled clients' late-bound ``build``.
     """
-    return asyncio.Semaphore(_WEBHOOK_CRAWL_CONCURRENCY)
+    return asyncio.Semaphore(WEBHOOK_CRAWL_CONCURRENCY)
 
 
 def _get_async_crawl_semaphore() -> asyncio.Semaphore:
@@ -201,4 +201,4 @@ async def run_async_crawl(
                 )
 
 
-__all__ = ["_WEBHOOK_CRAWL_CONCURRENCY", "_get_async_crawl_semaphore", "run_async_crawl"]
+__all__ = ["run_async_crawl"]
