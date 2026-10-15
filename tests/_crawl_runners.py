@@ -1,27 +1,41 @@
 """Crawl runners: payloads, pages, chains and strategy entry."""
 
+from collections.abc import Callable, Sequence
 from typing import Any
 from urllib.parse import urlparse
 
 from app.admission.policy import CrawlPolicy, read_policy
 from app.models.crawl_result import EngineCrawlResult
+from app.models.crawl_worker import CrawlWorker
 from app.models.host_policy import HostPolicy
+from app.models.http_fetcher import HttpFetcher
 from app.models.result_record import ProducerEnvelope
 from app.models.taxonomy import CrawlStrategyName
 from app.orchestration.engine import crawl_request
+from app.orchestration.scheduler import DomainScheduler
+from app.runtime.resource_pressure import ResourceGate
 from app.transport.cache import HttpCache
 from app.transport.content_cache import ContentCache
+from app.transport.fetchers import default_http_fetcher
 from app.transport.strategy_request import StrategyRequest
 from app.vocabulary.strategies import HTTP_DECLARED_CRAWLER
 from tests._fetch_doubles import site_fetcher
 from tests._fetch_scripted import tap_fetcher
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY, canonical
 
+#: One scripted page: (status, raw body, content type). The fetcher estimates
+#: the type when a page does not declare one; declaring it makes a sitemap.
+PageData = tuple[int, str, str]
+PageMap = dict[str, PageData]
+
+#: The policy limits a scripted crawl is run under, in wire shape.
+Limits = dict[str, Any]
+
 
 def make_crawl_payload(
     url: str,
     *,
-    strategies: list[str] | None = None,
+    strategies: Sequence[str] | None = None,
     timeout_seconds: int = 10,
     max_retries: int = 0,
     max_discovered_links: int = 50,
@@ -45,10 +59,10 @@ def make_crawl_payload(
 def build_payload(
     *,
     url: str | None = None,
-    urls: list[str] | None = None,
-    strategies: list[str] | None = None,
-    limits: dict[str, Any] | None = None,
-    **extra,
+    urls: Sequence[str] | None = None,
+    strategies: Sequence[str] | None = None,
+    limits: Limits | None = None,
+    **extra: Any,
 ) -> dict[str, Any]:
     payload: dict[str, Any] = {}
     if url:
@@ -73,7 +87,7 @@ LLM_FORMAT_TEST_HTML = (
 )
 
 
-def xml_page(body: str) -> tuple[int, str, str]:
+def xml_page(body: str) -> PageData:
     """One ``application/xml`` page, in the shape a page map wants.
 
     The content type is what makes a served document a sitemap; a fixture that
@@ -86,15 +100,15 @@ LINKED_PAIR_LIMITS = {"max_depth": 1, "max_pages": 10}
 
 
 async def crawled_results(
-    pages: dict[str, Any],
+    pages: PageMap,
     *,
     url: str = "http://example.com/",
-    limits: dict[str, Any] | None = None,
+    limits: Limits | None = None,
     policy: dict[str, Any] | None = None,
     spill_path: str | None = None,
-    content_cache: Any = None,
+    content_cache: ContentCache | None = None,
     calls: list[str] | None = None,
-    resource_gate: Any = None,
+    resource_gate: ResourceGate | None = None,
 ) -> ProducerEnvelope:
     """Run a recursive crawl over scripted ``pages`` and return the API response.
 
@@ -112,7 +126,7 @@ async def crawled_results(
     )
 
 
-async def crawled_urls(pages: dict[str, Any], **kwargs: Any) -> list[str]:
+async def crawled_urls(pages: PageMap, **kwargs: Any) -> list[str]:
     """:func:`crawled_results` projected to the crawled URLs, in crawl order.
 
     Order is crawl order (BFS), which a caller may depend on; a caller that
@@ -153,11 +167,11 @@ async def crawled_result(
     url: str,
     *,
     policy: CrawlPolicy | dict[str, Any] | None = None,
-    strategies: list[str] | None = None,
-    http_fetcher: Any = None,
-    browser_worker: Any = None,
-    cache: Any = None,
-    content_cache: Any = None,
+    strategies: Sequence[str] | None = None,
+    http_fetcher: HttpFetcher | None = None,
+    browser_worker: CrawlWorker | None = None,
+    cache: HttpCache | None = None,
+    content_cache: ContentCache | None = None,
     **payload_kwargs: Any,
 ) -> EngineCrawlResult:
     """The one result a real ``crawl_request`` returns for ``url``.
@@ -179,7 +193,9 @@ async def crawled_result(
     return (await crawl_request(payload, **kwargs))["results"][0]
 
 
-async def run_crawl_async(payload: dict[str, Any], *, cache=None, browser_worker=None) -> ProducerEnvelope:
+async def run_crawl_async(
+    payload: dict[str, Any], *, cache: HttpCache | None = None, browser_worker: CrawlWorker | None = None
+) -> ProducerEnvelope:
     if cache is None:
         cache = HttpCache()
     return await crawl_request(payload, browser_worker=browser_worker, cache=cache)
@@ -188,10 +204,10 @@ async def run_crawl_async(payload: dict[str, Any], *, cache=None, browser_worker
 async def crawl_homepage_async(
     base_url: str,
     *,
-    strategies: list[str] | None = None,
-    limits: dict[str, Any] | None = None,
-    cache=None,
-    browser_worker=None,
+    strategies: Sequence[str] | None = None,
+    limits: Limits | None = None,
+    cache: HttpCache | None = None,
+    browser_worker: CrawlWorker | None = None,
 ) -> ProducerEnvelope:
     payload = build_payload(
         url=f"{base_url}/",
@@ -209,13 +225,13 @@ EXAMPLE_URL = "http://example.com/"
 
 async def run_chain(
     url: str = EXAMPLE_URL,
-    fetcher: Any = None,
+    fetcher: HttpFetcher | None = None,
     *,
-    cffi_fetcher: Any = None,
+    cffi_fetcher: HttpFetcher | None = None,
     policy: CrawlPolicy | dict[str, Any],
-    scheduler: Any = None,
-    browser_worker: Any = None,
-) -> Any:
+    scheduler: DomainScheduler | None = None,
+    browser_worker: CrawlWorker | None = None,
+) -> EngineCrawlResult:
     """What the strategy chain decides for one URL, with the real wiring.
 
     Fetcher slots, host policy and scheduler set once (``scheduler`` stays a
@@ -225,6 +241,7 @@ async def run_chain(
 
     if scheduler is None:
         scheduler = DomainScheduler(global_limit=1, per_domain_limit=1, delay_seconds=0.0)
+    fetcher = fetcher or default_http_fetcher
     return await execute_crawl_chain(
         original_url=url,
         normalized_url=canonical(url),
@@ -239,8 +256,12 @@ async def run_chain(
 
 
 async def run_cached_twice(
-    url: str, policy: CrawlPolicy | dict[str, Any], fetcher: Any, cache: Any, content_cache: Any
-):
+    url: str,
+    policy: CrawlPolicy | dict[str, Any],
+    fetcher: HttpFetcher,
+    cache: HttpCache,
+    content_cache: ContentCache,
+) -> tuple[EngineCrawlResult, EngineCrawlResult]:
     """The same URL through the HTTP strategy twice, on the same two caches.
 
     The content cache is a claim about the SECOND run, so the arrangement is
@@ -267,7 +288,9 @@ def clocked_cache(
     return ContentCache(directory, default_ttl=default_ttl, clock=lambda: clock[0], **settings), clock
 
 
-def make_seeded_cache(directory: str, *keys: str, value: Any = None, **settings: Any):
+def make_seeded_cache(
+    directory: str, *keys: str, value: Any = None, **settings: Any
+) -> tuple[ContentCache, list[float]]:
     """:func:`clocked_cache` holding one entry per key.
 
     Seeding + a clock are the two halves of "an entry that expires"; a test
@@ -278,7 +301,7 @@ def make_seeded_cache(directory: str, *keys: str, value: Any = None, **settings:
     return cache, clock
 
 
-def _spawn_fetch(fn):
+def _spawn_fetch(fn: Callable[[object], Any]) -> Any:
     from tests.helpers.server import spawn_server
 
     server = spawn_server()
@@ -307,11 +330,11 @@ def strategy_request(
 async def run_http_strategy(
     url: str,
     policy: CrawlPolicy | dict[str, Any],
-    http_fetcher: Any,
-    cache: Any = None,
-    content_cache: Any = None,
+    http_fetcher: HttpFetcher,
+    cache: HttpCache | None = None,
+    content_cache: ContentCache | None = None,
     **extra: Any,
-) -> Any:
+) -> EngineCrawlResult:
     from app.transport.http import http_strategy_result
 
     kwargs: dict[str, Any] = {}
