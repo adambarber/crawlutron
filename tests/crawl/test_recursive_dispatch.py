@@ -1,9 +1,7 @@
-"""Direct unit tests for the extracted recursive dispatch (app.orchestration.recursive).
+"""Direct unit tests for the extracted recursive dispatch.
 
-These drive :func:`run_recursive_crawl` with fake closures/scheduler/spill so
-the batch-sizing and admission-gate logic is covered without standing up the
-full engine (the reason the dispatch was extracted from ``crawl_request``).
-"""
+Fake closures/scheduler/spill drive :func:`run_recursive_crawl` so the
+batch-sizing and admission-gate logic are covered without the full engine."""
 
 from urllib.parse import urlsplit
 
@@ -26,11 +24,8 @@ _ROOT_CANONICAL = canonical(_ROOT)
 def _task(url: str, *, index: int = 0) -> CrawlTask:
     """A crawl task whose ``normalized_url`` is the production canonical form.
 
-    ``original_url`` keeps the raw spelling, so the pair differs exactly where
-    normalization changed something. The four-field seed was written out six
-    times in this file, each copy free to drift from the canonical form on its
-    own; this is the one place that cannot.
-    """
+    ``original_url`` keeps the raw spelling; the four-field seed was written
+    six times here, each copy free to drift -- this is the one that cannot."""
     return CrawlTask(
         index=index,
         original_url=url,
@@ -70,10 +65,8 @@ async def _run(
 ):
     """These tests default to ``max_depth=2``; the harness default is 0.
 
-    A dispatch test wants the frontier to actually expand, and the bound under
-    test is passed explicitly, so the depth default is the only reason this
-    wrapper exists at all.
-    """
+    The bound under test is passed explicitly, so the depth default is the
+    only reason this wrapper exists."""
     return await drive_recursive_crawl(
         jobs,
         worker,
@@ -89,18 +82,10 @@ async def _run(
 
 
 def _expanding_worker():
-    """A worker whose ROOT result discovers ``/1`` and ``/2``; every other page is a leaf.
+    """A worker whose ROOT result discovers ``/1`` and ``/2``; the rest are leaves.
 
-    One definition of the site these dispatch tests crawl, so a test that differs
-    only in the bound under test does not restate the worker. That matters here
-    specifically because the ``max_pages`` pair asserts the unbounded reading and
-    the bounded one against the SAME crawl -- if each spelled its own worker, the
-    two could expand to different shapes and stop being comparable, while still
-    passing individually.
-
-    Only the root carries links, so the frontier terminates at exactly three
-    pages and the page count IS the shape under test.
-    """
+    One site definition so the ``max_pages`` pair shares a crawl; the frontier
+    terminates at three pages, so the count IS the shape under test."""
 
     async def worker(job):
         links = (
@@ -119,22 +104,10 @@ def _expanding_worker():
     ids=("misspelled-at-the-call-site", "dropped-from-production"),
 )
 async def test_an_override_production_does_not_take_is_rejected(keyword, value):
-    """The harness forwards through ``**overrides``; a keyword it cannot bind must not pass.
+    """The harness forwards ``**overrides``; a keyword it cannot bind must not pass.
 
-    This is the whole reason the harness is not allowed to be a plain
-    ``**kwargs`` catch-all, and the reason it cannot be. Before the signature was
-    read from production, every keyword was named in the harness's own signature
-    and Python itself raised on a misspelling. Reading the contract at runtime
-    keeps that property only if the binding is enforced, so this asserts the
-    enforcement rather than trusting it -- a rejected keyword names itself
-    instead of becoming an argument production never received.
-
-    The two cases fail differently and both matter. A misspelling is a caller
-    mistake, and silently dropping it means a test ran against a default nobody
-    chose -- a ``max_dept`` that never bounded anything. A keyword production has
-    dropped is worse: the harness would accept it, hand it over, and either pass a
-    default the caller chose nothing about or mask the removal entirely.
-    """
+    Runtime signature reading only keeps the check if the binding is enforced:
+    a misspelling must not run against a default nobody chose."""
 
     async def worker(job):
         return make_engine_result(job.normalized_url)
@@ -146,10 +119,8 @@ async def test_an_override_production_does_not_take_is_rejected(keyword, value):
 async def test_a_real_override_still_reaches_production():
     """Binding validates names, so the value path has to be proven separately.
 
-    A harness that rejected every override would satisfy both tests above. This
-    one drives a real bound through and reads it back off the crawl, which is the
-    only evidence that ``overrides`` is a funnel rather than a wall.
-    """
+    A harness that rejected every override would satisfy both tests above;
+    this drives a real bound through and reads it back off the crawl."""
 
     async def worker(job):
         return make_engine_result(job.normalized_url)
@@ -204,20 +175,8 @@ async def test_gate_scale_shrinks_batch_but_still_crawls_all():
 async def test_max_pages_zero_is_unbounded_at_the_dispatch_loop():
     """A cap of 0 means "no cap" here, so it must not fetch nothing.
 
-    ``remaining_page_capacity`` has always answered None -- unbounded -- for
-    ``max_pages <= 0``, and a whole-site job read back from its row keeps its
-    stored 0 all the way here: ``validate_wire_policy`` returns an already-built
-    model as it stands, so the API edge's "a crawl must be bounded" substitution
-    does not apply to it. That makes this the only place 0 reaches the loop, and
-    the loop compared ``page_count < max_pages`` directly -- so it read the
-    unbounded sentinel as "already at the cap" and returned before the first
-    batch. A whole-site job asking for an unlimited crawl returned zero results,
-    and because the loop had done nothing wrong there was no error to explain it.
-
-    Driven directly rather than through the API precisely because the API path
-    substitutes a budget and would have hidden this: a test through
-    ``crawl_request`` passes here today, for a reason unrelated to the loop.
-    """
+    The stored 0 reached the loop and read as "already at the cap" -- zero
+    results for a whole-site job (the API path substitutes a budget and hides it)."""
 
     spill, _scheduler, _gate = await _run([_task(_ROOT)], _expanding_worker(), max_pages=0)
     assert set(spill.writes) == {0, 1, 2}, (
@@ -228,10 +187,8 @@ async def test_max_pages_zero_is_unbounded_at_the_dispatch_loop():
 async def test_a_positive_cap_still_bounds_the_same_crawl():
     """The unbounded reading must not have cost the bounded one.
 
-    Stated against the same site and the same harness as the test above, because
-    "treat 0 as unbounded" and "ignore the cap" are the same edit to a reader
-    skimming a diff, and only a positive cap in the same fixture separates them.
-    """
+    Stated against the same site and harness, because "treat 0 as unbounded"
+    and "ignore the cap" are the same edit to a diff reader."""
 
     spill, _scheduler, _gate = await _run([_task(_ROOT)], _expanding_worker(), max_pages=1)
     assert set(spill.writes) == {0}, f"a cap of 1 admitted {sorted(spill.writes)} pages"
@@ -273,10 +230,8 @@ async def test_robots_disallows_initial_job_as_skip(recording_worker):
 def assert_spill_keeps_job_pairing(spill, jobs) -> None:
     """Every job's result is in its own spill slot, under its own URL.
 
-    The invariant the whole dispatch tier exists to protect: a shift by one (or
-    a drop) still hands back a full set of well-formed results, so only the
-    per-index pairing catches it.
-    """
+    The invariant the whole dispatch tier protects: a shift by one or a drop
+    still returns well-formed results, so only per-index pairing catches it."""
     assert set(spill.writes) == set(range(len(jobs)))
     for index, result in spill.writes.items():
         expected = jobs[index].normalized_url
@@ -316,11 +271,8 @@ def _open_scheduler(*pinned_domains: str):
 def _interleaved_jobs():
     """Four jobs whose index order alternates browser, http, browser, http.
 
-    The interleaving is the point: ``_pop_admitted`` emits tasks HTTP-first (tier
-    order) while ``DomainScheduler.run`` reports results in index order with
-    failures filtered out, so a batch that is all one tier never exercises the
-    mis-pairing.
-    """
+    The interleaving is the point: ``_pop_admitted`` emits HTTP-first while
+    results arrive in index order, so all-one-tier batches never pair badly."""
     return [_tiered_job(0, "b1"), _tiered_job(1, "h1"), _tiered_job(2, "b2"), _tiered_job(3, "h2")]
 
 
@@ -349,17 +301,8 @@ async def test_pool_exhaustion_requeue_does_not_consume_a_max_pages_slot(): ...
 async def test_in_flight_pages_count_against_the_cap_at_expansion():
     """Pages admitted this batch but not yet committed are OCCUPIED pages.
 
-    Two seeds share one in-flight batch, so when the first commit expands its
-    discovered links the second seed is admitted-but-uncommitted. The page
-    budget has three slots and two are spent on seeds, so exactly one slot is
-    left for discovered pages. The hand-passed
-    ``occupied=page_count+len(frontier)`` read 1+0 here -- both in-flight
-    seeds invisible -- so expansion robots-queried a page the cap already
-    refused and queued a phantom past the last slot. Occupation is now
-    DERIVED from the module's own reserved set (known ∪ frontier identities),
-    which is exactly the pages a crawl holds: nothing to hand-compute,
-    nothing to get wrong.
-    """
+    The hand-passed ``occupied`` read 1+0 with in-flight seeds invisible, so
+    expansion queued a phantom past the cap; it is now DERIVED from the reserved set."""
     probed: list[str] = []
 
     async def allows(url):
