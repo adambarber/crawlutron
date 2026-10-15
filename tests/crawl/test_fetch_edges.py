@@ -15,9 +15,9 @@ from app.safety.validation import HostPolicy
 from app.transport.cache import HttpCache
 from app.transport.fetch_policy import looks_like_binary_body
 from app.transport.request_profile import (
-    _cookie_header_for_url,
-    _select_fingerprint,
+    cookie_header_for_url,
     headers_for_strategy,
+    select_fingerprint,
 )
 from app.vocabulary.strategies import HTTP_DECLARED_CRAWLER
 from app.vocabulary.taxonomy import status_for_classification
@@ -199,12 +199,12 @@ class TestFingerprintInjectionRotation:
         profile = {"user_agents": ["UA-A", "UA-B", "UA-C"]}
         # Use more hosts than pool size so rotation is clearly visible.
         hosts = [f"{c}.com" for c in "abcdef"]
-        seen = {d: _select_fingerprint(profile, canonical(f"http://{d}/")).get("user_agent") for d in hosts}
+        seen = {d: select_fingerprint(profile, canonical(f"http://{d}/")).get("user_agent") for d in hosts}
         # Rotation: different hosts get a variety of UAs (not all identical)
         assert len(set(seen.values())) > 1
         # Stability: same host -> same UA across calls (keeps content-cache key stable)
-        assert _select_fingerprint(profile, canonical("http://a.com/"))["user_agent"] == seen["a.com"]
-        assert _select_fingerprint(profile, canonical("http://a.com/"))["user_agent"] == seen["a.com"]
+        assert select_fingerprint(profile, canonical("http://a.com/"))["user_agent"] == seen["a.com"]
+        assert select_fingerprint(profile, canonical("http://a.com/"))["user_agent"] == seen["a.com"]
 
     def test_fingerprint_rotation_changes_accept_language_per_domain(self):
         base = {"request_profile": {"fingerprint_rotation": True}, "headers": {}}
@@ -261,7 +261,7 @@ class TestQualityScore:
 class TestFetchHelpersEdges:
     def test_cookie_header_per_host(self):
         assert (
-            _cookie_header_for_url(
+            cookie_header_for_url(
                 {"cookie_jar": "per_host", "cookies": {"e.com": {"a": "1"}}},
                 canonical("http://e.com/"),
             )

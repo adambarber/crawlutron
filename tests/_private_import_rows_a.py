@@ -30,16 +30,6 @@ DECLARED: dict[str, Declaration] = {
         ["test"],
     ),
     "app.api.job_lifecycle._tasks": _d(_CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]),
-    "app.extraction.classify._strip_html_noise": _d(
-        "unreviewed",
-        "Not yet triaged.\n",
-        ["test"],
-    ),
-    "app.admission.admission_links._frontier_identity": _d(
-        "unreviewed",
-        "Not yet triaged.\n",
-        ["test"],
-    ),
     "app.transport.content_cache.ContentCache._remember_memory_locked": _d(
         _PRIVATE_TYPE.kind, _PRIVATE_TYPE.reason, ["test"]
     ),
@@ -82,11 +72,6 @@ DECLARED: dict[str, Declaration] = {
     "app.storage.sqlite_store._WAL_RETRY_SECONDS": _SUBSTITUTED_CAP,
     "app.transport.browser_driver.BrowserDriver._dispatch_action": _d(
         _PRIVATE_TYPE.kind, _PRIVATE_TYPE.reason, ["test"]
-    ),
-    "app.transport.browser_pool._derive_browser_pool_size": _d(
-        "unreviewed",
-        "Not yet triaged.\n",
-        ["test"],
     ),
     "app.transport.content_cache_key._RAM_SAFETY_BYTES": _SUBSTITUTED_CAP,
 }

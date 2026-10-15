@@ -24,6 +24,7 @@ __all__ = [
     "T",
     "admit_discovered_links",
     "compile_scope_pattern",
+    "frontier_identity",
     "gather_robots_decisions",
     "remaining_page_capacity",
 ]
@@ -102,7 +103,7 @@ async def admit_discovered_links[T](
     next_depth = source_depth + 1
     reserved: set[NormalizedUrl] = set(known)
     for value in frontier:
-        identity = _frontier_identity(value, host_policy=host_policy)
+        identity = frontier_identity(value, host_policy=host_policy)
         if identity is not None:
             reserved.add(identity)
     # Occupation is this set's size, never a caller's arithmetic: known ∪
@@ -264,7 +265,7 @@ def _is_url_text(value: Any) -> bool:
     return isinstance(value, (str, NormalizedUrl)) and bool(value)
 
 
-def _frontier_identity(value: Any, *, host_policy: HostPolicy) -> NormalizedUrl | None:
+def frontier_identity(value: Any, *, host_policy: HostPolicy) -> NormalizedUrl | None:
     raw_url: Any
     if isinstance(value, FrontierEntry):
         return value.url

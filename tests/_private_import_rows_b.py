@@ -47,21 +47,6 @@ DECLARED: dict[str, Declaration] = {
         "Not yet triaged.\n",
         ["test"],
     ),
-    "app.transport.request_profile._apply_credentials": _d(
-        "unreviewed",
-        "Not yet triaged.\n",
-        ["test"],
-    ),
-    "app.transport.request_profile._cookie_header_for_url": _d(
-        "unreviewed",
-        "Not yet triaged.\n",
-        ["test"],
-    ),
-    "app.transport.request_profile._select_fingerprint": _d(
-        "unreviewed",
-        "Not yet triaged.\n",
-        ["test"],
-    ),
     "app.orchestration.strategy_chain._starting_strategies": _d(
         "unreviewed",
         "Not yet triaged.\n",

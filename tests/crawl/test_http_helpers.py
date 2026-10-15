@@ -20,7 +20,7 @@ from app.transport.fetch_policy import (
     retry_backoff_seconds,
 )
 from app.transport.http import http_strategy_result
-from app.transport.request_profile import _cookie_header_for_url, headers_for_strategy
+from app.transport.request_profile import cookie_header_for_url, headers_for_strategy
 from app.vocabulary.extraction import (
     EXTRACTION_DOCUMENT,
     EXTRACTION_METHOD_BINARY_NO_TEXT,
@@ -125,13 +125,11 @@ class TestHeaderHelpers:
 
     def test_cookie_header_invalid_structures(self) -> None:
         assert (
-            _cookie_header_for_url(
-                {"cookie_jar": "per_host", "cookies": "notdict"}, canonical("http://host/")
-            )
+            cookie_header_for_url({"cookie_jar": "per_host", "cookies": "notdict"}, canonical("http://host/"))
             == ""
         )
         assert (
-            _cookie_header_for_url(
+            cookie_header_for_url(
                 {"cookie_jar": "per_host", "cookies": {"host": "notdict"}}, canonical("http://host/")
             )
             == ""

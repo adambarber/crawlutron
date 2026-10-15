@@ -17,7 +17,7 @@ from app.admission.payload_helpers import payload_policy
 from app.admission.policy import PolicyTier, read_policy
 from app.models.crawl_policy import CrawlPolicy
 from app.models.credential import Credential
-from app.transport.request_profile import _apply_credentials
+from app.transport.request_profile import apply_credentials
 from tests._policy_factories import canonical
 
 #: The settings a payload-policy test runs against: the defaults with nothing overridden.
@@ -54,20 +54,20 @@ class TestApplyCredentials:
     def test_matching_origin_gets_authorization(self):
         import base64
 
-        headers = _apply_credentials({}, canonical("https://private.example/page"), self._credentials())
+        headers = apply_credentials({}, canonical("https://private.example/page"), self._credentials())
         assert headers["Authorization"] == "Bearer tok"
         # Basic credentials canonicalize into the standard header value.
-        headers = _apply_credentials({}, canonical("http://legacy.example:8080/x"), self._credentials())
+        headers = apply_credentials({}, canonical("http://legacy.example:8080/x"), self._credentials())
         expected = base64.b64encode(b"u:p").decode()
         assert headers["Authorization"] == f"Basic {expected}"
 
     def test_other_origins_get_nothing(self):
-        headers = _apply_credentials(
+        headers = apply_credentials(
             {"X": "1"}, canonical("https://elsewhere.example/page"), self._credentials()
         )
         assert headers == {"X": "1"}
         # Default-port and case variants of the REQUEST url match the same origin.
-        headers = _apply_credentials({}, canonical("https://PRIVATE.example:443/page"), self._credentials())
+        headers = apply_credentials({}, canonical("https://PRIVATE.example:443/page"), self._credentials())
         assert headers["Authorization"] == "Bearer tok"
 
     def test_headers_for_strategy_attaches_only_the_matching_origin(self):

@@ -70,9 +70,9 @@ _GROUPING_ASSIGNMENTS = frozenset(
 
 
 def _strip(html):
-    from app.extraction.classify import _strip_html_noise
+    from app.extraction.classify import strip_html_noise
 
-    return _strip_html_noise(html)
+    return strip_html_noise(html)
 
 
 def test_strips_scripts_styles_comments_in_one_pass():
@@ -127,11 +127,11 @@ def test_strip_is_linear_under_pathological_unclosed_script_flood():
     not weaker: linear lands near 4x, quadratic near 16x, and the band between
     them is wider than the one it replaces.
     """
-    from app.extraction.classify import _strip_html_noise
+    from app.extraction.classify import strip_html_noise
 
     def cpu_for(n):
         payload = ("<script>" + "a" * 500) * n
-        return cpu_seconds(lambda: _strip_html_noise(payload))
+        return cpu_seconds(lambda: strip_html_noise(payload))
 
     t_small = cpu_for(2_000)
     t_big = cpu_for(8_000)

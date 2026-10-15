@@ -11,7 +11,7 @@ import os
 from collections.abc import Iterable, Mapping
 from typing import Any, Protocol, runtime_checkable
 
-from app.admission.credentials import apply_credentials as _apply_credentials
+from app.admission.credentials import apply_credentials as apply_credentials
 from app.models.crawl_policy import CrawlPolicy
 from app.models.normalized_url import NormalizedUrl
 from app.transport import cookie_jar
@@ -33,7 +33,7 @@ def cookie_namespace_for(profile: Mapping[str, Any]) -> str:
     return str(value).strip() if isinstance(value, str) else ""
 
 
-def _cookie_header_for_url(profile: Mapping[str, Any], url: NormalizedUrl) -> str:
+def cookie_header_for_url(profile: Mapping[str, Any], url: NormalizedUrl) -> str:
     """Build a Cookie header from policy cookies and the persistent jar."""
     host = url.host
     parts: list[str] = []
@@ -135,7 +135,7 @@ def _rotating_index(profile: Mapping[str, Any], domain: str, pool_size: int) -> 
     return int(hashlib.sha256(seed).hexdigest(), 16) % pool_size
 
 
-def _select_fingerprint(profile: Mapping[str, Any], url: NormalizedUrl) -> dict[str, str]:
+def select_fingerprint(profile: Mapping[str, Any], url: NormalizedUrl) -> dict[str, str]:
     """Select fingerprint signals for a host. Rotation is deterministic per host.
     Explicit ``user_agents``/``accept_languages`` pools are preferred; ``fingerprint_rotation``
     falls back to built-in pools. Anchored on the host so it is complementary to Camoufox
@@ -194,7 +194,7 @@ def headers_for_strategy(
     is_browser_like = strategy == HTTP_CFFI_IMPERSONATE or user_agent_family == "desktop_chrome"
     # Fingerprint injection/rotation: deterministic per-host selection so a single
     # crawl rotates fingerprints across hosts while staying stable per host.
-    fp = _select_fingerprint(resolved_profile, url)
+    fp = select_fingerprint(resolved_profile, url)
     if "user_agent" in fp:
         headers["User-Agent"] = fp["user_agent"]
         is_browser_like = is_browser_like or "Mozilla" in fp["user_agent"]
@@ -233,11 +233,11 @@ def headers_for_strategy(
     configured_user_agent = os.environ.get("CRAWLUTRON_USER_AGENT", "").strip()
     if configured_user_agent:
         headers["User-Agent"] = configured_user_agent
-    cookie_header = _cookie_header_for_url(resolved_profile, url)
+    cookie_header = cookie_header_for_url(resolved_profile, url)
     if cookie_header:
         headers["Cookie"] = cookie_header
     headers.update(policy.headers)
     # Origin-scoped credentials last: attached only when this exact URL's origin holds one,
     # and the redirect loop's scrub strips it on any cross-host hop (as with cookies).
-    _apply_credentials(headers, url, policy.credentials)
+    apply_credentials(headers, url, policy.credentials)
     return headers

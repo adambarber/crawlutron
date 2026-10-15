@@ -118,14 +118,14 @@ def _clear_pool_env(monkeypatch):
 
 def test_explicit_override_wins(monkeypatch):
     monkeypatch.setenv("CRAWLUTRON_BROWSER_POOL_SIZE", "3")
-    assert bp._derive_browser_pool_size() == 3
+    assert bp.derive_browser_pool_size() == 3
 
 
 def test_explicit_override_rejects_garbage(monkeypatch):
     monkeypatch.setenv("CRAWLUTRON_BROWSER_POOL_SIZE", "not-a-number")
     monkeypatch.setattr(rp, "read_memory_stats", lambda: _Mem(3 * 1024**3))
     # garbled override -> falls through to budget derivation (3GiB -> 2)
-    assert bp._derive_browser_pool_size() == 2
+    assert bp.derive_browser_pool_size() == 2
 
 
 @pytest.mark.parametrize("raw", ["0", "-5", "  "])
@@ -134,24 +134,24 @@ def test_nonpositive_or_blank_override_falls_through(monkeypatch, raw):
     # derivation owns the sizing.
     monkeypatch.setenv("CRAWLUTRON_BROWSER_POOL_SIZE", raw)
     monkeypatch.setattr(rp, "read_memory_stats", lambda: _Mem(3 * 1024**3))
-    assert bp._derive_browser_pool_size() == 2
+    assert bp.derive_browser_pool_size() == 2
 
 
 def test_budget_derivation_3g_defaults(monkeypatch):
     monkeypatch.setattr(rp, "read_memory_stats", lambda: _Mem(3 * 1024**3))
     # 0.5 * 3GiB / 700MiB ~= 2.19 -> floor 2
-    assert bp._derive_browser_pool_size() == 2
+    assert bp.derive_browser_pool_size() == 2
 
 
 def test_budget_derivation_capped(monkeypatch):
     monkeypatch.setattr(rp, "read_memory_stats", lambda: _Mem(64 * 1024**3))
     # huge host -> capped at the per-worker fleet ceiling
-    assert bp._derive_browser_pool_size() == rp.MAX_DERIVED_POOL_SIZE
+    assert bp.derive_browser_pool_size() == rp.MAX_DERIVED_POOL_SIZE
 
 
 def test_no_limit_falls_back_to_one(monkeypatch):
     monkeypatch.setattr(rp, "read_memory_stats", lambda: _Mem(0))
-    assert bp._derive_browser_pool_size() == 1
+    assert bp.derive_browser_pool_size() == 1
 
 
 def test_pool_uses_derived_size(monkeypatch):

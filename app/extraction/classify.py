@@ -147,7 +147,7 @@ SOFT_SINGLE_SIGNAL_CLASSIFICATIONS = frozenset(
 def classify_page_with_evidence(
     html: str | None, text: str | None, *, title: str | None = None
 ) -> tuple[Classification, list[dict[str, Any]]]:
-    stripped_html = _strip_html_noise(html).lower()
+    stripped_html = strip_html_noise(html).lower()
     visible_haystack = f"{title or ''}\n{text or ''}".lower()
     html_haystack = stripped_html
     if not (text or "").strip() and not (title or "").strip() and _html_has_no_user_visible_content(html):
@@ -242,7 +242,7 @@ def _evidence(
     }
 
 
-# Compiled at import: _strip_html_noise runs per page on every strategy attempt,
+# Compiled at import: strip_html_noise runs per page on every strategy attempt,
 # and the lazy-global compile also carried a benign double-compile race under threads.
 _TAGS_RE = re.compile(r"<[^>]+>")
 
@@ -254,7 +254,7 @@ _TAGS_RE = re.compile(r"<[^>]+>")
 _NOISE_OPENERS: Final = ("<script", "<style", "<!--")
 
 
-def _strip_html_noise(html: str | None) -> str:
+def strip_html_noise(html: str | None) -> str:
     """Remove scripts, styles, and comments via linear string scanning.
 
     Replaces the previous regex pass (``.*?`` alternation with ``re.DOTALL``),

@@ -244,7 +244,7 @@ class TestSSRFProtection:
 class TestFrontierIdentityRefusesRejectedTargets:
     """A rejected target must get no identity, not a fallback one.
 
-    ``_frontier_identity`` is the admission seam's dedupe helper. It asks the
+    ``frontier_identity`` is the admission seam's dedupe helper. It asks the
     owner for a canonical identity and, when the owner returns ``None``, used to
     hand back the raw string. That silently converted a refusal into an
     admission: the cloud-metadata address, a loopback port and a host outside an
@@ -265,14 +265,14 @@ class TestFrontierIdentityRefusesRejectedTargets:
     @pytest.mark.parametrize("target", REJECTED)
     def test_private_target_is_not_given_an_identity(self, monkeypatch, target):
         block_private_targets(monkeypatch)
-        from app.admission.admission_links import _frontier_identity
+        from app.admission.admission_links import frontier_identity
 
-        assert _frontier_identity(target, host_policy=HostPolicy.unrestricted()) is None
+        assert frontier_identity(target, host_policy=HostPolicy.unrestricted()) is None
 
     def test_every_raw_text_shape_is_covered(self, monkeypatch):
         """The refusal must not depend on which shape the raw text arrived in.
 
-        ``_frontier_identity`` accepts a bare string, a dict and any object
+        ``frontier_identity`` accepts a bare string, a dict and any object
         with ``normalized_url`` -- the three shapes that can still carry
         unadmitted text. A guard that only pins the string case leaves the
         other two open.
@@ -284,14 +284,14 @@ class TestFrontierIdentityRefusesRejectedTargets:
         production paths and this helper takes its identity definitionally.
         """
         block_private_targets(monkeypatch)
-        from app.admission.admission_links import _frontier_identity
+        from app.admission.admission_links import frontier_identity
 
         target = "http://169.254.169.254/latest/meta-data/"
         policy = HostPolicy.unrestricted()
         shapes = [target, {"url": target}, type("S", (), {"normalized_url": target})()]
         for shape in shapes:
             label = type(shape).__name__
-            assert _frontier_identity(shape, host_policy=policy) is None, (
+            assert frontier_identity(shape, host_policy=policy) is None, (
                 f"{label} shape was given an identity for a rejected target"
             )
 
@@ -302,10 +302,10 @@ class TestFrontierIdentityRefusesRejectedTargets:
         owner refuses. If only the first is honoured the guard is half a guard.
         """
         block_private_targets(monkeypatch)
-        from app.admission.admission_links import _frontier_identity
+        from app.admission.admission_links import frontier_identity
 
         policy = HostPolicy.from_strings("example.com", "")
-        assert _frontier_identity("http://evil.test/x", host_policy=policy) is None
+        assert frontier_identity("http://evil.test/x", host_policy=policy) is None
 
     def test_a_public_target_still_gets_its_identity(self, monkeypatch):
         """The other direction: returning ``None`` always would pass the above.
@@ -315,9 +315,9 @@ class TestFrontierIdentityRefusesRejectedTargets:
         ``return None`` on line 114.
         """
         block_private_targets(monkeypatch)
-        from app.admission.admission_links import _frontier_identity
+        from app.admission.admission_links import frontier_identity
 
-        got = _frontier_identity("https://example.gov/page/", host_policy=HostPolicy.unrestricted())
+        got = frontier_identity("https://example.gov/page/", host_policy=HostPolicy.unrestricted())
         # The identity is the admitted value, and its text is the page's durable identity.
         assert got is not None and got.raw == "https://example.gov/page", (
             f"a public target lost its identity: {got!r}"

@@ -21,7 +21,7 @@ from app.runtime.resource_pressure import (
     BROWSER_RAM_FRACTION,
 )
 from app.runtime.resource_pressure import (
-    derive_browser_pool_size as _derive_browser_pool_size,
+    derive_browser_pool_size as derive_browser_pool_size,
 )
 from app.transport.browser import BrowserRenderer
 from app.vocabulary.strategies import BROWSER_HEADED_WARMED, BROWSER_HEADLESS
@@ -51,7 +51,7 @@ class BrowserPool:
         settings: CrawlerSettings | None = None,
         **renderer_kwargs: Any,
     ) -> None:
-        self._pool_size = pool_size or _derive_browser_pool_size()
+        self._pool_size = pool_size or derive_browser_pool_size()
         self._settings = settings
         self._renderer_kwargs = renderer_kwargs
         self._renderers: list[BrowserRenderer] = []
