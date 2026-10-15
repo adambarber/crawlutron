@@ -218,29 +218,32 @@ def test_unowned_age_deletion_detector_bites():
 _SEMAPHORE_GLOBALS = frozenset({"_async_crawl_semaphore", "_async_crawl_semaphore_loop"})
 
 
-_SEMAPHORE_ACCESSOR = "_get_async_crawl_semaphore"
+# The accessor binds the cached instance to the running loop; the public reset
+# clears it so a test swapping the builder observes its patch immediately.
+_SEMAPHORE_WRITERS = frozenset({"_get_async_crawl_semaphore", "reset_process_state"})
 
 
 def _semaphore_global_touch_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
-    """The loop-bound semaphore module globals are touched only by the accessor.
+    """The loop-bound semaphore module globals are touched only by the writers.
 
     ``_get_async_crawl_semaphore`` is the single home that binds the cached
-    instance to the running loop and rebuilds it when the loop changes; reading
+    instance to the running loop and rebuilds it when the loop changes;
+    ``reset_process_state`` clears the cache for a swapped builder. Reading
     or assigning the module global from anywhere else silently reintroduces a
-    loop-bound violation (a Semaphore awaited off the loop it was created on).
-    The module-level declaration has no enclosing function and is exempt.
+    loop-bound violation. The module-level declaration has no enclosing
+    function and is exempt.
     """
     return [
         offender_at(
             path,
             node,
-            f"{node.id} touched outside {_SEMAPHORE_ACCESSOR}; "
+            f"{node.id} touched outside {'/'.join(sorted(_SEMAPHORE_WRITERS))}; "
             f"use the accessor so the instance stays bound to the running loop",
         )
         for node in name_reads(tree)
         if node.id in _SEMAPHORE_GLOBALS
         and (scopes := _enclosing_defs(node, tree))
-        and _SEMAPHORE_ACCESSOR not in scopes
+        and not set(scopes).intersection(_SEMAPHORE_WRITERS)
     ]
 
 
@@ -272,6 +275,11 @@ SEMAPHORE_GLOBALS_ARE_LOOP_BOUND = Rule(
         "    if _async_crawl_semaphore is None:\n"
         "        _async_crawl_semaphore = _build_async_crawl_semaphore()\n"
         "    return _async_crawl_semaphore\n",
+        # The public reset is the other sanctioned writer: it clears the cache.
+        "def reset_process_state():\n"
+        "    global _async_crawl_semaphore, _async_crawl_semaphore_loop\n"
+        "    _async_crawl_semaphore = None\n"
+        "    _async_crawl_semaphore_loop = None\n",
     ),
 )
 

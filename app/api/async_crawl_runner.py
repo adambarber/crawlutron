@@ -74,6 +74,17 @@ def _get_async_crawl_semaphore() -> asyncio.Semaphore:
     return _async_crawl_semaphore
 
 
+def reset_process_state() -> None:
+    """Drop the cached webhook-crawl semaphore and its event-loop binding.
+
+    The semaphore is process-wide: a test that swaps the builder needs the
+    cache cleared, exactly as the pooled clients clear their session cache.
+    """
+    global _async_crawl_semaphore, _async_crawl_semaphore_loop
+    _async_crawl_semaphore = None
+    _async_crawl_semaphore_loop = None
+
+
 async def run_async_crawl(
     request_id: str,
     payload_dict: dict[str, Any],

@@ -205,10 +205,8 @@ class TestAsyncCrawlApi:
 
         counter = CountingSemaphore(1)
         monkeypatch.setattr(async_crawl_runner, "_build_async_crawl_semaphore", lambda: counter)
-        # The runner caches one semaphore per event loop and only rebuilds it when the loop changes. Clearing
-        # the cache is what makes the patch visible to the first crawl of this test rather than the second.
-        monkeypatch.setattr(async_crawl_runner, "_async_crawl_semaphore", None, raising=False)
-        monkeypatch.setattr(async_crawl_runner, "_async_crawl_semaphore_loop", None, raising=False)
+        # The cache is reset so the patch is visible to this test's first crawl.
+        async_crawl_runner.reset_process_state()
 
         payload = crawl_api.payload(async_mode=True)
         completed = await asyncio.gather(*(submit_async_crawl(crawl_api.client, payload) for _ in range(3)))

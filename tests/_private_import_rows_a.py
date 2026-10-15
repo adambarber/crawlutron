@@ -13,12 +13,6 @@ from tests._private_import_decl import (
 
 DECLARED: dict[str, Declaration] = {
     "app.api.async_crawl_runner._build_async_crawl_semaphore": _SUBSTITUTED_COLLABORATOR,
-    "app.api.async_crawl_runner._async_crawl_semaphore": _d(
-        _CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]
-    ),
-    "app.api.async_crawl_runner._async_crawl_semaphore_loop": _d(
-        _CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]
-    ),
     "app.api.job_lifecycle._tasks": _d(_CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]),
     "app.transport.content_cache.ContentCache._remember_memory_locked": _d(
         _PRIVATE_TYPE.kind, _PRIVATE_TYPE.reason, ["test"]
