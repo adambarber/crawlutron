@@ -1,8 +1,5 @@
 """Output format and browser profiles speak the documented vocabulary."""
 
-import inspect
-import textwrap
-
 import httpx
 import pytest
 from pydantic import ValidationError
@@ -294,47 +291,16 @@ class TestTheRendererAgreesWithTheVocabulary:
     """
 
     @staticmethod
-    def _dispatch_chain() -> tuple[set[str], set[str]]:
-        """Return ``(types the chain recognises, of which the ones needing a selector)``.
+    def _chain() -> tuple[set[str], set[str]]:
+        """The dispatch table's recognised and selector-requiring sets."""
+        from app.transport.browser_driver import ACTION_STEPS
 
-        Parsed rather than executed: the branches are the contract, and running
-        them would need a live page. ``and selector`` in a branch test is how the
-        chain expresses "this action needs a target", so a branch carrying it is
-        exactly a member of the requiring set.
-        """
-        import ast
-
-        from app.transport.browser_driver import BrowserDriver
-
-        source = inspect.getsource(BrowserDriver._dispatch_action)
-        tree = ast.parse(textwrap.dedent(source))
-        recognised: set[str] = set()
-        requiring: set[str] = set()
-        for node in ast.walk(tree):
-            if not isinstance(node, ast.If):
-                continue
-            test = node.test
-            # A guarded branch reads ``action_type == "click" and selector``, so its test is a BoolOp whose
-            # first value
-            guarded = isinstance(test, ast.BoolOp)
-            comparison = test.values[0] if guarded else test
-            if not (
-                isinstance(comparison, ast.Compare)
-                and len(comparison.comparators) == 1
-                and isinstance(comparison.comparators[0], ast.Constant)
-                and isinstance(comparison.comparators[0].value, str)
-                and isinstance(comparison.left, ast.Name)
-                and comparison.left.id == "action_type"
-            ):
-                continue
-            name = comparison.comparators[0].value
-            recognised.add(name)
-            if guarded:
-                requiring.add(name)
+        recognised = set(ACTION_STEPS)
+        requiring = {name for name, step in ACTION_STEPS.items() if step.needs_selector}
         return recognised, requiring
 
     def test_every_recognised_action_type_is_in_the_table(self):
-        recognised, _ = self._dispatch_chain()
+        recognised, _ = self._chain()
         assert recognised == set(BROWSER_ACTION_TYPES), (
             f"the chain and the table disagree: table-only={set(BROWSER_ACTION_TYPES) - recognised}, "
             f"chain-only={recognised - set(BROWSER_ACTION_TYPES)}"
@@ -342,9 +308,9 @@ class TestTheRendererAgreesWithTheVocabulary:
 
     def test_the_requiring_set_is_the_chain_own_guard(self):
         """``ACTIONS_REQUIRING_SELECTOR`` must be what the chain skips without."""
-        _, requiring = self._dispatch_chain()
+        _, requiring = self._chain()
         declared = set(ACTIONS_REQUIRING_SELECTOR)
         assert requiring == declared, (
-            "the chain's ``and selector`` guards and the model's requirement set disagree: "
+            "the chain's guards and the model's requirement set disagree: "
             f"model-only={declared - requiring}, chain-only={requiring - declared}"
         )

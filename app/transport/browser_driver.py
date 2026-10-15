@@ -9,9 +9,9 @@ import asyncio
 import contextlib
 import logging
 import time
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, NamedTuple
 
 from app.config.env import get_env_int
 from app.transport.driver_config import (
@@ -34,7 +34,7 @@ from app.transport.driver_pages import (
     flatten_shadow_dom,
     safe_close_page,
 )
-from app.vocabulary.browser import BROWSER_ACTION_TYPES
+from app.vocabulary.browser import ACTIONS_REQUIRING_SELECTOR, BROWSER_ACTION_TYPES
 from app.vocabulary.limits import DEFAULT_COOKIE_HARVEST_TIMEOUT_SECONDS, DEFAULT_MAX_BROWSER_RENDERS
 
 if TYPE_CHECKING:
@@ -42,6 +42,63 @@ if TYPE_CHECKING:
 
 
 logger = logging.getLogger(__name__)
+
+
+async def _click_verb(driver: BrowserDriver, page: Any, action: dict[str, Any]) -> None:
+    await page.click(str(action["selector"]))
+
+
+async def _fill_verb(driver: BrowserDriver, page: Any, action: dict[str, Any]) -> None:
+    await page.fill(str(action["selector"]), str(action.get("value", "")))
+
+
+async def _hover_verb(driver: BrowserDriver, page: Any, action: dict[str, Any]) -> None:
+    await page.hover(str(action["selector"]))
+
+
+async def _scroll_verb(driver: BrowserDriver, page: Any, action: dict[str, Any]) -> None:
+    element = await page.query_selector(str(action["selector"]))
+    if element is not None:
+        await element.scroll_into_view_if_needed()
+
+
+async def _scroll_bottom_verb(driver: BrowserDriver, page: Any, action: dict[str, Any]) -> None:
+    await page.evaluate("() => window.scrollTo(0, document.body.scrollHeight)")
+
+
+async def _wait_verb(driver: BrowserDriver, page: Any, action: dict[str, Any]) -> None:
+    await page.wait_for_selector(str(action["selector"]), timeout=ACTION_WAIT_MS(action))
+
+
+async def _wait_seconds_verb(driver: BrowserDriver, page: Any, action: dict[str, Any]) -> None:
+    await driver._async_sleep(min(float(action.get("seconds", 1)), MAX_ACTION_WAIT_SECONDS))
+
+
+async def _refuse_execute_js(driver: BrowserDriver, page: Any, action: dict[str, Any]) -> None:
+    """Refuse arbitrary JS execution (RCE-class risk)."""
+    return None
+
+
+class _ActionStep(NamedTuple):
+    handler: Callable[[BrowserDriver, Any, dict[str, Any]], Awaitable[None]]
+    needs_selector: bool
+
+
+#: The bounded vocabulary the chain executes. ``needs_selector`` derives from
+#: the shared vocabulary so the table and the model refusal cannot drift.
+ACTION_STEPS: dict[str, _ActionStep] = {
+    name: _ActionStep(handler, name in ACTIONS_REQUIRING_SELECTOR)
+    for name, handler in (
+        ("click", _click_verb),
+        ("fill", _fill_verb),
+        ("hover", _hover_verb),
+        ("scroll", _scroll_verb),
+        ("scroll_bottom", _scroll_bottom_verb),
+        ("wait", _wait_verb),
+        ("wait_seconds", _wait_seconds_verb),
+        ("execute_js", _refuse_execute_js),
+    )
+}
 
 
 class BrowserDriver:
@@ -273,11 +330,6 @@ class BrowserDriver:
         Actions are best-effort -- one bad selector must not cost the page its
         extraction -- but not silent, since a ``wait`` for an element a SPA
         never grows is an invisible extraction-quality loss.
-
-        The per-action dispatch is a separate coroutine so this function stays the
-        loop-and-accounting shape and the vocabulary it recognises reads as one
-        list, rather than interleaved with the try/except that keeps a bad
-        selector from costing the page its extraction.
         """
         for action in actions:
             if not isinstance(action, dict):
@@ -307,35 +359,21 @@ class BrowserDriver:
                 )
 
     async def _dispatch_action(self, page: Any, action: dict[str, Any], action_type: str) -> None:
-        """Perform ONE recognised action. Errors propagate to the caller's handler.
+        """Perform ONE recognised action via :data:`_ACTION_STEPS`.
 
-        Split out of the chain loop so the recognised vocabulary reads as one
-        if/elif and the chain loop reads as accounting. ``execute_js`` is
-        recognised and refused here as well as at the model, because this is the
-        chokepoint a policy arriving by any other route still cannot run script
-        through.
+        ``execute_js`` is recognised and refused here as well as at the model,
+        because this is the chokepoint a policy arriving by any other route
+        still cannot run script through.
         """
-        selector = action.get("selector")
-        if action_type == "click" and selector:
-            await page.click(selector)
-        elif action_type == "fill" and selector:
-            await page.fill(selector, str(action.get("value", "")))
-        elif action_type == "hover" and selector:
-            await page.hover(selector)
-        elif action_type == "scroll" and selector:
-            element = await page.query_selector(selector)
-            if element is not None:
-                await element.scroll_into_view_if_needed()
-        elif action_type == "scroll_bottom":
-            await page.evaluate("() => window.scrollTo(0, document.body.scrollHeight)")
-        elif action_type == "wait" and selector:
-            await page.wait_for_selector(selector, timeout=ACTION_WAIT_MS(action))
-        elif action_type == "wait_seconds":
-            await self._async_sleep(min(float(action.get("seconds", 1)), MAX_ACTION_WAIT_SECONDS))
-        elif action_type == "execute_js":
-            # Refuse arbitrary JS execution (RCE-class risk). Callers must
-            # not be able to run scripts in the browser context.
+        step = ACTION_STEPS.get(action_type)
+        if step is None:
             return
+        if step.needs_selector and not action.get("selector"):
+            logger.warning(
+                "browser_action_skipped", extra={"reason": "missing_selector", "action": action_type}
+            )
+            return
+        await step.handler(self, page, action)
 
     async def capture_element_screenshots(self, page: Any, selectors: list[str]) -> list[dict[str, Any]]:
         """Capture targeted element screenshots as base64."""

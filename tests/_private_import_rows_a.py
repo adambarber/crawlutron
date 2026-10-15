@@ -50,7 +50,4 @@ DECLARED: dict[str, Declaration] = {
     ),
     "app.storage.sqlite_store._BUSY_TIMEOUT_MS": _SUBSTITUTED_CAP,
     "app.storage.sqlite_store._WAL_RETRY_SECONDS": _SUBSTITUTED_CAP,
-    "app.transport.browser_driver.BrowserDriver._dispatch_action": _d(
-        _PRIVATE_TYPE.kind, _PRIVATE_TYPE.reason, ["test"]
-    ),
 }
