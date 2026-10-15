@@ -22,8 +22,5 @@ DECLARED: dict[str, Declaration] = {
         "Not yet triaged.\n",
         ["app"],
     ),
-    "app.runtime.logging_config._BC_OWNED_HANDLER": _d(
-        _CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]
-    ),
     "app.models.registrable_domain._PSL": _d(_CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]),
 }
