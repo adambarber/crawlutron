@@ -65,12 +65,8 @@ URL = "http://example.test/page"
 class _Queue:
     """Yields scripted items then wedges, like a producer that never finishes.
 
-    The wedge is an ``Event`` that is never set rather than a long ``sleep``:
-    the suite patches ``asyncio.sleep`` to be instant by default, and a stream
-    that "ends immediately" would take the completion path instead of the
-    abandon path this test needs. A never-set event cannot be short-circuited by
-    any sleep patch, so the cancel is guaranteed to land inside the queue wait.
-    """
+    The wedge is a never-set ``Event``: it cannot be short-circuited by any
+    sleep patch, so the cancel is guaranteed to land inside the queue wait."""
 
     def __init__(self, items):
         self._items = list(items)
@@ -118,14 +114,8 @@ def _patch_session(stub_builder, response: _Response) -> _Session:
 def _clean_pooled_client_queue():
     """Start each test with the pooled state released and the close queue empty.
 
-    Pooled-client bookkeeping is irrelevant here and other suites leave entries
-    behind; start clean so a drain here cannot try to close one of their fakes.
-    ``reset_process_state`` is the one operation for this: it releases both
-    pooled clients and clears the queue as a unit, which is the unit production
-    releases them as, and these tests used to clear the queue by hand while
-    separately nulling the curl_cffi session global -- two halves of a state no
-    caller can reach.
-    """
+    Other suites leave entries behind; ``reset_process_state`` releases both
+    pooled clients and clears the queue as the unit production releases."""
     http_mod.reset_process_state()
 
 
@@ -141,14 +131,8 @@ def _scripted_stream(
 ) -> tuple[_Response, _Session, list[object]]:
     """A cffi session whose queue replays `items`; return it and the release log.
 
-    Every test here is about what one streaming fetch did with its response
-    handle, so the arrangement is the same each time: one scripted queue, one
-    session, one log of the releases the fetcher scheduled. ``items`` is the
-    only thing that varies -- an exception part-way through, a body past the
-    cap, a stream that ends -- and a queue that runs dry wedges rather than
-    ending, so a script that does not say what happens next cannot pass
-    silently.
-    """
+    One scripted queue, one session, one release log; ``items`` is the only
+    thing that varies, and a dry queue wedges rather than ending."""
     response = _Response(items, headers=headers)
     return response, _patch_session(stub_builder, response), _scheduled_closes(monkeypatch)
 
@@ -175,12 +159,8 @@ async def test_request_exception_from_the_queue_releases_the_handle(
 async def test_cancellation_of_the_queue_wait_releases_the_handle(stub_builder, monkeypatch):
     """The cancel exit: the engine's per-URL budget cancels fetches routinely.
 
-    The wait below is on the named state -- the fetch has taken the session
-    and the producer is wedged in the queue -- not on a deadline of seconds.
-    It used to need real sleeps only because the poll's ``asyncio.sleep`` was a
-    no-op that never yielded, so the fetch task could never be scheduled at
-    all; the zero-second patch yields now, so the poll works without wall time.
-    """
+    The wait is on named state, not a deadline of seconds -- the zero-second
+    sleep patch yields, so the poll needs no wall time."""
     response, session, released = _scripted_stream(
         stub_builder, monkeypatch, [b"first"]
     )  # then the producer wedges
@@ -201,11 +181,8 @@ async def test_cancellation_of_the_queue_wait_releases_the_handle(stub_builder, 
 async def test_cap_exceeded_and_still_releases_exactly_once(stub_builder, monkeypatch):
     """Boundary: the pre-existing abandon paths must not double-release.
 
-    Wrapping the loop in a release-on-any-exit guard is the obvious shape for
-    this fix; if it also fires on the paths that already release by hand, the
-    producer gets two scheduled closes. One release per fetch, whichever exit
-    was taken.
-    """
+    A release-on-any-exit guard that also fires on the paths releasing by hand
+    schedules two closes. One release per fetch, whichever exit was taken."""
     response, _session, released = _scripted_stream(stub_builder, monkeypatch, [b"x" * 100] * 5)
 
     result = await _DEFAULT_CFFI_FETCHER(canonical(URL), {}, 5, 50)
@@ -217,10 +194,8 @@ async def test_cap_exceeded_and_still_releases_exactly_once(stub_builder, monkey
 async def test_clean_stream_end_awaits_the_close_and_never_abandons(stub_builder, monkeypatch):
     """Inverse case: a finished producer is safe to await, and required now.
 
-    The shared session only recovers the handle for the next streamed request if
-    the completed fetch closed it, so the success path must NOT downgrade to the
-    non-blocking release.
-    """
+    The shared session only recovers the handle if the completed fetch closed
+    it, so the success path must NOT downgrade to the non-blocking release."""
     response, _session, released = _scripted_stream(
         stub_builder, monkeypatch, [b"<html>ok</html>", STREAM_END]
     )
@@ -235,20 +210,8 @@ async def test_clean_stream_end_awaits_the_close_and_never_abandons(stub_builder
 class _StalledBodyHandler(SilentHandler):
     """200 + headers, then not one body byte until ``_STALL_RELEASE`` is set.
 
-    Subclasses ``SilentHandler`` because the response methods used to be
-    duck-typed onto a bare class. ``socketserver`` constructs a handler with
-    ``(request, client_address, server)``, so the bare class raised
-    ``TypeError: _StalledBodyHandler() takes no arguments`` on every request and
-    the server reset the connection instead of stalling. The test below reads
-    any transport error as a pass, so it stayed green having never run the path
-    it names. ``counter.hits`` is what now proves the handler was reached.
-
-    The stall is an ``Event`` rather than a sleep because the suite patches
-    ``time.sleep`` to a no-op: a handler that waits by sleeping returns at once,
-    the response ends, and the fetch fails for a reason that has nothing to do
-    with the timeout under test. ``_STALL_RELEASE`` is set by the test's
-    teardown, so the wedged handler thread does not outlive it.
-    """
+    A bare duck-typed class raised on the three-arg construction and the
+    read-any-error test stayed green; ``counter.hits`` proves it is reached."""
 
     protocol_version = "HTTP/1.1"
 
@@ -269,15 +232,8 @@ _STALL_RELEASE = threading.Event()
 def test_cffi_stream_timeout_honored_on_stalled_body(monkeypatch) -> None:
     """real_cffi: drives the genuine fetcher inside an isolated interpreter.
 
-    The server answers 200 and its headers and then never sends a body byte,
-    so the only two acceptable outcomes are a bounded failure or a rejection of
-    the body. The harness owns the isolation and the join bound; what is
-    asserted here is that neither of those two became a success.
-
-    The target is loopback, so the child interpreter is allowed to reach one
-    here rather than relying on the suite-wide default, which a strict-SSRF run
-    does not set. The child inherits this process's environment.
-    """
+    The server sends headers but never a body byte, so only a bounded failure
+    or a body rejection is acceptable -- never a success."""
     monkeypatch.setenv("CRAWLUTRON_ALLOW_PRIVATE_TARGETS", "1")
     _STALL_RELEASE.clear()
     server = spawn_threaded_server(_StalledBodyHandler)
@@ -377,11 +333,8 @@ def _patch_client(monkeypatch, body: bytes):
 async def _capped_fetch(monkeypatch, body_size: int):
     """One impersonated cffi fetch of ``body_size`` bytes against a 64-byte cap.
 
-    The cap tests are about the streaming read stopping, not about the request,
-    so the body, the cap and the URL are fixed here: spelled per test, a change
-    to the cap was four edits and one of them was in a test that was asserting
-    something else.
-    """
+    The cap tests are about the streaming read stopping, not the request, so
+    body, cap and URL are fixed here, not spelled per test."""
     _patch_client(monkeypatch, b"x" * body_size)
     return await _DEFAULT_CFFI_FETCHER(canonical("http://example.test/page"), {}, 10, 64)
 
@@ -420,11 +373,8 @@ async def _fetch_twice(base_url):
 async def test_cffi_session_reused_across_requests(base_url, monkeypatch):
     """Two sequential fetches must construct exactly one AsyncSession.
 
-    curl_cffi's socket/timer watchdog needs the event loop to make real
-    progress, which is why this used to need real sleeps -- the suite's
-    zero-second patch used to be a no-op that never yielded at all. It yields
-    now, so the transfers progress.
-    """
+    The socket/timer watchdog needs the loop to make progress; the
+    zero-second sleep patch yields, so transfers need no wall time."""
     from app.transport import http_client_pool as http_mod
 
     constructions = 0
@@ -469,11 +419,8 @@ def test_cffi_session_rebuilt_on_loop_change(monkeypatch):
 async def test_cffi_missing_falls_back_to_httpx(monkeypatch, counting_server):
     """Without curl_cffi the fetcher still delegates to the plain httpx path.
 
-    Answered by a real local server rather than a fake transport, and asserted
-    through ``server.hits``: the point is that the page is fetched by *something*
-    when the impersonating transport is absent, and a stubbed fallback would
-    only prove the stub was called.
-    """
+    Answered by a real local server and asserted through ``server.hits`` -- a
+    stubbed fallback would only prove the stub was called."""
     import sys
 
     from app.transport import http_client_pool as http_mod
