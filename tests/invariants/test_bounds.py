@@ -416,7 +416,7 @@ HEADER_INT_GUARD = Rule(
         # The try/except shape.
         "def guard(value):\n    try:\n        return int(value)\n    except ValueError:\n        return 0\n",
         # A sanitizer takes a parameter, not a live header read -- never flagged.
-        "def _declared_length_exceeds(header_value, limit):\n    return int(header_value) > limit\n",
+        "def declared_length_exceeds(header_value, limit):\n    return int(header_value) > limit\n",
     ),
 )
 

@@ -10,7 +10,7 @@ fetch and turn one crafted response into that URL's failure.
 from app.models.normalized_url import NormalizedUrl
 from app.safety.validation import HostPolicy
 from app.transport.fetchers import default_http_fetcher
-from app.transport.pinned_transport import _declared_length_exceeds
+from app.transport.pinned_transport import declared_length_exceeds
 from tests._transport_doubles import MockResponse, patch_http_fetcher_transport
 
 
@@ -38,25 +38,25 @@ async def _fetch_behind_declared_length(monkeypatch, declared: str):
 
 class TestDeclaredLengthPredicate:
     def test_numeric_over_limit_is_oversized(self):
-        assert _declared_length_exceeds("2000", 1000) is True
+        assert declared_length_exceeds("2000", 1000) is True
 
     def test_numeric_under_limit_is_allowed(self):
-        assert _declared_length_exceeds("500", 1000) is False
+        assert declared_length_exceeds("500", 1000) is False
 
     def test_garbage_is_treated_as_unknown_not_a_crash(self):
         # The bug: int("abc") raised. A hostile header means "no declared size".
-        assert _declared_length_exceeds("abc", 1000) is False
-        assert _declared_length_exceeds("12x", 1000) is False
+        assert declared_length_exceeds("abc", 1000) is False
+        assert declared_length_exceeds("12x", 1000) is False
 
     def test_negative_is_treated_as_unknown(self):
-        assert _declared_length_exceeds("-5", 1000) is False
+        assert declared_length_exceeds("-5", 1000) is False
 
     def test_absent_is_treated_as_unknown(self):
-        assert _declared_length_exceeds(None, 1000) is False
-        assert _declared_length_exceeds("", 1000) is False
+        assert declared_length_exceeds(None, 1000) is False
+        assert declared_length_exceeds("", 1000) is False
 
     def test_float_shaped_value_is_treated_as_unknown(self):
-        assert _declared_length_exceeds("12.5", 1000) is False
+        assert declared_length_exceeds("12.5", 1000) is False
 
 
 async def test_httpx_fetcher_serves_body_despite_garbage_content_length(monkeypatch):

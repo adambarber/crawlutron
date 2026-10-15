@@ -128,7 +128,7 @@ def resolve_and_pin_host(url: NormalizedUrl) -> tuple[str, str]:
     raise ValueError(f"SSRF protection: hostname {hostname} has no public IP")
 
 
-def _declared_length_exceeds(header_value: str | None, limit: int) -> bool:
+def declared_length_exceeds(header_value: str | None, limit: int) -> bool:
     """True iff a ``Content-Length`` header parses to an int strictly over ``limit``.
 
     A malformed, negative, or absent value reads as "unknown size" and returns

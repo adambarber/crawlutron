@@ -27,11 +27,6 @@ DECLARED: dict[str, Declaration] = {
         ["test"],
     ),
     "app.transport.fetchers._release_stream_noblock": _SUBSTITUTED_COLLABORATOR,
-    "app.transport.pinned_transport._declared_length_exceeds": _d(
-        "unreviewed",
-        "Not yet triaged.\n",
-        ["test", "app"],
-    ),
     "app.transport.pinned_transport._http_413": _d(
         "unreviewed",
         "Not yet triaged.\n",

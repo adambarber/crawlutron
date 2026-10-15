@@ -83,7 +83,7 @@ async def default_http_fetcher(
             "GET", pinned_url, headers=hop_headers, timeout=timeout, follow_redirects=False
         ) as response:
             content_length = response.headers.get("content-length")
-            if pinned_transport._declared_length_exceeds(content_length, max_content_length):
+            if pinned_transport.declared_length_exceeds(content_length, max_content_length):
                 return pinned_transport._http_413(url, chain.url, started)
             status_code = response.status_code
             if chain.advance(response):
@@ -210,7 +210,7 @@ async def cffi_fetch(
                 return None
             # Content-length check
             content_length = response.headers.get("content-length")
-            if pinned_transport._declared_length_exceeds(content_length, max_content_length):
+            if pinned_transport.declared_length_exceeds(content_length, max_content_length):
                 await response.aclose()  # release the curl handle
                 elapsed_ms = int((time.monotonic() - started) * 1000)
                 return _cffi_too_large_result(url, chain.url, response, elapsed_ms)
