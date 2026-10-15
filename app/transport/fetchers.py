@@ -39,7 +39,7 @@ async def default_http_fetcher(
 
     ``impersonate`` is the whole transport preference, as one keyword on the one
     function that carries the contract. It used to be a second module-level
-    entry point -- ``_default_cffi_fetcher`` -- which meant the contract's four
+    entry point -- ``_defaultcffi_fetcher`` -- which meant the contract's four
     parameters had to be spelled twice, and the twin could only be kept honest
     by a guard that walked the tree. The engine now binds the preference instead
     of the signature: ``partial(default_http_fetcher, impersonate=True)``
@@ -70,7 +70,7 @@ async def default_http_fetcher(
     ``test_http_fetcher_contract_holds_tree_wide``.
     """
     if impersonate:
-        attempted = await _cffi_fetch(url, headers, timeout_seconds, max_content_length, pin=pin)
+        attempted = await cffi_fetch(url, headers, timeout_seconds, max_content_length, pin=pin)
         if attempted is not None:
             return attempted
     await pooled_clients._drain_pending_client_closes()
@@ -168,7 +168,7 @@ def _finish_fetch(
     )
 
 
-async def _cffi_fetch(
+async def cffi_fetch(
     url: NormalizedUrl,
     headers: dict[str, str],
     timeout_seconds: int,

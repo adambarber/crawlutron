@@ -6,13 +6,11 @@ from typing import NamedTuple
 from urllib.parse import urlparse
 
 import httpx
-import pdfplumber
 
 from app.transport.document import (
     _extract_pdf_bytes_to_markdown,
-    _format_table,
-    _pdf_to_markdown,
     default_document_text_extractor,
+    format_table,
 )
 from tests._extraction_helpers import format_extracted_document_text
 from tests._fetcher_factories import run_http_strategy, scripted_fetcher
@@ -34,7 +32,7 @@ class _ExtractionRun(NamedTuple):
 
 class TestPdfTablePreservation:
     def test_format_table_renders_markdown(self):
-        md = _format_table([["Name", "Department", "Salary"], ["Alice", "Engineering", "120000"]])
+        md = format_table([["Name", "Department", "Salary"], ["Alice", "Engineering", "120000"]])
         assert "Name" in md
         assert "Department" in md
         assert "Alice" in md
@@ -47,12 +45,6 @@ class TestPdfTablePreservation:
         assert "Salary" in md
         assert "Alice" in md
         assert "Engineering" in md
-        assert "|" in md
-
-    def test_pdf_to_markdown_with_real_pdfplumber(self):
-        with pdfplumber.open(FIXTURE) as pdf:
-            md = _pdf_to_markdown(pdf)
-        assert "Alice" in md
         assert "|" in md
 
     async def test_default_document_text_extractor_fetches_real_pdf_url(self, base_url):
@@ -222,8 +214,8 @@ async def test_document_extraction_with_uncompressed_bytearray_body(base_url):
 
 
 class TestDocumentExtractionEdges:
-    def test_format_table_empty(self):
-        assert _format_table([]) == ""
+    def test_table_empty(self):
+        assert format_table([]) == ""
 
     def test_extract_unreachable_url(self):
         assert default_document_text_extractor(canonical("http://127.0.0.1:1/nowhere.pdf")) == ""

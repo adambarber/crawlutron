@@ -6,7 +6,7 @@ from typing import Protocol
 import pytest
 
 import app.transport.http_client_pool as http_mod
-from app.transport.fetchers import _cffi_fetch
+from app.transport.fetchers import cffi_fetch
 from tests._async_harnesses import run_loop_rebind_scenario
 from tests._policy_factories import canonical
 from tests._pool_harnesses import builder_for as _builder_for
@@ -301,7 +301,7 @@ def test_cffi_session_superseded_by_a_failing_rebuild_is_still_queued(stub_build
     assert second.closed is True, "a superseded session was dropped when the rebuild failed"
 
 
-def test_cffi_fetch_releases_a_queued_session_by_taking_one(stub_builder):
+def test_cffi_transport_releases_a_queued_session(stub_builder):
     """The cffi transport's acquire is also a release point.
 
     The http fetcher drains on every request; the cffi transport must too, or
@@ -317,7 +317,7 @@ def test_cffi_fetch_releases_a_queued_session_by_taking_one(stub_builder):
     async def _attempt():
         # The fake session cannot answer, so the attempt declines -- after the
         # transport's own drain has released the queued session.
-        assert await _cffi_fetch(canonical("http://example.invalid/"), {}, 1, 1024) is None
+        assert await cffi_fetch(canonical("http://example.invalid/"), {}, 1, 1024) is None
         assert waiting.closed is True, (
             "the cffi transport took a session without releasing the one it "
             "superseded, so a superseded session has no release point on this path"

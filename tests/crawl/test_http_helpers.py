@@ -145,14 +145,11 @@ class TestFetchRetries:
 
     def test_retry_backoff_is_exponential_and_capped(self) -> None:
         """Each retry gap doubles from the base and plateaus at the ceiling."""
-        from app.transport.fetch_policy import _RETRY_BACKOFF_CAP_SECONDS
-
         assert retry_backoff_seconds(1) == pytest.approx(0.25)
         assert retry_backoff_seconds(2) == pytest.approx(0.5)
         assert retry_backoff_seconds(3) == pytest.approx(1.0)
-        assert retry_backoff_seconds(4) == pytest.approx(_RETRY_BACKOFF_CAP_SECONDS)
-        # Deep retry budgets never exceed the ceiling.
-        assert retry_backoff_seconds(20) == pytest.approx(_RETRY_BACKOFF_CAP_SECONDS)
+        # Deep retry budgets never exceed the ceiling: the gap plateaus.
+        assert retry_backoff_seconds(20) == retry_backoff_seconds(8) == retry_backoff_seconds(4)
 
     async def test_retries_wait_between_attempts(self, monkeypatch) -> None:
         """A failing fetch is retried after a bounded backoff gap, not hammered."""

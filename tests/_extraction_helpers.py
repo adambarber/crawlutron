@@ -8,7 +8,7 @@ from app.extraction.content import extract_discovered_links as _production_extra
 from app.extraction.content import extract_js_endpoints as _extract_js_endpoints_with_policy
 from app.extraction.content import html_diagnostics as _production_html_diagnostics
 from app.extraction.document_text import format_extracted_document_text
-from app.transport.document import _format_table
+from app.transport.document import format_table
 from app.transport.fetchers import default_http_fetcher as _production_default_http_fetcher
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY
 
@@ -75,7 +75,7 @@ __all__ = [
     "detect_pagination",
     "extract_discovered_links",
     "format_extracted_document_text",
-    "_format_table",
+    "format_table",
     "html_diagnostics",
     "doc_worker_acquisitions",
     "extract_content",

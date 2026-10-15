@@ -22,7 +22,7 @@ if TYPE_CHECKING:
     from app.transport import pinned_transport
 
 
-def _format_table(rows: list[list[Any]]) -> str:
+def format_table(rows: list[list[Any]]) -> str:
     """Render a single extracted table (list of rows) as a Markdown table."""
     if not rows:
         return ""
@@ -45,7 +45,7 @@ def _extract_pdf_tables_as_markdown(pdf: Any) -> str:
     tables: list[str] = []
     for page in getattr(pdf, "pages", []) or []:
         for table in page.extract_tables() or []:
-            rendered = _format_table(table)
+            rendered = format_table(table)
             if rendered:
                 tables.append(rendered)
     return "\n\n".join(tables)
