@@ -1,16 +1,16 @@
 """Well-known discovery endpoint."""
 
-from typing import Any
-
 from fastapi import APIRouter
 
-from app.models.discovery_response import DiscoveryResponse
+from app.models.discovery_response import DiscoveryPayload, DiscoveryResponse
 from app.models.service_identity import SERVICE_IDENTITY
 
 
-def discovery_payload() -> dict[str, Any]:
+def discovery_payload() -> DiscoveryPayload:
     return {
-        **SERVICE_IDENTITY,
+        "service": SERVICE_IDENTITY["service"],
+        "version": SERVICE_IDENTITY["version"],
+        "policy_schema_version": SERVICE_IDENTITY["policy_schema_version"],
         "links": {
             "openapi": "/openapi.json",
             "swagger_ui": "/docs",
@@ -59,7 +59,7 @@ def create_well_known_router() -> APIRouter:
     router = APIRouter(tags=["Discovery"])
 
     @router.get("/.well-known/crawler-service", response_model=DiscoveryResponse)
-    async def well_known_crawler_service() -> dict[str, Any]:
+    async def well_known_crawler_service() -> DiscoveryPayload:
         """Discover crawler service contracts."""
         return discovery_payload()
 

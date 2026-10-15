@@ -6,16 +6,19 @@ Extracted from ``app/main.py`` so the FastAPI app factory stays thin.
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import Any, cast
 
 from fastapi import HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
+from app.models.error_response import ErrorEnvelope
+from app.models.json_value import JsonValue
+
 logger = logging.getLogger(__name__)
 
 
-def error_envelope(code: str, message: str, details: dict | None = None) -> dict:
+def error_envelope(code: str, message: str, details: JsonValue | None = None) -> ErrorEnvelope:
     """The single definition of the wire error shape.
 
     ``details`` is always present — a hand-rolled site that forgets it is
@@ -29,7 +32,7 @@ def error_envelope(code: str, message: str, details: dict | None = None) -> dict
 MALFORMED_DETAIL_CODE = "malformed_error_detail"
 
 
-def error_envelope_from_detail(detail: Any, status_code: int) -> dict:
+def error_envelope_from_detail(detail: Any, status_code: int) -> ErrorEnvelope:
     """The only way an ``HTTPException`` detail becomes an error envelope.
 
     Conforming detail (built by :func:`http_error`) unwraps 1:1. Anything else
@@ -49,7 +52,7 @@ def error_envelope_from_detail(detail: Any, status_code: int) -> dict:
     return error_envelope(MALFORMED_DETAIL_CODE, "Request failed", {"status_code": status_code})
 
 
-def http_error(status_code: int, code: str, message: str, details: dict | None = None) -> HTTPException:
+def http_error(status_code: int, code: str, message: str, details: JsonValue | None = None) -> HTTPException:
     """HTTPException carrying a conforming envelope (use instead of literals)."""
     return HTTPException(status_code=status_code, detail=error_envelope(code, message, details))
 
@@ -87,7 +90,9 @@ async def validation_exception_handler(request: Request, exc: Exception) -> JSON
             status_code=500,
             content=error_envelope("internal_error", "Unhandled exception in request handling"),
         )
-    sanitized = [{"loc": err.get("loc"), "msg": err.get("msg")} for err in exc.errors()]
+    sanitized: list[JsonValue] = [
+        cast(dict[str, JsonValue], {"loc": err.get("loc"), "msg": err.get("msg")}) for err in exc.errors()
+    ]
     return JSONResponse(
         status_code=422,
         content=error_envelope("validation_error", "Request validation failed", {"errors": sanitized}),

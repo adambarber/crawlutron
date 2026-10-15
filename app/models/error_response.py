@@ -1,8 +1,22 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, TypedDict
 
 from pydantic import BaseModel, Field
+
+from app.models.json_value import JsonValue
+
+
+class ErrorEnvelope(TypedDict):
+    """The wire error shape: a stable code, a message, and open details.
+
+    ``details`` is carried verbatim to the serialized body, so it is
+    ``JsonValue`` -- arbitrary JSON -- not a declared record.
+    """
+
+    code: str
+    message: str
+    details: JsonValue
 
 
 class ErrorResponse(BaseModel):

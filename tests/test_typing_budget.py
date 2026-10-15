@@ -71,7 +71,7 @@ from tests.chokepoint_walks import nodes_of
 
 _METRIC = "undeclared record"
 
-_BUDGETS = {_METRIC: 204}
+_BUDGETS = {_METRIC: 198}
 
 # A record is anything whose key set a caller might depend on.
 _RECORD_ROOTS = frozenset(
@@ -185,7 +185,7 @@ def _walked() -> dict[str, int]:
 
 
 test_collector_sees_the_whole_tree = collector_sees_the_whole_tree(
-    _walked, {"annotation": 200}, subject="typing"
+    _walked, {"annotation": 190}, subject="typing"
 )
 
 
