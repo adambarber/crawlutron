@@ -39,6 +39,13 @@ class FormDiagnostic(TypedDict):
     controls: list[dict[str, str]]
 
 
+class HtmlDiagnostics(TypedDict, total=False):
+    """The diagnostics block a parsed page contributes (both sides optional)."""
+
+    frames: list[FrameDiagnostic]
+    forms: list[FormDiagnostic]
+
+
 # Tally over the real parser, not a patched one; locked because worker threads parse.
 _parse_tally_lock = threading.Lock()
 
@@ -228,8 +235,8 @@ def html_diagnostics(
     source_url: NormalizedUrl | None,
     *,
     tree: Any | None = None,
-) -> dict[str, Any]:
-    diagnostics: dict[str, Any] = {}
+) -> HtmlDiagnostics:
+    diagnostics: HtmlDiagnostics = {}
     # One parse, one guard: the walkable-tree precondition (empty diagnostic,
     # not an error) is stated once, not spelled in front of both extractors.
     walked = walkable(html, source_url, tree)

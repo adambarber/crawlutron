@@ -1,11 +1,7 @@
-"""The rule framework's own contract — mostly that a rule cannot be half-declared.
+"""The rule framework's own contract: a rule cannot be half-declared.
 
-A framework that generates the tests can quietly become the thing that stops the
-tests from existing: a rule with a detector that always returns nothing, or with
-no proof at all, would produce a green suite and enforce nothing. That is the
-failure this file exists to make impossible, so it tests the framework's
-enforcement rather than the framework's mechanics.
-"""
+A framework that generates the tests can quietly stop the tests from
+enforcing anything; this file proves that cannot happen."""
 
 from __future__ import annotations
 
@@ -81,10 +77,8 @@ class TestBiteProof:
     def test_every_declared_bite_must_fire_not_just_the_first(self):
         """A rule with one firing and one dead proof is a rule with a hole.
 
-        Reporting only the first would let a later spelling of the same mistake
-        go unwatched, which is exactly how the alias/root split in
-        ``test_page_identity`` was missed in the first place.
-        """
+        Reporting only the first would let a later spelling of the same
+        mistake go unwatched."""
         half = _urljoin_rule(bite=lambda: ("urljoin(a, b)\n", "def f():\n    return 1\n"))
         with pytest.raises(AssertionError, match="did NOT fire"):
             half.check_bites()
@@ -96,10 +90,8 @@ class TestBiteProof:
 class TestMarkerAndCountProofs:
     """``assert_detector`` proved three things; the rule must not prove fewer.
 
-    A bare source only shows the detector fires. That is satisfied by a detector
-    matching everything, and by one whose message has decayed to a generic
-    string, so these two shapes carry the proof that the old one-call form did.
-    """
+    A bare source only shows the detector fires -- satisfied by a detector
+    matching everything or a decayed message. These shapes carry that proof."""
 
     def test_a_marker_that_is_absent_from_the_offender_is_reported(self):
         rule = _urljoin_rule(bite=lambda: Bites("urljoin(a, b)\n", marker="safe_urljoin"))
@@ -113,10 +105,8 @@ class TestMarkerAndCountProofs:
     def test_a_detector_that_fires_twice_on_one_shape_is_reported(self):
         """The over-broad case, caught at the proof rather than in production.
 
-        Two separate ``or`` expressions, not one chain: ``a or b or c`` is a single
-        ``BoolOp`` with three values, so a detector that flags ``or`` rightly
-        reports it once.
-        """
+        ``a or b or c`` is one ``BoolOp``, so a detector that flags ``or``
+        rightly reports it once; two separate expressions are two findings."""
         rule = _urljoin_rule(
             find=_every_or,
             bite=lambda: Bites("a = urljoin(x, y) or x\nb = x or y\n", marker="an or"),
@@ -140,16 +130,10 @@ class TestMarkerAndCountProofs:
             rule.check_bites()
 
     def test_a_marker_and_a_count_can_be_required_together(self):
-        """Both halves at once, which is what most of the migrated proofs actually assert.
+        """Both halves at once, which is what most migrated proofs actually assert.
 
-        A shape wrong in two places -- a path written and a path unlinked -- is two
-        findings, so ``Trips`` states the count and ``Bites`` states what the message
-        has to say. Neither alone is the claim: with only the count, a detector whose
-        offender text has decayed to a bare path passes; with only the marker, one
-        that fires three times where two were wrong passes too. Nearly every bite
-        test in the invariant suite asserts both, so a framework that can only
-        express one of them forces the migration to drop half the proof.
-        """
+        ``Trips`` states the count, ``Bites`` the message; neither alone is the
+        claim, and nearly every bite test asserts both."""
         rule = _urljoin_rule(
             find=_every_or,
             bite=lambda: Bites("a = urljoin(x, y) or x\nb = x or y\n", marker="an or", count=2),
@@ -167,10 +151,8 @@ class TestMarkerAndCountProofs:
     def test_a_matching_count_with_a_missing_marker_is_still_reported(self):
         """The marker is checked against a real offender, not against the count.
 
-        A count of 2 and a marker no offender carries is the combination the two
-        checks exist to catch independently, and an implementation that only
-        verified the marker against the first offender would miss it here.
-        """
+        A count of 2 with a marker no offender carries is the combination the
+        two checks exist to catch independently."""
         rule = _urljoin_rule(
             find=_every_or,
             bite=lambda: Bites("a = urljoin(x, y) or x\nb = x or y\n", marker="no-such-marker", count=2),
@@ -183,10 +165,8 @@ class TestLookalikes:
     def test_a_lookalike_the_detector_flags_is_reported(self):
         """ "Flags innocent code" is a failure, not a warning.
 
-        A rule that fires on everything it is shown passes its own bite and then
-        reports every file in the repository, and the response to that is to
-        delete the rule rather than fix it.
-        """
+        A rule that fires on everything passes its own bite; the lookalike
+        half is what catches it."""
         # A deliberately over-eager detector: every `or`, whatever it joins. It passes a bite about `or` by
         # construction, which is precisely why the looksalike is the half that catches it.
         overeager = _urljoin_rule(find=_every_or, bite=lambda: "urljoin(a, b) or a\n")
@@ -233,14 +213,8 @@ class TestCleanCheck:
 class TestRuleScope:
     """A rule's tree is a property of the rule, not of whoever sweeps it.
 
-    ``Registry.check_all_clean`` used to sweep ``app_trees()`` for every rule,
-    which was harmless while every rule was about ``app/`` and became a silent
-    no-op the moment one was not. A rule about the test tree -- no test may write
-    into ``app/``, no test may import a sibling helper by bare name -- swept
-    production code instead, found nothing, and reported green. It is the
-    worst failure this suite has: not a false alarm, a rule enforcing nothing
-    while looking like it enforces something.
-    """
+    A test-tree rule swept over ``app/`` finds nothing and reports green -- a
+    rule enforcing nothing while looking like it enforces something."""
 
     @staticmethod
     def _planted(tmp_path: pathlib.Path, source: str) -> pathlib.Path:
@@ -258,10 +232,8 @@ class TestRuleScope:
     def test_the_scope_is_honoured_by_check_all_clean_and_not_only_by_scan(self, tmp_path):
         """The registry path is the one the migrated files actually use.
 
-        ``Rule.scan`` and ``Registry.check_all_clean`` are separate callers of the
-        same sweep, and fixing one of them would leave a rule green through the
-        other. Both have to read the declared scope.
-        """
+        ``Rule.scan`` and ``Registry.check_all_clean`` are separate callers of
+        the same sweep; both have to read the declared scope."""
         self._planted(tmp_path, "def f(a, b):\n    return urljoin(a, b)\n")
         rule = _urljoin_rule(scope=lambda *, exclude: trees_under(tmp_path))
         with pytest.raises(AssertionError):
@@ -270,11 +242,8 @@ class TestRuleScope:
     def test_a_violation_outside_the_declared_scope_is_not_reported(self, tmp_path):
         """The scope narrows the sweep; it does not widen it to everything.
 
-        Without this the first two tests would also be satisfied by a sweep that
-        reads every tree it can find: a rule scoped to an empty directory must
-        find nothing in the file beside it, and that is the only thing that
-        distinguishes "swept where it said" from "swept more".
-        """
+        A scope over an empty directory must find nothing in the file beside
+        it -- that distinguishes "swept where it said" from "swept more"."""
         self._planted(tmp_path, "def f(a, b):\n    return urljoin(a, b)\n")
         empty = tmp_path / "clean"
         empty.mkdir()
@@ -301,11 +270,8 @@ class TestRuleScope:
 class TestAProofStatesWhichModuleItRunsIn:
     """A detector keyed on a file's path is two claims, and one path holds one.
 
-    ``at`` exists because "this is correct" and "this is correct *in this file*"
-    are different claims, and only the second is what a path comparison enforces.
-    Both halves have to be run, which is why the location is per proof and why a
-    rule that places its bite somewhere must also place a ``Silent`` elsewhere.
-    """
+    ``at`` exists because "correct" and "correct in this file" are different
+    claims; both halves must run, so the location is per proof."""
 
     OWNER = pathlib.Path("/repo/app/owner.py")
     ELSEWHERE = pathlib.Path("/repo/app/transport/other.py")
@@ -337,10 +303,8 @@ class TestAProofStatesWhichModuleItRunsIn:
     def test_proving_at_the_default_path_instead_does_not_count_as_the_second_half(self):
         """A ``Silent`` at the firing path proves the same thing twice.
 
-        This is the mistake the requirement exists to catch: the rule looks fully
-        proved while the ninety files the detector deliberately ignores — the whole
-        content of the guard — have never been swept once.
-        """
+        The rule looks fully proved while the files the detector ignores have
+        never been swept once."""
         with pytest.raises(TypeError, match="somewhere else"):
             self._rule(clean=lambda: (Silent(self.SOURCE, at=self.OWNER),))
 
@@ -355,10 +319,8 @@ class TestAProofStatesWhichModuleItRunsIn:
     def test_a_silent_that_fires_is_reported_rather_than_ignored(self):
         """The proof is run at the path it names, not merely counted as declared.
 
-        A detector that fires everywhere, paired with a ``Silent`` naming a module
-        it does not fire in, is the false-negative shape: the declaration looks
-        complete and the second half was never actually run against anything.
-        """
+        A detector that fires everywhere with a ``Silent`` naming a quiet module
+        is the false-negative shape: the second half was never actually run."""
         with pytest.raises(AssertionError, match="must not fire"):
             Rule(
                 name="path-keyed",
@@ -370,9 +332,7 @@ class TestAProofStatesWhichModuleItRunsIn:
     def test_a_silent_is_not_flattened_into_the_lookalikes(self):
         """A lookalike promises "spared everywhere"; a ``Silent`` promises one module.
 
-        Folding the two together would assert the stronger claim at every path the
-        rule happens to run, which is a claim nobody proved.
-        """
+        Folding them together would assert the stronger claim unproved."""
         rule = self._rule(clean=lambda: (Silent(self.SOURCE, at=self.ELSEWHERE), "x = 1"))
         assert rule.looksalikes() == ("x = 1",)
 
