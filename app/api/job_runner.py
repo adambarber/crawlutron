@@ -114,7 +114,7 @@ def _pop_frontier(job: Any) -> list[FrontierEntry]:
     return batch
 
 
-def _job_engine_payload(job: Any, batch: Sequence[FrontierEntry]) -> dict[str, Any]:
+def job_engine_payload(job: Any, batch: Sequence[FrontierEntry]) -> dict[str, Any]:
     """Build one non-recursive engine batch from a whole-site job.
 
     The runner owns the durable frontier; the engine is a single-page fetcher per
@@ -239,7 +239,7 @@ async def run_job(
             await _pace_delayed_batch(context, batch)
 
             result = await _execute_crawl(
-                _job_engine_payload(job, batch),
+                job_engine_payload(job, batch),
                 settings=settings,
                 shutdown_event=shutdown_event,
             )

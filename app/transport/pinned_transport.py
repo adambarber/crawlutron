@@ -262,7 +262,7 @@ _REDIRECT_STATUSES = frozenset((301, 302, 303, 307, 308))
 _CREDENTIAL_HEADERS = frozenset({"cookie", "authorization", "proxy-authorization"})
 
 
-def _redirect_target(
+def redirect_target(
     current_url: NormalizedUrl,
     request_headers: dict[str, str],
     status_code: int,
@@ -321,7 +321,7 @@ class _RedirectChain:
     Both transports follow redirects by hand -- automatic following would
     connect to a target nobody re-validated -- so each one carried the walk's
     state as three locals (current url, per-hop headers, hop count) and each
-    spelled that state back out as six arguments to ``_redirect_target``. The
+    spelled that state back out as six arguments to ``redirect_target``. The
     state is one value, so it is one value here, and the hop budget and the
     cross-host credential strip are applied by the same code on both paths
     rather than by two call sites that can disagree.
@@ -354,7 +354,7 @@ class _RedirectChain:
         reading the redirect off it is part of the hop decision instead of two
         per-transport header lookups that have to agree.
         """
-        target = _redirect_target(
+        target = redirect_target(
             self.url,
             self.headers,
             response.status_code,

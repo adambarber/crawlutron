@@ -220,7 +220,7 @@ class TestWholeSiteJobExecution:
             FrontierEntry(url=canonical(GRAPH_CHILD), depth=1),
         ]
 
-        payload = job_runner._job_engine_payload(job, batch)
+        payload = job_runner.job_engine_payload(job, batch)
         assert payload == {
             "urls": [root, GRAPH_CHILD],
             # Depth zero and nothing else moved: this builder exists to stop the per-call max_depth from

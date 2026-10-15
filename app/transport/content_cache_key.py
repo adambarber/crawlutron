@@ -56,7 +56,7 @@ def build_content_cache_key(
 
 # Bound the RAM consumed by in-flight page bodies, a container quantity divided by the
 # worker count where it is read. This was the last cgroup budget in app/ still undivided.
-_RAM_SAFETY_BYTES = get_env_int("CRAWLUTRON_CONTENT_RAM_BUDGET_BYTES", 1 * 1024 * 1024 * 1024, lo=1)
+RAM_SAFETY_BYTES = get_env_int("CRAWLUTRON_CONTENT_RAM_BUDGET_BYTES", 1 * 1024 * 1024 * 1024, lo=1)
 _MIN_PER_PAGE_BYTES = 256 * 1024  # never shrink the cap below 256 KiB
 
 
@@ -89,6 +89,6 @@ def effective_max_content_length(limits: CrawlPolicyLimits, global_concurrency: 
     conc = global_concurrency or _default_global_concurrency()
     scaled = min(
         DEFAULT_MAX_CONTENT_LENGTH_BYTES,
-        max(_MIN_PER_PAGE_BYTES, _RAM_SAFETY_BYTES // (max(conc, 1) * worker_count())),
+        max(_MIN_PER_PAGE_BYTES, RAM_SAFETY_BYTES // (max(conc, 1) * worker_count())),
     )
     return int(scaled)

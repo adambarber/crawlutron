@@ -19,11 +19,6 @@ DECLARED: dict[str, Declaration] = {
     "app.api.async_crawl_runner._async_crawl_semaphore_loop": _d(
         _CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]
     ),
-    "app.api.job_runner._job_engine_payload": _d(
-        "unreviewed",
-        "Not yet triaged.\n",
-        ["test"],
-    ),
     "app.api.job_lifecycle._tasks": _d(_CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]),
     "app.transport.content_cache.ContentCache._remember_memory_locked": _d(
         _PRIVATE_TYPE.kind, _PRIVATE_TYPE.reason, ["test"]
@@ -58,5 +53,4 @@ DECLARED: dict[str, Declaration] = {
     "app.transport.browser_driver.BrowserDriver._dispatch_action": _d(
         _PRIVATE_TYPE.kind, _PRIVATE_TYPE.reason, ["test"]
     ),
-    "app.transport.content_cache_key._RAM_SAFETY_BYTES": _SUBSTITUTED_CAP,
 }

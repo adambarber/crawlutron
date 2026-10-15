@@ -27,11 +27,6 @@ DECLARED: dict[str, Declaration] = {
         "Not yet triaged.\n",
         ["app"],
     ),
-    "app.transport.pinned_transport._redirect_target": _d(
-        "unreviewed",
-        "Not yet triaged.\n",
-        ["test"],
-    ),
     "app.orchestration.strategy_chain._starting_strategies": _d(
         "unreviewed",
         "Not yet triaged.\n",

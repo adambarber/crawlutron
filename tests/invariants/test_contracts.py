@@ -19,16 +19,16 @@ from tests.rules import Bites, Rule
 """Payloads are built once and strategy runners run guarded."""
 
 
-def _job_engine_payload_chokepoint_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
+def job_engine_payload_chokepoint_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
     relative = relative_posix(path)
     has_builder = any(
-        isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef) and node.name == "_job_engine_payload"
+        isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef) and node.name == "job_engine_payload"
         for node in nodes_of(tree)
     )
     if relative != "app/api/job_runner.py" and not has_builder:
         return []
     execute_names = {"_execute_crawl", "_real_execute_crawl"}
-    builder_names = {"_job_engine_payload"}
+    builder_names = {"job_engine_payload"}
     for node in writes(tree):
         value = node.value
         targets = assignment_targets(node)
@@ -57,15 +57,15 @@ def _job_engine_payload_chokepoint_offenders(tree: ast.AST, path: pathlib.Path) 
             and payload.func.id in builder_names
         ):
             continue
-        offenders.append(offender_at(path, node, "_execute_crawl payload bypasses _job_engine_payload"))
+        offenders.append(offender_at(path, node, "_execute_crawl payload bypasses job_engine_payload"))
     return offenders
 
 
 JOB_ENGINE_PAYLOAD_USES_SINGLE_BUILDER = Rule(
     name="job-engine-payload-uses-single-builder",
-    find=_job_engine_payload_chokepoint_offenders,
+    find=job_engine_payload_chokepoint_offenders,
     summary=(
-        "Build whole-site engine payloads only with _job_engine_payload, "
+        "Build whole-site engine payloads only with job_engine_payload, "
         "so a new call site to _execute_crawl cannot silently skip the builder"
     ),
     proof_path=REPO_ROOT / "app" / "api" / "job_runner.py",
@@ -74,19 +74,19 @@ JOB_ENGINE_PAYLOAD_USES_SINGLE_BUILDER = Rule(
             "async def run(job, batch):\n"
             "    payload = {'urls': batch, 'policy': dict(job.policy)}\n"
             "    await _execute_crawl(payload)\n",
-            "payload bypasses _job_engine_payload",
+            "payload bypasses job_engine_payload",
         ),
         # An alias of the executor is the same bypass spelled a second way.
         Bites(
             "async def run(job, batch):\n"
             "    execute = _execute_crawl\n"
             "    await execute({'urls': batch, 'policy': {}})\n",
-            "payload bypasses _job_engine_payload",
+            "payload bypasses job_engine_payload",
         ),
     ),
     clean=lambda: (
         "async def run(job, batch):\n"
-        "    payload = _job_engine_payload(job, batch)\n"
+        "    payload = job_engine_payload(job, batch)\n"
         "    await _execute_crawl(payload)\n",
     ),
 )

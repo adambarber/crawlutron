@@ -132,7 +132,7 @@ def test_the_content_length_budget_is_split_across_workers(monkeypatch):
     from app.transport import content_cache_key as cck
 
     budget = 16 * 1024 * 1024
-    monkeypatch.setattr(cck, "_RAM_SAFETY_BYTES", budget)
+    monkeypatch.setattr(cck, "RAM_SAFETY_BYTES", budget)
     uncapped = CrawlPolicyLimits()
 
     # 16 MiB across one worker clears the 10 MiB per-page default, so the default binds and is reported
