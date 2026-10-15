@@ -195,6 +195,9 @@ def _direct_frontier_growth_offenders(
                 and isinstance(node.value, ast.Name)
                 and node.value.id == "frontier"
             )
+        if owner.name in {"_admit_chunk", "admit_discovered_links"}:
+            # The admission chokepoint is the funnel's sanctioned owner.
+            return True
         return (
             owner.name == "_persist"
             and isinstance(node, ast.Assign)
@@ -240,6 +243,8 @@ JOB_FRONTIER_GROWTH_ONLY_USES_FUNNEL = Rule(
         if relative == "app/storage/job_store_state.py"
         else {"allowed_functions": frozenset({"_persist"})}
         if relative == "app/storage/job_store.py"
+        else {"allowed_functions": frozenset({"admit_discovered_links", "_admit_chunk"})}
+        if relative == "app/admission/admission_links.py"
         else {}
     ),
     proof_path=REPO_ROOT / "app" / "api" / "job_runner.py",

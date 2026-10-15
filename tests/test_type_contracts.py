@@ -1,17 +1,7 @@
-"""Shared callable aliases must describe the contract callers actually rely on.
+"""Shared callable aliases must describe the contract callers rely on.
 
-``HttpFetcher`` is documented as the single source of truth for the fetcher
-type, so a caller typed against it must be able to invoke the concrete fetcher
-it is handed. The alias drifted to three parameters while every concrete
-fetcher accepts four (``max_content_length``), so code annotated against the
-alias could not legally call a real fetcher -- the mismatch was invisible only
-because the call sites annotated their fetcher as ``Any``.
-
-The arity check is tree-wide rather than a hand-typed pair of function objects.
-The pair was itself a declaration that could drift: a third concrete fetcher
-would simply not have been in the list, and the guard would have reported a
-green result while covering nothing.
-"""
+``HttpFetcher`` drifted to three parameters while every concrete fetcher
+accepts four; the arity check is a tree-wide walk, not a hand-typed pair."""
 
 from __future__ import annotations
 
@@ -39,20 +29,8 @@ _CONCRETE_FETCHERS = [pytest.param(default_http_fetcher, id="default_http_fetche
 def _unbound_call(protocol: type, *, resolve_annotations: bool = True) -> inspect.Signature:
     """A Protocol's ``__call__`` signature with the ``self`` wrapper dropped.
 
-    Read unbound, a Protocol's ``__call__`` carries ``self``; the contract is
-    about the call, not about the wrapper. Opening with a parameter by any other
-    name means the Protocol is not shaped the way this reading assumes, which is
-    a fact about the declaration rather than about the four parameters -- so it
-    fails here instead of skewing every comparison made with the result.
-
-    One reader for every Protocol read in this file, because three copies of
-    "drop self, take the positionals" is three places for a wrapper to be handled
-    inconsistently.
-
-    ``eval_str`` is load-bearing where it can be: the source uses postponed
-    annotations, so without it every parameter type reads as the string
-    ``'int'`` -- a string compares equal to nothing a caller can check.
-    """
+    One reader for every Protocol here, so a wrapper is never handled
+    inconsistently; ``eval_str`` is load-bearing for postponed annotations."""
     declared = inspect.signature(protocol.__call__, eval_str=resolve_annotations)
     parameters = list(declared.parameters.values())
     assert parameters[0].name == "self", (
@@ -69,12 +47,8 @@ def _omittable(parameters: list[inspect.Parameter]) -> frozenset[str]:
 def _parameters_of_kind(signature: inspect.Signature, kinds: frozenset) -> list[inspect.Parameter]:
     """Every parameter of one or more kinds, in declaration order.
 
-    One selector rather than one per kind, because the kinds differ only in the
-    set they name and two comprehensions differing by one constant is the shape a
-    copy takes. Positional is a pair of kinds -- a Protocol may declare its
-    parameters positional-only, positional-or-keyword, or both -- so the argument
-    is a set rather than a single kind.
-    """
+    One selector rather than one per kind; positional is a pair of kinds, so
+    the argument is a set."""
     return [param for param in signature.parameters.values() if param.kind in kinds]
 
 
@@ -103,12 +77,8 @@ _EXPECTED_OMITTABLE = _omittable(_FETCHER_POSITIONALS) | _BOUND_KEYWORD_OPTIONAL
 def _defaulted_params(node: ast.FunctionDef | ast.AsyncFunctionDef) -> frozenset[str]:
     """The parameters of ``node`` that a caller may omit.
 
-    ``...`` (Ellipsis) is what a Protocol body writes in place of a default, so
-    on the declaration side it means "this parameter is optional in the shape
-    being declared" -- which is exactly the question being asked. On the
-    implementation side a real default expression appears instead, and either
-    way the presence of something in the defaults tuple is the signal.
-    """
+    ``...`` on the declaration side and a real default on the implementation
+    side both mean "omittable"; either way, presence in the tuple is the signal."""
     args = node.args
     positional = [
         arg.arg
@@ -129,13 +99,8 @@ def _defaulted_params(node: ast.FunctionDef | ast.AsyncFunctionDef) -> frozenset
 def _http_fetcher_alias_signature() -> inspect.Signature:
     """The bound view's own signature, read off its Protocol.
 
-    ``HttpFetcher`` is a Protocol, so its shape is a real signature rather than a
-    ``Callable`` type argument: ``get_args(HttpFetcher)[0]`` is empty, and the
-    argument types live on ``__call__`` where a caller can also see *which* of
-    them carry a default. The old reading could count the parameters and name
-    their types, but it could not tell an optional fourth from a required one --
-    which is the axis the alias got wrong.
-    """
+    ``HttpFetcher``'s shape is a real signature: argument types live on
+    ``__call__``, where a caller also sees which carry a default."""
     return _unbound_call(HttpFetcher)
 
 
@@ -143,10 +108,8 @@ def _http_fetcher_alias_signature() -> inspect.Signature:
 def test_http_fetcher_alias_matches_the_concrete_fetcher_arity(fetcher):
     """The alias's positional parameters must equal each concrete fetcher's.
 
-    Compared by name as well as by count, so a reordering is caught too. A
-    caller typed against the alias calls ``fetcher(url, headers, timeout,
-    max_content_length)`` by position.
-    """
+    Compared by name as well as count, so a reordering is caught; callers invoke
+    the fetcher by position."""
     alias_names = [param.name for param in _parameters_of_kind(_http_fetcher_alias_signature(), _POSITIONAL)]
     concrete_names = [param.name for param in _parameters_of_kind(inspect.signature(fetcher), _POSITIONAL)]
     assert alias_names == concrete_names, (
@@ -171,15 +134,10 @@ def test_http_fetcher_alias_carries_the_documented_argument_types():
 
 
 def test_http_fetcher_alias_marks_the_content_length_cap_optional():
-    """The cap must read as omittable, which is what a Callable alias cannot say.
+    """The cap must read as omittable, which a Callable alias cannot say.
 
-    Every implementation gives ``max_content_length`` a default, and the engine
-    binds its fetcher with ``functools.partial``, which drops defaults when it
-    synthesizes a signature. So when the alias was ``Callable[[str, dict, int,
-    int], Any]`` -- four required positionals -- a correct three-argument call
-    read to the type checker as a missing argument, and the only real
-    requirement to fix it was to stop using a Callable alias.
-    """
+    ``functools.partial`` drops defaults, so a four-required Callable read a
+    correct three-argument call as a missing one."""
     alias_defaulted = frozenset(
         param.name
         for param in _http_fetcher_alias_signature().parameters.values()
@@ -192,18 +150,10 @@ def test_http_fetcher_alias_marks_the_content_length_cap_optional():
 
 
 def _concrete_fetchers_in_app() -> list[tuple[str, str, ast.AsyncFunctionDef]]:
-    """Every module-level async function in app/ whose return annotation is a
-    fetch result.
+    """Every module-level async function in app/ whose return is a fetch result.
 
-    Found by walking all of ``app/`` for the return type, not by importing a
-    list: a fetcher added to a new module must be covered without anyone
-    remembering to add it here.
-
-    Module level only, and async only. A concrete fetcher is a module-level
-    coroutine the engine binds by name; scoping the sweep that way is what
-    keeps the Protocol's own ``__call__`` -- which is the declaration, not an
-    implementation of it -- from being measured against itself.
-    """
+    Found by walking ``app/``, so a new fetcher is covered without being named;
+    module-level only, so the Protocol's own ``__call__`` escapes the sweep."""
     found: list[tuple[str, str, ast.AsyncFunctionDef]] = []
     for path in app_python_files():
         tree = ast.parse(path.read_text(encoding="utf-8"))
@@ -224,24 +174,8 @@ def _concrete_fetchers_in_app() -> list[tuple[str, str, ast.AsyncFunctionDef]]:
 def test_http_fetcher_contract_holds_tree_wide():
     """Every production fetcher is ``HttpFetcher`` plus exactly the bound keywords.
 
-    ``HttpFetcher`` is the one declaration of the call shape, and a production
-    fetcher adds keyword-only ``impersonate`` and ``pin`` to it. Those two facts
-    are typed in this file, next to the check that enforces them,
-    rather than spelled as a second Protocol in ``app/models/taxonomy.py`` -- which is what
-    they used to be, and which is how the same four positional parameters came to
-    be written twice. This check is the only thing standing between the two
-    spellings now that there is one: if a parameter is added to a fetcher and not
-    to the Protocol, or the other way round, this fails instead of the first call
-    site that omits it.
-
-    Names alone are not the whole shape. Which parameters are *optional* is a
-    separate axis, and it is the one that bites: a fetcher that defaults a
-    parameter the contract requires accepts a call the engine must never make,
-    so the fetch silently runs against the fetcher's private choice instead of
-    raising. mypy cannot see it, because a protocol only constrains what an
-    implementation must accept, never what it may accept beyond that. So the
-    comparison here includes defaulting.
-    """
+    Typed beside the check, not as a second Protocol; the comparison covers
+    defaulting, which a protocol never constrains on an implementation."""
     offenders = []
     for filename, funcname, node in _concrete_fetchers_in_app():
         args = node.args
@@ -265,20 +199,10 @@ def test_http_fetcher_contract_holds_tree_wide():
 
 
 def test_the_contract_guard_sees_defaulting_not_just_names():
-    """The guard must fail on a fetcher whose *names* match but whose optionals differ.
+    """Fail on a fetcher whose *names* match but whose optionals differ.
 
-    This is the mutation that motivated comparing defaulting at all, and it is
-    the one mypy accepts: a protocol constrains what an implementation must
-    accept, not what it may additionally accept, so widening one twin with a
-    default on a required parameter satisfies HttpFetcher and every name-based
-    key in the comparison above. On ``timeout_seconds`` the default would be the
-    fetcher's private choice standing in for one the engine must pass, and a
-    caller omitting it would never see a TypeError.
-
-    Written against the real tree: the sweep finds the fetchers, then the
-    comparison is run over a synthetic fetcher carrying the mutation, so this
-    fails if the guard stops considering defaulting.
-    """
+    The mutation mypy accepts: defaulting a required parameter satisfies the
+    Protocol, so the widened synthetic fetcher exercises the defaulting axis."""
     found = _concrete_fetchers_in_app()
     assert {name for _, name, _ in found} == {"default_http_fetcher"}, (
         f"the sweep found {sorted(name for _, name, _ in found)}; this test asserts against "
@@ -309,18 +233,8 @@ def test_the_contract_guard_sees_defaulting_not_just_names():
 def test_production_never_substitutes_the_pin_rule():
     """``pin=`` is a test door, and a production call site must never use it.
 
-    The keyword is on the contract precisely so the guard can see it, and seeing
-    it is only half the job: a substituted pin rule skips DNS resolution and the
-    SSRF check that resolution feeds, so passing one in ``app/`` would hand the
-    fetcher a connect-ready URL for a host nobody validated. ``None`` -- the
-    default -- is the real rule, so this is not about the parameter existing; it
-    is about the one value that would weaken the fetch never being supplied.
-
-    Written as a walk rather than a convention because the failure it prevents is
-    silent by construction: a test suite substituting a pin is correct, and the
-    same line in ``app/`` is an SSRF hole that no other gate in this tree looks
-    at.
-    """
+    A substituted pin rule skips DNS resolution and the SSRF check it feeds;
+    a walk because that failure is silent by construction."""
     offenders: list[str] = []
     for path in app_python_files():
         tree = ast.parse(path.read_text(), filename=str(path))
@@ -340,11 +254,8 @@ def test_production_never_substitutes_the_pin_rule():
 def _binds_fetcher(call: ast.Call, tree: ast.Module) -> bool:
     """Whether ``call`` produces a fetcher -- directly, or by partial-binding one.
 
-    Both spellings reach the same function: the engine hands the strategy a
-    ``functools.partial`` of the fetcher rather than the function itself, so a
-    check that only recognized the bare call would have walked straight past
-    every production site and reported the tree clean for the wrong reason.
-    """
+    The engine hands the strategy a ``functools.partial``, so a check that only
+    recognized the bare call would walk past every production site."""
     if resolved_call_name(tree, call) == "default_http_fetcher":
         return True
     return (
@@ -355,15 +266,10 @@ def _binds_fetcher(call: ast.Call, tree: ast.Module) -> bool:
 
 
 def test_the_contract_is_not_vacuous_tree_wide():
-    """The tree-wide check must actually be finding the fetchers it claims to.
+    """The tree-wide check must actually find the fetchers it claims to.
 
-    A detector whose sink pattern stops matching reports zero offenders and
-    passes forever. This asserts the sweep found the concrete fetcher, so a
-    rename or an annotation change that silently emptied the search is a
-    failure here rather than a permanently green gate. It also pins the count
-    at ONE: a second module-level fetcher would be a second spelling of the
-    contract, which is the duplication this design removed.
-    """
+    A detector whose sink stops matching passes forever; the count is pinned at
+    ONE so an emptied sweep fails here."""
     names = {funcname for _, funcname, _ in _concrete_fetchers_in_app()}
     assert names == {"default_http_fetcher"}, (
         f"tree-wide fetcher sweep found {sorted(names)} -- it is no longer "
@@ -373,23 +279,10 @@ def test_the_contract_is_not_vacuous_tree_wide():
 
 
 class TestNormalizedUrlIsAValueNotAString:
-    """A URL that has crossed admission is a VALUE, and text is something it lends.
+    """A URL that crossed admission is a VALUE; text is something it lends.
 
-    ``NormalizedUrl`` used to be a ``NewType`` over ``str``, which meant the type
-    was a comment: every position that said ``NormalizedUrl`` still accepted
-    concatenation, ``startswith``, and membership in a ``set[str]`` unchecked, so
-    the checker had no opinion about a URL that had never been admitted. It is
-    now a frozen value carrying its canonical string, its host and its site, and
-    the constructor is the admission decision -- there is no way to hold one
-    without having proved the host.
-
-    The records that survive a round trip therefore carry the value in their
-    FIELDS and lend text only at the wire edge: ``to_dict`` projects every URL
-    to ``.raw`` and ``from_wire`` re-admits it under the caller's policy, so
-    spill JSON never holds a value object and a stored URL never re-enters the
-    process unadmitted. The queue door (``AdmittedLink``) holds the value for
-    the same reason -- it is the boundary the scheduler queues from.
-    """
+    ``NormalizedUrl`` was a ``NewType`` over ``str`` (every position accepted
+    concatenation unchecked); it is now a frozen value lending text at the edge."""
 
     def test_the_type_is_a_value_not_a_newtype_over_str(self):
         from app.models.normalized_url import NormalizedUrl

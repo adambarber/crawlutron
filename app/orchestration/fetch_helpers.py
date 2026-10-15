@@ -9,7 +9,9 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import inspect
+import re as _re
 from collections.abc import Awaitable, Callable, Mapping
+from dataclasses import dataclass, field
 from typing import Any, NamedTuple
 
 from app.models.host_policy import HostPolicy
@@ -69,6 +71,22 @@ class Discovery(NamedTuple):
     def not_modified(self) -> bool:
         """True only when the origin confirmed the cached body is unchanged."""
         return self.status == 304
+
+
+@dataclass
+class _SitemapWalk:
+    """The shared state of one recursion pass, mutated by every visited node.
+
+    ``visited`` and ``page_urls`` are carried through the fan-out and mutated
+    in place, so a walk that hits its caps resolves in fewer passes."""
+
+    fetcher: HttpFetcher
+    timeout_seconds: int
+    host_policy: HostPolicy
+    max_depth: int
+    max_urls: int
+    visited: set[NormalizedUrl]
+    page_urls: set[tuple[NormalizedUrl, str | None]] = field(default_factory=set)
 
 
 async def _call_fetcher(
@@ -205,6 +223,85 @@ SITEMAP_CACHE: BoundedTTLCache[tuple[str, HostPolicy], tuple[list, str | None, s
 )
 
 
+_LOC_PATTERN = _re.compile(r"<loc>\s*([^<\s]+)\s*</loc>", _re.IGNORECASE)
+_LASTMOD_PATTERN = _re.compile(r"<lastmod>\s*([^<]+)\s*</lastmod>", _re.IGNORECASE)
+
+
+def _collect_page_entries(
+    text: str,
+    current_url: NormalizedUrl,
+    page_urls: set[tuple[NormalizedUrl, str | None]],
+) -> None:
+    """Associate each page ``<loc>`` with its neighboring ``<lastmod>``.
+
+    Matched by byte offsets so wrapped and bare entry shapes both parse."""
+    loc_items = [(m.start(), m.group(1)) for m in _LOC_PATTERN.finditer(text)]
+    lastmod_items = [(m.start(), m.group(1).strip()) for m in _LASTMOD_PATTERN.finditer(text)]
+    for idx, (pos, loc) in enumerate(loc_items):
+        next_pos = loc_items[idx + 1][0] if idx + 1 < len(loc_items) else len(text)
+        lastmod = next((val for lpos, val in lastmod_items if pos < lpos < next_pos), None)
+        admitted = current_url.resolve(loc)
+        if admitted is not None:
+            page_urls.add((admitted, lastmod))
+
+
+async def _fanout_sitemap_children(
+    walk: _SitemapWalk, current_url: NormalizedUrl, children: list[str], depth: int
+) -> None:
+    """Schedule bounded fan-out over one sitemapindex's children."""
+    for offset in range(0, len(children), SITEMAP_INDEX_FANOUT):
+        if len(walk.page_urls) >= walk.max_urls:
+            break
+        chunk = children[offset : offset + SITEMAP_INDEX_FANOUT]
+        pending = []
+        for child in chunk:
+            admitted = current_url.resolve(child)
+            if admitted is not None and admitted not in walk.visited:
+                pending.append(asyncio.create_task(_recurse_sitemap(walk, admitted, depth + 1, None)))
+        if pending:
+            # Stragglers are cancelled so one slow server cannot gate the
+            # entire resolution.
+            done, _ = await asyncio.wait(pending, timeout=SITEMAP_FANOUT_TIMEOUT_SECONDS)
+            for t in pending:
+                if t not in done:
+                    t.cancel()
+
+
+async def _recurse_sitemap(
+    walk: _SitemapWalk,
+    current_url: NormalizedUrl,
+    depth: int,
+    cond_headers: dict[str, str] | None,
+) -> tuple[str | None, str | None]:
+    """Resolve one sitemap node into ``walk.page_urls``, recursing into indexes.
+
+    Mutates ``walk.page_urls``; returns ``(etag, last_modified)``."""
+    etag: str | None = None
+    last_modified: str | None = None
+    if depth > walk.max_depth or current_url in walk.visited or len(walk.page_urls) >= walk.max_urls:
+        return etag, last_modified
+    walk.visited.add(current_url)
+    text, etag, last_modified, not_modified = await fetch_text(
+        walk.fetcher, current_url, cond_headers, walk.timeout_seconds
+    )
+    if not_modified:
+        # 304: reuse the previously resolved URLs. get_stale, not get: the
+        # entry must be PRESENT, not fresh -- the origin confirmed the set.
+        prev = SITEMAP_CACHE.get_stale((current_url.raw, walk.host_policy))
+        if prev:
+            walk.page_urls.update(prev[0])
+        return etag, last_modified
+    if text is None:
+        return etag, last_modified
+    locs = _LOC_PATTERN.findall(text)
+    if "<sitemapindex" in text.lower():
+        children = locs[: max(0, walk.max_urls - len(walk.page_urls))]
+        await _fanout_sitemap_children(walk, current_url, children, depth)
+        return etag, last_modified
+    _collect_page_entries(text, current_url, walk.page_urls)
+    return etag, last_modified
+
+
 async def fetch_sitemap_urls(
     fetcher: HttpFetcher,
     sitemap_url: NormalizedUrl,
@@ -219,87 +316,22 @@ async def fetch_sitemap_urls(
 
     Handles sitemap indexes (``<sitemapindex>`` pointing at child sitemaps) up
     to ``max_depth`` levels, and caps total collected URLs at ``max_urls`` so a
-    hostile or enormous index cannot run away.
-
-    Each collected entry is a ``(url, lastmod)`` tuple where ``url`` is the
-    admitted ``NormalizedUrl`` -- resolved here, at the one place that knows
-    the sitemap they came from, so no caller re-joins or re-admits -- and
-    ``lastmod`` is the sitemap ``<lastmod>`` for that URL when present (used
-    to skip re-fetching unchanged pages); it is ``None`` when the entry has
-    no ``<lastmod>``.
-
-    If a previous resolution cached an ETag/Last-Modified (or the caller passes
-    ``conditional``), the root sitemap is fetched with a conditional request
-    A 304 reuses the cached URLs without re-parsing the body, which
-    avoids re-downloading unchanged sitemaps on every crawl.
-    """
-    import re as _re
-
-    loc_pattern = _re.compile(r"<loc>\s*([^<\s]+)\s*</loc>", _re.IGNORECASE)
-    lastmod_re = _re.compile(r"<lastmod>\s*([^<]+)\s*</lastmod>", _re.IGNORECASE)
+    hostile or enormous index cannot run away."""
     visited: set[NormalizedUrl] = set()
     page_urls: set[tuple[NormalizedUrl, str | None]] = set()
-
-    async def recurse(current_url: NormalizedUrl, depth: int, cond_headers: dict[str, str] | None = None):
-        etag: str | None = None
-        last_modified: str | None = None
-        if depth > max_depth or current_url in visited or len(page_urls) >= max_urls:
-            return etag, last_modified
-        visited.add(current_url)
-        text, etag, last_modified, not_modified = await fetch_text(
-            fetcher, current_url, cond_headers, timeout_seconds
-        )
-        if not_modified:
-            # 304: reuse the previously resolved URLs. get_stale, not get: the
-            # entry must be PRESENT, not fresh -- the origin confirmed the set.
-            prev = SITEMAP_CACHE.get_stale((current_url.raw, host_policy))
-            if prev:
-                page_urls.update(prev[0])
-            return etag, last_modified
-        if text is None:
-            return etag, last_modified
-        locs = loc_pattern.findall(text)
-        if "<sitemapindex" in text.lower():
-            # Bounded fan-out: never schedule more children than still needed
-            # for max_urls, in capped chunks, so a huge index cannot spawn tasks.
-            children = locs
-            children = children[: max(0, max_urls - len(page_urls))]
-            for offset in range(0, len(children), SITEMAP_INDEX_FANOUT):
-                if len(page_urls) >= max_urls:
-                    break
-                chunk = children[offset : offset + SITEMAP_INDEX_FANOUT]
-                pending = []
-                for child in chunk:
-                    admitted = current_url.resolve(child)
-                    if admitted is not None and admitted not in visited:
-                        pending.append(asyncio.create_task(recurse(admitted, depth + 1)))
-                if pending:
-                    # Stragglers are cancelled so one slow server cannot gate
-                    # the entire resolution.
-                    done, _ = await asyncio.wait(pending, timeout=SITEMAP_FANOUT_TIMEOUT_SECONDS)
-                    for t in pending:
-                        if t not in done:
-                            t.cancel()
-            return etag, last_modified
-        # Page sitemap: associate each <loc> with its neighboring <lastmod>,
-        # by byte offsets, so wrapped and bare entry shapes both parse.
-        loc_items = [(m.start(), m.group(1)) for m in loc_pattern.finditer(text)]
-        lastmod_items = [(m.start(), m.group(1).strip()) for m in lastmod_re.finditer(text)]
-        for idx, (pos, loc) in enumerate(loc_items):
-            next_pos = loc_items[idx + 1][0] if idx + 1 < len(loc_items) else len(text)
-            lastmod = next((val for lpos, val in lastmod_items if pos < lpos < next_pos), None)
-            admitted = current_url.resolve(loc)
-            if admitted is not None:
-                page_urls.add((admitted, lastmod))
-        return etag, last_modified
-
+    walk = _SitemapWalk(
+        fetcher=fetcher,
+        timeout_seconds=timeout_seconds,
+        host_policy=host_policy,
+        max_depth=max_depth,
+        max_urls=max_urls,
+        visited=visited,
+        page_urls=page_urls,
+    )
     cache_key = (sitemap_url.raw, host_policy)
     fresh = SITEMAP_CACHE.get(cache_key)
     if fresh is not None:
-        # Fresh: serve directly (get() already LRU-touched).
         return set(fresh[0])
-    # get() hides an expired entry, so read it stale: its validators drive the
-    # replay, and leaving it in place lets a 304 in recurse() reuse its URLs.
     stale = SITEMAP_CACHE.get_stale(cache_key)
     if conditional is None and stale:
         if stale[1]:
@@ -307,11 +339,9 @@ async def fetch_sitemap_urls(
         elif stale[2]:
             conditional = {"If-Modified-Since": stale[2]}
     try:
-        root_etag, root_lm = await recurse(sitemap_url, 0, conditional)
+        root_etag, root_lm = await _recurse_sitemap(walk, sitemap_url, 0, conditional)
     except Exception:
         root_etag, root_lm = (stale[1] if stale else None), (stale[2] if stale else None)
-    # Store through the chokepoint: LRU recency refresh and bounded eviction
-    # happen inside put(), under its lock (no more manual popitem loop).
     SITEMAP_CACHE.put(cache_key, (list(page_urls), root_etag, root_lm))
     return page_urls
 

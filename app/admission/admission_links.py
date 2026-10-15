@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import re
-from collections.abc import Awaitable, Callable, Iterable, MutableSequence
+from collections.abc import Awaitable, Callable, Iterable, Iterator, MutableSequence
 from dataclasses import dataclass
 from typing import Any, TypeVar
 
@@ -80,6 +80,156 @@ def _link_values(link: Any) -> tuple[str, str] | None:
     return (str(normalized), str(original) if _is_url_text(original) else str(normalized))
 
 
+@dataclass(frozen=True)
+class _ChunkOutcome:
+    accepted: int
+    robots_blocked: int
+    duplicates_skipped: int
+    cap_blocked: bool
+    stopped: bool
+    occupied_delta: int
+
+
+@dataclass
+class _AdmissionPass[T]:
+    """The policy, dedupe sets, and output frontier one admission run carries.
+
+    Built by the public entry and threaded through the chunk loop unchanged;
+    ``reserved`` and ``known`` are mutated in place as candidates are admitted.
+    """
+
+    robots_allows: RobotsAllows
+    respect_robots: bool
+    robots_crawl_delay: RobotsCrawlDelay | None
+    commit_crawl_delay: CommitCrawlDelay
+    max_pages: int
+    reserved: set[NormalizedUrl]
+    known: set[NormalizedUrl]
+    frontier: MutableSequence[T]
+    make_entry: Callable[[AdmittedLink], T]
+    reserve_admitted: bool
+
+
+def _prepare_admission[T](
+    links: Iterable[Any],
+    *,
+    known: set[NormalizedUrl],
+    frontier: MutableSequence[T],
+    next_depth: int,
+    scope_pattern: BoundedPattern | None,
+    want_document_bodies: bool,
+    host_policy: HostPolicy,
+) -> tuple[set[NormalizedUrl], int, Iterator[AdmittedLink]]:
+    """The occupied set and candidate stream a link-admission pass runs over."""
+    reserved: set[NormalizedUrl] = set(known)
+    for value in frontier:
+        identity = frontier_identity(value, host_policy=host_policy)
+        if identity is not None:
+            reserved.add(identity)
+    candidates = iter(
+        _candidate_stream(
+            links,
+            next_depth=next_depth,
+            known=known,
+            scope_pattern=scope_pattern,
+            want_document_bodies=want_document_bodies,
+            host_policy=host_policy,
+        )
+    )
+    return reserved, len(reserved), candidates
+
+
+def _collect_chunk(candidates: Iterator[AdmittedLink], chunk_limit: int) -> list[AdmittedLink]:
+    """Pull up to ``chunk_limit`` candidates from the admission stream."""
+    chunk: list[AdmittedLink] = []
+    for _ in range(chunk_limit):
+        try:
+            chunk.append(next(candidates))
+        except StopIteration:
+            break
+    return chunk
+
+
+async def _admit_chunk[T](
+    pass_: _AdmissionPass[T],
+    chunk: list[AdmittedLink],
+    *,
+    current_occupied: int,
+) -> _ChunkOutcome:
+    """Admit one chunk against robots, dedupe, and the page cap."""
+    reserved = pass_.reserved
+    accepted = 0
+    robots_blocked = 0
+    duplicates_skipped = 0
+    occupied_delta = 0
+    if reserved:
+        before = len(chunk)
+        chunk = [c for c in chunk if c.normalized_url not in reserved]
+        duplicates_skipped += before - len(chunk)
+        if not chunk:
+            return _ChunkOutcome(accepted, robots_blocked, duplicates_skipped, False, False, 0)
+    if pass_.respect_robots:
+        allowed_values = await _gather_robots_allowed(
+            [candidate.normalized_url for candidate in chunk], pass_.robots_allows
+        )
+    else:
+        allowed_values = [True] * len(chunk)
+    for candidate, allowed in zip(chunk, allowed_values, strict=True):
+        if not allowed:
+            robots_blocked += 1
+            continue
+        # `reserved` can grow inside this loop, so two aliases within one chunk
+        # are caught here too, and the crawl-delay check is a robots artifact.
+        if candidate.normalized_url in reserved:
+            duplicates_skipped += 1
+            continue
+        if pass_.respect_robots and pass_.robots_crawl_delay is not None:
+            delay = await pass_.robots_crawl_delay(candidate.normalized_url)
+            if delay is not None and delay > 0:
+                pass_.commit_crawl_delay(candidate.normalized_url.host, delay)
+        if candidate.normalized_url in reserved:
+            continue
+        capacity = remaining_page_capacity(current_occupied + occupied_delta, pass_.max_pages)
+        if capacity is not None and capacity <= 0:
+            return _ChunkOutcome(accepted, robots_blocked, duplicates_skipped, True, True, occupied_delta)
+        pass_.frontier.append(pass_.make_entry(candidate))
+        accepted += 1
+        reserved.add(candidate.normalized_url)
+        if pass_.reserve_admitted:
+            pass_.known.add(candidate.normalized_url)
+        occupied_delta += 1
+    return _ChunkOutcome(accepted, robots_blocked, duplicates_skipped, False, False, occupied_delta)
+
+
+async def _admission_loop[T](
+    pass_: _AdmissionPass[T],
+    candidates: Iterator[AdmittedLink],
+) -> tuple[int, bool, int, int]:
+    """Consume the candidate stream chunk by chunk; returns the running tally."""
+    current_occupied = len(pass_.reserved)
+    accepted = 0
+    cap_blocked = False
+    robots_blocked = 0
+    duplicates_skipped = 0
+    stopped = False
+    while not stopped:
+        capacity = remaining_page_capacity(current_occupied, pass_.max_pages)
+        chunk_limit = _ROBOTS_ADMISSION_CHUNK_SIZE
+        if capacity is not None:
+            chunk_limit = min(chunk_limit, max(1, capacity + 1))
+        chunk = _collect_chunk(candidates, chunk_limit)
+        if not chunk:
+            break
+        outcome = await _admit_chunk(pass_, chunk, current_occupied=current_occupied)
+        accepted += outcome.accepted
+        robots_blocked += outcome.robots_blocked
+        duplicates_skipped += outcome.duplicates_skipped
+        cap_blocked = cap_blocked or outcome.cap_blocked
+        stopped = stopped or outcome.stopped
+        current_occupied += outcome.occupied_delta
+    return accepted, cap_blocked, robots_blocked, duplicates_skipped
+
+
 async def admit_discovered_links[T](
     links: Iterable[Any],
     *,
@@ -100,87 +250,30 @@ async def admit_discovered_links[T](
 ) -> AdmissionOutcome:
     if source_depth >= max_depth:
         return AdmissionOutcome()
-    next_depth = source_depth + 1
-    reserved: set[NormalizedUrl] = set(known)
-    for value in frontier:
-        identity = frontier_identity(value, host_policy=host_policy)
-        if identity is not None:
-            reserved.add(identity)
-    # Occupation is this set's size, never a caller's arithmetic: known ∪
-    # frontier is committed + in-flight + queued, so a hand-passed count was blind.
-    current_occupied = len(reserved)
-    accepted = 0
-    cap_blocked = False
-    robots_blocked = 0
-    duplicates_skipped = 0
-    stopped = False
-    candidates = iter(
-        _candidate_stream(
-            links,
-            next_depth=next_depth,
-            known=known,
-            scope_pattern=scope_pattern,
-            want_document_bodies=want_document_bodies,
-            host_policy=host_policy,
-        )
+    reserved, _occupied, candidates = _prepare_admission(
+        links,
+        known=known,
+        frontier=frontier,
+        next_depth=source_depth + 1,
+        scope_pattern=scope_pattern,
+        want_document_bodies=want_document_bodies,
+        host_policy=host_policy,
     )
-    while not stopped:
-        capacity = remaining_page_capacity(current_occupied, max_pages)
-        chunk_limit = _ROBOTS_ADMISSION_CHUNK_SIZE
-        if capacity is not None:
-            chunk_limit = min(chunk_limit, max(1, capacity + 1))
-        chunk: list[AdmittedLink] = []
-        for _ in range(chunk_limit):
-            try:
-                chunk.append(next(candidates))
-            except StopIteration:
-                break
-        if not chunk:
-            break
-        # Drop already-admitted identities BEFORE per-candidate work, or a
-        # duplicate alias pays a robots fetch and a crawl-delay commit for nothing.
-        if reserved:
-            before = len(chunk)
-            chunk = [candidate for candidate in chunk if candidate.normalized_url not in reserved]
-            duplicates_skipped += before - len(chunk)
-            if not chunk:
-                continue
-        if respect_robots:
-            allowed_values = await _gather_robots_allowed(
-                [candidate.normalized_url for candidate in chunk], robots_allows
-            )
-        else:
-            allowed_values = [True] * len(chunk)
-        for candidate, allowed in zip(chunk, allowed_values, strict=True):
-            if not allowed:
-                robots_blocked += 1
-                continue
-            # `reserved` can grow inside this loop (an accepted candidate is
-            # reserved), so two aliases within one chunk are caught here too.
-            if candidate.normalized_url in reserved:
-                duplicates_skipped += 1
-                continue
-            delay = None
-            # The crawl-delay lookup is a robots artifact: with robots disabled it
-            # must not run, or a crawl still fetches /robots.txt for a delay.
-            if respect_robots and robots_crawl_delay is not None:
-                delay = await robots_crawl_delay(candidate.normalized_url)
-            if delay is not None and delay > 0:
-                commit_crawl_delay(candidate.normalized_url.host, delay)
-            if candidate.normalized_url in reserved:
-                continue
-            capacity = remaining_page_capacity(current_occupied, max_pages)
-            if capacity is not None and capacity <= 0:
-                cap_blocked = True
-                stopped = True
-                break
-            entry = make_entry(candidate)
-            frontier.append(entry)
-            accepted += 1
-            reserved.add(candidate.normalized_url)
-            if reserve_admitted:
-                known.add(candidate.normalized_url)
-            current_occupied += 1
+    admission_pass = _AdmissionPass(
+        robots_allows=robots_allows,
+        respect_robots=respect_robots,
+        robots_crawl_delay=robots_crawl_delay,
+        commit_crawl_delay=commit_crawl_delay,
+        max_pages=max_pages,
+        reserved=reserved,
+        known=known,
+        frontier=frontier,
+        make_entry=make_entry,
+        reserve_admitted=reserve_admitted,
+    )
+    accepted, cap_blocked, robots_blocked, duplicates_skipped = await _admission_loop(
+        admission_pass, candidates
+    )
     return AdmissionOutcome(
         accepted=accepted,
         cap_blocked=cap_blocked,
