@@ -333,6 +333,16 @@ def test_pool_exhaustion_catch_detector_bites():
     POOL_EXHAUSTION_CATCH_SITES_ARE_SANCTIONED.check_bites()
 
 
+def test_status_resolver_lives_in_the_vocabulary_home():
+    """status_for_classification is defined once, in the taxonomy module."""
+    for path, tree in app_trees(exclude=SANCTIONED | frozenset({"taxonomy.py"})):
+        for node in functions(tree):
+            if node.name == "status_for_classification":
+                raise AssertionError(
+                    offender_at(path, node, "status_for_classification defined outside the taxonomy module")
+                )
+
+
 def test_classifier_lives_in_the_neutral_home():
     """classify_error_code must be defined in the classification module, not
     re-defined in a strategy module (the old site, http.py, forced browser.py

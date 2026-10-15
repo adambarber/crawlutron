@@ -20,7 +20,7 @@ import logging
 
 import pytest
 
-from app.main import _warn_if_bound_off_loopback
+from app.main import warn_if_bound_off_loopback
 
 # Addresses a request can never leave the machine over. The whole 127/8 block qualifies, not just 127.0.0.1: a
 # deployment that binds 127.0.0.53 is still loopback-only and should not be told it is exposed.
@@ -32,14 +32,14 @@ ROUTABLE = ["0.0.0.0", "::", "10.0.0.5", "192.168.1.10", "example.internal"]
 @pytest.mark.parametrize("host", LOOPBACK)
 def test_loopback_bind_says_nothing(caplog, host):
     with caplog.at_level(logging.WARNING):
-        _warn_if_bound_off_loopback(host)
+        warn_if_bound_off_loopback(host)
     assert caplog.records == [], f"{host} is loopback-only and warned anyway: {caplog.text}"
 
 
 @pytest.mark.parametrize("host", ROUTABLE)
 def test_routable_bind_warns_that_nothing_authenticates_the_caller(caplog, host):
     with caplog.at_level(logging.WARNING):
-        _warn_if_bound_off_loopback(host)
+        warn_if_bound_off_loopback(host)
 
     assert caplog.records, f"{host} is routable and startup said nothing"
     message = caplog.text
@@ -55,6 +55,6 @@ def test_a_bind_the_check_cannot_classify_is_treated_as_exposed(caplog, host):
     """Fail closed: an address this code cannot classify is not one it has any
     reason to believe is private."""
     with caplog.at_level(logging.WARNING):
-        _warn_if_bound_off_loopback(host)
+        warn_if_bound_off_loopback(host)
 
     assert caplog.records, f"{host!r} was assumed to be loopback"

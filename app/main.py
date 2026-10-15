@@ -115,7 +115,7 @@ logger = configure_service_logging(
 logging.getLogger("trafilatura").setLevel(logging.ERROR)
 
 
-def _warn_if_bound_off_loopback(host: str) -> None:
+def warn_if_bound_off_loopback(host: str) -> None:
     """Say so at startup when the API is reachable from off the machine.
 
     Nothing authenticates a caller here: every ``Authorization`` header in the
@@ -164,7 +164,7 @@ if FastAPI is not None:
 
         # Before anything is listening: the exposure is a property of the bind,
         # true from the first moment, so stated before the first request.
-        _warn_if_bound_off_loopback(settings.host)
+        warn_if_bound_off_loopback(settings.host)
 
         # One browser pool only: initialized here, reached via get_browser_pool(),
         # with no second pool global.

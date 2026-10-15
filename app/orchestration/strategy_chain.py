@@ -87,7 +87,7 @@ def _assert_strategy_names_agree() -> None:
 _assert_strategy_names_agree()
 
 
-def _starting_strategies(
+def starting_strategies(
     strategies: Iterable[CrawlStrategy],
     scheduler: DomainScheduler | None,
     domain: str,
@@ -321,7 +321,7 @@ async def execute_crawl_chain(
         global_concurrency=global_concurrency,
     )
     run = _ChainRun(context, _ChainState(attempts=[]))
-    for strategy in _starting_strategies(context.policy.strategies, context.scheduler, context.domain):
+    for strategy in starting_strategies(context.policy.strategies, context.scheduler, context.domain):
         result = await run.execute(strategy)
         run.record(strategy, result)
         if result.classification in BLOCKED_CLASSIFICATIONS:

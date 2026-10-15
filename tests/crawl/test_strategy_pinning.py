@@ -4,10 +4,10 @@ from __future__ import annotations
 
 from app.models.crawl_strategy import CrawlStrategy
 from app.orchestration.scheduler import DomainScheduler
-from app.orchestration.strategy_chain import _starting_strategies
+from app.orchestration.strategy_chain import starting_strategies
 from app.vocabulary.strategies import BROWSER_HEADLESS, HTTP_CFFI_IMPERSONATE, HTTP_DECLARED_CRAWLER
 
-# The policy ladder as the enum members `_starting_strategies` validates, not as the bare name strings.
+# The policy ladder as the enum members `starting_strategies` validates, not as the bare name strings.
 LADDER: list[CrawlStrategy] = [
     CrawlStrategy(HTTP_DECLARED_CRAWLER),
     CrawlStrategy(HTTP_CFFI_IMPERSONATE),
@@ -43,7 +43,7 @@ class TestStrategyPinning:
 
 
 class TestExecuteCrawlChainPinning:
-    """Where ``_starting_strategies`` puts the ladder start.
+    """Where ``starting_strategies`` puts the ladder start.
 
     These call the production slice rather than restating it. A restatement is
     a tautology: it keeps passing when production's pinning is deleted, which is
@@ -54,13 +54,13 @@ class TestExecuteCrawlChainPinning:
         """When a domain is pinned, the chain should start at that strategy."""
         scheduler = _scheduler()
         scheduler.set_pinned_strategy("example.com", BROWSER_HEADLESS)
-        assert _starting_strategies(LADDER, scheduler, "example.com") == [BROWSER_HEADLESS]
+        assert starting_strategies(LADDER, scheduler, "example.com") == [BROWSER_HEADLESS]
 
     def test_chain_starts_at_cffi_when_pinned(self) -> None:
         """When pinned to CFFI, chain should start at CFFI (skip HTTP_DECLARED_CRAWLER)."""
         scheduler = _scheduler()
         scheduler.set_pinned_strategy("example.com", HTTP_CFFI_IMPERSONATE)
-        assert _starting_strategies(LADDER, scheduler, "example.com") == [
+        assert starting_strategies(LADDER, scheduler, "example.com") == [
             HTTP_CFFI_IMPERSONATE,
             BROWSER_HEADLESS,
         ]
@@ -68,7 +68,7 @@ class TestExecuteCrawlChainPinning:
     def test_no_pin_starts_at_beginning(self) -> None:
         """When no pin, chain starts at the beginning."""
         scheduler = _scheduler()
-        assert _starting_strategies(LADDER, scheduler, "example.com") == LADDER
+        assert starting_strategies(LADDER, scheduler, "example.com") == LADDER
 
     def test_pin_not_in_policy_starts_at_beginning(self) -> None:
         """When pinned strategy is not in policy, chain starts at beginning."""
@@ -76,11 +76,11 @@ class TestExecuteCrawlChainPinning:
         scheduler.set_pinned_strategy("example.com", BROWSER_HEADLESS)
         # Policy without browser (e.g., HTTP-only job)
         http_only = [CrawlStrategy(HTTP_DECLARED_CRAWLER), CrawlStrategy(HTTP_CFFI_IMPERSONATE)]
-        assert _starting_strategies(http_only, scheduler, "example.com") == http_only
+        assert starting_strategies(http_only, scheduler, "example.com") == http_only
 
     def test_no_scheduler_starts_at_beginning(self) -> None:
         """With no scheduler there is no pin to honour."""
-        assert _starting_strategies(LADDER, None, "example.com") == LADDER
+        assert starting_strategies(LADDER, None, "example.com") == LADDER
 
 
 class TestSchedulerPinningIsolation:

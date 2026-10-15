@@ -16,29 +16,14 @@ DECLARED: dict[str, Declaration] = {
         _LIFECYCLE_DRAIN_PENDING_CLIENT_CLOSES.reason,
         ["app"],
     ),
-    "app.transport.pooled_clients._NoStoreCookieJar": _d(
-        "unreviewed",
-        "Not yet triaged.\n",
-        ["test"],
-    ),
     "app.transport.fetchers._release_stream_noblock": _SUBSTITUTED_COLLABORATOR,
     "app.transport.pinned_transport._http_413": _d(
         "unreviewed",
         "Not yet triaged.\n",
         ["app"],
     ),
-    "app.orchestration.strategy_chain._starting_strategies": _d(
-        "unreviewed",
-        "Not yet triaged.\n",
-        ["test"],
-    ),
     "app.runtime.logging_config._BC_OWNED_HANDLER": _d(
         _CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]
-    ),
-    "app.main._warn_if_bound_off_loopback": _d(
-        "unreviewed",
-        "Not yet triaged.\n",
-        ["test"],
     ),
     "app.models.registrable_domain._PSL": _d(_CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]),
     "app.search.providers._provider_http": _d(

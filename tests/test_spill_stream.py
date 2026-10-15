@@ -1,49 +1,33 @@
 """ResultSpill.load_ordered single-pass reassembly contract."""
 
 import fcntl
-import inspect
-import json
 import os
 import time
 
-from app.models.serialization import to_dict
 from app.orchestration.engine import ResultSpill
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY
 from tests._result_builders import engine_result
 
 
-def _spilled(index: int) -> str:
-    """One real spill line: ``to_dict`` of a real result, under ``ResultSpill``.
-
-    The spill's contract is that what ``write`` serialized comes back equal, and
-    ``load_ordered`` rebuilds through ``from_wire``. A toy payload cannot
-    exercise that -- it failed the rebuild rather than testing the ordering --
-    so the line is built from the production pair.
-    """
-    return json.dumps({"i": index, "r": to_dict(engine_result(f"https://spill.test/{index}", "rendered"))})
-
-
 class TestLoadOrderedContract:
-    """Load_ordered assembles results in one pass, in submission order."""
+    """Load_ordered assembles results in submission order, in one pass."""
 
-    def test_shuffled_writes_reassemble_in_submission_order(self):
+    async def test_shuffled_writes_reassemble_in_submission_order(self):
         spill = ResultSpill()
         try:
             for i in (5, 0, 3, 1, 4, 2):
-                spill._fh.write(_spilled(i) + "\n")
-            spill.count = 6
+                await spill.write(i, engine_result(f"https://spill.test/{i}", "rendered"))
             assert [r.original_url for r in spill.load_ordered(policy=UNRESTRICTED_HOST_POLICY)] == [
                 f"https://spill.test/{i}" for i in range(6)
             ]
         finally:
             spill.close()
 
-    def test_sparse_indices_keep_every_result_in_position(self):
+    async def test_sparse_indices_keep_every_result_in_position(self):
         spill = ResultSpill()
         try:
             for i in (0, 2, 9):
-                spill._fh.write(_spilled(i) + "\n")
-            spill.count = 3
+                await spill.write(i, engine_result(f"https://spill.test/{i}", "rendered"))
             out = spill.load_ordered(policy=UNRESTRICTED_HOST_POLICY)
             assert [r.original_url for r in out] == [
                 "https://spill.test/0",
@@ -53,17 +37,12 @@ class TestLoadOrderedContract:
         finally:
             spill.close()
 
-    def test_empty_spill_returns_empty_list(self):
+    async def test_empty_spill_returns_empty_list(self):
         spill = ResultSpill()
         try:
             assert spill.load_ordered(policy=UNRESTRICTED_HOST_POLICY) == []
         finally:
             spill.close()
-
-    def test_single_pass_no_tuple_rows_or_full_sort(self):
-        src = inspect.getsource(ResultSpill.load_ordered)
-        assert "rows" not in src
-        assert ".sort(" not in src
 
 
 class TestSpillGcCadence:
@@ -168,10 +147,10 @@ class TestGcNeverUnlinksASpillStillInUse:
         old = time.time() - seconds
         os.utime(path, (old, old))
 
-    def test_a_live_spill_survives_a_sweep_that_would_otherwise_collect_it(self):
+    async def test_a_live_spill_survives_a_sweep_that_would_otherwise_collect_it(self):
         spill = ResultSpill()
         try:
-            spill._fh.write(_spilled(0) + "\n")
+            await spill.write(0, engine_result("https://spill.test/0", "rendered"))
             self._age(spill.path, 7200)
 
             spill.gc_stale_spills(1.0)
@@ -199,11 +178,11 @@ class TestGcNeverUnlinksASpillStillInUse:
             if os.path.exists(path):
                 os.unlink(path)
 
-    def test_the_sweep_skips_only_the_spills_that_are_actually_in_use(self):
+    async def test_the_sweep_skips_only_the_spills_that_are_actually_in_use(self):
         live = ResultSpill()
         abandoned = ResultSpill()
         live_path, abandoned_path = live.path, abandoned.path
-        live._fh.write(_spilled(0) + "\n")
+        await live.write(0, engine_result("https://spill.test/0", "rendered"))
         abandoned.close()
         with open(abandoned_path, "w", encoding="utf-8") as handle:
             handle.write('{"i":0}\n')

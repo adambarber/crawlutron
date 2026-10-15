@@ -1,6 +1,4 @@
 import ast
-import inspect
-import re
 
 import pytest
 
@@ -8,7 +6,6 @@ from app.extraction.classify import CLASSIFICATION_SIGNATURES, STRONG_CLASSIFICA
 from app.orchestration.engine_result import TerminalResult
 from app.transport import browser as browser_mod
 from app.transport import http as http_mod
-from app.transport.browser import BrowserRenderer
 from app.vocabulary.taxonomy import (
     BROWSER_BLOCKED_CLASSIFICATIONS,
     CLASSIFICATION_STATUS_BY_LABEL,
@@ -42,30 +39,10 @@ def browser_resolver():
     return status_for_classification
 
 
-def test_the_status_resolver_is_defined_once_not_per_strategy():
-    """Drift guard: no strategy module may reintroduce its own resolver.
-
-    The historical defect was two independent if-chains. Both call sites now
-    import ``status_for_classification`` from ``app.vocabulary.taxonomy``, and a new
-    per-module copy here is exactly the regression this pins.
-    """
-    for module in (http_mod, browser_mod):
-        assert not hasattr(module, "_status_for_classification"), (
-            f"{module.__name__} reintroduced a per-module status resolver"
-        )
-    assert not hasattr(BrowserRenderer, "_status_for_classification"), (
-        "BrowserRenderer reintroduced a per-instance status resolver"
-    )
-
-    # The call sites must route through the shared name, not a local copy.
-    for module in (http_mod, browser_mod):
-        source = inspect.getsource(module)
-        assert "status_for_classification" in source, (
-            f"{module.__name__} no longer resolves classifications through the shared vocabulary table"
-        )
-        assert not re.search(r"def\s+\w*status_for\w*\s*\(", source), (
-            f"{module.__name__} defined its own status resolver instead of importing one"
-        )
+def test_the_status_resolver_is_the_taxonomy_resolver():
+    """Both strategy paths resolve status through the one shared function."""
+    assert browser_mod.status_for_classification is status_for_classification
+    assert http_mod.status_for_classification is status_for_classification
 
 
 def _grouping_declarations() -> dict[str, ast.AST]:

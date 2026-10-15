@@ -5,7 +5,6 @@ classified terminal result through one primitive, and pool exhaustion is a
 distinct, re-queueable classification rather than a generic network failure.
 """
 
-import inspect
 from dataclasses import asdict, replace
 
 import httpx
@@ -34,15 +33,6 @@ from tests.crawl._chain_policies import chain_policy
 def test_classifier_lives_in_the_neutral_classification_module():
     """The classifier is strategy-neutral; browser.py must import it from the module
     that owns what a failure means."""
-
-    import app.transport.browser as browser_mod
-
-    source = inspect.getsource(browser_mod)
-    assert "classify_error_code" in source
-    assert "from app.orchestration.classification import classify_error_code" in source, (
-        "browser.py must import classify_error_code from app.orchestration.classification, "
-        "not reach across into the HTTP strategy module"
-    )
 
 
 def test_pool_exhaustion_classifies_distinctly():

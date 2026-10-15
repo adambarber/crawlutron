@@ -296,17 +296,8 @@ class TestOutputFormatsEdges:
 class TestTheSerializerCoversTheVocabulary:
     """Admission and dispatch must be the same decision, and they were not.
 
-    ``serialize_results`` admits on ``fmt not in SUPPORTED_OUTPUT_FORMATS`` and
-    then dispatches through a chain of its own. Every copy of the set was pinned
-    by some test, so a naive edit fails somewhere -- but a *coordinated* edit
-    that adds a format to the annotation, the set, and both test copies while
-    writing no branch lands green, and the first caller who names the new format
-    gets ``unsupported_output_format`` from the terminal raise instead of a
-    serialized page.
-
-    That gap is a property of the two blocks, not of any one of them, so it is
-    asserted here against the function's own AST.
-    """
+    Calling the serializer with every admitted format exercises the branch a
+    caller would: a format with no branch hits the terminal raise."""
 
     @staticmethod
     def _dispatched_formats() -> set[str]:
@@ -343,11 +334,12 @@ class TestTheSerializerCoversTheVocabulary:
                     )
         return dispatched
 
-    def test_every_admitted_format_has_a_branch(self):
-        from app.extraction.output_formats import SUPPORTED_OUTPUT_FORMATS
+    def test_every_admitted_format_actually_serializes(self):
+        from app.extraction.output_formats import SUPPORTED_OUTPUT_FORMATS, serialize_results
 
-        dispatched = self._dispatched_formats()
-        assert dispatched == set(SUPPORTED_OUTPUT_FORMATS), (
-            f"admitted without a serializer branch: {set(SUPPORTED_OUTPUT_FORMATS) - dispatched}; "
-            f"branched but not admitted: {dispatched - set(SUPPORTED_OUTPUT_FORMATS)}"
-        )
+        results = [{"original_url": "http://x/", "status": "success", "text": "content"}]
+        for fmt in SUPPORTED_OUTPUT_FORMATS:
+            body, media_type = serialize_results(results, fmt)
+            # A branchless admitted format raises on the call a caller would make.
+            assert body and "http://x/" in body, f"{fmt}: serializer branch did not run"
+            assert media_type, f"{fmt}: no media type"

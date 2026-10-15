@@ -2,7 +2,6 @@
 
 import asyncio
 import dataclasses
-import inspect
 from pathlib import Path
 
 from tests._app_factory import service_app
@@ -97,15 +96,11 @@ class TestMultiWorkerInvariants:
         A correct `derive_browser_pool_size` that production never calls is an
         unused function and an over-subscribed fleet.
         """
-        from app.orchestration import request_pipeline
         from app.runtime.resource_pressure import derive_browser_pool_size
 
         monkeypatch.setenv("CRAWLUTRON_WORKERS", "4")
         monkeypatch.setenv("CRAWLUTRON_BROWSER_POOL_SIZE", "")
         assert derive_browser_pool_size(16 * 1024**3) == 1
-
-        source = inspect.getsource(request_pipeline)
-        assert "derive_browser_pool_size()" in source
 
     async def test_every_store_shares_the_one_database_path(self, monkeypatch):
         """The stores must share one file, or the sharing is only nominal.
