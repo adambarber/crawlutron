@@ -1,6 +1,6 @@
 """Unit tests for the shared manual-redirect decision helper (both fetchers)."""
 
-from app.transport.pinned_transport import _MAX_REDIRECT_HOPS, _redirect_target
+from app.transport.pinned_transport import MAX_REDIRECT_HOPS, _redirect_target
 from tests._policy_factories import canonical
 
 
@@ -15,7 +15,7 @@ def test_redirect_target_none_on_terminal_status():
 
 
 def test_redirect_target_none_when_hop_budget_exhausted():
-    assert _redirect_target(canonical("http://a.com/"), {}, 301, "/y", _MAX_REDIRECT_HOPS) is None
+    assert _redirect_target(canonical("http://a.com/"), {}, 301, "/y", MAX_REDIRECT_HOPS) is None
 
 
 def test_redirect_target_strips_sensitive_headers_cross_host():

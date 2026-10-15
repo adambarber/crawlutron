@@ -27,9 +27,6 @@ DECLARED: dict[str, Declaration] = {
         ["test"],
     ),
     "app.transport.fetchers._release_stream_noblock": _SUBSTITUTED_COLLABORATOR,
-    "app.transport.pinned_transport._MAX_REDIRECT_HOPS": _d(
-        _CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]
-    ),
     "app.transport.pinned_transport._declared_length_exceeds": _d(
         "unreviewed",
         "Not yet triaged.\n",

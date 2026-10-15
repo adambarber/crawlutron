@@ -107,11 +107,11 @@ async def test_redirect_loop_is_bounded_by_hop_limit(monkeypatch):
         monkeypatch,
         [
             MockResponse(302, {"location": "http://a.example/"})
-            for _ in range(pinned_mod._MAX_REDIRECT_HOPS + 1)
+            for _ in range(pinned_mod.MAX_REDIRECT_HOPS + 1)
         ],
     )
     result = await run_default_http_fetcher("http://public.example/", pin=_allow_every_host())
 
     # Terminates at the hop cap and returns the last 302 rather than looping.
     assert result.status_code == 302
-    assert len(requested) == pinned_mod._MAX_REDIRECT_HOPS + 1
+    assert len(requested) == pinned_mod.MAX_REDIRECT_HOPS + 1

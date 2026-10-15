@@ -253,7 +253,7 @@ def _off_loop[**P, R](resolve: Callable[[], Callable[P, R]]) -> Callable[P, Awai
 build_pinned_request_async = _off_loop(lambda: build_pinned_request)
 
 
-_MAX_REDIRECT_HOPS = 5
+MAX_REDIRECT_HOPS = 5
 
 _REDIRECT_STATUSES = frozenset((301, 302, 303, 307, 308))
 
@@ -289,7 +289,7 @@ def _redirect_target(
     https-to-http downgrade, which the host comparison missed in the
     direction where it matters most.
     """
-    if status_code not in _REDIRECT_STATUSES or not location or hops >= _MAX_REDIRECT_HOPS:
+    if status_code not in _REDIRECT_STATUSES or not location or hops >= MAX_REDIRECT_HOPS:
         return None
     new_url = current_url.resolve(location)
     if new_url is None:
