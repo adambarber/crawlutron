@@ -24,12 +24,8 @@ from tests.test_jscpd_gate import (
 def test_migrations_exclusion_is_a_directory_glob_so_new_migrations_are_covered() -> None:
     """The exclusion is a subtree, not a list of today's migration files.
 
-    `0001_crawl_jobs_initial.py` and `0001_results_initial.py` are flagged as an
-    8L/31T clone, and that is the correct shape: migrations are replayed by name
-    and two files creating parallel tables is what they are for. A per-file glob
-    would need editing every time a migration lands, which is the failure mode
-    this whole config is now gated against.
-    """
+    Two parallel-table migrations flag as a clone at 8L/31T, rightly; a
+    per-file glob would need editing every time one lands."""
     assert "**/app/storage/migrations/**" in gate.SANCTIONED_IGNORE_GLOBS
     configured = json.loads(gate.CONFIG_PATH.read_text(encoding="utf-8"))["ignore"]
     assert "**/app/storage/migrations/**" in configured
@@ -37,21 +33,8 @@ def test_migrations_exclusion_is_a_directory_glob_so_new_migrations_are_covered(
 
 def test_migrations_clones_are_not_reported_but_production_clones_are(monkeypatch, tmp_path, capsys) -> None:
     """One real scan of a mirrored tree, two planted clones: the migrations copy
-    is invisible, the production copy is not. Both plants are files this config
-    never names, so this also proves a migration added tomorrow is covered by
-    the glob.
-
-    The tree is mirrored rather than borrowed, and that is not a convenience.
-    This test used to plant the pair at fixed paths in the LIVE `app/` tree and
-    unlink them in a `finally`, which made the production tree a directory that
-    moves while a suite runs: every concurrent walk of `app/` became a
-    list-then-read race, and with 6 concurrent copies of this file against 6
-    concurrent copies of tests/invariants/, 10 tests died with
-    `FileNotFoundError: .../app/storage/migrations/zz_probe_clone.py` -- the
-    tree-wide chokepoint detectors among them, which then reported nothing for
-    the whole run while looking green. The glob under test is about path SHAPE,
-    so a mirror with the same relative layout is what this needs anyway.
-    """
+    is invisible, the production copy is not. The mirror -- not the live app --
+    stops concurrent walks from racing the real tree."""
     payload = (gate.SERVICE_ROOT / PROBE_SOURCE).read_text(encoding="utf-8")
     assert len(payload.splitlines()) >= 8, "the probe needs a clone big enough to clear the floor"
 
@@ -101,14 +84,10 @@ def test_python_source_globs_are_never_a_sanctioned_exception(glob) -> None:
     ids=["maxLines", "skipLocal"],
 )
 def test_jscpd_json_rejects_unknown_keys(tmp_path, unsanctioned) -> None:
-    """Bites: only `ignore` is allowed in .jscpd.json.
+    """Bites: only ``ignore`` is allowed in .jscpd.json.
 
-    The measured masking, and the reason the check runs before any scan, are
-    recorded on ``gate._validate_scan_config`` -- restating them here is a
-    second copy to go stale. This test only pins the rejection, and takes its
-    cases as a table because the one thing every unsanctioned key has in common
-    is being unsanctioned -- which is the rule, spelled once.
-    """
+    The measured masking and the reason the check runs first live on
+    ``gate._validate_scan_config``; this pins the rejection, case-tabled."""
     config = tmp_path / "jscpd.json"
     config.write_text(
         json.dumps({"ignore": gate.SANCTIONED_IGNORE_GLOBS, **unsanctioned}),
@@ -131,14 +110,8 @@ def test_jscpd_json_accepts_only_ignore(tmp_path) -> None:
 def test_the_test_suite_reads_the_floor_the_hook_runs() -> None:
     """The argv these tests gate on is the hook's own floor, not a copy of it.
 
-    Four spellings of 4/39 used to exist -- the hook entry, the hook's name, this
-    module's ``_args_for`` default, and this module's ``_GATE_ARGV`` -- with
-    nothing comparing them. The failure that shape hides is not a wrong number, it
-    is a green suite: every test here would keep passing against 4/39 while
-    commits were gated at whatever the config said, so the suite would vouch for a
-    floor that was no longer enforced. Asserting the argv against the config is
-    what turns the copy into a derived value.
-    """
+    Four spellings of 4/39 used to exist with nothing comparing them; deriving
+    the argv from the config kills the green-suite-against-a-different-floor lie."""
     argv = _GATE_ARGV
     assert (argv[argv.index("--min-lines") + 1], argv[argv.index("--min-tokens") + 1]) == (
         str(_CONFIGURED_MIN_LINES),
@@ -150,12 +123,8 @@ def test_the_test_suite_reads_the_floor_the_hook_runs() -> None:
 def test_a_laxer_floor_is_refused_because_it_cannot_report_the_truth() -> None:
     """A run handed a looser floor than the hook enforces fails instead of passing.
 
-    A duplication gate's number is a command-line argument, so "run it at 8/40" is
-    one flag away from the enforced value and returns a genuinely clean result for
-    the floor that was asked for. Reporting that as a pass is the whole hazard: the
-    output is true and the conclusion is wrong. Only laxer is refused -- scanning
-    stricter than the hook is how a candidate floor gets measured before adoption.
-    """
+    The floor is a CLI argument, so a lax run returns a genuinely clean result
+    for what was asked -- true output, wrong conclusion. Only laxer is refused."""
     laxer = _args_for(
         min_lines=_CONFIGURED_MIN_LINES + 1,
         min_tokens=_CONFIGURED_MIN_TOKENS + 1,
@@ -175,16 +144,8 @@ def test_the_enforced_floor_and_a_stricter_one_are_both_accepted() -> None:
 def test_a_floor_the_hook_does_not_state_is_unreadable_rather_than_defaulted(monkeypatch, tmp_path) -> None:
     """Bites: a hook entry missing a threshold raises instead of reading as one.
 
-    The failure this guards is a silent one. If an unreadable floor fell back to a
-    default, the gate would go on comparing clones against a number the config
-    stopped stating, and the guard refusing lax runs would refuse them against that
-    same phantom value -- two checks agreeing on a floor nobody chose.
-
-    The stripped copy is written to ``tmp_path`` and the module is pointed at it,
-    because the alternative -- editing the real config to observe that it becomes
-    unreadable -- leaves the repository one failed test away from a gate that
-    cannot name its own floor.
-    """
+    A fallback default would let two checks agree on a floor nobody chose; the
+    stripped copy lives in ``tmp_path``, never in the real config."""
     stripped = (tmp_path / "config.yaml").write_text(
         gate.PRECOMMIT_CONFIG_PATH.read_text(encoding="utf-8").replace(
             f"--min-tokens {_CONFIGURED_MIN_TOKENS}",
@@ -202,21 +163,8 @@ def test_a_floor_the_hook_does_not_state_is_unreadable_rather_than_defaulted(mon
 def test_every_sanctioned_pair_names_a_guard_that_exists_and_pins_its_fragment() -> None:
     """The baseline is load-bearing: a sanction is a guard, not a comment.
 
-    A sanction is a standing licence to duplicate, so the baseline is empty and
-    that is the claim being asserted. The two pairs it held were the fetcher
-    contract and the selector pair, each of which existed only because a
-    machine-checked guard required two spellings of one contract; both were
-    consolidated, so the licence is no longer needed and is withdrawn rather than
-    left in place for the next duplicate to hide behind.
-
-    The loop is the other half and is what fires if a pair is ever sanctioned
-    again: a sanction whose guard test was renamed or deleted would leave the copy
-    unchecked and the gate green, which is the shape of drift this whole program
-    is closing. The hash is what makes a baseline entry a claim about today's
-    code -- change either side of a pair and the recorded hash stops matching, so
-    the entry fails as unsanctioned rather than continuing to vouch for a fragment
-    that no longer exists.
-    """
+    Empty today -- the pairs it held were consolidated. A future sanction must
+    name a guard test that exists and a hash matching today's fragment."""
     sanctioned = [pair["id"] for pair in res._expected_pairs()]
     assert not sanctioned, (
         f"duplicate pairs are sanctioned again: {sanctioned}. A sanction is a standing licence "
@@ -239,13 +187,8 @@ def test_every_sanctioned_pair_names_a_guard_that_exists_and_pins_its_fragment()
 def test_a_fragment_of_imports_alone_is_a_shared_vocabulary_not_a_clone() -> None:
     """Two modules importing the same names is the one identical text that cannot drift.
 
-    Python resolves each module's own namespace, so there is no third module that
-    could hold these imports for both, no chokepoint to extract, and no rule for
-    the two lists to disagree about. At the enforced floor four such lines clear
-    the threshold, so a package whose records each import their own taxonomy
-    reported clones forever -- the one shape of duplication that carrying no
-    information about where a chokepoint is missing.
-    """
+    No third module could hold the imports, so there is no chokepoint to extract
+    and no rule they could disagree about; four such lines clear the floor."""
     imports = """from app.vocabulary.taxonomy import ResultStatus
 from app.models.crawl_job import CrawlJob
 from app.models.crawl_result import CrawlResult
@@ -257,10 +200,8 @@ from app.models.crawl_worker import CrawlWorker
 def test_one_line_of_code_between_two_import_runs_keeps_the_pair_under_judgement() -> None:
     """The filter admits a fragment only when EVERY line is an import.
 
-    The duplication this gate exists to find begins at the first line of real
-    code, so a fragment that mixes an import run with a body is exactly the
-    case that must stay visible -- including when the body is only a signature.
-    """
+    The duplication under test begins at the first line of real code, so a
+    fragment mixing an import run with a body -- even a signature -- stays visible."""
     fragment = """from app.vocabulary.taxonomy import ResultStatus
 from app.models.crawl_result import CrawlResult
 
@@ -273,10 +214,8 @@ def build(status: ResultStatus) -> CrawlResult:
 def test_a_parenthesised_import_is_still_a_declaration() -> None:
     """A wrapped import is one declaration spread over lines, not several.
 
-    Reading each physical line separately would see ``Classification,`` -- which
-    matches no import form -- and drop a fragment that is nothing but imports,
-    reinstating the noise the filter exists to remove.
-    """
+    Reading physical lines would see ``Classification,`` -- matching no import
+    form -- and drop a fragment that is nothing but imports."""
     fragment = """from app.models.taxonomy import (
     Classification,
     CrawlError,
@@ -287,14 +226,10 @@ def test_a_parenthesised_import_is_still_a_declaration() -> None:
 
 
 def test_a_fragment_ending_inside_an_open_import_is_still_a_declaration() -> None:
-    """A run that happens to be cut where the paren opens is still all imports.
+    """A run cut where the paren opens is still all imports.
 
-    jscpd reports the matched line range, so a fragment can end on the opening
-    line of a wrapped import. Judging that by its paren balance asked a question
-    about where the report stopped rather than about what the text says, and the
-    two test modules that open their shared harness import the same way reported
-    a clone of nothing but declarations.
-    """
+    jscpd reports the matched line range, so the fragment can end on an opening
+    paren; paren balance asks where the report stopped, not what the text says."""
     fragment = """from app.storage.job_store import FrontierEntry, JobStatus
 from app.admission.policy import read_policy
 from app.models.crawl_policy import CrawlPolicy
