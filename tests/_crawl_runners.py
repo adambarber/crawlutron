@@ -76,11 +76,8 @@ LLM_FORMAT_TEST_HTML = (
 def xml_page(body: str) -> tuple[int, str, str]:
     """One ``application/xml`` page, in the shape a page map wants.
 
-    The content type is the part that carries meaning, and it is the part a
-    sitemap fixture leaves out: the crawl only reads a served document as a
-    sitemap when the type says xml, so a sitemap fixture without it exercises the
-    in-page-link fallback instead and passes while the sitemap path is broken.
-    """
+    The content type is what makes a served document a sitemap; a fixture that
+    leaves it out exercises the link fallback and passes while sitemaps break."""
     return (200, body, "application/xml")
 
 
@@ -101,19 +98,8 @@ async def crawled_results(
 ) -> ProducerEnvelope:
     """Run a recursive crawl over scripted ``pages`` and return the API response.
 
-    The one way a test should invoke ``crawl_request`` against a scripted site.
-    The payload shape, the fetcher wiring and the cache wiring are stated once
-    here, so a policy key or a signature change lands here rather than in each
-    recursive test -- and a hand-rolled call cannot quietly differ from a
-    routed one, which is the drift this chokepoint exists to prevent.
-
-    ``limits`` is the limits sub-mapping; ``policy`` carries the rest of the
-    policy (``discovery``, ``scope_regex``, ``browser_profile``) as a mapping,
-    which is the shape the body below unpacks it as -- a ``CrawlPolicy`` is a
-    model, and ``**model`` is not a thing. ``calls``, if given, records the URLs
-    that actually reached the network, so a test about caching does not have to
-    build its own tap.
-    """
+    Payload, fetcher and cache wiring are stated once so a hand-rolled call
+    cannot differ from a routed one; ``limits`` is the limits sub-mapping."""
     body: dict[str, Any] = {"limits": dict(limits or {}), **(policy or {})}
     fetcher = tap_fetcher(site_fetcher(pages), calls) if calls is not None else site_fetcher(pages)
     return await crawl_request(
@@ -141,16 +127,8 @@ async def crawled_urls(pages: dict[str, Any], **kwargs: Any) -> list[str]:
 def site_linking_to(*paths: str, bodies: dict[str, str] | None = None) -> dict[str, Any]:
     """A fake site: an index linking to each of ``paths``, plus a page per path.
 
-    The page map :func:`crawled_results` and :func:`crawled_urls` are driven
-    over. A test names the children it wants and gets the map; ``bodies`` is
-    there for the tests whose point is a child's *content* (the memory-strip
-    cases need a page with real text in it, not the one-word default). Nothing
-    here decides anything a crawl decides: depth, page cap, scope and policy
-    stay with the caller, because those are what those tests are about.
-
-    The default child body is the path's own name (``/a`` -> ``<html>a</html>``),
-    which keeps the map readable in an assertion diff.
-    """
+    A test names the children it wants; depth, cap and scope stay with the
+    caller, and the default child body is its own path, for readable diffs."""
     bodies = bodies or {}
     links = "".join(f'<a href="{path}">{path.strip("/") or path}</a>' for path in paths)
     return {
@@ -162,11 +140,8 @@ def site_linking_to(*paths: str, bodies: dict[str, str] | None = None) -> dict[s
 def cache_with_etag(url: str, etag: str = "v1") -> HttpCache:
     """An HTTP cache that already holds a validator for ``url``.
 
-    A conditional request is only conditional if something was stored, so the
-    304 path is unreachable until a test says what was cached. Stating that as
-    "the cache holds an etag for this URL" keeps the validator, the URL it is
-    keyed by and the cache object one decision instead of three.
-    """
+    The 304 path is unreachable until something is stored -- one decision
+    keeps the validator, its URL and the cache object together."""
     cache = HttpCache()
     # Value-keyed cache: admit under the same policy the harness admits request URLs with, or the conditional
     # GET silently misses.
@@ -187,18 +162,8 @@ async def crawled_result(
 ) -> EngineCrawlResult:
     """The one result a real ``crawl_request`` returns for ``url``.
 
-    The single-URL sibling of :func:`crawled_results`, and the same argument:
-    "what came back for this URL?" is a payload, a fetcher and cache wiring, and
-    a ``results[0]`` projection, and every site that asked used to spell all
-    three. A hand-rolled call can differ from a routed one in a way nothing
-    notices -- a dropped cache, a payload key the engine never read -- and the
-    copy is the one the test actually ran.
-
-    ``policy`` is the whole policy when the test has a reason to state one;
-    otherwise ``strategies`` plus ``payload_kwargs`` go through
-    :func:`make_crawl_payload`, whose ``**extra`` lands at the top level, which
-    is why a policy sub-mapping is not one of them.
-    """
+    The single-URL sibling of :func:`crawled_results`: wiring plus the
+    ``results[0]`` projection stated once."""
     payload = (
         {"url": url, "policy": policy}
         if policy is not None
@@ -253,18 +218,8 @@ async def run_chain(
 ) -> Any:
     """What the strategy chain decides for one URL, with the real wiring.
 
-    Both fetcher slots, the domain derived from the URL, the unrestricted host
-    policy and an admitting scheduler are the arrangement every chain test
-    needed, and a copy that dropped a slot would quietly exercise a different
-    chain than the test describes. ``scheduler`` is a parameter so a test can
-    inspect the cooldown or delay the chain set on it.
-
-    ``cffi_fetcher`` is a parameter for the tests whose point is that a ladder
-    step answers differently from the one before it -- the cookie-retry and
-    cffi-escalation suites fail or succeed per transport on purpose. Omitting it
-    means "the cffi step behaves like the http step", which is what a
-    single-fetcher chain test means.
-    """
+    Fetcher slots, host policy and scheduler set once (``scheduler`` stays a
+    parameter); omitting ``cffi_fetcher`` means it behaves like the http step."""
     from app.orchestration.scheduler import DomainScheduler
     from app.orchestration.strategy_chain import execute_crawl_chain
 
@@ -288,10 +243,8 @@ async def run_cached_twice(
 ):
     """The same URL through the HTTP strategy twice, on the same two caches.
 
-    The content cache is a claim about the *second* run, so the tests that make
-    it each ran the strategy twice through an arrangement of their own; the
-    second result is the interesting one and the arrangement is not.
-    """
+    The content cache is a claim about the SECOND run, so the arrangement is
+    stated once rather than per test."""
     results = [
         await run_http_strategy(url, policy, fetcher, cache=cache, content_cache=content_cache)
         for _ in range(2)
@@ -308,11 +261,8 @@ def clocked_cache(
 ) -> tuple[ContentCache, list[float]]:
     """A cache over ``directory`` reading time from a handle the caller advances.
 
-    Expiry is the subject of most of these tests, so the clock is the thing a
-    test has to move, and a handle is what makes moving it possible without
-    re-deciding how the cache reads time. Returning it beside the cache is why
-    no site has to declare a one-element list and a lambda over it.
-    """
+    Expiry is the subject of most of these tests, so a movable clock handle is
+    returned beside the cache -- no site declares a list and a lambda over it."""
     clock = [clock_start]
     return ContentCache(directory, default_ttl=default_ttl, clock=lambda: clock[0], **settings), clock
 
@@ -320,10 +270,8 @@ def clocked_cache(
 def make_seeded_cache(directory: str, *keys: str, value: Any = None, **settings: Any):
     """:func:`clocked_cache` holding one entry per key.
 
-    Seeding and the clock are the two halves of "an entry that expires", and a
-    test that needs both was writing down the directory, the TTL, the clock list
-    and the entry -- four things to keep in agreement.
-    """
+    Seeding + a clock are the two halves of "an entry that expires"; a test
+    needing both used to write down directory, TTL, clock list and entry."""
     cache, clock = clocked_cache(directory, **settings)
     for key in keys:
         cache.set(key, {"data": "1"} if value is None else value)
@@ -345,12 +293,8 @@ def strategy_request(
 ) -> StrategyRequest:
     """The page identity these factories hand the real strategy entry points.
 
-    One spelling, so a factory cannot pass one page's URL to a result builder
-    that expects another's -- the same mixing hazard the record exists to remove
-    in production, and the reason the factories are not free to improvise the
-    five fields. The tests drive the real entry points, so the wiring they set up
-    is the wiring production uses.
-    """
+    One spelling, so a factory cannot pass one page's URL to a builder that
+    expects another's -- the same mixing hazard the record removes in production."""
     return StrategyRequest(
         original_url=url,
         normalized_url=canonical(url),
