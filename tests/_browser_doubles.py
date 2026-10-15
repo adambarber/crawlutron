@@ -23,22 +23,6 @@ from tests._browser_pool_doubles import (
 ROUTE_ARG_UNSET = object()
 
 
-__all__ = [
-    "BrowserFakeContextManager",
-    "BrowserFakePage",
-    "DEFAULT_PAGE_ANSWERS",
-    "DEFAULT_PAGE_HTML",
-    "ExhaustedPool",
-    "FakeBrowserPool",
-    "NoRendererPool",
-    "PageCookieContext",
-    "RaisingRenderer",
-    "RaisingRendererPool",
-    "ScriptedPage",
-    "owned_browser_pool",
-]
-
-
 class FakeBrowserDriver:
     """A stand-in for :class:`BrowserDriver` -- a duck type, NOT a subclass.
 
@@ -198,6 +182,35 @@ async def render_pinned(monkeypatch, url: str = "http://example.com/"):
     return page, result
 
 
+__all__ = [
+    "BrowserFakeContextManager",
+    "BrowserFakePage",
+    "DEFAULT_PAGE_ANSWERS",
+    "DEFAULT_PAGE_HTML",
+    "ExhaustedPool",
+    "FakeBrowserPool",
+    "NoRendererPool",
+    "PageCookieContext",
+    "RaisingRenderer",
+    "RaisingRendererPool",
+    "ScriptedPage",
+    "owned_browser_pool",
+    "FakeRequest",
+    "FakeRoute",
+    "ROUTE_ARG_UNSET",
+    "_fake_browser",
+    "build_pinned_renderer",
+    "pinned_page_renderer",
+    "render_pinned",
+    "PINNED_PUBLIC_IP",
+    "blocking_pinned_request",
+    "response_handler_double",
+    "run_blocking_document_route",
+    "ssrf_route_handler",
+    "assert_route_decision",
+]
+
+
 class FakeRoute:
     def __init__(self):
         self.actions = []
@@ -251,24 +264,6 @@ def _fake_browser(html=None, text="doc", metadata=None, status="success", classi
         )
 
     return worker
-
-
-__all__ = [
-    "BrowserFakePage",
-    "FakeRequest",
-    "FakeRoute",
-    "ROUTE_ARG_UNSET",
-    "_fake_browser",
-    "build_pinned_renderer",
-    "pinned_page_renderer",
-    "render_pinned",
-    "PINNED_PUBLIC_IP",
-    "blocking_pinned_request",
-    "response_handler_double",
-    "run_blocking_document_route",
-    "ssrf_route_handler",
-    "assert_route_decision",
-]
 
 
 def ssrf_route_handler(resource_mode=None, *, include_screenshot: bool = False, pin=None):
