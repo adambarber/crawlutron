@@ -18,9 +18,11 @@ from __future__ import annotations
 
 import math
 from collections.abc import Callable, Iterator
-from typing import Any
 
 from app.vocabulary.identity import USER_AGENT_TOKEN
+
+#: One robot's consumed directives as ``(key, value)`` pairs.
+_Directives = list[tuple[str, str]]
 
 
 def iter_robots_fields(text: str) -> Iterator[tuple[str, str]]:
@@ -72,8 +74,8 @@ def robots_groups(
 
 
 def select_robots_values(
-    groups: list[tuple[tuple[str, ...], list[Any]]], token: str = USER_AGENT_TOKEN
-) -> tuple[list[Any] | None, list[Any] | None]:
+    groups: list[tuple[tuple[str, ...], _Directives]], token: str = USER_AGENT_TOKEN
+) -> tuple[_Directives | None, _Directives | None]:
     """Return ``(matched, star)``: the most-specific group whose agent is a
     substring of our product token (longest agent wins), and the first
     ``*`` group.
@@ -89,9 +91,9 @@ def select_robots_values(
     keeps the guarantee next to the code that depends on it.
     """
     token = token.lower()
-    best: list[Any] | None = None
+    best: _Directives | None = None
     best_len = -1
-    star: list[Any] | None = None
+    star: _Directives | None = None
     for agents, values in groups:
         for agent in agents:
             if agent == "*":
@@ -137,7 +139,7 @@ def parse_robots_crawl_delay(text: str, *, token: str = USER_AGENT_TOKEN) -> flo
     groups = robots_groups(text, lambda key, value: key == "crawl-delay" and value != "")
     best, star = select_robots_values(groups, token)
 
-    def _last_valid(values: list[Any] | None) -> float | None:
+    def _last_valid(values: _Directives | None) -> float | None:
         delay: float | None = None
         for _, raw in values or []:
             try:
