@@ -89,9 +89,4 @@ DECLARED: dict[str, Declaration] = {
         ["test"],
     ),
     "app.transport.content_cache_key._RAM_SAFETY_BYTES": _SUBSTITUTED_CAP,
-    "app.transport.content_cache_key._effective_max_content_length": _d(
-        "unreviewed",
-        "Not yet triaged.\n",
-        ["test", "app"],
-    ),
 }

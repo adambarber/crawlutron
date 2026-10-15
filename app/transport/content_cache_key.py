@@ -69,7 +69,7 @@ def _default_global_concurrency() -> int:
         return 4
 
 
-def _effective_max_content_length(limits: CrawlPolicyLimits, global_concurrency: int | None = None) -> int:
+def effective_max_content_length(limits: CrawlPolicyLimits, global_concurrency: int | None = None) -> int:
     """Per-page body cap, scaled down as concurrency rises.
 
     An explicit ``max_content_length_bytes`` in the policy always wins. Otherwise

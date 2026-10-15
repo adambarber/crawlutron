@@ -282,19 +282,19 @@ class TestEngineChainEdges:
     def test_effective_max_content_length_scales(self):
         """Per-page cap shrinks as concurrency rises, floor
         respected, explicit policy value wins."""
-        from app.transport.content_cache_key import _effective_max_content_length
+        from app.transport.content_cache_key import effective_max_content_length
         from app.vocabulary.limits import DEFAULT_MAX_CONTENT_LENGTH_BYTES
 
         # Explicit value always wins.
-        assert _effective_max_content_length(CrawlPolicyLimits(max_content_length_bytes=123)) == 123
+        assert effective_max_content_length(CrawlPolicyLimits(max_content_length_bytes=123)) == 123
         # Default concurrency (4) -> unchanged 10 MiB default.
-        assert _effective_max_content_length(CrawlPolicyLimits()) == DEFAULT_MAX_CONTENT_LENGTH_BYTES
+        assert effective_max_content_length(CrawlPolicyLimits()) == DEFAULT_MAX_CONTENT_LENGTH_BYTES
         # High concurrency shrinks the cap.
-        small = _effective_max_content_length(CrawlPolicyLimits(), global_concurrency=400)
+        small = effective_max_content_length(CrawlPolicyLimits(), global_concurrency=400)
         assert small < DEFAULT_MAX_CONTENT_LENGTH_BYTES
         # Floor is respected even at absurd concurrency.
         assert small >= 256 * 1024
-        assert _effective_max_content_length(CrawlPolicyLimits(), global_concurrency=100000) == 256 * 1024
+        assert effective_max_content_length(CrawlPolicyLimits(), global_concurrency=100000) == 256 * 1024
 
     async def test_include_html_false_drops_html(self):
         """When include_html is False the raw HTML is not retained in the result."""

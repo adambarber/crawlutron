@@ -76,7 +76,7 @@ class TestPayloadPolicyCarriesAdvertisedLimits:
 
     def test_max_content_length_default_keeps_ram_scaling(self):
         # Default (absent) must remain 0 = "not explicitly set", so the concurrency-scaled RAM budget in
-        # _effective_max_content_length keeps working. Only an explicit value overrides it.
+        # effective_max_content_length keeps working. Only an explicit value overrides it.
         policy = _normalized_policy()
         assert policy.limits.max_content_length_bytes == 0
 
@@ -87,7 +87,7 @@ class TestPydanticDefaultPreservesRamScaling:
     CrawlRequest.model_dump(exclude_none=True) is what the endpoints feed the
     engine. A concrete default on CrawlPolicyLimits.max_content_length_bytes
     materializes in every dump, making the concurrency-scaled cap in
-    _effective_max_content_length unreachable through /v1/crawl. The field
+    effective_max_content_length unreachable through /v1/crawl. The field
     must therefore default to None and only an explicit caller value flows.
     """
 

@@ -37,7 +37,7 @@ def _resolve_http_limits(ctx: HttpStrategyContext) -> None:
     ctx.robots_evaluated = ctx.limits.respect_robots
     ctx.timeout_seconds = ctx.limits.timeout_seconds
     ctx.max_retries = ctx.limits.max_retries
-    ctx.max_content_length = content_cache_key._effective_max_content_length(
+    ctx.max_content_length = content_cache_key.effective_max_content_length(
         ctx.limits, ctx.global_concurrency
     )
     ctx.base_headers = request_profile.headers_for_strategy(

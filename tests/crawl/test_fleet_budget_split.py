@@ -138,12 +138,12 @@ def test_the_content_length_budget_is_split_across_workers(monkeypatch):
     # 16 MiB across one worker clears the 10 MiB per-page default, so the default binds and is reported
     # undivided.
     monkeypatch.setenv("CRAWLUTRON_WORKERS", "1")
-    assert cck._effective_max_content_length(uncapped, global_concurrency=1) == 10 * 1024 * 1024
+    assert cck.effective_max_content_length(uncapped, global_concurrency=1) == 10 * 1024 * 1024
 
     # Below the default the budget is the binding constraint, and each worker takes its share of it.
     for workers in (2, 4, 8):
         monkeypatch.setenv("CRAWLUTRON_WORKERS", str(workers))
-        each = cck._effective_max_content_length(uncapped, global_concurrency=1)
+        each = cck.effective_max_content_length(uncapped, global_concurrency=1)
         assert each == budget // workers, f"at {workers} workers"
 
 
@@ -160,9 +160,9 @@ def test_an_explicit_content_cap_is_not_divided(monkeypatch):
     explicit = CrawlPolicyLimits(max_content_length_bytes=5 * 1024 * 1024)
 
     monkeypatch.setenv("CRAWLUTRON_WORKERS", "1")
-    assert cck._effective_max_content_length(explicit, global_concurrency=1) == 5 * 1024 * 1024
+    assert cck.effective_max_content_length(explicit, global_concurrency=1) == 5 * 1024 * 1024
     monkeypatch.setenv("CRAWLUTRON_WORKERS", "8")
-    assert cck._effective_max_content_length(explicit, global_concurrency=1) == 5 * 1024 * 1024
+    assert cck.effective_max_content_length(explicit, global_concurrency=1) == 5 * 1024 * 1024
 
 
 def test_a_worker_always_gets_at_least_one_slot(monkeypatch):
