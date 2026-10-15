@@ -1,32 +1,7 @@
-"""One declaration per property: the rule, its proof, and the two tests they generate.
+"""One declaration per property: the rule, its proof, and the two tests it generates.
 
-Every property in this repository was written the same way: a ``_something_offenders``
-function that walks the AST and returns offender strings, a ``test_something`` that
-asserts the list is empty, and a ``test_something_detector_bites`` that feeds the
-detector a snippet of deliberately wrong code and asserts it fires. That is 71
-detectors, 93 bite proofs and roughly 10,900 lines of invariant test, and the three
-halves drift apart: a detector can be rewritten so the bite no longer fails, and
-the bite is a separate function that nothing forces anyone to update.
-
-A :class:`Rule` collapses the triple into one declaration, and the two tests are
-generated from the registry rather than written. Two consequences, both of which
-are the point:
-
-* **A rule cannot be registered without a bite proof.** ``bite`` has no default,
-  so ``Rule(name=..., find=...)`` raises ``TypeError`` at import time. The
-  invariant that every detector is known to be capable of firing is enforced by
-  the type, not by a reviewer remembering to ask. This is the failure the repo
-  actually had: bite proofs existed, but nothing tied a detector to one.
-* **The tests cannot drift from the rules.** There is one ``test_no_rule_violations``
-  and one ``test_every_rule_bites``, parametrized over the registry. Renaming a
-  rule or adding one changes the parametrization; there is no hand-written gate to
-  leave behind pointing at the old name.
-
-The bite proof parses one small synthetic source. It deliberately does not mutate
-production code: a test that edits ``app/`` to prove a detector works cannot run
-under ``-n auto`` alongside the suite that is reading those same files, and the
-detector's job is to decide about an AST, not to be surprised by a file's name.
-"""
+A :class:`Rule` collapses detector + bite + test into one declaration because
+the three halves drift apart."""
 
 from __future__ import annotations
 
@@ -48,31 +23,8 @@ Detector = Callable[..., Iterable[str]]
 class Bites:
     """A violating snippet that must produce ``count`` offenders, naming ``marker``.
 
-    The strongest of the three proof shapes: it pins *how many* findings the shape
-    is worth and *what* the message has to say. A detector that matches everything
-    satisfies "it fired", so requiring an exact count and a specific word is what
-    turns a proof into a specification.
-
-    ``count`` defaults to 1, which is the right default for a rule with a single
-    natural finding. A shape wrong in two places -- a path written and a path
-    unlinked -- is two findings, and pinning the count without a ``Trips`` beside
-    it means either the framework cannot express both halves or the migration drops
-    one. Nearly every bite proof in the invariant suite asserts a count *and* a
-    marker, so this is the form the framework actually has to carry.
-
-    The marker is checked against a real offender rather than against the first
-    one, because the two claims fail independently: a detector can hit the count
-    while every message it emits has decayed to a bare path, and that is how a gate
-    stops explaining itself without ever going red.
-
-    ``at`` places this one proof in a module other than the rule's default. It is
-    per proof rather than per rule because the claim itself is per proof: a detector
-    keyed on a file's path has to be *proved* at that path and *proved quiet* at
-    another, and a single rule-level path could state only one of those halves. That
-    asymmetry is the detector's entire content -- one ignoring paths would fire on
-    the sanctioned code too -- so whichever half the shared path dropped would go
-    unwatched.
-    """
+    The strongest proof: it pins how many findings a shape is worth and what the
+    message says. ``at`` places one proof in another module."""
 
     source: str
     marker: str
@@ -84,16 +36,8 @@ class Bites:
 class Trips:
     """A violating snippet that must produce exactly ``count`` offenders.
 
-    For a source that is wrong in more than one place: a ``uuid4()`` call *and*
-    the ``.hex`` slice on it are two findings, not one. A count of zero is
-    rejected — "must not fire" already has a spelling (:attr:`Rule.clean`), and
-    allowing a second one for the same fact lets the claim drift between forms
-    and turns a mis-edited count into a passing proof.
-
-    ``at`` places this one proof in a module other than the rule's default, for the
-    reason spelled on :attr:`Bites.at`: a detector keyed on a file's path has to be
-    proved both where it fires and where it must not, and those are two paths.
-    """
+    For a source wrong in more than one place; ``at`` places the proof elsewhere,
+    as on :attr:`Bites.at`."""
 
     source: str
     count: int
@@ -104,16 +48,8 @@ class Trips:
 class Silent:
     """A source that must produce NO offender, optionally at a named module.
 
-    The shape a path-keyed detector's clean half has: it must be proved quiet
-    somewhere OTHER than where it fires, because "correct" and "correct in this
-    file" are different claims and only the second one is the property. A ``clean``
-    string cannot state that -- it is always run at the rule's one proof path -- so
-    without this a detector whose entire content is a path comparison could be
-    proved only in the half that matters less.
-
-    It is a proof rather than a ``Trips`` of count zero on purpose: the count is
-    the claim here, so spelling it as a count invites a later edit to make it one.
-    """
+    The path-keyed detector's clean half: proved quiet elsewhere than where it
+    fires."""
 
     source: str
     at: pathlib.Path | None = None
@@ -125,10 +61,8 @@ Proof = Bites | Trips | Silent | str
 def _flat(produced: Proof | Sequence[Proof]) -> tuple[Proof, ...]:
     """A proof thunk's items as a tuple, whether it returned one or several.
 
-    The single-proof form is a convenience in the declaration, never a difference
-    in what is proved, so every consumer that wants to inspect all of them goes
-    through here rather than re-deriving the one-or-many branch.
-    """
+    Every consumer wanting all items goes through here rather than re-deriving
+    the one-or-many branch."""
     if isinstance(produced, (str, Bites, Trips, Silent)):
         return (produced,)
     return tuple(produced)
@@ -137,11 +71,8 @@ def _flat(produced: Proof | Sequence[Proof]) -> tuple[Proof, ...]:
 def _relative(path: pathlib.Path) -> str:
     """``path`` as a repo-relative posix string, or unchanged if it lies outside.
 
-    :func:`relative_posix` deliberately raises for a path the repo does not own,
-    which is right for a sweep over ``app/`` but not for the synthetic paths a
-    proof runs against. Scope has to degrade to "matches nothing" there, not blow
-    up, or a rule could not be proved at all.
-    """
+    :func:`relative_posix` raises for a path the repo does not own, but a proof's
+    synthetic path must degrade to "matches nothing", not blow up."""
     try:
         return relative_posix(path)
     except ValueError:
@@ -152,59 +83,8 @@ def _relative(path: pathlib.Path) -> str:
 class Rule:
     """One property, the detector that decides it, and the proof it can fire.
 
-    :param find: ``(tree, path) -> offender strings``. An empty iterable means the
-        property holds for that file.
-    :param bite: ``() -> proof`` (or several) for code that **violates** the
-        property: a bare source, a :class:`Bites` marker check, or a :class:`Trips`
-        count. Required, with no default, so a rule without a proof cannot be
-        constructed.
-    :param clean: ``() -> lookalikes`` that resemble a violation but must be spared.
-        Optional, and omitted far more often than not — but a rule with a broad
-        trigger (anything containing an ``or``) needs it, and the declaration is the
-        only place that need can be recorded. A rule whose detector keys on a path
-        is the one case where omitting it is not merely allowed but wrong: it is
-        proved at the path it governs, and without a :class:`Silent` at another it
-        has never been shown to spare the other ninety files. That is a missing
-        proof, not a missing test, so it is refused at construction.
-    :param premise: ``() -> None`` asserting the rule's trigger set is non-empty.
-        Optional, and required in substance by the minority of rules that DERIVE
-        what they look for — the sync methods of a store, the fields of a dataclass,
-        the module names in a tree — rather than naming it as a literal. A derived
-        trigger that came back empty would leave the detector matching nothing,
-        which reads as a property holding. The check belongs in the declaration
-        rather than in an ``assert`` inside the detector: there it is one line
-        among the walk's own logic, and ``python -O`` removes it.
-    :param excludes: basenames sanctioned as the rule's own owner, excluded from the
-        clean check for the same reason the owner of a chokepoint is.
-    :param skip: repo-relative paths exempt from this rule. Separate from
-        :attr:`excludes` because a chokepoint is usually named by its path: two
-        modules may share a basename, and a basename exclusion written for one of
-        them silently excuses the other.
-    :param kwargs_for: per-module keyword arguments for :attr:`find`, keyed on the
-        repo-relative path. A rule whose detector takes parameters declares here
-        which module gets which, so "which path holds the definition" is a fact of
-        the rule rather than a decision re-made at every call site.
-    :param scope: ``(*, exclude) -> trees`` naming the tree this rule governs.
-        Defaults to :func:`app_trees`, which is right for most rules and silently
-        wrong for the rest: a rule about the *test* tree -- no test may write into
-        ``app/``, no test may import a sibling helper by bare name -- swept
-        production code, found nothing, and reported green. That is the failure a
-        registry hides best, because a rule enforcing nothing looks exactly like a
-        rule holding. The walker is handed the rule's own exclude set, so a scope
-        can honour the owner exemption rather than being handed a name it has no
-        way to apply.
-    :param proof_path: where a bite proof's synthetic module is pretended to live.
-        Defaults to the shared ``app/_synthetic.py``; a detector that resolves
-        imports or package structure from the path needs a path inside the right
-        package instead. A rule keyed on ONE module's path states it per proof with
-        ``at=``, because such a rule must be proved both where it fires and where it
-        must stay quiet -- two paths, so one rule-level path could hold only one
-        half and the other would go unwatched.
-    :param summary: one line naming the property, used in failure text. Prefer the
-        property sentence to the mechanism: "every URL egress door applies the
-        refusal" tells a reader what is wrong, "calls admit_or_none"
-        tells them how it was decided.
-    """
+    :param find/bite/premise: offender strings (empty = holds); required proof;
+    derived set non-empty. :param excludes/skip: owner basename; exempt paths."""
 
     name: str
     find: Detector
@@ -226,17 +106,8 @@ class Rule:
     def _require_a_path_halved_proof(self) -> None:
         """A rule proved at a path it does not own must also be proved elsewhere.
 
-        ``at`` exists so a path-keyed detector can be proved in both halves: it
-        fires in its own module, and is silent everywhere else. Declaring the first
-        half alone is the failure this refuses -- the rule looks fully proved while
-        the sweep that matters (the ninety other files, which the ``path != owner``
-        guard makes the detector ignore) has never been run once.
-
-        Checked against the proofs rather than by inspecting the detector, because
-        "is this detector path-keyed" is a question about a function's body that no
-        caller can answer. What a caller CAN state is which path it proved, and that
-        is the fact worth holding them to.
-        """
+        ``at`` exists so a path-keyed detector is proved in both halves; declaring
+        one half alone is the failure this refuses."""
         placed = {proof.at for proof in self.proofs() if not isinstance(proof, str) and proof.at}
         if not placed:
             return
@@ -253,18 +124,8 @@ class Rule:
     def trees(self) -> tuple[tuple[pathlib.Path, ast.Module], ...]:
         """The tree this rule governs, with its own owner exemptions applied.
 
-        One definition rather than a ``app_trees(exclude=...)`` written at each
-        call site, because the two call sites -- :meth:`scan` and the registry's
-        combined sweep -- are exactly where a scope would be honoured by one and
-        dropped by the other.
-
-        The tuple is built here rather than trusted from the scope, because a
-        scope is free to return a generator and the reason this is a tuple at
-        all is the snapshot: a caller that holds one re-reads the same trees
-        even if the files move underneath it. Converting at this boundary is
-        what makes that true for every scope instead of the ones that happen to
-        cooperate.
-        """
+        One definition rather than calls at each site; built here as a tuple so a
+        caller re-reads the same trees even if the files move underneath."""
         return tuple((self.scope or app_trees)(exclude=self.excludes))
 
     def _run(self, tree: ast.Module, path: pathlib.Path) -> list[str]:
@@ -280,12 +141,8 @@ class Rule:
     def violations(self, trees: Sequence[tuple[pathlib.Path, ast.Module]]) -> list[str]:
         """Every offender across ``trees``, each naming the file it came from.
 
-        The rule's own ``excludes`` and ``skip`` are applied here rather than only
-        by :meth:`scan`. A caller that hands a rule a hand-built list would otherwise
-        be able to drive it outside its sanctioned scope, which would make the
-        scope a property of the call site instead of the rule's -- and a scope
-        that lives at the call site is a scope that drifts.
-        """
+        Excludes and skips apply here too: a hand-built list must not drive a rule
+        outside its sanctioned scope."""
         found: list[str] = []
         for path, tree in trees:
             if path.name in self.excludes or _relative(path) in self.skip:
@@ -310,10 +167,8 @@ class Rule:
     def proofs(self) -> tuple[Proof, ...]:
         """Every violating snippet this rule claims its detector rejects.
 
-        A rule usually has more than one way to be wrong — the same fallback
-        spelled against the alias and against the root function, say — and a
-        single proof would leave the second spelling unwatched.
-        """
+        A rule usually has more than one way to be wrong; a single proof would leave
+        the second spelling unwatched."""
         if not callable(self.bite):
             raise TypeError(
                 f"{self.name}: bite must be a callable returning a proof, not a "
@@ -325,35 +180,20 @@ class Rule:
     def looksalikes(self) -> tuple[str, ...]:
         """Code that resembles a violation but must not be flagged.
 
-        The half of the proof that stops a detector crying wolf. Without it a
-        rule can pass its firing cases by flagging every ``or`` in the tree, and
-        the cost of that rule being wrong is paid in false positives until
-        somebody deletes it.
-
-        A :class:`Silent` in ``clean`` is not a lookalike and is not flattened
-        here -- it is a claim about a specific module, so it stays a proof and
-        ``check_bites`` runs it. Keeping the two apart is the point: a lookalike
-        promises "spared everywhere", and folding a path-specific claim into that
-        tuple would quietly assert it somewhere the rule does not even run.
-        """
+        Without it a rule could pass its firing cases by flagging every ``or`` in
+        the tree; a :class:`Silent` is a per-module claim, not flattened here."""
         return tuple(item for item in self._clean_items() if isinstance(item, str))
 
     def _clean_items(self) -> tuple[str | Silent | Bites | Trips, ...]:
-        """``clean``'s declared items. It is a thunk, so it is called here.
+        """``clean``'s declared items; it is a thunk, so it is called here.
 
-        Flattened once so both consumers -- the lookalike half and the
-        ``Silent`` half -- read the same list, rather than each re-invoking a
-        lambda that builds every proof in the rule.
-        """
+        Flattened once so both consumers read the same list."""
         return tuple(self.clean()) if self.clean is not None else ()
 
     def _where(self, proof: Proof) -> pathlib.Path:
         """Where one proof runs: its own ``at``, else the rule's shared path.
 
-        The lookalike half has no override because "must not fire" is not a claim
-        about a particular module -- a lookalike is spared everywhere the rule
-        runs, which is the whole point of it.
-        """
+        The lookalike half has no override -- a lookalike is spared everywhere."""
         return getattr(proof, "at", None) or self.proof_path
 
     def _parse(self, source: str, *, kind: str) -> ast.Module:
@@ -427,11 +267,8 @@ class Rule:
     def check_bites(self) -> None:
         """Assert the detector rejects what the rule forbids and spares what it resembles.
 
-        The half that makes the rule worth having. Without it a detector that
-        silently matches nothing — a typo in a callee name, a walk that returns
-        early — reads as a passing property, which is the worst way for a gate to
-        lie: green, and enforcing nothing.
-        """
+        Without it a detector that silently matches nothing reads as a passing
+        property -- the worst way for a gate to lie."""
         if self.premise is not None:
             self.premise()
         for proof in self.proofs():
@@ -465,11 +302,8 @@ class Registry:
     def check_all_clean(self) -> None:
         """Every rule at once, so one run reports every violation rather than the first.
 
-        Running rules in a loop inside a single test rather than relying on
-        parametrization is deliberate: a rule that fails should not hide the other
-        twenty that also fail. ``raise`` on the first would make fixing a broken
-        tree a sequence of one-line changes instead of one pass.
-        """
+        A loop inside one test (not parametrization) keeps one failure from hiding
+        the other twenty."""
         failures: list[str] = []
         for rule in self.rules:
             found = rule.violations(rule.trees())
