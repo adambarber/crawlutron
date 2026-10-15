@@ -1,39 +1,6 @@
-"""Transport-level test seams: a scripted httpx transport, and the isolated
-interpreter the genuine curl_cffi fetcher has to run in.
-
-The httpx path is REPLACED rather than imitated. The client below is a real
-``httpx.AsyncClient`` over ``httpx.MockTransport`` and the responses are real
-``httpx.Response`` objects carrying a real async body stream, so the fetcher's
-own call -- ``async with client.stream(...) as response: async for chunk in
-response.aiter_raw()`` -- is the production call, with the production timeout
-object and the production redirect chain in front of it. The stand-in this
-replaced had a plain ``dict`` for headers (so no case-insensitive lookup and no
-duplicate header), and a ``stream()`` that returned the response instead of an
-async context manager, so its ``__aenter__`` was a fiction the real client
-never needs. None of that could fail when the fetcher changed how it reads a
-response, which is the only thing a transport double is for.
-
-The cffi path cannot be replaced at all: in-process real curl_cffi busy-spins
-the GIL under the suite's zero-second sleep patch and wedges the whole pytest
-process, so the genuine fetcher runs in a spawned interpreter with a hard join
-(see the ``real_cffi`` marker and ``conftest.stub_cffi_fetcher``).
-:func:`real_cffi_fetch_outcome` owns that arrangement -- the child, the queue,
-the join, the terminate -- and a test states only the outcome it is about. What
-comes back is the production :class:`HttpFetchResult` or a ``FetchFailed``
-naming the class of the transport failure that ended the fetch; see
-``tests/_fetch_outcome.py``.
-
-"Spawned" is a decision this module makes, not a platform default it inherits.
-The default start method is ``fork`` on Linux and ``spawn`` on macOS, and a fork
-child is a copy of the test process: it inherits the ``monkeypatch``ed
-``impersonating_fetcher`` stub and the zeroed ``time.sleep``. On a fork platform
-the isolation this file exists to provide silently did not happen, so a test
-marked ``real_cffi`` got the stub, and curl's LOW_SPEED watchdog -- which depends
-on real sleeps -- busy-spun in the child until the hang guard killed it. Both
-symptoms were platform-local: on macOS the tests passed. :func:`isolated_process`
-and :func:`isolated_queue` are the one place the start method is named, so the
-isolation is a property of the harness rather than of the kernel it runs on.
-"""
+"""Transport-level test seams: a scripted httpx transport, and the genuine
+curl_cffi fetcher in an isolated spawned interpreter (in-process curl_cffi
+busy-spins the GIL). Why and how: ``docs/testing.md`` -> Transport doubles."""
 
 import multiprocessing
 from collections.abc import Awaitable, Callable, Sequence
@@ -53,40 +20,24 @@ _ISOLATED = multiprocessing.get_context("spawn")
 def isolated_queue() -> "Queue[FetchOutcome]":
     """A queue from the same context as :func:`isolated_process`.
 
-    The two must agree: a queue created by the default context and handed to a
-    spawned process is the kind of pairing that works until it does not.
-
-    Its element type is the report both spawned reporters put on it, so this is
-    the one declaration of what crosses that boundary. It was ``Any``, which is
-    what let two reporters grow two shapes and a reader grow a convention for
-    telling them apart.
-    """
+    Its element type is the report both spawned reporters put on it: the one
+    declaration of what crosses that boundary."""
     return _ISOLATED.Queue()
 
 
 def isolated_process(target: Callable[..., None], args: Sequence[object] = ()) -> BaseProcess:
     """A child process that inherits nothing from this test process.
 
-    Named rather than inlined because the start method is the whole point: a
-    default ``multiprocessing.Process`` is isolated on macOS and a fork on Linux,
-    so a test written against it is a test that passes on the author's machine.
-
-    ``BaseProcess`` rather than ``multiprocessing.Process``: the spawn context
-    builds ``SpawnProcess``, a sibling and not a subclass of the name this used
-    to declare, so the annotation claimed a class the factory never returns.
-    Nothing checked that while the checker's scope was ``app``.
-    """
+    Named rather than inlined because the start method is the whole point; it
+    builds ``BaseProcess``, which the spawn context's factory returns."""
     return _ISOLATED.Process(target=target, args=tuple(args))
 
 
 class _ScriptedBody(httpx.AsyncByteStream):
     """The bytes a scripted server sent, delivered as a stream.
 
-    ``httpx.Response(content=...)`` reads the body eagerly and marks it consumed,
-    so the fetcher's ``aiter_raw()`` would raise ``StreamConsumed`` against it.
-    A response that has not been read yet is what a transport hands back, and
-    building one from the public ``AsyncByteStream`` base is how a test says so.
-    """
+    ``httpx.Response(content=...)`` reads eagerly and marks the body consumed;
+    building from the public ``AsyncByteStream`` says the response is unread."""
 
     def __init__(self, body: bytes) -> None:
         self._chunks = [body] if body else []
@@ -99,12 +50,8 @@ class _ScriptedBody(httpx.AsyncByteStream):
 class MockResponse(httpx.Response):
     """A real ``httpx.Response`` with a positional-friendly constructor.
 
-    The name stays because it is the suite's name for "a response a scripted
-    transport returns"; what changed is what it is. Headers are
-    ``httpx.Headers`` again -- case-insensitive, and able to hold two
-    ``Set-Cookie`` lines where a dict could hold one -- and the body is a
-    stream, so ``aiter_raw()`` reads it the way the fetcher reads it.
-    """
+    Headers are ``httpx.Headers`` (case-insensitive, two ``Set-Cookie`` lines)
+    and the body is a stream, so ``aiter_raw()`` reads it as the fetcher does."""
 
     def __init__(self, status_code: int, headers: dict[str, str] | None = None, content: bytes = b"") -> None:
         super().__init__(status_code, headers=headers, stream=_ScriptedBody(content))
@@ -126,13 +73,8 @@ def _recording_hook[T: httpx.Request | httpx.Response](sink: list[T]) -> Callabl
 class ScriptedClient(httpx.AsyncClient):
     """An ``httpx.AsyncClient`` that also keeps the headers it was called with.
 
-    A real client, because everything around the answer is what httpx actually
-    does: the request the fetcher built, the timeout it passed, the streaming
-    read, the close on the way out. ``captured_headers`` used to be poked onto
-    the instance after construction, which put a member on the object that its
-    own type did not declare -- so a test reading it was reaching for something
-    only the factory could promise. The type is where that promise belongs.
-    """
+    The type owns ``captured_headers`` rather than a factory poking it on
+    after construction."""
 
     def __init__(self, *args, captured_headers: list[httpx.Headers], **kwargs) -> None:
         super().__init__(*args, **kwargs)
@@ -147,22 +89,8 @@ def scripted_transport_client(
 ) -> httpx.AsyncClient:
     """A real ``httpx.AsyncClient`` that answers from `responses`, in call order.
 
-    ``httpx.MockTransport`` is the seam httpx itself publishes for this, so
-    everything around the answer is production: the request the fetcher built,
-    the timeout it passed, the streaming read, the close on the way out. A
-    scripted response beyond the list raises ``IndexError`` rather than
-    repeating an answer, because a fetch that asked for more hops than the
-    script has is a fact about the test, not a reason to invent one.
-
-    ``captured_headers`` holds one real ``httpx.Headers`` per request, in order.
-
-    ``observed_requests`` / ``observed_responses`` collect the client's own event
-    hooks, which is the only way to see the full ``httpx.Request`` (the URL the
-    fetcher caused, not just its headers) or the full ``httpx.Response`` -- and
-    therefore whether a redirect was followed by the fetcher's own loop or by
-    httpx, which is the difference ``response.history`` records and headers
-    cannot.
-    """
+    ``httpx.MockTransport`` is the seam httpx publishes; a call beyond the
+    script raises ``IndexError``; the event hooks record request and response."""
     captured: list[httpx.Headers] = []
 
     def _handle(request: httpx.Request) -> httpx.Response:
@@ -180,31 +108,16 @@ def scripted_transport_client(
 def dispatching_transport_client(handler) -> httpx.AsyncClient:
     """A real ``httpx.AsyncClient`` whose transport asks ``handler`` per request.
 
-    :func:`scripted_transport_client` answers from a fixed list, which is the right
-    shape when a test knows its hops up front and the wrong one when the answer
-    depends on where the request went -- a redirect chain, where each ``Location``
-    is only known once the previous hop answered. Everything else is the same: a
-    real client, a real ``httpx.Request``, real ``httpx.Response`` objects with a
-    real streaming body. Only who decides the answer differs.
-    """
+    The right shape when the answer depends on where the request went (a
+    redirect chain); only the answerer differs from :func:`scripted_transport_client`."""
     return httpx.AsyncClient(transport=httpx.MockTransport(handler))
 
 
 def allow_scripted_egress(monkeypatch, ip: str = "1.2.3.4") -> None:
     """Stand the SSRF guard down for a target no resolver could answer for.
 
-    Two things stand between a fetch and a socket and they are separate
-    concerns: what *answers* the request (:func:`scripted_transport_client`) and
-    what the SSRF guard *sees*. A script has no DNS, so the two production
-    seams that ask the network those questions are the two that must stand
-    down. Everything downstream of them still runs -- the redirect chain's
-    host bookkeeping, the header stripping on a cross-host hop, the declared
-    length -- so a test using this is still a test of the fetcher.
-
-    ``ip`` is what the pinned host resolves to. It is a public address by
-    construction, because a pinned private address is exactly what the guard
-    would have rejected and a test here is not about the guard.
-    """
+    A scripted host has no DNS, so the two network-asking seams stand down;
+    everything downstream still runs. ``ip`` is public by construction."""
     from app.transport import pinned_transport as pinned_mod
 
     monkeypatch.setattr(pinned_mod, "check_ssrf_protection", lambda url: None)
@@ -219,10 +132,8 @@ def patch_http_fetcher_transport(
 ) -> httpx.AsyncClient:
     """Point the httpx fetcher at a scripted transport; return the client.
 
-    ``allow_ssrf_bypass`` is required rather than defaulted because installing
-    this also installs :func:`allow_scripted_egress`, and a test that reaches
-    that by accident is a test whose SSRF verdict means nothing.
-    """
+    ``allow_ssrf_bypass`` is required because installing this also installs
+    the egress stand-down, and reaching that by accident voids the verdict."""
     if not allow_ssrf_bypass:
         raise ValueError("patch_http_fetcher_transport requires allow_ssrf_bypass=True")
 
@@ -264,25 +175,16 @@ def outcome_worker(
 ) -> None:
     """Subprocess body: hand the parent one outcome and exit.
 
-    Module-level because a spawn target has to be importable in the child, and
-    separate from the classification so that it -- which the parent asserts on --
-    is decided in the same interpreter as the fetch.
-    """
+    Module-level because a spawn target must be importable in the child, and
+    separate from the classification the parent asserts on."""
     out_queue.put(_genuine_cffi_outcome(url, timeout_seconds, max_content_length))
 
 
 def join_or_kill(worker: BaseProcess, join_timeout: float, what: str) -> None:
-    """Wait ``join_timeout`` for ``worker``; kill it and fail if it is still running.
+    """Wait ``join_timeout`` for ``worker``; kill it and fail if still running.
 
-    The guard every spawned-interpreter test needs, and the part that goes wrong
-    quietly: a bare ``join(timeout)`` returns, the test proceeds, and the wedged
-    child keeps running -- a curl watchdog busy-spinning the GIL is exactly the
-    process that then takes the whole suite down with it. Written per test, the
-    terminate step is the part that gets dropped.
-
-    ``what`` names the work in the failure message, because "a worker hung" in a
-    2000-test run is not enough to find the test.
-    """
+    A bare ``join(timeout)`` returns and the wedged child keeps running; written
+    per test, the terminate step is the part that gets dropped."""
     worker.join(join_timeout)
     if worker.is_alive():
         worker.terminate()
@@ -299,16 +201,8 @@ def real_cffi_fetch_outcome(
 ) -> FetchOutcome:
     """Run the genuine curl_cffi fetcher against `url` in a spawned interpreter.
 
-    The child inherits this process's environment, so a loopback target needs
-    ``CRAWLUTRON_ALLOW_PRIVATE_TARGETS=1`` set here (and undone by
-    monkeypatch afterwards) rather than inside the child.
-
-    ``join_timeout`` is a hang guard, not a budget: the fetch's own
-    ``timeout_seconds`` is the budget, and a run that outlasts the guard is
-    reported as the hang it is instead of being waited out. The bound is a
-    parameter because it is not a production constant and must not be
-    re-spelled per test.
-    """
+    Loopback targets set ``CRAWLUTRON_ALLOW_PRIVATE_TARGETS=1`` here;
+    ``join_timeout`` is a hang guard, not a budget."""
     out_queue = isolated_queue()
     worker = isolated_process(outcome_worker, (url, timeout_seconds, max_content_length, out_queue))
     worker.start()
