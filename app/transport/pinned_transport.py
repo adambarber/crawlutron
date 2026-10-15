@@ -26,7 +26,7 @@ from app.safety.bounded_ttl import BoundedTTLCache
 from app.safety.validation import is_public_ip_value
 
 
-def _is_private_or_loopback_ip(ip: str) -> bool:
+def is_private_or_loopback_ip(ip: str) -> bool:
     """Return whether an address is outside the shared public-target policy."""
     return not is_public_ip_value(ip)
 

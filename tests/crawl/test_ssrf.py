@@ -19,7 +19,7 @@ from tests._policy_factories import canonical
 
 
 def _blocked(ip):
-    return http_mod._is_private_or_loopback_ip(ip)
+    return http_mod.is_private_or_loopback_ip(ip)
 
 
 def _teredo_hiding(client: str, server: str = "192.0.2.1") -> str:

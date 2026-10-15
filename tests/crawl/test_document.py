@@ -8,8 +8,8 @@ from urllib.parse import urlparse
 import httpx
 
 from app.transport.document import (
-    _extract_pdf_bytes_to_markdown,
     default_document_text_extractor,
+    extract_pdf_bytes_to_markdown,
     format_table,
 )
 from tests._extraction_helpers import format_extracted_document_text
@@ -40,7 +40,7 @@ class TestPdfTablePreservation:
 
     def test_pdf_bytes_to_markdown_extracts_table(self):
         pdf_bytes = FIXTURE.read_bytes()
-        md = _extract_pdf_bytes_to_markdown(pdf_bytes)
+        md = extract_pdf_bytes_to_markdown(pdf_bytes)
         assert "Name" in md
         assert "Salary" in md
         assert "Alice" in md

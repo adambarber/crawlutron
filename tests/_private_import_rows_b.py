@@ -11,11 +11,6 @@ from tests._private_import_decl import (
 )
 
 DECLARED: dict[str, Declaration] = {
-    "app.transport.document._extract_pdf_bytes_to_markdown": _d(
-        "unreviewed",
-        "Not yet triaged.\n",
-        ["test"],
-    ),
     "app.transport.pooled_clients._drain_pending_client_closes": _d(
         _LIFECYCLE_DRAIN_PENDING_CLIENT_CLOSES.kind,
         _LIFECYCLE_DRAIN_PENDING_CLIENT_CLOSES.reason,
@@ -31,11 +26,6 @@ DECLARED: dict[str, Declaration] = {
         "unreviewed",
         "Not yet triaged.\n",
         ["app"],
-    ),
-    "app.transport.pinned_transport._is_private_or_loopback_ip": _d(
-        "unreviewed",
-        "Not yet triaged.\n",
-        ["test"],
     ),
     "app.transport.pinned_transport._redirect_target": _d(
         "unreviewed",

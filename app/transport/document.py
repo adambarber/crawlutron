@@ -69,7 +69,7 @@ def _pdf_to_markdown(pdf: Any) -> str:
     return body
 
 
-def _extract_pdf_bytes_to_markdown(pdf_bytes: bytes) -> str:
+def extract_pdf_bytes_to_markdown(pdf_bytes: bytes) -> str:
     """Extract Markdown (text + tables) from raw PDF bytes using pdfplumber."""
     with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
         return _pdf_to_markdown(pdf)
@@ -139,6 +139,6 @@ def default_document_text_extractor(url: NormalizedUrl) -> str:
     except Exception:  # fetch failure yields empty text
         return ""
     try:
-        return _extract_pdf_bytes_to_markdown(pdf_bytes)
+        return extract_pdf_bytes_to_markdown(pdf_bytes)
     except Exception:  # unparseable PDFs fall through
         return ""

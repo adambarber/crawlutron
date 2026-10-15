@@ -34,14 +34,14 @@ class TestHttpStrategyEdges:
         await close_async_http_client()
 
     def test_is_private_or_loopback_ip_invalid(self):
-        from app.transport.pinned_transport import _is_private_or_loopback_ip
+        from app.transport.pinned_transport import is_private_or_loopback_ip
 
-        assert _is_private_or_loopback_ip("127.0.0.1")
-        assert _is_private_or_loopback_ip("192.168.1.1")
-        assert _is_private_or_loopback_ip("10.0.0.1")
-        assert _is_private_or_loopback_ip("::1")
-        assert not (_is_private_or_loopback_ip("8.8.8.8"))
-        assert _is_private_or_loopback_ip("invalid")
+        assert is_private_or_loopback_ip("127.0.0.1")
+        assert is_private_or_loopback_ip("192.168.1.1")
+        assert is_private_or_loopback_ip("10.0.0.1")
+        assert is_private_or_loopback_ip("::1")
+        assert not (is_private_or_loopback_ip("8.8.8.8"))
+        assert is_private_or_loopback_ip("invalid")
 
     def test_impersonating_fetcher_response(self):
         """real_cffi subprocess: a normal fetch returns the served 200.
