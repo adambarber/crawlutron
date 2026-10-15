@@ -1,69 +1,7 @@
 """Count the invariant suite's detectors, so its coverage of itself is knowable.
 
-WHAT IS BEING COUNTED
---------------------
-A detector is a hand-written AST walk that answers "is this property still
-true?". Being *found* by a walk is not the same as being *declared*, and this
-module exists because the difference used to be invisible.
-
-A walk wired as a ``Rule``'s ``find=`` carries a name, a summary that is the
-string a reader actually sees when it fires, an explicit scope, and bite proofs
-demonstrating the walk can still fire. An identical function left hand-rolled
-carries none of that. Nothing states which property it pins, so a maintainer
-cannot tell an enforced invariant from a leftover helper; nothing proves it is
-still live, so deleting the code it was watching leaves a green suite.
-
-WHY THE NUMBER IS COMPUTED, NOT WRITTEN DOWN
----------------------------------------------
-An earlier revision opened this file with a MEASURED block -- "detector
-functions 71, functions in PROPERTY_REGISTRY 3" -- and defined ``unaccounted``
-as ``detectors - registered``. It was stale the moment the Rule migration
-began, and it was wrong before that. A property-registry entry declares an
-*owner module and symbols* for a *property*; a walk is a *checker*. Those are
-not the same kind of thing, they are not 1:1 (one entry can cover several walks,
-and several walks can cover one property), and subtracting one from the other
-manufactures a number that looks like a gap and is not one. The old docstring
-even conceded it "can overstate" the real gap.
-
-A ``Rule``, by contrast, wraps exactly one walk. So ``detectors - declared`` is
-an exact count, it moves the moment migration work lands, and it is the count
-worth driving to zero. Call :func:`audit`. A written-down number would go stale
-the same way, and a stale metric is worse than none because it is believed.
-
-THE PROPERTY REGISTRY IS A SEPARATE PROGRAM
--------------------------------------------
-That does not retire ``PROPERTY_REGISTRY``. Naming the owner of a property is
-the mechanism that makes it drift-proof rather than merely checked:
-``_property_owner_failures`` proves the owner is still its only definition. It
-deserves registry entries for every property the suite pins. But it answers a
-different question -- *whose job is this property* -- and its coverage should be
-measured against the properties, not inferred by subtracting a count of
-functions. That program wants to be done on its own terms, and counting
-function definitions is not the instrument for it.
-
-WHAT THIS MODULE IS, AND IS NOT
--------------------------------
-It makes the migration gap a function call rather than an inference from
-reading seventy-one walks by hand. That is the whole contribution, and it is
-deliberately not a gate:
-
-* **Not a cap on the detector count.** A cap invites the next person to add
-  walks up to the cap and stop, which is the opposite of the intent.
-* **Not an assertion that ``unaccounted == 0``.** That is red until the
-  migration finishes, and the only honest ways to green it are to wire every
-  walk to a rule (the work) or to lower the threshold until it fits today's
-  number (a lie). It is reported, not enforced, for the same reason the
-  registry gap was: a threshold picked to fit the present detects nothing and
-  only ever gets re-raised.
-
-THE BITES
----------
-The bites exist because a walk that reads nothing is indistinguishable from a
-suite with no detectors at all. One plants a detector in a tree the test owns
-and proves the count moves by exactly one while a non-detector does not count;
-the other proves a detector nested inside a factory is still seen, which is
-the cheap way to add enforcement the suite cannot account for.
-"""
+A detector is a hand-written AST walk; ``unaccounted`` (walks no ``Rule`` names)
+is the migration gap, exact and worth zero. Deliberately reported, not enforced."""
 
 from __future__ import annotations
 
@@ -79,39 +17,45 @@ DETECTOR_SUFFIX = "_offenders"
 
 
 @dataclass(frozen=True)
+class DetectorEntry:
+    """One walk under ``tests/invariants``, wherever it is defined."""
+
+    path: pathlib.Path
+    lineno: int
+    name: str
+
+    def display(self) -> str:
+        """Repo-relative where possible, absolute otherwise.
+
+        Bite plants live under pytest's tmp dir (outside the repo), so a bare
+        ``relative_to`` would raise on them."""
+        if self.path.is_relative_to(REPO_ROOT):
+            return str(self.path.relative_to(REPO_ROOT))
+        return str(self.path)
+
+    def __str__(self) -> str:
+        return f"{self.display()}:{self.lineno} {self.name}"
+
+
+@dataclass(frozen=True)
 class DetectorAudit:
     """What the suite holds, and how much of it declares an owner."""
 
-    detectors: tuple[str, ...]
-    declared: tuple[str, ...]
-    #: Suffix-matching functions that read no tree, so are not detectors: helpers a walk composes, and
-    #: factories that build one.
-    not_detectors: tuple[str, ...] = ()
+    detectors: tuple[DetectorEntry, ...]
+    declared: tuple[DetectorEntry, ...]
+    not_detectors: tuple[DetectorEntry, ...] = ()
 
     @property
     def unaccounted(self) -> int:
-        """Detectors that no ``Rule`` names: no summary, no scope, no proof.
-
-        This is the migration gap, and the only count here worth driving down.
-        A hand-rolled walk enforces something real, but nothing states which
-        property it pins, so a maintainer cannot tell an enforced invariant from
-        a leftover helper, and nothing proves the walk can still fire.
-
-        Unlike the registry comparison this one cannot overstate the gap. A
-        detector is either wired to a ``Rule`` or it is not, so the arithmetic
-        is exact; and it cannot go quietly stale, because a new ``_offenders``
-        walk lands counted-but-undeclared until somebody gives it a rule.
-        """
+        """Detectors no ``Rule`` names: the migration gap, exact and worth zero."""
         return len(self.detectors) - len(self.declared)
 
 
 def _rule_constructors(tree: ast.Module) -> set[str]:
-    """The names in ``tree`` that call ``Rule``.
+    """The local names in ``tree`` that call ``Rule``.
 
-    Resolved through the module's own import so an aliased ``Rule`` still counts,
-    with the bare name admitted unconditionally for a tree that never spells the
-    import -- a planted fixture, or a module that re-exports the framework.
-    """
+    Resolved through the module's own import so an aliased ``Rule`` still
+    counts; the bare name is admitted for a tree that never spells the import."""
     names = {"Rule"}
     for node in from_imports(tree):
         if (node.module or "").split(".")[-1] == "rules":
@@ -122,16 +66,8 @@ def _rule_constructors(tree: ast.Module) -> set[str]:
 def _wired_finds(tree: ast.Module) -> set[str]:
     """Detector names a ``Rule`` reaches through its ``find=``.
 
-    The name may be the ``find`` itself or appear inside it. A detector needing
-    an extra argument is wired ``find=lambda tree, path: _detector(tree, path,
-    extra)``, and a rule that recognises only the bare name reports that walk as
-    undeclared. That is not a small imprecision: it means the count tracks the
-    spelling of the wiring rather than the wiring, so it reads the same before
-    and after the migration it is supposed to measure.
-
-    Restricted to the detector suffix so that a ``find`` expression mentioning
-    some other helper does not declare a walk it never runs.
-    """
+    The name may be the ``find`` itself or appear inside it; a lambda-wired
+    detector must count, or the metric tracks the spelling, not the migration."""
     constructors = _rule_constructors(tree)
     wired: set[str] = set()
     for call in calls_to_any(tree, constructors):
@@ -146,17 +82,14 @@ def _wired_finds(tree: ast.Module) -> set[str]:
     return wired
 
 
-def _survey(root: pathlib.Path) -> tuple[list[str], list[str]]:
-    """Every walk under ``root``, and the subset a ``Rule`` names as its ``find``.
+def _survey(root: pathlib.Path) -> tuple[list[DetectorEntry], list[DetectorEntry], list[DetectorEntry]]:
+    """Every detector walk under ``root``; the halves a ``Rule`` does and does not name.
 
-    Walks nested definitions as well as module-level ones: a detector built
-    inside a factory runs for some inputs, and a top-level-only walk would not
-    see it, which is precisely how enforcement ends up unaccounted for. Each
-    file is parsed once and both answers come from that one tree.
-    """
-    detectors: list[str] = []
-    declared: list[str] = []
-    not_detectors: list[str] = []
+    Nested definitions count too -- a factory-built detector runs for some
+    inputs; each file parses once, both answers from that tree."""
+    detectors: list[DetectorEntry] = []
+    declared: list[DetectorEntry] = []
+    not_detectors: list[DetectorEntry] = []
     for path in sorted(root.rglob("*.py")):
         if "__pycache__" in path.parts:
             continue
@@ -165,7 +98,7 @@ def _survey(root: pathlib.Path) -> tuple[list[str], list[str]]:
         for node in functions(tree):
             if not node.name.endswith(DETECTOR_SUFFIX):
                 continue
-            entry = f"{_display(path)}:{node.lineno} {node.name}"
+            entry = DetectorEntry(path=path, lineno=node.lineno, name=node.name)
             if not _reads_a_tree(node):
                 not_detectors.append(entry)
                 continue
@@ -176,24 +109,10 @@ def _survey(root: pathlib.Path) -> tuple[list[str], list[str]]:
 
 
 def _reads_a_tree(node: ast.FunctionDef | ast.AsyncFunctionDef) -> bool:
-    """Whether this function walks a parsed module, and is therefore a detector.
+    """Whether this function's first parameter names the tree it walks.
 
-    The suffix alone does not decide it, and getting that wrong is worse than the
-    counting being approximate. A helper whose job is to compare two sets and a
-    factory whose job is to build a detector both end in ``_offenders``; counted
-    alongside real walks they make one total carry "work still to do", "not a
-    detector at all", and "cannot be expressed by the framework", which are three
-    different conversations. A reader given that number cannot tell which one
-    they are in, and neither could the author of it.
-
-    A detector's first parameter is the tree it walks. A method's first parameter
-    is ``self``, and a detector defined as a method still walks a tree, so the
-    receiver is skipped -- the bite that plants one caught that omission.
-
-    Some declare the type and some do not, and the union is deliberate: requiring
-    an annotation would drop the older half of the suite from the count, which is
-    the same mistake the retired subtraction made in the other direction.
-    """
+    Suffix alone does not decide it -- a factory can end in ``_offenders``;
+    ``self``/``cls`` are skipped, so a method detector still counts."""
     if not node.args.args:
         return False
     positional = node.args.args
@@ -208,25 +127,13 @@ def _reads_a_tree(node: ast.FunctionDef | ast.AsyncFunctionDef) -> bool:
     return "ast.AST" in annotation or "ast.Module" in annotation
 
 
-def detector_functions(root: pathlib.Path) -> list[str]:
-    """Every ``*_offenders`` function under ``root``, as ``file:line name``."""
+def detector_functions(root: pathlib.Path) -> list[DetectorEntry]:
+    """Every ``*_offenders`` walk under ``root``."""
     return _survey(root)[0]
 
 
-def _display(path: pathlib.Path) -> str:
-    """Repo-relative where possible, absolute otherwise.
-
-    The bites point this at trees under pytest's tmp dir, which are not inside
-    the repo, so a bare ``relative_to`` raises and the failure reads as a
-    defect in the walk rather than as a path that was never repo-relative.
-    """
-    if path.is_relative_to(REPO_ROOT):
-        return str(path.relative_to(REPO_ROOT))
-    return str(path)
-
-
 def audit(root: pathlib.Path = INVARIANTS_ROOT) -> DetectorAudit:
-    """Count the walks under ``root``, and the share of them a ``Rule`` names."""
+    """Count the walks under ``root``, and the share a ``Rule`` names."""
     detectors, declared, not_detectors = _survey(root)
     return DetectorAudit(
         detectors=tuple(detectors),
@@ -238,36 +145,22 @@ def audit(root: pathlib.Path = INVARIANTS_ROOT) -> DetectorAudit:
 def test_the_walk_sees_every_detector_in_the_suite() -> None:
     """The count is only useful if it is not vacuous on the real tree.
 
-    A walk whose glob silently matched nothing would report zero detectors and
-    zero unaccounted ones, and the number this module exists to produce would
-    read as reassurance. So the real tree is asserted non-empty, and every
-    entry is asserted to name a file that is actually under ``tests/invariants``
-    -- a result from anywhere else means the walk escaped its scope.
-    """
+    The real tree is asserted non-empty, and every entry must land under
+    ``tests/invariants`` -- elsewhere means the walk escaped its scope."""
     found = detector_functions(INVARIANTS_ROOT)
     assert found, "the walk reported no detectors in tests/invariants/, so its counts prove nothing"
-    assert all(entry.startswith("tests/invariants/") for entry in found), (
+    assert all(entry.path.is_relative_to(INVARIANTS_ROOT) for entry in found), (
         f"the walk reported detectors outside tests/invariants/: "
-        f"{[e for e in found if not e.startswith('tests/invariants/')]}"
+        f"{[e for e in found if not e.path.is_relative_to(INVARIANTS_ROOT)]}"
     )
-    assert all("_offenders" in entry for entry in found)
+    assert all(entry.name.endswith(DETECTOR_SUFFIX) for entry in found)
 
 
 def test_planting_a_detector_moves_the_count_by_one(tmp_path: pathlib.Path) -> None:
     """The bite: one detector in, one counted; a near-miss function does not.
 
-    Both halves matter. Without the first, a walk that returns nothing
-    satisfies the count. Without the second, a walk that counts every function
-    in the file would pass while never having looked at a detector at all --
-    which is the failure mode a name-based count is supposed to rule out.
-
-    The method takes ``(self, tree, path)``, not ``(self)``. A receiver is not a
-    tree, so a method that walks nothing is not a detector however it is spelled,
-    and planting one here would have kept the count honest only by accident:
-    this plant predates the rule that a detector must read a tree, and passed for
-    the wrong reason. A detector defined as a method is still a detector, which is
-    why the receiver is skipped rather than the method excluded.
-    """
+    A method takes ``(self, tree, path)`` -- a receiver is not a tree -- but a
+    method that DOES walk a tree still counts, so ``self`` is skipped."""
     root = tmp_path / "invariants"
     root.mkdir()
     (root / "test_planted.py").write_text(
@@ -290,11 +183,11 @@ def test_planting_a_detector_moves_the_count_by_one(tmp_path: pathlib.Path) -> N
     )
     found = detector_functions(root)
     assert len(found) == 2, f"expected the two planted detectors, got {found}"
-    assert any(entry.endswith("_planted_offenders") for entry in found), found
-    assert any(entry.endswith("_method_offenders") for entry in found), (
+    assert any(entry.name == "_planted_offenders" for entry in found), found
+    assert any(entry.name == "_method_offenders" for entry in found), (
         f"a detector defined as a method went uncounted: {found}"
     )
-    assert not any("_not_a_detector" in entry for entry in found), (
+    assert not any(entry.name == "_not_a_detector" for entry in found), (
         f"a function that is not a detector was counted: {found}"
     )
 
@@ -304,30 +197,8 @@ def test_a_rule_backed_detector_counts_as_declared_and_a_hand_rolled_one_does_no
 ) -> None:
     """The bite: being *found* by the walk is not the same as being *declared*.
 
-    Before the Rule migration these were the same question, and the count
-    answered "is there a walk here?". It no longer does. A detector wired as a
-    ``Rule``'s ``find=`` carries a name, a summary, an explicit scope and bite
-    proofs -- a maintainer reading one line learns which property is pinned and
-    what firing it looks like. The identical function left hand-rolled carries
-    none of that: nothing names the property, and nothing proves the walk can
-    still fire.
-
-    Measuring those two as one number is how the migration would have been able
-    to report success without having done anything. The count that is worth
-    having is the undeclared half, so this plants one of each and asserts the
-    split. The second half is what stops the first from passing vacuously: a
-    predicate that returned every detector would satisfy "the Rule-backed ones
-    are declared" while quietly declaring the hand-rolled one too.
-
-    Three wirings are planted, not one, because they are three spellings of the
-    same decision and the first cut of this bite recognised only the first. A
-    detector needing an extra argument is wired ``find=lambda tree, path:
-    _detector(tree, path, extra)`` -- the rule still owns that walk, and a
-    counter reading it as undeclared is not measuring the migration, it is
-    measuring the spelling. That is the same category error the retired
-    ``detectors - registered`` subtraction made, reintroduced one level down,
-    and it is invisible unless a bite plants the lambda form.
-    """
+    One of each is planted and the split asserted, with three wirings -- bare,
+    aliased, lambda -- so the count measures the migration, not its spelling."""
     root = tmp_path / "invariants"
     root.mkdir()
     (root / "test_planted.py").write_text(
@@ -368,19 +239,19 @@ def test_a_rule_backed_detector_counts_as_declared_and_a_hand_rolled_one_does_no
         f"expected both Rule-backed detectors to be declared, got {result.declared}"
     )
     for wired in ("_direct_wired_offenders", "_lambda_wired_offenders"):
-        assert any(entry.endswith(wired) for entry in result.declared), (
+        assert any(entry.name == wired for entry in result.declared), (
             f"{wired} is a Rule find but was not counted declared: {result.declared}"
         )
-    assert not any("_hand_rolled" in entry for entry in result.declared), (
+    assert not any(entry.name == "_hand_rolled_offenders" for entry in result.declared), (
         f"a hand-rolled detector was reported as declared: {result.declared}"
     )
     assert result.unaccounted == 1, (
         f"the one hand-rolled detector is the whole migration gap; got {result.unaccounted}"
     )
-    assert not any("_documented_knob_offenders" in entry for entry in result.detectors), (
+    assert not any(entry.name == "_documented_knob_offenders" for entry in result.detectors), (
         "a function that reads no tree was counted as a detector"
     )
-    assert any("_documented_knob_offenders" in entry for entry in result.not_detectors), (
+    assert any(entry.name == "_documented_knob_offenders" for entry in result.not_detectors), (
         f"a non-detector was dropped rather than reported apart: {result.not_detectors}"
     )
 
@@ -388,11 +259,8 @@ def test_a_rule_backed_detector_counts_as_declared_and_a_hand_rolled_one_does_no
 def test_a_detector_nested_in_a_factory_is_still_counted(tmp_path: pathlib.Path) -> None:
     """A detector built at call time runs, so it has to be accounted for.
 
-    Conditional or factory-defined walks are the cheap way to add enforcement
-    the suite cannot see: the walk runs for whatever inputs reach it, and
-    nothing counts it, so nothing notices when it stops running. The count
-    therefore walks the whole tree rather than module-level definitions only.
-    """
+    The count walks the whole tree, not module-level definitions only, so a
+    factory-defined walk cannot vanish undiscovered."""
     root = tmp_path / "invariants"
     root.mkdir()
     (root / "test_nested.py").write_text(
