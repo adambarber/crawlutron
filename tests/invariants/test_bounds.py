@@ -263,7 +263,7 @@ DECOMPRESS_BYPASS = Rule(
 
 # The load-bearing part of that is ``headers: dict | None``, where None is the transport-failure marker.
 # ``_Discovery``'s accessors are total over it, so a consumer cannot reach a ``.get`` on a missing map.
-_DISCOVERY_FETCH = "_fetch_decode_discovery"
+_DISCOVERY_FETCH = "fetch_decode_discovery"
 
 
 # The chokepoint module that legitimately owns what it bans.
@@ -313,20 +313,20 @@ DISCOVERY_RESPONSE = Rule(
     bite=lambda: (
         Bites(
             "async def f(fetcher):\n"
-            "    text, status, resp_headers = await _fetch_decode_discovery(fetcher, 'u', {}, 5)\n"
+            "    text, status, resp_headers = await fetch_decode_discovery(fetcher, 'u', {}, 5)\n"
             "    return text, status, resp_headers.get('etag')\n",
             "destructures a discovery response",
         ),
         Bites(
             "async def f(fetcher):\n"
-            "    resp = await _fetch_decode_discovery(fetcher, 'u', {}, 5)\n"
+            "    resp = await fetch_decode_discovery(fetcher, 'u', {}, 5)\n"
             "    return resp.headers\n",
             "header map directly",
         ),
     ),
     clean=lambda: (
         "async def f(fetcher):\n"
-        "    resp = await _fetch_decode_discovery(fetcher, 'u', {}, 5)\n"
+        "    resp = await fetch_decode_discovery(fetcher, 'u', {}, 5)\n"
         "    return resp.validators(), resp.not_modified(), resp.text, resp.status\n",
     ),
 )

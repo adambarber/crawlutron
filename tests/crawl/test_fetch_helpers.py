@@ -1,16 +1,16 @@
 """Fetch helpers: the shared discovery fetch+decompress+decode core.
 
-``fetch_and_decode`` (robots gating in the engine) and ``_fetch_text``
+``fetch_and_decode`` (robots gating in the engine) and ``fetch_text``
 (sitemap fan-out) each used to hand-roll the same fetch -> await ->
 lowercase headers -> capped decompress -> decode sequence. That core now
-lives in one place (``_fetch_decode_discovery``); these tests pin both call
+lives in one place (``fetch_decode_discovery``); these tests pin both call
 sites' contracts so the collapse is provably behavior-preserving.
 """
 
 import gzip
 from dataclasses import dataclass, field
 
-from app.orchestration.fetch_helpers import _fetch_decode_discovery, _fetch_text, fetch_and_decode
+from app.orchestration.fetch_helpers import fetch_and_decode, fetch_decode_discovery, fetch_text
 from app.vocabulary.limits import DISCOVERY_BODY_MAX_BYTES
 
 
@@ -64,34 +64,34 @@ class TestFetchDecodeDiscovery:
 
     async def test_decodes_two_hundred_body(self):
         fetcher = _fetcher(_FakeResp(200, {"content-type": "text/plain"}, b"hello"))
-        text, status, headers = await _fetch_decode_discovery(fetcher, "http://e.com/r", {}, 5)
+        text, status, headers = await fetch_decode_discovery(fetcher, "http://e.com/r", {}, 5)
         assert text == "hello"
         assert status == 200
         assert headers == {"content-type": "text/plain"}
 
     async def test_headers_are_lowercased(self):
         fetcher = _fetcher(_FakeResp(200, {"Content-Type": "text/plain", "ETag": '"1"'}, b"x"))
-        _, _, headers = await _fetch_decode_discovery(fetcher, "http://e.com/r", {}, 5)
+        _, _, headers = await fetch_decode_discovery(fetcher, "http://e.com/r", {}, 5)
         assert headers == {"content-type": "text/plain", "etag": '"1"'}
 
     async def test_non_two_hundred_returns_no_body_but_status_and_headers(self):
         # The body is absent, but status + headers survive so the sitemap path can still read
         # ETag/Last-Modified off a 404/5xx.
         fetcher = _fetcher(_FakeResp(404, {"etag": '"1"'}, b""))
-        text, status, headers = await _fetch_decode_discovery(fetcher, "http://e.com/r", {}, 5)
+        text, status, headers = await fetch_decode_discovery(fetcher, "http://e.com/r", {}, 5)
         assert text is None
         assert status == 404
         assert headers == {"etag": '"1"'}
 
     async def test_transport_failure_returns_no_body_or_status(self):
         fetcher = _raising_fetcher(ConnectionError("boom"))
-        assert await _fetch_decode_discovery(fetcher, "http://e.com/r", {}, 5) == (None, None, None)
+        assert await fetch_decode_discovery(fetcher, "http://e.com/r", {}, 5) == (None, None, None)
 
     async def test_coroutine_fetcher_is_awaited(self):
         async def fetcher(url, headers, timeout_seconds):
             return _FakeResp(200, {"content-type": "text/plain"}, b"async")
 
-        text, status, _ = await _fetch_decode_discovery(fetcher, "http://e.com/r", {}, 5)
+        text, status, _ = await fetch_decode_discovery(fetcher, "http://e.com/r", {}, 5)
         assert text == "async"
         assert status == 200
 
@@ -100,7 +100,7 @@ class TestFetchDecodeDiscovery:
         fetcher = _fetcher(
             _FakeResp(200, {"content-type": "application/xml", "content-encoding": "gzip"}, body)
         )
-        text, status, _ = await _fetch_decode_discovery(fetcher, "http://e.com/s", {}, 5)
+        text, status, _ = await fetch_decode_discovery(fetcher, "http://e.com/s", {}, 5)
         assert text == "<urlset></urlset>"
         assert status == 200
 
@@ -114,7 +114,7 @@ class TestFetchDecodeDiscovery:
                 _gzip_bomb(),
             )
         )
-        text, status, headers = await _fetch_decode_discovery(fetcher, "http://e.com/s", {}, 5)
+        text, status, headers = await fetch_decode_discovery(fetcher, "http://e.com/s", {}, 5)
         assert text is None
         assert status == 200
         assert headers is not None
@@ -122,7 +122,7 @@ class TestFetchDecodeDiscovery:
 
     async def test_headers_passed_through_to_fetcher(self):
         fetcher = _fetcher(_FakeResp(200, {"content-type": "text/plain"}, b"x"))
-        await _fetch_decode_discovery(fetcher, "http://e.com/r", {"if-none-match": '"1"'}, 9)
+        await fetch_decode_discovery(fetcher, "http://e.com/r", {"if-none-match": '"1"'}, 9)
         assert fetcher.calls == [("http://e.com/r", {"if-none-match": '"1"'}, 9)]
 
 
@@ -157,26 +157,26 @@ class TestFetchTextContract:
                 b"<urlset/>",
             )
         )
-        assert await _fetch_text(fetcher, "http://e.com/s.xml", None, 5) == ("<urlset/>", '"1"', "Tue", False)
+        assert await fetch_text(fetcher, "http://e.com/s.xml", None, 5) == ("<urlset/>", '"1"', "Tue", False)
 
     async def test_not_modified_reuses_validators_without_body(self):
         fetcher = _fetcher(_FakeResp(304, {"etag": '"1"', "last-modified": "Tue"}, b""))
-        assert await _fetch_text(fetcher, "http://e.com/s.xml", None, 5) == (None, '"1"', "Tue", True)
+        assert await fetch_text(fetcher, "http://e.com/s.xml", None, 5) == (None, '"1"', "Tue", True)
 
     async def test_missing_document_returns_all_none(self):
         fetcher = _fetcher(_FakeResp(404, {"etag": '"1"'}, b""))
-        assert await _fetch_text(fetcher, "http://e.com/s.xml", None, 5) == (None, None, None, False)
+        assert await fetch_text(fetcher, "http://e.com/s.xml", None, 5) == (None, None, None, False)
 
     async def test_transport_failure_returns_all_none(self):
         fetcher = _raising_fetcher(ConnectionError("boom"))
-        assert await _fetch_text(fetcher, "http://e.com/s.xml", None, 5) == (None, None, None, False)
+        assert await fetch_text(fetcher, "http://e.com/s.xml", None, 5) == (None, None, None, False)
 
     async def test_decompression_cap_keeps_validators(self):
         bomb = gzip.compress(b"\x00" * (DISCOVERY_BODY_MAX_BYTES + 4096))
         fetcher = _fetcher(_FakeResp(200, {"content-encoding": "gzip", "etag": '"1"'}, bomb))
-        assert await _fetch_text(fetcher, "http://e.com/s.xml", None, 5) == (None, '"1"', None, False)
+        assert await fetch_text(fetcher, "http://e.com/s.xml", None, 5) == (None, '"1"', None, False)
 
     async def test_conditional_headers_are_passed(self):
         fetcher = _fetcher(_FakeResp(304, {"etag": '"1"'}, b""))
-        await _fetch_text(fetcher, "http://e.com/s.xml", {"if-none-match": '"1"'}, 5)
+        await fetch_text(fetcher, "http://e.com/s.xml", {"if-none-match": '"1"'}, 5)
         assert fetcher.calls == [("http://e.com/s.xml", {"if-none-match": '"1"'}, 5)]

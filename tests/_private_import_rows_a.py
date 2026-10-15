@@ -36,16 +36,6 @@ DECLARED: dict[str, Declaration] = {
     "app.transport.browser_cookies.BROWSER_COOKIES_BY_DOMAIN._lock": _d(
         _CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]
     ),
-    "app.orchestration.fetch_helpers._fetch_decode_discovery": _d(
-        "unreviewed",
-        "Not yet triaged.\n",
-        ["test"],
-    ),
-    "app.orchestration.fetch_helpers._fetch_text": _d(
-        "unreviewed",
-        "Not yet triaged.\n",
-        ["test"],
-    ),
     "app.storage.job_store._Expected": _d(_CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]),
     "app.orchestration.robots._RobotsPathMatcher": _d(
         "private type",

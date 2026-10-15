@@ -38,7 +38,7 @@ type _RequestHeaders = Mapping[str, str] | None
 # decompressed size so a hostile origin cannot OOM the service via a gzip bomb.
 
 
-class _Discovery(NamedTuple):
+class Discovery(NamedTuple):
     """One discovery response (robots.txt / sitemap.xml): the owner of what a
     response *means*.
 
@@ -96,12 +96,12 @@ async def _call_fetcher(
     return resp
 
 
-async def _fetch_decode_discovery(
+async def fetch_decode_discovery(
     fetcher: HttpFetcher,
     url: NormalizedUrl,
     headers: _RequestHeaders,
     timeout_seconds: int,
-) -> _Discovery:
+) -> Discovery:
     """Fetch, decompress, and decode a discovery body (robots.txt / sitemap.xml).
 
     The single place the discovery fetch policy lives: sync or coroutine
@@ -112,7 +112,7 @@ async def _fetch_decode_discovery(
     normalizing them first. The header map is present even when the body is
     absent -- non-200, or a body that blew the cap -- so the sitemap path can
     still read ETag/Last-Modified while the robots path ignores it. All three
-    fields are ``None`` on transport-level failure, and ``_Discovery`` is the
+    fields are ``None`` on transport-level failure, and ``Discovery`` is the
     only thing a consumer is meant to read off the result.
     """
     from app.transport.decompression import DecompressionTooLargeError
@@ -129,10 +129,10 @@ async def _fetch_decode_discovery(
                     max_output_bytes=DISCOVERY_BODY_MAX_BYTES,
                 )
             except DecompressionTooLargeError:
-                return _Discovery(None, status, resp_headers)
-            return _Discovery(decode_body(body, resp_headers.get("content-type")), status, resp_headers)
-        return _Discovery(None, status, resp_headers)
-    return _Discovery(None, None, None)
+                return Discovery(None, status, resp_headers)
+            return Discovery(decode_body(body, resp_headers.get("content-type")), status, resp_headers)
+        return Discovery(None, status, resp_headers)
+    return Discovery(None, None, None)
 
 
 async def fetch_and_decode(
@@ -148,7 +148,7 @@ async def fetch_and_decode(
     robots handling treats differently (fail closed). ``(None, None)``
     on transport-level failure.
     """
-    resp = await _fetch_decode_discovery(fetcher, url, headers, timeout_seconds)
+    resp = await fetch_decode_discovery(fetcher, url, headers, timeout_seconds)
     return resp.text, resp.status
 
 
@@ -174,7 +174,7 @@ async def single_flight[K, T](
     return await asyncio.shield(task)
 
 
-async def _fetch_text(
+async def fetch_text(
     fetcher: HttpFetcher,
     url: NormalizedUrl,
     cond_headers: dict[str, str] | None,
@@ -188,7 +188,7 @@ async def _fetch_text(
     surfaced even when the body is absent (304, or a body that blew the
     decompression cap) so the cache entry stays addressable.
     """
-    resp = await _fetch_decode_discovery(fetcher, url, cond_headers, timeout_seconds)
+    resp = await fetch_decode_discovery(fetcher, url, cond_headers, timeout_seconds)
     validators = resp.validators()
     if validators is None:
         return None, None, None, False
@@ -246,7 +246,7 @@ async def fetch_sitemap_urls(
         if depth > max_depth or current_url in visited or len(page_urls) >= max_urls:
             return etag, last_modified
         visited.add(current_url)
-        text, etag, last_modified, not_modified = await _fetch_text(
+        text, etag, last_modified, not_modified = await fetch_text(
             fetcher, current_url, cond_headers, timeout_seconds
         )
         if not_modified:
