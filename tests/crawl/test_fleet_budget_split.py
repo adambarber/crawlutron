@@ -67,7 +67,7 @@ def test_every_worker_derives_a_pool_that_fits_the_whole_fleet(monkeypatch):
     monkeypatch.setenv("CRAWLUTRON_WORKERS", "4")
     per_worker = rp.derive_browser_pool_size(limit)
 
-    assert per_worker * 4 <= rp._MAX_DERIVED_POOL_SIZE
+    assert per_worker * 4 <= rp.MAX_DERIVED_POOL_SIZE
     assert per_worker >= 1
 
     # Un-divided, 4 workers on this limit would each take the full cap.
@@ -231,7 +231,7 @@ def test_the_browser_tier_stays_inside_the_ram_budget(monkeypatch):
     """
     limit = 16 * 1024 * 1024 * 1024
     budget = int(limit * rp.BROWSER_RAM_FRACTION)
-    browser_bytes = rp._BROWSER_TASK_RAM_BYTES
+    browser_bytes = rp.TaskRamBudget().browser_task_bytes
 
     affordable = budget // browser_bytes
     for workers in range(1, affordable + 1):

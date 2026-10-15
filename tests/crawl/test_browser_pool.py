@@ -145,8 +145,8 @@ def test_budget_derivation_3g_defaults(monkeypatch):
 
 def test_budget_derivation_capped(monkeypatch):
     monkeypatch.setattr(rp, "read_memory_stats", lambda: _Mem(64 * 1024**3))
-    # huge host -> capped at _MAX_DERIVED_POOL_SIZE (4)
-    assert bp._derive_browser_pool_size() == rp._MAX_DERIVED_POOL_SIZE
+    # huge host -> capped at the per-worker fleet ceiling
+    assert bp._derive_browser_pool_size() == rp.MAX_DERIVED_POOL_SIZE
 
 
 def test_no_limit_falls_back_to_one(monkeypatch):

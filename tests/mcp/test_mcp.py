@@ -406,7 +406,7 @@ class TestInternalErrorContract:
         async def boom(**kwargs):
             raise ValueError("simulated tool crash")
 
-        monkeypatch.setattr(server_mod, "_call_tool", boom)
+        monkeypatch.setattr(server_mod, "call_tool", boom)
         body = _body("tools/call", params={"name": "search", "arguments": {}, "_meta": {**_META}})
         status, payload = await handle_mcp_request(
             body,

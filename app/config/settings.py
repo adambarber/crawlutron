@@ -29,7 +29,7 @@ from app.vocabulary.limits import (
 _DEF_MB = 1024 * 1024
 
 
-def _default_http_max_connections() -> int:
+def default_http_max_connections() -> int:
     try:
         limit = read_memory_stats().total_bytes or (4 * _DEF_MB * 1024)
     except Exception:
@@ -39,9 +39,9 @@ def _default_http_max_connections() -> int:
     return max(100, max_http_concurrency_for(limit, derive_browser_pool_size(limit)))
 
 
-def _default_http_keepalive() -> int:
+def default_http_keepalive() -> int:
     # Keepalive tracks the connection ceiling (half), bounded for sanity.
-    return max(20, min(128, _default_http_max_connections() // 2))
+    return max(20, min(128, default_http_max_connections() // 2))
 
 
 ENVIRONMENT_FIELD_ALIASES: dict[str, str] = {
@@ -86,8 +86,8 @@ class CrawlerSettings:
     cookie_jar_path: str = "./cache/cookie_jar.json"
     # default_factory, not a class-body call: the derivation reads the memory
     # limit, so a class-body call froze import-time I/O as the ceiling forever.
-    http_max_connections: int = field(default_factory=_default_http_max_connections)
-    http_max_keepalive: int = field(default_factory=_default_http_keepalive)
+    http_max_connections: int = field(default_factory=default_http_max_connections)
+    http_max_keepalive: int = field(default_factory=default_http_keepalive)
     http_keepalive_expiry: float = 60.0
     # Browser runtime limits, centralized so they share the env mapping and are
     # visible in the capabilities config surface.
@@ -209,10 +209,10 @@ class CrawlerSettings:
             ),
             cookie_jar_path=source.get("CRAWLUTRON_COOKIE_JAR_PATH", cls.cookie_jar_path),
             http_max_connections=get_mapping_int(
-                source, "CRAWLUTRON_HTTP_MAX_CONNECTIONS", _default_http_max_connections()
+                source, "CRAWLUTRON_HTTP_MAX_CONNECTIONS", default_http_max_connections()
             ),
             http_max_keepalive=get_mapping_int(
-                source, "CRAWLUTRON_HTTP_MAX_KEEPALIVE", _default_http_keepalive()
+                source, "CRAWLUTRON_HTTP_MAX_KEEPALIVE", default_http_keepalive()
             ),
             http_keepalive_expiry=get_mapping_float(
                 source, "CRAWLUTRON_HTTP_KEEPALIVE_EXPIRY", cls.http_keepalive_expiry

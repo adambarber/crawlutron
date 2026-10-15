@@ -195,7 +195,7 @@ async def _projected(crawled: Awaitable[UnifiedCrawlResponse], projection: _Unif
     return response if projection is _Unified.from_crawl else await _extracted(response)
 
 
-async def _handle_crawl(payload: CrawlRequest, settings, shutdown_event) -> ToolResult:
+async def handle_crawl(payload: CrawlRequest, settings, shutdown_event) -> ToolResult:
     return await _guard_then_crawl(payload, settings, shutdown_event, _Unified.from_crawl)
 
 
@@ -222,15 +222,15 @@ async def _extracted(response: UnifiedCrawlResponse) -> CrawlAndExtractResponse:
     )
 
 
-async def _handle_crawl_and_extract(payload: CrawlRequest, settings, shutdown_event) -> ToolResult:
+async def handle_crawl_and_extract(payload: CrawlRequest, settings, shutdown_event) -> ToolResult:
     return await _guard_then_crawl(payload, settings, shutdown_event, _Unified.from_extract)
 
 
-async def _handle_map(payload: MapRequest, settings, shutdown_event) -> ToolResult:
+async def handle_map(payload: MapRequest, settings, shutdown_event) -> ToolResult:
     return await _tool_result(map_site(payload, settings=settings, shutdown_event=shutdown_event))
 
 
-async def _handle_render(payload: RenderRequest, settings, shutdown_event) -> ToolResult:
+async def handle_render(payload: RenderRequest, settings, shutdown_event) -> ToolResult:
     if get_browser_pool() is None:
         return ToolResult(
             text="Browser pool is not initialized; the service is starting up or shutting down.",
@@ -239,7 +239,7 @@ async def _handle_render(payload: RenderRequest, settings, shutdown_event) -> To
     return await _tool_result(render_endpoint_handler(payload, settings=settings))
 
 
-async def _handle_search(payload: SearchRequest, settings, shutdown_event) -> ToolResult:
+async def handle_search(payload: SearchRequest, settings, shutdown_event) -> ToolResult:
     return await _tool_result(search_endpoint_handler(payload, settings=settings))
 
 
@@ -260,7 +260,7 @@ TOOL_SPECS: list[ToolSpec] = [
         ),
         request_model=SearchRequest,
         output_schema=_schema(SearchResponse),
-        handler=_handle_search,
+        handler=handle_search,
     ),
     ToolSpec(
         name="crawl",
@@ -278,7 +278,7 @@ TOOL_SPECS: list[ToolSpec] = [
         request_model=CrawlRequest,
         unsupported_fields=_UNSUPPORTED_CRAWL_FIELDS,
         output_schema=_schema(UnifiedCrawlResponse),
-        handler=_handle_crawl,
+        handler=handle_crawl,
     ),
     ToolSpec(
         name="crawl_and_extract",
@@ -293,7 +293,7 @@ TOOL_SPECS: list[ToolSpec] = [
         request_model=CrawlRequest,
         unsupported_fields=_UNSUPPORTED_CRAWL_FIELDS,
         output_schema=_schema(CrawlAndExtractResponse),
-        handler=_handle_crawl_and_extract,
+        handler=handle_crawl_and_extract,
     ),
     ToolSpec(
         name="map",
@@ -306,7 +306,7 @@ TOOL_SPECS: list[ToolSpec] = [
         ),
         request_model=MapRequest,
         output_schema=_schema(SiteMapResponse),
-        handler=_handle_map,
+        handler=handle_map,
     ),
     ToolSpec(
         name="render",
@@ -319,10 +319,20 @@ TOOL_SPECS: list[ToolSpec] = [
         ),
         request_model=RenderRequest,
         output_schema=_schema(UnifiedCrawlResponse),
-        handler=_handle_render,
+        handler=handle_render,
     ),
 ]
 
 TOOLS_BY_NAME: dict[str, ToolSpec] = {spec.name: spec for spec in TOOL_SPECS}
 
-__all__ = ["TOOLS_BY_NAME", "TOOL_SPECS", "ToolResult", "ToolSpec"]
+__all__ = [
+    "TOOLS_BY_NAME",
+    "TOOL_SPECS",
+    "ToolResult",
+    "ToolSpec",
+    "handle_crawl",
+    "handle_crawl_and_extract",
+    "handle_map",
+    "handle_render",
+    "handle_search",
+]

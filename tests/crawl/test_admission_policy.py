@@ -11,9 +11,6 @@ from app.admission.policy import PolicyTier
 from app.models.host_policy import HostPolicy
 from app.models.normalized_url import NormalizedUrl
 from app.runtime.resource_pressure import (
-    _BROWSER_TASK_RAM_BYTES,
-    _DOC_TASK_RAM_BYTES,
-    _HTTP_TASK_RAM_BYTES,
     BROWSER_RAM_FRACTION,
     ResourceGate,
     TaskRamBudget,
@@ -95,9 +92,10 @@ class TestPolicyDerivation:
         # 3 GiB limit, 2 browsers * 700 MiB reserve and the default doc pool, -> HTTP ceiling from the
         # remainder.
         p = _policy()
-        assert p.browser_pool_reserve_bytes == 2 * _BROWSER_TASK_RAM_BYTES
-        assert p.doc_pool_reserve_bytes == 2 * _DOC_TASK_RAM_BYTES
-        assert p.max_http_concurrency == max(1, _unreserved_bytes(p) // _HTTP_TASK_RAM_BYTES)
+        weights = TaskRamBudget()
+        assert p.browser_pool_reserve_bytes == 2 * weights.browser_task_bytes
+        assert p.doc_pool_reserve_bytes == 2 * weights.doc_task_bytes
+        assert p.max_http_concurrency == max(1, _unreserved_bytes(p) // weights.http_task_bytes)
         # Browser tier is capped at pool_size * max_concurrent_pages
         assert p.max_browser_concurrency == 2 * 3
 
@@ -114,8 +112,8 @@ class TestPolicyDerivation:
         # The persistent markitdown workers are a fixed RAM consumer exactly like the browser pool: each
         # imports markitdown + the PDF/Office parsers once and stays alive.
         p = _policy(doc_workers=2)
-        assert p.doc_pool_reserve_bytes == 2 * _DOC_TASK_RAM_BYTES
-        assert p.max_http_concurrency == max(1, _unreserved_bytes(p) // _HTTP_TASK_RAM_BYTES)
+        assert p.doc_pool_reserve_bytes == 2 * TaskRamBudget().doc_task_bytes
+        assert p.max_http_concurrency == max(1, _unreserved_bytes(p) // TaskRamBudget().http_task_bytes)
 
     def test_doc_pool_reserve_lowers_the_http_ceiling(self):
         # The reserve must actually bite: admitting with doc workers must admit strictly fewer concurrent HTTP
@@ -129,7 +127,7 @@ class TestPolicyDerivation:
         # worker count, not zero.
         gate = ResourceGate()
         wa = default_admission_policy(gate)
-        assert wa._p.doc_pool_reserve_bytes == 2 * _DOC_TASK_RAM_BYTES
+        assert wa._p.doc_pool_reserve_bytes == 2 * TaskRamBudget().doc_task_bytes
 
 
 class TestWeightedAdmission:
@@ -212,14 +210,14 @@ class TestHTTPTaskRamEstimate:
 
     def test_default_covers_a_max_body_plus_parse_state(self):
         # A 10 MiB body plus lxml/trafilatura working set is 40+ MiB in practice.
-        assert _HTTP_TASK_RAM_BYTES >= 48 * 1024 * 1024
+        assert TaskRamBudget().http_task_bytes >= 48 * 1024 * 1024
 
     def test_http_ceiling_uses_the_same_bytes_as_admission(self):
         # Zero drift: the pool ceiling and the admission policy divide by the same per-task estimate, whatever
         # the default is.
         p = _policy()
         free = (3 * 1024 * 1024 * 1024) - p.browser_pool_reserve_bytes - p.doc_pool_reserve_bytes
-        assert p.max_http_concurrency == max(1, free // _HTTP_TASK_RAM_BYTES)
+        assert p.max_http_concurrency == max(1, free // TaskRamBudget().http_task_bytes)
 
     def test_the_3gib_default_still_admits_a_working_floor(self):
         # The minimal-deployment default (3 GiB, 2 browsers) must still admit enough concurrent HTTP fetches

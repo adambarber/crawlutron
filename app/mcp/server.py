@@ -178,7 +178,7 @@ def _validate_transport(
             )
 
 
-async def _call_tool(
+async def call_tool(
     request_id: int | str,
     params: dict[str, Any],
     settings,
@@ -261,7 +261,7 @@ async def handle_mcp_request(
         if method == "tools/list":
             return 200, result_response(request_id, tools_list_result())
         if method == "tools/call":
-            return 200, await _call_tool(request_id, params, settings, shutdown_event)
+            return 200, await call_tool(request_id, params, settings, shutdown_event)
         return 404, error_response(request_id, METHOD_NOT_FOUND, f"Method not found: {method}")
     except ProtocolValidationError as error:
         return error.status_code, error.payload

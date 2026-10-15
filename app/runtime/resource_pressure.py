@@ -52,7 +52,7 @@ _BROWSER_RAM_BYTES = get_env_int("CRAWLUTRON_BROWSER_RAM_BYTES", 700 * 1024 * 10
 BROWSER_RAM_FRACTION = get_env_float("CRAWLUTRON_BROWSER_RAM_FRACTION", 0.5, lo=0.0, hi=1.0)
 
 
-_MAX_DERIVED_POOL_SIZE = get_env_int("CRAWLUTRON_MAX_DERIVED_POOL_SIZE", 4)
+MAX_DERIVED_POOL_SIZE = get_env_int("CRAWLUTRON_MAX_DERIVED_POOL_SIZE", 4)
 
 
 def worker_count() -> int:
@@ -113,7 +113,7 @@ def derive_browser_pool_size(limit_bytes: int | None = None) -> int:
     if limit and limit > 0:
         # A fleet ceiling, not per-process: undivided, N workers each take
         # the full cap, which is N times the number it names.
-        cap = max(1, _MAX_DERIVED_POOL_SIZE // workers)
+        cap = max(1, MAX_DERIVED_POOL_SIZE // workers)
         budget = int(limit * BROWSER_RAM_FRACTION) // workers
         size = max(1, budget // _BROWSER_RAM_BYTES)
         return min(size, cap)

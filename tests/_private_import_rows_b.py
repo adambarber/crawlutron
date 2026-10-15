@@ -133,32 +133,6 @@ DECLARED: dict[str, Declaration] = {
         "Not yet triaged.\n",
         ["test"],
     ),
-    "app.mcp.server._call_tool": _SUBSTITUTED_COLLABORATOR,
-    "app.mcp.tools._handle_crawl": _d(
-        "unreviewed",
-        "Not yet triaged.\n",
-        ["test"],
-    ),
-    "app.mcp.tools._handle_crawl_and_extract": _d(
-        "unreviewed",
-        "Not yet triaged.\n",
-        ["test"],
-    ),
-    "app.mcp.tools._handle_map": _d(
-        "unreviewed",
-        "Not yet triaged.\n",
-        ["test"],
-    ),
-    "app.mcp.tools._handle_render": _d(
-        "unreviewed",
-        "Not yet triaged.\n",
-        ["test"],
-    ),
-    "app.mcp.tools._handle_search": _d(
-        "unreviewed",
-        "Not yet triaged.\n",
-        ["test"],
-    ),
     "app.extraction.output_formats._csv_neutralize": _d(
         "unreviewed",
         "Not yet triaged.\n",
@@ -174,18 +148,6 @@ DECLARED: dict[str, Declaration] = {
         "unreviewed",
         "Not yet triaged.\n",
         ["test"],
-    ),
-    "app.runtime.resource_pressure._BROWSER_TASK_RAM_BYTES": _d(
-        _CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]
-    ),
-    "app.runtime.resource_pressure._DOC_TASK_RAM_BYTES": _d(
-        _CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]
-    ),
-    "app.runtime.resource_pressure._HTTP_TASK_RAM_BYTES": _d(
-        _CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]
-    ),
-    "app.runtime.resource_pressure._MAX_DERIVED_POOL_SIZE": _d(
-        _CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]
     ),
     "app.orchestration.scheduler._COOLDOWN_PURGE_INTERVAL": _d(
         _CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]
@@ -204,16 +166,6 @@ DECLARED: dict[str, Declaration] = {
         ["test"],
     ),
     "app.search.providers._provider_http": _d(
-        "unreviewed",
-        "Not yet triaged.\n",
-        ["test"],
-    ),
-    "app.config.settings._default_http_keepalive": _d(
-        "unreviewed",
-        "Not yet triaged.\n",
-        ["test"],
-    ),
-    "app.config.settings._default_http_max_connections": _d(
         "unreviewed",
         "Not yet triaged.\n",
         ["test"],

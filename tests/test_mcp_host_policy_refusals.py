@@ -34,7 +34,7 @@ async def _probe_mcp_crawl(monkeypatch, tmp_path):
 
     monkeypatch.setattr(tools, "execute_crawl", _blocked_http)
     await _assert_refused(
-        tools._handle_crawl(_tool_payload("crawl", url=_BLOCKED_URL), _denied_settings(), None), {}
+        tools.handle_crawl(_tool_payload("crawl", url=_BLOCKED_URL), _denied_settings(), None), {}
     )
 
 
@@ -43,7 +43,7 @@ async def _probe_mcp_crawl_and_extract(monkeypatch, tmp_path):
 
     monkeypatch.setattr(tools, "execute_crawl", _blocked_http)
     await _assert_refused(
-        tools._handle_crawl_and_extract(
+        tools.handle_crawl_and_extract(
             _tool_payload("crawl_and_extract", url=_BLOCKED_URL), _denied_settings(), None
         ),
         {},
@@ -55,7 +55,7 @@ async def _probe_mcp_map(monkeypatch, tmp_path):
 
     monkeypatch.setattr(tools, "map_site", _blocked_http)
     await _assert_refused(
-        tools._handle_map(_tool_payload("map", url=_BLOCKED_URL), _denied_settings(), None), {}
+        tools.handle_map(_tool_payload("map", url=_BLOCKED_URL), _denied_settings(), None), {}
     )
 
 
@@ -65,7 +65,7 @@ async def _probe_mcp_render(monkeypatch, tmp_path):
     monkeypatch.setattr(tools, "get_browser_pool", lambda: object())
     monkeypatch.setattr(tools, "render_endpoint_handler", _blocked_http)
     await _assert_refused(
-        tools._handle_render(_tool_payload("render", url=_BLOCKED_URL), _denied_settings(), None), {}
+        tools.handle_render(_tool_payload("render", url=_BLOCKED_URL), _denied_settings(), None), {}
     )
 
 
@@ -74,5 +74,5 @@ async def _probe_mcp_search(monkeypatch, tmp_path):
 
     monkeypatch.setattr(tools, "search_endpoint_handler", _blocked_http)
     await _assert_refused(
-        tools._handle_search(_tool_payload("search", query="blocked"), _denied_settings(), None), {}
+        tools.handle_search(_tool_payload("search", query="blocked"), _denied_settings(), None), {}
     )

@@ -21,7 +21,7 @@ def test_parallelism_defaults():
 
 @dataclass
 class _Memory:
-    """The one attribute ``_default_http_max_connections`` reads."""
+    """The one attribute ``default_http_max_connections`` reads."""
 
     total_bytes: int
 
@@ -139,8 +139,8 @@ class _FakeStats:
 
 def test_small_limit_hits_floor():
     with patch.object(settings_mod, "read_memory_stats", lambda: _FakeStats(256 * 1024 * 1024)):
-        assert settings_mod._default_http_max_connections() == 100
-        assert settings_mod._default_http_keepalive() == 50
+        assert settings_mod.default_http_max_connections() == 100
+        assert settings_mod.default_http_keepalive() == 50
 
 
 def test_3gib_limit_scales_up():
@@ -149,8 +149,8 @@ def test_3gib_limit_scales_up():
         # The pool ceiling must equal the admission's HTTP concurrency for the same limit + pool, whatever the
         # per-task RAM estimate is (zero drift).
         expected = _expected_connections(limit)
-        assert settings_mod._default_http_max_connections() == expected
-        assert settings_mod._default_http_keepalive() == max(20, min(128, expected // 2))
+        assert settings_mod.default_http_max_connections() == expected
+        assert settings_mod.default_http_keepalive() == max(20, min(128, expected // 2))
         # With the honest per-task RAM estimate the 3 GiB derivation sits at the floor; the floor keeps the
         # minimal-deployment pool usable (a bigger box still scales above it -- see
         assert expected >= 100
@@ -158,8 +158,8 @@ def test_3gib_limit_scales_up():
 
 def test_huge_limit_is_capped():
     with patch.object(settings_mod, "read_memory_stats", lambda: _FakeStats(64 * 1024 * 1024 * 1024)):
-        assert settings_mod._default_http_max_connections() == 512
-        assert settings_mod._default_http_keepalive() == 128
+        assert settings_mod.default_http_max_connections() == 512
+        assert settings_mod.default_http_keepalive() == 128
 
 
 def test_env_override_still_wins():
