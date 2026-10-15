@@ -1,22 +1,7 @@
 """Tests that do not run, and doubles that hide the failure they were given.
 
-Two properties, both about the test suite lying to whoever reads it.
-
-A ``test_*`` def that pytest cannot collect is a test that never runs. It is
-parsed, imported, and then silently ignored -- so the suite stays green while the
-coverage it appeared to provide is gone, and the absence of a failure looks
-exactly like a passing test. That is not hypothetical: a test added in the
-middle of a test class and dedented to column 0 does not raise
-IndentationError, because the methods after it are absorbed as nested defs
-inside it, where nothing calls them.
-
-A test double that swallows a failed result, or accepts a keyword and drops it,
-is the same lie from the other side. The engine returns a failed result, the
-double discards it, and the test asserts on the happy path it also wrote -- so
-the suite stays green while the thing under test stopped working. Both are
-invisible to every test that does not check for them, which is why they are
-checked here rather than remembered.
-"""
+A ``test_*`` def pytest cannot collect never runs; a double that swallows a
+failed result keeps the suite green. Both lie to the reader of a green run."""
 
 from __future__ import annotations
 
@@ -42,11 +27,8 @@ from tests.rules import Bites, Rule
 def _collection_prefix() -> str:
     """The name prefix pytest actually collects, read from pytest.ini.
 
-    The rule used to accept any ``test``-spelled name as collectible, but pytest
-    collects what ``python_functions`` says -- ``test_*`` -- so a near-miss was
-    counted as a running test while pytest skipped it. Reading the configured
-    pattern keeps this rule and the collector from disagreeing again.
-    """
+    The rule used to accept any ``test``-spelled name; reading the configured
+    ``python_functions`` pattern keeps rule and collector from disagreeing."""
     parser = configparser.ConfigParser()
     parser.read(REPO_ROOT / "pytest.ini")
     pattern = parser["pytest"]["python_functions"].strip()
@@ -153,9 +135,7 @@ def test_uncollectible_test_detector_bites():
 def test_dynamic_pattern_re_calls_under_any_alias():
     """``import re as _re`` then ``_re.compile(<dynamic>)`` is invisible to a
     detector anchored on the name ``re``. The binding is resolved first, so an
-    alias cannot rename a dynamic pattern past the chokepoint. This subsumes
-    ``test_no_dynamic_pattern_re_calls`` and the call shape of
-    ``test_no_bare_re_compile_on_nonliteral``."""
+    alias cannot rename a dynamic pattern past the chokepoint."""
     from tests.membership_gate import aliased_dynamic_pattern_re_offenders
 
     offenders = app_offenders(aliased_dynamic_pattern_re_offenders)
@@ -185,10 +165,8 @@ def test_alias_detector_bites():
 def test_sanctioned_func_calls_under_any_alias():
     """A sanctioned chokepoint function is covered under any import alias.
 
-    The name-matching detectors each carry a frozenset of spellings and were
-    extended one alias at a time. This sweep resolves the import binding, so a
-    new alias of ``decompress_body`` cannot name its way out of the cap
-    requirement the way ``_re`` names its way out of the pattern check."""
+    Resolving the import binding closes the one-alias-at-a-time gap: a new
+    alias of ``decompress_body`` cannot name its way out of the cap requirement."""
     from tests.membership_gate import aliased_sanctioned_func_offenders
 
     offenders = app_offenders(aliased_sanctioned_func_offenders)
@@ -226,10 +204,9 @@ def test_sanctioned_func_alias_detector_bites():
 
 
 def test_doubles_do_not_accept_and_drop_kwargs():
-    """A Protocol-shaped double that accepts ``**kwargs`` and never routes it
-    is blind to a signature change on the production callable: the
-    ``failed_result`` refactor broke 24 tests silently through exactly this
-    shape, because the doubles accepted the new kwarg and dropped it."""
+    """A Protocol-shaped double that accepts ``**kwargs`` and never routes it is
+    blind to a signature change on the production callable. The ``failed_result``
+    refactor broke 24 tests silently through exactly this shape."""
     from tests.membership_gate import swallowing_test_double_offenders
 
     assert_trees_clean(
@@ -243,19 +220,8 @@ def test_doubles_do_not_accept_and_drop_kwargs():
 def test_failed_result_binding_detector_bites():
     """Bites: the shape that shipped, and the two ways the rule could go dead.
 
-    The real offender is a scheduler double whose ``run`` takes the scheduler's
-    positional arguments and then declares only ``**kwargs``, so the envelope
-    argument has nowhere to land. The quiet cases are the ones that would make
-    the rule a false alarm: a ``run`` with no scheduler-shaped signature at all
-    is not a scheduler double, and a method that does bind the name is the
-    property being asserted.
-
-    The positional arguments are built from the real signature rather than typed
-    out, for the same reason the detector reads them: a double that mirrors two of
-    three real parameters is not a scheduler double, and spelling the tuple here
-    would have kept this test green against a rule that had stopped recognising
-    the shape that actually shipped.
-    """
+    Offender: a ``run`` with the scheduler's positionals plus ``**kwargs``, so
+    the envelope cannot land; a binding ``run`` is the property asserted."""
     SCHEDULER_DOUBLES_BIND_FAILED_RESULT.check_bites()
 
 
@@ -289,17 +255,10 @@ def test_swallowing_double_detector_bites():
 
 
 def _scheduler_run_positional_names() -> tuple[str, ...]:
-    """The real ``DomainScheduler.run`` positional parameter names, in order.
+    """The real ``DomainScheduler.run`` positional names, in order.
 
-    Read from ``app/orchestration/scheduler.py`` rather than typed, because both the count and
-    the names are what tell a scheduler double from an unrelated function that
-    happens to be called ``run`` -- and a hand-kept tuple goes stale the moment a
-    parameter is added to the real signature, at which point the detector is
-    guarding a shape that no longer exists, and the bite test is asserting against
-    a signature the service stopped having. ``self`` is dropped because a double
-    is matched on the arguments a caller passes, and whether it is a method is not
-    part of that.
-    """
+    Read from production, not typed: the count and names tell a double from an
+    unrelated ``run``, and a hand-kept tuple stales when the signature grows."""
     tree = ast.parse((REPO_ROOT / "app" / "orchestration" / "scheduler.py").read_text(encoding="utf-8"))
     for node in nodes_of(tree):
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == "run":
@@ -313,20 +272,9 @@ def _scheduler_run_positional_names() -> tuple[str, ...]:
 def _failed_result_binding_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
     """A scheduler-shaped ``run()`` that does not bind ``failed_result``.
 
-    "Scheduler-shaped" means as many positional parameters as the real
-    ``DomainScheduler.run`` and a ``**kwargs`` to absorb the rest -- which is the
-    whole failure this rule exists for: a double that mirrors the real positional
-    arguments and then swallows the keyword-only ones, so the result envelope the
-    pipeline supplies has nowhere to land. Counting against the production
-    signature rather than naming two parameters is what keeps a plain ``def
-    run(a, b, **kwargs)`` out of the report; it is a utility, not a scheduler.
-
-    A detector rather than an inline loop because the walk, the offender
-    formatting and the failure message are ``assert_trees_clean``'s job, and
-    because a check carrying its own walk is a check whose sweep can drift from
-    the tree the rule is about. Extracted, it is callable against a synthetic
-    module, which is what makes it provable.
-    """
+    "Scheduler-shaped" is the real positional count plus ``**kwargs`` -- it
+    mirrors the positionals and swallows the envelope; a plain utility ``run``
+    stays out of the report."""
     scheduler_shaped = _scheduler_run_positional_names()
     offenders: list[str] = []
     for node in nodes_of(tree):
@@ -347,11 +295,8 @@ def _failed_result_binding_offenders(tree: ast.AST, path: pathlib.Path) -> list[
 def _failed_result_binding_source() -> str:
     """The proof's violating ``run``, its positionals read from the real scheduler.
 
-    Written out here rather than typed so the bite tracks the production
-    signature: a double that mirrors two of three real parameters is not a
-    scheduler double, and spelling the tuple in the proof would keep it green
-    against a rule that had stopped recognising the shape that shipped.
-    """
+    Written, not typed, so the bite tracks the production signature: spelling
+    the tuple keeps the proof green against a rule that stopped recognising it."""
     positionals = ", ".join(_scheduler_run_positional_names())
     return f"class _S:\n    async def run(self, {positionals}, **kwargs):\n        return {{}}\n"
 
@@ -383,10 +328,10 @@ SCHEDULER_DOUBLES_BIND_FAILED_RESULT = Rule(
 
 
 def test_no_existing_double_swallows_failed_result():
-    """Derived from the production signature, not a hand-kept list: every
-    scheduler double in tests/ binds ``failed_result`` by name today, which is
-    the property the ``failed_result`` refactor needed. A double that regressed
-    to ``**kwargs``-only would be caught by both this and the sweep above."""
+    """Derived from the production signature, not a hand-kept list.
+
+    Every scheduler double in tests/ binds ``failed_result`` by name today;
+    a ``**kwargs``-only regression is caught by this AND the sweep above."""
     SCHEDULER_DOUBLES_BIND_FAILED_RESULT.scan()
 
 
@@ -397,13 +342,8 @@ def test_no_existing_double_swallows_failed_result():
 def test_error_field_values_are_classification_members():
     """A literal ``error=`` on a result primitive is in the declared taxonomy.
 
-    ``error`` is a declared ``CrawlError`` Literal: page-outcome codes that are
-    also Classification members, plus pipeline conditions with no page analogue
-    (capacity, config). The field is documented as carrying a stable code
-    (render.py) that callers key on, so a literal outside the declared taxonomy
-    is a contract leak; this reports it so the missing chokepoint is visible
-    rather than latent.
-    """
+    ``CrawlError`` Literal: page-outcome Classification members plus conditions
+    with no page analogue -- an outside literal is a contract leak, reported."""
     from tests.membership_gate import error_field_taxonomy_offenders
 
     offenders = app_offenders(error_field_taxonomy_offenders)
