@@ -24,7 +24,7 @@ def extract_discovered_links(
     *,
     max_links: int = 250,
     tree: Any | None = None,
-) -> tuple[list[Any], int, bool]:
+) -> tuple[list[DiscoveredLink], int, bool]:
     if not html or not source_url:
         return [], 0, False
     source_host = source_url.host
@@ -34,7 +34,7 @@ def extract_discovered_links(
         return [], 0, False
     # Single pass: normalize/dedupe inline instead of materializing an
     # intermediate per-anchor dict list (memory on link-heavy pages).
-    links: list[Any] = []
+    links: list[DiscoveredLink] = []
     seen: set[NormalizedUrl] = set()
     total_count = 0
     for el in tree.iter("a"):

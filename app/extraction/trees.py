@@ -5,7 +5,7 @@ from __future__ import annotations
 import threading
 from dataclasses import dataclass
 from html import unescape
-from typing import Any
+from typing import Any, TypedDict
 
 from lxml import etree
 from lxml.etree import ParserError
@@ -13,6 +13,30 @@ from lxml.etree import ParserError
 from app.models.normalized_url import NormalizedUrl
 
 # --- Structured discovery diagnostics: links, frames, forms ---
+
+
+class FrameDiagnostic(TypedDict):
+    """One frame/iframe intercepted, admitted through the source URL's policy."""
+
+    url: str
+    normalized_url: str
+    name: str
+    title: str
+    source_url: str | None
+    host: str
+    is_same_host: bool
+
+
+class FormDiagnostic(TypedDict):
+    """One form and its controls, with the action admitted through policy."""
+
+    method: str
+    action: str
+    normalized_action: str
+    target: str
+    name: str
+    id: str
+    controls: list[dict[str, str]]
 
 
 # Tally over the real parser, not a patched one; locked because worker threads parse.
@@ -121,7 +145,7 @@ class FrameCollector:
 def frames_from(
     walkable: _Walkable,
     source_url: NormalizedUrl | None,
-) -> list[dict[str, Any]]:
+) -> list[FrameDiagnostic]:
     """Frame/iframe diagnostics, admitted through the source URL's own policy.
 
     ``resolve`` on the source value is the filter: a frame the job's policy
@@ -129,7 +153,7 @@ def frames_from(
     a different answer to.
     """
     source_host = walkable.source_url.host
-    frames: list[dict[str, Any]] = []
+    frames: list[FrameDiagnostic] = []
     seen: set[NormalizedUrl] = set()
     for el in walkable.tree.iter("frame", "iframe"):
         src = (el.get("src") or "").strip()
@@ -161,8 +185,8 @@ _CONTROL_TAGS = ("input", "select", "textarea", "button")
 
 def forms_from(
     walkable: _Walkable,
-) -> list[dict[str, Any]]:
-    forms: list[dict[str, Any]] = []
+) -> list[FormDiagnostic]:
+    forms: list[FormDiagnostic] = []
     for form_el in walkable.tree.iter("form"):
         attrs = {key.lower(): value for key, value in form_el.attrib.items()}
         action = unescape(str(attrs.get("action", "")).strip())
