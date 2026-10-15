@@ -10,7 +10,7 @@ from __future__ import annotations
 from collections.abc import Iterable
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import Any
+from typing import Any, TypedDict
 
 from app.admission.policy import PolicyTier, read_policy
 from app.models.crawl_policy import CrawlPolicy
@@ -51,8 +51,15 @@ class FrontierEntry:
     url: NormalizedUrl
     depth: int
 
-    def to_dict(self) -> dict[str, Any]:
+    def to_dict(self) -> FrontierEntryDict:
         return {"url": self.url.raw, "depth": self.depth}
+
+
+class FrontierEntryDict(TypedDict):
+    """The stored wire form of :class:`FrontierEntry`."""
+
+    url: str
+    depth: int
 
 
 # A persisted row is ``json.loads`` of TEXT, so collections may be absent, bare

@@ -16,6 +16,7 @@ results, so it is not the cost that justified this change.
 
 import json
 
+from app.models.json_value import JsonValue
 from app.storage.migrations.manifest import (
     CRAWL_JOB_RESULTS_SCHEMA,
     CRAWL_JOB_VISITED_SCHEMA,
@@ -36,7 +37,7 @@ _DROP = (
 )
 
 
-def _json_list(raw) -> list:
+def _json_list(raw) -> list[JsonValue]:
     """A column's JSON list, or nothing if it was never valid JSON.
 
     A legacy database is by definition one this code did not write, so a value

@@ -42,7 +42,7 @@ class CrawlResultStore(CoordinationStore):
         self._max_entries = max(1, int(max_entries))
         self._clock = clock or time.time
 
-    def put(self, request_id: str, payload: dict) -> None:
+    def put(self, request_id: str, payload: JsonValue) -> None:
         """Store a completed response; prune expired/oldest entries first."""
         stored_at = self._clock()
         with self._lock:
@@ -64,7 +64,7 @@ class CrawlResultStore(CoordinationStore):
             )
             self._conn.commit()
 
-    def get(self, request_id: str) -> dict | None:
+    def get(self, request_id: str) -> JsonValue | None:
         """Return the stored payload, or None if absent/expired."""
         now = self._clock()
         cutoff = now - self._ttl_seconds if self._ttl_seconds > 0 else 0.0
@@ -97,11 +97,11 @@ class CrawlResultStore(CoordinationStore):
             ).fetchall()
         return [json.loads(row[0]) for row in rows]
 
-    async def aput(self, request_id: str, payload: dict) -> None:
+    async def aput(self, request_id: str, payload: JsonValue) -> None:
         """Async :meth:`put`: the prune, the payload dumps and both commits off-loop."""
         await asyncio.to_thread(self.put, request_id, payload)
 
-    async def aget(self, request_id: str) -> dict | None:
+    async def aget(self, request_id: str) -> JsonValue | None:
         """Async :meth:`get`: a status-poll read must not park the loop."""
         return await asyncio.to_thread(self.get, request_id)
 
