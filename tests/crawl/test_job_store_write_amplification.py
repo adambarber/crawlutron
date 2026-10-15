@@ -1,17 +1,7 @@
 """The durable job row must not carry the page history.
 
-`JobStore._persist` used to write `results`, `visited` and `frontier` as JSON
-columns on the single `crawl_jobs` row, so every batch persist re-serialized
-the job's entire history. A 3000-page job therefore wrote roughly 9 MB of JSON
-per batch, and total write volume over a crawl was quadratic in page count --
-the store was doing O(n) of work per batch to record O(1) of new work.
-
-The accumulators are monotonic: pages are appended to `results` and to
-`visited`, and never rewritten. So they belong in append-only tables where a
-batch costs one INSERT per new page instead of a rewrite of everything before
-it. `frontier` stays a column -- it is a mutable queue, not an accumulator --
-and the tests below pin the measured split rather than assuming it.
-"""
+``JobStore._persist`` used to write the history as JSON columns on one row
+(quadratic re-serialization); the accumulators moved to child tables."""
 
 from __future__ import annotations
 
@@ -33,11 +23,8 @@ _BODY = "x" * 2000
 def job_db(tmp_path):
     """The store under test and the file it lives in.
 
-    Both come from ``make_job_store``, so this file measures the same store
-    every other job test builds, and ``db_path`` is read back off the store
-    rather than re-assembled from ``tmp_path`` -- a measurement of a file the
-    store is not using would report zeros and pass.
-    """
+    Both come from ``make_job_store`` and ``db_path`` is read off the store,
+    so a measurement of a file the store is not using cannot pass."""
     store = make_job_store(str(tmp_path))
     return store, store.db_path
 
@@ -45,18 +32,8 @@ def job_db(tmp_path):
 class TestConcurrentAccessHoldsTheConnectionLock:
     """Every use of the shared connection must happen under ``self._lock``.
 
-    ``sqlite3`` hands one connection to several threads safely only when the
-    caller serializes it. ``load`` fetched its row under the lock and then
-    deserialized OUTSIDE it -- harmless while the page history came back in
-    that same row, but moving the history into two child tables turned
-    deserializing into two further queries on the shared connection with
-    nothing held. Concurrent loads then drove one connection from two threads
-    and it failed with ``InterfaceError: bad parameter or other API misuse``.
-
-    That surfaced as a runner task dying mid-crawl and the job wedging with no
-    write ever arriving, rather than as anything resembling a locking bug --
-    which is why it needs a test that says so directly.
-    """
+    ``load`` once deserialized OUTSIDE the lock; the child-table move turned
+    that into unlocked queries and concurrent loads hit ``InterfaceError``."""
 
     _PAGES = 50
     _READERS = 8
@@ -100,12 +77,8 @@ class TestConcurrentAccessHoldsTheConnectionLock:
 def _on_disk(db_path):
     """A second connection to the store's file, for measuring what it wrote.
 
-    Both measurements below must read the real on-disk state rather than
-    whatever the store happens to be holding, and neither may borrow the
-    store's own connection: the test above is about what happens when two
-    threads reach that one. The open/close pair is owned here so every reader
-    gets the same separation instead of restating it.
-    """
+    Both measurements read real on-disk state and neither borrows the store's
+    own connection -- the test above is about two threads on that one."""
     conn = sqlite3.connect(db_path)
     try:
         yield conn
@@ -116,10 +89,8 @@ def _on_disk(db_path):
 def _accumulated_bytes(db_path, job_id: str) -> int:
     """Bytes the job row itself spends, across every column it declares.
 
-    The column list is taken from the live table rather than hardcoded, so this
-    keeps measuring the row after the schema changes and cannot quietly go on
-    measuring a column that is no longer there.
-    """
+    The column list comes from the live table, so this keeps measuring the row
+    after the schema changes instead of a column that is no longer there."""
     with _on_disk(db_path) as conn:
         columns = [row[1] for row in conn.execute("PRAGMA table_info(crawl_jobs)")]
         total = " + ".join(f"length(COALESCE(\"{column}\", ''))" for column in columns)
@@ -137,12 +108,8 @@ def _result_rows(db_path, job_id: str) -> int:
 def _job_with_pages(store: JobStore, count: int) -> CrawlJobState:
     """A job whose every page carries a body big enough to weigh.
 
-    The shared ``make_crawled_job_store`` seeds history without bodies, which
-    is the right seed for a test about how many pages a read returns. The byte
-    measurement below is the opposite case: it is only meaningful if each page
-    *would* have cost something to re-serialize, so the body is what the seed
-    exists to carry.
-    """
+    The shared seed leaves bodies out (right for read-count tests); the byte
+    measurement needs pages that would have cost something to re-serialize."""
     job = store.create("https://example.com/", CrawlPolicy())
     for i in range(count):
         url = f"https://example.com/p{i}"
@@ -155,10 +122,8 @@ def _job_with_pages(store: JobStore, count: int) -> CrawlJobState:
 def test_the_job_row_does_not_grow_with_the_page_count(job_db):
     """Ten times the pages must not mean ten times the bytes per batch persist.
 
-    This is the whole defect. Before the fix the row carried the history, so
-    the second measurement here was ~5x the first; after it the row carries only
-    live state and the two numbers are the same.
-    """
+    This is the whole defect: before the fix the second measurement was ~5x
+    the first; after it the row carries only live state and the two match."""
     store, db_path = job_db
 
     small_job = _job_with_pages(store, 50)
@@ -176,10 +141,8 @@ def test_the_job_row_does_not_grow_with_the_page_count(job_db):
 def test_each_page_becomes_exactly_one_append_only_row(job_db):
     """The cost of a batch is one INSERT per new page, not a rewrite.
 
-    A row count that tracks the page count exactly is what makes the previous
-    test mean something: if the history were also being mirrored somewhere else,
-    the row would be flat for the wrong reason.
-    """
+    A row count tracking the page count exactly is what makes the previous
+    test mean something -- flat-for-the-wrong-reason is excluded."""
     store, db_path = job_db
 
     job = _job_with_pages(store, 120)
@@ -190,10 +153,8 @@ def test_each_page_becomes_exactly_one_append_only_row(job_db):
 def test_a_second_save_of_an_unchanged_job_adds_no_rows(job_db):
     """Re-persisting without new pages must not duplicate the history.
 
-    The batch loop saves on every iteration, including iterations that discover
-    nothing. If save were a blind re-insert the table would grow without bound
-    and a resumed job would replay pages it had already committed.
-    """
+    The batch loop saves even on iterations that discover nothing; a blind
+    re-insert would grow the table without bound and replay committed pages."""
     store, db_path = job_db
     job = _job_with_pages(store, 30)
 
@@ -250,15 +211,8 @@ def test_a_job_with_few_pages_round_trips(job_db, count):
 def test_a_batch_save_inserts_only_the_pages_it_added(job_db):
     """The append must iterate the delta, not the collection.
 
-    `_append_results` read its high-water mark from the table and then handed
-    `executemany` a generator that walked `enumerate(results)` from the front,
-    so every save still touched every page ever recorded. The row count was
-    already right, which is why this went unnoticed: it is the shape of the
-    statement that matters, and a set-difference read of what the table holds is
-    what bounds it now. The characterization is the row set after a batch, which
-    is the same answer -- so what is asserted here is the *gap* between two
-    successive saves, measured as rows the table reports as new.
-    """
+    ``_append_results`` read the high-water mark but walked ``enumerate(results)``
+    from the front; the row count was right, so it went unnoticed until now."""
     store, _db_path = job_db
     job = _job_with_pages(store, 30)
 
@@ -281,12 +235,8 @@ def test_a_batch_save_inserts_only_the_pages_it_added(job_db):
 def test_a_batch_save_visits_only_the_pages_it_added(job_db):
     """The visited insert carries the new set, not the whole set.
 
-    The set is unordered, so the delta is a set difference against what the table
-    already holds. Re-inserting the whole set was harmless -- `INSERT OR IGNORE`
-    makes the primary key the answer -- but it meant every save handled every URL
-    the job had ever seen, which is the quadratic shape this file exists to
-    retire.
-    """
+    Re-inserting the whole set was harmless (``INSERT OR IGNORE`` makes the key
+    the answer) but quadratic: every save handled every URL the job had seen."""
     store, _db_path = job_db
     job = _job_with_pages(store, 30)
 
