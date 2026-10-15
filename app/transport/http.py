@@ -8,6 +8,7 @@ from typing import Any
 
 from app.admission.policy import discovery_flags
 from app.models.crawl_result import CrawlStrategyAttempt, EngineCrawlResult
+from app.models.fetch_envelope import RetryDiagnostics
 from app.models.taxonomy import Classification
 from app.orchestration.engine_result import (
     binary_no_text_result,
@@ -44,7 +45,7 @@ from app.vocabulary.extraction import EXTRACTION_DOCUMENT
 from app.vocabulary.taxonomy import status_for_classification
 
 
-async def _fetch_http_phase(ctx: HttpStrategyContext) -> tuple[Any, dict[str, Any]]:
+async def _fetch_http_phase(ctx: HttpStrategyContext) -> tuple[Any, RetryDiagnostics]:
     """Fetch a response with the strategy retry policy."""
     return await fetch_policy.fetch_with_retries(
         ctx.http_fetcher,

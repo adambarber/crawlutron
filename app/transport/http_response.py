@@ -10,12 +10,16 @@ from app.models.crawl_extraction_method import CrawlExtractionMethod
 from app.models.crawl_policy import CrawlPolicy
 from app.models.crawl_policy_limits import CrawlPolicyLimits
 from app.models.crawl_result import CrawlStrategyAttempt
+from app.models.fetch_envelope import RetryDiagnostics, SerializedResponse
 from app.models.host_policy import HostPolicy
 from app.models.http_fetch_result import HttpFetchResult
 from app.models.normalized_url import NormalizedUrl
 from app.models.taxonomy import CrawlStrategyName
 from app.transport.cache import HttpCache
 from app.transport.content_cache import ContentCache
+
+#: The pre-fetch retry tally every strategy context starts from.
+_DEFAULT_RETRY: RetryDiagnostics = {"attempts": 0, "transient_errors": [], "content_cache": "miss"}
 
 
 @dataclass
@@ -34,7 +38,6 @@ class HttpStrategyContext:
     started: float
     caller_conditional: dict[str, str] = field(default_factory=dict)
     profile: dict[str, Any] = field(default_factory=dict)
-    limits: CrawlPolicyLimits = field(default_factory=CrawlPolicyLimits)
     timeout_seconds: int = 10
     max_retries: int = 0
     max_content_length: int = 0
@@ -47,7 +50,8 @@ class HttpStrategyContext:
     content_hit: bool = False
     revalidated_304: bool = False
     response: Any = None
-    retry_diagnostics: dict[str, Any] = field(default_factory=lambda: {"attempts": 0, "transient_errors": []})
+    limits: CrawlPolicyLimits = field(default_factory=CrawlPolicyLimits)
+    retry_diagnostics: RetryDiagnostics = field(default_factory=lambda: _DEFAULT_RETRY)
 
 
 @dataclass
@@ -138,7 +142,7 @@ class FetchedResponse:
         }
 
 
-def serialize_response(resp: Any) -> dict[str, Any]:
+def serialize_response(resp: Any) -> SerializedResponse:
     """Capture a fetcher response into a JSON-serializable envelope."""
     return {
         "status_code": int(resp.status_code),
@@ -149,7 +153,7 @@ def serialize_response(resp: Any) -> dict[str, Any]:
     }
 
 
-def rebuild_response(data: dict[str, Any], ctx: HttpStrategyContext) -> HttpFetchResult:
+def rebuild_response(data: SerializedResponse, ctx: HttpStrategyContext) -> HttpFetchResult:
     """Reconstruct a response object from a cached envelope.
 
     The envelope is this module's own dump: URL fields were serialized as

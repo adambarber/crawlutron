@@ -11,13 +11,15 @@ import contextlib
 import inspect
 import re
 from collections.abc import Iterable
-from typing import Any
+from typing import Any, cast
 
 from app.admission.policy import DiscoveryFlags, discovery_flags
 from app.models.crawl_policy import CrawlPolicy
+from app.models.fetch_envelope import RetryDiagnostics
 from app.models.host_policy import HostPolicy
 from app.models.http_fetcher import HttpFetcher
 from app.models.normalized_url import NormalizedUrl
+from app.models.robots_diagnostics import RobotsDiagnostics
 from app.orchestration.classification import classify_error_code
 from app.orchestration.robots_parse import parse_robots_crawl_delay, parse_robots_sitemaps
 from app.transport.body_decode import decode_body
@@ -57,7 +59,7 @@ async def fetch_with_retries(
     timeout_seconds: int,
     max_retries: int,
     max_content_length: int = DEFAULT_MAX_CONTENT_LENGTH_BYTES,
-) -> tuple[Any, dict[str, Any]]:
+) -> tuple[Any, RetryDiagnostics]:
     transient_errors: list[str] = []
     max_attempts = max(1, max_retries + 1)
     for attempt in range(1, max_attempts + 1):
@@ -65,7 +67,11 @@ async def fetch_with_retries(
             response = fetcher(url, headers, timeout_seconds, max_content_length)
             if inspect.iscoroutine(response):
                 response = await response
-            return response, {"attempts": attempt, "transient_errors": transient_errors}
+            return response, {
+                "attempts": attempt,
+                "transient_errors": transient_errors,
+                "content_cache": "miss",
+            }
         except Exception as error:
             transient_errors.append(classify_error_code(error))
             if attempt >= max_attempts:
@@ -103,34 +109,26 @@ def looks_like_binary_body(body: bytes, content_type: str | None, url: Normalize
 
 #: Every key a ``diagnostics["robots"]`` block carries, with the answer
 #: for a robots.txt never consulted: the branches must agree on the shape.
-_ROBOTS_DIAGNOSTICS: dict[str, Any] = {
+_ROBOTS_DIAGNOSTICS: RobotsDiagnostics = {
     "url": None,
     "allowed": True,
     "crawl_delay_seconds": None,
     "sitemaps": [],
     "reused_from_engine": False,
+    "evaluation": "disabled",
 }
 
 
-def _robots_diagnostics(evaluation: str, **overrides: Any) -> dict[str, Any]:
+def _robots_diagnostics(evaluation: str, **overrides: Any) -> RobotsDiagnostics:
     """The ``diagnostics["robots"]`` block for one robots outcome.
 
-    The base above supplies every key; ``evaluation`` says how the answer was
-    reached -- ``disabled`` (robots not consulted), ``cached`` (the engine already
-    fetched it), or ``evaluated`` (fetched here, possibly unsuccessfully) -- and
-    ``overrides`` carries what this branch knows.
+    The base supplies every key; ``evaluation`` says how the answer was reached
+    and overrides carry the branch. URLs were resolved before this packer ran.
 
-    Every URL in the result was resolved through ``NormalizedUrl.resolve`` with the
-    request's host policy *before* it got here; this function resolves nothing,
-    so it is a packer and not a URL egress door, and it deliberately does not take
-    a ``HostPolicy`` to look like one. The alternative -- a signature naming a
-    policy it would never consult -- is a lie the reader has to disprove.
-
-    ``allowed`` stays True on the failure path on purpose: the caller falls back
-    to its own policy when robots could not be read, and a False here would read
-    as a denial that never happened.
+    ``allowed`` stays True on the failure path: a False would read as a denial.
     """
-    return {**_ROBOTS_DIAGNOSTICS, "sitemaps": [], "evaluation": evaluation, **overrides}
+    base: RobotsDiagnostics = {**_ROBOTS_DIAGNOSTICS, "evaluation": evaluation}
+    return cast(RobotsDiagnostics, {**base, **overrides})
 
 
 async def _fetch_robots_text(
@@ -185,7 +183,7 @@ async def _diagnose_robots(
     flags: DiscoveryFlags,
     engine_robots_sitemaps: list[str] | None,
     robots_evaluated: bool,
-) -> tuple[dict[str, Any] | None, list[str]]:
+) -> tuple[RobotsDiagnostics | None, list[str]]:
     """Resolve the ``robots`` block and reusable sitemap list for diagnostics.
 
     A ``None`` first value means the caller should not set the ``robots`` key."""
