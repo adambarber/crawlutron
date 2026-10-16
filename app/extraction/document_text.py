@@ -1,11 +1,6 @@
-"""Document-text normalization helpers (shared by HTTP/document strategies).
-
-Pure ``re``-based functions that turn scraper-extracted document text (item
-numbers, actions, headings, paragraph glue) into clean, annotation-ready text.
-Kept separate from :mod:`app.transport.http` so the fetching code and the
-document-text shaping code do not colocate, and so this module has exactly one
-public name -- every step below it is reachable only through
-:func:`format_extracted_document_text`, which is what the tests drive.
+"""Document-text normalization helpers (shared by HTTP and document strategies):
+pure ``re``-based functions turning scraper-extracted text into clean, readable
+text -- kept separate from the transport, with exactly one public name.
 """
 
 import re
@@ -120,17 +115,9 @@ def _clean_document_line(line: str) -> str:
 
 
 def _next_non_empty_document_line(lines: list[str], start: int) -> int | None:
-    """Index of the first non-blank line at or after ``start``, or ``None``.
-
-    The funnel for this module's line scanners, returning the *index* on
-    purpose: every caller must keep scanning from a position it chose, and
-    both scanners also need to know which line they hold. Skipping blanks
-    inline instead of asking here is what puts the obligation to advance past
-    one -- the rule that keeps a scanner from spinning on it -- in the body,
-    where nothing announces it.
-
-    Blank means falsy after ``_clean_document_line``, which is what makes
-    "blank" one rule across the module rather than a regex per scanner.
+    """Index of the first non-blank line at or after ``start``, or ``None`` -- the
+    funnel for the line scanners, returning the index on purpose so each continues
+    from its own position. ``_clean_document_line`` picks one "blank" rule for all.
     """
     for index in range(start, len(lines)):
         if lines[index]:
@@ -157,16 +144,9 @@ def _is_document_non_item_section(line: str) -> bool:
 
 
 def _is_document_section_title(line: str) -> bool:
-    """Whether ``line`` may stand as the title of the record being collected.
-
-    Two scanners need this answer and each used to compute its own, with a
-    different subset of the exclusions -- so the same line could be refused as a
-    numbered section's title and absorbed as an item's, rendering an item number
-    twice. One predicate, because a rule written twice is a rule that will drift.
-
-    The exclusions are sibling item markers, which are a record's own number
-    rather than prose, and boilerplate section markers, which are a label with
-    nothing under it.
+    """Whether ``line`` may stand as the title of the record being collected --
+    one predicate because a rule written twice drifts (the two scanners once
+    excluded different subsets). The exclusions are sibling items and bare labels.
     """
     return not _is_document_item_marker(line) and not _is_document_non_item_section(line)
 
@@ -197,17 +177,9 @@ def _collect_document_item_lines(lines: list[str], start: int) -> tuple[list[str
 
 
 def _document_item_range(start: str, end: str) -> list[str]:
-    """Item numbers covered by a range action line, e.g. ``1a`` through ``1c``.
-
-    Both halves come from the pattern that selected this line, so their
-    "digits then one letter" shape is already established and is deliberately not
-    re-checked here -- a guard against a malformed half could only ever be proved
-    by a test that fabricates the argument, which is how the two dead branches in
-    this function were being kept alive.
-
-    What can still go wrong is in the source document rather than the argument:
-    the digits disagreeing ("1a - 5a") is a typo rather than a range, and is
-    honoured literally instead of expanded across the items in between.
+    """Item numbers covered by a range action line (e.g. ``1a``-``1c``). The halves'
+    shape is established by the selecting pattern, so it is not re-checked here;
+    only the source can err -- ``1a - 5a`` is a typo, honoured literally.
     """
     start, end = start.lower(), end.lower()
     if start[:-1] != end[:-1]:

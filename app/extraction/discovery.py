@@ -70,18 +70,9 @@ def extract_discovered_links(
 
 
 def normalized_extraction(extracted: ExtractedContent) -> tuple[str, str | None]:
-    """The ``(text, markdown)`` an extractor result contributes to a crawl result.
-
-    Every caller of every extractor normalized the result the same two-line way
-    -- ``extracted.text or ""`` and ``extracted.markdown`` -- so the
-    normalization had as many copies as there were extractor call sites. The
-    ``or ""`` is load-bearing: it is what keeps an extractor's ``None`` text
-    from reaching a result at all, and a call site that omitted it produced a
-    None that only surfaced further downstream.
-
-    It lives here, beside ``ExtractedContent``, because that is the type whose
-    invariant it is: the coercion is a fact about extractor output, not about
-    any one strategy's result builder.
+    """The ``(text, markdown)`` an extractor result contributes to a crawl result:
+    ``or ""`` keeps an extractor's ``None`` text off a result, so the coercion
+    lives here beside ``ExtractedContent``, the type whose invariant it is.
     """
     return extracted.text or "", extracted.markdown
 
@@ -98,18 +89,9 @@ def extract_post_fetch_discovery(
     include_metadata: bool = False,
     host_policy: HostPolicy,
 ) -> dict[str, Any]:
-    """Sync post-fetch discovery block for the strategy result builders.
-
-    Parses the HTML once and derives frames/forms diagnostics, discovered
-    links, raw JS endpoints, and the pagination hint in one pass. Pure CPU
-    work with no I/O: both builders run it via ``asyncio.to_thread`` so page
-    parsing never parks the event loop. Returns only plain data (dicts,
-    lists, strings, DiscoveredLink values) -- the lxml tree never escapes.
-    The pagination hint is egress-filtered HERE rather than at the call sites:
-    this block used to promise each builder would keep its own filter
-    contract, and the browser builder silently dropped it, so a
-    ``javascript:`` rel=next escaped into the response. Filtering at the
-    producer covers every consumer.
+    """Sync post-fetch discovery for the result builders: parse HTML once and
+    derive diagnostics, links, endpoints, and the hint in pure-CPU passes, with
+    the hint egress-filtered at the producer (a builder once leaked ``javascript:``).
     """
     tree = parse_html_tree(html) if html and (include_diagnostics or include_links) else None
     diagnostics = html_diagnostics(html, final_url, tree=tree) if include_diagnostics else {}
@@ -165,16 +147,9 @@ def extract_js_endpoints(
     *,
     host_policy: HostPolicy,
 ) -> list[dict[str, str]]:
-    """Extract client-side API endpoints referenced from JavaScript.
-
-    Katana-style discovery: find ``fetch(...)``, ``axios.*(...)``, jQuery
-    ``$.get/$.post/$.ajax``, and ``XMLHttpRequest.open(...)`` calls so the
-    service can surface dynamic backend endpoints for callers to queue.
-
-    Each match is returned as ``{"url": <resolved absolute URL>}``. When
-    ``source_url`` is supplied the endpoint is resolved against it; otherwise
-    the raw endpoint string is returned unresolved. Results are de-duplicated
-    by their resolved URL.
+    """Extract client-side API endpoints from JavaScript (``fetch``, ``axios.*``,
+    jQuery ``$.*``, ``XMLHttpRequest.open``) so callers can queue dynamic backends,
+    resolving against ``source_url`` when given or returning the raw string.
     """
     if not html:
         return []
@@ -223,16 +198,9 @@ def detect_pagination(
     html: str | None,
     final_url: NormalizedUrl | None,
 ) -> NormalizedUrl | None:
-    """Auto-detect the next-page URL via ``rel="next"`` hints.
-
-    Checks both ``<a rel="next" href="...">`` and
-    ``<link rel="next" href="...">`` and resolves the href against the
-    final page URL. Returns ``None`` when no pagination hint is present.
-
-    The href is attacker-controlled HTML, so the resolved URL leaves the
-    service through the egress filter (the value's own ``resolve``) HERE rather
-    than at each call site: a non-http(s) target (``javascript:``, ``data:``)
-    becomes ``None``, and a consumer that forgot to filter cannot leak it.
+    """Auto-detect the next-page URL via ``rel="next"`` (anchor or link), resolving
+    against the final page URL, or ``None``. The href is attacker-controlled, so it
+    leaves only through the egress filter here -- a non-http target becomes ``None``.
     """
     if not html or not final_url:
         return None

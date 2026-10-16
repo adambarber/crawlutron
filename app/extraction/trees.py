@@ -54,27 +54,18 @@ _parse_tally = 0
 
 
 def parse_count() -> int:
-    """How many lxml trees this process has parsed.
-
-    Cumulative and monotonic: a caller measuring one stage brackets it and takes
-    the difference, so a budget that spans several pipeline phases is expressible
-    without production code having to know where the phase boundaries are.
+    """How many lxml trees this process has parsed -- cumulative and monotonic,
+    so a caller brackets one stage and takes the difference, freeing production
+    code from knowing where the phase boundaries are.
     """
     with _parse_tally_lock:
         return _parse_tally
 
 
 def parse_html_tree(html: str | None):
-    """Parse HTML once with lxml and return the root element.
-
-    All discovery passes (anchors, frames, forms) and the XPath selector path
-    reuse this single parse so we allocate and walk the tree only once instead
-    of running three separate :class:`HTMLParser` subclasses.
-
-    ``lxml.etree.HTML`` (rather than ``lxml.html.fromstring``) is used because
-    it wraps fragments in a document tree and preserves legacy ``<frameset>`` /
-    ``<frame>`` markup that the lenient ``fromstring`` path otherwise drops.
-    Returns ``None`` for empty/invalid input.
+    """Parse HTML once with lxml and return the root element -- reused by every
+    discovery pass and the XPath path so the tree is walked once. ``etree.HTML``
+    preserves legacy frameset markup; returns ``None`` for empty or invalid input.
     """
     global _parse_tally
     with _parse_tally_lock:
@@ -104,19 +95,9 @@ class _Walkable:
 
 
 def walkable(html: str | None, source_url: NormalizedUrl | None, tree: Any | None) -> _Walkable | None:
-    """What a diagnostic extractor needs before it can look at anything, or ``None``.
-
-    Three facts, and each one is a precondition the extractors all share: there is
-    a source URL to attribute a finding to, the HTML is parsed, and the parse
-    produced a tree. Stated per extractor it reads as three separate guards, and
-    it is the ``tree is None`` one that gets dropped -- a diagnostic that walks
-    ``None`` reports nothing, which is a passing test and a permanently dead
-    signal.
-
-    A record rather than the bare tree so the caller gets the *narrowed* URL back.
-    Handing back the tree alone leaves every caller's ``source_url`` typed
-    ``str | None`` even though the None case has just returned, which is how a
-    chokepoint ends up pushing its own precondition back onto the call sites.
+    """What a diagnostic extractor needs before it can look at anything, or None --
+    the shared preconditions, so the ``tree is None`` guard is never dropped. A
+    record, not a bare tree, so the caller gets the narrowed URL back.
     """
     if not source_url:
         return None
@@ -153,11 +134,9 @@ def frames_from(
     walkable: _Walkable,
     source_url: NormalizedUrl | None,
 ) -> list[FrameDiagnostic]:
-    """Frame/iframe diagnostics, admitted through the source URL's own policy.
-
-    ``resolve`` on the source value is the filter: a frame the job's policy
-    refuses is dropped here, and there is no second policy parameter to pass
-    a different answer to.
+    """Frame/iframe diagnostics, admitted through the source URL's own policy --
+    ``resolve`` on the source is the filter, so a refused frame is dropped here
+    with no second policy parameter to pass a different answer.
     """
     source_host = walkable.source_url.host
     frames: list[FrameDiagnostic] = []

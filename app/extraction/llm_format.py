@@ -25,20 +25,9 @@ for _field, _hint in get_type_hints(PageMetadata).items():
 
 
 def extract_carried_metadata(value: Any) -> PageMetadata:
-    """The one place unproven page metadata becomes :class:`PageMetadata`.
-
-    ``llm_metadata`` arrives from the engine spill, which is JSON: untyped,
-    mutable, and possibly written by a different build than the one reading it.
-    It is also arbitrary-shaped, so it is admitted field by field rather than
-    rejected whole -- a payload with four good fields and one junk one is worth
-    answering. A key that is not a declared field, or whose value does not match
-    the declared type, is dropped; everything else survives.
-
-    This is the checkpoint the type system cannot be for us. ``metadata[mapped]
-    = value`` is unchecked, and a dict read back from JSON is exactly the thing
-    the annotations describe without being, so once :func:`format_crawl_item`
-    claims to return :class:`PageMetadata`, this is the only line standing
-    between the claim and the truth.
+    """The one place unproven page metadata becomes :class:`PageMetadata`: the JSON
+    from the engine spill is admitted field by field (a junk field drops, the rest
+    survives) -- the only line standing between the typed return and the untyped dict.
     """
     if not isinstance(value, dict):
         return {}
@@ -55,21 +44,9 @@ def extract_carried_metadata(value: Any) -> PageMetadata:
 
 
 def extract_llm_metadata(html: str, url: NormalizedUrl | None) -> PageMetadata:
-    """Extract Page metadata from HTML meta tags.
-
-    # Parse the HTML once with lxml and read every field (title, meta
-    og/twitter tags, JSON-LD, canonical, favicon, language) from the single
-    tree instead of running 8+ independent regex scans over the raw string.
-    Inputs above ``MAX_HTML_INPUT_BYTES`` are truncated before
-    lxml parses them so a malicious oversized payload cannot exhaust RAM
-    building the DOM tree.
-
-    This is the fallback computation site: engine-produced items carry
-    metadata computed once from the discovery tree
-    (``app.extraction.content.extract_post_fetch_discovery``) and shaping
-    reads that dict instead of reaching this function. Keep the two
-    paths in sync through :func:`_llm_metadata_from_tree` -- it is the only
-    reader of a parsed tree.
+    """Extract Page metadata from HTML meta tags off ONE lxml parse (not 8+ regex
+    scans), truncating oversized input first. This is the fallback computation
+    site -- engine items carry it already -- kept in sync via ``_llm_metadata_from_tree``.
     """
     source = url.raw if url is not None else ""
     metadata: PageMetadata = {"source_url": source}
@@ -85,12 +62,9 @@ def extract_llm_metadata(html: str, url: NormalizedUrl | None) -> PageMetadata:
 
 
 def llm_metadata_from_tree(tree: Any, url: NormalizedUrl | None) -> PageMetadata:
-    """Read the page-metadata fields from an ALREADY-parsed lxml tree.
-
-    Shared by the fallback parse above and the engine's discovery stage, so
-    the carried ``llm_metadata`` and a shaping-time reparse cannot drift
-    into two different metadata dialects. Returns plain JSON data only --
-    the tree itself never escapes the caller.
+    """Read the page-metadata fields from an ALREADY-parsed lxml tree, shared by the
+    fallback and the engine's discovery stage so the two cannot drift into different
+    dialects; returns plain JSON data, the tree never escaping the caller.
     """
     source = url.raw if url is not None else ""
     metadata: PageMetadata = {"source_url": source}
@@ -138,18 +112,9 @@ def llm_metadata_from_tree(tree: Any, url: NormalizedUrl | None) -> PageMetadata
 
 
 def _carry_meta_tags(metadata: PageMetadata, tree: Any) -> None:
-    """Carry the ``<meta>`` tags that name a declared field into `metadata`.
-
-    One literal-key assignment per HTML meta name rather than a rename table
-    applied with a computed key. Every type checker this project runs rejects a
-    computed key into a TypedDict -- mypy calls it "expected TypedDict key to be
-    string literal", and pyright types the target as one field's type -- so the
-    table made the destination field unverifiable, and a table that renames
-    ``og:title`` to ``og_title`` had to be held in step with the record by a
-    separate detector. Spelling the pairs out here costs that table and gives
-    back a checked destination: a mistyped field name is a build failure rather
-    than a value that silently never reaches the wire. It is also the whole
-    list, so an HTML name no case lists is simply not carried.
+    """Carry the ``<meta>`` tags that name a declared field into ``metadata``: one
+    literal-key assignment per tag, not a rename table -- checkers reject a computed
+    key into a TypedDict, making a mistyped field a build error, not a lost value.
     """
     # meta tags (name / property -> content)
     for el in tree.iter("meta"):
