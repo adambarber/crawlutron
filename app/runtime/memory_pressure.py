@@ -1,11 +1,6 @@
-"""Memory-adaptive admission control (#self-tuning).
-
-The service senses its own ceiling (cgroup limit when containerized, total RAM
-otherwise) and current usage, and throttles crawl-batch dispatch so aggregate
-memory rides at a configured target (~92%) instead of climbing into the OOM
-killer. No operator tuning required: under target the service runs at full
-speed; approaching it, throughput scales down smoothly; at the hard ceiling new
-batches pause until usage drains.
+"""Memory-adaptive admission control (#self-tuning): senses its ceiling (cgroup
+limit or total RAM) and current usage, throttling batch dispatch so aggregate memory
+rides near a target (~92%), scaling down smoothly below the hard ceiling and pausing at it.
 """
 
 from __future__ import annotations
@@ -77,20 +72,9 @@ def batch_scale(used: float, total: float, target: float, hard: float | None = N
 
 
 class ResourceGauge:
-    """Base admission gauge for one bounded resource.
-
-    A gauge senses one resource's pressure as a fraction of its ceiling via
-    :attr:`usage_ratio` and turns that single signal into both the batch-scale
-    factor and the saturation wait. Centralizing the derived logic is what stops
-    the two drifting apart -- the bug class that previously let
-    ``batch_scale_factor`` bypass the usage signal.
-
-    The sensor is *data*, not an overridable method: ``usage_ratio`` holds a
-    ``Callable[[], float]`` defaulting to the subclass's real reading. That is
-    the same shape as ``clock`` below it, and for the same reason -- a bound
-    that can only be demonstrated by measuring the machine cannot be tested at
-    all. Subclasses override :meth:`_read_usage` rather than :attr:`usage_ratio`,
-    so the two can never disagree about which signal is live.
+    """Base admission gauge for one bounded resource: ``usage_ratio`` observes one
+    pressure signal and yields both the batch-scale factor and saturation wait, so they
+    cannot drift. ``usage_ratio`` is injected data; subclasses override only ``_read_usage``.
     """
 
     _default_target: float
@@ -123,11 +107,9 @@ class ResourceGauge:
         self.usage_ratio = self._read_usage if usage_ratio is None else usage_ratio
 
     def _read_usage(self) -> float:
-        """Current pressure as a fraction of the resource ceiling.
-
-        The real reading, and the default behind :attr:`usage_ratio`. Subclasses
-        override this and nothing else. Return 0.0 when there is no measured
-        ceiling to defend (e.g. an unbounded cgroup) so the gate stays open.
+        """Current pressure as a fraction of the resource ceiling -- the real reading
+        and default behind ``usage_ratio``; subclasses override this and nothing else.
+        Return 0.0 when there is no measured ceiling to defend, so the gate stays open.
         """
         raise NotImplementedError
 
@@ -140,13 +122,9 @@ class ResourceGauge:
         return batch_scale(self.usage_ratio(), 1.0, self.target, hard=self.hard)
 
     async def wait_while_saturated(self, max_wait_seconds: float | None = None) -> None:
-        """Block while at/above the hard ceiling; release below it.
-
-        The budget is a deadline read from the injected ``clock`` (the seam
-        ``app.transport.content_cache`` uses for TTL); without it a bound can only
-        be demonstrated by spending it in real time, which is what kept one
-        admission test at ten real seconds. The rate samplers keep reading
-        ``time.monotonic`` -- they measure intervals between samples.
+        """Block while at/above the hard ceiling; release below it, with a deadline
+        read from the injected ``clock`` so the bound is not demonstrated in real time.
+        The rate samplers still use ``time.monotonic`` to measure intervals.
         """
         budget = self.max_wait_seconds if max_wait_seconds is None else max_wait_seconds
         deadline = self.clock() + budget
@@ -156,11 +134,9 @@ class ResourceGauge:
             await asyncio.sleep(self.poll_seconds)
 
     def headroom_fraction(self) -> float:
-        """Fraction of the resource ceiling still available before hard limit.
-
-        Returns 1.0 when unbounded (no ceiling to defend). At the hard ceiling
-        returns 0.0. Between target and hard, returns the linear fraction
-        remaining. Below target returns 1.0 (full headroom).
+        """Fraction of the resource ceiling still available before the hard limit.
+        1.0 when unbounded or below target (full headroom); 0.0 at the hard ceiling;
+        the linear fraction remaining between target and hard.
         """
         usage = self.usage_ratio()
         if usage >= self.hard:
@@ -172,13 +148,8 @@ class ResourceGauge:
 
 class MemoryGate(ResourceGauge):
     """Global admission gate consulted before each crawl batch dispatch.
-
-    Beyond the trailing ``memory.current`` fraction, the gate tracks the *rate
-    of change* of usage: a trailing fraction is a
-    trailing signal. When usage climbs fast it anticipates the imminent
-    pressure and throttles early, so a sudden allocation spike cannot blow past
-    the hard ceiling between samples. Only the dispatch scale uses that leading
-    estimate; the hard-ceiling wait reads the raw fraction.
+    Beyond the trailing ``memory.current`` fraction, it tracks the *rate of change*
+    so a fast climb throttles early, anticipating pressure before a spike blows past the hard ceiling.
     """
 
     _default_target = _DEFAULT_TARGET
