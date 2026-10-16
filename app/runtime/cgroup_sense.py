@@ -1,9 +1,7 @@
 """Minimal cgroup filesystem readers shared by the resource gauges.
 
-Both :mod:`app.runtime.memory_pressure` and :mod:`app.runtime.resource_pressure` need to read
-cgroup scalar files (limits, usage, quotas). These tiny readers were
-duplicated across both modules; centralizing them removes the copy and keeps
-the sensing logic in one place.
+The memory- and resource-pressure modules both read cgroup scalar files (limits,
+usage, quotas); these readers were duplicated, so they now live here once.
 """
 
 from __future__ import annotations

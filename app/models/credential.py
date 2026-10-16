@@ -6,14 +6,10 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class Credential(BaseModel):
-    """A scoped HTTP credential, scoped to one origin.
+    """A scoped HTTP credential, keyed by canonical origin (scheme://host[:port]).
 
-    Keyed in ``CrawlPolicy.credentials`` by canonical origin
-    (``scheme://host[:port]``), so a credential is addressable only for the
-    origin it was written for -- the per-hop redirect scrub for
-    ``authorization`` then enforces "credentials never cross host
-    boundaries" for free. Values are secrets: never logged, never echoed in
-    diagnostics (policy echoes strip them, same discipline as cookies).
+    The per-hop redirect scrub then enforces "credentials never cross host boundaries"
+    for free; values are secrets, never logged or echoed in diagnostics.
     """
 
     model_config = ConfigDict(extra="forbid")

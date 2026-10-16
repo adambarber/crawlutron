@@ -8,10 +8,8 @@ from enum import StrEnum
 class WatchOutcome(StrEnum):
     """What the last check of a watch found.
 
-    ``not_modified`` is the cheap 304 revalidation the validators exist
-    for; ``modified`` is the state webhook delivery is pinned to;
-    ``error`` is a failed check (fetch or classification), which says
-    nothing about whether the page changed.
+    ``not_modified`` is the cheap 304 revalidation; ``modified`` is the state webhook
+    delivery pins to; ``error`` is a failed check and says nothing about change.
     """
 
     MODIFIED = "modified"

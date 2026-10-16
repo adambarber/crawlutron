@@ -1,9 +1,7 @@
 """Shared crawl execution path used by ``/v1/crawl`` and ``/v1/map``.
 
-Extracted from ``app/main.py`` so the crawl-execution logic and the
-endpoint handlers live in different modules. The executor takes the
-caller-supplied ``settings`` and ``shutdown_event`` explicitly (no
-module-level globals) so it can be invoked from any router.
+Extracted from ``app.main`` so execution and handler live apart; the executor
+takes ``settings`` and ``shutdown_event`` explicitly (no module globals).
 """
 
 from __future__ import annotations
@@ -54,14 +52,8 @@ async def execute_crawl(
 ) -> ProducerEnvelope:
     """Run a crawl shared by ``/v1/crawl`` and ``/v1/map``.
 
-    URL pre-validation: an invalid URL surfaces as a 422 (via the caller's
-    ``except ValueError``) instead of a misleading 503 from the pool guard.
-
-    Pool guard: only raises ``browser_pool_unavailable`` 503 when the pool
-    is None AND the request actually needs a browser strategy.
-
-    ``urls`` forwards the caller's already-gated batch so the
-    engine skips re-deriving it; the cap still applies there.
+    An invalid URL surfaces as 422 (not a 503 from the pool guard); a 503 only fires
+    when the pool is None and a browser is needed. ``urls`` forwards the gated batch.
     """
     active_settings = settings or CrawlerSettings.from_mapping()
     host_policy = HostPolicy.from_settings(active_settings)

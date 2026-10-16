@@ -29,13 +29,10 @@ logger = logging.getLogger(__name__)
 
 
 def _render_rejection(error: ValueError) -> HTTPException:
-    """``/v1/render``'s reject envelope: 400, and the ValueError text as the message.
+    """``/v1/render``'s reject envelope: 400, ValueError text as the message.
 
-    ``code`` is the machine-readable contract clients branch on and the
-    ValueError text stays as the message. Emitting the text as the code made
-    every new rejection reason a new, unenumerated wire value, so this is a
-    named factory handed to the shared gate rather than a literal at a raise
-    the handler no longer has.
+    ``code`` is the machine-readable contract clients branch on, so this is a named
+    factory handed to the gate, not a literal at a raise.
     """
     return http_error(400, "validation_error", str(error))
 

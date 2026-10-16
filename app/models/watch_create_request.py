@@ -12,11 +12,8 @@ from app.models.watch_state import IntervalSeconds
 class WatchCreateRequest(BaseModel):
     """A watch registration.
 
-    ``url`` is text rather than a ``NormalizedUrl`` because admission is the
-    handler's: constructing the value object needs this deployment's host
-    policy, and a URL this deployment will not crawl has to come back as a 422
-    the caller can act on -- not as a field validation error about text the
-    caller sent perfectly well.
+    ``url`` is text, not a ``NormalizedUrl``: admission is the handler's (it needs
+    this deployment's policy), so a refused URL returns 422, not a field error.
     """
 
     model_config = ConfigDict(extra="ignore")

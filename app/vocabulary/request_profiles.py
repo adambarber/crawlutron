@@ -1,9 +1,7 @@
 """The ``request_profile`` vocabulary and its ceilings.
 
-The same closure the browser profile has (see ``app.vocabulary.browser``), for
-the same reason: every caller-supplied mapping on ``CrawlPolicy`` is closed, so a
-caller learns from one declaration which keys exist rather than from a rejected
-request. What the profile DOES to a request is in ``app.transport``.
+The same closure the browser profile has: every caller-supplied ``CrawlPolicy``
+mapping is closed, so callers learn valid keys from one declaration.
 """
 
 from __future__ import annotations

@@ -9,12 +9,10 @@ from app.models.normalized_url import NormalizedUrl
 
 @dataclass
 class CrawlTask:
-    """Carries the per-job bookkeeping the engine/recursive dispatcher needs.
+    """Per-job bookkeeping the engine/recursive dispatcher needs.
 
-    Submission index for result ordering, the original URL, the admitted
-    page, and the registrable domain used for per-domain scheduling and
-    robots scoping. ``original_url`` stays the caller's text: the task must
-    remember what was asked for, not only what was admitted.
+    Submission index, original URL, admitted page, and the registrable domain for
+    scheduling/robots; ``original_url`` keeps the caller's text, not only the admitted form.
     """
 
     index: int

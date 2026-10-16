@@ -17,12 +17,10 @@ IntervalSeconds = Annotated[
 
 
 class WatchState(BaseModel):
-    """One row of the watches table, in the shape the store and the API share.
+    """One row of the watches table, in the shape the store and API share.
 
-    ``url`` is the durable text identity (``NormalizedUrl.raw`` at the
-    admission edge): a watch outlives the request that created it, so the
-    row stores text and every consumer re-admits it against the live host
-    policy rather than trusting a decision a past deployment made.
+    ``url`` stores the durable text identity, re-admitted by every consumer against
+    live host policy -- never a decision a past deployment made.
     """
 
     watch_id: str

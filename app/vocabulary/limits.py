@@ -1,9 +1,7 @@
 """Every number a crawl is bounded by: defaults and hard caps.
 
-Policy limits (timeouts, retries, budgets, discovered links), the extraction
-deadlines, the sitemap ceilings, the cache sizes and the browser-profile
-ceilings. A number an operator may raise has its default here and its cap beside
-it, because a default without a cap is a limit nothing enforces.
+Policy limits, extraction deadlines, sitemap ceilings, cache sizes and browser
+ceilings; a number an operator may raise holds its default and cap side by side.
 """
 
 from __future__ import annotations

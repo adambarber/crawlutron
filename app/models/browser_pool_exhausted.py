@@ -4,11 +4,8 @@ from __future__ import annotations
 
 
 class BrowserPoolExhaustedError(Exception):
-    """Lives beside the other declarations rather than in ``browser_pool``.
+    """Defined beside the other declarations, not in ``browser_pool``, to avoid a cycle.
 
-    The shared error classifier in ``app.orchestration.classification`` must
-    isinstance-check it without importing a strategy module: browser_pool
-    imports browser, and browser imports the classification module, so defining
-    it there would create an import cycle. ``browser_pool`` re-exports it for its existing
-    importers.
+    The shared classifier must isinstance-check it without importing a strategy module
+    (browser_pool -> browser -> classification); ``browser_pool`` re-exports the name.
     """

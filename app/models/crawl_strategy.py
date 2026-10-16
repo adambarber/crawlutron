@@ -13,10 +13,8 @@ from app.vocabulary.strategies import (
 class CrawlStrategy(StrEnum):
     """Fetch execution strategies, tried in fallback order.
 
-    These describe *how* to retrieve bytes for a URL. How those bytes are parsed
-    into text/markdown is a separate concern handled by
-    :class:`CrawlExtractionMethod` (the ``extraction`` policy field), orthogonal
-    to the fetch strategy.
+    These say HOW to retrieve bytes for a URL; parsing them into text/markdown is
+    a separate, orthogonal concern handled by ``CrawlExtractionMethod``.
     """
 
     HTTP_DECLARED_CRAWLER = HTTP_DECLARED_CRAWLER

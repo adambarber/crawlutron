@@ -10,10 +10,8 @@ from app.models.host_policy_suggestion import HostPolicySuggestion
 class PolicySuggestionsResponse(BaseModel):
     """Candidate host rules drawn from the retained crawl records.
 
-    ``records_examined`` is the window's honest size, so a caller can tell an
-    empty suggestion list from a store that held nothing at all -- and can see
-    that the evidence behind every suggestion is bounded by retention rather
-    than by the operator's whole crawl history.
+    ``records_examined`` is the window's honest size, so an empty list is distinct
+    from a store that held nothing and evidence is bounded by retention.
     """
 
     records_examined: int = Field(description="Retained crawl records the evidence was drawn from.")

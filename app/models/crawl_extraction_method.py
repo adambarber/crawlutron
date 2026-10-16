@@ -11,13 +11,10 @@ from app.vocabulary.extraction import (
 
 
 class CrawlExtractionMethod(StrEnum):
-    """Output/parsing pipeline applied to content a fetch strategy retrieves.
+    """Output/parsing pipeline applied to fetched content, orthogonal to fetch strategy.
 
-    Orthogonal to the fetch strategy: any fetch strategy may be paired with any
-    extraction method. ``FULL`` is the default unified pipeline (trafilatura HTML
-    main text, markitdown for documents, plain-text passthrough). ``TRAFILATURA``
-    forces HTML main-text extraction only. ``DOCUMENT`` forces markitdown
-    document extraction for PDFs and other non-HTML bodies.
+    ``FULL`` is the unified default (HTML main text, documents, plain text);
+    ``TRAFILATURA`` forces HTML main-text only; ``DOCUMENT`` forces markitdown for non-HTML.
     """
 
     FULL = EXTRACTION_FULL

@@ -8,11 +8,8 @@ from pydantic import BaseModel, ConfigDict, Field
 class FetchValidators(BaseModel):
     """Caller-supplied cached validators for cheap conditional revalidation.
 
-    Supply the ETag / Last-Modified you received from a previous crawl of the
-    same URL; matching URLs are revalidated with If-None-Match /
-    If-Modified-Since instead of fully re-fetched. A 304 yields a
-    ``not_modified`` result (no content) so freshness monitors avoid paying
-    full-fetch cost on unchanged pages.
+    An ETag/Last-Modified from a prior crawl makes matching URLs revalidate with
+    If-None-Match/If-Modified-Since; a 304 yields a ``not_modified`` (no content).
     """
 
     model_config = ConfigDict(extra="forbid")

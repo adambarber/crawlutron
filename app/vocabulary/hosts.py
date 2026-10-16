@@ -1,9 +1,7 @@
 """Hosts and URLs the crawl treats specially, by predicate.
 
-Analytics and social-feed infrastructure is recorded on pages but never enqueued,
-and a document URL is recorded without being downloaded. Both are hot paths --
-they run once per discovered link, up to thousands per page -- so the membership
-sets are precomputed here and the predicates are the only way to ask.
+Analytics/social-feed infra is recorded but never enqueued and documents recorded
+without download; on the per-link hot path, so membership sets are precomputed here.
 """
 
 from __future__ import annotations

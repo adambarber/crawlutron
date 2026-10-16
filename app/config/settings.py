@@ -120,12 +120,8 @@ class CrawlerSettings:
     def from_mapping(cls, values: Mapping[str, str] | None = None) -> CrawlerSettings:
         """Build settings from a mapping (os.environ by default).
 
-        Every numeric read goes through the never-raise env chokepoint
-        (``get_mapping_int``/``get_mapping_float``): a typo'd value falls
-        back to the dataclass default with a warning instead of crashing
-        boot, and every boolean goes through ``parse_bool_value`` so a typo
-        can never silently flip a policy open (``RESPECT_ROBOTS=ture``
-        keeps robots respected).
+        Numeric reads go through the never-raise chokepoints (typo -> dataclass default +
+        warning), and booleans through ``parse_bool_value`` so a typo never flips a policy open.
         """
         source = os.environ if values is None else values
         return cls(

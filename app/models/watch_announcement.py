@@ -10,11 +10,8 @@ from app.models.watch_outcome import WatchOutcome
 class WatchAnnouncement(TypedDict):
     """The body delivered to a watch's webhook when its representation changed.
 
-    A declared key set because it is a contract with something outside this
-    service: a subscriber reads these five fields, so a producer that quietly
-    stopped selecting one has to fail at the consumer rather than arrive as a
-    notification with a hole in it. No page body travels here -- the watch
-    promised a notification, not a copy of the page.
+    A declared key set because it is an external contract: a subscriber reads these
+    five fields, and no page body travels here -- the promise is a notification.
     """
 
     watch_id: str

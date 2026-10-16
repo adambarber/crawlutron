@@ -65,10 +65,8 @@ def _locked_backend(
 ) -> Iterator[DatabaseBackend]:
     """Open a migration backend under the same lock the store's writers take.
 
-    A migration writes the schema, and a write already in flight on this file
-    holds exactly the lock a DDL statement needs. Taking the store's own
-    process lock here is what keeps the two from meeting, instead of leaving
-    the outcome to whichever one loses the race for ``busy_timeout``.
+    A DDL write needs exactly the lock an in-flight write holds, so taking the
+    store's own process lock here keeps them apart instead of racing over ``busy_timeout``.
     """
     with process_lock(store_lock_key(db_path, memory_name)):
         backend = _backend(db_path, memory_name)

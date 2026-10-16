@@ -35,13 +35,8 @@ MALFORMED_DETAIL_CODE = "malformed_error_detail"
 def error_envelope_from_detail(detail: Any, status_code: int) -> ErrorEnvelope:
     """The only way an ``HTTPException`` detail becomes an error envelope.
 
-    Conforming detail (built by :func:`http_error`) unwraps 1:1. Anything else
-    means someone raised ``HTTPException`` outside the helpers -- a string
-    like Starlette's own 404/405, or a dict missing ``code``/``message`` --
-    so it is logged loudly (the drift must be visible in the server log, not
-    laundered into a fabricated ``http_<status>`` code whose message is a
-    ``str()`` of arbitrary content) and answered with the declared synthetic
-    code plus the numeric status in ``details``.
+    Conforming detail (built by ``http_error``) unwraps 1:1; anything else is logged
+    loudly and answered with the synthetic code plus numeric status, not a laundered message.
     """
     if isinstance(detail, dict) and "code" in detail and "message" in detail:
         return error_envelope(str(detail["code"]), str(detail["message"]), detail.get("details"))
@@ -78,12 +73,8 @@ def browser_pool_unavailable(message: str | None = None) -> HTTPException:
 async def validation_exception_handler(request: Request, exc: Exception) -> JSONResponse:
     """Standardize on the ``ErrorResponse`` shape and strip pydantic internals.
 
-    The parameter is typed ``Exception`` (Starlette's handler contract is
-    contravariant: a handler registered for a base type must accept any
-    subtype) rather than ``RequestValidationError``; the isinstance check
-    below keeps the pydantic-specific branch honest and routes anything else
-    to the generic envelope so an unexpected exception type cannot reach the
-    attribute access and 500.
+    Typed ``Exception`` for Starlette's contravariant handler contract; the isinstance
+    check routes non-pydantic exceptions to the generic envelope, never the attribute access.
     """
     if not isinstance(exc, RequestValidationError):
         return JSONResponse(
@@ -102,10 +93,8 @@ async def validation_exception_handler(request: Request, exc: Exception) -> JSON
 async def http_exception_handler(request: Request, exc: Exception) -> JSONResponse:
     """Unwrap FastAPI's ``{"detail": ...}`` envelope to ``{code, message, details}``.
 
-    ``exc`` is ``Exception`` to satisfy Starlette's contravariant handler
-    registration; the isinstance check below preserves the FastAPI-specific
-    unwrap, and anything else degrades to a generic 500 instead of an
-    AttributeError on a handler that was registered to catch it.
+    ``exc`` typed ``Exception`` satisfies Starlette's contravariant handler contract;
+    the isinstance check preserves the unwrap and anything else degrades to a 500.
     """
     if not isinstance(exc, HTTPException):
         return JSONResponse(

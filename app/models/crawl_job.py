@@ -13,10 +13,8 @@ from app.models.render_options import RenderOptions
 class CrawlJob:
     """One admitted URL and everything the worker needs to fetch it.
 
-    ``domain`` is derived, not stored. It used to be a caller-supplied field, and
-    a job could carry a ``domain`` that had nothing to do with its own URL --
-    which is invisible until a scheduler keys six mechanisms off the pair and
-    they disagree about which page the throttle belongs to.
+    ``domain`` is derived, not stored: a caller-supplied field could disagree with
+    the URL, silently mis-keying the scheduler mechanisms that key off the pair.
     """
 
     index: int

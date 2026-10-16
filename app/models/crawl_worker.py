@@ -1,11 +1,7 @@
 """The worker call shapes the engine dispatches to.
 
-The union is honest: a worker may be a coroutine function (the browser
-strategies and render-path instances) or a plain synchronous function (some
-HTTP/test workers). Callers MUST dispatch on the callable before invoking
-(see ``_call_worker``) rather than awaiting the result blindly -- awaiting a
-non-awaitable was the original double-invocation bug. The sync/async members
-are broken out so the dispatch can narrow without a cast.
+A worker may be a coroutine or plain sync function; callers MUST dispatch on the
+callable before invoking (awaiting a non-awaitable was the double-invocation bug).
 """
 
 from __future__ import annotations

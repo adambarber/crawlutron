@@ -1,9 +1,7 @@
-"""The fetch strategies, by name.
+"""The fetch strategies, by name and fallback order.
 
-Which strategies exist, and the order they are tried in. A strategy says HOW
-bytes are retrieved; how those bytes become text is ``app.vocabulary.extraction``
-and is orthogonal to this list. The strategy implementations live in
-``app.transport`` after #149's slice 2; the names they are selected by live here.
+A strategy says HOW bytes are retrieved (parsing them is ``extraction``, orthogonal);
+the implementations and the names they are selected by live in ``app.transport``.
 """
 
 from __future__ import annotations

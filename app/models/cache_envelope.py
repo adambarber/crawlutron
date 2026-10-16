@@ -1,10 +1,7 @@
 """The on-disk record one cached entry serializes to.
 
-A cache file is this service's own write, read back on the next boot by the
-same module -- so it is a declared record, not arbitrary JSON. ``value`` is the
-caller's payload and is genuinely arbitrary; the other two fields are the
-freshness contract, and every expiry comparison in the cache depends on both
-being present.
+A declared record, not arbitrary JSON: ``value`` is the caller's arbitrary payload;
+the other two fields are the freshness contract every expiry comparison depends on.
 """
 
 from __future__ import annotations
