@@ -55,12 +55,9 @@ def _table_names(conn: sqlite3.Connection) -> set[str]:
 
 
 def _column_names(conn: sqlite3.Connection, table: str) -> tuple[str, ...]:
-    """The column names of ``table``, in the order SQLite reports them.
-
-    Order, not set: a migration that reorders columns is real drift, and the
-    manifest declares an order to compare against. Every "did the migration drop
-    / add / reorder a column" assertion in this file goes through here so the
-    ``PRAGMA table_info`` row indexing and the ``str()`` of it are written once.
+    """The column names of ``table``, in SQLite's reported order, not as a set: a
+    migration that reorders columns is real drift, and the manifest declares an order
+    to compare against.
     """
     return tuple(str(row[1]) for row in conn.execute(f"PRAGMA table_info({table})"))
 
@@ -80,12 +77,9 @@ def _assert_migration_recorded(conn: sqlite3.Connection, schema: StoreSchema) ->
 
 
 def _stamped_legacy_job(db_path: Path) -> tuple[JobStore, CrawlJobState | None]:
-    """Create a legacy jobs database, stamp it on open, and load the row back.
-
-    Both legacy-stamping tests run these four steps in this order and are about
-    what comes after them, so the stamp is written once here. Written inline,
-    the pair read as four identical lines and the tests below them were the
-    only thing that said what they were actually asserting.
+    """Create a legacy jobs database, stamp it on open, and load the row back. Both
+    legacy-stamping tests run these steps in one order, so the stamp is written once
+    here -- inline they read as four identical lines.
     """
     _create_legacy_database(db_path, StoreSchema.CRAWL_JOBS)
     store = job_store(db_path)
@@ -93,11 +87,9 @@ def _stamped_legacy_job(db_path: Path) -> tuple[JobStore, CrawlJobState | None]:
 
 
 def _assert_unstamped(db_path: Path) -> None:
-    """A freshly-created legacy database carries no migration record yet.
-
-    Asserted here rather than at each call site: every legacy-stamping test
-    needs the same precondition, and the two that restated it were the two that
-    could disagree about what a legacy database is.
+    """A freshly-created legacy database carries no migration record yet. Asserted once
+    here: every legacy-stamping test needs the same precondition, and the two that
+    restated it could disagree about what a legacy database is.
     """
     before = sqlite3.connect(db_path)
     assert "_yoyo_migration" not in _table_names(before)
@@ -105,12 +97,9 @@ def _assert_unstamped(db_path: Path) -> None:
 
 
 def _assert_reopen_refused(db_path: Path, ddl: str, match: str) -> None:
-    """Tamper with a stamped store's shape, then require the reopen to refuse it.
-
-    The refusal is the point of the test, and the tamper is setup: written out
-    per test it was three copies of connect/DDL/commit/close and a
-    ``pytest.raises`` whose ``match`` could name a different column than the
-    DDL dropped.
+    """Tamper with a stamped store's shape, then require the reopen to refuse it. The
+    refusal is the point, the tamper setup: per-test it was connect/DDL/commit/close
+    plus a ``pytest.raises`` whose ``match`` could name a column the DDL never dropped.
     """
     conn = sqlite3.connect(db_path)
     conn.execute(ddl)

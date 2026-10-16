@@ -101,14 +101,9 @@ def test_to_dict_breaks_a_cyclic_sequence_graph():
 
 
 def test_a_result_survives_the_serialization_round_trip_unchanged():
-    """Every field, including the nested records, comes back equal.
-
-    ``from_wire`` is the inverse of ``to_dict`` and is derived from the same
-    field annotations, so the pair is one declaration of a result's key set
-    rather than two spellings a detector has to hold in step. The nested
-    assertions are the load-bearing half: a rebuild that returned the raw dicts
-    would pass an equality check on the outer object and leave every consumer
-    reading attributes off a dict.
+    """Every field comes back equal. ``from_wire`` inverts ``to_dict`` from the same
+    annotations -- one key-set declaration -- and the nested asserts are the load-
+    bearing half: a rebuild returning raw dicts would leave consumers off a dict.
     """
     result = engine_result(
         "https://example.test/a",
@@ -137,13 +132,9 @@ def test_a_result_survives_the_serialization_round_trip_unchanged():
 
 
 def test_a_field_the_record_stopped_writing_is_a_construction_error():
-    """Drift fails loudly instead of arriving on the wire as an absent value.
-
-    The defect this record exists to prevent: a renamed or dropped field read
-    as its default, so a response went out missing something no test asserted.
-    A required field absent from the payload has to raise, which is what turns
-    that class of drift into a build-time signal at the spill rather than a
-    silent hole.
+    """Drift fails loudly instead of arriving as an absent value: a renamed or dropped
+    field used to read as its default and ship missing. A required field absent from
+    the payload must raise -- a build-time signal at the spill, not a silent hole.
     """
     payload = to_dict(engine_result("https://example.test/a", "rendered"))
     del payload["original_url"]
@@ -153,12 +144,9 @@ def test_a_field_the_record_stopped_writing_is_a_construction_error():
 
 
 def test_an_absent_field_that_has_a_default_keeps_that_default():
-    """Defaults are not a licence to skip required fields.
-
-    The asymmetry is deliberate: ``to_dict`` always writes every field, so an
-    absent one means a producer that is not the serializer, and only the
-    defaulted fields can answer that safely. A payload missing ``markdown``
-    therefore builds, and one missing ``original_url`` does not.
+    """Defaults are not a licence to skip required fields: ``to_dict`` always writes
+    every field, so an absent one means a producer that is not the serializer -- only
+    defaulted fields answer safely (``markdown`` builds, ``original_url`` does not).
     """
     payload = to_dict(engine_result("https://example.test/a", "rendered"))
     del payload["markdown"]
@@ -167,12 +155,9 @@ def test_an_absent_field_that_has_a_default_keeps_that_default():
 
 
 def test_a_taxonomy_value_outside_the_literals_is_refused():
-    """The rebuild keeps the taxonomy check its construction already had.
-
-    ``LiteralChecked`` runs on ``__post_init__``, so rebuilding through the real
-    constructor validates ``status``/``classification``/``error`` for free. The
-    case worth pinning is the one JSON can produce and a dataclass cannot: a
-    status string from a spill line that no producer emits.
+    """The rebuild keeps the taxonomy check its construction had: ``LiteralChecked``
+    runs on ``__post_init__``, so rebuilding validates for free. The pinned case is one
+    JSON can produce and a dataclass cannot -- a status string no producer emits.
     """
     payload = to_dict(engine_result("https://example.test/a", "rendered"))
     payload["status"] = "not-a-real-status"

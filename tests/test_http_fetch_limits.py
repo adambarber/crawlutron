@@ -1,8 +1,6 @@
-"""Adversarial fix (HIGH): decompression-bomb / oversized-body guards in the HTTP fetcher.
-
-The fetcher must reject (413) responses that would expand to more than
-``max_content_length`` bytes after decompression, and must cap raw bytes read
-for chunked (no Content-Length) responses.
+"""Adversarial fix (HIGH): the fetcher must reject (413) any response that would
+expand past ``max_content_length`` after decompression, and must cap raw bytes
+read for chunked / no-Content-Length responses.
 """
 
 import asyncio
@@ -51,11 +49,9 @@ def _make_server():
 
 @contextmanager
 def _running_server():
-    """Serve the fixture site on a background thread; yield its port.
-
-    The teardown is the part worth stating once: a leaked server or a joined
-    thread outlives the test that forgot it, and the next test in the file
-    inherits the port.
+    """Serve the fixture on a background thread; yield its port. The teardown is the
+    worth-stating half: a leaked server or joined thread outlives the test that forgot
+    it and the next test inherits the port.
     """
     server = _make_server()
     port = server.server_address[1]
@@ -70,12 +66,9 @@ def _running_server():
 
 
 async def _fetch_with_cap(port: int, path: str, cap: int):
-    """The real default fetcher against this fixture, with `cap` bytes allowed.
-
-    The caps are the subject of every test in this file, so they are a parameter
-    rather than part of a call site; ``policy`` is spelled here because a
-    fixture this local has no SSRF stand-down and the loopback target is what
-    the fetcher is being pointed at.
+    """The real default fetcher against this fixture, with `cap` bytes allowed. The
+    caps are the subject of every test, so they are a parameter; ``policy`` is spelled
+    because this local fixture has no SSRF stand-down and the loopback is the target.
     """
     return await default_http_fetcher(
         canonical(f"http://127.0.0.1:{port}{path}"),
@@ -86,12 +79,9 @@ async def _fetch_with_cap(port: int, path: str, cap: int):
 
 
 def assert_capped(res) -> None:
-    """The fetch was refused for exceeding the cap, with no body.
-
-    A 413 with a partial body is not a rejection the caller can act on -- the
-    whole point of the cap is that the oversized content never lands. Asserting
-    the status alone would pass for a response that streamed a megabyte and then
-    gave up, which is the failure the cap exists to prevent.
+    """Refused for exceeding the cap, with no body: a 413 with a partial body is not a
+    rejection the caller can act on, and asserting only the status would pass a stream
+    that gave up after a megabyte -- the failure the cap exists to prevent.
     """
     assert res.status_code == 413, res.status_code
     assert res.body == b""
