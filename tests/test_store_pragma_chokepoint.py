@@ -1,12 +1,7 @@
 """Every SQLite store must share one durability configuration.
 
-JobStore enables busy_timeout + WAL; CrawlResultStore plain-connected --
-the sibling-drift class the extraction pattern already absorbed twice
-(_LoopBoundPooledClient, BoundedTTLCache). Durability/concurrency settings
-are a shared decision: one function configures every store connection, and
-a tree-wide invariant keeps PRAGMA statements confined to it (PRAGMAs are
-connection-scoped, so "configure at connect time" is a one-call contract).
-"""
+One function configures every store connection; a tree-wide invariant keeps
+PRAGMA statements confined to it (PRAGMAs are connection-scoped)."""
 
 import ast
 
@@ -39,20 +34,10 @@ def _pragma_exec_offenders() -> list[str]:
 
 
 def _dynamic_pragma_calls(tree: ast.AST) -> list[tuple[ast.Call, str]]:
-    """SQL assembled at runtime rather than written out, in PRAGMA statements.
+    """SQL assembled at runtime, in PRAGMA statements.
 
-    Bandit's S608 is the standing gate for built SQL, and it covers the four
-    injection shapes (f-string, ``+``, ``%``, ``!r``) -- but its keyword set is
-    DML, and ``PRAGMA`` is not in it. Probed against this tree's own ruff
-    config: ``conn.execute(f"SELECT... {x}")`` is flagged, the identical
-    ``conn.execute(f"PRAGMA table_info({x})")`` is clean. So the one place a
-    SQLite identifier is interpolated is the one place the linter is silent.
-
-    The complement is the trap in :func:`_pragma_exec_offenders` above: matching
-    only ``ast.Constant`` finds the statements whose text is *already* fixed and
-    misses the ones assembled from a value. The check and the risk run in
-    opposite directions, so the shape worth gating is the one neither test saw.
-    """
+    Bandit's S608 gates built SQL but its keyword set is DML, so the one place
+    a SQLite identifier is interpolated is where the linter is silent."""
     found: list[tuple[ast.Call, str]] = []
     for node, func in attribute_calls(tree):
         if func.attr not in {"execute", "executemany"} or not node.args:
@@ -82,10 +67,8 @@ def _mentions_pragma(sql: ast.AST) -> bool:
 def _is_identifier_chokepoint(node: ast.expr) -> bool:
     """Whether an expression is, or is derived from, the allowlist call.
 
-    Takes the ``ast.expr`` its callers hold and narrows inside: the
-    ``isinstance(node, ast.Call)`` that answered the question was invisible to
-    every caller that went on to read ``node.func``.
-    """
+    Narrowing inside lets every caller read ``node.func`` without repeating the
+    ``isinstance`` that was invisible to them."""
     if not isinstance(node, ast.Call):
         return False
     if not (isinstance(node.func, ast.Name) and node.func.id == "_validated_identifier"):
@@ -98,11 +81,9 @@ def _is_identifier_chokepoint(node: ast.expr) -> bool:
 def _module_constants(tree: ast.Module) -> set[str]:
     """Module-level names bound to a literal.
 
-    A PRAGMA that interpolates one of these is not naming an identifier -- it is
-    splicing a constant into a pragma *value* (``busy_timeout=5000``). The
-    module is not reachable from a request, so this is not an injection surface
-    and forcing it through the identifier allowlist would be theatre.
-    """
+    A PRAGMA interpolating one splices a constant into a *value*, not an
+    identifier, and is not reachable from a request -- the allowlist would be
+    theatre."""
     return {
         name
         for _node, name in single_target_name_assignments(
@@ -112,17 +93,10 @@ def _module_constants(tree: ast.Module) -> set[str]:
 
 
 def _snippet_call(source: str, *, fn: int = 0, stmt: int = 0) -> ast.Call:
-    """The ``Call`` evaluated by ``source``'s ``fn``-th function at statement ``stmt``.
+    """The ``Call`` evaluated by ``source``'s ``fn``-th function at ``stmt``.
 
-    Every snippet in this file is a tiny module whose function body is a single
-    statement that evaluates a ``conn.execute(...)``, sometimes as a bare
-    expression and sometimes as a ``return``. The walk down to that call was
-    spelled out index by index at each site, and those indices are not what those
-    tests are about -- they are only how each one reaches the node -- so the walk
-    itself had to be taken on faith. Naming the step says what is being handed to
-    the detector, and fails loudly if a snippet stopped being the shape its test
-    believes it is.
-    """
+    Every snippet is a tiny module whose body is one ``conn.execute(...)``; the
+    walk is named so tests fail loudly if a snippet stops being its shape."""
     module = ast.parse(source)
     function = module.body[fn]
     assert isinstance(function, (ast.FunctionDef, ast.AsyncFunctionDef)), source
@@ -136,12 +110,8 @@ def _snippet_call(source: str, *, fn: int = 0, stmt: int = 0) -> ast.Call:
 def _pragma_sql(call: ast.Call) -> ast.JoinedStr:
     """``call``'s first argument, asserted to be an f-string.
 
-    Every snippet below builds its PRAGMA with an f-string, and that is the only
-    shape :func:`_unvalidated_interpolations` can read -- it walks
-    ``sql.values``. Narrowing here means a snippet that stopped being an
-    f-string fails as itself, rather than being reported as "zero unvalidated
-    interpolations" by a detector that never looked.
-    """
+    Every snippet builds its PRAGMA with one -- the only shape the detector can
+    read -- so a snippet that stopped being one fails as itself."""
     sql = call.args[0]
     assert isinstance(sql, ast.JoinedStr), ast.unparse(sql)
     return sql
@@ -150,13 +120,8 @@ def _pragma_sql(call: ast.Call) -> ast.JoinedStr:
 def _local_chokepoint_bindings(function: ast.AST) -> set[str]:
     """Names in this function assigned the result of the allowlist call.
 
-    The live shape in ``sqlite_store.py`` validates into a local and then
-    interpolates the local, so a check that only recognised the *inline* call
-    would reject correct code and push the next editor back toward a raw
-    parameter -- the detector would be manufacturing the defect it exists to
-    prevent. Reaching one hop back is what makes the sanctioned shape and the
-    banned shape distinguishable.
-    """
+    The live shape validates into a local then interpolates it; checking only
+    the inline call would manufacture the defect the detector exists to prevent."""
     return {
         name for _node, name in single_target_name_assignments(nodes_of(function), _is_identifier_chokepoint)
     }
@@ -173,13 +138,9 @@ def _enclosing_function(tree: ast.Module, target: ast.AST) -> ast.AST | None:
 def _unvalidated_interpolations(tree: ast.Module, sql: ast.JoinedStr, at: ast.AST) -> list[str]:
     """Interpolated expressions that skip the identifier chokepoint.
 
-    ``_validated_identifier`` is an alnum+underscore allowlist, which is the
-    whole defence for a PRAGMA identifier: the argument is spliced into the
-    statement text verbatim, so anything outside ``[A-Za-z0-9_]`` would be a
-    syntax break at best and an injection at worst. An expression is accepted
-    when it is the call itself, a local bound to its result, or a module
-    constant -- and rejected when it is a bare parameter.
-    """
+    The allowlist is the whole defence (the argument is spliced verbatim): the
+    call, a local bound to its result, or a module constant are accepted; a
+    bare parameter is rejected."""
     safe = _module_constants(tree)
     function = _enclosing_function(tree, at)
     if function is not None:
@@ -314,12 +275,8 @@ def test_dynamic_pragma_detector_bites():
 def test_pragma_confinement_does_not_only_match_literals():
     """Why the literal-only check above is not enough on its own.
 
-    The existing confinement detector requires ``ast.Constant``, so the
-    assembled-PRAGMA case it cannot see is the only case with an interpolated
-    identifier in it. This pins that gap shut rather than leaving it as a
-    comment: if the sibling test is ever widened to constants *and* assembled
-    forms, this one is redundant and should be deleted with it.
-    """
+    The confinement detector requires ``ast.Constant``, so the assembled case it
+    cannot see is the only one with an interpolated identifier."""
     source = ast.parse('conn.execute(f"PRAGMA table_info({table})")')
     seen_by_the_literal_check = [
         node
