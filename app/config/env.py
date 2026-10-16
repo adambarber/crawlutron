@@ -1,12 +1,6 @@
-"""Reading configuration from a mapping or the environment, without ever raising.
-
-Every knob in the deployment arrives here: an environment string, or a mapping
-in tests. A typo in one must not fail a policy open, so nothing in this module
-raises -- it warns naming the variable and returns a bounded fallback.
-
-The mapping faces and the environment faces are one function each. ``get_env_int``
-is ``get_mapping_int`` bound to ``os.environ``, so a new option is added in one
-place. Restating the signature per face is what let the two drift.
+"""Reading configuration from a mapping or the environment, never raising: a
+typo must not fail a policy open, so each knob warns and falls back bounded. The
+env faces are the mapping faces bound to ``os.environ``.
 """
 
 from __future__ import annotations
@@ -19,12 +13,10 @@ from functools import partial
 
 
 def parse_bool_value(raw: str | None, default: bool, *, env_name: str) -> bool:
-    """Parse a boolean env value; warn (never silently flip) on garbage.
+    """Parse a boolean env value; warn, never silently flip, on garbage.
 
-    Unset/empty -> ``default``. Recognized truthy: 1/true/yes/on; falsy:
-    0/false/no/off (case-insensitive). Surrounding whitespace is ignored.
-    Anything else warns naming the variable and returns ``default``, so
-    ``RESPECT_ROBOTS=ture`` still keeps robots respected.
+    Unset/empty yields ``default``; 1/true/yes/on and 0/false/no/off parse
+    case-insensitively, anything else warns and returns ``default``.
     """
     if raw is None or not raw.strip():
         return default
@@ -63,11 +55,9 @@ def _finite_or_none(value: float) -> float | None:
 
 
 def in_range[T: (int, float)](lo: T, hi: T) -> Callable[[T], T | None]:
-    """Refuse a value outside ``[lo, hi]`` instead of clamping it.
-
-    For a value that is part of a contract: a deployment asking for 9 retries
-    and silently getting 5 cannot tell anyone. Fed to ``validate=`` this warns
-    and yields the fallback, so the misconfiguration is visible at startup.
+    """Refuse a value outside ``[lo, hi]`` instead of clamping it: for a value
+    that is part of a contract, silently adjusting is unobservable. Fed to
+    ``validate=`` it warns and yields the fallback, visible at startup.
     """
 
     def within(value: T) -> T | None:
@@ -120,9 +110,8 @@ def _mapping_number[T: (int, float)](
 ) -> T:
     """The one never-raise numeric read shared by the int and float faces.
 
-    Both public readers differed only in the parse callable, the warning event
-    and the float-only finiteness check; restating that body per type is how the
-    two faces drifted.
+    The two readers differ only in the parse callable, the warning event, and the
+    float-only finiteness check; restating the body per type is how they drifted.
     """
     raw = mapping.get(name)
     if raw is None:
@@ -157,12 +146,9 @@ def get_mapping_int(
     validate: Callable[[int], int | None] | None = None,
     validate_event: str | None = None,
 ) -> int:
-    """Read an integer from a mapping, or from the environment; never crash, always an int.
-
-    Hardened against every class of bad input: an unparseable value, a
-    non-numeric default, or one outside ``validate`` all fall back with a
-    warning, and the result is clamped to ``[lo, hi]``. A string default can no
-    longer leak a ``str`` into downstream arithmetic.
+    """Read an integer from a mapping or environment; never crash, always an int.
+    An unparseable value, non-numeric default, or out-of-range one all fall back
+    with a warning, clamped to ``[lo, hi]`` so a ``str`` cannot leak downstream.
     """
     return _mapping_number(
         mapping,

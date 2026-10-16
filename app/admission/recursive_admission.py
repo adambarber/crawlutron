@@ -37,20 +37,10 @@ class _BatchState(Protocol):
 
 @dataclass
 class RecursiveRunState:
-    """Everything one recursive crawl carries while it runs.
+    """Everything one recursive crawl carries while running.
 
-    This lives here rather than beside the dispatch loop that assembles it
-    because admission is the consumer that defines what a run has to offer: the
-    loop builds one of these and hands it down, and the stage signatures below
-    read it. It was previously declared twice -- once as a concrete dataclass
-    beside the loop, once as a ``_BatchRun`` protocol beside the stages -- and
-    the two lists had to be kept in step by hand. One declaration, in the module
-    that consumes it, is the version where they cannot drift.
-
-    Fields the admission stages never read (``max_depth``, ``include_html``,
-    ``want_document_bodies``, ``scope_pattern``, ``seed_sitemaps``) are still
-    here: this is the run's state, and the dispatch stages further down the
-    pipeline read the same object.
+    It lives here because admission is the consumer that defines what a run
+    offers -- declared once, not twice -- and dispatch stages read the same object.
     """
 
     scheduler: DomainScheduler
@@ -77,12 +67,9 @@ class RecursiveRunState:
 
 
 class _BatchContext(NamedTuple):
-    """Everything a batch-admission stage is allowed to see.
-
-    The ``(run, state, metrics)`` triple is bundled because a stage must never be
-    handed a ``state`` belonging to a different crawl: there is one context
-    object flowing down the pipeline, built once by ``admit_recursive_batch``, so
-    a stage cannot be wired to one run's gate and another run's bookkeeping.
+    """Everything a batch-admission stage is allowed to see -- the ``(run, state,
+    metrics)`` triple bundled so a stage can never be wired to one run's gate and
+    another run's bookkeeping; built once by ``admit_recursive_batch``.
     """
 
     run: RecursiveRunState
@@ -91,29 +78,18 @@ class _BatchContext(NamedTuple):
 
 
 class _PinProvider(Protocol):
-    """The one scheduler method admission reads.
-
-    ``DomainScheduler`` has always had ``get_pinned_strategy``, and the three
-    admission decisions below were unified behind :func:`_pinned_strategy`
-    precisely so the question was asked in one place. What was left over was the
-    ``getattr`` guard that let a scheduler *without* the hook through -- an
-    escape hatch for a shape the signature already forbade, and one that left
-    every caller's result un-narrowed. Naming the surface rather than the class
-    states the real requirement: anything that can answer the pin lookup, which
-    is the real scheduler and the test double alike.
+    """The one scheduler method admission reads: ``get_pinned_strategy``. Naming
+    the surface, not the class, states the real requirement -- anything that can
+    answer the pin lookup, the real scheduler and the test double alike.
     """
 
     def get_pinned_strategy(self, domain: str) -> str | None: ...
 
 
 def _pinned_strategy(scheduler: _PinProvider, task: CrawlTask) -> str | None:
-    """The strategy this task's domain is pinned to, or None when unpinned.
-
-    The one place the scheduler's per-domain pinning is read. Each of the
-    three admission decisions below needs it and each spelled its own
-    getattr-guard -- under two different local names, ``get_pin`` and
-    ``get_pinned`` -- so a scheduler without the hook was handled three
-    different ways, and a rename had to be caught three times.
+    """The strategy this task's domain is pinned to, or None when unpinned -- the
+    one place per-domain pinning is read, previously a ``getattr`` guard spelled
+    three ways under different local names.
     """
     return scheduler.get_pinned_strategy(task.domain)
 
@@ -253,11 +229,9 @@ async def admit_recursive_batch(
     state: _BatchState,
     metrics: MetricsStore,
 ) -> list[_Admitted]:
-    """Resource-gate the frontier, then robots-filter whatever survived.
-
-    The only place the batch-admission context is assembled. Both stages take
-    the resulting ``_BatchContext``, so the stage protocol is stated once here
-    instead of being re-spelled per stage.
+    """Resource-gate the frontier, then robots-filter whatever survived -- the
+    only place the batch-admission context is assembled, so the stage protocol is
+    stated once instead of re-spelled per stage.
     """
     ctx = _BatchContext(run, state, metrics)
     return await _robots_admitted_batch(ctx, await _resource_admitted_batch(ctx))

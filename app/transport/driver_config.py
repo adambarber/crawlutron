@@ -21,14 +21,10 @@ logger = logging.getLogger("app.transport.browser_driver")
 
 
 def _profile_int(profile: dict[str, Any], key: str, default: int, ceiling: int | None = None) -> int:
-    """Read a non-negative int knob from a browser_profile (never raises).
+    """Read a non-negative int knob from a browser_profile, never raising.
 
-    ``ceiling`` clamps a caller-supplied value on the way through. Without one
-    this is ``max(0, value)``, which is why ``lazy_scroll_steps: 10**12`` used to
-    be honoured: a closed key set says which keys exist, and says nothing about
-    how large their values may be. Clamping here rather than only at the model is
-    the point -- by the time a profile reaches a renderer it is a dict, so the
-    validator is no longer in the path.
+    ``ceiling`` clamps on the way (else ``max(0, value)``). Clamping matters here
+    because a profile reaches a renderer as a plain dict, validator long gone.
     """
     try:
         value = int(profile.get(key, default))
@@ -38,11 +34,9 @@ def _profile_int(profile: dict[str, Any], key: str, default: int, ceiling: int |
 
 
 def _profile_float(profile: dict[str, Any], key: str, default: float, ceiling: float | None = None) -> float:
-    """Read a non-negative float knob from a browser_profile (never raises).
-
-    The float sibling of :func:`_profile_int`, and bounded for the same reason:
-    ``cookie_harvest_timeout_seconds`` became the ``wait_for`` timeout holding a
-    pooled renderer, with nothing above it but a wall-clock budget.
+    """Read a non-negative float knob from a browser_profile, never raising; the
+    float sibling of ``_profile_int``, bounded for the same reason -- a timeout
+    knob became the ``wait_for`` holding a pooled renderer.
     """
     try:
         value = float(profile.get(key, default))
@@ -77,9 +71,8 @@ MAX_ACTION_WAIT_SECONDS = 10.0
 def ACTION_WAIT_MS(action: dict[str, Any]) -> int:
     """Clamp a caller-supplied ``wait`` timeout the way ``wait_seconds`` is.
 
-    Unbounded values park the render for as long as the caller likes, and 0
-    disables Playwright's timeout entirely instead of meaning "immediately".
-    Garbage falls back to the 5s default rather than failing the action.
+    Unbounded values park the render arbitrarily and 0 disables the timeout
+    entirely; garbage falls back to the 5s default rather than failing.
     """
     try:
         requested_ms = int(action.get("timeout", 5000))
@@ -89,21 +82,9 @@ def ACTION_WAIT_MS(action: dict[str, Any]) -> int:
 
 
 def _refuse_storage_state_without_cache_dir(storage_state: str) -> None:
-    """Log why a ``storage_state`` was dropped because no ``cache_dir`` is set.
-
-    The caller owns the return value; this owns the explanation. A separate
-    chokepoint for one reason: this is the only refusal in the validator that is
-    not "that path is not allowed". The configured-``cache_dir`` rejections stay
-    silent, because there the allowlist exists and the answer is simply no. With
-    no ``cache_dir`` no allowlist was ever configured, and that is the actionable
-    fact -- so this one names the setting instead of letting the caller return a
-    bare ``None`` indistinguishable from a path merely outside the allowlist.
-
-    The allowlist this replaced was the platform temp dir, which is not operator
-    control: it is world-readable on most hosts, so any local user could seed a
-    file another tenant's render then loads as its session. Losing a local dev's
-    ``storage_state`` is the cost; that is a diagnostic and a config line, against
-    a deployment's session otherwise.
+    """Log why a ``storage_state`` was dropped for lack of a ``cache_dir``: this
+    refusal is not "path not allowed" -- an absent allowlist is the actionable
+    fact (the old temp-dir allowlist was world-readable).
     """
     logger.warning(
         "browser_storage_state_no_cache_dir",
@@ -120,12 +101,9 @@ def _refuse_storage_state_without_cache_dir(storage_state: str) -> None:
 
 
 async def async_sleep(sleep: Callable[[float], None], seconds: float) -> None:
-    """Sleep without blocking the event loop, through an injected clock.
-
-    Both halves of a render need to wait -- the renderer between retries, the
-    driver between scroll steps and action waits -- and the wait must never
-    freeze the loop a render is running on. One implementation, two callers:
-    duplicated here it would be two places to keep honest about ``to_thread``.
+    """Sleep without blocking the event loop, through an injected clock -- both
+    render halves wait (renderer between retries, driver between scroll steps),
+    and the wait must never freeze the loop; one impl instead of two.
     """
     if seconds <= 0:
         return
