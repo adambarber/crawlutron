@@ -22,18 +22,10 @@ def block_private_targets(monkeypatch) -> None:
 
 @contextmanager
 def host_resolves_to(monkeypatch, ip: str):
-    """The precondition for a resolution-dependent SSRF verdict: the name resolves to ``ip``.
+    """The precondition for a resolution-dependent SSRF verdict: ``name`` resolves to ``ip``.
 
-    Opt out of the allow-private escape hatch *and* pin the resolver in one
-    step, so a rejection under test is the policy's answer and not an accident
-    of whatever the machine's resolver returned. ``ip="127.0.0.1"`` is the
-    private case; a public address is the accept case, and both go through here
-    so a test cannot assert one without the other half of the setup.
-
-    Yields the list of hostnames resolved inside the block. Counting belongs
-    here rather than in each test: "this name is resolved exactly once" is the
-    other half of the DNS contract, and a fixed return value cannot observe it.
-    """
+    Opts out of the allow-private escape hatch AND pins the resolver; yields
+    the hostnames resolved, so an exactly-once DNS contract is assertable."""
     import socket
     from unittest.mock import patch
 
@@ -79,23 +71,16 @@ def assert_result_success(result, classification: str = "rendered") -> None:
 def _field(result, name: str):
     """Read ``name`` off a wire dict or a result object.
 
-    The two spellings of the same assertion is the whole reason this exists: the
-    endpoint tests read the serialized dict and the strategy tests read the
-    result object, and the dict half had no shared assertion to call, so it
-    restated two lines per test.
-    """
+    The endpoint tests read the serialized dict, the strategy tests the result
+    object -- one shared assertion instead of two restated spellings."""
     return result[name] if isinstance(result, dict) else getattr(result, name)
 
 
 def assert_result_failed(result, classification: str) -> None:
     """A failed result whose status agrees with the classification table.
 
-    ``status`` is read from the production table rather than restated as the
-    literal ``"failed"``, so this cannot drift from what a classification
-    actually means: a classification added to the table as skipped would fail
-    here instead of being asserted into "failed" by a test that copied the
-    string.
-    """
+    ``status`` is read from production, not restated as ``"failed"``, so a
+    classification added as skipped cannot be asserted into "failed"."""
     from app.vocabulary.taxonomy import status_for_classification
 
     assert _field(result, "classification") == classification
@@ -105,13 +90,8 @@ def assert_result_failed(result, classification: str) -> None:
 def assert_pool_unavailable(resp) -> None:
     """A 503 carrying the browser-pool-unavailable envelope.
 
-    Two endpoint tests assert this shape and for two different reasons -- one
-    that the guard fires before URL validation, one that an exhausted pool is
-    reported rather than raised -- and they had the same three lines written
-    out. Restated, a change to the envelope's code left one of them asserting a
-    shape the server no longer returns, and that test still passed because the
-    other half of the pair was the one being read.
-    """
+    Two endpoint tests asserted this shape for two reasons with the same lines
+    written out; when the envelope changed, one kept passing on a stale shape."""
     assert resp.status_code == 503, resp.status_code
     assert resp.json()["code"] == "browser_pool_unavailable", resp.json()
 
@@ -163,11 +143,8 @@ def provider_results(*items) -> str:
 def one_search_result(override_settings, fake_provider_http, **overrides):
     """Pin the provider to Tavily and serve exactly one search result.
 
-    The pairing is the fixture: a provider choice, a key, and a body in the
-    provider's own wire shape. Two files were each writing it out, so a change to
-    the provider envelope (or the key name) landed in one test and not the other.
-    ``overrides`` tweaks a result field; pass ``items`` for a different count.
-    """
+    The pairing IS the fixture (provider, key, wire-shaped body); ``overrides``
+    tweaks a result field, ``items`` changes the count."""
     override_settings(search_provider="tavily", tavily_api_key="test-key")
     result = {"title": "A", "url": "https://example.gov/a", "content": "desc"}
     items = overrides.pop("items", None)
@@ -232,10 +209,8 @@ async def poll_crawl_completion(
 async def accepted_crawl(client, payload: dict) -> dict:
     """POST a crawl that must be accepted for background execution.
 
-    Asserts the 202/``accepted`` contract once so a test that is about the
-    webhook or the status URL is not also the place that re-spells the accept
-    envelope; returns that envelope.
-    """
+    Asserts the 202/``accepted`` contract once, so a webhook or status-URL test
+    is not also the place that re-spells the accept envelope; returns it."""
     response = await client.post("/v1/crawl", json=payload)
     assert response.status_code == 202, response.text
     body = response.json()
@@ -246,10 +221,8 @@ async def accepted_crawl(client, payload: dict) -> dict:
 async def completed_crawl(client, payload: dict) -> dict:
     """POST a crawl that must run synchronously and return its response body.
 
-    The mirror of :func:`accepted_crawl`: 200 with the results inline. A test
-    that wants a single result says ``(await completed_crawl(...))["results"][0]``
-    rather than re-deriving which status code means "ran".
-    """
+    The mirror of :func:`accepted_crawl`: 200 with results inline, so a
+    single-result test reads ``["results"][0]``, not re-derived codes."""
     response = await client.post("/v1/crawl", json=payload)
     assert response.status_code == 200, response.text
     return response.json()
