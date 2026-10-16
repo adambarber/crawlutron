@@ -48,10 +48,8 @@ class _ChainContext:
 
     def request_for(self, strategy: CrawlStrategyName) -> StrategyRequest:
         """The page's identity for one ladder step.
-
-        The chain owns this mapping because the chain is what knows which URLs
-        and policy a run was dispatched with; a strategy that built its own
-        would be one more place to mix two pages up.
+        The chain owns this mapping because it knows which URLs and policy a run was
+        dispatched with; a strategy building its own is one more place to mix pages up.
         """
         return StrategyRequest(
             original_url=self.original_url,
@@ -72,11 +70,8 @@ class _ChainState:
 
 def _assert_strategy_names_agree() -> None:
     """The enum and the alias are two declarations of one set of names.
-
-    They have to agree, because the ladder narrows one into the other, and
-    nothing in either declaration would notice if a fifth enum member appeared
-    without a matching alias entry: it would type-check, and then reach a
-    strategy the chain does not handle. Cheap at import, so it is cheap here.
+    They must agree because the ladder narrows one into the other, and nothing
+    would notice a fifth member without a matching alias (it would type-check, then hit an unhandled step).
     """
     enum_names = {member.value for member in CrawlStrategy}
     alias_names = set(get_args(CrawlStrategyName))
@@ -93,12 +88,8 @@ def starting_strategies(
     domain: str,
 ) -> list[CrawlStrategyName]:
     """The escalation ladder from the domain's pin onward, or the whole ladder.
-
-    Takes the three inputs the slice reads rather than the whole
-    ``_ChainContext``. A pin test that has to fabricate thirteen unrelated
-    fields to reach this line is a test that will not be written here -- and the
-    copy of the slice that gets written instead stops being what production
-    does, which is how a pinning regression ships with pinning tests green.
+    Takes the three inputs the slice reads (not the whole context), so a pin test
+    does not fabricate unrelated fields to reach this line -- or re-derive it locally.
     """
     # A static Literal cannot be derived from a runtime enum, so this narrowing is
     # asserted -- and _assert_strategy_names_agree() is what makes asserting it honest.
@@ -121,14 +112,8 @@ def starting_strategies(
 @dataclass
 class _ChainRun:
     """One walk of the ladder: the target's context plus this run's own state.
-
-    ``context`` and ``state`` were threaded through every step as a pair, so each
-    helper opened with the same two parameters, the pair was re-spelled at every
-    call site, and nothing in any signature said the two belonged together -- a
-    state from another walk was a legal argument. They are the two halves of one
-    run, so they are one value and the steps are its methods. That is also what
-    lets :meth:`terminal_failure` read the target's identity off ``self`` instead
-    of having each of its call sites declare it again.
+    They used to be threaded as a pair, re-spelled at every call site with no
+    signature tying them together; now one value, and the steps are its methods.
     """
 
     context: _ChainContext
@@ -143,13 +128,8 @@ class _ChainRun:
         diagnostics: dict[str, Any] | None = None,
     ) -> EngineCrawlResult:
         """A classified failed result for a step that never reached a strategy.
-
-        The two pre-chain refusals -- no renderer available, and a strategy
-        outside the ladder -- are the same result carrying a different reason.
-        ``TerminalResult`` exists so the terminal field list is declared once;
-        a call site that re-states ``original_url``/``normalized_url``/``strategy``
-        is a second declaration of the identity, which is the duplication
-        ``TerminalResult``'s own docstring says it was built to remove.
+        The two pre-chain refusals (no renderer; strategy outside the ladder) are the
+        same result with a different reason, built from the declared TerminalResult.
         """
         return failed_engine_result(
             TerminalResult(
@@ -164,10 +144,8 @@ class _ChainRun:
 
     def with_policy(self, policy: CrawlPolicy) -> _ChainRun:
         """This same run re-pointed at another policy, carrying the same state.
-
-        The cffi cookie retry is a ladder step like any other, so it continues
-        this run's state rather than starting a new one -- a retry that began a
-        fresh state would report only its own attempt and lose the ladder's.
+        The cffi cookie retry is a ladder step, so it continues this run rather than
+        starting fresh -- a new state would report only its own attempt.
         """
         return _ChainRun(replace(self.context, policy=policy), self.state)
 
@@ -217,11 +195,9 @@ class _ChainRun:
     async def retry_cookies(
         self, strategy: CrawlStrategyName, result: EngineCrawlResult
     ) -> EngineCrawlResult | None:
-        """Re-run the HTTP step carrying cookies the failed browser step harvested.
-
-        Returns the retry's result when it produced usable content, else None.
-        Routed through :meth:`execute` rather than :meth:`run_http`, because the
-        retry is a ladder step like any other and so is enveloped like any other.
+        """Re-run the HTTP step carrying cookies the failed browser step harvested;
+        returns the retry's result when it produced usable content, else None.
+        Routed through execute, so the retry is enveloped like any other ladder step.
         """
         state = self.state
         if not (
@@ -251,15 +227,8 @@ class _ChainRun:
 
     async def execute(self, strategy: CrawlStrategyName) -> EngineCrawlResult:
         """Invoke ONE strategy step, converting any raise into a failed result.
-
-        A strategy is a STEP in a ladder, not a whole URL. The HTTP strategy has
-        its own broad-except sink and the browser worker catches inside
-        ``render``, but a raise at the adapter boundary between them had nowhere
-        to go: it escaped the chain, so it was enveloped with no strategy
-        attribution and every remaining ladder step skipped -- one BROWSER_HEADLESS
-        binding error ended a URL that still had BROWSER_HEADED_WARMED to try.
-        Both ``run_*`` methods AND the cffi cookie retry route through here, so a
-        raise has exactly one place it can become a result.
+        A strategy is a STEP in a ladder, not a whole URL: an adapter-boundary raise
+        used to escape and skip the remaining rungs; both runs and the cookie retry route through here.
         """
         context = self.context
         try:
