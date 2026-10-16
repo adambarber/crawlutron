@@ -1,18 +1,7 @@
 """A property owner declares one public surface, and adding a second is a change.
 
-The registry tracks how much public surface each owner module has -- how many
-public symbols, how many entry points -- and this file is the half of that story
-that fails when the number grows. A second public surface is not a style
-preference: it is a second way for a caller to reach the same owner, and a rule
-that holds through one door and not the other is a rule that can be walked around.
-
-The budget is a count of offenders rather than a threshold on a count, because
-a threshold can be satisfied forever by choosing the threshold. At zero the
-budget does the failing on its own, and the offender list is in the failure text,
-so the gate and the work list are the same artifact -- there is no separate report
-to fall out of date. Both numbers are pinned by the tests below, which is what
-makes "the surface grew" a red run instead of a reviewer's memory.
-"""
+The budget is an offender count -- at zero it fails by itself and the offenders
+ARE the work list; pinned here, so "the surface grew" is a red run."""
 
 from __future__ import annotations
 
@@ -132,11 +121,8 @@ def test_property_owner_public_surfaces_equal_all():
 def _surface_budget_offenders(*, grown: bool) -> list[str]:
     """Ratchet offenders for the public-surface budgets, by direction.
 
-    Both directions read the same counts against the same budgets, so they share
-    this walk: a budget that is too loose is as much a defect as one that is too
-    tight, and two hand-rolled loops over the ratchet is one more place for the
-    two to disagree about what the budget is.
-    """
+    Both directions read the same counts against the same budgets, so they
+    share this walk: too-loose is as much a defect as too-tight."""
     offenders: list[str] = []
     for relative, (surface_budget, entry_budget) in _OWNER_PUBLIC_SURFACE_RATCHET.items():
         path = REPO_ROOT / relative
@@ -186,13 +172,8 @@ _MODELS_CONCERN_MODULES = frozenset({"taxonomy.py", "serialization.py"})
 def _declared_types(tree: ast.Module) -> set[str]:
     """The type declarations a module holds, in every form one can take.
 
-    A class, a PEP 695 ``type`` alias, a ``NewType``, and a bare assignment
-    (``JsonValue = None | bool | ...``) are all the same statement of "this module
-    declares a type", and the rule that a declaration is findable from its name has
-    to hold for all four or it is decorative for three of them. Module constants
-    are not declarations: ``LITERAL_FIELDS`` is data the module uses, not a name a
-    reader goes looking up, so SCREAMING_CASE and ``__all__`` are excluded.
-    """
+    A class, ``type`` alias, ``NewType`` and bare assignment are the same
+    "declares a type" statement; findability-from-name must hold for all four."""
     declared: set[str] = set()
     for node in tree.body:
         if isinstance(node, ast.ClassDef):
@@ -215,11 +196,8 @@ def _is_module_constant(name: str) -> bool:
 def _home_module(declared: str) -> str:
     """The file a reader looking up ``declared`` should find.
 
-    A trailing ``Error`` is a naming convention rather than a distinct concept, so
-    ``BrowserPoolExhaustedError`` and ``browser_pool_exhausted.py`` are one
-    declaration, not two spellings. Encoding the suffix here means the exception
-    is stated once instead of being noticed and special-cased per class.
-    """
+    Trailing ``Error`` is a convention, so ``BrowserPoolExhaustedError`` and
+    ``browser_pool_exhausted.py`` are one declaration, stated once here."""
     stem = re.sub(r"(?<!^)(?=[A-Z])", "_", declared).lower().removesuffix("_error")
     return f"{stem}.py"
 
@@ -227,22 +205,9 @@ def _home_module(declared: str) -> str:
 def _models_home_offenders(root: pathlib.Path = _MODELS_ROOT) -> list[str]:
     """Declarations whose home is not findable, and declarations with two homes.
 
-    Two checks, because they are two different failures. A declaration in a module
-    named for something else cannot be looked up from its name -- the rule
-    ``app/models/__init__.py`` states. The same declaration in two modules can be
-    looked up from either and so has no home at all, which is the failure that one
-    concept per file was split to prevent and the one nothing else would notice.
-
-    The naming check applies to a module holding exactly one declaration, which is
-    the case where the name is unambiguous and the reader has the best chance of
-    guessing right. A module holding several is named for the family: ``crawl_worker.py``
-    holds the sync and async forms of one worker, and ``crawl_result.py`` holds a
-    result and the attempt it records. Demanding any member's name there would mean
-    renaming the file to hide one of its own declarations. That boundary is the
-    honest limit of the rule -- a multi-declaration module can still collect a
-    declaration that belongs next door -- and the duplicate check below is what
-    catches the failure that matters in one.
-    """
+    Two failures: a mis-named module cannot be looked up from its name, and a
+    two-module declaration has no home at all. The naming check applies to
+    single-declaration modules (multi-declaration modules are families)."""
     offenders: list[str] = []
     homes: dict[str, str] = {}
     for path in sorted(root.glob("*.py")):
@@ -269,11 +234,8 @@ def _models_home_offenders(root: pathlib.Path = _MODELS_ROOT) -> list[str]:
 def _models_reexport_offenders(root: pathlib.Path = _MODELS_ROOT) -> list[str]:
     """A declaration re-exported from ``__init__.py`` is a declaration with two homes.
 
-    ``from app.models import X`` makes a type importable from anywhere, which is
-    what would let it live in the wrong file and still import cleanly -- the exact
-    drift the one-concept-per-file rule exists to make impossible. The empty
-    ``__init__`` is the mechanism, so this is the gate that keeps it empty.
-    """
+    ``from app.models import X`` lets a type live in the wrong file and still
+    import cleanly -- the drift one-concept-per-file makes impossible."""
     tree = ast.parse((root / "__init__.py").read_text(encoding="utf-8"))
     return [
         f"app/models/__init__.py imports "
@@ -295,10 +257,8 @@ def test_models_package_reexports_nothing():
 def test_models_concern_modules_still_exist():
     """The exemptions above must name files that exist and still hold no type.
 
-    An exemption is a hole in a rule, so the hole is itself checked: a module
-    removed or renamed leaves a stale entry that would silently exempt whatever
-    took its place.
-    """
+    An exemption is a hole in a rule, so the hole is checked: a removed or
+    renamed module leaves a stale entry silently exempting its replacement."""
     present = {path.name for path in _MODELS_ROOT.glob("*.py")}
     assert not _MODELS_CONCERN_MODULES - present, "exempted module no longer exists"
     for name in _MODELS_CONCERN_MODULES & present:
@@ -311,11 +271,9 @@ def test_models_concern_modules_still_exist():
 
 def test_models_typing_detectors_bite(tmp_path):
     """Both detectors fire on the shapes they exist to forbid.
-    Run against a synthetic tree, not the live one, so the proof does not depend
-    on ``app/models`` happening to contain a violation: a bite planted with a live
-    name stops biting the moment that name is renamed, which is precisely the fix
-    the rule drives.
-    """
+
+    Run against a synthetic tree, not the live one, so the proof cannot go
+    silent when the fix renames a live name the bite was planted with."""
     (tmp_path / "crawl_task.py").write_text("class CrawlTask:\n    pass\n")
     (tmp_path / "records.py").write_text("class HttpFetchResult:\n    pass\n")
     assert _models_home_offenders(tmp_path) == [
