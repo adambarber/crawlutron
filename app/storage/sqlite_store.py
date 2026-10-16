@@ -43,15 +43,9 @@ class IndexInfo:
 
 
 def _set_busy_timeout(conn: sqlite3.Connection, milliseconds: int) -> None:
-    """Set ``PRAGMA busy_timeout`` through the one chokepoint that splices a value in.
-
-    The pragma guard admits a module constant or a validated identifier and
-    nothing else, and this statement needs a computed value, so the value goes
-    through the same allowlist as every other spliced fragment instead of
-    earning an exemption of its own. The allowlist is not ceremony here: a
-    busy timeout is a non-negative integer of milliseconds, and the one thing
-    that is not -- a negative, a float, anything with a sign or a dot -- is
-    exactly what SQLite would misread.
+    """Set ``PRAGMA busy_timeout`` through the one chokepoint that splices a value in,
+    through the same allowlist as every spliced fragment. A busy timeout is a
+    non-negative millisecond integer; a negative/float/signed/dotted value is what SQLite misreads.
     """
     conn.execute(f"PRAGMA busy_timeout={_validated_identifier(str(milliseconds))}")
 
@@ -65,25 +59,8 @@ def configure_store_connection(conn: sqlite3.Connection) -> sqlite3.Connection:
 
 def _ensure_wal(conn: sqlite3.Connection) -> None:
     """Put the database in WAL, retrying while a sibling process holds the file.
-
-    On an already-WAL database the PRAGMA is a no-op read and never takes a
-    write lock, so the steady state stays uncontended; the retry is reached
-    only by the first conversion, which is the only time this is a write.
-
-    The two budgets are different things and both are real: ``_BUSY_TIMEOUT_MS``
-    is how long ONE attempt may block inside SQLite before it can report
-    contention, and ``_WAL_RETRY_SECONDS`` is the total wait. Checking the
-    deadline only between attempts is not enough to honour the second, because
-    an attempt allowed the first budget can outlive the second on its own -- a
-    15s budget over a 5s busy timeout really waits 20s, and a caller that
-    shortened the retry to half a second still waited five. Each attempt
-    therefore runs under whichever is smaller: its own timeout, or what is
-    left of the deadline.
-
-    The connection's configured timeout is restored on the way out, including
-    the failure path: a caller set ``_BUSY_TIMEOUT_MS`` for every statement on
-    this connection, and how long the WAL conversion happened to take is not
-    a licence to leave it narrowed.
+    Each attempt runs under its own timeout OR the deadline's remainder --
+    whichever is smaller -- and the connection's configured timeout is restored on the way out.
     """
     deadline = time.monotonic() + _WAL_RETRY_SECONDS
     try:
@@ -126,20 +103,8 @@ _LOCK_TRACE_THRESHOLD = 0.05
 
 class _TracedLock:
     """A re-entrant lock that can name the thread holding it.
-
-    The connection trace answers which process opened which file. It cannot
-    answer the question a locked database actually raises: a thread is blocked,
-    and the thread it is blocked on is inside a migration. Both are invisible
-    from outside the lock, so the lock records its holder and reports a waiter
-    that waited long enough to be worth a line::
-
-        CRAWLUTRON_TRACE_STORE_LOCKS=1 pytest -n 4 2> locks.log
-
-    The holder is cleared by whichever release runs first, so a re-entrant
-    inner release loses the outer holder's name. That is the wrong answer in a
-    case the trace exists to disprove -- a thread waiting on a lock the same
-    thread already holds is a deadlock, not contention, and it announces
-    itself by never returning.
+    The connection trace can't answer a locked database's real question (a thread
+    is blocked inside a migration), so it records the holder and reports a wait worth a line.
     """
 
     def __init__(self) -> None:
@@ -176,12 +141,9 @@ class _TracedLock:
 
 
 def store_lock_key(db_path: str | Path, memory_name: str | None = None) -> str:
-    """One lock key per database, however the caller happened to spell the path.
-
-    The migration backend opens the *resolved* file, so a key built from the
-    raw path would name a different lock whenever the two differ -- a symlinked
-    temp directory being the ordinary case. Two keys for one file means the
-    writer and the migration never actually exclude each other.
+    """One lock key per database, however the caller spelled the path.
+    The migration backend opens the *resolved* file, so a raw-path key would name
+    a different lock (symlink is the ordinary case); two keys means no exclusion.
     """
     if memory_name is not None:
         return f"memory:{memory_name}"
@@ -190,18 +152,8 @@ def store_lock_key(db_path: str | Path, memory_name: str | None = None) -> str:
 
 def process_lock(key: str) -> _TracedLock:
     """The one lock every writer and every migration on this database takes.
-
-    A store's own lock only serializes writes that go through *that* instance,
-    and a migration runs on a connection of its own. Within a single process
-    that left a migration free to collide with a write already in flight: the
-    store's ``busy_timeout`` then decides how long the collision is survivable
-    rather than whether it happens, and past that the caller sees
-    ``sqlite3.OperationalError: database is locked`` raised from inside a
-    migration step it had nothing to do with.
-
-    One lock per database file, shared by the writers and by
-    ``migrate_store``, is what makes the collision unrepresentable instead of
-    merely rare. Build the key with :func:`store_lock_key`.
+    A store's own lock only serializes that instance, and a migration runs on its
+    own connection; one per-file lock shared by both makes the collision unrepresentable.
     """
     with _PROCESS_LOCKS_GUARD:
         lock = _PROCESS_LOCKS.get(key)
@@ -219,15 +171,8 @@ def _trace_store_connection(
     memory_name: str | None,
 ) -> None:
     """Write one line per opened connection to stderr, when asked.
-
-    ``database is locked`` reproduces on one run in twelve and never on demand,
-    so the question that decides it -- which process and thread reached which
-    file, under which schema -- has to be answerable from a record made at the
-    moment of the call. Emitting to stderr rather than keeping a registry is
-    what lets that record exist without adding query and reset functions to the
-    store chokepoint's public surface for the sake of a debugging aid::
-
-        CRAWLUTRON_TRACE_STORE_CONNECTIONS=1 pytest -n 4 2> connections.log
+    "database is locked" reproduces rarely and never on demand, so which process,
+    thread, file and schema is answered from a record made at the moment of the call.
     """
     if os.environ.get(_STORE_TRACE_ENV) != "1":
         return
@@ -245,12 +190,8 @@ def _trace_store_connection(
 
 def connect_store(db_path: str | Path, *, schema: StoreSchema) -> sqlite3.Connection:
     """Open and configure the long-lived store connection, then migrate its database.
-
-    Service PRAGMAs come from ``configure_store_connection``, applied to this
-    connection. The migration's own connection is configured separately and
-    carries the same PRAGMAs, including the busy timeout -- which is precisely
-    why the store's own writes serialize on the file's process lock rather than
-    leaving a migration to lose a race it was never meant to take part in.
+    Service PRAGMAs come from ``configure_store_connection``; the migration's own
+    connection carries the same PRAGMAs, which is why writes serialize on the file's process lock.
     """
     conn, memory_name = _open_raw_store_connection(db_path)
     try:
