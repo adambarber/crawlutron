@@ -98,11 +98,9 @@ _FIXTURE_FILES = r"^(docker/browser-crawler/)?.*\.py$"
 
 
 def _fixture_hook(hook_id: str, name: str, entry: str, *, quoted: bool = False) -> str:
-    """One hook block of the fixture config.
-
-    The two hooks below differ only in id, name, entry, and whether the id is
-    quoted -- which is the whole defect the fixture exists to express -- so the
-    four lines they share are written once instead of twice.
+    """One hook block of the fixture config. The hooks differ only in id, name,
+    entry and whether the id is quoted -- the whole defect the fixture exists to
+    express -- so the four shared lines are written once.
     """
     rendered_id = f'"{hook_id}"' if quoted else hook_id
     return (
@@ -131,14 +129,9 @@ QUOTED_SECOND_JSCPD_HOOK = (
 
 
 def _hook_blocks(config: str) -> list[tuple[str, dict]]:
-    """Every hook in the config, as `(id, hook)` pairs read by a YAML parser.
-
-    This used to be a regex over the raw text anchored to exactly six spaces of
-    indentation, which meant a hook id written `- id: "jscpd-legacy"` was
-    invisible here: the contract could report one jscpd gate while the file
-    declared two. pre-commit reads ids as YAML values, so this test reads them
-    the same way. Quoting, indentation and key order are no longer ways to be
-    invisible.
+    """Every hook in the config as `(id, hook)` pairs, read like pre-commit reads
+    them (YAML, not a raw-text regex) -- a quoted id was once invisible here,
+    reporting one jscpd gate where the file declared two. Formatting hides it not.
     """
     document = yaml.safe_load(config)
     assert isinstance(document, dict), "the pre-commit config must be a mapping"
@@ -157,11 +150,9 @@ PRE_COMMIT = "pre-commit"
 
 
 def _run_precommit_on_temp_config(temp_dir: Path, config_text: str) -> subprocess.CompletedProcess[str]:
-    """Run the REAL pre-commit binary against a synthetic config in a temp dir.
-
-    Returns the CompletedProcess; the caller asserts on returncode. This is how
-    the gate validates that no `exclude` pattern disables every hook — because
-    it runs pre-commit and checks the binary actually ran something.
+    """Run the REAL pre-commit binary against a synthetic config in a temp dir; the
+    caller asserts on returncode. This is how the gate proves no `exclude` pattern
+    disables every hook -- the binary must actually run something.
     """
     config_path = Path(temp_dir) / "test-pre-commit-config.yaml"
     config_path.write_text(config_text, encoding="utf-8")
@@ -181,13 +172,9 @@ def _run_precommit_on_temp_config(temp_dir: Path, config_text: str) -> subproces
 
 
 def _assert_no_config_exclude(config: str) -> None:
-    """The config root must not declare an `exclude` that bypasses every hook.
-
-    `exclude: .*` in the pre-commit config disables all hooks: every file is
-    excluded, every hook reports Skipped, and the binary exits 0. This assertion
-    runs the REAL pre-commit binary against a synthetic config that replaces the
-    real hooks with `exit 1`, proves the binary exits 0 (hooks skipped), and
-    then requires the contract to reject that exclude pattern.
+    """`exclude: .*` disables every hook -- all files excluded, all hooks Skipped,
+    exit 0 -- so the contract runs the real binary against a synthetic config that
+    replaces the real hooks with `exit 1`, proving a bypass would vanish.
     """
     document = yaml.safe_load(config)
     assert isinstance(document, dict), "the pre-commit config must be a mapping"
@@ -210,11 +197,9 @@ def _field(block: dict, name: str) -> str:
 
 
 def _entry(block: dict) -> str:
-    """The command pre-commit will execute, with folded scalars already joined.
-
-    The assertion that used to be here (that `entry:` is a `>-` block) was a
-    proxy for the thing that matters: pre-commit runs the entry as one command,
-    so a literal block would smuggle newlines into it. That is asserted directly.
+    """The command pre-commit executes, with folded scalars joined. The old `>-`
+    assertion was a proxy for the real rule: pre-commit runs the entry as ONE
+    command, so a literal block would smuggle newlines in.
     """
     entry = block.get("entry")
     assert isinstance(entry, str) and entry.strip(), "hook is missing an entry"
@@ -251,13 +236,9 @@ def _synthetic_config(exclude: str | None, entry: str = "bash -c 'exit 1'") -> s
 
 
 def test_config_exclude_dot_star_makes_hooks_skipped(tmp_path) -> None:
-    """REPRO evidence: `exclude: .*` silently disables a failing hook.
-
-    A hook whose entry is `bash -c 'exit 1'` fails if it runs. Under
-    `exclude: .*` pre-commit reports `(no files to check)Skipped` and exits 0,
-    so the enforcement vanishes with no non-zero code to trip on. This is why a
-    root `exclude` is a config-level bypass: it is a shape the contract must
-    refuse, because no execution can catch it — the hooks are never run.
+    """REPRO: under `exclude: .*` a hook that runs `exit 1` reports Skipped and the
+    binary exits 0, so the enforcement vanishes with nothing to trip on -- a root
+    exclude is a bypass no execution catches, because hooks never run.
     """
     skipped = _run_precommit_on_temp_config(tmp_path, _synthetic_config(".*"))
     assert skipped.returncode == 0, f"skipped hooks exit 0:\n{skipped.stdout}"

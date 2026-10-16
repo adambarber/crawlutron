@@ -91,13 +91,9 @@ def _shifted_by_one_line() -> dict:
 
 
 def test_a_sanctioned_clone_that_moved_is_drift_not_a_disappearance(monkeypatch, tmp_path, capsys) -> None:
-    """Identity is the content, so moving a clone is recognised, not lost.
-
-    Identity used to be (path, start, end) and `missing` was checked before
-    `mismatched`, so inserting one comment line above a sanctioned clone
-    reported it as missing and the way forward was to copy the new coordinates
-    out of the error message into the expectation. The expectation's location
-    was therefore a self-report the gate never checked.
+    """Identity is content, so a moved clone is drift, not loss: identity used to be
+    (path, start, end) and `missing` was checked first, so a comment shove reported
+    it missing and the expectation became a self-report the gate never checked.
     """
     _configure(monkeypatch, tmp_path, _valid_pair(), [_shifted_by_one_line()])
     assert gate.main() == 1
@@ -141,12 +137,9 @@ def _relocated(second: dict) -> dict:
 
 
 def test_two_expectations_cannot_claim_the_same_location(monkeypatch, tmp_path, capsys) -> None:
-    """A location is claimed once or not at all.
-
-    Two expectations pinning the same lines is not a duplicate the gate can
-    resolve: at most one can ever be satisfied, and the loser used to be reported
-    as a missing clone, which sends the reader after the duplication instead of
-    after the expectations file.
+    """A location is claimed once or not at all. Two expectations on the same lines
+    cannot both be satisfied, and the loser used to be reported as a missing clone
+    -- sending the reader after the duplication, not the expectations file.
     """
     second = _relocated(_valid_pair())
     second["first"] = _valid_pair()["first"]
@@ -171,14 +164,9 @@ def test_two_expectations_cannot_share_an_id(monkeypatch, tmp_path, capsys) -> N
 
 
 def test_every_root_is_scanned_by_its_own_single_root_invocation() -> None:
-    """One root per invocation, because jscpd's names are root-relative.
-
-    `name` is relative to the scan root, so an invocation given several roots
-    cannot tell production from test: `app/api/x.py` and `tests/api/x.py`
-    both arrive as `crawl/x.py`, and a clone spanning the two is reported
-    against a path that names neither tree. A tree may hold several roots, but
-    each of them is scanned alone, which is what makes this gate's own report
-    able to say which tree it is talking about.
+    """One root per invocation because jscpd's `name` is root-relative: fed several
+    roots it cannot tell production from test (`app/api/x.py` vs `tests/api/x.py`
+    both arrive as `crawl/x.py`), so a cross-tree clone names neither.
     """
     roots = [root for tree_roots in gate.TREE_ROOTS.values() for root in tree_roots]
     assert len(set(roots)) == len(roots), f"a root scanned twice is ambiguous: {roots}"
@@ -191,14 +179,9 @@ def test_every_root_is_scanned_by_its_own_single_root_invocation() -> None:
 
 
 def test_each_root_gets_exactly_one_invocation(monkeypatch, tmp_path) -> None:
-    """One invocation per root, plus exactly one that spans all of them.
-
-    The spanning invocation is not a second look at the same thing. Each root's
-    own invocation cannot report a pair whose two sides are in different roots,
-    because jscpd only compares files it resolved from the paths it was handed --
-    so a fragment shared between `app/` and `tests/` is invisible to every
-    per-root scan, and the class is not small. It has to be asked for separately,
-    and asked for exactly once.
+    """The spanning invocation is not a second look: a per-root scan cannot see a
+    pair whose sides are in different roots (jscpd only compares what it resolved),
+    so such a fragment is invisible per-root and must be asked for once.
     """
     commands = _run_against_empty_tree(monkeypatch, tmp_path)
     spanning = [command for command in commands if len(_roots_of(command)) > 1]
@@ -209,14 +192,9 @@ def test_each_root_gets_exactly_one_invocation(monkeypatch, tmp_path) -> None:
 
 
 def test_one_floor_is_applied_to_every_root(monkeypatch, tmp_path) -> None:
-    """No root is scored at a looser bound than another.
-
-    Separate floors were the fix for a flat floor hiding production duplication
-    behind a number picked for test scaffolding. They became unnecessary once
-    this tree reported zero pairs in every tree at one number, and a second
-    number is a second thing to ratchet -- so there is one floor now, and the
-    check is that every invocation carries it. A root added later, or a floor
-    edited in one place only, is what this catches.
+    """No root is scored looser than another. Separate floors once hid production
+    duplication behind test-scaffolding numbers; with zero pairs at one number they
+    are unnecessary, so one floor, carried by every invocation.
     """
     commands = _run_against_empty_tree(monkeypatch, tmp_path)
     assert len(commands) > 1, "expected more than one root, so the check has something to compare"
@@ -230,13 +208,9 @@ def test_one_floor_is_applied_to_every_root(monkeypatch, tmp_path) -> None:
 
 
 def test_the_same_content_in_two_trees_is_two_findings_not_one(monkeypatch, tmp_path, capsys) -> None:
-    """Keyed by content AND tree, so the two cannot collapse into one pair.
-
-    This is the defect a single whole-tree scan at a single floor carried: the
-    same fragment appearing in `app/` and in `tests/` is one content hash, and
-    one content hash cannot say which tree it belongs to or which floor it
-    should be judged by. Test boilerplate must not become cover for production
-    code, so each is reported against the tree that actually holds it.
+    """Keyed by content AND tree so the two cannot collapse: one whole-tree scan sees
+    an app/ and tests/ fragment as one content hash, which names neither tree nor
+    floor -- test boilerplate must not cover production code.
     """
     _expect_nothing_sanctioned(
         monkeypatch,

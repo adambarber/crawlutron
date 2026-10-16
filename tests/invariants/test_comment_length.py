@@ -43,7 +43,7 @@ DOC_LIMIT = 3
 #: Exact equality both ways: new long docstrings fail; a trimmed tree lowers it.
 _DOC_BUDGETS = {
     "app": 546,
-    "tests": 539,
+    "tests": 522,
     "scripts": 33,
 }
 

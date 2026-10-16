@@ -1,54 +1,6 @@
-"""Typing ratchet: records whose key set no type declares.
-
-A pyright budget at zero says the annotations that are there are true. It says
-nothing about the annotation that is absent, and that is where ``JobStatusView``
-was ``dict[str, Any]`` -- twelve keys declared nowhere. The projection could stop
-selecting one, the response model could stop declaring one, and
-``JobStatusResponse(**view)`` into a model with ``extra="ignore"`` dropped the
-difference without a word. It did: ``kind`` was selected on purpose, read by both
-recovery seams, and had never reached a single response body. 2566 passing tests
-could not see it, because no test asserts a field a response is silently missing.
-
-The fix was one ``TypedDict``. This measures what keeps the next one from needing
-one.
-
-The measured property is a DECLARED KEY SET, not the presence of ``Any``.
-``Any`` is not a type; it is an exit from the type system, and counting how many
-times a token appears measures a spelling rather than a program. Three kinds of
-annotation are in this tree and they are not the same thing:
-
-    a domain record    a known set of keys with known value types. ``TypedDict``,
-                       dataclass, or model. Declared. Not counted.
-    a system type      a known CLASS with unconstrained contents -- ``JsonValue``
-                       for a payload that really is arbitrary JSON, ``bytes``,
-                       ``str``. "This could be anything" becomes "this is a JSON
-                       payload", which is a real statement the checker composes
-                       with. A dictionary is already the right shape for one of
-                       these. Not counted.
-    an exit            a record whose key set the code depends on and no
-                       annotation records. This is the defect. Counted.
-
-The honest ``JsonValue`` case and the defect are the same spelling on the page --
-``dict[str, Any]`` -- and only the author knows which one it is. That is why
-this is a ratchet and not a ban, and why the remedy names two moves rather than
-one: declare a ``TypedDict`` if a key set exists, or name the payload as the
-system type it is if it does not. Either one is a narrowing; deleting a token
-without doing either is not.
-
-``dict[str, str]`` and ``dict[str, int]`` are in neither, on purpose. An open key
-set with a typed value IS the declaration of an open key set -- it is the honest
-description of a header map, and there is no set of keys to declare.
-
-What is given up, stated plainly: a budget does not stop the value that would
-exceed it. It stops the population growing, names the work list in the failure
-message, and makes every narrowing a commit that lowers the number. The way to
-zero is mechanical and already demonstrated -- declare the record, and let the
-compiler reject every key the declaration and its consumers disagree about.
-
-To see the work list without failing anything:
-
-    python -c "import sys; sys.path[:0]=['tests']; \\
-      import tests.test_typing_budget as m; m.report()"
+"""A pyright budget at zero says the annotations there are true, nothing about an
+absent one -- ``JobStatusView`` was ``dict[str, Any]`` with twelve keys declared
+nowhere, so a dropped key reached no response until one TypedDict fixed it.
 """
 
 from __future__ import annotations
@@ -93,11 +45,9 @@ def _mentions_any(node: ast.AST) -> bool:
 
 
 def _is_record(node: ast.expr) -> bool:
-    """Whether this annotation's outermost type is a key-set-bearing record.
-
-    Descends through subscripts and unions -- `list[dict[str, Any]]` and
-    `dict[str, Any] | None` are records -- and stops at everything else, so a
-    type constructor's own arguments are never mistaken for the annotation's type.
+    """Whether this annotation's outermost type is a key-set-bearing record, descending
+    through subscripts and unions -- `list[dict[str, Any]]` and `dict[str, Any] | None`
+    are records -- and stopping elsewhere so a type's arguments are never the type.
     """
     if isinstance(node, ast.Name):
         return node.id in _RECORD_ROOTS
@@ -113,14 +63,9 @@ def _has_subscript(node: ast.AST) -> bool:
 
 
 def candidates(tree: ast.AST) -> Iterator[tuple[str, int, str]]:
-    """Every (metric, lineno, annotation) this tree offers, counted or not.
-
-    Three annotated positions carry the type a caller is checked against: a
-    parameter, a local or attribute assignment, and a return. `AnnAssign` is not
-    a dataclass field declaration -- `dataclasses.field()` types are written in
-    the class body as `x: T = field(...)`, which IS an AnnAssign, so those are
-    included and deliberately so: a dataclass field is the single most-checked
-    annotation in the tree.
+    """Every (metric, lineno, annotation) this tree offers, counted or not. Three
+    annotated positions carry what a caller is checked against; ``AnnAssign`` also
+    covers dataclass fields (written `x: T = field(...)`), the most-checked type.
     """
     for node in nodes_of(tree):
         annotations: list[ast.expr] = []
@@ -190,20 +135,9 @@ test_collector_sees_the_whole_tree = collector_sees_the_whole_tree(
 
 
 def test_the_collector_classifies_records_the_way_the_remedy_assumes() -> None:
-    """The analogue of a bite proof for a corpus detector.
-
-    Every other gate in this suite proves itself by planting a synthetic name and
-    watching the detector catch it. A collector that walks a whole tree cannot do
-    that -- `Rule` proofs accept one source string, which is why the corpus
-    detectors stay hand-rolled. So the proof is the collector's own input: one of
-    each thing it is supposed to count, and each of the things it must leave
-    alone, including the case that must NOT be here.
-
-    The negative half is the part that matters. The open-payload case and the
-    defect share a spelling, so a collector that reported every `dict[str, Any]`
-    as a defect would be unusable -- `JsonValue` is a legitimate answer and this
-    gate must not drive the tree away from it. That the two are indistinguishable
-    from the outside is the reason the remedy names both.
+    """A bite proof for a corpus detector: other gates plant a synthetic name, but a
+    whole-tree walker cannot, so its input is its own proof -- including the open-
+    payload case that must NOT be flagged (defect and ``JsonValue`` share a spelling).
     """
     parsed = ast.parse(
         "\n".join(
@@ -243,14 +177,9 @@ def test_the_collector_classifies_records_the_way_the_remedy_assumes() -> None:
 
 
 def test_the_status_view_is_a_declared_record() -> None:
-    """The record this gate was written for, checked at its own definition.
-
-    Every other assertion in this file counts. This one names the specific claim
-    the program rests on: `JobStatusView` is a `TypedDict`, not a `dict`. A
-    future edit that relaxes it back to a bare record would leave the budget in
-    this file unchanged -- the population would not grow, it would simply
-    re-absorb the key set it had declared -- so the declaration itself has to be
-    a tested fact rather than an assumption about the current tree.
+    """The record this gate was written for, at its own definition: relaxing it back
+    to a bare record would leave the budget unchanged, re-absorbing the declared key
+    set -- so the declaration itself is a tested fact, not an assumption.
     """
     from app.storage.job_store import JobStatusView
 
