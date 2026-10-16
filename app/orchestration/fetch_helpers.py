@@ -42,13 +42,8 @@ type _RequestHeaders = Mapping[str, str] | None
 
 class Discovery(NamedTuple):
     """One discovery response (robots.txt / sitemap.xml): the owner of what a
-    response *means*.
-
-    ``headers is None`` is the fetch core's transport-failure marker. Every
-    accessor below is total over it, so a consumer cannot reach a ``.get`` on a
-    missing header map -- the failure the sitemap path previously had to guard
-    by hand with ``resp_headers is None or status not in (200, 304)`` and then
-    trust for the two unguarded ``.get`` calls on the following lines.
+    response *means*. ``headers is None`` is the transport-failure marker, and
+    every accessor is total over it, so a consumer never reaches a ``.get`` on a missing header map.
     """
 
     text: str | None
@@ -56,13 +51,9 @@ class Discovery(NamedTuple):
     headers: dict[str, str] | None
 
     def validators(self) -> tuple[str | None, str | None] | None:
-        """``(etag, last_modified)`` when this response can revalidate a cache.
-
-        ``None`` when it cannot: a transport failure carries no headers, and a
-        status outside 200/304 revalidates nothing. Those are one decision
-        because they must agree -- as two separate predicates, a caller can
-        check one and then read through the other, which is the shape this
-        removed.
+        """``(etag, last_modified)`` when this response can revalidate a cache; ``None``
+        when it cannot (a transport failure carries no headers, a non-200/304
+        revalidates nothing) -- one decision, because as two predicates a caller could read through a gap.
         """
         if self.headers is None or self.status not in (200, 304):
             return None
@@ -96,14 +87,8 @@ async def _call_fetcher(
     timeout_seconds: int,
 ) -> HttpFetchResult:
     """Invoke the fetcher, tolerating the sync fetcher doubles the suite passes.
-
-    The production protocol is async, so the honest type of a conforming
-    fetcher's return is the coroutine; a sync double returns the result
-    directly, which is not that type, and the one ``Any`` below is where the
-    seam's tolerance for it lives -- stated once, here, instead of as an
-    untyped ``fetcher`` parameter at every call site the seam used to have.
-    When the doubles go async-native, this helper is the single deletion
-    point (along with the strategy seam's inline copy in fetch_policy).
+    The production protocol is async (a coroutine return); a sync double returns
+    the result directly, and the one ``Any`` admits the seam's tolerance here.
     """
     # ``_RequestHeaders`` promises a mapping the fetch only reads; the
     # protocol promises a dict. The copy is the whole bridge between the two.
@@ -120,18 +105,9 @@ async def fetch_decode_discovery(
     headers: _RequestHeaders,
     timeout_seconds: int,
 ) -> Discovery:
-    """Fetch, decompress, and decode a discovery body (robots.txt / sitemap.xml).
-
-    The single place the discovery fetch policy lives: sync or coroutine
-    fetcher, lowercase response headers, and a capped decompress so a hostile
-    origin cannot OOM the service with a gzip bomb
-    (``DISCOVERY_BODY_MAX_BYTES``). Absent ``headers`` means "send none", so a
-    caller passes its conditional headers straight through instead of
-    normalizing them first. The header map is present even when the body is
-    absent -- non-200, or a body that blew the cap -- so the sitemap path can
-    still read ETag/Last-Modified while the robots path ignores it. All three
-    fields are ``None`` on transport-level failure, and ``Discovery`` is the
-    only thing a consumer is meant to read off the result.
+    """Fetch, decompress and decode a discovery body (robots.txt / sitemap.xml):
+    the single place the policy lives -- capped decompress against a gzip bomb.
+    headers is None means "send none"; all fields are None on transport failure.
     """
     from app.transport.decompression import DecompressionTooLargeError
 
@@ -159,12 +135,9 @@ async def fetch_and_decode(
     headers: _RequestHeaders,
     timeout_seconds: int,
 ) -> tuple[str | None, int | None]:
-    """Fetch a URL, returning ``(decoded body, HTTP status)``.
-
-    The body is present only on 200; the status lets callers distinguish
-    "no such document" (404) from "origin is erroring" (5xx), which
-    robots handling treats differently (fail closed). ``(None, None)``
-    on transport-level failure.
+    """Fetch a URL, returning ``(decoded body, HTTP status)``; the body is present
+    only on 200, so the status lets callers tell a 404 from a 5xx (robots fails
+    closed differently), and ``(None, None)`` is a transport-level failure.
     """
     resp = await fetch_decode_discovery(fetcher, url, headers, timeout_seconds)
     return resp.text, resp.status
@@ -198,13 +171,9 @@ async def fetch_text(
     cond_headers: dict[str, str] | None,
     timeout_seconds: int,
 ) -> tuple[str | None, str | None, str | None, bool]:
-    """Fetch + decode a sitemap body, returning ``(text, etag, last_modified, not_modified)``.
-
-    The sitemap layer's only addition over the shared core is conditional
-    semantics: a 304 means the body is unchanged, so callers reuse a
-    previously resolved set instead of re-parsing. ETag/Last-Modified are
-    surfaced even when the body is absent (304, or a body that blew the
-    decompression cap) so the cache entry stays addressable.
+    """Fetch + decode a sitemap body: ``(text, etag, last_modified, not_modified)``.
+    The sitemap layer's only addition is conditional semantics: a 304 means the
+    body is unchanged, so callers reuse the previous set; validators stay addressable.
     """
     resp = await fetch_decode_discovery(fetcher, url, cond_headers, timeout_seconds)
     validators = resp.validators()
@@ -312,11 +281,10 @@ async def fetch_sitemap_urls(
     conditional: dict[str, str] | None = None,
     host_policy: HostPolicy,
 ) -> set[tuple[NormalizedUrl, str | None]]:
-    """Recursively resolve a sitemap URL into ``(loc, lastmod)`` pairs.
-
-    Handles sitemap indexes (``<sitemapindex>`` pointing at child sitemaps) up
-    to ``max_depth`` levels, and caps total collected URLs at ``max_urls`` so a
-    hostile or enormous index cannot run away."""
+    """Recursively resolve a sitemap URL into ``(loc, lastmod)`` pairs, following
+    sitemap indexes up to ``max_depth`` levels and capping total collected URLs at
+    ``max_urls`` so a hostile or enormous index cannot run away.
+    """
     visited: set[NormalizedUrl] = set()
     page_urls: set[tuple[NormalizedUrl, str | None]] = set()
     walk = _SitemapWalk(
