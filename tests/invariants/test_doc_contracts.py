@@ -43,23 +43,8 @@ _BACKTICKED_REPO_DOCUMENT = re.compile(r"^[\w][\w-]*\.md$")
 def _is_tree_path_claim(candidate: str) -> bool:
     """Whether a backticked span claims something exists in this repository.
 
-    A slash makes the claim directly: only a path with a directory separator
-    is a statement about this tree's layout. A bare basename normally is not
-    -- ``robots.txt`` in prose is the protocol file, not a file we ship.
-
-    A ``.md`` basename is the exception, and the exception is about what a
-    markdown filename *is* rather than about the words around it. Every
-    markdown file in this repository is a document of this repository; there
-    is no third-party markdown artifact for a document to discuss. So a bare
-    ``.md`` span is a pointer at one of our documents whatever verb precedes
-    it, and the gate must check it.
-
-    This is the hole that let four live documents point at
-    ``ADVERSARIAL_REVIEW_BROWSER_CRAWLER.md`` -- a file renamed to
-    ``ADVERSARIAL_REVIEW_BROWSER_CRAWLER.md`` -- while the gate that exists
-    to catch exactly this reported a clean tree. Restricting the new arm to
-    ``.md`` is what keeps it from flagging protocol filenames in prose.
-    """
+    A slash claims the tree; a bare basename does not. Bare ``.md`` is the
+    exception -- a renamed-document hole turned the gate's clean report false."""
     return bool(_BACKTICKED_PATH.match(candidate) or _BACKTICKED_REPO_DOCUMENT.match(candidate))
 
 
@@ -75,14 +60,8 @@ def _markdown_documents() -> list[str]:
 def _live_documents() -> list[str]:
     """Every markdown file that is not a stated exception.
 
-    Derived rather than listed, so a document added later is covered by
-    default. The earlier version enumerated the nine live documents, which
-    made the gate's scope itself a hand-maintained thing that drifts
-    silently: a new doc inherited no coverage and nothing failed. An
-    exclusion list is the right shape to keep by hand, because every entry is
-    a deliberate decision about a record that is *supposed* to cite files
-    that no longer exist, and each carries the reason it is exempt.
-    """
+    Derived (not enumerated) so a new document arrives covered; the earlier
+    nine-file list let the gate's scope drift silently. Exclusions stay hand-kept."""
     return [name for name in _markdown_documents() if name not in _DOC_REFERENCE_EXCLUSIONS]
 
 
@@ -91,25 +70,8 @@ def _broken_doc_reference_offenders(
 ) -> list[str]:
     """Every repo path a live document tells a reader to open must exist.
 
-    The scope is the point. A record of what was true legitimately cites
-    files that have since been deleted, and "fixing" those citations would
-    falsify the record -- so the exemptions are named, with reasons, rather
-    than applied by an exclusion nobody can see. What is checked is
-    everything else: the document a reader arrives intending to follow, where
-    a dead path is a navigational dead end and not history.
-
-    The span must look like a repository artifact, and that is not a stylistic
-    filter. A bare `robots.txt` or `browser.py` in prose is a basename being
-    discussed, not a path being pointed at; only a slash makes the span a
-    claim about this tree's layout. A bare ``.md`` span is a claim without a
-    slash, because a markdown filename in this tree always names a document of
-    this tree -- see `_is_tree_path_claim` for why that arm is bounded to
-    markdown.
-
-    ``root`` and ``documents`` exist so the proof that this detector bites can
-    run on a copy of a real document instead of on the real one, which is a
-    race with every other test that reads the tree.
-    """
+    Records of what was true legitimately cite deleted files -- exempted BY
+    NAME. The span must claim this tree's layout; the params enable a copy bite."""
     offenders: list[str] = []
     for name in _live_documents() if documents is None else documents:
         document = root / name
@@ -129,14 +91,8 @@ def _compose_file() -> pathlib.Path:
 def _deployment_knobs(manifest: pathlib.Path | None = None) -> set[str] | None:
     """Knobs the compose manifest sets, and the container runs with.
 
-    Compose is how the service is actually deployed, so it is a declaration
-    of intent from the same authority as ``.env.example`` -- but a later
-    one, and the more consequential: ``.env.example`` describes a local
-    checkout, while a key set here is what a real deployment runs with.
-
-    The manifest is a parameter so the proof that this detector bites can
-    mutate a copy rather than the repository's own deployment descriptor.
-    """
+    The later, more consequential declaration than ``.env.example``;
+    parameterised so the bite mutates a copy, not the descriptor."""
     manifest = manifest if manifest is not None else _compose_file()
     if not manifest.exists():
         return None
@@ -151,12 +107,8 @@ def _deployment_knobs(manifest: pathlib.Path | None = None) -> set[str] | None:
 def test_deployment_manifest_sets_no_dead_knob():
     """A key compose sets that nothing reads is the quietest failure here.
 
-    Not a crash and not a 5xx: the deployment starts, the operator believes
-    the setting is applied, and the default silently wins. Nothing surfaces
-    it, because from the service's point of view the key was never
-    mentioned. So the manifest is checked against the same consumer set the
-    ``.env.example`` direction uses, rather than trusted.
-    """
+    Not a crash or 5xx: the default silently wins and nothing surfaces it.
+    Checked against the same consumer set ``.env.example`` uses."""
     declared = _deployment_knobs()
     if declared is None:
         pytest.skip("no compose manifest in this tree")
@@ -165,15 +117,10 @@ def test_deployment_manifest_sets_no_dead_knob():
 
 
 def test_deployment_knob_detector_bites(tmp_path):
-    """Proved by mutating a real manifest rather than by trusting the helper.
+    """Proved by mutating a real manifest, not by trusting the helper.
 
-    A copy, and the copy is the point rather than a compromise. The first
-    version injected the key into the repository's own ``docker-compose.yml``
-    and restored it in a ``finally``; under a parallel run the gate that reads
-    that file read it mid-injection and failed on a knob that existed only
-    because this test had written it. A gate proved by breaking the artifact
-    it protects is not evidence when the proof is the outage.
-    """
+    The first version injected into the repo's own compose file and restored
+    in a ``finally``, racing the gate under parallel runs."""
     manifest = _compose_file()
     if not manifest.exists():
         pytest.skip("no compose manifest in this tree")
@@ -189,11 +136,8 @@ def test_deployment_knob_detector_bites(tmp_path):
 def test_live_documents_are_derived_not_enumerated():
     """The gate on the gate: coverage must equal the tree.
 
-    A document added later has to arrive covered, which is the failure a
-    hand-kept list cannot catch. One audit sat outside the original nine for
-    exactly as long as it had seven dead paths, and nothing said so -- the
-    exclusion set, not the covered set, is what a human maintains now.
-    """
+    A new document must arrive covered -- the failure a hand-kept list cannot
+    catch, when one audit sat outside the original nine with seven dead paths."""
     assert set(_live_documents()) | set(_DOC_REFERENCE_EXCLUSIONS) == set(_markdown_documents())
     assert not (stale := set(_DOC_REFERENCE_EXCLUSIONS) - set(_markdown_documents())), stale
 
@@ -203,18 +147,10 @@ def test_live_docs_point_at_paths_that_exist():
 
 
 def test_live_doc_reference_detector_bites(tmp_path):
-    """The gate must be able to fail against a real document, or it is
-    decoration rather than a check. Proved by mutating a real document, not by
-    feeding the helper a synthetic string.
+    """The gate must be able to fail against a real document, or it is decoration.
 
-    On a copy, for the same reason the deployment detector bites on one: this
-    test used to inject the dead path into the repository's actual ``README.md``
-    and put it back afterwards, which races every other test that reads the
-    tree's documents. The text under test is still the real document -- only the
-    directory is not -- and that is also why the assertion is containment: a
-    bare copy has none of the paths the document cites, and each of those is a
-    true positive about the copy rather than a false one.
-    """
+    Proved on a COPY: injecting a dead path into the real ``README.md`` raced
+    every other reader; the text is still the real document."""
     assert _broken_doc_reference_offenders() == []
 
     document = REPO_ROOT / "README.md"
