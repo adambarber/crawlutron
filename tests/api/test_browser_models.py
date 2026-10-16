@@ -17,25 +17,16 @@ from app.vocabulary.browser import (
 class TestOutputFormatIsTheDocumentedSet:
     """``output_format`` describes itself as an enum, so it is one.
 
-    The field is annotated ``str | None`` and its description reads "One of:
-    json (default), jsonl, ndjson, markdown, csv". Nothing bound the value to
-    that set, so a typo fell back to JSON and the caller received valid JSON
-    having asked for CSV, with nothing to indicate the substitution.
-
-    A census of every model for a field whose description enumerates values
-    while its annotation does not enforce them returns exactly this one field,
-    so the fix is deliberately not generalised into a sweep.
-    """
+    ``str | None`` with an enumerating description let typos fall back to JSON.
+    The census found one such field; the fix is deliberately not a sweep."""
 
     DOCUMENTED = ("json", "jsonl", "ndjson", "markdown", "csv")
 
     def test_the_documented_set_is_what_the_type_accepts(self):
         """The description and the annotation must state the same set.
 
-        This is the drift guard for the field: the description is what a caller
-        reads, the Literal is what is enforced, and the failure this issue
-        describes is exactly the two disagreeing while both look correct.
-        """
+        The drift guard for the field: description is what a caller reads,
+        Literal is what is enforced, and the failure is the two disagreeing."""
         from typing import get_args
 
         args = get_args(CrawlRequest.model_fields["output_format"].annotation)
@@ -61,10 +52,8 @@ class TestOutputFormatIsTheDocumentedSet:
     def test_the_refusal_names_the_field(self):
         """A caller whose only mistake was a typo must be told WHICH field.
 
-        Asserted here because a model-level rejection reports loc=() and the
-        API derives its error code from where pydantic points -- so a bare
-        "invalid request" would name nothing the caller can act on.
-        """
+        A model-level rejection reports ``loc=()`` and the API derives its
+        error code from where pydantic points -- a bare message names nothing."""
 
         with pytest.raises(ValidationError) as exc:
             CrawlRequest(url="https://example.com/", output_format="jsonlines")
@@ -74,15 +63,8 @@ class TestOutputFormatIsTheDocumentedSet:
 class TestBrowserProfileVocabularyIsClosed:
     """An open profile means every future dangerous key is a separate audit.
 
-    ``browser_profile`` is ``dict[str, Any]`` and exactly one key was checked
-    (``execute_js``). Every other key a caller may set is prose in a field
-    description, and a key that is inert reads identically to one that worked --
-    so a caller who misspelled an action type got a page that loaded with
-    nothing done and nothing said.
-
-    The vocabulary is asserted against the renderer's own if/elif chain, so
-    closing the model side cannot drift from the consumer that acts on it.
-    """
+    ``browser_profile`` was ``dict[str, Any]`` with one key checked; the
+    vocabulary is asserted against the renderer's chain, not a third copy."""
 
     ALLOWED = ("click", "fill", "hover", "scroll", "scroll_bottom", "wait", "wait_seconds")
 
@@ -147,12 +129,8 @@ class TestBrowserProfileVocabularyIsClosed:
     def test_every_allowed_profile_key_is_accepted(self, key):
         """Parametrised over the constant, not over a hand-kept list of keys.
 
-        The list this replaced included ``state``, which nothing in ``app/``
-        reads -- so the test was asserting that a key the service ignores is
-        accepted, which is the inert-input failure the closure exists to
-        prevent. Deriving the parameters from the constant means a key added to
-        it has to earn a reader, and one removed cannot keep a test alive.
-        """
+        The list replaced included ``state``, which nothing in ``app/`` reads;
+        a key added to the constant must therefore earn a reader."""
         from app.models.crawl_policy import CrawlPolicy
 
         value: object = [] if key == "actions" else "desktop"
@@ -161,11 +139,8 @@ class TestBrowserProfileVocabularyIsClosed:
     def test_no_allowed_profile_key_is_inert(self):
         """Every allowed key must have a reader, or allowing it is a lie.
 
-        ``state`` was allowed and read nowhere, so a caller who set it got no
-        error and no effect -- indistinguishable from a key that worked. This
-        asserts the property directly: each key appears as a literal read
-        somewhere in ``app/``.
-        """
+        ``state`` was allowed and read nowhere; each key must appear as a
+        literal read somewhere in ``app/``, asserted directly."""
         import ast
         import pathlib
 
@@ -201,23 +176,8 @@ class TestBrowserProfileVocabularyIsClosed:
 class TestBrowserProfileActionsAreWellFormed:
     """A recognised action name is not the same as a usable action.
 
-    The vocabulary closure proves a name is one the renderer implements. It
-    proved nothing about whether the action carries what that name needs: the
-    dispatch chain guards its target-taking branches with ``and selector``, so
-    a ``click`` arriving without a selector falls past every branch and returns
-    having done nothing. The request returns 200 with a page that loaded and no
-    interaction performed -- the caller cannot tell that from success.
-
-    Two shapes reach that outcome, and both were accepted:
-
-    - ``{"actions": 5}``. The closure iterated the value directly, so a
-      non-iterable raised ``TypeError``. Pydantic wraps ``ValueError`` into a
-      422 and does not wrap ``TypeError``, so the exception escaped the request
-      handler entirely -- one caller typo became an HTTP 500 on every policy-
-      bearing endpoint, and an uncaught traceback over MCP.
-    - ``{"actions": [{"type": "click"}]}``, which validated cleanly and then
-      did nothing at all.
-    """
+    ``click`` without a selector returned 200, having done nothing; a
+    non-iterable ``actions`` value escaped the handler as a 500."""
 
     def test_actions_must_be_a_list(self):
         """A non-list is a caller mistake to report, not a crash to propagate."""
@@ -248,11 +208,8 @@ class TestBrowserProfileActionsAreWellFormed:
     def test_actions_is_bounded(self):
         """The key allowlist bounds key COUNT; the values were unbounded.
 
-        Execution is already bounded by the render budget, so this is a parse
-        and memory cost rather than unbounded work -- but a caller can still
-        hand the model a 200,000-element action list, which is the same shape as
-        the unbounded ``urls`` collection the ceiling above already refuses.
-        """
+        Execution is render-budget-bounded, so this is a parse and memory cost;
+        a caller could still hand the model a 200,000-element action list."""
         from app.models.crawl_policy import CrawlPolicy
 
         one = {"type": "click", "selector": "#a"}
@@ -261,13 +218,10 @@ class TestBrowserProfileActionsAreWellFormed:
             CrawlPolicy(browser_profile={"actions": [one] * (MAX_BROWSER_ACTIONS + 1)})
 
     async def test_a_broken_actions_value_is_a_422_on_the_wire(self, async_client: httpx.AsyncClient):
-        """The exception has to be one the handler converts, not one it re-raises.
+        """The exception has to be one the handler converts, not re-raises.
 
-        Asserted on the wire rather than only against the model because the two
-        failure shapes are indistinguishable there: a ``TypeError`` out of a
-        validator surfaces as a 500, a ``ValueError`` as a 422, and only the
-        second is the behaviour this field promises.
-        """
+        A ``TypeError`` out of a validator surfaces as a 500, a ``ValueError``
+        as a 422, and only the second is this field's promised behaviour."""
         response = await async_client.post(
             "/v1/crawl",
             json={"url": "https://example.com/", "policy": {"browser_profile": {"actions": 5}}},
@@ -278,17 +232,8 @@ class TestBrowserProfileActionsAreWellFormed:
 class TestTheRendererAgreesWithTheVocabulary:
     """The vocabulary table is only the source of truth if the renderer reads it.
 
-    The closure refuses an action type the renderer does not implement, so the
-    two are one decision that happens to be written twice: once as a table in
-    ``app.vocabulary.browser`` and once as an if/elif chain in the renderer. The previous
-    guard compared the table to a tuple written in this test file, so it was a
-    third copy that could not see the chain at all -- adding a member to the
-    table without adding an ``elif`` reproduced the exact defect the closure
-    exists to prevent, and the test stayed green.
-
-    These read the chain's own AST, so the guard fails when the renderer changes
-    rather than when this file is edited.
-    """
+    The closure refuses an action the renderer does not implement -- one
+    decision written twice; these read the chain's own AST, not a third copy."""
 
     @staticmethod
     def _chain() -> tuple[set[str], set[str]]:
