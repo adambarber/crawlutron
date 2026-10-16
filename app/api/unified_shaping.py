@@ -28,27 +28,9 @@ from app.vocabulary.taxonomy import CrawlClassification
 
 
 def format_crawl_item(item: EngineCrawlResult) -> tuple[str | None, ExtractedPageMetadata]:
-    """Unified output formatter: produce ``(markdown, metadata)`` for any result.
-
-    Every access strategy (HTTP, browser, document/PDF, Trafilatura) funnels through
-    this single path. The ``markdown`` field is populated by the unified extraction
-    pipeline (trafilatura for web HTML, markitdown for documents, pass-through for plain
-    text). For HTML pages the HTML metadata is extracted from the raw markup; results
-    without HTML fall back to the strategy's extracted ``text`` so the consumer always
-    receives a consistent Markdown payload regardless of how the content was acquired.
-
-    Engine-produced items carry ``llm_metadata`` -- page
-    metadata computed ONCE from the discovery tree in the strategy stage --
-    and this formatter reads that plain-data dict instead of rebuilding an
-    lxml tree from the stored HTML. The reparse (``extract_llm_metadata``)
-    stays as the honest fallback for items without a carried dict: a
-    single-shot engine page (no discovery tree existed to read from) and
-    any caller-built item that predates the field. Serialization audit for
-    the carried field: it persists only in the engine spill (internal
-    JSONL) and the job-runner's stored result is the already-shaped
-    UnifiedCrawlResponse, so API responses, webhook payloads, and the MCP
-    frontier carry ZERO new keys -- the metadata replaced its computation
-    site, never the wire shape.
+    """Unified output formatter: ``(markdown, metadata)`` for any result, through one
+    path. Metadata comes from the carried ``llm_metadata`` when present, else from
+    ``extract_llm_metadata`` over the HTML; the carried field adds no new wire keys.
     """
     carried = item.llm_metadata
     url = item.final_url or item.normalized_url
@@ -70,13 +52,8 @@ def format_crawl_item(item: EngineCrawlResult) -> tuple[str | None, ExtractedPag
 
 async def aformat_crawl_item(item: EngineCrawlResult) -> tuple[str | None, ExtractedPageMetadata]:
     """Async :func:`format_crawl_item`: the whole formatter leaves the loop.
-
-    The fallback ``extract_llm_metadata`` path (items without a carried
-    ``llm_metadata`` dict) still builds an lxml tree per item; on a batch of
-    N such results the sync path parks the event loop N times. The async
-    path runs the identical sync formatter in a worker thread;
-    engine-produced items skip the tree entirely. Byte-
-    identical to :func:`format_crawl_item` for every item shape.
+    The fallback tree-reparse would otherwise park the event loop once per item;
+    runs the identical sync formatter on a worker thread.
     """
     return await asyncio.to_thread(format_crawl_item, item)
 
@@ -88,24 +65,16 @@ async def abuild_unified_result(item: EngineCrawlResult) -> UnifiedCrawlResult:
 
 def _coerce_strategy(value: CrawlStrategyName | None) -> CrawlStrategy | None:
     """The internal strategy literal as the wire enum, or None when none ran.
-
-    No fallback branch, and that is the point: the internal and wire strategy
-    taxonomies are the same set, which
-    ``test_the_internal_and_wire_taxonomies_name_the_same_members`` asserts
-    rather than assumes. The old ``except ValueError -> None`` existed to cover
-    a member one vocabulary had and the other did not, and it hid exactly that:
-    an unmapped strategy silently became "no strategy attempted" on the wire.
+    No fallback branch: the internal and wire taxonomies are the same set
+    (a test asserts it), so an unmapped strategy must not silently become "none attempted".
     """
     return CrawlStrategy(value) if value is not None else None
 
 
 def _attempt_models(attempts: list[CrawlStrategyAttempt]) -> list[StrategyAttempt]:
     """The per-strategy attempt models, built from the dataclass's own attributes.
-
-    ``from_attributes`` rather than a dict: the attempt is a declared record
-    already, and asking pydantic to read it by attribute is what keeps this a
-    conversion the checker can see instead of a coercion performed on the way
-    into a constructor.
+    ``from_attributes`` keeps this a conversion the checker can see, not a
+    coercion performed on the way into a constructor.
     """
     return [StrategyAttempt.model_validate(attempt, from_attributes=True) for attempt in attempts]
 
@@ -117,10 +86,8 @@ def _link_models(links: list[DiscoveredLink]) -> list[WireDiscoveredLink]:
 
 def _evidence_models(evidence: list[dict[str, Any]]) -> list[ClassificationEvidence]:
     """The classification-evidence models.
-
-    The one conversion still taking a raw dict, because the producer still
-    builds evidence as plain JSON rather than as a declared record. It is the
-    last such site in this module and the honest place to point a future wave.
+    The one conversion still taking a raw dict -- the producer still builds
+    evidence as plain JSON -- and the honest place to point a future wave.
     """
     return [ClassificationEvidence.model_validate(item) for item in evidence]
 
@@ -132,11 +99,8 @@ def _validator_model(validators: dict[str, str]) -> ContentValidators | None:
 
 def build_unified_result(item: EngineCrawlResult) -> UnifiedCrawlResult:
     """Map an internal engine result into the unified API response model.
-
-    The unified response carries both the LLM-friendly ``markdown`` and the
-    full ``diagnostics`` payload. Page metadata comes from the result's
-    carried ``llm_metadata`` or, when absent, the shared
-    page-metadata extractor (``extract_llm_metadata``) over the raw HTML.
+    The response carries both LLM-friendly ``markdown`` and full ``diagnostics``;
+    page metadata comes from the carried ``llm_metadata`` or the shared extractor over the HTML.
     """
     markdown, extracted = format_crawl_item(item)
     url = item.final_url or item.normalized_url
@@ -183,12 +147,8 @@ _RENDER_METADATA_AS_TOP_LEVEL = frozenset({"extraction_method"})
 
 def _render_diagnostics(metadata: Mapping[str, Any]) -> dict[str, Any]:
     """What the browser worker's ``metadata`` becomes on the render wire.
-
-    Every key survives: the two the model carries in a declared field are read
-    out of here, the rest pass through untouched. Naming the two exclusions by
-    the field that holds them -- rather than excluding five keys and re-adding
-    one -- is what makes a dropped key visible, and it is why a new worker key
-    lands in ``diagnostics`` by default instead of being filtered away.
+    Every key survives: the two carried in a declared field are read out, the rest
+    pass through unchanged, so a new worker key lands in diagnostics by default.
     """
     diagnostics: dict[str, Any] = {
         key: value
@@ -201,14 +161,8 @@ def _render_diagnostics(metadata: Mapping[str, Any]) -> dict[str, Any]:
 
 def render_result_to_unified(item: CrawlResult) -> UnifiedCrawlResult:
     """Adapt a browser ``CrawlResult`` into the unified result model.
-
-    Returns the model rather than a dict shaped like one. Every field of
-    ``UnifiedCrawlResult`` carries a default, so a dict that omitted one was a
-    valid dict and no checker could see the omission -- which is how
-    ``metadata={}`` shipped a ``/v1/render`` whose ``PageMetadata.title`` no
-    input could fill. The constructor names the field set, so the fields this
-    endpoint genuinely has nothing to say about are left at their defaults
-    rather than transcribed here.
+    Returns the model, not a dict: every field has a default, so a dict could
+    omit one invisibly (which is how an empty metadata shipped); the constructor names the field set.
     """
     metadata = item.metadata
     status = CrawlStatus(item.status)
