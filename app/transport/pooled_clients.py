@@ -65,10 +65,8 @@ _INFLIGHT_CLIENT_CLOSES: set[asyncio.Future] = set()
 
 def _queue_superseded_close(old_client: Any) -> Any | None:
     """Track one superseded pooled client; return whatever the cap displaced.
-
     The dedupe check lives inside the cap branch so a re-entrant append+pop
-    race cannot pop two distinct entries. Returns the displaced object for the
-    caller to release *outside* the lock.
+    race cannot pop two distinct entries. The caller releases the displaced object *outside* the lock.
     """
     stale_to_release: Any | None = None
     with _PENDING_CLIENT_CLOSE_LOCK:
@@ -81,41 +79,9 @@ def _queue_superseded_close(old_client: Any) -> Any | None:
 
 
 def _release_dropped_client(stale_to_release: Any, *, is_closed: Callable[[Any], bool] | None = None) -> None:
-    """Best-effort release of a client the cap had to displace.
-
-    Runs outside ``_PENDING_CLIENT_CLOSE_LOCK`` so a potentially slow
-    socket-close cannot block other clients entering that critical section.
-
-    What this actually does, per context:
-
-      * a synchronous ``close()`` is called directly when the kind publishes one
-        (neither pooled kind does today, but a future one may);
-      * otherwise, when an event loop is running, the async teardown is
-        scheduled on it through :func:`_schedule_client_close`, so the sockets
-        really are released instead of the reference being abandoned. Pass the
-        owning descriptor's ``is_closed`` so the same kind decides here as it
-        does on the eager path; without a descriptor the check falls back to
-        "closed only if the client says so".
-      * otherwise (no loop running) there is nothing that can run a coroutine,
-        so the reference is dropped and GC reclaims it once the owning loop is
-        gone. That is the only case that still degrades to a drop, and it is
-        reachable only when the cap fires from synchronous context.
-
-    Both pooled kinds expose only a coroutine teardown -- ``httpx.AsyncClient``
-    publishes ``aclose`` and no ``close``, and ``curl_cffi``'s ``AsyncSession.
-    close`` is itself a coroutine function -- so the earlier "synchronous close
-    that works from a dying loop" claim was not true of either: the guard below
-    used to reject coroutine closes and return, making the whole function a
-    no-op. Scheduling is safe here (unlike awaiting): the displaced client is no
-    longer reachable from the queue, and a scheduled-but-cancelled teardown is
-    still reclaimed by GC exactly as a dropped reference was.
-
-    Note this path is shared across kinds: because one queue holds both pooled
-    kinds under one cap, cffi churn can displace a queued httpx client and vice
-    versa. Each displaced client still gets the treatment above, so cross-kind
-    eviction cannot orphan a socket -- but a burst of one kind does crowd out
-    how many of the other can wait for a drain, which is why the release here is
-    real rather than a reference drop.
+    """Best-effort release of a client the cap displaced, run outside the close lock.
+    Sync close() is called directly when present; otherwise the coroutine
+    teardown is scheduled on the running loop, or the reference dropped if none runs.
     """
     if stale_to_release is None:
         return
@@ -133,12 +99,8 @@ def _release_dropped_client(stale_to_release: Any, *, is_closed: Callable[[Any],
 async def _drain_pending_client_closes() -> None:
     """Close any superseded pooled clients on the current (live) loop.
 
-    ``_schedule_client_close`` fires on the *dying* loop, where the scheduled
-    task is cancelled before ``aclose`` completes (every ``asyncio.run`` exit).
-    Draining here, inside a fetch that is already running on a live loop,
-    actually releases those sockets instead of leaking them. A bounded
-    queue with cap-on-enqueue keeps the list from growing unboundedly under
-    a stream of rapid loop changes.
+    Schedule fires on the *dying* loop, where the task is cancelled before
+    aclose completes (every asyncio.run exit), so draining here actually releases the sockets.
     """
     while True:
         with _PENDING_CLIENT_CLOSE_LOCK:
@@ -149,30 +111,17 @@ async def _drain_pending_client_closes() -> None:
 
 
 def _client_is_closed(client: Any) -> bool:
-    """Whether a pooled client reports itself closed, when it can say so.
-
-    Only used as a last-resort defensive check for callers that have no
-    descriptor to ask. An absent ``is_closed`` means "this kind cannot say",
-    which is NOT evidence of being closed -- treating it as such is what
-    silently disabled the eager close for every curl_cffi session. So this
-    returns False for unknown shapes and lets the caller's own predicate decide.
+    """Whether a pooled client reports itself closed, when it can say so -- a
+    defensive fallback for callers with no descriptor. An absent is_closed means
+    "cannot say", which is NOT closed; this returns False and lets the caller's predicate decide.
     """
     return bool(getattr(client, "is_closed", False))
 
 
 def _schedule_client_close(client, *, is_closed: Callable[[Any], bool]) -> None:
-    """Best-effort asynchronous close of a superseded pooled HTTP client.
-
-    ``get_async_http_client`` runs within an event loop, so we schedule the
-    async ``aclose`` on the running loop instead of blocking. This prevents
-    leaking the old client's sockets/file descriptors when the loop changes
-    (e.g. repeated ``asyncio.run`` calls).
-
-    ``is_closed`` is required rather than inferred: only the descriptor that
-    owns a pooled kind knows how that kind reports being closed (httpx has a
-    flag, curl_cffi has nothing). Defaulting the question to "no attribute
-    means closed" made every session look already finished and skipped this
-    call entirely.
+    """Best-effort asynchronous close of a superseded pooled client: schedule the
+    async aclose on the running loop (never block), so sockets don't leak when
+    the loop changes. is_closed is required, not inferred -- only the owner knows how a kind reports closed.
     """
     if client is None or is_closed(client):
         return
@@ -194,22 +143,9 @@ def _schedule_client_close(client, *, is_closed: Callable[[Any], bool]) -> None:
 
 
 class _LoopBoundPooledClient:
-    """One pooled HTTP client per running event loop, released on loop change.
-
-    The contract, not the narrative: :meth:`current` is the pooled client as the
-    module global holds it,:meth:`_supersede` and :meth:`_rebuild` implement the
-    three-step supersession lifecycle documented at module level, and both
-    pooled singletons (httpx and curl_cffi) are descriptors of this one class so
-    they cannot drift apart.
-
-    ``is_closed`` is the owning kind's own predicate, consulted for every
-    decision about whether a client still needs closing. ``build`` is the only
-    part of the pool a caller supplies, and
-    :func:`pooled_client_builders` is where they supply it, so ``build`` is a
-    plain value that can be a direct reference. The pooled instance lives in the
-    module global named by ``slot`` because that global is the pooled client's
-    identity, and :func:`reset_process_state` releases it and the close queue as
-    the one unit production releases them as.
+    """One pooled client per running loop, released on loop change.
+    :meth:`current` reads the module global; :meth:`_supersede` and :meth:`_rebuild`
+    implement the three-step lifecycle, and ``is_closed`` is the kind's own close predicate.
     """
 
     __slots__ = ("build", "consults_settings", "is_closed", "lock", "slot", "namespace")
@@ -252,21 +188,9 @@ class _LoopBoundPooledClient:
             _schedule_client_close(superseded, is_closed=self.is_closed)
 
     def _rebuild(self, settings: CrawlerSettings | None, superseded: Any) -> Any:
-        """Build the replacement, then release the old client. Lock held.
-
-        A failed build propagates. Both clients described by this class are
-        declared dependencies (``httpx``, ``curl_cffi``), so there is no
-        "unavailable" state to recover from, and the ``except ImportError:
-        return None`` that used to stand here was worse than useless: it
-        returned a ``None`` that no httpx caller checks -- so a missing
-        mandatory package surfaced as an ``AttributeError`` inside a fetcher
-        rather than an import error at start-up -- while the cffi path read the
-        same ``None`` as "impersonation unavailable" and silently downgraded a
-        TLS-fingerprinted fetch to plain httpx, reporting success.
-
-        The superseded client is still released on the failing path. A rebuild
-        that raised must not leave the client it was replacing with no owner,
-        which is exactly the socket leak this descriptor exists to prevent.
+        """Build the replacement, then release the old client. Lock held; a failed build
+        propagates. Both kinds are declared deps, so there is no "unavailable" state
+        to recover from, and the superseded client is still released on the failing path.
         """
         if settings is None and self.consults_settings:
             # Deferred env walk: paid only when a client is actually built, so
@@ -323,10 +247,8 @@ _HTTP_CLIENT_SINGLETON = _LoopBoundPooledClient(
 
 def get_async_http_client(settings: CrawlerSettings | None = None) -> httpx.AsyncClient:
     """Return the pooled ``httpx.AsyncClient`` bound to the current event loop.
-
-    The client is reused while the running event loop is unchanged (HTTP/2
-    connection pooling), and transparently rebuilt if the loop changes (for
-    example when a test harness drives many ``asyncio.run`` calls in sequence).
+    The client is reused while the running loop is unchanged (HTTP/2 connection
+    pooling) and rebuilt if the loop changes (e.g. test harness ``asyncio.run`` sequences).
     """
     return _HTTP_CLIENT_SINGLETON.get(settings)
 
@@ -337,26 +259,9 @@ async def close_async_http_client() -> None:
 
 
 class _NoStoreCookieJar(_StdlibCookieJar):
-    """A cookie jar that never stores or replays anything.
-
-    The long-lived httpx client would otherwise accumulate every Set-Cookie and
-    replay domain-matching cookies on later requests independently of the
-    namespaced ``_GLOBAL_COOKIE_JAR`` -- the same cross-tenant leak the cffi
-    session's ``discard_cookies`` closes. httpx has no such switch and its
-    ``Client.cookies`` property wraps any assigned value in a fresh
-    ``httpx.Cookies``, so the jar must be inert at construction:
-    ``httpx.Cookies`` adopts a passed-in ``CookieJar`` as its own ``jar``
-    rather than copying it, which is why this override survives the wrap. With
-    nothing stored there is nothing to replay and nothing to clobber the
-    namespaced ``Cookie:`` header the fetcher sets per request.
-
-    The base is deliberately the ALIASED stdlib jar (``_StdlibCookieJar``), not
-    the project's own ``CookieJar`` defined further down this module:
-    this class is defined first, so its base resolves from whatever the
-    ``CookieJar`` name points at at class-creation time. Basing it on the alias
-    makes that resolution independent of source order -- rebinding the base to
-    the storing jar below would silently invert this class's purpose, and the
-    shadowing was load-bearing.
+    """A cookie jar that never stores or replays anything, so a long-lived pooled
+    client cannot leak cookies across tenants (the cffi session's discard_cookies
+    closes the same leak). Basing on the ALIASED stdlib jar keeps it inert.
     """
 
     def extract_cookies(self, response, request=None):
@@ -371,33 +276,18 @@ def _default_settings() -> CrawlerSettings:
 
 
 class _LoopBound(Protocol):
-    """A pooled client carrying the event loop it was built on.
-
-    Neither ``httpx.AsyncClient`` nor curl_cffi's ``AsyncSession`` declares this
-    attribute -- this module installs it -- so its type is declared here, once,
-    rather than left to be implied by a suppression at each site that writes it.
-    A ``Protocol`` is the honest shape for an attribute added to somebody else's
-    object: it states the contract this module depends on without claiming the
-    library publishes it.
+    """A pooled client carrying the event loop it was built on, an attribute the
+    module installs (neither httpx nor curl_cffi declares it); the type lives
+    here once, as a Protocol, rather than a suppression at each site that writes it.
     """
 
     _bound_loop: asyncio.AbstractEventLoop | None
 
 
 def _bind_to_running_loop[T](client: T) -> T:
-    """Stamp a freshly built pooled client with the loop it was built on.
-
-    The single place that writes ``_bound_loop``. It was four: two builders, each
-    with its own no-running-loop branch, and each of the four carrying a bare
-    ``# type: ignore[attr-defined]`` for an attribute neither library declares.
-    Four suppressions for one fact about one attribute, read through a fifth
-    defaulted ``getattr`` -- and none of them said what the attribute holds or
-    when it is None.
-
-    None is an answer, not a failure. A client built outside a loop has no loop
-    to belong to, and :func:`_loop_bound_to` reports that as matching nothing, so
-    the next ``get`` rebuilds rather than handing out a client this loop cannot
-    use.
+    """Stamp a freshly built pooled client with the loop it was built on -- the
+    single reader-safe writer of ``_bound_loop``. None is an answer, not a failure:
+    a client built outside a loop has none, so the next ``get`` rebuilds rather than hand out an unusable one.
     """
     bound = cast(_LoopBound, client)
     try:
@@ -408,24 +298,17 @@ def _bind_to_running_loop[T](client: T) -> T:
 
 
 def _loop_bound_to(client: Any) -> asyncio.AbstractEventLoop | None:
-    """The loop a pooled client was built on, or None if it was never bound.
-
-    A defaulted read rather than an attribute access, because this is the reader
-    that has to tolerate an object this module did not build -- a test double, or
-    a client predating the attribute. Typed anyway: the declared return is what
-    makes the caller's comparison a loop-identity check instead of a comparison
-    against ``Any``.
+    """The loop a pooled client was built on, or None if never bound. Read with a
+    default because the reader must tolerate objects this module didn't build (a
+    test double, or a pre-attribute client), yet typed so the comparison is a loop-identity check.
     """
     return getattr(client, "_bound_loop", None)
 
 
 async def _safe_aclose(client):
-    """Await a pooled client's async close, swallowing failures.
-
-    The client is being replaced (its event loop changed); any close error is
-    irrelevant, so we ignore it rather than risk surfacing during shutdown.
-    Shared by every pooled kind: httpx exposes ``aclose``, curl_cffi exposes
-    ``close`` -- both coroutine methods, so one helper reaps either.
+    """Await a pooled client's async close, swallowing failures -- the client is
+    being replaced (its loop changed), so any close error is irrelevant during
+    shutdown. Shared by every kind: httpx ``aclose`` and curl_cffi ``close`` are both coroutines.
     """
     with contextlib.suppress(Exception):
         close = getattr(client, "aclose", None) or client.close
@@ -456,11 +339,8 @@ def _discard_if_unowned_loop(close: Callable[[], Any], slot: str, namespace: dic
 
 def reset_process_state() -> None:
     """Release every process-wide object this module holds.
-
     The two lazily-created clients and the pending-close queue are one unit: a
-    queue holding references to a client that has been released outlives the loop
-    that could have drained it, so resetting one without the others leaves a
-    state production never reaches.
+    queue holding a released client outlives its loop, so resetting one without the rest leaves a wrong state.
     """
     if _DEFAULT_HTTP_CLIENT is not None:
         _discard_if_unowned_loop(close_async_http_client, "_DEFAULT_HTTP_CLIENT", globals())
