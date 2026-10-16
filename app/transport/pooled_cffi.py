@@ -28,17 +28,9 @@ _CFFI_SESSION_INIT_LOCK = threading.Lock()
 
 
 def _build_cffi_session(settings: CrawlerSettings | None = None) -> Any:
-    """Build a shared curl_cffi AsyncSession (impersonation fixed, no timeout).
-
-    The per-request timeout travels on each ``get()`` call instead of the
-    session so one session serves every policy budget.
-
-    ``settings`` is accepted and ignored so the builder matches the
-    ``build(settings)`` contract both pooled singletons share. It is not
-    decoration: an httpx client is configured from the operator's pool limits and
-    a curl_cffi session is not, so the shape that carries them is not the shape
-    that needs them. Saying so in the signature is what lets this be a direct
-    reference rather than a lambda discarding its argument.
+    """Build a shared curl_cffi AsyncSession (impersonation fixed, no timeout --
+    the timeout rides each ``get()`` so one session serves every budget); ``settings``
+    is accepted and ignored to match the shared ``build(settings)`` contract.
     """
     # discard_cookies=True: the built-in jar would replay cookies outside the
     # namespaced chokepoint -- a cross-tenant leak -- so it is born empty.
@@ -65,20 +57,9 @@ _CFFI_SESSION_SINGLETON = _LoopBoundPooledClient(
 
 
 def get_cffi_session() -> Any:
-    """Return the shared curl_cffi session bound to the current event loop.
-
-    Reused while the running loop is unchanged (warm TLS/connection pool),
-    transparently rebuilt when the loop changes. A build that fails raises:
-    curl_cffi is a declared dependency, so there is no missing-package state to
-    return ``None`` for. The ``Any`` return is not looseness -- curl_cffi ships
-    partial stubs and the session type is not expressible without them, which is
-    why the impersonation target and cookie-jar discipline around it are
-    enforced by the code that builds it rather than by a signature.
-
-    A session superseded by a loop change is tracked in the shared bounded
-    pending-close queue and drained by the next fetch on a live loop -- the
-    same discipline the pooled httpx client has, which this path used to
-    approximate with a best-effort task on the loop that was already exiting.
+    """Return the shared curl_cffi session bound to the current event loop: reused
+    while the loop is unchanged, rebuilt when it changes, and a failed build raises
+    (curl_cffi is declared). ``Any`` because the session type is not expressible.
     """
     return _CFFI_SESSION_SINGLETON.get()
 

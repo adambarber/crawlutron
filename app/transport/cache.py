@@ -1,23 +1,6 @@
-"""In-memory HTTP conditional cache (ETag / Last-Modified).
-
-Supports :rfc:`7232` conditional requests: a previously cached response's
-``ETag`` and ``Last-Modified`` are replayed as ``If-None-Match`` /
-``If-Modified-Since`` headers, and a ``304 Not Modified`` short-circuits
-parsing. This lets repeated crawls of unchanged pages avoid re-downloading and
-re-extracting content.
-
-Design notes:
-
-* Conditional-request metadata is tiny (two short strings per normalized URL)
-  and process-local, so an in-process ``dict`` with TTL + LRU eviction is both
-  strictly faster and free of blocking SQL/disk on the event loop. The previous
-  SQLite-backed store serialized all cache writes through one ``check_same_thread
-  =False`` connection with no lock -- a crash-under-load hazard on the async
-  loop. A plain dict guarded by a lock is correct under the GIL for this
-  access pattern.
-* The cache is intentionally in-memory. Persistence across restarts is out of
-  scope here (conditional revalidation is a within-session fast path); content
-  caching belongs to :class:`app.transport.content_cache.ContentCache`.
+"""In-memory HTTP conditional cache (ETag / Last-Modified): :rfc:`7232` headers
+are replayed and a ``304`` short-circuits parsing, so unchanged pages avoid
+re-downloading. In-process metadata under a lock, not persisted.
 """
 
 from __future__ import annotations
@@ -73,11 +56,9 @@ class HttpCache:
             return etag, last_modified
 
     def store(self, url: NormalizedUrl, headers: dict[str, str]) -> None:
-        """Record conditional-request metadata for ``url`` from response ``headers``.
-
-        ``etag`` and ``last-modified`` are extracted (case-insensitively) from
-        the headers dict; only those two values are persisted so subsequent
-        crawls can issue :rfc:`7232` conditional re-requests.
+        """Record conditional-request metadata for ``url`` from response ``headers``:
+        only ``etag`` and ``last-modified`` (case-insensitive) are persisted, so
+        later crawls can issue :rfc:`7232` conditional re-requests.
         """
         lowered = {str(key).lower(): value for key, value in (headers or {}).items()}
         etag = lowered.get("etag")

@@ -31,11 +31,9 @@ _RETRY_BACKOFF_CAP_SECONDS = 2.0
 
 
 def retry_backoff_seconds(attempt: int) -> float:
-    """Capped exponential gap before the retry following a failed ``attempt``.
-
-    Doubles from the base and plateaus at the ceiling: one failing origin
-    must not be hammered back-to-back, yet the wait stays bounded so a large
-    ``max_retries`` budget cannot park a URL for minutes.
+    """Capped exponential gap before the retry after a failed ``attempt``: doubles
+    from the base and plateaus at the ceiling, so a failing origin is not hammered
+    back-to-back yet a large retry budget cannot park a URL for minutes.
     """
     return min(_RETRY_BACKOFF_CAP_SECONDS, _RETRY_BACKOFF_BASE_SECONDS * (2 ** (attempt - 1)))
 
@@ -120,12 +118,9 @@ _ROBOTS_DIAGNOSTICS: RobotsDiagnostics = {
 
 
 def _robots_diagnostics(evaluation: str, **overrides: Any) -> RobotsDiagnostics:
-    """The ``diagnostics["robots"]`` block for one robots outcome.
-
-    The base supplies every key; ``evaluation`` says how the answer was reached
-    and overrides carry the branch. URLs were resolved before this packer ran.
-
-    ``allowed`` stays True on the failure path: a False would read as a denial.
+    """The ``diagnostics["robots"]`` block for one outcome: the base supplies every
+    key, ``evaluation`` names how the answer was reached, and ``allowed`` stays
+    True on the failure path -- a False would read as a denial.
     """
     base: RobotsDiagnostics = {**_ROBOTS_DIAGNOSTICS, "evaluation": evaluation}
     return cast(RobotsDiagnostics, {**base, **overrides})

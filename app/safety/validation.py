@@ -8,11 +8,9 @@ __all__ = ["filter_js_endpoints", "is_public_ip_value"]
 
 
 def is_public_ip_value(value: str) -> bool:
-    """Return whether a host string is safe for public egress.
-
-    Unlike ``app.models.host_policy._host_is_public`` this is asked of a
-    *resolved* address, so a string that is not an address at all is not public
-    here.
+    """Whether a host string is safe for public egress. Unlike the host policy's
+    check this is asked of a *resolved* address, so a string that is not an
+    address at all is not public here.
     """
     return classify(value) is AddressClass.PUBLIC
 
@@ -23,16 +21,9 @@ def filter_js_endpoints(
     resolve_against: NormalizedUrl | None = None,
     policy: HostPolicy,
 ) -> list[dict[str, str]]:
-    """Egress filter for the JS-endpoint discovery door.
-
-    ``extract_js_endpoints`` scrapes URLs out of attacker-controlled HTML/JS
-    and hands back ``{"url": ...}`` dicts. Two builders (HTTP and browser)
-    each filtered that list with the same inline comprehension -- the shape
-    that drifts the moment a third consumer forgets the copy. This is the
-    single filter for the door: an endpoint survives only if its URL passes
-    :meth:`NormalizedUrl.resolve` (resolve relatives first, then accept only
-    http(s)), and the surviving endpoint carries the filtered URL so callers
-    never see the raw scraped string.
+    """The single egress filter for the JS-endpoint door (two builders once
+    filtered with their own inline copies): an endpoint survives only if its URL
+    passes ``NormalizedUrl.resolve``, carrying the filtered URL.
     """
     return [
         {**endpoint, "url": clean.raw}

@@ -24,22 +24,9 @@ def build_content_cache_key(
     css_selector: str | None,
     xpath: str | None,
 ) -> str:
-    """Stable content-cache key mirroring what http.py stores under.
-
-    Kept as a shared helper so engine.py can reconstruct the exact key a future
-    fetch of ``normalized_url`` would use (for sitemap lastmod freshness checks)
-    without duplicating the key composition.
-
-    ``base_headers`` is serialized WHOLE, and that deliberately includes the
-    per-request ``Cookie`` header set by ``headers_for_strategy``. The
-    comment at the call site documents the intentional EXCLUSION of the
-    conditional-revalidation headers; ``Cookie`` is the opposite case -- an
-    intentional INCLUSION, and a safety property rather than an optimization:
-    the cookie namespace is what separates one tenant's authenticated view of a
-    URL from another's, so a key that ignored ``Cookie`` could serve tenant A's
-    private page to tenant B straight out of tenant A's cache slot (cross-tenant
-    cache poisoning). The cookie header participates in the key exactly so that
-    differing credentials can never share a cache entry.
+    """Stable content-cache key mirroring what http.py stores under -- a shared
+    helper reconstructing a future fetch's exact key. ``base_headers`` is
+    serialized whole, including ``Cookie``, to prevent cross-tenant poisoning.
     """
     # pre-flip key was built from, so every entry already on disk stays addressable after
     # the object flip.
@@ -70,17 +57,9 @@ def _default_global_concurrency() -> int:
 
 
 def effective_max_content_length(limits: CrawlPolicyLimits, global_concurrency: int | None = None) -> int:
-    """Per-page body cap, scaled down as concurrency rises.
-
-    An explicit ``max_content_length_bytes`` in the policy always wins. Otherwise
-    the cap is ``min(DEFAULT, RAM_BUDGET / (concurrency x workers))`` so the
-    in-flight page set stays within budget even when hundreds of pages run
-    concurrently. At the default concurrency (4) on one worker this resolves to
-    the unchanged 10 MiB default.
-
-    The two clamps are different kinds of quantity and are treated as such:
-    ``DEFAULT_MAX_CONTENT_LENGTH_BYTES`` is a per-page ceiling, so it is not
-    divided, while the RAM budget is a fleet aggregate, so it is.
+    """Per-page body cap, scaled down as concurrency rises: an explicit
+    ``max_content_length_bytes`` always wins, else ``min(DEFAULT, RAM/(concurrency
+    x workers))`` so the in-flight set stays in budget.
     """
     # A model-bound int, so no re-validation: 0 and None both mean "no explicit
     # cap", and the model's le is the same ceiling this used to clamp to.
