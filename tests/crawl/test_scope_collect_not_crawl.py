@@ -1,10 +1,7 @@
 """Collect-but-don't-crawl contract (flipped scope semantics + skip hosts).
 
-* ``scope_regex`` gates frontier expansion ONLY: out-of-scope links stay in
-  ``discovered_links`` (municipalities advertise social profiles we must
-  record) but are never fetched.
-* Analytics/skip-list hosts are likewise recorded yet never enqueued as jobs,
-  regardless of strategy.
+``scope_regex`` gates expansion ONLY: out-of-scope links stay in
+``discovered_links`` but are never fetched.
 """
 
 import pytest
@@ -40,11 +37,8 @@ def _crawled_urls(out) -> set[str]:
 async def _crawl_example_site(pages, **policy):
     """Crawl the example fixture site; return the (envelope, fetched urls) pair.
 
-    ``policy`` is merged over the default limits, so a test that is about one
-    policy knob (a scope regex, ``extraction``) names that knob instead of
-    re-spelling the crawl it is not about -- which is how two of these tests
-    each grew their own copy of the payload, the cache and the
-    crawled-URL-set line.
+    ``policy`` is merged over the default limits, so a test names the one knob
+    it is about instead of re-spelling a crawl it is not testing.
     """
     fetcher = _recording_fetcher(pages)
     payload = {
@@ -58,14 +52,8 @@ async def _crawl_example_site(pages, **policy):
 def _recorded_discovered(out: dict, root_url: str = "http://example.com") -> set[str]:
     """URLs recorded on the seed result's ``discovered_links``, as a set.
 
-    The property under test is that a link which was *recorded but deliberately
-    not fetched* still reaches the seed result. Each of these tests needs the
-    recorded half on its own -- the URL it is asking about was never fetched, so
-    it has no entry in ``results`` -- and the lookup that got there was three
-    verbatim copies of the same two lines. Stated once because it has two ways
-    to go wrong that a single copy makes visible: a root keyed on a hard-coded
-    URL, and a comprehension that keeps whole records instead of URLs, which
-    passes for every host and fails for exactly one.
+    The property is that a recorded-but-not-fetched link still reaches the seed
+    result; stated once so neither the root nor the shape can drift per copy.
     """
     root = next(r for r in out["results"] if r.normalized_url.raw == root_url)
     return {d.normalized_url.raw for d in root.discovered_links}
@@ -138,17 +126,8 @@ async def test_document_urls_fetched_when_extraction_document_requested():
 class TestSitemapCandidateBuilderUsesTheCanonicalOrigin:
     """``fetch_job_sitemap_candidates`` re-derived the origin by hand.
 
-    It called ``urlparse`` and rebuilt ``scheme://netloc`` itself instead of
-    going through ``NormalizedUrl``, the value whose constructor is the
-    single source of truth for what a normalized URL is. The
-    hand-built form keeps a default port, keeps host case, and keeps a trailing
-    dot -- so the same job root produced a different sitemap URL depending on
-    which spelling the caller happened to store. The policy is also never
-    consulted here, so a host the canonicalizer would refuse is used as a
-    sitemap origin before the fetcher sees it.
-
-    Asserted behaviourally: the URL the builder fetches is the one the
-    canonicalizer would produce for the same root.
+    It rebuilt ``scheme://netloc`` instead of via ``NormalizedUrl``, so a
+    default port or trailing dot changed the sitemap URL; asserted behaviourally.
     """
 
     async def _sitemap_url_for(self, root_url: str) -> str | None:

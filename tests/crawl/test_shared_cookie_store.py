@@ -1,20 +1,7 @@
 """The cookie jar's storage must be shared, not per-process.
 
-`CookieJar.save_to_file` serialises the whole in-memory jar and replaces the
-target through the atomic-write chokepoint. Atomicity prevents a *truncated*
-file; it does nothing about a *lost update*, because the update is
-read-nothing-then-replace-everything. Each worker loads the jar at startup and
-saves it at shutdown, so with N workers shutdown is last-writer-wins: the last
-worker to exit discards every cookie the others collected, and the deployment
-still reports healthy. That is the same defect shape as the metrics store and
-the spill sweep -- a fact held in a structure only its own process can see.
-
-Sharing has to be additive, not replacement. Two workers crawling the same host
-set different cookies, and a last-writer-wins write loses whichever landed
-first, so the store merges within a transaction rather than overwriting.
-
-The JSON file stays as import/export. It is a useful operator tool and its
-format is pinned by tests; it just stops being the live persistence mechanism.
+``save_to_file`` is atomic against truncation but not lost update; sharing
+must merge in a transaction, not last-writer-wins.
 """
 
 import pytest
@@ -32,11 +19,8 @@ def store_path(tmp_path):
 def _worker_jar(store_path) -> CookieJar:
     """One worker's jar over the shared store.
 
-    Every test in this file is about what a *sibling* can see, so the unit
-    under test is a pair of independently-constructed jars over one file -- the
-    same shape a second process would have. Handing out the pair is therefore
-    the arrangement, and a test states only what the first worker did and what
-    the second one sees.
+    The unit here is a pair of independently-built jars over one file -- the
+    same shape a second process would have.
     """
     return CookieJar(SharedCookieStore(store_path))
 
@@ -44,10 +28,8 @@ def _worker_jar(store_path) -> CookieJar:
 def _two_workers(store_path):
     """Two independent jars over one shared store: the multi-worker shape.
 
-    Every property in this file is about a *second* worker observing a first
-    worker's write, so the pair is part of the setup rather than of each test.
-    Building it per test meant four copies of the same two lines, and the copy
-    that forgot to open the second jar would still have read as a sibling test.
+    Every property here is about a second worker observing a first's write,
+    so the pair is setup, not per-test.
     """
     return _worker_jar(store_path), _worker_jar(store_path)
 
@@ -123,9 +105,8 @@ def test_export_captures_what_a_sibling_wrote(store_path, tmp_path):
 def test_a_worker_holding_no_store_keeps_the_in_memory_behavior():
     """The jar must still be constructible with no store at all.
 
-    Two tests construct ``CookieJar()`` directly, and an operator debugging a
-    single-process run should not need a database. Memory-only is a valid
-    configuration, not a degraded one.
+    Two tests build ``CookieJar()`` directly, and a single-process operator
+    should not need a database: memory-only is a valid configuration.
     """
     jar = CookieJar()
 
