@@ -1,32 +1,20 @@
 """What a whole-site job admits, and what the admission decision leaves out.
 
-Job execution lives in ``test_jobs_execution.py``; this file is the admission
-seam on its own, because it answers a different question. Every test there asks
-whether the runner moves a job through its states correctly. These ask which
-URLs survive the crawl at all -- the scope regex, the depth and page limits, the
-same URL reached twice, a page that answers and one that does not -- and a
-failure in either family is indistinguishable from outside if the two are
-interleaved in one file.
-
-The shared shape is derived rather than repeated. ``ADMITTED``,
-``ADMISSION_ROOT`` and ``ADMITTED_ONLY_SCOPE`` were spelled out at three separate
-sites before they were named, and a test that declared a different ``admitted``
-and then asserted a different ``visited`` passed anyway, because neither number
-came from anything. ``assert_pair_crawled_once`` is here for the same reason: a
-dropped or duplicated URL still leaves two results behind, so neither the result
-count nor the visited set catches it -- the per-URL attempt count is the edge
-that does, and every recovery test here asserts it.
-"""
+Run-state questions live elsewhere; these ask which URLs survive. The per-URL
+attempt count is the edge that catches a dropped or duplicated URL."""
 
 from __future__ import annotations
 
-from typing import Any
+from collections.abc import Awaitable, Callable, Sequence
+from typing import Any, NamedTuple
 
 import pytest
 
+from app.admission.policy import PolicyLike
 from app.api import job_runner
+from app.orchestration.robots import RobotsRules
 from app.orchestration.robots_parse import parse_robots_rules
-from app.storage.job_store import JobStatus
+from app.storage.job_store import CrawlJobState, JobStatus
 from tests._job_harnesses import (
     ScriptedExecute,
     _create_api_job,
@@ -47,14 +35,13 @@ ADMISSION_ROOT = "https://example.test/root"
 ADMITTED_ONLY_SCOPE = r"^https://example\.test/included$"
 
 
-def _rules_from(fetch_robots):
-    """``load_robots_rules`` over a decode rule, dropping the caching and policy
-    arguments the gate supplies.
+def _rules_from(
+    fetch_robots: Callable[[Any, str, dict[str, str], int], Awaitable[tuple[str, int]]],
+) -> Callable[..., Awaitable[RobotsRules]]:
+    """``load_robots_rules`` over a decode rule, dropping what the gate supplies.
 
-    Only the rules are this test's precondition; the origin, the fetcher and the
-    policy the gate binds are its own business, and restating them here would make
-    the arrangement look like the production one when it is not.
-    """
+    Only the rules are the precondition; the origin, fetcher and policy are the
+    gate's own business, not the production arrangement."""
 
     async def load(origin, fetcher, timeout_seconds, *, policy, fetch_and_decode=None):
         body, status = await fetch_robots(fetcher, f"{origin}/robots.txt", {}, timeout_seconds)
@@ -64,38 +51,39 @@ def _rules_from(fetch_robots):
     return load
 
 
-def assert_pair_crawled_once(finished, engine, root: str, child: str) -> None:
+def assert_pair_crawled_once(finished: CrawlJobState, engine: ScriptedExecute, root: str, child: str) -> None:
     """Both pages fetched exactly once, both recorded, both results present.
 
-    A dropped or duplicated URL still leaves two results, so neither the result
-    count nor the visited set alone catches it -- the per-URL attempt count is
-    the edge that does. Stated once because every recovery test in this file
-    asserts the same triple.
-    """
+    A dropped or duplicated URL still leaves two results; only the per-URL
+    attempt count catches it -- asserted once for every recovery test."""
     assert engine.attempts == {root: 1, child: 1}
     assert finished.visited == {canonical(root), canonical(child)}
     assert len(finished.results) == 2
 
 
-def _root_with_alias(alias_query: str) -> tuple[str, str, str, ScriptedExecute]:
-    """A seeded root, one query-aliased URL of it, an unrelated child, and an engine.
+class _AliasSite(NamedTuple):
+    """The seed, its query alias, the unrelated child, and the engine.
 
-    Both alias tests are about an aliased URL being *the same work item* as the
-    URL it aliases, so the shape is fixed and only the alias's query string
-    differs. Written out per test it could drift in a way the assertion would
-    not catch -- a different child, or a seed that was not the root -- and the
-    test would then pass for a reason that had nothing to do with aliasing.
-    """
+    Both alias tests are about an aliased URL being the same work item as the
+    URL it aliases; the shape is fixed, only the alias's query string differs."""
+
+    root: str
+    root_alias: str
+    child: str
+    engine: ScriptedExecute
+
+
+def _root_with_alias(alias_query: str) -> _AliasSite:
     root = "https://example.test/root"
     root_alias = f"{root}?{alias_query}"
     child = "https://example.test/child"
-    return root, root_alias, child, ScriptedExecute(_scripted_result_map((root, child)))
+    return _AliasSite(root, root_alias, child, ScriptedExecute(_scripted_result_map((root, child))))
 
 
 class TestWholeSiteAdmissionContract:
     @staticmethod
-    def _policy(max_depth: int, max_pages: int, scope_regex: str | None = None) -> dict[str, Any]:
-        policy: dict[str, Any] = {
+    def _policy(max_depth: int, max_pages: int, scope_regex: str | None = None) -> PolicyLike:
+        policy: PolicyLike = {
             "limits": {
                 "max_depth": max_depth,
                 "max_pages": max_pages,
@@ -107,32 +95,34 @@ class TestWholeSiteAdmissionContract:
             policy["scope_regex"] = scope_regex
         return policy
 
-    async def _admitted(self, client, job_store, root, links, policy):
-        """``links`` offered,:data:`ADMITTED` the only survivor; assert the settled shape.
+    async def _admitted(
+        self,
+        client: Any,
+        job_store: Any,
+        root: str,
+        links: Sequence[str],
+        policy: PolicyLike,
+    ) -> None:
+        """``links`` offered, :data:`ADMITTED` the only survivor; assert the settlement.
 
-        The three admission tests differ in *why* the other links were refused --
-        scope regex, robots, shape -- and agree on everything else. This carries
-        the agreement, so a test states its refusal and nothing else.
-        """
+        The admission tests differ only in *why* the other links were refused
+        (scope, robots, shape); this carries the agreement."""
         job = await self._admission_scenario(client, job_store, root, links, policy, admitted=[ADMITTED])
         assert_settled(job, visited={root, ADMITTED}, discovered=1, crawled=2)
 
-    async def _admission_scenario(self, client, job_store, root, links, policy, admitted=()):
+    async def _admission_scenario(
+        self,
+        client: Any,
+        job_store: Any,
+        root: str,
+        links: Sequence[str],
+        policy: PolicyLike,
+        admitted: Sequence[str] = (),
+    ) -> CrawlJobState:
         """Run one page offering ``links``, of which exactly ``admitted`` survive.
 
-        The per-URL attempt count is the edge that makes this a contract and not
-        a coincidence: a refused link that was fetched and then dropped still
-        leaves a result behind, so neither the visited set nor the result count
-        can tell a correct refusal from a lucky one. Between these tests only
-        the links and the policy vary, so only they are arguments -- and the
-        count and the discovery total come from the argument rather than being
-        restated, which is what kept two of them drifting.
-
-        The visited set is asserted here too, for the same reason: it is the same
-        statement every one of these tests ends on, derived from ``admitted``,
-        and a test that declared the survivors and then asserted a different
-        visited set would have passed.
-        """
+        Only links and policy vary across tests; the attempt count, discovery
+        total and visited set derive from ``admitted``, never restated."""
         engine = ScriptedExecute({root: [_canned_result(root, links=links)]})
         job = await run_api_job(client, job_store, root, engine, policy)
         assert engine.attempts == {root: 1, **{url: 1 for url in admitted}}

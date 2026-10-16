@@ -1,12 +1,13 @@
 """Webhook validation and delivery behavior.
 
-Covers failure-webhook delivery and the requirement that webhook URL
-validation and pinned delivery resolve DNS off the event loop.
-"""
+Covers failure-webhook delivery and the requirement that validation and pinned
+delivery resolve DNS off the event loop."""
 
 import asyncio
+import pathlib
 import socket
 import threading
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -19,14 +20,11 @@ from tests._assertions import block_private_targets, host_resolves_to
 from tests._webhook_doubles import record_webhook_delivery
 
 
-def _spy_resolver_threads(monkeypatch) -> list[threading.Thread]:
+def _spy_resolver_threads(monkeypatch: pytest.MonkeyPatch) -> list[threading.Thread]:
     """Record the thread every ``socket.getaddrinfo`` call runs on.
 
-    Shared by the validation and delivery offload tests: both stage the same
-    spy (a public-IP answer plus the thread capture) and then assert against
-    the recorded threads themselves, so the staging exists in one place and
-    the two tests can only differ in what they drive.
-    """
+    Both offload tests stage the same spy (public-IP answer plus thread capture)
+    and assert against the recorded threads; only what they drive differs."""
     resolver_threads: list[threading.Thread] = []
 
     def spy_getaddrinfo(host, *args, **kwargs):
@@ -40,11 +38,8 @@ def _spy_resolver_threads(monkeypatch) -> list[threading.Thread]:
 class TestAsyncCrawlFailureWebhookDelivery:
     """The async-crawl FAILURE webhook must actually be delivered.
 
-    ``await coro().model_dump()`` parses as ``await (coro().model_dump())``:
-    ``model_dump()`` runs on the coroutine object (TypeError) and the adjacent
-    ``except Exception: pass`` swallows it, so ``post_webhook`` never runs and
-    the coroutine is never awaited.
-    """
+    ``await coro().model_dump()`` parses as ``await (coro().model_dump())``: the
+    dump runs on the coroutine (TypeError) and ``except Exception`` swallows it."""
 
     async def test_failed_async_crawl_delivers_failure_webhook(self, job_store, tmp_path):
         request_id = "crawl_c3_failure"
@@ -86,24 +81,18 @@ class TestAsyncCrawlFailureWebhookDelivery:
 class TestAsyncCrawlTerminalCasControlsWhatIsPublished:
     """What the runner publishes is decided by whether its terminal write won.
 
-    ``pause_job`` and ``recover_orphaned_running_jobs`` both compare-and-set
-    from ``RUNNING``, and so does the runner's own ``COMPLETED`` write. The
-    runner used to discard the result of that write and publish regardless, so
-    the two cases below failed in opposite directions: a paused crawl answered
-    200 and fired a success webhook, and a crawl rewound to ``PENDING`` was left
-    unreachable, because ``PENDING`` is never picked up again.
-    """
+    All status moves CAS from ``RUNNING``, including the runner's own terminal
+    write; discarding that result published a paused crawl and stranded one."""
 
     REQUEST_ID = "crawl_terminal_cas"
 
-    async def _displaced_crawl(self, job_store, tmp_path, displaced_to):
-        """Run a crawl whose job is moved off ``RUNNING`` while the crawl runs.
+    async def _displaced_crawl(
+        self, job_store: Any, tmp_path: pathlib.Path, displaced_to: JobStatus
+    ) -> tuple[CrawlResultStore, AsyncMock]:
+        """Run a crawl whose job is moved off ``RUNNING`` while it runs.
 
-        The displacement runs *inside* ``execute_crawl`` rather than before the
-        call, because the window the runner has to survive is exactly the one
-        between claiming ``RUNNING`` and writing the terminal status. Moving the
-        status first would lose the runner's claim and return before reaching
-        that window, which tests the claim rather than the terminal write.
+        The displacement runs *inside* ``execute_crawl``: the window the runner
+        must survive is between claiming ``RUNNING`` and the terminal write.
         """
         request_id = self.REQUEST_ID
         job_store.create_single_shot(request_id, "http://example.com/", {"url": "http://example.com/"})
@@ -155,19 +144,9 @@ class TestAsyncCrawlTerminalCasControlsWhatIsPublished:
 
 
 class TestWebhookValidationRunsOffLoop:
-    """``validate_webhook_url`` admits the webhook URL and pins it, and
-    pinning means ``socket.getaddrinfo``. A caller-chosen webhook hostname
-    with a slow/blackholed resolver therefore stalls the whole FastAPI loop
-    when the pin runs on it. Crawl targets already offload the identical
-    resolution via ``build_pinned_request_async`` (a dedicated dns-resolve
-    thread pool); webhook validation must reuse that off-thread path, not a
-    second one.
-
-    The delivery-path twin: ``deliver_pinned_webhook`` re-pins through
-    the same builder to close the validation->delivery TOCTOU, and that
-    pin ran inline too -- offloading validation while leaving delivery on
-    the loop would still stall every webhook callback.
-    """
+    """Webhook host pinning must run off the event loop; a blackholed resolver
+    would otherwise stall the FastAPI loop. Pin as crawl targets do; delivery
+    re-pins through the same builder, closing the validation->delivery TOCTOU."""
 
     async def test_post_webhook_validates_off_the_event_loop(self, monkeypatch):
         from app.api.webhooks import post_webhook
@@ -197,11 +176,8 @@ class TestWebhookValidationRunsOffLoop:
     async def test_deliver_pinned_webhook_parses_off_the_event_loop(self, monkeypatch):
         """The delivery pin must also leave the event loop.
 
-        Unlike the validation test above, delivery is NOT mocked away: the
-        whole point is that ``deliver_pinned_webhook`` itself reaches
-        ``build_pinned_request_async``. Only the network POST is stubbed, so a
-        pin left inline resolves on the loop thread and this fails.
-        """
+        ``deliver_pinned_webhook`` reaches ``build_pinned_request_async`` itself
+        (only the POST is stubbed), so a pin left inline resolves on the loop."""
         from app.api.webhooks import deliver_pinned_webhook
 
         block_private_targets(monkeypatch)
