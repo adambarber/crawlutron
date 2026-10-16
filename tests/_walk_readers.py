@@ -17,13 +17,8 @@ def call_nodes(root: ast.AST) -> tuple[ast.Call, ...]:
 def or_nodes(root: ast.AST) -> tuple[ast.BoolOp, ...]:
     """Every two-valued ``a or b``, in walk order.
 
-    A detector's rule is very often "an expression that coerces a possibly-absent
-    value into a present one", and in Python that is spelled ``x or y``. The
-    shape appears once per rule, so it is a vocabulary word rather than a guard
-    each rule re-derives: written out, the three-line guard below was the same
-    clone in every file that needed it, which is exactly what the clone gate
-    exists to prevent.
-    """
+    "coerces a possibly-absent value into a present one" is spelled ``x or y``
+    in Python; the three-line guard is one clone per rule that wants it."""
     return tuple(
         node
         for node in _narrow(root, "boolop", ast.BoolOp)
@@ -106,14 +101,8 @@ def writes(root: ast.AST) -> tuple[ast.Assign | ast.AnnAssign | ast.AugAssign, .
 def assignment_targets(node: ast.Assign | ast.AnnAssign) -> list[ast.expr]:
     """The target expressions of a write, whatever form the write took.
 
-    ``ast.Assign`` carries a list and ``ast.AnnAssign`` a single node, so every
-    detector that cares what a statement binds had to branch on the form before
-    it could look at a target. That branch is four lines, it reads as incidental,
-    and it was written out in six detectors across four files -- which is how one
-    of them grew a variant that handled only ``Assign`` and quietly read a tuple
-    where an annotated assignment was written. The question every caller is
-    actually asking is "what does this statement bind", and this is that answer.
-    """
+    ``Assign`` carries a list, ``AnnAssign`` a single node; the four-line
+    branch was copied into six detectors, one of which read a tuple silently."""
     return list(node.targets) if isinstance(node, ast.Assign) else [node.target]
 
 
@@ -133,10 +122,8 @@ def from_imports(root: ast.AST) -> tuple[ast.ImportFrom, ...]:
 def unannotated_writes(root: ast.AST) -> tuple[ast.Assign | ast.AugAssign, ...]:
     """Writes that bind without declaring a type: ``=`` and ``+=``.
 
-    `assignments` covers the three statement forms and yields the target/value
-    triple; this is the pair that leaves out ``ast.AnnAssign``, because a rule
-    about rebinding an existing name wants the writes carrying no annotation.
-    """
+    ``assignments`` minus the ``ast.AnnAssign`` form, for a rule about
+    rebinding an existing name."""
     return tuple(
         node
         for node in _narrow(root, "unannotated-write", ast.Assign, ast.AugAssign)
@@ -174,18 +161,8 @@ def comprehensions(root: ast.AST) -> tuple[ast.ListComp | ast.SetComp | ast.Gene
 def assignments(nodes: Iterable[ast.AST]) -> Iterator[tuple[ast.AST, ast.expr, ast.expr | None]]:
     """Every ``(node, target, value)`` written by any of `nodes`, in walk order.
 
-    "What does this node assign, and to what?" has exactly two answers --
-    ``ast.Assign``'s ``targets``/``value`` and ``ast.AnnAssign``'s single
-    ``target``/``value`` -- and detectors kept writing both as an ``isinstance``
-    ladder over a local ``targets`` list they had to declare and re-initialise
-    on every node. The ladder is the failure mode: a detector that writes the
-    ``AnnAssign`` branch and forgets the ``Assign`` one under-reports silently,
-    which is indistinguishable from a clean tree.
-
-    The owning node rides along because a detector almost always reports against
-    it, and recovering it afterwards means re-walking to line the two sequences
-    up -- which is where a mismatched pair goes unnoticed.
-    """
+    The two forms were an isinstance ladder per detector; a detector that
+    forgets one branch under-reports silently."""
     for node in nodes:
         if isinstance(node, ast.Assign):
             for target in node.targets:
@@ -208,11 +185,8 @@ def attribute_calls(tree: ast.AST) -> Iterator[tuple[ast.Call, ast.Attribute]]:
 def local_nodes(node: ast.AST) -> Iterator[ast.AST]:
     """Yield ``node`` and its descendants, stopping at a nested definition.
 
-    A detector asking "does THIS expression call strip()" must not be answered by
-    a ``strip`` in a function defined inside it, so the walk does not descend
-    into a nested ``def``/``async def``/``class`` body. Distinct from
-    :func:`nodes_of`, which is whole-subtree and cached.
-    """
+    A ``strip`` inside a nested ``def``/``class`` must not answer a question
+    about its enclosing expression; distinct from the cached ``nodes_of``."""
     yield node
     for child in ast.iter_child_nodes(node):
         if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
@@ -224,17 +198,8 @@ def local_nodes(node: ast.AST) -> Iterator[ast.AST]:
 def local_subtree(node: ast.AST) -> tuple[ast.AST, ...]:
     """``local_nodes(node)`` as a cached tuple -- one walk per node, walked once.
 
-    ``local_nodes`` is a generator, so a detector asking a question about a
-    node's local subtree walked it again from the top. The property registry
-    asks four questions per node, and asks them of every node of every module,
-    so one node was traversed five or six times per pass: sixty-odd million
-    node visits for a single test run. Caching the walk makes each of those a
-    tuple read.
-
-    Keyed on the node alone, because the walk reads only that node's own
-    subtree and AST nodes are compared by identity. Same reasoning, and the
-    same memory profile, as the cached ``nodes_of`` above.
-    """
+    The registry asks four questions of every node (five or six visits per
+    node per pass); keyed on the node alone, which reads only its subtree."""
     return tuple(local_nodes(node))
 
 
@@ -242,11 +207,6 @@ def local_subtree(node: ast.AST) -> tuple[ast.AST, ...]:
 def local_calls(node: ast.AST) -> tuple[ast.Call, ...]:
     """Every call in ``node``'s local subtree, walked once per node.
 
-    ``local_call_leaf_names`` re-walked the subtree on every call, and it is in
-    turn the body of ``_calls_naming_method`` and ``has_method_call``, so one
-    question about a node cost a fresh walk of it. Only the tree-independent
-    half is cached -- which nodes are calls -- because the name a call resolves
-    to is a property of the tree it is read in, and a node reached through two
-    modules is read in each.
-    """
+    The tree-independent half is cached -- which nodes ARE calls -- because the
+    name a call resolves to is a property of the tree it is read in."""
     return tuple(child for child in local_subtree(node) if isinstance(child, ast.Call))

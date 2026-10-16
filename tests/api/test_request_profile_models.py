@@ -7,22 +7,10 @@ from tests.chokepoint_walks import APP_ROOT
 
 
 class TestRequestProfileVocabularyIsClosed:
-    """``request_profile`` is ``dict[str, Any]``, the same shape ``browser_profile`` had.
+    """``request_profile`` is ``dict[str, Any]``, the shape ``browser_profile`` had.
 
-    Every other caller-supplied mapping on this model is closed: ``headers``
-    refuses a banned name, ``credentials`` refuses a colliding origin, and
-    ``browser_profile`` refuses a key that is not in the table. This one was
-    left open, so a misspelling is not a refusal but a silent no-op:
-
-    - ``{"cookie_jarr": "per_host"}`` disables the per-host jar and reports 200.
-    - ``{"fingerprint_rotatoin": True}`` disables fingerprint rotation and
-      reports 200.
-
-    The consumer reads eight keys. The field description advertised a ninth,
-    ``accept_language``, which is not one of them -- the code reads the plural
-    ``accept_languages`` -- so the prose was advertising a key that did nothing,
-    the same failure as the inert ``state`` key removed in #61.
-    """
+    Every other caller-supplied mapping is closed; this one left a misspelling
+    a silent no-op, and the description advertised a key the reader never reads."""
 
     def test_an_unknown_key_is_refused(self):
         from app.models.crawl_policy import CrawlPolicy
@@ -41,10 +29,8 @@ class TestRequestProfileVocabularyIsClosed:
     def test_every_allowed_key_has_a_reader_in_app(self):
         """A key nothing reads is a caller-visible no-op, which is what #61 removed.
 
-        ``state`` sat in the browser profile allowlist for the whole life of the
-        closed vocabulary with zero readers. This asserts the property for the
-        request profile so the same class cannot reappear.
-        """
+        ``state`` sat in the allowlist with zero readers; this asserts the
+        property for the request profile so the class cannot reappear."""
         from app.models.crawl_policy import CrawlPolicy
 
         field = CrawlPolicy.model_fields["request_profile"]
@@ -60,10 +46,8 @@ class TestRequestProfileVocabularyIsClosed:
     def test_the_description_names_exactly_the_allowed_keys(self):
         """Prose advertising a key that does not exist is the ``state`` bug in prose.
 
-        This is what let ``accept_language`` survive: nothing compared the
-        description against the table, so a key could be advertised and inert at
-        the same time.
-        """
+        Nothing compared the description against the table, so a key could be
+        advertised and inert at the same time."""
         from app.models.crawl_policy import CrawlPolicy
 
         field = CrawlPolicy.model_fields["request_profile"]
@@ -86,20 +70,10 @@ class TestRequestProfileVocabularyIsClosed:
 
 
 class TestRequestProfileCookiesCannotBypassTheNamespaceChokepoint:
-    """``headers`` refuses a raw ``Cookie``. ``request_profile.cookies`` builds one anyway.
+    """``headers`` refuses a raw ``Cookie``; ``request_profile.cookies`` builds one anyway.
 
-    The ban's stated reason is that "the cookie jar owns Cookie; a raw header
-    bypasses the cookie-namespace chokepoint". A caller-supplied nested dict
-    assembled into the same header at ``headers_for_strategy`` is that bypass,
-    reached by a different door -- and the ban cannot see it, because it only
-    inspects ``headers``.
-
-    Unbounded, it is worse than a large header. ``content_cache_key`` serialises
-    the whole header map into the cache key, so every distinct cookie string is a
-    distinct cache slot holding a full response body. A 500-host cookie map
-    produced a 14,088-character ``Cookie`` header, and 200,000 host entries
-    parsed into one.
-    """
+    The nested dict assembled into the same header is the bypass through
+    another door; every distinct cookie string is a distinct cache slot."""
 
     #: Most hosts a static cookie map may name.
     MAX_COOKIE_HOSTS = 32
@@ -141,14 +115,8 @@ class TestRequestProfileCookiesCannotBypassTheNamespaceChokepoint:
     def test_the_un_namespaced_single_tenant_path_still_works(self):
         """One caller, one session, no namespace -- the path ``cookie_jar`` promises to keep.
 
-        An earlier version of this validator refused a cookie map with no
-        ``cookie_namespace``, on the theory that an unnamed namespace is the
-        shared jar and so mixes tenants. That refused the documented
-        single-tenant path, and the theory does not hold: a namespace is a string
-        the caller picks, and this service has no caller authentication, so it is
-        a tenant key rather than a boundary. There is no value to refusing here
-        that a caller could act on.
-        """
+        A namespace is a caller-picked string with no caller authentication: a
+        tenant key, not a boundary, so there is no value to refusing one."""
         from app.models.crawl_policy import CrawlPolicy
 
         profile = CrawlPolicy(
@@ -167,23 +135,14 @@ class TestRequestProfileCookiesCannotBypassTheNamespaceChokepoint:
 class TestRequestProfileValueTypesMatchTheHeaderMapTheyCorrupt:
     """``headers_for_strategy`` is annotated ``-> dict[str, str]`` and is handed a ``dict[str, Any]``.
 
-    Nothing checked the value types, so a pool entry that is not a string lands
-    in the header map the HTTP client is about to serialise:
-
-    - ``{"user_agents": [{"x": 1}]}`` puts a ``dict`` in ``User-Agent``.
-    - ``{"accept_languages": [[1, 2]]}`` puts a ``list`` in ``Accept-Language``.
-    - ``{"user_agents": [None]}`` raises ``TypeError`` from inside the header
-      builder -- the same shape as #58, one module over.
-    """
+    Nothing checked value types, so a non-string pool entry lands in the map
+    the HTTP client serialises -- dict, list or ``TypeError``."""
 
     def test_a_pool_must_be_a_list_of_strings(self):
         """One test over the two shapes, not one per shape.
 
-        ``user_agents`` and ``accept_languages`` are the same reader reached
-        through two keys, so a case that failed for one failed for the other;
-        splitting them produced two tests with a duplicated body and no way to
-        add a third key without a third copy.
-        """
+        The two keys are one reader; splitting them duplicated the body and
+        made a third key a third copy."""
         from app.models.crawl_policy import CrawlPolicy
 
         for key in ("user_agents", "accept_languages"):
