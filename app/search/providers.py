@@ -1,17 +1,6 @@
-"""Search providers for ``POST /v1/search``.
-
-Which search index backs the endpoint is a *configuration* decision, not a
-code decision. The service ships three keyed providers (Tavily, Brave,
-Serper) and one keyless best-effort provider (DuckDuckGo's HTML endpoint,
-which datacenter IPs may captcha-block). ``auto`` selection activates the
-first provider whose credentials are configured; an explicitly selected
-provider whose key is missing raises :class:`SearchProviderUnavailable` so
-the endpoint can surface an actionable 503 instead of a silent failure.
-
-Every result URL is admitted through :class:`app.models.normalized_url.NormalizedUrl`
-before it is returned: callers are expected to pipe search results straight
-into ``/v1/crawl``, so the same SSRF hygiene that guards crawling applies
-here. Loopback/private targets are dropped, never advertised.
+"""Search providers for ``POST /v1/search``; which index backs it is a config
+decision, not a code one. ``auto`` picks the first configured provider, and
+every result URL is SSRF-admitted via NormalizedUrl before it is advertised.
 """
 
 from __future__ import annotations
@@ -118,10 +107,8 @@ def _clip(text: str) -> str:
 
 def _normalize_url(raw: str, *, policy: HostPolicy) -> str | None:
     """Return ``raw`` when it is a crawlable public HTTP(S) URL, else ``None``.
-
-    Dropping (rather than rewriting) invalid targets keeps the response honest:
-    a result that points at loopback or a private network is not a public URL
-    a caller can legally crawl, so it is not advertised.
+    Invalid targets are dropped, never rewritten, to keep the response honest:
+    a loopback/private result is not a URL a caller can legally crawl.
     """
     normalized = admit_or_none(raw, policy=policy)
     return str(normalized) if normalized is not None else None
@@ -136,11 +123,8 @@ def collect_results(
     policy: HostPolicy,
 ) -> list[SearchResult]:
     """Normalize a keyed provider's raw result list into ``SearchResult``s.
-
-    The three keyed providers (Tavily/Brave/Serper) differ only in which key
-    holds which field; the validation/dedupe/clip flow is one contract
-    rather than three hand-copied ones. Non-dict entries and
-    non-public URLs are dropped, never rewritten.
+    The three keyed providers differ only in which key holds which field, so the
+    validation/dedupe/clip flow is one contract; non-dicts and non-public URLs are dropped.
     """
     results: list[SearchResult] = []
     seen: set[str] = set()
@@ -180,11 +164,9 @@ def _provider_message(provider: str, status: int, payload: dict[str, Any]) -> st
 
 @dataclass(frozen=True)
 class _ProviderCall:
-    """One provider request, minus the credential.
-
-    The method, endpoint, and payload are the only per-provider facts about
-    going out over the wire; carrying them in one value is what lets
-    :meth:`_ApiKeyProvider._request` be written once.
+    """One provider request, minus the credential: method, endpoint and payload are
+    the only per-provider facts about going over the wire, and carrying them in
+    one value lets :meth:`_ApiKeyProvider._request` be written once.
     """
 
     method: str
@@ -195,20 +177,9 @@ class _ProviderCall:
 
 
 class _ApiKeyProvider:
-    """Shared credential slot and shared flow for the keyed providers.
-
-    The three providers differ only in endpoint, method, where the API key
-    travels, and key names. Everything else -- issue the request, refuse a
-    non-200 with the provider-specific message, normalize the result list --
-    is this class, so a fourth provider cannot reach a result by forgetting the
-    non-200 check, which is the one step of the flow that silently turns an
-    error page into an empty result set.
-
-    A subclass describes one query as :meth:`_call` and says where the raw
-    result list sits as :attr:`_items_path`. It does not write the request: the
-    per-provider ``_request`` override this replaced re-spelled the pooled call
-    identically for every provider, so a provider added later could reach the
-    network by a route the shared flow never sees.
+    """Shared credential slot and shared flow for the keyed providers, which differ
+    only in endpoint, method, key placement and key names; everything else --
+    issue, refuse a non-200, normalize -- must not be reachable a new way.
     """
 
     name: str
@@ -232,10 +203,8 @@ class _ApiKeyProvider:
 
     def _call(self, query: str, limit: int) -> _ProviderCall:
         """This provider's request shape for one query. Subclass hook.
-
-        The endpoint, the method, and whether the key travels in a header or
-        the JSON body are per-provider facts, and none of them is a fact about
-        what to do with the response.
+        Endpoint, method and key travel (header or body) are per-provider facts;
+        none of them is a fact about what to do with the response.
         """
         raise NotImplementedError
 
@@ -253,11 +222,8 @@ class _ApiKeyProvider:
 
     def _items_of(self, payload: dict[str, Any]) -> object:
         """Walk :attr:`_items_path` down to the raw result list.
-
-        A missing or non-object node yields ``None`` rather than raising: the
-        collector already reads anything that is not a list as no results, and
-        a 200 with a differently-shaped body is an empty result set, not a
-        crash.
+        A missing or non-object node yields ``None``, not a raise: the collector
+        reads a non-list as no results, so a shaped-unexpected 200 is empty, not a crash.
         """
         node: object = payload
         for key in self._items_path:
@@ -268,10 +234,8 @@ class _ApiKeyProvider:
 
     def _results(self, status: int, body: str) -> list[SearchResult]:
         """The keyed-provider response contract, in one place.
-
-        The three field names are read off the instance rather than passed in:
-        they are per-provider class state, and taking them as arguments let a
-        call site hand one provider's keys to another's collector.
+        The three field names come from the instance, not callers: they are
+        per-provider class state, and passing them let one provider's keys cross to another.
         """
         payload = _parse_json(body)
         if status != 200:
@@ -452,10 +416,8 @@ def active_search_provider_name(settings: Any) -> str:
 
 def get_search_provider(settings: Any) -> SearchProvider:
     """Resolve the configured search provider for ``settings``.
-
     Raises :class:`SearchProviderUnavailable` when an explicit provider was
-    selected but its API key is missing, so the endpoint can fail with an
-    actionable message instead of a generic 500.
+    selected but its API key is missing, so the endpoint fails with an actionable message.
     """
     requested = (settings.search_provider or "auto").strip().lower()
     host_policy = HostPolicy.from_settings(settings)
