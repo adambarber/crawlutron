@@ -116,9 +116,9 @@ def test_generic_membership_detector_bites():
 def test_generic_membership_subsumes_the_per_field_detectors():
     """The generic sweep covers every field the per-field detectors guarded.
 
-    The historical transcribed six-name list missed three live primitives and
-    five direct constructions; the derived twelve-entry registry is closed by
-    construction -- the property that licenses deleting the per-field list."""
+    The transcribed six-name list missed live primitives; the derived registry
+    is closed by construction, licensing the list's deletion.
+    """
     from tests.membership_gate import RESULT_DATACLASS_NAMES, RESULT_PRIMITIVES, literal_typed_field_members
 
     members = literal_typed_field_members()
@@ -254,10 +254,11 @@ def test_wrong_namespace_detector_bites():
 
 
 def test_the_membership_gate_rejects_a_non_member_value():
-    """The AST detectors see source text; the historical escape reached the
-    primitive through a LOCAL VARIABLE, which no textual detector can see.
+    """The AST detectors see source text; the historical escape used a local variable.
+
     The gate is the structural closure: whatever indirection a value took, it
-    must pass the primitive to become a result."""
+    must pass the primitive to become a result.
+    """
     from tests.membership_gate import NonMemberValue, assert_member, assert_optional_member
 
     members = frozenset({"rendered", "site_error"})
@@ -275,9 +276,9 @@ def test_the_membership_gate_rejects_a_non_member_value():
 def test_the_gate_sees_the_local_variable_indirection_the_ast_detectors_cannot():
     """The exact historical shape, end to end.
 
-    A local assigned a wrong-namespace constant, handed to the primitive as a
-    bare Name: no kwarg-level AST detector fires; the gate does, because it
-    inspects the value at the boundary."""
+    A local of a wrong-namespace constant handed to the primitive as a bare
+    Name fires no kwarg-level AST detector; the gate does, at the boundary.
+    """
     import asyncio
 
     from tests.membership_gate import NonMemberValue, field_member_sets

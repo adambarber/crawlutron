@@ -75,9 +75,8 @@ def _browser_release_offenders(tree, path, *, owners, fields, chokepoint):
 def _browser_release_source() -> str:
     """The proof's source, with its resets generated from the swept field tuple.
 
-    Written out twice it was the same three lines of drift-prone fixture, and the
-    drift is invisible: a field added to the tuple would leave a hand-written
-    proof asserting on a source that never mentions it.
+    Written twice it was the same three drift-prone lines, invisible when a
+    field added to the tuple left the hand-written proof never mentioning it.
     """
     reset = "\n".join(f"        self.{field} = None" for field in _BROWSER_RELEASE_FIELDS)
     return (
@@ -132,16 +131,8 @@ _PRIVATE_LOCK_NAMES = frozenset({"Lock", "RLock"})
 def _opens_a_store_connection(class_node: ast.ClassDef) -> bool:
     """Whether this class reaches ``connect_store``, the one connection chokepoint.
 
-    Scoping the rule to this call is what keeps it from being wrong rather than
-    merely strict. Most of the tree holds state that no other process can reach
-    -- parsed robots rules, a content cache, a cookie jar, readiness counters --
-    and for all of those a private ``threading.Lock`` is the correct and only
-    sensible choice. A blanket ban reports those as violations, and a rule whose
-    violations include correct code is a rule people learn to ignore.
-
-    The class reaching the chokepoint is the set the rule is actually about, and
-    it is derived from the code rather than listed, so a new store is covered
-    the moment it opens a connection and no exemption list can rot.
+    Scoping to this call keeps the rule from being wrong: most private locks are
+    the correct choice, so only classes reaching the chokepoint are in the set.
     """
     return any(
         isinstance(node, ast.Call)
@@ -153,18 +144,8 @@ def _opens_a_store_connection(class_node: ast.ClassDef) -> bool:
 def _private_store_lock_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
     """A store must take the file's process lock, not a lock of its own.
 
-    A per-instance ``threading.Lock`` excludes that store from nothing else. The
-    migration it already ran takes ``process_lock``, and a second instance
-    writing the same file brings its own private lock again -- so a write runs
-    straight through a migration in flight, and the only thing left deciding
-    whether that is survivable is ``busy_timeout``. That is how a shared
-    database becomes ``database is locked`` raised from inside a migration step
-    on one run in twelve, in some other worker's test, with no way to reproduce
-    it on demand.
-
-    It is invisible by construction: a private lock is locally correct, passes
-    every single-store test, and only fails once a second writer exists. So the
-    rule has to be a gate rather than a review convention.
+    A per-instance lock excludes nothing, so a second writer runs through a
+    migration in flight; the failure is invisible locally, so it must be a gate.
     """
     offenders: list[str] = []
     for class_node in class_defs(tree):

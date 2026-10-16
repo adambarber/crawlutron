@@ -61,17 +61,8 @@ _DISCOVERY_PROJECTION = "discovery_result_fields"
 def _extraction_reach_past_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
     """Flag a use of a raw extractor outside the content pipeline.
 
-    Keyed on the *name in load position* rather than on a call: the shape both
-    strategies used was an offloaded extractor, ``asyncio.to_thread(extract_html,
-    ...)``, where the extractor is an argument rather than a callee, and a
-    call-keyed detector misses exactly that. Keyed on the use rather than the
-    import because binding a name is not the duplication, dispatching on it is.
-
-    ``self.extract_html(page)`` in the browser worker is a method on the
-    renderer, not this function, so it resolves to a different name and is not
-    an offender. A reference *within* extraction.py resolves to the bare name
-    rather than the dotted one, which is how the owner of these functions is
-    left out of its own sweep without being named in it.
+    Keyed on name-in-load-position, not a call or import: both strategies
+    dispatched an offloaded extractor as an argument.
     """
     offenders: list[str] = []
     for node in name_reads(tree):
@@ -150,9 +141,8 @@ def test_extraction_reach_past_detector_bites():
 def _respelled_discovery_result_fields_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
     """Flag discovered-links result fields spelled at a result-builder call.
 
-    ``**`` spread is the sanctioned shape and is not a keyword, so a strategy
-    that routes the envelope through ``discovery_result_fields`` reports
-    nothing; a strategy that re-spells one field reports that field.
+    ``**`` spread is the sanctioned shape; a strategy routing through
+    ``discovery_result_fields`` reports nothing, a re-spelling reports fields.
     """
     offenders: list[str] = []
     for node, callee in named_calls_to_any(tree, _RESULT_BUILDERS):
@@ -213,9 +203,8 @@ def test_discovery_result_field_detector_bites():
 def test_discovery_result_projection_has_exactly_one_definition():
     """The projection is one function, so it cannot be forked per strategy.
 
-    Tree-wide for the same reason the sweeps above are: a second definition
-    would satisfy every structural guard above while reintroducing the exact
-    duplication they exist to prevent.
+    Tree-wide for the same reason as the sweeps above: a second definition would
+    satisfy every structural guard while reintroducing the exact duplication.
     """
     definitions = [
         offender(path, node.lineno)

@@ -29,9 +29,8 @@ _CATCH_ALL_EXCEPTIONS: tuple[type[BaseException], ...] = (ValueError, OSError, E
 def _table_shadowing_offenders(rows) -> list[str]:
     """Report rows that can never fire, and broad rows that are not terminal.
 
-    First-hit-wins means a row is dead the moment an EARLIER row's type is a
-    superclass of one of its own: the earlier row claims every instance, so the
-    specific verdict is unreachable no matter how it is spelled.
+    First-hit-wins means a row is dead once an earlier row's type is a
+    superclass of one of its own, regardless of spelling.
     """
     offenders: list[str] = []
     last_index = len(rows) - 1
@@ -141,10 +140,8 @@ _TRANSIENCE_REEXPORTS = frozenset(
 def _transience_verdict_name(target: ast.expr, value: ast.expr | None) -> str | None:
     """The name of a module-level transience/retry verdict, or ``None``.
 
-    All three of the shape's requirements are one predicate -- a verdict-shaped
-    name, a collection-shaped value, and not a re-export of the taxonomy's own
-    set -- so the filter is stated once here instead of as three ``continue``
-    guards in each detector that wanted the same answer.
+    The shape's three requirements (verdict name, collection value, not a
+    re-export of the taxonomy's own set) are one predicate, stated once here.
     """
     name = getattr(target, "id", None)
     if not isinstance(name, str) or not _TRANSIENCE_SET_NAME.match(name):
@@ -159,11 +156,8 @@ def _transience_verdict_name(target: ast.expr, value: ast.expr | None) -> str | 
 def _ad_hoc_transience_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
     """Flag a module-level transience/retry verdict defined outside the taxonomy.
 
-    A consumer asking "does this failure deserve another pass" must call
-    ``app.vocabulary.taxonomy.is_transient_classification``. A local answer is a
-    second opinion, and second opinions are what made ``dns_error`` look retryable
-    while ``connection_error`` -- the label every transport failure actually
-    gets -- did not.
+    A consumer must call the taxonomy's classifier; a second opinion is what
+    made ``dns_error`` look retryable while ``connection_error`` did not.
     """
     return [
         offender_at(path, node, f"local {name} re-answers the taxonomy's transience verdict")
