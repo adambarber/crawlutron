@@ -117,9 +117,8 @@ _PRIVATE_TARGET_DECISION: tuple[str | None, bool] | None = None
 def allow_private_targets() -> bool:
     """Memoized read of the private-target escape hatch (inverted default).
 
-    The raw env value is the cache key, so unrecognized values keep resolving to
-    ``False`` (guard ON) through the shared ``parse_bool_env`` chokepoint and
-    every distinct value change is honored immediately.
+    The raw env value is the cache key: unrecognized values keep resolving to
+    ``False`` (guard ON) via ``parse_bool_env``, and every distinct change honors immediately.
     """
     global _PRIVATE_TARGET_DECISION
     raw = os.environ.get("CRAWLUTRON_ALLOW_PRIVATE_TARGETS")
@@ -156,29 +155,18 @@ def reset_private_target_memo() -> None:
 def _host_is_public(host: str) -> bool:
     """SSRF verdict for one canonical host (bounded memo, pure function).
 
-    Deterministic for a given host and independent of the env hatch (only
-    consulted while the guard is ON), so cache entries never go stale. The bound
-    keeps attacker-influenced host floods from growing memory.
+    Deterministic per host and guarded-call-independent, so entries never go stale;
+    the bounded memo caps attacker-influenced host floods from growing memory.
     """
-    if host in _PRIVATE_HOSTS:
-        return False
-    # A host that is not an address is a name, judged against ``is_public_ip_value``
-    # once the resolver answers; only a literal IP in a rejected range is refused.
     return classify(host) in (AddressClass.NOT_AN_ADDRESS, AddressClass.PUBLIC)
 
 
 def host_egress_reason(host: str) -> str | None:
     """Why this host may not be reached, or None when the SSRF guard admits it.
 
-    Deliberately not folded into ``host_policy_reason``: that one answers "is
-    this host on the list", this one answers "can we leave the machine for it".
-    Merging them would change the meaning of every existing caller, and the list
-    is consulted first so a host that is both unlisted and private still answers
-    ``host_not_allowed``.
+    Separate from ``host_policy_reason``: that asks "on the list?", this "can we leave?".
+    The list check runs first, so an unlisted-but-private host answers ``host_not_allowed``.
     """
-    if allow_private_targets() or _host_is_public(host):
-        return None
-    return "private_network_target"
 
 
 __all__ = [

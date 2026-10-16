@@ -1,17 +1,7 @@
-"""Candidate host policy rules, proposed from the evidence crawls recorded.
+"""Candidate host policy rules, proposed from the recorded evidence crawls.
 
-A rollup over the retained crawl records: group the blocked attempts by host
-and propose the one rule repeated blocks support -- a deny entry -- carrying
-the evidence a reviewer needs to accept, edit or reject it.
-
-Read-only by construction. Nothing in this surface writes host policy, and the
-deployment's policy is consulted for exactly one thing: reading a host off a
-stored URL, through the constructor, because that is the one place admission
-happens. A URL this deployment may no longer crawl yields no suggestion.
-
-The rollup reads the same projection the trace view does (:class:`TraceResponse`),
-so a suggestion can only cite an attempt the trace would also show -- one stored
-record, read two ways.
+A read-only rollup over retained crawl records: blocked attempts per host propose
+a deny entry with evidence; policy is read only to get a host off a stored URL.
 """
 
 from __future__ import annotations
@@ -45,10 +35,8 @@ _DENY_RULE: CandidateRule = "denied_hosts"
 def _host_of(url_text: str, *, host_policy: HostPolicy) -> str | None:
     """The registrable site of a stored URL, or None if this deployment refuses it.
 
-    Through the admission chokepoint rather than a hand-rolled
-    ``NormalizedUrl(...)`` in a ``try``: refusing a URL is the constructor's
-    decision, and a second spelling of that decision is how two sites end up
-    admitting different sets.
+    Read through the admission chokepoint (never a hand-rolled ``NormalizedUrl`` in a ``try``):
+    refusing a URL is the constructor's call, and a second spelling diverges admission.
     """
     admitted = admit_or_none(url_text, policy=host_policy)
     return None if admitted is None else admitted.site
@@ -61,11 +49,8 @@ def build_policy_suggestions(
 ) -> PolicySuggestionsResponse:
     """Propose candidate rules from the blocked attempts in ``records``.
 
-    Every attempt counts towards its host's observed total; only blocked ones
-    count towards a candidate. An attempt that reported a block without evidence
-    -- the browser path records classifications but no signatures -- still
-    counts, and says so by contributing no evidence rather than by being
-    dropped: a block with no signature is still a block.
+    Every attempt counts toward its host's observed total; only blocked ones count toward
+    a candidate, and an evidence-less block still counts (contributing none, not dropped).
     """
     blocked_attempts: dict[str, int] = {}
     observed_attempts: dict[str, int] = {}

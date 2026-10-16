@@ -1,11 +1,7 @@
 """Site-map endpoint support.
 
-A "map" is a structured discovery of the URLs reachable from a root URL: the
-in-page discovered links plus the URLs advertised via robots.txt sitemaps and
-feeds. The crawler already gathers these during a normal crawl (discovery diag
-in :func:`app.orchestration.engine.crawl_request`); ``build_site_map`` aggregates them
-into a single de-duplicated, stable-ordered URL list for callers that only want
-the frontier (e.g. to drive their own recursive crawl or sitemap generation).
+A "map" is the reachable-from-root URL set (in-page links + robots sitemaps +
+feeds, gathered in a normal crawl); ``build_site_map`` yields a de-duplicated, stable-ordered list.
 """
 
 from __future__ import annotations
@@ -18,17 +14,10 @@ from app.models.site_map_response import SiteMapPayload
 
 
 def build_site_map(crawl_response: ProducerEnvelope, *, host_policy: HostPolicy) -> SiteMapPayload:
-    """Aggregate discovered URLs from a crawl response into a site map.
+    """Aggregate a crawl response's discovered URLs into a site map.
 
-    Returns a dict with:
-
-    * ``url``      - the crawled root URL (final_url or original_url)
-    * ``links``    - in-page discovered links (sorted, de-duplicated)
-    * ``sitemaps`` - robots.txt + sitemap.xml URLs (sorted, de-duplicated)
-    * ``feeds``    - discovered feed URLs (sorted, de-duplicated)
-    * ``all_urls`` - the de-duplicated union in stable encounter order
-
-    The function is pure and defensive about the link shape (dict or dataclass).
+    Returns a SiteMapPayload: ``url`` = crawled root (final_url or original_url); links/sitemaps/
+    feeds sorted+de-duplicated, ``all_urls`` = de-duplicated union in stable encounter order.
     """
     results = crawl_response["results"]
     result = results[0] if results else None
@@ -41,10 +30,9 @@ def build_site_map(crawl_response: ProducerEnvelope, *, host_policy: HostPolicy)
         root = admit_or_none(result.original_url, policy=host_policy)
 
     def _normalize(u: str | None) -> str | None:
-        """Canonicalize every emitted URL (sorts query params, strips
-        fragments/default ports). Origin-relative paths resolve against the
-        crawled root; anything that still is not a normalizable public
-        URL is dropped rather than leaked raw."""
+        """Canonicalize every emitted URL: sort query params, strip fragments/
+        default ports, resolve origin-relative paths; drop anything not
+        normalizable rather than leak it raw."""
         if not u:
             return None
         normalized = root.resolve(u) if root is not None else admit_or_none(u, policy=host_policy)

@@ -1,11 +1,7 @@
 """Single canonical bounded scope matcher.
 
-Both the engine's sitemap-seed filter and the recursive BFS loop apply a
-caller-supplied scope regex per URL. The identical "bounded match, fail closed
-on timeout" wrapper lived in two files, where a future fix (a new caught
-exception, an inverted fail direction) applied to one would silently leave the
-other on the stale contract. It now lives here once; both import it. ``tests/
-test_url_doors.py`` asserts exactly one definition remains.
+The "bounded match, fail closed on timeout" wrapper, previously duplicated across the
+sitemap filter and BFS loop, lives here once; tests/test_url_doors.py pins the definition.
 """
 
 from __future__ import annotations
@@ -20,9 +16,8 @@ logger = logging.getLogger(__name__)
 def scope_allows(compiled, url: str) -> bool:
     """Bounded scope check: a RegexTimeout fails CLOSED (link excluded).
 
-    A pathological pattern must never hang the crawl or BFS loop; if the
-    wall-clock budget fires, the URL is treated as out-of-scope and the crawl
-    continues.
+    A pathological pattern must never hang the crawl or BFS loop, so a wall-clock
+    budget fire treats the URL as out-of-scope and the crawl continues.
     """
     try:
         return match_bounded(compiled, url) is not None
