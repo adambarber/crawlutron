@@ -25,12 +25,9 @@ from tests._result_builders import GRAPH_CHILD, GRAPH_ROOT, _canned_result, _fla
 
 
 class TestTransientFailureRequeue:
-    """A page that can't be reached for a *transient* reason (network/dns/tls/
-    timeout/browser crash) must not be counted done or drain the frontier — it is
-    re-queued for a bounded number of retries, while a *permanent* failure
-    (not_found/site_error/gone) is recorded terminal immediately. Otherwise a
-    whole-site job whose links fail while the network is down would mark itself
-    COMPLETED having crawled only the seed."""
+    """A TRANSIENT failure (network/dns/tls/timeout/browser crash) re-queues
+    for bounded retries; a PERMANENT one (not_found/site_error/gone) is
+    terminal immediately."""
 
     _CAP = 3  # MAX_URL_TRANSIENT_ATTEMPTS
 
@@ -97,10 +94,8 @@ class TestTransientFailureRequeue:
     async def test_frontier_expansion_uses_normalized_url(self, client, job_store):
         """The frontier must carry the validated URL, never the raw href.
 
-        extraction.py can legitimately emit url="/rel" with normalized_url set
-        to the resolved absolute URL; a runner that reads ``url`` re-queues
-        unvalidated hrefs and dedupes them inconsistently against visited URLs.
-        """
+        extraction emits ``url="/rel"`` with ``normalized_url`` resolved; a
+        runner reading ``url`` re-queues unvalidated hrefs."""
         divergent = _link("/rel", GRAPH_ROOT, normalized="https://ok.test/abs")
         install = ScriptedExecute(
             results=[
@@ -167,18 +162,8 @@ class TestRunnerLifecycle:
     async def test_paused_single_shot_job_is_not_resumed_as_a_whole_site_job(self):
         """The startup scan's kind filter was reading a key nothing populated.
 
-        ``alist_jobs`` did not select ``kind``, so every summary answered
-        ``None`` for it. The filter that reads that key -- the one meant to
-        keep single-shot jobs out of the frontier-resuming runner -- therefore
-        excluded nothing, and a single-shot job found PENDING at startup was
-        handed to the whole-site runner and resumed from a frontier it does not
-        have.
-
-        The assertion is on what the scan refuses to launch, not on a status:
-        the row is legitimately PENDING here, so the only thing that
-        distinguishes a correct scan from the broken one is whether it starts
-        work for it.
-        """
+        ``alist_jobs`` did not select ``kind``, so the filter excluded nothing
+        and a PENDING single-shot job was handed to the whole-site runner."""
         with single_shot_job(job_id="seeded-shot") as (store, job):
             started = await job_runner.recover_and_start_pending_jobs(
                 store, CrawlerSettings.from_mapping({}), asyncio.Event()
@@ -190,18 +175,8 @@ class TestRunnerLifecycle:
     async def test_single_shot_orphan_is_failed_not_left_pending_forever(self):
         """A single-shot orphan is unrecoverable, and must be marked so.
 
-        Recovery rewinds every RUNNING row to PENDING, but the startup path
-        only resumes WHOLE_SITE jobs. A single-shot job killed mid-flight was
-        therefore marked recoverable and then never recovered: it sat PENDING
-        forever, and ``GET /v1/crawl/{id}`` answered ``202 pending`` from an
-        endpoint that is otherwise authoritative. A polling client runs to its
-        own timeout learning nothing.
-
-        The two seams disagree about what "recoverable" means, so the fix
-        belongs where the rewind is decided. The row is marked terminal at the
-        moment the service concludes it cannot be resumed, which is the only
-        point at which that conclusion is true.
-        """
+        Recovery rewinds every RUNNING row to PENDING but only resumes
+        WHOLE_SITE jobs, so the killed job sat PENDING forever."""
         with single_shot_orphan(job_id="orphan-shot") as (store, job):
             await job_runner.recover_orphaned_running_jobs(store)
 
@@ -213,11 +188,8 @@ class TestRunnerLifecycle:
     async def test_single_shot_orphan_does_not_become_a_runner_task(self):
         """The rewind alone must not make a single-shot job look startable.
 
-        The terminal status above is what a client sees; this is the other
-        half. If the FAILED write were ever the only thing missing, a
-        single-shot row would still be PENDING at the moment the startup scan
-        reads it, and the scan is what decides whether work is launched.
-        """
+        If the FAILED write were the only thing missing, a single-shot row
+        would still be PENDING when the startup scan reads it."""
         with single_shot_orphan(job_id="orphan-shot-2") as (store, job):
             await job_runner.recover_orphaned_running_jobs(store)
             started = await job_runner.recover_and_start_pending_jobs(
@@ -251,9 +223,7 @@ class TestRunnerLifecycle:
 class TestWholeSiteRedirectedUrlResolution:
     """Whole-site results are keyed by final_url but looked up by the
     pre-redirect frontier URL, so a redirected page misses -> "transient" ->
-    re-queued forever, then counted failed and dropped: its content never
-    reaches job.results.
-    """
+    re-queued forever, then counted failed and dropped."""
 
     async def test_frontier_url_resolves_via_final_url(self, job_store, monkeypatch):
         frontier_url = "http://example.com/page"

@@ -42,10 +42,7 @@ class TestCapabilitiesPayload:
         """The no-ceiling note must name BOTH escape hatches.
 
         async_mode de-risks the HTTP request; only POST /v1/jobs is durable
-        (pause/cancel/resume, crash recovery). An agent that reads only
-        async_mode picks a continuation of a single request when it should
-        book a job -- the guidance is the only place this choice is written.
-        """
+        (pause/cancel/resume, crash recovery)."""
         settings = CrawlerSettings.from_mapping()
         timing = capabilities_payload(settings)["crawl_timing"]
         assert "/v1/jobs" in timing["large_crawl_guidance"]
@@ -54,10 +51,8 @@ class TestCapabilitiesPayload:
 class TestCapabilitiesWireContract:
     """Serialize through the real endpoint, not the raw dict.
 
-    ``response_model=CapabilitiesResponse`` silently filters any top-level key the
-    model does not declare; the payload-dict tests above cannot see that, so a new
-    advertised block would ship green in tests yet be absent on the wire.
-    """
+    ``response_model`` silently filters undeclared top-level keys, which the
+    payload-dict tests cannot see -- an unmodelled block would ship green."""
 
     async def test_capabilities_endpoint_advertises_crawl_timing(self, async_client):
         resp = await async_client.get("/v1/capabilities")
@@ -72,12 +67,10 @@ class TestCapabilitiesWireContract:
         assert body["features"]["async_mode"] is True
 
     async def test_timing_guidance_is_one_string_shared_by_every_surface(self, async_client):
-        """The no-time-ceiling guidance shipped as three
-        hand-maintained copies (capabilities, agent-hints, the OpenAPI
-        endpoint description). One constant now feeds all three, so the
-        surfaces cannot drift; this pins the identity on the WIRE,
-        not in the source text.
-        """
+        """The no-time-ceiling guidance shipped as three hand-maintained copies.
+
+        One constant now feeds capabilities, agent-hints and the OpenAPI
+        description; this pins the shared identity ON THE WIRE."""
         caps = (await async_client.get("/v1/capabilities")).json()
         guidance = caps["crawl_timing"]["large_crawl_guidance"]
         hints = (await async_client.get("/v1/agent-hints")).json()
@@ -101,10 +94,8 @@ class TestAgentHintsPayload:
     def test_agent_hints_time_guidance_names_both_escape_hatches(self):
         """The no-ceiling hint must point at async_mode AND jobs.
 
-        Same rationale as the capabilities guidance test: the hints are what
-        agents actually read before constructing a first request, so the
-        durable option must be named where the sync ceiling is documented.
-        """
+        Same rationale as the capabilities test: agents read the hints before
+        the first request, so the durable option must be named there."""
         payload = agent_hints_payload()
         timing_hints = [g for g in payload["guidance"] if "time ceiling" in g]
         assert timing_hints, "no time-ceiling guidance in agent hints"
@@ -162,8 +153,7 @@ class TestDiscoveryPayload:
     def test_recommended_endpoints_name_the_job_control_pair(self):
         """An agent that discovers the service the documented way can start a
         job and read its state, but could not stop one: the control and delete
-        endpoints were live in the router and absent from the recommendation
-        list, which is the surface a discovering agent reads."""
+        endpoints were live but absent from the recommendation list."""
         recommended = discovery_payload()["recommended_endpoints"]
         assert "POST /v1/jobs/{job_id}/control" in recommended
         assert "DELETE /v1/jobs/{job_id}" in recommended
@@ -204,9 +194,8 @@ class TestDiscoveryPayload:
 
     def test_every_recommended_endpoint_is_a_live_route(self):
         """The recommendation list is hand-curated, so it can drift from the
-        routers it mirrors: an entry for a route that no longer exists sends a
-        discovering agent at a 404 with no signal the list is stale. Every
-        advertised METHOD /path must resolve against the real app."""
+        routers it mirrors: an entry for a dead route sends a discovering agent
+        at a 404. Every advertised METHOD /path must resolve against the app."""
         from app.main import app as service
 
         # The app mounts its routers via _IncludedRouter, so app.routes does not expose APIRoute objects; the

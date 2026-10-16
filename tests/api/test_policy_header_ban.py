@@ -1,22 +1,7 @@
 """Policy.headers may not carry chokepoint-bypassing header names.
 
-Two families, both rejected at the *model* (rejection at the validation site,
-never a silent strip at consumption):
-
-- Conditional headers (``if-none-match`` / ``if-modified-since``) belong to
-  the ``validators`` map.
-- ``cookie`` / ``host`` / ``proxy-authorization`` / ``x-forwarded-*`` /
-  ``x-real-ip`` bypass chokepoints or spoof caller identity to the origin:
-  the cookie jar owns Cookie, the pinned-request chokepoint owns Host, and
-  origin-side IP/identity headers are never a crawl input.
-
-``authorization`` is deliberately NOT banned here (user ruling 2026-09-22):
-credentialed crawling of one's own site is a real use case, and banning the
-header without a typed replacement would push callers into worse patterns
-(baked-in URL credentials). It moves under the ``policy.credentials``
-chokepoint; until then the ban list and this test
-pin exactly the six, no more.
-"""
+Conditional headers belong to ``validators``; cookie/host/x-real-ip bypass
+chokepoints. ``authorization`` stays (ruling 2026-09-22) until credentials."""
 
 from __future__ import annotations
 
@@ -55,11 +40,8 @@ def test_banned_headers_rejected_in_any_spelling(header, spelling):
 def test_the_ban_travels_with_the_shared_policy(module_name, model_name):
     """Every model embedding CrawlPolicy inherits the ban from one site.
 
-    The three crawl-shaped request models (crawl, map, jobs) all embed the
-    same CrawlPolicy, so anchoring the validator there covers them at once.
-    ``RenderRequest`` embeds ``RenderOptionsRequest``, which has no ``headers``
-    field -- it is structurally immune and correctly excluded here.
-    """
+    The three crawl-shaped request models embed the same CrawlPolicy, so the
+    validator covers them at once; ``RenderRequest`` has no ``headers`` field."""
     import importlib
 
     model = getattr(importlib.import_module(module_name), model_name)
@@ -81,11 +63,8 @@ def test_render_request_has_no_header_smuggling_surface():
 def test_authorization_stays_allowed_until_the_credentials_field_lands():
     """Pin the ruling, not an accident.
 
-    If a future change bans ``authorization`` here, it must do it *together
-    with* ``policy.credentials`` so the typed path exists first; deleting a
-    caller's only credentialed-crawl option without a replacement is the
-    workaround-forcing move this test exists to catch in review.
-    """
+    A future ban of ``authorization`` must land WITH ``policy.credentials``
+    first; deleting the only credentialed-crawl option without one is caught."""
     from app.models.crawl_request import CrawlRequest
 
     request = CrawlRequest(url="http://example.com/", policy={"headers": {"Authorization": "Bearer t"}})
@@ -130,10 +109,8 @@ FRAMING_HEADERS = (
 def test_framing_headers_rejected_at_the_policy_chokepoint(header):
     """Rejected at the MODEL, not stripped at consumption.
 
-    A silent strip would leave the caller believing the header was sent. The
-    whole point of this chokepoint is that the refusal names the header and says
-    why, so the caller can act on it.
-    """
+    A silent strip leaves the caller believing the header was sent; the whole
+    point of the chokepoint is that the refusal names the header and why."""
     from app.models.crawl_policy import CrawlPolicy
 
     with pytest.raises(ValidationError):
@@ -144,10 +121,8 @@ def test_framing_headers_rejected_at_the_policy_chokepoint(header):
 def test_framing_refusal_names_the_header_and_the_reason(header):
     """The message must identify WHICH header and WHY.
 
-    "header not permitted" without the name leaves a caller with a policy of
-    forty headers to bisect, and the reason string is what turns the refusal
-    into an explanation rather than a dead end.
-    """
+    "header not permitted" alone leaves a caller with a forty-header policy to
+    bisect; the reason string turns the refusal into an explanation."""
     from app.models.crawl_policy import CrawlPolicy
 
     with pytest.raises(ValidationError) as exc:
@@ -159,11 +134,8 @@ def test_framing_refusal_names_the_header_and_the_reason(header):
 def test_a_smuggling_attempt_is_refused_whole():
     """The realistic attack shape: the two framing headers that disagree.
 
-    Sent together, Content-Length and Transfer-Encoding are the classic
-    desync pair. Asserted as ONE case rather than two, because the two single
-    cases above already prove each header is refused -- what is new here is
-    that pairing them does not produce a differently-shaped outcome.
-    """
+    Sent together, Content-Length and Transfer-Encoding are the classic desync
+    pair; the single cases prove each is refused."""
     from app.models.crawl_policy import CrawlPolicy
 
     with pytest.raises(ValidationError):
