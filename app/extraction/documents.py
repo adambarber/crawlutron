@@ -25,20 +25,9 @@ logger = logging.getLogger(__name__)
 
 @dataclass(frozen=True, slots=True)
 class Selectors:
-    """A narrowing request: the part of a page the caller wants extracted.
-
-    CSS and XPath are two spellings of one intent, and they are only ever sent
-    together -- a request carrying a CSS selector and no XPath is not a narrower
-    request, it is half of one, and half a narrowing request is what a function
-    that takes the two names separately is able to express. As two optional
-    parameters on each of three extractors, that mistake had a spelling
-    everywhere and a rule somewhere else forbidding it; as one value it has no
-    spelling at all, so the rule stopped being necessary and became structural.
-
-    Frozen and slots because it is a settled statement of intent, built once by
-    the caller from policy and read by everything downstream: nothing here edits
-    a narrowing request, and a mutable one would let one extractor narrow and
-    another widen from the same object.
+    """A narrowing request: the part of a page the caller wants extracted, as one
+    value (CSS and XPath are two spellings of one intent, only ever sent together,
+    so half a narrowing request is inexpressible). Frozen and slots: settled intent.
     """
 
     css: str | None = None
@@ -55,11 +44,9 @@ _EXTRACTION_EXECUTOR: concurrent.futures.ThreadPoolExecutor | None = None
 
 
 def _extraction_executor() -> concurrent.futures.ThreadPoolExecutor:
-    """The shared pool, created on first use.
-
-    Every worker is idle before this returns: a pool handed out while a
-    shutdown is in flight is a pool whose ``submit`` may land after it was
-    closed, which is the same failure one layer down.
+    """The shared pool, created on first use; every worker is idle when it returns,
+    so a ``submit`` can never land after the pool was closed by an in-flight
+    shutdown -- the same failure the layer below avoids.
     """
     global _EXTRACTION_EXECUTOR
     if _EXTRACTION_EXECUTOR is None:
@@ -83,11 +70,8 @@ DOC_POOL = DocExtractionPool(
 
 async def shutdown_doc_extraction_executor() -> None:
     """Terminate every persistent extraction worker, process and thread alike.
-
-    Both pools were checked separately by the caller, which meant the caller had
-    to know there were two. The thread pool has no shutdown of its own here, so
-    asking whether it is still alive was the only way it ever got closed; a
-    second pool added later would have shipped unclosed by exactly this route.
+    Both pools shut down here, once: the caller used to check them separately
+    and had to know there were two, so a new pool could ship never closed.
     """
     DOC_POOL.teardown()
     global _EXTRACTION_EXECUTOR
@@ -118,17 +102,8 @@ def html_to_markdown(html_fragment: str) -> tuple[str | None, str | None]:
 
 class _SelectorTimedOut:
     """Type of the timeout sentinel, so a timeout does not erase the result type.
-
-    The sentinel used to be a bare ``object()``, which forced the evaluator's
-    return type to ``T | object`` -- and a union with ``object`` collapses to
-    ``object`` at every call site. That erasure is why ``for tag in selected``
-    type-checked as iterating an ``object``: the selector's real result type was
-    thrown away before the loop could see it. A sentinel with its own class
-    keeps the union narrow, so the caller's ``isinstance(..., _SelectorTimedOut)``
-    check narrows the rest to the callable's actual return type. Identity is not
-    enough here: pyright does not narrow a union on ``is`` against a module-level
-    instance, so the timeout path stayed in the type and the selector loop below
-    still type-checked as iterating a sentinel.
+    A bare object() would collapse the evaluator's ``T | object`` to object, so the
+    caller's isinstance check narrows to the callable's real return (``is`` alone cannot narrow).
     """
 
     __slots__ = ()
@@ -144,11 +119,8 @@ def _eval_selector[SelectorResult](
     fn: Callable[[], SelectorResult], timeout: float
 ) -> SelectorResult | _SelectorTimedOut:
     """Run a selector evaluation in a worker thread so it cannot hang a request.
-
-    Returns the callable's result, or ``_EXTRACTION_SELECTOR_SENTINEL`` if it
-    exceeded ``timeout`` seconds.
-
-    Uses a shared bounded thread pool to avoid thread leaks.
+    Returns the callable's result, or ``_EXTRACTION_SELECTOR_SENTINEL`` when it
+    exceeds ``timeout``, using the shared bounded pool to avoid thread leaks.
     """
     fut = _extraction_executor().submit(fn)
     try:
@@ -165,20 +137,9 @@ def extract_selected(
     settings: CrawlerSettings | None = None,
     tree: Any | None = None,
 ) -> ExtractedContent:
-    """Mechanical DOM targeting: extract only the matched nodes as Markdown.
-
-    One selector contract shared with ``extract_content`` and ``extract_html``:
-    a :class:`Selectors` value, never loose ``css_selector``/``xpath`` parameters,
-    so half a narrowing request is not expressible. CSS selectors are resolved
-    with BeautifulSoup; XPath expressions with lxml.
-    The matched subtree(s) are serialized and converted to Markdown, so callers
-    can target a specific section (e.g. an agenda table) without Trafilatura's
-    full-page boilerplate removal.
-
-    ``tree`` accepts an already-parsed lxml tree for the XPath form, the same
-    seam ``html_diagnostics`` offers: a caller that already holds the tree pays
-    for one parse, and a test can hand in the tree whose evaluation it wants
-    bounded instead of replacing the parser.
+    """Mechanical DOM targeting: extract only matched nodes as Markdown, via a
+    Selectors value (never loose css/xpath params), CSS by BeautifulSoup and
+    XPath by lxml; ``tree`` accepts an already-parsed lxml tree so a holder pays one parse.
     """
     if not html or not selectors:
         return ExtractedContent(None, None)
@@ -252,12 +213,9 @@ DOC_EXTENSIONS = (
 
 
 class _LogRestorer:
-    """Restore logger levels a:func:`_suppress_trafilatura_chatter` call muted.
-
-    A module-level class (rather than one defined inside the function) so the
-    suppressor can declare it as its return type: an inner class would leave
-    the caller with ``object``, which has no ``__enter__``/``__exit__`` to type
-    the ``with`` block against.
+    """Restore logger levels a :func:`_suppress_trafilatura_chatter` call muted.
+    Module-level so the suppressor can declare it as its return type -- an inner
+    class would leave the ``with`` block typing against a bare ``object``.
     """
 
     def __init__(self, prior: dict[logging.Logger, int]) -> None:
@@ -273,17 +231,9 @@ class _LogRestorer:
 
 
 def _suppress_trafilatura_chatter() -> _LogRestorer:
-    """Silence trafilatura's ERROR-level chatter for benign inputs.
-
-    trafilatura logs ERROR from ``trafilatura.core`` and ``trafilatura.utils``
-    when the HTML is empty, a fragment, or has no main content. All three are
-    normal for a crawler (a robots page, a redirect stub, an empty 200), and
-    ``extract_html`` already falls through to markdownify and then plain
-    text, so the record carries no diagnostic signal. At ERROR level across a
-    ~2000-page run it produced 2239 records that crowded out real failures.
-
-    Used as a context manager so the suppression is scoped to the extraction
-    call: a parse failure we did not route here stays loud.
+    """Silence trafilatura's ERROR chatter for benign inputs (empty/fragment/no-main
+    HTML), which carries no diagnostic signal and otherwise drowns real failures
+    at scale; a context manager so suppression is scoped to the extraction call.
     """
     loggers = [logging.getLogger(n) for n in ("trafilatura.core", "trafilatura.utils", "trafilatura.xml")]
     prior = {logger: logger.level for logger in loggers}
@@ -297,12 +247,9 @@ def extract_html(
     url: NormalizedUrl | None,
     selectors: Selectors | None = None,
 ) -> ExtractedContent:
-    """The single owner of the HTML selector dispatch, for both callers.
-
-    The unified :func:`extract_content` entry and the trafilatura-only strategy
-    path both route HTML here, which is why the pair is a parameter on this
-    function at all: one place decides whether a page is selector-targeted or
-    full-page, so the two callers cannot disagree about the same page.
+    """The single owner of the HTML selector dispatch, for both callers: the unified
+    extract_content entry and the trafilatura-only path both route HTML here, so
+    one place decides selector-targeted vs full-page and they cannot disagree.
     """
     if selectors:
         return extract_selected(html, url, selectors=selectors)
@@ -337,11 +284,8 @@ def extract_document(
     body: bytes, url: NormalizedUrl | None, settings: CrawlerSettings | None = None
 ) -> ExtractedContent:
     """Extract markdown from document bytes with a wall-clock timeout.
-
-    The markitdown conversion runs on a persistent pool worker with a hard
-    per-task timeout so a pathological document cannot block the pool
-    indefinitely; the worker is forcefully killed and its slot respawned.
-    Output is also capped to prevent unbounded memory growth.
+    The conversion runs on a persistent pool worker with a hard per-task timeout,
+    so a pathological document cannot block the pool; the worker is killed, its slot respawned, output capped.
     """
     active = settings or CrawlerSettings.from_mapping()
     if not _document_extraction_enabled():
