@@ -33,18 +33,8 @@ _VOCABULARY_LAYER = frozenset(
 def _referenced_names(tree: ast.AST, path: pathlib.Path) -> frozenset[str]:
     """Every name this module could be reaching for, in all three spellings.
 
-    A bare ``Name`` covers local use and an unaliased import. An ``alias`` tail
-    covers ``from tests.x import y as z``: the *original* name is what proves the
-    primitive is used, and ``z`` would otherwise make an aliased import look like
-    a reference to something else entirely.
-
-    The qualified form is resolved through imports rather than pattern-matched,
-    because ``Attribute.attr`` alone is what made this measurement lie in the
-    first place: ``"".join(...)`` puts a name called ``join`` in 134 places, and a
-    gate built on that would never have fired on the ``matching.join`` it was
-    written for. Resolving the chain through the module's own import bindings
-    counts ``walks.foo`` and leaves ``str.join`` alone.
-    """
+    Bare ``Name``, ``alias`` tail (the original of ``from x import y as z``),
+    and qualified forms resolved through imports -- ``attr`` alone lied."""
     local = _test_tree_module_names()
     names: set[str] = set()
     for node in ast.walk(tree):
@@ -77,12 +67,8 @@ def _public_definitions(
 ) -> Iterator[ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef]:
     """The top-level definitions a module advertises by not hiding them.
 
-    "Public" here means exactly that, and nothing more: top-level, and no leading
-    underscore. One implementation on purpose -- the detector and its premise
-    have to agree on what counts as public, and a second spelling of the
-    predicate is how the two drift into disagreeing about which names the rule
-    is even deciding.
-    """
+    One implementation on purpose -- the detector and its premise must agree on
+    what counts as public, or the two drift into deciding different rule sets."""
     return (
         node
         for node in tree.body
@@ -94,12 +80,8 @@ def _public_definitions(
 def _unreferenced_primitive_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
     """A public vocabulary primitive that no module outside its own names.
 
-    Restricted to the vocabulary layer by name. Every other test module is full
-    of symbols referenced by exactly one consumer, and a helper that is genuinely
-    private to a fixture module is exactly the ``_`` case below -- neither is the
-    false memory this exists to catch, and sweeping them would make the rule
-    unadoptable.
-    """
+    Restricted to the vocabulary layer by name; sweeping other modules'
+    single-consumer symbols and private helpers would make the rule unadoptable."""
     if path.name not in _VOCABULARY_LAYER:
         return []
     outside: set[str] = set()
@@ -125,12 +107,8 @@ PLANTED_ORPHAN_PRIMITIVE = "def orphan_walker(tree, path):\n    return []\n"
 def _vocabulary_has_public_primitives() -> None:
     """The rule has something to decide, derived from the tree rather than named.
 
-    This detector's trigger set is whatever the vocabulary layer currently
-    exports, so an emptied or renamed layer would leave it matching nothing --
-    which reports as a property holding. The check belongs here because inside
-    the detector it would be one line among the walk's own logic, and ``-O``
-    removes it.
-    """
+    An emptied or renamed layer would leave the detector matching nothing --
+    green while reporting a property; inside the detector ``-O`` removes it."""
     exported = [
         node.name
         for path, tree in _tests_tree(exclude=frozenset())
@@ -180,25 +158,16 @@ VOCABULARY_PRIMITIVES_ARE_REFERENCED = Rule(
 def test_vocabulary_primitives_are_referenced():
     """Every public name in the shared vocabulary layer has a caller somewhere.
 
-    This is the class of defect that reads as tidiness rather than as a bug: a
-    deleted caller leaves a well-formed, well-documented, unreferenced function,
-    and nothing else in the suite can notice. The header is what makes it
-    expensive, because it is what the next author trusts.
-    """
+    A deleted caller leaves a well-formed, well-documented, unreferenced
+    function, and nothing else in the suite can notice."""
     VOCABULARY_PRIMITIVES_ARE_REFERENCED.scan()
 
 
 def test_vocabulary_primitive_detector_bites():
     """Bites, and the two neighbours that must stay quiet.
 
-    The offender is a public function at a real vocabulary path with no caller,
-    which is the whole defect. The two Silent halves are the claims that keep the
-    rule from becoming useless: a private helper at a *different* vocabulary
-    module proves the underscore is the declaration, and a public helper outside
-    the named layer proves the layer is a list rather than a directory sweep --
-    without it the rule would eventually fire on a fixture factory's
-    single-consumer double, and a gate that does that gets deleted.
-    """
+    The offender is an unreferenced public function at a real vocabulary path.
+    A private helper elsewhere and a public one outside the layer stay clean."""
     VOCABULARY_PRIMITIVES_ARE_REFERENCED.check_bites()
 
 
@@ -254,10 +223,8 @@ RETIRED_VOCABULARY_IS_NOT_IMPORTABLE = Rule(
 def test_no_module_imports_the_retired_vocabulary_bucket():
     """Every vocabulary import names a topic module.
 
-    The measurable half of #149's definition of done. A one-time sweep would
-    satisfy it for exactly one commit; this is what stops the bucket regrowing
-    after the split.
-    """
+    The measurable half of #149's definition of done; a one-time sweep would
+    satisfy it for one commit, and this stops the retired bucket regrowing."""
     RETIRED_VOCABULARY_IS_NOT_IMPORTABLE.scan()
 
 

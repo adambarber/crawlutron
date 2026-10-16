@@ -29,11 +29,8 @@ from tests.rules import Bites, Rule, Silent
 def _cache_envelope_literals(tree: ast.AST, path: pathlib.Path) -> list[str]:
     """Flag any dict literal shaped like a content-cache envelope.
 
-    Keyed on the *stored shape* -- the key set every cache entry carries --
-    rather than on the two write paths that happened to spell it, so a third
-    writer is caught too. A dict that merely mentions ``expires`` is not an
-    envelope; it has to carry the whole contract.
-    """
+    Keyed on the stored key set so a third write path is caught too; it must
+    carry the whole contract, not just ``expires``."""
     required = {"expires", "value", "cached_at"}
     offenders: list[str] = []
     for node in dict_displays(tree):
@@ -66,12 +63,8 @@ CACHE_ENVELOPE_IS_BUILT_BY_ONE_OWNER = Rule(
 def test_cache_envelope_is_built_by_one_owner():
     """The content-cache entry envelope has one builder.
 
-    ``set`` and ``aset`` each built the on-disk envelope themselves, which is
-    the cache's *stored contract*: a field added for one write path was absent
-    from the other, so an entry written through it was missing something the
-    reader expects. ``ContentCache._entry_to_store`` is the owner; a new write
-    path has to go through it.
-    """
+    ``set``/``aset`` each built it, so a field added for one path was missing
+    from the other; ``ContentCache._entry_to_store`` owns the shape."""
     CACHE_ENVELOPE_IS_BUILT_BY_ONE_OWNER.scan()
 
 
@@ -89,10 +82,10 @@ def test_cache_envelope_detector_bites():
 
 
 def _crawl_response_construction_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
-    """Flag explicit ``UnifiedCrawlResponse(..., results=[...])`` construction
-    outside response_shaping — callers must use build_unified_crawl_response so
-    persisted/webhook/REST payloads cannot drift (endpoint-wide).
-    ``**stored`` deserialization splats have no explicit results= keyword."""
+    """Flag explicit ``UnifiedCrawlResponse(..., results=[...])`` outside response_shaping.
+
+    Callers must use ``build_unified_crawl_response`` so persisted/webhook/REST
+    payloads cannot drift; ``**stored`` splats have no explicit ``results=``."""
     if path.name == "response_shaping.py":
         return []
     offenders: list[str] = []
@@ -219,15 +212,8 @@ def test_crawl_response_envelope_adapter_detector_bites():
 def _hand_rolled_envelope_fields_offenders(tree, path):
     """Flag the unified envelope's scalar fields being passed outside their owner.
 
-    Every one of those fields is REQUIRED by :class:`UnifiedCrawlResponse`, so a
-    second spelling of the list is a second place to forget a field -- and a
-    forgotten field is dropped silently, which is how one shipped missing from
-    one endpoint and was caught only by curling the live endpoint. The
-    ``submitted_count`` fallback that decides what the wire calls a batch's size
-    lives in the same function for the same reason: it used to be written in both
-    builders, and two copies of a fallback is how two paths start disagreeing
-    about a count.
-    """
+    Every field is REQUIRED, so a second spelling is a place to forget one --
+    dropped silently, as one shipped and was caught only by curling live."""
     relative = relative_posix(path)
     offenders: list[str] = []
     for call in calls_named(tree, "UnifiedCrawlResponse"):
@@ -254,10 +240,8 @@ _HAND_ROLLED_ENVELOPE_PROOF_PATH = REPO_ROOT / "app" / "api" / "crawl_endpoint.p
 def _hand_rolled_envelope_source(fn_name: str) -> str:
     """The proof's hand-rolled ``UnifiedCrawlResponse`` build, named ``fn_name``.
 
-    Written out twice it was the same drift-prone block of fixture; the owner
-    half is the identical source with the function renamed to the owner's, so
-    the one spelling backs both the firing and the sanctioned-owner proof.
-    """
+    The owner half is the identical source renamed, so one spelling backs both
+    the firing and the sanctioned-owner proofs."""
     return (
         f"def {fn_name}(results, request_id):\n"
         "    return UnifiedCrawlResponse(results=results, request_id=request_id, success=True, "
@@ -312,16 +296,8 @@ def test_crawl_response_envelope_fields_detector_bites():
 def _job_row_accumulator_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
     """Flag SQL that reads or writes a dropped ``crawl_jobs`` column.
 
-    ``crawl_jobs`` used to carry ``results`` and ``visited`` as JSON columns, so
-    every batch persist re-serialized the job's entire page history and total
-    write volume grew as the square of the page count (migration 0003). Both are
-    append-only accumulators and now live in their own tables.
-
-    The banned set is read from the manifest rather than written out here, so
-    the detector cannot drift from the schema: the columns in LEGACY_COLUMNS are
-    by definition the ones a current store no longer has. Migrations are exempt
-    because dropping a column is the one operation that must name it.
-    """
+    ``results``/``visited`` were JSON columns (quadratic batch rewrites), now
+    append-only tables; the banned set is read from the migration manifest."""
     if "migrations" in path.parts:
         return []
     banned = {column.name for column in LEGACY_COLUMNS[StoreSchema.CRAWL_JOBS]}
@@ -377,12 +353,8 @@ def test_job_row_accumulator_detector_bites():
 def _render_options_construction_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
     """Flag ``RenderOptions(...)`` construction outside the resolver.
 
-    The effective render options were once hand-assembled at every entry
-    point and the copies drifted -- the browser strategy hardcoded the
-    capture knobs while policy reads respected the caller elsewhere, and
-    the /v1/render builder silently dropped browser_profile. Only
-    app/admission/render_options.py may decide the shape; callers map their own
-    source into the resolver's mappings."""
+    Hand-assembled per entry point, the options drifted (hardcoded capture
+    knobs, dropped ``browser_profile``); only the resolver may decide the shape."""
     if path.name == "render_options.py":
         return []
     offenders: list[str] = []
