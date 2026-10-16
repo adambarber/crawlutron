@@ -1,10 +1,7 @@
 """An app over the crawl and policy routers with stores the test owns.
 
-The policy rollup reads EVERY retained record, so a test that asserts counts
-cannot share the service's own stores: another test in the same worker that
-crawls the same session server moves the numbers under it. This app owns its
-result store, and takes the job store and the event so the crawl door behind
-the same overrides is the real one.
+The policy rollup reads EVERY retained record, so a count-asserting test cannot
+share the service's stores -- another test in the worker moves the numbers.
 """
 
 from __future__ import annotations
@@ -27,12 +24,9 @@ from tests._app_factory import service_app
 
 
 def policy_client(result_store, job_store) -> AsyncClient:
-    """An AsyncClient over ``/v1/crawl`` and ``/v1/policy-suggestions``.
-
-    The error handlers are read off the real app rather than restated: the
-    envelope is part of the surface under test, and a harness that spelled the
-    handlers out would keep answering with the old shape after the service
-    changed.
+    """An AsyncClient over ``/v1/crawl`` and ``/v1/policy-suggestions``, its error
+    handlers read off the real app rather than restated -- the envelope is part of
+    the surface, and a harness that spelled it would answer with the old shape.
     """
     app = FastAPI()
     app.include_router(crawl_router)

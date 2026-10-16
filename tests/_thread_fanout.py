@@ -1,19 +1,6 @@
-"""The N-way thread fan-out a concurrency test needs, written once.
-
-Four modules -- the cookie jar, the DNS cache, the HTTP validator cache and the
-bounded TTL cache -- each had a "many threads hit this at once" test, and each
-had spelled the same eight lines: build the threads, start them all, join them
-all, and re-raise whatever the workers caught. That is the duplication, and it
-is a trap as well: the version that asserts inside the worker collects the
-failure into a list and the version that does not lose it, and a test whose
-worker raised is a test that silently proved nothing unless someone remembered
-the final ``assert not errors``.
-
-``run_thread_fanout`` is the fan-out. The worker is handed its own index and
-owns everything else it needs by closure; whatever it raises -- including an
-``AssertionError`` from inside it -- comes back as the returned list, so a test
-that forgets to assert still cannot pass quietly, because the list is what it
-asserts on.
+"""The N-way thread fan-out a concurrency test needs, written once: it starts and
+joins all threads and returns whatever raised, so four modules no longer each
+spell the same eight lines and diverge on whether a worker's failure surfaces.
 """
 
 from __future__ import annotations
@@ -25,13 +12,9 @@ __all__ = ["run_thread_fanout"]
 
 
 def run_thread_fanout(worker: Callable[[int], None], *, count: int = 8) -> list[BaseException]:
-    """Run ``worker(index)`` on ``count`` threads at once; return what raised.
-
-    The threads are started before any is joined, so the overlap the test is
-    about actually happens; every thread is joined even if one raised, so a
-    failure cannot leave a worker mutating the cache the assertions then read.
-    An empty list means every worker finished clean -- which is the assertion
-    each caller makes on it.
+    """Run ``worker(index)`` on ``count`` threads at once; start before joining so the
+    overlap happens, join all even if one raised, and return what raised -- an empty
+    list means the clean pass every caller asserts on.
     """
     errors: list[BaseException] = []
 

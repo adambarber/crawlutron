@@ -1,11 +1,6 @@
-"""The watches API over a test's own store.
-
-Mirrors ``tests/_job_harnesses._make_app``: the real router with the store and
-settings overridden, so an endpoint test drives production routing, production
-admission and the store itself. It lives in its own module because both the
-endpoint suite and the store-offload guard in ``tests/api/test_store_offload``
-need the same app, and a fixture defined in one test module is invisible to
-the other.
+"""The watches API over a test's own store: the real router with store and
+settings overridden, lived in its own module because both the endpoint suite and
+the store-offload guard need the same app.
 """
 
 from __future__ import annotations

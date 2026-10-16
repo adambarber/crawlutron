@@ -11,13 +11,9 @@ def admit_or_none(candidate, *, policy=UNRESTRICTED_HOST_POLICY):
 
 
 def assert_url_refused(url: str, policy, reason: str) -> None:
-    """``NormalizedUrl`` admission must reject `url` for exactly `reason`.
-
-    The rejection and the reason are one assertion. Stated as a bare
-    ``pytest.raises(ValueError)``, the reason is the part that goes missing: a URL
-    refused as ``private_network_target`` when the test meant ``host_denied``
-    passes, and which of those two reasons wins is the entire subject of the
-    host-policy tests.
+    """``NormalizedUrl`` admission must reject `url` for exactly `reason`; stated as
+    a bare ``pytest.raises(ValueError)`` the reason goes missing, and which reason
+    wins is the entire subject of the host-policy tests.
     """
     import pytest
 

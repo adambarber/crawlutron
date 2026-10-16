@@ -1,22 +1,15 @@
-"""Call the ``/v1/render`` producer the way an endpoint test needs to.
-
-``render_request`` is a plain coroutine, not a route: a test that wants the
-envelope the response adapter reads calls it directly, and every such call
-spelled out the same two arguments -- default settings, and a worker that
-returns a rendered result -- next to the payload the test was actually about.
-The payload is the per-test part; the rest is the arrangement.
+"""Call the ``/v1/render`` producer the way an endpoint test needs to; it is a
+plain coroutine, not a route, and every direct call spelled the same two
+arguments (default settings, a worker) next to the per-test payload.
 """
 
 from tests._browser_doubles import _fake_browser
 
 
 async def render_stub_request(payload: dict, *, worker=None) -> dict:
-    """The envelope ``/v1/render`` produces for `payload`.
-
-    The worker defaults to one that succeeds with a fixed body, which is the
-    shape an endpoint test is asserting on. Pass ``worker`` for the scenarios
-    that are about the worker itself -- one that raises, one that records the
-    jobs it was handed.
+    """The envelope ``/v1/render`` produces for `payload`, with a worker defaulting
+    to success on a fixed body -- the shape an endpoint test asserts on; pass
+    ``worker`` for scenarios that are about the worker itself.
     """
     from app.api.render import render_request
     from app.config.settings import CrawlerSettings

@@ -1,38 +1,6 @@
-"""The ratchet funnel: what every budget gate in this suite does identically.
-
-Four modules measure a budget over the app tree. Each supplies its own budgets
-and its own collector, and each then re-typed the same five things: the
-work-list printer, the not-exceeded assertion, the tightness assertion, the
-determinism check, and the proof that its collector reaches real code. The
-duplication gate caught that in the first place -- `test_metrics_budget.py` and
-`test_typing_budget.py` cloned four regions of each other at 30 tokens a piece --
-and a sanctioned annotation would have been the wrong answer. Five copies of one
-ratchet is five places a future change to a ratchet has to be remembered, and
-the fifth is the one nobody remembers.
-
-So the funnel lives here and each gate supplies only what is genuinely its own:
-the budget table, the collector, and the prose for its failure message. What
-cannot be supplied -- the arithmetic, the assertion shapes, the whole-tree proof
--- is written once.
-
-`Offender` is deliberately NOT here. The metrics gate's offender carries a size
-and the typing gate's carries an annotation, and unifying them would mean every
-offender carries two fields one of which is always meaningless. Each module keeps
-its own and passes a `render` callable, which is the one line that has to know
-the shape.
-
-Every factory returns a named function rather than taking a decorator, because a
-parametrized assertion has to be reachable by name at module scope for pytest to
-collect it. `budget_not_exceeded(...)` is called at module level in the gate
-module and its result assigned to `test_...`, which is why the `subject`
-argument exists: it is what makes the two gates' failure messages
-distinguishable in a parallel run.
-
-The functions the factories build are deliberately NOT named `test_*`. This is a
-helper module, not a test module, and a `def test_...` in here is never collected
-by anything -- pytest only collects module-level names in a test module. The
-hygiene invariant calls that out by name, and it is right: the name belongs to the
-caller that binds it, and only the caller can put it where pytest will look.
+"""The ratchet funnel: every budget gate supplies its own budgets, collector and
+prose, and gets back the work-list, not-exceeded/tight/deterministic assertions
+and a whole-tree proof -- written once, not five copies. ``Offender`` stays per-gate.
 """
 
 from __future__ import annotations
@@ -70,13 +38,9 @@ def walk(
     *,
     exclude: frozenset[str] = ALL_APP,
 ) -> Iterator[tuple[str, str, Any]]:
-    """Every candidate in the app tree, as ``(metric, where, detail)``.
-
-    The collector is per-gate because what it measures is; the tree walk is not,
-    because every gate wants the same one and every gate spells `relative` the
-    same way. A collector that forgets to qualify its line numbers with a path
-    produces a work list nobody can act on, so that is the part worth writing
-    once.
+    """Every candidate in the app tree as ``(metric, where, detail)``: the collector
+    is per-gate but the walk is shared, and the part worth writing once is qualifying
+    each line number with its path so the work list can be acted on.
     """
     for path, tree in app_trees(exclude=exclude):
         relative = path.relative_to(APP_ROOT.parent).as_posix()
@@ -105,9 +69,8 @@ def report(
 ) -> None:
     """Print every metric, its budget, and its offenders -- the work list.
 
-    `headline` exists because the metrics gate prints a unit and the typing gate
-    prints a slash, and because one of them has a metric whose budget is its own
-    limit. Neither is worth a second copy of the loop; both are worth a callable.
+    ``headline`` exists because the metrics gate prints a unit and the typing gate
+    prints a slash; neither is worth a second loop, both are worth a callable.
     """
     measurement, offenders = read
     for metric, budget in budgets.items():
@@ -182,16 +145,9 @@ def collector_sees_the_whole_tree(
     *,
     subject: str,
 ) -> Callable:
-    """The gate is only worth what it scans.
-
-    An empty scan and a whole-tree scan both report zero, so a broken collector
-    would otherwise turn a budget module into permanently-passing tests. Proved
-    by reaching real code, never by counting offenders -- which is the mistake
-    the zero-observation proof in `tests/invariants/` already made once.
-
-    A gate may walk for several things (the metrics gate counts functions and
-    classes, the typing gate counts annotations), so the counts are a mapping and
-    the thresholds are per-key.
+    """The gate is only worth what it scans: an empty and a whole-tree scan both
+    report zero, so reach is proved against real code, never by counting offenders;
+    a gate may walk for several things, so counts are a mapping with per-key minimums.
     """
     minimum_modules = 50
 

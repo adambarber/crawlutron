@@ -12,33 +12,9 @@ def assert_detector(
     trips: dict[str, int] | None = None,
     clean: tuple[str, ...] = (),
 ) -> None:
-    """Prove a detector. Three orthogonal claims, one call, all exact.
-
-    ``fires``  -- source -> the substring its single offender must name. The
-    strongest claim: fires once, and says what it found.
-    ``trips``  -- source -> how many offenders it must produce. For sources that
-    legitimately contain the bad shape more than once (four hand-rolled cache
-    envelopes; a ``uuid4`` call AND a ``.hex`` slice are two findings, not one).
-    ``clean``  -- sources that must produce none.
-
-    One call covering all of them because they fail in OPPOSITE directions and a
-    bites test that can only easily express one is how a detector rots with the
-    suite green: drop ``fires`` and nothing notices the detector has stopped
-    detecting; drop ``clean`` and it has quietly grown over-broad. Every claim is
-    exact, because ``assert offenders`` -- the hand-rolled form this replaced --
-    proves only that a detector is not inert, and is equally satisfied by one that
-    matches everything and by one whose message has degraded to a generic string.
-
-    ``trips`` rejects 0 rather than accepting it: "must not fire" already has a
-    spelling, and a count of 0 as a second one would let the same fact drift
-    between two forms and make a mis-edited count read as a passing proof.
-
-    Detector output is normalized to a list HERE rather than at each call site.
-    The tree's detectors are split between ``list[str]`` and generators, and that
-    split is worse than cosmetic: ``not <generator>`` is always True, so an
-    over-matching generator detector would satisfy a hand-rolled ``assert not
-    offenders`` while reporting everything. Normalizing once means a caller
-    cannot get that wrong, and a new detector can be written either way.
+    """Prove a detector in one call, all claims exact: ``fires`` fires once and
+    names its offender, ``trips`` counts offenders (rejecting 0, which belongs in
+    ``clean``), and ``clean`` fires none -- all of it normalized to a list.
     """
     for src, why in (fires or {}).items():
         offenders = list(detector(ast.parse(src), path))
@@ -57,11 +33,9 @@ def assert_detector(
 
 
 def assert_fires_once(detector, fires: dict[str, str], path: pathlib.Path) -> None:
-    """A ``*_bites`` proof's red half: each source fires the detector, saying why.
-
-    Thin wrapper over :func:`assert_detector` so the assertion exists in one
-    place; kept as its own name because a number of proofs cover only the red
-    half and reading as a wrapper is honest about that.
+    """A ``*_bites`` proof's red half: each source fires the detector, saying why --
+    a thin wrapper over :func:`assert_detector`, given its own name because several
+    proofs cover only the red half and reading as a wrapper is honest about that.
     """
     assert_detector(detector, path=path, fires=fires)
 

@@ -1,33 +1,6 @@
-"""Harnesses for driving ``run_recursive_crawl`` from a test.
-
-``run_recursive_crawl`` takes twenty keyword arguments. A test of the dispatch
-loop is about at most four of them -- the jobs, the worker, whether robots
-allows, and the bound under test -- and the other sixteen were spelled out in
-full at every call site. That is a funnel that did not exist: a new required
-keyword in production became a four-file edit, and a call site that quietly
-kept a stale default passed for the wrong reason rather than failing.
-
-``drive_recursive_crawl`` is that funnel. It takes the uncontested defaults from
-``_crawl_defaults`` and binds every keyword against ``run_recursive_crawl``'s own
-signature, so the harness cannot restate a contract and drift from it: the list
-of keywords exists in exactly one place, production's, and a required keyword
-added there becomes a ``TypeError`` at the harness rather than a four-file edit.
-The defaults are the ones that mean "this test is not about admission, robots,
-or document bodies":
-
-* ``FakeScheduler`` runs the jobs it is handed, in order, with no domain
-  politeness and no strategy pinning -- so a scheduling assertion is a test
-  that passes its own scheduler in.
-* ``ContentionFreeGate`` never contends. The real ``ResourceGate`` samples
-  ``/sys/fs/cgroup`` and the wall clock, which would make a dispatch test's
-  result depend on the machine it ran on; a double that reports full speed and
-  zero usage is the hermetic way to say admission is not the subject.
-* ``respect_robots=True`` with an ``allows`` closure the test supplies, and a
-  ``robots_disallowed`` skip that records the URL as rendered. A test that is
-  about robots passes a different ``allows``; a test that is about the
-  skip path passes its own ``robots_disallowed``.
-* ``spill`` and the frontier bookkeeping are the real ``Spill``, so what a test
-  asserts on is what the loop actually wrote.
+"""Harnesses for driving ``run_recursive_crawl`` from a test: a dispatch test is
+about at most four of twenty keywords, so ``drive_recursive_crawl`` binds the
+uncontested defaults against production's own signature rather than restating it.
 """
 
 from __future__ import annotations
@@ -47,22 +20,9 @@ __all__ = ["ContentionFreeGate", "RecursiveRun", "drive_recursive_crawl", "make_
 
 
 class ContentionFreeGate:
-    """A ``ResourceGate`` that reports a fixed scale and no memory or CPU use.
-
-    Stands in for ``app.runtime.resource_pressure.ResourceGate``, which reads the real
-    cgroup and the real clock. What a dispatch test needs from a gate is a
-    *known* scale, and that is a statement about the test rather than a
-    reimplementation of the gate: a double that computed anything would be
-    testing the double. ``scale=0.0`` is the interesting non-default, because it
-    forces each batch down to the floor of one job and is how a test pins that
-    shrinking the batch does not shrink the crawl.
-
-    ``consultations`` counts the ``batch_scale_factor`` calls, which is the only
-    gate method the recursive path actually invokes
-    (``app/admission/recursive_admission.py``). The gate also exposes
-    ``wait_while_saturated``, and deliberately does not count it: the recursive
-    loop must not consult it -- admission is per-batch weighted, not a
-    stop-the-world pause -- so a counter on it is a counter nothing increments.
+    """A ``ResourceGate`` that reports a fixed scale and no memory or CPU use, so a
+    dispatch test's result does not depend on the machine; ``scale=0.0`` forces a
+    batch floor of one job, and ``consultations`` counts the one method it invokes.
     """
 
     def __init__(self, scale: float = 1.0) -> None:
@@ -114,19 +74,9 @@ async def drive_recursive_crawl(
     host_policy: Any | None = None,
     **overrides: Any,
 ) -> RecursiveRun:
-    """Run one recursive crawl with the uncontested defaults filled in.
-
-    The rest of ``run_recursive_crawl``'s keywords come from
-    ``_crawl_defaults`` and are bound against ``run_recursive_crawl``'s own
-    signature before the call, so this is the production contract rather than a
-    second opinion about it -- derived, not restated. A new required keyword in
-    production raises at the harness, once, instead of at one of several call
-    sites, and the list of keywords exists in exactly one place: production's.
-
-    ``overrides`` is not the ``**kwargs`` catch-all it looks like. Every value in
-    it is bound against ``_CRAWL_SIGNATURE``, so a typo'd or misspelled override
-    is a ``TypeError`` here, naming the parameter, rather than an argument
-    production never received.
+    """Run one recursive crawl with the uncontested defaults filled in; every keyword
+    is bound against ``run_recursive_crawl``'s own signature first, so this is derived
+    rather than restated, and a typo'd ``overrides`` value is a ``TypeError`` here.
     """
     the_spill = spill if spill is not None else Spill()
     the_gate = gate if gate is not None else ContentionFreeGate(gate_scale)
@@ -158,15 +108,9 @@ _CRAWL_SIGNATURE = inspect.signature(run_recursive_crawl)
 def _crawl_defaults(
     *, robots_disallowed: Callable[[CrawlTask], Any] | None, sitemap_seeds: Any
 ) -> dict[str, Any]:
-    """The values for the keywords a crawl test is not about.
-
-    Factories, not values: ``shutdown_event`` has to be a fresh ``Event`` per
-    call, because a shared one carries ``is_set()`` state between tests and a
-    crawl that should have run would stop immediately.
-
-    A parameter absent here is required by the signature, which is the point --
-    the harness is the contract, and a new required keyword in production becomes
-    a ``TypeError`` here rather than a silent default nobody chose.
+    """The values for the keywords a crawl test is not about: factories, not values,
+    so ``shutdown_event`` is a fresh ``Event`` per call -- a shared one carries
+    ``is_set()`` state between tests and would stop a crawl that should have run.
     """
     return {
         "robots_disallowed": (
