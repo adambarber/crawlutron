@@ -1,10 +1,6 @@
 """The engine-side funnels: an attempt becomes a reportable record.
-
-Every engine result is built here, so the record's construction is one chokepoint:
-the three outcome axes come from the attempt, which keeps a flat wire field and
-the attempt's own copy of the same value from disagreeing. Exceptions enter
-through ``engine_result_from_exception`` -- the same door whether the failure
-was a strategy raising, the scheduler's worker envelope, or the per-URL budget.
+Every engine result is built here (one construction chokepoint), so the three
+outcome axes stay the wire fields the attempt declared; exceptions enter via engine_result_from_exception.
 """
 
 from __future__ import annotations
@@ -44,27 +40,9 @@ def engine_result_from_exception(
     extra_diagnostics: dict | None = None,
     known_classification: Classification | None = None,
 ) -> EngineCrawlResult:
-    """Convert ANY strategy exception into a classified terminal result.
-
-    This is the single chokepoint for "a strategy raised": the HTTP strategy's
-    broad-except sink, the browser strategy's outer guard, the engine's
-    budget-timeout path, and the scheduler's worker-exception recovery all
-    route through here, so an exception can never become an ad-hoc result
-    shape (or vanish entirely) at one of them.
-
-    Raw exception text is logged server-side only and never reaches the wire
-    (it can leak DNS names, paths, or stack detail); the caller sees the stable
-    code.
-
-    ``strategy`` is the strategy this failure belongs to, or None when the
-    failure preceded any attempt (the scheduler's worker envelope, the
-    per-URL budget overrunning the whole chain): "no strategy was attempted"
-    is not a strategy, and None is the value the strict wire enum accepts.
-
-    ``known_classification`` is for the one case where the failure mode is not
-    derived from the exception type at all -- the per-URL wall-clock budget,
-    which raises bare ``TimeoutError`` and whose real classification is
-    ``url_budget_exceeded``. It must be a taxonomy member.
+    """Convert ANY strategy exception into a classified terminal result -- the one
+    chokepoint "a strategy raised". Raw exception text is logged server-side only
+    and never reaches the wire; ``known_classification`` pins the budget-exceeded case.
     """
     classification, retryable = classify_and_log(
         error,
@@ -100,10 +78,8 @@ def engine_result_from_exception(
 
 def _job_url_value(job: object) -> NormalizedUrl | None:
     """The job's own URL as an admitted value, whichever record it was dispatched with.
-
-    ``CrawlJob`` holds it as ``url``, ``CrawlTask`` as ``normalized_url``: same
-    thing, two names. A reader reaching for one attribute gets the other
-    record's shape, so the two read sites name this once.
+    ``CrawlJob`` holds it as ``url``, ``CrawlTask`` as ``normalized_url``: one thing,
+    two names, so the two read sites name this once.
     """
     for attribute in ("url", "normalized_url"):
         found = getattr(job, attribute, None)
@@ -119,16 +95,8 @@ def failed_result_for[JobT](
     url_of: Callable[[JobT], str],
 ) -> EngineCrawlResult:
     """Build the terminal ``EngineCrawlResult`` for a job the scheduler skipped.
-
-    The domain scheduler used to construct this envelope inline, which silently
-    assumed every pipeline it serves returns an ``EngineCrawlResult``. The
-    render pipeline does not, so the envelope now comes from the pipeline:
-    crawl pipelines route here, the render pipeline supplies its own builder.
-
-    ``_CircuitBreakerOpen`` is the one exception the scheduler raises itself; it
-    reaches the same ``engine_result_from_exception`` chokepoint so the
-    ``network_error`` / ``circuit_breaker_open`` classification and the redaction
-    contract stay in one place.
+    The envelope comes from the pipeline (crawl routes here; render its own), so
+    a skipped job still reports; the scheduler's single raise reaches the same exception chokepoint.
     """
     original_url = url_of(job)
     normalized = _job_url_value(job)
@@ -167,11 +135,8 @@ def build_engine_result(
     llm_metadata: dict[str, Any] | None = None,
 ) -> EngineCrawlResult:
     """Construct an EngineCrawlResult from a pre-built attempt.
-
-    The outcome axes -- status, classification and error -- are DERIVED from
-    the attempt rather than accepted as parameters: the record re-declares
-    them as flat wire fields, and a funnel that also took them by keyword
-    held a second spelling of the same three values that nothing compared.
+    Status, classification and error are DERIVED from the attempt, not accepted
+    as parameters -- a funnel that took them too held a second spelling nothing checked.
     """
     if headers is None:
         headers = {}
@@ -212,13 +177,8 @@ def build_engine_result(
 @dataclass(frozen=True)
 class TerminalResult:
     """The per-attempt fields every terminal result carries, bound as one value.
-
-    Four constructors each spelled this same list of keyword-only parameters.
-    That is four signatures to widen when a field is added, and the duplicated
-    text was exactly those signatures -- the duplication was never
-    the logic, it was the argument list. Binding them into a value the
-    constructors take positionally means the field list exists once, and a call
-    site passes one object instead of nine keywords to say one thing.
+    Four constructors used to spell this list as nine keyword parameters, so a
+    field addition widened four signatures; now the list exists once.
     """
 
     original_url: str
@@ -234,12 +194,8 @@ class TerminalResult:
 
 def terminal_engine_result(result: TerminalResult, *, status: ResultStatus) -> EngineCrawlResult:
     """Construct a terminal (no payload) EngineCrawlResult with one attempt.
-
-    The three terminal outcomes -- failed, blocked, skipped -- differ only in
-    the status string and how the error defaults: a blocked result reports the
-    classification itself as the reason and a skipped result never carries a
-    final URL or status. The thin wrappers below pin those per-status defaults
-    so no call site has to spell them out.
+    The three terminal outcomes (failed/blocked/skipped) differ only in status
+    and error defaults; the thin wrappers pin those per-status defaults.
     """
     error = result.error or result.classification
     attempt = CrawlStrategyAttempt(
@@ -263,23 +219,8 @@ def terminal_engine_result(result: TerminalResult, *, status: ResultStatus) -> E
 
 def failed_engine_result(result: TerminalResult) -> EngineCrawlResult:
     """Construct a failed EngineCrawlResult with a single attempt.
-
-    One of two per-status names over :func:`terminal_engine_result`, and the
-    duplication between them is irreducible in Python: ``status`` is
-    keyword-only and must stay supplied, because ``CONTEXT_VARYING_STATUS``
-    classifications legitimately need a status other than the table default, so
-    the value cannot be derived here. Binding the status with
-    ``functools.partial`` was tried and is worse, not better -- a partial
-    merges keywords rather than owning them, so a caller could pass
-    ``status="skipped"`` to this function and get a skipped result, and mypy
-    does not close that hole. So each name is a real function.
-
-    What makes it safe is not the shape but the guard underneath:
-    :func:`status_agrees_with_classification` rejects any ``(classification,
-    status)`` pair the taxonomy does not allow, at the point the attempt is
-    built. That is what these names are for -- pinning a status and having it
-    checked -- and it is why a third copy of this forwarding call, inlined in
-    :func:`_classify_and_build`, was the one that actually needed removing.
+    One of two per-status names over terminal_engine_result; ``functools.partial``
+    was tried and is worse -- it merges keywords, so a caller could mis-ask for a skipped result.
     """
     return terminal_engine_result(result, status="failed")
 
