@@ -26,10 +26,8 @@ _PROTOCOL_CONSTANTS_MODULE = "app/mcp/constants.py"
 def _module_level_assignment_lines(tree: ast.Module, names: Iterable[str]) -> dict[str, int]:
     """Line of each named module-level assignment, for the offender label.
 
-    Distinct from :func:`_declared_public_symbols`, which reads the *declaration*
-    of the surface; this locates a name the surface already vouches for, so a
-    reader of the failure is handed the line to delete rather than a name to go
-    looking for.
+    Distinct from the surface declaration reader; this locates a name the
+    surface already vouches for so the failure names the line to delete.
     """
     wanted = set(names)
     lines: dict[str, int] = {}
@@ -54,28 +52,8 @@ def _unproduced_protocol_constants(
 ) -> list[str]:
     """Declared protocol constants that no other module under ``app/`` reads.
 
-    This surface is a set of *values other code can rely on*: a JSON-RPC code a
-    caller can be sent, a ``_meta`` key the server looks for. A declared value
-    nothing reads is not a spare part of that surface, it is a claim about it --
-    and an untested error code is worse than an absent one precisely because it
-    reads as coverage. Two sat in that state: ``MISSING_REQUIRED_CLIENT_CAPABILITY``,
-    which nothing ever raised, and ``META_CLIENT_INFO``, which nothing ever read,
-    because the 2026-07-28 spec requires only ``protocolVersion`` and
-    ``clientCapabilities`` in ``_meta``.
-
-    Reachability is the check rather than a reviewer's memory, because the
-    registry is where a spec addition goes to be *recorded* and the recording is
-    not the same act as implementing it. The reference sweep is the whole
-    ``app/`` tree -- a constant read from a module this test never heard of is
-    produced -- with the declaring module excluded from the reference side,
-    because its own assignments would otherwise satisfy the check for every
-    name in it, which is the defect spelled backwards.
-
-    ``__all__`` rather than every module-level assignment, reusing
-    :func:`_declared_public_symbols`, because ``__all__`` is the module's own
-    statement of the surface it offers and the claim under test is about that
-    surface. An unreadable declaration is itself a finding: a registry the sweep
-    cannot read is a registry nothing holds.
+    An unread value is a claim that reads as coverage; reachability across
+    ``app/`` is the check, against the ``__all__`` surface statement.
     """
     if owner_tree is None:
         return [f"{owner}: the protocol registry module could not be read, so it cannot be swept"]
@@ -152,19 +130,8 @@ def _cycle_guard_offenders(
 ) -> list[str]:
     """Calls to the cycle guard made from anywhere but the one function that owns it.
 
-    ``_entered`` was single-sourced as a *function* and then inlined back at
-    every use: three container branches each carried the two-step "descend, and
-    give up if already on the path" sequence, so the guard existed in four
-    places. The function's own docstring already claimed the dedup -- "One
-    function rather than three copies of the four lines" -- which made the gap
-    worse, not better: a reader checking that claim would have believed it.
-
-    The hazard is what a *fourth* branch does. Adding a container kind means
-    writing a new ``isinstance`` arm, and the guard is not something the type
-    system requires there. Routing every arm through one helper is what makes
-    the check structural instead of remembered, so the rule under test is
-    positional rather than structural: the guard is consulted in exactly one
-    function in ``app/``, and that function is the one the arms call.
+    ``_entered`` was single-sourced then inlined at every use, and the guard is
+    not type-required on a new branch; one helper makes the check structural.
     """
     return [
         offender(path, node.lineno, f"{call}() is called from {enclosing!r}, not {owner}()")
@@ -226,19 +193,8 @@ _META_WRONG_TYPE_FRAGMENT = "Invalid _meta key (must be "
 def _meta_key_reason_offenders(tree: ast.AST, path: Path, *, owner: str = _META_REASON_OWNER) -> list[str]:
     """The wrong-type half of the ``_meta`` key rejection authored outside its owner.
 
-    ``validate_meta`` checked two required ``_meta`` keys and, for each, spelled
-    out the same two-part reason -- absent versus wrong type -- and raised the
-    same error around it. The distinction is the caller's only way to learn it
-    forgot a key rather than sent the wrong shape, so it is a contract, and a
-    duplicated one can drift in both directions at once: the two arms can stop
-    agreeing on wording, or one can stop distinguishing the two cases at all,
-    with the suite green either way.
-
-    Matching the *literal* rather than the shape is deliberate. A second arm that
-    built the same sentence a different way -- an f-string split across lines, a
-    helper, a new noun -- would be precisely the drift, and a test that recognised
-    the shape would wave it through. The rule is that the sentence is authored
-    once, in the function both keys check through.
+    The absent/wrong-type reason was spelled per key, and that distinction is
+    the caller's only way to learn which failure it hit -- so it must be one sentence.
     """
 
     def is_reason(node: ast.AST) -> bool:

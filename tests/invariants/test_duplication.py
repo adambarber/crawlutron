@@ -15,10 +15,8 @@ from tests.rules import Bites, Rule
 def _provider_loop_reinlines(tree: ast.AST, path: pathlib.Path) -> list[str]:
     """Flag the keyed-provider dedupe loop re-inlined outside the collector.
 
-    The exact copy-paste shape is ``seen: set`` + ``isinstance(item, dict)``
-    guard + ``SearchResult`` construction in one function. DuckDuckGo's
-    provider legitimately keeps a separate lxml node-walk: it has no dict
-    guard, so the sink never fires on it.
+    The copy-paste shape is ``seen: set`` + dict guard + result construction in
+    one function; the DuckDuckGo walk has no dict guard, so it never fires.
     """
     offenders: list[str] = []
     for node in nodes_of(tree):
@@ -105,20 +103,8 @@ _SELECTOR_KEY_BUILDER = "build_content_cache_key"
 def _selector_contract_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
     """A narrowing extractor carries the pair in one value, never as two names.
 
-    The rule used to be "take both names or neither", which forbade the defect
-    by counting parameters. It could catch a function declaring one, and it
-    could say nothing about a function declaring both and then honouring only
-    one. It was also the *reason* the pair was spelled four times -- three
-    signatures plus the mapping that fed them -- because satisfying a parameter
-    rule is a spelling, and a spelling cannot be shared between entry points.
-
-    :class:`app.extraction.content.Selectors` replaced the spelling, so the rule
-    inverts: a function narrows by taking ONE ``selectors`` value, and nothing
-    outside the carrier declares the names. That is stronger in the direction
-    that matters -- there is no longer any signature in which passing one
-    selector is expressible -- and it is what stops a future fourth extractor
-    from reintroducing the pair as parameters, which a rule checking only "both
-    or neither" would have waved through.
+    The old "take both or neither" counted parameters and let one be honoured;
+    the ``Selectors`` carrier inverts the rule, so passing one is inexpressible.
     """
     offenders: list[str] = []
     for node in functions(tree):
@@ -184,20 +170,8 @@ def test_selector_contract_detector_bites():
 def _keyed_provider_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
     """A keyed provider states one request; it does not write one.
 
-    The normalize/dedupe/clip contract above is only half the shared flow. The
-    other half -- issue the request, refuse a non-200, hand the result list to
-    the collector -- used to be spelled once per provider, and the per-provider
-    request bodies were those spellings: identical but for the
-    endpoint and the credential placement, so the only part that genuinely
-    varied was the part left as a hook. The flow then moved into the base, and
-    what a provider supplies is a ``_call`` describing its request and an
-    ``_items_path`` saying where the results sit.
-
-    Requiring the declaration *and* forbidding the flow is what makes a fourth
-    provider a subclass with two declarations instead of a fourth copy of the
-    non-200 check. ``search``, ``_request``, ``_results`` and ``_items_of`` are
-    all the base's now, so a subclass defining any of them is re-spelling part
-    of the shared flow and reaching the network by a route the base never sees.
+    The request/refuse/collect flow lives in the base, so a subclass defining
+    the flow reach the network by a route the base never sees.
     """
     offenders: list[str] = []
     for node in class_defs(tree):
@@ -304,14 +278,7 @@ def test_keyed_providers_inherit_the_shared_response_flow():
 def test_keyed_provider_flow_detector_bites():
     """The re-spelled flow fires, the incomplete subclass fires, the data passes.
 
-    The first two shapes are what the two POST providers did: the whole flow
-    written per provider, differing only in the endpoint and the credential
-    placement -- once by overriding ``search``, once by re-opening the request
-    itself. The next two are the quieter failures: a provider that never says
-    what its request looks like, and one that never says where its results sit,
-    each reaching ``NotImplementedError`` or an empty result set on the first
-    query instead of at import. The last is the shape the class is for. Each
-    source is built to trip exactly one rule, so a rule that started firing for
-    the wrong reason shows up as a count change rather than a green run.
+    Each source trips exactly one rule, so a rule firing for the wrong reason
+    shows up as a count change rather than a green run.
     """
     KEYED_PROVIDERS_INHERIT_THE_SHARED_RESPONSE_FLOW.check_bites()

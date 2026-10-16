@@ -21,11 +21,8 @@ from tests.rules import Bites, Rule, Trips
 def _tests_tree(*, exclude: frozenset[str]) -> tuple[tuple[pathlib.Path, ast.Module], ...]:
     """The test tree, swept whole.
 
-    Carries ``exclude`` so it is a drop-in for ``app_trees``, and ignores it: the
-    exemptions a rule needs are named against ``app/`` modules, and a helper or a
-    fixture under a directory this rule has never heard of is exactly what it is
-    here to catch. A sanctioned-name list for ``tests/`` would be a list that has
-    to be extended by every file the suite gains.
+    A drop-in for ``app_trees`` that ignores ``exclude``; exemptions are named
+    against ``app/`` modules, not a ``tests/`` list.
     """
     return trees_under(TESTS_DIR)
 
@@ -109,10 +106,8 @@ _BINDING_PASSES = 4
 def _names_app_tree(component: ast.expr) -> bool:
     """Whether one path component selects the `app/` tree.
 
-    A relative literal names the tree when its FIRST segment is `app`, so
-    `tests/fixtures/app/x.py` is a fixture and not a production path. An
-    absolute literal is a real filesystem path and any `app` segment in it
-    counts.
+    A relative literal names the tree when its first segment is ``app``; an
+    absolute literal is a real path and any ``app`` segment counts.
     """
     if not (isinstance(component, ast.Constant) and isinstance(component.value, str)):
         return False
@@ -123,11 +118,10 @@ def _names_app_tree(component: ast.expr) -> bool:
 
 
 def _path_components(expr: ast.expr) -> list[ast.expr] | None:
-    """Flatten `a / b / c`, `os.path.join(a, b)`, and `Path(a)` into components.
+    """Flatten ``a / b / c``, ``os.path.join(a, b)``, and ``Path(a)`` into components.
 
-    The elements are expressions -- a name, an attribute, a call result -- which
-    is what every consumer classifies them as, so the wider node type was the
-    only thing stopping them from saying so.
+    The elements are expressions, which is what every consumer classifies them
+    as; only the wider node type was stopping them from saying so.
     """
     if isinstance(expr, ast.BinOp) and isinstance(expr.op, ast.Div):
         head = _path_components(expr.left)
@@ -151,11 +145,8 @@ def _tree_role(
 ) -> str:
     """Classify a path expression as the app tree, a service root, or neither.
 
-    Returns ``"app"`` for anything that lands in `app/`, ``"root"`` for a bare
-    service root (so an alias of one can be absorbed), and ``"other"`` for every
-    expression whose first filesystem anchor this cannot name -- `tmp_path`, a
-    parameter, a value returned by a call. That last case is the whole point:
-    an unnamed anchor cannot be assumed to be the production tree.
+    The unnamed-anchor case is the point: a path whose first filesystem anchor
+    this cannot name (`tmp_path`, a parameter) must not be assumed to be `app/`.
     """
     for position, component in enumerate(components):
         if isinstance(component, ast.Name) and component.id in rooted:
@@ -332,10 +323,7 @@ def test_tests_do_not_mutate_the_production_tree():
 def test_tree_detectors_bite():
     """Bites: the shapes that actually shipped, and the near-misses beside them.
 
-    The first is the real offender -- the exact path written and unlinked from a test
-    that made `app/` a directory that MOVES while the suite runs. The rest are the
-    ways a plausible fix could regress the rule into either a no-op or a false alarm.
-    All of it is declared on the rules, so neither half can be dropped without the
-    declaration failing to build.
+    The first is the real offender (making `app/` move mid-suite); the rest are
+    ways a fix could regress the rule into a no-op or false alarm.
     """
     TESTS_MUST_NOT_MUTATE_APP.check_bites()

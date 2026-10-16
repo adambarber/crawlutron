@@ -28,10 +28,8 @@ def _literal_check_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
 def _enclosing_class(tree: ast.AST, node: ast.AST) -> ast.ClassDef | None:
     """The innermost ``class`` body containing ``node``, or None.
 
-    A call to the check has to be attributed to the class it is written in, and
-    a nested function inside that class is still that class's: the whole point
-    of the guard is that the check runs at construction, which is a property of
-    the class, not of the function that happens to spell the call.
+    A call is attributed to the class it is written in (even from a nested
+    function), because construction is a property of the class, not the function.
     """
     found: list[ast.ClassDef | None] = []
 
@@ -82,10 +80,8 @@ THE_LITERAL_FIELD_CHECK_IS_CALLED_BY_ONE_OWNER = Rule(
 def test_the_literal_field_check_is_called_by_one_owner():
     """One caller for ``check_literal_fields``, and it is the owning base class.
 
-    A second caller is a second place the construction check can be re-spelled,
-    which is the shape this consolidation removed: the check was one function
-    reached through three identical trampolines, and a class that re-spelled it
-    would be indistinguishable from one that inherited it.
+    A second caller is a second place the check can be re-spelled -- the shape
+    this consolidation removed (three trampolines into one function).
     """
     THE_LITERAL_FIELD_CHECK_IS_CALLED_BY_ONE_OWNER.scan()
 
@@ -93,10 +89,8 @@ def test_the_literal_field_check_is_called_by_one_owner():
 def test_literal_check_owner_detector_bites():
     """The owner guard fires on a re-spelled trampoline and admits the base.
 
-    The first shape is the pre-consolidation one -- a class calling the check for
-    itself -- and the second is the class that is allowed to. The third is the
-    shape the guard must NOT fire on: a *different* module's function that
-    happens to share the name, resolved by import bindings rather than by text.
+    It must not fire on a different module's function that shares the name,
+    resolved by import bindings rather than text.
     """
     THE_LITERAL_FIELD_CHECK_IS_CALLED_BY_ONE_OWNER.check_bites()
 
@@ -104,22 +98,8 @@ def test_literal_check_owner_detector_bites():
 def test_every_taxonomy_literal_dataclass_inherits_the_construction_check():
     """A dataclass that declares a taxonomy ``Literal`` field inherits the check.
 
-    The half of the property the owner guard cannot see: an *omission* rather
-    than a duplicate. Which dataclasses qualify is derived from the taxonomy's
-    own declaration -- ``LITERAL_FIELDS`` for the field names and
-    ``literal_members`` for whether the annotation is really a taxonomy alias --
-    and the classes are enumerated by walking ``app/models``, so a result
-    dataclass added tomorrow is covered the day it lands and nothing here is a
-    hand-kept class list. A field merely *named* like a taxonomy field but
-    annotated ``str`` is not one of these and is not reported.
-
-    Splitting the declarations into one file per type used to narrow this: it
-    could only see the classes that shared a module with the aliases, and the
-    docstring said so and called the owner guard above the tree-wide half. The
-    package made that gap disappear -- the aliases and the dataclasses now share
-    a HOME rather than a file -- so this guard is the whole property and the
-    caveat it used to carry is what makes it worth keeping the enumeration
-    derived: ``model_index`` finds every declared class by walking the package.
+    The half the owner guard cannot see is an *omission*: qualifying classes are
+    derived from the taxonomy's own declaration and ``model_index``.
     """
     import typing
     from dataclasses import is_dataclass
