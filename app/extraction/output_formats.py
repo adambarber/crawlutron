@@ -1,23 +1,7 @@
 """Multiple output formats for crawl results.
 
-The unified crawl result is a list of dicts (one per crawled URL). This module
-serializes that list into the caller-requested wire format without changing the
-underlying data shape:
-
-* ``json``     -> pretty-printed JSON array (default; the API model response)
-* ``jsonl``    -> one JSON object per line
-* ``ndjson``   -> newline-delimited JSON (same as jsonl, stream-friendly)
-* ``markdown`` -> one Markdown section per result (LLM-friendly)
-* ``csv``      -> flat tabular view of the most useful columns
-
-All serializers are pure and JSON-safe (pydantic models and arbitrary objects
-are reduced to dicts/strings via ``jsonify``).
-
-This module owns the vocabulary. ``OutputFormat`` is the only place the set is
-written out -- ``Literal`` cannot be built from a runtime tuple -- and
-``SUPPORTED_OUTPUT_FORMATS`` below is derived from it, so the annotation the
-model enforces and the set this module dispatches on cannot drift apart. The
-serializer's if/elif chain is asserted against the same set.
+Serializes the unified list-of-dicts result into wire formats (json/jsonl/ndjson/markdown/csv);
+``OutputFormat`` is the only place the set is written, so annotation and dispatch cannot drift.
 """
 
 from __future__ import annotations

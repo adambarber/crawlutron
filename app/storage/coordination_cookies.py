@@ -1,22 +1,7 @@
 """Cross-process shared cookie storage.
 
-`CookieJar` kept cookies in a per-process dict and persisted them by
-serialising the whole jar over a JSON file. The atomic-write chokepoint makes
-that write *non-truncated*; it does nothing about a *lost update*, because the
-update is replace-everything. Each worker loads at startup and saves at
-shutdown, so with N workers shutdown is last-writer-wins: the last process to
-exit discards every cookie the others collected and the deployment still
-reports healthy.
-
-A shared table makes the write additive instead. Two workers crawling one host
-set different cookies, so `merge` reads the row and writes back the union
-inside one transaction -- the read-modify-write is what the file could not do,
-because between its read and its replace another process had nothing to lose.
-
-`touched_at` carries the LRU clock. The jar is long-lived and every crawled
-host contributes a slot, so the table needs the same bound the in-memory map
-had, and eviction has to happen here because the map is no longer the thing
-being bounded.
+A shared table beats the old replace-everything file (last-writer-wins lost updates):
+``merge`` writes back the union in one transaction; ``touched_at`` carries the LRU clock for eviction.
 """
 
 from __future__ import annotations

@@ -1,10 +1,7 @@
 """Who this service says it is.
 
-The service's own id, version, repository and user-agent. These are the strings
-that go out on the wire -- in the user-agent header, the MCP server name, the
-OpenAPI service name and the discovery payloads -- so they are declared once and
-imported everywhere; a site that spells one by hand is a site that can disagree
-with the service it is talking to.
+The id, version, repository and user-agent that go out on the wire (user-agent header,
+MCP server name, OpenAPI name, discovery payloads) are declared once, imported everywhere.
 """
 
 from __future__ import annotations

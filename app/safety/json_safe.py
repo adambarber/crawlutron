@@ -1,11 +1,7 @@
 """Shared JSON fallback serializer: one canonical rendering for non-native values.
 
-Three ``default=`` fallbacks drifted: ``JobStore._json_default``
-(datetime/bytes/set/Exception specials), ``output_formats._default``
-(pydantic/model reducers), and bare ``default=str`` sprinkled through
-webhooks/MCP/logging (crudest -- ``str(datetime)`` with a space instead of
-ISO-8601). Union semantics below; every ``json.dumps`` with a fallback uses
-:func:`json_default` so renderings cannot drift again.
+Three ``default=`` fallbacks had drifted (store, output shaper, bare ``str``); every
+``json.dumps`` with a fallback uses :func:`json_default` so renderings cannot drift again.
 """
 
 from __future__ import annotations

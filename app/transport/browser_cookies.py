@@ -26,17 +26,8 @@ BROWSER_COOKIES_MAX = 500
 class _LockedDomainCookieStore:
     """LRU cookie store whose every read and mutation is internally guarded.
 
-    The store is module-global and genuinely concurrent: the render path writes
-    harvested cookies while the crawl engine reads them for the cffi
-    cookie-bootstrap retry, from different tasks and threads. Every operation
-    acquires ``_lock`` for its whole duration, so an unsynchronized access is
-    not a state a caller can construct and the eviction cannot interleave with a
-    read.
-
-    It implements no container protocol. It used to subclass
-    ``MutableMapping``, and ten of its thirteen methods existed to honour that
-    promise to callers outside ``app/`` -- no production path reached any of
-    them, and ``no-unclaimed-container-protocol`` now holds that line.
+    Module-global and concurrent (render writes while the engine reads), so every op holds
+    ``_lock`` whole-duration; no container protocol (a ``MutableMapping`` once promised 10 dead methods).
     """
 
     __slots__ = ("_data", "_lock", "_max_entries")

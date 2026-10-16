@@ -16,17 +16,10 @@ from app.models.taxonomy import CrawlStrategyName
 
 @dataclass(frozen=True)
 class StrategyRequest:
-    """What a strategy is being asked to fetch, in one piece.
+    """What a strategy is being asked to fetch, in one piece (five fields, once spelled).
 
-    These five -- original URL, canonical URL, strategy name, policy mapping,
-    host policy -- were spelled as keyword parameters at both strategy entry
-    points and then again as constructor arguments when the HTTP path built its
-    context, so the identity of one page had three independent spellings. That
-    is more than tidiness: mixing two pages' URLs is a correctness bug that
-    reads as a plausible-looking result rather than an exception, and a parameter
-    list with five same-shaped members is exactly the shape a transposition hides
-    in. ``frozen`` because a strategy must not be able to rewrite the page it
-    was dispatched for; the context objects downstream copy what they need.
+    The identity of one page had three independent spellings; mixing two pages' URLs is a
+    correctness bug that reads as plausible. ``frozen`` -- a strategy cannot rewrite its page.
     """
 
     original_url: str

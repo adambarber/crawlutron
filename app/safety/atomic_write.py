@@ -1,10 +1,7 @@
 """Crash-safe file writes: one audited mkstemp + fsync + replace dance.
 
-The cookie jar hand-rolled this inline; ContentCache used bare
-``path.write_text`` (a mid-write crash leaves a corrupt file, survived only
-because the envelope reader swallows ``ValueError``). Every disk write goes
-through :func:`atomic_write_text` so the crash-window class is closed in
-exactly one place.
+Every disk write goes through :func:`atomic_write_text` so the mid-write-corrupt-file
+crash class is closed in exactly one place.
 """
 
 from __future__ import annotations

@@ -42,11 +42,8 @@ _LOOP_LAG_SMOOTHING = 0.25
 class LoopLagProbe:
     """Best-effort event-loop lag sensor.
 
-    A lightweight background tick measures how far the loop falls behind its
-    scheduled cadence. A saturated loop (many concurrent coroutines, blocking
-    callbacks) lags, an independent pressure signal from CPU/memory: the cgroup
-    quota can look fine while the single event loop is the bottleneck. The gate
-    multiplies its scale by :meth:`factor` so lag alone can shed load.
+    A lightweight background tick measures how far the loop falls behind its cadence -- a
+    saturated loop lags even when the cgroup quota looks fine -- and the gate scales by :meth:`factor`.
     """
 
     def __init__(

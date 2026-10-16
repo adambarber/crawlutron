@@ -255,18 +255,9 @@ _NOISE_OPENERS: Final = ("<script", "<style", "<!--")
 
 
 def strip_html_noise(html: str | None) -> str:
-    """Remove scripts, styles, and comments via linear string scanning.
-
-    Replaces the previous regex pass (``.*?`` alternation with ``re.DOTALL``),
-    which exhibited O(N^2) backtracking on inputs with many unclosed script
-    tags: 4MB of unclosed tags pinned a worker for tens of seconds.
-    ``str.find`` scans each region exactly once, so the
-    cost is linear in input size regardless of tag structure.
-
-    Semantics are browser-consistent: an *unclosed* ``<script>``/``<style>``
-    or ``<!--`` swallows the remainder of the document (the old regex left
-    the unterminated body visible to classification — script code counted
-    as page text).
+    """Remove script/style/comment regions via linear string scanning (str.find), not a
+    backtracking regex -- and browser-consistent: an *unclosed* ``<script>``/``<style>``/``<!--``
+    swallows the rest of the document, so code is never counted as page text.
     """
     body = truncate_html_input(html)
 

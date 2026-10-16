@@ -100,20 +100,10 @@ def extract_content(
     url: NormalizedUrl | None,
     selectors: Selectors | None = None,
 ) -> ExtractedContent:
-    """Extract ``(text, markdown)`` from raw content using the unified pipeline.
+    """Extract ``(text, markdown)`` via the unified pipeline.
 
-    The HTML branch hands the selector pair down rather than dispatching on it
-    here: ``extract_html`` already routes a selector to :func:`extract_selected`
-    and a bare page to trafilatura, so deciding it in both places was two copies
-    of one rule that could disagree about the same page.
-
-    A selector only means something to a DOM. Applied to a document or a plain
-    text body there is no DOM to target, so the pair cannot be honoured and the
-    full content is extracted instead. That is logged rather than dropped in
-    silence: the caller asked to narrow and is being handed the whole thing, and
-    the only other signal it gets is a result that looks like a successful
-    narrowing. The same request against an HTML page does narrow, so the
-    difference between the two is invisible on the wire otherwise.
+    The HTML branch hands the selector pair to ``extract_html`` (which routes it); a selector
+    means nothing to a non-DOM body, so the full content is extracted and the fallback logged.
     """
     # ONE decision, read twice (drop report + dispatch): the predicate decodes
     # the whole body, so two evaluations meant two full decodes per non-HTML request.

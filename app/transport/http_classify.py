@@ -21,15 +21,10 @@ from app.vocabulary.extraction import (
 
 
 async def _extract_http_phase(ctx: HttpStrategyContext, resp: FetchedResponse) -> ExtractedHttpContent:
-    """Decode the body, run the selected extractor, and measure content.
+    """Decode the body, run the selected extractor, measure content.
 
-    ``is_html`` is :func:`app.extraction.content.is_html`, the same predicate the
-    unified funnel dispatches on, rather than a second reading of the same
-    question: this copy asked "does the content type mention html, or does the
-    decoded text open like a document" and extraction.py asked "the same", in
-    the same package, three functions apart. Two answers to one question about
-    one body is how a page that the funnel calls HTML reaches trafilatura here
-    and vice versa.
+    ``is_html`` is :func:`app.extraction.content.is_html`, the one predicate the funnel
+    dispatches on -- not a second reading of the same question two functions apart.
     """
     content_encoding = resp.headers.get("content-encoding", "")
     if content_encoding:

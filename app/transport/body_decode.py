@@ -21,17 +21,9 @@ except ImportError:
 
 
 def decode_body(body: bytes | bytearray | memoryview, content_type: str | None) -> str:
-    """Decode an already-decompressed response body to text.
-
-    Try the declared (or UTF-8) charset strictly first; fall back to
-    charset-normalizer when that fails, then to a lossy UTF-8 decode. This
-    avoids scanning/rewriting the whole body with ``errors='replace'`` (and
-    the resulting replacement-character check) on the common valid-UTF-8 path
-
-
-    ``body`` may be a bytearray/memoryview when the streamed fetcher returns an
-    uncompressed buffer without converting to immutable bytes; ``bytes`` is
-    required for the ``.decode()`` calls below, so normalize here exactly once.
+    """Decode an already-decompressed body to text: declared charset strictly, then
+    charset-normalizer, then lossy UTF-8 (avoiding a whole-body replace scan). ``body`` may be
+    bytearray/memoryview -- normalize to ``bytes`` here exactly once.
     """
     if not isinstance(body, bytes):
         body = bytes(body)

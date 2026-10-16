@@ -1,14 +1,7 @@
 """Timeout budgets chokepoint: one named place for HTTP timeout numbers.
 
-``httpx.Timeout`` was constructed at four call sites, each inventing its
-own connect/read/write/pool values -- and one site omitted ``write``,
-which httpx rejects at runtime. Every new I/O site picks a named
-constructor here instead of inventing numbers:
-
-- :meth:`Timeouts.for_request` -- per-request budgets derived from the
-  caller's ``timeout_seconds`` (fetch paths, search providers).
-- :meth:`Timeouts.defaults` -- service posture for shared/long-lived
-  clients (the pooled HTTP client, webhook delivery).
+``for_request`` derives per-request budgets from the caller's ``timeout_seconds``;
+``defaults`` is the service posture for shared/long-lived clients.
 """
 
 from __future__ import annotations
