@@ -1,11 +1,7 @@
-"""The lxml parse budget, measured against the real parser.
+"""The lxml parse budget, bracketing ``extraction.parse_count()``.
 
-lxml parsing is invisible: nothing in a green suite distinguishes a page that
-parsed once from a page that parsed four times, and the difference is real CPU
-on every request. These tests therefore bracket ``extraction.parse_count()`` --
-the counter production increments -- rather than replacing the parser, which
-would measure a patched function and would only see the parses that sat behind
-the patch.
+Parsing is invisible in a green suite, so tests bracket the production counter
+rather than replace the parser, which would measure a patch and miss real ones.
 """
 
 from dataclasses import dataclass, field
@@ -15,11 +11,9 @@ from app.extraction.content import parse_count
 
 @dataclass
 class ParseBudget:
-    """Parses observed since the last mark, without any production reset.
-
-    ``parse_count`` is cumulative, so a stage is measured by difference. That
-    keeps the counter honest (production only ever increments it) and lets a
-    budget span several pipeline phases that production cannot name.
+    """Parses since the last mark; ``parse_count`` is cumulative and only ever
+    incremented by production, so a stage is measured by difference -- letting a
+    budget span phases production cannot name.
     """
 
     _mark: int = field(default_factory=parse_count)

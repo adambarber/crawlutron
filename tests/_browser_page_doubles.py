@@ -14,24 +14,18 @@ DEFAULT_PAGE_HTML = "<html><body><h1>Visible body text</h1></body></html>"
 
 
 class PageCookieContext(Protocol):
-    """What the renderer reads off a page's context.
-
-    Production only asks for ``cookies``, so that is the whole contract -- and
-    declaring it here is what lets a test's own context double be passed in
-    without the page having to name that double's class.
+    """The renderer's whole page-context contract: it only reads ``cookies``, and
+    declaring it as a Protocol lets a test pass its own context double without the
+    page naming that double's class.
     """
 
     async def cookies(self, url: str | None = None) -> list[dict[str, str]]: ...
 
 
 class FakePageContext:
-    """A page context that holds no cookies.
-
-    ``harvest_session_cookies`` reads ``page.context.cookies``,
-    so a page double with no context is a double the renderer cannot ask -- and
-    the two ways tests were getting around that (assigning ``page.context`` after
-    construction) put a member on the object that its own type did not declare.
-    A context is part of the page's surface, so it is part of the double.
+    """A page context that holds no cookies; ``harvest_session_cookies`` reads
+    ``page.context.cookies``, so a page with none would be one the renderer cannot
+    ask -- the context is part of the surface, so part of the double.
     """
 
     async def cookies(self, url: str | None = None) -> list[dict[str, str]]:
@@ -39,28 +33,17 @@ class FakePageContext:
 
 
 async def _selector_is_present(selector, timeout=None, **kwargs):
-    """The default ``wait_for_selector``: the awaited element is there.
-
-    The renderer calls this for a page's hydration markers, and a double that
-    timed out by default would make every test that happens to use it about the
-    wait rather than about whatever it is actually testing.
+    """The default ``wait_for_selector``: the awaited element is there, so a double
+    that timed out by default would make every hydration test about the wait rather
+    than its actual subject.
     """
     return None
 
 
 class BrowserFakePage:
-    """A page double whose ``url`` is a plant the test sets, not a navigation result.
-
-    See :meth:`goto` for why navigation deliberately leaves it alone.
-
-    The surface is the renderer's, not the tests': ``context`` and
-    ``wait_for_selector`` are here because the renderer calls them, and a double
-    that omitted them made those two reads fail as ``AttributeError`` inside
-    production code rather than as a missing member at the call site that
-    installed it. ``on_wait_for_selector`` is the hook for a test that needs a
-    different answer -- a selector that never appears, or one that wedges the
-    wait -- because replacing the method outright is what the missing member
-    pushed people into doing.
+    """A page double whose ``url`` is the test's plant, not a navigation result; the
+    surface is the renderer's, and omitting it fired ``AttributeError`` inside
+    production -- ``on_wait_for_selector`` is the hook for a different answer.
     """
 
     def __init__(
@@ -112,24 +95,9 @@ class BrowserFakePage:
 
 
 class ScriptedPage(BrowserFakePage):
-    """A page that answers the renderer's real reads and records its writes.
-
-    Four browser suites each wrote out the same Playwright surface -- ``route``,
-    ``on``, ``goto``, ``set_extra_http_headers``, ``evaluate``, ``content``,
-    ``close`` -- and kept one behaviour of their own. The surface is what a
-    change to the renderer breaks first, and it broke unevenly: a read the
-    renderer newly made raised ``AttributeError`` in one suite and returned
-    ``""`` in another, so which tests failed depended on which file the double
-    happened to be written in.
-
-    ``answers`` maps a fragment of the evaluated expression to what the page
-    reports, so a suite states the reads it cares about rather than re-deriving
-    the whole list. ``on_goto`` is the hook for the behaviour that genuinely
-    differs -- the page-cap suite counts overlapping tabs on navigation and
-    nothing else needs to -- and ``html`` carries the content a test asserts on.
-    Every evaluated expression is appended to ``evaluates``, so a test about how
-    many times the renderer asks is a length check rather than a counter it has
-    to increment itself and keep in agreement.
+    """A page that answers the renderer's real reads and records its writes; ``answers``
+    maps an expression fragment to what the page reports, ``on_goto`` is the hook for
+    behaviour that differs, and every ``evaluate`` lands in ``evaluates``.
     """
 
     def __init__(self, *, url="http://example.com/", answers=None, html=None, on_goto=None, **kwargs):

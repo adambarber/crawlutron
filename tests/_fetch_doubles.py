@@ -47,13 +47,9 @@ Route = Any
 
 
 def _answer(spec: Route, url: NormalizedUrl) -> HttpFetchResult:
-    """The route spec as a real ``HttpFetchResult``.
-
-    ``HttpFetchResult`` rather than nothing: every branch that returns one here
-    does, and the branch that does not raise. Left unannotated the answer was
-    ``Any``, which is what let a fetcher double's return type be ``Any`` too --
-    a chain in which the one place that actually builds the result said nothing
-    about it.
+    """The route spec as a real ``HttpFetchResult``; every branch that returns one
+    here does, and the branch that does not raises. Declared, it stops a fetcher
+    double's return type drifting back to ``Any`` at the one place it is built.
     """
     if isinstance(spec, BaseException) or (isinstance(spec, type) and issubclass(spec, BaseException)):
         raise spec() if isinstance(spec, type) else spec
@@ -68,18 +64,9 @@ def _answer(spec: Route, url: NormalizedUrl) -> HttpFetchResult:
 
 
 class FetcherDouble:
-    """The production fetcher contract, the request seam, and the observations.
-
-    This was a plain function with ``calls`` attached to it after construction,
-    so the observations were invisible to every type that saw the return: a test
-    reading ``fetcher.calls`` was reaching for something only the factory could
-    promise. The class is where that promise lives, and it is still a real
-    ``HttpFetcher`` everywhere production asks for one -- ``app.orchestration.worker``
-    recognises a callable object by its ``__call__``, so the async-discipline
-    check sees exactly what it saw before.
-
-    ``answer`` takes the whole request and returns a :data:`Route` unless
-    ``answer_is_response`` says otherwise; signature and cap are production's.
+    """The production fetcher contract, the request seam, and its observations; a
+    plain function with ``calls`` attached made them invisible to every type that
+    saw it, and it stays callable so production's HttpFetcher checks still apply.
     """
 
     calls: list[str]
@@ -109,19 +96,9 @@ class FetcherDouble:
         timeout: int,
         max_content_length: int = DEFAULT_MAX_CONTENT_LENGTH_BYTES,
     ) -> HttpFetchResult:
-        """What the strategy reads, whichever way this factory was built.
-
-        ``HttpFetchResult`` is the contract production consumes, and both arms
-        below satisfy it: ``_answer`` builds one from a route spec, and the
-        ``answer_is_response`` arm hands back the caller's own object, which is
-        shaped like one. Declaring it here rather than ``Any`` is what lets a
-        caller of a fetcher double know what it got.
-
-        The answer callback receives the admitted ``NormalizedUrl`` as its
-        first argument -- this is the one place that contract lives, so every
-        factory's ``respond`` reads ``url.path`` / ``url.site`` / ``url.raw``
-        and never ``urlparse(url)``; a respond written against text is
-        responding to a request production never made.
+        """What the strategy reads, whichever way this factory was built: declared as
+        ``HttpFetchResult`` so a caller knows what it got, not ``Any``. The answer
+        receives the admitted ``NormalizedUrl`` -- the one place that contract lives.
         """
         # ``calls`` speaks text: it is what tests assert membership in, and the wire form of the value is the
         # text the request was made to.
@@ -187,29 +164,16 @@ def raise_fetcher(url, sent_headers, timeout, max_content_length=DEFAULT_MAX_CON
 
 
 def scripted_fetcher(*, status=200, body=b"", headers=None, ctype="text/html; charset=utf-8"):
-    """A fetcher that serves one fixed response for whatever URL it is handed.
-
-    Most fetcher doubles in this tree answer every URL the same way, and
-    spelling that out meant re-stating the production fetcher's signature at
-    each site. That is the copy the ``scripted-fetcher`` funnel bans: the
-    signature, and the cap's default, are owned by :func:`fetcher_double`, so
-    a change to the real fetcher lands here once.
-
-    ``headers`` replaces the response headers wholesale (``content-type``
-    included), which is what a test about a header or a content-encoding needs;
-    otherwise ``ctype`` supplies the content type and nothing else is sent.
+    """A fetcher that serves one fixed response for every URL; the
+    ``scripted-fetcher`` funnel bans re-stating the production signature, which is
+    owned by :func:`fetcher_double`, and ``headers`` replaces the response wholesale.
     """
     return FetcherDouble(lambda url, *_: {"status": status, "body": body, "headers": headers, "ctype": ctype})
 
 
 def failing_fetcher(error: BaseException | type[BaseException] | None = None, calls: list[str] | None = None):
-    """A fetcher that raises instead of responding, optionally recording URLs.
-
-    ``calls`` turns this into a recorder, so a test that asserts the engine
-    retried the same URL three times does not need its own closure for it.
-
-    A class is instantiated per call, so each raise is a distinct exception
-    with its own traceback; pass an instance only when the exception carries
-    state a test needs to inspect (``httpx.HTTPStatusError`` and its response).
+    """A fetcher that raises instead of responding, optionally recording URLs; with
+    ``calls`` it becomes a recorder, and a class is raised per call so each failure
+    is distinct -- pass an instance only when the exception must carry state.
     """
     return FetcherDouble(lambda url, *_: error if error is not None else ConnectionError, calls)

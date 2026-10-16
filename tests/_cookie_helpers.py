@@ -1,9 +1,7 @@
 """Helpers for tests that exercise the cookie jar's on-disk persistence.
 
-Both consumers -- the atomic-write test and the namespace round-trip test --
-write to a real file, read it back as JSON, and clean up after themselves. That
-is four lines each, and the copy that skipped the unlink first left a previous
-run's file in place for a test about atomicity to read.
+Both consumers write a real file, read it back, and clean up; the copy that
+skipped the unlink left a previous run's file for an atomicity test to read.
 """
 
 import json
@@ -16,11 +14,9 @@ from typing import Any
 
 @contextmanager
 def cookie_file(jar: Any, name: str) -> Iterator[str]:
-    """Export `jar` to a fresh file named `name`; yield the path.
-
-    The file is removed on exit whether or not the body asserted, and it is
-    removed *first* if a previous run left one behind -- otherwise a test about
-    atomicity is reading a file it did not write.
+    """Export ``jar`` to ``name``; yield the path, removed on exit, and removed
+    *first* if a previous run left one behind so an atomicity test never reads a
+    file it did not write.
     """
     target = os.path.join(tempfile.gettempdir(), name)
     if os.path.exists(target):
