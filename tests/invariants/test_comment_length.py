@@ -1,27 +1,7 @@
 """A comment block longer than two lines is documentation wearing a comment.
 
-Inline ``#`` comments exist to carry the line-local WHY. A third comment line
-in one block means it stopped annotating code and started substituting for a
-docstring, a commit message, or a design note -- and every one of those has a
-better home. The limit is two comment lines per block: a code line ends a
-block, a blank line DOES NOT -- a block split by blank lines is still one
-block, and the split is a cheat this gate exists to catch.
-
-A second property rides the same walk: a block's last line must CLOSE its
-thought. Trimming a block at the length limit is a rewrite, and a rewrite can
-end mid-clause -- ``the cap is a fleet ceiling, and`` says less than the block
-it replaced while passing the length rule. The dangling-end detector names that
-shape wherever it lands, which is what lets the trims stay mechanical.
-
-The tree measured 954 such blocks (390 in app/, 564 in tests/) under the
-hardened blank-joined rule, so the property starts as a budget ratchet in the pyright-budget shape: the
-declared count is exact, a new long block fails the commit, and a wave that
-trims blocks must lower the number in the same commit. The only direction the
-budget moves is down.
-
-Both properties are collected by ONE block scan and ONE tree walk: the
-detectors differ only in the predicate they apply, so a third property later
-adds a predicate, not a second copy of the scan.
+Inline comments carry line-local WHY; a third line substitutes for a docstring.
+The count is a budget ratchet, fed by one scan, that only moves down.
 """
 
 from __future__ import annotations
@@ -43,7 +23,7 @@ DOC_LIMIT = 3
 #: Exact equality both ways: new long docstrings fail; a trimmed tree lowers it.
 _DOC_BUDGETS = {
     "app": 546,
-    "tests": 250,
+    "tests": 248,
     "scripts": 33,
 }
 
@@ -71,10 +51,8 @@ _DECORATIVE_TAIL = re.compile(r"-{3,}\s*$")
 def comment_blocks(source: str) -> list[tuple[int, int, int, str]]:
     """Every blank-joined comment block as ``(start, end, lines, last_text)``.
 
-    One scan feeds both detectors: a block is a maximal run of comment lines
-    joined across blank lines and broken only by a code line. The two rows the
-    detectors differ about are the line count and the last line's text, so both
-    travel with the block instead of being recomputed per detector.
+    One scan feeds both detectors; the two metrics differ only in which block
+    row they test, so the line count and last line travel with the block.
     """
     blocks: list[tuple[int, int, int, str]] = []
     count = 0
