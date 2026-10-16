@@ -16,11 +16,8 @@ from tests._policy_factories import canonical, job_store
 class _StatusBus:
     """Edge-triggered notifications for one ``JobStore``.
 
-    Subscription is edge-triggered and the subscription happens BEFORE the
-    first read, so a transition that lands between the read and the wait still
-    wakes the waiter (its callback is already queued) and none can be missed.
-    That is what lets :func:`_wait_status` drop its deadline without a window.
-    """
+    Subscription precedes the first read, so a transition between read and
+    wait still wakes the waiter -- no window, no deadline."""
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
@@ -48,11 +45,9 @@ class _StatusBus:
 class _StoreListener:
     """One subscriber's wake-up: an event plus the loop that has to be woken.
 
-    Job-store writes reach the store from a worker thread -- the runner and the
-    control plane both go through ``asyncio.to_thread`` -- so the signal hops to
-    the awaiting loop with ``call_soon_threadsafe``. Setting an ``asyncio.Event``
-    from a foreign thread is not safe.
-    """
+    Store writes arrive from a worker thread, so the signal hops via
+    ``call_soon_threadsafe`` -- an ``asyncio.Event`` from a foreign thread is
+    not safe."""
 
     __slots__ = ("_bus", "event", "job_id", "loop")
 
@@ -77,20 +72,9 @@ class _StoreListener:
 class InstrumentedJobStore(JobStore):
     """A real ``JobStore`` that also publishes every write it receives to a bus.
 
-    ``set_status`` and ``save`` are OVERRIDDEN, which shadows the base method for
-    every caller (``job_store.save(...)``, ``asyncio.to_thread(job_store.save,
-    ...)``, ``self.save`` from ``asave``) without touching the store class
-    production uses.
-
-    This is a subclass rather than attributes poked onto an instance because
-    ``status_bus`` is not a ``JobStore`` field: production has no such concept,
-    and ``tests/api/test_jobs_execution.py`` asserts exactly that -- the marker
-    is present on an instrumented store and absent on a bare one. Poking the
-    attribute and the two methods onto the instance made that a promise the type
-    of the object denied, and rebound a method on an object typed as having a
-    read-only one. The bus is a test concern, so the type carrying it is a test
-    type, and it is still a real ``JobStore`` everywhere production asks for one.
-    """
+    Overriding ``set_status``/``save`` shadows the base for every caller; a
+    subclass (not instance poking) because ``status_bus`` is not a ``JobStore``
+    field."""
 
     def __init__(self, db_path: str | pathlib.Path, *, policy: HostPolicy, tier: PolicyTier) -> None:
         super().__init__(db_path, policy=policy, tier=tier)
@@ -119,27 +103,18 @@ def make_job_store(tmpdir: str) -> JobStore:
 def loaded_job(store: JobStore, job_id: str) -> CrawlJobState:
     """``store.load(job_id)``, asserted present.
 
-    ``load`` returns ``None`` for a job that does not exist, and the call sites
-    that reach for it are all reading back a row they just created or saved.
-    Asserting here rather than at each site says what actually went wrong when
-    the store loses one -- a real message naming the job -- instead of an
-    ``AttributeError`` on ``None`` several frames from the cause, and it is one
-    check rather than the same check copied.
-    """
+    Call sites read back a row they just created; asserting at the seam yields
+    a message naming the job, not an ``AttributeError`` on ``None``."""
     job = store.load(job_id)
     assert job is not None, f"job {job_id!r} has no row in the store after it was written"
     return job
 
 
 def frontier(urls: list[str], depth: int = 0) -> list[FrontierEntry]:
-    """``urls`` as frontier entries, at ``depth``.
+    """``urls`` as frontier entries at ``depth``.
 
-    ``CrawlJobState.frontier`` is ``list[FrontierEntry]``, and a raw string in
-    that list survives only because ``_frontier_identity`` sniffs the element
-    type. The moment anything reads ``entry.url`` off it, a string stops being
-    a URL and becomes an ``AttributeError``. Built through the real dataclass so
-    the fixture says what the field holds.
-    """
+    A raw string survives only while the element-type sniff runs; reading
+    ``entry.url`` off one raises. Built through the real dataclass."""
     return [FrontierEntry(url=canonical(url), depth=depth) for url in urls]
 
 
@@ -147,10 +122,8 @@ def frontier(urls: list[str], depth: int = 0) -> list[FrontierEntry]:
 def single_shot_job(job_id: str = "test-id", root: str = "http://example.com/"):
     """A throwaway store holding one fresh SINGLE_SHOT job; yield ``(store, job)``.
 
-    The store, the temporary directory and the seed job are one fixture: a test
-    about SINGLE_SHOT semantics should not have to re-derive them, and a second
-    copy of the seed line is a second thing to forget to update.
-    """
+    Store, temp dir and seed are one fixture -- an about-SINGLE_SHOT test should
+    not re-derive them, and a second seed copy is a second thing to forget."""
     with tempfile.TemporaryDirectory() as tmpdir:
         store = make_job_store(tmpdir)
         yield store, store.create_single_shot(job_id, root, CrawlPolicy())
@@ -160,15 +133,8 @@ def single_shot_job(job_id: str = "test-id", root: str = "http://example.com/"):
 def single_shot_orphan(job_id: str = "test-id", root: str = "http://example.com/"):
     """A throwaway store holding one SINGLE_SHOT job stranded in RUNNING.
 
-    The state a process crash leaves behind: the row was claimed for a crawl
-    that the service can never resume, because a single-shot job has no
-    frontier to continue from. Recovery has to retire it rather than rewind it.
-
-    Separate from :func:`single_shot_job` because that one seeds the *fresh*
-    state, and a test about recovery has to state the stranded one -- spelling
-    the claim-and-crash out again at each call site is how the two states came
-    to be confused.
-    """
+    The crash state: claimed for a crawl that can never resume, so recovery
+    retires it. (The FRESH state is :func:`single_shot_job`.)"""
     with single_shot_job(job_id, root) as (store, job):
         store.set_status(job.job_id, JobStatus.RUNNING, expected=JobStatus.PENDING)
         yield store, job
@@ -177,11 +143,8 @@ def single_shot_orphan(job_id: str = "test-id", root: str = "http://example.com/
 def make_crawled_job_store(tmpdir: str, pages: int) -> tuple[JobStore, CrawlJobState]:
     """A store holding one job that has already crawled ``pages`` pages.
 
-    The companion to :func:`make_job_store` for the tests whose subject is a job
-    with history behind it -- what a status read costs, and what a batch persist
-    costs. Both need a non-empty accumulator, and building one the same way
-    twice is a clone rather than a coincidence.
-    """
+    The :func:`make_job_store` companion for subjects with history; both need a
+    non-empty accumulator, and building it twice is a clone, not a coincidence."""
     from tests._policy_factories import canonical
 
     store = make_job_store(tmpdir)
