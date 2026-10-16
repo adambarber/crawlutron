@@ -46,13 +46,9 @@ class TestLoadOrderedContract:
 
 
 class TestSpillGcCadence:
-    """Tier-2 stale-spill GC is rate-limited, not per-construction.
-
-    The listdir+getmtime sweep of the system temp dir ran on EVERY crawl
-    request. The cadence gate keeps exactly one guarantee shape: the first
-    construction in a process always scans (so bc-spill-* files orphaned by a
-    killed run get reclaimed), and the next scan happens only once the
-    interval has elapsed.
+    """Tier-2 stale-spill GC is rate-limited, not per-construction: the sweep ran on
+    every request; the cadence keeps exactly one guarantee -- the first construction
+    always scans, and the next only once the interval has elapsed.
     """
 
     def _spy(self, monkeypatch):
@@ -132,14 +128,9 @@ class TestSpillFileOwnership:
 
 
 class TestGcNeverUnlinksASpillStillInUse:
-    """A live spill is the crawl's result, not a checkpoint that can be dropped.
-
-    ``load_ordered`` reassembles the result by opening the spill's PATH by name.
-    An unlink from a concurrent GC sweep therefore does not cost a worker its
-    local checkpoint -- it makes the finished crawl's own output unreadable, and
-    the whole crawl has already been paid for by then. A whole-site job that
-    runs past ``gc_age_seconds`` is ordinary, not exotic, so the sweep has to
-    treat "still in use" as a hard skip rather than as a tolerable loss.
+    """A live spill is the crawl's result, not a droppable checkpoint: ``load_ordered``
+    reassembles output by opening the spill's PATH, so a concurrent unlink makes the
+    finished crawl unreadable -- still-in-use must be a hard skip, not a tolerable loss.
     """
 
     @staticmethod
@@ -198,17 +189,9 @@ class TestGcNeverUnlinksASpillStillInUse:
                 os.unlink(abandoned_path)
 
     def test_a_spill_owned_by_another_process_is_not_collected(self):
-        """Ownership is a kernel fact, not a fact about this process's memory.
-
-        The in-process live set could only answer "is a spill owned by *me*
-        live?", so a concurrent process's in-flight spill was indistinguishable
-        from one abandoned by a killed run and got unlinked mid-crawl. The whole
-        temp dir is shared, so that is the default outcome whenever two
-        processes crawl at once -- a dev server beside a test run, or any
-        future second worker.
-
-        A distinct open file description holding the lock reproduces exactly
-        the kernel state a second process creates, without spawning one.
+        """Ownership is a kernel fact, not a process-memory fact: the in-process live set
+        missed a concurrent process's in-flight spill, which got unlinked mid-crawl; a
+        distinct open file description reproduces the kernel state without spawning a second process.
         """
         seed = ResultSpill()
         path = seed.path

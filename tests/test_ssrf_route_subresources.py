@@ -1,13 +1,6 @@
-"""SSRF route handler: HTTPS subresources stay blocklist-checked without
-paying for a DNS-rebinding pin the connection never uses.
-
-``SafeUrl.connect`` keeps the original hostname for ``https`` (real certs carry
-no IP SAN, so a pinned IP would only break SNI/cert verification). The route
-handler therefore validated HTTPS subresources with an *uncached* pin resolve
-whose result was discarded — one ``socket.getaddrinfo`` per subresource through
-the default executor. HTTPS now goes through the cached validation-only check
-the websocket guard and the HTTP fetcher already use; plain HTTP keeps the
-fresh pin because there the pinned IP governs the actual connection.
+"""SSRF route handler: HTTPS subresources stay blocklist-checked without the DNS
+pin an https connection never uses (no IP SAN), so it now runs the shared cached
+validation-only check; plain HTTP keeps the fresh pin that governs the connection.
 """
 
 from __future__ import annotations

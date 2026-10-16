@@ -79,11 +79,10 @@ def _is_identifier_chokepoint(node: ast.expr) -> bool:
 
 
 def _module_constants(tree: ast.Module) -> set[str]:
-    """Module-level names bound to a literal.
-
-    A PRAGMA interpolating one splices a constant into a *value*, not an
-    identifier, and is not reachable from a request -- the allowlist would be
-    theatre."""
+    """Module-level names bound to a literal: a PRAGMA interpolating one splices a
+    constant into a *value*, not an identifier, and is not reachable from a request
+    -- the allowlist would be theatre.
+    """
     return {
         name
         for _node, name in single_target_name_assignments(
@@ -136,11 +135,10 @@ def _enclosing_function(tree: ast.Module, target: ast.AST) -> ast.AST | None:
 
 
 def _unvalidated_interpolations(tree: ast.Module, sql: ast.JoinedStr, at: ast.AST) -> list[str]:
-    """Interpolated expressions that skip the identifier chokepoint.
-
-    The allowlist is the whole defence (the argument is spliced verbatim): the
-    call, a local bound to its result, or a module constant are accepted; a
-    bare parameter is rejected."""
+    """Interpolated expressions that skip the identifier chokepoint: the allowlist is
+    the whole defence (the argument splices verbatim) -- the call, a local bound to
+    its result, or a module constant are accepted; a bare parameter is rejected.
+    """
     safe = _module_constants(tree)
     function = _enclosing_function(tree, at)
     if function is not None:

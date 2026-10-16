@@ -1,8 +1,6 @@
-"""TDD tests for webhook SSRF (hostname not resolved).
-
-The webhook validator must resolve DNS hostnames and reject any that map to a
-private/loopback address, and the delivery POST must connect to a pinned IP
-(DNS-rebinding safe) while preserving the original Host header.
+"""TDD tests for webhook SSRF (hostname not resolved): the validator must resolve
+DNS and reject private/loopback targets, and the delivery POST must connect to a
+pinned IP (DNS-rebinding safe) while preserving the original Host header.
 """
 
 import pytest
@@ -53,11 +51,9 @@ class TestWebhookUrlValidation:
 
 class TestWebhookDeliveryPinning:
     async def test_delivery_posts_to_pinned_ip(self, monkeypatch):
-        """The outbound POST must target the resolved/pinned IP, not the raw
-        hostname, and preserve the original Host header (DNS-rebinding safe).
-
-        Driven through the production funnel ``post_webhook`` -- not a deleted
-        island entry point -- so the guard protects the path real crawls take.
+        """The outbound POST must target the resolved/pinned IP, not the raw hostname, and
+        preserve the original Host header (DNS-rebinding safe), driven through the
+        production funnel so the guard protects the path real crawls take.
         """
         delivered = record_webhook_delivery(monkeypatch)
         with host_resolves_to(monkeypatch, "8.8.8.8"):
@@ -114,10 +110,10 @@ class TestWebhookDeliveryPinning:
 
 
 def test_webhook_size_cap_honors_a_live_env_override(monkeypatch):
-    """-F: the cap is read 2-3 times per delivery and used to be re-read and
-    re-parsed from ``os.environ`` on every call. Caching it on the raw env value
-    parses once per distinct value while an override -- operator env, or a test
-    -- is still picked up on the very next call."""
+    """The cap is read 2-3 times per delivery; caching it on the raw env value parses
+    once per distinct value while an override -- operator env, or a test -- is still
+    picked up on the very next call.
+    """
     from app.api import webhooks
 
     monkeypatch.setenv("CRAWLUTRON_MAX_WEBHOOK_SIZE", "1234")

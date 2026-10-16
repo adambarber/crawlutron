@@ -96,11 +96,9 @@ class TestNormalizationGuardMemoization:
 
 
 class TestFilterJsEndpoints:
-    """The single egress filter for the JS-endpoint discovery door.
-
-    ``extract_js_endpoints`` scrapes URLs out of attacker-controlled HTML/JS;
-    this filter is the one place an endpoint survives or is dropped, so a
-    consumer that forgot the old inline comprehension cannot leak one.
+    """The single egress filter for the JS-endpoint discovery door: it is the one
+    place an endpoint survives or is dropped, so a consumer that forgot the old
+    inline comprehension cannot leak one.
     """
 
     def test_drops_non_http_endpoint(self):

@@ -49,13 +49,9 @@ class TestMatchBounded:
         assert match_bounded(compiled, "a123b", op="search")
 
     def _assert_bounded_timeout(self, pattern: str, text: str) -> None:
-        """A pattern that must hit the bound, and must hit it without a leftover thread.
-
-        Both halves are the point. A thread-abandonment implementation would
-        pass the wall-time half alone while leaving a wedged worker burning
-        behind -- so pin the wall time AND that no thread survived, and
-        assert them in one place so a new catastrophic shape cannot pin one and
-        forget the other.
+        """A pattern that must hit the bound without a leftover thread: both halves are
+        the point, because a thread-abandoning implementation passes the wall-time half
+        alone -- so pin both, in one place, for every new catastrophic shape.
         """
         compiled = compile_untrusted(pattern)
         threads_before = threading.active_count()

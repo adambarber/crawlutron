@@ -1,9 +1,6 @@
 """Timeouts chokepoint contract: one named place for HTTP timeout budgets.
-
-httpx.Timeout was constructed at four call sites, each inventing its own
-connect/read/write/pool numbers (and one site omitted `write`, which httpx
-rejects -- a live bug the search-cap RED test surfaced). Every new I/O
-site picks a named constructor instead of inventing numbers.
+``httpx.Timeout`` was constructed at four sites with invented numbers (one
+omitting ``write``, a live bug), so every new I/O site picks a named constructor.
 """
 
 from __future__ import annotations

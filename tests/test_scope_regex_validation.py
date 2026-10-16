@@ -1,9 +1,6 @@
-"""Scope_regex validation contract.
-
-compile_untrusted RAISES UnsafePattern on over-long/invalid patterns; the
-API field validator must convert that into a pydantic ValidationError (which
-FastAPI renders as a 422 validation_error), not let it escape as a 500 or
-silently drop the filter. Pins the fix for the dead `result is None` branch.
+"""scope_regex validation contract: ``compile_untrusted`` RAISES on unsafe patterns,
+and the API field validator must turn that into a pydantic ValidationError (a 422),
+not a 500 or a dropped filter -- pinning the fix for the dead ``result is None`` branch.
 """
 
 import pytest

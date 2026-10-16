@@ -1,8 +1,6 @@
-"""The service binds loopback by default.
-
-Unauthenticated by design, so the default bind must be 127.0.0.1; only an
-explicit CRAWLUTRON_HOST=0.0.0.0 (as the compose file sets, where the
-loopback ports mapping is the external control) exposes the port.
+"""The service binds loopback by default: unauthenticated by design, the default
+bind is 127.0.0.1, and only an explicit ``CRAWLUTRON_HOST=0.0.0.0`` (as the compose
+file sets, where the loopback port mapping is the external control) exposes it.
 """
 
 from app.config.settings import CrawlerSettings

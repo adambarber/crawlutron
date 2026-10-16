@@ -1,8 +1,6 @@
-"""Service identity must be coherent (single source of truth).
-
-The User-Agent version drifted from the API version, and the agent hints
-advertised a different impersonation target than the code uses. Both now
-derive from shared constants.
+"""Service identity must be coherent, from one source of truth: the User-Agent
+version and the agent hints drifted from the API version and the actual
+impersonation target, and both now derive from shared constants.
 """
 
 from app.discovery.agent_hints import STRATEGY_DESCRIPTIONS

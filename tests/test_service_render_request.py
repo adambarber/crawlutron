@@ -32,13 +32,9 @@ class TestServiceRenderRequest:
             await render_stub_request({"urls": [f"http://127.0.0.1:1/x{i}" for i in range(1000)]})
 
     async def test_render_worker_exception_does_not_leak_raw_error_text(self):
-        """A worker failure must surface a stable code, not the exception text.
-
-        The missing-slot result used to carry ``error=str(error)`` from the
-        caught worker exception, and ``to_dict`` is pure serialization -- so
-        raw exception text (which can carry DNS names, paths, or secrets)
-        reached the /v1/render response body verbatim. This is exactly the
-        leak the shared exception->result primitive exists to prevent.
+        """A worker failure must surface a stable code, not the exception text: the
+        missing-slot result carried ``error=str(error)`` and pure serialization shipped
+        raw text (DNS names, paths, secrets) out to /v1/render verbatim -- the exact leak.
         """
         secret = "SECRET_TOKEN_ABC123_INTERNAL_PATH=/etc"
 
