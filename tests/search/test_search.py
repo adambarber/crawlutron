@@ -1,8 +1,6 @@
-"""POST /v1/search behavior: provider parsing, SSRF hygiene, selection, and the endpoint.
-
-Provider HTTP is injected via ``app.search.providers.provider_http`` so no
-real network is touched; the endpoint runs over the ASGI transport against the
-real FastAPI app.
+"""POST /v1/search behavior: provider parsing, SSRF hygiene, selection, and the
+endpoint. Provider HTTP is injected via ``provider_http`` so no real network is
+touched; the endpoint runs over the ASGI transport against the real app.
 """
 
 from __future__ import annotations
@@ -28,10 +26,8 @@ from tests._assertions import one_search_result, provider_results
 
 
 def _collect(items):
-    """``collect_results`` with this file's uniform provider key names.
-
-    Every provider spells the same three keys, so the call shape is a constant
-    of these tests rather than a decision each one repeats -- and a copy that
+    """``collect_results`` with this file's uniform provider key names: every provider
+    spells the same three keys, so the call shape is a constant here, and a copy that
     drops ``description_key`` silently asserts against a blank description.
     """
     return collect_results(
@@ -375,14 +371,9 @@ class TestProviderHttpCaps:
 
 
 class _FakeStreamResponse:
-    """httpx-faithful stream response.
-
-    Mirrors the REAL httpx attribute surface provider_http relies on —
-    ``encoding`` (never ``charset``), ``status_code``, ``aiter_bytes`` — per
-    the rule that fakes must mirror the real client surface. The
-    shared ``fake_provider_http`` fixture patches provider_http wholesale,
-    which left this decode path with zero coverage and shipped a reference
-    to an attribute httpx does not have (500 on every real search request).
+    """httpx-faithful stream response mirroring the real attribute surface
+    ``provider_http`` relies on (``encoding``, ``status_code``, ``aiter_bytes``), so a
+    reference to an attribute httpx does not have fails loudly, not at 500.
     """
 
     def __init__(self, body, encoding: str | None = "utf-8"):

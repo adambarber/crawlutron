@@ -1,18 +1,6 @@
-"""Address classification, and the two different questions asked of it.
-
-Three call sites each derived an IP verdict for themselves: the SSRF guard
-(egress), the pinning path (transport), and -- once added -- the startup bind
-check. They are not the same question. ``10.0.0.5`` is not a safe public
-*egress* target and is perfectly reachable as a *bind* address by every host
-on the LAN, so one predicate cannot answer for the other.
-
-What they do share is the work underneath: parse the string, unwrap any IPv4
-hidden inside an IPv6 wrapper, read the range predicates. That is the
-primitive, and it lives in one place so a range added to it is seen by every
-consumer instead of by whichever one happened to be edited.
-
-These tests pin the classification table and the unwrapping, not the call
-structure -- the callers' own behaviour is covered by the SSRF corpus.
+"""Address classification, and the two different questions asked of it: the SSRF
+guard, the pinning path and the bind check are not the same predicate, but they
+share the parse/unwrap/range work, which lives once so a range added is seen by all.
 """
 
 import ipaddress
@@ -60,11 +48,9 @@ def test_6to4_and_teredo_wrappers_reach_the_embedded_ipv4():
 
 
 def test_a_resolver_numeric_form_is_classified_not_treated_as_a_name():
-    """Resolvers accept forms ``ipaddress`` rejects, so they must be read.
-
-    An unparseable string that is really a numeric address is exactly the case
-    where treating it as a hostname would let ``127.0.0.1`` through as
-    "some name we do not recognise".
+    """Resolvers accept forms ``ipaddress`` rejects, so they must be read: an
+    unparseable string that is really numeric is exactly where treating it as a
+    hostname would let ``127.0.0.1`` through as an unrecognised name.
     """
     assert classify("2130706433") is AddressClass.LOOPBACK
     assert classify("0x7f000001") is AddressClass.LOOPBACK
@@ -129,12 +115,9 @@ def test_bind_locality_is_a_separate_question_from_egress(host, local):
 
 
 def test_a_private_bind_is_not_local_even_though_it_is_not_public():
-    """The distinction the two predicates exist to keep.
-
-    ``10.0.0.5`` fails the public-egress test and passes a bind-locality test,
-    because it is not a safe target and is still reachable by every host on the
-    LAN. Answering the bind question with the egress predicate would call a
-    LAN-exposed API local.
+    """The distinction the two predicates exist to keep: ``10.0.0.5`` fails the public
+    egress test but passes a bind-locality test; answering the bind question with the
+    egress predicate would call a LAN-exposed API local.
     """
     assert classify("10.0.0.5") is AddressClass.PRIVATE
     assert is_loopback_bind("10.0.0.5") is False

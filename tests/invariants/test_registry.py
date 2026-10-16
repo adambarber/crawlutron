@@ -145,11 +145,9 @@ def _property_nodes(tree: ast.AST, path: pathlib.Path, prop: Property) -> list[t
 
 
 class _PropertyObservations:
-    """One file's observation walk, and the counts it has tallied so far.
-
-    Every registered property is checked the same way -- walk, ask a detector, return
-    a fingerprint->count map -- so the three things the walk needs and the accumulator
-    belong together, instead of four functions re-spelling the same trio and the tally.
+    """One file's observation walk and the counts it has tallied: the tree, the path
+    and the claim travel with the accumulator because every property is checked the
+    same way, where four functions once re-spelled the trio and the tally.
     """
 
     def __init__(self, tree: ast.AST, path: pathlib.Path, prop: Property) -> None:

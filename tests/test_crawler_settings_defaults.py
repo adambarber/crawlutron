@@ -27,11 +27,9 @@ class _Memory:
 
 
 def test_a_failed_memory_read_still_yields_the_declared_fallback_every_time():
-    """The 4 GiB fallback is a per-construction decision, not a cached verdict.
-
-    Pinned because a frozen fallback is indistinguishable from a derived one
-    once it is wrong: the only evidence is that a later, readable limit does
-    not change the number.
+    """The 4 GiB fallback is a per-construction decision, not a cached verdict: a
+    frozen fallback is indistinguishable from a derived one once wrong, since the
+    only evidence is that a later readable limit changes nothing.
     """
     with patch.object(settings_mod, "read_memory_stats", lambda: _Memory(64 * 1024**3)):
         derived = CrawlerSettings().http_max_connections
@@ -87,18 +85,9 @@ class TestFromMappingHardening:
 
 
 def test_the_extraction_deadlines_are_settings_rather_than_module_snapshots():
-    """The extraction deadlines are operator knobs, so they belong in settings.
-
-    Each of the three was read from its environment variable by ``extraction.py``
-    at import and kept as a module-private constant. That made them the only
-    knobs in that module with no home in the config -- ``EXTRACTION_DOC_MAX_INPUT_BYTES``
-    sits ten lines above them and is public for exactly the same reason. And a
-    deadline frozen at import is a knob no caller can move: a test could only
-    reach it by rewriting a private module global, which is why fourteen patch
-    sites existed for three numbers.
-
-    The browser deadlines were centralized here for the same reason and carry
-    that in their comment. These are the remaining three in the same category.
+    """The extraction deadlines are operator knobs, so they belong in settings: read
+    at import they were the only knobs with no config home, and a deadline frozen at
+    import is a knob no caller can move -- hence fourteen patch sites for three numbers.
     """
     defaults = CrawlerSettings.from_mapping()
     assert defaults.extraction_doc_timeout == 10.0
@@ -170,15 +159,9 @@ def test_env_override_still_wins():
 
 
 def test_the_pool_default_is_derived_per_construction_not_frozen_at_import():
-    """The derivation READS the memory limit, so it is I/O -- and a call in the
-    class body made it import-time I/O, run once and frozen for the process.
-
-    That is not a style point. A box whose limit only becomes readable after
-    the module was first imported (a cgroup limit the runtime applies late), or
-    whose read failed and silently took the 4 GiB fallback, kept that wrong
-    ceiling for its whole life with nothing in the config saying so. Deriving
-    per construction means the number is always derived from the limit the
-    running process actually has.
+    """The derivation READS the memory limit, so it is I/O; a call in the class body
+    made it import-time I/O frozen for the process, keeping a late-applied or failed
+    limit wrong forever -- deriving per construction always reflects the running limit.
     """
     limit = 8 * 1024 * 1024 * 1024
     expected = _expected_connections(limit)

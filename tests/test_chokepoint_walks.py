@@ -1,8 +1,7 @@
-"""The proof harness has to have teeth, or consolidating onto it loses proofs.
-
-A harness that under-asserts turns "the detector fires" into a rubber stamp;
-so it is tested the way the detectors are -- each refusal proved with a real
-failing call."""
+"""The proof harness has to have teeth, or consolidating onto it loses proofs: a
+harness that under-asserts turns the detector-fires claim into a rubber stamp, so
+each refusal is proved with a real failing call.
+"""
 
 from __future__ import annotations
 
@@ -38,11 +37,10 @@ def _never_fires(tree: ast.AST, path: pathlib.Path) -> list[str]:
 
 
 def _yields_once(tree: ast.AST, path: pathlib.Path):
-    """A generator-returning detector that actually discriminates.
-
-    Detectors are split between ``list[str]`` and generators, so normalization
-    lives here once; a proof that ``list()``-items each caller's detector is a
-    chokepoint that leaks."""
+    """A generator-returning detector that actually discriminates: detectors split
+    between ``list[str]`` and generators, so normalization lives here once, and proving
+    each caller's detector is a chokepoint that leaks.
+    """
     if _calls(tree, "marker"):
         yield f"{path}:1 marker"
 
@@ -82,11 +80,10 @@ def test_a_detector_that_fires_on_a_sanctioned_shape_fails_the_proof() -> None:
 
 
 def test_assert_detector_runs_both_halves() -> None:
-    """The combined entry point is what a bites test calls, so it must gate both.
-
-    The halves fail in opposite directions (over-broad vs inert); ``fires`` is
-    keyword-only and REQUIRED, so not declaring a bad source is an explicit
-    ``fires={}``."""
+    """The combined entry point is what a bites test calls, so it must gate both
+    halves, which fail in opposite directions (over-broad vs inert); ``fires`` is
+    keyword-only and required, so not declaring a bad source is an explicit ``{}``.
+    """
     with pytest.raises(AssertionError):
         assert_detector(_never_fires, path=PATH, fires={"marker()\n": "marker"})
     with pytest.raises(AssertionError):

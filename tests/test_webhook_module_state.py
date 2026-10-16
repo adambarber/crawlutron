@@ -1,11 +1,6 @@
-"""Guards for ``app.api.webhooks`` after the dead-delivery-island deletion.
-
-The crawl-plus-deliver story lives solely in ``app.api.async_crawl_runner``;
-``app.api.webhooks`` is the delivery funnel (``post_webhook`` ->
-``deliver_pinned_webhook``) plus the URL validator. A second module-level
-dependency-wiring apparatus in the webhook module would recreate the island
-that shipped a duplicate crawl path with zero production callers, so its
-absence is pinned here.
+"""Guards for ``app.api.webhooks`` after the dead-delivery-island deletion: the
+crawl-plus-deliver story lives in ``async_crawl_runner``, and a second wiring
+apparatus here would recreate the island -- so its absence is pinned.
 """
 
 from __future__ import annotations
@@ -31,11 +26,9 @@ ISLAND_NAMES = (
 
 
 def test_webhook_module_has_no_dependency_wiring_state():
-    """The deleted island must not come back.
-
-    Every name the island needed is gone from the module: no globals to wire,
-    no setters, no second crawl-composing entry point. The live surface is
-    exactly the funnel plus the validator.
+    """The deleted island must not come back: every name it needed -- no globals, no
+    setters, no second crawl-composing entry point -- is gone, leaving exactly the
+    funnel plus the validator.
     """
     for name in ISLAND_NAMES:
         assert not hasattr(wm, name), f"dead-island name reappeared: {name}"
@@ -49,13 +42,9 @@ def test_webhook_module_has_no_dependency_wiring_state():
 
 
 def test_deliver_pinned_webhook_is_called_only_from_post_webhook():
-    """One POST funnel: only ``post_webhook`` may invoke the pinned delivery.
-
-    This is the shape the deleted island violated -- a second crawler reached
-    the same delivery helper by composing its own crawl. If a caller other
-    than ``post_webhook`` appears inside the module (or any other module
-    calls the helper), the funnel is no longer the only path and the
-    size-cap/validation story can drift from it.
+    """One POST funnel: only ``post_webhook`` may invoke the pinned delivery -- the
+    shape the deleted island violated by composing its own crawl; a second caller
+    means the size-cap/validation story can drift from the funnel.
     """
     repo_root = pathlib.Path(__file__).resolve().parents[1]
     callers: set[str] = set()
@@ -73,16 +62,9 @@ def test_deliver_pinned_webhook_is_called_only_from_post_webhook():
 
 
 def test_build_job_status_handles_single_shot_jobs(tmp_path):
-    """SINGLE_SHOT jobs report zero counts, through the real store.
-
-    A reviewer worried that counting ``frontier``/``visited`` on a SINGLE_SHOT
-    job would raise AttributeError, since a single-shot job never populates
-    them. Those counts are the store's projection now, not ``len()`` over
-    dataclass fields, so the concern cannot be expressed any more -- but the
-    invariant behind it is real, so the test stays and is pinned against
-    production code instead of a hand-built dataclass. That also covers the
-    case the dataclass could not: a job whose accumulators were genuinely
-    never written to.
+    """SINGLE_SHOT jobs report zero counts through the real store: the counts are the
+    store's projection now, not ``len()`` over dataclass fields, so the AttributeError
+    concern is gone but the invariant is pinned against production code.
     """
     from app.api.main_helpers import build_job_status
     from app.models.job_status_response import JobStatusResponse

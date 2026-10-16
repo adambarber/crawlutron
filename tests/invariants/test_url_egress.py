@@ -34,11 +34,9 @@ def _is_urljoin_call(node: ast.expr) -> bool:
 
 
 def _unfiltered_urljoin_return_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
-    """Flag a function that returns a ``urljoin`` result with no egress filter.
-
-    ``return urljoin(a, b)`` and ``u = urljoin(a, b); return u``. A URL out of untrusted
-    text is an egress door once a caller trusts it, so the join and the filter belong
-    together -- "every consumer remembers" does not scale.
+    """Flag a function returning a ``urljoin`` result with no egress filter -- a URL
+    out of untrusted text is an egress door once trusted, so the join and the filter
+    belong together, and "every consumer remembers" does not scale.
     """
     offenders: list[str] = []
     for func in functions(tree):

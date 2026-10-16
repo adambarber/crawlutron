@@ -1,7 +1,5 @@
-"""Lifespan installs the readiness utilization sampler at startup and
-uninstalls it at shutdown.
-
-Also the shutdown sequence's own contract: every teardown step is attempted,
+"""Lifespan installs the readiness utilization sampler at startup and uninstalls
+it at shutdown; the shutdown contract is that every teardown step is attempted,
 so one pool whose close() raises cannot cost the others theirs.
 """
 
@@ -10,11 +8,9 @@ from tests._lifespan_doubles import stub_heavy_teardown
 
 
 def _spy_on_every_teardown(monkeypatch, http_closer) -> list[str]:
-    """Record the order the lifespan teardown reaches each pool in.
-
-    The resource gate is the real object with its real ``close`` replaced, not a
-    stand-in: startup drives the same instance, and a hand-rolled gate that
-    only knows the one method under test fails on whatever the next one is.
+    """Record the order the lifespan teardown reaches each pool in: the resource gate
+    is the real object with its real ``close`` replaced, not a stand-in, so a
+    hand-rolled gate that knows one method fails on whatever the next one is.
     """
     from app import main as main_mod
     from app.extraction import content as extraction_mod
@@ -53,13 +49,9 @@ class TestLifespanSamplerSymmetry:
 
 
 class TestShutdownRunsEveryStep:
-    """A failing close() must not skip the teardown that follows it.
-
-    The document-extraction subprocesses are the reason this is not
-    theoretical: nothing touches them after the lifespan block, so the step
-    that skips them is the step that leaks every markitdown worker's memory
-    and pipes past the process's own shutdown -- which is what the comment
-    beside that call says it is there to prevent.
+    """A failing close() must not skip the teardown that follows it: the document
+    subprocesses are why this is not theoretical -- the step that skips them leaks
+    every markitdown worker's memory and pipes past the process shutdown.
     """
 
     async def test_a_raising_closer_does_not_skip_later_pools(self, monkeypatch):
