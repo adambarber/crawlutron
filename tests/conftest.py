@@ -1,10 +1,6 @@
-"""Shared pytest fixtures and path setup for the crawlutron test suite.
-
-Puts the service root on ``sys.path`` once so every test file can import
-:mod:`app` and the suite's own helpers (as ``tests.helpers.server``). The
-parent monorepo's ``shared/python`` directory is no longer referenced; the
-equivalent logging helper lives at :mod:`app.runtime.logging_config` and is
-importable from the package root.
+"""Shared pytest fixtures and path setup, putting the service root on ``sys.path``
+once so ``app`` and ``tests.helpers`` resolve; the monorepo's ``shared/python`` is
+no longer referenced -- the logging helper lives at :mod:`app.runtime.logging_config`.
 """
 
 import asyncio

@@ -1,9 +1,6 @@
-"""Real, in-process HTTP test server (no mocks).
-
-Serves a fixed set of routes used by the crawler's actual-behavior tests:
-HTML pages with JSON-LD, pagination, inline JS fetch (XHR), lazy-load
-scroll triggers, robots/sitemap/feeds, documents (PDF/CSV/JSON), and a
-route that honors ``If-None-Match`` conditional requests (304).
+"""Real, in-process HTTP test server (no mocks) serving the fixed routes the
+crawler's actual-behavior tests need -- HTML with JSON-LD, robots/sitemap/feeds,
+documents, and a conditional-request (304) route.
 """
 
 from __future__ import annotations
@@ -249,11 +246,8 @@ class _Handler(BaseHTTPRequestHandler):
     def _respond(self, status: int, headers: dict[str, str], body: bytes) -> None:
         """Send one complete response, skipping the body for a HEAD.
 
-        Every branch below is the same four calls, and each copy is a place the
-        HEAD guard or the content-length goes missing: a branch without the HEAD
-        guard answers a HEAD with a body the client never asked for, and one
-        without content-length makes a keep-alive connection hang. The 304
-        branch is deliberately NOT this -- it carries no body and no length.
+        Every branch is the same four calls, and each copy is a place the HEAD guard or
+        content-length goes missing; the 304 branch is deliberately NOT this -- no body, no length.
         """
         self.send_response(status)
         for key, value in headers.items():
@@ -334,18 +328,9 @@ def spawn_server() -> TestServer:
 
 
 class SilentHandler(BaseHTTPRequestHandler):
-    """A request handler that answers with one body and says nothing in the log.
-
-    Two things every fixture handler here was re-spelling. ``send_body`` is the
-    response shape -- status, the headers you name, a content-length that
-    matches the body actually written, then the body. Spelled per handler, a
-    content-length that disagreed with the body was invisible, because nothing
-    compares the two.
-
-    ``log_message`` is the silence. ``BaseHTTPRequestHandler`` writes a line to
-    stderr per request, and in a suite this size that buries the failures; four
-    copies of a method whose only job is to return is four places for the next
-    handler to forget it.
+    """A request handler that answers with one body and says nothing in the log:
+    ``send_body`` writes status, named headers, a content-length that matches the
+    body (a mismatch was invisible), and ``log_message`` keeps one copy of the silence.
     """
 
     def send_body(self, status: int, body: bytes, **headers: str) -> None:
@@ -361,22 +346,17 @@ class SilentHandler(BaseHTTPRequestHandler):
 
     @property
     def counter(self) -> CountingHTTPServer:
-        """The hit counter, as the type it actually is.
-
-        The one cast in this module, replacing three suppressions of the same
-        error: ``spawn_threaded_server`` always builds a ``CountingHTTPServer``,
+        """The hit counter as the type it actually is: the one cast in this module,
+        replacing three suppressions of the same error -- always a ``CountingHTTPServer``,
         so this narrows a known shape rather than hiding an unknown one.
         """
         return cast("CountingHTTPServer", self.server)
 
 
 class CountingHTTPServer(ThreadingHTTPServer):
-    """A threading server carrying the hit counter its handlers maintain.
-
-    ``BaseHTTPRequestHandler.server`` is typed ``BaseServer``, which declares no
-    ``hits``, so every handler that counted hits suppressed the same error and
-    nothing checked that the attribute existed. The counter is declared here
-    instead, and handlers reach it through :attr:`SilentHandler.counter`.
+    """A threading server carrying the hit counter its handlers maintain: the base
+    types declare no ``hits``, so handlers reached it by suppressing the same error;
+    counter and accessor live here instead.
     """
 
     hits: int = 0

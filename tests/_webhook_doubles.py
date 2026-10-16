@@ -1,24 +1,6 @@
-"""The webhook delivery path's HTTP answer, staged as a real httpx exchange.
-
-``deliver_pinned_webhook`` builds its own client -- ``async with
-httpx.AsyncClient(timeout=...) as client: async with client.stream("POST",
-connect_url, ...) as response:`` -- and then drains the body through the
-bounded-io cap. Two files were each standing a fake client in front of that:
-a class with an ``__aenter__``, a ``stream()`` returning a context manager of
-its own invention, and an ``aiter_bytes()`` that yielded a ``bytes`` object.
-
-That double was a second httpx. It could not fail when production changed how
-it read a response, which is the only thing a transport seam is for, and it
-made the response-cap test assert against a fake iterator rather than the real
-``read_capped_async`` over a real stream.
-
-``record_webhook_delivery`` replaces rather than imitates. It patches the
-``AsyncClient`` *constructor* so production still constructs and closes a real
-client, and the real client is handed an ``httpx.MockTransport`` -- the seam
-httpx itself publishes. What the test gets back is the list of real
-``httpx.Request`` objects the delivery actually built, and everything in front
-of the answer stays production: the timeout object, the request line, the
-streaming read, the cap, the close on the way out.
+"""The webhook delivery path's HTTP answer, staged as a real httpx exchange: two
+files each stood a fake second-httpx in front of ``deliver_pinned_webhook``, so
+this patches the ``AsyncClient`` constructor to build a real client over ``httpx.MockTransport``.
 """
 
 from __future__ import annotations
@@ -37,15 +19,9 @@ def record_webhook_delivery(
     status_code: int = 200,
     headers: dict[str, str] | None = None,
 ) -> list[httpx.Request]:
-    """Answer every webhook POST with ``body``; return the requests delivery built.
-
-    ``body`` is the *response* body, which is attacker-controlled: a test that
-    is about the response cap passes one bigger than the cap and a test that is
-    about the request passes a small one (or the default empty body, which
-    drains nothing). The recorded requests are the assertion surface for
-    everything about the request -- that the connect URL is the pinned IP, that
-    the ``Host`` header still carries the logical hostname, that an https
-    delivery was not rewritten to an IP at all.
+    """Answer every webhook POST with ``body``; return the requests delivery built, for
+    asserting the request side (pinned IP, Host header, no https-to-IP rewrite); the
+    response body is attacker-controlled, so a cap test passes one over the cap.
     """
     real_client = httpx.AsyncClient
     requests: list[httpx.Request] = []
@@ -65,11 +41,8 @@ def record_webhook_delivery(
 
 
 def assert_delivered_once(delivered) -> None:
-    """Exactly one webhook was delivered, and it is the one under test.
-
-    Every delivery test here follows with assertions on ``delivered[0]``, so a
-    zero- or two-delivery outcome raised ``IndexError`` or asserted against the
-    wrong one. This says what the tests mean -- one delivery, and here it is --
-    and the following lines read as the property that delivery had.
+    """Exactly one webhook was delivered, and it is the one under test; a zero- or
+    two-delivery outcome used to raise ``IndexError`` or assert against the wrong
+    one, so this names the delivery the following lines are about.
     """
     assert len(delivered) == 1, delivered

@@ -1,12 +1,6 @@
-"""Worker dispatch: the two shapes ``call_worker`` accepts, and the lie it names.
-
-``app.orchestration.worker.call_worker`` is the seam between the engine and whatever
-fetches a job, so its whole contract is two overloads and one runtime refusal.
-Five tests across two modules were re-deriving that contract independently, with
-untyped workers, a bare ``class _Job: pass`` in place of a ``CrawlJob``, and a
-string in place of the result -- none of which the type checker could see, and
-all of which a future edit to the seam could quietly invalidate. These are the
-same three claims stated once, on the real models.
+"""Worker dispatch: the two shapes ``call_worker`` accepts, and the lie it names --
+five tests across two modules re-derived this contract with untyped stand-ins, so
+these are the same claims stated once on the real models.
 """
 
 from __future__ import annotations
@@ -25,11 +19,9 @@ WORKER_URL = "http://worker.test/page"
 
 
 async def assert_coroutine_worker_is_awaited_directly() -> None:
-    """A coroutine worker is awaited, and its own result object comes back.
-
-    Asserted by identity, not by value: the claim is that ``call_worker`` hands
-    back the object the worker returned rather than a copy or a re-read of the
-    same fields, and a value comparison would pass for either of those.
+    """A coroutine worker is awaited and its own result object comes back, asserted by
+    identity -- the claim is ``call_worker`` returns the object the worker returned,
+    not a copy or re-read, which a value comparison would not catch.
     """
     job = make_job(0, WORKER_URL)
     expected = crawl_result(WORKER_URL)
@@ -44,12 +36,9 @@ async def assert_coroutine_worker_is_awaited_directly() -> None:
 
 
 async def assert_sync_worker_runs_once_in_a_thread() -> None:
-    """A plain worker runs in a thread, once, and its result survives the hop.
-
-    The call count is the half that matters: a plain function that is awaited
-    instead of run off-loop blocks the event loop, and a result that got dropped
-    on the way back looks like a worker that never ran. Both are invisible to an
-    assertion about the return value alone.
+    """A plain worker runs in a thread, once, and its result survives the hop; the call
+    count matters because a plain function awaited in-loop blocks the event loop, and
+    a dropped result looks like a worker that never ran.
     """
     job = make_job(0, WORKER_URL)
     expected = crawl_result(WORKER_URL, domain="worker.test")
@@ -66,19 +55,9 @@ async def assert_sync_worker_runs_once_in_a_thread() -> None:
 
 
 async def assert_sync_worker_returning_awaitable_is_named() -> None:
-    """A plain function returning a coroutine is refused at the seam, by name.
-
-    This is the mistake the seam's guard exists for: a ``lambda job: render(job)``
-    is a plain function, so it took the sync branch and handed the strategy an
-    un-awaited coroutine, which then read ``.html`` off it and reported a
-    ``network_error`` ~100 lines downstream -- a report that reads like a site
-    problem and sent the investigation at the page instead of at the double.
-
-    The mismatch cannot be written in the type system: a coroutine function
-    satisfies neither overload, which is precisely why the runtime check is
-    needed. So the callable is cast to the sync worker type it is being passed
-    as. That narrows to a real type rather than erasing the contract, and it is
-    the exact claim the ``TypeError`` then falsifies.
+    """A plain function returning a coroutine is refused at the seam, by name, because
+    ``lambda job: render(job)`` once handed the sync branch an un-awaited coroutine
+    that read as a ``network_error`` far downstream -- a report about the wrong thing.
     """
     job = make_job(0, WORKER_URL)
 
