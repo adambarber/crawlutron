@@ -79,10 +79,8 @@ def _policy(limit=3 * 1024 * 1024 * 1024, pool_size=2, max_concurrent_pages=3, d
 def _unreserved_bytes(policy) -> int:
     """The 3 GiB limit minus the reserves that are already spent.
 
-    Both reserves are RAM a consumer holds for the life of the process rather
-    than RAM a request borrows, so the HTTP ceiling is sized from what is left.
-    One function because two tests assert the same subtraction and a third
-    that got it wrong would be invisible: the arithmetic IS the contract.
+    Reserves are RAM a consumer holds for the process's life, not RAM a request
+    borrows; the HTTP ceiling sizes from what is left -- the arithmetic IS here.
     """
     return (3 * 1024 * 1024 * 1024) - policy.browser_pool_reserve_bytes - policy.doc_pool_reserve_bytes
 
@@ -238,9 +236,8 @@ async def _no_crawl_delay(url: str) -> float | None:
 class _RequeueJob:
     """The slice of a job state that the requeue path actually reads.
 
-    Deliberately narrow: this names the contract ``requeue_admitted_pages``
-    depends on, so a change that widens what it reads shows up as a missing
-    attribute here rather than as a confusing failure inside a real job row.
+    Deliberately narrow: a widening change surfaces as a missing attribute
+    here, not a confusing failure inside a real job row.
     """
 
     def __init__(self, *, policy, tier=None, visited=()):
@@ -260,11 +257,8 @@ def _requeue_context():
 class TestRequeueOvercommitContract:
     """``cap_blocked`` and ``cap_overcommitted`` must mean opposite things.
 
-    Both arrive as a number in an ``AdmissionOutcome``, and on the requeue path
-    the count was reported as ``cap_blocked`` -- "the cap refused this" -- for
-    entries that were admitted anyway. A reader reconciling the outcome against
-    the frontier would find one candidate that was simultaneously refused and
-    present, and the two facts are not reconcilable.
+    The requeue path once reported an admitted count as ``cap_blocked``, so a
+    reader found one candidate both refused and present.
     """
 
     def test_requeue_past_the_cap_admits_and_reports_overcommit_not_blocked(self):
@@ -300,9 +294,8 @@ class TestRequeueOvercommitContract:
     async def test_normal_admission_refuses_past_the_cap_and_flags_no_overcommit(self):
         """The ordinary path refuses, and the two signals never both fire.
 
-        Together with the two tests above this is the whole contract: refusal
-        and overcommit are opposites, each belongs to exactly one path, and a
-        caller can tell them apart by which number is non-zero.
+        With the two tests above this is the whole contract: refusal and overcommit
+        are opposites, each on exactly one path, told apart by which number is non-zero.
         """
         frontier: list[NormalizedUrl] = []
         outcome = await admit(

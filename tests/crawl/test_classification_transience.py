@@ -1,19 +1,7 @@
 """Transience: is a page that failed this way worth another pass?
 
-The verdict used to live in three hand-maintained lists that had already drifted
-apart -- the browser strategy's ``TRANSIENT_CLASSIFICATIONS`` authorized retries
-for a code nothing produced (``dns_error``) while omitting the code that
-actually caught every transport failure (``connection_error``);
-``result_helpers`` hardcoded ``retryable = classification ==
-"browser_pool_exhausted"`` in both the crawl and render paths; and
-``recursive._commit_recursive_result`` requeued only that one label too,
-recording a capacity skip as a terminal result. The durable job runner imported
-the browser strategy's set, so a one-second DNS blip marked a URL visited and
-dropped it from a whole-site crawl.
-
-These tests pin the single source of truth, its coverage over the taxonomy, and
-the classifier that feeds it. The tree-wide ban on new hand-lists is
-``tests/invariants/test_taxonomy.py::test_transience_verdict_has_one_home``.
+The verdict lived in three hand-maintained sets that had drifted, and a brief
+DNS blip once dropped a URL from a whole-site crawl; tests pin one source.
 """
 
 import socket
@@ -37,11 +25,11 @@ class TestTransienceIsATaxonomyOwnedVerdict:
     of them accounted for."""
 
     def test_every_taxonomy_member_has_a_transience_verdict(self):
-        """Both sides are stated, so the pair is a complete verdict over the
-        enum. A member landing in neither set would default to terminal, which
-        is the fail-closed direction but still an untriaged decision nobody
-        made -- so it fails here instead, exactly as a missing status entry
-        does."""
+        """Both sides are stated, so the pair is a complete verdict over the enum.
+
+        A member in neither set defaults terminal (the fail-closed direction) but
+        is still untriaged, so it fails here as a missing status entry would.
+        """
         entire = {member.value for member in CrawlClassification}
         decided = TRANSIENT_CLASSIFICATIONS | NON_TRANSIENT_CLASSIFICATIONS
         assert entire - decided == set(), (
@@ -64,10 +52,11 @@ class TestTransienceIsATaxonomyOwnedVerdict:
         )
 
     def test_every_transient_failure_is_never_reported_as_a_dead_page(self):
-        """A page eligible for another pass must not wear a status that reads as
-        done: ``blocked``/``disallowed``/``skipped`` are the "we are finished
-        with this" shapes a consumer keys on, and ``success`` is the only status
-        that feeds strategy pinning and the content cache."""
+        """A page eligible for another pass must not wear a status that reads as done.
+
+        ``blocked``/``disallowed``/``skipped`` are the finished shapes a
+        consumer keys on, and ``success`` feeds strategy pinning and the cache.
+        """
         dead_page = {"success", "blocked", "disallowed", "skipped"}
         for label in sorted(TRANSIENT_CLASSIFICATIONS):
             assert CLASSIFICATION_STATUS_BY_LABEL[label] not in dead_page, (
@@ -108,11 +97,11 @@ class TestClassifiedFailuresGetTheVerdictThatMatchesThem:
         assert is_transient_classification(code) is (expected != "value_error")
 
     def test_dns_failures_report_dns_error_not_connection_error(self):
-        """``dns_error`` was a declared, wire-legal, unreachable member: nothing
-        in app/ ever produced it, because name-resolution failures shared a
-        branch with connect/timeout failures. That is a dead taxonomy entry
-        *and* a diagnostic that says "connection" when the name never resolved,
-        so the two are split."""
+        """``dns_error`` was a declared, wire-legal, unreachable member.
+
+        Nothing produced it; name-resolution failures shared a branch with
+        connect/timeout failures -- a dead entry that says "connection".
+        """
         assert classify_error_code(socket.gaierror(-2, "Name or service not known")) == "dns_error"
         assert classify_error_code(socket.herror("no address associated with hostname")) == "dns_error"
 

@@ -38,11 +38,8 @@ class TestReadinessState:
     def test_saturated_when_a_gate_is_over_its_line(self, gauge, over_the_line):
         """Both gates carry the same shape: ready below the line, saturated above it.
 
-        One test over the two gauges because the shape is the property -- zero
-        the other gauge so this one is what decides, read ready, push this one
-        over, read saturated. Written per gate it was twice the same walk with a
-        different number, and the CPU copy had quietly stopped asserting the
-        status string the memory copy checked.
+        Two gauges in one test because the shape is the property; written per
+        gate it was twice the walk, and the CPU copy had dropped the status.
         """
         metrics = get_metrics()
         metrics.resource_memory_utilization = 0.0
@@ -125,12 +122,8 @@ def test_read_cpu_usage_missing_is_none(tmp_path):
 def _cpu_gate(monkeypatch, *, target=0.90):
     """A CpuGate on a fake clock and a fake usage series, with a way to advance both.
 
-    Every CPU-throttle test needs the same three things -- a pinned quota, a
-    clock it owns, and a way to say "the box used this much CPU over this much
-    wall time" without waiting for either -- and each of them was spelling the
-    same two one-element lists. The gate itself stays real: only the two sensors
-    it reads are replaced, so the utilization arithmetic under test is
-    production's.
+    Tests once re-spelled the same two one-element lists; the gate stays real,
+    only its two sensors are replaced, so the arithmetic is production's.
     """
     clock, usage = [0.0], [0.0]
     monkeypatch.setattr("app.runtime.pressure_gates.time.monotonic", lambda: clock[0])
@@ -214,15 +207,8 @@ async def test_gate_returns_immediately_under_target(monkeypatch, kind, make_gat
 def _pinned_resource_gate(monkeypatch, *, cpu_ratio, memory_ratio, max_wait_seconds=0.05):
     """A ResourceGate with both sampler ratios pinned, an injected clock, and recorded waits.
 
-    The clock and the sleep are one seam, not two: the recorded sleep advances
-    the clock by exactly the interval it was asked to wait, so the wait
-    terminates on the gate's OWN ``max_wait_seconds`` instead of on a real one.
-    Faking only the sleep is what made this fixture dishonest -- with the sleep
-    free but the deadline on the real monotonic clock, the bound the helper
-    advertises is a bound no test could afford to reach, so the callers had to
-    pass a ten-second ``max_wait_seconds`` that overrode it and then sat out
-    those ten real seconds. The wait is still a wait: the gate polls, yields,
-    and re-reads both ratios, exactly as in production.
+    The recorded sleep advances the clock by the interval it was asked to wait,
+    so the wait ends on the gate's OWN bound rather than a real one.
     """
     now = [0.0]
     gate = ResourceGate(
@@ -264,11 +250,8 @@ async def test_resource_gate_returns_when_both_idle(monkeypatch):
 async def test_resource_gate_explicit_budget_overrides_the_pinned_bound(monkeypatch):
     """The argument still wins over the gate's own bound, observably.
 
-    The test above exercises the bound the helper pins (0.05s -> one poll at the
-    0.1s poll interval). This pins the other half of the contract, so "no
-    argument" cannot quietly become "the argument is ignored" and so the two
-    bounds are distinguishable in the recorded poll count rather than only in
-    the source: 0.25s of budget is three polls, 0.05s of budget is one.
+    This pins the other half of the contract -- "no argument" must not mean
+    "the argument is ignored" -- so 0.25s of budget is three polls, 0.05s is one.
     """
     gate, waited = _pinned_resource_gate(monkeypatch, cpu_ratio=0.99, memory_ratio=0.0)
     await gate.wait_while_saturated(max_wait_seconds=0.25)

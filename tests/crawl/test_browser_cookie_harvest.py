@@ -1,9 +1,7 @@
 """The cookie harvest must complete before the render returns.
 
 The harvest used to fire-and-forget a collection task, so the cffi retry's
-synchronous store read usually raced it and retried cookieless. Awaiting
-the harvest makes the browser-minted session visible to the immediate
-retry that follows the render.
+sync read raced it and retried cookieless; awaiting it fixes that.
 """
 
 import asyncio
@@ -34,12 +32,8 @@ class _FakeContext:
 def isolated_browser_cookies(url: NormalizedUrl):
     """Detach the module-global cookie slot for ``url``'s domain, then restore it.
 
-    ``BROWSER_COOKIES_BY_DOMAIN`` is process-global and keyed by registrable
-    domain, so a test that harvests or refuses to harvest against
-    ``http://harvest-race.test/page`` is reading and writing state that outlives
-    it. Detachment used to pop one key and put it back, and the restore was the
-    part that went missing; the store offers no per-key removal (nothing in
-    production wanted one), so the slot is detached by emptying the whole store.
+    The store is process-global, the restore was once missing, and no
+    per-key removal exists -- so the slot is detached by emptying the store.
     """
     domain = url.site
     browser_mod.reset_process_state()
@@ -108,15 +102,8 @@ class TestHarvestWaitBounded:
 class TestActionChainFailuresAreVisible:
     """Best-effort is the right policy for an action chain; silence is not.
 
-    Every action error was swallowed by a bare ``except Exception: continue``,
-    including the common one -- a ``wait`` for a selector the page never grows.
-    That costs extraction quality on exactly the pages an operator most wants to
-    hear about (SPA content that never arrived), and it left no evidence at all.
-
-    These drive the REAL ``BrowserDriver``, which is where the chain lives. The
-    shared ``build_pinned_renderer`` helper substitutes a driver whose chain is
-    a no-op (it is there to drive the render), so a test using it asserts
-    against the stub and passes no matter what the production chain does.
+    Every action error was swallowed by ``except Exception: continue``,
+    including a timed-out ``wait`` -- SPA content that never arrived, no evidence.
     """
 
     async def test_a_selector_timeout_names_the_selector_url_and_budget(self, caplog):
@@ -148,14 +135,8 @@ class TestActionChainFailuresAreVisible:
 class TestActionChainIsOneBoundedHold:
     """A pool slot may be held for the render's budget, not for the chain's.
 
-    The page semaphore is held for the whole render, but the only deadline in it
-    was the navigation's -- the action chain after it had none, only a
-    PER-ACTION clamp. Three ``wait`` actions were therefore 3x10s of pooled
-    renderer, on a pool whose whole reason for existing is that concurrent tabs
-    crash the shared process, and the exhaustion that follows is reported as
-    ``browser_pool_exhausted`` with nothing saying a chain was still waiting.
-    One deadline for the chain, taken from the same per-URL budget the
-    navigation got, removes the multiplier.
+    The chain once had no deadline, only a per-action clamp, so three
+    ``wait`` actions multiplied into a long hold on a shared-process pool.
     """
 
     async def test_a_wedged_chain_releases_the_slot_at_the_render_budget(self, caplog):
