@@ -13,16 +13,8 @@ from tests._lifespan_doubles import stub_heavy_teardown
 def _booted_app(monkeypatch, *, workers: str | None = None):
     """The real lifespan, with the cookie jar backed by the shared store.
 
-    Two claims in this file need a *running* service rather than a built one: the
-    fleet boot and the shared database. Neither can be observed on an unstarted
-    app, and both are vacuous without cookie persistence -- the jar does not
-    exist, and a jar with no store behind it opens no file, so an assertion about
-    sharing would pass on a jar that shares nothing.
-
-    Written twice, the two setups drifted into being different, which is the only
-    reason it is worth writing once. `workers` is optional because only the fleet
-    claim is about the worker count; the shared-database claim is about the file.
-    """
+    The fleet boot and shared database need a RUNNING service; written twice,
+    the two setups drifted into being different."""
     from app import main as main_mod
 
     if workers is not None:
@@ -39,10 +31,8 @@ def _booted_app(monkeypatch, *, workers: str | None = None):
 def _database_file(store) -> Path:
     """The file a store's own connection actually opened, resolved.
 
-    Read from SQLite rather than from the constructor argument: a store that
-    resolved, split, or substituted the path would report the argument back
-    verbatim and hide it.
-    """
+    Read from SQLite rather than the constructor argument: a store that
+    resolved or substituted its path would echo the argument back and hide it."""
     conn = store.conn if hasattr(store, "conn") else store._conn
     row = conn.execute("PRAGMA database_list").fetchone()
     assert row[1] == "main", row
@@ -52,36 +42,14 @@ def _database_file(store) -> Path:
 class TestMultiWorkerInvariants:
     """`CRAWLUTRON_WORKERS > 1` is supported; these are the properties that make it so.
 
-    The service used to refuse a second process, because three of its
-    process-local singletons were wrong rather than merely wasteful:
-
-      * the cookie jar loaded at startup and rewrote the whole file at
-        shutdown, so N workers made continuity per-process and shutdown
-        last-writer-wins. It is now backed by a table in the shared database;
-      * `/metrics` served one worker's counters, so the numbers the admission
-        gate is tuned from reported a fraction of real load. The counters are
-        now in the same shared database, and the two resource gauges stay
-        per-process because they read a cgroup every worker shares;
-      * the admission gate reads shared cgroup pressure but granted capacity
-        per process. Its ceilings are now divided by the worker count where
-        they are derived, so the fleet's grants sum to one worker's worth.
-
-    The refusal is gone, so these assert the invariants hold rather than that
-    boot is denied. The arithmetic behind the division is proven in
-    `tests/crawl/test_fleet_budget_split.py`; what is untested there is that
-    the running service is actually wired to it, which is what this covers.
-    """
+    The cookie jar, /metrics counters and the gate's ceilings were per-process;
+    each now derives from shared state divided by worker count."""
 
     async def test_the_lifespan_boots_a_four_worker_fleet(self, monkeypatch):
         """The refusal is gone, so prove the boot rather than the absence of a token.
 
-        A source read cannot see a guard reintroduced under another name, and it
-        does not prove the service starts at all. This drives the real lifespan
-        at the fleet's worker count and asserts what startup built while doing
-        it: the cookie jar has to be backed by the shared store, because a jar
-        only this process can see is exactly what made N workers lose every
-        cookie the others collected while reporting healthy.
-        """
+        A source read cannot see a reintroduced guard and does not prove the
+        service starts; driving the real lifespan asserts what startup built."""
         from app.storage.coordination_cookies import SharedCookieStore
 
         app = _booted_app(monkeypatch, workers="4")
@@ -105,17 +73,8 @@ class TestMultiWorkerInvariants:
     async def test_every_store_shares_the_one_database_path(self, monkeypatch):
         """The stores must share one file, or the sharing is only nominal.
 
-        The cookie jar and the metrics counters each hold a connection. If
-        either were pointed at its own path -- which is what the
-        single-database decision exists to prevent -- both would pass their own
-        tests and the fleet would still not see shared state.
-
-        Every store is read off the running app, including the two the lifespan
-        builds internally, and the path is taken from each live connection's
-        ``PRAGMA database_list`` rather than from the constructor argument: a
-        store that resolved or substituted its own file would echo the argument
-        back and hide it.
-        """
+        A per-process path would pass each store's own test; the path is read
+        from each live connection's ``PRAGMA database_list``, not the argument."""
         from app.main import DATABASE_PATH, job_store, result_store
         from app.runtime.metrics import get_metrics
         from app.storage.coordination_cookies import SharedCookieStore
@@ -194,11 +153,8 @@ class TestLifespanContextManager:
     async def test_lifespan_is_handed_the_app_it_is_managing(self):
         """The lifespan publishes onto the app it was given.
 
-        This is what the ``lifespan=_lifespan(None)`` shape broke: the shutdown
-        event is written to ``_app.state``, so a lifespan handed ``None`` raises
-        at startup and the app never serves. Asserting on the decorator would
-        only restate how the fix was written.
-        """
+        The ``_lifespan(None)`` shape wrote the event to ``_app.state``, so
+        ``None`` raised at startup; the decorator cannot see that."""
         from app.main import app
 
         async with app.router.lifespan_context(app):
@@ -208,16 +164,8 @@ class TestLifespanContextManager:
 class TestShutdownEventBelongsToOneLifespanRun:
     """The shutdown signal is minted per run, not once per process.
 
-    ``shutdown_event`` was a module global built at import and wired to
-    ``app.state`` at import, while the lifespan only ever called ``.set()`` on
-    it. The first run to finish therefore left the process-wide event signalled
-    for good, and every later run handed that dead event to the request
-    dependency, so crawls started already cancelled.
-
-    Nothing in production reads the global -- ``get_shutdown_event`` resolves
-    ``request.app.state.shutdown_event`` -- so the state is the only thing that
-    has to be fresh, and the fix belongs in the lifespan.
-    """
+    A module-global event wired to ``app.state`` at import stayed signalled
+    after the first run, so later crawls started cancelled."""
 
     async def test_a_second_lifespan_run_gets_a_live_shutdown_event(self, monkeypatch):
         stub_heavy_teardown(monkeypatch)

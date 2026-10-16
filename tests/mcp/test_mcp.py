@@ -1,11 +1,7 @@
 """MCP 2026-07-28 streamable-HTTP endpoint behavior.
 
-Tests the protocol contract at the wire level over the ASGI transport: request
-metadata validation (headers + ``_meta``), ``server/discover``, ``tools/list``,
-``tools/call`` dispatch, Origin handling, and the JSON-RPC error surface.
-Written against the 2026-07-28 specification (stateless, per-request metadata,
-no ``initialize`` handshake).
-"""
+Wire-level protocol over ASGI: metadata validation, discover, tools list/call,
+Origin handling, and the JSON-RPC error surface (stateless, no initialize)."""
 
 from __future__ import annotations
 
@@ -60,12 +56,8 @@ async def _mcp(client, body: dict, headers: dict | None = None):
 async def _assert_complete(client, body: dict, headers: dict | None = None) -> dict:
     """Post one request, assert it succeeded, and return its result.
 
-    The 2026-07-28 spec requires every result to carry ``resultType:
-    "complete"``, so that is one assertion rather than a shape each test
-    re-derived. The envelope is a response_model (a new top-level key is
-    silently dropped by a model that does not declare it), so this reads the
-    real wire shape.
-    """
+    Every result must carry ``resultType: "complete"``; the model drops
+    undeclared keys, so this reads the real wire shape."""
     resp = await _mcp(client, body, headers)
     assert resp.status_code == 200, resp.text
     result = resp.json()["result"]
@@ -76,10 +68,8 @@ async def _assert_complete(client, body: dict, headers: dict | None = None) -> d
 async def _assert_complete_tool(client, body: dict, headers: dict | None = None) -> dict:
     """Assert a completed *tool* result, and return it.
 
-    ``isError`` is a tool result's field, not a discover result's -- a discover
-    payload has no such key, so folding the check into the general helper made
-    it assert something the spec does not promise there.
-    """
+    ``isError`` is a tool result's field, not a discover result's -- folding it
+    into the general helper would assert what the spec does not promise there."""
     result = await _assert_complete(client, body, headers)
     assert result["isError"] is False, result
     return result
@@ -90,18 +80,8 @@ async def _assert_header_mismatch(
 ) -> None:
     """Assert the endpoint rejected headers that are missing or contradict the body.
 
-    Five of the protocol's rejections are this single spec rule reached from
-    different angles: a required header absent, a protocol-version header that
-    disagrees with ``_meta``, an ``Mcp-Method``/``Mcp-Name`` header that names
-    a different call than the body does. Each of the five was asserting the 400
-    and the code by hand, so a change to the code would have left four of them
-    still passing against the old number while only the one whose literal had
-    been updated caught it.
-
-    ``code`` is a parameter because one of the five is a different error:
-    an *absent* ``_meta`` block is InvalidParams (-32602), not a header
-    mismatch, and conflating the two is the mistake this helper exists to stop.
-    """
+    Five rejections are one spec rule from different angles; ``code`` is a
+    parameter because an absent ``_meta`` is InvalidParams (-32602)."""
     resp = await _mcp(client, body, headers)
     assert resp.status_code == 400, resp.text
     assert resp.json()["error"]["code"] == code, resp.text
@@ -251,12 +231,8 @@ class TestToolsList:
 def browser_pool_stub():
     """Make the browser pool present without launching a real browser.
 
-    The MCP crawl/map tools are invoked with the full default strategy chain
-    (including browser strategies) to prove every strategy is reachable over
-    MCP. In the hermetic suite the direct-HTTP strategy succeeds first, so the
-    stub pool is never actually used; it only needs to exist so the engine's
-    ``browser_pool_unavailable`` guard does not 503.
-    """
+    The crawl/map tools run the full strategy chain; the stub pool merely stops
+    the ``browser_pool_unavailable`` 503 (HTTP succeeds first in the suite)."""
     with owned_browser_pool(FakeBrowserPool()):
         yield
 
@@ -307,10 +283,10 @@ class TestToolsCall:
 
     @pytest.mark.usefixtures("browser_pool_stub")
     async def test_crawl_and_extract_reports_the_same_verdict_as_the_full_crawl(self, async_client, base_url):
-        """The projection is faithful: a caller must not get a kinder verdict from
-        the composite than from the crawl it replaced. Whatever the strategy chain
-        settles on -- HTTP sees the access-denied page, the stub pool cannot render
-        it -- both doors report the same status, classification and content."""
+        """The projection is faithful: the composite must not give a kinder verdict.
+
+        Whatever the chain settles on -- HTTP sees the access-denied page, the
+        stub pool cannot render it -- both doors report the same verdict."""
         full = await _tool_call(async_client, "crawl", {"url": f"{base_url}/blocked"})
         projected = await _tool_call(async_client, "crawl_and_extract", {"url": f"{base_url}/blocked"})
 
@@ -385,12 +361,8 @@ class TestToolsCall:
 async def _call_tool(async_client, name, arguments):
     """POST a ``tools/call`` for ``name`` and return ``(response, payload)``.
 
-    Every wire-level test here states the same request -- method, the tool name,
-    the arguments, and the required ``_meta`` -- and the ``_meta`` is the part
-    that must never be dropped, since a request without it is rejected before
-    the tool is even named. Written per test it was three copies of the frame
-    and one of them was the copy someone edited.
-    """
+    ``_meta`` must never drop -- a request without it is rejected before the
+    tool is named (three copies per test, one of them the edited copy)."""
     body = _body("tools/call", params={"name": name, "arguments": arguments, "_meta": _META})
     resp = await _mcp(async_client, body)
     return resp, resp.json()

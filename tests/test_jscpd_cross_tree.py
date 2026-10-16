@@ -25,22 +25,16 @@ def test_uniform_profile_shape() -> None:
 def _cross_tree_duplicate() -> dict:
     """A fragment shared between production and a test, at the same floor.
 
-    The shape this is about is a test harness re-spelling production's truth: it
-    looks like one legitimate copy on each side, so a per-tree gate has nothing to
-    object to even in principle.
-    """
+    A harness re-spelling production's truth looks like one legitimate copy on
+    each side, so a per-tree gate has nothing to object to even in principle."""
     return _duplicate("app/orchestration/recursive.py", "tests/_recursive_harnesses.py")
 
 
 def _sanctioned_cross_tree_pair() -> dict:
     """A declared cross-tree pair, pinned at the locations the duplicate reports.
 
-    The locations are not incidental. ``_expected_tree`` reads the tree label off
-    the two declared paths, so a declaration whose sides are in the same tree is
-    keyed under that tree and will never be found by the cross-tree pass -- the
-    one way to write an expectation here that reads as satisfied and pins
-    nothing.
-    """
+    ``_expected_tree`` keys on the two paths, so a same-tree declaration is
+    never found by the cross-tree pass -- satisfied yet pinning nothing."""
     pair = _valid_pair()
     pair["first"] = {"path": "app/orchestration/recursive.py", "start": 10, "end": 20}
     pair["second"] = {"path": "tests/_recursive_harnesses.py", "start": 30, "end": 40}
@@ -69,13 +63,8 @@ def test_a_clone_spanning_two_trees_fails(monkeypatch, tmp_path, capsys) -> None
 def test_per_root_scans_alone_cannot_see_a_cross_tree_clone(monkeypatch, tmp_path) -> None:
     """The gap this pass exists to close, asserted rather than remembered.
 
-    Runs the same planted cross-tree duplicate with the cross-tree scan removed
-    and requires the gate to pass. If the per-root scans ever grow the ability to
-    compare across roots -- jscpd adds a flag, the root list is folded into one
-    argument -- this fails, and the right response is to drop the spanning
-    invocation rather than keep paying for a second full scan of every file on
-    every run.
-    """
+    The planted clone passes without the cross-tree scan; if per-root scans
+    ever gain cross-tree reach, drop the spanning invocation."""
     _expect_nothing_sanctioned(monkeypatch, tmp_path, [_cross_tree_duplicate()])
     _without_cross_tree_scan(monkeypatch, [])
 
@@ -85,16 +74,8 @@ def test_per_root_scans_alone_cannot_see_a_cross_tree_clone(monkeypatch, tmp_pat
 def test_a_pair_inside_one_tree_is_not_also_reported_as_cross_tree(monkeypatch, tmp_path, capsys) -> None:
     """A within-tree pair is scored once, by the pass that owns its tree.
 
-    The spanning invocation necessarily re-reports every within-tree clone it
-    sees -- all three of this service's real pairs are same-file pairs in `app/`.
-    Charging those against a second expectation would let one clone satisfy two,
-    and would make the cross-tree count a second tally of findings already
-    counted rather than a count of the ones nothing else can see.
-
-    The names are real paths because the gate resolves a reported name to a root
-    against the filesystem; a synthetic name in a hand-written report is
-    unattributable, and unattributable is rejected rather than guessed.
-    """
+    The spanning invocation re-reports within-tree clones; charging them twice
+    would let one clone satisfy two expectations."""
     _expect_nothing_sanctioned(monkeypatch, tmp_path, [])
     _without_cross_tree_scan(
         monkeypatch,
@@ -114,12 +95,8 @@ def test_a_pair_inside_one_tree_is_not_also_reported_as_cross_tree(monkeypatch, 
 def test_a_cross_tree_clone_can_be_sanctioned_with_a_guard(monkeypatch, tmp_path) -> None:
     """A cross-tree clone is sanctionable on the same terms as any other.
 
-    Not a concession: a guard is the only thing that ever justified a sanctioned
-    pair, and refusing cross-tree pairs specifically would make a justified one
-    unsanctionable -- so the fix would be to delete the duplication, which is the
-    outcome the gate wants anyway, by making it impossible rather than by
-    disallowing the admission.
-    """
+    A guard is the only thing that ever justified a pair; refusing cross-tree
+    ones makes a justified pair unsanctionable -- deletion made impossible."""
     _configure(monkeypatch, tmp_path, _sanctioned_cross_tree_pair(), [_cross_tree_duplicate()])
 
     assert gate._run(_args()) == 0
@@ -128,11 +105,8 @@ def test_a_cross_tree_clone_can_be_sanctioned_with_a_guard(monkeypatch, tmp_path
 def test_a_cross_tree_pair_whose_fragment_moved_is_drift(monkeypatch, tmp_path, capsys) -> None:
     """Attribution follows the content across both trees, as for a within-tree pair.
 
-    A sanctioned cross-tree pair identified by path and line would read as a
-    disappearance the moment the production side shifted, and the fix-forward
-    would be to copy the coordinates out of the error into the expectation -- the
-    same failure mode the within-tree content identity exists to prevent.
-    """
+    A pair pinned by path and line reads as gone when the production side
+    shifts, inviting coordinates copied out of the error."""
     moved = _cross_tree_duplicate()
     moved["firstFile"]["start"] = 11
     moved["firstFile"]["end"] = 21
@@ -145,12 +119,8 @@ def test_a_cross_tree_pair_whose_fragment_moved_is_drift(monkeypatch, tmp_path, 
 def test_jscpd_command_resolves_the_service_copy(monkeypatch, tmp_path) -> None:
     """The command names the repository's own jscpd, whichever install it came from.
 
-    Asserted against ``require_repo_tool`` rather than against a spelled-out
-    path, because the install is genuinely two-shaped: a repository-root
-    ``.venv`` locally, the runner's console script in CI. Spelling the venv
-    path here made the assertion false in CI for a command that was correct,
-    which is the same mistake the gate itself was making.
-    """
+    The install is two-shaped (.venv locally, console script in CI); spelling
+    the venv path made the assertion false in CI for a correct command."""
     commands = _run_against_empty_tree(monkeypatch, tmp_path)
     assert commands
     for command in commands:
