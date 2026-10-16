@@ -76,12 +76,9 @@ class BrowserPool:
             )
 
     async def acquire(self, timeout: float | None = BROWSER_POOL_ACQUIRE_TIMEOUT_SECONDS) -> BrowserRenderer:
-        """Acquire a renderer from the pool.
-
-        The wait is bounded: a leaked renderer must shrink capacity
-        loudly, not hang every subsequent acquire forever with no
-        diagnostics. Pass ``timeout=None`` only when the caller owns an
-        outer deadline.
+        """Acquire a renderer from the pool; the wait is bounded so a leaked
+        renderer shrinks capacity loudly rather than hanging every acquire with
+        no diagnostics. Pass ``timeout=None`` only when the caller owns a deadline.
         """
         if not self._initialized:
             await self.initialize()
@@ -105,13 +102,9 @@ class BrowserPool:
         return renderer
 
     def release(self, renderer: BrowserRenderer) -> None:
-        """Return a renderer to the pool, unless its generation has been retired.
-
-        A renderer that was checked out when ``close`` ran has already been
-        closed by it, and returning it would put a closed renderer back in the
-        queue for the next acquire to hand out. That is the same retired-
-        generation state the queue drain in ``close`` prevents from the other
-        side, so it is dropped here -- the only place that can reintroduce it.
+        """Return a renderer to the pool, unless its generation was retired: one
+        closed by ``close`` during checkout would otherwise re-enter the queue for
+        the next acquire -- dropped here, the only place that can reintroduce it.
         """
         if not self._initialized or not any(r is renderer for r in self._renderers):
             logger.debug(
@@ -123,14 +116,9 @@ class BrowserPool:
         logger.debug("browser_pool_released", extra={"available": self._available.qsize()})
 
     async def close(self) -> None:
-        """Close all renderers and clean up.
-
-        The idle queue is drained as well as the renderer list cleared. Keeping
-        the closed renderers queued made the pool's two halves disagree: the
-        next ``initialize`` appended the new generation to the back of a queue
-        that already held the old one, and ``acquire`` pops the front, so the
-        first ``pool_size`` acquires after a recycle returned closed renderers
-        and ``available`` reported double the real capacity.
+        """Close all renderers and drain the idle queue, not just clear the list;
+        keeping closed renderers queued made the pool's halves disagree -- a new
+        generation queued behind closed ones, so early acquires returned them.
         """
         async with self._lock:
             for renderer in self._renderers:
@@ -149,16 +137,10 @@ class BrowserPool:
 
     @property
     def browser_strategy(self) -> CrawlStrategyName:
-        """The CrawlStrategy label for the renders this pool performs.
+        """The ``CrawlStrategyName`` label for this pool's homogeneous renders.
 
-        A pool's renderers are homogeneous (all built from one kwargs set), so
-        the first renderer's profile stands for the pool: the headed-warmed
-        profile is the one carrying warmup URLs, every other configuration is a
-        plain headless render. Before initialization the renderers do not exist
-        yet, so the constructor kwargs decide, and those default to the
-        headless profile. Exposed so a worker that fails before or during
-        acquire can label its terminal result with the browser mode it was
-        actually configured for, never an invented member.
+        The first renderer's profile stands for the pool (headed-warmed if it
+        carries warmup URLs, else plain headless); before init, the kwargs decide.
         """
         warmup = self._renderer_kwargs.get("warmup_urls")
         if self._renderers:
@@ -174,13 +156,9 @@ _BROWSER_STRATEGIES: frozenset[CrawlStrategyName] = frozenset({BROWSER_HEADLESS,
 
 
 class PooledBrowserWorker:
-    """Callable that acquires a renderer from the pool, renders, and releases.
-
-    Used as the ``browser_worker`` callback in ``crawl_request`` and
-    ``render_request``. Its failure path returns the contracted
-    ``CrawlResult`` shape (classified through the shared chokepoint) rather
-    than raising: there is no catch site above it that can handle an
-    ``EngineCrawlResult``-shaped substitute.
+    """Callable that acquires a renderer, renders, and releases -- the
+    ``browser_worker`` callback for crawl and render requests. Its failure path
+    returns the contracted ``CrawlResult`` shape rather than raising.
     """
 
     def __init__(self, pool: BrowserPool, *, strategy: CrawlStrategyName | None = None) -> None:
@@ -233,13 +211,9 @@ _browser_pool_singleton: BrowserPool | None = None
 
 
 def get_browser_pool() -> BrowserPool | None:
-    """Get the global browser pool (the one set up during lifespan).
-
-    Returns None until ``initialize_browser_pool`` has run (or after
-    ``close_browser_pool``), never lazily constructing a divergent,
-    wrongly-sized pool -- the pool size is derived from settings at startup,
-    not re-derived here. Callers that need the pool before startup (i.e. only
-    browser strategies) must ensure startup ordering.
+    """Get the global browser pool (set up during lifespan), or None before it;
+    never lazily constructs a divergent, wrongly-sized pool -- the size comes
+    from settings at startup, not re-derived here.
     """
     return _browser_pool_singleton
 

@@ -86,13 +86,9 @@ class JobAdmissionContext:
         settings: Any,
         fetch_and_decode: FetchAndDecode | None = None,
     ) -> JobAdmissionContext:
-        """The admission gate's own view of a policy.
-
-        ``tier`` and ``settings`` are separate because they answer different
-        questions: the tier is what an omitted limit means for this deployment,
-        and ``settings`` is the scheduler's own configuration. Passing settings
-        where a tier belongs is what let the job path resolve its limits with
-        the model defaults while ``/v1/crawl`` used the operator tier.
+        """The admission gate's own view of a policy: ``tier`` and ``settings``
+        stay separate because they answer different questions -- the tier defines
+        an omitted limit, settings configure the scheduler.
         """
         normalized = read_policy(policy, tier)
         limits = normalized.limits
@@ -126,11 +122,8 @@ class JobAdmissionContext:
 
 def admitted_page_identities(job: Any, *, host_policy: HostPolicy) -> set[NormalizedUrl]:
     """Union of canonical identities already admitted across the job's state.
-
-    No normalization pass: entries are canonical by construction (ingress and
-    the shared admission chokepoint), and rows are normalized once at the
-    storage boundary. Re-scanning the whole job here put a per-URL
-    canonicalization pass on every batch's hot path.
+    No normalization pass here: entries are canonical by construction (ingress and
+    the shared chokepoint normalize once at the storage boundary).
     """
     identities: set[NormalizedUrl] = set()
     values = set(job.visited) | {entry.url for entry in job.in_flight} | {entry.url for entry in job.frontier}
@@ -149,12 +142,10 @@ def normalize_sitemap_candidates(
     *,
     scope_pattern: BoundedPattern | None,
 ) -> list[tuple[NormalizedUrl, str | None]]:
-    """Dedupe and scope-filter already-admitted sitemap seed candidates.
+    """Dedupe and scope-filter already-admitted sitemap candidates.
 
-    The pairs arrive as admitted values -- resolved at the one place that knew
-    their base, ``fetch_sitemap_urls`` -- so this funnel only dedupes and applies
-    the job's scope pattern; there is no admission step left to re-spell, and a
-    candidate refused by policy never reaches this far.
+    The pairs were admitted at the one place that knew their base, so this funnel
+    only dedupes and applies the scope pattern -- no admission step is re-spelled.
     """
     candidates: list[tuple[NormalizedUrl, str | None]] = []
     seen: set[NormalizedUrl] = set()
@@ -169,21 +160,9 @@ def normalize_sitemap_candidates(
 
 
 def _record_cap_flag(job: Any, stat_key: str, level: int, event: str) -> None:
-    """Set a once-only cap stat on ``job``, logging it the first time only.
-
-    ``cap_truncated`` and ``cap_overcommitted`` are the same signal at two
-    severities: the cap bit, a one-shot log so a capped crawl is visible in
-    aggregate without filling the log, and no change to the job's own fate.
-    Spelled per flag, the pair duplicated the log payload and the cap source
-    and invited a third hand-written copy of the same three facts.
-
-    Private because the two cap signals are the whole of this module's cap
-    vocabulary. A public four-argument version would let a caller pair a stat
-    key with the wrong log event, and a mismatch there is invisible -- the
-    stat and the log would simply disagree.
-
-    ``level`` is the stdlib logging level and ``event`` the record's event
-    name; both are part of the signal's identity, not of this helper.
+    """Set a once-only cap stat on ``job``, logging the first time only. Private:
+    the two cap signals are this module's whole cap vocabulary, and a public
+    version would let a caller pair a stat key with the wrong log event.
     """
     if job.stats.get(stat_key, 0) == 0:
         _logger.log(
@@ -239,22 +218,9 @@ def _requeue_page_identities(
     known: set[NormalizedUrl],
     candidates: Iterable[tuple[NormalizedUrl, int]],
 ) -> tuple[list[FrontierEntry], int]:
-    """Re-admit already-admitted identities, counting how far past the cap they go.
-
-    The ONLY path in this module that can admit past the page cap, and it is
-    deliberately so. Every other route to the frontier -- ``admit_discovered_links``
-    -- refuses past the cap and reports the refusal. This one does not, because
-    the pages it is given were admitted before the cap was reached, may already
-    have been fetched once, and are being requeued for a transient retry.
-    Refusing them now would strand work that has already been paid for.
-
-    The count is returned rather than folded into the caller's outcome under the
-    old name, because it is not a refusal: the entries are appended either way.
-    Naming it the way the normal path names its refusals meant an outcome could
-    report a refusal for an entry that was simultaneously present in the frontier.
-
-    ``known`` is mutated as identities are admitted, so a caller passing the same
-    identity twice admits it once.
+    """Re-admit already-admitted identities, counting how far past the cap they
+    go -- the one path that may admit past it, since these are retries of already
+    paid-for work. ``known`` is mutated, so a duplicate identity admits once.
     """
     accepted: list[FrontierEntry] = []
     overcommitted = 0
@@ -288,15 +254,9 @@ def requeue_admitted_pages(
 
 
 async def fetch_job_sitemap_candidates(root_url: str, context: JobAdmissionContext) -> list[str]:
-    """Sitemap candidates for a job root, or none if the root is not crawlable.
-
-    The origin is taken from the admitted ``NormalizedUrl`` rather than rebuilt
-    here. This used to call ``urlparse`` and reassemble ``scheme://netloc``
-    itself, which kept host case, kept a default port and kept a trailing dot --
-    so the same job root produced a different sitemap URL depending on which
-    spelling had been stored, and a host the canonicalizer refuses was used as
-    a sitemap origin before any fetcher saw it. Routing through the declared
-    chokepoint makes this path agree with every other URL the service handles.
+    """Sitemap candidates for a job root, or none if not crawlable: the origin
+    comes from the admitted ``NormalizedUrl``, not a hand-rolled ``urlparse``
+    rebuild, so every spelling agrees with the rest of the service.
     """
     try:
         canonical_root = NormalizedUrl(root_url, policy=context.host_policy)

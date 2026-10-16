@@ -1,23 +1,6 @@
-"""Prometheus-style metrics for the crawler service.
-
-Counters are service totals and live in the shared coordination store, so
-`/metrics` reports the service rather than whichever worker happened to answer
-the request. `MetricsStore` started as a dataclass singleton whose counters
-were plain integer increments reachable only from the process holding them, so
-under `uvicorn --workers` the endpoint served one worker's numbers and called
-the result total traffic. That matters more than a stale number: the admission
-gate tunes itself from these numbers, so a reading that is a fraction of real
-load looks like an idle service.
-
-Gauges stay process-local on purpose. `resource_memory_utilization` and
-`resource_cpu_utilization` measure a cgroup every worker shares, so each
-worker's reading is equally valid and summing them would multiply a ratio by
-the worker count -- an alert that fires on a healthy service and a signal whose
-meaning depends on the deployment's worker count.
-
-A store is optional. Without one the counters are a plain process-local dict,
-which is the whole service in the single-process deployment that ships, and
-keeps unit tests and offline debugging from needing a database.
+"""Prometheus metrics; counters live in the shared store, gauges stay
+process-local (measuring a cgroup every worker shares). The store is optional:
+without one the counters are a plain process-local dict.
 """
 
 from __future__ import annotations
@@ -206,11 +189,9 @@ class MetricsStore:
         self._add(_SEARCH_ELAPSED, elapsed_ms)
 
     def record_throttle(self) -> None:
-        """Count one batch shrunk by the admission gate.
-
-        A method rather than a `+= 1` on a property, because a property setter
-        cannot know its own delta without a read-then-write that loses
-        increments when two workers set it at once.
+        """Count one batch shrunk by the admission gate; a method rather than
+        ``+= 1`` on a property, because a setter cannot know its own delta without
+        a read-then-write that loses increments under concurrent setters.
         """
         self._add(_THROTTLE_BATCHES, 1)
 
@@ -222,17 +203,9 @@ class MetricsStore:
         return self._counters
 
     def bind_counters(self, counters: CoordinationCounters) -> None:
-        """Attach shared storage mid-life, and import any counters already there.
-
-        The lifespan attaches the store after the process is already running, so
-        counters a sibling worker recorded before this one finished booting must
-        be carried over rather than dropped -- otherwise worker 3's early
-        requests vanish from the totals for the life of the process.
-
-        The local counters are carried over unconditionally. A shared store that
-        already holds values is not evidence this process's counters reached it:
-        those values can be a sibling's, and the values this process recorded
-        before the bind exist in exactly the deployments that bind late.
+        """Attach shared storage mid-life, carrying over any local counters --
+        carried over unconditionally, since a non-empty store can be a sibling's
+        and is not evidence this process's counts reached it.
         """
         if self._counters is not None:
             self._counters = counters
@@ -244,11 +217,9 @@ class MetricsStore:
         self._local = {}
 
     def reset(self) -> None:
-        """Zero every counter and gauge in place.
-
-        Resets the shared store too: a reset that only cleared this process's
-        memory would leave the next read unchanged, and an operator who clears
-        counters after an incident expects the endpoint to agree.
+        """Zero every counter and gauge in place, including the shared store; a
+        reset that cleared only process memory would leave the endpoint's next read
+        unchanged, but an operator expects agreement after an incident.
         """
         if self._counters is not None:
             self._counters.reset()
@@ -264,10 +235,8 @@ class MetricsStore:
 def _exposition(store: MetricsStore) -> str:
     """Render the Prometheus text exposition for ``store``.
 
-    A module function rather than a method: this is pure formatting over values
-    the store already exposes, and keeping ~90 lines of it on the state object
-    made MetricsStore the fourth oversized class in the tree without adding a
-    single behaviour.
+    A module function rather than a method: pure formatting over exposed values,
+    keeping the oversized state object free of ~90 behaviourless lines.
     """
     lines: list[str] = []
 
@@ -330,8 +299,7 @@ metrics = MetricsStore()
 def get_metrics() -> MetricsStore:
     """Return the metrics singleton.
 
-    Callers should use this accessor instead of ``from app.runtime.metrics import
-    metrics`` so they always observe the current store -- including if a test
-    or harness swaps the singleton -- rather than a name bound at import time.
+    Callers use this accessor rather than importing ``metrics`` so they observe
+    the current store even if a test or harness swaps the singleton.
     """
     return metrics

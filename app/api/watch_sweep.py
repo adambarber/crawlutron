@@ -1,16 +1,7 @@
-"""The watch sweep: one pass rechecks every due watch and announces what changed.
+"""The watch sweep: one pass rechecks every due watch and announces changes.
 
-A check is a conditional GET, not a crawl. The watch's stored validators go
-out as ``If-None-Match`` / ``If-Modified-Since``, and only a delivered
-representation counts as a change -- which is why the check runs the HTTP
-strategy alone: rendering a page to answer "did this change?" would pay for a
-body nobody asked for, and a ``304`` is answered before any body exists.
-
-Every outcome decision is made here and handed to the store as a value. The
-store holds rows and does not interpret results, so the two cannot disagree
-about what a check meant. A check that reaches no verdict is an ``ERROR``:
-it says nothing about whether the page changed, so it keeps the stored
-validators, fires no webhook, and only extends the failure streak.
+A check is a conditional GET under the HTTP strategy alone -- only a delivered
+representation counts; no verdict is an ``ERROR``, decided here, not in the store.
 """
 
 from __future__ import annotations
@@ -50,13 +41,9 @@ __all__ = ["WATCH_SWEEP_INTERVAL_SECONDS", "WatchSweeper", "sweep_watches_foreve
 
 
 def _check_policy():
-    """The single-URL policy a check runs under.
-
-    HTTP alone, declared here rather than taken from the payload because the
-    question a check answers is answered by a conditional GET. A chain that
-    climbed to a browser would ask for a render to compare against a
-    representation the caller never received, and would need the browser pool
-    to answer a question the pool is not part of.
+    """The single-URL policy a check runs under: HTTP alone, declared here, so a
+    climb to a browser would render a body the caller never received and need a
+    pool that is not part of the answer.
     """
     return read_policy({"strategies": [HTTP_DECLARED_CRAWLER], "limits": {}, "headers": {}})
 
@@ -73,12 +60,9 @@ def _announcement(watch: WatchState, *, outcome: WatchOutcome, checked_at: float
 
 
 class WatchSweeper:
-    """Rechecks due watches and announces what changed, one pass at a time.
-
-    Collaborators are constructor arguments rather than module globals: the
-    store is the deployment's, and the policy is the one in force now, so a
-    watch registered under an allow-list that has since closed fails its check
-    instead of quietly reaching a host this deployment no longer admits.
+    """Rechecks due watches and announces changes, one pass at a time; the store
+    and policy are constructor arguments, not module globals, so a watch under
+    a since-closed allow-list fails rather than silently reaching the host.
     """
 
     def __init__(
@@ -97,9 +81,8 @@ class WatchSweeper:
     async def sweep_once(self, now: float) -> list[WatchOutcome]:
         """Recheck every watch due at ``now``; return what each pass concluded.
 
-        One conclusion per due watch, in the order the registry hands them
-        over: the caller reports progress from this, and the row itself is the
-        record of what was stored.
+        One conclusion per due watch, in registry order -- the caller reports
+        progress from this, while the stored row is the record of what happened.
         """
         return [await self._check(watch, now=now) for watch in await self._store.adue(now)]
 
@@ -121,13 +104,10 @@ class WatchSweeper:
         return outcome
 
     async def _revalidate(self, watch: WatchState) -> tuple[WatchOutcome, ContentValidators]:
-        """One conditional check: the stored validators in, the verdict out.
+        """One conditional check: stored validators in, the row's new ones out.
 
-        The second value is what the row should now hold. A ``304`` and a
-        failure both keep what was already known -- neither told us anything
-        new about the representation -- while a delivered body replaces the
-        set outright, including dropping a validator the origin no longer
-        sends.
+        A ``304`` and a failure both keep what was already known; a delivered
+        body replaces the set outright, dropping a no-longer-sent validator.
         """
         try:
             NormalizedUrl(watch.url, policy=self._host_policy)
@@ -178,13 +158,9 @@ async def sweep_watches_forever(
     interval_seconds: float = WATCH_SWEEP_INTERVAL_SECONDS,
     clock: Callable[[], float] = time.time,
 ) -> None:
-    """Sweep the registry until the deployment is told to stop.
-
-    The wait rides the shutdown event rather than a bare ``sleep``, so a
-    stopping process leaves at once instead of finishing out a cadence it will
-    never act on. ``clock`` is a parameter because the loop's own tests drive
-    the passes they assert on; production reads the wall clock through the
-    default.
+    """Sweep the registry until told to stop; the wait rides the shutdown event
+    so a stopping process leaves at once instead of finishing an idle cadence.
+    ``clock`` is a parameter for the loop's tests.
     """
     sweeper = WatchSweeper(
         store,

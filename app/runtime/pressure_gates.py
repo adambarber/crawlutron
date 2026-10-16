@@ -22,14 +22,10 @@ from app.runtime.pressure_probes import (
 
 
 class CpuGate(ResourceGauge):
-    """Admission gate driven by CPU utilization relative to the cgroup quota.
+    """Admission gate on CPU utilization relative to the cgroup quota -- a rate.
 
-    Utilization is a *rate*: we keep the last (usage, wall) sample and report
-    (delta CPU seconds / delta wall seconds) / quota. Below ``target`` the gate
-    returns scale 1.0; between target and hard it scales down linearly; at or
-    above hard dispatchers wait until utilization drains below the ceiling.
-    When the cgroup is CPU-unbounded and no ``cpu_budget`` is configured the
-    gate reports None and never throttles: no measured ceiling, no defence.
+    Below ``target`` scale is 1.0, between target and hard it scales down linearly,
+    at/above hard it waits; an unbounded cgroup with no ``cpu_budget`` is None.
     """
 
     _default_target = DEFAULT_CPU_TARGET
@@ -102,12 +98,8 @@ class CpuGate(ResourceGauge):
     def is_warm(self) -> bool:
         """Whether the gate has a real utilization sample yet.
 
-        True when the cgroup is CPU-unbounded (no ceiling to defend, so the full
-        concurrency multiplier is always safe) or once at least one rate sample
-        has been taken. False only on a cold start with a real CPU ceiling --
-        exactly when the first recursive batch should ramp conservatively instead
-        of launching ``global_concurrency * multiplier`` parallel fetches, which
-        can briefly exceed a tight CPU quota before the gate engages.
+        True when the cgroup is CPU-unbounded or one rate sample was taken; False only
+        on a cold start with a real ceiling, when the first batch should ramp.
         """
         if self._quota_cpus() is None:
             return True
@@ -118,12 +110,10 @@ class CpuGate(ResourceGauge):
 
 
 class ResourceGate:
-    """Combined admission gate over memory + CPU.
+    """Combined admission gate over memory + CPU, the engine's single gate.
 
-    Dispatchers wait while *either* resource is saturated, and the batch-scale
-    factor is the *minimum* across resources, so the most-contended resource
-    sets the pace. This is the single gate the crawl engine consults before each
-    recursive batch dispatch.
+    Dispatchers wait while *either* resource is saturated; the batch scale factor
+    is the *minimum* across resources, so the most-contended one sets the pace.
     """
 
     def __init__(
@@ -165,11 +155,10 @@ class ResourceGate:
         self._lag_probe_enabled = lag_probe_enabled
 
     def start_lag_probe(self) -> None:
-        """Start the loop-lag sampler on the running loop.
+        """Start the loop-lag sampler on the running loop; idempotent.
 
-        Called from lifespan startup, not __init__: the module-level gate is
-        constructed at import time with no running loop, so an __init__-time
-        start silently never schedules and lag reads 0.0 forever. Idempotent.
+        Called from lifespan, not ``__init__``: the module gate is built at import
+        time with no running loop, and an early start silently never schedules.
         """
         if self._lag_probe_enabled:
             self._lag_probe.start()
@@ -193,10 +182,8 @@ class ResourceGate:
     async def wait_while_saturated(self, max_wait_seconds: float | None = None) -> None:
         """Block while *either* resource is saturated, bounded by the budget.
 
-        One injected ``clock``, handed to both sub-gates, bounds this wait and
-        theirs; it is read back off ``memory`` because that is the gate the
-        budget comes from, so the two cannot come from different sources. See
-        ``ResourceGauge.wait_while_saturated`` for why it is injectable at all.
+        One injected ``clock`` bounds this wait and both sub-gates' waits; it is read
+        back off ``memory`` (the budget's home) so the two cannot disagree.
         """
         budget = self.memory.max_wait_seconds if max_wait_seconds is None else max_wait_seconds
         deadline = self.memory.clock() + budget
@@ -212,11 +199,8 @@ class ResourceGate:
     def http_scale_factor(self) -> float:
         """Scale factor for HTTP-only (browser-free) tasks.
 
-        HTTP fetches add little memory and no browser process. When the CPU has
-        ample headroom (> 50%), HTTP work is *not* bound by the memory held by
-        browser processes of other domains -- it rides the CPU-implied scale,
-        using the spare CPU headroom. Only when CPU is itself the tight resource
-        does it fall back to the combined memory+CPU gate.
+        With ample CPU headroom (>50%) HTTP work rides the CPU-implied scale, escaping
+        the browser-held-memory bottleneck; only when CPU is tight does it fall back.
         """
         cpu_headroom = self.cpu.headroom_fraction()
         if cpu_headroom > 0.5:

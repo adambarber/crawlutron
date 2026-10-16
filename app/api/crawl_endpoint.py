@@ -1,13 +1,7 @@
 """``/v1/crawl`` endpoint handlers (sync + async + result retrieval).
 
-Extracted from the previous monolith in ``app/main.py`` so the
-handler logic and the FastAPI URL→handler mapping live in different
-modules. The handlers are exposed as plain async functions; the router
-in :mod:`app.api.crawl_router` calls them and wires ``Depends`` for
-``settings`` / ``job_store`` / ``result_store`` / ``shutdown_event``.
-
-The ``READINESS_STATE`` singleton is imported directly so the
-``begin_request`` / ``end_request`` gate does not require a closure.
+Split from ``app/main.py`` so handler logic and the FastAPI URL→handler mapping
+live apart; the router wires ``Depends`` for settings, stores and shutdown.
 """
 
 from __future__ import annotations
@@ -44,14 +38,9 @@ logger = logging.getLogger(__name__)
 
 
 async def await_or_client_gone(work: Awaitable[Any], request: Request, *, poll_interval: float = 0.25) -> Any:
-    """Await the sync crawl but cancel it if the client disconnects first.
-
-    A synchronous ``/v1/crawl`` would otherwise run to completion to feed a
-    result nobody will read (the client-abandon case). Starlette does not cancel
-    a normal handler on disconnect, so we poll ``is_disconnected`` alongside the
-    crawl and cancel the work, letting the engine's cancellation cleanup free
-    the slot/browser. The fast path costs nothing: a finished crawl returns
-    before the first poll sleep.
+    """Await the sync crawl but cancel it if the client disconnects first:
+    Starlette does not cancel a handler on disconnect, so poll ``is_disconnected``
+    and cancel (freeing the slot/browser); a finished crawl returns untouched.
     """
     task = asyncio.ensure_future(work)
     while True:
@@ -75,18 +64,9 @@ def _crawl_rejection(error: ValueError) -> HTTPException:
 
 
 def _serialize_or_reject(items: list[dict[str, Any]], output_format: str) -> tuple[str, str]:
-    """Serialize ``items`` for ``output_format``, or refuse the way the API says.
-
-    An unusable output format is a caller error, so it becomes the 422
-    ``validation_error`` the contract names -- and it is the only edge where a
-    refused format is allowed to surface. ``/v1/crawl`` serializes twice on
-    purpose: once to validate the format before the sync/async branch commits
-    to a shape, and once to produce the real body. Written inline at both
-    sites, the refusal was a second thing each site could spell differently,
-    and the async branch's copy is the one a caller is least able to see.
-
-    Callers that only want the format checked pass no items and discard the
-    result; the validation is the point, not the bytes.
+    """Serialize ``items`` for ``output_format``, or refuse as the 422 the
+    contract names -- the one edge a refused format surfaces. Callers that only
+    want the format checked pass no items; the validation is the point, not bytes.
     """
     try:
         return serialize_results(items, output_format)
@@ -192,27 +172,9 @@ async def _stored_response_payload(
     job_store,
     result_store,
 ) -> JsonValue | None:
-    """The stored response for ``request_id``, or None when nothing is stored.
-
-    One definition of "what may be shown for this request_id", shared by the
-    response door and the trace door, because a second copy is how the two
-    drifted into answering differently about the same crawl.
-
-    A job that is not in a terminal state raises 202 rather than answering. A
-    job that has written its results but not yet been marked ``COMPLETED`` is
-    still 202, because ``run_async_crawl`` performs those two writes in that
-    order: reporting a moment early tells a polling client the crawl is
-    finished while it is still running, and the job store it then reads says
-    ``running``.
-
-    The job is consulted *before* the result store for the same reason. The
-    store is a cache of finished crawls, but nothing about a row in it proves
-    the job finished: the runner publishes after its terminal write, so a job
-    paused in between sits in the store while it is still running.
-
-    A request_id with no job at all still answers from the store. That is the
-    synchronous path, which writes the store as the last step of a crawl that
-    has already returned -- there was never a job to be in flight.
+    """The stored response for ``request_id``, or None, shared by both replay
+    doors: a job not in a terminal state raises 202; the sync path with no job
+    answers from the store.
     """
     job = await job_store.aload(request_id)
     if job is not None and job.status not in TERMINAL_STATUSES:
@@ -253,14 +215,10 @@ async def get_crawl_result(
     job_store,
     result_store,
 ) -> Response:
-    """Retrieve a completed crawl response by request_id.
+    """Retrieve a completed crawl response by request_id; a replay is bytes.
 
-    A replay is bytes, not values: the stored payload is the response model's
-    own dump -- the documented wire shape itself -- so serving it directly
-    answers the request byte-for-byte. Rebuilding models from it would
-    re-validate URL fields, and admission is the constructor's job with a policy
-    the cache does not own: the value discipline governs ingress (crawl results
-    entering the response), not the replay of an already-shaped record.
+    Serving the stored dump answers byte-for-byte; rebuilding would re-validate
+    URL fields, and admission is the constructor's ingress job, not the cache's.
     """
     return JSONResponse(content=await _stored_payload_or_not_found(request_id, job_store, result_store))
 
@@ -270,14 +228,10 @@ async def get_crawl_trace(
     job_store,
     result_store,
 ) -> TraceResponse:
-    """The same stored record, read as a trace: attempts and evidence, no bodies.
+    """The same stored record read as a trace: attempts and evidence, no bodies.
 
-    A projection, not a second store: the trace validates straight off the
-    response envelope's dump, so it cannot claim an attempt the response does
-    not have. ``TraceResponse`` names its keys as the stored envelope names
-    them, which is what lets the stored record be read here without a
-    translation layer -- including the URLs, which stay text because
-    re-admitting them would need a policy the result cache does not own.
+    A projection, not a second store -- it validates off the response envelope's
+    dump, so it cannot claim an attempt the response does not have.
     """
     payload = await _stored_payload_or_not_found(request_id, job_store, result_store)
     return TraceResponse.model_validate(payload)

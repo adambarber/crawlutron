@@ -1,17 +1,6 @@
-"""Single robots.txt line-scanner and group selector.
-
-The engine parsed one robots.txt body with three hand-rolled scanners
-(crawl-delay at module level, rules + sitemaps as nested closures), each
-re-implementing the same BOM strip → comment strip → ``partition(":")``
-walk plus, for the two group parsers, the same user-agent accumulator and
-RFC 9309 most-specific-group selection. The copies had already drifted on
-one gate (an empty ``Crawl-delay:`` must not open a group while an empty
-``Disallow:`` must, because it means allow-all).
-
-The family is linear-time by construction: a str.find/partition
-walk, never a regex over attacker-controlled text. ``accepts`` is the
-per-parser policy of *which directives it consumes*; everything structural
-is shared here so a robots-parsing fix lands once.
+"""One robots.txt line-scanner and group selector, shared by all parsers: the
+family is linear-time (a partition walk, never a regex over attacker text),
+``accepts`` the per-parser policy, and structure lands here so a fix lands once.
 """
 
 from __future__ import annotations
@@ -28,9 +17,8 @@ _Directives = list[tuple[str, str]]
 def iter_robots_fields(text: str) -> Iterator[tuple[str, str]]:
     """Yield ``(key, value)`` per meaningful robots line, key case-folded.
 
-    Strips a leading BOM and trailing ``#`` comments, drops blank lines and
-    colon-less lines (inert under every directive grammar), and splits at
-    the first colon only so values may contain ``:`` (``Sitemap: https://…``).
+    Strips a leading BOM and trailing ``#`` comments, drops blank and colon-less
+    lines, and splits at the first colon so values may contain ``:``.
     """
     for raw in text.lstrip("﻿").splitlines():
         line = raw.split("#", 1)[0].strip()
@@ -45,14 +33,9 @@ def iter_robots_fields(text: str) -> Iterator[tuple[str, str]]:
 def robots_groups(
     text: str, accepts: Callable[[str, str], bool]
 ) -> list[tuple[tuple[str, ...], list[tuple[str, str]]]]:
-    """Tokenize into ``(agents, directives)`` user-agent groups.
-
-    ``accepts(key, value)`` decides whether a line is *this parser's*
-    directive; only an accepted line materializes a group. Agents that
-    declare nothing consumed therefore contribute no group of their own —
-    foreign blocks stay out of selection through :func:`select_robots_values`
-    matching on the product token. (Agent lists accumulate across
-    non-consumed lines, exactly as both old scanners behaved.)
+    """Tokenize into ``(agents, directives)`` user-agent groups; only a line
+    ``accepts`` materializes a group, and agents accumulate across non-consumed
+    lines (foreign blocks stay out via :func:`select_robots_values`).
     """
     groups: list[tuple[tuple[str, ...], list[tuple[str, str]]]] = []
     last_agents: list[str] = []
@@ -76,19 +59,9 @@ def robots_groups(
 def select_robots_values(
     groups: list[tuple[tuple[str, ...], _Directives]], token: str = USER_AGENT_TOKEN
 ) -> tuple[_Directives | None, _Directives | None]:
-    """Return ``(matched, star)``: the most-specific group whose agent is a
-    substring of our product token (longest agent wins), and the first
-    ``*`` group.
-
-    Matching is against the product token, not the full User-Agent string —
-    URL/version fragments in a robots group must not claim our crawler.
-
-    Both sides are lower-cased here. ``robots_groups`` already lower-cases the
-    file side, so without this the comparison silently depended on the caller
-    passing an already-lower-case token: a mixed-case token would match no group
-    and fall through to the star group, which answers a question RFC 9309 2.2.1
-    makes case-insensitive by throwing it away. Normalising at the comparison
-    keeps the guarantee next to the code that depends on it.
+    """Return ``(matched, star)``: the most-specific group (longest agent that is
+    a substring of the product token) and the first ``*`` group. Both sides are
+    lower-cased here, or a mixed-case token would match nothing and fall to star.
     """
     token = token.lower()
     best: _Directives | None = None
@@ -108,14 +81,10 @@ def select_robots_values(
 
 
 def parse_robots_rules(text: str, *, token: str = USER_AGENT_TOKEN) -> list[tuple[bool, str]]:
-    """``(is_allow, path)`` pairs for the group governing this crawler.
+    """Return ``(is_allow, path)`` pairs for the group governing this crawler.
 
-    A matched group is final even when its content is the empty-path
-    ``Disallow:`` — an answer, not an absence, so it never falls through to the
-    star group. What the pair means is the matcher's question, not this one's:
-    an empty pattern is a rule to ignore (RFC 9309 2.2.2 — it has no octets, so
-    it is never the most specific match), which is why it is passed through
-    rather than dropped here.
+    A matched group is final even when empty-path ``Disallow:`` (an answer, not
+    an absence); an empty pattern is passed through for the matcher to ignore.
     """
     groups = robots_groups(text, lambda key, value: key in ("allow", "disallow"))
     best, star = select_robots_values(groups, token)
@@ -124,17 +93,9 @@ def parse_robots_rules(text: str, *, token: str = USER_AGENT_TOKEN) -> list[tupl
 
 
 def parse_robots_crawl_delay(text: str, *, token: str = USER_AGENT_TOKEN) -> float | None:
-    """Seconds from the governing group's last valid ``Crawl-delay``.
-
-    An empty value never opens a group (the gate the rules parser does not
-    share), non-numeric, negative and non-finite values are dropped, and the
-    last valid value in a group wins — matching the old overwrite-on-valid
-    scan. A token-matched group whose values are all invalid yields no delay
-    and falls back to the star group, exactly as the old ``best_delay is None
-    → star_delay`` return did. Non-finite numbers (``inf``/``nan``, or a
-    value that overflows to ``inf``) are rejected here so a hostile robots.txt
-    can never install an unbounded politeness floor; the scheduler clamps
-    finite values to the politeness ceiling at the write.
+    """Seconds from the governing group's last valid ``Crawl-delay``, else the
+    star group's. Empty never opens a group; non-numeric, negative and non-finite
+    values are dropped, so a hostile file cannot install an unbounded floor.
     """
     groups = robots_groups(text, lambda key, value: key == "crawl-delay" and value != "")
     best, star = select_robots_values(groups, token)

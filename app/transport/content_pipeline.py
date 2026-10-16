@@ -1,22 +1,7 @@
-"""The content pipeline both crawl strategies share: extract, then discover.
+"""The extract-then-discover pipeline both strategies share, once spelled.
 
-The browser strategy and the HTTP strategy each need the same three things out
-of one fetched body: the text/markdown an extractor produced, the post-fetch
-discovery envelope parsed off the page, and the part of that envelope which
-belongs in a crawl result. All three were spelled once per strategy, which is
-what the duplication report named: the three-way extraction dispatch, the
-offloaded discovery call, and the result field block. They live here so a
-change to the dispatch or to the envelope reaches both paths, and a field
-threaded from discovery into a result can no longer be added to one strategy
-and forgotten in the other -- a silent behavioural divergence between the
-browser and HTTP results for the same page.
-
-What stays with the caller is policy: which extraction mode, which content
-type, the selector pair, the method label for the body/text mode, and the
-discovery switches. Those are exactly the parts the two strategies genuinely
-disagree about. This module must not fetch, decode a body (``body_decode``
-owns that), classify a page, or assemble a result (``engine_result`` and
-``render_result`` own that).
+The shared text extractor, discovery envelope, and result fields mean a change
+reaches both paths; policy stays with the caller, never fetch/decode/classify.
 """
 
 from __future__ import annotations
@@ -49,11 +34,10 @@ from app.vocabulary.extraction import (
 
 @dataclass(frozen=True)
 class ExtractedContent:
-    """What one extraction contributes to a crawl result.
+    """A settled fact about a finished extraction, not a scratch value.
 
-    Frozen because it is a settled fact about a finished extraction, not a
-    scratch value: the strategy that receives it has already decided what it
-    does with it, and the three fields are the three a result carries.
+    Frozen because the receiving strategy has already decided what to do with it;
+    the three fields are the three a crawl result carries.
     """
 
     text: str
@@ -72,29 +56,9 @@ async def run_extraction(
     default_method: str,
     html: bool,
 ) -> ExtractedContent:
-    """Run the configured extractor for one body, off the event loop.
-
-    The three modes are dispatched here, once, so a fourth mode is a change to
-    this function rather than a branch added to every strategy that fetches.
-    ``content`` is the raw body the byte-oriented extractors take; ``decoded``
-    is the same body's text form, which is what the HTML extractor reads. The
-    browser path passes the same string for both, because a render hands over
-    text it already decoded. ``policy`` carries the selector pair, which belongs
-    to the two HTML paths only -- the document path takes neither, and handing
-    it one is a TypeError -- and it is read here rather than shaped by each
-    caller so that a selector honoured on one path cannot be dropped on the
-    other for the same page. It is read into ONE :class:`Selectors` and handed
-    whole to both HTML paths, so the two cannot be given different narrowing
-    requests for the same page.
-
-    ``html`` is the caller's claim that the body is HTML and it gates
-    trafilatura alone: the HTTP path computes it from the content type, while
-    the browser path passes the rendered page through either way, since a
-    render that produced no markup still yields the worker's text and
-    trafilatura falls back to it. ``default_method`` is the label for the
-    body/text mode, whose name depends on how the body was obtained (HTML vs
-    decoded body vs browser render).
-    """
+    """Run the configured extractor once, off the loop: a fourth mode is one
+    change here, not a branch per caller. ``content`` is the raw body, ``decoded``
+    its text form; ``policy`` the selectors, ``html`` gates trafilatura."""
     selectors = Selectors(css=policy.css_selector, xpath=policy.xpath)
     if extraction == EXTRACTION_DOCUMENT:
         # The document extractor is typed for bytes; a browser render has text.
@@ -123,24 +87,10 @@ async def discover_after_fetch(
     policy: CrawlPolicy,
     host_policy: HostPolicy,
 ) -> dict[str, Any]:
-    """The post-fetch discovery envelope, parsed off the event loop.
+    """One post-fetch discovery parse shared by both strategies; switches are
 
-    One call site for the CPU-bound page parse, because the two strategies
-    differ only in the switches they pass and must not differ in whether the
-    parse happens at all. ``include_metadata`` is not a switch: the page
-    metadata rides the tree this call already parsed, and the result's
-    ``llm_metadata`` field is fed from here by both strategies.
-
-    The switches are derived from the policy here rather than taken as
-    arguments, which is the point of the signature. They used to be passed in,
-    and the two strategies passed different answers for one policy: the browser
-    path asked for links, diagnostics and JS endpoints unconditionally while
-    the HTTP path asked for them only when a discovery channel was on or the
-    call had a depth to spend. So the same policy discovered links on a
-    browser-rendered page and not on an HTTP-fetched one, and the divergence
-    was invisible in both results -- each was individually well-formed. A
-    caller cannot pass a wrong combination here because there is no wrong one
-    to pass.
+    derived from the policy here, not passed in, so both paths cannot disagree
+    on discovery for one page, and the metadata rides the same parse.
     """
     flags = discovery_flags(policy)
     discovery_block = any(flags)
@@ -166,14 +116,10 @@ def discovery_result_fields(
     *,
     classification_evidence: list[dict[str, Any]],
 ) -> dict[str, Any]:
-    """The result fields both strategies take from one discovery envelope.
+    """The result fields both strategies take from one envelope. Spreads into
 
-    Spread into ``build_engine_result`` as ``**_discovery_result_fields(...)``.
-    The envelope's keys and the result field they feed are one decision, so it
-    is written once: a discovered-links field that reached the HTTP result but
-    not the browser result would be a divergence nothing else in the tree can
-    see. ``classification_evidence`` rides along because both strategies pass
-    it at the same point in the same block.
+    ``build_engine_result`` so the key-to-field mapping is one decision; a
+    cross-path divergence would otherwise be invisible.
     """
     return {
         "classification_evidence": classification_evidence,
@@ -189,14 +135,10 @@ def post_fetch_diagnostics(
     final_url: NormalizedUrl | None,
     host_policy: HostPolicy,
 ) -> dict[str, Any]:
-    """The diagnostics every strategy takes from one discovery envelope.
+    """The per-strategy diagnostics taken from one envelope, spelled once: the
 
-    Merge into the strategy's own diagnostics dict. The two rules here are the
-    ones that must not differ between the browser and HTTP answers to the same
-    page: the pagination hint is surfaced only when the envelope found one, and
-    the scraped JS endpoints leave through ``filter_js_endpoints`` rather than
-    raw. Spelled per strategy, one of the two could stop filtering while the
-    other kept passing its tests.
+    pagination hint rides only when the envelope found one, and the scraped JS
+    endpoints always leave through ``filter_js_endpoints``.
     """
     diagnostics: dict[str, Any] = {}
     if post_fetch["next_page_url"]:
