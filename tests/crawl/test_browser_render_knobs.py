@@ -1,8 +1,7 @@
 """Browser driver fixed overhead must be configurable via render knobs.
 
-Lazy-scroll steps/delay and the cookie-harvest timeout are hardcoded
-(3 / 1s / 5.0s). They must be policy/env-configurable with byte-identical
-defaults. Ready-state/challenge behavior is confirmed and stays untouched.
+Lazy-scroll steps/delay and the cookie-harvest timeout are hardcoded and must
+be policy/env-configurable with byte-identical defaults; ready-state stays fixed.
 """
 
 import tempfile
@@ -67,9 +66,8 @@ def test_harvest_timeout_resolution_order():
 def test_browser_knob_defaults_unchanged():
     """Configurability must not move the shipped defaults (policy: keep 3/1/5.0).
 
-    Shipped defaults live in constants + settings, which nothing mutates at
-    runtime: a driver reads its knobs at construction, so there is no module
-    global for a test to patch and drift behind.
+    Shipped defaults live in constants/settings, and a driver reads its knobs
+    at construction -- no module global to patch and drift behind.
     """
     from app.vocabulary.limits import (
         DEFAULT_COOKIE_HARVEST_TIMEOUT_SECONDS,

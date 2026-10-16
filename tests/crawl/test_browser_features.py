@@ -1,12 +1,7 @@
 """Browser feature tests (reuse, action chains, targeted screenshots).
 
-Drives the renderer over a fake Playwright-compatible page -- no real browser,
-no ``unittest.mock`` -- so the orchestration logic is exercised deterministically.
-That is also why this file carries no ``browser`` marker: the marker means
-"launches a real headless browser", and every test here runs against a double.
-Marking it excluded six unit tests from the default suite and from the
-pre-commit hook, so a change to the renderer's page surface could break them
-with nothing red.
+Drives the renderer over a fake Playwright-compatible page, no mocks; no
+``browser`` marker means these unit tests run in the pre-commit hook too.
 """
 
 import base64
@@ -32,10 +27,8 @@ class FakeElement:
 class FakePage(ScriptedPage):
     """A scripted page plus the element/interaction surface these tests drive.
 
-    The navigation, evaluation and content half is :class:`ScriptedPage`; what
-    stays here is the part specific to this suite -- a keyed element store, the
-    interaction calls the renderer records, and the response listener the XHR
-    interception installs.
+    The navigation/evaluation/content half is ``ScriptedPage``; the rest here
+    is the keyed element store, interaction calls, and the XHR listener.
     """
 
     def __init__(self):

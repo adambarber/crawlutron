@@ -29,14 +29,8 @@ from tests._timing_harnesses import HANG_GUARD_SECONDS
 class _BlockingResolver:
     """A synchronous, deliberately loop-blocking stand-in for the DNS resolver.
 
-    The instrument is a ``Barrier``, not a stopwatch. Five concurrent route
-    handlers each enter the resolver and wait for all five to be there: the
-    barrier can only be satisfied by five resolvers running at the same time.
-    The regression this pins is the resolver running ON the event loop, and in
-    that case the first caller wedges the loop, the other four never arrive,
-    the barrier times out, and the test fails naming exactly that -- instead of
-    a 0.2s stopwatch guessing whether five 0.05s sleeps fit inside it and
-    passing on a slow box, failing on a fast one.
+    The instrument is a Barrier: five handlers must all be there, so it fails
+    fast only when the resolver wedged the loop, not by hoping a stopwatch fits.
     """
 
     def __init__(self, parties: int, timeout: float) -> None:
@@ -250,9 +244,8 @@ async def test_response_handler_caps_entries_and_payload_size():
 async def test_response_handler_caps_the_url_it_retains():
     """The entry cap bounds entries, not what an entry may contain.
 
-    The URL was the one unbounded field: ten XHRs at a multi-megabyte URL each
-    put ten megabytes of page-controlled text into result metadata, through a
-    bound the module documented as covering the whole entry.
+    The URL was the one unbounded field: multi-MB page-controlled text went
+    into result metadata through a bound documented to cover the whole entry.
     """
     collected: list[Any] = []
     handler = make_response_handler(collected)
