@@ -15,32 +15,9 @@ __all__ = [
 
 
 def close_browser_profile_vocabulary(profile: dict[str, JsonValue]) -> dict[str, JsonValue]:
-    """Refuse inert keys and inert actions in ``browser_profile``, and say what is allowed.
-
-    This model was ``dict[str, Any]`` with exactly one key checked
-    (``execute_js``). Everything else a caller could set was prose in a field
-    description, which is not enforcement: a misspelled action type passed the
-    boundary and was then silently skipped by the renderer's if/elif chain, so
-    the caller got a page that loaded with nothing done and nothing said. An
-    inert key and a key that worked looked identical.
-
-    The vocabulary is imported from ``app.vocabulary`` rather than restated,
-    because the renderer's chain recognises the same set and the two lists have
-    to agree -- the shape of bug this closes. ``execute_js`` stays refused in
-    BOTH places on purpose: here so a malicious payload never reaches a render,
-    and in the renderer so a policy arriving by any other route still cannot run
-    script.
-
-    Action types are compared case-insensitively because the renderer lowercases
-    before matching. Refusing ``CLICK`` while permitting ``click`` would refuse
-    something the consumer handles.
-
-    Refusals are ``ValueError`` on purpose, including for the two shape errors
-    below. Pydantic wraps a ``ValueError`` into a 422 but lets a ``TypeError``
-    escape the request handler entirely, so the first version of this function --
-    which iterated ``profile["actions"]`` directly -- turned ``{"actions": 5}``
-    into an HTTP 500 on every policy-bearing endpoint. A caller mistake must
-    arrive as a refusal, which is the only shape the caller can act on.
+    """Refuse inert keys and actions in browser_profile (a misspelled action used to
+    be silently skipped). Vocabulary comes from app.vocabulary so this and the
+    renderer read one set; refusals are ValueError (a 422), not a TypeError's 500.
     """
     from app.vocabulary.browser import ALLOWED_BROWSER_ACTION_TYPES, BROWSER_PROFILE_KEYS
 
@@ -76,19 +53,8 @@ def close_browser_profile_vocabulary(profile: dict[str, JsonValue]) -> dict[str,
 
 def _refuse_over_ceiling_knobs(profile: dict[str, JsonValue]) -> None:
     """Refuse a closed key whose value is larger than the work it buys is worth.
-
-    The vocabulary is closed, which is a claim about which keys exist and nothing
-    about how large their values may be. Four knobs took whatever the caller
-    sent, each in a place the code already said should be bounded: the lazy scroll
-    runs directly below an action chain that *is* budgeted and whose docstring
-    says production must pass a budget; the cookie harvest holds a pooled
-    renderer from a finally block; and every screenshot selector appends a
-    base64 PNG to the result, so that one bounds the response body too.
-
-    The readers clamp the same values (see ``_profile_int``), because by the time
-    a profile reaches a renderer it is a dict and the validator is not in the
-    path. This refusal exists so the caller is *told*, rather than silently
-    handed a render that finished early.
+    The closed vocabulary bounds which keys exist, not how large their values may
+    be, and the consumers only clamp -- so this is the tell, not a silent early-finish render.
     """
     from app.vocabulary.limits import (
         MAX_COOKIE_HARVEST_TIMEOUT_SECONDS,
@@ -116,12 +82,8 @@ def _refuse_over_ceiling_knobs(profile: dict[str, JsonValue]) -> None:
 
 def _refuse_unusable_action(action: Any, index: int, allowed: str) -> None:
     """Refuse one action the renderer would accept and then do nothing about.
-
-    Split out of :func:`close_browser_profile_vocabulary` so the three
-    refusals read as the three distinct failures they are, rather than as one
-    long loop body. ``allowed`` is the already-formatted list of permitted types,
-    passed in so this stays a check on one action rather than a place the
-    vocabulary is read a second time.
+    Split out so the refusals read as distinct failures; ``allowed`` is passed in
+    so this checks one action instead of reading the vocabulary a second time.
     """
     from app.vocabulary.browser import (
         ACTIONS_REQUIRING_SELECTOR,
@@ -159,41 +121,9 @@ def _refuse_unusable_action(action: Any, index: int, allowed: str) -> None:
 
 
 def close_request_profile_vocabulary(profile: dict[str, JsonValue]) -> dict[str, JsonValue]:
-    """Refuse inert keys and malformed values in ``request_profile``, and say what is allowed.
-
-    This model was ``dict[str, Any]`` with no constraints at all, while its
-    siblings on the same class are closed: ``headers`` refuses a banned name and
-    ``credentials`` refuses a colliding origin. Two consequences, both silent:
-
-    - A misspelled key is accepted and does nothing. ``{"cookie_jarr":
-      "per_host"}`` disables the per-host jar; ``{"fingerprint_rotatoin": True}``
-      disables fingerprint rotation. Both report success, which is the same
-      failure as the inert ``state`` key this series removed from
-      ``browser_profile``, and the same one the field description was already
-      committing by advertising ``accept_language`` when the code reads
-      ``accept_languages``.
-    - A malformed *value* is accepted and breaks deeper in, where it cannot be
-      reported. The consumer is annotated ``-> dict[str, str]``, so a pool entry
-      that is a mapping puts a ``dict`` in ``User-Agent``; and
-      ``{"user_agents": [None]}`` raises ``TypeError`` from inside the header
-      builder, which is an HTTP 500. The same validator-shape bug that turned
-      ``{"actions": 5}`` into a 500 in the browser profile, one module over.
-
-    ``cookies`` is a second door to the ``Cookie`` header, which is why its size
-    and shape are bounded here. ``headers`` refuses a raw ``Cookie`` on the
-    grounds that "the cookie jar owns Cookie; a raw header bypasses the
-    cookie-namespace chokepoint", and a caller-supplied nested dict assembled
-    into that same header is the same capability reached by a door the ban does
-    not inspect. What that means for *isolation* is not this validator's call to
-    make: a ``cookie_namespace`` is a string the caller picks, with no
-    authentication behind it, so it is a tenant key and not a boundary. The ban's
-    rationale and ``cookie_jar``'s isolation claim are corrected in #64 to say
-    so; here the ceiling is the part that is unambiguous.
-
-    Every refusal here is ``ValueError`` on purpose. Pydantic wraps a
-    ``ValueError`` into a 422 and lets a ``TypeError`` past the request handler,
-    so a caller mistake must arrive as a refusal, which is the only shape the
-    caller can act on.
+    """Refuse inert keys and malformed values in request_profile: a misspelled key
+    used to do nothing while reporting success, and a malformed value raised a 500
+    inside the header builder. Refusals are ValueError (a 422), never a TypeError.
     """
     if not isinstance(profile, dict):
         return profile
@@ -211,11 +141,8 @@ def close_request_profile_vocabulary(profile: dict[str, JsonValue]) -> dict[str,
 
 def _refuse_malformed_profile_values(profile: dict[str, JsonValue]) -> None:
     """Refuse a value of the wrong shape behind a permitted key.
-
-    Split from the vocabulary check because the two answer different questions:
-    the caller asked for a key that exists, or the caller asked for something that
-    is not the thing that key means. The second was the one that had no home, so
-    a malformed value reached the header builder and raised from inside it.
+    Split from the vocabulary check: "key exists" and "value is the thing the
+    key means" are different questions, and the latter used to raise inside the header builder.
     """
     from app.vocabulary.request_profiles import (
         MAX_COOKIE_NAMESPACE_LENGTH,
@@ -249,10 +176,8 @@ def _refuse_malformed_profile_values(profile: dict[str, JsonValue]) -> None:
 
 def _refuse_malformed_pool(profile: dict[str, JsonValue], key: str, ceiling: int) -> None:
     """Refuse a header pool that is not a bounded list of strings.
-
-    Split out so the two refusals read as the two failures they are: the wrong
-    container, and the wrong thing inside the right container. A ``[None]`` here
-    used to reach the header builder and raise from inside it.
+    Split so the wrong-container and wrong-contents failures read separately; a
+    ``[None]`` used to reach the header builder and raise from inside it.
     """
     pool = profile[key]
     if not isinstance(pool, list):
@@ -266,17 +191,8 @@ def _refuse_malformed_pool(profile: dict[str, JsonValue], key: str, ceiling: int
 
 def _refuse_malformed_cookie_map(profile: dict[str, JsonValue], host_ceiling: int, pair_ceiling: int) -> None:
     """Refuse a static cookie map that is unbounded or malformed.
-
-    Without these a 200,000-host map parsed into one policy, and because
-    ``content_cache_key`` serialises the whole header map into the cache key,
-    every distinct value became a distinct cache slot holding a full response
-    body.
-
-    Note what this deliberately does NOT refuse: a cookie map with no
-    ``cookie_namespace``. That is the documented single-tenant path, and
-    ``cookie_jar``'s docstring commits to preserving it. A namespace is a tenant
-    key chosen by the caller, and this service has no caller authentication, so
-    it cannot be an authorization boundary -- see #64.
+    Without the bounds, a huge map became distinct cache slots (content_cache_key
+    serialises the whole header map); the no-namespace single-tenant path stays allowed.
     """
     cookies = profile["cookies"]
     if not isinstance(cookies, dict):
@@ -306,11 +222,8 @@ def _refuse_malformed_cookie_map(profile: dict[str, JsonValue], host_ceiling: in
 
 def narrows_credential_scope(key: str) -> bool:
     """True when a credential key names less than a whole origin.
-
-    A key that cannot reach every path on its host is a narrower scope than
-    the per-origin lookup it would be normalized into, so the two are not two
-    spellings of one thing. The empty path is not narrower: it is how
-    ``scheme://host`` is written.
+    A key that cannot reach every path on its host is narrower than the per-origin
+    lookup it would normalize into; the empty path is just "scheme://host".
     """
     parsed = urlsplit(key.strip())
     if parsed.query or parsed.fragment or parsed.username is not None or parsed.password is not None:
