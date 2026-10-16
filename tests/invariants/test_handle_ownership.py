@@ -25,13 +25,8 @@ from tests.rules import Bites, Rule, Trips
 def _id_mint_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
     """Flag direct ``uuid4()`` calls or ``.hex`` slicing outside app/storage/ids.
 
-    Handles double as the lookup credential for status/result routes, so the
-    full-entropy policy must live in exactly one primitive; a re-inlined mint
-    is where a shorter slice silently regresses to 48 bits. The two shapes are
-    separate walks because a call and a subscript are different nodes; the
-    callee's leaf name is :func:`chokepoint_walks.calls_named_leaf`, shared with
-    the error-envelope sweep, so "a banned chokepoint reached as ``mod.name()``
-    or as a bare import" is decided once.
+    A re-inlined mint is where a shorter slice regresses to 48 bits; both
+    shapes are separate walks because a call and a subscript are different nodes.
     """
     return [
         offender_at(path, call, "uuid4() minted outside app/storage/ids.py")
@@ -76,10 +71,8 @@ def test_id_mint_detector_bites():
 def _unbounded_domain_delay_writes(tree: ast.AST, path: pathlib.Path) -> list[str]:
     """Flag direct writes to ``_domain_min_delay`` outside ``set_domain_min_delay``.
 
-    The robots Crawl-delay floor is clamped to a finite politeness ceiling only
-    in ``set_domain_min_delay``; a bare ``self._domain_min_delay[...] = ...``
-    anywhere else (even ``+=``) bypasses that bound and can drop an
-    ``inf``/huge value straight into ``asyncio.sleep``.
+    Only that setter clamps the robots Crawl-delay floor; a bare write
+    elsewhere drops an ``inf`` straight into ``asyncio.sleep``.
     """
     offenders: list[str] = []
     for func in (
@@ -226,12 +219,8 @@ _SEMAPHORE_WRITERS = frozenset({"_get_async_crawl_semaphore", "reset_process_sta
 def _semaphore_global_touch_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
     """The loop-bound semaphore module globals are touched only by the writers.
 
-    ``_get_async_crawl_semaphore`` is the single home that binds the cached
-    instance to the running loop and rebuilds it when the loop changes;
-    ``reset_process_state`` clears the cache for a swapped builder. Reading
-    or assigning the module global from anywhere else silently reintroduces a
-    loop-bound violation. The module-level declaration has no enclosing
-    function and is exempt.
+    The cached instance is bound to the running loop by its single home and
+    cleared on rebuild; assigning it elsewhere is a loop-bound violation.
     """
     return [
         offender_at(

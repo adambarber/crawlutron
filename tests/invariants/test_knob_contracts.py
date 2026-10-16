@@ -210,12 +210,8 @@ def _resolved_env_reader_offenders(tree: ast.AST, path: pathlib.Path, prop: Prop
 def _consumed_knobs() -> set[str]:
     """Every ``CRAWLUTRON_*`` name app/ actually reads from the environment.
 
-    ``_environment_reader_reference`` is the same detector the forward
-    direction uses, so the two agree by construction rather than by two
-    hand-maintained lists happening to line up. It resolves both the literal
-    form and the ``ENVIRONMENT_FIELD_ALIASES`` lookup, and it already declines
-    strings that only appear in a docstring, which is what keeps a prose
-    mention of a knob from reading as a consumer.
+    The reader detector is the same one the forward direction uses, so the two
+    agree by construction; it already declines docstring-only mentions.
     """
     names: set[str] = set()
     for _path, tree in app_trees():
@@ -230,12 +226,8 @@ def _consumed_knobs() -> set[str]:
 def _undocumented_knob_offenders() -> list[str]:
     """The reverse of ``_documented_knob_offenders``.
 
-    The forward direction guards against publishing a knob that does nothing.
-    This one guards the failure the forward direction cannot see: a knob that
-    works, that the code reads, and that an operator has no way to find. The
-    read is real either way, so the cost is not a crash -- it is a setting
-    nobody knows exists, discovered by reading the source, and set by editing
-    a deploy manifest.
+    The forward guard misses a knob the code reads but an operator can't find;
+    this catches the real-but-undocumented set.
     """
     documented = _documented_browser_knobs()
     if documented is None:
@@ -253,9 +245,8 @@ def test_every_consumed_knob_is_documented():
 def test_every_consumed_knob_is_documented_bites():
     """The reverse gate has to be able to fail, or it is decoration.
 
-    Asserted against a real tree: this passes if and only if the walk finds a
-    genuine consumer and the document set genuinely omits it, so deleting the
-    walk cannot turn the test green.
+    Asserted against a real tree: it passes only if the walk finds a genuine
+    consumer the document set omits, so deleting the walk can't turn it green.
     """
     consumed = _consumed_knobs()
     assert "CRAWLUTRON_HOST" in consumed, "the walk stopped finding real consumers"

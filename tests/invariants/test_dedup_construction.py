@@ -25,9 +25,8 @@ _ROBOTS_SCANNER_SANCTIONED = "iter_robots_fields"
 def _robots_scanner_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
     """One line-walk for every robots consumer.
 
-    Sink: a function doing the ``lstrip(BOM) + splitlines()`` scan. It lived
-    three times (crawl-delay, rules, sitemaps) and drifted on the empty-value
-    gate; the tokenizer in app/orchestration/robots_parse.py is now the only one.
+    The ``lstrip(BOM) + splitlines()`` scan lived three times and drifted on the
+    empty-value gate; the tokenizer in ``robots_parse.py`` is now the only one.
     """
     offenders: list[str] = []
     for node in functions(tree):
@@ -89,9 +88,8 @@ _FAKE_BUILDER_SANCTIONED = frozenset({"_fetcher_factories.py", "_fetch_doubles.p
 def _fetcher_factory_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
     """Flag a test file hand-building a model the fetcher factory already fabricates.
 
-    HttpFetchResult's field set is the crawl contract; a fixture that spells
-    it out by hand silently diverges when the contract grows (the exact
-    drift this detector exists to catch). _fetcher_factories.make_fetch is the sanctioned builder.
+    A fixture spelling ``HttpFetchResult`` by hand silently diverges when the
+    contract grows -- exactly the drift this detector exists to catch.
     """
     offenders: list[str] = []
     for node in call_nodes(tree):
@@ -201,8 +199,7 @@ def _is_asdict_call(node: ast.expr) -> bool:
     """Whether a node calls asdict, under either import spelling.
 
     ``from dataclasses import asdict`` and ``import dataclasses`` are both in
-    use in this tree, so a detector keyed on one spelling silently stops
-    detecting the moment a module picks the other.
+    use, so a detector keyed on one spelling silently stops detecting the other.
     """
     return isinstance(node, ast.Call) and (
         (isinstance(node.func, ast.Name) and node.func.id == "asdict")

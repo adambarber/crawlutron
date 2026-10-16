@@ -13,19 +13,10 @@ from tests.rules import Bites, Rule
 
 
 def _lock_bodies_with_awaits(tree: ast.AST, path: pathlib.Path) -> list[str]:
-    """Flag `with <lock>:` bodies containing an await (the ).
+    """Flag ``with <lock>:`` bodies containing an await.
 
-    A THREADING lock held across an await blocks the event loop and can
-    deadlock. `async with` (asyncio.Lock/Condition) bodies may legitimately
-    await -- that is the sanctioned pattern -- so only sync `with` is
-    checked. Sync-with bodies that await include any `threading.Lock`/
-    `RLock` context (which is what ContentCache.aset did before
-    rework).
-
-    A lock is recognized by case-insensitive name stem (lock/mutex/guard)
-    *or* by binding to a threading lock-family constructor anywhere in the
-    module, so `self._mutex = threading.RLock()` cannot rename its way out
-    of the sweep.
+    A threading lock held across an await blocks the loop; only sync ``with``
+    is checked (``async with`` may await). Locks are matched by name or binding.
     """
     offenders: list[str] = []
     lock_names = _threading_lock_bindings(tree)
@@ -143,9 +134,9 @@ _CACHE_TWIN_METHODS = {"get", "aget", "set", "aset"}
 def _memory_cache_twin_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
     """Flag public cache twin methods touching ``_memory_cache`` directly.
 
-    The RAM mirror's probe/store logic must live in the _*_locked helpers so
-    the sync and async paths cannot drift (aget once lost the LRU count cap,
-    and the pre-write mirror never rolled back — both invisible twins)."""
+    The RAM mirror logic must live in the ``_*_locked`` helpers so the sync and
+    async paths cannot drift (aget once lost the LRU cap -- an invisible twin).
+    """
     offenders: list[str] = []
     for fn in function_defs(tree):
         if fn.name not in _CACHE_TWIN_METHODS:
@@ -211,12 +202,8 @@ def _references_lock(expr: ast.expr) -> bool:
 def _locked_calls_outside_lock_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
     """Flag a call to a ``_*_locked`` helper not lexically inside a lock ``with``.
 
-    The ``_*_locked`` cache helpers assume the caller already holds ``self._lock``
-    (they touch shared index/RAM state with no internal acquisition). ``get()``
-    once called ``_remember_memory_locked`` off-lock while ``aget()`` held it —
-    the exact sync/async drift the twin detector can't see, because the call site
-    is helper-shaped and only the *lock ownership* was wrong. This closes that by
-    making an unlocked ``_*_locked`` call a hard failure anywhere in ``app``.
+    The helpers assume the caller holds ``self._lock``; ``get()`` once called
+    one off-lock while ``aget()`` held it -- drift the twin detector can't see.
     """
     parents: dict[ast.AST, ast.AST] = {}
     for node in nodes_of(tree):

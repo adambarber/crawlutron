@@ -1,24 +1,7 @@
-"""A helper that hands back a URL has to have consulted the host policy first.
+"""A helper that hands back a URL must have consulted the host policy first.
 
-Every function in this module is about one URL-returning helper: if it returns
-something that will be fetched, the host policy that decides what may be
-fetched has to have been applied on the way out. That is a small sentence, and it
-is the one thing these detectors exist to keep true.
-
-It is also the hardest detector in the suite to express, because "consulted the
-policy" has no single syntactic form. A helper can check a parameter name, read
-``self._host_policy``, call a validator directly, call a URL parser and discard
-the result, branch on the policy before returning, or build the URL from parts
-and validate only the finished string. Each of those is a different shape, and a
-detector that handled only some of them would pass on the others -- which is how
-a second, looser implementation of the same rule appeared here in the first
-place.
-
-The proof work is part of the rule, not a separate suite. Each detection shape
-has a bite that must fire and a look-alike that must not, and the look-alikes are
-written out rather than assumed: a helper that returns ``None`` did not return a
-URL, and a helper that returns its own parameter without touching the policy is
-this gate's business only when it is one that gets fetched.
+"Consulted the policy" has no single syntactic form, and a detector covering
+only some shapes passes on the others; the proof work is part of the rule.
 """
 
 from __future__ import annotations
@@ -78,13 +61,8 @@ def _url_parameter_name(name: str) -> bool:
 def _is_policy_call(tree: ast.AST, node: ast.Call, policy_names: frozenset[str]) -> bool:
     """Whether this call is one of the sanctioned ways to reach a URL policy.
 
-    Both name sets were folded to lower case here rather than on one side only.
-    The two predicates this replaces spelled the same question twice -- one
-    lower-cased the leaf name and one did not -- which is correct only for as
-    long as every entry in both sets happens to be written in lower case. A
-    mixed-case entry added to the set that skipped the fold would have stopped
-    matching, and nothing would have said so: the detector would find one fewer
-    way to consult the policy, find nothing wrong, and report clean.
+    Both name sets are folded here, not on one side: a mixed-case entry that
+    skipped the fold would silently stop matching and report clean.
     """
     name = resolved_call_name(tree, node)
     return name.rsplit(".", 1)[-1].lower() in policy_names
@@ -148,12 +126,8 @@ def _host_policy_call_is_validated(tree: ast.AST, node: ast.Call, policy_names: 
 def _reads_url_field(receiver, field, url_names: set[str]) -> bool:
     """True when ``field`` is read off a name the walk already knows is a URL.
 
-    The attribute form (``url.final_url``) and the subscript form
-    (``url["final_url"]``) are one question with two spellings, and so is the
-    ``url.get("final_url")`` call the caller below handles. Answering them in
-    three places is how the dict form came to check a different field set than
-    the attribute form -- a URL field the walk missed is an unvalidated URL
-    reaching a host-policy call, and the guard would have reported the tree clean.
+    Attribute and subscript are one question with two spellings; answering them
+    separately is how the dict form checked a different field set.
     """
     return isinstance(receiver, ast.Name) and receiver.id in url_names and field in _HOST_POLICY_URL_FIELDS
 
