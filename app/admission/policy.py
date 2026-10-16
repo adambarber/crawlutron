@@ -1,29 +1,6 @@
-"""The one read edge between a policy as it arrives and the model everything reads.
-
-Two producers fed this shape before, and they disagreed. ``payload_policy``
-validated a wire payload field by field, re-spelling every bound the model
-already declares; ``job_store.normalized_policy`` merely copied a stored dict
-and filled in nothing, so a stored job policy that predated a field -- or was
-corrupt text -- resolved every limit to ``0``. That included
-``respect_robots``, which read as *do not obey robots.txt*. The API path always
-filled the defaults, which is precisely why a suite that exercised the API path
-for nearly everything stayed green while the job path quietly dropped the
-protection.
-
-Both edges come through here now, so "what does a policy that did not say X
-mean" has one answer:
-
-* :func:`read_policy` is total. Absent, wrong-shaped, or unreadable resolves to
-  the model's declared defaults -- the safe direction, because the dangerous
-  direction for a limit is the one that widens it.
-* :func:`validate_wire_policy` is the API edge. It rejects instead, and it
-  *derives* the ``invalid_policy_*`` code from where the model reports the
-  error, so a code cannot drift from the declaration it names.
-
-The operator tier (:func:`operator_limits`) is the third layer and is shared
-deliberately: a deployment's default for a field a caller may omit has to be
-the same number on the API path and the job path, or the two paths describe
-different crawls. That was the original defect in a different costume.
+"""The one read edge between a policy as it arrives and the model that reads it:
+read_policy is total (defaults, the safe direction), validate_wire_policy rejects,
+and the operator tier is shared so API- and job-path defaults agree.
 """
 
 from __future__ import annotations
@@ -81,19 +58,9 @@ class DiscoveryFlags(NamedTuple):
 
 
 def discovery_flags(policy: CrawlPolicy) -> DiscoveryFlags:
-    """Resolve a policy's discovery channels once, absence included.
-
-    Every channel defaults to off -- ``true`` is the only thing that turns one
-    on -- so an absent block and an explicit ``{"discovery": {}}`` are the same
-    policy and have to be the same answer: fetch nothing. A stored row written
-    before the field existed is absent too, so it lands here as well.
-
-    Deciding that here is the whole point of the function. Reading the optional
-    field at each call site is how the two answers drifted apart to begin with:
-    a defaulted lookup over the raw mapping could not tell an absent channel
-    from an explicit ``false``, and the block being optional meant a policy that
-    never mentioned discovery arrived as an empty mapping rather than as a model
-    whose declared defaults had something to say about it.
+    """Resolve the policy's discovery channels once, absence included.
+    Every channel defaults to off (``true`` alone turns one on), so an absent
+    block, an explicit ``{"discovery": {}}``, and a pre-field stored row all mean fetch nothing.
     """
     discovery = policy.discovery
     if discovery is None:
@@ -103,21 +70,9 @@ def discovery_flags(policy: CrawlPolicy) -> DiscoveryFlags:
 
 @dataclass(frozen=True, slots=True)
 class PolicyTier:
-    """A deployment's answer for limit fields a caller may omit.
-
-    Exists as a value rather than a ``CrawlerSettings`` argument because the
-    invariant it carries -- "a field the caller omitted means the same number on
-    the API path and the job path" -- is only enforceable if the deployment
-    resolves it once and every read edge is handed the result. Threading the
-    settings themselves made it optional at each site, and optional at each site
-    is the same as absent at one of them: every job-path read passed ``None``,
-    so ``/v1/crawl`` honoured ``CRAWLUTRON_DEFAULT_TIMEOUT_SECONDS`` and
-    ``/v1/jobs`` did not, from the same deployment, on the same policy.
-
-    Bounded at the settings chokepoint by the deployment's own authority, which
-    is deliberately NOT the model's per-request bound: a deployment-wide default
-    has the blast radius of every caller, so it is capped lower, while a single
-    job's caller may ask for more.
+    """A deployment's answer for limit fields a caller may omit, resolved once so an
+    omitted field is the same number on the API and job paths (threading settings
+    made it optional per site, so /v1/crawl honored the default but /v1/jobs did not).
     """
 
     timeout_seconds: int
@@ -126,30 +81,17 @@ class PolicyTier:
     @classmethod
     def model_defaults(cls) -> PolicyTier:
         """The tier a policy gets with no deployment opinion: the model's own.
-
-        A named value rather than ``None`` so "nobody stated a tier" and
-        "the deployment said the model's defaults" cannot be confused, and so
-        a default is a decision on the same type as every other tier.
+        A named value rather than ``None``, so "nobody stated a tier" and
+        "the deployment said the model's defaults" cannot be confused; a default is a tier value too.
         """
         limits = CrawlPolicyLimits()
         return cls(timeout_seconds=limits.timeout_seconds, max_retries=limits.max_retries)
 
     @classmethod
     def from_settings(cls, settings: CrawlerSettings) -> PolicyTier:
-        """The deployment's numbers, as the settings chokepoint resolved them.
-
-        No re-clamping here. ``CrawlerSettings.from_mapping`` is the single place
-        a deployment's numbers are bounded, and it bounds them by the
-        *deployment's* authority (an operator retry ceiling lower than the
-        per-job one), which is not the bound the policy model declares. Reading
-        the model's bound here was a second enforcement site with different
-        semantics: it silently repaired a bad deployment value that the
-        chokepoint had already warned about, so the warning and the resulting
-        number could disagree. The invariant this function used to protect
-        instead -- an operator cannot install a value a caller would be rejected
-        for -- is a standing check on the constants
-        (``test_the_deployment_retry_ceiling_is_requestable``), because it is a
-        property of the numbers, not of a runtime value.
+        """The deployment's numbers, as the settings chokepoint resolved them -- no
+        re-clamping: ``from_mapping`` is the single bound, by the deployment's own
+        authority, not the model's per-request bound; that invariant is now a constants check.
         """
         return cls(
             timeout_seconds=int(settings.default_timeout_seconds),
@@ -161,16 +103,9 @@ class PolicyTier:
 
 
 def _with_omitted_defaults(raw: dict[str, Any], tier: PolicyTier | None) -> dict[str, Any]:
-    """Fill the fields a caller omitted, leaving every stated value alone.
-
-    A field that is not a mapping is passed through untouched so the model
-    reports its own shape error -- reaching into it here is how a bad
-    ``limits`` raised ``TypeError`` out of the validator and became a 500 where
-    the caller owed a 400.
-
-    ``setdefault`` on a copy, not on the caller's dict: the input is a payload
-    the API layer is about to echo, and mutating it is how "we did not touch
-    the caller's policy" stopped being true.
+    """Fill the caller's omitted fields, leaving every stated value alone.
+    Non-mapping fields pass through so the model reports its own shape error
+    ("limits" not a mapping used to raise into a 500); setdefault on a copy, never the caller's dict.
     """
     # Absent needs the operator tier applied; present-but-wrong-shape is a caller
     # error the model reports. Collapsing the two skipped both.
@@ -184,24 +119,8 @@ def _with_omitted_defaults(raw: dict[str, Any], tier: PolicyTier | None) -> dict
 
 def _code_for(exc: ValidationError) -> str:
     """The API error code for a validation failure, derived from its location.
-
-    Deepest mapped location wins, so a bad ``limits.max_depth`` reports the
-    limits code even when a top-level field also failed -- the caller needs to
-    know which part of their policy to fix, and the limits are the specific
-    answer.
-
-    ``strategies`` is the one field with two codes, and the choice is made by
-    rank rather than by returning early. The model reports a name outside the
-    enum and a member that is not a string at all identically -- for a Literal
-    field both are "not one of the allowed values" -- so the offending value is
-    what separates them. Naming a strategy we do not support is one caller
-    mistake (``invalid_policy_strategy``); sending a malformed list is another
-    (``invalid_policy_strategies``), and the API contract has always said which
-    was which. Ranking it alongside the other candidates rather than returning
-    from inside the loop is what keeps the "deepest wins" rule true when a
-    strategy error and a deeper limits error arrive together; an early return
-    made the answer depend on where ``strategies`` happened to be declared in
-    the model.
+    Deepest mapped location wins, so a bad ``limits.max_depth`` beats a top-level
+    error. ``strategies`` ranks its two codes rather than returning early, keeping "deepest wins" true.
     """
     ranked: list[tuple[int, str]] = []
     for detail in exc.errors():
@@ -223,12 +142,8 @@ def _code_for(exc: ValidationError) -> str:
 
 def _without(raw: dict[str, Any], path: list[Any]) -> dict[str, Any] | None:
     """``raw`` with ``path`` removed, or ``None`` when it is not there.
-
-    Pure and copy-on-write along the path: a repair that mutated its input
-    would be invisible to the caller but visible to the API layer, which echoes
-    this payload back -- the response would under-report what was sent. Only the
-    mappings on the path are copied, so a policy carrying a large credential
-    block pays for the path and not the tree.
+    Pure and copy-on-write along the path, so a repair cannot mutate the payload
+    the API echoes back; only path mappings copy, so a large block pays for the path, not the tree.
     """
     chain: list[dict[str, Any]] = [raw]
     node: Any = raw
@@ -248,18 +163,9 @@ def _without(raw: dict[str, Any], path: list[Any]) -> dict[str, Any] | None:
 
 
 def _drop_rejected(raw: dict[str, Any], exc: ValidationError) -> dict[str, Any] | None:
-    """The policy with every location the model rejected removed.
-
-    Deepest first, so a bad ``limits.max_retries`` drops the retry bound rather
-    than the caller's whole limits block -- the neighbouring ``timeout_seconds``
-    is a different decision, stated by the same caller in the same breath. A
-    location that names a list index drops the whole list: an element removed
-    from the middle renumbers the rest, and ``strategies`` is an ordered
-    execution chain where that would promote one strategy into another's slot.
-
-    Returns ``None`` when nothing was removable, which is the caller's signal
-    that the repair is finished and the remaining answer is the declared
-    defaults.
+    """The policy with every location the model rejected removed, deepest first: a
+    bad ``limits.max_retries`` drops the retry bound, not the whole limits block.
+    A list-index location drops the whole list (elements renumber); ``None`` signals nothing was removable.
     """
     candidate = raw
     dropped = False
@@ -283,20 +189,9 @@ PolicyLike = CrawlPolicy | dict[str, Any]
 
 
 def _policy_input(raw: Any) -> CrawlPolicy | dict[str, Any] | None:
-    """``raw`` as the one of three things a policy edge can act on.
-
-    A model is already validated and must be handed straight back -- validating
-    it again is not merely wasted work, it is how the strict edge used to reject
-    a valid policy as ``invalid_policy`` for not being a mapping. A mapping is
-    something to validate. ``None`` is neither, and it is the *only* case where
-    the two policy edges genuinely differ: the read edge answers with defaults
-    because it is total, the wire edge answers with a refusal because it is
-    not.
-
-    Stated once because it was stated twice, and the two copies had drifted
-    apart on the question that matters -- whether a re-read of a broken model
-    is even possible. It is not: a constructed model is valid by construction,
-    so returning one untouched is not a shortcut, it is the only correct answer.
+    """``raw`` as the one of three things a policy edge can act on: a model (handed
+    straight back -- re-validating one used to reject it as "invalid_policy"), a
+    mapping to validate, or ``None`` (where the total read and refusing wire edges differ).
     """
     if isinstance(raw, CrawlPolicy):
         return raw
@@ -305,24 +200,8 @@ def _policy_input(raw: Any) -> CrawlPolicy | dict[str, Any] | None:
 
 def read_policy(raw: Any, tier: PolicyTier | None = None) -> CrawlPolicy:
     """Total read edge: any input resolves to a policy, repairing what failed.
-
-    A row the write edge produced is always valid, so a stored policy that
-    fails here is corrupt text or a pre-schema-version row.
-    The repair is field-scoped, and the reason it is not "fall back to the
-    whole declared default" is that the whole-default answer discards the
-    fields the caller got right. One retry bound over the ceiling used to
-    replace a narrower timeout, an explicit strategy chain, the browser
-    profile, and ``respect_robots`` -- with no error and no log, because the
-    read edge by contract cannot raise. That is the shadow-dict failure mode
-    again wearing a different hat: an operator's stated choice that vanishes.
-    The dangerous direction for a limit is the one that widens it, and total
-    defaults widened every field at once.
-
-    The rule is written once rather than per field, because pydantic already
-    names what it rejected: drop those locations and re-validate, and whatever
-    the model then accepts is the answer. It terminates because each pass
-    removes at least one key, and it ends at full defaults only when there is
-    nothing left to drop.
+    Repair is field-scoped (whole-default discards what the caller got right; the read edge never raises).
+    Drop the rejected locations and re-validate, ending at full defaults only when nothing remains.
     """
     resolved = _policy_input(raw)
     if not isinstance(resolved, dict):
@@ -341,28 +220,16 @@ def read_policy(raw: Any, tier: PolicyTier | None = None) -> CrawlPolicy:
 
 def stored_policy(policy: Any) -> dict[str, Any]:
     """The write edge, mirroring :func:`read_policy` in the other direction.
-
-    A stored row keeps a dict because ``CrawlJobState`` is JSON, so the
-    persistence shape is the model's own dump rather than a second spelling of
-    it. Nothing downstream of :func:`read_policy` sees this shape.
+    A stored row keeps the model's own dump because ``CrawlJobState`` is JSON,
+    rather than a second spelling; nothing downstream of read_policy sees this shape.
     """
     return read_policy(policy).model_dump()
 
 
 def validate_wire_policy(raw: Any, tier: PolicyTier | None = None) -> CrawlPolicy:
     """Validate a caller's policy, rejecting with the code the API contracts for.
-
-    Every rule is the model's own. The per-field codes come from where the
-    model reports the error, so adding a bound to a field cannot leave this
-    function enforcing something different from the model -- the failure mode
-    of the hand-spelled version, which had drifted far enough that it read
-    ``limits`` three different ways in one file.
-
-    An already-built model is returned as it stands. The whole-site runner
-    holds one (it read the policy out of a job row) and hands it to the engine
-    through the raw payload shape, so re-validating a validated policy is not
-    just wasted work -- it was rejecting it, as ``invalid_policy``, for not
-    being a dict.
+    Every rule is the model's own: per-field codes derive from where the model
+    reports the error; an already-built model returns as-is, since re-validating one used to reject it.
     """
     resolved = _policy_input(raw)
     if not isinstance(resolved, dict):
