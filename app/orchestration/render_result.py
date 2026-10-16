@@ -1,9 +1,6 @@
-"""The render-side funnels: a worker's outcome becomes the /v1/render wire shape.
-
-The render pipeline reports a ``CrawlResult`` -- what one browser strategy did to
-one URL -- so its primitives hold an attempt rather than restating it. The
-failure primitives mirror the engine side: an exception classifies through the
-same chokepoint and the raw text never reaches the wire.
+"""The render-side funnels: a worker's outcome becomes the /v1/render wire
+shape, holding a ``CrawlResult`` attempt rather than restating it. The failure
+primitives mirror the engine side -- classify through the same chokepoint.
 """
 
 from __future__ import annotations
@@ -36,22 +33,9 @@ def terminal_crawl_result(
     metadata: dict[str, Any] | None = None,
     selected_strategy: CrawlStrategyName | None = None,
 ) -> CrawlResult:
-    """Construct a terminal (no-payload) CrawlResult -- the /v1/render wire shape.
-
-    Three sites hand-built this same ``final_url=None, html=None, text=None``
-    result: the browser strategy's failure path, the render endpoint's
-    robots-disallowed path, and its worker-failure path. The render copy
-    drifted: it set ``error=str(error)`` from a caught worker exception, and
-    ``to_dict`` is pure serialization, so raw exception text (DNS names,
-    filesystem paths, secrets) reached the response body. This primitive is
-    the single construction site; ``error`` must be a stable classification
-    (``classify_error_code``), never raw exception text -- which is what the
-    browser path already passed correctly.
-
-    ``selected_strategy`` is the browser mode that was in play, or None when no
-    browser produced the result (a policy refusal, a pool that never handed out a
-    renderer): the render shaper carries it to the wire instead of inventing
-    a member.
+    """Construct a terminal ``CrawlResult`` (no payload) -- the single site where
+    ``error`` must be a stable ``classify_error_code``, never raw exception text
+    that once reached the body. ``selected_strategy`` is the mode, or None.
     """
     return CrawlResult(
         url=url,
@@ -79,13 +63,9 @@ def terminal_attempt(
     elapsed_ms: int,
     error: CrawlError | None,
 ) -> CrawlStrategyAttempt:
-    """The attempt a terminal result reports: no HTTP status, no body, no content type.
-
-    Public because a result built outside this module needs the same attempt --
-    the render endpoint's paced-task result and the browser strategy's own
-    success path both have axes, timings and an error to place, and building one
-    by hand at each site is how they would drift apart from the pair this
-    primitive is checked against.
+    """The attempt a terminal result reports -- no HTTP status, body, or content
+    type. Public because results built elsewhere need the same attempt, and
+    building it by hand per site is how they would drift.
     """
     return CrawlStrategyAttempt(
         strategy=strategy,
@@ -99,22 +79,9 @@ def terminal_attempt(
 
 
 def crawl_result_from_engine_result(engine: EngineCrawlResult, *, url: NormalizedUrl) -> CrawlResult:
-    """Adapt an ``EngineCrawlResult`` into the render pipeline's ``CrawlResult``.
-
-    :meth:`DomainScheduler.run` builds its worker-exception envelope as an
-    ``EngineCrawlResult`` -- the right shape for ``/v1/crawl``, whose pipeline
-    reads ``original_url``/``normalized_url``, and the wrong shape for
-    ``/v1/render``, whose pipeline reads ``url``
-    (:func:`render_result_to_unified`). The scheduler cannot know which pipeline
-    it is serving, so the render pipeline normalizes at its single receive
-    point (``_collect``) rather than making the scheduler polymorphic.
-
-    Classification, error and diagnostics survive the adaptation (the
-    classification was already derived through the shared classifier, so it is
-    a taxonomy member and redaction-safe); the caller supplies the URL its slot
-    was submitted with, since the engine shape carries it under a different
-    name. "no payload" fields mirror the other terminal ``CrawlResult``
-    primitives: this result represents a page that was never rendered.
+    """Adapt an ``EngineCrawlResult`` into the render pipeline's ``CrawlResult``
+    at its single receive point. Classification, error, and diagnostics survive
+    (redaction-safe); the caller supplies the URL, named differently there.
     """
     elapsed_ms = int(engine.attempted_strategies[0].elapsed_ms) if engine.attempted_strategies else 0
     return CrawlResult(
@@ -146,25 +113,9 @@ def crawl_result_from_exception(
     strategy: CrawlStrategyName | None,
     elapsed_ms: int,
 ) -> CrawlResult:
-    """Convert a render-path exception into a classified terminal CrawlResult.
-
-    The render worker contract (``CrawlWorker -> CrawlResult``) has no catch
-    site above it that can handle the failure: the scheduler's envelope builds
-    an ``EngineCrawlResult``, which is the wrong shape for the render pipeline
-    (``to_dict`` then ``render_result_to_unified`` reads ``item["url"]``, which
-    ``EngineCrawlResult`` does not have), and the engine's browser consumer
-    reads ``result.metadata`` / ``result.elapsed_ms``, which
-    ``EngineCrawlResult`` equally lacks. A render worker that fails must
-    therefore return the contracted ``CrawlResult`` shape itself, classified
-    through the same chokepoint as the engine path: ``classify_error_code``
-    owns the taxonomy, this primitive owns the redaction (raw exception text is
-    logged server-side only).
-
-    ``strategy`` is the browser mode the worker was configured for, or None
-    when no strategy was attempted; it rides the server-side log and the
-    result metadata, never an invented enum member. ``retryable`` survives into
-    ``metadata`` so the render layer can answer 503 for capacity exhaustion and
-    the at-least-once frontier layer can re-queue the URL.
+    """Convert a render-path exception into a classified terminal ``CrawlResult``:
+    no catch site can handle it, so the worker returns the contracted shape,
+    classified through the same chokepoint, with ``retryable`` in ``metadata``.
     """
     classification, retryable = classify_and_log(
         error,

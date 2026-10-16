@@ -1,10 +1,7 @@
 """Recursive crawl dispatch (bounded BFS) with self-tuning admission.
 
-Extracted from :mod:`app.orchestration.engine.crawl_request` so the resource-gated
-batch loop can be unit-tested in isolation, without standing up the whole
-engine. The engine still owns policy parsing, the per-URL crawl chain, robots
-handling, and result spill/reassembly; it hands this function the already-built
-closures (worker, robots checks, sitemap seeding) and the dispatch knobs.
+Extracted from ``crawl_request`` so the resource-gated batch loop is testable in
+isolation; the engine owns policy, chains, robots, and spill, handing the closures.
 """
 
 from __future__ import annotations
@@ -36,12 +33,9 @@ MAX_TRANSIENT_REQUEUES = 3
 
 
 def _engine_envelope(job: CrawlTask, exc: BaseException) -> EngineCrawlResult:
-    """Crawl-pipeline failure envelope for the domain scheduler.
-
-    ``DomainScheduler.run`` is generic over the result shape, so the pipeline
-    that owns the ``EngineCrawlResult`` contract supplies how a broken job is
-    represented. ``CrawlTask.original_url`` is the reporting URL for this
-    pipeline; the render pipeline passes its own accessor for ``CrawlJob.url``.
+    """Crawl-pipeline failure envelope for the domain scheduler, which is generic
+    over the result shape: this pipeline supplies how a broken job is represented,
+    reporting via ``CrawlTask.original_url``.
     """
     return failed_result_for(job, exc, url_of=lambda j: j.original_url)
 
@@ -53,17 +47,9 @@ def requeue_transient(
     frontier: deque[tuple[int, CrawlTask]],
     attempts: dict[NormalizedUrl, int],
 ) -> bool:
-    """Re-queue a transiently-failed task to the frontier tail, up to the cap.
-
-    Returns True when the task was re-queued (the caller must NOT record it as
-    a permanent failure) and False when the cap is exhausted (the caller lets
-    the classified result stand). ``attempts`` maps the normalized URL to how
-    many times it has already been re-queued and is mutated in place.
-
-    Whether a classification is transient at all is the taxonomy's call (see
-    ``app.vocabulary.taxonomy.is_transient_classification``); this function owns only the
-    bound, so the cap cannot be sidestepped by a caller re-queueing for its own
-    reason.
+    """Re-queue a transiently-failed task to the frontier tail, up to the cap:
+    returns True (the caller must not record a permanent failure) or False when
+    the cap exhausts. Transience is the taxonomy's call; this owns only the bound.
     """
     count = attempts.get(task.normalized_url, 0)
     if count >= MAX_TRANSIENT_REQUEUES:
@@ -85,11 +71,8 @@ _HTTP_HEAVY_LOOKAHEAD: int = RECURSIVE_RAMP_MAX * ENGINE_BATCH_CONCURRENCY_MULTI
 
 
 async def _spill_write(spill: Any, index: int, result: Any) -> None:
-    """Write a result to ``spill`` if present, tolerating sync or async ``write``.
-
-    ``_ResultSpill.write`` is async (offloaded off the event loop), but
-    callers/tests may supply a sync spill object, so accept
-    either. A ``None`` spill is a no-op (in-memory caller).
+    """Write a result to ``spill`` if present, tolerating a sync or async ``write``
+    (the real spill is async, but tests may supply a sync one); ``None`` is a no-op.
     """
     if spill is None:
         return
@@ -253,11 +236,9 @@ async def run_recursive_crawl(
     admission: WeightedAdmission | None = None,
     host_policy: HostPolicy,
 ) -> None:
-    """Bounded recursive BFS with self-tuning resource admission control.
-
-    Writes page results (and robots-disallowed skips) to ``spill`` and expands
-    the frontier from each result's discovered links. The caller owns the
-    closures so this stays a pure dispatch function.
+    """Bounded recursive BFS with self-tuning resource admission: writes results
+    to ``spill`` and expands the frontier from each result's discovered links.
+    The caller owns the closures, so this stays a pure dispatch function.
     """
     metrics = get_metrics()
     run = RecursiveRunState(

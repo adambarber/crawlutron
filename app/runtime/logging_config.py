@@ -1,11 +1,6 @@
-"""Standalone JSON-structured logging for the crawlutron service.
-
-The module exposes one call surface: ``configure_service_logging`` returns a
-configured logger, and every entry point wires it the same way.
-
-For deployments that want richer logging (rotating files, structured
-JSON, JSON-Lines with HTTP context), swap ``configure_service_logging``
-with a more capable implementation in your own integration.
+"""Standalone JSON-structured logging for the service: one call surface,
+``configure_service_logging``, which every entry point wires the same way and
+deployments can swap for a richer implementation in their own integration.
 """
 
 from __future__ import annotations
@@ -44,11 +39,8 @@ _RESERVED_LOGRECORD_ATTRS = {
 
 
 class _JsonFormatter(logging.Formatter):
-    """Emit each log record as a single-line JSON object.
-
-    Keeps the record's ``service`` attribute (added by ``configure_service_logging``)
-    and any extra kwargs passed via ``logger.info(..., extra={...})`` so the
-    structured fields are visible to downstream tooling.
+    """Emit each record as a single-line JSON object, keeping the ``service`` field
+    and any ``extra`` kwargs so the structured fields reach downstream tooling.
     """
 
     def format(self, record: logging.LogRecord) -> str:
@@ -73,11 +65,9 @@ class _JsonFormatter(logging.Formatter):
 
 
 class _ServiceFieldFilter(logging.Filter):
-    """Stamp the service name onto records that did not already carry one.
-
-    Attached to the root handlers so a record emitted from any namespace (an
-    ``app.*`` module or a third-party library) carries the ``service`` field the
-    JSON formatter reports.
+    """Stamp the service name onto records that did not already carry one, attached
+    to the root handlers so a record from any namespace carries the ``service``
+    field the JSON formatter reports.
     """
 
     def __init__(self, service_name: str) -> None:
@@ -104,19 +94,8 @@ def configure_service_logging(
 ) -> logging.Logger:
     """Configure JSON line output for the whole service.
 
-    Handlers are attached to the root logger so every namespace reaches them;
-    the returned service-named logger is kept for callers that hold it (its
-    level mirrors the configured one).
-
-    Args:
-        service_name: value reported in the ``service`` field (and the name of
-            the logger returned to the caller).
-        log_level: one of ``"debug"``/``"info"``/``"warning"``/``"error"``/``"critical"``.
-        log_file_path: optional path to also tee logs to a rotating file. The
-            file's parent directories are created automatically. ``None`` keeps
-            output on stderr only.
-        log_file_max_bytes: maximum bytes per log file before rotation.
-        log_file_backup_count: number of rotated files to keep.
+    Handlers attach to the root logger so every namespace reaches them; the
+    returned service-named logger is kept for callers, level mirrored.
     """
     level = getattr(logging, log_level.upper(), logging.INFO)
     logger = logging.getLogger(service_name)

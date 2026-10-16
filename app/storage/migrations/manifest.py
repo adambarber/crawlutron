@@ -218,11 +218,9 @@ def create_table_sql(schema: TableSchema) -> str:
 
 
 def create_index_sql(schema: TableSchema, index: IndexSchema) -> str:
-    """Render an index's DDL from its declaration.
-
-    A migration creates its indexes through this renderer rather than by
-    spelling DDL of its own, so the declared index and the one the drift
-    check compares against cannot be two different statements.
+    """Render an index's DDL from its declaration -- a migration creates indexes
+    through this renderer rather than spelling DDL itself, so the declared index
+    and the one the drift check compares cannot be two different statements.
     """
     unique = "UNIQUE " if index.unique else ""
     name = _quote_identifier(index.name)
@@ -279,16 +277,8 @@ def _column_drift(
 ) -> tuple[str, ...]:
     """Compare a live table against the declared manifest BY COLUMN NAME.
 
-    SQLite appends a column added by ALTER TABLE to the end of the table, so a
-    database created by the previous migration path has exactly the declared
-    columns in a different ORDER. Order is a physical accident of how the table
-    was built, not part of the contract -- SQL addresses columns by name. A
-    positional comparison therefore rejects every database this service has
-    ever created, which is how a startup conformance check becomes an outage.
-
-    `allowed` carries columns that are permitted to exist beyond the manifest
-    (a legacy column on the stamping path); they are still checked against their
-    own declared shape, never ignored.
+    SQLite appends ALTER TABLE columns to the end, so order is not a contract --
+    positional comparison would reject every database this service has built.
     """
     actual = {column.name: column for column in _actual_columns(conn, schema.name)}
     expected = {column.name: column for column in schema.columns}
@@ -311,11 +301,8 @@ def schema_drift(
     conn: sqlite3.Connection, schema: TableSchema, store_schema: StoreSchema | None = None
 ) -> tuple[str, ...]:
     """How a live table differs from the declaration, plus its companions' drift.
-
-    ``store_schema`` is what lets a check cover the tables a store owns beyond
-    its own: pass the owning schema and the companion tables are held to their
-    declared shape too, so a store cannot be half-migrated. Omit it when only
-    one table is under inspection.
+    Pass ``store_schema`` to hold the tables a store owns beyond its own to their
+    declared shape too -- so a store cannot be half-migrated; omit for one table.
     """
     drift = _column_drift(conn, schema, allowed={})
     if store_schema is not None:
@@ -324,13 +311,10 @@ def schema_drift(
 
 
 def _companion_drift(conn: sqlite3.Connection, store_schema: StoreSchema) -> tuple[str, ...]:
-    """Check the tables a store schema owns beyond its own primary table.
+    """Check the tables a store schema owns beyond its primary table.
 
-    Absent companions are not drift at that point in the chain: before
-    0003 runs, `crawl_job_results` and `crawl_job_visited` correctly do not
-    exist. Once they do, they are held to the declared shape exactly like the
-    primary table, so a table that drifted is rejected rather than accepted
-    because the store that owns it also owns another one.
+    Absent companions are not drift at that chain point; once present they are
+    held to the declared shape like the primary, so a drifted one cannot hide.
     """
     drift: list[str] = []
     for companion in COMPANION_SCHEMAS.get(store_schema, ()):

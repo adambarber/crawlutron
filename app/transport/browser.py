@@ -121,43 +121,33 @@ class BrowserRenderer:
         self._page_semaphore = asyncio.Semaphore(max(1, _concurrent_pages))
 
     async def _async_sleep(self, seconds: float) -> None:
-        """Non-blocking sleep for use inside coroutines.
-
-        The default ``time.sleep`` clock (injectable for tests) would block the
-        whole event loop; run it in a thread so one render can never freeze the
-        service.
+        """Non-blocking sleep for use inside coroutines: the injectable clock, run
+        in a thread, so one render (or the driver between steps) can never freeze
+        the event loop.
         """
         await async_sleep(self._sleep, seconds)
 
     @property
     def pdf_text_extractor(self) -> Callable[[NormalizedUrl], str]:
-        """The collaborator that turns a PDF URL into text.
-
-        Public because it is an injection point: a caller that supplied one, or a
-        test asserting the supplied/default behaviour, should not have to read a
-        private attribute to say which extractor is in play.
+        """The collaborator that turns a PDF URL into text; public as an injection
+        point so a test or caller does not read a private attribute to name the
+        extractor in play.
         """
         return self._pdf_text_extractor
 
     @property
     def driver(self) -> BrowserDriver:
-        """The driver this renderer drives the page with.
-
-        Public because the driver is a collaborator rather than an
-        implementation detail: it owns the browser lifecycle and the per-page
-        steps, and a test asserting on either needs to name it rather than reach
-        past the renderer into a private attribute.
+        """The driver this renderer drives the page with; public because it is a
+        collaborator, not an implementation detail -- it owns the lifecycle and
+        the per-page steps, which tests should name directly.
         """
         return self._driver
 
     @property
     def warmup_urls(self) -> list[str]:
-        """Resolved warmup URLs for this renderer's browser profile.
-
-        The headed-warmed strategy profile is the one carrying warmup URLs (see
-        ``app.vocabulary.strategies.BROWSER_STRATEGIES``); exposing the resolved list lets
-        the browser pool label its renders with the real browser mode instead
-        of inventing a strategy name on a failure path.
+        """Resolved warmup URLs for this renderer's browser profile: the
+        headed-warmed profile carries them, and exposing the resolved list lets
+        the pool label renders with the real mode, not an invented one.
         """
         return self._warmup_urls
 
@@ -397,11 +387,9 @@ class BrowserRenderer:
 
     @staticmethod
     async def extract_text(page: Any) -> str:
-        """The rendered visible text, or empty string if the page will not say.
-
-        Static and public for the same reason ``extract_html`` is: neither reads
-        renderer state, so a test that substitutes the extraction *step* needs
-        these without carrying a renderer around to call them on.
+        """The rendered visible text, or empty string if the page will not say --
+        static and public for the same reason ``extract_html`` is: neither reads
+        renderer state, so a test substituting the step needs these stand-alone.
         """
         try:
             return await page.evaluate("() => document.body ? document.body.innerText: ''")
