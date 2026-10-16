@@ -12,11 +12,8 @@ from tests.chokepoint_walks import REPO_ROOT, app_offenders
 def test_crawl_strategy_name_members_match_vocabulary():
     """The ``CrawlStrategyName`` Literal must not drift from the vocabulary.
 
-    ``CrawlStrategyName`` cannot reference the ``Final`` constants directly inside
-    ``Literal[...]`` (mypy rejects that), so its members are spelled as string
-    literals. ``app/vocabulary/strategies.py`` remains the single source of truth;
-    this pins the two together so a rename there cannot orphan the alias.
-    """
+    mypy rejects ``Final`` inside ``Literal``, so the members are spelled out
+    and this pins them to the constants."""
     from typing import get_args
 
     from app.models.taxonomy import CrawlStrategyName
@@ -39,21 +36,8 @@ def test_crawl_strategy_name_members_match_vocabulary():
 def test_classification_literal_covers_the_enum_exactly():
     """``Classification`` and ``CrawlClassification`` name the same taxonomy.
 
-    Neither can be derived from the other: mypy will not evaluate
-    ``*get_args()`` inside ``Literal[...]`` and will not read an enum, so
-    ``Classification`` is spelled out and ``CrawlClassification`` is spelled out,
-    and this is the only thing that says they are the same set. It was missing,
-    which is the gap this whole taxonomy chain is built to close: a member added
-    to the enum and emitted by a classifier passes every membership sweep (they
-    check the enum direction), and then
-    ``check_literal_fields`` rejects the whole batch at construction because the
-    Literal never heard of it. The reverse -- a Literal member with no enum
-    member -- reaches the strict enum at response shaping and takes the batch
-    down there instead.
-
-    Both directions are asserted, so neither half of the drift can be the one
-    that slips through.
-    """
+    mypy evaluates neither inside ``Literal``, so both are spelled out and this
+    alone says they are one set."""
     from typing import get_args
 
     from app.models.taxonomy import Classification
@@ -74,14 +58,8 @@ def test_classification_literal_covers_the_enum_exactly():
 def test_crawl_error_is_the_pipeline_additions_over_classification():
     """The pipeline-only codes are a real split, not a second copy of the taxonomy.
 
-    ``CrawlError`` is defined as the union of ``Classification`` and
-    ``PIPELINE_ONLY_CRAWL_ERRORS`` (app/models/taxonomy.py), so its membership is derived
-    and cannot drift. What a union cannot check is whether the split is still
-    meaningful: a code listed as a pipeline condition while also being a
-    classification says a page outcome is a pipeline condition, and a pipeline
-    condition deleted silently narrows the ``error`` field for callers who key on
-    it as a stable code.
-    """
+    ``CrawlError`` derives from the union so membership cannot drift; a
+    silently deleted condition narrows the ``error`` field callers key on."""
     from app.models.taxonomy import PIPELINE_ONLY_CRAWL_ERRORS, Classification, literal_members
 
     pipeline_only = literal_members(PIPELINE_ONLY_CRAWL_ERRORS)
@@ -136,20 +114,11 @@ def test_generic_membership_detector_bites():
 
 
 def test_generic_membership_subsumes_the_per_field_detectors():
-    """The generic sweep covers every field the three per-field detectors
-    guarded, and every primitive the hard-coded list forgot.
+    """The generic sweep covers every field the per-field detectors guarded.
 
-    The historical detectors matched on a *transcribed* primitive list of six
-    names (``_RESULT_PRIMITIVES`` below). Three live primitives that set
-    classification/status/strategy were never on it -- ``binary_no_text_result``
-    (which sets all three), ``crawl_result_from_engine_result``, and
-    ``terminal_engine_result`` -- and neither were the direct dataclass
-    constructions at five sites that bypass the primitives entirely. The
-    derived registry has twelve entries and is closed by construction.
-
-    This assert is the property that licenses deleting the per-field list: the
-    coverage gap is not a matter of opinion, it is the set difference below.
-    """
+    The historical transcribed six-name list missed three live primitives and
+    five direct constructions; the derived twelve-entry registry is closed by
+    construction -- the property that licenses deleting the per-field list."""
     from tests.membership_gate import RESULT_DATACLASS_NAMES, RESULT_PRIMITIVES, literal_typed_field_members
 
     members = literal_typed_field_members()
@@ -183,13 +152,8 @@ def test_generic_membership_subsumes_the_per_field_detectors():
 def test_result_construction_enforces_membership_at_the_dataclass():
     """A result dataclass built ANYWHERE rejects a non-member value.
 
-    The historical escapes went through direct constructions outside
-    result_helpers, so routing was policed geographically. That is no longer the
-    load-bearing guarantee: every result dataclass validates its Literal fields
-    in ``__post_init__``, so a build site cannot escape membership checking
-    regardless of who calls it. This is the falsifiable version of that claim --
-    a bad value at a direct construction site must raise, and a member must not.
-    """
+    Every dataclass validates its Literal fields in ``__post_init__``, so no
+    build site can escape membership checking; a bad direct construction raises."""
     from dataclasses import asdict
 
     from app.models.crawl_result import CrawlResult, CrawlStrategyAttempt, EngineCrawlResult
@@ -291,7 +255,7 @@ def test_wrong_namespace_detector_bites():
 
 def test_the_membership_gate_rejects_a_non_member_value():
     """The AST detectors see source text; the historical escape reached the
-    primitive through a local variable, which no textual detector can see.
+    primitive through a LOCAL VARIABLE, which no textual detector can see.
     The gate is the structural closure: whatever indirection a value took, it
     must pass the primitive to become a result."""
     from tests.membership_gate import NonMemberValue, assert_member, assert_optional_member
@@ -309,10 +273,11 @@ def test_the_membership_gate_rejects_a_non_member_value():
 
 
 def test_the_gate_sees_the_local_variable_indirection_the_ast_detectors_cannot():
-    """The exact historical shape, end to end: a local variable assigned a
-    wrong-namespace constant, then handed to the primitive as a bare Name. No
-    kwarg-level AST detector fires on this; the gate does, because it inspects
-    the value at the boundary instead of the text at the call."""
+    """The exact historical shape, end to end.
+
+    A local assigned a wrong-namespace constant, handed to the primitive as a
+    bare Name: no kwarg-level AST detector fires; the gate does, because it
+    inspects the value at the boundary."""
     import asyncio
 
     from tests.membership_gate import NonMemberValue, field_member_sets
@@ -338,12 +303,9 @@ def test_the_gate_sees_the_local_variable_indirection_the_ast_detectors_cannot()
 
 
 def test_the_gate_would_have_caught_the_shipped_defect():
-    """``EXTRACTION_METHOD_BINARY_NO_TEXT`` has a value that IS a legal
-    classification member -- so this is the shape a value check admits. The
-    gate inspects the value, and the value here is legal, which is precisely
-    the point: the *provenance* AST detector above is what names the defect,
-    while the gate is what guarantees no wrong value of ANY provenance crosses.
-    Both are needed and neither subsumes the other."""
+    """``EXTRACTION_METHOD_BINARY_NO_TEXT``'s value IS a legal member, so this
+    is the shape a value check admits: the PROVENANCE detector names the
+    defect, the gate bars any wrong value of any provenance."""
     from tests.membership_gate import NonMemberValue, assert_result_fields, field_member_sets
 
     members = field_member_sets()
