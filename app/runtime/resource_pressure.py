@@ -56,32 +56,17 @@ MAX_DERIVED_POOL_SIZE = get_env_int("CRAWLUTRON_MAX_DERIVED_POOL_SIZE", 4)
 
 
 def worker_count() -> int:
-    """How many uvicorn worker processes this deployment runs.
-
-    The single home for the value. It lives here rather than in ``app.main``
-    because the functions that size a process's pools live here, and a pool
-    sized from a shared cgroup limit has to know how many processes are
-    spending it -- so importing the number from the module that refuses N>1
-    would be circular.
-
-    Reads through the never-raise env chokepoint, so a typo'd value falls back
-    to one worker instead of dividing every budget to nothing.
+    """How many uvicorn worker processes this deployment runs -- the single home for
+    the value (a pool sized from a cgroup limit must know how many processes spend it).
+    Reads through the never-raise env chokepoint, so a bad value falls back to one worker.
     """
     return get_env_int("CRAWLUTRON_WORKERS", 1, lo=1)
 
 
 def doc_worker_count() -> int:
-    """Persistent markitdown worker count *for this process*.
-
-    The single home for this count: ``app.extraction.content`` borrows it so the
-    pool it spawns is exactly the size admission reserved. Reading the env var
-    in two places would let the spawned pool and the RAM reservation drift
-    apart. A malformed value falls back to the default rather than aborting
-    startup -- extraction is a nicety, not a load-bearing path.
-
-    The configured count is a fleet total: each worker spawns its own markitdown
-    process pool, and each holds 100-300 MiB for the life of the process, so N
-    workers at the configured count would be N times the reserved RAM.
+    """Persistent markitdown worker count *for this process* -- the single home,
+    so the spawned pool and the RAM reservation can't drift. A malformed value
+    falls back to the default; the count is a fleet total, each worker spawning its own pool.
     """
     try:
         configured = get_env_int("CRAWLUTRON_EXTRACTION_DOC_WORKERS", _DEFAULT_DOC_WORKERS, lo=1)
@@ -91,19 +76,9 @@ def doc_worker_count() -> int:
 
 
 def derive_browser_pool_size(limit_bytes: int | None = None) -> int:
-    """Browser-pool size *for this process*, from the cgroup memory limit.
-
-    Honors ``CRAWLUTRON_BROWSER_POOL_SIZE``; else derives so this process's
-    share of the fleet uses at most ``BROWSER_RAM_FRACTION`` of RAM; falls back
-    to 1 when no limit is discoverable. Shared by
-    ``app.transport.browser_pool`` and the httpx pool sizing so the
-    connection ceiling tracks the admission's HTTP concurrency.
-
-    The cgroup limit belongs to the container, so it is the same number in every
-    worker while the pool is each worker's own. Un-divided, N workers would each
-    spend the whole budget. The configured size is therefore a fleet total too,
-    which coincides with the previous per-process reading in the single-worker
-    configuration that ships.
+    """Browser-pool size *for this process* from the cgroup memory limit: honors
+    CRAWLUTRON_BROWSER_POOL_SIZE, else derives this process's share up to
+    BROWSER_RAM_FRACTION, falling back to 1; the cap is a fleet total, not per process.
     """
     workers = worker_count()
     explicit = get_env_int("CRAWLUTRON_BROWSER_POOL_SIZE", 0, lo=0)
@@ -129,19 +104,9 @@ def max_http_concurrency_for(
     doc_workers: int = 0,
     doc_task_bytes: int = _DOC_TASK_RAM_BYTES,
 ) -> int:
-    """Admission's HTTP concurrency ceiling *for this process*.
-
-    Reserves this process's fixed pools' RAM, then divides the remainder by the
-    per-task estimate. This is exactly the ceiling ``WeightedAdmission`` uses, so
-    the httpx pool can be bound to it with zero drift as RAM scales.
-
-    The remainder is this worker's share: the limit is the container's and
-    ``pool_size`` and ``doc_workers`` are per-process, so the reserve is a
-    *fleet* quantity and is multiplied before the subtraction. Subtracting it
-    once and then dividing overstates the fleet's free memory -- with 4 workers
-    on a 16 GiB limit that is 320 concurrent HTTP tasks where a single worker
-    would have run 283, which is the over-admission the division exists to
-    remove.
+    """Admission's HTTP concurrency ceiling *for this process*: reserve the fixed
+    pools' RAM, then divide the remainder by the per-task estimate. The reserve
+    is a fleet quantity, multiplied before the division so this worker's share stays honest.
     """
     workers = worker_count()
     limit = max(limit_bytes, 256 * 1024 * 1024)
@@ -153,23 +118,8 @@ def max_http_concurrency_for(
 @dataclass(frozen=True)
 class TaskRamBudget:
     """The per-task RAM weights admission sizing is derived from, as one value.
-
-    ``build_admission_policy`` and ``max_http_concurrency_for`` sized a
-    process's admission from the same four inputs, and the duplication was those
-    two keyword-only parameter lists rather than any logic: the
-    duplication was the argument list, not the arithmetic. Binding the list into
-    a value the caller builds and this function hands on unchanged means the
-    weights exist once, and a caller adding a weight edits a dataclass instead
-    of two signatures that have to agree. The same move
-    ``app.orchestration.engine_result.TerminalResult`` made for the terminal-result
-    constructors, for the same reason.
-
-    Every field defaults to the env-read weight this module already reserves
-    against, so admission built without a budget reserves exactly what it did
-    before. ``doc_workers`` defaults to zero rather than to
-    :func:`doc_worker_count` because a caller that spawns no markitdown pool
-    must not have one silently reserved for it -- the count is a fact about the
-    caller's process, not a default the sizing can know.
+    The weights used to be two keyword-only parameter lists that had to agree;
+    binding them into one value means adding a weight edits a dataclass, not two signatures.
     """
 
     http_task_bytes: int = _HTTP_TASK_RAM_BYTES
@@ -203,13 +153,8 @@ def build_admission_policy(
     budget: TaskRamBudget | None = None,
 ) -> AdmissionPolicy:
     """Derive an admission policy from the memory limit plus the fixed pools.
-
-    The four sizing weights arrive as one :class:`TaskRamBudget` rather than as
-    four parameters, because they were four parameters here *and* four there and
-    the two lists had to be edited together. The budget is passed to
-    :func:`max_http_concurrency_for` unchanged, so the HTTP ceiling this policy
-    reports is computed from exactly the weights the policy was built from --
-    the property the flat signature made a coincidence of ordering.
+    The four sizing weights arrive as one ``TaskRamBudget`` (they were four
+    parameters in two places); the budget passes through to the HTTP ceiling unchanged.
     """
     sizing = budget or TaskRamBudget()
     limit = max(limit_bytes, 256 * 1024 * 1024)
@@ -251,14 +196,8 @@ def default_admission_policy(gate: ResourceGate) -> WeightedAdmission:
 
 class WeightedAdmission:
     """RAM/CPU-weighted, two-tier batch admission.
-
-    HTTP tasks are cheap (a few MiB each); browser tasks are expensive because
-    the persistent browser pool holds most of the cgroup RAM, so the tiers are
-    budgeted separately. HTTP tasks are admitted up to
-    ``max_http_concurrency * headroom``; browser tasks up to the (small)
-    browser-tier cap. ``admit`` never blocks for long: when nothing fits it
-    yields :data:`_ADMIT_YIELD_SECONDS` of backpressure instead of parking the
-    whole crawl.
+    HTTP tasks are cheap and browser tasks expensive (the persistent browser pool
+    holds most RAM), so tiers are budgeted separately; ``admit`` yields rather than parks the crawl.
     """
 
     def __init__(self, gate: ResourceGate, policy: AdmissionPolicy) -> None:
