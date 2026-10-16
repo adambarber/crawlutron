@@ -44,13 +44,9 @@ MAKEFILE_HOOK_ID = re.compile(r"(?:\$\(PRE_COMMIT\)|\bpre-commit)\s+run\s+(\S+)"
 
 
 def _makefile_recipe_lines(makefile: str) -> list[tuple[str, str]]:
-    """`(target, command)` for every non-comment recipe line in a Makefile.
-
-    Comments are dropped because they are prose about a command rather than the
-    command: this file's own comment records the ruff invocation it no longer
-    runs, and a detector that read that would be reporting the explanation of the
-    fix as the defect. A `Makefile` is tab-indented, and a line starting with a
-    non-tab is a target or a variable.
+    """`(target, command)` for every non-comment recipe line. Comments are prose
+    about a command, not the command -- this file's own comment records the ruff
+    invocation it no longer runs, so reading it would report the fix as the defect.
     """
     lines: list[tuple[str, str]] = []
     target = ""
@@ -66,13 +62,9 @@ def _makefile_recipe_lines(makefile: str) -> list[tuple[str, str]]:
 
 
 def _assert_no_gate_restated(makefile: str) -> None:
-    """No Makefile recipe runs a gate tool directly instead of by hook id.
-
-    The Makefile used to spell out `ruff check app tests scripts` and `mypy`,
-    which made it a second declaration of every gate -- and the two copies had
-    already drifted apart in both scope and interpreter before this was checked.
-    Delegating with `pre-commit run <id>` deletes the second copy rather than
-    documenting it, and the commands then live only in the config CI also reads.
+    """No recipe runs a gate tool directly instead of by hook id: the Makefile once
+    spelled out `ruff check` and `mypy`, a second declaration of every gate that had
+    already drifted apart -- so delegation deletes the copy, not documents it.
     """
     for target, command in _makefile_recipe_lines(makefile):
         for pattern in GATE_TOOL_PATTERNS:
@@ -100,11 +92,9 @@ def test_a_makefile_target_that_restates_a_hook_command_is_caught() -> None:
 
 
 def test_every_hook_id_the_makefile_names_exists() -> None:
-    """A delegation is only a single source of truth if the id resolves.
-
-    Delegating by id replaces one drift with a quieter one: a renamed hook would
-    leave `make lint` reporting "hook not found" as a non-zero exit that reads
-    like a passing gate that did nothing.
+    """A delegation is single-sourced only if the id resolves: a renamed hook would
+    leave `make lint` exiting non-zero with "hook not found", which reads like a
+    passing gate that did nothing.
     """
     config = CONFIG_PATH.read_text(encoding="utf-8")
     known = {hook_id for hook_id, _ in _hook_blocks(config)}
@@ -199,11 +189,9 @@ def test_required_gate_evasions_are_rejected(evasion) -> None:
 
 
 def test_the_aggregate_script_is_what_fails_not_just_what_it_says() -> None:
-    """The enforcement assertion is the load-bearing line; prove it is executed.
-
-    Before this, the contract only read the workflow. Reading it is what let
-    both evasions through, so the propagation claim is settled by running the
-    aggregate's own script with a failed need.
+    """The enforcement assertion is the load-bearing line and must execute: the
+    contract once only READ the workflow, which is what let both evasions through,
+    so the propagation claim is settled by running the aggregate script.
     """
     workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
     needs = _required_needs(workflow)
@@ -232,11 +220,9 @@ def test_the_aggregate_script_is_what_fails_not_just_what_it_says() -> None:
 
 
 def test_quoted_hook_id_is_visible_to_this_contract() -> None:
-    """A hook id is a YAML value, not a line of text.
-
-    The parser used to be `^      - id: ([A-Za-z0-9_-]+)\\s*$`, so a hook
-    declared `- id: "jscpd-legacy"` did not exist as far as this contract was
-    concerned and a second, laxer duplication gate could be added undetected.
+    """A hook id is a YAML value, not a line: the old anchored regex saw `- id:
+    "jscpd-legacy"` as nonexistent, so a second, laxer duplication gate could be
+    added undetected.
     """
     hooks = _hook_blocks(QUOTED_SECOND_JSCPD_HOOK)
     assert [hook_id for hook_id, _ in hooks] == ["jscpd", "jscpd-legacy"]

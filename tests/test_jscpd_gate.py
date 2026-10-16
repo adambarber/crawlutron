@@ -51,16 +51,9 @@ def _write_expectations(path: Path, pairs: list[dict]) -> None:
 
 
 def _strip_root(name: str, root: str) -> str:
-    """jscpd's name for a file when several roots are scanned in one invocation.
-
-    A single-root invocation reports paths relative to that root. Handed several,
-    it strips the root prefix from each and reports `crawl/recursive.py` for
-    `app/orchestration/recursive.py` and `_recursive_harnesses.py` for
-    `tests/_recursive_harnesses.py` -- measured, not assumed: a multi-path scan of
-    this service returns exactly those two strings, neither of which names the
-    tree it came from. The stub has to reproduce that, because the gate resolves
-    those names back to a root against the filesystem and a stub that returned
-    honest paths would be modelling a tool that does not exist.
+    """jscpd's name for a file in a multi-root invocation: it strips the root prefix,
+    reporting `crawl/recursive.py` for `app/orchestration/recursive.py` -- a pair
+    the gate resolves back against the filesystem, so the stub must reproduce it.
     """
     return name[len(root) + 1 :] if name.startswith(root + "/") else name
 
@@ -156,12 +149,9 @@ def _stub_report(
 
 
 def _run_against_empty_tree(monkeypatch, tmp_path, **kwargs) -> list[list[str]]:
-    """Run the gate over a tree with no duplicates; return the commands issued.
-
-    The clean run is the precondition for most of what this file asserts (a
-    threshold is honoured, a root is scanned once, a floor is applied to every
-    root), so the empty expectations file and the report stub are set up here
-    once rather than re-spelled per test.
+    """Run the gate over a tree with no duplicates; return the commands issued. The
+    clean run is the precondition for most of this file, so the empty expectations
+    and report stub are set up here once rather than re-spelled per test.
     """
     _write_expectations(tmp_path / "expectations.json", [])
     monkeypatch.setattr(res, "EXPECTATIONS_PATH", tmp_path / "expectations.json")
@@ -176,12 +166,9 @@ _KNOWN_ROOTS = frozenset(root for roots in gate.PROFILE_PATHS.values() for root 
 
 
 def _roots_of(command: list[str]) -> list[str]:
-    """The scan roots an invocation was handed.
-
-    Everything after the last flag, rather than ``command[-1]``: the cross-tree
-    invocation is given every root as a positional, so the last one is not the
-    only one and reading it that way would model that invocation as a `scripts`
-    scan.
+    """The scan roots an invocation was handed: everything after the last flag, not
+    ``command[-1]``, because the cross-tree invocation gets every root and reading
+    the last one alone would model it as a `scripts` scan.
     """
     positionals = command[command.index("--fail-on-empty") + 1 :]
     return [argument for argument in positionals if argument in _KNOWN_ROOTS]
@@ -223,20 +210,9 @@ PROBE_SOURCE = "app/storage/ids.py"
 
 
 def _mirrored_service_tree(tmp_path: Path, payload: str) -> Path:
-    """A throwaway service tree carrying production's relative layout.
-
-    `app/storage/ids.py` is IN the mirror, because it is the other half of the
-    production clone: the reported pair is the planted probe against the real
-    module it was copied from, and a mirror holding only the probe would report
-    nothing and pass for the wrong reason.
-
-    `jscpd` matches each ignore glob against the path RELATIVE TO ITS OWN CWD,
-    not against an absolute path, and that is what makes a tree under pytest's
-    `tmp_path` a faithful stand-in: measured by scanning `app/` from a mirror
-    rooted under `/tmp`, the `**/tmp/**` glob matched nothing while
-    `**/app/storage/migrations/**` excluded the migration clone and left the
-    production clone reported. So this holds on a Linux checkout where
-    `tmp_path` itself lives under `/tmp`, not only on a macOS tmp dir.
+    """A throwaway tree carrying production's relative layout. The real
+    `app/storage/ids.py` is in the mirror -- it is the clone's other half -- and
+    jscpd matches ignore globs against its own CWD, not absolute paths.
     """
     mirror = tmp_path / "service"
     # Two production files with identical content, plus the same content again under the excluded migrations
@@ -277,12 +253,9 @@ def _configure(monkeypatch, tmp_path, pair: dict, duplicate: list[dict]) -> list
 
 
 def _expect_nothing_sanctioned(monkeypatch, tmp_path, duplicates, **report) -> None:
-    """An attestation file that sanctions nothing, plus a scan report we choose.
-
-    Every gate failure that is NOT about a sanctioned pair needs exactly these
-    two things, and was spelling both out at each site. ``_configure`` cannot
-    stand in for it: that helper requires a declared pair, which is precisely
-    what these tests are rejecting.
+    """An attestation file sanctioning nothing, plus a scan report we choose. Every
+    failure NOT about a sanctioned pair needs exactly these two, and ``_configure``
+    cannot stand in: it requires a declared pair, which these tests reject.
     """
     expectations = tmp_path / "expectations.json"
     _write_expectations(expectations, [])

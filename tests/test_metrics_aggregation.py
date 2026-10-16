@@ -1,24 +1,6 @@
-"""`/metrics` must report the service, not whichever worker answered.
-
-MetricsStore is a dataclass singleton. Every counter is a plain integer
-incremented under no lock at all, and the store is reachable only from the
-process holding it -- so under `uvicorn --workers` the endpoint served one
-worker's numbers and called the result total traffic. That matters more than
-usual here because the admission gate tunes itself *from these numbers*: a
-scraper or operator reading a fraction of real load sees a service that looks
-idle.
-
-The counter/gauge split is the design, and it is why this is not "sum
-everything": `resource_memory_utilization` and `resource_cpu_utilization`
-measure a cgroup that every worker shares, so they are the same reading
-whichever worker reports it. Summing them would multiply a ratio by the
-worker count and report a utilization no process is experiencing. Counters are
-monotone and additive and must be summed; gauges are instantaneous and must
-not be.
-
-No multiprocessing here: two `CoordinationCounters` on one path are exactly
-what two worker processes hold, which is how the counter store's own tests
-prove the same property.
+"""`/metrics` must report the service, not whichever worker answered -- one
+worker's numbers used to read as total traffic, and the gate tunes itself from
+them. Counter/gauge is the design: counters sum, gauges (shared cgroup) never.
 """
 
 from app.runtime.metrics import MetricsStore
@@ -28,12 +10,9 @@ from tests._result_builders import engine_result
 
 
 def _observe_one_success(metrics: MetricsStore) -> None:
-    """One successful result recorded against `metrics`.
-
-    Named because five tests in this file need exactly this and the call itself
-    is a declared record now -- ``results`` is a sequence of engine results, so
-    spelling the same two-line call five times is five chances for one of them to
-    drift into a dict and test nothing.
+    """One successful result against `metrics`, named because five tests need exactly
+    this and ``results`` is a declared record now -- spelling the two-line call five
+    times is five chances for one to drift into a dict and test nothing.
     """
     metrics.observe_crawl(results=[engine_result("http://example.com/a", "rendered")])
 
@@ -56,11 +35,9 @@ def test_counters_are_summed_across_workers(tmp_path):
 
 
 def test_a_worker_reports_totals_it_did_not_produce(tmp_path):
-    """Reading one worker must still show the whole service.
-
-    Otherwise a scraper gets a different answer depending on which worker the
-    load balancer picked, which is worse than a stale number: it is an answer
-    that looks live.
+    """Reading one worker must still show the whole service: otherwise a scraper gets
+    a different answer by which worker the load balancer picked -- an answer that
+    looks live, worse than a stale one.
     """
     first, second = _two_workers(tmp_path / "coordination.db")
     second.observe_search(provider="tavily", results=7)
@@ -85,11 +62,9 @@ def test_labelled_series_are_summed_not_overwritten(tmp_path):
 
 
 def test_gauges_are_reported_per_worker_and_never_summed(tmp_path):
-    """A shared cgroup reading is the same in every worker.
-
-    Summing the two would report 2.0 when neither process is over budget --
-    an alert that fires on a healthy service and a signal that stops meaning
-    anything once the worker count changes.
+    """A shared cgroup reading is the same in every worker; summing would report 2.0
+    when neither process is over budget -- an alert that fires on a healthy service
+    and a signal that stops meaning anything once the worker count changes.
     """
     first, second = _two_workers(tmp_path / "coordination.db")
     first.resource_memory_utilization = 0.25
@@ -128,13 +103,9 @@ def test_reset_clears_the_shared_store_not_just_local_fields(tmp_path):
 
 
 def test_a_late_bind_carries_counters_recorded_before_it(tmp_path):
-    """The bind must add to the shared store, never replace what it finds.
-
-    The lifespan attaches the shared store after the process is already running,
-    so a worker that served requests during boot has counters the new store does
-    not have. A bind that treats a non-empty store as "already propagated" drops
-    them for the life of the process, which is invisible in a single-worker test
-    and wrong in every deployment that restarts a worker.
+    """The bind must add to the shared store, never replace what it finds: a worker
+    that served requests during boot has counters the new store lacks, and treating a
+    non-empty store as propagated drops them invisibly for the process's life.
     """
     metrics = MetricsStore()
     metrics.observe_crawl(results=[engine_result("http://example.com/before", "rendered")])
