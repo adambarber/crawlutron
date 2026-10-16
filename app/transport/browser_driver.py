@@ -1,7 +1,8 @@
 """The live browser: launching, recycling, tabs and driver steps.
 
-``BrowserRenderer`` takes ``driver=``; a test passes a driver whose page steps
-do nothing. The action vocabulary lives in ``app.vocabulary.browser``."""
+``BrowserRenderer`` takes ``driver=`` since a test passes a driver whose page
+steps do nothing; the action vocabulary lives in ``app.vocabulary.browser``.
+"""
 
 from __future__ import annotations
 
@@ -103,12 +104,8 @@ ACTION_STEPS: dict[str, _ActionStep] = {
 
 class BrowserDriver:
     """Owns the browser and does page work; the renderer decides what to ask for.
-
-    ``browser_factory`` is the Camoufox/Playwright launcher, ``max_browser_renders``
-    the recycle bound that keeps a long-lived browser process from growing without
-    limit, and ``cache_dir`` the allowlist a caller-supplied ``storage_state`` must
-    live inside. All three default from settings, so the renderer can build one
-    without restating them.
+    ``browser_factory`` (launcher), ``max_browser_renders`` (recycle bound) and
+    ``cache_dir`` (storage_state allowlist) default from settings, so the renderer builds one freely.
     """
 
     def __init__(
@@ -158,11 +155,8 @@ class BrowserDriver:
 
     async def open_page(self, browser_profile: dict[str, Any] | None) -> Any:
         """Return a page on a (possibly reused) browser, with profile kwargs applied.
-
-        One call rather than acquire-then-new_page, because a caller that wants a
-        page has no reason to know the browser is recycled underneath it -- and a
-        test substituting this driver should not have to supply a fake browser
-        whose only job is to have a ``new_page``.
+        One call rather than acquire-then-new_page, so a test substituting this
+        driver does not have to supply a fake browser whose only job is ``new_page``.
         """
         browser = await self._acquire_browser(browser_profile)
         return await browser.new_page(**self.page_kwargs(browser_profile))
@@ -175,21 +169,16 @@ class BrowserDriver:
     @property
     def cache_dir(self) -> str | Path | None:
         """Where storage-state files are allowed to live, or None when unset.
-
-        Public because it is a safety boundary, not plumbing: with no cache
-        directory the driver accepts no storage state at all, and a caller (or a
-        test) asking "is any path acceptable here?" is asking about the
-        contract, not about an attribute.
+        Public because it is a safety boundary: with no cache dir the driver accepts
+        no storage state at all, so "is any path acceptable?" is a contract question.
         """
         return self._cache_dir
 
     @property
     def browser(self) -> Any:
         """The live browser, or None while the driver holds none.
-
-        Public because releasing it is a driver contract: after ``close()`` the
-        driver must be back to holding nothing, and a test asserting that should
-        not have to read a private attribute to find out.
+        Public because releasing it is a driver contract: after ``close()`` the driver
+        must hold nothing, and a test asserting that reads a public property.
         """
         return self._browser
 
@@ -245,13 +234,8 @@ class BrowserDriver:
 
     async def _release_browser(self) -> None:
         """Take the cached context manager and tear it down, best-effort.
-
-        The single owner of "forget the browser": both the per-attempt reset
-        and the service-shutdown close have to drop the same three fields, and
-        when they were spelled separately one of them grew a stale
-        ``_browser_reused`` that the other did not clear. Clearing the whole
-        set here means a field added later is cleared in both places or in
-        neither, which is the only way that stays true.
+        The single owner of "forget the browser": both reset and close paths must
+        clear the same fields, and clearing them once here keeps that true.
         """
         cm = self._browser_cm
         self._browser_cm = None
@@ -284,19 +268,8 @@ class BrowserDriver:
         budget_seconds: float | None = None,
     ) -> None:
         """Run policy-specified actions under ONE deadline, then move on.
-
-        The chain had no deadline at all -- only the navigation above it was
-        bounded -- so N ``wait`` actions held the page semaphore (one slot of the
-        pool that exists because concurrent tabs crash the shared process) for
-        N x ``MAX_ACTION_WAIT_SECONDS``, and the exhaustion that followed said
-        nothing about the chain still waiting. The budget is the per-URL number
-        the navigation already got, so the render's worst case stops growing
-        with the chain length.
-
-        ``budget_seconds=None`` is the unbounded form, for driving the chain
-        directly; production must pass the render budget, which
-        ``test_the_action_chain_is_always_invoked_with_a_budget`` enforces
-        tree-wide, since an optional deadline is only as good as that gate.
+        A chain without one let N waits hold a pooled page for N x MAX_ACTION_WAIT_SECONDS,
+        so the render budget bounds it (None is the unbounded test form).
         """
         if not actions:
             return
@@ -316,20 +289,9 @@ class BrowserDriver:
             )
 
     async def _perform_action_chain(self, page: Any, actions: list[dict[str, Any]], *, url: str) -> None:
-        """Execute a sequence of browser actions before extraction.
-
-        Supported action types: ``click``, ``fill``, ``hover``, ``scroll``
-        (into an element), ``scroll_bottom``, ``wait`` (for a selector), and
-        ``wait_seconds``.
-
-        Arbitrary JavaScript (``execute_js``) is intentionally NOT supported:
-        running caller-supplied scripts in the browser context is an RCE-class
-        risk (cookie/localStorage theft, requests to internal services with no
-        SSRF guard).
-
-        Actions are best-effort -- one bad selector must not cost the page its
-        extraction -- but not silent, since a ``wait`` for an element a SPA
-        never grows is an invisible extraction-quality loss.
+        """Execute a sequence of browser actions before extraction: click, fill, hover,
+        scroll, scroll_bottom, wait, wait_seconds. ``execute_js`` is refused (RCE-class
+        risk); actions are best-effort but not silent -- a wait that never resolves is a real quality loss.
         """
         for action in actions:
             if not isinstance(action, dict):
@@ -360,10 +322,8 @@ class BrowserDriver:
 
     async def _dispatch_action(self, page: Any, action: dict[str, Any], action_type: str) -> None:
         """Perform ONE recognised action via :data:`_ACTION_STEPS`.
-
-        ``execute_js`` is recognised and refused here as well as at the model,
-        because this is the chokepoint a policy arriving by any other route
-        still cannot run script through.
+        ``execute_js`` is recognised and refused here as at the model, because this
+        is the chokepoint a policy arriving by any route cannot run script through.
         """
         step = ACTION_STEPS.get(action_type)
         if step is None:
