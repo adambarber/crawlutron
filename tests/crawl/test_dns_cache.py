@@ -1,11 +1,7 @@
 """DNS resolution results are cached per-host for a short TTL.
 
-The validation path (check_ssrf_protection) may reuse a cached resolution so
-a crawl of N pages on one host does not issue N blocking socket.getaddrinfo
-calls. The pinning path (resolve_and_pin_host) intentionally resolves FRESH
-on every call so the connection always pins a freshly re-validated public IP;
-caching the pin would let a DNS rebind inside the TTL window bypass the SSRF
-check (TOCTOU).
+The validation path reuses a cached resolution to avoid N blocking lookups;
+the pinning path resolves FRESH so a rebind inside the TTL cannot bypass SSRF.
 """
 
 import socket
@@ -73,9 +69,8 @@ class TestDnsCacheLocking:
     def test_dns_cache_concurrent_writes_do_not_corrupt(self, monkeypatch):
         """Eight threads racing the public check must leave a consistent cache.
 
-        The DNS cache is process-wide; concurrent first resolutions of the same
-        host must not corrupt it, and every thread must get the same answer.
-        The resolver is a network boundary, so it is the one injected piece.
+        The cache is process-wide; concurrent first resolutions must not corrupt
+        it, and every thread gets the same answer.
         """
         monkeypatch.setenv("CRAWLUTRON_ALLOW_PRIVATE_TARGETS", "0")
         host = f"d-{uuid.uuid4().hex}.example.com"

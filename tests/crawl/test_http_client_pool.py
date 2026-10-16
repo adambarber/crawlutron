@@ -9,12 +9,8 @@ from app.transport.http_client_pool import get_async_http_client
 class TestPooledClientBuilders:
     """The public seam that replaces monkeypatching the builders.
 
-    The pooled clients are process-wide and created lazily on whichever loop
-    asks first, so there is no per-test construction site to inject at. That
-    absence is why the builders used to be patched on the module -- and why the
-    module's own docstring advertised a late-bound lambda as a design goal, so
-    the patch would be observed. The seam states the same capability as an
-    argument and removes the reason for the indirection.
+    The pooled clients are process-wide and lazily created, so there was no
+    per-test site to inject at -- the seam states the capability as an argument.
     """
 
     def test_a_supplied_builder_produces_the_pooled_client(self):
@@ -31,11 +27,8 @@ class TestPooledClientBuilders:
     def test_the_builder_is_restored_when_the_body_raises(self):
         """A failing test must not leave a fake in a process-wide singleton.
 
-        This is why the seam restores rather than merely being callable: a
-        builder left installed outlives the test that set it, and every later
-        test in the process that asks for a pooled client then gets the
-        previous test's double. That failure is order-dependent, which is the
-        hardest kind to read.
+        A builder left installed outlives the test, so every later test gets the
+        previous one's double -- an order-dependent, hard-to-read failure.
         """
         sentinel = object()
         with contextlib.suppress(ValueError), http_mod.pooled_client_builders(cffi=lambda settings: sentinel):

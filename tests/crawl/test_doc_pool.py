@@ -1,10 +1,7 @@
 """The persistent markitdown worker pool, asserted through its own constructor.
 
-Every test here builds a :class:`DocExtractionPool` over stub workers instead of
-writing the module's slot list: seeding a pool by growing it through its own
-acquire is what production does, so an arrangement a test can build is an
-arrangement production can reach. The tests that need real child processes keep
-the production pool and swap only its ``spawn`` collaborator.
+Every test builds a pool over stub workers instead of writing the slot list;
+an arrangement a test can build is one production can reach.
 """
 
 import threading
@@ -200,11 +197,8 @@ def test_extract_document_degrades_when_no_worker_can_be_acquired(fake_pool, mon
 class _LockWatcherProc(StubProc):
     """A dead worker whose termination reports whether the pool lock was held.
 
-    The kill-escalation in ``terminate_doc_process`` can take up to ~10s
-    (SIGTERM -> join(5) -> SIGKILL -> join(5)). Running it under the pool lock
-    blocks every other acquisition and every release for that whole window, so
-    the termination must happen off-lock. ``terminate`` is the first slow step
-    of that escalation, so it is where the lock state is observed.
+    The kill-escalation runs long, so it must happen off-lock; ``terminate`` is
+    its first slow step, which is where the lock state is observed.
     """
 
     def __init__(self, lock, *, alive: bool = False) -> None:

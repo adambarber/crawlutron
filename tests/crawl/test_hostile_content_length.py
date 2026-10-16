@@ -1,10 +1,7 @@
 """A hostile ``Content-Length`` must not crash the fetcher.
 
-Both fetchers pre-check the declared length against the per-page cap. The
-parse must treat a non-numeric (or negative, or absent) ``Content-Length`` as
-"unknown size" and skip the pre-flight rejection -- the streamed running cap
-still bounds the body -- rather than letting ``int("abc")`` raise out of the
-fetch and turn one crafted response into that URL's failure.
+A non-numeric / negative / absent value must read as "unknown size" and skip
+pre-flight rejection -- not raise ``int("abc")`` out of the fetch.
 """
 
 from app.models.normalized_url import NormalizedUrl
@@ -17,11 +14,8 @@ from tests._transport_doubles import MockResponse, patch_http_fetcher_transport
 async def _fetch_behind_declared_length(monkeypatch, declared: str):
     """Serve one small HTML body behind a declared ``Content-Length`` and fetch it.
 
-    The unknown-size case and the well-formed-oversized case below are the same
-    fetch with a different header value: same transport, same page cap, same
-    policy. Making the header the argument is what keeps the two from drifting
-    into testing two different things, and it deletes the one-call
-    ``_patch_transport`` indirection that only existed to be written twice.
+    The unknown-size and well-formed-oversized cases are the same fetch with a
+    different header value -- the header-as-argument keeps the two from drifting.
     """
     patch_http_fetcher_transport(
         monkeypatch,

@@ -49,19 +49,8 @@ async def _run(
 ):
     """Drive the real ``http_strategy_result`` for one page.
 
-    The page identity is one argument here rather than five, so a test that
-    means to crawl ``/a`` and asserts against ``/b`` cannot be written by
-    misspelling one of five same-shaped parameters -- and the sixteen tests
-    below share this instead of each rebuilding the record.
-
-    The strategy, the policy and the fetcher default to the one combination
-    that means "the declared HTTP strategy, a default policy, the fetcher that
-    carries that policy", because they are a single choice rather than three:
-    every caller that spelled all three was reaching for the same transport, and
-    spelling the triple fifteen times is how one of them ends up keeping a stale
-    default while the other fourteen are correct. A test that means a different
-    transport passes the argument; it does not restate the two it did not mean
-    to change.
+    Page identity is one argument (no misspelling five params); the strategy,
+    policy and fetcher default to the single "declared strategy" combination.
     """
     return await http_strategy_result(
         request=strategy_request(url, http_policy() if policy is None else policy, strategy),
@@ -289,14 +278,8 @@ class TestHttpStrategyRetry:
 async def test_a_binary_body_result_keeps_its_attempt_type_for_the_render_adapter():
     """A binary response must reach the render pipeline as an EngineCrawlResult.
 
-    The binary result is the one place the HTTP strategy copies a finished
-    result to override a single field. Rebuilding that copy through
-    ``dataclasses.asdict`` recursively converts the frozen ``CrawlStrategyAttempt``
-    list into plain dicts, so the copy still *looks* right and fails only when a
-    consumer reaches for an attribute -- which the render adapter does, on the
-    first field it reads. Driving the real strategy and the real adapter together
-    is the only version of this that could have caught it: asserting on the
-    strategy's result alone passes happily with dicts in the list.
+    The binary copy is rebuilt via ``asdict``, recursing the attempt list into
+    plain dicts -- correct-looking, failing only when the adapter reads a field.
     """
     # An archive: inside the detector's real contract (PK magic under a non-text content type).
     archive = b"PK\x03\x04" + b"\x00" * 64

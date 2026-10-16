@@ -1,9 +1,7 @@
 """Per-request cookie namespace isolates concurrent crawls.
 
-Without isolation, the shared ``_GLOBAL_COOKIE_JAR`` would leak cookies from
-one tenant to another. The
-namespace contextvar is set per ``crawl_request`` from
-``request_profile.cookie_namespace`` so cookies are keyed by tenant.
+Without isolation the shared jar leaks cookies across tenants; the namespace
+contextvar is set per ``crawl_request`` from ``cookie_namespace``, keying jars.
 """
 
 from app.transport.cookie_jar import COOKIE_NAMESPACE, CookieJar
@@ -18,11 +16,8 @@ TENANT_B = "tenant_b"
 def two_tenant_jar() -> CookieJar:
     """A jar holding one cookie per tenant, both for the same host.
 
-    Every operation under test here -- read back, clear one namespace, clear
-    everything -- is a question about whether the two tenants stayed apart, and
-    that question is only asked against a jar where each tenant has something to
-    lose. Staging it once keeps a test from quietly proving isolation with a jar
-    that only ever held one cookie.
+    Every operation here is a question about whether the two tenants stayed
+    apart, only asked against a jar where each tenant has something to lose.
     """
     jar = CookieJar()
     jar.add_cookie_header(canonical("http://x.example/"), "a=1", namespace=TENANT_A)

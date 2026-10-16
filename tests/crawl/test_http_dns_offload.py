@@ -14,15 +14,8 @@ from tests._policy_factories import canonical
 def _thread_recording_spy(seen: dict, *, dead_port: bool = True):
     """A pin rule that records the thread it ran on.
 
-    Both tests below assert one property -- the rule ran off the event-loop
-    thread -- so the recorder is one thing they share. Only what the spy hands
-    back differs: the fetcher test points the connection at a closed loopback
-    port so the fetch fails fast without real network work, and the walk test
-    echoes the caller's own URL back so it can assert the yield.
-
-    It is passed as `pin=` rather than rebound over the module's builder, which
-    is the whole point of the seam: off-loading is a property of the call site,
-    so it must be checkable with a rule that is not the module's own.
+    Both tests assert the same property -- the rule ran off the loop thread --
+    so the recorder is shared and passed as ``pin=``, not by module swap.
     """
 
     def spy(url, headers):
@@ -59,9 +52,8 @@ async def test_http_fetcher_offloads_the_pin_rule_to_thread():
 async def test_pinned_hop_offloads_the_pin_rule_to_thread():
     """The redirect walk off-loads whatever rule it was given.
 
-    Same property as the fetcher test, at the walk instead of the transport,
-    and this one also pins down what the walk yields: the rule's connect-ready
-    URL and headers reach the caller of the hop, not the rule's input.
+    Same property as the fetcher test, at the walk; this also pins that the
+    hop yields the rule's connect-ready URL/headers, not the rule's input.
     """
     seen: dict = {}
 
