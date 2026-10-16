@@ -93,11 +93,8 @@ def _declared_models() -> dict[str, type[BaseModel]]:
 def _caller_supplied() -> set[str]:
     """Transitive closure of the bound request bodies over field annotations.
 
-    Reachability rather than a hand-kept list, because the failure this guards
-    against is a model being ADDED to the input side and inheriting pydantic's
-    default ``ignore`` with nobody deciding otherwise. A list written by hand
-    goes stale silently and reproduces the exact bug it was meant to prevent.
-    """
+    Reachability rather than a hand-kept list: an input model ADDED inherits
+    pydantic's default ``ignore`` until somebody decides otherwise."""
     models = _declared_models()
     reachable, frontier = set(), set(_BOUND_REQUEST_BODIES)
     while frontier:
@@ -124,25 +121,14 @@ def _caller_supplied() -> set[str]:
 
 class TestExtraKeysAreRefusedOnTheInputSide:
     """An unknown key on an input model is a caller believing they configured
-    something they did not.
-
-    The dangerous cases are all silent today: a mistyped ``max_rps`` disables
-    rate limiting against a third-party target, a mistyped ``strategies`` runs
-    the default chain (which includes a HEADED browser), a mistyped
-    ``respect_robots`` changes nothing while appearing in the caller's payload.
-
-    Response models are deliberately NOT covered: they describe what this service
-    produced, and a caller sending extras to one is not a configuration mistake.
-    """
+    something they did not; a mistyped ``max_rps`` disables rate limiting.
+    Response models are deliberately NOT covered."""
 
     def test_the_caller_supplied_set_is_not_empty(self):
         """Guards the rest of this class from passing by finding nothing.
 
-        A reachability walk that silently resolves to the empty set would make
-        every assertion below vacuously true -- a gate that reports success
-        because it examined no models. This is the premise the other tests rest
-        on, so it is asserted rather than assumed.
-        """
+        A reachability walk resolving to the empty set makes every assertion
+        below vacuously true; this premise is asserted, not assumed."""
         supplied = _caller_supplied()
         assert len(supplied) >= 10, f"reachability walk found too little: {sorted(supplied)}"
         assert "CrawlPolicy" in supplied, "CrawlPolicy is caller-supplied via CrawlRequest.policy"
@@ -174,11 +160,8 @@ class TestExtraKeysAreRefusedOnTheInputSide:
     def test_the_error_names_the_offending_field(self, model_name):
         """A rejection a caller cannot act on is a rejection they route around.
 
-        The error must carry a loc pointing at the key they sent. A model-level
-        message would report loc=() and the API's code derivation could not map
-        it, so a caller whose only mistake was a typo would be told a code that
-        names no field.
-        """
+        The error must carry a loc pointing at the sent key; a model-level
+        message reports ``loc=()`` and the API's code derivation could not map it."""
         model = _declared_models()[model_name]
         with pytest.raises(ValidationError) as exc:
             model(**{**_sample_field(model), "not_a_real_setting": 1})
@@ -188,12 +171,8 @@ class TestExtraKeysAreRefusedOnTheInputSide:
     def test_response_models_are_not_forbidden(self):
         """The other half of the split, as an invariant over the whole output side.
 
-        Asserted as a set rather than per-model, so a new response model is
-        covered the day it is written. A blanket ``forbid`` everywhere would break
-        every response the service emits, and would be the wrong correction: the
-        caller is not configuring our output, so an extra key on a response is
-        not a mistake anyone needs to be told about.
-        """
+        Asserted as a set so a new response model is covered the day it is
+        written; an extra key on a response is not a mistake anyone is told about."""
         models = _declared_models()
         offenders = sorted(
             name
@@ -207,12 +186,8 @@ class TestExtraKeysAreRefusedOnTheInputSide:
     def test_response_models_accept_extras(self):
         """Behavioural companion to the config assertion above.
 
-        Restricted to output models that need no required fields, so a valid
-        instance is ``{}``. A hand-written sample for the 14-field
-        ``CapabilitiesResponse`` would be a second copy of the response schema
-        living in the test suite -- exactly the drift-prone hand-maintained
-        declaration this codebase already rejects elsewhere.
-        """
+        Restricted to output models needing no required fields; a hand-written
+        sample of a 14-field response is a second copy of the schema."""
         models = _declared_models()
         checkable = sorted(
             name
@@ -227,11 +202,8 @@ class TestExtraKeysAreRefusedOnTheInputSide:
 def _sample_field(model: type[BaseModel]) -> dict[str, object]:
     """One minimal valid instance of ``model``, for the extra-key assertions.
 
-    Only the INPUT side needs a sample: those models are the ones that must
-    reject, and they are small enough that a literal is cheaper to read than a
-    generated instance. See ``test_response_models_accept_extras`` for why the
-    output side deliberately avoids this.
-    """
+    Only the INPUT side needs a sample -- those models must reject, and they are
+    small enough that a literal reads cheaper than a generated instance."""
     fixtures: dict[str, dict[str, object]] = {
         "CrawlRequest": {"url": "https://example.com/"},
         "CrawlPolicy": {"limits": {"max_pages": 5}},
@@ -252,15 +224,8 @@ def _sample_field(model: type[BaseModel]) -> dict[str, object]:
 class TestRequestCollectionsAreBounded:
     """A caller-supplied collection with no ceiling is an unbounded fan-out.
 
-    ``credentials`` has carried ``max_length=32`` all along, while its siblings
-    in the same model were left uncapped. That asymmetry reads as an oversight
-    rather than a decision, and each capped collection is a place where a
-    malicious or merely careless payload turns into work the service agreed to:
-    a policy naming a thousand origins, a crawl naming a million URLs.
-
-    The ceilings are policy decisions, not derivable facts, so they live here
-    beside the tests that pin them rather than being spread across the model.
-    """
+    One collection carried ``max_length`` while its siblings were uncapped; the
+    ceilings are policy decisions, so they live beside the tests that pin them."""
 
     #: Longest caller-supplied URL list accepted in one request. A whole-site job is the unbounded path -- it
     #: exists precisely so this is bounded.
@@ -281,10 +246,8 @@ class TestRequestCollectionsAreBounded:
     def test_the_render_and_map_models_cap_urls_too(self):
         """The cap must travel with the shared url-source base, not just CrawlRequest.
 
-        Three models bind URLs and they share one base class; a ceiling declared
-        on only the biggest one leaves the other two uncapped, which is the
-        shape this test exists to prevent.
-        """
+        Three models bind URLs through one base; a ceiling on only the biggest
+        leaves the other two uncapped -- the shape this test exists to prevent."""
         from app.models.map_request import MapRequest
         from app.models.render_request import RenderRequest
 
