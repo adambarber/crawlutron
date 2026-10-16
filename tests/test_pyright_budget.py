@@ -155,11 +155,10 @@ def test_pyright_budget_is_tight() -> None:
 
 
 def test_pyright_detects_its_own_suppressions_decaying() -> None:
-    """Both rules that catch a suppression outliving its finding must be ON.
-
-    With either rule off, a decaying suppression leaves the budget at zero and
-    the suite green -- five of eight parked suppressions had never suppressed
-    anything; the other half is ``enableTypeIgnoreComments``."""
+    """Both rules that catch a suppression outliving its finding must be ON: with either
+    off, a decaying suppression leaves the budget at zero and the suite green -- five of
+    eight parked suppressions had never suppressed anything.
+    """
     config = json.loads(_strip_jsonc((SERVICE_ROOT / "pyrightconfig.json").read_text(encoding="utf-8")))
     assert config.get("enableTypeIgnoreComments") is False, (
         "pyright is honoring mypy's `# type: ignore` comments again, so a "

@@ -1,20 +1,6 @@
-"""No comment or docstring may cite a review item, milestone or fix number.
-
-Those markers pointed at numbered entries in review documents a future reader
-does not have open, so every annotated comment pointed at a file the reader had
-to go find first -- and several of them were the only thing explaining WHY a
-line existed. The rule is that the host sentence must stand alone.
-
-The patterns are written as a test rather than a lint rule because this is a
-property of what the prose SAYS, and ruff has no opinion on that.
-
-The scope is app/ and tests/ because a marker in either is a marker a reviewer
-reads, plus ``.env.example`` because that file is read by whoever is setting the
-service up: a marker there points an operator at a review document they do not
-have. The root-level dated records are outside the scope by construction rather
-than by exemption -- they describe what shipped at the time it shipped, and
-stripping a marker from a historical entry would make it describe something that
-never happened.
+"""No comment or docstring may cite a review item, milestone or fix number: those
+markers point at documents a future reader does not have, so each host sentence must
+stand alone. Scoped to app/ and tests/ plus ``.env.example`` -- not historical dated records.
 """
 
 from __future__ import annotations

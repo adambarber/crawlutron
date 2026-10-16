@@ -1,10 +1,6 @@
-"""The /v1/render 400 envelope must carry a stable error ``code``.
-
-The handler raised ``http_error(400, str(error), str(error))``, so the
-wire-visible ``code`` field was whatever the ValueError text happened to be
-("batch_size_exceeded", "invalid_options",...) while every other site in the
-service emits the stable ``"validation_error"``. Clients key error handling on
-``code``; a free-text code is an untracked, unenumerable contract.
+"""The /v1/render 400 envelope must carry a stable error ``code``: it used to echo
+whatever the ValueError text was while every other site emits ``"validation_error"``,
+and clients key error handling on ``code`` -- a free-text code is unenumerable.
 """
 
 import pytest

@@ -16,13 +16,9 @@ def _blocked_http(*args, **kwargs):
 
 
 def _tool_payload(tool: str, **fields):
-    """Build what the MCP dispatcher builds before a handler ever sees it.
-
-    The dispatcher validates a call's arguments into the tool's declared
-    ``request_model``, so a probe that invokes a handler directly has to
-    construct that same model -- a raw dict is no longer what a handler takes.
-    Reading the model off the registration rather than naming it here keeps the
-    probe from becoming a second place that knows which model a tool uses.
+    """Build what the MCP dispatcher builds before a handler sees it: the dispatcher
+    validates args into the tool's declared ``request_model``, so a probe must construct
+    the same model, read off the registration rather than named here.
     """
     from app.mcp.tools import TOOLS_BY_NAME
 

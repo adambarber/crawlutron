@@ -304,11 +304,10 @@ class TestJobRunnerSavesOffTheEventLoop:
 
 
 class TestAsyncCrawlRunnerSavesOffTheEventLoop:
-    """``run_async_crawl`` must not serialize+commit the job row on the loop.
-
-    The single-shot runner used to call ``job_store.save`` directly at its
-    transitions, stalling the loop while the response serialized; this guard
-    drives ``run_async_crawl`` itself, not just the whole-site runner."""
+    """``run_async_crawl`` must not serialize+commit the job row on the loop: the
+    single-shot runner once called ``job_store.save`` directly at its transitions,
+    stalling the loop -- this drives the runner itself, not just the whole-site one.
+    """
 
     async def test_run_async_crawl_save_does_not_block_the_event_loop(self, monkeypatch, tmp_path) -> None:
         from app.api.async_crawl_runner import run_async_crawl

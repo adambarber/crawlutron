@@ -1,40 +1,6 @@
-"""Every module holding state that outlives a call satisfies one protocol.
-
-Six modules do: ``pinned_transport`` (DNS answers), ``cookie_jar`` (the process jar
-and the request namespace), ``fetch_helpers`` (sitemap documents), ``engine`` (the
-robots and shared HTTP caches), ``http_client_pool`` (the two lazily-created
-clients and the pending-close queue), and ``cgroup_sense`` (memoized cgroup reads).
-Before this table existed, the harness reached into all six -- sixteen private names
-from ``tests/conftest.py`` and seven hand-rolled ``.clear()`` calls across four test
-files -- because a caller obliged to publish a reset had no door to publish it
-through.
-
-The matcher is parameterized over the table rather than written out per module,
-because the claim is a property of the *protocol*: every owner answers the same
-question the same way. A test per module would pass identically while the protocol
-drifted, which is the failure this file exists to prevent.
-
-What is asserted, and what is deliberately not
-----------------------------------------------
-
-Three things, all checkable without a network:
-
-1. **Shape.** Each owner satisfies :class:`~app.runtime.process_state.ProcessStateOwner`.
-2. **Agreement.** The probe and the reset name the same module-level state. A probe
-   reading a different object than the reset empties would certify a reset that
-   never emptied anything, and no live assertion catches that -- see below.
-3. **Idempotence.** Resetting twice is the same as resetting once, because the
-   harness calls it before every test and a caller that has already reset must not
-   be punished for it.
-
-What is *not* asserted is that the probe returns ``True`` when the module holds
-something. Arranging real state means a DNS resolution, a fetch, or a client build
--- and the only cheap way to do it is to write into the module's private store,
-which is the exact reach-in this program exists to remove. A test that fabricates
-the state it then verifies has proved that a dict is clearable. So the live half of
-the contract is stated here and checked by the owner instead, which is why each
-``has_process_state`` is written against the same object its ``reset_process_state``
-empties and the gate above refuses a pair that disagrees.
+"""Every module holding state that outlives a call satisfies one protocol (six
+owners reachable through it, not sixteen private conftest names); the matcher is
+parameterized over the table and asserts shape, agreement, and idempotence -- not fabricated state.
 """
 
 from __future__ import annotations
@@ -82,13 +48,9 @@ def test_owner_satisfies_the_protocol(module_path: str) -> None:
 
 @pytest.mark.parametrize("module_path", OWNERS)
 def test_probe_and_reset_agree_on_the_state(module_path: str) -> None:
-    """The probe reads what the reset empties.
-
-    The one part of the contract a live run cannot check cheaply. Asserting it
-    needs real state in the module, and manufacturing that means writing to the
-    private store -- so the pair is checked structurally instead: two functions
-    naming disjoint state are two functions answering about different objects, and
-    the one that reports emptiness would be reporting on something else.
+    """The probe reads what the reset empties: a live check needs real module state,
+    which means reaching into the private store, so the pair is checked structurally
+    instead -- disjoint names would disagree.
     """
     module = ast.parse((REPO_ROOT / f"{module_path.replace('.', '/')}.py").read_text(encoding="utf-8"))
     functions = {n.name: n for n in module.body if isinstance(n, ast.FunctionDef)}
@@ -115,12 +77,9 @@ def test_reset_is_idempotent(module_path: str) -> None:
 
 
 def test_every_owner_is_listed() -> None:
-    """The table is the declaration; a new module has to be added to it.
-
-    Asserted against the tree rather than trusted: a module that gains
-    process-wide state and is not named here conforms to nothing and is checked
-    by nothing, which is how the six undocumented reaches in ``conftest`` survived
-    a gate that was already looking for them.
+    """The table is the declaration; a new module must be added to it, asserted against
+    the tree rather than trusted -- an unnamed state holder conforms to nothing and is
+    checked by nothing, which is how the six undocumented reaches survived.
     """
     listed = {name.rpartition(".")[2] for name in OWNERS}
     found: set[str] = set()

@@ -1,19 +1,6 @@
-"""A non-loopback bind exposes an API that has no caller authentication.
-
-The service defaults to loopback precisely because nothing authenticates a
-caller: every ``Authorization`` header in the tree is outbound, attached to a
-crawled origin rather than presented by one. The shipped compose file keeps
-the container on ``0.0.0.0`` and publishes only to ``127.0.0.1``, which is
-also the only configuration Docker port mapping can reach.
-
-The gap both leave is the operator who changes one of those and gets an
-unauthenticated crawl, job-control and webhook surface on a network, with
-nothing in the log to say so. Startup is the only moment the exposure exists
-and the operator is watching, which is why the check is there and not in a
-request path.
-
-A warning and not a refusal. A refusal would reject the container's own
-``0.0.0.0`` bind -- the configuration this project ships.
+"""A non-loopback bind exposes an API with no caller authentication, so the check
+lives at startup (when the operator is watching), warns rather than refusing, and
+leaves the shipped ``0.0.0.0`` publish-to-loopback docker mapping intact.
 """
 
 import logging

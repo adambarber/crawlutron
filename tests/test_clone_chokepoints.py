@@ -10,14 +10,9 @@ NESTABLE_TYPES = (*FUNCTION_TYPES, ast.ClassDef)
 
 
 def _scopes(nodes):
-    """Every function in ``nodes``, at any nesting depth.
-
-    Recursion continues *through* a function body, not just around it. A
-    hand-rolled setup is nearly always a closure inside a test rather than a
-    module-level helper, so a walk that stops at the first ``def`` reports a
-    clean tree while the thing it was written to catch has moved one indent in.
-    Every detector below shares this walk, so the gap was not one detector's
-    blind spot -- it was the whole declaration file agreeing on an empty tree.
+    """Every function in ``nodes``, at any nesting depth: recursion continues through
+    a function body, and a walk that stops at the first ``def`` reports a clean tree
+    while the caught shape has moved one indent in.
     """
     for node in nodes:
         if isinstance(node, NESTABLE_TYPES):
@@ -26,14 +21,9 @@ def _scopes(nodes):
 
 
 def _scopes_outside_owners(nodes, owners, inside_owner=False):
-    """Yield ``(node, exempt)`` for every function, tracking owner ancestry.
-
-    A funnel is exempt by *name*, and a funnel is usually a factory whose own
-    implementation is the closure it returns -- ``blocking_pinned_request``
-    builds ``build``, and ``build`` is the thing the detector recognises. So
-    exemption has to be lexical, not just self-referential: a function nested
-    anywhere inside a named owner is that owner's own body, and flagging it
-    would be the detector reporting the declaration file's own plumbing.
+    """Yield ``(node, exempt)`` for every function, tracking owner ancestry: a funnel
+    is exempt by name and is usually a factory whose body is the closure it returns,
+    so exemption is lexical -- a function nested in a named owner is its own body.
     """
     for node in nodes:
         child_inside = inside_owner

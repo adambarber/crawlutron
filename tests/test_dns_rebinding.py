@@ -1,9 +1,6 @@
-"""Tests that the DNS-rebinding (TOCTOU) fix actually pins the IP.
-
-Before the fix, the HTTP client re-resolved the hostname at connect time, so a
-second DNS response could return a private IP and bypass SSRF protection. After
-the fix, ``resolve_and_pin_host`` resolves once and the fetcher connects to the
-pinned IP with the original ``Host`` header preserved.
+"""Tests that the DNS-rebinding (TOCTOU) fix actually pins the IP: before it, the
+client re-resolved at connect time so a second response could return a private IP;
+now ``resolve_and_pin_host`` resolves once and connects to the pinned IP.
 """
 
 from unittest.mock import patch

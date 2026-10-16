@@ -7,12 +7,9 @@ from tests._thread_fanout import run_thread_fanout
 
 
 def _clocked_cache(ttl: float = 10.0) -> tuple[dict[str, float], BoundedTTLCache[str, Any]]:
-    """A cache whose clock the test owns, and the handle to move it.
-
-    These tests are about what expiry *means* at the boundary, so none of them
-    can use a real clock -- and each was building the same clock-plus-cache pair
-    before making a different assertion about it. The returned dict is the verb:
-    moving ``now`` is the only thing the caller does.
+    """A cache whose clock the test owns, plus the handle to move it: none of these
+    tests can use a real clock, so each was building the same clock-plus-cache pair;
+    moving ``now`` is the only verb the caller has.
     """
     clock: dict[str, float] = {"now": 1000.0}
     cache = BoundedTTLCache[str, Any](max_entries=4, ttl=ttl, clock=lambda: clock["now"])

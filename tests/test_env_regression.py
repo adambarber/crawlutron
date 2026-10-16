@@ -1,22 +1,6 @@
-"""Never re-derive env numbers without the parser.
-
-Bare `int()`/`float()` on an env-sourced mapping read is the config-typo
-crash the env parser (`app/safety/validation.py:get_env_int`/`get_env_float`)
-exists to absorb -- it raised at import and denied boot. This AST scan
-keeps every app module on the safe path.
-
-Two shapes are banned, because name-aliasing defeats shape-only matching
-(``source = os.environ; int(source.get(...))`` slipped past the original
-single-shape detector):
-
-1. ``int/float(<anything>.get("CRAWLUTRON_..."))`` -- the constant
-   env-key prefix is the robust signal regardless of how the mapping is
-   aliased (settings.py:from_mapping blinds spot).
-2. ``int/float(os.environ.get(...))`` -- the direct shape, any key name.
-3. ``var = <env read>; ... int(var)`` -- the alias read-back. The original
-   bypass for this shape lived in resource_pressure.derive_browser_pool_size
-   (``explicit = os.environ.get(...); int(explicit)``), which slipped past
-   shapes 1-2 because the coercion targets the *variable*, not the call.
+"""Never re-derive env numbers without the parser: bare ``int()``/``float()`` on an
+env read is the config-typo boot crash the parser absorbs, and three shapes are
+banned because name-aliasing defeats shape-only matching.
 """
 
 import ast
@@ -25,13 +9,9 @@ from tests.chokepoint_walks import app_trees, bare_callee, call_nodes, nodes_of,
 
 
 def _get_receiver(call: ast.Call) -> ast.expr | None:
-    """The receiver of a ``<anything>.get(...)`` call, or None if it is not one.
-
-    The call shape both env detectors below match on, stated once. It yields the
-    receiver rather than answering yes/no, because a ``bool`` leaves the caller
-    unable to narrow ``call.func`` and every call site re-spelled the shape after
-    asking the question -- ``_is_attr_get(node) and node.func.value.attr`` could
-    only be read by a type checker that did not exist.
+    """The receiver of a ``<anything>.get(...)`` call, or None if it is not one: the
+    shape both env detectors match on, returned (not a bool) so the caller can narrow
+    ``call.func`` instead of re-deriving the attr-get at each site.
     """
     if isinstance(call.func, ast.Attribute) and call.func.attr == "get":
         return call.func.value

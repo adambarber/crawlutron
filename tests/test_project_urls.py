@@ -1,16 +1,6 @@
-"""The project's remote, service id and name are pinned to one reviewed spelling.
-
-`REPOSITORY_URL` ships in the user-agent on every outbound request, and
-`SERVICE_ID` is the token that answers for the service in robots.txt, the
-discovery payloads, the MCP server name and the OpenAPI service name. The
-package metadata in `pyproject.toml` has to carry the same remote and cannot
-import the constant, so that half is a hand-maintained copy of a fact this tree
-already owns -- which is why `test_homepage_is_the_repository_constant` exists.
-
-So each check here is positive: it names the value the project ships with. That
-is stronger than asserting some retired spelling is absent, because a rename
-that missed a site fails the pin outright, and a pin cannot be satisfied by the
-code agreeing with itself.
+"""The project's remote, service id and name are pinned to one reviewed spelling:
+``REPOSITORY_URL`` ships in every user-agent and ``SERVICE_ID`` answers for the
+service, so checks are positive -- a rename that missed a site fails the pin.
 """
 
 from __future__ import annotations
@@ -65,13 +55,9 @@ def test_user_agent_is_built_from_the_same_identity() -> None:
 
 
 def test_openapi_title_is_the_brand() -> None:
-    """The `/docs` title is the brand a user actually sees.
-
-    Pinned positively because the rename missed it: the sweep matched hyphen
-    and underscore spellings, and this one is spaced and title-cased, so it
-    shipped an OpenAPI document still calling the service something else. A
-    positive pin catches the next spelling without anyone having to remember
-    to widen a ban list.
+    """The ``/docs`` title is the brand a user actually sees: pinned positively because
+    the rename missed it -- space/title-cased, it escaped hyphen/underscore sweeps -- and
+    a positive pin catches the next spelling without widening a ban list.
     """
     from app.main import app as service
 
@@ -79,12 +65,9 @@ def test_openapi_title_is_the_brand() -> None:
 
 
 def test_agent_contract_is_reachable_under_the_documented_path() -> None:
-    """README and AGENTS.md both send agents here, in backticks.
-
-    A backticked path is a navigational instruction, and when the document
-    and the tree disagree the reader finds out at the worst moment. This
-    pins the path they cite, which is what makes the reference chain
-    `test_live_docs_point_at_paths_that_exist` walks from the top.
+    """README and AGENTS.md both send agents here, in backticks; when document and tree
+    disagree the reader finds out at the worst moment, so this pins the path they cite
+    and anchors the doc-links walk.
     """
     contract = SERVICE_ROOT / "docs" / "references" / "crawlutron-agent-contract.md"
     assert contract.exists()

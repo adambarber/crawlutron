@@ -1,12 +1,6 @@
-"""Adversarial review the analytics hard-skip list must not contain
-legitimate content hosts.
-
-``ANALYTICS_HOST_SUFFIXES`` silently drops every discovered link to a listed
-host (links are recorded but never enqueued, and the browser route handler
-aborts their requests). A government content domain in that list is data
-poisoning: ``cdc.gov`` silently disappeared from every crawl until it was
-removed. These tests pin the boundary: tracking/ad infrastructure stays
-skipped, real content hosts never enter the list.
+"""Adversarial review the analytics hard-skip list must not hold content hosts:
+``ANALYTICS_HOST_SUFFIXES`` silently drops links to listed hosts, so a government
+domain there is data poisoning -- tracking stays skipped, content never enters.
 """
 
 from app.vocabulary.hosts import ANALYTICS_HOST_SUFFIXES, is_analytics_host

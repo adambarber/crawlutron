@@ -1,22 +1,6 @@
-"""Find a declared type by name, without a hand-kept name-to-module table.
-
-Every declaration lives in its own file under ``app/models``, named for it, and
-nothing re-exports anything (``app/models/__init__.py`` says why). The price of
-that rule is that ``getattr(app.models, "EngineCrawlResult")`` no longer works,
-and the obvious repair -- a dict of name to module -- is exactly the hand-
-maintained mirror the split exists to remove: it goes stale silently the day
-somebody adds a declaration, and a stale entry is a ``LookupError`` that reads
-like a typo rather than like the drift it is.
-
-So the index is DERIVED. Walk the package, collect the classes each module
-declares, and the answer to "where does this name live" is a property of the
-tree rather than a fact written down next to it. Adding a file needs no edit
-here; renaming a file cannot desynchronise this.
-
-The package rule makes the ambiguity small: one concept per file, so a name
-appears in one module. Should two modules ever declare the same name that is a
-duplicate declaration, and raising on it here makes the collision loud at first
-use instead of a coin flip about which of the two wins.
+"""Find a declared type by name without a hand-kept table: the ``app/models`` split
+that forbids re-exports makes any dict go stale silently, so the index is DERIVED
+by walking the package -- a duplicate declaration raises, and the tree never drifts.
 """
 
 from __future__ import annotations

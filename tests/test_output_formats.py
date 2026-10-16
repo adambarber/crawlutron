@@ -252,11 +252,9 @@ class TestOutputFormatsEdges:
         ],
     )
     def test_serialize_results_carries_the_url_and_the_media_type(self, fmt, results, needle, media_type):
-        """One row per text output format.
-
-        The three line-oriented formats differed only in the name the caller
-        passes and the media type that comes back, which is data, not behaviour:
-        as three bodies it was three places for a format rename to land in two.
+        """One row per text output format: the three line-oriented formats differ only in
+        the name and media type the caller passes -- data, not behaviour -- so one table
+        is one place a format rename has to land.
         """
         from app.extraction.output_formats import serialize_results
 

@@ -1,11 +1,6 @@
-"""The body-size middleware must stay truncated once the cap is breached.
-
-After truncating a chunk that carried ``more_body=False``, ``already_drained``
-was set while ``bytes_delivered`` was never charged for the truncating chunk, so
-a later ``receive()`` fell through to ``remaining = cap - bytes_delivered`` --
-still positive -- and admitted more bytes after the app had already been told
-the body ended. ``truncated`` is now sticky and short-circuits every later
-receive at the top of the wrapper.
+"""The body-size middleware must stay truncated once the cap is breached: before,
+a truncating chunk never charged ``bytes_delivered``, so a later ``receive()``
+admitted more bytes -- ``truncated`` is now sticky and short-circuits each.
 """
 
 import pytest

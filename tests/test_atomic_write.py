@@ -1,8 +1,6 @@
-"""atomic_write chokepoint contract: every disk write is crash-safe.
-
-The cookie jar hand-rolled mkstemp + fsync + os.replace; ContentCache used
-bare path.write_text (a mid-write crash leaves a corrupt file survived only
-because the reader swallows ValueError). One helper, one audited dance.
+"""atomic_write chokepoint contract: every disk write is crash-safe. One helper,
+one audited mkstemp + fsync + os.replace dance, replacing the cookie jar's
+hand-rolled copy and ContentCache's bare ``path.write_text``.
 """
 
 from __future__ import annotations

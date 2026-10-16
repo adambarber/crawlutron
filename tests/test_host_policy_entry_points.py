@@ -132,11 +132,10 @@ async def _probe_watch_router(monkeypatch, tmp_path):
 
 
 async def _probe_site_map(monkeypatch, tmp_path):
-    """A denied host must not reach the output where policy is the only filter.
-
-    Other probes prove refusal by catching one; this entry point filters
-    instead of raising, so the claim to prove is the output -- and the shape
-    with NO normalized root is exactly where aggregation consults policy."""
+    """A denied host must not reach the output where policy is the only filter: this
+    entry point filters instead of raising, so the claim is the output, and the shape
+    with no normalized root is where aggregation consults policy.
+    """
     from app.api.site_map import build_site_map
     from app.models.host_policy import HostPolicy
     from app.models.result_record import ProducerEnvelope
@@ -259,13 +258,9 @@ async def _probe_webhook_delivery(monkeypatch, tmp_path):
 
 
 async def _probe_policy_suggestions(monkeypatch, tmp_path):
-    """A host this deployment refuses must produce no suggestion at either level.
-
-    The rollup admits every stored URL through the deployment's policy, and a
-    candidate rule about a host this deployment may not crawl is not reviewable
-    -- so the refusal shows up as an empty proposal rather than an exception,
-    which is why this probe asserts on the suggestion list instead of reusing
-    :func:`_assert_refused`.
+    """A host this deployment refuses must produce no suggestion at either level: the
+    rollup admits every stored URL through the deployment's policy, so a candidate rule
+    about a refused host is not reviewable and surfaces as an empty proposal, not a raise.
     """
     from app.api import policy_suggestions as module
     from app.models.trace_response import TraceResponse

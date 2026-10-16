@@ -44,25 +44,9 @@ class TestHttpStrategyEdges:
         assert is_private_or_loopback_ip("invalid")
 
     def test_impersonating_fetcher_response(self):
-        """real_cffi subprocess: a normal fetch returns the served 200.
-
-        In-process real cffi is banned because the curl watchdog busy-spins the
-        GIL under the suite's sleep patch; ``tests/_transport_doubles.py`` owns
-        the arrangement and says why. What is asserted here is that the report
-        arriving on the queue is the production result.
-
-        The isolation is the load-bearing part, and it has to be asked for. A
-        default ``multiprocessing.Process`` forks on Linux, and a forked child
-        inherits the suite-wide ``impersonating_fetcher`` stub, so this test
-        received the stub instead of the transport it is about and failed with
-        "curl_cffi stubbed in tests" -- on CI only, having passed on the macOS
-        where the same default spawns. ``isolated_process`` names the start
-        method so the test means the same thing on both.
-
-        This drove its own reporter, which put a ``("ok", 200)`` tuple on the
-        queue; the harness reporter beside it put a record with an ``ok`` flag.
-        Both were ways of not saying what came back, and the reader had to be
-        told which slot was real. It uses the harness reporter now.
+        """real_cffi subprocess: a normal fetch returns the served 200, isolated by an
+        explicit start method -- a forked child inherits the suite-wide fetcher stub and
+        fails only on CI. The queue's report is the production result, not a re-encoding.
         """
         server = spawn_threaded_server(_Handler)
         url = f"http://127.0.0.1:{server.server_port}/"
@@ -82,22 +66,9 @@ class TestHttpStrategyEdges:
         assert outcome.status_code == 200
 
     def test_the_isolated_fetch_reports_the_result_rather_than_its_status(self, monkeypatch):
-        """A served page, fetched by the real fetcher in its own interpreter.
-
-        What comes back has to BE the production result. It used to be a
-        re-encoding of one -- an ``ok`` flag beside a ``status`` int -- and a
-        re-encoding cannot say which operator produced it: the httpx fallback
-        runs after the impersonated attempt precisely when there was none, so
-        the same integer means both. It also permitted states no producer ever
-        meant, ok-with-no-status and not-ok-with-a-status, which is what a hand-
-        written union of primitives always permits.
-
-        Asserting on a field the old record did not carry is the point: a status
-        proves nothing about the result the fetcher actually produced.
-
-        In-process real cffi is banned because the curl watchdog busy-spins the
-        GIL under the suite's sleep patch; ``tests/_transport_doubles.py`` owns
-        the arrangement and says why.
+        """A served page fetched by the real fetcher in its own interpreter: what comes
+        back must BE the production result -- a re-encoding with an ``ok`` flag could not
+        say which operator produced it and permitted states no producer ever meant.
         """
         monkeypatch.setenv("CRAWLUTRON_ALLOW_PRIVATE_TARGETS", "1")
         server = spawn_threaded_server(_Handler)

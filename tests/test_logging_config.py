@@ -1,10 +1,6 @@
-"""Structured-logging sink invariants.
-
-The service's JSON formatter must attach where every module and third-party
-logger can reach it (the root logger) so ``extra={...}`` context survives and
-INFO-level service events are not silently dropped. The document-extraction
-worker suppresses pdfminer's per-font parser chatter at the source because it
-runs in a child process with no other logging configuration.
+"""Structured-logging sink invariants: the JSON formatter must attach where every
+logger can reach it (the root), so ``extra`` survives and INFO events are not
+dropped; the doc worker suppresses pdfminer chatter at its source.
 """
 
 from __future__ import annotations
@@ -73,13 +69,9 @@ def test_third_party_loggers_route_through_the_json_sink(service_sink):
 
 
 def test_uvicorn_loggers_route_through_the_service_sink():
-    """The shipped uvicorn log config routes uvicorn's loggers through the sink.
-
-    uvicorn applies its logging config in ``Config.__init__`` -- before the app
-    is imported -- so the service's JSON sink has to exist by then. The config
-    uvicorn loads is asserted here the same way uvicorn loads it: applied with
-    ``dictConfig``, then a uvicorn record must arrive JSON-formatted with the
-    service field via root propagation.
+    """The shipped uvicorn log config routes uvicorn's loggers through the sink:
+    uvicorn applies its config in ``Config.__init__`` before the app is imported, so
+    the config is asserted the same way uvicorn applies it -- via ``dictConfig``.
     """
     import io
     import logging.config

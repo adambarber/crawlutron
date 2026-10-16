@@ -1,12 +1,6 @@
-"""A plain-HTTP fetch must never leak the pinned IP.
-
-The pin rule rewrites the wire URL's host to the resolved IP
-(DNS-rebinding defense) while preserving the logical URL via Host. The
-pinned IP is a transport detail: final_url, cookie keying, and link-base
-resolution must all reflect the ORIGINAL hostname URL the caller asked
-for -- never http://<resolved-ip>/..., which leaks resolved topology to
-API consumers, fragments the cookie jar by IP, and mis-bases discovered
-links.
+"""A plain-HTTP fetch must never leak the pinned IP: the pin rewrites the wire
+host to the resolved IP while preserving the logical URL, so final_url, cookie
+keying and link-base must all reflect the ORIGINAL hostname, never the IP.
 """
 
 import asyncio
