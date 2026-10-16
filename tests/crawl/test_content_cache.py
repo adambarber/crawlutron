@@ -36,10 +36,8 @@ def etag_case(tmp_path, etag_server):
 def cached_strategy_runner(url, policy, fetcher, cache=None, content_cache=None):
     """The HTTP strategy over one URL and the two caches, handed back unrun.
 
-    "What the *second* crawl did" is the subject of these tests, and one of them
-    changes the origin's answer in between, so the arrangement is owned here and
-    the moment of each run is the test's. ``run_http_strategy`` drops a cache
-    that was not given, so passing neither is a strategy run with no caching.
+    "what the *second* crawl did" is the subject, so the arrangement is owned
+    once and the moment of each run is the test's; neither cache = uncached.
     """
 
     async def run():
@@ -52,10 +50,8 @@ def cached_strategy_runner(url, policy, fetcher, cache=None, content_cache=None)
 def etag_serving(etag: str, body: bytes) -> Iterator[None]:
     """Make the etag server answer with a new validator and body, then restore.
 
-    The restore values are read back off the handler rather than re-spelled: a
-    copy of them drifts the moment the fixture's default body changes, and the
-    drift is invisible -- the next test just talks to a server nobody else is
-    talking to.
+    The restore values are read off the handler, not re-spelled -- a copied
+    default drifts invisibly the moment the fixture body changes.
     """
     original = (EtagHandler.etag, EtagHandler.body)
     EtagHandler.etag, EtagHandler.body = etag, body
@@ -108,9 +104,8 @@ def test_prune_removes_only_expired(tmp_path):
 def test_get_holds_lock_while_updating_memory_mirror(tmp_path, monkeypatch):
     """Sync get() warms the RAM mirror under the lock, exactly like aget().
 
-    ``_remember_memory_locked`` requires the caller to hold ``self._lock``;
-    the sync disk-hit path honors the same contract as the async one so the
-    mirror/index update stays atomic against concurrent set/aset/get.
+    The disk-hit path honors the same ``_remember_memory_locked`` contract as
+    the async one, keeping the mirror/index update atomic against set/aset.
     """
     c = ContentCache(cache_dir=tmp_path / "m", default_ttl=3600)
     c.set("k", {"v": 1})
@@ -210,8 +205,7 @@ async def test_crawl_request_serves_recursive_pages_from_content_cache(tmp_path)
     def page_fetches():
         """Declared pages that reached the network, in order.
 
-        Discovery probes (robots.txt) are answered by the scripted site too,
-        and they are not pages -- this is about the content cache serving
+        Discovery probes are answered by the scripted site too and are not
         pages, so the filter is "is a declared page", not a literal path list.
         """
         return [p for u in fetched_urls if (p := urlparse(u).path or "/") in pages]
@@ -248,11 +242,11 @@ async def test_mirror_gate_small_value_still_mirrors(tmp_path):
 
 
 async def test_cold_aget_does_not_mirror_oversized_envelope(tmp_path):
-    """After a warm restart ``_index_sizes`` is empty for pre-existing files,
-    so ``aget`` must gate the RAM mirror on the actual envelope bytes (stat),
-    not ``_index_sizes.get(key, 0)`` -- which defaults to 0 and lets a multi-MB
-    cold read into the small-value mirror (the RAM exhaustion path the
-    serialized-size gate was built to close)."""
+    """After a warm restart ``_index_sizes`` is empty for pre-existing files.
+
+    ``aget`` must gate the mirror on the actual bytes (stat), not
+    ``_index_sizes.get(key, 0)``, which defaults to 0 and admits a multi-MB read.
+    """
     fat = {"body": "x" * (1024 * 1024 + 1024)}  # > _MEMORY_CACHE_MAX_SIZE
     writer = ContentCache(tmp_path)
     await writer.aset("fat-key", fat)

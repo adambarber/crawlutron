@@ -58,10 +58,8 @@ class TestPdfTablePreservation:
 class TestDocumentRedirectSsrf:
     """A public PDF that redirects to an internal host must not be followed.
 
-    The extractor connects to the PINNED IP returned by validation, so
-    urllib never re-resolves DNS at connect time -- the rebinding TOCTOU is
-    closed. The logical hostname rides the Host header, which is what the
-    fake opener dispatches on (both test hosts resolve to the same IP).
+    The extractor connects to the PINNED IP from validation, so urllib never
+    re-resolves at connect time; the hostname rides the Host header.
     """
 
     PDF_PATH = "http://initial.test/doc.pdf"
@@ -80,10 +78,8 @@ class TestDocumentRedirectSsrf:
         def fake_getaddrinfo(hostname, port, *args, **kwargs):
             """The DNS table for this scenario, one level below the module.
 
-            Stubbing the resolver rather than the module's ``_resolve_ips`` keeps
-            the cache policy under test: the pinning path resolves fresh, so
-            ``conftest`` clearing the cache between tests is enough for a stub
-            here to be the whole of DNS.
+            Stubbing the resolver keeps the cache policy under test: pinning
+            resolves fresh, so a cleared cache makes this the whole of DNS.
             """
             if ":" in hostname:
                 return []
@@ -116,11 +112,8 @@ class TestDocumentRedirectSsrf:
     def _drive_extraction(self, monkeypatch, redirects=None, url=None) -> _ExtractionRun:
         """Install the fakes, run the real extractor over the fixture, report the run.
 
-        The pinning questions in this class are all questions about *where* the
-        extractor connected -- the logical ``Host`` it sent, the URL it handed
-        to the connection, and what it managed to read back. Staging the fakes
-        and driving the extractor is one step, so it is written once here and a
-        test states only the question it has of the run.
+        These tests all ask *where* the extractor connected; staging and driving is
+        one step, so a test states only the question it has of the run.
         """
         fetched, connect_urls = self._install_fakes(monkeypatch, FIXTURE.read_bytes(), redirects or {})
         markdown = default_document_text_extractor(canonical(url or self.PDF_PATH))
@@ -148,14 +141,10 @@ class TestDocumentRedirectSsrf:
         assert urlparse(connect_urls[0]).hostname == self.PINNED_IP
 
     def test_https_document_connects_by_hostname_not_ip(self, monkeypatch):
-        """-A: https keeps the hostname (certs carry no IP SANs) -- the
-        pinned IP must never surface in an https request URL, or every properly
-        configured site would fail TLS and silently break extraction.
+        """-A: https keeps the hostname, since certs carry no IP SANs.
 
-        The assertion is about the https HOP, not every hop. The redirect target
-        here is an http URL, so the second hop is pinned like any other http
-        fetch and carries the IP; a blanket "no URL anywhere is an IP" would be
-        asserting the opposite of the pin rule.
+        The pinned IP must never surface in an https request URL, or every site
+        would fail TLS; the assertion is about the https HOP only, not the http.
         """
         run = self._drive_extraction(
             monkeypatch,
@@ -185,10 +174,11 @@ class TestDocumentRedirectSsrf:
         assert "evil.test" not in run.fetched
 
     def test_relative_redirect_resolves_against_hostname_url(self, monkeypatch):
-        """-B: the next Location urljoins against the LOGICAL (hostname)
-        URL, never the pinned-IP connect URL -- the resolver must see the
-        hostname, and a resolver that refuses IP literals proves which one
-        the code actually used."""
+        """-B: the next Location urljoins against the LOGICAL (hostname) URL.
+
+        The resolver must see the hostname, never the pinned-IP connect URL; a
+        resolver that refuses IP literals proves which one the code used.
+        """
         run = self._drive_extraction(monkeypatch, {"initial.test/doc.pdf": "/doc2.pdf"})
         assert "Alice" in run.markdown
         assert "initial.test" in run.fetched

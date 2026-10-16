@@ -15,13 +15,10 @@ from tests.crawl.test_pooled_supersede import _bind_to_running_loop
 
 
 class _PooledClientDouble:
-    """The half of a pooled-client double that does not depend on the library.
+    """The half of a pooled-client double independent of the library.
 
-    ``closed`` is a class attribute so a subclass only has to say what is
-    different about its shape; assigning it in ``_finish_close`` shadows it per
-    instance, which is what the assertions read. ``_bound_loop`` is here because
-    ``_LoopBoundPooledClient`` writes it on every build. The ``sleep(0)`` is the
-    yield that lets a scheduled close finish before a test looks at the flag.
+    ``closed`` is a class attribute so a subclass states only what differs;
+    ``_bound_loop`` is set on every build, and ``sleep(0)`` lets a close finish.
     """
 
     closed = False
@@ -56,8 +53,8 @@ class _RealShapedHttpClient(_PooledClientDouble):
 class _ThirdKind(_PooledClientDouble):
     """A pooled kind that is neither httpx nor curl_cffi shaped, and is meant to be.
 
-    It reaps under ``aclose`` like httpx but publishes no ``is_closed``, which
-    is the combination neither library actually has.
+    It reaps under ``aclose`` like httpx but publishes no ``is_closed``, the
+    one combination neither real library has.
     """
 
     async def aclose(self) -> None:
@@ -67,9 +64,8 @@ class _ThirdKind(_PooledClientDouble):
 def test_real_pooled_classes_have_no_synchronous_close():
     """The premise of, pinned against the installed libraries.
 
-    If either class ever gains a synchronous close, the reasoning behind
-    ``_release_dropped_client`` has to be revisited -- this test is the trip
-    wire that says so instead of a docstring that quietly stays wrong.
+    If either class ever gains a sync close, the reasoning behind
+    ``_release_dropped_client`` must be revisited -- this is the trip wire.
     """
     assert not hasattr(httpx.AsyncClient(), "close"), "httpx gained a sync close"
     assert inspect.iscoroutinefunction(AsyncSession.close), "cffi close is no longer async"
@@ -79,13 +75,8 @@ def test_real_pooled_classes_have_no_synchronous_close():
 def test_real_shaped_session_is_closed_eagerly_on_a_live_loop(stub_builder):
     """The eager close must fire for a session with no ``is_closed``.
 
-    Driven through the production ``get_cffi_session`` rebuild path with a
-    curl_cffi-shaped object, so the guard cannot be satisfied by a fake
-    inventing the attribute the real class does not have. The queue still holds
-    the reference (that half is the durable safety net), but on a live loop the
-    superseded session must already be closed by the time the request that
-    triggered the rebuild finishes -- which is what the merged comment claims
-    and the ``getattr(client, "is_closed", True)`` guard never delivered.
+    Driven through the production rebuild path with a curl_cffi-shaped object,
+    so the superseded session is closed when the triggering request finishes.
     """
     built: list[_RealShapedSession] = []
 
@@ -109,11 +100,8 @@ def test_real_shaped_session_is_closed_eagerly_on_a_live_loop(stub_builder):
 def install_httpx_double(stub_builder) -> list[_RealShapedHttpClient]:
     """Hand out real-shaped httpx doubles through the public seam; return them.
 
-    The list is the point: the getter is typed as handing back a real
-    ``httpx.AsyncClient``, whose ``is_closed`` is a read-only property and which
-    has no ``closed`` at all, so a test that wants to read or set either has to
-    name the double the builder actually built. Two tests were each spelling this
-    builder out, and the second copy is the one that would have drifted.
+    The list is the point: the getter is typed to hand back a real
+    ``httpx.AsyncClient``, so a test must name the double the builder built.
     """
     built: list[_RealShapedHttpClient] = []
 
@@ -143,16 +131,8 @@ def test_httpx_kind_keeps_its_eager_close_after_the_gate_moves(stub_builder):
 def test_already_closed_pooled_client_is_not_re_closed_on_the_live_loop(stub_builder):
     """Boundary: the descriptor predicate still recognises a closed client.
 
-    A client the caller reports as closed owns no live sockets, so the rebuild
-    must drop it quietly instead of scheduling a pointless teardown task.
-
-    The assertion is the double's own ``closed`` flag, not a spy on the private
-    close helper this used to replace. ``closed`` is only ever set by the close
-    coroutine itself, and one loop yield is enough for a teardown that WAS
-    scheduled to start and finish -- the task goes on the ready queue by
-    ``ensure_future`` and the close yields once itself. So the flag staying
-    False is positive evidence that nothing was scheduled, and it is evidence
-    about the client rather than about one chosen route to closing it.
+    A client the caller reports closed owns no live sockets, so the rebuild
+    must drop it quietly; the ``closed`` flag staying False is the evidence.
     """
     built = install_httpx_double(stub_builder)
 

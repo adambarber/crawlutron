@@ -1,23 +1,7 @@
 """Connection setup must wait out a peer that is using the database.
 
-`configure_store_connection` sets `PRAGMA journal_mode=WAL` on every connection
-it opens. WAL is a persistent property of the *database file*, not a
-per-connection setting, so re-issuing the change is unnecessary once set -- and
-on the first conversion, when the file is still in `delete` mode, it is a write
-that SQLite refuses with SQLITE_BUSY rather than waiting. `busy_timeout` does
-not cover a journal-mode change, so the busy handler is never invoked.
-
-Proven with four spawned processes driving the real store, three runs: two clean
-at 800/800, one where three of four children died at sqlite_store.py:39 with
-"database is locked" and the increments they were responsible for never landed.
-`uvicorn --workers` starts its children together, so on a fresh database every
-one of them races the same first conversion. Every store in the service opens
-through this chokepoint.
-
-A race that fires one run in three makes a bad gate, so these tests hold a lock
-that is *proven* held before the conversion is attempted, and assert the two
-behaviours that matter: a peer that releases must be waited out, and a peer
-that never releases must still be refused rather than hung on forever.
+A first ``PRAGMA journal_mode=WAL`` conversion is a write SQLite refuses with
+``SQLITE_BUSY``, so these tests hold a proven lock and assert wait-out vs refusal.
 """
 
 import sqlite3
@@ -41,10 +25,8 @@ def _delete_mode_database(path: str) -> None:
 class _PeerHoldingTheFile:
     """A connection holding an exclusive lock until the test releases it.
 
-    The lock is taken on a thread but proven taken via an event before the
-    caller proceeds, so the test cannot race past a peer that has not started.
-    SQLite's locking is file-level, so a second connection in this process is
-    exactly what a sibling worker process is to the converting connection.
+    The lock is proven taken via an event, so the test cannot race past a peer
+    that has not started; a file-level lock makes this a sibling worker.
     """
 
     def __init__(self, db_path: str) -> None:
@@ -69,20 +51,10 @@ class _PeerHoldingTheFile:
 
 @contextmanager
 def _peer_locked_store(tmp_path, name: str, *, already_wal: bool = False, release_after: float | None = None):
-    """A store database with a peer PROVEN to be holding it, and our connection.
+    """A store database with a peer PROVEN holding it, and our connection.
 
-    Yields the connection the chokepoint must be run through, and closes it and
-    releases the peer on the way out. The three tests here are one arrangement
-    in three states, and the arrangement was being re-derived in each: a fresh
-    ``delete``-mode database, then (optionally) a WAL conversion, then a peer
-    that holds an exclusive lock before anything else runs.
-
-    ``release_after`` schedules the peer's release that many seconds in, which is
-    how "a peer that releases is waited out" is arranged; leaving it None holds
-    the lock until the block exits, which is the "a peer that never releases"
-    case. ``already_wal`` converts the journal first, so the peer is locking a
-    database whose property is already set -- the case where any write at all
-    must be refused.
+    Yields the connection the chokepoint runs through and cleans up on the way
+    out; ``release_after`` = waited-out, None = refused, ``already_wal`` converts.
     """
     db_path = str(tmp_path / f"{name}.db")
     _delete_mode_database(db_path)
@@ -109,10 +81,8 @@ def _peer_locked_store(tmp_path, name: str, *, already_wal: bool = False, releas
 def test_setup_outlasts_a_peer_beyond_the_busy_timeout(tmp_path, monkeypatch):
     """Proves the retry loop, not `busy_timeout`, is what carries the wait.
 
-    The busy timeout is cut to 50ms so a 0.6s peer cannot be outwaited by it.
-    `busy_timeout` was measured never firing for this statement at all -- the
-    failing children died 0.000s in -- so with the timeout this small, success
-    can only come from the retry.
+    The timeout is cut to 50ms so a 0.6s peer cannot be outwaited by it -- it
+    never fired for this statement, so success can only come from the retry.
     """
     monkeypatch.setattr(sqlite_store, "_BUSY_TIMEOUT_MS", 50)
 
@@ -124,13 +94,8 @@ def test_setup_outlasts_a_peer_beyond_the_busy_timeout(tmp_path, monkeypatch):
 def test_setup_refuses_a_peer_that_never_releases(tmp_path, monkeypatch):
     """Bounded, not forever: a hard lock must not become an unkillable hang.
 
-    The bound asserted is the one the caller set. This used to accept any wait
-    under ten seconds, which is what let the knob stay broken: the retry checked
-    its deadline only BETWEEN attempts, and one attempt could block for the
-    whole connection busy timeout, so a half-second budget still waited five and
-    the loose bound called that a pass. A budget that is not the wait is not a
-    budget, so the slack here is a quarter of the configured time -- enough for
-    a loaded machine, far too little to hide an attempt that outlives it.
+    The bound is the caller's, asserted tightly; a loose "under ten seconds"
+    once let a budget checked only between attempts pass.
     """
     monkeypatch.setattr(sqlite_store, "_WAL_RETRY_SECONDS", 0.5)
 

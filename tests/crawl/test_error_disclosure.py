@@ -1,9 +1,7 @@
-"""Adversarial fix (HIGH): error responses must not leak raw exception
-text (DNS names, internal paths, stack detail) in the API payload.
+"""Adversarial fix (HIGH): error responses must not leak raw exception text.
 
-Raw detail is NEVER returned to the caller. Only a stable error code is exposed
-in ``error``/``diagnostics``, and the raw detail is logged server-side for
-debugging (see app.transport.http.http_strategy_result).
+Only a stable error code is exposed in ``error``/``diagnostics``; the raw
+DNs/paths/stack detail is logged server-side, never returned to the caller.
 """
 
 import json
@@ -83,21 +81,7 @@ def test_both_failure_primitives_log_the_same_server_side_payload(caplog):
     """The redaction half of this file's contract, asserted where it lives.
 
     ``engine_result_from_exception`` and ``crawl_result_from_exception`` are the
-    same operation at two layers -- an ``EngineCrawlResult`` and the render
-    pipeline's ``CrawlResult`` -- and each used to spell out its own ``extra``
-    dict. Nothing asserted the two agreed, so the drift was invisible from either
-    side: an operator grepging the failure stream for the raw detail would have
-    found the engine path, not found it on the render path, and concluded the
-    render path had stopped logging the detail that makes it debuggable. One
-    classifier-and-logger now serves both, and the event name is the only thing
-    that differs.
-
-    The parity assertion is ``vars()`` of the two records compared to each other,
-    not to a hand-written key list: a snapshot of the key list passes whenever
-    both paths are wrong in the same direction, and goes stale the first time
-    someone legitimately adds a field to the shared payload. Comparing the two
-    records states the property that is actually at stake, and the three keys
-    that carry the redaction are then required by name on both.
+    same operation at two layers, each spelling its own ``extra`` dict.
     """
     caplog.set_level(logging.WARNING)
 
@@ -158,12 +142,8 @@ _NEW_ERROR_CODES = (
 class TestEmittedErrorCodesAreValidClassifications:
     """Every emitted error code must be a ``CrawlClassification`` member.
 
-    The strategy layer stores the code straight into
-    ``CrawlStrategyAttempt.classification``. The internal attempt model is a
-    lenient dataclass (plain ``str``), so an invalid code sails through the
-    fetcher -- and then rejects at response shaping, where the field is the
-    strict ``CrawlClassification`` enum, failing the whole batch with a 422
-    instead of just the one URL. A code that is a member shapes cleanly.
+    The attempt model stores it as a lenient ``str``, so an invalid code sails
+    through and then 422s the whole batch at shaping, where the field is strict.
     """
 
     async def test_strategy_error_codes_shape_through_the_response_model(self):
@@ -188,10 +168,8 @@ class TestEmittedErrorCodesAreValidClassifications:
     def test_every_emitted_error_code_is_an_explicit_status_table_entry(self):
         """New codes integrate with the ONE status table, not a parallel map.
 
-        An error code with no entry falls through to the ``blocked`` default,
-        which is the wrong verdict for a fetch that is known-dead: it keeps the
-        URL eligible for re-crawl as if it were an unclassified block, and it
-        disagrees with the ``failed`` status the strategy already reported.
+        A code with no entry falls through to ``blocked``, the wrong verdict
+        for a known-dead fetch -- keeping it eligible for re-crawl.
         """
         from app.vocabulary.taxonomy import CLASSIFICATION_STATUS_BY_LABEL, status_for_classification
 
@@ -205,11 +183,10 @@ class TestEmittedErrorCodesAreValidClassifications:
 
 
 class TestFailureDiagnosticsRedaction:
-    """The FAILURE path dumped the raw ``request_profile`` (which can carry
-    live cookies, fingerprint_seed, cookie_namespace) into diagnostics, while
-    the SUCCESS path exports only ``user_agent_family`` + ``cookie_jar``.
-    Diagnostics reach the API response, result store, persisted job.results and
-    webhook payloads, so the failure path must emit the same redacted shape.
+    """The FAILURE path dumped the raw ``request_profile`` into diagnostics.
+
+    It can carry live cookies and reach API responses and webhook payloads,
+    so it must match the redacted shape the SUCCESS path exports.
     """
 
     async def test_failure_diagnostics_redact_request_profile(self, monkeypatch):
