@@ -1,10 +1,6 @@
 """The envelope contract: every HTTP error body is exactly {code, message, details}.
-
-The pre-helper state had 13 hand-rolled dict literals across 7 files; three
-silently omitted ``details``, and any future site could drift the key names
-freedom-planting the drift-masking fallback in http_exception_handler. The
-factory is now the single definition; the AST drift detector in
-tests/invariants/test_result_shape.py keeps it that way.
+The pre-helper state had 13 literals across 7 files, three silently omitting
+`details`; the factory is the single definition now, held there by the AST gate.
 """
 
 import asyncio
@@ -18,12 +14,9 @@ from app.api.exceptions import error_envelope, http_error
 
 
 def _bare_request() -> Request:
-    """The smallest scope a Starlette ``Request`` can be built from.
-
-    ``http_exception_handler`` never reads its request argument, so the tests
-    used to hand it a ``SimpleNamespace``. That is a stand-in for a type the
-    handler is registered to receive; building a real one costs four keys and
-    keeps the double from being the only path that shape is ever seen on.
+    """The smallest scope a Starlette ``Request`` can be built from. The handler never
+    reads its request, so tests once used a ``SimpleNamespace`` -- a stand-in for a
+    type the handler is registered to receive; a real one keeps that shape on the path.
     """
     return Request({"type": "http", "method": "GET", "path": "/", "headers": [], "query_string": b""})
 
@@ -132,12 +125,9 @@ class TestEnvelopeFromDetail:
         }
 
     async def test_live_app_404_is_the_conforming_handler_path(self, async_client):
-        """App-raised 404s unwrap 1:1 through the funnel (not the fallback).
-
-        Also pins which 404s reach the handler at all: Starlette's own
-        route-miss 404 never reaches this handler (its exception is the
-        base class, outside the registered handler's MRO match), so the
-        synthetic code only ever means a non-conforming construction.
+        """App-raised 404s unwrap 1:1 through the funnel (not the fallback): Starlette's
+        route-miss 404 is the base class, outside the registered handler's MRO match, so
+        the synthetic code only ever means a non-conforming construction.
         """
         resp = await async_client.get("/v1/jobs/definitely-not-a-job")
         assert resp.status_code == 404

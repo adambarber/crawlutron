@@ -1,10 +1,6 @@
-"""The revalidation path must fetch exactly once.
-
-A cached entry with a validator is revalidated with a conditional GET. When the
-origin answers 200 (content changed) that response must be used and stored; the
-code previously fell through to a second, unconditional fetch because neither
-``content_hit`` nor ``revalidated_304`` was set on the 200 branch -- two real
-round-trips and doubled origin load for one crawl.
+"""The revalidation path must fetch exactly once: a cached entry revalidates with a
+conditional GET, and a 200 answer must be used and stored -- the code once fell
+through to a second unconditional fetch (double load for one crawl).
 """
 
 from app.transport.cache import HttpCache
@@ -13,17 +9,9 @@ from tests._fetcher_factories import make_fetch, run_http_strategy
 
 
 class _CountingFetcher:
-    """A fetcher that counts calls and always returns a fresh 200.
-
-    Stands in for the network boundary only; ``http_strategy_result`` itself
-    runs for real, so this exercises the production cache+revalidation control
-    flow rather than a substituted shape.
-
-    The 200 answer is its own method so a scripted subclass overrides *which*
-    response it hands back instead of re-stating the call bookkeeping -- the
-    count and the header capture -- that every variant has to do identically and
-    that a copy can drift from (a variant that forgets the capture silently
-    answers every header assertion with an empty dict).
+    """A fetcher that counts calls and always returns a fresh 200, standing in for the
+    network only -- the strategy runs for real. The 200 is its own method so a scripted
+    subclass overrides WHICH response, not the shared bookkeeping that can drift.
     """
 
     etag = "v1"
@@ -79,24 +67,15 @@ class TestRevalidationFetchesOnce:
         assert fetcher.header_sets[1].get("If-None-Match") == "v1"
 
     async def test_origin_fresh_200_is_stored_and_later_304s_serve_it(self, tmp_path):
-        """The revalidated 200 must LAND IN THE CACHE, not just be used.
-
-        The double-fetch fix briefly reused ``content_hit`` ("served from the
-        content cache -> do not write back") to also mean "a response is in
-        hand", which silently skipped the store: later crawls revalidated
-        against -- and served -- the stale pre-revalidation body forever.
-        Fetch-count assertions cannot see this (conditional GETs are the
-        design); only WHICH BODY a later 304 serves discriminates. Response-
-        in-hand is dataflow (response is not None); served-from-cache is the
-        flag's only meaning.
+        """The revalidated 200 must LAND IN THE CACHE, not just be used: the double-fetch
+        fix briefly misread ``content_hit`` as "response in hand", skipping the store, so
+        later 304s served stale forever -- only which body a 304 serves discriminates.
         """
 
         class _ScriptedFetcher(_CountingFetcher):
-            """A fresh 200 until the third call, then a permanent 304.
-
-            ``body`` is an instance attribute the test rewrites between crawls;
-            that rewrite is how the stale-versus-stored discrimination is set up,
-            so it stays a per-instance value and the response shape is inherited.
+            """A fresh 200 until the third call, then a permanent 304. ``body`` is an instance
+            attribute the test rewrites between crawls -- that rewrite is how stale-versus-
+            stored is set up, so the response shape is inherited.
             """
 
             def __init__(self) -> None:
