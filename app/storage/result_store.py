@@ -1,9 +1,6 @@
-"""Persist completed single-request crawl results for later retrieval.
-
-Fixes two problems: the 202 webhook response advertises ``status_url`` that
-previously did not exist, and a dropped HTTP connection mid-response meant the
-crawl work was lost. Completed ``UnifiedCrawlResponse`` payloads are stored
-keyed by ``request_id`` with TTL + entry-count retention guardrails.
+"""Persist completed single-request crawl results for later retrieval, fixing the
+202 webhook's missing ``status_url`` and the crawl work lost on a dropped
+connection. Payloads store keyed by ``request_id`` with TTL + count guardrails.
 """
 
 from __future__ import annotations
@@ -19,12 +16,9 @@ from app.storage.migrations import StoreSchema
 
 
 class CrawlResultStore(CoordinationStore):
-    """SQLite-backed store of completed crawl responses keyed by request id.
-
-    The connection, its PRAGMAs, the intra-process lock and ``close`` are the
-    base's. This store used to open its own connection and keep its own lock,
-    which made it the one store that could drift from the shared WAL/busy-timeout
-    configuration and the one whose ``close`` was written twice.
+    """SQLite-backed store of completed crawl responses keyed by request id. The
+    connection, PRAGMAs, lock, and ``close`` are the base's; this store once
+    opened its own, drifting from the shared WAL config and duplicating ``close``.
     """
 
     schema = StoreSchema.RESULTS
@@ -81,12 +75,9 @@ class CrawlResultStore(CoordinationStore):
         return json.loads(payload)
 
     def payloads(self) -> list[JsonValue]:
-        """Every retained payload, newest first.
-
-        The same TTL filter as :meth:`get`, applied here too: an expired row
-        that still answered a rollup would have the store reporting evidence it
-        has already declared gone. Ordering is newest-first so a caller reading
-        a bounded prefix sees the most recent records.
+        """Every retained payload, newest first -- the same TTL filter as :meth:`get`,
+        so an expired row cannot report evidence the store has declared gone.
+        Newest-first lets a caller reading a bounded prefix see the recent records.
         """
         now = self._clock()
         cutoff = now - self._ttl_seconds if self._ttl_seconds > 0 else 0.0
