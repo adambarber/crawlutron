@@ -160,11 +160,10 @@ def assert_settled(
     crawled: int | None = None,
     in_flight: Collection[str] = (),
 ) -> None:
-    """A job that ran to terminal: stopped, nothing queued, these pages kept.
-
-    The same claim in every whole-site job test -- per test, the drained
-    frontier line was most likely dropped. ``visited`` is a set; ``Collection``,
-    not ``Container``."""
+    """A job that ran to terminal: stopped, nothing queued, these pages kept -- the
+    same claim in every whole-site job test, where the drained-frontier line was the
+    one most likely dropped. ``visited`` is a set; ``Collection``, not ``Container``.
+    """
     assert job.status == JobStatus.COMPLETED, f"job ended {job.status}"
     assert not job.frontier, f"frontier left queued: {job.frontier}"
     admitted_in_flight = {canonical(url) for url in in_flight}

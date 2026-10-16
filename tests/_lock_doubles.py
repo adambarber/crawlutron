@@ -1,16 +1,8 @@
 """Delegating lock doubles: observe one operation, inherit the rest.
 
-A lock's surface is large -- ``acquire`` takes a timeout and a blocking flag,
-``wait`` takes a timeout, and there are three release-ish calls. Two modules
-each spelled out a subclass whose only real content was the one operation it
-observed, and the rest was the same seven-method forwarding tail copied along
-with it. That tail is the duplication, and it is also a trap: a double that is
-missing a method the real lock has fails with an ``AttributeError`` in whichever
-test happens to be the first to call it, which reads as a bug in the code
-under test rather than in the double.
-
-``DelegatingLock`` is that tail, written once. A double subclasses it and
-overrides only the operation it is watching, calling ``super()`` for the rest.
+``DelegatingLock`` is the forwarding tail written once, so a double overrides
+only the operation it watches instead of copying seven methods and risking a
+gap that reads as a bug in the code under test rather than in itself.
 """
 
 from __future__ import annotations
@@ -19,12 +11,9 @@ from typing import Any, Literal
 
 
 class DelegatingLock:
-    """Every lock operation forwarded to ``inner``; override what you observe.
-
-    ``inner`` is whatever real lock is being stood in for, so the double is
-    always installed over a live object rather than faking lock semantics --
-    the property under test is usually *which* lock was taken, not whether
-    locking works.
+    """Every lock operation forwarded to ``inner``; override what you observe, and
+    stay installed over a live object rather than faking lock semantics -- the
+    property under test is usually *which* lock was taken.
     """
 
     def __init__(self, inner: Any) -> None:

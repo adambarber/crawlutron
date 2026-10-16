@@ -36,29 +36,17 @@ def _refused_result(result) -> bool:
 
 
 def _effects() -> defaultdict[str, list[Any]]:
-    """An empty recorder for the "this must never be reached" lists.
-
-    The refusal tests all need the same thing: somewhere to record what the
-    refused code would have done, so the refusal is proven by the list staying
-    empty rather than by the absence of an exception. Eight sites spelled that out
-    as a hand-built dict literal, each declaring its keys up front -- while the
-    one assertion that consumes them never names a key and only walks whatever
-    got recorded. So those key lists were ceremony: a test could declare
-    ``{"webhook": []}``, record under ``"wire"``, and still pass, with the
-    declared key never read by anything. Here a key exists only if something was
-    recorded, so the recorder and the assertion cannot drift apart.
+    """An empty recorder for the "this must never be reached" lists: refusal is proven
+    by the list staying empty, and a key exists only once something was recorded, so
+    the recorder and the consuming assertion cannot drift apart.
     """
     return defaultdict(list)
 
 
 def _record_probe_fetch(effects: MutableMapping[str, list], payload: Mapping[str, Any]) -> None:
-    """Note a fetch the guard was supposed to prevent, unless it was the blocked URL.
-
-    The stand-in execution helpers all need the same recording: the only fetch
-    that is *not* a finding is the one the guard was supposed to refuse. Spelled
-    inline in each helper, a probe that compared a different value than the one
-    the test asserted on would record every URL it saw -- and the assertion
-    still passed, because the test only ever checked the blocked one.
+    """Note a fetch the guard was supposed to prevent, except the blocked URL itself;
+    spelled inline, a probe comparing a different value would record every URL and
+    the assertion would still pass, since it only ever checked the blocked one.
     """
     if payload.get("url") != _BLOCKED_URL:
         effects["fetched"].append(payload.get("url"))

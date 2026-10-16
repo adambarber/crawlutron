@@ -95,11 +95,9 @@ def make_html_fetcher(calls: list[str], body: bytes = b"<html><body>page content
 
 
 async def run_default_http_fetcher(url: str, headers=None, *, pin=None):
-    """The real default fetcher against a caller-supplied pin rule.
-
-    ``pin`` is the fetcher's own seam, forwarded rather than rebound over the
-    transport module's private builder: a redirect test needs a pin that is not
-    a real resolver, and the fetcher is where that choice belongs.
+    """The real default fetcher against a caller-supplied pin rule; ``pin`` is the
+    fetcher's own seam, forwarded rather than rebound over the transport module's
+    private builder, because a redirect test needs a pin that is not a resolver.
     """
     from app.transport.fetchers import default_http_fetcher
 

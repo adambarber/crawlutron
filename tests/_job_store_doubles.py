@@ -46,8 +46,8 @@ class _StoreListener:
     """One subscriber's wake-up: an event plus the loop that has to be woken.
 
     Store writes arrive from a worker thread, so the signal hops via
-    ``call_soon_threadsafe`` -- an ``asyncio.Event`` from a foreign thread is
-    not safe."""
+    ``call_soon_threadsafe`` -- an ``asyncio.Event`` from a foreign thread is unsafe.
+    """
 
     __slots__ = ("_bus", "event", "job_id", "loop")
 
@@ -73,8 +73,8 @@ class InstrumentedJobStore(JobStore):
     """A real ``JobStore`` that also publishes every write it receives to a bus.
 
     Overriding ``set_status``/``save`` shadows the base for every caller; a
-    subclass (not instance poking) because ``status_bus`` is not a ``JobStore``
-    field."""
+    subclass (not instance poking) because ``status_bus`` is not a ``JobStore`` field.
+    """
 
     def __init__(self, db_path: str | pathlib.Path, *, policy: HostPolicy, tier: PolicyTier) -> None:
         super().__init__(db_path, policy=policy, tier=tier)

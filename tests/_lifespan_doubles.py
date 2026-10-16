@@ -1,23 +1,15 @@
-"""Stubbing the heavy lifespan teardown so a test can run the real lifespan.
-
-Running ``app.router.lifespan_context`` for real starts browsers, HTTP clients
-and subprocess pools. A test that only cares about one shutdown step still has
-to survive the others, and two files were each assembling their own version of
-"neutralise everything that is not the step under test" -- with their own idea
-of which closers that covered, so a teardown step added later reached the real
-implementation in one file and not the other.
+"""Neutralise the heavy lifespan teardown so a test can run the real lifespan,
+which otherwise spawns browsers, clients and pools; this is the one place that
+spells which closers the step-under-test is meant to survive.
 """
 
 from typing import Any
 
 
 def stub_heavy_teardown(monkeypatch) -> Any:
-    """Neutralise the lifespan's heavy teardown; return the fresh readiness state.
-
-    Replaces every close/close-all the lifespan reaches with a no-op and
-    installs a fresh ``READINESS_STATE``, so startup and shutdown run for real
-    and only the pool or sampler under test does anything. Returns the fresh
-    readiness state, which a sampler test asserts against.
+    """Neutralise the lifespan's heavy teardown -- each close it reaches is a no-op
+    and a fresh ``READINESS_STATE`` is installed -- and return that state, which
+    a sampler test asserts against.
     """
     from app import main as main_mod
     from app.api import job_runner as job_runner_mod
