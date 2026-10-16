@@ -169,10 +169,8 @@ def test_explicit_pool_size_arg_wins(monkeypatch):
 def _driver_with_exploding_cm(*, max_browser_renders: int = 1):
     """A driver holding a browser whose context manager raises on exit.
 
-    A released browser (no cached one left) and exactly one exit of the context
-    manager is the contract under test, so the fixture asserts both and the
-    caller only has to say *which* call was made.
-    """
+    A released browser (none cached) with exactly one exit is the contract under
+    test; the fixture asserts both, the caller only says which call was made."""
     context_manager = _ExplodingContextManager()
     driver = BrowserDriver(
         browser_factory=lambda **_kwargs: context_manager,
@@ -189,11 +187,8 @@ def _driver_with_exploding_cm(*, max_browser_renders: int = 1):
 def _bare_renderer(**overrides):
     """A real ``BrowserRenderer`` with no browser factory and no warmup.
 
-    Only the renderer-owned collaborators are exercised through this; page-facing
-    steps go to :func:`_bare_driver`, which owns them. Both stay real -- only the
-    page is a double, which is what keeps these tests about the strategy's own
-    error handling rather than a stub's.
-    """
+    Only renderer-owned collaborators go through this; page-facing steps use
+    :func:`_bare_driver`. Both stay real -- only the page is a double."""
     from app.transport.browser import BrowserRenderer
 
     return BrowserRenderer(**overrides)
@@ -207,17 +202,10 @@ def _bare_driver(**overrides):
 def _page(**stubs):
     """A page double whose only attributes are ``stubs``.
 
-    Each stub is the answer that method gives: a plain value is returned, an
-    exception instance is raised (the error path under test), and a callable is
-    called and its result returned (a page that answers differently on the
-    second poll). An awaitable answer is awaited, so a stub declared ``async``
-    returns the value it returns rather than the coroutine -- otherwise a
-    ``if await element.is_visible():`` test would read a truthy coroutine and
-    pass without ever checking the answer. A method the test did not stage is
-    simply absent, so reaching for one raises ``AttributeError`` the way a page
-    without it would -- rather than passing against a double that answers
-    everything.
-    """
+    Plain values are returned, exceptions raised, callables called (a page that
+    answers differently on the second poll), awaitable answers awaited -- an
+    ``if await element.is_visible():`` must check the answer, not a truthy
+    coroutine; unstaged methods are absent, so reaching one raises."""
 
     def _method(name: str, answer):
         async def _call(self, *args, **kwargs):
@@ -237,13 +225,9 @@ def _page(**stubs):
 async def _challenge_wait_outcome(renderer, page):
     """Drive ``_extract_with_challenge_wait`` asking for everything.
 
-    The render-options double is the same in every challenge-wait test: which
-    page the extractor decided it was looking at is only a question if html and
-    text were both requested, so the "include everything" options are staged
-    once here. The renderer's own four-tuple comes back so each test asserts on
-    the half it is about -- the classification on the timeout case, the escape on
-    the one that gets through.
-    """
+    The options double is the same in every challenge-wait test -- "which page"
+    is only a question if both html and text were requested; the four-tuple
+    comes back so each test asserts the half it is about."""
     options = type("obj", (), {"include_html": True, "include_text": True})()
     return await renderer.extract_with_challenge_wait(page, options)
 
@@ -251,19 +235,15 @@ async def _challenge_wait_outcome(renderer, page):
 class TestWorkerExtractorErrorDegrades:
     """The error branches of the browser strategy, across renderer and driver.
 
-    Split by owner rather than by file: the split moved half of these onto the
-    driver, and naming the class after the module it used to live in is how the
-    retarget left five driver tests wearing a renderer's name.
-    """
+    Split by owner rather than by file: half of these moved onto the driver, and
+    the class name is the pre-split module's."""
 
     async def test_recycle_releases_the_browser_it_replaces(self):
         """The per-render recycle path must drop the browser it is replacing.
 
         A separate entry point from shutdown: the driver releases the old
-        context manager on the way to launching a replacement, so a raise there
-        has to be swallowed the same way or every recycle after the first
-        browser breaks the render.
-        """
+        context manager on the way to launching a replacement, and a raise there
+        is swallowed or every recycle after the first breaks."""
         driver, cm, _ = _driver_with_exploding_cm(max_browser_renders=1)
         await driver.open_page({})
         driver.note_render()
@@ -365,13 +345,10 @@ class TestWorkerExtractorErrorDegrades:
 class TestCloseLeavesNoStaleRendererToAcquire:
     """close() retired the renderers but kept handing them out.
 
-    ``close`` walked ``_renderers``, closed each and cleared the list, and left
-    ``_available`` full. ``initialize`` then appended the new generation to the
-    BACK of that same queue, and ``acquire`` pops the FRONT -- so the first
-    ``pool_size`` acquires after a recycle returned renderers that had already
-    been closed. The queue was also double the pool size, which quietly
-    contradicts every ``available`` count the pool logs on timeout.
-    """
+    ``close`` cleared ``_renderers`` but not ``_available``; ``initialize``
+    appended the new generation to the BACK of that queue and ``acquire`` pops
+    the FRONT -- so the first ``pool_size`` acquires after a recycle returned
+    closed renderers, and the queue was double the pool size."""
 
     @staticmethod
     def _pool(pool_size: int = 2) -> BrowserPool:
@@ -413,9 +390,8 @@ class TestCloseLeavesNoStaleRendererToAcquire:
         """The other route to the same retired renderer.
 
         A renderer checked out when ``close`` runs is closed by it, and the
-        holder returns it afterwards. That is the one caller that can put a
-        closed renderer back after the drain, so the drop belongs in ``release``.
-        """
+        holder returns it afterwards -- the one caller able to put a closed
+        renderer back after the drain, so the drop belongs in ``release``."""
         pool = self._pool()
         await pool.initialize()
         checked_out = await pool.acquire()
