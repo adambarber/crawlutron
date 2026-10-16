@@ -1,19 +1,6 @@
 """The persistent markitdown worker pool, and nothing else about extraction.
-
-Document extraction (markitdown) runs in a PERSISTENT pool of worker processes.
-Each worker imports markitdown once (it stays in the worker's ``sys.modules``)
-and serves many documents, amortizing the spawn + import cost of the old
-spawn-per-document design. Timeout-kill semantics are kept per task: a worker
-that exceeds the document deadline -- or dies mid-task -- is terminated and
-reaped immediately, and its slot is respawned on the next acquisition, so a
-pathological document can neither block the pool nor linger as a zombie.
-
-Everything the pool touches arrives through :class:`DocExtractionPool`'s
-constructor: how a worker is built, how many there should be, whether the
-feature is on, and the lock its slots live under. A caller that needs a
-different arrangement builds a pool instead of rewriting another module's names,
-which is what lets the suite test this machinery against stubs rather than by
-reaching into ``app.extraction.content``'s internals.
+Document extraction runs in a persistent worker pool (import once, amortize
+spawn cost), with per-task timeout-kill; all collaborators arrive via the pool constructor.
 """
 
 import io
@@ -59,11 +46,8 @@ class DocWorker:
 
 def terminate_doc_process(proc) -> None:
     """Terminate a runaway document-extraction process and reap it.
-
-    SIGTERM alone is not enough: a worker wedged in an uninterruptible native
-    conversion absorbs it and holds its pipe, memory and pool slot for the life of
-    the service. Escalate to SIGKILL, and join after the kill so the child cannot
-    linger as a zombie.
+    SIGTERM alone is not enough: a wedged native conversion absorbs it and holds
+    pipe/memory/slot for the service life, so escalate to SIGKILL and join lest a zombie lingers.
     """
     with suppress(Exception):
         proc.terminate()
@@ -76,22 +60,17 @@ def terminate_doc_process(proc) -> None:
 
 
 def test_hooks_enabled() -> bool:
-    """Whether the ``TEST_MARKITDOWN_*`` child hooks are in force.
-
-    They exist so tests can simulate child death, hangs and output without real
-    parsers, and they only fire when the operator exports ``CRAWLUTRON_TEST_HOOKS=1``
-    alongside the per-hook flag -- a stray env var must never alter production.
+    """Whether the ``TEST_MARKITDOWN_*`` child hooks are in force: they let tests
+    simulate child death, hangs and output without real parsers, and fire only
+    with ``CRAWLUTRON_TEST_HOOKS=1`` plus the per-hook flag -- a stray env must never alter production.
     """
     return parse_bool_env("CRAWLUTRON_TEST_HOOKS", default=False)
 
 
 def doc_task_hooks() -> dict | None:
-    """Snapshot the ``TEST_MARKITDOWN_*`` hooks for one task (parent-side).
-
-    Workers are persistent, so they would otherwise act on the env from their spawn
-    moment rather than the caller's current flags. The parent always sees current
-    env, so it snapshots per call and ships the result with the task; the worker
-    honors the message, never its own env.
+    """Snapshot the TEST_MARKITDOWN_* hooks for one task, parent-side.
+    Persistent workers would otherwise act on spawn-time env, not the caller's
+    current flags; the parent ships the snapshot with the task and the worker honors the message.
     """
     if not test_hooks_enabled():
         return None
@@ -103,21 +82,17 @@ def doc_task_hooks() -> dict | None:
 
 
 def configure_doc_worker_logging() -> None:
-    """Quiet expected parser chatter in the document worker.
-
-    A bare child process has no service logging, so pdfminer warns per font whose
-    descriptor lacks a usable FontBBox -- common on municipal PDFs, and carrying no
-    signal when the text still parsed. Drop it at the source, keep ERROR+.
+    """Quiet expected parser chatter in the document worker: a bare child has no
+    service logging, and pdfminer warns per font whose descriptor lacks a usable
+    FontBBox (common, no signal) -- drop it at the source, keep ERROR+.
     """
     logging.getLogger("pdfminer").setLevel(logging.ERROR)
 
 
 def _markitdown_extract(body: bytes) -> str | None:
-    """Convert document bytes with markitdown (worker-side real path only).
-
-    Test hooks are NOT read here: the parent snapshots them per task and the
-    worker honors the shipped message, so persistent workers never observe stale
-    env.
+    """Convert document bytes with markitdown (worker-side real path only). Test
+    hooks are NOT read here: the parent snapshots them per task, and the worker
+    honors the shipped message, so persistent workers never observe stale env.
     """
     res = MarkItDown().convert_stream(io.BytesIO(body))
     return res.text_content if res is not None else None
@@ -125,10 +100,8 @@ def _markitdown_extract(body: bytes) -> str | None:
 
 def _doc_worker_main(conn) -> None:
     """Persistent worker entry: serve markitdown tasks until killed or orphaned.
-
-    Each task arrives as ``(body, hooks)``; hooks come from the parent's per-call
-    snapshot (never the worker's spawn-time env). A ``die`` hook exits without
-    sending (a worker segfaulting on hostile input).
+    Each task arrives as ``(body, hooks)`` from the parent's per-call snapshot
+    (never spawn-time env); a ``die`` hook exits without sending, like a segfault.
     """
     try:
         configure_doc_worker_logging()
@@ -170,12 +143,8 @@ def spawn_doc_worker() -> DocWorker:
 
 class DocExtractionPool:
     """The persistent document-worker pool, and the only thing that owns it.
-
-    How a worker is built, how many there should be, whether the feature is on and
-    the lock the slots live under all arrive through the constructor, so the
-    machinery below is written once against collaborators rather than module names.
-    Production builds one from the environment; a caller needing a different
-    arrangement builds its own.
+    The builder, worker count, enabled flag and slot lock all arrive via the
+    constructor, written once against collaborators; production builds one from the environment.
     """
 
     def __init__(
@@ -198,16 +167,8 @@ class DocExtractionPool:
 
     def acquire(self, timeout: float) -> DocWorker | None:
         """Take an idle pool worker, spawning on demand up to the configured size.
-
-        The pool starts empty and grows only as demand requires, so a caller doing
-        one extraction owns exactly one worker and the zero-live-children-after-death
-        invariant still holds. Dead idle slots are respawned in place; retired slots
-        are never handed out, alive-report or not.
-
-        ``None`` means no worker within ``timeout``, and callers must degrade the
-        document rather than wait: the alternative was a wait with no deadline, so
-        one busy flag its holder never cleared wedged every later extraction in the
-        process.
+        Dead idle slots respawn in place; retired slots are never handed out, and
+        ``None`` (no worker within timeout) means callers must degrade the document, not wait.
         """
         if not self._enabled():
             return None
@@ -262,16 +223,9 @@ class DocExtractionPool:
                 self.retire(worker)
 
     def retire(self, worker: DocWorker) -> None:
-        """Terminate and reap one worker, leaving its (dead) slot for respawn.
-
-        Respawn is lazy, on the next acquisition: a dead-idle slot costs nothing
-        until the next document arrives, and lazy is what keeps a timeout or a
-        child death at zero live children immediately.
-
-        The retired mark is set before anything slow because retirement is not
-        always under the lock: without it, the window between "terminated" and
-        "respawned" would let an acquisition hand a doomed worker to the next
-        caller.
+        """Terminate and reap one worker, leaving its (dead) slot for lazy respawn.
+        The retired mark is set before anything slow -- retirement is not always under
+        the lock -- so no acquisition ever hands a doomed worker to the next caller.
         """
         worker.retired = True
         terminate_doc_process(worker.proc)
@@ -293,10 +247,8 @@ class DocExtractionPool:
 
     def health(self) -> list[tuple[bool, bool, bool]]:
         """Per-worker ``(alive, reaped, busy)`` snapshot.
-
-        Idle workers legitimately stay alive across calls, so the recoverable-
-        failure contract is per worker, not process-global: a worker that died must
-        be reaped (exitcode set, not a zombie) and none may be left busy mid-task.
+        Idle workers legitimately stay alive across calls, so the contract is per worker,
+        not process-global: a died worker must be reaped (not a zombie) and none left busy mid-task.
         """
         with self._lock:
             return [
