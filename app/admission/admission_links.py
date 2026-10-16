@@ -62,10 +62,8 @@ class AdmissionOutcome:
 def _link_values(link: Any) -> tuple[str, str] | None:
     """The ``(normalized text, original text)`` an extraction record carries.
 
-    The host is deliberately not read. ``DiscoveredLink.host`` is the extractor's
-    own answer, and it disagreed with the admitted URL whenever the two were
-    produced differently -- the crawl-delay key was then a host that had nothing
-    to do with the request it throttled.
+    The host is deliberately not read: ``DiscoveredLink.host`` is the extractor's
+    own answer and disagreed with the admitted URL whenever produced differently.
     """
     if isinstance(link, str):
         return link, link
@@ -283,19 +281,10 @@ async def admit_discovered_links[T](
 
 
 def remaining_page_capacity(admitted_count: int, max_pages: int) -> int | None:
-    """Pages still admissible, or None when the cap is UNBOUNDED.
+    """Pages still admissible, or None when the cap is unbounded (``max_pages <= 0``).
 
-    None is the answer for ``max_pages <= 0``, and it is the codebase's single
-    definition of that sentinel -- every cap-reading site defers here rather than
-    restating it. 0 means "no cap", NOT "zero pages", because the alternative
-    reading makes an unlimited whole-site job (which stores 0) admit nothing and
-    report no error, while a caller who means zero has ``max_pages=1`` with an
-    empty frontier.
-
-    Note the one deliberate exception: the API edge substitutes a real budget
-    for an absent-or-zero request, so an externally-triggered crawl is always
-    bounded. A whole-site job read back from its row keeps its 0, which is how
-    the unbounded reading reaches the crawl loop.
+    ``None`` is the single no-cap sentinel; 0 means "no cap", not "zero pages" --
+    an unlimited whole-site job stores 0, and only the API edge substitutes a real budget.
     """
     if max_pages <= 0:
         return None
@@ -303,23 +292,10 @@ def remaining_page_capacity(admitted_count: int, max_pages: int) -> int | None:
 
 
 def compile_scope_pattern(scope_regex: Any) -> BoundedPattern | None:
-    """Compile a user-supplied scope regex for bounded matching.
+    """Compile a user-supplied scope regex: ``None`` means no restriction declared.
 
-    ``None`` means exactly one thing: no restriction was declared. A restriction
-    that IS declared but cannot compile raises instead, because every consumer
-    reads ``None`` as "allow everything" -- and a crawl the operator restricted
-    running unrestricted is the one outcome a scope policy must never produce.
-    The request boundary rejects invalid patterns with ``invalid_policy``, so
-    the row that reaches here compiled when it was written; the gap is the
-    resume, where the same row loads under today's rules.
-
-    Defense in depth: static shape rejection is bypassable by
-    construction -- the depth-3 nested-quantifier ``(((a|aa)))*`` defeated
-    every enumerated heuristic -- so the durable guarantee is BOUNDED
-    EXECUTION via :mod:`app.safety.safe_regex`: every match runs on the ``regex``
-    engine with a wall-clock timeout, raising RegexTimeout instead of hanging
-    the crawl loop. The cheap heuristics there remain as an early filter for
-    obvious footguns; they are not load-bearing.
+    A declared pattern that fails to compile raises -- consumers read ``None`` as
+    "allow everything". Bounded execution lives in :mod:`app.safety.safe_regex`.
     """
     if not isinstance(scope_regex, str) or not scope_regex:
         return None

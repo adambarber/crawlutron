@@ -22,7 +22,7 @@ DOC_LIMIT = 3
 #: The measured over-length docstring count per root, at the last wave.
 #: Exact equality both ways: new long docstrings fail; a trimmed tree lowers it.
 _DOC_BUDGETS = {
-    "app": 62,
+    "app": 43,
     "tests": 0,
     "scripts": 33,
 }

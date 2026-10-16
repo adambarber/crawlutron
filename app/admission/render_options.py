@@ -1,30 +1,6 @@
-"""The single decision point for effective browser-render options.
-
-Render options were once assembled by hand at every entry point, and the
-copies had already drifted: the engine's browser strategy hard-coded the
-capture knobs while policy-derived reads respected the caller elsewhere,
-and the ``/v1/render`` builder silently dropped ``browser_profile`` so no
-worker knob (viewport, lazy scroll, resource mode...) could reach the
-worker from that path.
-
-``resolve_render_options`` is now the only place request-side options and
-server defaults merge into a :class:`app.models.RenderOptions`; the AST
-detector in ``tests/invariants/test_result_shape.py`` fails the build on any new
-construction site. Callers adapt their own source shape (a render-options
-dict, a crawl policy) into the two mappings the resolver reads.
-
-One knob, two owners — this is the distinction the drifted sites collapsed:
-
-* **capture** (``include_html`` / ``include_text`` as the browser worker
-  consumes them): the ``/v1/render`` caller legitimately controls it, so
-  the request value wins there. On the crawl path the *pipeline* owns it:
-  ``_browser_strategy_result`` feeds the captured HTML to markdown
-  extraction, classification, and link discovery before anything applies
-  the caller's output knob, so honoring the payload knob for capture would
-  silently degrade results instead of saving work.
-* **payload** (what survives into the spilled/shaped result): always the
-  caller's ``browser_profile.include_html``, read through
-  :func:`policy_wants_html` — never re-derived at each strip site.
+"""Single place request-side browser-render options merge over server
+defaults into :class:`app.models.RenderOptions`; capture is pipeline-owned
+on the crawl path, payload is the caller's ``include_html`` via :func:`policy_wants_html`.
 """
 
 from __future__ import annotations
@@ -49,16 +25,10 @@ def resolve_render_options(
     request_options: Mapping[str, Any] | None,
     defaults: Mapping[str, Any] | None = None,
 ) -> RenderOptions:
-    """Merge request-side render options over server defaults.
+    """Merge caller render options over server defaults -- caller wins, an explicit ``None`` counts as absent.
 
-    ``request_options`` is whatever the caller supplied (a ``/v1/render``
-    options dict, or a pipeline's fixed requirement set — callers own the
-    policy of *which* of their knobs are caller-controlled and pass the
-    rest through ``defaults``). Unknown keys are ignored: a stale client
-    sending a removed knob (``wait_until``) must keep working.
-    ``browser_profile`` is forwarded as a defensive copy — dropping it was
-    the asymmetry that made every worker knob unreachable from
-    ``/v1/render``.
+    Unknown keys are ignored (a stale client's removed knob keeps working);
+    ``browser_profile`` is forwarded as a defensive copy so worker knobs stay reachable.
     """
     request = request_options or {}
     base = defaults or {}
@@ -78,12 +48,9 @@ def resolve_render_options(
 
 
 def policy_wants_html(policy: CrawlPolicy) -> bool:
-    """The caller's payload knob for a crawl policy: keep raw HTML or strip it.
-
-    The one reading of ``policy.browser_profile["include_html"]`` allowed
-    outside this module; strip sites (engine spill, HTTP strategy) call this
-    instead of re-deriving the expression, which is how "who owns this
-    knob" drifted per call site in the first place.
+    """The caller's payload knob: keep raw HTML or strip it, read once via
+    ``policy.browser_profile["include_html"]``. Strip sites call this to avoid
+    drift — the sole reading of that field allowed outside this module.
     """
     return bool(policy.browser_profile.get("include_html", True))
 

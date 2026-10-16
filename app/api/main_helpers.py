@@ -20,17 +20,10 @@ from app.storage.job_store import JobStatusView
 
 
 def build_job_status(view: JobStatusView) -> JobStatusResponse:
-    """Build a JobStatusResponse from a store status view.
+    """Build a ``JobStatusResponse`` from a store status view.
 
-    Takes the view rather than a ``CrawlJobState`` so the counts come from the
-    store's projection instead of ``len()`` over the page history: that was
-    what made polling a job's status cost as much as reading its whole crawl.
-
-    The ``**`` splat is the chokepoint that makes the view and this model one
-    record rather than two hand-kept lists, and it is safe only because the view
-    is a declared ``TypedDict``: pyright reports a key the model does not declare,
-    which is the defect this replaced -- ``kind`` was selected by the projection
-    and dropped here, for every response the API has ever returned.
+    Taking the view (a declared ``TypedDict``) keeps counts in the store's projection, not
+    ``len()`` over history; the ``**`` splat fuses view and model -- pyright flags any undeclared key.
     """
     return JobStatusResponse(**view)
 
@@ -57,27 +50,9 @@ def request_gate(
     logger: logging.Logger,
     reject: Callable[[ValueError], HTTPException] = validation_http_error,
 ) -> Iterator[None]:
-    """Admit one readiness-tracked request and own everything that must happen to it.
-
-    Three obligations belong to the same tail, so they live here together and a
-    handler spells none of them: the ``begin_request`` admission, the rejection
-    (operator warning + the 4xx envelope), and the ``end_request`` release.
-    Written per endpoint, each was droppable independently -- a reject that
-    forgot the release leaks a readiness slot for the life of the process, and
-    one that forgot the warning loses the only operator signal that a caller was
-    turned away.
-
-    The release lives in the ``finally`` and nowhere else, so it happens
-    exactly once on every exit: admit, reject, success, and an unhandled 500
-    alike. It is deliberately NOT also called on the reject path, because
-    ``end_request`` clamps at zero -- a second decrement would silently cancel
-    a slot another request is legitimately holding.
-
-    ``reject`` is the endpoint's own refusal policy, and it is the only part
-    that varies: /v1/render answers 400 with the ValueError text as the message
-    where the others answer 422 with the shared error detail list. Naming it
-    per endpoint is why the default can be the shared envelope rather than an
-    average of the three.
+    """Admit one readiness-tracked request and own the whole tail: the ``begin_request``
+    admission, the rejection (warning + 4xx envelope), and the ``end_request`` release in the
+    ``finally`` -- exactly once per exit, not repeated on reject (``end_request`` clamps at zero).
     """
     readiness_state.begin_request()
     try:

@@ -58,13 +58,8 @@ _TeardownStep = tuple[str, Callable[[], Awaitable[None]]]
 async def _run_shutdown_steps(steps: Sequence[_TeardownStep]) -> None:
     """Run every teardown step, then report the ones that failed.
 
-    Shutdown is the one place where a single failure must not be allowed to
-    decide what else gets released: the pools below a raising ``close()`` are
-    not retried by anything, and the last of them outlives the process
-    entirely. Every step is therefore attempted regardless of what its
-    predecessor did, and the failures are raised together once the last one has
-    run -- so this widens the blast radius of a broken close without hiding it,
-    which a bare ``try``/``except``/``continue`` would.
+    Shutdown is where one failure must not decide what else is released, so each
+    step runs whatever its predecessor did; failures raise together at the end.
     """
     failures: list[str] = []
     for name, step in steps:
@@ -116,19 +111,9 @@ logging.getLogger("trafilatura").setLevel(logging.ERROR)
 
 
 def warn_if_bound_off_loopback(host: str) -> None:
-    """Say so at startup when the API is reachable from off the machine.
-
-    Nothing authenticates a caller here: every ``Authorization`` header in the
-    tree is outbound, attached to a crawled origin rather than presented by
-    one. Loopback is what makes that safe, so the moment the bind leaves
-    loopback the whole surface -- crawl execution, job control, result
-    retrieval, webhooks -- is open.
-
-    A warning and not a refusal, because the shipped compose file binds
-    ``0.0.0.0`` inside the container (Docker port mapping cannot reach a
-    loopback-bound process) and publishes only to ``127.0.0.1``. Refusing that
-    bind would refuse this project's own supported deployment to guard a
-    configuration nobody ships.
+    """Warn at startup when the API is reachable from off the machine: nothing authenticates
+    callers (every ``Authorization`` header is outbound), so loopback keeps the surface safe.
+    A warning, not a refusal -- compose binds 0.0.0.0 in the container, publishing to 127.0.0.1 only.
     """
     if is_loopback_bind(host):
         return

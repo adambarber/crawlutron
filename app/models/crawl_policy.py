@@ -176,42 +176,9 @@ class CrawlPolicy(BaseModel):
     @field_validator("credentials", mode="before")
     @classmethod
     def _canonicalize_credential_origins(cls, value: Any) -> Any:
-        """Key every credential by its canonical origin, at the read edge.
-
-                The lookup at request time is a plain dict hit on
-                ``app.admission.credentials.origin_of(url)``, which lowercases the scheme
-                and host and drops a default port. The canonicality rule itself lives
-                in ``origin_of`` -- the same function every lookup uses, so one rule at
-                one site -- and this is the only place it is applied to a stored key.
-
-                Two spellings of one origin are canonicalized; a key that is not an
-                origin is REJECTED rather than narrowed. ``https://a.example/secret``
-                is a path-scoped key, and canonicalizing it to ``https://a.example``
-                would silently widen the credential from one path to every request to
-                that host, which is the outcome this rejection exists to prevent. So only the
-                parts that cannot change what the credential reaches are normalized --
-                scheme and host case, and a default port -- and a key that narrows the
-                scope is reported to the caller rather than rewritten into a broader
-                one.
-
-                The distinction matters because rejecting both was a real failure in
-                the other direction: a caller who wrote ``HTTPS://Private.Example:443/``
-                is naming the origin they meant, and rejection left them with a
-                credential that validated, appeared in their policy, and then never
-                applied to the request it was for. Nothing said so at either end.
-        Two keys that canonicalize to the SAME origin are rejected, for the same
-                reason a path-scoped key is: the comprehension that builds the canonical
-                map keeps the last and drops the first, so the caller ends up holding a
-                policy that lists two credentials and has one, and nothing said so at
-                either end. A credential the caller believes is applied is worse than one
-                rejected here -- the request would simply go out unauthenticated.
-
-                The error names both spellings, because "duplicate origin" alone leaves
-                the caller to work out which two of their own keys collided.
-
-                Each key is canonicalized ONCE, into the map that is returned, so the form
-                a key is checked against is by construction the form it is stored under;
-                there is no second computation that could disagree with the first.
+        """Key every credential by its canonical origin, at the read edge; the rule lives
+        in ``app.admission.credentials.origin_of`` (the same function every lookup uses), so one
+        rule at one site. A path-scoped or duplicate-canonical key is rejected, never narrowed.
         """
         if not isinstance(value, dict):
             return value
@@ -235,28 +202,9 @@ class CrawlPolicy(BaseModel):
     @field_validator("headers")
     @classmethod
     def _reject_banned_headers(cls, value: dict[str, str]) -> dict[str, str]:
-        """Reject chokepoint-bypassing header names in ``policy.headers``.
-
-        Anchored on ``CrawlPolicy`` (not a request model) so every endpoint
-        that embeds a policy -- crawl, map, render alike -- inherits the ban
-        from one site; a per-request validator is a per-call-site guard the
-        engine's chokepoints would still have to re-trust. Rejection, never a
-        silent strip, so the caller learns the contract.
-
-        ``authorization`` is deliberately absent: credentialed crawling of
-        one's own site is a real use case, and the typed replacement
-        (``policy.credentials``) scopes it per origin. Callers may
-        still set a raw ``Authorization`` header for one-off needs, but the
-        credentials field is the supported path: origin-scoped, scrubbed on
-        cross-host hops by the same redirect scrub as cookies.
-
-        A field validator rather than a model validator so the rejection
-        carries a location. From a ``mode="after"`` hook pydantic reports
-        ``loc=()``, which the API's code derivation cannot map, so a caller
-        whose only mistake was a ``Cookie`` header was told ``invalid_policy``
-        -- the one code that names no field -- instead of the
-        ``invalid_policy_headers`` the contract documents. The check is the
-        same single site either way; only the reported location changes.
+        """Reject chokepoint-bypassing header names, anchored on ``CrawlPolicy`` so every
+        endpoint inherits the ban from one site -- rejection, never a silent strip; ``authorization``
+        is deliberately absent (``policy.credentials`` scopes it). A field validator, so the location maps.
         """
         for key in value:
             reason = cls._BANNED_HEADERS.get(key.strip().lower())

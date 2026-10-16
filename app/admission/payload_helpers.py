@@ -25,16 +25,10 @@ def _validated_url(url: str, *, host_policy: HostPolicy) -> str:
 
 
 def payload_urls(payload: dict[str, Any], *, host_policy: HostPolicy) -> list[str]:
-    """Extract the request URL batch, collapsing duplicates by page identity.
+    """The request URL batch, collapsed by page identity.
 
-    ``NormalizedUrl`` is the single source of truth for what counts
-    as the "same page" (fragment / trailing-slash / tracking-param / param-order
-    variants all canonicalize identically), so dedup here must key on that
-    canonical form -- not the raw string. Identical pages crawl once; the first
-    occurrence is kept, order-preserving. Both the engine and the render paths
-    inherit the dedup here, and the batch-size check downstream counts unique
-    pages. Validation happens before the key is built, so a refused target is
-    never a distinct entry that can cross an acceptance boundary.
+    Dedup keys on the :class:`NormalizedUrl` canonical form, first kept,
+    order-preserving, validated first so no refused target crosses a boundary.
     """
     if "urls" in payload:
         urls = payload["urls"]
@@ -61,19 +55,10 @@ def checked_payload_urls(
     host_policy: HostPolicy,
     urls: list[str] | None = None,
 ) -> list[str]:
-    """Deduplicated URL batch, rejected if it exceeds the batch cap.
+    """Deduplicated URL batch; rejected if it exceeds the batch cap.
 
-    The single gate shared by the engine (sync) and the crawl endpoint (async
-    accept path): the async handler must call this *before* returning 202 so
-    an oversized batch is rejected at the boundary instead of being accepted
-    and failing inside the detached background task, where the caller can no
-    longer see why.
-
-    ``urls`` carries an already-derived batch forward: the
-    endpoint gate parses the payload once and hands the result to the engine,
-    so a request never parses the same batch twice. A forwarded batch skips
-    re-derivation but not the cap -- supplying urls cannot smuggle an
-    oversized batch past the ceiling.
+    Engine (sync) and crawl endpoint (async accept) share this gate; ``urls``
+    forwarding skips re-derivation but never the cap.
     """
     if urls is None:
         urls = payload_urls(payload, host_policy=host_policy)
@@ -90,21 +75,8 @@ def checked_payload_urls(
 def payload_policy(payload: dict[str, Any], tier: PolicyTier) -> CrawlPolicy:
     """Validate a wire policy into the model every decision site reads.
 
-    The ``invalid_policy_*`` codes this raises are derived from where the model
-    reports the error, in :func:`app.admission.policy.validate_wire_policy`, rather
-    than spelled out here -- the hand-spelled version that used to live in this
-    function had already begun to read ``limits`` three different ways and to
-    enforce bounds the model did not declare.
-
-    How a caller sees a rejection is not decided here either, and the honest
-    description is that it differs by edge. Over HTTP, FastAPI validates
-    ``CrawlRequest.policy`` as this model *before* the handler runs, so a
-    rejected policy arrives as a 422 ``validation_error`` carrying pydantic's
-    own ``loc``-tagged message and never reaches this function -- which makes
-    the per-field codes unreachable on that path, not merely unused. MCP
-    surfaces the bare code string. A direct ``crawl_request`` caller gets the
-    ``ValueError``. Three shapes for one bad input, each owned by the edge that
-    produced it.
+    ``invalid_policy_*`` codes come from where the model reports the error, in
+    :func:`validate_wire_policy`; the rejection shape differs by edge.
     """
     return validate_wire_policy(payload.get("policy") or {}, tier)
 
