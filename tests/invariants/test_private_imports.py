@@ -1,29 +1,7 @@
 """The suite reaches an ``app`` module through a public name, or through the ledger.
 
-43 of the 49 structural commits that moved ``app/`` also moved ``tests/``. That
-ratio is what this file exists to shrink, and it is expensive exactly once per
-refactor, which is the kind of cost that gets re-litigated instead of paid down.
-
-The underlying fact is that a test importing an ``app`` module's private name is
-not making a choice -- it is reporting that the module has no level above its
-insides, so there is nowhere else to stand. ``app/extraction/content.py`` published
-four entry points that were all *compositions*, while the twenty contracts
-underneath them were private; a caller reading the public surface would conclude
-it was covered, and the suite knew better.
-
-So the gate is deliberately blunt: **a private ``app`` name reaches the suite only
-through a declared ledger row with a reason.** It is blunt because a gate that
-weighs the merit of an import is a convention, and conventions decay. What the
-bluntness buys is the only thing worth enforcing here -- a new weld cannot land
-without somebody writing down why it is acceptable.
-
-The ledger is :mod:`tests.private_import_ledger`, and it is expected to shrink.
-Rows leave it as modules gain real surfaces (issues #70 through #82); rows that
-stay get their kind and reason filled in, which turns a line item into a
-decision. A row the suite no longer imports is a lie about the code, so the drift
-guard below holds the names to reality in both directions and the hand-maintained
-part is left as the reasons alone.
-"""
+43 of the 49 structural commits that moved ``app/`` also moved ``tests/``; a
+private import reports no public door, and only a declared row admits one."""
 
 from __future__ import annotations
 
@@ -57,28 +35,8 @@ _PATCH_CALLS = frozenset({"setattr", "object", "delattr"})
 def _private_app_names(tree: ast.Module) -> dict[str, int]:
     """``"module.name" -> lineno`` for every private ``app`` name the file reaches.
 
-    Three forms reach the same private name and the first version of this gate read
-    only one of them, which left 19 welds invisible: nineteen modules the suite
-    reaches through a bound module object rather than a from-import, as in
-    ``extraction_mod.quality_score``. A gate that can be walked around by
-    spelling the import differently is not a gate, so every form is resolved to the
-    same ``"module.name"`` key and the ledger holds names rather than spellings.
-
-    The third form is the one the suite uses most and the gate could not see at all:
-    ``monkeypatch.setattr(module, "_name", value)`` passes the reach as a string
-    literal, so a detector reading imports and attribute accesses finds nothing.
-    That is not a spelling detail -- it is 98 reaches, 45 of which had no ledger
-    row while this gate reported the suite clean. The target is resolved through the
-    module's own import bindings so the three spellings agree, and a target that
-    resolves to a non-``app`` module is skipped: a test's own private double is the
-    suite substituting something it owns, not reaching into ``app``.
-
-    One blind spot survives and is not papered over: a name patched on an *object*
-    the suite holds in a local (``monkeypatch.setattr(gate, "_usage_ratio", ...)``,
-    18 sites) names no module, so no syntactic gate can resolve it. That reach is
-    real and undeclared; closing it needs the factory's return type, not a wider
-    spelling.
-    """
+    Three forms (import, bound module object, ``setattr``) resolve to one key;
+    non-``app`` targets are skipped; a locally-held OBJECT names no module."""
     found: dict[str, int] = {}
 
     def record(key: str, lineno: int) -> None:
@@ -167,23 +125,16 @@ def test_no_rule_violations():
 def test_every_rule_bites():
     """A ledger gate that can only fire is indistinguishable from no gate.
 
-    Both directions are proved: the bite is a private import nobody declared, and
-    the clean set is a public name, a declared one, a non-``app`` module, and an
-    attribute read. The last two matter because a rule keyed on the text
-    ``_`` rather than on the import form would fire on all of them.
-    """
+    Both directions proved: an undeclared private import bites; a public name,
+    a declared row and a non-``app`` module stay clean."""
     RULES.check_all_bite()
 
 
 def test_ledger_rows_all_correspond_to_a_real_import():
     """A row the suite no longer imports is a lie about the code.
 
-    This is what keeps the ledger from becoming a second hand-maintained mirror of
-    the import graph: the names are verified in both directions on every run, so
-    the only thing a maintainer can drift is a reason -- prose, which is theirs to
-    hold. Without it, a row deleted from the suite would linger as a debt nobody
-    is paying, and the ledger would grow a false floor.
-    """
+    Names are verified both ways every run, so only a reason can drift;
+    otherwise a deleted row lingers as debt and the ledger grows a false floor."""
     actual: set[str] = set()
     for _, tree in trees_under(_TESTS_DIR):
         actual |= set(_private_app_names(tree))
@@ -207,13 +158,8 @@ def _module_of(path: pathlib.Path) -> str:
 def _cross_module_private_names(tree: ast.Module, path: pathlib.Path) -> dict[str, int]:
     """``"module.name" -> lineno`` for private names reached across a module boundary.
 
-    A module reaching its own privates is ordinary -- that is what private means --
-    so the owning module has to be resolved and compared rather than assumed. The
-    resolved name supplies both: ``from app.transport import body_decode``
-    binds ``body_decode``, so ``body_decode.decode_body`` resolves to
-    ``app.transport.body_decode.decode_body``, which names the module that
-    owns the definition and not merely the binding the caller happens to use.
-    """
+    A module reaching its own privates is ordinary; the owner is resolved, so
+    ``body_decode.decode_body`` names the owner module, not the bind."""
     here = _module_of(path)
     found: dict[str, int] = {}
     for node in nodes_of(tree):
@@ -288,13 +234,8 @@ _CONFTEST = _TESTS_DIR / "conftest.py"
 def _conftest_trees(*, exclude: frozenset[str] = frozenset()) -> tuple[tuple[pathlib.Path, ast.Module], ...]:
     """The one tree for ``tests/conftest.py``.
 
-    ``trees_under`` rglobs, so handed a *file* it returns nothing at all -- an empty
-    scope, which is the worst result available to a gate: green while inspecting zero
-    files. That is not hypothetical. It is what the first version of this function
-    did, and the reason the rule below carries a :attr:`~tests.rules.Rule.premise` is
-    that an empty trigger set is now a construction error rather than a passing
-    property.
-    """
+    ``trees_under`` rglobs, so handed a FILE it returns nothing -- green while
+    inspecting zero files: the empty-trigger construction error."""
     del exclude
     tree = ast.parse(_CONFTEST.read_text(encoding="utf-8"), filename=str(_CONFTEST))
     return ((_CONFTEST, tree),)
@@ -303,20 +244,8 @@ def _conftest_trees(*, exclude: frozenset[str] = frozenset()) -> tuple[tuple[pat
 def _conftest_private_offenders(tree: ast.Module, path: pathlib.Path) -> list[str]:
     """Every private ``app`` name ``conftest.py`` reaches, with nothing exempted.
 
-    The general gate lets a declared row through. This one does not, and the
-    difference is the argument rather than the strictness. In a test, a private
-    reach says the module has no public door the test can stand on, so a declared
-    row with a reason is a fair answer to that. In the autouse fixture it is not,
-    because the fixture has no test to be near: it runs before every one of them,
-    its imports are plumbing rather than assertions, and all of its reaches are the
-    same obligation -- some module holds process-wide state, and the only way the
-    harness can currently fulfil that is to reach in and mutate it.
-
-    So a ledger row cannot rescue a reach here. A row would record "and here is
-    why the harness mutates another module's private state", which is a true
-    sentence and a useless one: every kind the ledger defines describes a reach
-    that is *legitimate*, and none of them describes this.
-    """
+    The autouse fixture has no test to be near -- its reaches are plumbing,
+    one obligation (mutating process-wide state), no ledger kind describes it."""
     return [
         f"{relative_posix(path)}:{lineno}: {key} is private to another module"
         for key, lineno in sorted(_private_app_names(tree).items())

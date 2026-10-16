@@ -27,11 +27,8 @@ from tests.crawl.test_extraction import assert_extraction_empty
 def test_document_worker_gate_uses_the_shared_bool_parser(monkeypatch, caplog, raw, expected):
     """``CRAWLUTRON_EXTRACTION_DOC_ENABLED`` is read by the shared env parser.
 
-    The knob decides whether a document may consume a worker process, so "on" must
-    mean the same thing here as in every other feature flag. Asserting through the
-    pool rather than through the flag reader proves the reader is the one production
-    uses: a gate that ignored this variable would still acquire nothing.
-    """
+    "on" must mean the same here as in every flag; asserting through the pool
+    proves the reader is the one production uses."""
     set_optional_env(monkeypatch, "CRAWLUTRON_EXTRACTION_DOC_ENABLED", raw)
     spawner = StubSpawner(stub_worker(1))
     pool = DocExtractionPool(spawn=spawner, worker_count=lambda: 1, enabled=_enabled_from_env)
@@ -47,10 +44,8 @@ def test_document_worker_gate_uses_the_shared_bool_parser(monkeypatch, caplog, r
 def _enabled_from_env() -> bool:
     """The gate production builds ``DOC_POOL`` with, reached by value not by name.
 
-    Re-derived rather than imported because ``_document_extraction_enabled`` is
-    private and this test is about the parser's verdict, not about which function
-    holds it -- the pool's own gate honoring that verdict is asserted above.
-    """
+    Re-derived rather than imported because the reader is private; this test is
+    about the parser's verdict, and the pool honoring it is asserted above."""
     return parse_bool_env("CRAWLUTRON_EXTRACTION_DOC_ENABLED", default=True)
 
 
@@ -121,21 +116,16 @@ class TestLinkExtraction:
 def _reset_doc_extraction_pool():
     """No persistent process pool to reset.
 
-    Each extraction call now spawns its own short-lived process (reaped on
-    completion or timeout), so there is nothing to tear down between tests. The
-    injected env flags (TEST_MARKITDOWN_HANG / TEST_MARKITDOWN_OUTPUT) are
-    reverted by the ``monkeypatch`` fixture at test teardown.
-    """
+    Each extraction spawns its own short-lived process (reaped on completion or
+    timeout); the injected env flags revert via ``monkeypatch`` teardown."""
     yield
 
 
 async def test_extract_document_timeout_is_enforced(monkeypatch):
     """A document extraction exceeding the wall-clock timeout returns None.
 
-    The hang lives in the worker SUBPROCESS and is injected there through the
-    environment, so the suite's in-process sleep patch is irrelevant to it --
-    which is why this test never actually needed real sleeps.
-    """
+    The hang lives in the worker SUBPROCESS, injected via the environment, so
+    the suite's in-process sleep patch is irrelevant -- no real sleeps needed."""
     # The worker subprocess hangs; a deadline short enough to notice is the whole point of the test, so it is
     # passed in rather than written onto the module the call lives in.
     monkeypatch.setenv("TEST_MARKITDOWN_HANG", "1")
@@ -166,11 +156,8 @@ async def test_extract_document_child_death_returns_empty(monkeypatch):
 async def test_extract_document_output_is_truncated_at_the_configured_cap(monkeypatch):
     """Extracted markdown is truncated to the cap the caller configured.
 
-    The worker is told what to emit through the same hook the death and hang
-    scenarios use, so this asserts the cap rather than the plumbing around it: 10 KB
-    of markdown against a 10 KB cap is a truncation, and it is the only way to see
-    one without materializing the 5 MB default.
-    """
+    Same emission hook as the other scenarios; 10 KB against a 10 KB cap is a
+    truncation, visible without materializing the 5 MB default."""
     cap = 10000
     monkeypatch.setenv("TEST_MARKITDOWN_OUTPUT", "x" * (cap + 1000))
     monkeypatch.setenv("CRAWLUTRON_TEST_HOOKS", "1")
@@ -187,19 +174,8 @@ async def test_extract_document_output_is_truncated_at_the_configured_cap(monkey
 async def test_extract_document_normal_works():
     """A real document comes back as real markdown, converted by a real worker.
 
-    This deliberately does not inject ``TEST_MARKITDOWN_OUTPUT``. The hook
-    short-circuits the worker's task loop before markitdown is called, so a test
-    using it passes whether or not the worker can convert anything at all --
-    it is reading back an echo. The echo path itself is covered by the output
-    cap test above.
-
-    Running the real converter is also the only thing that covers the request
-    and reply shape the parent and the child must agree on. A stub connection
-    is written by the same hand as the code it stands in for, so it cannot
-    disagree with it; the two could drift apart and every stub-backed test
-    would still pass. Here the parent and the child are separate processes that
-    have to mean the same thing.
-    """
+    No hook: the echo path is covered elsewhere, and only a real conversion
+    exercises the parent/child request-reply shape."""
     ext_mod.DOC_POOL.teardown()
     result = extract_document(b"name,score\nada,10\n", "http://example.com/data.csv")
 
@@ -215,13 +191,10 @@ async def test_extract_document_normal_works():
 
 
 async def test_extract_document_process_pool_isolation(monkeypatch):
-    """Document extraction runs in a separate process so a hang can be killed
-    and does not degrade the shared thread pool.
+    """Document extraction runs in a separate process so a hang can be killed.
 
-    The kill is injected into the worker SUBPROCESS via the environment, so the
-    suite's in-process sleep patch is irrelevant to it -- which is why this
-    test never actually needed real sleeps.
-    """
+    The kill and the hang are injected into the worker SUBPROCESS via the
+    environment, so the in-process sleep patch never needed to apply here."""
     # The subprocess will check this env var and hang if set.
     monkeypatch.setenv("TEST_MARKITDOWN_HANG", "1")
     monkeypatch.setenv("CRAWLUTRON_TEST_HOOKS", "1")
