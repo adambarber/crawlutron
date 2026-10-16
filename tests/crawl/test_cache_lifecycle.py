@@ -82,12 +82,8 @@ class TestContentCacheEntryLifecycle:
     def test_content_cache_drops_entries_and_reports_the_count(self, tmp_path, drop):
         """Whatever retired them, the entries are gone and the count said so.
 
-        ``prune`` retires on TTL and ``clear`` retires unconditionally; the
-        property under test is identical, so it is one test over the two
-        operations. Advancing the clock for both costs nothing and keeps the
-        fixture to one shape -- spelled per operation it was two copies of the
-        same four assertions, which is how the ``clear`` copy ended up not
-        checking that the count matched the entries that disappeared.
+        ``prune`` retires on TTL, ``clear`` unconditionally; one test over the
+        two, since spelled per operation the ``clear`` copy lost the count.
         """
         cache, clock = make_seeded_cache(tmp_path, "key1", "key2", default_ttl=1)
         clock[0] = 1002.0
@@ -117,12 +113,8 @@ class TestContentCacheEntryLifecycle:
 class TestCachedAtReadsMetadataWithoutDeserializingTheValue:
     """Cached_at_of must not deserialize the whole envelope on every call.
 
-    Sitemap freshness checks call this for many keys per crawl, and each
-    envelope can hold a multi-MB body. Reading the value bytes off disk (and
-    JSON-parsing them) to answer a timestamp question makes freshness O(bytes)
-    instead of O(keys). The timestamp is now answered from a metadata mirror
-    that is warmed on set and on the first read, with _read_envelope remaining
-    the single chokepoint for full reads and for every state mutation.
+    Freshness checks touch many keys per crawl; reading the value bytes off
+    disk makes it O(bytes) instead of O(keys) -- the timestamp comes from a mirror.
     """
 
     def test_cached_at_after_set_reads_no_envelope(self, tmp_path):
@@ -204,9 +196,8 @@ class TestContentCacheUnlinkDiscipline:
     def test_re_set_key_survives_its_stale_eviction_unlink(self, tmp_path):
         """A key re-set after its eviction reuses the same deterministic path.
 
-        The deferred unlink must spare a file that has become live again,
-        otherwise the fresh write is destroyed and only a self-healing cache
-        miss hides the loss.
+        The deferred unlink must spare a file that has become live again, or the
+        fresh write is destroyed and only a self-healing miss hides the loss.
         """
         cache = cc.ContentCache(tmp_path, max_entries=1, max_total_bytes=None, default_ttl=0)
         key = cache.make_key("hot")

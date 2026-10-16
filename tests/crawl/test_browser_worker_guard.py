@@ -34,10 +34,8 @@ async def _run_worker(pool: BrowserPool, job: CrawlJob | None = None) -> CrawlRe
 class TestBrowserWorkerGuard:
     """The browser worker must return a classified result, never raise.
 
-    BrowserRenderer.render already wraps every attempt in a catch-all retry
-    loop that returns a classified CrawlResult, so the raw-propagation gap is
-    NOT in render -- it is in PooledBrowserWorker, which lets
-    BrowserPoolExhaustedError (and a missing pool) escape to the scheduler.
+    ``render`` already wraps everything; the gap is in ``PooledBrowserWorker``,
+    where pool exhaustion used to escape to the scheduler.
     """
 
     async def test_pool_exhaustion_returns_result_not_raises(self):
@@ -67,10 +65,11 @@ class TestTransientRequeue:
     """A capacity-exhausted URL goes back on the frontier, once."""
 
     async def test_pool_exhausted_url_is_requeued_to_the_frontier_tail(self):
-        """The at-least-once contract for capacity failures: the URL was never
-        attempted, so recording it as a permanent failure loses work. The
-        recursive loop must re-queue it at the frontier tail under a per-job
-        cap so a permanently oversubscribed crawl degrades instead of spinning."""
+        """The at-least-once contract for capacity failures: the URL was never attempted.
+
+        So recording it as permanent loses work; the loop re-queues it at the
+        frontier tail under a per-job cap so an oversubscribed crawl degrades.
+        """
         from app.models.crawl_task import CrawlTask
         from app.orchestration.recursive import MAX_TRANSIENT_REQUEUES, requeue_transient
 
@@ -96,14 +95,8 @@ class TestTransientRequeue:
     async def test_pool_exhausted_url_is_requeued_through_the_real_crawl_path(self, base_url):
         """End-to-end proof of the at-least-once contract this cluster is about.
 
-        An exhausted pool worker returns its classified ``CrawlResult``; the
-        engine's browser consumer reads it without an AttributeError; the
-        recursive loop keys on ``browser_pool_exhausted`` and re-queues the URL
-        to the frontier tail under the cap. That re-queue is observable here as
-        the worker being invoked once per try, and the classification surviving
-        to the final result. Before the worker honored its contracted shape the
-        classification was destroyed at the scheduler envelope (AttributeError
-        -> network_error) and the re-queue never fired.
+        Before the worker honored its shape, the classification was destroyed at
+        the scheduler envelope; now the re-queue fires and survives.
         """
         from app.orchestration.recursive import MAX_TRANSIENT_REQUEUES
         from app.transport.browser_pool import PooledBrowserWorker
