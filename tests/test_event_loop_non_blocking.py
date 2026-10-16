@@ -1,12 +1,7 @@
-"""Blocking disk I/O, serialization and DNS held on the
-asyncio event loop, or run under a ``threading.Lock`` the loop contends on.
+"""Blocking disk IO, serialization and DNS held off the event loop.
 
-Every test asserts an observable outcome — a concurrent lock holder or the
-event loop itself keeps making progress while the blocking work is in flight —
-rather than which internal helper happened to run. The blocking stubs spin on
-a counter only the event loop can advance, so the same work run on the loop
-fails on the observed count instead of on a wall-clock guess.
-"""
+Every test asserts an observable outcome -- a concurrent holder or the loop
+itself keeps advancing -- while the blocking work is in flight."""
 
 from __future__ import annotations
 
@@ -31,17 +26,8 @@ from tests._timing_harnesses import HANG_GUARD_SECONDS
 class _LoopLiveness:
     """A counter only the event loop can advance.
 
-    The heartbeat runs on the loop and bumps the count under a
-    ``threading.Condition``; the blocking work waits on that condition and
-    returns how far the loop got. The same work run *on* the loop can never
-    tick it, so it observes zero progress and fails on the count.
-
-    This was a wall-clock race before: the heartbeat slept 0.01s a hundred
-    times to accumulate ticks while the worker busy-spun on ``time.sleep``.
-    The condition removes the race entirely -- the worker is woken BY the tick
-    it was waiting for, so there is no rate at which the loop has to tick for
-    the assertion to hold, and no timeout in the success path at all.
-    """
+    The heartbeat runs on the loop and bumps the count under a ``Condition``;
+    the blocking work waits on it and reports how far the loop got."""
 
     def __init__(self, needed: int = 3) -> None:
         self.needed = needed
@@ -58,10 +44,8 @@ class _LoopLiveness:
     def wait_for_progress(self, timeout: float = HANG_GUARD_SECONDS) -> int:
         """Blocking worker: return how far the loop advanced while we waited.
 
-        The baseline is snapshotted on entry, so the count can only be
-        satisfied by ticks that land WHILE the blocking work is in flight --
-        the same work run on the loop observes zero and fails on the count.
-        """
+        The baseline is snapshotted on entry, so only ticks landing WHILE the
+        blocking work is in flight can satisfy the count."""
         with self._condition:
             baseline = self.ticks
             self._condition.wait_for(lambda: self.ticks - baseline >= self.needed, timeout=timeout)
@@ -70,11 +54,8 @@ class _LoopLiveness:
     async def run_with_heartbeat(self, work, *, timeout: float):
         """Await ``work()`` with the heartbeat ticking; cancel the tick task.
 
-        The shared scenario scaffolding — spawn the heartbeat task, bound the
-        run, and cancel the heartbeat no matter how the work exits —
-        exists here and nowhere else, so a test cannot forget the ``finally``
-        and leak the heartbeat into the next test's tick count.
-        """
+        The shared scaffolding -- spawn, bound the run, cancel no matter how the
+        work exits -- lives here so a test cannot leak a heartbeat."""
         hb = asyncio.ensure_future(self.heartbeat())
         try:
             return await asyncio.wait_for(work(), timeout=timeout)
@@ -85,11 +66,8 @@ class _LoopLiveness:
 async def _wait_for(flag: threading.Event, *, reason: str) -> None:
     """Block until a worker thread sets ``flag``.
 
-    ``flag`` is a ``threading.Event`` because it is set from a worker thread,
-    and the wait runs in a thread too -- so the event loop stays free to run
-    whatever it is the loop's job to run. A poll loop here would hold the GIL
-    for exactly as long as it is waiting on the thread that wants it.
-    """
+    The wait runs in a thread, so the loop stays free; a poll loop here would
+    hold the GIL for as long as it waits on the thread that wants it."""
     if not await asyncio.to_thread(flag.wait, HANG_GUARD_SECONDS):
         pytest.fail(f"{reason} (no signal within {HANG_GUARD_SECONDS}s)")
 
@@ -97,12 +75,8 @@ async def _wait_for(flag: threading.Event, *, reason: str) -> None:
 def _serve_stale_envelope(monkeypatch, cache: ContentCache, stale: bytes) -> list[bool]:
     """Serve ``stale`` bytes for key "k"'s envelope file until the toggle clears.
 
-    The envelope read runs off the lock and can race a concurrent refresh, so
-    these tests must control exactly what the file read returns while the
-    assertion runs; the returned toggle re-enables the real bytes once the
-    racy window is done. The staging (capture the real ``read_bytes``, patch
-    the conditional stub) exists here and nowhere else.
-    """
+    The envelope read runs off the lock and can race a refresh; the returned
+    toggle re-enables the real bytes once the racy window is done."""
     serve = [True]
     real_read_bytes = Path.read_bytes
 
@@ -118,10 +92,8 @@ def _serve_stale_envelope(monkeypatch, cache: ContentCache, stale: bytes) -> lis
 def _clocked_cache(tmp_path) -> tuple[list[float], ContentCache]:
     """A cache whose clock the test advances; return ``(now, cache)``.
 
-    The tests here are about a verdict computed at one instant from bytes read
-    at another, so the clock has to be a value they move. One builder keeps the
-    ttl/byte-cap pair they share from being restated as two literals.
-    """
+    These tests pin a verdict computed at one instant from bytes read at
+    another; one builder keeps the shared ttl/byte-cap pair stated once."""
     now = [1000.0]
     cache = ContentCache(str(tmp_path), default_ttl=30, clock=lambda: now[0], max_entry_bytes=10_000)
     return now, cache
@@ -235,15 +207,9 @@ class TestContentCacheDiskIOOffTheLock:
         assert cache._index_sizes["k"] == path.stat().st_size
 
     def test_prune_does_not_destroy_an_entry_refreshed_during_the_scan(self, monkeypatch, tmp_path) -> None:
-        """The expiry verdict was computed from bytes read off the lock, so a
-        re-set that landed during the scan (same deterministic path, a new TTL)
-        must not be applied: the entry is live, and unlinking it destroys data.
-
-        The direct analogue of
-        :meth:`test_read_of_superseded_bytes_does_not_enter_the_mirror` for the
-        prune verdict: the mirror guard there and the verdict guard here are the
-        same currency check against the recorded index entry.
-        """
+        """The expiry verdict came from bytes read off the lock; a re-set that
+        landed during the scan must not be applied -- the entry is live and
+        unlinking destroys data. The mirror-guard analogue for the prune verdict."""
         now, cache = _clocked_cache(tmp_path)
         cache.set("k", {"body": "a" * 100}, ttl=10)  # expires 1010
         # The refresh a concurrent writer landed during the scan: a longer payload so the recorded byte size
@@ -265,16 +231,9 @@ class TestContentCacheDiskIOOffTheLock:
         assert cache.get("k") == {"body": "b" * 200}
 
     def test_stale_read_does_not_poison_the_freshness_mirror(self, monkeypatch, tmp_path) -> None:
-        """The freshness mirror is written from bytes read off the lock, so a
-        superseded read must not record its ``(expires, cached_at)``: a
-        fabricated timestamp and a stale ``expires=None`` (which makes a live
-        entry look never-expiring) both violate the module contract that the
-        fast path can never answer from metadata the slow path would have
-        expired.
-
-        The sibling value-mirror write in the same method is already guarded;
-        this is the same guard for the metadata mirror.
-        """
+        """A superseded read must not record its ``(expires, cached_at)`` --
+        a stale ``expires=None`` makes a live entry look never-expiring. The
+        value-mirror write is already guarded; same guard, metadata mirror."""
         now, cache = _clocked_cache(tmp_path)
         cache.set("k", {"v": "old"})  # (expires, cached_at) = (1030.0, 1000.0)
         real = cache._index_cached_at["k"]
@@ -347,15 +306,9 @@ class TestJobRunnerSavesOffTheEventLoop:
 class TestAsyncCrawlRunnerSavesOffTheEventLoop:
     """``run_async_crawl`` must not serialize+commit the job row on the loop.
 
-    ``run_job`` (the whole-site runner above) already offloads its saves via
-    ``asyncio.to_thread(job_store.save,...)``. The async single-shot runner
-    called ``job_store.save`` directly at its RUNNING / COMPLETED / FAILED
-    transitions -- same store, contradictory discipline, and the full response
-    body was serialized and written while the loop stalled. The blind spot
-    survived because the guard above drives only ``run_job``; this one drives
-    ``run_async_crawl`` itself, so the async path cannot regress unnoticed
-    again.
-    """
+    The single-shot runner used to call ``job_store.save`` directly at its
+    transitions, stalling the loop while the response serialized; this guard
+    drives ``run_async_crawl`` itself, not just the whole-site runner."""
 
     async def test_run_async_crawl_save_does_not_block_the_event_loop(self, monkeypatch, tmp_path) -> None:
         from app.api.async_crawl_runner import run_async_crawl
