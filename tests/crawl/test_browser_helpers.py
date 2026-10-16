@@ -19,8 +19,7 @@ async def _retry_exhausted(browser_factory, *, max_retries: int = 1):
     """Render through a browser factory that always raises, retries off the clock.
 
     Asserts the budget was actually spent -- ``attempts == max_retries + 1`` --
-    so a test claiming "exhausted" cannot pass because the first attempt already
-    failed. Returns the result for the caller to classify.
+    so "exhausted" cannot pass because the first attempt already failed.
     """
     renderer = BrowserRenderer(
         driver=BrowserDriver(browser_factory=browser_factory),

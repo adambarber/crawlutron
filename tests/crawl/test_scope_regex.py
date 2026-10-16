@@ -1,8 +1,7 @@
 """Adversarial fix (MEDIUM): ReDoS guard for user-controlled scope_regex.
 
-scope_regex is applied to every discovered link URL. A pattern such as
-``(a+)+$`` triggers catastrophic backtracking and can hang the request. We
-refuse to compile pathological patterns and bound the number of links scanned.
+``scope_regex`` is applied to every discovered link; a pathological pattern
+like ``(a+)+$`` is refused at compile and the scanned-link count is bounded.
 """
 
 import contextlib

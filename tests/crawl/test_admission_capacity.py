@@ -97,17 +97,8 @@ async def test_admission_robots_work_stops_at_remaining_capacity():
 class TestAPersistedScopeRestrictionFailsClosed:
     """A stored scope restriction that cannot compile must not widen the crawl.
 
-    The request boundary rejects an invalid ``scope_regex`` with
-    ``invalid_policy``, so the pattern that reaches a job row compiled when it
-    was written. The gap is the resume: the same row, loaded later, compiles
-    under today's rules -- and an unparsable pattern resolved to ``None``,
-    which every consumer reads as "no restriction declared". A crawl the
-    operator restricted then ran unrestricted, silently, which is the one
-    outcome a scope policy must never produce.
-
-    ``None`` from the compiler keeps exactly one meaning: no restriction was
-    declared. A restriction that is declared but unusable raises, so the job
-    fails loudly instead of crawling wide.
+    On resume an unparsable pattern read as "no restriction" and the crawl ran
+    unrestricted; an unusable restriction now raises loudly instead.
     """
 
     def test_a_declared_pattern_that_cannot_compile_raises(self):

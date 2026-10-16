@@ -18,13 +18,10 @@ def _resolve_as(addrs):
 
 
 class TestBuildPinnedRequest:
-    """The builder applies the pin policy so a fetcher cannot re-resolve at
-    connect time (DNS rebinding TOCTOU): plain HTTP connects to the exact
-    validated IP with a Host header preserving the hostname; HTTPS keeps the
-    hostname (SNI/cert), matching the sibling HTTP fetcher.
+    """The builder applies the pin policy so a fetcher cannot re-resolve at connect.
 
-    The old ``SafeUrl.connect`` refused an unpinned URL; the builder removed
-    the unpinned state entirely -- there is no ``pin`` switch left to leave off.
+    Plain HTTP connects to the validated IP with hostname in Host, HTTPS keeps
+    the hostname; the old ``SafeUrl.connect`` refused an unpinned URL.
     """
 
     def test_plain_http_uses_pinned_ip_and_host_header(self, monkeypatch):

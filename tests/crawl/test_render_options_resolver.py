@@ -1,25 +1,8 @@
 """Resolve_render_options chokepoint.
 
-Effective render options used to be decided in several places that had
-already drifted: the engine's browser strategy hard-coded the capture
-knobs while policy-derived reads respected the caller elsewhere, and the
-``/v1/render`` builder silently dropped ``browser_profile``. Exactly one
-place (``app/admission/render_options.py``) now turns request-side options +
-server defaults into the effective ``RenderOptions``.
-
-The knob has TWO consumers with different owners, and the split is pinned
-here rather than argued per call site:
-  * capture (what the browser worker extracts) — the caller legitimately
-    controls this on ``/v1/render``; on the crawl path the PIPELINE owns
-    it, because ``_browser_strategy_result`` feeds the captured HTML to
-    markdown extraction and link discovery BEFORE the caller's output knob
-    is applied to the spilled payload (disabling capture there would
-    change results, not just save work);
-  * payload (what survives into results) — always the caller's
-    ``browser_profile.include_html``, read through ``policy_wants_html``.
+Exactly one place now decides effective RenderOptions; the two consumers split:
+capture is the pipeline's on the crawl path, payload is the caller's include_html.
 """
-
-from __future__ import annotations
 
 import pytest
 

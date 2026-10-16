@@ -26,10 +26,8 @@ def _policy(*, respect_robots: bool = True) -> dict:
 def _gate(fetch_and_decode: FetchAndDecode | None = None) -> RobotsGate:
     """A gate over default settings and no host policy.
 
-    The consolidation tests all read one policy through two very different
-    paths, so the gate is built once here: the arguments were restated at every
-    call site, and a test that changed one of them stopped being about the
-    robots cache at all.
+    The consolidation tests read one policy through two very different paths,
+    so the gate is built once; the arguments were restated at every call site.
     """
     return RobotsGate(CrawlPolicy(), HostPolicy.unrestricted(), fetch_and_decode)
 

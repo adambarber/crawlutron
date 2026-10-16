@@ -33,9 +33,8 @@ from tests._policy_factories import canonical, http_strategy_policy
 def http_policy(*strategies: str, extraction: str = "full", **extra) -> CrawlPolicy:
     """The HTTP strategy's policy with a different strategy list or one more key.
 
-    Derived from the shared policy factory rather than re-spelled: the limits and
-    the empty header mappings are that factory's to state, and a test says only
-    the part it is changing.
+    Derived from the shared policy factory rather than re-spelled, so the
+    limits and empty header mappings are that factory's to state.
     """
     raw = http_strategy_policy(extraction=extraction).model_dump()
     if strategies:

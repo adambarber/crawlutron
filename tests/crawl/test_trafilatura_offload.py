@@ -1,9 +1,7 @@
 """Sync trafilatura extraction must leave the event loop.
 
-``http_strategy_result`` (strategies/http.py) and ``_browser_strategy_result``
-(engine.py) call ``extract_html`` (trafilatura, CPU-bound) synchronously
-inside async functions. Both must go through ``asyncio.to_thread`` like the
-neighboring ``extract_document``/``extract_content`` calls already do.
+Both strategy result builders call the CPU-bound ``extract_html`` synchronously;
+they must go through ``asyncio.to_thread`` like their sibling calls.
 """
 
 from app.extraction.content import extract_html

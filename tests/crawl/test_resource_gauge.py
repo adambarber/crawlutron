@@ -10,9 +10,8 @@ from app.runtime.resource_pressure import LoopLagProbe, ResourceGate
 def _sensor(sequence: list[float]):
     """A sensor that walks a series of readings and holds the final value.
 
-    This replaces a ``ResourceGauge`` subclass that existed only to supply a
-    reading: the sensor is a callable, so a scripted one needs no class, no
-    override and no patch.
+    It is a callable, so a scripted one needs no ``ResourceGauge`` subclass,
+    no override and no patch.
     """
     values = list(sequence)
     index = 0

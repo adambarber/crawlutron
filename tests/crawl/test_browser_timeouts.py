@@ -1,10 +1,7 @@
 """Caller time budgets must be honored and bounded.
 
-- RenderOptions.timeout_seconds was never enforced (page.goto ran on
-  Playwright's default); the navigation must honor it and surface
-  navigation_timeout through the existing retry envelope.
-- The action-chain "wait" timeout was caller-unbounded (contrast the
-  clamped wait_seconds); it is clamped to MAX_ACTION_WAIT_SECONDS.
+The navigation must honor ``timeout_seconds`` and surface ``navigation_timeout``;
+the action-chain ``wait`` was caller-unbounded and is clamped.
 """
 
 import asyncio

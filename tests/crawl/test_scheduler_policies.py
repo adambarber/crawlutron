@@ -162,12 +162,10 @@ class TestSchedulerPolicies:
         assert "example.com" not in scheduler._domain_min_delay
 
     async def test_run_streams_results_via_on_result(self):
-        """With ``on_result`` set, each completed result is
-        delivered immediately (a fast job is delivered before a slow one) and
-        ``run`` returns None (nothing accumulated in memory).
+        """With ``on_result`` set, each completed result is delivered immediately.
 
-        Uses an ``asyncio.Event`` (not ``asyncio.sleep``) to force ordering,
-        because the test environment patches ``sleep`` to be instant.
+        A fast job is delivered before a slow one and ``run`` returns None;
+        ``asyncio.Event`` forces the order since the env patches ``sleep``.
         """
         on_result_order: list[int] = []
         release_slow = asyncio.Event()

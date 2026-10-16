@@ -22,10 +22,8 @@ from tests._policy_factories import canonical
 def assert_extraction_empty(result) -> None:
     """A failed document extraction yields nothing at all, in both fields.
 
-    A timeout, a crash and a parse failure all arrive here, and all three are
-    the same claim: no text *and* no markdown. Asserting one field would let a
-    half-filled result through, which is how an empty page reaches the caller
-    dressed as a successful extraction.
+    A timeout, crash or parse failure all claim "no text and no markdown";
+    asserting one would let a half-filled result through as a success.
     """
     assert result.text is None
     assert result.markdown is None

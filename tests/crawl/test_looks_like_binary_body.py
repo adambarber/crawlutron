@@ -1,9 +1,7 @@
 """LOW fix regression: looks_like_binary_body magic-number check.
 
-The historical bug used a duplicated b"PK" and a single-byte b"\xe3" (0xE3) that
-false-positived on ordinary UTF-8 text (e.g. any 3-byte sequence led by 0xE3,
-common in CJK). The correct magic bytes are PK\x03\x04 (zip local header),
-PK\x05\x06 (zip EOCD), and \x1f\x8b (gzip). These tests lock that in.
+The historical bug used a duplicated ``b"PK"`` and a single-byte ``0xE3`` that
+false-positived on CJK/UTF-8; the correct magic bytes are the zip and gzip ones.
 """
 
 from app.transport.fetch_policy import looks_like_binary_body

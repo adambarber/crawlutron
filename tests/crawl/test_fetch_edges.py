@@ -326,17 +326,8 @@ class TestFetchHelpersEdges:
 class TestAcceptEncodingAdvertisesOnlyWhatWeCanDecode:
     """Asking for an encoding we cannot decode is a self-inflicted failure.
 
-    ``Accept-Encoding`` must not name a coding outside
-    ``app.transport.decompression.DECODABLE_ENCODINGS``: a server told to send a body
-    this process will then refuse or pass through whole fails the crawl on a
-    request we chose to make that way.
-
-    Every decoder in the advertised list is a declared dependency, so the list is
-    unconditional. It was once gated on a brotli availability probe, and the two
-    tests below are the residue of that: one skipped itself when the probe said
-    no, and one monkeypatched the probe to ``False`` to assert a deployment
-    requirements.txt does not describe. Both are gone; what is asserted instead is
-    that the unconditional list is unconditionally decodable.
+    ``Accept-Encoding`` must name only a decodable coding; the advertised list is
+    unconditional (a decoder is a declared dependency), not probe-gated.
     """
 
     def test_br_is_advertised(self):

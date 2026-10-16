@@ -1,15 +1,7 @@
 """Cross-process shared counters: the substrate every multi-worker fact needs.
 
-`MetricsStore` is a dataclass singleton with plain integer increments and a
-`threading.Lock`. Both are invisible across processes, so with N workers
-`/metrics` served one worker's numbers while reporting a healthy service. The
-spill-GC bug was the same shape: a fact held in a structure that only the
-writing process could see.
-
-The property under test is therefore not "increments add up" -- it is that two
-*independent connections* to one database observe one total. Two connections
-are exactly what two `uvicorn --workers` processes hold, so the test uses two
-rather than exercising a single object twice.
+Plain increments and a thread lock are invisible across processes, so with N
+workers ``/metrics`` served one worker's numbers, not a shared total.
 """
 
 import pytest

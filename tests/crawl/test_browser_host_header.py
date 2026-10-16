@@ -1,9 +1,7 @@
 """The pinned Host header must not leak to later page requests.
 
-set_extra_http_headers() applies page-wide: without clearing after the
-pinned navigation, every later request from that page (third-party XHR,
-subsequent navigations) carries the spoofed Host. The render must set it
-for the navigation, then clear it.
+``set_extra_http_headers`` applies page-wide, so the render must set the host
+for the pinned navigation, then clear it.
 """
 
 from tests._browser_doubles import ROUTE_ARG_UNSET, render_pinned, run_route_with_pinner

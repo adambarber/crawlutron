@@ -17,21 +17,8 @@ from tests._policy_factories import UNRESTRICTED_HOST_POLICY
 async def _track_overlapping_tabs(page, *, tracker, saturated):
     """Count the tabs open at the same moment, which is the cap's whole job.
 
-    The cap decides how many tabs may be open *concurrently*, and
-    ``tracker["max"]`` is that number. A cap that serialized renders entirely
-    would report 1, and a cap that was ignored would report 6.
-
-    Holding the tab open until ``saturated`` is set is what makes that a fact
-    instead of a race. Measuring overlap at a single ``asyncio.sleep(0)`` --
-    the earlier version of this helper -- looked correct and was not: when the
-    event loop is loaded, the first holder is resumed and decrements before the
-    second is ever scheduled inside the window, so a cap of 2 reported 1 and the
-    test failed roughly one run in five without anything being wrong. A cap of
-    N admits N waiters, so waiting for N of them to be inside is deterministic.
-
-    The wait is bounded, and a timeout is swallowed rather than raised, so that
-    "the cap serialized everything" arrives as the assertion below it failing
-    with a readable tracker instead of a bare ``TimeoutError`` from here.
+    A serializing cap reports 1, an ignored one 6; a single ``sleep(0)`` was a
+    race under load, so holding the tab open until ``saturated`` is deterministic.
     """
     tracker["n"] += 1
     tracker["max"] = max(tracker["max"], tracker["n"])

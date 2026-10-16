@@ -1,10 +1,7 @@
-"""CRITICAL fix: recursive crawl scope filtering must use the safe
-compiled regex, never a raw re.search(scope_regex, link).
+"""CRITICAL fix: recursive crawl scope filtering must use the safe compiled regex.
 
-A malicious scope_regex like (a+)+$ would hang the recursive loop via
-catastrophic backtracking if applied with re.search on every discovered link.
-The fix compiles the pattern once with compile_scope_pattern (which rejects
-pathological patterns) and uses the compiled pattern's .search() in the loop.
+A malicious ``scope_regex`` like ``(a+)+$`` would hang the loop on every link;
+the pattern is compiled once (rejecting pathological forms) and used in the loop.
 """
 
 import re

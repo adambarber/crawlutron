@@ -1,12 +1,7 @@
-"""Streaming spill: page results serialize to disk as each batch
-completes, so peak memory scales with batch size instead of total pages.
+"""Streaming spill: page results serialize to disk as each batch completes.
 
-Contract:
-* ``crawl_request(..., spill_path=...)`` writes exactly one JSON line per
-  crawled page ({"i": index, "r": to_dict(result)}) in append order.
-* The assembled response is byte-equivalent to a run without spilling.
-* Auto-created temp spill files are deleted when the request finishes;
-  stale spills from dead runs are garbage-collected on subsequent crawls.
+Peak memory scales with batch size, not total pages; ``crawl_request`` writes
+one JSON line per page in append order, and temp spills are cleaned up.
 """
 
 import json

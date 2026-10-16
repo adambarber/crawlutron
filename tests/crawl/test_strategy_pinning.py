@@ -45,9 +45,8 @@ class TestStrategyPinning:
 class TestExecuteCrawlChainPinning:
     """Where ``starting_strategies`` puts the ladder start.
 
-    These call the production slice rather than restating it. A restatement is
-    a tautology: it keeps passing when production's pinning is deleted, which is
-    exactly the regression this class exists to catch.
+    These call the production slice rather than restating it; a restatement is
+    a tautology that keeps passing when production's pinning is deleted.
     """
 
     def test_chain_starts_at_pinned_strategy(self) -> None:

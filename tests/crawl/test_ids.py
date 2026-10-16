@@ -1,9 +1,7 @@
 """Request/job id entropy contract (extended to handles).
 
-GET /v1/crawl/{request_id} takes the id as its only lookup credential, so
-the "avoid brute-forceable short IDs" policy that job_store documents for
-job_id must govern request handles too — the 12-hex mints were 48 bits of
-entropy exposed in a status URL.
+The id is the only lookup credential for ``/v1/crawl/{id}``, so the
+anti-brute-force policy must govern request handles too -- 12-hex was 48 bits.
 """
 
 import re
