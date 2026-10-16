@@ -53,13 +53,8 @@ def _job_post(node):
 def _seeded_job(node):
     """A seeded-job run assembled by hand instead of through the funnel.
 
-    The two halves are the row seeder and the seeded runner. Reaching for both
-    in one scope is how the shape was written before ``run_seeded_scripted_job``
-    existed, and a reader copying it gets the persistence and recovery wiring
-    inlined again. A call to the funnel itself is the sanctioned state and must
-    not be reported -- the owner is skipped by name further up, but naming it
-    here as well would flag every legitimate caller.
-    """
+    Copying the seeder + runner pair inlines the recovery wiring again; a call
+    to the funnel itself is sanctioned and must not be reported."""
     return _has_call(node, "_seed_job") and _has_call(node, "run_seeded_job")
 
 
@@ -74,13 +69,10 @@ def _response_handler(node):
 
 
 def _http_strategy(node):
-    """A call that re-spells one page's identity inline instead of passing the record.
+    """A call re-spelling one page's identity inline instead of the record.
 
-    Kept in step with the entry point's signature: when the five identity fields
-    moved into ``StrategyRequest``, this detector had to follow them inside the
-    ``request=`` keyword, or a match on the old six-keyword shape could never
-    fire again and the clone it exists to catch would be reported as clean.
-    """
+    When the identity fields moved into ``StrategyRequest``, the match had to
+    follow them into the ``request=`` keyword or it could never fire again."""
     for child in nodes_of(node):
         if not isinstance(child, ast.Call) or _name(child.func) != "http_strategy_result":
             continue
@@ -174,27 +166,17 @@ def _job_store(node):
 def _is_50_mib_ceiling(node) -> bool:
     """Whether a default value is production's ``50 * 1024 * 1024`` byte ceiling.
 
-    Matched on the arithmetic rather than a single literal, so the detector
-    survives a reformat and would still fire if the constant were re-derived
-    (``52_428_800``, ``50 << 20``) without turning into noise.
-    """
+    Matched on the arithmetic, not a single literal, so the detector survives a
+    reformat and still fires on a re-derived constant."""
     dumped = ast.dump(node)
     return "50" in dumped and "1024" in dumped
 
 
 def _scripted_fetcher(node):
-    """A def that re-declares the production ``http_fetcher`` contract.
+    """A def re-declaring the production ``http_fetcher`` contract.
 
-    The distinctive part is the ``max_content_length`` default: 50 MiB is the
-    ceiling in ``app/transport/fetchers.py``, and a test def that
-    hard-codes it is asserting that ceiling by copying it. When production
-    lowers the ceiling such a copy still passes, and the test that looked like
-    it covered the bound covers nothing.
-
-    Requiring a ``headers`` parameter alongside it is what keeps this from
-    matching every four-argument helper: a def taking a request's headers and a
-    content-length cap is a fetcher, whatever it is called.
-    """
+    Hard-coding the 50 MiB ceiling asserts it by copying it, and a copy still
+    passes when production lowers it; the ``headers`` guard shapes the match."""
     if not isinstance(node, FUNCTION_TYPES):
         return False
     params = [arg.arg for arg in (*node.args.posonlyargs, *node.args.args)]
@@ -212,13 +194,10 @@ def _scripted_fetcher(node):
 
 
 def _ssrf_resolution(node):
-    """A test that builds a private-resolution precondition by hand.
+    """A test building a private-resolution precondition by hand.
 
-    Two halves, and both are required: the allow-private escape hatch has to be
-    closed, and the resolver has to be pinned. A copy that closes one and not
-    the other produces a verdict about the environment rather than the policy,
-    and a copy that is missing one half fails (or passes) for the wrong reason.
-    """
+    Both halves are required: the escape hatch closed AND the resolver pinned;
+    a copy missing one half fails or passes for the wrong reason."""
     blocks = _has_call(node, "block_private_targets")
     pins = any(
         isinstance(child, ast.Call)
@@ -235,13 +214,8 @@ def _ssrf_resolution(node):
 def _crawl_submit(node):
     """A raw /v1/crawl POST whose body is projected for results.
 
-    Reading ``["results"]`` off a crawl response *is* the assertion that the
-    request ran synchronously -- which is what ``completed_crawl`` owns and
-    checks once. Narrower than "any crawl POST" on purpose: a test that wants
-    the status code, the headers or a 422 rejection is asserting something else
-    and legitimately needs the raw response, so flagging it would be the
-    detector insisting on a funnel that does not fit.
-    """
+    Reading ``["results"]`` off the response is the assertion that the request
+    ran synchronously; status/headers/422 tests legitimately need the raw body."""
     posts = [
         child
         for child in nodes_of(node)
@@ -266,11 +240,8 @@ _PROCESS_DOUBLE_METHODS = frozenset({"is_alive", "terminate", "kill", "join"})
 def _process_double(node):
     """A second ``multiprocessing.Process`` stand-in.
 
-    The pool's contract *is* signal semantics, so a stand-in is any class with
-    is_alive/terminate/kill/join. Three copies of one existed, each freezing its
-    own idea of what ``exitcode`` should be; ``_process_doubles.StubProc`` models
-    all of it and a test states only the property it needs.
-    """
+    The pool's contract is signal semantics, so a stand-in is any class with
+    is_alive/terminate/kill/join; ``_process_doubles.StubProc`` models it once."""
     if not isinstance(node, ast.ClassDef):
         return False
     return _PROCESS_DOUBLE_METHODS <= {
@@ -281,10 +252,8 @@ def _process_double(node):
 def _lifespan_teardown(node):
     """A hand-built "neutralise the heavy lifespan teardown" setup.
 
-    Which closers the lifespan reaches is production's list, and a test that
-    re-spells a subset reaches the real implementation for whatever the test
-    forgot. ``stub_heavy_teardown`` derives the set instead.
-    """
+    Re-spelling a subset of production's closer list reaches the real teardown
+    for whatever the test forgot; ``stub_heavy_teardown`` derives the set."""
     if _has_call(node, "stub_heavy_teardown"):
         # Specialising the neutraliser is routing through it, not inlining it: the set of closers still came
         # from the chokepoint.
@@ -303,15 +272,10 @@ def _lifespan_teardown(node):
 
 
 def _crawled_urls(node):
-    """A test that crawls scripted pages by hand instead of through crawled_urls.
+    """A test crawling scripted pages by hand instead of through crawled_urls.
 
-    The shape is a ``crawl_request`` whose ``http_fetcher`` is a freshly
-    constructed ``site_fetcher(...)``: the test is serving a literal page table
-    to the recursive crawler, which is exactly what ``crawled_urls`` does. A
-    copied payload + copied call can drift from the chokepoint in either
-    direction -- a policy key the helper knows about and the copy does not, or a
-    cache the copy drops -- and the copy is the one the test actually ran.
-    """
+    A ``crawl_request`` with a fresh ``site_fetcher(...)`` is exactly what
+    ``crawled_urls`` does; a copied call can drift from the chokepoint."""
     return any(
         isinstance(child, ast.Call)
         and _name(child.func) == "crawl_request"
