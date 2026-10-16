@@ -33,10 +33,8 @@ def test_redirect_target_strips_sensitive_headers_cross_host():
 def test_redirect_target_keeps_sensitive_headers_within_one_origin():
     """A path change within one origin. Renamed from "same_host".
 
-    The boundary is the origin, not the host, so a test named for the host was
-    asserting something weaker than the code guarantees -- and, read the other
-    way, implying that same host was sufficient, which is exactly the bug #69
-    fixed.
+    The boundary is the origin, not the host; a test named for the host
+    asserted something weaker -- implying same host was sufficient, bug #69.
     """
     headers = {"Cookie": "s=1"}
     result = redirect_target(canonical("http://a.com/a"), headers, 307, "/b", 2)
@@ -46,15 +44,10 @@ def test_redirect_target_keeps_sensitive_headers_within_one_origin():
 
 
 def test_redirect_target_strips_sensitive_headers_on_a_port_change():
-    """A different port on the same host is a different origin, and a different service.
+    """A different port on the same host is a different origin, and a service.
 
-    RFC 6454 puts the port in the origin, and the service already believes that
-    elsewhere: ``credentials.origin_of`` is ``scheme://host[:port]`` with default
-    ports dropped, and ``apply_credentials`` sends a credential only to that exact
-    origin. So a credential scoped to ``https://a.com:443`` is not sent to
-    ``https://a.com:8443``, while one attached to ``https://a.com`` is. Two
-    chokepoints answering "is this the same origin?" with different answers, and
-    this one was the looser of the pair.
+    RFC 6454 puts the port in the origin, and ``credentials.origin_of`` already
+    believes that; this chokepoint was the looser of the two answers.
     """
     headers = {"Cookie": "s=1", "Authorization": "Bearer t", "Accept": "*/*"}
     result = redirect_target(canonical("https://a.com/x"), headers, 301, "https://a.com:8443/z", 0)
@@ -81,10 +74,8 @@ def test_redirect_target_strips_sensitive_headers_on_a_scheme_downgrade():
 def test_redirect_target_keeps_sensitive_headers_across_a_default_port_spelling():
     """A hop that only respells the default port is not a boundary crossing.
 
-    The other half of the origin rule, and the one a naive ``host:port`` string
-    comparison gets wrong: ``https://a.com`` and ``https://a.com:443`` are the
-    same origin, so scrubbing on that hop would drop the session on every
-    legitimate redirect that spells the port out.
+    ``https://a.com`` and ``https://a.com:443`` are the same origin, so a naive
+    ``host:port`` compare would scrub the session on a legitimate redirect.
     """
     headers = {"Cookie": "s=1", "Authorization": "Bearer t"}
     result = redirect_target(canonical("https://a.com/x"), headers, 301, "https://a.com:443/z", 0)

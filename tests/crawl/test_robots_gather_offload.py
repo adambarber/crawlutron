@@ -1,9 +1,7 @@
 """robots.txt gathering must run off the event loop (concurrent, not sequential).
 
-``run_recursive_crawl`` (and the engine's non-recursive branch) await
-``robots_allows``/``robots_crawl_delay`` one URL at a time, so a batch of N
-URLs pays N sequential robots round-trips. These tests pin the concurrent
-contract: overlapping checks must be observable via an in-flight counter.
+The engine awaits ``robots_allows``/``robots_crawl_delay`` one URL at a time,
+so N URLs paid N sequential round-trips; tests pin the concurrent contract.
 """
 
 import asyncio
@@ -22,17 +20,8 @@ from tests._result_builders import make_engine_result
 async def _overlap_window(state: dict):
     """Hold ``state``'s in-flight window across one scheduling point.
 
-    The window is a *scheduling point*, not a duration: the guarded call yields
-    once to the event loop before it comes back, so every caller that is able to
-    run concurrently is inside the window at the same time. A scheduler that
-    awaited these one at a time would drive ``max_in_flight`` to 1, which is
-    exactly the regression these tests exist to catch -- so the assertion has
-    teeth with no wall-clock sleep anywhere in it.
-
-    It was written out twice -- once inside :func:`_tracker`, once inline in the
-    non-recursive engine test -- and the increment/decrement pair is exactly the
-    bookkeeping a copy gets wrong: leaving the window on a raised path reports
-    overlap that never happened.
+    The guarded call yields once, so every concurrent caller is inside the
+    window; written once because the increment/decrement pair gets copied wrong.
     """
     state["in_flight"] += 1
     state["max_in_flight"] = max(state["max_in_flight"], state["in_flight"])
@@ -46,13 +35,8 @@ async def _overlap_window(state: dict):
 def _tracker():
     """Robots closure pair tracking max in-flight overlap.
 
-    ``first_screen_max`` narrows the window above to the FIRST screening of each
-    distinct URL, and it has to: a recursive crawl screens the same URL twice,
-    once through admission (the discovered-link screen) and once through the
-    frontier-batch screen before the leaf is crawled. A single all-calls max
-    would be satisfied by either seam alone, so it would not pin the one a
-    given test is about. Measured this way, the discovered-link test fails if
-    the admission screen alone is serialized.
+    ``first_screen_max`` narrows the window to the first screening of each URL,
+    since a single all-calls max would not pin the seam a test is about.
     """
     state = {"in_flight": 0, "max_in_flight": 0, "first_screen_max": 0, "calls": 0}
     screened: set[str] = set()

@@ -1,25 +1,7 @@
 """Lxml tree parses per page, measured not assumed.
 
-The chokepoint-theory review claimed "two parses per page"; measurement
-through the real production paths (this file) found the codebase's own
-accounting in response_shaping's PERF TODO to be exact: trafilatura (its own
-parser, not counted here), ONE shared lxml tree in the engine's discovery
-block (tree= threading covers diagnostics/frames/forms/links), and ONE
-re-parse in extract_llm_metadata at shaping time, across the persistence
-boundary.
-
-Consolidation moved the shaping-side re-parse to its computation site:
-when the discovery tree exists it also reads the LLM page metadata once, and
-the result carries the small plain-data dict (``llm_metadata``) across the
-persistence boundary; shaping reads the carried dict instead of rebuilding a
-tree. The shaping ceiling is therefore 0 for every item the engine produced
-from a parsed body; an engine item with no discovery tree (single-shot,
-no links/diagnostics requested) never parses at engine stage and shaping
-still reparses the ONE time (total unchanged). The tree itself still never
-escapes the worker thread: what crosses the boundary is a JSON dict.
-
-These tests pin the lxml counts as CEILINGS; a new call site or a
-duplicated parse inside a stage fails here rather than in a perf profile.
+Measurement found one shared discovery tree plus one shaping-time re-parse;
+consolidation carries a small dict instead, and these tests pin lxml as CEILINGS.
 """
 
 from dataclasses import replace
@@ -80,11 +62,8 @@ async def test_link_discovery_is_one_shared_parse(parse_budget):
 async def test_selector_mode_adds_no_parse_inside_the_strategy(parse_budget):
     """Selector + discovery is still ONE parse inside the strategy layer.
 
-    Selector extraction itself parses later (engine phase, extract_content ->
-    extract_selected), so a selector-mode page totals two lxml parses across
-    the pipeline -- but the strategy stage keeps its one-shared-tree
-    guarantee. Ceiling, not target: consolidation may drop the total, never
-    raise the per-stage count.
+    Selector extraction parses later (engine phase), so a selector-mode page
+    totals two parses, but the strategy stage keeps its shared-tree guarantee.
     """
     await _run({"css_selector": "body", "limits": {"max_depth": 1}})
     assert parse_budget.parses == 1
@@ -129,9 +108,8 @@ async def test_shaping_never_reparses_engine_produced_items(parse_budget):
 async def test_engine_item_without_a_tree_still_shapes_once(parse_budget):
     """Single-shot pages never parse at engine stage; shaping keeps their one.
 
-    Carrying is conditional on a tree the pipeline built anyway -- asking
-    the metadata to force its own parse would REGRESS the single-shot
-    budget (test_single_shot_parses_no_tree), so the fallback stays.
+    Carrying is conditional on a tree the pipeline built anyway; forcing its
+    own parse would REGRESS the single-shot budget, so the fallback stays.
     """
     from app.api.unified_shaping import format_crawl_item
 

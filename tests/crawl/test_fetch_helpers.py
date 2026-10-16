@@ -1,10 +1,7 @@
 """Fetch helpers: the shared discovery fetch+decompress+decode core.
 
-``fetch_and_decode`` (robots gating in the engine) and ``fetch_text``
-(sitemap fan-out) each used to hand-roll the same fetch -> await ->
-lowercase headers -> capped decompress -> decode sequence. That core now
-lives in one place (``fetch_decode_discovery``); these tests pin both call
-sites' contracts so the collapse is provably behavior-preserving.
+``fetch_and_decode`` and ``fetch_text`` each hand-rolled the same sequence;
+this core now lives in one place, and both call sites are pinned.
 """
 
 import gzip
@@ -24,9 +21,8 @@ class _FakeResp:
 def _gzip_bomb() -> bytes:
     """A gzipped body that decompresses to more than the discovery cap allows.
 
-    One construction because "over the cap" is a fact about the decoder, not about
-    either caller -- and a bomb sized against a constant that later moved was a
-    bomb that stopped testing the cap without anything going red.
+    One construction because "over the cap" is a fact about the decoder, not
+    either caller -- and a bomb sized against a moved constant stopped testing.
     """
     return gzip.compress(b"\x00" * (DISCOVERY_BODY_MAX_BYTES + 4096))
 
@@ -35,9 +31,8 @@ def _gzip_bomb() -> bytes:
 class _RecordingFetcher:
     """A fetcher that always returns ``resp`` and records its call arguments.
 
-    A class rather than a closure with a bolted-on attribute: ``calls`` is part
-    of what a test inspects, so it is declared here instead of attached at
-    runtime and hidden from the type checker.
+    A class rather than a closure with a bolted-on attribute, so ``calls`` is
+    declared here and visible to the type checker.
     """
 
     resp: object

@@ -45,8 +45,7 @@ def test_deflate_that_is_not_one_stream_is_rejected(body):
     """Truncated, junk-tailed and concatenated deflate are all rejected.
 
     One body, one claim: a deflate stream that is not a single well-formed
-    member has no valid body, and each of the three ways to break that is the
-    same rejection. They were three functions body-and-all.
+    member has no valid body -- each way to break it is the same rejection.
     """
     with pytest.raises(decompression_mod.DecompressionError):
         decompress_body(body, "deflate", max_output_bytes=100)
@@ -146,9 +145,8 @@ def test_a_stacked_layer_still_honours_the_cap():
 def test_an_unknown_coding_in_a_stack_passes_the_body_through():
     """Never a half-decoded lie: if any layer is unreadable, the body is returned as-is.
 
-    Returning the raw bytes leaves the consumer with input it cannot parse, which
-    fails as a parse error it can see. Decoding the layers it does understand
-    would return confidently wrong bytes attributed to a real resource.
+    Raw bytes fail as a parse error the consumer can see; decoding the layers
+    it understands would return confidently wrong bytes for a real resource.
     """
     body = _stack("gzip", "br")
     assert decompress_body(body, "gzip, compress", max_output_bytes=_CAP) == body
@@ -327,11 +325,8 @@ class TestDecompressionSelection:
     def test_corrupt_compressed_input_is_rejected(self, payload, encoding):
         """Undecodable bytes are a typed error for every supported codec.
 
-        One row per codec rather than one test per codec: a codec added to the
-        selection table gets a row here instead of a copy of this body, and the
-        thing under test -- that a body the codec cannot read raises
-        ``DecompressionError`` rather than surfacing a codec-specific
-        exception -- is stated once.
+        One row per codec in the selection table states once that a body a codec
+        cannot read raises ``DecompressionError``, never a codec-specific exception.
         """
         with pytest.raises(decompression_mod.DecompressionError):
             decompress_body(payload, encoding, max_output_bytes=_CAP)

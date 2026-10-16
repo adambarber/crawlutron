@@ -27,9 +27,8 @@ class TestResultHelpersEdges:
 class TestFunnelDerivesAxes:
     """The funnel takes the attempt and derives the axes from it.
 
-    The record's flat status, classification and error are the winning
-    attempt's values, so the funnel accepts no second spelling of them: a
-    caller cannot make the two records disagree about one outcome.
+    Status, classification and error are the winning attempt's values, so the
+    funnel accepts no second spelling of them -- the two cannot disagree.
     """
 
     def test_the_funnel_derives_the_axis_values_from_the_attempt(self):
@@ -60,9 +59,8 @@ class TestFunnelDerivesAxes:
 class TestTerminalResultContract:
     """The three terminal builders differ only in status and error defaulting.
 
-    Pinning every wire-visible field makes the collapse of
-    _failed/_blocked/_skipped_engine_result onto one primitive provably
-    behavior-preserving: a field that moves silently is caught here.
+    Pinning every wire-visible field proves the collapse onto one primitive
+    is behavior-preserving; a field that moves silently is caught here.
     """
 
     @staticmethod
@@ -130,10 +128,8 @@ class TestTerminalResultContract:
 class TestTerminalCrawlResult:
     """The /v1/render wire terminal: no payload, and error is caller-supplied.
 
-    The browser failure path, the render disallowed path, and the render
-    worker-failure path share this shape. Pinning the fields proves the
-    collapse onto one primitive is behavior-preserving and that the result
-    never carries a payload (html/text/final_url are always None).
+    Three paths share this shape; pinning the fields proves the collapse onto
+    one primitive is behavior-preserving and the result never carries a payload.
     """
 
     def test_no_payload_and_carries_error_verbatim(self):

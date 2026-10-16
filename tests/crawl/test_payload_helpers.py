@@ -14,17 +14,8 @@ from app.models.crawl_policy import CrawlPolicy
 def _normalized_policy(**policy: Any) -> CrawlPolicy:
     """``payload_policy`` over a bare crawl payload, with default settings.
 
-    Every test in this file is about one field of the normalized policy, and
-    they differed only in the policy body they handed it -- so the payload
-    envelope and the empty ``CrawlerSettings`` are written once here. A test
-    that is about a *rejection* still gets the raise from the real entry point:
-    the helper is called inside ``pytest.raises``, it does not swallow anything.
-
-    The return type is ``CrawlPolicy`` because that is what ``payload_policy``
-    returns and what every assertion here reads ``.limits`` off. It was annotated
-    ``-> dict``, which made the whole file look like attribute access on a
-    mapping. The annotation was the only thing wrong with it, and it was wrong in
-    the one place that decides what the helper hands back.
+    Every test here is about one policy field, so the envelope and empty
+    settings are written once; rejections still raise from the real entry point.
     """
     return payload_policy(
         {"url": "https://example.com/", "policy": policy},
@@ -84,11 +75,8 @@ class TestPayloadPolicyCarriesAdvertisedLimits:
 class TestPydanticDefaultPreservesRamScaling:
     """The pydantic default must not silently disable the RAM-scaled cap.
 
-    CrawlRequest.model_dump(exclude_none=True) is what the endpoints feed the
-    engine. A concrete default on CrawlPolicyLimits.max_content_length_bytes
-    materializes in every dump, making the concurrency-scaled cap in
-    effective_max_content_length unreachable through /v1/crawl. The field
-    must therefore default to None and only an explicit caller value flows.
+    A concrete default materializes in every ``model_dump``, making the
+    concurrency-scaled cap unreachable through /v1/crawl.
     """
 
     def test_default_request_omits_the_cap(self):
@@ -155,17 +143,8 @@ class TestPayloadHelpersEdges:
 class TestExplicitEmptyStrategiesIsRejectedNotDefaulted:
     """An absent list means "use the default chain"; an empty one is a mistake.
 
-    ``policy.get("strategies") or DEFAULT_STRATEGIES`` cannot tell the two
-    apart: ``[]`` is falsy, so an explicitly empty chain was replaced with the
-    full default before the ``not strategies`` guard on the next line could
-    fire. That guard was therefore dead code, and the caller got the whole
-    default chain -- including a browser, which they had asked not to run --
-    while the request they sent said otherwise.
-
-    The wire layer already refuses an empty list (the API model requires
-    min_length=1), so a 422 there and a raise here describe the same contract.
-    Silent defaulting is the one option that cannot: it lets the value on the
-    wire and the behavior of the code describe different things.
+    ``policy.get(...) or DEFAULT_STRATEGIES`` treats ``[]`` as falsy, so an
+    explicitly empty chain was replaced by a default that included a browser.
     """
 
     def test_explicitly_empty_strategies_is_rejected(self):

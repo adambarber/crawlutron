@@ -41,18 +41,8 @@ class TestExtractionEdges:
     def test_extraction_still_works_after_a_shutdown(self):
         """A shutdown releases the workers; it does not retire extraction.
 
-        ``shutdown_doc_extraction_executor`` is on the app lifespan, so every test
-        that drives the lifespan once ran it -- and a module-global executor that
-        is shut down and never rebuilt left every LATER extraction test in that
-        worker raising ``cannot schedule new futures after shutdown``. The suite
-        passed or failed on test ordering rather than on behaviour, and only
-        randomized order ever exposed it.
-
-        The sibling process pool in the same module already had this right: it is
-        built on demand, torn down to ``None``, and rebuilt by the next caller. A
-        shutdown there means "not right now", so it has to mean the same thing
-        here -- otherwise the two pools in one module disagree about what
-        shutdown means, and only one of them is safe to call twice.
+        The module-global executor, shut down and never rebuilt, left later
+        extractions raising ``cannot schedule new futures after shutdown``.
         """
         asyncio.run(shutdown_doc_extraction_executor())
 
@@ -168,11 +158,8 @@ class TestExtractionGaps:
 class TestTrafilaturaChatterIsSuppressed:
     """The extractor must not emit ERROR-level records for benign inputs.
 
-    trafilatura logs ERROR from trafilatura.core and trafilatura.utils when
-    the HTML is empty, a fragment, or has no main content -- normal
-    conditions for a crawler, and the code already falls through to the
-    markdownify/plain-text fallbacks. At ERROR level on a run of ~2000 pages
-    this produced 2239 spurious records that crowded out real failures.
+    trafilatura logs ERROR for empty/fragment/no-main HTML -- normal crawler
+    conditions it already falls through on -- crowding out real failures.
     """
 
     @pytest.mark.parametrize("html", ["", "<html><body></body></html>", "<div></div>"])
@@ -202,18 +189,8 @@ class TestTrafilaturaChatterIsSuppressed:
 def test_selector_on_non_html_is_reported_not_silently_dropped(caplog):
     """A selector against a body with no DOM cannot be honoured, and must say so.
 
-    ``extract_content`` routes the selector pair only on the HTML branch. A PDF
-    or a plain text body has no DOM to target, so the pair cannot narrow
-    anything and the full content comes back instead -- which is a *different
-    answer*, not a smaller one, and the caller has no way to tell: the same
-    request against an HTML page does narrow, and both return a populated
-    ``ExtractedContent``. So the warning is the load-bearing assertion here, for
-    the same reason it is in ``test_css_selector_slow_must_not_hang``: the
-    returned value is identical whether or not the drop is reported, so a
-    regression that stopped reporting it would pass on the result alone.
-
-    Reachable from the wire, not just from here: the crawl path builds the pair
-    from caller policy and spreads it into this function.
+    ``extract_content`` routes the selector pair only on the HTML branch, so a
+    PDF returns the full content; the warning is the load-bearing assertion.
     """
     pdf = b"%PDF-1.7\n1 0 obj\n<< /Type /Catalog >>\nendobj\ntrailer\n%%EOF\n"
     with caplog.at_level(logging.WARNING, logger="app.extraction.content"):
