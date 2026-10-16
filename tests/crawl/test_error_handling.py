@@ -146,10 +146,7 @@ class TestClassificationValueValidity:
         assert result.classification == "url_budget_exceeded"
 
 
-def _budget_item() -> dict:
-    """An engine result dict as produced by engine_result_from_exception."""
-    from app.orchestration.engine_result import engine_result_from_exception
-
+def _budget_item() -> EngineCrawlResult:
     result = engine_result_from_exception(
         error=TimeoutError("budget exhausted"),
         original_url="https://a.example/slow",

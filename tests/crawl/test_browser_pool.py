@@ -202,10 +202,9 @@ def _bare_driver(**overrides):
 def _page(**stubs):
     """A page double whose only attributes are ``stubs``.
 
-    Plain values are returned, exceptions raised, callables called (a page that
-    answers differently on the second poll), awaitable answers awaited -- an
-    ``if await element.is_visible():`` must check the answer, not a truthy
-    coroutine; unstaged methods are absent, so reaching one raises."""
+    Plain values return, exceptions raise, callables and awaitables answer; an
+    unstaged method's absence means reaching one raises.
+    """
 
     def _method(name: str, answer):
         async def _call(self, *args, **kwargs):
@@ -225,9 +224,9 @@ def _page(**stubs):
 async def _challenge_wait_outcome(renderer, page):
     """Drive ``_extract_with_challenge_wait`` asking for everything.
 
-    The options double is the same in every challenge-wait test -- "which page"
-    is only a question if both html and text were requested; the four-tuple
-    comes back so each test asserts the half it is about."""
+    ``which page`` is a question only if html and text are both requested, so
+    options are the same in every test; the tuple comes back per assertion.
+    """
     options = type("obj", (), {"include_html": True, "include_text": True})()
     return await renderer.extract_with_challenge_wait(page, options)
 
@@ -235,15 +234,16 @@ async def _challenge_wait_outcome(renderer, page):
 class TestWorkerExtractorErrorDegrades:
     """The error branches of the browser strategy, across renderer and driver.
 
-    Split by owner rather than by file: half of these moved onto the driver, and
-    the class name is the pre-split module's."""
+    Sorted by owner rather than by file: half moved onto the driver, and the
+    class name is the pre-split module's.
+    """
 
     async def test_recycle_releases_the_browser_it_replaces(self):
         """The per-render recycle path must drop the browser it is replacing.
 
-        A separate entry point from shutdown: the driver releases the old
-        context manager on the way to launching a replacement, and a raise there
-        is swallowed or every recycle after the first breaks."""
+        A distinct entry point from shutdown: the driver releases the old context
+        manager en route to a replacement, and a raise there breaks every recycle.
+        """
         driver, cm, _ = _driver_with_exploding_cm(max_browser_renders=1)
         await driver.open_page({})
         driver.note_render()
@@ -346,9 +346,8 @@ class TestCloseLeavesNoStaleRendererToAcquire:
     """close() retired the renderers but kept handing them out.
 
     ``close`` cleared ``_renderers`` but not ``_available``; ``initialize``
-    appended the new generation to the BACK of that queue and ``acquire`` pops
-    the FRONT -- so the first ``pool_size`` acquires after a recycle returned
-    closed renderers, and the queue was double the pool size."""
+    appends to the BACK, ``acquire`` pops the FRONT -- closed ones returned.
+    """
 
     @staticmethod
     def _pool(pool_size: int = 2) -> BrowserPool:
@@ -389,9 +388,9 @@ class TestCloseLeavesNoStaleRendererToAcquire:
     async def test_releasing_a_renderer_after_close_does_not_resurrect_it(self):
         """The other route to the same retired renderer.
 
-        A renderer checked out when ``close`` runs is closed by it, and the
-        holder returns it afterwards -- the one caller able to put a closed
-        renderer back after the drain, so the drop belongs in ``release``."""
+        A renderer checked out when ``close`` runs comes back afterwards -- the
+        one caller able to re-queue it, so the drop belongs in ``release``.
+        """
         pool = self._pool()
         await pool.initialize()
         checked_out = await pool.acquire()

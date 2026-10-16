@@ -34,9 +34,8 @@ def test_batch_scale_zero_at_hard_ceiling():
 async def _crawl_under_pressure(monkeypatch, *, cpu_ratio, memory_ratio):
     """Run the two-page fixture crawl against a gate with pinned sampler ratios.
 
-    Returns the (envelope, waits) pair: the combined ResourceGate is
-    exercised with only the pinned resource driving the throttle, and the
-    engine is handed the pinned gate as the collaborator it takes.
+    Returns the ``(envelope, waits)`` pair; only the pinned resource drives the
+    throttle, and the engine is handed the pinned gate as its collaborator.
     """
     gate, waits = _pinned_resource_gate(monkeypatch, cpu_ratio=cpu_ratio, memory_ratio=memory_ratio)
 
@@ -51,9 +50,7 @@ async def _crawl_under_pressure(monkeypatch, *, cpu_ratio, memory_ratio):
 )
 async def test_engine_throttles_batches_under_pressure(monkeypatch, cpu_ratio, memory_ratio, saturated):
     """Integration: with one sampler pinned at 99%, the engine pauses dispatch
-    (gate waits) yet the crawl still completes. The combined ResourceGate is
-    exercised; the other resource is pinned idle so only the named one drives
-    the throttle."""
+    (gate waits) yet the crawl still completes, the other resource idle."""
     out, waits = await _crawl_under_pressure(monkeypatch, cpu_ratio=cpu_ratio, memory_ratio=memory_ratio)
     # Engine results carry the value object; identity is its ``.raw`` text.
     assert {r.normalized_url.raw for r in out["results"]} == {
@@ -93,11 +90,8 @@ def test_direct_reads_do_not_perturb_slope(monkeypatch):
 def _http_heavy(pins: dict[str, str], domains: list[str], *, sample: int = 8) -> bool:
     """Build the batch the way the admission gate sees it and ask if it is HTTP-heavy.
 
-    The scheduler double, the frontier construction and the sample size were
-    spelled at every call site. The two tests that differ only in the pin map
-    were the pair a reader could not tell apart: what each one asserts is which
-    domains are pinned and whether that is enough. Now a test states its pins
-    and its verdict and nothing else.
+    The scheduler double, frontier construction and sample size used to be
+    re-spelled at every site; a test now states its pins and verdict only.
     """
     frontier = [(0, make_crawl_task(0, d)) for d in domains]
     return batch_is_http_heavy(_Scheduler(pins), frontier, sample=sample)
@@ -145,28 +139,10 @@ class TestBatchIsHttpHeavy:
 # --------------------------------------------------------------------------- Dispatcher wiring: apply
 # http_scale_factor for HTTP-heavy batches.
 class PinnedGate(ResourceGate):
-    """A ResourceGate with fixed scales and fixed ratios, recording consultations.
+    """A ResourceGate with fixed scales and ratios, recording consultations.
 
-    What the two admission questions have in common: WHICH scale the dispatcher
-    read (``calls``), and how saturated the box is (``mem``/``cpu``). One double
-    answers both, so a test pins the scales without the ratios and vice versa,
-    and a gate method a test starts needing is one method here rather than a
-    second double.
-
-    Subclasses ResourceGate rather than re-implementing its shape. The double is
-    handed to the production dispatchers, which are typed for ResourceGate, so a
-    stand-in that merely *looks* like one leaves that boundary unchecked -- rename
-    a real method and every test here keeps passing while the dispatcher stops
-    consulting the double at all, and the tests would still assert that the
-    double recorded its calls, just on a gate nobody asked. Inheriting puts the
-    double under the same signature the production code is compiled against.
-
-    ``ResourceGate.__init__`` is deliberately not called: it builds live
-    MemoryGate/CpuGate objects that read the host's cgroup, which is the I/O the
-    double exists to avoid, and pinned ratios are the point anyway. The
-    consequence is that this instance is initialised only as far as these five
-    methods reach, so an inherited method that touches unbuilt state fails loudly
-    instead of returning a real measurement the test never pinned.
+    It subclasses the production type so dispatch is compiled against the same
+    boundary, and skips ``__init__`` to avoid live gates reading the host cgroup.
     """
 
     def __init__(self, *, batch=1.0, http=1.0, mem=0.0, cpu=0.0):
@@ -209,9 +185,8 @@ async def _robots_allow_all(url):
 async def _run_with_gate(sched, gate, jobs):
     """Drive the recursive crawl with the pinned gate as its only resource authority.
 
-    The spill, the worker, the robots gate, the shutdown event and every
-    ``run_recursive_crawl`` keyword belong to the harness; a test states the
-    jobs, the scheduler's pins and the gate's scales.
+    The spill, worker, robots gate, shutdown event and every keyword belong to
+    the harness; a test states the jobs, pins and scales only.
     """
     await drive_recursive_crawl(
         jobs,

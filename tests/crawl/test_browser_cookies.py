@@ -16,10 +16,8 @@ from tests._lock_doubles import DelegatingLock
 def clean_cookie_store():
     """The process-global cookie store, emptied for this test and left empty.
 
-    Save-and-restore was ``dict(store)`` / ``store.update(saved)``, which only
-    worked because the store implemented ``MutableMapping``. For a process global
-    whose whole purpose is to be reset, leaving it empty is the cleaner end state
-    and needs no surface the production path does not already have.
+    Resetting handily needs no surface the production path lacks, which was
+    the reason save-and-restore only ever worked by ``MutableMapping``.
     """
     store = browser_cookies.BROWSER_COOKIES_BY_DOMAIN
     browser_mod.reset_process_state()
@@ -32,10 +30,8 @@ def clean_cookie_store():
 def test_public_helpers_reach_the_guarded_store(clean_cookie_store):
     """The guarded object is the one the public helpers actually use.
 
-    A bare ``OrderedDict`` handed to every call site is what made the race
-    possible: callers had to remember to synchronize, and none did. So the claim
-    is not that the store *has* a lock -- it is that the helpers it is reached
-    through cannot be holding a different, unguarded mapping.
+    A bare ``OrderedDict`` at every site made the race possible; the claim is
+    the helpers cannot be holding an unguarded mapping.
     """
     store_browser_cookies("guarded.example", "sess=1")
     assert get_browser_cookies_for("guarded.example") == "sess=1"
@@ -44,27 +40,8 @@ def test_public_helpers_reach_the_guarded_store(clean_cookie_store):
 def test_concurrent_read_and_eviction_does_not_raise(clean_cookie_store):
     """The regression, scheduled rather than left to GIL luck.
 
-    The pre-fix store was a bare ``OrderedDict`` and its read path was
-    ``get(domain)`` followed by ``move_to_end(domain)`` with no
-    synchronization between them. A concurrent write past the cap evicts the
-    front-most key with ``popitem(last=False)``, so an eviction landing in that
-    read window makes the touch raise ``KeyError`` out of a live crawl. Left
-    to the GIL, landing there is timing luck -- this test observed passing
-    ~2/3 of the time against the pre-fix code -- so the interleaving is
-    scheduled explicitly instead.
-
-    Two coordinated halves, each deterministic:
-
-    1. The old-code shape reproduced with a seam: the read yields between
-       ``get`` and ``move_to_end`` and the evictor runs in that exact window,
-       so the ``KeyError`` is *guaranteed*. This is the defect the guard must
-       close, no longer dependent on the GIL choosing to land the eviction in
-       the window.
-    2. The guarded store's own lock, held by a probe: a concurrent read must
-       wait for it rather than run alongside -- the read path is serialized,
-       which is what makes the window in (1) unreachable. An unguarded store
-       has no lock to hold, so this half is red against the pre-fix store on
-       that fact alone.
+    The pre-fix ``get`` then ``move_to_end`` had no sync, so an eviction in
+    that window raised ``KeyError``; the interleaving is deterministic here.
     """
     for i in range(BROWSER_COOKIES_MAX):
         store_browser_cookies(f"d{i}.example", f"k{i}=v")
@@ -115,10 +92,8 @@ def test_concurrent_read_and_eviction_does_not_raise(clean_cookie_store):
     class _RecordingLock(DelegatingLock):
         """Delegating lock that records which thread acquired it, and how often.
 
-        Per-thread, not just a total: the probe below deliberately holds the
-        lock, so a plain acquisition count would be satisfied by the probe
-        alone and would pass against exactly the lock-free read this test
-        exists to reject.
+        Per-thread, not just a total: the probe holds the lock, so a plain count
+        would pass against the lock-free read this test exists to reject.
         """
 
         def __init__(self, inner):
@@ -216,10 +191,9 @@ def test_lru_keeps_recently_used(clean_cookie_store):
 
 @pytest.mark.real_cffi
 async def test_cffi_session_does_not_replay_cookies_it_received(base_url):
-    """The impersonated session's own jar must be inert (store nothing, replay
-    nothing); a cookie it saw on one request must never come back on the next.
+    """The impersonated session's own jar must be inert (store nothing, replay nothing).
 
-    Two requests to the same domain is the whole leak: tenant A's Set-Cookie
+    Two requests to the same domain is the whole leak: tenant A's ``Set-Cookie``
     becomes tenant B's ``Cookie:`` header when the jar replays by domain.
     """
     pytest.importorskip("curl_cffi")

@@ -63,17 +63,8 @@ class _PerDomainDelayScheduler(DomainScheduler):
 async def test_domain_delay_does_not_block_other_domains(monkeypatch):
     """The per-domain delay is awaited inside the *domain* gate, not the global one.
 
-    The regression this pins: sleeping on the delay while holding a global
-    concurrency slot burns that slot on pure waiting, so every other domain
-    queues behind a wait that has nothing to do with them. Proved with a
-    handshake rather than a stopwatch: the slow domain's delay will not
-    *complete* until the fast domain's worker has run. With ``global_limit=1``
-    the two orderings are then distinguishable without any timing at all -- if
-    the delay held the only global slot the fast worker could never start, the
-    handshake could never be satisfied, and the wait fails naming exactly that.
-
-    The hosts must be registrable-distinct: ``domain`` is the registrable
-    domain, so two ``example.com`` hosts are one domain sharing one delay.
+    Sleeping while holding a global slot burned it on pure waiting and starved
+    every other domain; the hosts must be registrable-distinct.
     """
     scheduler = make_scheduler(_PerDomainDelayScheduler, adaptive=False)
     fast_started = asyncio.Event()
@@ -113,11 +104,8 @@ async def test_domain_delay_does_not_block_other_domains(monkeypatch):
 async def test_zero_delay_requests_no_sleep_at_all(monkeypatch):
     """The inverse: a domain configured with no delay must request no wait.
 
-    The suite's autouse patch now makes every sleep zero-second *and* yielding,
-    so "the delay was skipped" is no longer observable as elapsed time -- but
-    it is still observable as a request. A scheduler that turned a zero
-    configured delay into a positive sleep request would be inventing politeness
-    the operator never asked for, and paying it on every single job.
+    With every sleep now zero-second, the skip is observable as a request, not
+    time; a scheduler turning zero into a positive sleep invents politeness.
     """
     sleeps = recorder(monkeypatch)
     scheduler = make_scheduler(adaptive=False)
@@ -131,14 +119,8 @@ async def test_zero_delay_requests_no_sleep_at_all(monkeypatch):
 class TestDeliveryFailuresAreNotWorkerFailures:
     """``on_result`` is a SINK, and a sink that raises says nothing about the work.
 
-    The callback is where a crawl spills a result to disk. When that spill
-    raised, delivery happened inside the worker's ``try``, so the scheduler
-    answered with ``record_failure`` and a fabricated ``failed_result`` envelope
-    delivered through the same broken sink -- three things wrong at once: a page
-    that succeeded was counted against its domain's circuit breaker (real
-    traffic for that domain then gets skipped), the caller was handed a failure
-    envelope for a page it had already fetched, and ``gather``'s
-    ``return_exceptions=True`` swallowed what was left with no log line at all.
+    Delivery once ran inside the worker's ``try``, so a failing spill was
+    ``record_failure``d and an envelope delivered through the same broken sink.
     """
 
     async def test_a_raising_sink_does_not_trip_the_circuit_breaker(self, caplog):
@@ -161,9 +143,8 @@ class TestDeliveryFailuresAreNotWorkerFailures:
     async def test_a_raising_sink_gets_exactly_one_call_per_job(self, caplog):
         """No retry, and above all no fabricated envelope for a page that worked.
 
-        The old shape delivered a second result for the same job -- the
-        ``failed_result`` envelope -- which a spill-based sink would have
-        written to disk as though the crawl had failed.
+        The old shape delivered a second ``failed_result`` envelope for the same
+        job, which a spill-based sink would write as though the crawl had failed.
         """
         scheduler = make_scheduler(adaptive=False)
         jobs = [make_job(0, "https://example.com/a"), make_job(1, "https://example.com/b")]
@@ -192,16 +173,8 @@ class TestDeliveryFailuresAreNotWorkerFailures:
 class TestSchedulerFailureAccountingIsAboutStatuses:
     """A failure verdict is a STATUS; the reason is a CLASSIFICATION.
 
-    The success/failure branch tested membership in ``("failed",
-    "network_error")``, which reads as though a network fault got its own
-    accounting. It does not: ``network_error`` is a taxonomy member describing
-    WHY a page failed, and ``status_for_classification`` maps it ONTO
-    "failed" -- it is never a status itself, so the element could not match
-    anything. Meanwhile four of the six ResultStatus members matched neither
-    branch, and nothing noticed.
-
-    Total by construction now: the verdicts live in one table keyed by status,
-    and the exhaustiveness test fails if a status is added without one.
+    The old branch matched ``("failed", "network_error")``, but network_error is
+    a member mapped ONTO "failed", never a status -- six members, four unmatched.
     """
 
     @staticmethod
@@ -268,10 +241,8 @@ class TestSchedulerFailureAccountingIsAboutStatuses:
     def test_status_accounting_is_total(self):
         """Every ResultStatus member has a verdict, so none can arrive unhandled.
 
-        The branch this replaced tested membership in a two-element tuple, so
-        blocked, disallowed, retry_exhausted and skipped matched nothing, and a
-        status added to the taxonomy later would have silently joined them
-        rather than forcing a decision.
+        The replaced branch matched a two-element tuple, so blocked/disallowed/
+        retry_exhausted/skipped counted as nothing; new statuses would stay silent.
         """
         import typing
 
