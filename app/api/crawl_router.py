@@ -1,10 +1,7 @@
 """``/v1/crawl`` URL→handler mapping.
 
-Pure router: imports :func:`app.api.crawl_endpoint.crawl` and
-:func:`app.api.crawl_endpoint.get_crawl_result` and binds them to
-their paths. The handler implementations live in the endpoint module
-so the router stays trivial and the handlers are testable without
-FastAPI machinery.
+Pure router: binds :func:`app.api.crawl_endpoint.crawl` and
+``get_crawl_result`` to their paths; handler implementations live in the endpoint module.
 """
 
 from __future__ import annotations

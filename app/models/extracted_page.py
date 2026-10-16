@@ -14,13 +14,8 @@ from app.vocabulary.taxonomy import CrawlClassification
 class ExtractedPage(BaseModel):
     """A crawled page reduced to its content and its verdict.
 
-    The projection exists because the full response carries the crawl's
-    PROVENANCE -- attempts, headers, diagnostics, evidence, discovered links --
-    and an MCP result carries its payload twice (text plus structured content).
-    A caller who wants many pages' content pays for all of that per page. What
-    stays here is the content and the verdict, and ``markdown`` is None when the
-    page produced none: a blocked page reports its block rather than an empty
-    string that reads like a successful extraction.
+        The full response carries provenance (attempts, headers, evidence, links); this keeps
+    only content + verdict, and ``markdown`` is None when the page produced none.
     """
 
     url: Annotated[

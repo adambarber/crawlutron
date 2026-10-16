@@ -16,16 +16,8 @@ from app.vocabulary.taxonomy import CrawlClassification
 class PageTrace(BaseModel):
     """The diagnostic record of one page, as the crawl already wrote it.
 
-    The fields are named as the stored response names them and typed as the
-    stored record holds them -- the URL is text here, because the stored payload
-    is JSON and re-admitting it would need a policy the result cache does not
-    own. So a trace is a projection of the same record the response is, which is
-    what makes it incapable of disagreeing with it: one record, read two ways.
-
-    Nothing here is new instrumentation. The spans are the crawl's own
-    ``attempted_strategies`` and the evidence its own
-    ``classification_evidence``; what a trace leaves out is the page body, which
-    is why it is cheap to keep asking for.
+    A projection of the same record the response is (fields named and typed as stored,
+    spans reusing the crawl's own attempts/evidence), with only the page body omitted.
     """
 
     normalized_url: str = Field(description="Canonical URL of the page this trace describes.")

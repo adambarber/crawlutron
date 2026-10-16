@@ -1,19 +1,7 @@
 """Shared FastAPI dependencies for cross-module state access.
 
-The :class:`FastAPI` instance stores per-app state on ``app.state``
-(lifespan-attached ``crawler_settings`` and ``shutdown_event``). Routers
-defined in modules outside ``app/main.py`` cannot reach into the closure
-where those values live, so they use the ``Depends(get_settings)`` /
-``Depends(get_shutdown_event)`` providers below.
-
-The ``*Dep`` aliases are those same providers in ``Annotated`` form, and they
-are the one owner of the wiring. An endpoint signature names the alias instead
-of repeating ``= Depends(get_x)`` because a repeated dependency list is a
-list that can drift: ``create_job`` and ``control_job`` need the IDENTICAL
-triple (nothing about creating a job and controlling one needs different state),
-which used to be two hand-written lists that could disagree. That the two sets
-are still equal is checked against the live signatures, not asserted here in a
-second list that could rot.
+Routers outside ``app/main.py`` cannot reach the closure-held app state; the
+``*Dep`` ``Annotated`` aliases are the one owner of the wiring.
 """
 
 from __future__ import annotations

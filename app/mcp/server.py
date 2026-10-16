@@ -1,15 +1,7 @@
 """MCP 2026-07-28 streamable-HTTP dispatch for ``POST /mcp``.
 
-Implements the stateless protocol: every request carries its protocol version
-and capabilities in ``_meta``; there is no ``initialize`` handshake and no
-session. Server behaviour per the 2026-07-28 specification:
-
-* every POST is validated against the ``MCP-Protocol-Version``, ``Mcp-Method``,
-  and (for ``tools/call``) ``Mcp-Name`` headers, which MUST match the body;
-* ``server/discover``, ``tools/list``, and ``tools/call`` are dispatched;
-* unknown RPC methods return ``404`` with ``-32601`` (which distinguishes a
-  modern server from a legacy HTTP+SSE host);
-* notifications (no ``id``) are accepted with ``202`` and no body.
+Stateless protocol: headers validated against the body, ``server/discover`` /
+``tools/list`` / ``tools/call`` dispatched, unknown methods 404 with ``-32601``.
 """
 
 from __future__ import annotations

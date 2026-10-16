@@ -1,9 +1,7 @@
 """``POST /mcp`` — MCP 2026-07-28 streamable-HTTP endpoint.
 
-Pure router: parses the raw JSON-RPC body, validates the Origin header, and
-delegates to :func:`app.mcp.server.handle_mcp_request`. Responses are single
-JSON objects (``application/json``); the SSE streaming form is not needed by
-the synchronous tool set this endpoint exposes.
+Pure router: parses the raw JSON-RPC body, validates the Origin header, and delegates
+to :func:`app.mcp.server.handle_mcp_request`; responses are single JSON objects.
 """
 
 from __future__ import annotations

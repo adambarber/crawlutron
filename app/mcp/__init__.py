@@ -1,11 +1,7 @@
 """Model Context Protocol (2026-07-28) endpoint for the crawler.
 
-Exposes the four crawler primitives (search, crawl, map, render) plus one
-composite over them (``crawl_and_extract``: the crawl response projected to
-per-page content) as MCP tools
-over the stateless streamable-HTTP transport. No ``initialize`` handshake and
-no sessions: every request carries its protocol version and client capabilities
-in ``_meta``.
+Exposes the four primitives (search, crawl, map, render) plus ``crawl_and_extract``
+as MCP tools over stateless streamable-HTTP, with version/capabilities in ``_meta``.
 """
 
 from app.mcp.tools import TOOL_SPECS, TOOLS_BY_NAME

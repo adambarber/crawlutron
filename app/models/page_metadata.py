@@ -6,21 +6,10 @@ from typing import TypedDict
 
 
 class PageMetadata(TypedDict, total=False):
-    """What the extractor can fill, owned here and projected by ``PageMetadataResponse``.
+    """What the extractor can fill, owned here, projected by ``PageMetadataResponse``.
 
-    ``total=False`` because the extractor sets a key only when the page
-    actually carries it: a page with no ``og:image`` has no ``og_image``. The
-    key SET is therefore fixed even though the presence of any one key is not.
-
-    Living at this stem is load-bearing, not cosmetic. The mirror invariant in
-    ``tests/invariants/test_wire_mirror.py`` pairs an owner with its projection
-    by module name, so this file and ``page_metadata_response.py`` is the pair;
-    a differently-named record would simply not be compared, which is how three
-    wire fields survived with no producer.
-
-    ``json_ld`` is genuinely open -- one parsed JSON-LD block is an arbitrary
-    object, a list of them is an arbitrary list -- so it stays ``dict | list``
-    rather than pretending to a shape the document chooses.
+        ``total=False`` (a key exists only when the page carries it); the mirror invariant
+    pairs owner/projection by module name; ``json_ld`` stays ``dict | list``.
     """
 
     source_url: str

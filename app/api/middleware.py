@@ -1,16 +1,7 @@
-"""ASGI body-size guard middleware.
+"""ASGI body-size guard middleware capping request bodies to 16 MiB at ``receive()``.
 
-Caps request bodies to 16 MiB at the ASGI ``receive()`` layer so a
-malicious caller cannot OOM the container before pydantic validation.
-Extracted from ``app/main.py`` so the app's construction in that module
-stays thin, and so the middleware is testable in isolation.
-
-Two properties of the cap are load-bearing:
-
-* Truncated requests get ``Connection: close`` and the wrapper keeps
-  draining ``original_receive()`` until ``more_body=False`` so keep-alive
-  is not poisoned.
-* Per-chunk trailers are preserved via ``{**message, ...}``.
+Truncated requests get ``Connection: close`` and drain until ``more_body=False``
+so keep-alive is not poisoned; per-chunk trailers are preserved via ``{**message, ...}``.
 """
 
 from __future__ import annotations

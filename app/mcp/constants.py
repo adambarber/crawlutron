@@ -1,19 +1,7 @@
 """MCP 2026-07-28 protocol constants for the ``/mcp`` endpoint.
 
-Values mirror the 2026-07-28 specification: the protocol is stateless, results
-carry a ``resultType``, list/discover results carry ``ttlMs`` + ``cacheScope``,
-and the reserved JSON-RPC error range ``-32020..-32099`` is used for
-protocol-defined errors.
-
-The mirror is of the codes this server can actually produce, not of the codes the
-specification numbers. A code nothing returns is not documentation: it reads as
-coverage from across the room, so a caller auditing the surface finds a value
-with no path to it, and a future edit that wires the code up will not be caught
-for having done so. ``MISSING_REQUIRED_CLIENT_CAPABILITY`` and
-``META_CLIENT_INFO`` were both such values -- the 2026-07-28 spec requires only
-``protocolVersion`` and ``clientCapabilities`` in ``_meta``, so nothing ever
-raised the one or read the other. ``test_every_protocol_constant_is_produced``
-holds the line.
+Values mirror the spec; only codes this server can produce are declared --
+``test_every_protocol_constant_is_produced`` holds the line.
 """
 
 from app.vocabulary.identity import SERVICE_ID, SERVICE_VERSION

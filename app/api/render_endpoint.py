@@ -1,11 +1,7 @@
 """``/v1/render`` endpoint handler.
 
-Backward-compatible browser-render endpoint that wraps
-:func:`app.api.render.render_request` with the readiness gate and the
-unified response shape. Extracted from the previous monolith in
-``app/main.py`` so the handler logic and the FastAPI URL→handler mapping
-live in different modules; the router in :mod:`app.api.render_router`
-calls it.
+Backward-compatible browser-render endpoint wrapping
+:func:`app.api.render.render_request` with the readiness gate and unified shape.
 """
 
 import logging

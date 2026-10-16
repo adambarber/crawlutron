@@ -1,10 +1,7 @@
 """``/v1/watches`` registration and status.
 
-Registration admits the URL through this deployment's host policy and persists
-its canonical identity. Everything after that belongs to the sweep
-(:mod:`app.api.watch_sweep`): rechecks, recorded outcomes, and change
-notifications to a watch's webhook. This router owns the edges a caller can
-reach -- register, list, inspect, delete -- and nothing about checking.
+Registration admits the URL through host policy and persists its identity; checking
+belongs to the sweep (:mod:`app.api.watch_sweep`). This router owns register/list/inspect/delete.
 """
 
 from __future__ import annotations

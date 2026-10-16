@@ -1,19 +1,7 @@
 """Background async-crawl runner for ``/v1/crawl`` webhook deliveries.
 
-When ``/v1/crawl`` receives ``async_mode=True`` or a ``webhook_url``, it
-queues a :func:`run_async_crawl` task that:
-
-1. Acquires the bounded webhook-crawl concurrency semaphore.
-2. Runs the crawl via the shared :mod:`app.api.crawl_executor` helper.
-3. Persists results in both the durable job store and the bounded result
-   cache (for backward compatibility with ``/v1/crawl/{request_id}``).
-4. POSTs the result to ``webhook_url`` via the pinned-delivery helper from
-   :mod:`app.api.webhooks`.
-
-Extracted from ``app/main.py`` so the background-task implementation and
-the request handlers live in different modules. The runner accesses shared
-state via the ``Depends(get_settings)`` / ``Depends(get_shutdown_event)``
-providers wired in :mod:`app.api.dependencies`.
+Queued when ``async_mode=True`` or a ``webhook_url`` is set: acquire the bounded
+semaphore, run via :mod:`app.api.crawl_executor`, persist in both stores, POST to the webhook.
 """
 
 from __future__ import annotations

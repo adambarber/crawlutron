@@ -50,12 +50,8 @@ def render_options_for(payload: dict[str, Any], settings: CrawlerSettings) -> Re
 def _failed_render_result(job: CrawlJob, exc: BaseException, *, submitted_url: str) -> CrawlResult:
     """Render-pipeline failure envelope for the domain scheduler.
 
-    ``DomainScheduler.run`` is generic over the result shape a pipeline uses, so
-    it asks the pipeline how to represent a job it never ran (an open circuit
-    breaker) or whose worker raised. The crawl pipeline answers with an
-    ``EngineCrawlResult``; this one answers with the ``CrawlResult`` the
-    ``/v1/render`` contract is built on, adapting through the same converter
-    ``_collect`` uses so classification and redaction stay centralized.
+        ``DomainScheduler.run`` is generic over result shape; this answers ``CrawlResult``,
+    the ``/v1/render`` contract, via the same converter ``_collect`` uses.
     """
     return crawl_result_from_engine_result(
         failed_result_for(job, exc, url_of=lambda _job: submitted_url),

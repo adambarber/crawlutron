@@ -1,9 +1,7 @@
 """``/v1/jobs`` URL→handler mapping for whole-site crawl jobs.
 
-Create spawns a background runner task (module :mod:`app.api.job_runner`)
-that consumes the persisted frontier through the shared crawl engine.
-State inspection (list/get) and row management (delete) remain direct
-JobStore operations.
+Create spawns a background runner (:mod:`app.api.job_runner`) consuming the persisted
+frontier; list/get/delete stay direct JobStore operations.
 """
 
 from __future__ import annotations
