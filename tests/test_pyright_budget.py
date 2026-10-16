@@ -1,36 +1,7 @@
 """Whole-tree pyright budget: the tree's type-annotation lies must be zero.
 
-Mypy is the declared type gate and is clean. This is the third checker, and it
-exists because it finds things mypy structurally cannot: mypy reads the
-`regex` package as untyped and degrades its values to `Any`, so a `regex.Pattern`
-handed to a parameter declared `re.Pattern[str]` passes. Pyright found that, plus
-a symbol imported from the wrong module and a `urllib.error` reference that only
-resolved because some other import happened to bind the submodule.
-
-Fourteen findings on first run, triaged against ground truth rather than taken
-at face value: four were real defects and are fixed, and ten were the checker
-being wrong -- six pydantic `default_factory` overloads, two incomplete lxml
-stubs, one `curl_cffi` re-export marker, and one Literal-annotated property that
-pyright widens. Verifying those ten mattered: the `curl_cffi` import was then
-inside a `try: ... except ImportError: return None` at the head of the transport,
-whose "fix" would have silently routed every streaming fetch through the httpx
-fallback rather than correcting anything. That guard is gone -- curl_cffi is a
-declared dependency, so a failed session build now raises instead of degrading
-the transport -- which means this import is free to be spelled the way pyright
-wants it.
-
-The budget is an exact zero rather than a count, because the triage is finished:
-there is no known-acceptable finding left, so any new one is either a real defect
-or a suppression that has to be argued for in pyrightconfig.json. A count would
-only be a number to ratchet, and this one did not need one.
-
-This gate FAILS when pyright is absent. It used to skip, and that was how a
-green result came to mean nothing: CI installs `.[dev]`, pyright was only ever
-in requirements-dev.txt, which no workflow reads, so the pre-commit hook
-printed "pyright budget ... Passed" while both substantive checks skipped. A
-gate that cannot tell "clean" from "not run" is not a gate, so the tool is now
-a declared dev dependency and its absence is an error.
-"""
+Pyright finds what mypy structurally cannot (untyped ``regex`` interop,
+wrong-module imports); findings are triaged against ground truth."""
 
 from __future__ import annotations
 
@@ -76,11 +47,8 @@ def _pyright() -> str | None:
 def _require_pyright() -> str:
     """The tool, or a failure. Never a skip.
 
-    A skip here is indistinguishable from a pass in a pre-commit hook's output
-    and in a CI log's green tick, which is the whole reason this function
-    exists: the budget is a gate, and a gate that reports success without
-    running has to be the loudest thing in the file.
-    """
+    A skip is indistinguishable from a pass in hook and CI output -- a gate
+    that reports success without running has to be the loudest thing in it."""
     executable = _pyright()
     if executable is None:
         pytest.fail(
@@ -95,11 +63,8 @@ def _require_pyright() -> str:
 def _readable(path: str) -> str:
     """A finding's path relative to the service root, wherever pyright ran from.
 
-    Splitting on the service's own directory name assumed the service is nested
-    under a parent directory of that name, which stops being true the moment it
-    is its own repository -- and then every reported finding in a failure
-    message shows an absolute path from whatever machine ran it.
-    """
+    Splitting on the service's directory name assumed a parent of that name,
+    which fails the moment the service is its own repository."""
     try:
         return pathlib.Path(path).resolve().relative_to(SERVICE_ROOT).as_posix()
     except ValueError:
@@ -109,10 +74,8 @@ def _readable(path: str) -> str:
 def _interpreter() -> str:
     """The interpreter pyright should resolve imports against.
 
-    CI creates no `.venv` -- it installs the package into the runner's Python --
-    so pointing pyright at a venv that is not there made the gate depend on a
-    path that only exists locally.
-    """
+    CI creates no ``.venv`` -- it installs into the runner's Python -- so a venv
+    path that only exists locally made the gate environment-dependent."""
     venv_python = SERVICE_ROOT / ".venv" / "bin" / "python"
     return str(venv_python if venv_python.exists() else pathlib.Path(sys.executable))
 
@@ -120,10 +83,8 @@ def _interpreter() -> str:
 def test_pyright_is_declared_in_the_dev_extra_ci_installs() -> None:
     """requirements-dev.txt is not read by any workflow, so it is not a source.
 
-    `pip install -e ".[dev]"` is what CI runs, so a tool that is only in
-    requirements-dev.txt is absent in CI and the gate that needs it is the one
-    thing that cannot tell.
-    """
+    CI runs ``pip install -e ".[dev]"``, so a tool only in requirements-dev.txt
+    is absent where the gate needs it."""
     pyproject = tomllib.loads((SERVICE_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
     dev = pyproject["project"]["optional-dependencies"]["dev"]
     pinned = [entry for entry in dev if entry.split("==")[0].strip() == "pyright"]
@@ -147,17 +108,8 @@ def test_the_gate_resolves_the_interpreter_that_actually_ran_it() -> None:
 def _pyright_report() -> tuple[int, str]:
     """One pyright run of the whole tree, shared by both assertions below.
 
-    The two tests asked the same question of the same unchanged tree with the
-    same command, and paid for the analysis twice: 2.29s and 2.20s, the two
-    most expensive entries in this file. That is a962c7b's argument applied
-    where it was not applied: one observation, handed to every reader, instead
-    of one observation per reader.
-
-    Memoized rather than computed at import, so running either test alone still
-    runs pyright. Cached per session, not per file, because the answer is a
-    property of the tree: if the tree changed mid-session the two assertions
-    would have disagreed, and disagreement is the failure mode, not a feature.
-    """
+    The two tests paid for the same analysis twice; memoized per session (not
+    at import), so either test alone still runs pyright."""
     executable = _require_pyright()
     completed = subprocess.run(
         [executable, "--pythonpath", _interpreter(), "--outputjson"],
@@ -205,21 +157,9 @@ def test_pyright_budget_is_tight() -> None:
 def test_pyright_detects_its_own_suppressions_decaying() -> None:
     """Both rules that catch a suppression outliving its finding must be ON.
 
-    Assertions about the config, not the tree, because the failure they guard is
-    invisible FROM the tree: with either rule off, a suppression that stopped
-    suppressing anything leaves this budget at zero and the suite green. That is
-    not hypothetical. Eight suppressions sat in `app/` with comments explaining
-    why they were needed and nothing to check any of it, and five of them had
-    never suppressed anything -- from the commit that added them onward.
-
-    `enableTypeIgnoreComments` is the other half of the same defect. Pyright
-    honoring mypy's comments let four `# type: ignore[attr-defined]` in
-    http_client_pool.py satisfy mypy while pyright's own view of those same four
-    lines reported `Cannot assign to attribute "_bound_loop"`, and a bare
-    `# type: ignore[return-value]` in cgroup_sense.py hid a real `Type "object" is
-    not assignable to return type "str | None"`. Two checkers, one tree, and every
-    one of those findings visible to only one of them.
-    """
+    With either rule off, a decaying suppression leaves the budget at zero and
+    the suite green -- five of eight parked suppressions had never suppressed
+    anything; the other half is ``enableTypeIgnoreComments``."""
     config = json.loads(_strip_jsonc((SERVICE_ROOT / "pyrightconfig.json").read_text(encoding="utf-8")))
     assert config.get("enableTypeIgnoreComments") is False, (
         "pyright is honoring mypy's `# type: ignore` comments again, so a "
@@ -260,14 +200,8 @@ def test_pyright_config_targets_the_running_interpreter() -> None:
 def _annotated_field_calls(annotation: ast.expr | None) -> Iterator[ast.Call]:
     """Every ``Field(...)`` written as metadata inside an ``Annotated[...]``.
 
-    The half of the pattern space the detector was blind to, and in this file the
-    larger half. ``x: Annotated[T, Field(<default>, ...)] = <default>`` states its
-    default twice and puts it in the slot a checker cannot see; reading only the
-    assignment's value missed every one of them, including two ``url``
-    re-declarations in ``app/api_models.py`` written exactly this way, one of them
-    carrying a comment that said it was inherited. A detector that sees one of two
-    spellings of a shape is not a detector of the shape.
-    """
+    The half the detector was blind to, and here the larger one: the default is
+    stated twice, in the slot a checker cannot see."""
     if not (isinstance(annotation, ast.Subscript) and isinstance(annotation.value, ast.Name)):
         return
     if annotation.value.id != "Annotated":
@@ -281,17 +215,8 @@ def _annotated_field_calls(annotation: ast.expr | None) -> Iterator[ast.Call]:
 def _positional_field_default_offenders(tree: ast.Module, path: pathlib.Path | None = None) -> list[str]:
     """``Field(<default>, ...)`` sites, wherever the ``Field`` is written.
 
-    Ellipsis (``Field(..., ...)``) is excluded because those fields really are
-    required and pyright is right about them. ``default_factory=`` is excluded
-    because pyright resolves the factory, so it is a different question from a
-    default pyright cannot see.
-
-    Both spellings are swept -- the default in the assignment's value
-    (``x: T = Field(None, ...)``) and in the annotation's ``Annotated`` metadata
-    (``x: Annotated[T, Field(None, ...)] = None``) -- because they are one rule,
-    and a detector that reads only one of them reports a clean tree over the
-    other without ever saying so.
-    """
+    Ellipsis excluded (really-required); ``default_factory=`` excluded
+    (pyright resolves it); both spellings swept -- they are one rule."""
     found: list[str] = []
     where = f"{path.name}:" if path is not None else ""
     for node, target, value in assignments(nodes_of(tree)):
