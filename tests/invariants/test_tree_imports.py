@@ -38,20 +38,16 @@ def _app_reads(monkeypatch) -> list[pathlib.Path]:
 def _test_tree_module_names() -> frozenset[str]:
     """The bare module names that name a file in the test tree.
 
-    Cached because the sweep asks once per import statement and the set does not
-    change within a run -- the same reasoning as the shared ``app_trees``
-    snapshot, and it is what keeps this affordable at every call site.
-    """
+    Cached because the sweep asks once per import and the set does not change
+    within a run -- what keeps this affordable at every call site."""
     return frozenset(candidate.stem for candidate in TESTS_DIR.rglob("*.py"))
 
 
 def _imported_modules(tree: ast.AST) -> Iterator[tuple[ast.AST, str]]:
     """Every module name a tree imports, with the node that imported it.
 
-    ``from a.b import c`` contributes ``a.b``; ``import a.b`` contributes
-    ``a.b`` as written. One traversal over both spellings so the caller compares
-    one thing rather than repeating its verdict per import form.
-    """
+    One traversal over both spellings (``from a.b import c`` contributes
+    ``a.b``) so the caller compares one thing per import form."""
     for from_node in from_imports(tree):
         if from_node.module:
             yield from_node, from_node.module
@@ -65,19 +61,8 @@ def _imported_modules(tree: ast.AST) -> Iterator[tuple[ast.AST, str]]:
 def _bare_sibling_import_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
     """A test module importing a sibling helper by its bare name.
 
-    ``from _chain_policies import chain_policy`` resolves only because pytest
-    puts each test file's own directory on ``sys.path``. That is the conftest
-    path hack in a form E402 and mypy cannot see: the module is unresolvable to
-    the type checker, and the import breaks the moment the file moves up a
-    directory or the rootdir changes. Two test modules had it, both reading
-    exactly like the package imports around them.
-
-    Membership is decided by asking whether the name is a file in the test tree,
-    not by listing the standard library -- so ``httpx`` and ``pytest`` are left
-    alone by construction rather than by an allowlist that would need a third
-    dependency added to it. The match is on the whole name because no module in
-    the test tree is dotted, so a dotted import cannot be one of these.
-    """
+    It resolves only via pytest's per-file ``sys.path`` hack -- invisible to
+    E402 and mypy, and it breaks when a file moves."""
     local = _test_tree_module_names()
     return [
         offender_at(
@@ -100,16 +85,8 @@ PLANTED_BARE_IMPORT = (
 def _own_package(module: str) -> str:
     """The package a dotted module name belongs to.
 
-    ``app.transport.http`` -> ``app.transport``; a top-level module
-    like ``app.runtime.metrics`` -> ``app``. A module name is never its own package, so a
-    leaf module and its siblings share one boundary.
-
-    That last clause is why ``app.runtime.cgroup_sense`` and ``app.runtime.memory_pressure`` are
-    one package rather than two. Reading a top-level module as its own package
-    would exempt every one of the top-level modules from each other, and those
-    are exactly the reaches hardest to see -- there is no directory name to
-    suggest a boundary has been crossed.
-    """
+    ``app.transport.http`` -> ``app.transport``; a top-level module resolves to
+    ``app``, never itself, so leaf and siblings share one boundary."""
     head, _, _tail = module.rpartition(".")
     return head
 
@@ -117,43 +94,16 @@ def _own_package(module: str) -> str:
 def _dotted_module(path: pathlib.Path) -> str:
     """``app/admission/admission.py`` -> ``app.admission.admission``.
 
-    Root-relative, because the import being judged is written root-relative and
-    a comparison between an absolute path and a dotted name never matches. The
-    failure that produces is quiet rather than loud: every top-level module looks
-    like it sits outside every other package, so the rule fires on reaches that
-    are inside the same one and a reader stops believing it.
-    """
+    Root-relative because the judged import is root-relative; a path-vs-dotted
+    comparison never matches, and the failure is quiet."""
     return relative_posix(path).removesuffix(".py").replace("/", ".")
 
 
 def _private_leak_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
     """A private app name imported from outside the package that defines it.
 
-    A leading underscore has two halves and a name is only honest if both are
-    respected. The conventional half is package-internal: ``_post_fetch_diagnostics``
-    is private to ``app.transport`` and every sibling module may use it,
-    because no consumer outside ``transport`` can be written ``from
-    app.transport.http import _post_fetch_diagnostics`` and get far. The
-    half that gets broken is the one the import form defeats -- binding the name
-    into another package *does* make it reachable, and the underscore is then
-    asserting a boundary the reader cannot check.
-
-    Twenty-one names were doing this. ``DNS_EXECUTOR`` lives in
-     ``transport.pinned_transport`` and is imported by ``api.webhooks``;
-    ``allow_private_targets`` lives in ``app.models.host_policy`` and is imported
-    by a transport strategy; ``BROWSER_RAM_FRACTION`` crosses from ``app`` into
-    ``runtime.resource_pressure``. Each is a real collaboration, which is
-    precisely why the fix is to promote the name rather than to forbid the call.
-
-    The boundary is the *imported-from* module, not a map from name to definer, so
-    this reads one import and decides it. That is what lets it be a ``Rule``: a
-    detector that had to know where the name was born would need the whole corpus
-    to answer, and a proof that plants a synthetic source could not supply it --
-    the bite would pass for any implementation, since the synthetic name would be
-    absent from the real map. Comparing the two packages on the node in hand is
-    both cheaper and stricter: a re-exporting hop is judged against the hop that
-    names it, and a name laundered twice is caught on the first.
-    """
+    Binding a name into another package defeats the underscore, so the fix is
+    to promote the name; judging the imported-from module makes this provable."""
     module = _dotted_module(path)
     here = _own_package(module)
     return [
@@ -214,22 +164,16 @@ PRIVATE_NAME_LEAKS_PACKAGE = Rule(
 def test_a_private_name_does_not_leave_its_package():
     """No app module reaches a private name in another package.
 
-    The load-bearing half of a name that is genuinely private, and the thing a
-    reviewer reads ``from app.models.host_policy import allow_private_targets`` and
-    cannot check at a glance.
-    """
+    The load-bearing half of a genuinely private name -- the thing a reviewer
+    cannot check at a glance when reading an import."""
     PRIVATE_NAME_LEAKS_PACKAGE.scan()
 
 
 def test_private_leak_detector_bites():
     """Bites across the boundary; silent inside it, and silent on the rest.
 
-    The clean case pins all four ways the rule must not degenerate: a sibling
-    inside the defining package, a public cross-package name, a dunder spelling,
-    and imports that are not app-internal at all. Without them the rule would
-    also pass as "no imports whose name starts with an underscore anywhere",
-    which is a different and much worse rule.
-    """
+    The clean case pins all four ways the rule must not degenerate: sibling,
+    public cross-package name, dunder spelling, non-app imports."""
     PRIVATE_NAME_LEAKS_PACKAGE.check_bites()
 
 
@@ -269,10 +213,7 @@ def test_tests_import_their_helpers_by_package_path():
 def test_bare_sibling_import_detector_bites():
     """Bites: the shipped spellings, and the neighbors that must stay quiet.
 
-    The first is the real thing -- the exact ``from _chain_policies import
-    chain_policy`` that two test modules carried. The clean case pins both
-    directions: the package form, a stdlib import, and a third-party import all
-    name a module that is not a test file and must be left alone, so the rule
-    cannot degenerate into "no unqualified imports".
-    """
+    The clean case pins both directions -- package, stdlib and third-party
+    imports are all left alone, so the rule cannot degenerate into "no
+    unqualified imports" at all."""
     TEST_HELPERS_IMPORTED_BY_PACKAGE_PATH.check_bites()
