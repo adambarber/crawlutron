@@ -1,12 +1,7 @@
 """``multiprocessing.Process`` stand-ins for the document-extraction pool.
 
-The pool's whole contract is signal semantics -- SIGTERM absorbed, SIGKILL
-fatal, join after death, exitcode once dead -- so one double models all of it
-and a test states only the property it needs (``responds_to_sigterm``,
-``alive``). Two copies of this class were the duplication: a second one that
-recorded shutdown, and a third shape for a worker nothing can kill, each
-freezing its own idea of what ``exitcode`` should be.
-"""
+One double models the whole signal contract (SIGTERM absorbed, SIGKILL fatal,
+join after death); three copies previously froze three ideas of ``exitcode``."""
 
 from typing import Any
 
@@ -16,12 +11,8 @@ from app.orchestration.doc_pool import DocExtractionPool, DocWorker
 class StubProc:
     """A ``multiprocessing.Process`` stand-in with signal semantics.
 
-    ``responds_to_sigterm=False`` models the runaway worker: SIGTERM is
-    absorbed, only SIGKILL ends it. ``alive=False`` models a child that is
-    already dead. ``join`` records the timeout it was given and whether the
-    child was already dead when it was called, so a test can tell "reaped"
-    from "told to die and still running".
-    """
+    ``responds_to_sigterm=False`` models the runaway worker (only SIGKILL ends
+    it); ``join`` also records prior death ("reaped" vs "still running")."""
 
     def __init__(self, pid: int = 4242, responds_to_sigterm: bool = True, alive: bool = True) -> None:
         self.pid = pid
@@ -95,13 +86,10 @@ def stub_worker(pid: int, responds_to_sigterm: bool = True) -> DocWorker:
 
 
 def unkillable_doc_worker(pid: int = 1111) -> Any:
-    """A retired-but-still-``is_alive()`` pool slot nothing can reclaim.
+    """A retired-but-``is_alive()`` pool slot nothing can reclaim.
 
-    ``responds_to_sigterm=False`` models a worker nothing can kill: ``is_alive()``
-    stays True for the life of the process, and no normal path terminates it.
-    The pool must skip such a slot rather than let it hold a list slot and a PID
-    forever.
-    """
+    ``responds_to_sigterm=False`` keeps ``is_alive()`` True for the process's
+    life; the pool must skip the slot rather than let it hold a PID forever."""
     zombie = DocWorker(StubProc(pid, responds_to_sigterm=False), StubConn())
     zombie.retired = True
     zombie.busy = False
@@ -111,11 +99,8 @@ def unkillable_doc_worker(pid: int = 1111) -> Any:
 class StubSpawner:
     """A pool ``spawn`` that hands out known workers and records that it asked.
 
-    Asserting only that a handed-out worker is the expected one would pass on a
-    pool that grew its slot some other way, so the record is asserted too: it is
-    empty until the pool actually asks, and ``clear()`` retires a seeding so the
-    record speaks only about what the test's own acquisition did.
-    """
+    Asserting only the worker would pass a pool that grew its slot another way;
+    ``clear()`` retires a seeding so the record speaks about the test."""
 
     def __init__(self, *workers: DocWorker) -> None:
         self._queue = list(workers)
@@ -123,13 +108,10 @@ class StubSpawner:
         self.asked: list[DocWorker] = []
 
     def __call__(self) -> DocWorker:
-        """The next queued worker, or the last one handed out once the queue runs dry.
+        """The next queued worker, or the last one out once the queue runs dry.
 
-        Repeating rather than raising is what a pool that grows one slot at a time
-        needs: a second spawn in the same test is a respawn of the same slot, and
-        a double that raised would be asserting a fact about the test rather than
-        about the pool.
-        """
+        Repeating rather than raising is what a pool growing one slot at a time
+        needs: a second spawn respawns the same slot."""
         worker = self._queue.pop(0) if self._queue else self._last
         assert worker is not None, "a spawn with nothing queued and nothing handed out"
         self._last = worker
@@ -144,11 +126,8 @@ class StubSpawner:
 def install_unkillable_doc_worker() -> tuple[DocWorker, DocExtractionPool, StubSpawner]:
     """:func:`unkillable_doc_worker`, seeded into the pool as its only slot.
 
-    The pool is grown to hold the worker through a real acquisition, so the
-    seeded pool was arrived at the way production arrives at one. The spawner
-    comes back so a test can queue the workers the pool should grow into once it
-    has reaped the slot nothing can reclaim.
-    """
+    Grown through a real acquisition, so the pool matches production's arrival;
+    the spawner lets a test queue the workers the pool should grow into."""
     import app.extraction.content as ext_mod
 
     zombie = unkillable_doc_worker()
