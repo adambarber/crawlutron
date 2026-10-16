@@ -13,10 +13,8 @@ SENSITIVE_HEADERS = {"Cookie": "session=secret123", "Authorization": "Bearer tok
 class _TransportHeadersDouble:
     """The transport's own header multidict, with only the repeated names.
 
-    ``get`` and ``items`` raise rather than answer, so the cookie path is pinned
-    to ``get_list``: reading Set-Cookie any other way is the corruption this
-    test exists to catch, and a double that quietly answered would hide the
-    regression instead of failing on it.
+    ``get``/``items`` raise, pinning the cookie path to ``get_list`` -- reading
+    Set-Cookie any other way is the corruption this test exists to catch.
     """
 
     def __init__(self) -> None:
@@ -78,9 +76,8 @@ async def test_http_fetcher_keeps_cookie_on_same_domain_redirect(monkeypatch):
 class _TwoCookieHandler(BaseHTTPRequestHandler):
     """Serve a response carrying two separate ``Set-Cookie`` headers.
 
-    A real socket, not a ``MockResponse``: a plain dict can hold only one value
-    per key, so it structurally cannot express the duplicate header that this
-    behaviour turns on.
+    A real socket, not a ``MockResponse``: a plain dict holds one value per key,
+    so it cannot express the duplicate header this behavior turns on.
     """
 
     def do_GET(self):
@@ -98,24 +95,8 @@ class _TwoCookieHandler(BaseHTTPRequestHandler):
 async def test_http_fetcher_persists_every_set_cookie_header():
     """Every Set-Cookie on a response must reach the jar, not just the last.
 
-    ``store_set_cookies`` is documented to capture each Set-Cookie separately
-    and does so via ``get_list("set-cookie")``, which returns one entry per
-    header. The httpx fetcher used to bypass that: it built a dict comprehension
-    of the response headers and handed *that* to the helper, and because
-    ``httpx.Headers.items()`` comma-joins duplicate keys the helper fell through
-    to its plain-dict branch with a single ``"a=1; Path=/, b=2; Path=/"`` entry.
-
-    Both cookies did survive that round trip -- the jar's SimpleCookie re-splits a
-    comma-joined value -- but only for shapes where the first cookie carries its
-    own attributes, and ``test_cookiejar_add_cookie_header_parses_each_cookie_
-    separately`` in this file documents comma-joined values as a corruption risk
-    outright. The fetcher now stores cookies from the response headers themselves,
-    so the helper takes its documented ``get_list`` path and the guarantee rests
-    on the code that was written to provide it.
-
-    This is the only test covering the fetcher's call into the cookie helper; the
-    helper's own multi-header guarantee is pinned separately below and passed
-    happily while the caller defeated it.
+    The httpx fetcher once comma-joined duplicates in a dict comprehension,
+    defeating the helper's ``get_list`` path; it now stores from the headers.
     """
     from tests.helpers.server import spawn_threaded_server
 
@@ -134,13 +115,8 @@ async def test_http_fetcher_persists_every_set_cookie_header():
 def test_store_set_cookies_handles_multiple_set_cookie_headers():
     """store_set_cookies must capture all Set-Cookie headers, not just one.
 
-    In httpx 0.28+, Headers.items() returns comma-joined values for duplicate
-    keys. Using get_list("set-cookie") gives each header separately.
-
-    Reads the process-wide jar, which the conftest teardown empties between
-    tests, rather than swapping the module global for a private one: the swap
-    was 8 lines of try/finally guarding state the fixture already guarantees
-    is clean on entry.
+    httpx 0.28+ comma-joins duplicate keys in ``items()``; ``get_list`` gives
+    each header separately. Reads the process-wide jar the conftest empties.
     """
     jar = cookie_jar.global_cookie_jar()
 

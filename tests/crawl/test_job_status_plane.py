@@ -1,12 +1,7 @@
 """Control state (status) and data state are separate write planes.
 
-The runner reloads its row every loop iteration and saves the WHOLE row --
-including ``status`` -- from a pre-engine snapshot. A pause/cancel handled
-mid-batch was silently overwritten by the runner's next save, and the
-post-save check read the same stale in-memory copy, so the transition could
-never be observed. Fix: ``save()`` never touches the status column; every
-transition goes through ``set_status(job_id, new, expected=...)``, an
-atomic compare-and-set on the row itself.
+The runner saved the WHOLE row from a pre-engine snapshot, overwriting a
+mid-batch pause/cancel; ``save()`` never touches status (atomic CAS only).
 """
 
 import ast
@@ -52,11 +47,10 @@ class TestStatusPlane:
         assert store.set_status("ghost", JobStatus.CANCELLED, expected=JobStatus.RUNNING) is False
 
     def test_save_never_clobbers_a_control_transition(self, tmp_path):
-        """The, at the store boundary.
+        """The store boundary, at the row's own dataclass.
 
-        The runner holds a pre-engine snapshot (status RUNNING); a handler
-        pauses the row mid-batch; the runner's next data save must persist
-        frontier/visited/results but MUST NOT resurrect RUNNING.
+        The runner's snapshot (RUNNING) must not resurrect a paused state, so the
+        save below persists frontier/visited/results but not the status.
         """
         store = _store(tmp_path)
         snapshot = _running_job(store)
@@ -73,15 +67,8 @@ class TestStatusPlane:
     async def test_terminal_claim_respects_a_concurrent_cancel(self, tmp_path):
         """A cancelled job is settled, and nothing may claim otherwise.
 
-        Runner finishes the last batch and claims COMPLETED, but the user
-        cancelled first: the CAS refuses and CANCELLED stands. A reader asking
-        "has this job finished?" gets that answer back too. It used not to: the
-        harness restated the store's terminal set from memory and omitted
-        CANCELLED, so such a reader waited out the thirty-second hang guard and
-        then failed an assertion the row had already satisfied -- the cost paid
-        by whichever test happened to cancel mid-assertion. The store and the
-        cancel are production; only the waiting is under test. The bound on the
-        wait is what keeps that test cheap while it is red.
+        The runner claims COMPLETED but the user cancelled first: the CAS refuses
+        and CANCELLED stands. It once restated the terminal set from memory.
         """
         store = _store(tmp_path)
         _running_job(store)
@@ -96,9 +83,8 @@ class TestStatusPlane:
 def _status_assignment_offenders() -> list[str]:
     """Any ``X.status = ...`` in app/ outside the store itself.
 
-    The dataclass field exists for reads (loaded rows carry it); writing it
-    outside ``JobStore`` reconstructs the old world where an in-memory
-    status view could reach ``save()`` and clobber a control transition.
+    The dataclass field is for reads; writing it outside ``JobStore``
+    reconstructs the old world where a stale in-memory status reached ``save()``.
     """
     found: list[str] = []
     for path, tree in app_trees():

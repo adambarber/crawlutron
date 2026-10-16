@@ -29,9 +29,8 @@ def budgeted_cache(tmp_path, *, max_total_bytes: int = 400, **settings) -> Conte
 def _at_cap_budget() -> tuple[float, dict, int]:
     """``(now, value, cap)`` where ``cap`` is exactly the on-disk envelope size.
 
-    The budget is the *envelope's* byte count, not the value's -- the cap that
-    admits an entry has to be derived from what actually lands on disk, so the
-    two are computed together here and a change to either moves both.
+    The budget is the envelope's bytes, not the value's, so the two are computed
+    together here -- a change to either moves both.
     """
     now = 1000.0
     value = {"body": "x" * 150}
@@ -88,10 +87,11 @@ class TestContentCacheByteBudget:
         assert await cache.aget("k3") is not None
 
     async def test_aset_oversized_never_written(self, tmp_path, monkeypatch):
-        """The async path must refuse oversized entries before any disk
-        write -- the payload must not transiently hit disk (crash window).
-        Mirrors set(): pre-serialize, size-check under the lock, then write.
-        The spy sits on ``_write_data``, the seam the real code uses."""
+        """The async path must refuse oversized entries before any disk write.
+
+        Mirrors set(): pre-serialize, size-check under the lock, then write, so the
+        spy sits on ``_write_data``, the seam the real code uses.
+        """
         cache = _make_cache(tmp_path, max_entry_bytes=200)
         written: list[str] = []
 
@@ -189,9 +189,8 @@ class TestContentCacheByteBudget:
     async def test_aset_new_key_write_failure_preserves_byte_total(self, tmp_path, monkeypatch):
         """A failed write of a NEW key must not move _index_total_bytes.
 
-        Bytes enter the total only at commit (after a successful write), so the
-        old rollback's `total -= size` decremented bytes that were never added;
-        the max(0,...) clamp only hid it when the cache was otherwise empty."
+        Bytes enter the total only at commit; the old rollback's ``total -= size``
+        decremented bytes never added, the clamp only hiding it when empty.
         """
         cache = _make_cache(tmp_path, max_entry_bytes=10_000)
         await cache.aset("keep", {"body": "v" * 200}, ttl=60)  # counts once, stays
@@ -221,11 +220,10 @@ class TestContentCacheByteBudget:
 
 
 class TestExpiredEntryFreesByteAccounting:
-    """Reading an expired (or unreadable) entry popped ``_index`` but left
-    ``_index_sizes``/``_index_total_bytes`` untouched. The phantom bytes keep
-    ``_over_limits()`` true, so the next ``set()``'s ``_enforce_limits`` evicts
-    LIVE LRU entries it should not -- a sustained self-inflicted cache wipe-out
-    on a TTL-busy cache.
+    """Reading an expired entry popped ``_index`` but left byte accounting untouched.
+
+    The phantom bytes keep ``_over_limits()`` true, so the next set evicts LIVE
+    LRU entries it should not -- a self-inflicted wipe on a TTL-busy cache.
     """
 
     def test_expired_read_frees_byte_accounting(self, tmp_path):

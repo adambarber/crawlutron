@@ -46,17 +46,8 @@ class TestScheduler:
     async def test_cooldown_delay_applied_to_domain(self, monkeypatch):
         """A domain in cooldown must have the cooldown awaited before the worker.
 
-        Asserted on the *request* the scheduler makes, not on how long the box
-        took to grant it: a cooldown of 0.3s is honoured by asking to sleep the
-        remaining window, and that ask is the behaviour under test. The
-        worker's own assertion pins the ordering -- it fails if the cooldown
-        branch is skipped, or if the cooldown is ever moved behind the worker.
-
-        The 90%-of-window floor (0.27 of 0.3) is not the whole window on
-        purpose: the remaining window shrinks by whatever the test itself
-        spends between ``set_domain_cooldown`` and ``run`` -- admitting the
-        job's URL, building the scheduler's gates -- so an exact-0.29 floor
-        flakes on a loaded box while saying nothing more about the scheduler.
+        Asserted on the *request*, not the wall time -- the worker's own check
+        pins the ordering; the 90%-of-window floor absorbs before-run spend.
         """
         sleeps = recorder(monkeypatch)
         scheduler = make_scheduler(delay_seconds=0.05)
@@ -94,10 +85,8 @@ class TestScheduler:
     async def test_delay_applied_between_same_domain_jobs(self, monkeypatch):
         """Every job on a delayed domain asks for the jittered per-domain delay.
 
-        Two same-domain jobs at ``delay_seconds=0.1`` must produce two delay
-        requests inside the jitter band, not one (or none). The band is
-        production's ``uniform(0.8, 1.2)``, derived from the code rather than
-        from whatever the machine happened to do.
+        Two same-domain jobs must each request the delay inside production's
+        ``uniform(0.8, 1.2)`` band -- not one, or none.
         """
         sleeps = recorder(monkeypatch)
         scheduler = make_scheduler(delay_seconds=0.1, adaptive=False)
@@ -152,18 +141,8 @@ class TestAdaptiveThrottling:
 class TestObservedLatencyCrossesPipelines:
     """Both result shapes must feed the estimator, through one attribute.
 
-    The scheduler used to dig latency out of ``result.diagnostics["runtime"]``,
-    and only ``EngineCrawlResult`` carries ``diagnostics``. Every /v1/render
-    result is a ``CrawlResult``, which has ``elapsed_ms`` directly and no
-    ``diagnostics`` at all -- so the getattr returned None and the render
-    pipeline's latencies were silently dropped, leaving the adaptive estimator
-    calibrated on crawl traffic alone.
-
-    Both shapes are the real models, and the crawl one is built through the
-    real ``build_engine_result`` chokepoint. A stand-in carrying a
-    ``diagnostics`` key would have passed against the old code, which is the
-    whole point: the defect was the attribute a shape does not have, so the
-    fixture has to be the shape itself.
+    The scheduler once read ``diagnostics["runtime"]``, which only the crawl
+    model carries -- so render pipeline latencies were silently dropped.
     """
 
     @staticmethod
@@ -224,10 +203,10 @@ class TestObservedLatencyCrossesPipelines:
 
 
 class TestCircuitBreakerSpillsOnResult:
-    """With ``on_result`` set, an open circuit must spill the failed
-    envelope through ``on_result`` instead of writing ``results[index]``
-    (which is ``None`` in that mode -> TypeError, swallowed by
-    ``gather(..., return_exceptions=True)`` -> the URL silently vanishes).
+    """With ``on_result`` set, an open circuit must spill the failed envelope through it.
+
+    Writing ``results[index]`` in that mode is ``None`` -> TypeError, swallowed
+    by ``return_exceptions=True`` -> the URL silently vanishes.
     """
 
     async def test_open_circuit_spills_via_on_result(self):
