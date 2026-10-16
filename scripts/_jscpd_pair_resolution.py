@@ -93,12 +93,9 @@ SANCTIONED_IGNORE_GLOBS = (
 
 
 def _tree_of(path: str) -> str:
-    """Which tree a reported path belongs to.
-
-    Derived from the path, not declared by the expectation, so a file cannot
-    choose the floor it is judged by. Anything outside the known roots is
-    production: the tighter floor, so an unrecognised file cannot slip through
-    on the looser one.
+    """Which tree a reported path belongs to, derived from the path -- so a file cannot
+    choose the floor it is judged by; anything outside the known roots is production
+    (the tighter floor, so an unrecognised file cannot slip through).
     """
     for tree, roots in TREE_ROOTS.items():
         if any(path == root or path.startswith(root + "/") for root in roots):
@@ -109,9 +106,8 @@ def _tree_of(path: str) -> str:
 def _reject_source_masking(ignore: list[str]) -> None:
     """A glob that hides source is never a sanctioned exception.
 
-    Checked independently of the sanctioned list so that widening the list is
-    not itself a way to hide a clone: the rule is that this gate's ignore list
-    may skip caches and vendored trees, and nothing else.
+    Checked independently of the sanctioned list so widening the list cannot itself
+    hide a clone: this gate's ignore may skip caches and vendored trees, nothing else.
     """
     for glob in ignore:
         if glob.rstrip("/").endswith(".py") or "*.py" in glob:
@@ -121,16 +117,10 @@ def _reject_source_masking(ignore: list[str]) -> None:
 
 
 def _validate_scan_config(path: Path) -> None:
-    """Fail closed unless `.jscpd.json` contains only the sanctioned `ignore` key.
+    """Fail closed unless ``.jscpd.json`` holds only the sanctioned ``ignore`` key.
 
-    Checked before jscpd runs, not after: a scan taken under an unvalidated
-    config has already decided what the gate cannot see, so there is nothing
-    left to check afterwards. Only `ignore` is allowed; extra keys like
-    `maxLines`, `skipLocal`, `minLines`, `minTokens` pass straight through
-    to jscpd via `--config` and are live. Measured: `maxLines: 500` shrinks
-    production coverage from 94 sources/21506 lines to 83/13560 (37% of
-    production unscanned) while the gate still exits 0 because the expectations
-    file is satisfied by the reduced pair set.
+    Checked before jscpd runs -- a config validated after the scan can no longer
+    see what it hid; extra keys (``maxLines``, ``minTokens``...) pass straight through as live.
     """
     document = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(document, dict):
@@ -276,34 +266,17 @@ def _scanned_roots(profile: str) -> tuple[str, ...]:
 
 
 def _resolve_roots(name: str, profile: str) -> tuple[str, ...]:
-    """Which scan root a multi-path report's name belongs to.
-
-    jscpd strips the root prefix when it is handed several paths, so one
-    invocation over `app tests` returns `crawl/recursive.py` for
-    `app/orchestration/recursive.py` AND `_recursive_harnesses.py` for
-    `tests/_recursive_harnesses.py` -- names that name no tree, which is the
-    whole reason attribution was delegated to one-root-per-invocation scans in
-    the first place. There is no flag to turn that off, so attribution is
-    resolved here instead, against the filesystem.
-
-    Returns every root that could hold the name, not just the first, because a
-    name in two roots (two files of the same name, as the gate's own fixtures
-    have) is genuinely undecidable. The caller treats that as possibly-spanning
-    rather than picking one, which keeps the failure mode a report a human can
-    dismiss rather than a dropped clone nobody sees.
+    """Which scan root a multi-path report's name belongs to, resolved against the
+    filesystem because jscpd strips roots when handed several paths. Returns every root
+    that could hold the name -- a name in two roots is undecidable, kept over guessed.
     """
     return tuple(root for root in _scanned_roots(profile) if _IS_FILE(SERVICE_ROOT / root / name))
 
 
 def _expected_tree(pair: dict[str, Any]) -> str:
-    """The tree label a declared pair is scored under.
-
-    Derived from the two declared paths the same way the cross-tree pass derives
-    it from the two reported ones, so a pair whose sides straddle two trees is
-    keyed ``cross`` whether it was declared or observed. Keying a cross-tree
-    declaration under its first side's tree would let a within-tree entry of
-    identical content satisfy it -- the sanctioned fragment would be found in the
-    other tree and the cross-tree clone would go unreported.
+    """The tree label a declared pair is scored under, derived the same way the
+    observed pass derives it -- so a pair straddling two trees keys ``cross`` whether
+    declared or not, and a within-tree twin cannot satisfy a cross-tree expectation.
     """
     first, second = _expected_locations(pair)
     if _tree_of(first[0]) != _tree_of(second[0]):
@@ -312,12 +285,9 @@ def _expected_tree(pair: dict[str, Any]) -> str:
 
 
 def _pair_id(duplicate: dict[str, Any], root: str) -> LocationPair:
-    """Where jscpd says a clone is, in repository-relative terms.
-
-    jscpd's `name` is relative to the scan root, so the root is put back on.
-    Without it, `models.py` scanned from `app/` and `models.py` scanned from
-    `tests/` are the same string, and a single whole-tree scan cannot say which
-    tree a pair belongs to.
+    """Where jscpd says a clone is, in repository-relative terms: jscpd's ``name`` is
+    root-relative, so the root is put back on -- otherwise ``models.py`` from ``app/``
+    and ``tests/`` collapse into the same string.
     """
     return _location_pair(
         [_scoped(root, _location(duplicate, side, "name")) for side in ("firstFile", "secondFile")]
@@ -342,24 +312,9 @@ def jscpd_report(
     fail_on_empty: bool = False,
     paths: tuple[str, ...] = (),
 ) -> dict[str, Any] | None:
-    """Run jscpd over one root at one (lines, tokens) floor and parse the report.
-
-    The one place that knows how to invoke jscpd. The gate scores what comes
-    back and the frontier sweep enumerates the whole staircase of floors, and
-    a second copy of this command line is a second answer to "what did jscpd
-    see" -- which is the question the whole gate exists to keep one answer to.
-
-    ``paths`` scans several roots in ONE invocation, which is the only way to see
-    a clone that spans two of them: handed one root, jscpd reports the other
-    root's files under names relative to the one it was given, so a pair is
-    either invisible or attributed to a path that names neither tree. Used only
-    by the cross-tree scan, with ``root="."`` so the reported names are the real
-    service-relative paths.
-
-    ``fail_on_empty`` is a gate concern, not a measurement one: it makes jscpd
-    refuse an empty result so a mis-pointed scan root cannot read as clean.
-    A sweep wants the report either way. Returns None only when jscpd produced
-    no report at all, which is the one failure a caller cannot interpret.
+    """Run jscpd over one root at one (lines, tokens) floor and parse the report -- the
+    ONE place that knows how to invoke jscpd. ``paths`` scans several roots in one
+    invocation (the only way to see a spanning clone); ``fail_on_empty`` refuses an empty result.
     """
     with tempfile.TemporaryDirectory(prefix="jscpd-gate-") as raw_output:
         output = Path(raw_output)
@@ -403,19 +358,9 @@ def _scan(root: str, floor: tuple[int, int], args: argparse.Namespace) -> dict[s
 
 
 def _cross_tree_scan(floor: tuple[int, int], args: argparse.Namespace) -> dict[str, Any]:
-    """Every root in ONE invocation, so a pair that spans two of them is visible.
-
-    The per-root scans are the reason this exists. Handed one root, jscpd names
-    the other root's files relative to the one it was given, so a fragment shared
-    between `app/` and `tests/` is reported by neither invocation -- not at a
-    higher floor, not with a different threshold, not at all. The gap is not a
-    near miss, and the shape it hides is the one that matters most: a test
-    harness re-spelling production's truth looks like one legitimate copy on each
-    side, so the per-tree gate has nothing to object to even in principle.
-
-    Scanned as one invocation with every root as a positional, and attributed
-    through :func:`_resolve_root` because the reported names are root-relative and
-    name no tree.
+    """Every root in ONE invocation so a pair spanning two of them is visible -- a
+    per-root scan names the other root's files relative to the one it was given, so a
+    cross-tree fragment is reported by neither. Attributed via ``_resolve_root``.
     """
     report = jscpd_report(
         CROSS_TREE_ROOT,
@@ -430,15 +375,9 @@ def _cross_tree_scan(floor: tuple[int, int], args: argparse.Namespace) -> dict[s
 
 
 def _spans_trees(duplicate: dict[str, Any], profile: str) -> bool:
-    """True when the two sides of a pair could resolve to different scan roots.
-
-    Decided as "could", not "must". A name that resolves to one root on both
-    sides is within one tree and was already scored by the per-root pass; a name
-    that resolves to several is unattributable and is kept rather than guessed.
-    Keeping it costs a report a human can dismiss, dropping it could hide a real
-    cross-tree clone, and the asymmetry is the point -- this pass exists to catch
-    the one class the per-root scans are blind to, so its bias is toward
-    reporting.
+    """True when the two sides of a pair could resolve to different roots ("could",
+    not "must"): a single-root pair was scored per-root already; an unattributable
+    multi-root name is kept rather than guessed -- bias toward reporting this blind class.
     """
     first = _resolve_roots(duplicate["firstFile"]["name"], profile)
     second = _resolve_roots(duplicate["secondFile"]["name"], profile)
@@ -452,14 +391,9 @@ def _spans_trees(duplicate: dict[str, Any], profile: str) -> bool:
 
 
 def _cross_pair_id(duplicate: dict[str, Any], profile: str) -> LocationPair:
-    """A cross-tree pair's location, re-prefixed so both sides name their root.
-
-    The per-root scans cannot leave this to ``_scoped``, because the name a
-    multi-path invocation returns has already had its root stripped and no longer
-    says which file it was. A name that resolves to several roots is reported
-    under each of them, since which copy was the one compared is exactly what is
-    unknown -- and the declared locations use the same rule, so an ambiguous pair
-    can still be sanctioned.
+    """A cross-tree pair's location, re-prefixed so both sides name their root; ``_scoped``
+    cannot do it because a multi-path invocation's name has had its root stripped. A name in
+    several roots is reported under each -- and declared locations use the same rule.
     """
     sides = [
         [

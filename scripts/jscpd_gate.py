@@ -1,12 +1,7 @@
 """A duplication profile that rejects every pair not declared in the expectations baseline.
 
-The expectations file is a DECLARED BASELINE of known, reviewed duplication,
-not a record of past approvals. Each pair carries a reason and a fragment hash
-that prove the list and the code agree at the time of the assertion — a hash
-proves the list and the code agree, not that a human approved the duplication.
-The baseline changes through a reviewed commit; GitHub rulesets return 403 on
-this account, so the trust boundary is this gate plus a CODEOWNERS entry
-covering `jscpd-expectations.json`.
+The baseline is DECLARED, not a record of approvals -- each pair carries a reason + fragment
+hash; the trust boundary is this gate plus a CODEOWNERS entry over ``jscpd-expectations.json``.
 """
 
 from __future__ import annotations
@@ -34,17 +29,8 @@ TREE_ROOTS = resolver.TREE_ROOTS
 def configured_floor() -> tuple[int, int, float]:
     """The floor the pre-commit hook actually runs at, read from the hook itself.
 
-    ``.pre-commit-config.yaml`` is the threshold source, because the hook's
-    ``entry`` has to carry the numbers as text for pre-commit to invoke it -- YAML
-    has no interpolation and an anchor cannot inject a flag, so the literal cannot
-    live anywhere else. Everything that needs to know the floor reads it from
-    there: the gate's own test suite builds its argv from this, and
-    :func:`_require_configured_floor` refuses a run that was handed a laxer pair.
-
-    That refusal is the part worth having. A duplication gate whose number is a
-    command-line argument is one keystroke away from being run at a floor that
-    hides today's clones and reports green, and the report would be true of the
-    floor that was asked for rather than of the one the hook enforces.
+    ``.pre-commit-config.yaml`` is the threshold source; :func:`_require_configured_floor`
+    refuses a laxer floor, so the gate cannot be a keystroke away from hiding clones.
     """
     document = yaml.safe_load(resolver.PRECOMMIT_CONFIG_PATH.read_text(encoding="utf-8"))
     hooks = [
@@ -68,10 +54,8 @@ def configured_floor() -> tuple[int, int, float]:
 def _require_configured_floor(args: argparse.Namespace) -> None:
     """Refuse a run whose thresholds are laxer than the hook's.
 
-    Only laxer is rejected. Scanning *stricter* than the hook is how a new floor
-    gets measured before it is adopted -- that is the point of running the gate by
-    hand -- so it is allowed, and adopting the number is a reviewed edit to the
-    hook plus the baseline it produced.
+    Only laxer is rejected: scanning *stricter* is how a new floor gets measured
+    before adoption -- that is the point of running the gate by hand -- so it is allowed.
     """
     min_lines, min_tokens, threshold = configured_floor()
     laxer = (args.min_lines > min_lines, args.min_tokens > min_tokens, args.threshold > threshold)
@@ -116,29 +100,9 @@ _IMPORT_LINE = re.compile(r"^(?:import|from)\s")
 
 
 def _is_dependency_declaration(fragment: str) -> bool:
-    """True when a fragment is nothing but import statements.
-
-    Two modules that both import the same four names produce byte-identical
-    text, and no third module can hold those imports for them -- Python resolves
-    each module's own namespace. So a fragment of this shape cannot drift from
-    its twin, cannot be extracted into a chokepoint, and cannot be a defect. It
-    is the one place in a codebase where identical text means identical intent
-    rather than a second copy of a decision, which is exactly what this gate
-    exists to find. At the configured floor four of these lines clear the
-    threshold, so a package where every record module imports its own taxonomy
-    reports clones forever.
-
-    A fragment qualifies only if EVERY logical line is an import: one line of
-    real code between two import runs is enough to keep the pair under
-    judgement, because that is where the duplication the gate wants to see
-    begins. The fragment is NOT required to end with balanced parens. jscpd
-    reports a line range, so a run that happens to be cut on the opening line of
-    a wrapped import is still nothing but declarations, and asking whether the
-    report stopped mid-statement is a question about where jscpd stopped rather
-    than about what the text says. A continuation line inherits the
-    classification of the statement it continues, so an unclosed tail stays an
-    import; a fragment made ONLY of continuation lines has no statement to judge
-    and stays visible, which is the safe direction.
+    """True when a fragment is nothing but import statements -- byte-identical text Python
+    cannot hold for the modules (so it cannot drift OR be a defect), but only when EVERY logical
+    line is an import; it need not end in balanced parens.
     """
     logical: list[str] = []
     open_parens = 0

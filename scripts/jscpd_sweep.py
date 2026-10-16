@@ -1,20 +1,7 @@
 """Sweep the jscpd (min-lines, min-tokens) frontier and report what it reveals.
 
-Why this exists. jscpd is a step function on two independent limits: a clone is
-reported only when it trips BOTH the line floor and the token floor. So the
-counts along the frontier are not a ranking of duplication, they are a
-staircase, and the interesting question is not "how many pairs at 4/39" but
-*which* limit is binding at each step and *where* the first pair for each file
-appears. A file that first appears at 2/20 holds a genuine three-line
-repetition that the current floor cannot see at all.
-
-It scans each root separately, for the same reason `jscpd_gate` does: jscpd
-reports paths relative to the scan root, so one whole-tree scan's pair set is
-not the union of the per-root pair sets. A sweep run any other way reports a
-frontier for a tool configuration that does not exist.
-
-Run: .venv/bin/python -m scripts.jscpd_sweep [--max-lines 4] [--max-tokens 35]
-     [--min-lines 2] [--min-tokens 20] [--show N] [--json OUT]
+A clone tripping BOTH floors makes the counts a staircase; the interesting question is which
+limit binds at each step. Scans each root separately. Run: ``python -m scripts.jscpd_sweep``.
 """
 
 from __future__ import annotations
@@ -33,11 +20,8 @@ from scripts.ast_scopes import SCOPE_OPENING_NODES
 def _scan(root: str, min_lines: int, min_tokens: int) -> tuple[str, list[dict]]:
     """One jscpd invocation at one floor, tagged with the root it scanned.
 
-    The invocation itself is the gate's ``jscpd_report`` -- the sweep must not
-    hold a second copy of the command line, or the frontier would be a
-    staircase over a tool configuration the gate does not use. What the sweep
-    adds is the root tag: jscpd reports paths relative to the scan root, so a
-    bare name cannot be attributed to a tree.
+    The invocation IS the gate's ``jscpd_report`` (no second copy of the command
+    line); the sweep adds the root tag, since jscpd reports paths root-relative.
     """
     report = gate.jscpd_report(root, (min_lines, min_tokens))
     duplicates = (report or {}).get("duplicates") or []
@@ -156,14 +140,10 @@ def _matrix(results: dict) -> str:
 
 
 def _binding(results: dict) -> str:
-    """Which limit is actually holding the frontier down, per step.
+    """Which limit is binding the frontier down per step.
 
-    Raising tokens while lines is fixed removes pairs that were token-poor but
-    line-long. Raising lines while tokens is fixed removes pairs that were
-    line-short but token-dense. Whichever direction removes pairs is the
-    dimension the remaining duplication is being filtered by, and the ratio
-    between the two tells you whether the current floor is anywhere near the
-    real shape of the code.
+    Raising tokens removes long/token-poor pairs; raising lines removes dense/short pairs --
+    the removing direction is the binding dimension.
     """
     floors = sorted(results)
     out = ["  raising tokens (per line floor) | raising lines (per token floor)"]
@@ -197,10 +177,8 @@ def _all(by_root: dict) -> list[dict]:
 def _first_appearance(results: dict, floors: list) -> list[tuple[tuple[int, int], str, dict]]:
     """The cheapest floor at which each file first holds a pair.
 
-    This is the answer to "where is the real duplication hiding": a file whose
-    first appearance is at 2/20 contains a repetition three lines long that the
-    shipped 4/39 floor cannot see, and lowering the floor is the only way to
-    learn about it.
+    The answer to "where is the real duplication hiding": a file whose first
+    appearance is at 2/20 holds a repetition the shipped 4/39 floor cannot see.
     """
     seen: dict[str, tuple[tuple[int, int], dict]] = {}
     for floor in floors:

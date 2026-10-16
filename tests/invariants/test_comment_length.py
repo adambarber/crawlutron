@@ -24,7 +24,7 @@ DOC_LIMIT = 3
 _DOC_BUDGETS = {
     "app": 0,
     "tests": 0,
-    "scripts": 33,
+    "scripts": 0,
 }
 
 #: The measured long-run count per root, at the last wave. Exact equality both ways: a run fails, a trimmed

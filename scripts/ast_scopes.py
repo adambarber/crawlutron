@@ -1,18 +1,7 @@
 """The AST scope vocabulary shared by the walk layer and the metrics gate.
 
-Two independent analyses of this repository need to agree on what a *scope* is.
-The chokepoint walks in ``tests/chokepoint_walks.py`` decide which statement owns
-a body; the duplication sweep in ``scripts/jscpd_sweep.py`` counts compound
-nodes to measure where duplication first becomes visible. Neither is right on its
-own -- the second is only a meaningful metric if it counts the same statements
-the first walks over.
-
-That is the whole reason these three live here rather than in either consumer.
-A list of seven AST node types is exactly the kind of thing two files restate
-identically and then let drift: nothing breaks when they disagree, the walks
-just quietly stop covering the same ground, and the metric keeps reporting a
-number. One definition, imported by both, is the only version of this that
-cannot rot.
+Two independent analyses must agree on what a *scope* is (the chokepoint walks, the
+duplication sweep); one definition imported by both is the only version that cannot rot.
 """
 
 from __future__ import annotations
@@ -54,10 +43,8 @@ def is_scope_opener(
 ) -> TypeGuard[ast.If | ast.For | ast.AsyncFor | ast.While | ast.With | ast.AsyncWith | ast.Try]:
     """Whether ``node`` is a compound statement, narrowed to the kinds that are.
 
-    The narrowed companion to :data:`SCOPE_OPENING_NODES`, for the walks that
-    read ``node.body`` off the answer. Membership in the tuple and the narrowed
-    type are one fact, and keeping them apart is how a walk ends up reading a
-    member the declared type does not have.
+    The narrowed companion to :data:`SCOPE_OPENING_NODES`, for walks that read
+    ``node.body`` off the answer -- membership and type are one fact, kept together.
     """
     return isinstance(node, SCOPE_OPENING_NODES)
 
@@ -79,8 +66,7 @@ def is_body_owner(
 ]:
     """Whether ``node`` is a statement that owns a body, narrowed to the kinds that do.
 
-    The predicate a walk needs rather than a bare ``isinstance``: the
-    membership test and the narrowed type are the same fact, and separating them
-    is how a check ends up written against a type that cannot answer it.
+    The predicate a walk needs rather than a bare ``isinstance`` -- membership test and
+    narrowed type are the same fact, and separating them lets a check miss the type.
     """
     return isinstance(node, BODY_OWNING_NODES)

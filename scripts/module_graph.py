@@ -1,20 +1,7 @@
 """Module dependency graph and coupling report for app/.
 
-Usage:
-    python scripts/module_graph.py                 # coupling report
-    python scripts/module_graph.py --mermaid       # emit a mermaid diagram
-    python scripts/module_graph.py --mermaid -o docs/module-graph.md
-
-Why this exists: the splitting programme needs to know which modules are
-entangled before it cuts anything. A file's SIZE says how much work a split is;
-its FAN-IN says how much risk, because every importer of a hub has to be updated
-and every one of them is a chance to leave a second path behind. Fan-out says
-which modules are reaching too widely. Cycles are reported because a cycle
-between two responsibilities is the clearest evidence that the boundary is in the
-wrong place.
-
-The report is ranked, because a sorted list of 100 modules is not a work list.
-The diagram is for the shape; the ranking is for the next commit.
+Usage: ``python scripts/module_graph.py [--mermaid] [-o docs/module-graph.md]``. For the
+splitting programme: size = work, fan-in = risk, cycles = misplaced boundary; ranked output.
 """
 
 from __future__ import annotations

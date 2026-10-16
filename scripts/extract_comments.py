@@ -1,32 +1,7 @@
 """Extract every comment in the repository into one file, with file and line.
 
-Usage:
-    python scripts/extract_comments.py                        # to stdout
-    python scripts/extract_comments.py -o tmp/comments.txt    # to a file
-    python scripts/extract_comments.py --grep 'jscpd|REVIEW'  # only matching lines
-    python scripts/extract_comments.py --no-docstrings         # '#' comments only
-    python scripts/extract_comments.py --path app/transport   # one subtree
-
-Output is one ``path:line:text`` record per line, in file-then-line order, so
-the extract reads as a single numbered document and every entry is greppable
-and jumpable. Python line comments come from ``tokenize`` and carry their own
-``#``; docstrings are emitted with their source quoting intact, so the ``\"\"\"``
-delimiters show where each one starts and ends. Non-Python files contribute
-whole-line comments only -- a trailing ``#`` in YAML or TOML can be part of a
-string value or a URL, and a report that invents comments is worse than one
-that misses some.
-
-Why this exists: comment hygiene is a judgement call, and a judgement call
-belongs to a reader, not to a test. What counts as a useful explanation of a
-non-obvious decision and what counts as a note left behind by whoever opened
-the file last month cannot be decided by a regular expression, and a gate
-built on one either bans honest comments or misses the residue it was written
-to catch. So the residue is surfaced as a document a person reads once, rather
-than as a pass/fail that a later editor can satisfy by deleting a line.
-
-This deliberately does not run in pre-commit and deliberately has no test. The
-scope comes from ``git ls-files``, so tracked files only: an untracked scratch
-directory is not part of the project and must not show up in a report about it.
+Usage: ``python scripts/extract_comments.py [-o OUT] [--grep RE] [--no-docstrings] [--path TREE]``
+-- one ``path:line:text`` record per line; comment hygiene is a reader's call, not a regex gate.
 """
 
 from __future__ import annotations
@@ -71,15 +46,8 @@ FALLBACK_SKIP = frozenset(
 def _tracked_files() -> list[pathlib.Path]:
     """Every tracked file, or a rglob fallback when git cannot answer.
 
-    Honouring git rather than a hand-maintained skip list is the point: a
-    scratch directory someone created is not in the report, and nothing has to
-    remember to add it to an exclusion set to keep it out.
-
-    Git is an optional dependency here, not a required one -- the fallback
-    below already produces a report -- so its absence takes the fallback
-    rather than raising. That is why this resolves the name with ``which``
-    instead of sharing the gate tests' ``require_executable``, which fails hard
-    because its callers cannot answer without the tool.
+    Honouring git rather than a hand-maintained skip list keeps scratch dirs out
+    of the report; git is optional, so a missing git takes the fallback, not raise.
     """
     git = shutil.which("git")
     if git is not None:
@@ -127,9 +95,8 @@ def _docstring_nodes(tree: ast.Module) -> list[ast.Expr]:
 def over_line_docstrings(tree: ast.Module, line_limit: int) -> list[tuple[int, int, str]]:
     """Every docstring longer than ``line_limit`` content lines, from ONE tree.
 
-    Only real docstring positions count -- a string at a module, function or
-    class body's head. Content lines exclude the quoting, so a line-wrapped
-    closing quote never moves a docstring across the cap.
+    Only real docstring positions count -- a string at a module, function or class
+    body's head; content lines exclude the quoting.
     """
     holders = [tree] + [
         node
@@ -162,10 +129,8 @@ def _docstring_records(tree: ast.Module, lines: list[str]) -> list[tuple[int, in
 def _python_records(path: pathlib.Path, *, include_docstrings: bool) -> Iterator[tuple[int, int, str]]:
     """Yield ``(row, col, text)`` for Python comments and docstrings.
 
-    ``tokenize`` rather than a regex, so a ``#`` inside a string is not a
-    comment and a comment's text is the real text. Docstrings come from the AST
-    because the tokenizer reports them as ordinary string tokens, which is the
-    one place it cannot tell documentation from data.
+    ``tokenize`` rather than a regex, so a ``#`` inside a string is not a comment;
+    docstrings come from the AST, which the tokenizer cannot tell from data.
     """
     source = path.read_text(encoding="utf-8")
     records: list[tuple[int, int, str]] = []
@@ -189,9 +154,8 @@ def _python_records(path: pathlib.Path, *, include_docstrings: bool) -> Iterator
 def _text_records(path: pathlib.Path) -> Iterator[tuple[int, int, str]]:
     """Yield whole-line comments from a non-Python source file.
 
-    Whole-line only. An inline ``#`` in YAML or TOML may sit inside a quoted
-    scalar or after a URL, and reporting a fragment of somebody's URL as a
-    comment would make the extract lie.
+    Whole-line only: an inline ``#`` in YAML/TOML may sit in a quoted scalar or
+    after a URL, and reporting a fragment of a URL as a comment would make the extract lie.
     """
     for row, line in enumerate(path.read_text(encoding="utf-8", errors="replace").splitlines(), start=1):
         stripped = line.strip()

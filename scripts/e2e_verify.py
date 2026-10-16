@@ -1,12 +1,7 @@
 """Live end-to-end feature verification for crawlutron.
 
-Usage:
-    python scripts/e2e_verify.py [base_url] [target_url]
-
-Defaults: base_url=http://127.0.0.1:8765 target=https://example.com/
-Exercises every public feature against a real target and exits non-zero on any
-failure. Requires the service to be running (e.g. via Docker) with outbound
-network access.
+Usage: ``python scripts/e2e_verify.py [base_url] [target_url]`` (defaults
+127.0.0.1:8765, example.com). Requires the service running, with outbound access.
 """
 
 import sys
