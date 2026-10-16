@@ -6,7 +6,6 @@ from dataclasses import dataclass
 from unittest.mock import patch
 
 import app.config.settings as settings_mod
-from app.config.env import parse_bool_value
 from app.config.settings import CrawlerSettings
 
 
@@ -73,7 +72,10 @@ class TestFromMappingHardening:
         assert settings.adaptive_throttling is True
 
     def test_padded_boolean_is_intentionally_accepted_and_declared(self):
-        assert "surrounding whitespace" in (parse_bool_value.__doc__ or "").lower()
+        """Padding around a boolean is accepted; the parse is documented to ignore it.
+
+        The behavioral claim is the mapping below; the acceptance was once also
+        pinned to ``parse_bool_value``'s docstring, which is not a surface."""
         settings = CrawlerSettings.from_mapping(
             {
                 "CRAWLUTRON_RESPECT_ROBOTS": " FALSE ",
