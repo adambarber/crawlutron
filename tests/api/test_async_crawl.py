@@ -77,12 +77,9 @@ class TestAsyncCrawlApi:
         assert body["results"][0]["status"] == "success"
 
     async def test_single_shot_stats_do_not_fabricate_discovered(self, crawl_api):
-        """Single-shot jobs never enqueue a frontier, so "discovered" is
-        undefined for them -- stats must report what actually happened
-        (submitted pages crawled/failed), never invent a discovered count
-        that happens to equal crawled. Whole-site jobs keep the frontier-
-        derived total_discovered; a conflated value makes the two job kinds
-        mean different things under one field name.
+        """Single-shot jobs never enqueue a frontier, so ``total_discovered`` is
+        undefined -- stats report what happened, never a value equal to crawled
+        that conflates two job kinds under one field name.
         """
         from app.main import job_store
 
@@ -184,22 +181,9 @@ class TestAsyncCrawlApi:
         assert resp.json()["code"] == "validation_error"
 
     async def test_v1_crawl_async_mode_concurrent_limit(self, crawl_api, monkeypatch):
-        """Concurrent async crawls queue on the bound rather than all running.
-
-        The bound is asserted, not assumed. A counting semaphore of width one
-        is installed in place of the runner's, so the test observes how many
-        crawls were inside the bound at once rather than inferring it from the
-        fact that the submissions returned.
-
-        That is what the previous version of this test failed to do. It
-        submitted three crawls against the default limit of four -- under the
-        limit, so no queueing happened -- and then asserted only that all
-        three succeeded. An implementation with no bound at all passed it.
-
-        The peak is also the falsifiable half: it reads 1 only because the
-        crawler entered the semaphore, so removing the `async with` drops it to
-        0, and a width other than 1 pushes it above 1. Both are caught without
-        a slow page, a sleep, or a wall clock anywhere in the test.
+        """The bound is asserted, not assumed: a width-one semaphore measures the
+        peak, which stays 1 only while the crawler holds the ``async with`` (drop
+        it and the peak drops to 0); a prior version tested under the limit.
         """
         from app.api import async_crawl_runner
 
@@ -280,13 +264,9 @@ class TestAsyncCrawlShutdownOwnership:
     """The async crawl path is work the job runner already owns a registry for."""
 
     async def test_an_in_flight_async_crawl_is_cancelled_by_the_shutdown_drain(self, crawl_api, monkeypatch):
-        """A shutdown that cannot see the async crawl cannot stop it.
-
-        The endpoint hands the crawl to a Starlette background task, which the
-        runner's registry never learns about, so the drain that app/main.py
-        documents as stopping the world first skips it. A crawl left running
-        past shutdown is the one thing that can publish a webhook against
-        dependencies the shutdown just cleared.
+        """A Starlette background task is invisible to the runner's registry, so the
+        drain documented as stopping the world skips it -- and a crawl past
+        shutdown can publish a webhook against dependencies just cleared.
         """
         started = asyncio.Event()
         cancelled = asyncio.Event()

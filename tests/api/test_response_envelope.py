@@ -1,14 +1,6 @@
-"""One owner for the unified response envelope.
-
-``/v1/crawl`` and ``/v1/render`` each read a raw producer envelope and adapt it
-to :class:`UnifiedCrawlResponse`. They used to do that at their own call sites,
-passing four fields by name each, and a field added to one path and forgotten on
-the other is dropped by the model rather than rejected: a response field has
-already shipped missing from one endpoint and was caught only by curling the
-live endpoint. The adaptation is now one function
-(``app.api.response_shaping.aunified_response_from_result``) over one envelope
-shape, and the tree-wide guards in ``tests/invariants/test_result_shape.py`` keep it
-that way. These tests pin the two properties that made the move worth making.
+"""One owner for the envelope: two endpoints passed four fields by name each, so
+a field added on one path and forgotten on the other shipped missing and was
+caught only by curling live. Adaptation is now one function over one shape.
 """
 
 from app.api.response_shaping import arender_response_from_result, aunified_response_from_result
@@ -34,12 +26,9 @@ async def _render_envelope() -> dict:
 
 
 async def test_render_producer_stamps_the_envelope_the_adapter_reads():
-    """``/v1/render`` used to substitute the policy version at the ENDPOINT.
-
-    That is a second place the version lives, and the quiet kind: the value was
-    correct only because a constant was passed next to a dict that never carried
-    it. The producer stamps it now, so the adapter reads one envelope shape from
-    both producers and the endpoint passes no version of its own.
+    """``/v1/render`` used to substitute the policy version at the ENDPOINT -- a
+    second home for the version, correct only because a constant was passed next
+    to a dict that never carried it. The producer stamps it now.
     """
     envelope = await _render_envelope()
     assert envelope["policy_schema_version"] == POLICY_SCHEMA_VERSION
@@ -71,21 +60,9 @@ _BROWSER_METADATA_KEYS = frozenset(
 
 
 async def test_no_browser_metadata_key_is_dropped_between_worker_and_wire():
-    """The property that was false for four of these six keys.
-
-    The render adapter copied ``CrawlResult.metadata`` into ``diagnostics`` by
-    excluding five keys BY NAME, re-surfaced exactly one of them, and hardcoded
-    ``metadata: {}``. So ``content_length``, ``browser_reused`` and
-    ``challenge_resolved`` were produced by the worker and read by nothing, and
-    ``PageMetadata.title`` -- a declared field -- could not be filled on this
-    endpoint by any input. Nothing failed at the time: an exclusion set says
-    which keys are going elsewhere without saying where, and every field of
-    ``UnifiedCrawlResult`` carries a default, so a dict that omitted one was a
-    perfectly valid dict.
-
-    The adapter constructs the model now, so the assertion is the whole
-    property rather than a list of the keys someone remembered: everything the
-    worker emits must be readable off the shaped item somewhere.
+    """The adapter once copied metadata by excluding keys BY NAME, re-surfacing
+    one and hardcoding the rest, so half the worker's output reached no wire
+    field and nothing failed (every result field carries a default).
     """
     envelope = await render_stub_request(
         {"url": "http://127.0.0.1:1/x"},

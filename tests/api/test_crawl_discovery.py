@@ -143,14 +143,9 @@ class TestDiscoveryAndRenderApi:
         assert resp.json()["code"] == "browser_pool_unavailable"
 
     def _warmed_pool(self, monkeypatch, warmup_urls):
-        """A real ``/v1/render`` whose pool serves renders in a chosen mode.
-
-        Only the browser is faked (no binary in CI): the pool, its
-        ``browser_strategy`` property, the pooled worker, the scheduler, the
-        ``to_dict`` serialization, the ``render_result_to_unified`` adapter and
-        the strict ``UnifiedCrawlResponse`` model all run as in production, so a
-        key the adapter emits but the wire model does not declare is dropped
-        before it reaches the assertion.
+        """A real ``/v1/render`` whose pool serves renders in a chosen mode; only
+        the browser is faked (no binary in CI), so a key the adapter emits but
+        the wire model drops never reaches the assertion.
         """
         from app.models.crawl_result import CrawlResult
         from app.orchestration.render_result import terminal_attempt
@@ -195,10 +190,10 @@ class TestDiscoveryAndRenderApi:
         return response.json()["results"][0]
 
     async def test_v1_render_reports_the_pools_real_strategy_when_warmed(self, monkeypatch):
-        """The render wire must carry the browser mode that actually served the
-        render. The adapter used to hard-code ``BROWSER_HEADLESS`` for every
-        result while a warmed pool serves ``BROWSER_HEADED_WARMED`` -- the two
-        endpoints then disagreed about the provenance of the same render."""
+        """The wire must carry the mode that actually served the render: the adapter
+        once hard-coded ``BROWSER_HEADLESS`` while a warmed pool served
+        ``BROWSER_HEADED_WARMED``, so two endpoints disagreed on the provenance.
+        """
         from app.vocabulary.strategies import BROWSER_HEADED_WARMED
 
         item = await self._render_result(monkeypatch, ["https://warmup.example/"])

@@ -1,12 +1,6 @@
-"""The OpenAPI document is a live door: it must actually be servable.
-
-Every URL-valued field on the wire renders as a string -- that is the only
-JSON form an admitted URL has. When ``NormalizedUrl`` became a value with a
-plain-validator core schema, the OpenAPI generator could no longer infer a
-JSON Schema for it, and GET /openapi.json started failing with a 500: the
-discovery door every agent is told to read (AGENTS.md) went dark while the
-app itself kept running. A consumer sees this only through the endpoint,
-so the test goes through the endpoint.
+"""Every URL-valued wire field renders as a string. When ``NormalizedUrl`` gained
+core plain-validator schema the generator could no longer infer JSON Schema, and
+GET /openapi.json 500'd -- a door agents read, seen only via the endpoint.
 """
 
 import pytest

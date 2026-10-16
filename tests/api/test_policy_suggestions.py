@@ -1,14 +1,6 @@
-"""``GET /v1/policy-suggestions``: candidate host rules proposed from evidence.
-
-The evidence is whatever the crawls actually recorded -- these tests crawl a
-real blocked page through the real crawl door, so a suggestion here was proposed
-from classification evidence the engine produced, not from a fixture describing
-what evidence looks like. Each test owns its result store (see
-``tests/_policy_harnesses``): the rollup reads every retained record, so a
-shared store would let another test's crawl move the counts.
-
-A suggestion is a candidate for a human to accept, edit or reject. Nothing in
-this surface applies one: the service proposes rules, a caller owns host policy.
+"""Suggestions come from what the crawls actually recorded; each test owns its
+result store (the rollup reads every record), and nothing here applies one
+-- the service proposes, a caller owns host policy.
 """
 
 from typing import Any

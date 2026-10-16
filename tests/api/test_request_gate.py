@@ -1,17 +1,6 @@
-"""The endpoint readiness gate: one owner for admit, reject, release.
-
-``/v1/crawl``, ``/v1/map``, and ``/v1/render`` each hand their request to
-:func:`app.api.main_helpers.request_gate`, which admits a readiness slot,
-converts a ``ValueError`` rejection into the shared 4xx envelope with an
-operator warning, and releases the slot. Spelled per endpoint, the three
-obligations were independently droppable and the expensive one to lose is the
-release: a rejected request that skips ``end_request`` holds its slot for the
-life of the process, so ``/ready`` never recovers from it and nothing in the
-request path says why.
-
-These tests drive the real gate, the real endpoints, and the real readiness
-singleton -- the counter is process-wide, so every assertion here is a delta
-rather than an absolute.
+"""One owner for admit, reject, release: spelled per endpoint the three were
+independently droppable, and a reject that skips ``end_request`` holds its
+slot for the process's life -- nothing in the request path says why.
 """
 
 import asyncio
@@ -86,12 +75,9 @@ async def test_gate_releases_the_slot_when_the_body_fails_outright():
 
 
 async def test_rejected_crawl_hands_its_slot_back_and_still_counts_the_error(caplog):
-    """The real /v1/crawl handler refusing a batch over the cap.
-
-    Exercises the whole gate: the shared 422 envelope, the operator warning, the
-    released slot, and /v1/crawl's own error metric -- which the handler used to
-    bump from its own reject tail and now passes in as the gate's ``on_reject``
-    hook, so a refactor that dropped it would be invisible here otherwise.
+    """The real /v1/crawl handler refusing a batch over the cap exercises the whole
+    gate: the shared 422 envelope, the operator warning, and /v1/crawl's own error
+    metric -- passed in as ``on_reject``, so a refactor dropping it stays visible.
     """
     metrics = get_metrics()
     before_active, before_errors = _active(), metrics.crawl_errors_total
@@ -119,12 +105,9 @@ async def test_rejected_crawl_hands_its_slot_back_and_still_counts_the_error(cap
 
 
 async def test_map_holds_a_readiness_slot_only_while_it_runs(monkeypatch):
-    """The real /v1/map handler on the success path, at the engine seam.
-
-    The counter is sampled from inside the crawl the endpoint is waiting on, so
-    this proves the slot is taken for the work and not merely balanced at the
-    end -- a release that fired before the body would pass a before/after check
-    alone and report a saturated service as idle.
+    """The real /v1/map handler samples the counter from inside the crawl it waits
+    on, so the slot is proven taken for the work, not merely balanced -- a release
+    before the body would pass a before/after check and hide a saturated service.
     """
     held: list[int] = []
 

@@ -1,10 +1,6 @@
-"""Sync ``/v1/crawl`` must halt when the client disconnects.
-
-A synchronous crawl runs to completion even when the caller has gone away (the
-283-abandon case: the driver timed out, but the server kept crawling pages to
-feed a result nobody would read). ``crawl`` therefore races the engine call
-against the client's disconnect signal and cancels the crawl, letting the
-engine's existing cancellation cleanup free the slot/browser.
+"""Sync /v1/crawl must halt when the client disconnects: the 283-abandon case
+ran pages to feed a result nobody would read. ``crawl`` races the engine call
+against the disconnect signal and cancels, letting cancellation free the slot.
 """
 
 from __future__ import annotations
@@ -22,11 +18,9 @@ _SCOPE = {"type": "http", "method": "POST", "path": "/v1/crawl", "headers": [], 
 
 
 class _MidFlightGone(Request):
-    """Client that disconnects mid-crawl (the 283-abandon shape).
-
-    Reports connected for the first ``after_checks - 1`` polls so the crawl
-    task actually starts, then disconnects. Disconnecting on the very first
-    check would cancel a never-started task, which never runs its body at all.
+    """Client that disconnects mid-crawl: connected for the first polls so the task
+    really starts -- disconnecting on the first check would cancel a never-started
+    task, which never runs its body at all.
     """
 
     def __init__(self, after_checks: int = 2) -> None:

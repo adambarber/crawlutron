@@ -78,12 +78,10 @@ class LoopGuardResultStore(CrawlResultStore):
 
 
 class LoopGuardWatchStore(WatchStore):
-    """The real watch store, with every sync entry point refusing the loop.
+    """The real watch store, every sync entry point refusing the loop.
 
-    The sweep is the harder half of this surface: it runs in the background for
-    the life of the process, so a sync store call there would park the loop
-    that every in-flight request is being answered on, and nothing in the
-    request path would say so.
+    The sweep is the hard half: it runs for the process's life, so a sync store
+    call there would park the loop answering every in-flight request.
     """
 
     def create(self, url, /, **kwargs):

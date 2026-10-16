@@ -1,9 +1,6 @@
-"""``/v1/watches``: registration, status, listing and deletion.
-
-Registration is the only edge here that decides anything -- it admits the URL
-through the deployment's policy and persists canonical identity. Everything
-the status endpoints report was written by the sweep, so these tests write
-through the store and read back through the API.
+"""Registration is the only edge that decides anything -- it admits the URL
+through deployment policy and persists canonical identity. Everything status
+reports was written by the sweep, so tests write via the store, read via the API.
 """
 
 import pytest

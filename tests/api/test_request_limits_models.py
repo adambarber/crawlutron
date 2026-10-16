@@ -7,21 +7,9 @@ from app.models.crawl_strategy import CrawlStrategy
 
 
 class TestBrowserActionKeysAreClosed:
-    """The action *type* vocabulary is closed. The keys inside an action are not.
-
-    ``_close_browser_profile_vocabulary`` refuses a top-level key that is not in
-    the table and an action ``type`` that is not in the vocabulary, then hands
-    each action dict to the chain, which reads four keys out of it. Nothing
-    checks those. So::
-
-        {"type": "fill", "selector": "#q", "val": "hi"}
-
-    is accepted, and the chain fills an empty string -- a 200 on a page that
-    loaded with no interaction performed, which is exactly the silent no-op the
-    ``type`` check exists to prevent, one level down.
-
-    This is the ``state`` key again (#61) and the ``accept_language``
-    description (#64): the same failure, at the third place it can hide.
+    """Inside an action the key set is closed too: ``val`` for ``value`` is a
+    key nothing reads, so the chain fills an empty string -- the silent no-op
+    #61's ``state`` and #64's ``accept_language`` each hid, at a third spot.
     """
 
     @pytest.mark.parametrize(
@@ -36,10 +24,8 @@ class TestBrowserActionKeysAreClosed:
     )
     def test_a_key_the_chain_does_not_read_is_refused(self, action):
         """``val`` for ``value`` is the reported case: the action then does nothing.
-
-        One test over the table rather than one test per spelling, because the
-        two reported cases are the same defect -- a key the consumer never reads
-        -- and a second copy of the assertion is a second place to forget one.
+        One test over the table, not one per spelling -- a second copy is a
+        second place to forget one key.
         """
         from app.models.crawl_policy import CrawlPolicy
 
@@ -60,12 +46,8 @@ class TestBrowserActionKeysAreClosed:
             assert policy.browser_profile["actions"][0]["type"] == action["type"]
 
     def test_the_chain_reads_exactly_the_declared_keys(self):
-        """The drift guard: a reader added without a declaration fails here.
-
-        Read off the chain's own ``action.get(...)`` calls rather than restated,
-        because the whole failure of this issue is a key the consumer reads and
-        the producer never named. Restating the list here would just be a second
-        place to forget.
+        """Drift guard: read off the chain's own ``action.get`` calls, because the
+        whole failure is a key the consumer reads and the producer never named.
         """
         import ast
 
@@ -86,27 +68,9 @@ class TestBrowserActionKeysAreClosed:
 
 
 class TestCallerKnobsBehindClosedKeysAreCeilinged:
-    """A closed key set answers *which* keys exist. It is silent about how large their values may be.
-
-    The browser profile's vocabulary was closed in aa46380 and the ceiling
-    question was not asked, so every knob behind the closed keys took whatever
-    the caller sent. Four of them, each with a place in the code that already
-    said the value should be bounded:
-
-    - ``_profile_int`` and ``_profile_float`` return ``max(0, value)`` with no
-      upper clamp, so ``lazy_scroll_steps: 10**12`` is accepted.
-    - ``_lazy_load_scroll`` is called with no budget, immediately below
-      ``_run_action_chain``, which is passed ``budget_seconds=navigation_timeout``
-      and whose docstring says production must pass a budget. The one call site
-      documented as needing a ceiling is the one without one.
-    - ``cookie_harvest_timeout_seconds`` is the ``wait_for`` timeout, and the
-      comment at that call site says the harvest must not hold the pooled
-      renderer for the per-URL budget.
-    - ``screenshot_selectors`` has no ``max_length``; each entry appends a
-      base64 PNG to the result metadata, so it is a response-size knob too.
-
-    All four returned 200. The 900 s chain budget bounds wall clock and none of
-    these.
+    """Closing the key set answered WHICH keys, not how large: four knobs took
+    whatever the caller sent, so each now has a ceiling plus a clamping reader
+    for when the model is bypassed (900 s chain budget bounds wall clock only).
     """
 
     #: Longest scroll a lazy-load pass will take, in steps. Deep pages still load in a few dozen; this is past
@@ -161,15 +125,9 @@ class TestCallerKnobsBehindClosedKeysAreCeilinged:
         assert policy.browser_profile["lazy_scroll_steps"] == self.MAX_LAZY_SCROLL_STEPS
 
     def test_the_readers_clamp_too_even_when_the_model_is_bypassed(self):
-        """Defence in depth, asserted at the call path rather than at a helper.
-
-        The model is a boundary, not the only door: by the time a profile reaches
-        a renderer it is a dict, so the validator is not in the path any more.
-        The readers are what actually bound the work, so they are what is
-        asserted -- through ``_scroll_config_for`` and ``_harvest_timeout_for``,
-        which is how the renderer calls them, rather than through
-        ``_profile_int`` with no ceiling, whose contract is deliberately to pass a
-        value through.
+        """Defence in depth, asserted at the call path: by render time the profile
+        is a dict and the validator is gone, so the readers (never ``_profile_int``,
+        whose contract is to pass a value through) are what actually bound work.
         """
         from app.transport.browser_driver import BrowserDriver
         from app.vocabulary.limits import (
@@ -201,21 +159,9 @@ class TestCallerKnobsBehindClosedKeysAreCeilinged:
 
 
 class TestStrategyLadderIsBounded:
-    """``strategies`` is the outbound fan-out per URL, and it was the one collection left uncapped.
-
-    ``urls`` has carried ``max_length=500`` and ``headers`` ``max_length=64`` all
-    along. ``strategies`` had ``min_length=1`` and nothing above it, which reads
-    as an oversight rather than a decision: it is a list of outbound network
-    attempts, and the ladder runs one per entry.
-
-    The ceiling is a ceiling and not a dedupe, deliberately. A duplicate is
-    usually pure waste -- if a strategy comes back blocked, the same strategy
-    blocks again, and a usable one returns immediately -- but not always: a
-    browser render mints a session cookie that a later ``HTTP_CFFI_IMPERSONATE``
-    entry replays, so a non-blocked-but-unusable first attempt can leave the jar
-    in a state that makes its own repetition succeed. Dedupe would have thrown
-    that path away. A ceiling bounds the repetition instead of declaring all of
-    it worthless.
+    """The one collection left uncapped: the ladder runs one outbound attempt
+    per entry, and the ceiling beats a dedupe because a browser render mints a
+    session cookie a later CFFI entry replays -- repetition can be the win.
     """
 
     #: Most ladder entries in one request. The vocabulary is three strategies and cookie replay needs a repeat

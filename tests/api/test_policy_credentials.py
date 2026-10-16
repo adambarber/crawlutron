@@ -1,14 +1,6 @@
-"""policy.credentials: scoped, typed, host-bounded credentials.
-
-Spoofable headers are banned but deliberately kept ``authorization``
-available: credentialed crawling of one's own site is real use, and banning
-the header would push callers to bake credentials into URLs (userinfo),
-which then leak through logs, Referer and retries. The typed field is the
-replacement path: credentials are keyed by canonical origin, so the
-existing cross-host redirect scrub (``_CREDENTIAL_HEADERS``) is also
-the enforcement point for "credentials never cross host boundaries" -- a
-credential attached to origin A is scrubbed from every request to origin B
-by the chokepoint that already scrubs cookies.
+"""``authorization`` stays while other spoofable headers are banned, because
+credentialed crawling of what one owns is real use and a ban would push
+secrets into URLs; origin-keyed fields ride the existing cross-host scrub.
 """
 
 import pytest
@@ -106,21 +98,9 @@ class TestPayloadPolicy:
             )
 
     def test_two_keys_collapsing_to_one_origin_are_rejected(self):
-        """Two spellings of one origin must not silently become one credential.
-
-        Both keys canonicalize to ``https://a.example``, so the comprehension that
-        builds the canonical map keeps the last and drops the first. The caller
-        then holds a policy that lists two credentials and has one, and nothing
-        at either end says so -- the same failure the sibling validator exists to
-        prevent when it REJECTS a path-scoped key, since that path would silently
-        widen a credential rather than silently narrow the set.
-
-        Asserted at the MODEL boundary because that is where the detail lives.
-        Over HTTP FastAPI validates ``CrawlRequest.policy`` as this model before
-        the handler runs, so this message is what a caller is shown. The bare-code
-        edges (MCP, direct caller) keep the code, exactly as they do for every
-        other validation error here -- so the code is asserted separately below
-        rather than pretending the detail rides along on edges that drop it.
+        """Two spellings of one origin must not silently become one credential: the
+        canonicalizer keeps the last, so the caller lists two and has one -- the
+        same collapse its sibling validator rejects by refusing a path-scoped key.
         """
         with pytest.raises(ValueError) as exc:
             CrawlPolicy(
@@ -134,13 +114,9 @@ class TestPayloadPolicy:
         assert "https://a.example:443" in message, message
 
     def test_a_colliding_credential_map_is_rejected_on_the_wire_path(self):
-        """The wire path must reject too, not repair the collision away.
-
-        ``read_policy`` is total and repairs a policy field by field. A collision
-        is not a bad single field -- it is a disagreement BETWEEN two fields -- so
-        if this ever became repairable, the repair would drop one of the two
-        credentials and return a policy that validated. That is the original bug
-        with an extra step, so the wire path is asserted to reject outright.
+        """The wire path must reject too, not repair the collision away:
+        ``read_policy`` repairs field by field, so a fixable collision would drop
+        one credential and validate -- the original bug with an extra step.
         """
         with pytest.raises(ValueError, match="invalid_policy_credentials"):
             payload_policy(
@@ -176,11 +152,9 @@ class TestPayloadPolicy:
         }
 
     def test_an_already_canonical_policy_revalidates_without_collision(self):
-        """Re-validating a validated policy is how a policy round-trips through storage.
-
-        If the collision check compared keys against each other rather than
-        canonical forms, a policy that was already canonical would report itself
-        as colliding with itself on every reload.
+        """Re-validating a validated policy is how one round-trips through storage; a
+        check comparing keys rather than canonical forms would report an already-
+        canonical policy as colliding with itself on every reload.
         """
         once = payload_policy(
             {"policy": {"credentials": {"https://a.example": {"kind": "bearer", "token": "t"}}}},

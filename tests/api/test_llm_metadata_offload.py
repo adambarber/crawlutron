@@ -1,8 +1,6 @@
-"""LLM metadata extraction must leave the event loop.
-
-``format_crawl_item`` runs ``extract_llm_metadata`` (a second lxml parse)
-synchronously for every result. The async endpoint path must offload that
-parse with ``asyncio.to_thread`` via the additive async shaping API.
+"""LLM metadata extraction must leave the event loop: ``format_crawl_item``
+runs a second lxml parse synchronously per result, so the async endpoint must
+offload it via ``asyncio.to_thread``.
 """
 
 import asyncio
@@ -22,11 +20,9 @@ from tests._result_builders import engine_result
 
 
 def _html_item(i: int = 0) -> EngineCrawlResult:
-    """A real engine result carrying the HTML and markdown this suite parses.
-
-    A dict here would not have been a shorthand: the formatter reads declared
-    attributes, so a dict made the offload test pass through the ``except``
-    arm rather than the parse it claims to measure.
+    """A real engine result carrying the HTML and markdown this suite parses; a
+    dict would send the formatter down its ``except`` arm, and the test would
+    measure nothing.
     """
     html = (
         f"<html><head><title>Page {i}</title>"
@@ -107,13 +103,9 @@ async def test_abuild_unified_crawl_response_matches_sync():
 
 @pytest.mark.parametrize("submitted", [None, 0, 2, 7])
 async def test_sync_and_async_envelope_builders_agree_on_the_submitted_count(submitted):
-    """The ``submitted_count`` fallback is resolved once, for both builders.
-
-    It used to be written out in each of them -- ``submitted_count if submitted
-    is not None else len(results)`` -- and two copies of a fallback is how two
-    paths start disagreeing about how many URLs a batch held. The number is what
-    a caller reconciles its own accounting against, so a divergence here is a
-    wire bug, not a cosmetic one.
+    """The ``submitted_count`` fallback is resolved once for both builders: two
+    copies of it is how two paths start disagreeing about how many URLs a batch
+    held, and that number is what a caller reconciles its accounting against.
     """
     items = [_html_item(0), _html_item(1)]
     sync = build_unified_crawl_response(
@@ -136,11 +128,9 @@ async def test_abuild_unified_result_single_item_matches_sync():
 
 
 async def _empty_batch_response(monkeypatch=None):
-    """The empty batch, through the same door both empty-batch tests use.
-
-    One helper so the two tests below cannot drift into asserting different
-    things about the same call: one pins the response, one pins the offload
-    count, and a rewritten call would silently change what the other proves.
+    """The empty batch through the same door both empty-batch tests use, so they
+    cannot drift: one pins the response, one pins the offload count, and a
+    rewritten call would change what the other proves.
     """
     if monkeypatch is not None:
         install_to_thread_spy(monkeypatch)
@@ -156,12 +146,9 @@ async def test_async_response_empty_results():
 
 
 async def test_abuild_unified_crawl_response_batches_into_one_offload(monkeypatch):
-    """One response must pay one thread-submission, not one per item.
-
-    Fanning N items to N ``asyncio.to_thread`` calls makes every batch carry N
-    Future/thread-dispatch overheads. The whole list is shaped in a single
-    offload; output stays byte-identical to the sync contract (the companion
-    test above pins that).
+    """One response pays one thread-submission, not one per item: fanning N items
+    to N ``asyncio.to_thread`` calls tacks N dispatch overheads onto every batch,
+    while one offload stays byte-identical to the sync contract.
     """
     items = [_html_item(i) for i in range(4)]
     offloaded = install_to_thread_spy(monkeypatch)

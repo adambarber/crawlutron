@@ -328,19 +328,9 @@ class TestJobApi(_AsgiEndpointTests):
     async def _assert_unknown_action_refused_without_side_effect(
         self, job_id: str, expected_status: str
     ) -> None:
-        """An unknown control action is refused, and the persisted row does not move.
-
-        ``expected_status`` is the row's state *before* the bad request, which is
-        the only thing that differs between a row nobody ever controlled and one
-        cancelled a moment earlier. That is the reason this is one helper taking a
-        status rather than two copies of a fixed assertion: asserting the row is
-        *unchanged* is what makes it a refusal test, and a fixed ``pending`` would
-        have passed against a rejection that silently advanced the row, while a
-        fixed ``cancelled`` would not have run at all on a fresh row.
-
-        The contract is the EXACT envelope code, not a prefix -- jobs_router
-        declares ``invalid_action``, and a substring check would keep passing
-        through any drift that keeps the prefix.
+        """An unknown control action is refused; ``expected_status`` is the state
+        *before* the bad request, so asserting the row is unchanged is what makes
+        this a refusal test (a fixed ``pending`` would pass under a silent advance).
         """
         resp_bad = await self.client.post(f"/v1/jobs/{job_id}/control", json={"action": "invalid"})
         assert resp_bad.status_code == 422

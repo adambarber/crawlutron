@@ -1,11 +1,6 @@
-"""The watch sweep: one pass rechecks due watches and announces what changed.
-
-The origin is a real HTTP server answering genuine ``304``s, so "did the
-revalidation actually revalidate" is answered by the wire rather than by a
-stand-in for the engine. The delivery call is the one boundary stubbed: what
-a pass announces is the sweeper's own decision, while the funnel that carries
-it -- validation, size cap, pinned delivery -- is ``app.api.webhooks``'
-contract and is driven end-to-end in ``tests/test_webhook_ssrf.py``.
+"""The origin is a real HTTP server answering genuine ``304``s, so revalidation
+is answered by the wire; the delivery call is the one stub here (the sweeper's
+decision), while the funnel it rides is ``app.api.webhooks``' contract.
 """
 
 import asyncio

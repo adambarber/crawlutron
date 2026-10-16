@@ -6,14 +6,9 @@ from tests.helpers.server import WEBHOOK_RECEIVED
 
 
 class _AsgiEndpointTests:
-    """The ASGI client plus the fixture-server base URL, for endpoint classes.
-
-    Four of the endpoint classes below opened with this identical autouse
-    fixture, and a copy of it is a rule with two owners: a class that forgot the
-    ``WEBHOOK_RECEIVED.clear()`` inherited a webhook assertion reading another
-    test's delivery. It lives here once, and a class that needs a different
-    fixture (no base URL, or one that also persists a cookie jar) keeps its own
-    rather than inheriting a superset it does not want.
+    """The ASGI client plus base URL; a copy of this autouse fixture is a rule
+    with two owners -- one that forgot ``WEBHOOK_RECEIVED.clear()`` read another
+    test's delivery. A class with a different need keeps its own fixture.
     """
 
     @pytest.fixture(autouse=True)

@@ -51,11 +51,8 @@ def _fresh_runner():
 
 def test_every_job_endpoint_declares_its_providers_through_an_alias():
     """No job endpoint wires a provider as an invisible ``= Depends(...)`` default.
-
-    Read off the registered routes, so a new endpoint is covered by declaring
-    itself. A default is invisible in a signature -- it does not read as a
-    requirement, and it is the shape that let two hand-written dependency lists
-    (one per endpoint) look equivalent without being checked against anything.
+    Read off the registered routes so a new endpoint is covered by declaring; a
+    default is the shape that let two hand-written lists look equivalent.
     """
     aliases = {value for name, value in vars(dependencies).items() if name.endswith("Dep")}
     assert aliases, "app.api.dependencies declares no provider aliases"
@@ -79,11 +76,9 @@ def test_every_job_endpoint_declares_its_providers_through_an_alias():
 
 
 def test_creating_and_controlling_a_job_need_the_same_providers():
-    """The identity claim behind the shared aliases, checked against the signatures.
-
-    ``create_job`` and ``control_job`` were two hand-written copies of the same
-    triple; they now name the same three aliases. If a fourth provider ever
-    becomes necessary for one of them and not the other, this is what says so.
+    """The identity claim behind the shared aliases, checked against signatures:
+    ``create_job`` and ``control_job`` now name the same three providers, so a
+    fourth needed by one and not the other is what this says.
     """
 
     def _providers(handler) -> dict[str, Callable[..., Any]]:
@@ -104,14 +99,9 @@ def test_creating_and_controlling_a_job_need_the_same_providers():
 
 
 class TestCrashRecovery:
-    """A process killed mid-engine-call must not silently drop the in-flight batch.
-
-    ``run_job`` write-aheads the frontier pop (so the reload-each-iteration loop
-    can't refetch the same batch), which means the persisted state right after a
-    crash is: the batch removed from ``frontier`` but not yet recorded to
-    ``visited``/``results``. Recovery must re-queue that batch and re-crawl it
-    (at-least-once; visited + the content cache keep the re-fetch cheap), rather
-    than observing an empty frontier and marking the job COMPLETED with 0 pages.
+    """A kill mid-engine-call must not drop the in-flight batch. ``run_job`` writes
+    ahead the frontier pop, so after a crash the batch is not yet in
+    visited/results -- recovery re-queues it (at-least-once), never COMPLETED at 0.
     """
 
     async def test_crash_recovery_requeues_the_in_flight_batch(self, job_store):
@@ -323,11 +313,9 @@ class TestWholeSiteJobExecution:
         assert job.stats["total_failed"] == 2
 
     async def test_failed_item_failing_to_build_counts_once(self, client, job_store):
-        """An item that fails to build AND carries status=failed counts once.
-
-        build_unified_result requires original_url; an item with a resolvable
-        URL but no original_url raises inside the try, and its
-        status=="failed" must not add a second count for the same item.
+        """An item that fails to build AND carries status=failed counts once: it raises
+        inside the try (no original_url), and its ``status=="failed"`` must not add a
+        second count for the same item.
         """
 
         async def _execute(payload_dict, *, settings, shutdown_event):

@@ -1,11 +1,6 @@
-"""``GET /v1/crawl/{request_id}/trace``: the diagnostic spine of a finished crawl.
-
-The trace is a declared projection of the record the crawl already stored --
-same request, same attempt list, same classification evidence -- with the page
-bodies left out. So a trace cannot disagree with the response it describes:
-there is one record, read two ways. These tests drive a real crawl and read the
-trace back through the API, because the interesting failure is a projection
-that drifts from the stored shape, and only a stored shape can show that.
+"""The trace is a declared projection of the stored record -- same request,
+same attempts, no page bodies -- so it cannot disagree with the response it
+describes; the interesting failure is a projection drifting from the shape.
 """
 
 import pytest

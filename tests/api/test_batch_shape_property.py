@@ -1,13 +1,6 @@
-"""Batch-shape resilience property.
-
-The response builders reshape each item inside a per-item guard so one poison item
-cannot 500 the batch. The original defect had two halves: a bare except
-swallowed the exception with NO logging, and a healthy item could end up
-silently reclassified to ``site_error``. These property-style tests pin the
-CLASS of defect, not the instance: across many randomized batches (stdlib
-random, fixed seed sweep), the batch always survives, every healthy item
-keeps its real classification, every degraded position still reports
-declared taxonomy members, and every poison degradation is logged.
+"""One poison item must not 500 the batch -- a bare except once swallowed with
+no log and silently reclassified healthy items to ``site_error``. Seeds pin
+the class: batches survive, healthy items keep their type.
 """
 
 from __future__ import annotations
@@ -57,12 +50,9 @@ class _BoomMapping(dict):
 
 
 def _healthy(index: int, classification: str) -> EngineCrawlResult:
-    """A real engine result: what the pipeline actually hands the shaper.
-
-    Built through the record rather than spelled as a dict, because the dict form
-    was only ever admissible while the shaper read untyped keys. The property
-    below is still meaningful here -- it is now about what can go wrong AT the
-    shaping boundary, not about a shape no producer can emit.
+    """A real engine result, built through the record not a dict: the dict form
+    was only admissible while the shaper read untyped keys, so the property is
+    about what goes wrong AT the boundary, not a shape no producer emits.
     """
     url = f"https://ok.example/page{index}"
     success = status_for_classification(classification) == "success"
@@ -103,17 +93,9 @@ def _healthy_render(index: int) -> CrawlResult:
 
 
 def _poison(kind: str, index: int) -> Any:
-    """Something the per-item guard has to absorb.
-
-    The set shrank when results became records, and that shrinkage IS the
-    finding: ``missing_keys`` and ``wrong_types`` are no longer constructible,
-    because a field the producer stops writing now fails its constructor and a
-    field of the wrong type is refused before shaping sees it. What survives is
-    what the shaper itself can still be handed wrongly -- an object that is not a
-    result at all, one that explodes on the first attribute read, and two records
-    whose OPEN payloads (``classification_evidence``, ``validators``) carry
-    values the wire models reject. Those are still ``dict[str, Any]`` by
-    declaration, which is why they are still reachable.
+    """The survivors of records closing most shapes: a non-result, one that
+    explodes on first read, and the OPEN payloads (``classification_evidence``,
+    ``validators``) still ``dict[str, Any]`` by declaration -- so reachable.
     """
     if kind == "not_a_result":
         return {}
@@ -131,13 +113,9 @@ def _poison(kind: str, index: int) -> Any:
 def _random_batch(
     rng: random.Random,
 ) -> tuple[list[Any], list[tuple[str, str] | None], list[str | None]]:
-    """A batch of healthy/poison items plus the per-position expectations.
-
-    Each position is either ``(status, classification)`` — a healthy item
-    whose real classification must survive shaping — or ``None`` (a poison
-    position, whose only contract is "the batch survives and the taxonomy is
-    honored"). The third list records the poison kind per position so the
-    sweep can prove every strategy actually ran.
+    """Per position, either ``(status, classification)`` for a healthy item whose
+    real type must survive, or None for a poison slot (survival is its only
+    contract); ``kinds`` lets the sweep prove every strategy ran.
     """
     batch: list[Any] = []
     expected: list[tuple[str, str] | None] = []

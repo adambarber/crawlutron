@@ -20,11 +20,9 @@ _DEAD_ORIGIN = "http://127.0.0.1:9/"
 
 
 class TestJobEndpointsStayOffTheLoop:
-    """Every ``/v1/jobs`` handler used to reach a sync method directly.
-
-    ``create_job`` wrote the row, ``list_jobs`` read every row, ``get_job`` and
-    ``control_job`` read one twice, ``delete_job`` deleted -- all on the loop
-    that was supposed to be answering liveness probes.
+    """Every ``/v1/jobs`` handler used to reach a sync method directly -- create
+    wrote, list read, get/control read twice, delete deleted -- all on the loop
+    meant to be answering liveness probes.
     """
 
     async def test_the_whole_job_endpoint_surface_stays_off_the_loop(self, jobs_client, loop_guard_store):
@@ -63,10 +61,8 @@ class TestJobEndpointsStayOffTheLoop:
 
 class TestWatchSurfaceStaysOffTheLoop:
     """The ``/v1/watches`` handlers and the sweep, on a store that refuses the loop.
-
-    The sweep is the half that cannot fail loudly: it runs in the background for
-    the life of the process, so a sync store call in it parks the loop that every
-    in-flight request is answered on, and no request path ever reports it.
+    The sweep is the half that cannot fail loudly: it runs for the process's life,
+    so a sync call parks the loop answering every in-flight request.
     """
 
     async def test_the_whole_watch_endpoint_surface_stays_off_the_loop(
