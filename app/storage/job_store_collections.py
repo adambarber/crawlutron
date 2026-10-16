@@ -1,8 +1,6 @@
 """Persisted job collections: entries, status vocabulary, normalization.
-
 A row is ``json.loads`` of TEXT, so every read path admits what it finds and
-drops what does not survive admission. Identity is derived on read, never
-trusted from a stored flag.
+drops what does not survive; identity is derived on read, never from a stored flag.
 """
 
 from __future__ import annotations
@@ -81,11 +79,9 @@ def _entry_depth(value: Any, fallback: int) -> int:
 
 
 def _entry_payload(entry: Any) -> Any:
-    """Serialize a frontier entry, tolerating the legacy bare-string shape.
-
-    The store does not rewrite a caller's collections: a row written with bare
-    strings stays bare, and :meth:`CrawlJobState.from_json` recognizes that
-    shape as legacy and normalizes it once on read.
+    """Serialize a frontier entry, tolerating the legacy bare-string shape: the
+    store does not rewrite a caller's collections, and ``from_json`` normalizes
+    a legacy bare row once on read.
     """
     return entry.to_dict() if isinstance(entry, FrontierEntry) else entry
 
@@ -97,12 +93,9 @@ def normalize_frontier(
     policy: CrawlPolicy,
     host_policy: HostPolicy,
 ) -> list[FrontierEntry]:
-    """Coerce persisted/runner-supplied frontier values into ``FrontierEntry`` records.
-
-    Canonicalization is unconditional on the read path: it coerces shape, keeps
-    the shallowest depth per identity, and drops unusable entries. A persisted
-    "already canonical" flag could disagree with the row it describes, which is
-    why migration 0002 dropped it.
+    """Coerce persisted frontier values into ``FrontierEntry`` records: always
+    canonicalize -- coerce shape, keep the shallowest depth, drop unusable ones.
+    A stored "already canonical" flag is why migration 0002 dropped it.
     """
     if not isinstance(values, (list, tuple)):
         return []
@@ -145,13 +138,9 @@ def normalize_frontier(
 
 
 def _normalize_visited(visited: _PersistedJSON, *, host_policy: HostPolicy) -> set[NormalizedUrl]:
-    """Coerce a persisted visited column to admitted values, keeping only what admits.
-
-    Visited elements arrive both ways: ``from_json`` admits its list before
-    this pass, while raw rows still carry bare text. An admitted value keeps
-    its identity by construction; text must pass admission. A persisted column
-    that is not a sequence of URLs is not a crash worth raising: the job loses
-    its visited history, and the frontier still bounds what it will fetch.
+    """Coerce a persisted visited column to admitted values, keeping only what
+    admits: text must pass admission, an admitted value keeps its identity. A
+    non-sequence column costs the visited history, not a crash.
     """
     if isinstance(visited, str):
         visited_values: list[object] = [visited]

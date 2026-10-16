@@ -1,26 +1,6 @@
-"""The result records, and the strategy attempt they record.
-
-A render result (:class:`CrawlResult`) reports what one strategy did to one
-URL, so it HOLDS that strategy's attempt rather than restating it. The five
-fields the wire still exposes as attributes -- ``status``, ``classification``,
-``elapsed_ms``, ``error`` and ``selected_strategy`` -- are properties here,
-reaching into the one attempt that holds the answer, so the record and the
-attempt cannot disagree about the same outcome.
-
-:class:`EngineCrawlResult` is the record that crosses every boundary in the
-system: strategies build it, the engine wraps it in a job envelope, the spill
-persists it as JSON, and response shaping reads it back out. It sits beside the
-attempt because both records are one family over one vocabulary, and the shared
-read that split produced was the duplication. Both directions of its
-serialization are DERIVED from this declaration (``app.models.serialization``),
-so a field renamed or added moves both at once.
-
-The ``(status, classification)`` agreement check lives on
-:class:`LiteralChecked`, which every record carrying both axes already
-inherits. A construction chokepoint that had to remember to call a checker let
-an attempt built anywhere else validate its two axes separately and never check
-that they agreed -- and the record the wire reports is exactly the pair the
-attempt carries.
+"""The result records and the strategy attempt they record. A ``CrawlResult``
+HOLDS its attempt, exposing the wire attributes as properties so the two cannot
+disagree; both serializations are derived from this declaration.
 """
 
 from __future__ import annotations
@@ -72,11 +52,9 @@ class CrawlResult(LiteralChecked):
 
     @property
     def elapsed_ms(self) -> int:
-        """How long the winning attempt took.
-
-        The same reach-through :class:`EngineCrawlResult` uses for its own
-        elapsed time, so the scheduler can ask either record for the number
-        without knowing which shape it holds.
+        """How long the winning attempt took -- the same reach-through the engine
+        record uses, so the scheduler can ask either shape for the number without
+        knowing which it holds.
         """
         return self.attempt.elapsed_ms
 
@@ -86,13 +64,9 @@ class CrawlResult(LiteralChecked):
 
     @property
     def selected_strategy(self) -> CrawlStrategyName | None:
-        """The browser mode that actually served this render.
-
-        ``BROWSER_HEADLESS`` or ``BROWSER_HEADED_WARMED``, or None when no
-        browser strategy produced it. The render endpoint surfaces this on
-        the wire so the caller can tell a warmed render from a plain headless
-        one; None rather than a hard-coded member keeps "we did not render
-        this" distinguishable from "we rendered it headless".
+        """The browser mode that actually served this render -- headless or
+        headed-warmed, or None when no browser produced it, keeping "we did not
+        render this" distinguishable from "we rendered it headless".
         """
         return self.attempt.strategy
 
@@ -130,16 +104,9 @@ class EngineCrawlResult(LiteralChecked):
 
     @property
     def elapsed_ms(self) -> int:
-        """How long this result's work took, or 0 when nothing observed it.
-
-        The scheduler is generic over two result shapes and needs this number
-        from both, so it is one attribute with one meaning rather than a
-        ``getattr`` for a member only one of the two happens to carry. The
-        diagnostics block is consulted first because that is what the HTTP and
-        browser strategies write, and the attempt is the fallback for a result
-        built without diagnostics (the worker-exception and budget-timeout
-        envelopes). Both are milliseconds, so no caller has to know which one
-        it got.
+        """How long this result's work took, or 0 when nothing observed it -- one
+        attribute, since the generic scheduler reads it off both shapes. Diagnostics
+        is consulted first (what the strategy writes), the attempt the fallback; ms.
         """
         runtime = self.diagnostics.get("runtime")
         if isinstance(runtime, dict):

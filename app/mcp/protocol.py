@@ -1,9 +1,6 @@
-"""JSON-RPC 2.0 helpers and MCP 2026-07-28 request-metadata validation.
-
-The 2026-07-28 protocol is stateless: every request carries its protocol
-version, client identity, and client capabilities in ``_meta``, and a request
-missing the required fields is malformed (``-32602``, HTTP 400). Results must
-carry ``resultType`` and SHOULD carry ``_meta.serverInfo``.
+"""JSON-RPC 2.0 helpers and MCP 2026-07-28 request-metadata validation: the
+protocol is stateless, every request carrying version, identity, and capabilities
+in ``_meta``; a request missing them is malformed (``-32602``/400).
 """
 
 from __future__ import annotations
@@ -76,21 +73,9 @@ def error_response(
 def _require_meta_key(
     meta: dict[str, JsonValue], key: str, expected: type[Any], label: str, request_id: int | str
 ) -> Any:
-    """Return ``meta[key]``, or reject with the reason naming what was wrong.
-
-    Absent and wrong-typed are reported as different failures because they
-    are different mistakes: a client that never sent the key has to send it, and
-    one that sent the wrong shape has to fix it. Collapsing the two into one
-    message leaves a client unable to act on the correction.
-
-    One function for both required keys rather than the check spelled out per
-    key, because the two reasons and the error wrapped around them have to agree
-    across keys. When each key owned the sentence, either could stop
-    distinguishing the cases, or stop matching the other, with nothing failing.
-
-    ``label`` is the type as the spec names it -- "a string", "an object" -- and
-    not the Python class, because this string goes on the wire and
-    ``must be dict`` is not what a client author is shown.
+    """Return ``meta[key]``, or reject naming what was wrong -- absent vs
+    wrong-typed are distinct corrections, so one function keeps the reasons
+    agreeing. ``label`` is the spec's name for the type, shown on the wire.
     """
     value = meta.get(key)
     if not isinstance(value, expected):
@@ -108,11 +93,9 @@ def _require_meta_key(
 
 
 def validate_meta(params: JsonValue | None, request_id: int | str) -> None:
-    """Reject requests missing the per-request metadata this revision requires.
-
-    Raises :class:`ProtocolValidationError` (HTTP 400, ``-32602``) when the
-    request body does not declare ``protocolVersion`` and ``clientCapabilities``
-    in ``_meta``.
+    """Reject requests missing the per-request metadata this revision requires:
+    raise :class:`ProtocolValidationError` (HTTP 400, ``-32602``) unless ``_meta``
+    declares ``protocolVersion`` and ``clientCapabilities``.
     """
     meta = (params if isinstance(params, dict) else {}).get("_meta")
     if not isinstance(meta, dict):
@@ -132,11 +115,9 @@ def validate_meta(params: JsonValue | None, request_id: int | str) -> None:
 
 
 def decode_header_value(value: str) -> str:
-    """Decode the ``=?base64?...?=`` sentinel format for non-ASCII header values.
-
-    Header values that cannot be represented as plain ASCII (or that literally
-    match the sentinel pattern) are Base64-encoded; servers MUST decode before
-    comparing to the body value.
+    """Decode the ``=?base64?...?=`` sentinel for non-ASCII header values, which
+    servers MUST decode before comparing to the body value; a sentinel-looking
+    value that fails to decode is returned unchanged.
     """
     if value.startswith("=?base64?") and value.endswith("?="):
         try:
