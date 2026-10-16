@@ -21,9 +21,8 @@ host" is answering a different question than the one this surface answers.
 class HostPolicySuggestion(BaseModel):
     """One host's candidate rule, with the evidence that proposed it.
 
-    A proposal, never an application. The service has no path that writes host
-    policy from a crawl result, so the only way this becomes real is a person
-    reading ``rationale`` and the evidence beneath it and deciding.
+    A proposal, never an application: the service has no path writing host policy
+    from a crawl result, so it only becomes real when a person reads the rationale.
     """
 
     host: str = Field(description="Registrable site this candidate rule is about.")

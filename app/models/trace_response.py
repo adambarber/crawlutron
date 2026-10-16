@@ -10,9 +10,8 @@ from app.models.page_trace import PageTrace
 class TraceResponse(BaseModel):
     """The stored crawl response read as a trace.
 
-    Two keys of the stored envelope and the pages' diagnostic spines, in
-    submitted order. It validates straight off that envelope's own dump, so
-    there is no translation layer between the record and the view of it.
+    Two keys of the stored envelope plus the pages' diagnostic spines, in
+    submitted order, validated straight off that envelope's dump (no translation layer).
     """
 
     request_id: str = Field(description="Request identifier the trace was recorded under.")

@@ -8,9 +8,8 @@ from pydantic import BaseModel, ConfigDict, Field
 class SearchRequest(BaseModel):
     """Request body for ``POST /v1/search``.
 
-    A web-search query that returns SERP-style results (title, url,
-    description) from the configured provider. The service does not crawl
-    result URLs; callers pipe them into ``POST /v1/crawl`` themselves.
+    A web-search query returning SERP-style results (title, url, description) from
+    the provider; the service does not crawl result URLs, callers pipe them to /v1/crawl.
     """
 
     model_config = ConfigDict(extra="forbid")

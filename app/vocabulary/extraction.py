@@ -1,8 +1,7 @@
 """How retrieved bytes are parsed, and what the pipeline reports about it.
 
-The extraction methods -- a policy choice, orthogonal to the fetch strategy -- and
-the ``extraction_method`` codes that label a result's provenance. The extraction
-itself lives in ``app.extraction``.
+Extraction methods are a policy choice orthogonal to fetch strategy, plus the
+``extraction_method`` codes labeling provenance; parsing lives in ``app.extraction``.
 """
 
 from __future__ import annotations

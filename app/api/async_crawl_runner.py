@@ -50,8 +50,7 @@ _async_crawl_semaphore_loop: asyncio.AbstractEventLoop | None = None
 def _build_async_crawl_semaphore() -> asyncio.Semaphore:
     """Construct the webhook-crawl semaphore.
 
-    Kept as its own module-level name (rather than inline in
-    ``_get_async_crawl_semaphore``) so tests can patch the builder and have a
+    Kept as its own module-level name so tests can patch the builder and a
     rebuild observe it, mirroring the pooled clients' late-bound ``build``.
     """
     return asyncio.Semaphore(WEBHOOK_CRAWL_CONCURRENCY)
@@ -97,9 +96,8 @@ async def run_async_crawl(
 ) -> None:
     """Run a single-shot crawl in the background, persisting results to job_store.
 
-    Updates the job through PENDING -> RUNNING -> COMPLETED/FAILED.
-    If ``webhook_url`` is provided, POSTs the result on completion.
-    ``urls`` carries the endpoint's already-gated batch forward.
+    Updates the job through PENDING -> RUNNING -> COMPLETED/FAILED; POSTs the result
+    on completion if ``webhook_url`` is given. ``urls`` carries the gated batch forward.
     """
     # Load job and mark RUNNING
     job = await job_store.aload(request_id)

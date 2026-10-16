@@ -9,8 +9,7 @@ class MapRequest(BaseModel):
     """Site-map request: discover the URL frontier for a root URL.
 
     Discovery (robots sitemaps + feeds + in-page links) is forced on; the caller
-    controls the fetch ``policy`` (strategies, limits, scope_regex) and the rest
-    is delegated to the shared crawl engine.
+    controls the fetch ``policy`` and the rest is delegated to the shared crawl engine.
     """
 
     model_config = ConfigDict(extra="forbid")

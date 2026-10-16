@@ -10,9 +10,8 @@ from app.models.extracted_page import ExtractedPage
 class CrawlAndExtractResponse(BaseModel):
     """The crawl response read as extraction records.
 
-    ``submitted_count`` is carried beside the pages so a caller can tell a
-    deduplicated result (several submitted URLs normalizing to one page) from a
-    failed one, without re-deriving either from the page list.
+    ``submitted_count`` sits beside the pages so a caller can tell a deduplicated
+    result (several URLs normalized to one page) from a failed one, without re-deriving.
     """
 
     submitted_count: int = Field(description="Number of URLs accepted in the request.")

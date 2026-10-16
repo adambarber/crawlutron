@@ -158,6 +158,10 @@ def _host_is_public(host: str) -> bool:
     Deterministic per host and guarded-call-independent, so entries never go stale;
     the bounded memo caps attacker-influenced host floods from growing memory.
     """
+    if host in _PRIVATE_HOSTS:
+        return False
+    # A host that is not an address is a name, judged against ``is_public_ip_value``
+    # once the resolver answers; only a literal IP in a rejected range is refused.
     return classify(host) in (AddressClass.NOT_AN_ADDRESS, AddressClass.PUBLIC)
 
 
@@ -167,6 +171,9 @@ def host_egress_reason(host: str) -> str | None:
     Separate from ``host_policy_reason``: that asks "on the list?", this "can we leave?".
     The list check runs first, so an unlisted-but-private host answers ``host_not_allowed``.
     """
+    if allow_private_targets() or _host_is_public(host):
+        return None
+    return "private_network_target"
 
 
 __all__ = [

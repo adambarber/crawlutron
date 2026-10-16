@@ -1,8 +1,7 @@
 """The browser action vocabulary: which actions exist and which are allowed.
 
-A closed set answers WHICH actions a caller may name; the ceilings on their
-values are in ``app.vocabulary.limits``. The driver that dispatches them lives in
-``app.transport`` after #149's slice 2.
+A closed set answers WHICH actions a caller may name; value ceilings live in
+``app.vocabulary.limits``, and the dispatching driver in ``app.transport``.
 """
 
 from __future__ import annotations

@@ -1,8 +1,7 @@
 """The pooled HTTP and curl_cffi client lifecycle, as one public face.
 
-Construction, loop binding, supersession, bounded close queues and teardown
-live in :mod:`app.transport.pooled_clients`; this module re-exports them so
-callers depend on a role, not on the pool's internals.
+Construction, loop binding, supersession, bounded close queues and teardown live
+in ``app.transport.pooled_clients``; this re-exports them so callers depend on a role.
 """
 
 from __future__ import annotations

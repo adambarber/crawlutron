@@ -1,8 +1,7 @@
 """Shared helpers for main.py API endpoints.
 
-Centralizes JobStatusResponse construction, and the two halves of a gated
-endpoint's lifecycle: :func:`request_gate` (admit, reject, release) and
-:func:`record_crawl_completion` (the accepted/completed bookkeeping).
+Centralizes JobStatusResponse construction and a gated endpoint's lifecycle:
+``request_gate`` (admit, reject, release) and ``record_crawl_completion`` (bookkeeping).
 """
 
 import logging

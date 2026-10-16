@@ -113,9 +113,8 @@ def _validate_transport(
 ) -> None:
     """Validate request metadata headers against the body.
 
-    Order matters: a missing/unsupported protocol-version header is reported
-    before ``_meta`` problems so legacy clients (which send no ``_meta`` and no
-    header) receive an UnsupportedProtocolVersionError naming what we support.
+    A missing/unsupported protocol-version header is reported before ``_meta``
+    problems so legacy clients (no ``_meta``, no header) get an UnsupportedProtocolVersionError.
     """
     if protocol_version_header is None:
         raise ProtocolValidationError(

@@ -120,9 +120,8 @@ CSV_NEUTRALIZE_COLUMNS: set[str] = {"error", "classification", "status"}
 def csv_neutralize(value: str, column: str) -> str:
     """Escape a CSV cell that might trigger formula execution in a spreadsheet.
 
-    Only columns that flow attacker-controlled page content are neutralized
-    (per-column allowlist); URLs and numeric columns are returned unchanged
-    so existing analyses still work.
+    Only columns flowing attacker-controlled page content are neutralized (per-column
+    allowlist); URLs and numeric columns stay unchanged so existing analyses work.
     """
     if column not in CSV_NEUTRALIZE_COLUMNS or not value:
         return value

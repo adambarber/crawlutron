@@ -51,9 +51,8 @@ class _LockedDomainCookieStore:
     def store(self, domain: str, header: str) -> None:
         """Record a harvested cookie header, evicting LRU entries past the cap.
 
-        Assignment and eviction happen under one acquisition, so a concurrent
-        reader can never observe the store over the cap, and the entry being
-        written cannot be the one evicted by its own insert.
+        Assignment and eviction hold one acquisition, so a concurrent reader never sees
+        the store over the cap, and the inserted entry cannot be the one it evicts.
         """
         with self._lock:
             # Deliberately not move_to_end: re-storing a known domain updates

@@ -70,9 +70,8 @@ class SharedCookieStore(CoordinationStore):
     def merge(self, namespace: str, host: str, cookies: dict[str, str]) -> None:
         """Union ``cookies`` into the slot, then evict past the cap.
 
-        The read and the write are one transaction, which is the whole point:
-        the JSON file's replace-everything write is what lost a sibling's
-        cookies, and only an in-transaction union avoids it.
+        Read and write are one transaction -- the JSON file's replace-everything
+        write is what lost a sibling's cookies, and only an in-transaction union avoids it.
         """
         now = time.time()
         key = (namespace or "", host)

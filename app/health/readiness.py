@@ -21,10 +21,8 @@ _CPU_SATURATION = 0.90
 class ReadinessSnapshot:
     """Typed view of the readiness state at one instant.
 
-    ``snapshot`` used to return ``dict[str, int | bool | str]``, which widened
-    every field to that union and made the ``ReadinessResponse`` construction
-    un-typecheckable: the caller had to assert each key held the right member.
-    Declaring the four fields pins the shape at the source instead.
+    Declaring the four fields pins the shape at the source instead of a widened
+    ``dict[str, int | bool | str]`` that forced per-key asserts at construction.
     """
 
     status: str
@@ -36,9 +34,8 @@ class ReadinessSnapshot:
 class ReadinessState:
     """Thread-safe readiness state tracker.
 
-    Saturation is derived from the service's own resource-guard utilization
-    (memory/CPU fraction of the discovered cgroup limit), not a fixed external
-    concurrency cap. The active-request count is tracked for visibility only.
+    Saturation derives from the resource-guard's measured cgroup utilization
+    (not a fixed concurrency cap); the active-request count is visibility only.
     """
 
     def __init__(self) -> None:
@@ -49,9 +46,9 @@ class ReadinessState:
     def set_utilization_sampler(self, sampler: Callable[[], tuple[float, float]] | None) -> None:
         """Install a live ``(memory, cpu)`` utilization source.
 
-        The lifespan wires the engine's ResourceGate here so /ready reflects
-        current pressure even when no recursive crawl has run to refresh the
-        metrics gauges. ``None`` restores the gauge fallback (tests)."""
+        The lifespan wires the engine's ResourceGate here so /ready reflects current
+        pressure without a recursive crawl refreshing the gauges; ``None`` restores them.
+        """
         with self._lock:
             self._utilization_sampler = sampler
 

@@ -37,8 +37,7 @@ class ProcessStateOwner(Protocol):
     def has_process_state(self) -> bool:
         """Whether anything is currently held.
 
-        Honest in both directions. A module reporting ``False`` while holding a
-        populated cache is worse than having no probe at all, because the
-        conformance test then certifies a reset that never emptied anything.
+        Honest in both directions: a module reporting ``False`` while holding a populated
+        cache is worse than no probe, because conformance then certifies a reset that failed.
         """
         ...

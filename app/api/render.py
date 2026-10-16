@@ -1,8 +1,7 @@
 """Browser-render request orchestration (the ``/v1/render`` path).
 
-Extracted from the previous ``app.service`` shim so the canonical entry point
-for browser-render orchestration lives in ``app.api``. ``app.service`` is
-deleted; existing callers import from ``app.api.render``.
+Extracted from the old ``app.service`` shim so the canonical browser-render
+entry point lives in ``app.api``; existing callers import from ``app.api.render``.
 """
 
 from __future__ import annotations
