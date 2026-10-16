@@ -78,19 +78,9 @@ class CrawlJobState:
 
     @classmethod
     def from_json(cls, data: dict[str, Any], *, host_policy: HostPolicy, tier: PolicyTier) -> CrawlJobState:
-        """Deserialize from JSON dict.
-
-        The read boundary always normalizes: canonical identity, cross-list
-        dedupe, shallowest depth and legacy bare-string depths are enforced
-        here, so a row written by any writer -- including one that put
-        non-canonical URLs inside well-formed records -- cannot reintroduce a
-        second identity for a page. The cost is bounded by the canonicalization
-
-        This used to branch on a persisted ``canonicalized`` column, read from
-        a local that was hardcoded ``False`` -- the column is gone (migration
-        0002), so the branch could only ever take the normalizing path, and
-        keeping it invited a second writer to "optimize" a flag that no longer
-        exists. One path, no flag.
+        """Deserialize from JSON dict; the read boundary always normalizes canonical
+        identity, cross-list dedupe and depths, so no writer can reintroduce a second
+        identity for a page. One path, no persisted ``canonicalized`` flag (migration 0002 removed it).
         """
         status = data.get("status", JobStatus.PENDING.value)
         kind = data.get("kind", JobKind.WHOLE_SITE.value)
@@ -214,20 +204,8 @@ _JOB_STATUS_PROJECTION = """
 
 class JobStatusView(TypedDict):
     """The status view: one record, one declared shape, every key mandatory.
-
-    This is the type the defect lived in. The view was ``dict[str, Any]``, which
-    is a type that says nothing, so a key the producer omitted and a key the
-    consumer read were both unchecked -- and ``JobStatusResponse(**view)`` into a
-    model declaring ``extra="ignore"`` dropped whatever the model did not declare
-    without a word. ``kind`` was selected here on purpose, read by both recovery
-    seams, and had never reached a single response body.
-
-    Declaring it closes that in both directions, and the compiler is what closes
-    it: pyright reports ``Unable to match unpacked TypedDict argument to
-    parameters`` the moment the view and the response model disagree about a key,
-    so neither side can drift alone. Removing ``kind`` from the projection is now
-    a build failure at ``_status_row`` rather than a ``None`` that every
-    recovery read treated as whole-site.
+    A TypedDict so the compiler catches a view/response-model key mismatch (the
+    old dict[str, Any] dropped kind silently, which recovery read as whole-site).
     """
 
     job_id: str
@@ -245,20 +223,9 @@ class JobStatusView(TypedDict):
 
 
 def _status_row(row: sqlite3.Row, visited: int, results: int) -> JobStatusView:
-    """Shape one projected row into the status view the API returns.
-
-    ``frontier_size`` and ``cap_truncated`` are NULL when the row has no
-    frontier or no stats object, which is the normal state of a fresh job.
-
-    ``kind`` is here because recovery reads it from this view. It was missing,
-    and both recovery seams asked for it anyway: the rewind checked
-    ``summary.get("kind")`` and the startup scan filtered on the same key, so
-    every summary answered ``None``, every job looked whole-site, and the
-    startup scan's kind check filtered nothing. A caller reading a key that the
-    projection never selected is a missing column, not a defensive default.
-    ``COALESCE`` covers rows written before the column existed, which is why
-    ``kind`` is ``str`` here and not ``str | None``: the SQL has no branch that
-    can produce a null one.
+    """Shape one projected row into the status view the API returns: frontier_size
+    and cap_truncated are NULL on a fresh job, and ``kind`` is selected because
+    recovery reads it from this view (it was missing, so every job read as whole-site).
     """
     return {
         "job_id": row["job_id"],
@@ -287,10 +254,8 @@ def _retries_payload(retries: dict[NormalizedUrl, int]) -> dict[str, int]:
 
 def _job_row_params(job: CrawlJobState) -> tuple:
     """The live-state columns of the job row, in ``_UPSERT_JOB_ROW_SQL`` order.
-
     Separate from the statement so the two cannot drift: a column added to the
-    SQL without a matching entry here is a TypeError at the first persist
-    rather than a silently unwritten column.
+    SQL without a matching entry here is a TypeError at first persist, not a silent drop.
     """
     return (
         job.job_id,
@@ -309,20 +274,9 @@ def _job_row_params(job: CrawlJobState) -> tuple:
 
 
 class JobAccumulators:
-    """The growing part of a job: its page history and its visited set.
-
-    These two collections used to be JSON columns on the job row, so a batch
-    persist re-serialized every page crawled so far and total write volume over
-    a crawl grew as the square of the page count. They are append-only, so they
-    live in their own tables and a batch costs one INSERT per new page.
-
-    They are also everything about a job that is NOT live state, which is what
-    makes them separable: the row holds what the runner is doing right now
-    (frontier, status, retries) and can be rewritten wholesale each batch
-    because it is bounded; this holds what has already happened, and is only
-    ever appended to.
-
-    Caller holds the store's lock: these share the store's single connection.
+    """The growing part of a job: its append-only page history and visited set.
+    They live in their own tables so a batch is one INSERT per new page, not a
+    re-serialization of everything crawled (the live row is rewritten wholesale).
     """
 
     def __init__(self, conn: sqlite3.Connection) -> None:
@@ -351,21 +305,16 @@ class JobAccumulators:
 
     def delete(self, job_id: str) -> None:
         """Drop a job's history.
-
-        Without this the tables would keep a deleted job's entire crawl with
-        nothing pointing at it, which is worse than the leak the old column
-        layout could not have: there, deleting the row deleted the history by
-        construction.
+        Without this, the tables would keep a deleted job's crawl with nothing
+        pointing at it -- the old column layout deleted the history by construction.
         """
         self._conn.execute('DELETE FROM "crawl_job_results" WHERE job_id = ?', (job_id,))
         self._conn.execute('DELETE FROM "crawl_job_visited" WHERE job_id = ?', (job_id,))
 
     def counts_by_job(self) -> dict[str, tuple[int, int]]:
-        """``{job_id: (visited, results)}`` for the job list, in one query.
-
-        Two correlated subqueries per job would make the list view cost a round
-        trip per job per counter; the primary keys make both counts a single
-        grouped scan of the two tables.
+        """``{job_id: (visited, results)}`` for the job list, in one query, instead of a
+        correlated subquery round trip per job per counter -- the primary keys make
+        both counts a single grouped scan of the two tables.
         """
         rows = self._conn.execute(
             """
@@ -378,12 +327,9 @@ class JobAccumulators:
         return {row["job_id"]: (row["visited_count"], row["results_count"]) for row in rows}
 
     def counts_for(self, job_id: str) -> tuple[int, int]:
-        """``(visited, results)`` for one job, without reading either list.
-
-        ``count(*)`` over the primary key is an index probe, so this gives the
-        same answer ``len()`` gives after a full load for none of the load. It
-        exists so a status read can report a size without materializing the
-        page history to measure it.
+        """``(visited, results)`` for one job, without reading either list: ``count(*)``
+        over the primary key is an index probe, giving ``len()``'s answer for none
+        of the load, so a status read reports a size without materializing the history.
         """
         row = self._conn.execute(
             "SELECT (SELECT count(*) FROM crawl_job_visited WHERE job_id = ?) AS visited,"
@@ -393,14 +339,9 @@ class JobAccumulators:
         return row["visited"], row["results"]
 
     def _append_results(self, job: CrawlJobState) -> None:
-        """Insert only the pages this batch added.
-
-        The high-water mark is read from the table rather than remembered, so a
-        resumed process that never persisted a count in memory still appends
-        exactly the pages it has not written. If the history is shorter than
-        what is already stored -- normalization dropped pages a previous save
-        had written -- the accumulator was not monotone after all, and the
-        cheap path would silently skip pages; resync instead.
+        """Insert only the pages this batch added, keyed off the table's high-water mark
+        (not a remembered count, so a resumed process still appends exactly what it
+        hasn't written). If normalization shrank history, resync rather than silently skip.
         """
         job_id = job.job_id
         results = job.results
@@ -419,17 +360,9 @@ class JobAccumulators:
         )
 
     def _append_visited(self, job: CrawlJobState) -> None:
-        """Insert newly visited pages.
-
-        The count check keeps a batch that discovered nothing from re-probing
-        every page seen so far; when there is growth the insert is OR IGNORE, so
-        a page visited by two branches collapses to one row and the set
-        semantics of the accumulator are the table's primary key.
-
-        The set is unordered, so "new" cannot be a slice: the URLs already
-        stored are read back as a set and differenced. Reading them is cheaper
-        than the insert it bounds, because that used to hand the driver every
-        URL the job had ever seen on every save.
+        """Insert newly visited pages. The count check skips no-growth batches; on
+        growth the INSERT OR IGNORE collapses a page visited twice to one row (set
+        semantics = the primary key). "New" is a set difference, not a slice.
         """
         job_id = job.job_id
         visited = job.visited
@@ -458,18 +391,8 @@ def _create_job(
     frontier: list[FrontierEntry] | None = None,
 ) -> CrawlJobState:
     """The one place a job is born, for both kinds, and the one place it is written.
-
-    The two kinds used to be built by two nearly-identical blocks inside the
-    store, and one of them had already drifted: ``create_single_shot`` carried
-    the store's ``host_policy`` but not its ``tier``, so every limit on a
-    single-shot job resolved against the model's defaults while a whole-site
-    job on the same store resolved against the deployment's. Same request, same
-    answer, two numbers.
-
-    A module function rather than a method so the class holds only the two
-    one-line calls into it: the row's content and the locked write are one
-    decision, and splitting them across the boundary is what let the two kinds
-    disagree.
+    A module function so the row's content and the locked write are one decision;
+    the two kinds used to split across that boundary and drift (one lost its tier).
     """
     job = CrawlJobState(
         job_id=job_id,
