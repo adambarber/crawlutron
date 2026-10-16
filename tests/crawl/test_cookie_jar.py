@@ -1,9 +1,7 @@
 """Adversarial fixes (MEDIUM): CookieJar thread-safety and atomic persistence.
 
-The shared global cookie jar is mutated by concurrent requests. Without a lock,
-concurrent writes can lose updates or raise mid-iteration. And save_to_file
-wrote directly to the target path, so a crash during json.dump left a
-truncated/corrupted file (silently losing all persisted cookies on restart).
+The global jar is mutated concurrently; a crash during a direct ``save_to_file``
+could leave a truncated jar that silently lost all persisted cookies.
 """
 
 import contextlib
@@ -82,10 +80,8 @@ def _cookie_jar_max_hosts() -> int:
 def _jar_with_hosts(count: int):
     """A jar holding ``host0..host{count - 1}``, each with a distinct cookie.
 
-    The LRU tests are about *which* host is evicted, so the population has to be
-    named and identical across them -- the loop stated per test is how two
-    eviction tests end up filling different numbers of slots and passing for the
-    wrong reason.
+    The LRU tests are about *which* host is evicted, so the population must be
+    named and identical -- per-test loops filled different slot counts.
     """
     jar = CookieJar()
     for i in range(count):

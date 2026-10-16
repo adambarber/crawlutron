@@ -1,8 +1,7 @@
 """Conditional-fetch contract (freshness monitoring).
 
-Callers supply cached ETag / Last-Modified validators via ``validators``;
-matching URLs are revalidated with If-None-Match / If-Modified-Since and an
-unchanged page yields a not_modified result without a full body fetch.
+Callers supply ETag / Last-Modified validators; matching URLs are revalidated
+with If-None-Match / If-Modified-Since and an unchanged page is not_modified.
 """
 
 from typing import Any
@@ -172,9 +171,8 @@ def test_validators_conflict_with_policy_headers_rejected():
 def test_conditional_headers_rejected_without_validators():
     """Raw If-* in policy.headers is rejected even with no validators.
 
-    Without validators the raw headers flow into the fetch, an origin 304
-    yields a bodyless not_modified result -- caller-controlled content
-    suppression through the exact path the validator exists to guard.
+    Without validators the raw headers flow into the fetch, and an origin 304
+    yields a bodyless result -- caller-controlled content suppression.
     """
     with pytest.raises(ValidationError):
         CrawlRequest(

@@ -19,17 +19,8 @@ class TestContentCacheOverwrite:
     def test_a_row_with_an_unparsable_expiry_is_a_miss_on_every_surface(self, tmp_path):
         """A malformed ``expires`` must not raise, and must read as a miss.
 
-        The envelope parses as JSON, so the corruption check passes, and the
-        freshness test then compares the clock against whatever the row carried.
-        A row whose expiry is a string raised ``TypeError`` there -- through the
-        disk read, through the RAM mirror it warmed, and through the freshness
-        mirror -- so one bad row made every later read of that key raise.
-
-        The row is corrupt by the same standard as unparsable JSON, and
-        corruption here means a miss. Both surfaces are asserted because they
-        have separate answer paths: the freshness mirror answers from its own
-        metadata without reading the row, so a regression that serves one
-        surface but not the other must not pass.
+        A string expiry raised ``TypeError`` through every surface, so one bad
+        row made every later read raise; asserted on both answer paths.
         """
 
         warm, _clock = make_seeded_cache(tmp_path, "key1")
@@ -115,17 +106,8 @@ def test_max_entries_enforces_bound(tmp_path):
 def test_explicit_max_entries_zero_disables_limit():
     """Max_entries=0 means no limit (opt-out).
 
-    Two records, run twice: once under a cap of one, once under a cap of zero.
-    The contrast at the same volume is the point -- "nothing was evicted" only
-    says something next to a cache that did evict, and pinning both here means
-    the second half cannot pass by being broken too.
-
-    The volume is two because the claim is that the count cap is not applied.
-    The cap reads ``max_entries > 0 and len(index) > max_entries``, so a zero
-    with anything in the index evicts every entry if the ``> 0`` test is ever
-    dropped -- two records catch that, one would not. It used to write 15,000,
-    which took longer than every other test in this file combined and proved
-    only that a large number of writes finish.
+    Run twice -- cap of one then cap of zero -- so "nothing was evicted" reads
+    next to a cache that did evict; two records catch a dropped ``> 0`` test.
     """
     with scoped_cache(default_ttl=3600, max_entries=1) as bounded:
         bounded.set("k0", 0)

@@ -107,25 +107,8 @@ def test_classify_unchanged_after_refactor():
 def test_strip_is_linear_under_pathological_unclosed_script_flood():
     """Unclosed <script> tags must not trigger quadratic regex backtracking.
 
-    A page with N unclosed <script> tags made _HTML_NOISE_RE cost O(N^2):
-    each tag anchor re-scanned to end-of-string for a closing tag that never
-    comes. The replacement scanner must stay linear.
-
-    Measured in CPU seconds, not wall clock, and sized so the signal is
-    unambiguous. Both choices were arrived at by being wrong first.
-
-    *Wall clock* reports how busy the box was, not how much work the scanner
-    did: a descheduled process keeps the wall clock running while its own CPU
-    clock stands still, which is how a scanner spending a flat ~2ns per byte
-    measured as 37x super-linear for a 2x input.
-
-    *Size* is the subtler one. At the 400-tag payload this test used to build,
-    a full pass cost ~0.4ms, and at that scale the growth term is the same
-    order as the fixed one -- a linear implementation measured 4.5x for a 2x
-    input. Measuring over 1MB->4MB instead puts the linear term 100x above the
-    noise, and widening the range from 2x to 4x makes the assertion *stronger*,
-    not weaker: linear lands near 4x, quadratic near 16x, and the band between
-    them is wider than the one it replaces.
+    N unclosed tags made the noise regex O(N^2); measured in CPU seconds (wall
+    clock lies) and sized 1MB->4MB so the linear growth term dominates the noise.
     """
     from app.extraction.classify import strip_html_noise
 
@@ -216,14 +199,10 @@ class TestClassifyHtmlComments:
 
 
 def test_wire_classification_literal_matches_the_enum():
-    """The ``Classification`` Literal in app/models/taxonomy.py is a hand-maintained second
-    copy of the enum.
+    """The ``Classification`` Literal is a hand-maintained second copy of the enum.
 
-    url_budget_exceeded shipped as an enum member missing from the Literal, and
-    the value-validity detector could not catch it -- it checks call-site
-    literals against the enum, not the Literal against the enum. A member added
-    to the enum but forgotten in the Literal would still pass CI, which is the
-    exact duplication that produced the original defect.
+    A member added to the enum but forgotten in the Literal passes CI -- the
+    detector checks call-site literals -- which produced the original defect.
     """
     import typing
 

@@ -33,15 +33,8 @@ async def test_document_extractor_blocks_internal_url(monkeypatch):
 async def test_document_extractor_invokes_ssrf_check(monkeypatch):
     """The document fetch must gate the URL before any socket opens.
 
-    The gate is the fetch walk's first pin: ``default_document_text_extractor``
-    fetches through ``apinned_hops``, and the walk pins before anything
-    connects. A scripted client keeps the test off the network while the
-    recording gate proves the property: a hand-rolled loop that skipped the
-    pin would reach the client with no gate entry, and a gate entry carrying a
-    different URL would mean the fetch was not the one that was checked.
-
-    The extractor's own contract swallows every fetch failure into empty
-    text, so the gate entry -- not an escaping sentinel -- is the observable.
+    The fetch walk's first pin: the extractor swallows every failure, so the
+    recording gate entry -- not an escaping sentinel -- is the observable.
     """
     from unittest.mock import patch
 
@@ -83,18 +76,7 @@ async def test_browser_pin_resolve_does_not_run_on_the_event_loop(monkeypatch):
     """Blocking DNS must not happen on the loop thread, and this is the render path.
 
     Every rendered page is pinned before navigation, so a resolve on the loop
-    thread stalls every other in-flight crawl in the process once per page -- the
-    loop is shared, so the cost is paid by traffic this page has nothing to do with.
-
-    The observer is ``socket.getaddrinfo`` rather than the pin builder, because the
-    builder is what got fixed and the resolver is what is actually blocking; a test
-    pinned to the thing that was corrected proves the correction and not the
-    property. The address is canned, so this is deterministic and does no DNS.
-
-    Private targets are blocked because the session-wide loopback hatch is the
-    other way this test would prove nothing: with it on, ``resolve_and_pin_host``
-    returns the hostname before it resolves, the observer never fires, and the
-    assertion ends up checking that nothing happened.
+    stalls every in-flight crawl -- and the pin builder is what got fixed.
     """
     block_private_targets(monkeypatch)
     loop_thread = threading.get_ident()
