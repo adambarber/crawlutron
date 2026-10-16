@@ -1,33 +1,7 @@
 """Job-runner test harness: stores, fake engine seams, and the job-state waits.
 
-The waits at the bottom are the reason this module exists in its current form.
-They used to be a poll loop racing a 5.0s wall-clock deadline:
-
-    while loop.time() < deadline:
-        if <the status I asked for>:
-            return
-        await asyncio.sleep(0.01)
-    raise AssertionError(...)
-
-That deadline was a starvation escape hatch wearing a deadline's clothes. It
-surfaced as one red run of
-``tests/api/test_jobs_execution.py::TestTransientFailureRequeue::test_pause_non_
-running_conflicts`` on a box running four agent sessions, where the process took
-62.9s of user CPU inside a 271.5s run (23% of one core) -- a job that was
-progressing perfectly well simply ran out of seconds. The same test passed 3/3
-in isolation (0.4s), its whole file passed 53/53, and three other full runs of
-the commit were green, which is the signature of a scheduling failure and not a
-defect. Raising the number would have hidden that without fixing it.
-
-The fix is the instrument, not the number. ``JobStore.save()`` deliberately
-never writes ``status`` -- control state moves exclusively through
-:meth:`JobStore.set_status` -- so that single compare-and-set is the COMPLETE
-set of edges a job-state wait has to observe. Subscribing to it turns the poll
-into an edge-triggered wait: the wait returns the instant the status is
-committed, however long ago that was relative to now, so a starved-but-progressing
-suite is no longer raced. ``save`` is published on too, because
-:func:`_wait_until` takes arbitrary predicates over the whole row.
-"""
+The waits are EDGE-triggered, not a poll racing a deadline: ``set_status`` is
+the complete edge set, so the wait returns the instant the status is committed."""
 
 import asyncio
 from collections.abc import Collection
@@ -116,22 +90,8 @@ def _execution_payload(results: list[EngineCrawlResult], submitted_count: int) -
 class ScriptedExecute:
     """The engine seam, faked, owning the per-URL attempt count.
 
-    Four runner wrappers used to hand back ``(job, attempts)`` because the
-    counter was declared by the test and threaded down through each of them. But
-    the count is what separates "fetched once" from "fetched twice and still
-    produced a result", so it belongs to the thing that does the fetching, not to
-    the caller that asks -- and once it lived here, the four wrappers turned out
-    to be the same wrapper.
-
-    Construct from exactly one of:
-
-    ``scripts``  per-URL response sequences. A URL with more than one entry is
-                 served from the front and popped, which is how transient-failure
-                 requeue is driven. An unscripted URL renders successfully.
-    ``results``  a flat list of responses, keyed by ``original_url``. An unscripted
-                 URL fails, because a fixed answer set means the runner asked for
-                 something the fixture never described.
-    """
+    The count belongs to the fetcher, not the caller (four wrappers collapsed
+    into one). ``scripts``: per-URL sequences; unscripted URLs succeed."""
 
     def __init__(
         self,
@@ -181,21 +141,8 @@ def _make_app(job_store):
 async def _join_runner_task(job_id: str) -> bool:
     """Await the runner task for ``job_id`` if one is registered and live.
 
-    For a terminal wait this is the exact event the caller is waiting on:
-    ``run_job`` returns when it has finished, and it does not return at a time
-    of our choosing. A starved box *delays* that task; it does not end it early,
-    so a task join is immune to the whole class of failure this replaced --
-    there is no deadline in this path to race.
-
-    ``asyncio.wait`` rather than ``await``: it resolves when the task finishes
-    however it finishes (returned, raised, cancelled) without re-raising any of
-    those into the waiter, and it still propagates the waiter's own
-    cancellation. The row is the record of what happened; the task's exception
-    is not the caller's to handle.
-
-    Returns True when a task was joined, so the caller knows the state may have
-    moved without an edge having been observed.
-    """
+    For a terminal wait this is the exact event the caller waits on, with no
+    deadline to race; ``asyncio.wait`` resolves however the task finished."""
     from app.api import job_lifecycle
 
     task = job_lifecycle._tasks.get(job_id)
@@ -208,18 +155,8 @@ async def _join_runner_task(job_id: str) -> bool:
 async def _next_store_edge(store: JobStore, job_id: str, listener: _StoreListener) -> None:
     """Block until the next write to ``job_id``, or fail naming what never came.
 
-    The bound here is a HANG GUARD, not an instrument, and the difference is
-    load-bearing: the wait is edge-triggered, so a slow job takes longer to
-    reach its next write instead of failing. The guard only fires when NOTHING
-    is written for this long.
-
-    Sized off measurement rather than off the old 5.0s: across a full
-    ``pytest -q`` sweep the slowest of the 68 edge-driven waits in the suite
-    took 1.6ms. The old number was not a hang guard, though -- a synthetic 6.5s
-    stall in the runner's worker thread (longer than 5.0s) reproduced the exact
-    original failure against a 5.0s guard, which is why the terminal path joins
-    the task instead and this bound is a store-level wedge detector at 30s.
-    """
+    A HANG GUARD, not an instrument: edge-triggered, so a slow job takes longer
+    instead of failing; fires only when NOTHING is written (measured, 30s)."""
     listener.event.clear()
     try:
         await asyncio.wait_for(listener.event.wait(), STORE_HANG_GUARD_SECONDS)
@@ -234,14 +171,8 @@ async def _next_store_edge(store: JobStore, job_id: str, listener: _StoreListene
 async def _wait_for(job_store, job_id: str, satisfied, *, join_task: bool):
     """Block until ``satisfied(job)`` holds; return that job.
 
-    Subscribe first, then read, then wait -- in that order, and the read comes
-    before the wait because the state can already be what the caller asked for
-    (a caller that drove ``run_job`` in-line reaches this only once the job is
-    finished). Clearing the event after the read is what makes the wait
-    lossless: a write that lands after the clear has its ``call_soon_threadsafe``
-    callback queued, so the very next suspension runs it and the wait returns; a
-    write that landed before the clear is visible to a read that follows it.
-    """
+    Subscribe, then read, then wait -- the state can already be what the caller
+    asked for; clearing after the read keeps the wait lossless."""
     bus = getattr(job_store, "status_bus", None)
     if bus is None:
         raise AssertionError(
@@ -264,11 +195,8 @@ async def _wait_for(job_store, job_id: str, satisfied, *, join_task: bool):
 async def _wait_status(job_store, job_id: str, statuses: Collection[str]) -> str:
     """Block until ``job_id`` holds one of ``statuses``; return the status name.
 
-    When the caller is waiting for a terminal status there is a live runner task
-    to join, and that is the preferred path: it carries no deadline at all. A
-    predicate over an intermediate state has no such task, so
-    :func:`_wait_until` falls back to the store-level hang guard alone.
-    """
+    A terminal wait joins the live runner task (no deadline at all); an
+    intermediate-state predicate falls back to the hang guard alone."""
     job = await _wait_for(
         job_store,
         job_id,

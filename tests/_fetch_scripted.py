@@ -9,11 +9,8 @@ from tests._fetch_doubles import FetcherDouble, Route
 def hanging_fetcher(calls: list[str] | None = None):
     """A fetcher that never returns, so only the caller's deadline ends it.
 
-    The tarpit, for a poisoned URL whose fetch has to time out. It awaits a
-    never-resolved future rather than sleeping: the suite monkeypatches
-    ``asyncio.sleep`` to return instantly, which would turn the tarpit into a
-    fast success and assert nothing.
-    """
+    Awaits a never-resolved future rather than sleeping: the suite patches
+    ``asyncio.sleep``, which would make the tarpit a fast success."""
 
     async def never(url, *_):
         await asyncio.Future()
@@ -31,26 +28,8 @@ def routed_fetcher(
 ):
     """A fetcher that answers per-URL, by substring match on the URL.
 
-    Almost every hand-rolled fetcher in this tree is the same shape with the
-    same three branches -- robots, sitemap, page -- and the branches are what
-    makes them worth stating once. ``routes`` maps a URL substring to what that
-    fetch should do; the first match wins, so order the specific before the
-    general. A route may be an exception (raised), a ``(status, body, ctype)``
-    triple, a :func:`make_fetch` kwargs dict, or a prebuilt ``HttpFetchResult``.
-
-    ``calls`` records every URL fetched, which is the assertion most of these
-    tests exist to make. ``on_route(url, headers)`` is called when a route
-    matches, for a test that counts one *kind* of fetch across fetcher instances
-    it does not want to share a fetcher between -- the sharing under test is
-    elsewhere, and building a second fetcher per request is the honest way to
-    show it.
-
-    ``missing`` is what happens when nothing matches: ``"default"`` serves
-    ``default``; ``"raise"`` raises an ``AssertionError`` naming the URL, for a
-    test that must not be fetching something it did not script. The default is
-    the 404, matching :func:`site_fetcher`, because a crawler test that reads a
-    body it did not arrange is a test that passes for the wrong reason.
-    """
+    ``routes`` maps a substring to an exception, a ``(status, body, ctype)``
+    triple, kwargs, or a prebuilt result (first match wins); ``missing`` is 404."""
 
     def answer(url: NormalizedUrl, sent_headers, *_):
         for fragment, spec in (routes or {}).items():
@@ -73,14 +52,8 @@ def sequenced_fetcher(
 ):
     """A fetcher that answers in call order, for a test about what happens next.
 
-    The shape behind "the first strategy gets a CAPTCHA and the escalated one
-    gets the page", or "the first attempt drops and the retry recovers". Writing
-    it as a closure means an ``if calls == 1`` branch per test and no statement
-    of what happens on the third call, which is where these go wrong.
-
-    ``repeat_last`` serves the final step for every call past the list, so a
-    test that only cares about the transition still terminates.
-    """
+    The shape behind "CAPTCHA then the escalated page" or "drop then retry";
+    ``repeat_last`` serves the final step past the list."""
     if not steps:
         raise ValueError("sequenced_fetcher needs at least one step")
     state = {"n": 0}
@@ -103,19 +76,8 @@ def sequenced_fetcher(
 def request_fetcher(respond, record_headers: list[dict[str, str]] | None = None):
     """A fetcher whose answer is computed from ``(url, headers)``.
 
-    The conditional-request seam: what a sitemap or page fetch returns depends
-    on the ``If-None-Match`` / ``If-Modified-Since`` header the crawler sent, so
-    the branch cannot be keyed on the URL. ``respond(url, headers)`` -- the
-    request, not the whole contract -- returns whatever :func:`routed_fetcher`'s
-    routes may, or a finished response when ``answer_is_response`` is set.
-
-    Distinct from :func:`tap_fetcher` (which delegates to a real fetcher) and
-    from :func:`concurrent_fetcher` (which also counts overlap): this one adds
-    no scheduling point, so a test about headers does not acquire a
-    concurrency behaviour it did not ask for. ``fetcher.headers`` is the header
-    log, which is what this seam is for -- and it is its own member rather than
-    ``calls`` so that "which URLs" and "what was sent" stay two different facts.
-    """
+    The conditional-request seam: the answer depends on ``If-None-Match`` /
+    ``If-Modified-Since``, so the branch keys on the request."""
     seen: list[dict[str, str]] = [] if record_headers is None else record_headers
     return FetcherDouble(lambda url, sent_headers, *_: respond(url, sent_headers), record_headers=seen)
 
@@ -123,12 +85,8 @@ def request_fetcher(respond, record_headers: list[dict[str, str]] | None = None)
 def tap_fetcher(inner, calls: list[str] | None = None):
     """Wrap another fetcher, recording the URLs that reach it.
 
-    For a test whose subject is a *real* fetcher (the default HTTP fetcher, a
-    site fetcher) and whose only extra requirement is to see what was asked
-    for. Recording and delegating are separate concerns, so they are separate
-    functions: this one owns the list, the wrapped one owns the response --
-    which may be sync or async, since :func:`fetcher_double` awaits either.
-    """
+    For a test whose subject is a REAL fetcher and whose only extra need is to
+    see what was asked for; this owns the list, the wrapped one the response."""
     return FetcherDouble(
         lambda url, sent_headers, timeout, cap: inner(url, sent_headers, timeout, cap), calls
     )
@@ -142,19 +100,8 @@ def concurrent_fetcher(
 ):
     """A fetcher that tracks how many of its calls are in flight at once.
 
-    ``respond(url, headers)`` maps a request to a route spec (see
-    :func:`routed_fetcher`) and may be a plain callable or a coroutine function.
-    It takes the request for the same reason :func:`request_fetcher` does -- one
-    ``respond`` shape across the seam -- and because a fetcher that is deciding
-    anything usually needs the headers as much as the URL.
-
-    The counter is raised on entry and lowered on exit, with ``yield_times`` loop
-    yields in between: the yield is the scheduling point that makes overlap
-    observable at all, and without it an async fetcher that never awaits
-    serialises itself and any concurrency assertion passes for free.
-
-    ``peak`` on the returned fetcher is what a concurrency test should assert.
-    """
+    ``respond(url, headers)`` maps to a route spec; the counter rises on entry
+    and falls on exit with ``yield_times`` yields between. ``peak`` is to assert."""
     state = {"inflight": 0, "peak": 0}
 
     async def answer(url, sent_headers, *_args):
