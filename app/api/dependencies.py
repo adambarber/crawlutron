@@ -11,7 +11,10 @@ from typing import Annotated
 
 from fastapi import Depends, Request
 
+from app.api.caller_auth import get_caller_identity
 from app.config.settings import CrawlerSettings
+from app.models.caller_identity import CallerIdentity
+from app.storage.caller_key_store import CallerKeyStore
 from app.storage.job_store import JobStore
 from app.storage.result_store import CrawlResultStore
 from app.storage.watch_store import WatchStore
@@ -42,8 +45,15 @@ def get_watch_store(request: Request) -> WatchStore:
     return request.app.state.watch_store
 
 
+def get_caller_key_store(request: Request) -> CallerKeyStore:
+    """FastAPI dependency: return the :class:`CallerKeyStore` for the running app."""
+    return request.app.state.caller_key_store
+
+
 # One declaration per provider, Annotated rather than a default so the dependency is
 # declared: an unannotated provider makes the alias, and every endpoint, carry Any.
+CallerKeyStoreDep = Annotated[CallerKeyStore, Depends(get_caller_key_store)]
+CallerDep = Annotated[CallerIdentity, Depends(get_caller_identity)]
 SettingsDep = Annotated[CrawlerSettings, Depends(get_settings)]
 ShutdownEventDep = Annotated[asyncio.Event, Depends(get_shutdown_event)]
 JobStoreDep = Annotated[JobStore, Depends(get_job_store)]
@@ -52,11 +62,14 @@ WatchStoreDep = Annotated[WatchStore, Depends(get_watch_store)]
 
 
 __all__ = [
+    "CallerDep",
+    "CallerKeyStoreDep",
     "JobStoreDep",
     "ResultStoreDep",
     "SettingsDep",
     "ShutdownEventDep",
     "WatchStoreDep",
+    "get_caller_key_store",
     "get_job_store",
     "get_result_store",
     "get_settings",

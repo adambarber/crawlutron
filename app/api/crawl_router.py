@@ -12,7 +12,13 @@ from fastapi.responses import Response
 from app.api.crawl_endpoint import crawl as crawl_handler
 from app.api.crawl_endpoint import get_crawl_result as get_crawl_result_handler
 from app.api.crawl_endpoint import get_crawl_trace as get_crawl_trace_handler
-from app.api.dependencies import get_job_store, get_result_store, get_settings, get_shutdown_event
+from app.api.dependencies import (
+    CallerDep,
+    get_job_store,
+    get_result_store,
+    get_settings,
+    get_shutdown_event,
+)
 from app.api.policy_defaults import BROWSER_FALLBACK_POLICY, DOCUMENT_EXTRACTION_POLICY
 from app.models.crawl_request import CrawlRequest
 from app.models.error_response import ErrorResponse
@@ -100,6 +106,7 @@ router = APIRouter(tags=["Crawler"])
 )
 async def crawl(
     request: Request,
+    caller: CallerDep,
     payload: CrawlRequest = Body(
         ...,
         examples=[
@@ -121,6 +128,7 @@ async def crawl(
         result_store=result_store,
         shutdown_event=shutdown_event,
         request=request,
+        caller=caller,
     )
 
 
@@ -138,12 +146,15 @@ async def crawl(
 )
 async def get_crawl_result(
     request_id: str,
+    caller: CallerDep,
     job_store=Depends(get_job_store),
     result_store=Depends(get_result_store),
 ) -> Response:
     # The handler replays the stored response model's own bytes, so the wire schema is
     # documented via response_model while the honest return is the replayed Response.
-    return await get_crawl_result_handler(request_id, job_store=job_store, result_store=result_store)
+    return await get_crawl_result_handler(
+        request_id, job_store=job_store, result_store=result_store, caller=caller
+    )
 
 
 @router.get(
@@ -160,10 +171,13 @@ async def get_crawl_result(
 )
 async def get_crawl_trace(
     request_id: str,
+    caller: CallerDep,
     job_store=Depends(get_job_store),
     result_store=Depends(get_result_store),
 ) -> TraceResponse:
-    return await get_crawl_trace_handler(request_id, job_store=job_store, result_store=result_store)
+    return await get_crawl_trace_handler(
+        request_id, job_store=job_store, result_store=result_store, caller=caller
+    )
 
 
 __all__ = ["router"]

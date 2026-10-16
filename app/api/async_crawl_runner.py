@@ -108,7 +108,7 @@ async def run_async_crawl(
                 urls=urls,
             )
             result["request_id"] = request_id
-            get_metrics().observe_crawl(results=result.get("results", []))
+            get_metrics().observe_crawl(results=result.get("results", []), caller_id=job.owner)
             response_model = await abuild_unified_crawl_response(
                 result.get("results", []),
                 adapt=build_unified_result,
@@ -162,7 +162,7 @@ async def run_async_crawl(
 
             if published:
                 try:
-                    await result_store.aput(request_id, response_payload)
+                    await result_store.aput(request_id, response_payload, owner=job.owner)
                 except Exception:
                     logger.warning("crawl_result_store_failed", extra={"request_id": request_id})
 

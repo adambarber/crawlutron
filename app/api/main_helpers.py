@@ -34,11 +34,13 @@ def record_crawl_completion(
     *,
     event: str,
     logger: logging.Logger,
+    caller_id: str = "",
 ) -> None:
     results = result.get("results", [])
     get_metrics().observe_crawl(
         results=results,
         elapsed_ms=(time.monotonic() - started) * 1000,
+        caller_id=caller_id,
     )
     logger.info(event, extra={"url_count": len(results)})
 

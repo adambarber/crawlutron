@@ -17,6 +17,12 @@ from fastapi.responses import JSONResponse, Response
 
 from app.admission.payload_helpers import checked_payload_urls
 from app.admission.policy import read_policy
+from app.api.caller_auth import (
+    anonymous_caller,
+    check_concurrency_quota,
+    check_page_quota,
+    effective_cookie_namespace,
+)
 from app.api.crawl_executor import execute_crawl
 from app.api.exceptions import http_error, validation_http_error
 from app.api.job_runner import start_tracked_task
@@ -25,6 +31,7 @@ from app.api.response_shaping import aunified_response_from_result
 from app.api.webhooks import validate_webhook_url_async
 from app.config.settings import CrawlerSettings
 from app.extraction.output_formats import serialize_results
+from app.models.caller_identity import CallerIdentity
 from app.models.crawl_request import CrawlRequest
 from app.models.host_policy import HostPolicy
 from app.models.json_value import JsonValue
@@ -81,8 +88,10 @@ async def crawl(
     result_store: CrawlResultStore,
     shutdown_event: asyncio.Event,
     request: Request | None = None,
+    caller: CallerIdentity | None = None,
 ) -> Any:
     """Execute a policy-driven crawl (sync or async webhook mode)."""
+    active_caller = caller if caller is not None else anonymous_caller()
     with request_gate("crawl_request_rejected", logger=logger, reject=_crawl_rejection):
         if payload.output_format:
             # Validate the format before the branch commits to sync or async:
@@ -97,6 +106,7 @@ async def crawl(
             settings.max_batch_size,
             host_policy=host_policy,
         )
+        owner = await _admit_caller_request(payload_dict, job_store, active_caller)
         webhook_url = payload.webhook_url
         async_mode = payload.async_mode
         if async_mode or webhook_url:
@@ -110,7 +120,10 @@ async def crawl(
             # The store's tier, not ``settings``: the row is read back with the
             # store's tier, and two tier sources drift apart the moment they differ.
             await job_store.acreate_single_shot(
-                request_id, checked[0], read_policy(payload_dict.get("policy"), job_store.tier)
+                request_id,
+                checked[0],
+                read_policy(payload_dict.get("policy"), job_store.tier),
+                owner=owner,
             )
             from app.api.async_crawl_runner import run_async_crawl
 
@@ -127,7 +140,7 @@ async def crawl(
                     urls=checked,
                 ),
             )
-            get_metrics().observe_crawl(accepted=True)
+            get_metrics().observe_crawl(accepted=True, caller_id=owner)
             return JSONResponse(
                 status_code=202,
                 content={
@@ -152,10 +165,11 @@ async def crawl(
             _crawl_started,
             event="crawl_request_completed",
             logger=logger,
+            caller_id=owner,
         )
         response_model = await aunified_response_from_result(result)
         try:
-            await result_store.aput(result["request_id"], response_model.model_dump())
+            await result_store.aput(result["request_id"], response_model.model_dump(), owner=owner)
         except Exception:
             logger.warning("crawl_result_store_failed", extra={"request_id": result["request_id"]})
         output_format = payload.output_format
@@ -167,16 +181,37 @@ async def crawl(
         return response_model
 
 
+async def _admit_caller_request(
+    payload_dict: dict[str, JsonValue],
+    job_store: JobStore,
+    caller: CallerIdentity,
+) -> str:
+    """Quota checks and cookie-namespace defaulting for one crawl; returns the owner."""
+    resolved = read_policy(payload_dict.get("policy"), job_store.tier)
+    check_page_quota(caller, resolved.limits.max_pages)
+    check_concurrency_quota(caller, await job_store.aactive_count_for_caller(caller.caller_id))
+    namespace = effective_cookie_namespace(resolved.request_profile, caller)
+    if namespace:
+        request_profile = dict(resolved.request_profile)
+        request_profile["cookie_namespace"] = namespace
+        raw_policy = payload_dict.get("policy")
+        policy_block = dict(raw_policy) if isinstance(raw_policy, dict) else {}
+        policy_block["request_profile"] = request_profile
+        payload_dict["policy"] = policy_block
+    return caller.caller_id
+
+
 async def _stored_response_payload(
     request_id: str,
     job_store,
     result_store,
+    caller_id: str = "",
 ) -> JsonValue | None:
     """The stored response for ``request_id``, or None, shared by both replay
     doors: a job not in a terminal state raises 202; the sync path with no job
-    answers from the store.
+    answers from the store. Reads scope to ``caller_id``; foreign rows miss.
     """
-    job = await job_store.aload(request_id)
+    job = await job_store.aload_for_caller(request_id, caller_id)
     if job is not None and job.status not in TERMINAL_STATUSES:
         raise http_error(
             202,
@@ -184,7 +219,7 @@ async def _stored_response_payload(
             f"Job {request_id} is still {job.status.value}",
             {"status": job.status.value},
         )
-    stored = await result_store.aget(request_id)
+    stored = await result_store.aget_for_caller(request_id, caller_id)
     if stored is not None:
         return stored
     if job is not None and job.kind == JobKind.SINGLE_SHOT and job.results:
@@ -198,13 +233,14 @@ async def _stored_payload_or_not_found(
     request_id: str,
     job_store,
     result_store,
+    caller_id: str = "",
 ) -> JsonValue:
     """The stored payload for ``request_id``, or a 404.
 
     Both replay doors answer the same miss the same way, and the second copy of
     the check is a second place the message shape can drift.
     """
-    payload = await _stored_response_payload(request_id, job_store, result_store)
+    payload = await _stored_response_payload(request_id, job_store, result_store, caller_id)
     if payload is None:
         raise http_error(404, "not_found", f"Unknown or expired request_id: {request_id}")
     return payload
@@ -214,26 +250,32 @@ async def get_crawl_result(
     request_id: str,
     job_store,
     result_store,
+    caller: CallerIdentity | None = None,
 ) -> Response:
     """Retrieve a completed crawl response by request_id; a replay is bytes.
 
     Serving the stored dump answers byte-for-byte; rebuilding would re-validate
     URL fields, and admission is the constructor's ingress job, not the cache's.
     """
-    return JSONResponse(content=await _stored_payload_or_not_found(request_id, job_store, result_store))
+    caller_id = caller.caller_id if caller is not None else ""
+    return JSONResponse(
+        content=await _stored_payload_or_not_found(request_id, job_store, result_store, caller_id)
+    )
 
 
 async def get_crawl_trace(
     request_id: str,
     job_store,
     result_store,
+    caller: CallerIdentity | None = None,
 ) -> TraceResponse:
     """The same stored record read as a trace: attempts and evidence, no bodies.
 
     A projection, not a second store -- it validates off the response envelope's
     dump, so it cannot claim an attempt the response does not have.
     """
-    payload = await _stored_payload_or_not_found(request_id, job_store, result_store)
+    caller_id = caller.caller_id if caller is not None else ""
+    payload = await _stored_payload_or_not_found(request_id, job_store, result_store, caller_id)
     return TraceResponse.model_validate(payload)
 
 

@@ -41,6 +41,19 @@ Use `GET /health` for process liveness and Docker healthcheck interpretation.
 Use `GET /ready` for crawl-capacity readiness before submitting large batches
 or retrying after a timeout.
 
+## Caller Authentication (API Keys)
+
+Callers may mint a key with `POST /v1/keys` (`{"label": ...}`, optional
+`max_pages` / `max_concurrency` quotas) and present it as `X-API-Key` (or an
+`Authorization: Bearer` token). Jobs and results created under a key are
+readable only under that key: `GET /v1/crawl/{request_id}`, its `/trace`, and
+the `/v1/jobs` reads answer 404 to any other caller. Requests with no key are
+anonymous and keep the legacy behavior (anonymous rows stay anonymous-readable).
+A wrong or revoked key is 401; a crawl past the key's page or concurrency
+quota is 429 `quota_exceeded`. Unless `request_profile.cookie_namespace` is set,
+a keyed crawl's cookies are namespaced to the key id. Per-caller request counts
+are exposed in `/metrics` as `crawler_crawl_requests_total{caller="<key_id>"}`.
+
 ## Liveness and Readiness
 
 `GET /health` is intentionally lightweight: it confirms the FastAPI process can

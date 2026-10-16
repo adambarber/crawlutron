@@ -11,8 +11,10 @@ from typing import NoReturn, cast
 from fastapi import APIRouter
 
 from app.admission.payload_helpers import checked_payload_urls
+from app.admission.policy import read_policy
 from app.api import job_runner
-from app.api.dependencies import JobStoreDep, SettingsDep, ShutdownEventDep
+from app.api.caller_auth import check_concurrency_quota, check_page_quota
+from app.api.dependencies import CallerDep, JobStoreDep, SettingsDep, ShutdownEventDep
 from app.api.exceptions import http_error, validation_http_error
 from app.api.main_helpers import build_job_status
 from app.models.error_response import ErrorResponse
@@ -56,6 +58,7 @@ async def create_job(
     job_store: JobStoreDep,
     settings: SettingsDep,
     shutdown_event: ShutdownEventDep,
+    caller: CallerDep,
 ) -> JobCreateResponse:
     try:
         host_policy = HostPolicy.from_settings(settings)
@@ -64,7 +67,9 @@ async def create_job(
             settings.max_batch_size,
             host_policy=host_policy,
         )
-        job = await job_store.acreate(checked[0], payload.policy)
+        check_page_quota(caller, read_policy(payload.policy, job_store.tier).limits.max_pages)
+        check_concurrency_quota(caller, await job_store.aactive_count_for_caller(caller.caller_id))
+        job = await job_store.acreate(checked[0], payload.policy, owner=caller.caller_id)
     except ValueError as error:
         raise validation_http_error(error) from error
     job_runner.start_job(job.job_id, job_store, settings, shutdown_event)
@@ -85,8 +90,8 @@ async def create_job(
     summary="List crawl jobs with live status",
     description="Return a list of all crawl jobs with basic status info.",
 )
-async def list_jobs(job_store: JobStoreDep) -> JobListResponse:
-    jobs = await job_store.alist_jobs()
+async def list_jobs(job_store: JobStoreDep, caller: CallerDep) -> JobListResponse:
+    jobs = await job_store.alist_for_caller(caller.caller_id)
     return JobListResponse(jobs=[build_job_status(row) for row in jobs])
 
 
@@ -99,8 +104,8 @@ async def list_jobs(job_store: JobStoreDep) -> JobListResponse:
     ),
     responses={404: {"model": ErrorResponse, "description": "Job not found."}},
 )
-async def get_job(job_id: str, job_store: JobStoreDep) -> JobStatusResponse:
-    row = await job_store.astatus(job_id)
+async def get_job(job_id: str, job_store: JobStoreDep, caller: CallerDep) -> JobStatusResponse:
+    row = await job_store.astatus_for_caller(job_id, caller.caller_id)
     if row is None:
         _raise_not_found(job_id)
     return build_job_status(row)
@@ -129,11 +134,12 @@ async def control_job(
     job_store: JobStoreDep,
     settings: SettingsDep,
     shutdown_event: ShutdownEventDep,
+    caller: CallerDep,
 ) -> JobStatusResponse:
     action = payload.action.lower()
     if action not in {"pause", "resume", "cancel"}:
         raise http_error(422, "invalid_action", f"Unknown action: {action}")
-    if not await job_store.aexists(job_id):
+    if not await job_store.aexists_for_caller(job_id, caller.caller_id):
         _raise_not_found(job_id)
 
     if action == "pause":
@@ -147,7 +153,7 @@ async def control_job(
         _raise_not_found(job_id)
     if outcome == "conflict":
         _raise_conflict(f"Action '{action}' is not valid for the job's current state.")
-    row = await job_store.astatus(job_id)
+    row = await job_store.astatus_for_caller(job_id, caller.caller_id)
     # `aexists` above established the row, and the control path only reads it.
     row = cast("JobStatusView", row)
     return build_job_status(row)
@@ -160,10 +166,12 @@ async def control_job(
     "first.",
     responses={404: {"model": ErrorResponse, "description": "Job not found."}},
 )
-async def delete_job(job_id: str, job_store: JobStoreDep) -> dict[str, str]:
+async def delete_job(job_id: str, job_store: JobStoreDep, caller: CallerDep) -> dict[str, str]:
+    if not await job_store.aexists_for_caller(job_id, caller.caller_id):
+        _raise_not_found(job_id)
     if job_runner.is_running(job_id):
         job_runner.cancel_job_task(job_id)
-    if not await job_store.adelete(job_id):
+    if not await job_store.adelete_for_caller(job_id, caller.caller_id):
         _raise_not_found(job_id)
     return {"status": "deleted", "job_id": job_id}
 

@@ -12,9 +12,9 @@ from app.storage.watch_store import WatchStore
 class LoopGuardJobStore(JobStore):
     """The real store, with every sync entry point refusing to run on the loop."""
 
-    def create(self, root_url, policy):
+    def create(self, root_url, policy, *, owner=""):
         _refuse_on_loop("JobStore.create")
-        return super().create(root_url, policy)
+        return super().create(root_url, policy, owner=owner)
 
     def create_single_shot(self, job_id, root_url, policy, *, owner=""):
         _refuse_on_loop("JobStore.create_single_shot")
@@ -71,6 +71,10 @@ class LoopGuardJobStore(JobStore):
     def exists_for_caller(self, job_id, caller_id):
         _refuse_on_loop("JobStore.exists_for_caller")
         return super().exists_for_caller(job_id, caller_id)
+
+    def active_count_for_caller(self, caller_id):
+        _refuse_on_loop("JobStore.active_count_for_caller")
+        return super().active_count_for_caller(caller_id)
 
     def close(self):
         _refuse_on_loop("JobStore.close")

@@ -19,6 +19,7 @@ from app.runtime.logging_config import configure_service_logging
 from app.vocabulary.identity import SERVICE_ID, SERVICE_VERSION
 
 from .config.settings import CrawlerSettings
+from .storage.caller_key_store import CallerKeyStore
 from .storage.job_store import JobStore
 from .storage.result_store import CrawlResultStore
 from .storage.watch_store import WatchStore
@@ -93,6 +94,9 @@ result_store = CrawlResultStore(
 # Registered watches and revalidation history: no policy or tier -- a watch
 # arrives admitted, and the sweep re-admits against the policy in force when it checks.
 watch_store = WatchStore(DATABASE_PATH)
+
+# Inbound caller keys: issuance, verification, and revocation for API-key identity.
+caller_key_store = CallerKeyStore(DATABASE_PATH)
 
 # Ensure the parent directory of the log file exists before the logger tries
 # to open it; standalone checkouts default to ./logs which may not exist.
@@ -291,6 +295,7 @@ if FastAPI is not None:
     app.state.job_store = job_store
     app.state.result_store = result_store
     app.state.watch_store = watch_store
+    app.state.caller_key_store = caller_key_store
 
     # Body-size guard: 16 MiB cap at the ASGI receive layer (see
     # app/api/middleware.py for how truncation and keep-alive are handled).
@@ -310,6 +315,7 @@ if FastAPI is not None:
     app.include_router(create_well_known_router())
     from .api.crawl_router import router as crawl_router
     from .api.jobs_router import router as jobs_router
+    from .api.keys_router import router as keys_router
     from .api.map_router import router as map_router
     from .api.metrics_router import router as metrics_router
     from .api.policy_router import router as policy_router
@@ -322,6 +328,7 @@ if FastAPI is not None:
     app.include_router(render_router)
     app.include_router(map_router)
     app.include_router(jobs_router)
+    app.include_router(keys_router)
     app.include_router(watch_router)
     app.include_router(crawl_router)
     app.include_router(policy_router)

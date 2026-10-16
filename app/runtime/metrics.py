@@ -31,6 +31,7 @@ _THROTTLE_BATCHES = "resource_throttle_batches_total"
 _STRATEGY_PREFIX = "strategy:"
 _CLASSIFICATION_PREFIX = "classification:"
 _PROVIDER_PREFIX = "search_provider:"
+_CALLER_PREFIX = "caller:"
 
 # Counter name -> the observable field callers read, built once so a
 # counter cannot be recorded under one name and read under another.
@@ -144,6 +145,10 @@ class MetricsStore:
     def search_provider_counts(self) -> dict[str, float]:
         return self._labelled(_PROVIDER_PREFIX)
 
+    @property
+    def caller_counts(self) -> dict[str, float]:
+        return self._labelled(_CALLER_PREFIX)
+
     # -- the only counter write paths --------------------------------------
 
     def observe_crawl(
@@ -153,8 +158,11 @@ class MetricsStore:
         results: Sequence[EngineCrawlResult] | None = None,
         elapsed_ms: float = 0.0,
         errors: int = 0,
+        caller_id: str = "",
     ) -> None:
         self._add(_CRAWL_REQUESTS, 1)
+        if caller_id:
+            self._add(_CALLER_PREFIX + caller_id, 1)
         if accepted:
             self._add(_CRAWL_ACCEPTED, 1)
         if results:
@@ -232,6 +240,14 @@ class MetricsStore:
         return _exposition(self)
 
 
+def _caller_lines(store: MetricsStore) -> list[str]:
+    """Per-caller request counts, sorted by key id."""
+    return [
+        f'crawler_crawl_requests_total{{caller="{caller}"}} {count}'
+        for caller, count in sorted(store.caller_counts.items())
+    ]
+
+
 def _exposition(store: MetricsStore) -> str:
     """Render the Prometheus text exposition for ``store``.
 
@@ -262,6 +278,7 @@ def _exposition(store: MetricsStore) -> str:
     counter("crawler_search_errors_total", store.search_errors_total, "Total failed web search requests.")
     for provider, count in sorted(store.search_provider_counts.items()):
         lines.append(f'crawler_search_results_total{{provider="{provider}"}} {count}')
+    lines.extend(_caller_lines(store))
     lines.append("# HELP crawler_search_seconds_total Total wall-clock time spent on web searches (seconds).")
     lines.append("# TYPE crawler_search_seconds_total counter")
     lines.append(f"crawler_search_seconds_total {store.search_total_elapsed_ms / 1000.0:.3f}")

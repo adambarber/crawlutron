@@ -63,6 +63,7 @@ _BOUND_REQUEST_BODIES = (
     "CrawlRequest",
     "JobCreateRequest",
     "JobControlRequest",
+    "KeyCreateRequest",
     "MapRequest",
     "RenderRequest",
     "SearchRequest",

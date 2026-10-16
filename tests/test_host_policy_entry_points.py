@@ -65,6 +65,7 @@ async def _probe_crawl_executor(monkeypatch, tmp_path):
 
 async def _probe_jobs_router(monkeypatch, tmp_path):
     from app.api import jobs_router
+    from app.models.caller_identity import CallerIdentity
     from app.models.job_create_request import JobCreateRequest
 
     effects = _effects()
@@ -85,6 +86,7 @@ async def _probe_jobs_router(monkeypatch, tmp_path):
             # A real event: the handler refuses before it reads this, and the parameter is a required
             # ``asyncio.Event``.
             shutdown_event=asyncio.Event(),
+            caller=CallerIdentity(),
         ),
         effects,
     )

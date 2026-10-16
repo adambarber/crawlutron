@@ -14,6 +14,7 @@ from httpx import ASGITransport, AsyncClient
 
 from app.admission.policy import read_policy
 from app.api import dependencies, job_runner, jobs_router
+from app.api.caller_auth import get_caller_identity
 from app.api.dependencies import get_job_store, get_settings, get_shutdown_event
 from app.config.settings import CrawlerSettings
 from app.models.crawl_policy import CrawlPolicy
@@ -77,8 +78,8 @@ def test_every_job_endpoint_declares_its_providers_through_an_alias():
 
 def test_creating_and_controlling_a_job_need_the_same_providers():
     """The identity claim behind the shared aliases, checked against signatures:
-    ``create_job`` and ``control_job`` now name the same three providers, so a
-    fourth needed by one and not the other is what this says.
+    ``create_job`` and ``control_job`` now name the same four providers, so a
+    fifth needed by one and not the other is what this says.
     """
 
     def _providers(handler) -> dict[str, Callable[..., Any]]:
@@ -95,7 +96,12 @@ def test_creating_and_controlling_a_job_need_the_same_providers():
     controlled = _providers(jobs_router.control_job)
 
     assert created == controlled
-    assert set(created.values()) == {get_job_store, get_settings, get_shutdown_event}
+    assert set(created.values()) == {
+        get_job_store,
+        get_settings,
+        get_shutdown_event,
+        get_caller_identity,
+    }
 
 
 class TestCrashRecovery:

@@ -288,6 +288,15 @@ class JobStore:
         """Whether ``caller_id`` owns a row under ``job_id``, without reading it."""
         return self._has_job_row(job_id, caller_id)
 
+    def active_count_for_caller(self, caller_id: str) -> int:
+        """Owned jobs still holding a runner slot: pending or running, never terminal."""
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT count(*) FROM crawl_jobs WHERE owner = ? AND status IN (?, ?)",
+                (caller_id, JobStatus.PENDING.value, JobStatus.RUNNING.value),
+            ).fetchone()
+        return int(row[0])
+
     def _has_job_row(self, job_id: str, owner: str | None) -> bool:
         """Whether a row matches, filtered to ``owner`` when one is given."""
         with self._lock:
@@ -322,3 +331,4 @@ class JobStore:
     astatus_for_caller = atwin(status_for_caller)
     aexists = atwin(exists)
     aexists_for_caller = atwin(exists_for_caller)
+    aactive_count_for_caller = atwin(active_count_for_caller)
