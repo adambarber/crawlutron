@@ -1,8 +1,7 @@
 """Centralized error handling: classification, result construction, and drift.
 
-These tests pin the chokepoint contract: every strategy exception becomes a
-classified terminal result through one primitive, and pool exhaustion is a
-distinct, re-queueable classification rather than a generic network failure.
+Pins the chokepoint contract: every strategy exception becomes a classified
+terminal result through one primitive, and pool exhaustion is re-queueable.
 """
 
 from dataclasses import asdict, replace
@@ -103,13 +102,10 @@ def test_primitive_marks_pool_exhaustion_as_not_attempted():
     [BrowserPoolExhaustedError("none free"), httpx.ConnectTimeout("boom"), ValueError("boom")],
 )
 def test_exception_envelopes_never_carry_discovered_links(error):
-    """Failure envelopes carry no links -- the invariant that makes the
-    re-queue ``continue`` in ``run_recursive_crawl`` (which precedes link
-    expansion) safe: a re-queued pool-exhausted URL cannot "lose" links
-    because an un-attempted crawl discovers none. If a future envelope
-    builder ever fills ``discovered_links`` from partial results, that link
-    source must reach the frontier BEFORE the re-queue decision; this pin
-    fails the day that becomes possible so the ordering gets revisited."""
+    """Failure envelopes carry no links, making the re-queue ``continue`` safe:
+    an un-attempted crawl discovers none. Newly discovered links must reach
+    the frontier BEFORE the re-queue decision, or this pin fails.
+    """
     result = engine_result_from_exception(
         error=error,
         original_url="https://a.example/x",
@@ -132,12 +128,8 @@ def test_primitive_default_classification_is_network_error():
 class TestClassificationValueValidity:
     """A classification the engine emits must survive response shaping.
 
-    The bug this class pins: ``url_budget_exceeded`` was passed as
-    ``known_classification`` -- a genuinely distinct signal -- but it was not a
-    ``CrawlClassification`` member. The lenient internal dataclass accepted it,
-    then ``_shape_all`` built a strict ``UnifiedCrawlResult`` and the whole
-    batch 500'd on one budget-exhausted URL. The unit tests read raw spill
-    dicts and never crossed the pydantic boundary, so the suite was green.
+    ``url_budget_exceeded`` passed as ``known_classification`` wasn't a member:
+    the lenient dataclass took it, then the strict wire model 500'd the batch.
     """
 
     def test_url_budget_exceeded_is_a_taxonomy_member(self):
@@ -172,13 +164,8 @@ def _budget_item() -> dict:
 class TestCallWorkerExecutesOnce:
     """A sync worker must not be invoked twice.
 
-    The old shape ran worker(job) on the event-loop thread (blocking the loop
-    and keeping side effects), found a non-coroutine, then called it AGAIN via
-    asyncio.to_thread and discarded the first result. The first invocation's
-    side effects were kept and its return discarded. Production passes async
-    workers, so it never bit -- but it is a trap for the next sync worker, and
-    the first call blocked the loop for the full duration, which is exactly
-    what to_thread exists to avoid.
+    The old shape ran it on the loop thread, then called it AGAIN via
+    asyncio.to_thread and discarded the first result -- blocking the loop.
     """
 
     async def test_sync_worker_runs_once_off_loop(self):
@@ -195,11 +182,8 @@ class TestCallWorkerExecutesOnce:
 class TestShapeAllGuardsPerItem:
     """One malformed item must not kill the whole batch at the endpoint.
 
-    The job runner guards per-item (abuild_unified_result in try/except,
-    dropping the item as a failed crawl). The endpoint's _shape_all had no
-    guard, so a single unshapable item raised and the endpoint 500'd the
-    entire batch -- the same primitive, two contracts. The fix lives at the
-    shaping primitive itself so both paths share one guard.
+    The job runner guards per-item, but the endpoint's ``_shape_all`` had no
+    guard, so one item 500'd the batch; the fix lives at the primitive.
     """
 
     async def test_one_bad_item_does_not_fail_the_batch(self):
@@ -243,16 +227,10 @@ _unreachable_fetcher = failing_fetcher(AssertionError("an HTTP strategy ran but 
 
 
 class TestStrategyChainGuardsRaisingStrategies:
-    """``_execute_strategy`` is where a strategy's work is invoked, so it is
-    where a raise must become a result.
+    """A raise at the strategy ADAPTER boundary becomes a failed step, not a dead URL.
 
-    Below the chain, the HTTP strategy has its own broad-except sink and the
-    browser worker catches inside ``render`` -- but a raise at the ADAPTER
-    boundary between them (worker dispatch, a binding failing in a way the
-    render loop does not expect) had nowhere to go: it escaped the chain and
-    was enveloped by whatever ran the URL, with no strategy attribution and
-    with every remaining ladder step skipped. A strategy is a step in a ladder;
-    a step that blows up is a failed step, and the ladder moves on.
+    The HTTP and browser workers each catch inside; a raise between them
+    escaped the chain and skipped every remaining ladder step.
     """
 
     async def test_a_raising_step_is_enveloped_and_the_ladder_continues(self):

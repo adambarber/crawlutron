@@ -1,9 +1,7 @@
 """Sync post-fetch discovery parsing must leave the event loop.
 
-``parse_html_tree`` / ``html_diagnostics`` / ``extract_discovered_links`` /
-``extract_js_endpoints`` / ``detect_pagination`` run synchronously in both
-strategy result builders. The post-fetch block must move to
-``asyncio.to_thread``, returning plain data (no lxml tree escapes).
+The parse/extract/detect block runs synchronously in both strategy result
+builders, so it must move to ``asyncio.to_thread`` and return plain data.
 """
 
 import asyncio
@@ -35,9 +33,8 @@ HTML = (
 def _page_resp(url):
     """The 200 the HTTP strategy will read, as a real ``HttpFetchResult``.
 
-    The strategy is handed the production model rather than a local object with
-    the same handful of attributes, so a field the builder starts reading
-    cannot be missing here without this failing.
+    Hand the strategy the production model, so a field the builder starts
+    reading cannot be missing here without this failing.
     """
     return make_fetch(url=url, final_url=url, body=HTML.encode(), ctype="text/html")
 
@@ -68,9 +65,8 @@ async def _render(monkeypatch, html: str, *, text: str = BROWSER_TEXT):
 def assert_extracted_discovery(result) -> None:
     """Assert the shared post-fetch discoveries, whichever builder produced them.
 
-    The count is asserted next to the set because the set deduplicates: three
-    distinct URLs is not the same claim as exactly three links found, and a
-    duplicated discovery is exactly the kind of drift a flat row would hide.
+    The count sits next to the set because the set deduplicates: three URLs is
+    not the same claim as exactly three links found.
     """
     assert result.discovered_link_count == len(EXPECTED_LINKS)
     assert {link.normalized_url for link in result.discovered_links} == EXPECTED_LINKS
@@ -175,11 +171,8 @@ async def test_discovery_feeds_are_policy_filtered():
 async def test_browser_path_filters_malicious_next_page_url(monkeypatch):
     """The browser result must not surface an unfiltered attacker href.
 
-    ``detect_pagination`` resolves an ``href`` out of attacker-controlled
-    HTML. The HTTP builder filtered the resolved URL before use; the browser
-    builder assigned it raw to both diagnostics and the result field, so a
-    ``javascript:`` rel=next escaped into the response. Egress now happens at
-    the producer, so every consumer is covered.
+    ``detect_pagination`` resolves an attacker ``href``; the HTTP builder
+    filtered it, the browser builder assigned it raw -- ``javascript:`` escaped.
     """
     malicious = '<html><body><a rel="next" href="javascript:alert(1)">next</a></body></html>'
     result = await _render(monkeypatch, malicious, text="body copy")
@@ -191,11 +184,8 @@ async def test_browser_path_filters_malicious_next_page_url(monkeypatch):
 async def test_browser_result_carries_the_shared_builder_shape(monkeypatch):
     """The browser path must build its result through build_engine_result.
 
-    The HTTP path routes through the shared builder; the browser path
-    hand-built EngineCrawlResult, silently relying on the ``validators``
-    default (a render has no etag). This pins every field the hand-build
-    produced for this page so routing through the shared builder is provably
-    behavior-preserving -- and a field that silently changes is caught here.
+    It hand-built EngineCrawlResult, silently relying on the ``validators``
+    default; pinning the fields proves the shared-builder route preserves them.
     """
     result = await _render(monkeypatch, HTML)
     assert result.status == "success"
@@ -227,12 +217,8 @@ async def test_browser_result_carries_the_shared_builder_shape(monkeypatch):
 async def test_both_strategies_agree_on_the_discovery_result_fields(monkeypatch):
     """The two paths over one page must not disagree about a discovery field.
 
-    Every discovered-links field reaches a result through
-    ``content_pipeline._discovery_result_fields``, and this is the behavioural
-    half of that chokepoint: a field threaded into one strategy and not the
-    other is invisible in both results -- each is individually well-formed --
-    and shows up only as a difference between them. Stated on the two real
-    builders, over one page, so the pair is what is compared.
+    Every discovery field reaches a result through one chokepoint; one threaded
+    into only one strategy shows up only as a difference between the pair.
     """
     http = await invoke_http_strategy(monkeypatch, policy=_full_discovery_policy(), resp=_page_resp)
     browser = await _render(monkeypatch, HTML)

@@ -15,22 +15,8 @@ from app.transport.content_cache import ContentCache
 def scoped_cache(**settings) -> Iterator[ContentCache]:
     """A ContentCache over a throwaway directory, removed when the block ends.
 
-    ``with tempfile.TemporaryDirectory() as d: cache = ContentCache(d,...)``
-    was the arrange at a dozen sites in this file, differing only in the
-    settings; owning it here means a test cannot leave a cache writing into a
-    directory it meant to clean up. The directory itself is ``cache.cache_dir``
-    for the two sites that need to inspect the on-disk files.
-
-    Two kinds of site sit outside it on purpose, because the block is not
-    really this shape: one opens a *second* cache over the same directory (a
-    warm restart), which needs the directory rather than a cache; the other
-    seeds its entry through ``make_content_cache_with_entry``, which returns
-    the clock handle the test then advances.
-
-    Settings are passed through, never restated. The byte caps in particular
-    used to be written out here as literal numbers, and one of those literals
-    had drifted to a value eight times smaller than the production default --
-    a test that kept passing while testing a cap nothing shipped with.
+    This owns the near-duplicated arrange; warm-restart and seeder sites stay
+    out. Caps pass through--a literal cap here once drifted 8x under default.
     """
     with tempfile.TemporaryDirectory() as tmpdir:
         yield ContentCache(tmpdir, **settings)
@@ -40,10 +26,8 @@ def scoped_cache(**settings) -> Iterator[ContentCache]:
 def watching_entry_unlinks(monkeypatch, cache) -> Iterator[list[bool]]:
     """Record, per cache-entry unlink, whether the cache lock was held.
 
-    Scoped to the cache directory's own entry files on purpose:
-    ``atomic_write_text`` unlinks its own ``.tmp`` file *under* the lock, so an
-    unfiltered watch reports the writer's temp-file cleanup as an eviction. The
-    teardown is the ``monkeypatch`` fixture's, which restores the real unlink.
+    Scoped to the cache's own entry files: the writer's ``.tmp`` cleanup
+    unlinks under the lock and would otherwise read as an eviction.
     """
     real_unlink = cc.Path.unlink
     held: list[bool] = []
@@ -61,9 +45,8 @@ def watching_entry_unlinks(monkeypatch, cache) -> Iterator[list[bool]]:
 def entry_replaced_by_directory(cache, key) -> Iterator[Any]:
     """Swap an entry's file for a directory, so reading it raises OSError.
 
-    A file swapped for a directory is the only way to make a read fail without
-    patching the reader itself, and the swap has to be undone -- otherwise the
-    directory the cache is writing into is left dirty for the next test.
+    A file-for-directory swap is the only unpatched way to fail a read, and it
+    must be undone or the cache's directory is left dirty for the next test.
     """
     path = cache._path_for(key)
     path.unlink()
@@ -96,15 +79,10 @@ def watching_envelope_reads(cache) -> Iterator[list[str]]:
 
 
 def watch_writes(cache, *, calls=None, on_write=None, fail=None):
-    """Point the cache's ``write_data`` seam at a watcher so a test can watch,
-    or fail, the cache's disk writes.
+    """Point the cache's ``write_data`` seam at a watcher to watch or fail writes.
 
-    One seam, three questions: ``calls`` records the paths that reached disk (an
-    oversized entry must never transiently be one), ``on_write`` observes each
-    write -- which is how the off-loop test sees which thread ran it -- and
-    ``fail`` makes the write raise, either always (``True``) or only for data
-    carrying a substring, so a prior entry survives to be read back. Each of
-    those was its own inline closure over the same private method.
+    One seam, three questions: ``calls`` records paths to disk, ``on_write``
+    observes each write, ``fail`` makes it raise (always or on a substring).
     """
     real_write = cache.write_data
 
@@ -128,9 +106,8 @@ def _make_cache(tmp_path, **kwargs):
 def reopen_cache(directory, **settings) -> ContentCache:
     """A fresh instance over a directory a previous instance wrote.
 
-    It deliberately seeds nothing: what the sites that use it are after is the
-    state a cold process finds on disk, and writing an entry first would warm
-    the very mirror they are testing.
+    It seeds nothing on purpose: these sites want the cold on-disk state, and
+    writing an entry first would warm the mirror they are testing.
     """
     return ContentCache(directory, **settings)
 
@@ -138,11 +115,8 @@ def reopen_cache(directory, **settings) -> ContentCache:
 async def _seeded_then_write_fails(cache, monkeypatch, body="old"):
     """A cache holding a persisted value, armed to fail the next write.
 
-    Both rollback tests start from the same place: a live entry that an
-    in-flight write fails against, so what is under test is what the *failed*
-    write left behind. Spelling that start state in each test meant a change to
-    the seeded value or to how a write is broken had to be made twice, and one
-    copy could be left asserting about a state the other never created.
+    Both rollback tests share this start: a live entry a failed in-flight
+    write leaves behind. Spelling it twice let one copy drift.
     """
     await cache.aset("k", {"body": body}, ttl=60)
     watch_writes(cache, fail="new")
