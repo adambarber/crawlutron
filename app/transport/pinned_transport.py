@@ -1,12 +1,7 @@
 """Owns SSRF validation, DNS resolution, pinning, and redirect targeting.
 
-This module owns transport safety decisions and the pinned request
-primitives: the resolved-IP blocklist, the fresh-IP pin, and the one
-connect composition (pinned IP literal + Host header for plain HTTP,
-hostname kept for HTTPS) that every fetching path builds requests
-through.
-
-It must not perform retries, response extraction, or result construction.
+Carries the safety decisions and pinned primitives (IP blocklist, fresh pin,
+plain-HTTP/HTTPS connect composition); never retries, extracts, or constructs.
 """
 
 from __future__ import annotations
@@ -39,18 +34,9 @@ _DNS_CACHE: BoundedTTLCache[str, list[str]] = BoundedTTLCache(max_entries=_DNS_C
 
 
 def _resolve_ips(hostname: str, *, use_cache: bool = True) -> list[str]:
-    """Resolve a hostname to its IPs with a short TTL cache.
-
-    Returns the raw IP list from socket.getaddrinfo (may include IPv6). Raises
-    socket.gaierror on resolution failure.
-
-    Caching avoids a blocking resolver call on every fetch in high-concurrency
-    batches. The pinning path (``resolve_and_pin_host``) passes
-    ``use_cache=False`` so the connection always pins a *freshly* resolved,
-    freshly re-validated public IP -- a cached pin would let a DNS rebind
-    inside the TTL window bypass the SSRF check (TOCTOU). The validation-only
-    path (``check_ssrf_protection``) may use the cache: it only needs to know
-    the host is safe to connect to, and the actual connection re-validates.
+    """Resolve a hostname to its IPs on a short-TTL cache (raw addrinfo list,
+    IPv6 included; socket.gaierror on failure). The pinning path passes
+    use_cache=False so a cached IP never bypasses SSRF via rebind (TOCTOU).
     """
     if use_cache:
         cached = _DNS_CACHE.get(hostname)
@@ -68,11 +54,9 @@ def _resolve_ips(hostname: str, *, use_cache: bool = True) -> list[str]:
 
 
 def check_ssrf_protection(url: NormalizedUrl) -> None:
-    """Resolve the URL's host and abort if any IP is private/loopback.
-
-    The host is read off the admitted value; there is nothing left to
-    re-parse here. Set ``CRAWLUTRON_ALLOW_PRIVATE_TARGETS=1`` (or
-    ``true``/``yes``/``on``) to disable for local testing.
+    """Resolve the URL's host and abort if any IP is private/loopback. The host
+    is read off the admitted value (nothing left to re-parse). Set
+    "CRAWLUTRON_ALLOW_PRIVATE_TARGETS=1" (or "true"/"yes"/"on") to disable.
     """
     if allow_private_targets():
         return
@@ -91,22 +75,9 @@ def check_ssrf_protection(url: NormalizedUrl) -> None:
 
 
 def resolve_and_pin_host(url: NormalizedUrl) -> tuple[str, str]:
-    """Resolve the URL's host once and pin the resulting IP for the connection.
-
-    Prevents DNS-rebinding (TOCTOU) SSRF: ``check_ssrf_protection`` validates
-    the resolved IPs, then this helper returns the FIRST public IP so the HTTP
-    client connects to that exact IP instead of re-resolving at connect time.
-    The original ``Host`` header is preserved by the caller.
-
-    Fails closed. A hostname that cannot be resolved here raises rather than
-    falling back to ``(hostname, hostname)``, which read as harmless but is not:
-    it hands the HTTP client permission to resolve the name a third time, at
-    connect time, with nothing validating the answer. ``check_ssrf_protection``
-    checked the IPs it saw and this discarded them, so an attacker able to fail
-    the pin-time lookup got an unvalidated connection -- the rebinding this
-    function exists to prevent, reached by breaking the pin instead of racing it.
-    ``check_ssrf_protection`` already refuses the same condition with the same
-    message; this keeps the two halves of one guarantee refusing together.
+    """Resolve the host once and pin the resulting IP, connecting to that exact IP
+    to defeat DNS-rebinding TOCTOU SSRF. Fails closed: an unresolvable host
+    raises instead of falling back to "(hostname, hostname)"; the caller keeps the Host header.
     """
 
     hostname = url.host
@@ -129,12 +100,10 @@ def resolve_and_pin_host(url: NormalizedUrl) -> tuple[str, str]:
 
 
 def declared_length_exceeds(header_value: str | None, limit: int) -> bool:
-    """True iff a ``Content-Length`` header parses to an int strictly over ``limit``.
+    """True iff a Content-Length header parses to an int strictly over ``limit``.
 
     A malformed, negative, or absent value reads as "unknown size" and returns
-    False -- it must never raise. Skipping the pre-flight rejection is
-    safe: the streamed running cap still bounds the actual body, so a hostile
-    ``Content-Length: abc`` cannot crash the fetch or spoof a pass.
+    False (never raises); skipping pre-flight is safe as the streamed running cap still bounds the body.
     """
     if not header_value:
         return False
@@ -148,9 +117,8 @@ def declared_length_exceeds(header_value: str | None, limit: int) -> bool:
 def _http_413(url: NormalizedUrl, final_url: NormalizedUrl, started: float) -> HttpFetchResult:
     """Standard 413 (payload too large) result for size/cap violations.
 
-    Takes the logical ``final_url`` (never ``current_url``): for a
-    pinned plain-HTTP fetch the response url is the resolved-IP literal, and
-    surfacing it leaks topology and mis-keys cookies by IP.
+    Takes the logical ``final_url``, never ``current_url``: a pinned plain-HTTP
+    response url is the resolved-IP literal, which leaks topology and mis-keys cookies by IP.
     """
     return HttpFetchResult(
         url=url,
@@ -163,23 +131,9 @@ def _http_413(url: NormalizedUrl, final_url: NormalizedUrl, started: float) -> H
 
 
 def build_pinned_request(url: NormalizedUrl, headers: dict[str, str]) -> tuple[str, dict[str, str]]:
-    """Build the pinned request for an admitted URL, in one step.
-
-    This is the one owner of the pin policy's connect composition: the
-    resolved-IP blocklist check, the fresh pin, IPv6 bracketing, port
-    handling, and the Host header. Plain HTTP connects to the exact
-    validated IP (closing the DNS-rebinding TOCTOU between validation and
-    connect) with a Host header preserving the original hostname for
-    virtual hosting; HTTPS keeps the hostname so TLS SNI / certificate
-    verification works (real certs carry no IP SAN) -- there the rebinding
-    window is bounded by CA validation plus this pre-connect check.
-
-    The unsafe state the old ``SafeUrl.connect`` refused is now
-    unrepresentable rather than refused: this builder always pins, so there
-    is no unpinned plain-HTTP branch left to raise from. Keeping the
-    composition in one place is what makes it impossible to drift between
-    fetch paths -- both HTTP fetchers, both browser transports, and
-    webhook delivery all build requests through this one builder.
+    """Build the pinned request for an admitted URL, in one step -- the sole owner
+    of the composition (IP blocklist, fresh pin, exact-IP plain-HTTP pin with
+    Host header preserved; HTTPS keeps the hostname for TLS SNI). Always pins; one place prevents drift.
     """
     check_ssrf_protection(url)
     if url.scheme == "https":
@@ -198,20 +152,9 @@ def build_pinned_request(url: NormalizedUrl, headers: dict[str, str]) -> tuple[s
 
 
 class PinRule(Protocol):
-    """The rule that turns a URL into a request safe to connect to.
-
-    Named and injected rather than reached for. A test that wants a pinned
-    request without a real resolver used to rebind this module's private
-    builder, which tied eight test modules to a name the SSRF chokepoint was
-    never meant to expose -- and it made the walk's threading property
-    untestable under substitution, because off-loading was welded to the module
-    binding rather than to the call site.
-
-    It is the rule and not the resolver that travels, deliberately.
-    Substituting the resolver would exercise more of the rule, which is
-    better, but the resolver is the one part of this module a double must
-    never stand in for: it is the SSRF decision itself, not a collaborator. So
-    the seam is placed outside it.
+    """The rule that turns a URL into a request safe to connect to; named and injected.
+    It is the rule, not the resolver, that travels -- the resolver is the
+    SSRF decision and must never be doubled; tests inject a pinned request without rebinding the builder.
     """
 
     def __call__(self, url: NormalizedUrl, headers: dict[str, str]) -> tuple[str, dict[str, str]]: ...
@@ -223,22 +166,9 @@ DNS_EXECUTOR = concurrent.futures.ThreadPoolExecutor(max_workers=32, thread_name
 
 
 def _off_loop[**P, R](resolve: Callable[[], Callable[P, R]]) -> Callable[P, Awaitable[R]]:
-    """The one way to run blocking call machinery off the event loop.
-
-    Two things are owned here instead of at the call sites: the *pool* and the
-    *argument list*. The pool is this module's ``DNS_EXECUTOR``, so every
-    off-loop resolution in the process lands on the same 32 workers and the
-    default executor stays free for the blocking extraction work it is sized
-    for. The argument list is the builder's, carried whole by the ParamSpec
-    rather than restated: a wrapper that spelled ``(url, headers)`` next
-    to a builder spelling the same list would be a second copy of the pin rule,
-    and the copy is free to disagree with the rule it wraps. Here the two cannot
-    disagree, so there is nothing left to keep in sync.
-
-    ``resolve`` is a thunk, not the builder, because the rule is not known when
-    the wrapper is made: a chain wraps whichever rule it was handed, default or
-    substituted, and binding at wrap time would freeze this module's builder into
-    every later call.
+    """The one way to run blocking call machinery off the loop: it owns the
+    pool (DNS_EXECUTOR) and the builder's argument list, carried whole via the
+    ParamSpec so the wrapper cannot disagree. ``resolve`` is a thunk -- the rule is unknown at wrap time.
     """
 
     async def _run(*args: P.args, **kwargs: P.kwargs) -> R:
@@ -271,23 +201,8 @@ def redirect_target(
 ) -> tuple[NormalizedUrl, dict[str, str]] | None:
     """Decide the next hop of a manual redirect loop (shared by both fetchers).
 
-    Returns ``(new_url, updated_headers)`` when the response is an in-budget
-    redirect, else ``None`` (terminal response). The next URL is admitted by
-    the value's own ``resolve``, so every hop re-runs the full admission
-    policy; the caller then re-runs ``build_pinned_request`` for it so every
-    hop re-validates against the SSRF blocklist and re-pins DNS. Sensitive
-    headers (Cookie, Authorization) are stripped when crossing an origin
-    boundary.
-
-    The origin boundary is the value's ``.origin``, the same scheme/host/port
-    law ``credentials.origin_of`` spells for text keys, and that sharing is
-    the point. This used to compare ``hostname``, so a hop to a different
-    port on the same host kept the credential while ``apply_credentials``
-    would have refused to send it there -- one definition of origin was in
-    the sibling chokepoint and a looser one here, and the looser one is
-    where the credential leaks. Comparing origins also catches an
-    https-to-http downgrade, which the host comparison missed in the
-    direction where it matters most.
+    On an in-budget redirect returns ``(new_url, updated_headers)``, else ``None``
+    (terminal). Each hop re-pins; Cookie/Authorization strip cross-origin, catching https-to-http downgrades.
     """
     if status_code not in _REDIRECT_STATUSES or not location or hops >= MAX_REDIRECT_HOPS:
         return None
@@ -302,15 +217,9 @@ def redirect_target(
 
 
 def _crosses_origin(new_url: NormalizedUrl, current_url: NormalizedUrl) -> bool:
-    """Whether a redirect hop leaves the origin.
-
-    The origin law lives on the value -- ``NormalizedUrl.origin`` -- the same
-    scheme/host/port definition ``credentials.origin_of`` spells for text
-    config keys, so the walk and credential scoping cannot disagree. Both
-    operands here are admitted values, so there is no unparseable case left
-    to fall back from: the direct comparison IS the fail-safe reading, and
-    it still fails toward stripping, since a header kept is unrecoverable
-    and a header dropped only costs a re-login.
+    """Whether a redirect hop leaves the origin (the scheme/host/port law shared
+    with ``credentials.origin_of``). The direct comparison is the fail-safe reading,
+    failing toward stripping: a kept header is unrecoverable; a dropped one only costs a re-login.
     """
     return new_url.origin != current_url.origin
 
@@ -318,13 +227,8 @@ def _crosses_origin(new_url: NormalizedUrl, current_url: NormalizedUrl) -> bool:
 class _RedirectChain:
     """One hop-by-hop redirect walk: its state, and the decision that advances it.
 
-    Both transports follow redirects by hand -- automatic following would
-    connect to a target nobody re-validated -- so each one carried the walk's
-    state as three locals (current url, per-hop headers, hop count) and each
-    spelled that state back out as six arguments to ``redirect_target``. The
-    state is one value, so it is one value here, and the hop budget and the
-    cross-host credential strip are applied by the same code on both paths
-    rather than by two call sites that can disagree.
+    Both transports follow redirects by hand (automatic would connect to an
+    un-revalidated target); the state each carried as locals is one value here.
     """
 
     __slots__ = ("_off_loop", "hops", "headers", "url")
@@ -346,13 +250,8 @@ class _RedirectChain:
     def advance(self, response: Any) -> bool:
         """Step to the next hop; return True when the caller should re-request.
 
-        False means this response is terminal and the caller should read its
-        body. The next iteration re-runs :meth:`pin`, which re-validates the
-        new target against the SSRF blocklist and re-pins its DNS.
-
-        Takes the response rather than ``(status_code, location)`` so that
-        reading the redirect off it is part of the hop decision instead of two
-        per-transport header lookups that have to agree.
+        False means terminal - read the body; the next hop re-runs :meth:`pin`,
+        re-validating SSRF. It takes the response so the redirect read is part of the hop decision.
         """
         target = redirect_target(
             self.url,
@@ -374,25 +273,10 @@ async def apinned_hops(
     *,
     pin: PinRule | None = None,
 ) -> AsyncIterator[tuple[_RedirectChain, str, dict[str, str]]]:
-    """Yield each hop of the manual redirect walk, already SSRF-checked.
+    """Yield each hop of the manual redirect walk, already SSRF-checked and re-pinned.
 
-    This is the loop both transports used to spell for themselves: pin, send,
-    decide, repeat. Only the *send* differs between them -- httpx streams
-    through its pooled client's ``stream()``, curl_cffi through a session
-    ``get()`` -- so it stays at the call site, while the parts that must not
-    differ are here. Every iteration re-pins through :meth:`_RedirectChain.pin`,
-    so each redirect target is re-validated against the SSRF blocklist and
-    re-resolved to a fresh IP; :meth:`_RedirectChain.advance` applies the
-    shared hop budget and the cross-host credential strip. A transport that
-    re-spelled the loop could drop either one and nothing would notice.
-
-    The body drives the walk: it receives ``(chain, pinned_url, hop_headers)``,
-    sends it, and leaves the block. ``continue`` after
-    ``chain.advance(response)`` asked for another hop; every other exit is the
-    end of the walk -- the terminal body finished reading, an early 413
-    returned, a transport error raised. The hop count is what tells the two
-    apart, and it is the count only ``advance`` increments, so a body that
-    forgets to advance cannot silently keep the walk going: it ends here.
+    The body receives ``(chain, pinned_url, hop_headers)``, sends, then leaves;
+    ``continue`` after ``chain.advance(response)`` asks for the next hop.
     """
     chain = _RedirectChain(url, headers, pin=pin or build_pinned_request)
     while True:
@@ -409,11 +293,8 @@ async def apinned_hops(
 def reset_process_state() -> None:
     """Drop every memoized DNS resolution.
 
-    The cache is process-wide with a 60s TTL, so a test that resolves a host once
-    is served the same answer for the rest of the session. Production wants the
-    memo -- a single host crawled thousands of times would otherwise pay a blocking
-    getaddrinfo per fetch -- which is exactly why the drop belongs here, named, on
-    the owner, rather than in every caller that happens to need a clean slate.
+    The cache is process-wide with a 60s TTL, so a test that resolves once is
+    served the same answer all session; production wants the memo, so the drop lives on the owner.
     """
     _DNS_CACHE.clear()
 
