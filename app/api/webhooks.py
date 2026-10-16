@@ -1,21 +1,6 @@
-"""Webhook delivery helpers (SSRF-safe + IP-pinned).
-
-All outbound webhook callbacks route through this module so the SSRF guard,
-DNS-pinning, and payload-size cap are applied uniformly. The original
-implementation lived inline in ``app/main.py``; splitting it out makes the
-endpoint handlers easier to read and lets integration tests target the
-helpers directly.
-
-The one delivery funnel is :func:`post_webhook`: it validates, size-caps,
-and delegates to :func:`deliver_pinned_webhook`, which re-admits and re-pins
-through the one rule the fetchers use (``build_pinned_request``) to close the
-TOCTOU between validation and delivery. Nothing else
-in ``app/`` may POST to a webhook URL or compose a crawl with a delivery --
-the crawl-plus-deliver story lives solely in
-:mod:`app.api.async_crawl_runner`, and the response payload is always built by
-:func:`app.api.response_shaping.build_unified_crawl_response` — the one shaping
-chokepoint, called directly (never a swappable hook, so a test cannot
-reinstiate a drift-prone construction path).
+"""Webhook delivery helpers (SSRF-safe, IP-pinned): every outbound callback routes
+through ``post_webhook`` -> ``deliver_pinned_webhook``, re-admitting and re-pinning
+via the fetchers' one rule so validation-to-delivery TOCTOU stays closed; nothing else composes deliver.
 """
 
 from __future__ import annotations
@@ -45,19 +30,8 @@ async def deliver_pinned_webhook(
     host_policy: HostPolicy,
 ) -> None:
     """POST ``payload_bytes`` to ``webhook_url`` with DNS-rebinding safety.
-
-    The pin policy lives in ``build_pinned_request()`` (plain HTTP connects to the
-    validated IP with the original ``Host`` header; HTTPS keeps the hostname
-    because certs carry no IP SANs -- the residual rebinding window there is
-    the same posture the fetcher accepts: pre-connect check + CA validation).
-    This helper holds no URL composition of its own, so the IPv6 bracketing
-    and Host handling cannot drift from the fetchers.
-
-    Caller MUST have validated ``webhook_url`` via ``validate_webhook_url``
-    first; this helper assumes the URL has already passed the SSRF guard.
-
-    Consolidated from ``run_and_deliver_webhook`` so the ``post_webhook``
-    path shares the same TOCTOU-safe delivery code.
+    No URL composition lives here -- build_pinned_request owns the pin, so
+    IPv6/Host handling cannot drift; the caller MUST have validated the URL first.
     """
     # one place) rather than urlparse/check/pin inline -- manual composition is the
     # shape that produced the redirect findings, and this closes validation's window.
@@ -90,10 +64,8 @@ _WEBHOOK_SIZE_DEFAULT = 10_485_760
 @functools.lru_cache(maxsize=256)
 def _parse_webhook_size(raw: str | None) -> int:
     """Parse one distinct raw env value into the bounded webhook cap.
-
-    The parse -- and its never-raise contract plus the ``lo=1`` floor -- stays
-    in ``get_mapping_int``; caching on the raw string means the parse runs once
-    per distinct value while an override is still picked up on the next call.
+    The parse and its never-raise ``lo=1`` contract live in get_mapping_int;
+    caching on the raw string parses once per value yet honors an override next call.
     """
     mapping = {} if raw is None else {"CRAWLUTRON_MAX_WEBHOOK_SIZE": raw}
     return get_mapping_int(mapping, "CRAWLUTRON_MAX_WEBHOOK_SIZE", _WEBHOOK_SIZE_DEFAULT, lo=1)
@@ -101,12 +73,8 @@ def _parse_webhook_size(raw: str | None) -> int:
 
 def max_webhook_size() -> int:
     """The outbound webhook payload/response size cap.
-
-    Read 2-3 times per delivery, this used to re-read and re-parse
-    ``os.environ`` on every call. It is cached on the raw env value, so
-    the parse runs once per distinct value; the key is the value itself, so an
-    override -- operator env, or a test -- is honored on the very next call
-    instead of being shadowed by a stale cached parse.
+    Cached on the raw env value so the parse runs once per distinct value,
+    and an override (operator env or a test) is honored on the very next call.
     """
     return _parse_webhook_size(os.environ.get("CRAWLUTRON_MAX_WEBHOOK_SIZE"))
 
@@ -117,19 +85,9 @@ async def post_webhook(
     *,
     host_policy: HostPolicy,
 ) -> None:
-    """POST payload to webhook URL with size limit and SSRF+IP-pinning.
-    Routes through the same validated + IP-pinned delivery path
-    (:func:`deliver_pinned_webhook`) so a malicious or rebinding webhook URL cannot
-    escape the SSRF guard between endpoint validation and delivery
-    (TOCTOU window). The size cap and best-effort failure handling live
-    here so the crawl worker is never crashed by a dead callback.
-
-    ``payload`` is the body some producer declared (``WatchAnnouncement``) or
-    assembled (the async-crawl failure body), and this funnel serializes it
-    without reading a single key of it -- so it takes the shape it can accept
-    rather than the shape the first caller happened to hold. The size cap
-    measures what actually goes on the wire, which is why the ``dict`` call is
-    here: ``json.dumps`` serializes a dict, and a ``Mapping`` need not be one.
+    """POST a webhook payload with size limit and SSRF+IP pinning, via the same
+    validated delivery path (no TOCTOU window); size-capping and best-effort
+    failure handling live here so a dead callback never crashes the crawl worker.
     """
     payload_bytes = json.dumps(dict(payload)).encode("utf-8")
     if len(payload_bytes) > max_webhook_size():
@@ -153,17 +111,9 @@ async def post_webhook(
 
 
 def validate_webhook_url(webhook_url: str, *, host_policy: HostPolicy) -> None:
-    """Validate webhook URL to prevent SSRF attacks.
-
-    Similar to crawl target validation but for outbound webhook callbacks.
-    Resolves the hostname and rejects any that map to a private/loopback
-    address, protecting against attacker-controlled DNS that returns an
-    internal IP (DNS-rebinding class of SSRF).
-
-    Implemented on the one pin rule, :func:`build_pinned_request`: admission
-    (scheme/hostname/private-name rules, via ``NormalizedUrl`` construction)
-    + DNS check + resolve-and-pin, composed in one place. Raises ValueError
-    if unsafe; returns None when the URL is safe to deliver to.
+    """Validate a webhook URL against SSRF: resolves the hostname and rejects any
+    that maps to a private/loopback address (DNS-rebinding class), implemented
+    on the one pin rule (admission + resolve-and-pin); raises ValueError if unsafe.
     """
     from app.transport.pinned_transport import build_pinned_request
 
@@ -171,16 +121,9 @@ def validate_webhook_url(webhook_url: str, *, host_policy: HostPolicy) -> None:
 
 
 async def validate_webhook_url_async(webhook_url: str, *, host_policy: HostPolicy) -> None:
-    """Off-event-loop twin of :func:`validate_webhook_url`.
-
-    ``build_pinned_request`` calls the synchronous ``socket.getaddrinfo``,
-    so running validation inline stalls the event loop whenever a
-    caller-chosen webhook hostname has a slow or blackholed resolver. Crawl
-    targets already offload the identical resolution off-thread via
-    ``build_pinned_request_async``; this reuses that same dedicated
-    ``dns-resolve`` pool rather than inventing a second offload mechanism.
-    Every caller of ``validate_webhook_url`` is already async, so they route
-    here instead.
+    """Off-event-loop twin of :func:`validate_webhook_url`: the sync getaddrinfo
+    would stall the loop on a slow resolver, so this reuses the fetch path's
+    dedicated dns pool; every webhook caller is async, so they route here.
     """
     from app.transport.pinned_transport import build_pinned_request_async
 
