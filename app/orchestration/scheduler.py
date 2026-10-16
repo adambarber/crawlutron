@@ -25,12 +25,8 @@ _JITTER_LOW, _JITTER_HIGH = 0.8, 1.2
 
 def jittered_delay(base_delay: float) -> float:
     """``base_delay`` with the crawl-delay jitter applied, or 0 for a zero base.
-
-    Named and module-level so the band lives in exactly one place: the band used
-    to be an inline expression inside ``run``, which is a loop that also holds
-    the per-domain gate, so nothing could reach it in a test. A test that wanted
-    to cover the band had to re-derive the expression locally, and a test that
-    re-derives the thing it is testing asserts the re-derivation.
+    Module-level so the jitter band lives in exactly one place, tested directly
+    rather than re-derived out of ``run`` by tests that assert the re-derivation.
     """
     if base_delay <= 0:
         return 0.0
@@ -38,22 +34,9 @@ def jittered_delay(base_delay: float) -> float:
 
 
 class ScheduledJob(Protocol):
-    """The structural contract ``DomainScheduler.run`` actually depends on.
-
-    ``run`` is polymorphic over the job shape: the crawl pipeline submits
-    ``CrawlTask`` (original_url + normalized_url) and the render pipeline
-    submits ``CrawlJob`` (url). Declaring the parameter as ``CrawlJob`` hid
-    that -- the scheduler then read ``job.url`` in the two error-envelope
-    branches, which only exists on one of the two shapes, and the annotation
-    was the only thing standing between the crawl path and an
-    ``AttributeError`` inside a ``gather(return_exceptions=True)`` handler.
-
-    The members are read-only properties on purpose: the scheduler never
-    mutates a job, and a mutable-attribute protocol would reject the frozen
-    dataclasses both shapes actually are. The reporting URL is deliberately
-    NOT a member -- the two shapes carry it under different names, so callers
-    pass an accessor and the shape mapping stays at the pipeline boundary
-    that owns it.
+    """The structural contract ``DomainScheduler.run`` actually depends on: the crawl
+    and render pipelines submit different job shapes, and the reporting URL is
+    deliberately not a member (the shapes name it differently). Members are read-only properties.
     """
 
     @property
@@ -71,22 +54,9 @@ _Job = TypeVar("_Job", bound=ScheduledJob)
 
 
 class SchedulerResult(Protocol):
-    """What the domain scheduler reads off a worker's result.
-
-    The breaker, latency-estimator and failure-bookkeeping paths below consult
-    ``.status`` and ``.elapsed_ms``; nothing else about the result shape is
-    scheduler business. Declaring the requirement as a protocol keeps ``run``
-    generic over the crawl (``EngineCrawlResult``) and render (``CrawlResult``)
-    pipelines without naming either, and without a union leaking into the
-    caller's type.
-
-    ``elapsed_ms`` is declared rather than ``getattr``-ed because the two
-    shapes carry it in different places: ``CrawlResult`` has the field and no
-    ``diagnostics`` at all, while ``EngineCrawlResult`` computes it from
-    ``diagnostics`` or its first attempt. A member only one of them has is a
-    member the scheduler silently skips for the other, which is how every
-    render-pipeline latency went unlearned while the estimator looked
-    correctly fed from crawl traffic alone.
+    """What the domain scheduler reads off a worker's result: ``.status`` and
+    ``.elapsed_ms``. A protocol (rather than naming either pipeline's type) keeps
+    ``run`` generic, and ``elapsed_ms`` is declared so a shape without it isn't silently skipped.
     """
 
     @property
@@ -210,11 +180,8 @@ class DomainScheduler:
 
     def set_domain_cooldown(self, domain: str, seconds: float) -> None:
         """Set a cooldown period for a domain after a rate limit (429) response.
-
-        Also purges domain cooldowns/circuits that have already elapsed, so the
-        mappings cannot leak memory across a long-lived service — but on an
-        amortized cadence, since every rate-limited result reaches here
-        and rebuilding both dicts per call is quadratic in the number of 429s.
+        Also purges elapsed cooldowns/circuits so the mappings cannot leak memory,
+        on an amortized cadence -- rebuilding both dicts per 429 is quadratic.
         """
         if seconds > 0:
             self._domain_cooldowns[domain] = time.time() + seconds
@@ -225,11 +192,8 @@ class DomainScheduler:
 
     def _record_result_health(self, domain: str, result: SchedulerResult) -> None:
         """Apply a result's domain-health verdict. See STATUS_ACCOUNTING.
-
-        Its own method because it is one decision, not part of running a job:
-        inlined it pushed the enclosing ``async with`` in run_one too long to
-        read, and the verdict it reads is the whole
-        question of what a status means for a domain's health.
+        One decision, kept out of ``run_one``'s ``async with`` so the loop stays
+        readable; the verdict mapping is the whole question of a status's health.
         """
         accounting = STATUS_ACCOUNTING.get(result.status, "none")
         if accounting == "failure":
@@ -280,16 +244,8 @@ class DomainScheduler:
 
     def record_latency(self, domain: str, latency_ms: float) -> None:
         """Feed observed response latency (ms) into the adaptive delay estimator.
-
-        Negative is the only rejected value, and it is rejected because it is a
-        bad measurement rather than a fast response: adopting one would pull the
-        EMA below any delay actually observed and speed the domain up on the
-        strength of a clock that went backwards.
-
-        There is deliberately no ``None`` case. The one production caller reads
-        ``SchedulerResult.elapsed_ms``, a non-optional ``int``, behind ``if
-        latency:`` -- no measurement means nothing to record, and "no
-        measurement" is decided at the call site where the result is in hand.
+        Negative is the only rejected value -- it is a bad measurement, not a fast
+        response; there is no ``None`` case, the caller decides when nothing was measured.
         """
         if latency_ms < 0:
             return
@@ -318,22 +274,16 @@ class DomainScheduler:
 
     def current_delay(self, domain: str) -> float:
         """Delay (seconds) to apply before the next request to ``domain``.
-
-        When adaptive throttling is enabled this is latency-driven; otherwise the
-        fixed ``delay_seconds`` is used. A per-domain robots Crawl-delay floor
-        (set via :meth:`set_domain_min_delay`) is always respected on top of the
-        adaptive/global delay.
+        Latency-driven when adaptive throttling is on, else the fixed ``delay_seconds``;
+        a per-domain robots Crawl-delay floor (set_domain_min_delay) is always respected.
         """
         base = self._delay_seconds if not self._adaptive else self._recompute_delay(domain)
         return max(base, self._domain_min_delay.get(domain, 0.0))
 
     def set_domain_min_delay(self, domain: str, seconds: float) -> None:
         """Enforce a minimum inter-request delay for a domain (robots Crawl-delay).
-
-        Non-finite values are ignored and finite values are clamped to the
-        politeness ceiling so a hostile robots.txt cannot install an unbounded
-        per-domain floor — the cap is enforced at the write, the
-        chokepoint where a delay becomes a scheduler wait.
+        Non-finite values are ignored and finite ones clamped to the politeness
+        ceiling, so a hostile robots.txt cannot install an unbounded per-domain floor.
         """
         if seconds and seconds > 0 and math.isfinite(seconds):
             clamped = min(float(seconds), MAX_COOLDOWN_WAIT)
@@ -354,20 +304,9 @@ class DomainScheduler:
         *,
         failed_result: Callable[[_Job, BaseException], _Result],
     ) -> dict[int, _Result] | None:
-        """Run ``jobs`` through ``worker``.
-
-        When ``on_result`` is provided, each completed result is handed to it
-        immediately (e.g. streamed to the on-disk result spill) and is NOT
-        retained in memory -- peak RAM then tracks the in-flight set rather than
-        the whole batch. In that mode ``run`` returns
-        ``None``; otherwise it returns a mapping of ``job.index -> result``.
-
-        The mapping is keyed by job index rather than positionally so callers
-        can align each result with its own job regardless of completion order,
-        and so the result store does not have to allocate a slot for every
-        index in the batch (a high-index batch would otherwise allocate a list
-        of ``max(index)`` entries). Jobs whose worker raised are absent from the
-        mapping; the caller decides how to represent them.
+        """Run ``jobs`` through ``worker``: when ``on_result`` is set each result is
+        delivered and NOT retained (peak RAM tracks the in-flight set) and ``run``
+        returns None; else it returns a ``job.index -> result`` mapping (raised jobs absent).
         """
         # Purge stale state up front so dicts cannot grow without bound.
         self.purge_expired()
