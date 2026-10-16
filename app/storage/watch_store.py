@@ -1,18 +1,6 @@
-"""Durable watch registry: one row per URL to revalidate on a schedule.
-
-The store is mechanical. Every decision a row encodes -- the interval, the
-effective validators after a check, whether a failure counts -- is made by
-the caller (the registration edge or the sweep) and written here, so the
-store can never disagree with the sweep about what a check meant.
-
-``due`` is read-only: the sweep claims a watch by recording its result. A
-sweep that dies between ``due`` and ``record_check`` leaves the watch due,
-so checks run at-least-once rather than being silently skipped -- the
-honest default for a revalidator. The documented escape hatch for a
-multi-process deployment is an atomic claim ``UPDATE ... WHERE
-next_check_at = ?`` added to ``due``; a single-writer sweep (this service's
-model) has no race to protect against, so the claim dance is not paid for
-up front.
+"""Durable watch registry: one row per URL to revalidate on a schedule. The store
+is mechanical -- the caller makes every decision a row encodes -- and ``due`` is
+read-only, so a died sweep leaves the watch due and checks run at-least-once.
 """
 
 from __future__ import annotations
@@ -33,18 +21,9 @@ __all__ = ["WatchStore"]
 
 
 class WatchStore(CoordinationStore):
-    """SQLite-backed registry of watches.
-
-    The connection, its PRAGMAs, the intra-process lock and ``close`` are the
-    base's, exactly as they are for the other three coordination stores. A watch
-    needs nothing beyond a path, so it is the base's shape precisely -- and
-    writing a second ``__init__`` here is what already cost ``CrawlResultStore``
-    its ``close``.
-
-    It owns no policy or tier: a watch arrives already admitted
-    (``NormalizedUrl`` at the edge) and the row stores text identity, so a later
-    deployment re-admits against its own live host policy rather than trusting a
-    decision a past one made.
+    """SQLite-backed registry of watches. The connection, PRAGMAs, lock, and
+    ``close`` are the base's (it needs nothing beyond a path); it owns no policy or
+    tier -- a watch arrives already admitted and the row stores text identity.
     """
 
     schema = StoreSchema.WATCHES
@@ -140,13 +119,9 @@ class WatchStore(CoordinationStore):
         next_check_at: float,
         validators: ContentValidators,
     ) -> None:
-        """Persist a completed check's result and reschedule.
-
-        The caller hands back the effective validators (a 200 means the
-        ones the origin returned; a 304 or an error means the ones already
-        stored), so the row's validator set is a decision, not a merge --
-        there is no COALESCE here that could quietly keep a validator the
-        origin dropped.
+        """Persist a completed check's result and reschedule. The caller hands back the
+        effective validators (200 → the origin's; 304/error → the stored ones), so the
+        row's set is a decision, not a ``COALESCE`` that could keep a dropped validator.
         """
         with self._lock:
             self._conn.execute(

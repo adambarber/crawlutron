@@ -1,11 +1,6 @@
-"""Bounded-I/O primitives: the single audited place body reads get capped.
-
-Same-shape-safety-logic lens (chokepoints review): every layer used to cap
-input differently -- httpx streaming inline, cffi via the queue consumer,
-decompression internally -- and the document extractor held a bare
-``response.read()``. Every body acquisition in strategies/
-must go through one of these helpers; the AST invariant in
-tests/invariants/test_url_doors.py bans bare ``.read()``/``.content`` access.
+"""Bounded-I/O primitives: the single audited place body reads get capped, since
+each layer once capped differently (and the document path held a bare ``read()``).
+Every body acquisition runs through these helpers; an AST invariant bans bare reads.
 """
 
 from __future__ import annotations
@@ -18,11 +13,9 @@ class BodyTooLarge(Exception):
 
 
 async def read_capped_async(chunks: AsyncIterator[bytes], cap: int) -> bytes:
-    """Consume an async byte stream, capped.
-
-    Async counterpart for httpx-style ``aiter_raw()`` streams; raises
-    BodyTooLarge the moment the budget is exceeded so the connection is
-    abandoned early instead of buffering a hostile body.
+    """Consume an async byte stream, capped -- the counterpart for httpx-style
+    ``aiter_raw()`` streams. Raises ``BodyTooLarge`` as soon as the budget is hit
+    so the connection is dropped instead of buffering a hostile body.
     """
     raw = bytearray()
     async for chunk in chunks:
@@ -38,12 +31,9 @@ MAX_HTML_INPUT_BYTES = 4 * 1024 * 1024
 
 
 def truncate_html_input(html: str | None) -> str:
-    """Bound an HTML document to :data:`MAX_HTML_INPUT_BYTES` characters.
-
-    Truncates rather than raises, because both callers are extractors: a partial
-    document still yields usable text and metadata, whereas refusing the page
-    loses the result entirely. Callers keep their own justification for *why*
-    they cap; this owns *how much*.
+    """Bound an HTML document to :data:`MAX_HTML_INPUT_BYTES`, truncating rather
+    than raising: a partial document still yields usable text, so a refused page
+    would lose the result entirely. Callers keep the "why"; this owns "how much".
     """
     body = html or ""
     if len(body) > MAX_HTML_INPUT_BYTES:
