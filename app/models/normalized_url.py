@@ -1,15 +1,6 @@
-"""The canonical form of a URL that has crossed admission.
-
-Constructing a ``NormalizedUrl`` IS the admission decision: the constructor
-validates the scheme and the host against the policy and the egress guard,
-canonicalizes the string, and derives the host and the registrable site. There is
-no other way to build one, so every position that admits a URL for queueing can
-say ``NormalizedUrl`` in its own signature and mean it.
-
-The three answers a URL carries -- its canonical string, its host, its site --
-are read off the value rather than recomputed at each use. The string itself
-stays available as ``raw`` for the wire, cache keys and spill JSON, which is the
-one place a URL becomes text again.
+"""The canonical form of a URL that has crossed admission: constructing one IS
+admission -- scheme/host validated against policy and the egress guard, with no
+other way to build it. Host and site ride the value; ``raw`` is the text form.
 """
 
 from __future__ import annotations
@@ -81,10 +72,8 @@ def _canonical_parts(url: str, *, policy: HostPolicy) -> tuple[str, str, str, st
 
 class NormalizedUrl:
     """An admitted URL: canonical, and carrying its host and its site.
-
-    Immutable and compared by canonical string, so it can key a map or a cache
-    the way the bare string used to. ``raw`` is the one explicit place a URL
-    turns back into text.
+    Immutable and compared by canonical string, so it keys maps and caches the way
+    the bare string did; ``raw`` is the one explicit place it turns back into text.
     """
 
     __slots__ = ("_host", "_path", "_policy", "_port", "_query", "_raw", "_scheme", "_site")
@@ -105,9 +94,9 @@ class NormalizedUrl:
     @property
     def raw(self) -> str:
         """The canonical string: the wire form, the cache key, the spill field.
-        This is also the value's durable identity -- equality, hashing and
-        persistence all key on it, so two ``NormalizedUrl``s with the same
-        canonical string are the same value."""
+        Also the value's durable identity -- equality, hashing and persistence key
+        on it, so two NormalizedUrls with the same canonical string are the same value.
+        """
         return self._raw
 
     @property
@@ -151,10 +140,8 @@ class NormalizedUrl:
 
     def resolve(self, reference: str | None) -> NormalizedUrl | None:
         """Join ``reference`` against this URL and admit the result.
-
-        Every ``urljoin(base, href)`` + egress-filter pair in the tree is
-        this: resolve, then admit with the same policy. Returns None when the
-        reference does not yield a public page URL.
+        Every urljoin + egress-filter pair in the tree is this (resolve, then admit
+        with the same policy); None when the reference is not a public page URL.
         """
         if not reference:
             return None
@@ -177,12 +164,9 @@ class NormalizedUrl:
 
     @classmethod
     def __get_pydantic_core_schema__(cls, _source_type, handler):
-        """Accept exactly one thing -- an already-admitted ``NormalizedUrl`` --
-        and render as the canonical string on the wire.
-
-        A raw string passed to a response model would have to admit itself,
-        and a wire model has no ``HostPolicy``; refusing it keeps admission at
-        the constructor, which is the one place a policy exists.
+        """Accept exactly one thing -- an already-admitted ``NormalizedUrl`` -- and render
+        as the canonical string on the wire. A raw string has no policy to admit it,
+        so refusing keeps admission at the constructor, the one place a policy exists.
         """
         from pydantic_core import core_schema
 
@@ -201,11 +185,8 @@ class NormalizedUrl:
     @classmethod
     def __get_pydantic_json_schema__(cls, core_schema, handler):
         """The wire form of an admitted URL is its canonical text.
-
-        A plain-validator core schema carries no JSON Schema the generator
-        could infer, and the serializer is the truth this must match: the
-        value crosses the wire as one string. Declaring it by hand keeps the
-        OpenAPI document servable.
+        A plain-validator core schema carries no inferable JSON Schema, and the
+        serializer is the truth to match; declaring it by hand keeps OpenAPI servable.
         """
         return {"type": "string"}
 
@@ -215,15 +196,8 @@ __all__ = ["NormalizedUrl", "admit_or_none"]
 
 def admit_or_none(candidate: str | NormalizedUrl | None, *, policy: HostPolicy) -> NormalizedUrl | None:
     """Admit ``candidate`` as a public page URL, or drop it.
-
-    The ``NormalizedUrl`` constructor is the enforcement chokepoint; this is
-    the one None-returning wrapper for foreign candidates (search results,
-    sitemap entries, robots hints) that every egress door shares, so a
-    rejection is never one caller's hand-rolled ``try/except ValueError``.
-
-    An already-admitted value is its own answer: it returns unchanged (the
-    policy stored in it is the one it was admitted under), so callers handing
-    values from one boundary to another cannot crash on text-only helpers.
+    The constructor is the enforcement chokepoint; this is the one None-returning
+    wrapper every egress door shares. An already-admitted value returns unchanged.
     """
     if isinstance(candidate, NormalizedUrl):
         return candidate
