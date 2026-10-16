@@ -1,14 +1,7 @@
 """The vocabulary a crawl result is written in.
 
-One concept declared as a set: what a page turned out to be
-(:class:`CrawlClassification`), what that means for the caller's request
-(:data:`ResultStatus` and the classification-to-status table), and whether it is
-worth another pass (the transience sets). They live together because the tables
-map over the enum: split them and every reader opens three files to answer "what
-does this classification do to my result".
-
-The static type aliases (``Classification``, ``CrawlError``, ``CrawlStrategyName``)
-are in ``app/models/taxonomy.py``; that module is the type view of this one.
+One concept as a set -- what a page turned out to be, its status meaning, and
+whether another pass is worth it; the type aliases live in models/taxonomy.
 """
 
 from __future__ import annotations
@@ -70,11 +63,9 @@ class CrawlClassification(StrEnum):
 # Classification groupings: set operations over one another -- each member is
 # named once, in its leaf grouping; deriving from the enum makes typos import errors.
 def _classification_values(*members: CrawlClassification) -> frozenset[str]:
-    """The label set for a leaf grouping declared as enum members.
-
-    Every grouping below that is not a leaf is a ``|`` of earlier ones, so this
-    is called with a member only in the one place that member is being
-    classified, and a member is never spelled twice.
+    """The label set for a leaf grouping; a non-leaf grouping is a ``|`` of earlier
+    ones, so this is called with a member only where it is first classified, and
+    a member is never spelled twice.
     """
     return frozenset(member.value for member in members)
 
@@ -168,10 +159,8 @@ UNKNOWN_CLASSIFICATION_STATUS: ResultStatus = "blocked"
 def status_for_classification(classification: str) -> ResultStatus:
     """Map a page classification onto the crawl result status.
 
-    Every classification a strategy can emit is an explicit key in
-    :data:`CLASSIFICATION_STATUS_BY_LABEL`; only labels outside the taxonomy
-    (or a classifier that has not been given a status) take
-    :data:`UNKNOWN_CLASSIFICATION_STATUS`.
+    Every classification a strategy can emit is an explicit key in the table; only
+    labels outside the taxonomy take :data:`UNKNOWN_CLASSIFICATION_STATUS`.
     """
     return CLASSIFICATION_STATUS_BY_LABEL.get(classification, UNKNOWN_CLASSIFICATION_STATUS)
 
@@ -227,17 +216,9 @@ NON_TRANSIENT_CLASSIFICATIONS: frozenset[str] = (
 
 
 def is_transient_classification(classification: str | None) -> bool:
-    """Return whether a page that failed as ``classification`` deserves another pass.
-
-    The single answer for every retry decision: the render layer's
-    503-vs-permanent split, the crawl layer's ``diagnostics["retryable"]`` flag,
-    the recursive crawler's re-queue, and the durable job runner's per-URL
-    transient budget all route through here.
-
-    Fails closed, and ``None`` with it: a missing or unrecognized label -- a
-    result row that never carried a classification, or a new taxonomy member
-    nobody has triaged -- is not retried, because retrying an untriaged failure
-    is the direction that costs politeness.
+    """Return whether ``classification`` deserves another pass; the single answer
+    for every retry decision, failing closed and with ``None`` -- an untriaged
+    label is not retried, the direction that costs politeness.
     """
     return classification in TRANSIENT_CLASSIFICATIONS
 
@@ -250,15 +231,9 @@ CONTEXT_VARYING_STATUS: dict[str, frozenset[ResultStatus]] = {
 
 
 def status_agrees_with_classification(classification: str, status: str) -> bool:
-    """Whether a ``(classification, status)`` pair is one the taxonomy allows.
-
-    This is the guard that makes a disagreeing pair unrepresentable at the
-    terminal-result chokepoint: ``status`` must either be the table default for
-    this classification (:func:`status_for_classification`) or one of the
-    documented context-dependent statuses in :data:`CONTEXT_VARYING_STATUS`.
-    A caller re-deriving status from classification can therefore rely on the
-    value the builder set, which is the load-bearing invariant in this
-    module's docstring.
+    """Whether a ``(classification, status)`` pair is one the taxonomy allows --
+    the guard that makes a disagreeing pair unrepresentable at the result
+    chokepoint: the status must be the table default or a context-dependent one.
     """
     if status == status_for_classification(classification):
         return True

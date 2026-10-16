@@ -35,39 +35,9 @@ async def default_http_fetcher(
     impersonate: bool = False,
     pin: pinned_transport.PinRule | None = None,
 ) -> HttpFetchResult:
-    """The one fetcher: TLS impersonation first when asked, the pooled httpx client otherwise.
-
-    ``impersonate`` is the whole transport preference, as one keyword on the one
-    function that carries the contract. It used to be a second module-level
-    entry point -- ``_defaultcffi_fetcher`` -- which meant the contract's four
-    parameters had to be spelled twice, and the twin could only be kept honest
-    by a guard that walked the tree. The engine now binds the preference instead
-    of the signature: ``partial(default_http_fetcher, impersonate=True)``
-    is a different *binding* of the same callable, so a parameter can no longer
-    be added to one role and missed on the other, because there is only one role
-    and one spelling left.
-
-    The URL arrives already admitted, carrying the host policy it was admitted
-    under -- the fetcher re-states no policy of its own, so there is no second
-    opinion to disagree with the value's.
-
-    The impersonated attempt falls back to plain httpx, not to an error: the same
-    page fetched differently is not a different outcome, and a 200 from the
-    fallback is not a failure of the attempt that could not be made.
-
-    Async HTTP/2 fetch over the shared pooled ``httpx.AsyncClient`` with
-    granular timeouts, SSRF protection, content-length limits and
-    SSRF-safe manual redirect handling.
-
-    Redirects are followed by hand so every hop is re-validated against the SSRF
-    blocklist and re-pinned to its resolved IP. Automatic httpx following is off
-    because it would connect to a redirect target without re-checking it.
-    Sensitive headers (Cookie, Authorization) are stripped when crossing host
-    boundaries to prevent credential leakage.
-
-    The signature is :data:`app.models.HttpFetcher` plus the bound ``impersonate``
-    keyword and the optional ``pin`` rule, checked tree-wide by
-    ``test_http_fetcher_contract_holds_tree_wide``.
+    """The one fetcher: TLS impersonation first when asked, the pooled httpx
+    client otherwise -- ``impersonate`` bound via ``partial`` so no twin can
+    drift, the URL arrives already admitted, and failed impersonation falls back.
     """
     if impersonate:
         attempted = await cffi_fetch(url, headers, timeout_seconds, max_content_length, pin=pin)
@@ -122,29 +92,9 @@ def _finish_fetch(
     elapsed_ms: int,
     too_large: Callable[[], HttpFetchResult],
 ) -> HttpFetchResult:
-    """Decompress, persist cookies and build the terminal result of a fetch.
-
-    Both transports share this tail. The three things in it must not diverge:
-    the decompression bomb cap, which is a safety bound, cookie persistence,
-    and the header normalisation the shaping layer reads. The parts that
-    genuinely differ per transport stay at the call site and arrive as the
-    ``too_large`` *factory* -- httpx returns from inside its pooled client's
-    ``async with``, while curl_cffi has to name a busy handle it already
-    released. A factory rather than a value so the 413 is only built when a
-    decompression bomb actually trips, not on every successful fetch.
-
-    Cookies are stored from ``response_headers`` -- the transport's own
-    multidict -- rather than from the normalised dict below. httpx's
-    ``Headers.items()`` comma-joins duplicate keys, so normalising first
-    collapses a multi-cookie response into one ``"a=1; Path=/, b=2; Path=/"``
-    entry and forces ``store_set_cookies`` off its documented ``get_list``
-    path. The jar re-splits such a value today, but only when the first cookie
-    carries its own attributes, and a comma-joined cookie value is a
-    documented corruption risk in its own right.
-
-    The content encoding is read here rather than passed in: both transports
-    took it from the same header with the same expression, so a third reading
-    of it was pure opportunity to disagree.
+    """Decompress, persist cookies, and build the terminal result -- the shared
+    tail both transports use, so the bomb cap, cookie persistence, and header
+    casing cannot diverge; ``too_large`` is a factory that runs only on a bomb.
     """
     try:
         body = _decompress_body(
@@ -176,17 +126,9 @@ async def cffi_fetch(
     *,
     pin: pinned_transport.PinRule | None = None,
 ) -> HttpFetchResult | None:
-    """The curl_cffi transport behind ``default_http_fetcher(impersonate=True)``.
-
-    TLS-fingerprint-impersonated, mirroring the httpx transport including its
-    SSRF-safe manual redirect handling and sensitive-header stripping on
-    cross-domain redirects.
-
-    Returns ``None`` -- not a result -- when the attempt failed for any
-    transport reason, so the caller decides the fallback. A transport that
-    cannot answer must not answer with an error result: the httpx path is the
-    same page fetched differently, not a different outcome, and a 200 from the
-    fallback is not a failure of the impersonated attempt.
+    """The curl_cffi transport behind ``impersonate=True``: TLS-impersonated,
+    mirroring httpx's SSRF-safe redirects and header stripping. Returns ``None``,
+    not a result, on any transport failure -- the httpx fallback is that outcome.
     """
     # Same release point as the http fetcher: any pooled client superseded by a
     # loop change (either kind) is closed here, on this live loop.
@@ -281,16 +223,9 @@ async def cffi_fetch(
 
 
 def impersonating_fetcher() -> HttpFetcher:
-    """The one fetcher, bound to prefer TLS impersonation.
-
-    This is the value the engine hands the chain for the impersonating strategy,
-    and it is a *binding* rather than a second function so the contract's four
-    parameters are spelled exactly once in the tree. It lives here, next to the
-    function it binds, because it was previously written out three times: the
-    engine reached for a second module-level entry point, the tests reached for
-    that same entry point, and each of them re-decided independently which
-    transport "the cffi fetcher" meant. One factory is the one place that
-    decision is made.
+    """The one fetcher bound to prefer TLS impersonation -- a ``partial`` binding,
+    not a second function, so the contract is spelled once in the tree. Lives
+    here, next to the function it binds, as the one place that decision is made.
     """
     return functools.partial(default_http_fetcher, impersonate=True)
 
@@ -309,11 +244,9 @@ def _cffi_too_large_result(
 
 
 def _release_stream_noblock(response: Any) -> None:
-    """Schedule a best-effort stream close without awaiting it.
-
-    Callers are abandoning a live or wedged producer; awaiting
-    ``response.aclose()`` would join that task and can hang. The done
-    callback consumes the result so a failed close never surfaces.
+    """Schedule a best-effort stream close without awaiting it -- the caller is
+    abandoning a live or wedged producer, and awaiting ``aclose`` would join that
+    task and hang. The done callback swallows a failed close.
     """
     try:
         aclose = getattr(response, "aclose", None)

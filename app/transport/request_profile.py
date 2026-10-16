@@ -21,13 +21,9 @@ from app.vocabulary.strategies import HTTP_CFFI_IMPERSONATE
 
 
 def cookie_namespace_for(profile: Mapping[str, Any]) -> str:
-    """Return a per-request cookie namespace, or ``""`` for the shared default.
-
-    Callers running multi-tenant crawls should set
-    ``request_profile.cookie_namespace`` to a tenant id so cookies from
-    different callers cannot leak into each other's sessions. Empty / unset
-    preserves the legacy shared behavior so single-tenant callers and the
-    test suite see no change.
+    """Return a per-request cookie namespace, or ``""`` for the shared default,
+    so multi-tenant callers (who set ``cookie_namespace`` to a tenant id) never
+    leak cookies across callers; empty or unset keeps the legacy shared behavior.
     """
     value = profile.get("cookie_namespace")
     return str(value).strip() if isinstance(value, str) else ""
@@ -58,19 +54,9 @@ def cookie_header_for_url(profile: Mapping[str, Any], url: NormalizedUrl) -> str
 
 @runtime_checkable
 class TransportHeaders(Protocol):
-    """A transport's own header multidict, which keeps duplicate values.
-
-    The two transports disagree about what a header map is -- httpx's is
-    ``httpx.Headers``, curl_cffi's is a libcurl multidict that is nothing like
-    it -- but both keep repeated header names separate, and that is the
-    property the cookie jar needs. Normalising either into a ``dict`` first
-    would comma-join duplicate ``Set-Cookie`` names into a single entry, which
-    ``Headers.items()`` does and ``dict`` construction always does.
-
-    So this is the shape the *transport* hands over, and it is deliberately not
-    a ``Mapping``: a plain ``dict`` of headers is accepted where a caller
-    offers one, but it is the one shape that cannot express a repeated header,
-    and naming the difference is what keeps the cookie path honest.
+    """A transport's own header multidict, keeping duplicate values apart -- the
+    property the cookie jar needs, which a ``dict`` would comma-join. httpx and
+    curl_cffi both keep repeated names, so this is deliberately not a ``Mapping``.
     """
 
     def get(self, key: str, default: str = "") -> str: ...
@@ -84,18 +70,9 @@ def store_set_cookies(
     *,
     namespace: str | None = None,
 ) -> None:
-    """Extract Set-Cookie headers from a response into the persistent jar.
-
-    Uses ``get_list`` to capture all ``Set-Cookie`` headers (httpx 0.28+
-    returns comma-joined values from ``.items()`` for duplicate keys).
-    ``namespace`` isolates cookies for multi-tenant callers; when not
-    provided, the per-request cookie namespace contextvar is used.
-
-    The parameter names ``TransportHeaders`` because the body branches on it:
-    the ``isinstance`` below is the whole reason that protocol exists, and a
-    signature that omitted it made that branch unreachable to any checker -- so
-    the one caller shape the function was written to accept was the one it
-    could not legally be handed.
+    """Extract all Set-Cookie headers into the persistent jar (via ``get_list``,
+    since a dict comma-joins duplicates); ``namespace`` isolates multi-tenant
+    cookies. The parameter is typed ``TransportHeaders`` because the body branches.
     """
     if namespace is None:
         namespace = COOKIE_NAMESPACE.get()
@@ -136,10 +113,10 @@ def _rotating_index(profile: Mapping[str, Any], domain: str, pool_size: int) -> 
 
 
 def select_fingerprint(profile: Mapping[str, Any], url: NormalizedUrl) -> dict[str, str]:
-    """Select fingerprint signals for a host. Rotation is deterministic per host.
-    Explicit ``user_agents``/``accept_languages`` pools are preferred; ``fingerprint_rotation``
-    falls back to built-in pools. Anchored on the host so it is complementary to Camoufox
-    and curl_cffi TLS impersonation rather than conflicting with them."""
+    """Select fingerprint signals for a host; rotation is deterministic per host.
+    Explicit pools are preferred, falling back to built-ins; anchoring on the
+    host keeps them complementary to TLS impersonation, never conflicting.
+    """
     domain = url.host
     out: dict[str, str] = {}
     ua_pool = list(profile.get("user_agents") or [])
@@ -156,19 +133,9 @@ def select_fingerprint(profile: Mapping[str, Any], url: NormalizedUrl) -> dict[s
 
 
 def _accept_encoding() -> str:
-    """The encodings this process will actually decode.
-
-    Every one of these is a declared dependency, so the list is a constant rather
-    than a capability probe. It was conditional on ``_brotli_available`` because
-    brotli was documented as optional, and a server that returned a brotli body
-    this process then refused to decode failed the crawl on a request we had
-    chosen to make -- which is the correct reason to stop declining ``br``, and
-    not one to keep declining it in a deployment that cannot exist.
-
-    Its own function rather than an inline constant: the builder that reads it is
-    already long, and the list is a claim about the decoder
-    set that a reader should be able to check against
-    ``app.transport.decompression._DECODABLE_ENCODINGS`` in one place.
+    """The encodings this process will actually decode -- a constant, since every
+    one is a declared dependency. It once declined ``br`` on a probe, but a server
+    returning a body this process refuses to decode fails a chosen crawl.
     """
     return "gzip, deflate, br"
 

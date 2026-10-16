@@ -69,31 +69,9 @@ class ExtractedHttpContent:
 
 @dataclass(frozen=True)
 class FetchedResponse:
-    """One fetched response, and the header view every phase reads it through.
-
-    The owner of "how this module keys a response's headers". It exists because
-    that rule had three answers. ``_not_modified_result`` built its own
-    lowercased copy; ``http_strategy_result`` built a second one; and
-    ``_store_http_caches`` read ``etag``/``last-modified`` off the *raw* map with
-    no lowering at all, so it was the one site whose answer depended on the
-    transport having already normalized. The fetchers do lowercase today
-    (``_finish_fetch``), which is why the third site has never been observed
-    wrong -- it is a coincidence, not a contract, and nothing said so.
-
-    What this buys is not tidiness. The phases used to take ``response``,
-    ``headers`` and ``content_type`` as three sibling parameters, which made
-    "headers from one response, content type from another" a call any of them
-    could make and none could detect. Here the header map and the content type
-    are read off the response they were derived from, so that pairing is not
-    expressible -- there is no way to hand a phase a ``content_type`` that its
-    ``headers`` does not contain, because the second is a read of the first.
-
-    Built once per response, where the response enters the phases, so the
-    lowercasing is paid once per fetch rather than once per phase that wanted a
-    header. Attribute access that is not header access falls through to the
-    response unchanged (:meth:`__getattr__`), so this is a header binding and not
-    a second response type: it cannot fall behind the transport's shape, and it
-    does not need editing when the transport grows a field.
+    """One fetched response bound to its lowercased header view, so a phase cannot
+    read a content_type that its headers lack; built once per fetch, other
+    attributes falling through to the raw response.
     """
 
     raw: Any
@@ -113,23 +91,16 @@ class FetchedResponse:
 
     @property
     def decompression_failed(self) -> bool:
-        """Whether a Content-Encoding promised compression the body never got.
-
-        Stated once because it is asked in two places that must not be able to
-        disagree about the same response: the diagnostic that records it, and the
-        quality ceiling that caps a result whose body is not what it claims.
+        """Whether Content-Encoding promised compression the body never got; stated
+        once because it is read in two places that must not disagree about one
+        response -- the recording diagnostic and the quality ceiling.
         """
         return bool(getattr(self.raw, "decompression_failed", False))
 
     def validators(self, echoed: dict[str, str] | None = None) -> dict[str, str]:
         """The origin's ETag / Last-Modified, keyed the way a result spells them.
-
-        ``echoed`` is the caller's own conditional headers, read for a validator
-        a 304 did not repeat. :data:`app.models.EngineCrawlResult.validators`
-        documents ``"etag"``/``"last_modified"``, the response headers are
-        ``etag``/``last-modified``, and the caller's are ``If-None-Match``/
-        ``If-Modified-Since`` -- three spellings of two headers, which is why
-        they are read here rather than at each of the sites that report them.
+        ``echoed`` is the caller's conditional headers, read for a validator a 304
+        did not repeat -- three spellings converged here, not at each site.
         """
         fallback = echoed or {}
         return {
@@ -154,12 +125,9 @@ def serialize_response(resp: Any) -> SerializedResponse:
 
 
 def rebuild_response(data: SerializedResponse, ctx: HttpStrategyContext) -> HttpFetchResult:
-    """Reconstruct a response object from a cached envelope.
-
-    The envelope is this module's own dump: URL fields were serialized as
-    raw text, so the rebuild re-admits them under the strategy's host policy
-    -- the same re-admission a redirect hop performs -- rather than feeding
-    text into value-typed fields.
+    """Reconstruct a response object from a cached envelope the module dumped:
+    the URL fields were serialized as raw text, so the rebuild re-admits them
+    under the strategy's host policy rather than feeding text into URL fields.
     """
     return HttpFetchResult(
         url=ctx.normalized_url,
@@ -174,14 +142,9 @@ def rebuild_response(data: SerializedResponse, ctx: HttpStrategyContext) -> Http
 def response_result_fields(
     ctx: HttpStrategyContext, resp: FetchedResponse, attempt: CrawlStrategyAttempt
 ) -> dict[str, Any]:
-    """The result fields every response-derived engine result repeats.
-
-    The two URLs, the URL the response actually landed on, the attempt record and
-    the response headers are the same four things whichever verdict the strategy
-    reached -- ``not_modified`` and the full extraction both build them the same
-    way. Stated at each site it is how a result ended up carrying the request's
-    ``normalized_url`` under ``final_url`` on one path, which is invisible to every
-    test that only checks the classification.
+    """The result fields every response-derived engine result repeats -- the URLs,
+    the landed URL, the attempt, and the headers -- whatever verdict was reached.
+    Stated here once so the two builders cannot carry different bases.
     """
     return {
         "original_url": ctx.original_url,
