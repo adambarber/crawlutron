@@ -19,9 +19,8 @@ _WIRE_MODEL_DIR = "app/models"
 def _stem_pairs(package: str) -> dict[str, tuple[pathlib.Path, ast.ClassDef, ast.ClassDef]]:
     """``stem -> (owner module, owner record, projection)`` for every pair that exists.
 
-    The owner is ``<stem>.py`` and the projection ``<stem>_response.py``; both live
-    in the package, so the pairing is derived from file names that the one-home
-    rule already forces to be findable.
+    The owner is ``<stem>.py`` and the projection ``<stem>_response.py``, so the
+    pairing is derived from file names the one-home rule forces to be findable.
     """
     root = REPO_ROOT / package
     pairs: dict[str, tuple[pathlib.Path, ast.ClassDef, ast.ClassDef]] = {}
@@ -58,11 +57,8 @@ def _is_dataclass(node: ast.ClassDef) -> bool:
 def _is_record(node: ast.ClassDef) -> bool:
     """True for a class that DECLARES its key set: a dataclass or a TypedDict.
 
-    Both spell the same contract -- a closed set of named fields -- so the mirror
-    rule reads both. The TypedDict half is what let an extractor's output be
-    checked against its response model at all; before it, the extractor returned
-    ``dict[str, Any]``, which declares nothing, and the pair simply did not
-    exist to be compared.
+    Both spell a closed set of named fields; the TypedDict half is what let an
+    extractor's ``dict[str, Any]`` output be checked at all.
     """
     return _is_dataclass(node) or any(
         isinstance(base, ast.Name)
@@ -133,16 +129,8 @@ def _synthetic_pair(
 def test_wire_models_mirror_every_domain_field():
     """A field cannot disappear between an owner record and its wire projection.
 
-    Both directions break a promise the wire cannot keep. A field the owner fills
-    and the projection does not declare stops existing at the splat; a field
-    declared on the wire and filled by nothing is ``None`` forever -- which is the
-    defect PageMetadata's producer was declared to find when it was a bare
-    ``dict[str, Any]``: undeclared, and so in neither half of any pair.
-
-    The pair comes from module stems, not class names, so a record whose two
-    halves are named for different things is still compared. That is what this
-    rule used to get wrong -- it intersected class names, so ``DiscoveredLink``
-    and ``DiscoveredLinkResponse`` were never compared by anything.
+    A filled-but-undeclared field stops existing at the splat; a declared-but-
+    unfilled one is ``None`` forever. Pairs come from module stems, not names.
     """
     pairs = _stem_pairs(_WIRE_MODEL_DIR)
     assert pairs, (
@@ -220,11 +208,8 @@ _ADVERTISED_PAYLOADS = (
 def _advertised_keys(tree: ast.Module, function_name: str) -> set[str]:
     """Top-level string keys of a payload function's single returned dict.
 
-    Asserts rather than degrading when the shape is not statically readable. A
-    payload assembled across several statements defeats extraction, and quietly
-    reporting "nothing dropped" for exactly the shape this gate cannot see would
-    recreate the defect it exists to catch -- a detector that goes blind without
-    saying so is the gap, not the fix.
+    Asserts rather than degrading: reporting "nothing dropped" for a shape this
+    gate cannot see would recreate the defect it exists to catch.
     """
     function = next(
         (n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == function_name),
@@ -313,22 +298,8 @@ def literal_members(alias: object) -> set[str]:
 def test_the_internal_and_wire_taxonomies_name_the_same_members():
     """The engine's result records and the wire enums agree, set for set.
 
-    This is what lets the adapters convert instead of coercing. Reading an
-    internal ``Literal`` into a wire ``StrEnum`` is a total function exactly when
-    the two name the same members -- and that is not something a type checker can
-    verify, because a ``Literal`` and a ``StrEnum`` are unrelated types and the
-    enum constructor accepts any ``str``.
-
-    It matters because the alternatives were both worse. The adapters used to
-    wrap each conversion in ``try/except`` and substitute a fallback: an
-    unmapped ``status`` became ``failed`` and an unmapped ``strategy`` became
-    ``None``, both silently. That fallback is the shape of the bug this whole
-    change set out to remove -- a producer that emitted something new and a
-    response that answered anyway -- only one layer down from the result
-    record. The conversions are now total, with no fallback to reach, and this
-    is what keeps them total.
-
-    All three axes are checked: status, classification, and strategy.
+    That makes the adapters convert, not coerce; the fallback substitutes are the
+    shape of the bug this whole change removed. All three axes are checked.
     """
     from app.models.crawl_status import CrawlStatus
     from app.models.crawl_strategy import CrawlStrategy

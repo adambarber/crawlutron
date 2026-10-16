@@ -36,9 +36,8 @@ _RESULT_PRIMITIVES = (
 def _result_primitive_names() -> frozenset[str]:
     """The registry the per-field detectors actually sweep.
 
-    Routed through the derived registry rather than the transcribed tuple
-       above so the three per-field detectors cannot re-acquire the coverage gap
-    the generic sweep was written to close.
+    Routed through the derived registry so the three per-field detectors cannot
+    re-acquire the coverage gap the generic sweep was written to close.
     """
     from tests.membership_gate import RESULT_PRIMITIVES
 
@@ -48,17 +47,8 @@ def _result_primitive_names() -> frozenset[str]:
 def _non_member_classification_offenders(tree, path, *, members=None):
     """A literal classification passed to a result primitive must be a member.
 
-    ``members`` is the live ``CrawlClassification`` value set. There is no
-    hand-maintained exemption list: such a list is precisely how a new code
-    ships as a non-member -- the list would have to be remembered and updated
-    in lockstep with the enum, and it never is. A non-literal (variable or
-    attribute access, e.g. CrawlClassification.x) is what callers should
-    write, and passes without comment.
-
-    Which values count as spelled non-members is
-    :func:`chokepoint_walks.non_member_literals`, the same funnel the status,
-    strategy, Literal-field and error sweeps go through, so the guard that
-    admits a variable cannot be dropped from one axis and kept on another.
+    No hand-maintained exemption list -- it is precisely how a new code ships
+    as a non-member; a variable or attribute read passes.
     """
     if members is None:
         members = real_members("CrawlClassification")
@@ -124,14 +114,8 @@ _STRATEGY_VALUE_SOURCES = ("strategy",)
 def _non_member_strategy_offenders(tree, path, *, members=None):
     """A literal strategy passed to a result primitive must be a real member.
 
-    ``members`` is the live ``CrawlStrategy`` value set. ``None`` is admitted
-    explicitly: it is the honest label for "no strategy was attempted" (an
-    envelope built after a worker raised, before any strategy ran), which is
-    not an invented member and not an empty string. There is no
-    hand-maintained exemption list -- such a list is precisely how the invented
-    name shipped, because it would have to be remembered and updated in
-    lockstep with the enum. A non-literal (variable, attribute, or module
-    constant) is what callers should write and passes without comment.
+    ``None`` is admitted (the honest "no strategy was attempted" label) and a
+    non-literal read passes; there is no exemption list.
     """
     if members is None:
         members = real_members("CrawlStrategy")
@@ -202,11 +186,8 @@ _STATUS_VALUE_SOURCES = ("status",)
 def _non_member_status_offenders(tree: ast.AST, path: pathlib.Path, *, members=None) -> list[str]:
     """A literal ``status`` passed to a result primitive must be a real member.
 
-    Mirrors the classification/strategy detectors: ``status`` feeds the strict
-    wire enum on the unified result, so an invented literal is a KeyError or a
-    silent shaping failure waiting on a batch. ``members`` is the live
-    ``ResultStatus`` argument set, read at test time -- a hand-maintained
-    exemption list is precisely how an invented status would ship.
+    ``status`` feeds the strict wire enum, so an invented literal is a KeyError
+    or silent shaping failure; a hand-maintained exemption list is how one ships.
     """
     if members is None:
         members = real_members("ResultStatus")
@@ -260,11 +241,8 @@ _ATTEMPT_STRATEGY_KWARG = "strategy"
 def _non_member_attempt_strategy_offenders(tree: ast.AST, path: pathlib.Path, *, members=None) -> list[str]:
     """A literal ``strategy=`` at a ``CrawlStrategyAttempt`` site must be a member.
 
-    Covers the class directly rather than the builder primitives, so a new
-    construction site anywhere in ``app/`` is policed without being registered
-    anywhere first. ``None`` is admitted: it is the honest label for "no
-    strategy was attempted". ``members`` is the live ``CrawlStrategyName``
-    argument set, read at test time.
+    Covers the class directly so new construction sites are policed without
+    prior registration; ``None`` is the honest "no strategy was attempted" label.
     """
     if members is None:
         members = real_members("CrawlStrategyName")

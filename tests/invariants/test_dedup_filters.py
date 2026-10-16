@@ -24,10 +24,8 @@ _JS_ENDPOINTS_FILTER_SANCTIONED = frozenset({"validation.py"})
 def _reinline_js_endpoints_filter_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
     """Flag the inlined endpoint-filter comprehension outside its chokepoint.
 
-    The reinlined shape is a comprehension whose element spreads an existing
-    dict and rewrites its ``url`` key (``{**endpoint, "url": clean}``) -- a
-    None key in the dict is the ``**`` spread, and the rewritten ``url`` key is
-    what makes it an endpoint filter rather than an ordinary copy.
+    The reinlined shape is a ``{**endpoint, "url": clean}`` comprehension -- a
+    rewritten ``url`` key is what makes it an endpoint filter, not a copy.
     """
     if path.name == "validation.py":
         return []
@@ -110,14 +108,8 @@ _ROBOTS_COMPILE_HOME = "_RobotsPatternCache"
 def _robots_compile_call_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
     """``_compile_robots_pattern`` may be called only from ``_RobotsPatternCache.get``.
 
-    The pure pattern translation is the cheap half of the robots matcher; the
-    safety property is that every caller reaches it through the bounded
-    PER-HOST LRU. A second caller reintroduces a process-global matcher cache
-    keyed only on the pattern string -- patterns arrive from remotely-fetched
-    robots.txt, so a hostile site spraying distinct patterns would evict every
-    other site's matchers and control the whole cache. The home method
-    is the single sanctioned call site; the module-level wrapper
-    (``_robots_pattern_to_regex``) goes through it too.
+    A second caller reintroduces a process-global matcher cache keyed only on the
+    pattern string -- so a hostile site spraying patterns controls the whole cache.
     """
     offenders: list[str] = []
     for node in calls_named(tree, _ROBOTS_COMPILE):
@@ -193,12 +185,8 @@ _COMMENT_TRANSPARENT = frozenset(
 def _comment_blocks(source: str) -> list[tuple[int, tuple[str, ...]]]:
     """``(first line, normalized text)`` for each run of consecutive comment lines.
 
-    ``tokenize`` rather than a ``#`` search, because a ``#`` inside a string is a
-    character and not a comment. A run is consecutive *lines* rather than merely
-    adjacent comment tokens, so a blank line, a statement, or a re-indent between
-    two notes ends the block instead of silently welding unrelated prose into one
-    clone -- and re-welding it is what the re-indent case has to catch, which is
-    why the break is the line gap and not the indentation.
+    ``tokenize`` rather than a ``#`` search (a ``#`` in a string is not a
+    comment); a blank line or statement ends a block rather than welding prose.
     """
     blocks: list[tuple[int, tuple[str, ...]]] = []
     lines: list[str] = []
@@ -233,18 +221,8 @@ def _duplicated_comment_runs(
 ) -> list[str]:
     """Comment blocks written twice in app/, with every site that repeats them.
 
-    The token floor cannot see this class at all: jscpd matches tokens, so a
-    duplicated comment contributes nothing to a clone it reports, and a
-    six-line WHY note read as zero clones at 4/25. That is what happened -- the
-    same note about the content cache's eviction window sat at both write call
-    sites, each copy carrying a claim about locking, and nothing in the suite or
-    the gate could tell that a later edit to the locking had updated one and left
-    the other asserting something the code no longer did.
-
-    Normalized on whitespace before comparison, so a re-indented copy -- the way
-    these forks actually arrive, by pasting between call sites -- still matches.
-    A block shorter than ``minimum`` is not a WHY worth centralizing, and a
-    two-line threshold would fire on ordinary repeated section rules.
+    jscpd matches tokens, so a duplicated six-line WHY reads as zero clones and
+    two copies can drift; comparison is whitespace-normalized, so re-indent matches.
     """
     sites: dict[tuple[str, ...], list[tuple[Path, int]]] = {}
     for path, source in sources:
@@ -271,9 +249,8 @@ def test_no_comment_block_is_written_twice():
 def test_comment_clone_detector_bites():
     """A repeated block fires, in one file and across two; distinct blocks do not.
 
-    Hand-rolled rather than :func:`assert_detector`, which parses its sources
-    into modules: a comment is not in the ``ast`` at all, so this is the one
-    detector in the file whose input is the text.
+    Hand-rolled rather than ``assert_detector`` (which parses to modules), because
+    a comment is not in the ``ast`` -- this detector reads the text.
     """
     path = REPO_ROOT / "app" / "transport" / "content_cache.py"
     repeated = "# first line of the note\n# second line\n# third line\n"

@@ -1,26 +1,7 @@
 """A page's durable identity lives on the URL object, never spelled at call sites.
 
-A job stores its URLs in collections that must agree with each other --
-``visited``, ``in_flight`` and ``frontier`` -- and every one of those is a set
-or dict keyed by identity. Since the NormalizedUrl convergence, identity is a
-property of the value object: an admitted value IS its own durable key, and
-``.raw`` is by definition the stored form (see the class docstring).
-
-The retired architecture spelled identity out as a fallback at call sites::
-
-    canonical_page_identity(url, host_policy=hp) or url
-
-so a refused URL still occupied a key made of its raw text. That category of
-keying is gone by design: a URL that admission refuses is skipped and
-reported, not keyed. The hazard this gate now watches for is the same drift
-rebuilt on the current seam -- an ``or``-fallback that resurrects raw text a
-refusing admission call just declined::
-
-    admit_or_none(url, policy=hp) or url
-    base.resolve(ref) or ref
-
-Every one of those reintroduces "refused but keyed anyway" one call site at a
-time, which is exactly how the eleven scattered copies arrived the first time.
+An admitted URL IS its own durable key; the gate watches for any ``or <raw>``
+fallback that resurrects refused raw text at a call site.
 """
 
 import ast
@@ -41,9 +22,8 @@ _REFUSING_NAMES = frozenset({"admit_or_none", "resolve"})
 def _inline_identity_fallbacks(tree: ast.AST, path: pathlib.Path) -> list[str]:
     """Flag a call site that spells the raw-text fallback out as ``or <raw>``.
 
-    Keyed on the *fallback* -- a refusing call being ``or``-ed into a value
-    that survives it -- rather than on any one module's spelling, so a new
-    call site written in a new way is caught too.
+    Keyed on the fallback (a refusing call ``or``-ed into a surviving value)
+    rather than any module's spelling, so a new call site is caught.
     """
     offenders: list[str] = []
     for node in or_nodes(tree):
@@ -55,17 +35,8 @@ def _inline_identity_fallbacks(tree: ast.AST, path: pathlib.Path) -> list[str]:
 def _names_refusing_call(tree: ast.AST, node: ast.AST) -> bool:
     """True when a refusing admission call is a DIRECT operand of the ``or``.
 
-    Matched on the *leaf* of the resolved name. ``resolved_call_name`` answers
-    with the import-resolved dotted path, so a consumer calling
-    ``admit_or_none`` reads as ``app.models.normalized_url.admit_or_none``
-    while the defining module reads as the bare name. Comparing the whole
-    string would fire in exactly one file -- the one that defines the
-    function -- and report a clean sweep of the call sites that are the
-    actual problem.
-
-    Only a direct operand is the fallback: ``<refusing call> or <raw>``. A
-    call nested deeper inside an operand -- ``<other> or <refusing call> is
-    not None`` -- is the correct refusal question, not an overruling of it.
+    Matched on the leaf so callers read as full paths without firing in the
+    defining module; a nested call is the correct refusal, not an overruling.
     """
     return any(
         isinstance(value, ast.Call) and resolved_call_name(tree, value).rsplit(".", 1)[-1] in _REFUSING_NAMES
@@ -103,10 +74,8 @@ def test_page_identity_fallback_is_not_written_out_at_call_sites():
 def test_page_identity_fallback_detector_bites():
     """The sweep must fire on a hand-rolled fallback and stay off a lookalike.
 
-    Without the clean case this either flags some unrelated ``or`` -- a detector
-    that cries wolf is a detector that gets deleted -- and without the firing
-    case it is a gate that proves nothing. Both are declared on the rule, so
-    neither can be dropped without the declaration failing to build.
+    Without the clean case a detector that cries wolf gets deleted; the firing
+    and clean cases are both declared on the rule, so neither can drop out.
     """
     RULES.check_all_bite()
 
@@ -114,10 +83,8 @@ def test_page_identity_fallback_detector_bites():
 def test_admitted_raw_is_the_durable_identity():
     """The owner's contract: an admitted value's stored form is its ``.raw``.
 
-    Stated as behavior rather than as the AST shape the gate above enforces,
-    because the two are independent. A future refactor that keeps every call
-    site free of inline fallbacks but changes what identity means would pass
-    the gate and silently re-key every stored collection.
+    Stated as behavior, not the AST shape, because the two are independent and
+    a refactor that changed identity could pass the gate and re-key everything.
     """
     from app.models.normalized_url import NormalizedUrl
     from tests._policy_factories import UNRESTRICTED_HOST_POLICY

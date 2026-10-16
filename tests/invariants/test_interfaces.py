@@ -1,10 +1,7 @@
 """What an app class promises, checked against who is listening.
 
-A base class is a promise to a consumer. Inheriting ``Mapping`` says this object
-behaves like a dict to whoever holds it -- so the interesting question is not
-whether the methods exist but whether anything in ``app/`` ever asked for them.
-A promise with no listener is not a design; it is weight, and it is weight that
-compiles clean, reads as capability, and never fails a test.
+A base class is a promise to a consumer; a promise with no listener is weight
+that compiles clean, reads as capability, and never fails a test.
 """
 
 from __future__ import annotations
@@ -41,8 +38,7 @@ def _base_class_name(base: ast.expr) -> str | None:
     """The trailing name behind a base, however it was written.
 
     ``Foo``, ``mod.Foo`` and ``Foo[int]`` all name ``Foo``; only the dotted and
-    subscripted forms were unreadable, and ``app/runtime/logging_config.py`` already
-    writes bases that way.
+    subscripted forms were unreadable, and app/ already writes bases that way.
     """
     if isinstance(base, ast.Name):
         return base.id
@@ -68,10 +64,8 @@ def _container_aliases(tree: ast.Module) -> frozenset[str]:
 def _type_position_names(tree: ast.Module) -> frozenset[str]:
     """Names app/ declares in a type position: annotated, bound, or isinstance'd.
 
-    Deliberately not every mention. A class that is only ever *instantiated* is
-    not handed to a caller as a type, so what it implements promises nothing --
-    and counting the instantiation is what let ten unclaimed methods read as
-    claimed.
+    Deliberately not every mention: a class only ever instantiated promises
+    nothing, and counting instantiation hid ten unclaimed methods.
     """
     names: set[str] = set()
 
@@ -107,12 +101,8 @@ def _app_announced_names() -> frozenset[str]:
 def _container_base_reading_is_not_broken() -> None:
     """The derivation finds a container base when one is there.
 
-    Asserted against a synthetic tree, not app/: app/ declaring no container base
-    is this rule's finished state, so demanding one there would make the gate
-    unsatisfiable at exactly the moment it starts being true. What must not go
-    unnoticed is the derivation quietly matching nothing -- a mistyped base name
-    or a base-read that stops handling Subscript would leave the detector inert
-    and green, which is the one failure a premise exists to catch.
+    Asserted against a synthetic tree; the only failure it must catch is the
+    derivation quietly matching nothing and going inert.
     """
     tree = ast.parse("class _Probe(MutableMapping[str, str]):\n    pass\n")
     declared = {
@@ -128,9 +118,8 @@ def _container_base_reading_is_not_broken() -> None:
 def _container_protocol_offenders(tree: ast.Module, path: Path) -> list[str]:
     """Classes that promise to behave like a container for nobody in app/.
 
-    A name counts as announced if app/ mentions it anywhere, or if the tree under
-    sweep does: the swept file is itself part of app/, so a class another
-    declaration in the same file annotates is claimed, not orphaned.
+    A name counts announced if app/ or the swept tree mentions it; a class
+    another declaration in the same file annotates is claimed, not orphaned.
     """
     announced = _app_announced_names() | _type_position_names(tree)
     container_names = _CONTAINER_PROTOCOL_BASES | _container_aliases(tree)
