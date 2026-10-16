@@ -1,22 +1,7 @@
 """Crawl-policy defaults, and the one way a test should admit discovered links.
 
-A crawl policy is a handful of sub-mappings that are only ever spelled out
-together, and the values in them were re-typed at every site: this file alone
-carried the same limits block twice and a third copy of a sibling, and
-``admit_discovered_links`` was called with all fourteen of its keywords written
-out at each of the three sites that needed it. Each copy is a place a policy
-change lands in only one of them, and the copy is the one the test runs.
-
-``_CRAWL_LIMITS`` and ``_STRATEGY_LIMITS`` are the two profiles, named so the
-factories below differ only in what is actually different about them, and every
-factory hands out a fresh value because callers are told to derive their own
-from the policy they are given.
-
-The factories return the model, not the wire mapping, because that is what every
-function they feed now takes. A test that built the dict itself had a way to
-produce a policy no caller could -- which is why a suite could stay green while
-the production read edge answered a different question than the test's did.
-"""
+The policy sub-mappings were re-typed at every site -- each copy a place a
+change lands in only one test. Factories return the MODEL, not the wire mapping."""
 
 import pathlib
 from typing import Any
@@ -36,28 +21,8 @@ UNRESTRICTED_HOST_POLICY = HostPolicy.unrestricted()
 def canonical(url: "str | NormalizedUrl") -> NormalizedUrl:
     """The admitted value production would hold for ``url``.
 
-    A test that spells ``normalized_url="http://a/"`` is asserting a state
-    production cannot reach -- normalization strips that trailing slash, so the
-    real task field reads ``http://a`` -- and those tests were green only
-    because nothing checked the claim.
-
-    Going through the production normalizer rather than trimming the slash here
-    is the whole point: a hand-rolled version of the canonical rules would be a
-    second copy that passes every test while production changes underneath it,
-    the failure mode ``UNRESTRICTED_HOST_POLICY`` above exists to
-    prevent. It also costs nothing: the private-target guard is skipped outright
-    while the suite-wide loopback fixture is in force, so no DNS happens for
-    fixture hostnames.
-
-    An already-admitted value passes through untouched: production seams hand
-    tests values, and re-admitting would assert nothing the constructor has not
-    already guaranteed. This is the suite's ONE admission seam; the per-module
-    ``_admit`` copies it replaced each drifted on their own.
-
-    Returns the ``NormalizedUrl`` value, because the record fields that carry
-    it are value-typed; the few text comparisons project ``.raw`` where a wire
-    or storage boundary is what the assertion is about.
-    """
+    Going through the production normalizer is the point: a hand-rolled form
+    passes every test while production changes underneath it."""
     if isinstance(url, NormalizedUrl):
         return url
     return NormalizedUrl(url, policy=UNRESTRICTED_HOST_POLICY)
@@ -104,10 +69,8 @@ def make_base_policy(strategies=None) -> CrawlPolicy:
 def _policy(extra=None) -> CrawlPolicy:
     """The strategy-level policy, with an optional override merged over it.
 
-    Carries no ``strategies`` on purpose: the strategy-level tests want the
-    default ladder to climb, and a pinned strategy here would answer a question
-    the ladder is what the caller is actually testing.
-    """
+    Carries no ``strategies`` on purpose: strategy tests want the default
+    ladder to climb, not a pinned step."""
     policy: dict[str, Any] = {
         "request_profile": {},
         "headers": {},
@@ -121,17 +84,8 @@ def _policy(extra=None) -> CrawlPolicy:
 def http_strategy_policy(*, extraction: str = "full", discovery: bool | None = None) -> CrawlPolicy:
     """A crawl policy for the HTTP/browser strategy tests, with discovery optional.
 
-    ``discovery=True`` means the channels are ON, and says so by turning them
-    on. It used to write ``{"robots": False, "sitemaps": False, "feeds":
-    False}`` and rely on the block being *present*: a non-empty mapping is
-    truthy, so ``bool(policy["discovery"] or {})`` read an all-off block as
-    "discovery requested". That was true of the old reader and false of the
-    model, and the model won -- ``DiscoveryConfig`` defaults every channel
-    off and the consumer asks ``any(flags)``, so the same policy discovered
-    links on the browser path and not on the HTTP one. Post-fetch link
-    discovery is also gated on a depth to spend, which this factory's base
-    limits leave at 0, so an all-off block meant no links at all.
-    """
+    ``discovery=True`` turns the channels ON by spelling them; the old all-off
+    block read as truthy in one reader and false in the model."""
     policy = make_base_policy().model_dump()
     policy["extraction"] = extraction
     if discovery is not None:
@@ -167,19 +121,8 @@ async def admit(
 ):
     """Run production ``admit_discovered_links`` and return its real outcome.
 
-    Every keyword here mirrors production's, default for default, so the harness
-    is the production contract and not a second opinion about it: a new required
-    argument in production raises here, once, instead of being missed at one of
-    several call sites. There is no ``**kwargs`` catch-all on purpose -- a
-    misspelled override must be a ``TypeError`` at the harness rather than an
-    argument production never received.
-
-    The three robots keywords default to "nothing blocks, nothing to look up,
-    nothing to commit", which is the profile an admission scenario that is not
-    about robots wants and should not have to spell. ``frontier`` collects
-    ``link.normalized_url`` strings unless a caller supplies its own
-    ``make_entry``.
-    """
+    Every keyword mirrors production's, so a new required argument raises
+    here once; no ``**kwargs`` -- a misspelled override is a ``TypeError``."""
     return await admit_discovered_links(
         links,
         source_depth=source_depth,
@@ -212,16 +155,8 @@ __all__ = [
 def crawl_limits(*, respect_robots: bool | None = None, **over) -> dict:
     """The limits block a crawl fixture needs, with overrides merged over it.
 
-    ``timeout_seconds: 10`` is the live-server profile, on the same reasoning as
-    :data:`_STRATEGY_LIMITS` -- a fixture that timed out reports a transport
-    problem for a policy that was too tight, which is the most expensive kind of
-    wrong. Stated inline it was four copies of the same three numbers, and a
-    profile change was four edits of which one would have been missed.
-
-    ``respect_robots`` is a switch tests flip rather than a number they tune, so
-    it is a keyword; ``None`` leaves it out of the block entirely rather than
-    writing a default no caller asked for.
-    """
+    ``timeout_seconds: 10`` is the live-server profile -- a too-tight fixture
+    reports a transport problem. ``respect_robots`` is a keyword tests flip."""
     limits: dict = {"timeout_seconds": 10, "max_retries": 0, "max_discovered_links": 10}
     if respect_robots is not None:
         limits["respect_robots"] = respect_robots
@@ -239,16 +174,8 @@ def crawl_policy(
 ) -> dict:
     """A crawl policy carrying strategies, limits, and the named extra blocks.
 
-    The shape several tests each rebuilt around the same limits block. Each extra
-    block is a named keyword rather than ``**extra``, so what a policy can carry
-    is a decision made here instead of one each caller makes -- and so a typo'd
-    block name is a TypeError rather than a policy that silently does not scope.
-
-    ``scope_regex`` is omitted from the policy entirely when not given, rather
-    than written as ``None``: the payload validators distinguish the two, and a
-    test that did not mean to scope should not hand production a key that says
-    "no scope" in a way the engine has to special-case.
-    """
+    Each extra block is a named keyword, so a typo'd name is a ``TypeError``;
+    ``scope_regex`` is omitted when not given (validators distinguish unset)."""
     policy: dict = {
         "strategies": list(strategies) if strategies is not None else [HTTP_DECLARED_CRAWLER],
         "limits": crawl_limits(**(limits or {})),
@@ -265,17 +192,8 @@ def crawl_policy(
 def deployment_tier(**overrides: str) -> PolicyTier:
     """The operator tier a test deployment runs with.
 
-    ``tier`` is a required argument to ``JobStore`` because a store that cannot
-    say which deployment it belongs to resolves a stored row's omitted limits to
-    the model defaults instead of the operator's -- and every job-path read used
-    to make exactly that substitution, so ``/v1/crawl`` and ``/v1/jobs`` answered
-    with different timeouts from the same configuration. Required at the store
-    is how "forgot to pass the deployment" stopped being expressible; this is
-    the one place a test says what its deployment is.
-
-    Defaults to the model defaults (an empty mapping), so a test that does not
-    care about the tier reads as a test about the thing it does care about.
-    """
+    Required at ``JobStore``: without it, omitted limits resolve to model
+    defaults. Tests that do not care about the tier default to those defaults."""
     return PolicyTier.from_settings(CrawlerSettings.from_mapping(overrides))
 
 
@@ -288,21 +206,8 @@ def job_store(
 ) -> JobStore:
     """A ``JobStore`` bound to a test deployment.
 
-    Every argument a test does not pass is the one it did not mean to vary, which
-    is why the unrestricted host policy is the default here rather than repeated
-    at each of the two dozen sites that construct a store.
-
-    ``str | Path`` because that is what ``JobStore`` takes: a test that hands it
-    a ``tmp_path`` was always right, and the narrower annotation here was the
-    only thing rejecting it.
-
-    ``of`` is there for a store a test specializes -- ``InstrumentedJobStore``
-    in the job-runner harness, which publishes writes to a bus. The subclass is
-    built through the same defaults rather than re-spelling the policy and the
-    deployment tier a second time, which is the restatement this factory exists
-    to prevent. ``of`` must stay a ``JobStore`` subclass: that is what every
-    caller passes on to production.
-    """
+    Every argument a test does not pass is one it did not mean to vary; ``of``
+    builds a specialized subclass through the same defaults."""
     return of(
         db_path,
         policy=policy if policy is not None else UNRESTRICTED_HOST_POLICY,
