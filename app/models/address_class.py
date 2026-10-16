@@ -1,21 +1,6 @@
 """Address classification: parse once, judge once, answer many questions.
-
-Every IP verdict in this codebase needs the same two steps -- turn the string
-into an address, unwrap any IPv4 hidden inside an IPv6 wrapper, and read the
-range predicates. Those steps used to be written out at each call site, which
-meant a range added for one consumer was invisible to the others.
-
-What sits on top is not one question but several, and they do not agree:
-
-* Is this address safe to *send a request to*? (``10.0.0.1`` -- no.)
-* Is a socket bound to this address reachable *from elsewhere*?
-  (``10.0.0.5`` -- yes, from every host on the LAN, even though it fails the
-  first question.)
-
-So the ranges are classified here and the questions are asked elsewhere. This
-module answers exactly one of them -- which range is this -- and every caller
-builds its own predicate on the answer. A consumer that wanted a sixth range
-adds it here, where all the other consumers will see it.
+Every IP verdict needs the same two steps (parse the string, unwrap an IPv4 inside
+IPv6, read the range predicates), so the ranges are classified here and the questions asked elsewhere.
 """
 
 from __future__ import annotations
@@ -38,12 +23,8 @@ _NAT64_NETWORK = ipaddress.ip_network("64:ff9b::/96")
 
 class AddressClass(StrEnum):
     """Which range an address falls in, or that it is not an address at all.
-
-    ``NOT_AN_ADDRESS`` is a first-class answer, not a failure. A host that
-    parses as nothing has no range verdict, and the consumers each decide what
-    that means for them -- an egress guard must reject it, a bind check must
-    assume it is reachable. Folding "could not parse" into ``PUBLIC`` would
-    silently invert both.
+    NOT_AN_ADDRESS is a first-class answer, not a failure: folding "could not
+    parse" into PUBLIC would silently invert every consumer's decision.
     """
 
     PUBLIC = "public"
@@ -79,14 +60,9 @@ def _resolver_numeric_part(part: str) -> int | None:
 
 
 def _resolver_numeric_ipv4(host: str) -> int | None:
-    """Interpret *host* as IPv4 the way resolvers parse numeric forms.
-
-    ``ipaddress`` rejects bare integers (``2130706433``), hex
-    (``0x7f000001``), and short dotted quads (``127.1``), but resolvers
-    accept them -- so this must classify the packed value itself instead of
-    treating every unparseable host as a plain hostname. Returns the 32-bit
-    value, or None when the host is not a numeric form (or is out of range,
-    which resolvers also reject).
+    """Interpret *host* as IPv4 the way resolvers parse numeric forms: ipaddress
+    rejects bare integers, hex and short dotted quads that resolvers accept, so the
+    packed value is classified itself. Returns the 32-bit value, or None when not a numeric form.
     """
     if not host or any(c not in "0123456789abcdefxABCDEF." for c in host):
         return None
@@ -120,14 +96,9 @@ def _resolver_numeric_ipv4(host: str) -> int | None:
 
 
 def _embedded_ipv4(addr: ipaddress.IPv4Address | ipaddress.IPv6Address) -> ipaddress.IPv4Address | None:
-    """Unwrap an IPv4 address hidden inside an IPv6 wrapper.
-
-    IPv4-mapped (``::ffff:0:0/96``), 6to4 (``2002::/16``) and Teredo
-    (``2001::/32``) all reach an IPv4 target, so the verdict must be taken on
-    the embedded IPv4 rather than the wrapper. Otherwise a wrapper hides
-    whatever the IPv4 range check rejects: ``::ffff:100.64.0.1`` wrapped a
-    carrier-grade NAT target and was classified public. Returns ``None`` for
-    native IPv6 and bare IPv4, meaning "classify ``addr`` as-is".
+    """Unwrap an IPv4 hidden inside an IPv6 wrapper: IPv4-mapped, 6to4 and Teredo
+    all reach an IPv4 target, so the verdict must be on the embedded IPv4, else a
+    wrapper hides what the range check rejects. None (native IPv6, bare IPv4) = classify ``addr`` as-is.
     """
     if not isinstance(addr, ipaddress.IPv6Address):
         return None
@@ -142,10 +113,8 @@ def _parse(
     host: str | ipaddress.IPv4Address | ipaddress.IPv6Address,
 ) -> ipaddress.IPv4Address | ipaddress.IPv6Address | None:
     """Return the address *host* denotes, or None if it denotes none.
-
-    An already-parsed address is returned unchanged, so a caller holding one
-    does not pay to re-parse and cannot reach a different answer than a caller
-    holding the string.
+    An already-parsed address returns unchanged, so a caller holding one does
+    not re-parse and cannot reach a different answer than a string holder.
     """
     if isinstance(host, (ipaddress.IPv4Address, ipaddress.IPv6Address)):
         return host
@@ -159,17 +128,9 @@ def _parse(
 
 
 def classify(host: str | ipaddress.IPv4Address | ipaddress.IPv6Address) -> AddressClass:
-    """Return the range *host* falls in.
-
-    The one place an address is parsed, unwrapped and read against a range.
-    Precedence is the order of the checks below: the first matching range
-    wins, and ``PUBLIC`` is the fallback for anything unmatched.
-
-    A range Python models as private is reported PRIVATE and one it models as
-    reserved is reported RESERVED, including the documentation block
-    (``2001:db8::/32``), which Python considers private. Re-labelling those
-    would be inventing a distinction no consumer makes: every one of them
-    blocks on "not PUBLIC".
+    """Return the range *host* falls in -- the one place an address is parsed,
+    unwrapped and read against a range. Precedence is the order of the checks below
+    (first match wins, PUBLIC is the fallback); private/reserved are both "not PUBLIC".
     """
     candidate = host.strip() if isinstance(host, str) else host
     address = _parse(candidate)
@@ -199,16 +160,8 @@ def classify(host: str | ipaddress.IPv4Address | ipaddress.IPv6Address) -> Addre
 
 def is_loopback_bind(host: str) -> bool:
     """Return whether a listen address keeps the service on this machine.
-
-    The bind question, asked separately from the egress question on purpose.
-    A private-range address is not a public egress target and is still
-    reachable from the LAN, so reusing the egress verdict to answer this would
-    call a LAN-exposed service local.
-
-    ``127.0.0.0/8`` and ``::1`` qualify, as does the name ``localhost``.
-    Anything else -- including a host this module cannot classify -- is
-    reported reachable, because the failure mode of getting this wrong is a
-    service listening where nobody was told it would.
+    Asked separately from the egress question: a private-range address is LAN-reachable,
+    so reusing egress would call it local. 127.0.0.0/8, ::1 and localhost qualify; unclassifiable = reachable.
     """
     candidate = (host or "").strip()
     if candidate.lower() == "localhost":
