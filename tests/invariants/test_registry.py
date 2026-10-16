@@ -147,14 +147,9 @@ def _property_nodes(tree: ast.AST, path: pathlib.Path, prop: Property) -> list[t
 class _PropertyObservations:
     """One file's observation walk, and the counts it has tallied so far.
 
-    Every registered property is checked the same way -- walk this file, ask a
-    detector what it recognises, return a fingerprint->count map -- so the three
-    things that walk needs (the tree, the path, the claim) and the accumulator
-    belong together. They were four functions taking the same three positional
-    parameters, each declaring its own ``observations: dict[str, int] = {}`` and
-    each re-tallying a fingerprint with the same ``get(..., 0) + count``. A
-    fourth property needed the same three lines re-spelled, and a count had two
-    places to be tallied.
+    Every registered property is checked the same way -- walk, ask a detector, return
+    a fingerprint->count map -- so the three things the walk needs and the accumulator
+    belong together, instead of four functions re-spelling the same trio and the tally.
     """
 
     def __init__(self, tree: ast.AST, path: pathlib.Path, prop: Property) -> None:
@@ -171,15 +166,9 @@ class _PropertyObservations:
 def _property_sites(
     tree: ast.AST, path: pathlib.Path, prop: Property, *, modules: Any
 ) -> list[tuple[str, DefinitionNode, list[tuple[ast.AST, ast.AST]]]]:
-    """``(name, site node, resolved nodes)`` per site, the owner's own code excluded.
-
-    A registered property is a claim about the whole codebase, so the code that
-    *implements* it cannot be evidence for it. Every observation walk therefore
-    asks :func:`_owner_definition_ids` what to skip, takes the property's node
-    list, and runs the local-resolution pass over what is left. Those three
-    steps were spelled out in each detector, and a copy that dropped the
-    exclusion would quietly observe the owner believing it had observed the
-    codebase -- the one way a registry check can pass without being run.
+    """``(name, site node, resolved nodes)`` per site, the owner's own code excluded: a
+    registered property is a claim about the whole codebase, so the code that implements
+    it cannot be its own evidence -- the owner exclusion is the one step a copy could drop.
     """
     excluded = _owner_definition_ids(tree, path, prop)
     return [

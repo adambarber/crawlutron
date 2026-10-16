@@ -203,11 +203,10 @@ def _home_module(declared: str) -> str:
 
 
 def _models_home_offenders(root: pathlib.Path = _MODELS_ROOT) -> list[str]:
-    """Declarations whose home is not findable, and declarations with two homes.
-
-    Two failures: a mis-named module cannot be looked up from its name, and a
-    two-module declaration has no home at all. The naming check applies to
-    single-declaration modules (multi-declaration modules are families)."""
+    """Declarations whose home is not findable, or that have two homes: a mis-named
+    module cannot be looked up from its name, and a two-module declaration has no
+    home at all -- the naming check applies to single-declaration modules.
+    """
     offenders: list[str] = []
     homes: dict[str, str] = {}
     for path in sorted(root.glob("*.py")):

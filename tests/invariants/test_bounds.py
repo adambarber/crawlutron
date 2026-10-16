@@ -1,8 +1,7 @@
-"""Untrusted input is bounded before it is used.
-
-Decompression, response bodies, header numbers, declared encodings and
-extracted text all arrive from a host we do not control. The cap is declared
-once, passed at the call, and reachable by no other route."""
+"""Untrusted input is bounded before it is used: decompression, bodies, header
+numbers, encodings and extracted text all arrive from an uncontrolled host, so
+the cap is declared once, passed at the call, reachable by no other route.
+"""
 
 from __future__ import annotations
 

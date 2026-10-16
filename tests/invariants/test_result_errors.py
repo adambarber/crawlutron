@@ -23,15 +23,9 @@ def _dict_keys(node: ast.Dict) -> set[str]:
 
 
 def _envelope_dict_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
-    """Flag hand-rolled error envelopes; the factory is the only definition.
-
-    Three shapes: ANY ``HTTPException(...)`` construction (the wire shape
-    may only be built by :func:`http_error`/``browser_pool_unavailable`` -- a
-    bare ``HTTPException(detail="str")`` reaches the handler's fallback and
-    used to be laundered into a fabricated ``http_<status>`` code); a
-    ``HTTPException(detail={...code, message...})`` literal (the pre-factory
-    form); and any dict carrying all three envelope keys anywhere (catches
-    JSONResponse/return-value variants).
+    """Flag hand-rolled error envelopes; the factory is the only definition: any bare
+    ``HTTPException(...)`` (laundered into a fabricated code), the pre-factory
+    ``HTTPException(detail={...})`` literal, and any dict with all three keys.
     """
     offenders = [
         offender_at(

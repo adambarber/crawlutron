@@ -1,17 +1,6 @@
-"""A regex pattern built from anything other than a literal is the ReDoS shape.
-
-``re.search(LITERAL, text)`` is safe, and a great deal of this codebase searches
-for patterns that are compiled from constants. The hazard is narrow and specific:
-it is the *pattern* argument, not the text, and only when that pattern is built at
-runtime from data. So the rule below fires on a non-literal first argument to
-``re.<method>`` and on nothing else -- a dynamic subject is an ordinary
-inefficiency, and a detector that reported those would train people to ignore it.
-
-The companion checks in this file close the two ways the shape gets past a
-literal-pattern rule: importing the ``re`` engine under another name, and
-calling ``re.compile`` through a reference that was assigned to a variable first.
-Both are the same bypass reached two ways, so they are proved by the same
-detector rather than by two rules that could disagree about what a literal is.
+"""A regex pattern built from anything other than a literal is the ReDoS shape:
+the hazard is a runtime-built *pattern* argument, so the rule fires on a dynamic
+first arg to ``re.<method>`` only; companions close the alias and pre-bound-``compile`` bypasses.
 """
 
 from __future__ import annotations
@@ -28,14 +17,9 @@ _RE_DYNAMIC_METHODS = frozenset({"compile", "search", "match", "fullmatch", "sub
 
 
 def _re_dynamic_pattern_offenders(methods: frozenset[str]):
-    """Build the detector for ``re.<method>(<non-literal pattern>, ...)``.
-
-    ``re.compile`` with a dynamic pattern is the ReDoS shape, and so is
-    ``re.sub``/``re.search``/... with one: the hazard is a pattern built from
-    attacker-influenced text, not a method name. Both the broad sweep and the
-    single-method gate below are that one predicate over a method set, so it is
-    written once -- two hand-rolled copies is how the narrow one ended up
-    dropping the receiver check the broad one has.
+    """Build the detector for ``re.<method>(<non-literal pattern>, ...)``: the hazard
+    is a pattern built from attacker-influenced text, and both the broad sweep and
+    the single-method gate are that one predicate over the method set, written once.
     """
 
     def detector(tree: ast.AST, path: pathlib.Path) -> list[str]:

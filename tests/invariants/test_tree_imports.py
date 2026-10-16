@@ -211,9 +211,8 @@ def test_tests_import_their_helpers_by_package_path():
 
 
 def test_bare_sibling_import_detector_bites():
-    """Bites: the shipped spellings, and the neighbors that must stay quiet.
-
-    The clean case pins both directions -- package, stdlib and third-party
-    imports are all left alone, so the rule cannot degenerate into "no
-    unqualified imports" at all."""
+    """Bites: the shipped spellings, and the neighbors that must stay quiet -- the
+    clean case pins both directions so package, stdlib and third-party imports are
+    left alone and the rule cannot degenerate into banning all unqualified imports.
+    """
     TEST_HELPERS_IMPORTED_BY_PACKAGE_PATH.check_bites()

@@ -36,10 +36,9 @@ def _is_urljoin_call(node: ast.expr) -> bool:
 def _unfiltered_urljoin_return_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
     """Flag a function that returns a ``urljoin`` result with no egress filter.
 
-    Caught shapes: ``return urljoin(a, b)`` and ``u = urljoin(a, b); return u``.
-    A URL resolved out of untrusted text is an egress door as soon as a caller
-    trusts it, so the join and the filter belong together; the browser path
-    proved that "every consumer remembers to filter" does not scale.
+    ``return urljoin(a, b)`` and ``u = urljoin(a, b); return u``. A URL out of untrusted
+    text is an egress door once a caller trusts it, so the join and the filter belong
+    together -- "every consumer remembers" does not scale.
     """
     offenders: list[str] = []
     for func in functions(tree):
@@ -104,11 +103,9 @@ def test_unfiltered_urljoin_detector_bites():
 
 
 def _definitions_in(tree: ast.AST, path: pathlib.Path) -> list[str]:
-    """The scope-compiler labels one parsed tree contributes.
-
-    Split out from :func:`_scope_compiler_definitions` so the bites case can
-    hand the detector a synthetic tree: the walk owns app/ only, so a test
-    that wants to prove the detector fires has to plant the shape itself.
+    """The scope-compiler labels one parsed tree contributes, split out from
+    :func:`_scope_compiler_definitions` so the bites case can hand the detector a
+    synthetic tree -- the walk owns ``app/`` only, so a firing proof plants its own.
     """
     found: list[str] = []
     for node in nodes_of(tree):

@@ -1,8 +1,6 @@
-"""Delegating lock doubles: observe one operation, inherit the rest.
-
-``DelegatingLock`` is the forwarding tail written once, so a double overrides
-only the operation it watches instead of copying seven methods and risking a
-gap that reads as a bug in the code under test rather than in itself.
+"""Delegating lock doubles: observe one operation, inherit the rest. ``DelegatingLock``
+is the forwarding tail written once, so a double overrides only the operation it
+watches instead of copying the surface and risking a gap that hides a real-bug read.
 """
 
 from __future__ import annotations

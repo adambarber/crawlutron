@@ -105,11 +105,9 @@ _STRATEGY_RUNNERS = frozenset({"_run_http_strategy", "_run_browser_strategy"})
 
 
 def _guarded_node_ids(tree: ast.AST) -> set[int]:
-    """Identity of every node in a ``try`` body that has an ``except Exception``.
-
-    Only the guarded ``body`` counts. A call in an ``except``/``else``/
-    ``finally`` clause is not protected by its own try, so including those
-    would open exactly the hole this detector closes.
+    """Identity of every node in a ``try`` body guarded by ``except Exception``: only
+    the guarded ``body`` counts -- a call in ``except``/``else``/``finally`` is not
+    protected by its own try, so including it would open the hole this closes.
     """
     guarded: set[int] = set()
     for node in try_blocks(tree):
@@ -124,14 +122,9 @@ def _guarded_node_ids(tree: ast.AST) -> set[int]:
 
 
 def _runner_call_name(node: ast.Call) -> str:
-    """A strategy runner's name, whether it was called bare or as a method.
-
-    Resolving both spellings is what keeps the invariant attached to the CODE
-    rather than to one particular refactor's shape. A detector that matched only
-    ``ast.Name`` reported a clean tree at the exact moment the runner became a
-    method -- the refactor that cannot weaken the invariant is the one most
-    likely to make it silently unenforced, because nothing about the change looks
-    like touching it.
+    """A strategy runner's name, whether called bare or as a method: resolving both
+    spellings keeps the invariant attached to the CODE, so the method refactor that
+    would otherwise silently unenforce it cannot pass with a clean tree.
     """
     if isinstance(node.func, ast.Name):
         return node.func.id

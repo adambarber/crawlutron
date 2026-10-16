@@ -1,8 +1,6 @@
-"""Structural rules for the spill loader and pipeline wiring.
-
-``ResultSpill.load_ordered`` must rebuild in one pass and the browser pool
-size must be derived at the pipeline construction site; both are contracts
-no behavior test can observe.
+"""Structural rules for the spill loader and pipeline wiring: ``ResultSpill.load_ordered``
+rebuilds in one pass and the browser-pool size derives at the construction site --
+contracts no behavior test can observe.
 """
 
 from __future__ import annotations

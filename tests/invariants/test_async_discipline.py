@@ -1,8 +1,8 @@
 """Sync work does not happen on the event loop, and budgets are passed not defaulted.
 
-A blocking store call inside an async frame, a sink that never runs because it
-sat inside the worker's own try, or a crawler that grows the frontier without
-the admission funnel are all shapes that only show up under load."""
+A blocking store call in an async frame, a sink that never runs, or a crawl that
+grows the frontier without the admission funnel are shapes that only show under load.
+"""
 
 from __future__ import annotations
 
@@ -295,9 +295,9 @@ def _sync_store_methods() -> dict[str, frozenset[str]]:
 def _stores_still_have_sync_methods() -> None:
     """The trigger set is derived, so prove it is not empty.
 
-    A store whose methods were all made async would leave this detector
-    matching nothing; named, not counted, so one unused method cannot satisfy
-    it."""
+    A store whose methods were all made async would leave this detector matching
+    nothing; named, not counted, so one unused method cannot satisfy it.
+    """
     sync_methods = _sync_store_methods()
     assert "load" in sync_methods["JobStore"] and "aload" not in sync_methods["JobStore"], (
         f"JobStore's sync/async pair moved: {sorted(sync_methods['JobStore'])[:8]}. This rule's "

@@ -270,11 +270,10 @@ def _scheduler_run_positional_names() -> tuple[str, ...]:
 
 
 def _failed_result_binding_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
-    """A scheduler-shaped ``run()`` that does not bind ``failed_result``.
-
-    "Scheduler-shaped" is the real positional count plus ``**kwargs`` -- it
-    mirrors the positionals and swallows the envelope; a plain utility ``run``
-    stays out of the report."""
+    """A scheduler-shaped ``run()`` that does not bind ``failed_result``: the shape is
+    the real positional count plus ``**kwargs`` -- mirrors the positionals and swallows
+    the envelope -- leaving a plain utility ``run`` out of the report.
+    """
     scheduler_shaped = _scheduler_run_positional_names()
     offenders: list[str] = []
     for node in nodes_of(tree):

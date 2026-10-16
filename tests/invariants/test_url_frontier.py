@@ -79,31 +79,9 @@ def _frontier_link_url_call(node: ast.AST) -> bool:
 
 
 def _optional_host_policy_offenders(tree, path):
-    """A ``HostPolicy`` parameter must never be optional.
-
-    The host policy is the SSRF gate. Every one of the 70-odd functions that
-    takes one requires it, and requiring it is the point: a caller that forgot
-    to pass a policy gets a ``TypeError`` at the boundary rather than a fetch
-    that quietly ran against the wrong target policy.
-
-    Defaulting one turns that into a silent bypass, and nothing else in the
-    stack catches it. Verified by mutation, twice:
-
-      * ``fetchers.impersonating_fetcher`` with
-        ``policy: HostPolicy = HostPolicy((), ())`` -- ``mypy app`` reported no
-        issues across 111 files, because protocol conformance is
-        one-directional and an implementation may accept more than the contract
-        asks for. The fetcher contract guard now covers that one specifically
-        (see test_type_contracts).
-      * ``pinned_transport.build_pinned_request_async`` with the same default
-        -- no Protocol covers that pair, and every AST invariant in this file
-        passed. This rule is what closes it.
-
-    The rule is derived from the *type* rather than from a name list, which is
-    what makes it hold for a function nobody has written yet: any
-    ``HostPolicy``-annotated parameter anywhere in ``app/``, in any module, at
-    any nesting depth. ``policy`` and ``host_policy`` are both in scope because
-    the rule keys off the annotation, not the name.
+    """A ``HostPolicy`` parameter must never be optional: the policy is the SSRF gate,
+    and a default turns a forgotten argument into a silent bypass that mypy and every
+    name-list gate missed -- so the rule keys off the annotation, not the name.
     """
     for node in callable_defs(tree):
         args = node.args
