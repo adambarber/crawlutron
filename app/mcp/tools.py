@@ -1,10 +1,6 @@
 """MCP tool registry: the four crawler primitives exposed over ``/mcp``.
-
-Each tool delegates to the same pydantic request models and handler functions
-the REST endpoints use, so the MCP surface cannot drift from the HTTP surface.
-Webhook/async delivery (``async_mode`` / ``webhook_url``) is deliberately not
-exposed over MCP: a tool call has no out-of-band callback channel, so those
-requests are rejected with a tool execution error that names the REST path.
+Each delegates to the same pydantic models and handlers the REST endpoints use;
+webhook/async delivery is deliberately rejected (no out-of-band callback).
 """
 
 from __future__ import annotations
@@ -56,21 +52,9 @@ class ToolResult:
 
 @dataclass(frozen=True)
 class ToolSpec:
-    """A registered MCP tool definition plus its handler.
-
-    ``request_model`` is the source of truth for both the advertised
-    ``inputSchema`` and the validation of a call's arguments, so the two cannot
-    describe different contracts. That used to be a hand-written JSON schema
-    beside a handler that validated independently: the schema advertised a
-    narrower contract than the handler accepted while claiming
-    ``additionalProperties: False``, which pydantic does not enforce -- a
-    client reading the schema could neither use a real field nor rely on
-    extras being rejected. A field added to a request model is now advertised
-    the day it is added.
-
-    ``unsupported_fields`` names the model fields this tool deliberately will
-    not accept. It is the same list the handler rejects on, so the advertised
-    contract and the enforced one cannot drift apart either.
+    """A registered MCP tool definition plus its handler. ``request_model`` is
+    the source of truth for the advertised ``inputSchema`` and argument
+    validation; ``unsupported_fields`` is the same list the handler rejects on.
     """
 
     name: str
@@ -123,15 +107,9 @@ def _tool_success(value: BaseModel | Mapping[str, object]) -> ToolResult:
 
 
 async def _tool_result(coro: Awaitable[BaseModel | Mapping[str, object]]) -> ToolResult:
-    """Cross the MCP boundary for one tool call: run it, or report it as an error.
-
-    Every handler does the same two things -- await the endpoint, and turn an
-    ``HTTPException``/``ValueError`` from it into a tool error rather than a
-    raised traceback. Only the endpoint differs.
-
-    The envelope lives here because it is the boundary's contract: a handler
-    that spelled its own ``except`` could forget the arm, and the failure mode
-    is an exception escaping a JSON-RPC call as a 500.
+    """Cross the MCP boundary for one tool call: run it, or turn the endpoint's
+    ``HTTPException``/``ValueError`` into a tool error rather than a traceback.
+    Spelled once here so no handler can forget the arm and leak a 500.
     """
     try:
         result = await coro
@@ -200,12 +178,9 @@ async def handle_crawl(payload: CrawlRequest, settings, shutdown_event) -> ToolR
 
 
 async def _extracted(response: UnifiedCrawlResponse) -> CrawlAndExtractResponse:
-    """The crawl response read as extraction records.
-
-    The same projection shape over the same stored data, with the provenance
-    dropped: an MCP result carries its payload twice, so per-page bulk is
-    doubled on the wire, and a caller who only wants content pays for attempts,
-    headers, diagnostics and evidence anyway.
+    """The crawl response read as extraction records -- the same projection over the
+    same stored data, provenance dropped, so a content-only caller does not pay
+    for doubled per-page bulk on the wire.
     """
     return CrawlAndExtractResponse(
         submitted_count=response.submitted_count,

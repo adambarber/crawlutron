@@ -1,17 +1,6 @@
-"""Move the two growing collections off the job row into append-only tables.
-
-`crawl_jobs.results` and `crawl_jobs.visited` held the job's entire history as
-JSON on the row itself, so every batch persist re-serialized the whole page
-history: a 3000-page job rewrote ~6 MB per batch, and total write volume over a
-crawl grew as the square of the page count. Both collections are monotonic --
-pages are appended and never rewritten -- so they belong in tables where a
-batch costs one INSERT per new page.
-
-`frontier` deliberately stays a column. It is a mutable queue, not an
-accumulator: each batch pops entries and pushes newly discovered ones, so a
-table would buy a rewrite-avoidance it cannot deliver without re-implementing
-queue order on disk. At 3000 pages the frontier is ~300 KB against ~6 MB of
-results, so it is not the cost that justified this change.
+"""Move the two growing collections off the job row into append-only tables:
+``results``/``visited`` re-serialized the whole page history per batch, so their
+monotonic appends now cost one INSERT; the mutable ``frontier`` stays a column.
 """
 
 import json
@@ -38,12 +27,9 @@ _DROP = (
 
 
 def _json_list(raw) -> list[JsonValue]:
-    """A column's JSON list, or nothing if it was never valid JSON.
-
-    A legacy database is by definition one this code did not write, so a value
-    that will not parse is a real possibility rather than a programming error;
-    reading such a job as having crawled nothing is better than refusing to
-    start, and the columns are dropped either way.
+    """A column's JSON list, or nothing if it was never valid JSON. A legacy database
+    is one this code did not write, so an unparseable value is a real possibility:
+    reading the job as having crawled nothing beats refusing to start.
     """
     if not isinstance(raw, str) or not raw:
         return []
@@ -55,12 +41,9 @@ def _json_list(raw) -> list[JsonValue]:
 
 
 def _create_missing(conn) -> None:
-    """Create the companion tables, tolerating ones that are already there.
-
-    The manifest's DDL has no IF NOT EXISTS, so an operator who pre-created the
-    tables by hand would fail the upgrade on a step that has nothing left to do
-    -- and the schema check that follows would then reject a database that is
-    in fact exactly the shape this migration produces.
+    """Create the companion tables, tolerating ones already there: the manifest DDL
+    has no IF NOT EXISTS, so a hand-pre-created table must not fail the upgrade on
+    a step with nothing left to do -- or fail the schema check that follows.
     """
     existing = {
         str(row[0]) for row in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'").fetchall()
@@ -71,12 +54,9 @@ def _create_missing(conn) -> None:
 
 
 def _carry_across(conn) -> None:
-    """Move whatever the columns already hold into the new tables, then drop them.
-
-    A fresh database has no rows and no columns to drop, so both copies no-op.
-    An upgraded one keeps its history, which is the whole point of a migration:
-    a crawl in flight across the deploy resumes with the pages it had already
-    committed rather than silently forgetting them.
+    """Move whatever the columns already hold into the new tables, then drop them: a
+    fresh database no-ops both copies, while an upgraded one keeps its history so
+    a crawl in flight resumes with the pages it had already committed.
     """
     columns = {column.name for column in table_columns(conn, "crawl_jobs")}
 
