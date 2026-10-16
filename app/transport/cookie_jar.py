@@ -1,14 +1,6 @@
-"""Owns namespaced persistent cookie storage and cookie context state.
-
-This module owns cookie parsing, namespace keys, persistence, and the process cookie jar.
-It must not construct HTTP clients or assemble request headers.
-
-The per-request ``cookie_namespace`` is a PARTITIONING CONVENTION, not an
-authorization boundary: the service authenticates no callers, so a namespace
-separates tenants only as far as callers pick distinct values and trust each
-other. The default ``""`` keeps one shared jar for a single-tenant deployment;
-a multi-tenant deployment must set a unique tenant id per crawl. Put
-authentication in front of the service when isolation is a requirement.
+"""Owns namespaced persistent cookie storage and cookie context state; it must not
+construct HTTP clients or assemble headers. ``cookie_namespace`` is a PARTITIONING
+convention, not authorization (no callers are authenticated); multi-tenant deployments add their own auth.
 """
 
 from __future__ import annotations
@@ -37,22 +29,9 @@ COOKIE_JAR_MAX_HOSTS = DEFAULT_MAX_HOSTS
 
 
 class CookieJar:
-    """Cookie storage, optionally shared by every worker process.
-
-    Cookies are stored per-domain and merged into ``Set-Cookie`` response
-    headers / ``Cookie`` request headers across recursive page loads.
-
-    With a ``store`` the shared table is the single source of truth: the
-    in-memory map stays empty, so there is no second copy to diverge. Without
-    one the jar keeps cookies in a per-process LRU, which is a valid
-    single-process configuration rather than a degraded one.
-
-    A caller-supplied ``namespace`` string (e.g. a tenant id, a request id,
-    or a logical ``cookie_jar`` profile name) is accepted by the public API
-    and used to namespace stored cookies so concurrent calls from different
-    namespaces cannot read each other's cookies. Passing ``namespace=""``
-    (or omitting it) preserves the legacy shared behavior; the documented
-    mitigation for multi-tenant deployments is to pass a per-tenant id.
+    """Cookie storage per-domain, optionally shared across worker processes, merged
+    into Set-Cookie/Cookie headers across page loads. With a ``store`` the shared
+    table is the single source of truth; a caller ``namespace`` isolates cookies between concurrent callers.
     """
 
     def __init__(self, store: SharedCookieStore | None = None) -> None:
@@ -66,10 +45,10 @@ class CookieJar:
 
     @property
     def store(self) -> SharedCookieStore | None:
-        """The shared table this jar reads and writes, or None when it is
-        process-local. Which of the two a jar is decides whether a cookie set by
-        one worker is visible to another, so it is answerable without reaching
-        into the instance."""
+        """The shared table this jar reads and writes, or None when it is process-local.
+        Which of the two decides whether a cookie set by one worker is visible to
+        another, so it is answerable without reaching into the instance.
+        """
         return self._store
 
     @staticmethod
@@ -77,15 +56,9 @@ class CookieJar:
         return (namespace or "", host)
 
     def _touch(self, ns_key: tuple[str, str]) -> None:
-        """Mark `ns_key` most-recently-used and evict past the host cap.
-
-        The LRU discipline in one place, called with the lock already held. It
-        was written out at each of the two write paths -- the parsed
-        ``Set-Cookie`` and the file import -- and the jar is module-global and
-        long-lived, so a host cap that one of them forgot to apply is a slow leak
-        that only a test watching the cap's bound would notice. A read counts as
-        a use too, which is why this is named for the fact rather than the
-        eviction.
+        """Mark `ns_key` most-recently-used and evict past the host cap; called with
+        the lock already held. One LRU discipline for both write paths (a forgotten
+        cap is a slow leak only the boundary test would notice); a read counts as a use.
         """
         self._cookies.move_to_end(ns_key)
         while len(self._cookies) > COOKIE_JAR_MAX_HOSTS:
@@ -150,17 +123,9 @@ class CookieJar:
                 del self._cookies[key]
 
     def export_to_file(self, path: str) -> None:
-        """Write the jar's legacy shared namespace to a JSON file atomically.
-
-        Import/export, not live persistence. The shutdown save that used to
-        live here was last-writer-wins across workers: it rewrote the whole
-        file and discarded every sibling's cookies, which is why a shared store
-        exists. A caller wanting a file now gets a mirror of shared state, and
-        the mirror is never read back on the request path.
-
-        Routes through the app.safety.atomic_write chokepoint (temp file + fsync
-        + replace), so a crash (or write error) mid-serialization cannot
-        leave a truncated/corrupted file.
+        """Write the jar's legacy shared namespace to a JSON file atomically --
+        import/export, not live persistence (last-writer-wins is why a shared store
+        exists) -- via the atomic_write chokepoint, so a crash cannot corrupt the file.
         """
         import json
 
@@ -169,11 +134,9 @@ class CookieJar:
         atomic_write_text(path, json.dumps(self._legacy_slots()))
 
     def import_file_into(self, path: str) -> None:
-        """Merge a legacy JSON jar's shared namespace into this jar.
-
-        The file format is read here and nowhere else, so a migration into a
-        store-backed jar cannot drift from the format an export writes. A
-        missing or corrupt file is a no-op: the caller keeps whatever it had.
+        """Merge a legacy JSON jar's shared namespace into this jar; the file format
+        is read here and nowhere else, so a store migration cannot drift from the
+        export format. A missing or corrupt file is a no-op.
         """
         for host, cookies in self._read_legacy_file(path).items():
             if self._store is not None:
@@ -192,10 +155,8 @@ class CookieJar:
 
     def _legacy_slots(self) -> dict[str, dict[str, str]]:
         """The jar's shared namespace, in the legacy on-disk shape.
-
-        Namespaced cookies stay in the store: they are caller-managed and were
-        never persisted, so exporting them would leak one tenant's cookies into
-        a file the next start imports into the shared namespace.
+        Namespaced cookies stay in the store: caller-managed and never persisted,
+        exporting them would leak one tenant's cookies into a file the next start imports.
         """
         if self._store is not None:
             slots = self._store.all_slots()
@@ -240,12 +201,8 @@ def set_global_cookie_jar(jar: CookieJar) -> None:
 
 def reset_process_state() -> None:
     """Drop the process cookie jar and clear the per-request namespace.
-
-    One door for one piece of state, because the jar and the namespace contextvar
-    are one unit: a leftover namespace points the next request at a tenant's jar
-    that a previous test emptied, and a leftover jar outlives the namespace that
-    selected it. Resetting one without the other leaves a state that never occurs
-    in production, which is exactly the state a test then believes it found.
+    One door for one piece of state: the jar and the namespace contextvar are
+    one unit, so resetting one without the other leaves a state production never reaches.
     """
     _GLOBAL_COOKIE_JAR.clear()
     COOKIE_NAMESPACE.set("")
