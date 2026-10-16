@@ -17,9 +17,8 @@ from tests._fetcher_factories import (
 def _assert_memory_stripped(out) -> None:
     """Every result must have dropped html/text but kept its markdown.
 
-    The non-empty check is the half that matters: the loop below passes
-    vacuously on an empty result list, which is what a crawl that found nothing
-    hands back.
+    The non-empty check is the half that matters: the loop passes vacuously on
+    an empty result list, which is what a crawl that found nothing hands back.
     """
     assert out["results"], "the crawl returned nothing, so nothing was stripped"
     for result in out["results"]:
@@ -46,16 +45,8 @@ class TestRecursiveCrawl:
     async def test_wire_edge_bounds_an_absent_or_zero_cap_before_the_crawl_sees_it(self):
         """0 means "unbounded" to a stored policy, but the API substitutes a budget.
 
-        Two layers read 0 as unbounded: ``remaining_page_capacity`` returns None
-        for it, and a whole-site job read back from its row keeps the 0. The API
-        edge is deliberately different -- an externally-triggered crawl must be
-        bounded -- and substitutes the default page budget. This pins that
-        substitution where a test can see it end to end.
-
-        It matters because the dispatch loop has its own, different reading of 0,
-        asserted directly in ``test_recursive_dispatch``. Without a test on this
-        substitution, deleting it would not fail here; the loop would just
-        quietly receive 0 and crawl nothing.
+        Two layers read 0 as unbounded, so the API edge substitutes a default --
+        without this pin, the dispatch loop would quietly crawl nothing.
         """
         from app.admission.policy import validate_wire_policy
         from app.models.crawl_policy import CrawlPolicy as PolicyModel

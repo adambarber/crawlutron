@@ -271,17 +271,8 @@ async def _run_http_result(
 ):
     """Drive the real ``http_strategy_result`` over a default single-page policy.
 
-    Module-level rather than a method on the class that owns most of the callers,
-    because the discovery-diagnostics tests below need the same drive and were
-    reaching it by instantiating that test class -- a test borrowing another
-    test's harness, which reads as a second owner of the same setup.
-
-    ``final_url`` is honoured: ``scripted_fetcher`` cannot answer with a final URL
-    other than the requested one, and a caller that asks for a different one (the
-    ``.zip`` final URL the binary-body test is named for) gets a prebuilt
-    ``HttpFetchResult``, which ``routed_fetcher`` returns verbatim. It used to be
-    accepted and dropped, so that test asserted over a redirected page it thought
-    it was serving and nobody could tell from reading it.
+    Module-level so the discovery tests share it, not another class's harness;
+    ``final_url`` is honoured now -- it used to be accepted and dropped.
     """
     if fetcher is None:
         fetcher = (
@@ -304,12 +295,8 @@ async def _run_http_result(
 async def _diagnostics_for_failed_probes(fetcher, **policy):
     """Full discovery whose probes fail: the ``(result, diagnostics)`` pair.
 
-    Discovery probes fail; the page fetch does not. The point of both tests that
-    call this is that a failed probe is recorded as diagnostics and does not fail
-    the crawl, so the crawl config and those two assertions are written once here
-    and each test says only WHICH diagnostic it is about. A copy that drops the
-    limits silently runs the default ones, and a copy that drops
-    ``DISCOVERY_ALL_ON`` passes a test that discovered nothing.
+    Discovery probes fail; the page fetch does not. The point is a failed probe
+    is recorded as diagnostics and does not fail the crawl.
     """
     result = await _run_http_result(
         fetcher=fetcher,

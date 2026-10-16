@@ -15,10 +15,8 @@ from tests._policy_factories import canonical
 def assert_selector_timed_out(result, caplog, flavour: str) -> None:
     """A selector that timed out and one that matched nothing look identical.
 
-    Both yield ``ExtractedContent(None, None)``, so the warning is the only
-    thing that distinguishes a working deadline from a deadline that quietly
-    stopped firing -- which is the failure this assertion exists to catch, and
-    the reason neither selector test may assert on the result alone.
+    Both yield ``ExtractedContent(None, None)``, so only the warning
+    distinguishes a working deadline from a silent one.
     """
     assert result == ExtractedContent(None, None)
     assert "extraction_selector_timeout" in caplog.text, (
@@ -30,9 +28,8 @@ def assert_selector_timed_out(result, caplog, flavour: str) -> None:
 def test_css_selector_slow_must_not_hang(monkeypatch, caplog):
     """A selector that never returns must be bounded, not awaited.
 
-    The stub blocks on an Event nothing ever sets, for far longer than any
-    timeout this test could afford, so the ONLY thing that can end the wait is
-    the selector deadline firing inside ``_eval_selector``.
+    The stub blocks on an Event nothing ever sets, so the only thing that can
+    end the wait is the selector deadline firing inside ``_eval_selector``.
     """
     never_released = threading.Event()
     monkeypatch.setattr(

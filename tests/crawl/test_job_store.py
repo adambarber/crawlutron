@@ -309,12 +309,8 @@ def test_create_canonicalizes_root_and_initial_frontier(tmp_path):
 def test_load_resolves_unreadable_policy_to_the_declared_defaults(tmp_path):
     """A stored policy that cannot be read must not become a permissive one.
 
-    This used to assert the opposite: a corrupt row sanitized to ``{}``, and
-    ``{}`` read as ``respect_robots=False`` -- a whole-site job silently
-    ignoring robots.txt, and ``max_depth``/``max_pages`` reading as 0. The
-    sanitizer was the detection gap: it looked like a safety measure and was
-    the mechanism. Unreadable now means the model's own defaults, and the
-    assertion that matters is the protection, not the shape.
+    This used to sanitize a corrupt row to ``{}``, which read as
+    ``respect_robots=False``; unreadable now means the model's defaults.
     """
     store = make_job_store(tmp_path)
     for policy_json in ('["corrupt"]', '{"limits":"corrupt","scope_regex":null}', '"not even a mapping"'):
@@ -331,13 +327,8 @@ def test_load_resolves_unreadable_policy_to_the_declared_defaults(tmp_path):
 def test_load_honors_an_explicitly_disabled_robots_limit(tmp_path):
     """A readable policy that opts out of robots.txt must keep opting out.
 
-    The sibling of the unreadable-policy test, and it exists because that one
-    was written to cover both cases at once -- which asserted that an explicit
-    ``respect_robots: false`` resolved to ``True``. Resolution to defaults is
-    what unreadable input gets; a caller's stated choice is a different
-    decision, and silently upgrading it to the protection would make the
-    opt-out untestable. The protection is asserted where it belongs: on
-    unreadable input.
+    Resolution to defaults is for unreadable input; upgrading a caller's
+    stated opt-out would make the opt-out untestable.
     """
     store = make_job_store(tmp_path)
     job = store.create("https://example.test/root", CrawlPolicy())

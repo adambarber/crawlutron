@@ -1,13 +1,7 @@
 """The PDF extraction fallback must not run on the event loop.
 
-The render path ends with a PDF fallback (browser produced no text for a
-``.pdf`` URL). The extractor is a sync downloader/parser -- calling it
-directly inside ``_render_with_page_unlocked`` stalls the WHOLE loop for one
-PDF's parse, the same defect family the to_thread sweeps killed three times
-(doc-pool). ``install_to_thread_spy`` records offloads without
-changing behavior, so this is a behavioral assertion on the real render
-body: the branch runs (extraction_method ``pdf_text``) and its extractor is
-recorded as offloaded.
+The sync extractor called directly would stall the whole loop for one PDF's
+parse -- the same defect the to_thread sweeps killed -- so it is offloaded.
 """
 
 from app.models.normalized_url import NormalizedUrl
@@ -36,11 +30,8 @@ class _PdfPage(BrowserFakePage):
 async def _real_extraction(page, options):
     """Un-stub the builder's canned extraction so the real branch is driven.
 
-    ``build_pinned_renderer`` pins the extraction *step* to a success fixture
-    and ``looks_like_pdf`` to False; the PDF-offload contract needs the REAL
-    branch, so both collaborators are replaced here (the shared builder's
-    defaults are deliberately preserved for every other consumer). Both
-    extractors are static, so this needs no renderer to call them on.
+    ``build_pinned_renderer`` pins extraction to a success fixture; the
+    PDF-offload contract needs the real branch, so both collaborators are swapped.
     """
     html = await BrowserRenderer.extract_html(page) if options.include_html else None
     text = await BrowserRenderer.extract_text(page) if options.include_text else None

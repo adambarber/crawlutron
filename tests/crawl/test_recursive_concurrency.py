@@ -1,8 +1,7 @@
 """Throughput regression tests: recursive crawls must use the scheduler.
 
-Before the batching fix the recursive branch awaited ``run_job`` one link at a
-time, bypassing DomainScheduler entirely (no global/per-domain concurrency,
-no rate limiting).
+Before the batching fix the recursive branch awaited one link at a time,
+bypassing DomainScheduler entirely (no concurrency, no rate limiting).
 """
 
 from app.config.settings import CrawlerSettings
@@ -21,12 +20,8 @@ def _page_html(path: str) -> str:
 async def test_recursive_crawl_fetches_links_concurrently():
     """Discovered links are fetched concurrently, within the configured gates.
 
-    The overlap window is a scheduling point, not a duration: the fake fetcher
-    yields once to the event loop mid-fetch, so every link the engine is willing
-    to have in flight is in flight at the same time. A crawl that awaited the
-    links one at a time would hold the harness's overlap peak at 1 and fail the lower
-    bound, so the assertion is not weakened by removing the simulated network
-    latency -- it is measuring the same thing with a cheaper instrument.
+    The fetcher yields once mid-fetch, so every in-flight link is in flight at
+    once; awaiting them one at a time holds the peak at 1 and fails the bound.
     """
 
     def respond(url, headers):
