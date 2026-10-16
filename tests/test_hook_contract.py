@@ -26,13 +26,10 @@ from tests.test_precommit_ci_contract import (
 
 
 def test_all_hooks_share_one_trigger() -> None:
-    """The five `files:` values are one YAML anchor, so they cannot drift apart.
+    """The five ``files:`` values are one YAML anchor, so they cannot drift apart.
 
-    The trigger was copied five times previously, and the copies were never
-    compared: it is what let the `.gitignore` edit slip through with every hook
-    Skipped. They are now `&service_trigger` / `*service_trigger`, so a divergent
-    value on any one hook is caught here.
-    """
+    The trigger was copied five times and never compared -- a ``.gitignore`` edit
+    slipped through with every hook Skipped; they are now ``&service_trigger``."""
     hooks = _hook_blocks(CONFIG_PATH.read_text(encoding="utf-8"))
     triggers = {_field(block, "files") for _, block in hooks}
     assert triggers == {ENFORCEMENT_TRIGGER_PATTERN}, (
@@ -41,12 +38,10 @@ def test_all_hooks_share_one_trigger() -> None:
 
 
 def test_a_hook_with_a_divergent_trigger_is_caught() -> None:
-    """Bites: a hook carrying a different `files:` value fails the all-share-one check.
+    """Bites: a hook with a different ``files:`` value fails the all-share-one check.
 
-    The anchor collapses the copies, but the chokepoint is the assertion here:
-    without it, adding a sixth hook (or reverting one copy to a per-file pattern)
-    would silently reintroduce the drift this file exists to forbid.
-    """
+    Without the chokepoint, adding a sixth hook -- or reverting one copy to a
+    per-file pattern -- silently reintroduces the drift."""
     config = CONFIG_PATH.read_text(encoding="utf-8")
     reverted = config.replace("*service_trigger", r"^(docker/browser-crawler/)?.*\.py$")
     reverted_hooks = _hook_blocks(reverted)
@@ -57,11 +52,8 @@ def test_a_hook_with_a_divergent_trigger_is_caught() -> None:
 def test_every_gate_fires_on_every_enforcement_input() -> None:
     """No gate's own configuration can be edited without that gate running.
 
-    The `files:` pattern is a pre-commit trigger, so a config that no pattern
-    matches is a config nothing checks. `.jscpd.json` was the live instance: every
-    hook matched only `.*\\.py`, so the commit that added an ignore glob to hide a
-    clone ran no hook at all.
-    """
+    A ``files:`` pattern nothing matches is a config nothing checks; ``.jscpd.json``
+    was the live instance -- a commit that hid a clone ran no hook at all."""
     hooks = _hook_blocks(CONFIG_PATH.read_text(encoding="utf-8"))
     assert hooks
     for hook_id, block in hooks:
@@ -76,13 +68,8 @@ def test_every_gate_fires_on_every_enforcement_input() -> None:
 def test_the_workflow_is_written_for_the_repository_root_it_will_run_from() -> None:
     """GitHub only loads workflows from a repository root.
 
-    This file is nested inside the service today, so it has never run and is
-    currently documentation. It is written for the layout where the service is
-    the repository, which is where it is going: the extraction is a file copy,
-    so every path in it has to already be true at a root. A `docker/browser-crawler/`
-    prefix is the one thing that cannot survive that copy, because it names a
-    directory that will not exist there.
-    """
+    Nested today, it has never run; it is written for the root layout it is
+    going to, where a ``docker/browser-crawler/`` prefix cannot survive the copy."""
     workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
     assert "docker/browser-crawler" not in workflow, (
         "the workflow names a path that will not exist once the service is its own repository"
@@ -96,13 +83,10 @@ def test_the_workflow_is_written_for_the_repository_root_it_will_run_from() -> N
 
 
 def test_every_job_checks_out_full_history() -> None:
-    """Every job needs `fetch-depth: 0` for the git-history budget ratchet.
+    """Every job needs ``fetch-depth: 0`` for the git-history budget ratchet.
 
-    tests/test_metrics_budget.py reads this service's commit history to prove
-    the complexity budgets only fall. GitHub's default checkout is a shallow
-    clone of depth 1, under which the ratchet test SKIPS -- a gate that is
-    silently inert in CI. Each job's checkout must fetch the full history.
-    """
+    GitHub's default shallow checkout makes the ratchet test SKIP -- a gate
+    silently inert in CI; each checkout must fetch the full history."""
     workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
     for name, job in _jobs(workflow).items():
         checkouts = [
@@ -123,21 +107,8 @@ def test_every_job_checks_out_full_history() -> None:
 def test_every_hook_resolves_the_service_root_in_both_layouts(tmp_path_factory) -> None:
     """The config travels, so its commands must work at either root.
 
-    The dual-layout resolution used to be five VERBATIM copies of a two-line
-    preamble inlined in each entry, checked by substring-matching that preamble.
-    It now lives in one committed helper, ``scripts/gate``, and the entries keep
-    only the irreducible part: a file that is at ``docker/browser-crawler/
-    scripts/gate`` in one layout and at ``scripts/gate`` in the other cannot be
-    named by a single relative path from the repository root, which is where
-    pre-commit runs every hook.
-
-    So the property is asserted where it now lives, and by EXECUTION rather than
-    by reading the config. The contract builds a synthetic git repository in each
-    layout, installs the REAL helper and the REAL entry in it, runs them, and
-    requires the gate to end up in that layout's service root. Losing the
-    fallback makes the root layout exit non-zero, which is the failure the old
-    substring assertion was only a proxy for.
-    """
+    The dual-layout resolution is one committed helper (``scripts/gate``); the
+    property is asserted by EXECUTION in each synthetic layout."""
     config = CONFIG_PATH.read_text(encoding="utf-8")
     for hook_id, block in _hook_blocks(config):
         entry = _entry(block)
@@ -164,13 +135,8 @@ def test_every_hook_resolves_the_service_root_in_both_layouts(tmp_path_factory) 
 def test_every_hook_shares_one_gate_entry_preamble() -> None:
     """The five entry preambles are byte-identical, so they cannot drift.
 
-    The helper moved the semantic content out of the config, but the one-line
-    lookup that remains is still copied five times -- YAML has no string
-    interpolation, so this cannot be an anchor the way ``*service_trigger`` is.
-    What it CAN be is checked: every entry must open with the same bytes, so
-    editing one preamble and not the others fails here instead of quietly
-    working in one layout and not the other.
-    """
+    YAML has no interpolation, so the one-line lookup cannot be an anchor -- but
+    it CAN be checked: editing one preamble and not the others fails here."""
     hooks = _hook_blocks(CONFIG_PATH.read_text(encoding="utf-8"))
     prologues = {_split_gate_entry(_entry(block))[0] for _, block in hooks}
     commands = {_split_gate_entry(_entry(block))[1] for _, block in hooks}
@@ -186,12 +152,8 @@ def test_every_hook_shares_one_gate_entry_preamble() -> None:
 def _split_gate_entry(entry: str) -> tuple[str, str]:
     """The entry as ``(bash -c prologue, command)``.
 
-    pre-commit shlex-splits the entry into ``bash -c SCRIPT gate ARGS...``, so
-    ``SCRIPT`` is the whole dual-layout prologue and ``ARGS`` is the gate command
-    the helper hands to the pinned interpreter. The split point is the closing
-    quote of that script followed by the gate's own ``$0`` name, which appears
-    exactly once per entry.
-    """
+    pre-commit shlex-splits to ``bash -c SCRIPT gate ARGS...``; the split point
+    is the prologue script's closing quote before the gate's own ``$0``."""
     prologue, separator, command = entry.partition(GATE_ENTRY_END)
     assert separator, f"gate entry has no {GATE_ENTRY_END!r} terminator: {entry!r}"
     return prologue + "'", command.strip()
@@ -200,12 +162,8 @@ def _split_gate_entry(entry: str) -> tuple[str, str]:
 def _run_gate_entry_in_layout(repo: Path, layout: str) -> tuple[Path, subprocess.CompletedProcess[str]]:
     """Run a real hook entry against a synthetic repo laid out the named way.
 
-    ``nested`` builds ``<repo>/docker/browser-crawler`` (the service vendored
-    into a parent monorepo). ``root`` builds the service at the repository root,
-    which is the layout this repository is in. The helper and the entry are the
-    real files rather than re-typed stand-ins, so a helper that stops doing its
-    job cannot pass this by agreeing with a copy of itself.
-    """
+    ``nested`` builds ``<repo>/docker/browser-crawler``; ``root`` builds the
+    service at the repo root. Real files, not re-typed stand-ins."""
     # `browser-crawler` here is the pre-extraction layout the hook's prologue still probes for, not this
     # project's name; the nested branch exists to prove the helper resolves there too.
     service_root = repo / "docker" / "browser-crawler" if layout == "nested" else repo
