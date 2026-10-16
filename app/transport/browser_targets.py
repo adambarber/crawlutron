@@ -22,21 +22,9 @@ async def resolve_browser_target(
     *,
     pin: Callable[..., Awaitable[tuple[str, dict[str, str]]]],
 ) -> tuple[str, dict[str, str]]:
-    """SSRF-check + IP-pin ``url`` for browser navigation.
-
-    Returns ``(pinned_url, extra_http_headers)``. The browser is told to connect
-    to the single resolved IP (preventing DNS-rebinding) while preserving the
-    original ``Host`` header. Raises ``ValueError`` if the target is unsafe --
-    the value's own policy decides whether the target is reachable at all.
-
-    Async because pinning resolves DNS, and a render is not the only thing on
-    the loop: called synchronously this ran ``socket.getaddrinfo`` inline, so every
-    other in-flight crawl waited out the resolver once per rendered page.
-
-    ``pin`` is a required argument, not a keyword with a default. It is the rule
-    that decides whether this crawl may reach the URL at all, so a caller that
-    forgot to pass one would silently fall back to a weaker rule; the type is
-    declared here rather than imported so the dependency is visible at the call.
+    """SSRF-check and IP-pin ``url`` for browser navigation: the browser connects
+    to the resolved IP (no DNS rebinding) while keeping the original ``Host``;
+    unsafe targets raise. Async because pinning resolves DNS; ``pin`` is required.
     """
     pinned_url, request_headers = await pin(url, {})
     host = request_headers.get("Host")
@@ -55,25 +43,9 @@ def make_ssrf_route_handler(
     policy: HostPolicy,
     pin: Callable[..., tuple[str, dict[str, str]]],
 ):
-    """Playwright route handler that aborts requests to SSRF-unsafe hosts.
-
-    Registered via ``page.route`` so the main navigation, server-side
-    redirects, and every subresource load (images/scripts/XHR) is checked
-    against the SSRF blocklist. Requests that resolve to internal/loopback/
-    reserved addresses are aborted before the browser connects.
-
-    The SSRF check involves synchronous DNS resolution (socket.getaddrinfo).
-    To avoid blocking the event loop, the check runs in a thread pool via
-    ``asyncio.to_thread``.
-
-    Plain-HTTP requests keep the FRESH (uncached) pinned IP, which governs the
-    actual connection: a rebind inside the resolver cache TTL must not slip
-    onto the wire. HTTPS requests are validated through the
-    same cached check the websocket handler uses: ``build_pinned_request``
-    keeps the original hostname there (real certificates carry no IP address
-    SAN, so a pin would only break SNI/cert verification), making an uncached
-    pin resolve per subresource pure cost with no security gain. HTTPS stays
-    blocklist-checked before the browser connects.
+    """A Playwright ``page.route`` handler aborting requests to SSRF-unsafe hosts:
+    every navigation, redirect, and subresource is blocklist-checked (DNS in a
+    thread pool). Plain HTTP uses the fresh pinned IP; HTTPS keeps the hostname.
     """
 
     async def _handler(route, request):
@@ -136,11 +108,9 @@ def make_ssrf_route_handler(
 
 
 def make_ssrf_websocket_handler(*, policy: HostPolicy):
-    """Playwright websocket-route handler blocking SSRF-unsafe WS targets.
-
-    page.route does not intercept WebSocket upgrades; without this a hostile
-    page could open a WebSocket to an internal host around the route guard.
-    Validation reuses check_ssrf_protection with ws/wss mapped to http/https.
+    """A Playwright websocket-route handler blocking SSRF-unsafe WS targets:
+    ``page.route`` cannot intercept WebSocket upgrades, so this closes any that
+    resolve internal, reusing ``check_ssrf_protection`` with ws/wss mapped to http.
     """
 
     async def _ws_handler(ws):

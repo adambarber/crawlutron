@@ -89,12 +89,9 @@ def decompress_bounded(
 
 
 def _decode_one(body: bytes | bytearray | memoryview, coding: str, max_output_bytes: int) -> bytes:
-    """Decode one Content-Encoding layer, bounded by the caller's cap.
-
-    Split out so the stacked case is a loop over the same single-layer decoder
-    rather than a second selection: a header naming several codings used to pick
-    one branch on a substring test and return, so ``gzip, br`` lost only its gzip
-    layer and served the brotli bytes as if they were the body.
+    """Decode one Content-Encoding layer, bounded by the caller's cap -- split
+    out so the stacked case loops over one decoder rather than a substring branch
+    that returned after the first coding and served the rest raw.
     """
     if coding == "br":
         decoded = _decompress_brotli(body, max_output_bytes)
@@ -118,28 +115,9 @@ def decompress_body(
     *,
     max_output_bytes: int,
 ) -> bytes:
-    """Decompress response body based on Content-Encoding header.
-
-    ``max_output_bytes`` is a required keyword: every caller states the
-    decompression-bomb bound explicitly, so a new call site physically cannot
-    expand attacker-compressed bytes without a cap (the optional
-    default existed only for the uncapped legacy branches, which are gone).
-    Every layer is held to it, not just the outermost, so an intermediate stage
-    of a stack cannot expand past the bound on its way to a small final body.
-
-    Codings are listed in the order they were applied, so they are undone in
-    reverse. ``identity`` names the absence of a coding and is dropped.
-
-    Malformed, truncated, or unavailable decoder input raises
-    :class:`DecompressionError`; a genuine over-cap expansion raises
-    :class:`DecompressionTooLargeError`. A header this process cannot read end to
-    end — an unknown coding, alone or stacked — passes the body through unchanged
-    rather than decoding the part it recognises: raw bytes fail downstream as a
-    parse error the caller can see, where half-decoded bytes would be a
-    successful fetch of content the server never sent.
-
-    ``body`` accepts bytes-like input; the passthrough normalizes it to ``bytes``
-    at this boundary because all consumers read the result as bytes.
+    """Decompress a body by Content-Encoding: ``max_output_bytes`` is a required
+    keyword (no call site can expand attacker bytes uncapped) applied to every
+    layer; an unreadable header passes the body through unchanged.
     """
     codings = [part.strip() for part in content_encoding.lower().split(",")]
     codings = [coding for coding in codings if coding and coding != "identity"]
@@ -152,19 +130,9 @@ def decompress_body(
 
 
 def _decompress_brotli(body: bytes | bytearray | memoryview[int], max_output_bytes: int) -> bytes | bytearray:
-    """Decode a brotli body within a cap or raise a typed error.
-
-    The two brotli APIs are incompatible: brotlicffi exposes
-    ``.decompress(data, cap)`` and google-brotli ``.process(data)`` with no cap.
-    Which is installed is not knowable statically, so ``hasattr`` is the
-    discriminator and the cast records what that check just proved -- the decoder
-    is typed ``object`` for exactly that reason. The Protocols document the two
-    shapes, which ``hasattr`` on an ``object`` did not.
-
-    That ambiguity is about WHICH brotli is installed, not whether one is. The
-    module is a declared dependency, so there is no availability to probe: the
-    old ``try: import brotli`` here and the ``_brotli_available`` it fed existed
-    for a deployment that requirements.txt does not describe.
+    """Decode a brotli body within a cap or raise a typed error. The two brotli
+    APIs differ (capped ``decompress`` vs uncapped ``process``); which is installed
+    is not statically knowable, so ``hasattr`` discriminates.
     """
     try:
         decoder: object | None = brotli.Decompressor()

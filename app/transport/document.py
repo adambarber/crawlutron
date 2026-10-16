@@ -1,9 +1,6 @@
-"""Document extraction strategy.
-
-PDF/Office documents are extracted into Markdown. For PDFs we use
-``pdfplumber`` (replacing the previous subprocess ``pdftotext`` call) so we can
-preserve tabular structure: extracted tables are emitted as GitHub-flavored
-Markdown tables rather than being flattened into prose.
+"""Document extraction strategy: PDF and Office documents extracted to Markdown.
+``pdfplumber`` (replacing a subprocess ``pdftotext``) preserves tabular structure
+as GitHub-flavored Markdown tables rather than flattening them to prose.
 """
 
 from __future__ import annotations
@@ -76,20 +73,9 @@ def extract_pdf_bytes_to_markdown(pdf_bytes: bytes) -> str:
 
 
 async def _afetch_document_bytes(url: NormalizedUrl, pin: pinned_transport.PinRule | None = None) -> bytes:
-    """Fetch a document's bytes over the shared pinned transport.
-
-    This used to be a hand-rolled ``urllib`` loop, and it was the last one: every
-    other fetch in ``app/`` already walked redirects through
-    :func:`pinned_transport.apinned_hops`. Spelling the walk again here meant the
-    document path carried its own copy of rules it had to keep in step with the
-    shared ones, and it had already fallen behind -- the copy had no cross-host
-    credential strip, because only the shared chain has one.
-
-    Now every hop is re-validated against the SSRF blocklist and re-pinned to its
-    resolved IP by the same chain the HTML fetcher uses, the hop budget is that
-    chain's, and ``follow_redirects=False`` keeps httpx from connecting to a
-    target nobody checked. The read is capped so a hostile infinite body cannot
-    buffer into memory before extraction sees it.
+    """Fetch a document's bytes over the shared pinned transport -- every hop
+    re-validated and re-pinned by the same chain the HTML fetcher uses (a
+    hand-rolled urllib copy had drifted out of step), with ``follow_redirects=False``.
     """
     from app.extraction.content import EXTRACTION_DOC_MAX_INPUT_BYTES
     from app.safety.bounded_io import read_capped_async
@@ -111,25 +97,9 @@ async def _afetch_document_bytes(url: NormalizedUrl, pin: pinned_transport.PinRu
 
 
 def default_document_text_extractor(url: NormalizedUrl) -> str:
-    """Default document text extractor: fetch the URL and extract Markdown.
-
-    Used by the browser strategy for ``.pdf`` final URLs. Injectable via
-    ``BrowserRenderer(pdf_text_extractor=...)`` for tests.
-
-    SSRF is inherited rather than reimplemented, twice over: the URL arrives
-    already admitted (a caller's ``NormalizedUrl`` construction already
-    refused an unsafe target loudly, before this function can turn it into
-    empty text), and the fetch goes through
-    :func:`pinned_transport.apinned_hops`, the same walk every other fetch
-    uses, so every redirect hop is re-validated against the SSRF blocklist
-    and re-pinned to a resolved IP before anything connects.
-
-    The loud failure is therefore the caller's constructor call, and it is a
-    separate obligation from the per-hop check: a refused target raises at
-    admission rather than degrading to empty text, so a caller can tell "this
-    target was refused" from "this document had no text". The old pre-flight
-    ``SafeUrl.parse`` pin duplicated the walk's first resolve; that duplicate
-    retired with ``SafeUrl``.
+    """Default document text extractor: fetch the URL and extract Markdown (used
+    by the browser strategy for ``.pdf`` URLs, injectable for tests). SSRF is
+    inherited -- the URL arrives admitted, and the fetch walks the shared chain.
     """
     try:
         # the one production caller runs this through asyncio.to_thread, so a
