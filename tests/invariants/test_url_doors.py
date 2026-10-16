@@ -24,12 +24,8 @@ _CANONICALIZER = frozenset({"NormalizedUrl", "_validated_url", "admit_or_none"})
 def _raw_batch_dedup_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
     """Flag ``dict.fromkeys`` batch dedup that keys on raw values.
 
-    The url-batch dedup at ``payload_urls`` must collapse duplicates by
-    admitted page identity (``NormalizedUrl`` admission) -- not the raw
-    string -- or a request carrying both ``.../x`` and ``.../x/?utm_source=tw``
-    crawls one page twice. Every ordered-dedup via ``dict.fromkeys`` must sit
-    inside a function that also routes through the canonicalizer, so a new
-    raw-key dedup fails the suite the moment it lands.
+    Batch dedup must collapse by admitted identity, not the raw string, or
+    ``.../x`` and ``.../x?utm=tw`` crawl twice -- a raw-key dedup fails at once.
     """
     offenders: list[str] = []
     for func in functions(tree):
@@ -91,13 +87,8 @@ def test_batch_dedup_detector_bites():
 def _bare_body_reads(tree: ast.AST, path: pathlib.Path) -> list[str]:
     """Flag an unbounded body acquisition on a response-like object.
 
-    Both ``response.read()`` (no size arg) and ``response.content`` pull the
-    whole body into RAM. Capped reads go through app.safety.bounded_io.read_capped_async;
-    curl_cffi's ``.body`` attribute and non-response reads (files, sockets)
-    are not HTTP body acquisitions and stay exempt. Tree-wide: any module may
-
-    grow a fetch path, so this is keyed on the response-object convention
-    rather than a directory.
+    ``response.read()`` and ``.content`` pull the whole body into RAM; capped
+    reads go through ``read_capped_async``, keyed on the response convention.
     """
     offenders: list[str] = []
     for node in nodes_of(tree):
@@ -137,12 +128,10 @@ EVERY_HTTP_BODY_READ_IS_CAPPED = Rule(
 
 
 def test_no_bare_body_reads():
-    """Every HTTP body read anywhere must be capped ().
+    """Every HTTP body read anywhere must be capped.
 
-    Scope note: app/safety/bounded_io.py IS the chokepoint and streams the capped body
-    itself -- exempt by receiver, not path, so it survives a tree-wide sweep.
-    Widening kept precise on the response-object convention to avoid flagging
-    file/socket reads.
+    ``bounded_io.py`` IS the chokepoint and exempt by receiver, not path; the
+    response-object convention avoids flagging file/socket reads.
     """
     EVERY_HTTP_BODY_READ_IS_CAPPED.scan()
 
@@ -155,10 +144,8 @@ def test_bare_body_read_detector_bites():
 def _scope_matcher_definitions() -> list[str]:
     """File labels of every ``def scope_allows``/``_scope_allows`` under app/.
 
-    The bounded scope check was verbatim-copied into engine.py and
-    recursive.py; a one-sided fix would have left the other on the stale
-    contract. Deduped into app/admission/scope_match.py -- a second definition
-    anywhere means the copy crept back.
+    The bounded check was verbatim-copied into engine.py and recursive.py;
+    a second definition after dedup into scope_match.py means the copy crept back.
     """
     defs: list[str] = []
     for path, tree in app_trees(exclude=frozenset()):
@@ -182,12 +169,8 @@ def test_scope_matcher_has_exactly_one_definition():
 def test_no_pinned_url_leaks_into_final_url():
     """A pinned fetch must never surface str(response.url) as final_url.
 
-    build_pinned_request_async rewrites a plain-HTTP host to its resolved IP
-    so httpx reports the IP; surfacing it in final_url leaks topology and
-    keys the cookie jar by IP. The fetchers must use current_url instead.
-    Tree-wide: any module may grow a fetcher, so the final_url sink is
-    checked everywhere (search providers use response.url legitimately but
-    never as a final_url, so they are not false positives).
+    ``build_pinned_request_async`` rewrites the host to its resolved IP, so
+    surfacing it leaks topology and keys the cookie jar by IP.
     """
     offenders = []
     for path, tree in app_trees():
@@ -220,15 +203,10 @@ def _is_response_url(node: ast.expr) -> bool:
 
 
 def test_no_inline_pinned_url_composition():
-    """The pinned connect URL -- IP literal, IPv6 bracketing, port, and Host
-    header composition -- is ``build_pinned_request``'s job alone.
+    """The pin connect URL (IP, IPv6 bracketing, port, Host) is the builder's job alone.
 
-    Three divergent copies of that composition had already drifted into the
-    tree (the retired ``SafeUrl.connect``, the http fetcher, the webhook
-    builder); the copies disagreed on Host-port handling and all lacked IPv6
-    bracketing, which is why the composition lives in exactly one function.
-    An f-string that mentions a pinned IP outside ``pinned_transport.py``
-    re-opens that drift.
+    Three divergent copies had drifted, disagreeing on port and lacking IPv6
+    bracketing; an f-string outside the builder re-opens that drift.
     """
     offenders: list[str] = []
     for path, tree in app_trees(exclude=frozenset({"pinned_transport.py", "safe_regex.py"})):

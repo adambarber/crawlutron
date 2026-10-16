@@ -1,12 +1,7 @@
 """The helpers more than one themed invariant module needs.
 
-`assert_trees_clean` is the tree-wide sweep every check depends on -- one
-definition rather than ~100 copies, so "sweep the whole app tree" has a single
-place to drift from. The `_enclosing_*` helpers answer "what def encloses this
-node?", which the shape detectors need and which is subtle enough to write once.
-`assert_property_detector_bites` is the check that a registered property's
-detector would actually fire, i.e. that the registry entry is not a lie.
-`function_defs` is the walk most shape detectors open with.
+``assert_trees_clean`` is the one tree-wide sweep every check depends on;
+``_enclosing_*`` answer "what def encloses this node?"; function_defs opens scans.
 """
 
 from __future__ import annotations
@@ -33,13 +28,8 @@ __all__ = [
 def app_names() -> set[str]:
     """Every name the app tree spells, at any depth and in any position.
 
-    Definitions alone are too narrow to answer "is this detector still aimed at
-    something real", and being too narrow there is not conservative, it is wrong:
-    ``self._memory_cache`` and ``threading._lock`` are attribute spellings that
-    exist in app/ perfectly well, and an audit calling them missing would send
-    someone to fix working detectors. So the universe is every def, class,
-    attribute, stored name and import alias -- exactly the set of spellings a
-    detector could legitimately be pointed at.
+    Definitions alone are too narrow: attribute spellings exist in app/, so the
+    universe is every def/class/attr/alias spelling a detector could target.
     """
     names: set[str] = set()
     for path in (REPO_ROOT / "app").rglob("*.py"):
@@ -63,11 +53,8 @@ type FunctionNode = ast.FunctionDef | ast.AsyncFunctionDef
 def function_defs(tree: ast.AST) -> list[FunctionNode]:
     """Every function definition in ``tree``, sync or async, in source order.
 
-    The opening move of most shape detectors: "look inside each function in this
-    module and find the one that does X". Written as a parenthesised generator
-    inside a ``for`` it appeared verbatim in detector after detector, which is
-    how a detector ends up walking a narrower set of nodes than the one beside
-    it and the two disagree about the same file for no visible reason.
+    The opening move of most shape detectors, written once; a parenthesised
+    copy in each detector is how two end up walking different node sets.
     """
     return [node for node in ast.walk(tree) if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))]
 
@@ -80,28 +67,8 @@ def assert_trees_clean(
 ) -> None:
     """Sweep every module through `detector` and fail on the offenders it finds.
 
-    This is the tree-wide walk every invariant check depends on, so it is written
-    once here rather than per detector. It used to be four lines copied into each
-    of ~60 tests -- declare the list, walk ``app_trees()``, ``extend``, assert --
-    and a copy is exactly what makes a check that sweeps nothing, or sweeps a
-    hard-coded file list, look identical to one that sweeps the tree the rule
-    actually requires (see :func:`tests.chokepoint_walks.app_trees`).
-
-    ``trees`` defaults to the whole app tree; a check passes an explicit walker
-    only to exclude sanctioned modules, and the default is what makes a forgotten
-    sweep fail loudly rather than silently pass on an empty list.
-
-    ``detector`` and ``trees`` are ``Module``, not ``AST``: every tree this
-    sweeps came from ``ast.parse`` over a whole file, and a detector that reads
-    ``tree.body`` -- which is how a great many of them reach module-level
-    definitions -- is asking for exactly that. The wider node left those
-    detectors unable to say what they actually read.
-
-    The offenders are appended to ``message`` separated by ``; ``, so a caller
-    writes one sentence of consequence and lets the sweep supply the evidence.
-    The separator is a semicolon because every offender is already a complete
-    sentence. It was a comma until a check whose message needed re-joining by
-    hand could not use this at all and copied the walk instead -- four had.
+    One tree-wide walk rather than ~60 copied walks; ``trees`` defaults to the
+    whole app tree so a forgotten sweep fails loud instead of passing empty.
     """
     offenders = [
         hit for path, tree in (app_trees() if trees is None else trees) for hit in detector(tree, path)
@@ -112,13 +79,8 @@ def assert_trees_clean(
 def _enclosing_nodes(tree: ast.AST, matches: Callable[[ast.AST], bool]) -> list[tuple[ast.AST, str]]:
     """``(node, innermost enclosing function name)`` for every node ``matches`` accepts.
 
-    ``nodes_of`` yields a flat breadth-first sequence with no parent links, so a
-    detector that needs to know *where* a node sits cannot be built on it. This
-    descends instead, which is affordable: a couple of rules, once per module.
-
-    The name is where a detector reads *ownership* from -- a contract authored in
-    one function rather than three -- and that question applies to any node kind,
-    not only to calls, so the descent takes a predicate instead of a callee name.
+    ``nodes_of`` has no parent links, so this descends per module to
+    read ownership from the enclosing function name via a predicate.
     """
     found: list[tuple[ast.AST, str]] = []
 
@@ -243,14 +205,8 @@ def assert_property_detector_bites(
 ) -> None:
     """Prove a property detector has teeth, in-process, without a break/restore cycle.
 
-    ``caught`` maps a label to (source, exact offender count): every shape must
-    be reported with exactly that many offenders, so a detector cannot pass by
-    over-reporting. A mapping source places each named module in a separate AST
-    and invokes the detector on the final module with all modules available for
-    capability resolution. ``quiet`` is a module or labelled modules that
-    delegate to the owner and must produce none. This is the entire proof of a
-    detector's teeth -- a detector that cannot recognise its own property fails
-    here rather than in production.
+    ``caught`` maps a label to (source, exact offender count); a detector that
+    cannot recognise its own property fails here, not in production.
     """
     path = REPO_ROOT / "app" / "_synthetic.py"
 
