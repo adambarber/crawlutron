@@ -37,18 +37,10 @@ from tests._timing_harnesses import await_until
 
 
 class TestStatusResponseShape:
-    """The job status response is a projection of the status view, not a subset of it.
+    """The job status response is a projection of the status view, not a subset.
 
-    The store persists a job's kind, the status projection selects it, and the two
-    recovery seams read it back out of that same view. It was nevertheless absent
-    from every status response the API returned: ``_build_job_status`` handed the
-    view to the model with a ``**`` splat, and the model declares ``extra="ignore"``,
-    so a key it did not declare was dropped without a word. No test asserted the
-    response carried it, so no test could fail.
-
-    Asserted here through the HTTP surface rather than against the model, because
-    the client is what was being told something untrue.
-    """
+    The persisted ``kind`` was splatted into an ``extra="ignore"`` model and
+    dropped without a word; asserted here through the HTTP surface."""
 
     async def test_status_response_carries_the_job_kind(self, client):
         job_id = await _create_api_job(
@@ -65,10 +57,8 @@ class TestStatusResponseShape:
     async def test_single_shot_status_response_carries_its_own_kind(self, client, job_store):
         """The kind must come from the row, not from a per-endpoint constant.
 
-        Both kinds read the same projection, so a response that hard-coded one
-        would satisfy the whole-site case above while lying to every single-shot
-        caller -- which is the half that decides resumption.
-        """
+        A hard-coded one would satisfy the whole-site case while lying to every
+        single-shot caller -- the half that decides resumption."""
         job_store.create_single_shot("shot-1", GRAPH_ROOT, CrawlPolicy())
 
         response = await client.get("/v1/jobs/shot-1")
@@ -80,24 +70,14 @@ class TestStatusResponseShape:
 class TestJobStateWaitContract:
     """The wait itself is the contract, so it is pinned like one.
 
-    ``_wait_status`` used to poll the row against a 5.0s wall-clock deadline.
-    That deadline is a starvation escape hatch wearing a deadline's clothes: it
-    turned one red run under four agent sessions (62.9s user CPU inside a
-    271.5s run) into a failing suite for a job that was progressing fine. These
-    two tests hold the line so nobody quietly puts a poll-and-a-number back.
-    """
+    ``_wait_status`` polled against a 5.0s deadline -- a starvation escape hatch
+    wearing a deadline's clothes; these tests hold the line."""
 
     async def test_wait_status_rides_the_write_not_the_clock(self, job_store, monkeypatch):
         """The wait blocks until the control-plane write lands, then returns it.
 
-        The runner's PENDING->RUNNING claim is held in its worker thread behind
-        a gate, so the row is guaranteed to read ``pending`` for as long as the
-        test wants it to. A waiter created before that claim can therefore not
-        have completed -- there is nothing for it to have seen -- which is what
-        makes "it was still blocked" an observation rather than a timing bet.
-        Opening the gate lets the claim through and the assertion becomes: the
-        wait returned the terminal status the job actually reached.
-        """
+        A waiter created before the claim can not have completed -- nothing for
+        it to have seen -- so "still blocked" is an observation, not a bet."""
         gate = threading.Event()
         real_set_status = job_store.set_status
 
@@ -130,10 +110,8 @@ class TestJobStateWaitContract:
     async def test_wait_status_refuses_a_store_it_cannot_observe(self, job_store, tmp_path):
         """A store with no write bus is a hard error, never a silent poll.
 
-        The fallback that would make this "work" -- poll the row until the state
-        matches -- is exactly the implementation that raced a starved box, so
-        the harness refuses the job instead of quietly reintroducing it.
-        """
+        The "workable" fallback -- poll until the state matches -- is exactly
+        the implementation that raced a starved box, so the harness refuses."""
         from app.storage.job_store import JobStore
         from tests._job_harnesses import _wait_status as wait_status
         from tests._policy_factories import UNRESTRICTED_HOST_POLICY, deployment_tier
@@ -148,10 +126,8 @@ class TestJobStateWaitContract:
 class TestJobControlOverRunner:
     """Control transitions observed on a live runner, not on a finished row.
 
-    Each of these has to flip a control bit while the runner is mid-batch, so
-    the engine is held and released at the moment the test means it -- see
-    :func:`submit_blocked_job`.
-    """
+    Each flips a control bit mid-batch, so the engine is held and released at
+    the moment the test means it -- see :func:`submit_blocked_job`."""
 
     @staticmethod
     async def _blocked(client, job_store, results):
@@ -224,14 +200,10 @@ class TestJobControlOverRunner:
 
 
 class TestJobControlTransitions:
-    """A control action the job is not in a state to accept is a state conflict.
+    """A control action a job is not in a state to accept is a state conflict.
 
-    The three cases differ only in the action and in the state the job is put
-    into first, so the wiring around them -- the app, the store, the seed job,
-    the cleanup -- is one helper rather than three copies of it. A copy is what
-    made the "seed to a terminal state first" line the one most likely to be
-    forgotten, and then a 409 test would have been asserting a 422.
-    """
+    The three cases differ only in action and seed state, so the wiring is one
+    helper; a copy let the seed-to-terminal line be forgotten."""
 
     @staticmethod
     async def _control(action: str, expected: int, *, seed_terminal: bool = False) -> None:
@@ -262,15 +234,8 @@ class TestJobControlTransitions:
 class TestEveryVisitedUrlHasAnEnvelope:
     """A job's results must account for every URL it marked visited.
 
-    When the engine's batch came back without a result for a URL, the runner
-    counted it in ``total_failed`` and moved on: the URL was in ``visited`` but
-    nothing in ``results`` named it, so a job read as ``total_crawled: 2`` with a
-    single result and no way to tell which page was missing. The batch's own
-    shaping path already solved this -- ``_failed_unified_result`` carries the
-    URL through and reports it as a terminal failure -- and its docstring says it
-    mirrors the runner's semantics, which is exactly the coupling that let the
-    runner drift from it.
-    """
+    A URL in ``visited`` without a result read as ``total_crawled: 2`` with a
+    single result; this asserts the runner cannot drift from the batch path."""
 
     async def test_a_url_the_engine_never_answered_still_gets_an_envelope(self, client, job_store):
         from tests._job_harnesses import _execution_payload, _execution_urls
@@ -316,10 +281,8 @@ class TestTheRunnerClaim:
     def _paused_after_claim(job_store):
         """A seeded job claimed RUNNING then stopped PAUSED, engine installed.
 
-        The flip is the claim the two paths below exercise: the row is PENDING,
-        this process claims it, then stops it. What happens next differs per
-        path; the state setup does not.
-        """
+        The claim is the flip the two paths below exercise; the state setup
+        does not differ between them."""
         job = TestTheRunnerClaim._seeded(job_store)
         assert job_store.set_status(job.job_id, JobStatus.RUNNING, expected=JobStatus.PENDING)
         assert job_store.set_status(job.job_id, JobStatus.PAUSED, expected=JobStatus.RUNNING)
