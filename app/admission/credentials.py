@@ -1,21 +1,6 @@
-"""Origin-scoped credentials, keyed by canonical origin.
-
-One module owns the two decisions that must never disagree:
-
-- ``origin_of``: the canonical origin form. Credential KEYS are validated
-  against it (``origin_of(key) == key``, rejection and never silent
-  normalization -- a path-, query- or userinfo-bearing key can never match the
-  per-hop lookup, so accepting one would let a caller believe the credential
-  was scoped narrower than it applies), and every request looks up with it --
-  one rule, one site.
-- ``authorization_value``: the only place a credential becomes an
-  ``Authorization`` header value.
-
-Cross-host containment is NOT re-implemented here: the produced value lands
-in the normal header set, and the redirect loop's credential scrub
-(``_CREDENTIAL_HEADERS`` strips ``authorization`` across hosts) enforces
-"credentials never cross host boundaries" at the hop boundary, exactly as
-it does for cookies.
+"""Origin-scoped credentials, keyed by canonical origin, owning the two decisions
+that must never disagree: ``origin_of`` and ``authorization_value``. Cross-host
+stripping is the redirect loop's, not this module's.
 """
 
 from __future__ import annotations
@@ -31,11 +16,9 @@ __all__ = ["apply_credentials", "authorization_value", "origin_of"]
 
 
 def origin_of(url: str) -> str:
-    """Canonical ``scheme://host[:port]`` for ``url``.
-
-    Lowercases scheme/host, drops default ports, rejects non-HTTP schemes
-    and userinfo (a credential must never be addressed through ``user@``).
-    Idempotent: ``origin_of(origin_of(u)) == origin_of(u)``.
+    """Canonical ``scheme://host[:port]`` for ``url``: lowercases scheme/host, drops
+    default ports, rejects non-HTTP schemes and userinfo (never addressed through
+    ``user@``). Idempotent.
     """
     parsed = urlsplit(url.strip())
     scheme = parsed.scheme.lower()
@@ -53,13 +36,9 @@ def origin_of(url: str) -> str:
 
 
 def authorization_value(credential: Credential) -> str:
-    """The single wire shape for a validated credential.
-
-    Pure projection: whether a credential can produce a header at all is
-    decided by ``Credential``'s own validator at the read edge, so this cannot
-    be the place a policy is found to be unusable. It used to be, which meant a
-    bearer credential with no token passed policy validation and then raised
-    here, three layers down, on the first request that used it.
+    """The single wire shape for a validated credential -- a pure projection, since
+    usability is decided by ``Credential``'s validator at the read edge (it used
+    to raise here, three layers down, on the first request that used a bad one).
     """
     if credential.kind == "bearer":
         return f"Bearer {credential.token}"
@@ -72,11 +51,9 @@ def apply_credentials(
     url: NormalizedUrl,
     credentials: Mapping[str, Credential],
 ) -> dict[str, str]:
-    """Attach the Authorization header iff ``url``'s origin holds one.
-
-    Lookup is exact canonical-origin equality: a credential written for
-    origin A can never attach to a request for origin B (same-origin
-    redirects keep it; cross-host redirects strip it).
+    """Attach the Authorization header iff ``url``'s origin holds one, by exact
+    canonical-origin equality: a credential for origin A can never attach to a
+    request for origin B (cross-host redirects strip it).
     """
     if not credentials:
         return headers

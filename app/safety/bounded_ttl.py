@@ -1,14 +1,6 @@
-"""BoundedTTLCache: one locked, TTL'd, LRU-bounded cache.
-
-Chokepoints review, first primitive. The same shape (a dict + a lock + a TTL
-+ a cap) was hand-rolled at three sites and produced two lock bugs (the
-robots cap mutating outside _ROBOTS_CACHE_LOCK; the DNS soft-cap clear
-under the lock window). Here the lock lives INSIDE every operation, so
-"forgot the lock" and "evicted outside the lock" are unrepresentable.
-
-Value semantics: each entry stores (expires_at, value). Expired entries
-read as absent. put() refreshes recency (LRU) and evicts
-least-recently-used entries beyond max_entries.
+"""BoundedTTLCache: one locked, TTL'd, LRU-bounded cache, standing in for the
+hand-rolled dict+lock+TTL shapes that produced two lock bugs. The lock lives
+inside every operation, so "forgot the lock" is unrepresentable.
 """
 
 from __future__ import annotations
@@ -29,20 +21,9 @@ class BoundedTTLCache[K, V]:
         self._lock = threading.Lock()
 
     def _entry_if_fresh(self, key: K, *, touch: bool, allow_stale: bool = False) -> V | None:
-        """Shared read path: return the value if fresh, else None.
-
-        Expired entries are NOT deleted here -- the engines' hand-rolled
-        dicts leave expired entries in place (purge-only deletion), and the
-        sitemap 304 path reads stale-but-present entries directly. Callers
-        that want eager eviction use purge_expired().
-
-        ``allow_stale`` is the 304-reuse contract, expressed as a flag on this
-        one read path rather than as a second read path. It used to be a second
-        path, and the cost of that is the two rules that MUST NOT differ between
-        readers -- the expiry boundary and the LRU touch -- being declared twice,
-        with nothing testing that they still agree. ``None`` and ``value`` are
-        both legitimate returns here, so a divergence is invisible until a
-        sitemap quietly stops seeing a last-known URL.
+        """Shared read path: the value if fresh, else ``None``; expired entries stay
+        in place (purge-only), so the sitemap 304 path reads stale-but-present
+        ones. ``allow_stale`` keeps the 304 contract on this one read path.
         """
         now = self._clock()
         with self._lock:
@@ -57,11 +38,9 @@ class BoundedTTLCache[K, V]:
             return value
 
     def get(self, key: K) -> V | None:
-        """Fresh value for key, or None if absent/expired (LRU-touched).
-
-        Expiry mirrors the engines' contract (``expires_at > now`` = fresh):
-        the boundary instant itself is expired. Expired entries stay present
-        (purge-only deletion) so stale-but-present reads keep working.
+        """Fresh value for key, or None if absent or expired (LRU-touched). Expiry
+        mirrors the engines' contract -- ``expires_at > now`` is fresh, the
+        boundary instant expired -- and expired entries stay present for stale reads.
         """
         return self._entry_if_fresh(key, touch=True)
 
@@ -70,11 +49,9 @@ class BoundedTTLCache[K, V]:
         return self._entry_if_fresh(key, touch=False)
 
     def get_stale(self, key: K) -> V | None:
-        """Value even when expired (304-reuse contract), with LRU touch.
-
-        The sitemap fetcher reuses last-known URLs when the origin answers
-        304 Not Modified; the entry must be present, not fresh. Expiry is
-        enforced by the fetch path (get), not here.
+        """Value even when expired (the 304-reuse contract), LRU-touched: the
+        sitemap fetcher reuses last-known URLs on ``304 Not Modified``, so the
+        entry must be present, and expiry is enforced by the fetch path, not here.
         """
         return self._entry_if_fresh(key, touch=True, allow_stale=True)
 
