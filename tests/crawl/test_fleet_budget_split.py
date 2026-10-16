@@ -1,23 +1,8 @@
 """A cgroup budget is shared; the pools that spend it are not.
 
-`derive_browser_pool_size` and `max_http_concurrency_for` size themselves from
-the cgroup memory limit. That limit belongs to the container, so it is the
-same number in every worker -- but each worker's pools are its own. With N
-workers every one of them reads the whole budget and grants a whole pool's
-worth, so the fleet spends N times the RAM the admission gate is reasoning
-about. The gate reads genuinely shared pressure and then hands out per-process
-capacity at the observed ratio, which is the combination that produces an OOM
-kill of the whole service rather than a slow request.
-
-The division belongs where the budget is derived, not at each pool's call site:
-the httpx pool, the browser pool and the extraction pool all size from these
-functions, and dividing at a call site would let one of them keep the
-undivided number.
-
-`doc_worker_count` is in the same file for the same reason -- each persistent
-markitdown worker holds 100-300 MiB for the life of the process, so N workers
-at the default 2 is 2N of them.
-"""
+Every worker grants a whole pool's worth, so N workers spend N times the RAM.
+The division belongs where the budget is DERIVED; each markitdown worker
+holds 100-300 MiB, hence ``doc_worker_count`` here."""
 
 import pytest
 
@@ -56,12 +41,9 @@ def test_a_non_positive_worker_count_is_clamped_to_one(monkeypatch):
 def test_every_worker_derives_a_pool_that_fits_the_whole_fleet(monkeypatch):
     """The defect: N workers each spending the whole RAM budget.
 
-    The assertion is on the fleet total against the cap that names it, not
-    against a single worker's pool: with N workers each guaranteed at least one
-    browser, an undersized container cannot always keep the fleet at or below
-    what one worker would have taken, and pretending otherwise would only be
-    satisfiable by giving a worker no browser at all.
-    """
+    The assertion is on the fleet total against the cap that names it: an
+    undersized container cannot always keep the fleet at what one worker would
+    have taken."""
     limit = 16 * 1024 * 1024 * 1024
     monkeypatch.setenv("CRAWLUTRON_BROWSER_POOL_SIZE", "")
     monkeypatch.setenv("CRAWLUTRON_WORKERS", "4")
@@ -78,10 +60,8 @@ def test_every_worker_derives_a_pool_that_fits_the_whole_fleet(monkeypatch):
 def test_the_pool_size_knob_is_a_fleet_total_not_a_per_process_one(monkeypatch):
     """An operator setting 4 means four browsers, not four per worker.
 
-    With the shipped single-worker configuration the two readings coincide, so
-    this changes no shipped behaviour -- it stops the fleet from quietly
-    multiplying the number the operator thought they were capping.
-    """
+    The shipped single-worker config makes the readings coincide, so this
+    changes no shipped behaviour -- it stops a quiet fleet-wide multiply."""
     monkeypatch.setenv("CRAWLUTRON_BROWSER_POOL_SIZE", "4")
     monkeypatch.setenv("CRAWLUTRON_WORKERS", "1")
     assert rp.derive_browser_pool_size() == 4
@@ -116,18 +96,9 @@ def test_doc_workers_are_split_across_workers(monkeypatch):
 def test_the_content_length_budget_is_split_across_workers(monkeypatch):
     """The last cgroup budget that was read undivided.
 
-    ``CRAWLUTRON_CONTENT_RAM_BUDGET_BYTES`` bounds the RAM held by in-flight
-    page bodies, which is container memory -- the same shared number the pool
-    sizes read. Left whole, each worker sized its per-page cap against the whole
-    budget, so the fleet held N times what the knob names. This is the same
-    over-admission ``test_http_concurrency_is_split_across_workers`` covers for
-    connections, reached through the one budget not in that sweep.
-
-    The two clamps on this cap are different kinds of quantity and the test keeps
-    them apart. ``DEFAULT_MAX_CONTENT_LENGTH_BYTES`` is a per-page ceiling, so it
-    is not divided and is what binds when the budget is generous; the RAM budget
-    is a fleet aggregate, so it is divided and is what binds when it is not.
-    """
+    ``CRAWLUTRON_CONTENT_RAM_BUDGET_BYTES`` bounds in-flight page bodies; left
+    whole, the fleet held N times the knob. The per-page ceiling is NOT divided
+    (binds when generous), the fleet RAM aggregate IS (binds when not)."""
     from app.models.crawl_policy_limits import CrawlPolicyLimits
     from app.transport import content_cache_key as cck
 
@@ -150,10 +121,8 @@ def test_the_content_length_budget_is_split_across_workers(monkeypatch):
 def test_an_explicit_content_cap_is_not_divided(monkeypatch):
     """A per-page cap the caller set is that caller's business, not the fleet's.
 
-    Division answers "how much of a SHARED budget may this process hold", and an
-    explicit cap is a single page the caller already bounded. Scaling it by the
-    worker count would silently shrink a policy the operator wrote on purpose.
-    """
+    Division answers "how much SHARED budget may this process hold"; an explicit
+    cap is single-page, and scaling it shrinks an operator-written policy."""
     from app.models.crawl_policy_limits import CrawlPolicyLimits
     from app.transport import content_cache_key as cck
 
@@ -168,10 +137,9 @@ def test_an_explicit_content_cap_is_not_divided(monkeypatch):
 def test_a_worker_always_gets_at_least_one_slot(monkeypatch):
     """Division must never produce a zero budget.
 
-    A worker that admits nothing is indistinguishable from a hung service, and
-    an over-subscribed fleet is the operator's memory-limit error, not a
-    reason to make the crawler refuse to work at all.
-    """
+    A worker that admits nothing is indistinguishable from a hung service; an
+    over-subscribed fleet is the operator's memory error, not a reason to
+    refuse to work."""
     monkeypatch.setenv("CRAWLUTRON_WORKERS", "64")
 
     assert rp.derive_browser_pool_size(64 * 1024 * 1024) >= 1
@@ -189,20 +157,11 @@ def _policy(limit: int) -> rp.AdmissionPolicy:
 
 
 def test_the_admission_gate_grants_the_fleet_no_more_than_one_worker_would(monkeypatch):
-    """The third defect, and the reason no distributed semaphore is needed.
+    """The defect, and the reason no distributed semaphore is needed.
 
-    The gate reads cgroup pressure, which every worker shares, and grants
-    capacity per process. N uncoordinated controllers therefore admit N times
-    what the measured pressure supports. The obvious fix is a shared semaphore,
-    but a semaphore has to lease and expire slots or a dead worker's share is
-    lost forever, and it has to be contended on every batch.
-
-    Dividing the ceiling is strictly better here: the resource is a shared,
-    slow-moving budget rather than a contended instantaneous semaphore, so a
-    static split needs no coordination, cannot leak, and cannot over-admit. The
-    price is that an idle worker's share goes unused -- under-utilisation,
-    which is the safe direction to be wrong in.
-    """
+    N uncoordinated controllers reading shared pressure admit N times it; a
+    semaphore would lease/expire slots and contend every batch. A static SPLIT
+    of a slow-moving budget cannot leak or over-admit -- only under-utilises."""
     limit = 16 * 1024 * 1024 * 1024
     monkeypatch.setenv("CRAWLUTRON_WORKERS", "1")
     single = _policy(limit)
@@ -218,17 +177,9 @@ def test_the_admission_gate_grants_the_fleet_no_more_than_one_worker_would(monke
 def test_the_browser_tier_stays_inside_the_ram_budget(monkeypatch):
     """The bound the floor of one browser per worker puts on the worker count.
 
-    Every budget is floored at one so a worker is never useless, and one
-    browser is 700 MiB reserved. That is the right trade -- under-utilisation
-    beats a worker that cannot render anything -- but it is only free while N
-    browsers fit the budget the pool sizing assumed. Past that point the fleet
-    is over-committed by exactly the overflow, and the operator's remedy is
-    fewer workers or more RAM, not a different setting.
-
-    Naming the crossing point is the point: it is the number a deployment has
-    to stay under, and an undocumented floor is how a container gets OOM-killed
-    by a config that looks conservative everywhere.
-    """
+    One browser is 700 MiB, so the floor is only free while N browsers fit the
+    sized budget; past that, fewer workers or more RAM. An undocumented floor
+    is how a container gets OOM-killed by a conservative config."""
     limit = 16 * 1024 * 1024 * 1024
     budget = int(limit * rp.BROWSER_RAM_FRACTION)
     browser_bytes = rp.TaskRamBudget().browser_task_bytes
