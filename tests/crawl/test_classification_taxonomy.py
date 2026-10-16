@@ -65,11 +65,8 @@ def _grouping_declarations() -> dict[str, ast.AST]:
 def _assigned_value(source: str, index: int = 0) -> ast.AST:
     """The value ``source``'s ``index``-th top-level statement assigns.
 
-    The snippets below are single-assignment modules, and reaching their value
-    was spelled out as ``ast.parse(...).body[i].value`` at each site. That
-    expression is only a value on an ``Assign``, and saying so once here is what
-    lets the tests be about the groupings rather than about the walk.
-    """
+    The snippets are single-assignment modules; saying "value only on an
+    ``Assign``" once lets the tests be about the groupings, not the walk."""
     statement = ast.parse(source).body[index]
     assert isinstance(statement, ast.Assign), source
     return statement.value
@@ -99,13 +96,8 @@ def _reaches_the_taxonomy(
 ) -> bool:
     """Whether a grouping names enum members directly or via another grouping.
 
-    The transitive half matters because a derived grouping legitimately contains
-    no member reference of its own: ``HTTP_BLOCKED`` is a union of two earlier
-    groupings, and requiring it to spell a member would force the transcription
-    this whole section exists to prevent. A cycle terminates instead of hanging,
-    and reports False -- a grouping that only ever refers to itself has not
-    reached the taxonomy by any path.
-    """
+    A derived grouping contains no member reference of its own
+    (``HTTP_BLOCKED`` is a union); a cycle terminates and reports False."""
     if name in seen or name not in declarations:
         return False
     value = declarations[name]
@@ -124,12 +116,8 @@ def _reaches_the_taxonomy(
 def test_groupings_are_derived_from_the_enum_not_relisted():
     """No grouping embeds a string literal, and every one reaches the taxonomy.
 
-    The literal half is the historical check. The reachability half replaces a
-    proxy that was narrower than its own intent: it used to demand a direct
-    ``CrawlClassification.x`` reference inside every grouping, which a correct
-    transitive union does not have, so enforcing it would have required
-    re-introducing the transcription.
-    """
+    Reachability replaces a proxy that demanded a direct member reference
+    inside every grouping -- which a transitive union does not have."""
     declarations = _grouping_declarations()
     assert set(declarations) == _GROUPING_ASSIGNMENTS, (
         "expected every grouping to be declared, found "
@@ -164,10 +152,8 @@ def test_a_grouping_with_no_path_to_the_taxonomy_fails_the_check():
 def test_a_classification_grouping_is_derived_not_restated():
     """No taxonomy member is spelled in two grouping declarations.
 
-    Every grouping after the leaves is composed with a set operation, so a
-    classification added to the taxonomy lands in the derived groupings without
-    anyone editing them, and this sweep has nothing to report.
-    """
+    Every grouping after the leaves is a set operation, so a classification
+    lands in the derived groupings without anyone editing them."""
     spelled: dict[str, list[str]] = {}
     for name, value in sorted(_grouping_declarations().items()):
         for member in sorted(_spelled_classification_members(value)):
@@ -190,10 +176,8 @@ def test_the_restated_grouping_detector_bites():
 def test_the_grouping_relations_still_hold():
     """The relations the derived declarations must preserve, stated as values.
 
-    Deriving the groupings is only safe if the sets are still the same sets.
-    These are the properties the hand-written transcriptions were carrying, and
-    they are what a refactor of ``app/vocabulary`` could silently break.
-    """
+    The properties the hand-written transcriptions carried; what a refactor of
+    ``app/vocabulary`` could silently break."""
     entire = {member.value for member in CrawlClassification}
     assert BROWSER_BLOCKED_CLASSIFICATIONS <= HTTP_BLOCKED_CLASSIFICATIONS
     assert BROWSER_BLOCKED_CLASSIFICATIONS <= NON_TRANSIENT_CLASSIFICATIONS
@@ -206,11 +190,8 @@ def test_the_grouping_relations_still_hold():
 def test_every_classifiable_label_is_an_explicit_table_entry():
     """Drift guard: no classifier output may fall through to the default.
 
-    Adding a signature to ``app.extraction.classify`` without giving it a status is the
-    regression this pins; it is what let the two if-chains drift apart in the
-    first place (an unlisted label silently took whichever default the local
-    copy happened to use).
-    """
+    Adding a signature to ``app.extraction.classify`` without a status is the
+    regression this pins -- it is what let the two if-chains drift apart."""
     table = CLASSIFICATION_STATUS_BY_LABEL
     missing = [label for label in _classifiable_labels() if label not in table]
     assert not missing, f"classifications with no explicit status entry: {missing}"
@@ -219,11 +200,8 @@ def test_every_classifiable_label_is_an_explicit_table_entry():
 def test_every_classifiable_label_resolves_through_the_table(browser_resolver):
     """Every label the classifiers can emit takes its status from the one table.
 
-    This is the direct migration of the pre-consolidation check that the HTTP and
-    browser paths agree on every label: with one shared resolver the agreement
-    is by construction, so the assertion is now that the resolver both paths use
-    is the table itself.
-    """
+    With one shared resolver the HTTP/browser agreement is by construction; the
+    assertion is that the resolver both paths use is the table itself."""
     labels = _classifiable_labels() + sorted(FAILED_CLASSIFICATIONS)
     labels += sorted(HTTP_BLOCKED_CLASSIFICATIONS | BROWSER_BLOCKED_CLASSIFICATIONS)
     labels += list(UNRECOGNIZED_LABELS)
@@ -282,19 +260,10 @@ def test_every_grouping_member_is_an_enum_member():
 
 
 def test_the_status_table_covers_every_taxonomy_member():
-    """Completeness: every ``CrawlClassification`` member is an explicit key in
-    the status table, so no label can fall through to
-    ``UNKNOWN_CLASSIFICATION_STATUS``.
+    """Completeness: every taxonomy member is an explicit status-table key.
 
-    The module docstring claims this and nothing used to enforce it: 13 members
-    (the transport/strategy exception codes, the robots and policy-refusal
-    labels and the browser retry codes) took the "blocked" default while the
-    terminal builders asserted "failed"/"skipped"/"disallowed"/"retry_exhausted"
-    for those same labels -- so a consumer re-deriving status from
-    classification saw a different value than the wire. The set difference is
-    derived from the enum, not hand-copied, so a member added to the taxonomy
-    without a status entry fails here by name.
-    """
+    Nothing used to enforce it -- 13 members took a "blocked" default while
+    builders asserted otherwise; the enum-derived set difference fails by name."""
     entire = {member.value for member in CrawlClassification}
     covered = set(CLASSIFICATION_STATUS_BY_LABEL)
     assert covered <= entire, (
@@ -322,9 +291,8 @@ def test_every_table_status_is_a_declared_result_status():
 
 class TestStatusAgreesWithClassification:
     """The (classification, status) agreement the taxonomy guards at the
-    terminal builders. These are the labels that used to disagree: the builders
-    asserted one status and ``status_for_classification`` re-derived the
-    "blocked" default for the same label."""
+    terminal builders -- the labels that used to disagree, where the builders
+    asserted one status and ``status_for_classification`` re-derived another."""
 
     # The exception chokepoint's labels: it builds a terminal failure, and the table used to hand back
     # "blocked" for every one of them.
