@@ -34,14 +34,8 @@ def frontier_link_url(
     resolve_against: NormalizedUrl | None = None,
 ) -> NormalizedUrl | None:
     """The only link field eligible for frontier/visited use: the validated URL.
-
-    Extraction can legitimately emit a raw ``url`` href (``/rel``, ``#frag``,
-    scheme-relative) alongside the policy-validated ``normalized_url``.
-    Frontier and visited sets are keyed on absolute, validated URLs, so the raw
-    ``url`` must never enter them. A link without a usable ``normalized_url``
-    (or a non-link string) yields None: unqueue-able, not a raw-href fallback.
-    Attribute-held links (e.g. ``DiscoveredLink`` dataclasses) read the same
-    validated field; the raw href is never consulted in any shape.
+    A raw href (/rel, #frag, scheme-relative) is not an absolute URL, so a link
+    with no usable normalized_url yields None -- never a raw-href fallback.
     """
     if isinstance(link, dict):
         normalized = link.get("normalized_url")
@@ -59,14 +53,8 @@ def frontier_link_url(
 @dataclass(frozen=True, slots=True)
 class EnvelopeOptions:
     """The scalar fields a response envelope carries, beside its shaped results.
-
-    One record rather than four keyword parameters on each of two builders: the
-    parameters were the reason the sync and async signatures were a six-line
-    identical fragment, and a twin signature is a contract that has to be edited
-    twice. The fields stay named and explicit -- a misspelled or unpassed
-    envelope field is a field the response silently lacks, because
-    ``UnifiedCrawlResponse`` drops one rather than raising -- so this is a place
-    to add a field, not a ``**options`` bag that would take any.
+    One record instead of the twin six-line builder signatures (a contract edited
+    twice); fields stay named and explicit, since a dropped field is silently absent.
     """
 
     request_id: str = ""
@@ -80,23 +68,9 @@ def _response_envelope(
     result_count: int,
     options: EnvelopeOptions,
 ) -> UnifiedCrawlResponse:
-    """The one construction of the response envelope: shaped results plus every scalar field.
-
-    The sync builder, the async builder, and every endpoint's raw-result
-    adaptation funnel through here, so the field list exists once. Every field
-    of :class:`UnifiedCrawlResponse` is required by the model, so a new one has
-    to be passed HERE or the whole tree starts raising at the first request --
-    which is the loud outcome; the quiet one is a builder that drops it.
-
-    The ``submitted_count`` fallback -- the count the wire reports when the
-    caller could not say how many URLs were admitted -- used to be spelled in
-    both builders, and two copies of a fallback is how two paths start
-    disagreeing about a batch's size. ``test_abuild_unified_crawl_response_matches_sync``
-    is what proves they still agree.
-
-    ``result_count`` is the length of the RAW result list, passed separately
-    from ``shaped`` on purpose: counting the shaped list instead would make a
-    dropped item silently change a number the response claims was submitted.
+    """The one construction of the response envelope: shaped results + every scalar.
+    Every UnifiedCrawlResponse field is required, so a new one is passed here.
+    result_count is the RAW list length, so a dropped shaped item can't silently change the submitted count.
     """
     return UnifiedCrawlResponse(
         results=shaped,
@@ -113,10 +87,8 @@ def build_unified_crawl_response(
     options: EnvelopeOptions | None = None,
 ) -> UnifiedCrawlResponse:
     """Build the unified crawl response from a list of engine-result dicts.
-
-    The async twin below is the same contract with the shaping off the event
-    loop; both hand their options to :func:`_response_envelope`, so the response
-    they build is decided in one place.
+    The async twin is the same contract with shaping off the event loop; both
+    hand their options to :func:`_response_envelope`, so the response is decided in one place.
     """
     return _response_envelope(
         _shape_all(results, adapt=build_unified_result), len(results), options or EnvelopeOptions()
@@ -128,28 +100,9 @@ def _shape_all[ResultT: AnyResult](
     *,
     adapt: Callable[[ResultT], UnifiedCrawlResult],
 ) -> list[UnifiedCrawlResult]:
-    """Shape a whole batch in one pass (the worker-thread side of
-    :func:`abuild_unified_crawl_response`).
-
-    One malformed item must not fail the batch: the job-runner path guards
-    per-item (a dropped item counts as a failed crawl, not silence), and the
-    endpoint must hold the same contract. The guard lives here rather than
-    at each caller so the two paths cannot drift apart again.
-
-    ``adapt`` is the per-item transform a pipeline applies before the
-    unified shaping (``/v1/render`` maps its browser-result dicts through
-    :func:`render_result_to_unified`). It is REQUIRED rather than defaulting to
-    the engine adapter: a default would pick a shape for the caller, and the
-    caller's shape is the one thing here that cannot be inferred -- ``/v1/crawl``
-    and ``/v1/render`` hold different records. It is typed as a transform INTO
-    the model rather than into a dict-shaped one, so an adapter cannot return a
-    partial item for ``build_unified_result`` to reinterpret -- that round trip
-    through a dict is where a required field could be omitted without any
-    checker noticing. It runs INSIDE the same per-item guard,
-    so an item the adapter cannot read degrades to a terminal failure for that
-    item instead of failing the batch -- the same resilience ``/v1/crawl``
-    already had, now extended to the render endpoint's adaptation step, which
-    used to run unguarded in a list comprehension at the call site.
+    """Shape a whole batch in one pass (the worker-thread side), so one malformed
+    item degrades to a terminal failure for that item, not the batch.
+    ``adapt`` is the required per-item transform, run inside the guard (the caller's shape can't be inferred).
     """
     shaped: list[UnifiedCrawlResult] = []
     for item in results:
@@ -168,14 +121,8 @@ def _shape_all[ResultT: AnyResult](
 
 def _peek_failed_fields(item: Any) -> dict[str, Any]:
     """Best-effort field reads off whatever arrived at the batch's last guard.
-
-    This is deliberately typed ``Any``: the guard above exists because the
-    per-item path CAN raise, so whatever arrived is by definition not the
-    record this module otherwise works in. Reading it is therefore best-effort
-    by attribute with a default -- ``getattr`` rather than ``.get`` because
-    the items are dataclasses now -- and whatever the item cannot answer
-    degrades to the honest empty value instead of raising a second exception
-    out of the guard and 500ing the whole batch.
+    Deliberately ``Any`` (the per-item path can raise), read by ``getattr`` with
+    a default -- the items are dataclasses now -- never raising out of the guard.
     """
     if isinstance(item, NormalizedUrl):
         # A page the batch never answered, held by the runner as an admitted
@@ -196,11 +143,9 @@ def _peek_failed_fields(item: Any) -> dict[str, Any]:
 
 
 def failed_unified_result(item: Any) -> UnifiedCrawlResult:
-    """A shape failure becomes a terminal failure for that item, not the batch.
-
-    Mirrors the job runner's semantics (``failed += 1`` on a dropped item).
-    Fields that require no interpretation are carried through so the caller
-    still sees which URL failed.
+    """A shape failure becomes a terminal failure for that item, not the batch,
+    mirroring the job runner's ``failed += 1`` on a dropped item. Fields that
+    need no interpretation are carried through, so the caller still sees which URL failed.
     """
     peeked = _peek_failed_fields(item)
 
@@ -239,15 +184,8 @@ async def abuild_unified_crawl_response[ResultT: AnyResult](
     adapt: Callable[[ResultT], UnifiedCrawlResult],
 ) -> UnifiedCrawlResponse:
     """Async :func:`build_unified_crawl_response` for use inside async endpoints.
-
-    The whole batch is shaped in ONE event-loop offload:
-    fanning one ``to_thread`` per item made every response pay N Future +
-    thread-dispatch overheads, and the default executor serializes those
-    submissions anyway once N exceeds the pool. Output is identical to the
-    sync contract, which stays for sync callers and tests.
-
-    ``adapt`` reaches ``_shape_all``'s per-item guard, so an item the adapter
-    rejects degrades instead of failing the response.
+    Shapes the whole batch in ONE ``to_thread`` offload (per-item fan-out pays N
+    Future + dispatch overheads), matching the sync contract; ``adapt`` keeps the per-item guard.
     """
     shaped = await asyncio.to_thread(_shape_all, results, adapt=adapt) if results else []
     return _response_envelope(shaped, len(results), options or EnvelopeOptions())
@@ -255,11 +193,8 @@ async def abuild_unified_crawl_response[ResultT: AnyResult](
 
 def _envelope_options(result: ProducerEnvelope | RenderEnvelope) -> EnvelopeOptions:
     """The three scalar keys, read once for both endpoints.
-
-    This is the whole reason the two adapters below exist as one pair rather
-    than two hand-written field lists: an envelope field added here reaches both
-    endpoints, and ``UnifiedCrawlResponse`` drops an unpassed field rather than
-    raising, which is how one shipped missing from a single endpoint.
+    This is why the two adapters below share one pair of reads, not two
+    hand-written lists: a field added here reaches both endpoints, and a dropped one is silent.
     """
     return EnvelopeOptions(
         request_id=result["request_id"],
@@ -270,22 +205,8 @@ def _envelope_options(result: ProducerEnvelope | RenderEnvelope) -> EnvelopeOpti
 
 async def aunified_response_from_result(result: ProducerEnvelope) -> UnifiedCrawlResponse:
     """The one adapter from a crawl producer's envelope to the unified response.
-
-    Both wire endpoints read their envelope through this module, so an envelope
-    field is passed once and cannot reach one path while being forgotten on the
-    other. That mistake is silent by construction --
-    ``UnifiedCrawlResponse`` drops an unpassed field rather than raising -- and
-    a response field has already shipped missing from one endpoint and been
-    caught only by curling the live endpoint.
-
-    Paired with :func:`arender_response_from_result`, which is the same adapter
-    for the other producer. Two functions rather than one overloaded on the
-    envelope, because the envelope's ``results`` element type IS the adapter's
-    input type: a single signature would have to accept either record and a
-    matching callable, which is exactly the ``Any``-on-both-sides pairing the
-    records exist to remove. Each body is its own call to
-    :func:`abuild_unified_crawl_response` and they share
-    :func:`_envelope_options`.
+    Both wire endpoints read the envelope here, so an envelope field is passed once
+    and reaches both (a dropped field is silent). Paired with :func:`arender_response_from_result`.
     """
     return await abuild_unified_crawl_response(
         result["results"],
@@ -296,10 +217,8 @@ async def aunified_response_from_result(result: ProducerEnvelope) -> UnifiedCraw
 
 async def arender_response_from_result(result: RenderEnvelope) -> UnifiedCrawlResponse:
     """:func:`aunified_response_from_result` for the render producer's envelope.
-
-    Same one-adapter-per-shape decision, same shared options builder, and the
-    per-item guard in ``_shape_all`` still degrades one unshapable result to a
-    terminal failure rather than 500ing the response.
+    Same one-adapter-per-shape decision and shared options builder; the per-item
+    guard in ``_shape_all`` still degrades one unshapable result to a terminal failure.
     """
     return await abuild_unified_crawl_response(
         result["results"],
