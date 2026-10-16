@@ -54,10 +54,8 @@ __all__ = [
 
 class JobStore:
     """SQLite-backed store for crawl job states.
-
-    Every method is synchronous SQLite work, so every method has an
-    ``a``-prefixed twin that runs the call off the event loop. ``self._lock``
-    serializes every connection use, so a twin never races a direct sync call.
+    Every method is synchronous SQLite work, so each has an ``a``-prefixed twin
+    running off the loop; ``self._lock`` serializes every connection use.
     """
 
     def __init__(self, db_path: str | Path, *, policy: HostPolicy, tier: PolicyTier):
@@ -124,22 +122,17 @@ class JobStore:
         )
 
     def save(self, job: CrawlJobState) -> None:
-        """Persist job DATA to SQLite (thread-safe).
-
-        ``status`` is written only on first INSERT; the UPDATE path
-        deliberately never touches it. Control state moves exclusively
-        through :meth:`set_status`: a stale whole-row save must not
-        resurrect the writer's status view and clobber a pause/cancel.
+        """Persist job DATA to SQLite (thread-safe). ``status`` is written only on first
+        INSERT -- the UPDATE path never touches it -- so control state moves through
+        set_status and a stale whole-row save cannot clobber a pause/cancel.
         """
         with self._lock:
             self._persist(job)
 
     def _persist(self, job: CrawlJobState) -> None:
         """Write job state to SQLite. Caller must hold ``self._lock``.
-
-        No normalization pass: identity is established at ingress, and the
-        read boundary re-derives it once per load. Re-deriving every URL here
-        would multiply the job loop's cost by the whole page history.
+        No normalization pass: identity is established at ingress, and the read
+        boundary re-derives it once per load, not per URL per save.
         """
         job.updated_at = time.time()
         self._conn.execute(_UPSERT_JOB_ROW_SQL, _job_row_params(job))
@@ -148,10 +141,8 @@ class JobStore:
 
     def set_status(self, job_id: str, new: JobStatus, *, expected: _Expected) -> bool:
         """Atomic compare-and-set on the row's status (the control plane).
-
-        Returns True iff the row existed in one of the ``expected`` states
-        and now holds ``new``. False means missing-or-conflict: the caller's
-        view is stale, and the persisted control state stands.
+        Returns True iff the row existed in one of the ``expected`` states and now
+        holds ``new``; False means missing-or-conflict, so the caller's view is stale.
         """
         wanted = {expected} if isinstance(expected, JobStatus) else set(expected)
         with self._lock:
@@ -167,33 +158,22 @@ class JobStore:
 
     def load(self, job_id: str) -> CrawlJobState | None:
         """Load job state from SQLite. Returns None if not found.
-
-        The whole job: live state plus the page history and visited set. A
-        caller that only needs the live state pays for neither accumulator
-        and must say so -- :meth:`reload_state` is that call.
+        The whole job: live state plus page history and visited set. A caller that
+        needs only live state must use ``reload_state``, not pay for the accumulators.
         """
         return self._read_row(job_id, with_accumulators=True)
 
     def reload_state(self, job_id: str) -> CrawlJobState | None:
         """The live state of a job, without its page history or visited set.
-
-        The batch loop reloads the job once per batch to pick up what the
-        batch wrote, and keeps the accumulators in its own object across
-        batches -- it is the one writer. The accumulators come back empty on
-        purpose: a caller already holding them must keep its own, because the
-        store's high-water mark would otherwise resync the table from scratch.
+        The batch loop reloads once per batch to pick up what it wrote and keeps
+        its own accumulators; they come back empty because it is the one writer.
         """
         return self._read_row(job_id, with_accumulators=False)
 
     def _read_row(self, job_id: str, *, with_accumulators: bool) -> CrawlJobState | None:
         """The one row read both loaders share.
-
-        The whole read -- row, page history, visited set -- happens under one
-        hold of the lock, and it has to. The history and visited set live in
-        their own tables, so it is two more queries on the shared connection.
-        Releasing the lock between them would let a writer interleave, driving
-        the connection from two threads and letting a load return a state that
-        never existed.
+        Row, history and visited set are read under one hold of the lock, because
+        releasing it between queries would let a writer race the shared connection.
         """
         with self._lock:
             row = self._conn.execute(
@@ -213,11 +193,9 @@ class JobStore:
                 return None
 
     def delete(self, job_id: str) -> bool:
-        """Delete job from SQLite. Returns True if existed.
-
-        The page history and visited set go with it: they are child tables,
-        so a delete that only removed the row would leave a job's entire
-        crawl behind with nothing pointing at it.
+        """Delete job from SQLite. Returns True if it existed.
+        The page history and visited set go with it -- child tables -- so deleting
+        only the row would orphan a job's entire crawl.
         """
         with self._lock:
             self._accumulators.delete(job_id)
@@ -234,10 +212,8 @@ class JobStore:
 
     def status_row(self, job_id: str) -> JobStatusView | None:
         """The status view for one job, or None if there is no such job.
-
-        Deliberately not :meth:`load`. The response exposes counts, and
-        loading the state in order to count it deserializes every result
-        payload and visited URL only to throw them away after ``len()``.
+        Deliberately not ``load``: the response exposes counts, and loading the state
+        to count it would deserialize every payload and visited URL to throw them away.
         """
         with self._lock:
             row = self._conn.execute(_JOB_STATUS_PROJECTION + " WHERE job_id = ?", (job_id,)).fetchone()
