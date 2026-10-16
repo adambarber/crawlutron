@@ -61,14 +61,9 @@ def _required_gate_script(workflow: str) -> str:
 
 
 def _required_gate_shell(workflow: str) -> str:
-    """The aggregate's shell, which the gate depends on and so must be declared.
-
-    The script is a chain of `test` lines. A shell without errexit gives the
-    step the exit code of its LAST line, so `test "failure" = "success"` in the
-    middle is invisible: the required check reports success over a run that
-    failed. GitHub's implicit default on Linux is `bash -e {0}`, so this works
-    today by accident, and the accident is exactly what an edit to this step,
-    a `defaults.run.shell`, or a move to another runner can take away.
+    """The aggregate's shell, which the gate depends on and so must be declared: the
+    script is a chain of `test` lines, and without errexit its exit code is the LAST
+    line's, so a mid-chain failure reports success by accident.
     """
     shell = _required_gate_step(workflow).get("shell")
     assert shell == ERREXIT_SHELL, (
@@ -93,13 +88,9 @@ def _run_script(script: str) -> subprocess.CompletedProcess[str]:
 
 
 def _assert_no_continue_on_error(block: dict, label: str) -> None:
-    """Reject any `continue-on-error` that GitHub could evaluate to true.
-
-    `continue-on-error` is an expression in GitHub Actions. `yaml.safe_load`
-    gives `${{ true }}` back as the STRING "${{ true }}", so an `is not True`
-    check is satisfied by an expression that GitHub evaluates to true — the
-    job/step is reported successful and `needs.X.result` becomes hollow. The
-    only value that is safe is absent, or literally the scalar `false`.
+    """Reject any `continue-on-error` GitHub could evaluate true: `${{ true }}` loads
+    as a STRING, so an `is not True` check passes the value GitHub runs as true --
+    the only safe value is absent or the literal scalar `false`.
     """
     value = block.get("continue-on-error")
     assert value is False or value is None, (
@@ -109,20 +100,9 @@ def _assert_no_continue_on_error(block: dict, label: str) -> None:
 
 
 def _assert_failure_propagation(workflow: str) -> None:
-    """A required check that cannot fail is not a gate.
-
-    Two evasions were verified against the previous version of this contract,
-    which only counted the enforcement command and checked that `enforcement`
-    was in `needs`:
-
-      * `continue-on-error: true` on the enforcement job -- GitHub reports the
-        job as successful, so the aggregate asserts success over a run that
-        never happened.
-      * deleting `test "${{ needs.enforcement.result }}" = "success"` -- the
-        aggregate still runs, still needs enforcement, and no longer checks it.
-
-    Both are refused here, and the refusal is checked by executing the
-    aggregate's own script rather than by reading it.
+    """A required check that cannot fail is not a gate: `continue-on-error: true`
+    (which GitHub reports as success) and deleting the result assertion both slipped
+    the old contract -- the refusal is checked by running the aggregate's script.
     """
     jobs = _jobs(workflow)
     required = jobs["required"]
@@ -198,15 +178,9 @@ def test_ci_runs_every_precommit_hook_through_one_surface() -> None:
 
 
 def test_no_ci_job_reruns_a_precommit_hook_command() -> None:
-    """CI must not execute a gate twice inside one run.
-
-    `lint` (ruff) and `typecheck` (mypy + pyright) used to be separate jobs that
-    re-ran exactly what the pre-commit hooks inside `enforcement` already
-    execute -- three gates ran twice per CI run and nothing compared the copies.
-    This is the chokepoint that would have caught that duplication on day one:
-    any `run:` command in a workflow job must not contain a command a pre-commit
-    hook already runs. The hook entries strip the shared `bash -c 'cd...' gate`
-    wrapper; the tool invocation after it is what CI must not repeat.
+    """CI must not run a gate twice in one run: `lint`/`typecheck` used to re-run
+    what `enforcement`'s hooks already execute -- three gates twice, nothing
+    comparing the copies. Any `run:` must not repeat a tool a hook runs.
     """
     hook_tools = {
         "python -m ruff check",
@@ -233,11 +207,9 @@ def test_a_ci_job_that_reruns_a_hook_command_is_caught() -> None:
 
 
 def assert_no_hook_command_rerun(workflow: str, hook_tools) -> None:
-    """No CI job re-runs a command the pre-commit enforcement job already runs.
-
-    The duplicate and the gate are two copies of the same check, and only the
-    copy that is edited drifts. The error names the job so the offending step is
-    findable from the failure alone.
+    """No CI job re-runs a command the enforcement job already runs: the duplicate and
+    the gate are two copies of one check, only the edited one drifts -- the error names
+    the job so the step is findable from the failure alone.
     """
     for name, job in _jobs(workflow).items():
         for step in job.get("steps") or []:

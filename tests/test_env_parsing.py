@@ -1,8 +1,6 @@
 """Env-int parsing contract: a typo'd numeric env var must not kill the boot.
-
-Two module-import sites parsed ints bare (``int(os.environ.get(...))``):
-a typo'd value crashed the whole service at import. ``get_env_int`` logs
-and falls back to the default, with optional clamping.
+Two import sites parsed ints bare (`int(os.environ.get(...))`); ``get_env_int``
+logs and falls back to the default, with optional clamping.
 """
 
 from __future__ import annotations
@@ -56,12 +54,9 @@ class TestGetEnvInt:
 
 
 class TestDefaultCoercionNeverBlowsUp:
-    """The chokepoint must ALWAYS return a value of the declared numeric type,
-    no matter what default literal a caller passes, and must never raise.
-
-    Regression that motivated this: ``get_env_float(..., "0.5")`` returned the
-    *string* ``"0.5"`` uncast, so ``limit * fraction`` became runaway string
-    repetition -- a boot-time hang that froze every test importing the module.
+    """The chokepoint must ALWAYS return a value of the declared numeric type, never
+    raise. ``get_env_float(..., "0.5")`` once returned the string uncast, so
+    ``limit * fraction`` became runaway string repetition -- a boot-time hang.
     """
 
     def test_int_getter_coerces_string_default(self, monkeypatch):
@@ -127,19 +122,9 @@ class TestDefaultCoercionNeverBlowsUp:
 
 
 class TestDeploymentValuesAreRefusedNotClamped:
-    """A deployment number that is part of a contract must be REFUSED, not rewritten.
-
-    The settings comment used to promise "out of range falls back here, loudly"
-    while the code passed ``lo``/``hi`` and silently clamped: an operator asking
-    for 999 seconds got 120, and a deployment asking for 9 retries got 5, with
-    nothing said at either value. ``get_mapping_int`` could not refuse anything
-    -- it had no way to express a rejected range, because the float face's
-    ``validate``/``validate_event`` pair was never exposed on the int face.
-
-    The timeout assertions below are deliberately a value that is far out of
-    range, so a refusal (30, the default) is distinguishable from a clamp
-    (120, the ceiling). Asserting against the ceiling would pass under either
-    behaviour and so would prove nothing.
+    """A deployment number under contract must be REFUSED, not rewritten: the comment
+    promised a loud fallback while ``lo``/``hi`` silently clamped. The timeout is
+    asserted far out of range so refusal (30) beats clamp (120); the ceiling proves nothing.
     """
 
     def test_out_of_ceiling_timeout_yields_the_default_not_the_ceiling(self):
@@ -164,13 +149,9 @@ class TestDeploymentValuesAreRefusedNotClamped:
 
 
 class TestRetryAuthorityIsPerJob:
-    """The two retry ceilings are different authorities and must not be one number.
-
-    Ruling: a deployment's default is capped at MAX_RETRIES (its blast radius is
-    every caller), while ONE job's caller may ask for anything up to
-    MAX_JOB_MAX_RETRIES. Reading the model's bound when resolving the tier made
-    the deployment's own limit depend on the caller's ceiling, so the two could
-    not be set independently at all.
+    """The two retry ceilings are different authorities: the deployment default is
+    capped at MAX_RETRIES (blast radius: every caller), one job's caller up to
+    MAX_JOB_MAX_RETRIES -- binding one to the other made them inseparable.
     """
 
     @pytest.mark.parametrize("requested", [0, 1, 5, 9, 10])
@@ -195,12 +176,9 @@ class TestRetryAuthorityIsPerJob:
         assert CrawlerSettings.from_mapping({}).default_max_retries == DEFAULT_MAX_RETRIES
 
     def test_the_deployment_retry_ceiling_is_requestable(self):
-        """The invariant ``_within_bounds`` used to enforce at runtime.
-
-        If the deployment ceiling ever rose above the per-job ceiling, the
-        deployment's default would be a value no caller could legally ask for --
-        a hole in the model's per-request bound. A runtime clamp could hide that
-        by quietly repairing it; a standing check states it.
+        """The invariant ``_within_bounds`` used to enforce at runtime: if the deployment
+        ceiling rose above the per-job one, the default would be a value no caller could
+        ask for -- a standing check states it instead of clamping it away.
         """
         assert MAX_RETRIES <= MAX_JOB_MAX_RETRIES
         assert DEFAULT_MAX_RETRIES <= MAX_JOB_MAX_RETRIES
