@@ -57,6 +57,7 @@ class CrawlJobState:
     job_id: str
     kind: JobKind = JobKind.WHOLE_SITE
     root_url: str = ""
+    owner: str = ""
     policy: dict[str, Any] = field(default_factory=dict)
     status: JobStatus = JobStatus.PENDING
     # Whole-site fields (used when kind == WHOLE_SITE)
@@ -115,6 +116,7 @@ class CrawlJobState:
             job_id=str(data.get("job_id") or ""),
             kind=JobKind(kind),
             root_url=root_url,
+            owner=str(data.get("owner") or ""),
             policy=_stored_policy(policy),
             status=JobStatus(status),
             frontier=normalize_frontier(
@@ -176,8 +178,9 @@ def normalize_job_state(job: CrawlJobState) -> CrawlJobState:
 
 _UPSERT_JOB_ROW_SQL = """
       INSERT INTO crawl_jobs (job_id, kind, root_url, policy, status, frontier,
-                              created_at, updated_at, error, stats, in_flight, transient_retries)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                               created_at, updated_at, error, stats, in_flight, transient_retries,
+                               owner)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(job_id) DO UPDATE SET
     kind=excluded.kind,
     root_url=excluded.root_url,
@@ -190,11 +193,10 @@ ON CONFLICT(job_id) DO UPDATE SET
           transient_retries=excluded.transient_retries
 """
 
-
 # Every field the job response exposes, shared by single and list reads so the
 # two cannot drift into describing different jobs.
 _JOB_STATUS_PROJECTION = """
-    SELECT job_id, root_url, status, created_at, updated_at, stats, error,
+    SELECT job_id, root_url, status, created_at, updated_at, stats, error, owner,
            COALESCE(kind, 'whole_site') AS kind,
            json_array_length(frontier) AS frontier_size,
            COALESCE(json_extract(stats, '$.cap_truncated'), 0) AS cap_truncated
@@ -210,6 +212,7 @@ class JobStatusView(TypedDict):
 
     job_id: str
     root_url: str
+    owner: str
     status: str
     kind: str
     created_at: float
@@ -230,6 +233,7 @@ def _status_row(row: sqlite3.Row, visited: int, results: int) -> JobStatusView:
     return {
         "job_id": row["job_id"],
         "root_url": row["root_url"],
+        "owner": row["owner"],
         "status": row["status"],
         "kind": row["kind"],
         "created_at": row["created_at"],
@@ -270,6 +274,7 @@ def _job_row_params(job: CrawlJobState) -> tuple:
         _json(job.stats),
         _json([_entry_payload(entry) for entry in job.in_flight]),
         _json(_retries_payload(job.transient_retries)),
+        job.owner,
     )
 
 
@@ -389,6 +394,8 @@ def _create_job(
     root_url: str,
     policy: CrawlPolicy,
     frontier: list[FrontierEntry] | None = None,
+    *,
+    owner: str = "",
 ) -> CrawlJobState:
     """The one place a job is born, for both kinds, and the one place it is written.
     A module function so the row's content and the locked write are one decision;
@@ -398,6 +405,7 @@ def _create_job(
         job_id=job_id,
         kind=kind,
         root_url=root_url,
+        owner=owner,
         policy=_stored_policy(policy),
         status=JobStatus.PENDING,
         frontier=frontier or [],

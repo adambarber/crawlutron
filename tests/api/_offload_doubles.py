@@ -16,9 +16,9 @@ class LoopGuardJobStore(JobStore):
         _refuse_on_loop("JobStore.create")
         return super().create(root_url, policy)
 
-    def create_single_shot(self, job_id, root_url, policy):
+    def create_single_shot(self, job_id, root_url, policy, *, owner=""):
         _refuse_on_loop("JobStore.create_single_shot")
-        return super().create_single_shot(job_id, root_url, policy)
+        return super().create_single_shot(job_id, root_url, policy, owner=owner)
 
     def save(self, job):
         _refuse_on_loop("JobStore.save")
@@ -32,6 +32,10 @@ class LoopGuardJobStore(JobStore):
         _refuse_on_loop("JobStore.load")
         return super().load(job_id)
 
+    def load_for_caller(self, job_id, caller_id):
+        _refuse_on_loop("JobStore.load_for_caller")
+        return super().load_for_caller(job_id, caller_id)
+
     def reload_state(self, job_id):
         _refuse_on_loop("JobStore.reload_state")
         return super().reload_state(job_id)
@@ -40,17 +44,33 @@ class LoopGuardJobStore(JobStore):
         _refuse_on_loop("JobStore.delete")
         return super().delete(job_id)
 
+    def delete_for_caller(self, job_id, caller_id):
+        _refuse_on_loop("JobStore.delete_for_caller")
+        return super().delete_for_caller(job_id, caller_id)
+
     def list_jobs(self):
         _refuse_on_loop("JobStore.list_jobs")
         return super().list_jobs()
+
+    def list_for_caller(self, caller_id):
+        _refuse_on_loop("JobStore.list_for_caller")
+        return super().list_for_caller(caller_id)
 
     def status_row(self, job_id):
         _refuse_on_loop("JobStore.status_row")
         return super().status_row(job_id)
 
+    def status_for_caller(self, job_id, caller_id):
+        _refuse_on_loop("JobStore.status_for_caller")
+        return super().status_for_caller(job_id, caller_id)
+
     def exists(self, job_id):
         _refuse_on_loop("JobStore.exists")
         return super().exists(job_id)
+
+    def exists_for_caller(self, job_id, caller_id):
+        _refuse_on_loop("JobStore.exists_for_caller")
+        return super().exists_for_caller(job_id, caller_id)
 
     def close(self):
         _refuse_on_loop("JobStore.close")
@@ -60,13 +80,17 @@ class LoopGuardJobStore(JobStore):
 class LoopGuardResultStore(CrawlResultStore):
     """The real result store, with its sync entry points refusing the loop."""
 
-    def put(self, request_id, payload):
+    def put(self, request_id, payload, *, owner=""):
         _refuse_on_loop("CrawlResultStore.put")
-        return super().put(request_id, payload)
+        return super().put(request_id, payload, owner=owner)
 
     def get(self, request_id):
         _refuse_on_loop("CrawlResultStore.get")
         return super().get(request_id)
+
+    def get_for_caller(self, request_id, caller_id):
+        _refuse_on_loop("CrawlResultStore.get_for_caller")
+        return super().get_for_caller(request_id, caller_id)
 
     def payloads(self):
         _refuse_on_loop("CrawlResultStore.payloads")

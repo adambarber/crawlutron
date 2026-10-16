@@ -36,14 +36,14 @@ class CrawlResultStore(CoordinationStore):
         self._max_entries = max(1, int(max_entries))
         self._clock = clock or time.time
 
-    def put(self, request_id: str, payload: JsonValue) -> None:
+    def put(self, request_id: str, payload: JsonValue, *, owner: str = "") -> None:
         """Store a completed response; prune expired/oldest entries first."""
         stored_at = self._clock()
         with self._lock:
             self._prune(stored_at)
             self._conn.execute(
-                "INSERT OR REPLACE INTO results (request_id, stored_at, payload) VALUES (?, ?, ?)",
-                (request_id, stored_at, json.dumps(payload)),
+                "INSERT OR REPLACE INTO results (request_id, stored_at, payload, owner) VALUES (?, ?, ?, ?)",
+                (request_id, stored_at, json.dumps(payload), owner),
             )
             self._conn.commit()
             # Enforce entry cap after insert (drop oldest beyond the cap).
@@ -60,16 +60,26 @@ class CrawlResultStore(CoordinationStore):
 
     def get(self, request_id: str) -> JsonValue | None:
         """Return the stored payload, or None if absent/expired."""
+        return self._read_owned(request_id, None)
+
+    def get_for_caller(self, request_id: str, caller_id: str) -> JsonValue | None:
+        """The payload iff ``caller_id`` owns it; foreign rows read as missing."""
+        return self._read_owned(request_id, caller_id)
+
+    def _read_owned(self, request_id: str, caller_id: str | None) -> JsonValue | None:
+        """The payload, filtered to ``caller_id`` when one is given."""
         now = self._clock()
         cutoff = now - self._ttl_seconds if self._ttl_seconds > 0 else 0.0
         with self._lock:
             row = self._conn.execute(
-                "SELECT stored_at, payload FROM results WHERE request_id = ?",
+                "SELECT stored_at, payload, owner FROM results WHERE request_id = ?",
                 (request_id,),
             ).fetchone()
         if row is None:
             return None
-        stored_at, payload = row
+        stored_at, payload, owner = row
+        if caller_id is not None and owner != caller_id:
+            return None
         if self._ttl_seconds > 0 and stored_at < cutoff:
             return None
         return json.loads(payload)
@@ -88,13 +98,17 @@ class CrawlResultStore(CoordinationStore):
             ).fetchall()
         return [json.loads(row[0]) for row in rows]
 
-    async def aput(self, request_id: str, payload: JsonValue) -> None:
+    async def aput(self, request_id: str, payload: JsonValue, *, owner: str = "") -> None:
         """Async :meth:`put`: the prune, the payload dumps and both commits off-loop."""
-        await asyncio.to_thread(self.put, request_id, payload)
+        await asyncio.to_thread(self.put, request_id, payload, owner=owner)
 
     async def aget(self, request_id: str) -> JsonValue | None:
         """Async :meth:`get`: a status-poll read must not park the loop."""
         return await asyncio.to_thread(self.get, request_id)
+
+    async def aget_for_caller(self, request_id: str, caller_id: str) -> JsonValue | None:
+        """Async :meth:`get_for_caller`: a scoped poll read stays off the loop."""
+        return await asyncio.to_thread(self.get_for_caller, request_id, caller_id)
 
     async def apayloads(self) -> list[JsonValue]:
         """Async :meth:`payloads`: a whole-cache rollup must not park the loop."""

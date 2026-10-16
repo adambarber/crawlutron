@@ -82,6 +82,7 @@ class JobStore:
             {
                 "job_id": job_id,
                 "kind": row["kind"],
+                "owner": row["owner"],
                 "root_url": row["root_url"],
                 "policy": json.loads(row["policy"]),
                 "status": row["status"],
@@ -99,7 +100,7 @@ class JobStore:
             tier=self.tier,
         )
 
-    def create(self, root_url: str, policy: PolicyLike) -> CrawlJobState:
+    def create(self, root_url: str, policy: PolicyLike, *, owner: str = "") -> CrawlJobState:
         """Create a new whole-site crawl job with initial frontier containing root_url."""
         canonical_root = NormalizedUrl(root_url, policy=self._host_policy)
         return _create_job(
@@ -109,9 +110,12 @@ class JobStore:
             canonical_root.raw,
             read_policy(policy, self.tier),
             frontier=[FrontierEntry(url=canonical_root, depth=0)],
+            owner=owner,
         )
 
-    def create_single_shot(self, job_id: str, root_url: str, policy: PolicyLike) -> CrawlJobState:
+    def create_single_shot(
+        self, job_id: str, root_url: str, policy: PolicyLike, *, owner: str = ""
+    ) -> CrawlJobState:
         """Create a new single-shot async crawl job with the given job_id (request_id)."""
         return _create_job(
             self,
@@ -119,12 +123,13 @@ class JobStore:
             JobKind.SINGLE_SHOT,
             str(NormalizedUrl(root_url, policy=self._host_policy)),
             read_policy(policy, self.tier),
+            owner=owner,
         )
 
     def save(self, job: CrawlJobState) -> None:
-        """Persist job DATA to SQLite (thread-safe). ``status`` is written only on first
-        INSERT -- the UPDATE path never touches it -- so control state moves through
-        set_status and a stale whole-row save cannot clobber a pause/cancel.
+        """Persist job DATA to SQLite (thread-safe). ``status`` and ``owner`` are
+        INSERT-only -- the UPDATE path never touches them -- so a stale whole-row
+        save cannot clobber a pause/cancel or transfer ownership.
         """
         with self._lock:
             self._persist(job)
@@ -177,7 +182,7 @@ class JobStore:
         """
         with self._lock:
             row = self._conn.execute(
-                "SELECT job_id, kind, root_url, policy, status, frontier, "
+                "SELECT job_id, kind, owner, root_url, policy, status, frontier, "
                 "created_at, updated_at, error, stats, in_flight, transient_retries "
                 "FROM crawl_jobs WHERE job_id = ?",
                 (job_id,),
@@ -192,6 +197,14 @@ class JobStore:
                 logger.warning("job_store_load_corrupt", extra={"job_id": job_id, "error": str(exc)})
                 return None
 
+    def load_for_caller(self, job_id: str, caller_id: str) -> CrawlJobState | None:
+        """The job iff ``caller_id`` owns it; a foreign id reads as missing.
+        Same miss for missing and foreign, so ownership is not an oracle."""
+        job = self.load(job_id)
+        if job is None or job.owner != caller_id:
+            return None
+        return job
+
     def delete(self, job_id: str) -> bool:
         """Delete job from SQLite. Returns True if it existed.
         The page history and visited set go with it -- child tables -- so deleting
@@ -203,11 +216,39 @@ class JobStore:
             self._conn.commit()
         return cur.rowcount > 0
 
+    def delete_for_caller(self, job_id: str, caller_id: str) -> bool:
+        """Delete iff ``caller_id`` owns the row; a foreign id deletes nothing."""
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT 1 FROM crawl_jobs WHERE job_id = ? AND owner = ?", (job_id, caller_id)
+            ).fetchone()
+            if row is None:
+                return False
+            self._accumulators.delete(job_id)
+            cur = self._conn.execute(
+                "DELETE FROM crawl_jobs WHERE job_id = ? AND owner = ?", (job_id, caller_id)
+            )
+            self._conn.commit()
+        return cur.rowcount > 0
+
     def list_jobs(self) -> list[JobStatusView]:
         """Every job's status view, newest first."""
+        return self._read_job_list(None)
+
+    def list_for_caller(self, caller_id: str) -> list[JobStatusView]:
+        """The caller's own jobs, newest first; foreign rows are not listed."""
+        return self._read_job_list(caller_id)
+
+    def _read_job_list(self, owner: str | None) -> list[JobStatusView]:
+        """The status views owned by ``owner``, or every row when None."""
         with self._lock:
             counts = self._accumulators.counts_by_job()
-            rows = self._conn.execute(_JOB_STATUS_PROJECTION + " ORDER BY created_at DESC").fetchall()
+            if owner is None:
+                rows = self._conn.execute(_JOB_STATUS_PROJECTION + " ORDER BY created_at DESC").fetchall()
+            else:
+                rows = self._conn.execute(
+                    _JOB_STATUS_PROJECTION + " WHERE owner = ? ORDER BY created_at DESC", (owner,)
+                ).fetchall()
         return [_status_row(r, *counts.get(r["job_id"], (0, 0))) for r in rows]
 
     def status_row(self, job_id: str) -> JobStatusView | None:
@@ -215,8 +256,21 @@ class JobStore:
         Deliberately not ``load``: the response exposes counts, and loading the state
         to count it would deserialize every payload and visited URL to throw them away.
         """
+        return self._read_status_row(job_id, None)
+
+    def status_for_caller(self, job_id: str, caller_id: str) -> JobStatusView | None:
+        """The status view iff ``caller_id`` owns the row, else None."""
+        return self._read_status_row(job_id, caller_id)
+
+    def _read_status_row(self, job_id: str, owner: str | None) -> JobStatusView | None:
+        """One job's status view, or None when no row matches the owner filter."""
         with self._lock:
-            row = self._conn.execute(_JOB_STATUS_PROJECTION + " WHERE job_id = ?", (job_id,)).fetchone()
+            if owner is None:
+                row = self._conn.execute(_JOB_STATUS_PROJECTION + " WHERE job_id = ?", (job_id,)).fetchone()
+            else:
+                row = self._conn.execute(
+                    _JOB_STATUS_PROJECTION + " WHERE job_id = ? AND owner = ?", (job_id, owner)
+                ).fetchone()
             if row is None:
                 return None
             visited, results = self._accumulators.counts_for(job_id)
@@ -228,8 +282,21 @@ class JobStore:
         The control plane's existence check is a gate, not a question about
         the job: anything that reads the row to answer it does more than asked.
         """
+        return self._has_job_row(job_id, None)
+
+    def exists_for_caller(self, job_id: str, caller_id: str) -> bool:
+        """Whether ``caller_id`` owns a row under ``job_id``, without reading it."""
+        return self._has_job_row(job_id, caller_id)
+
+    def _has_job_row(self, job_id: str, owner: str | None) -> bool:
+        """Whether a row matches, filtered to ``owner`` when one is given."""
         with self._lock:
-            row = self._conn.execute("SELECT 1 FROM crawl_jobs WHERE job_id = ?", (job_id,)).fetchone()
+            if owner is None:
+                row = self._conn.execute("SELECT 1 FROM crawl_jobs WHERE job_id = ?", (job_id,)).fetchone()
+            else:
+                row = self._conn.execute(
+                    "SELECT 1 FROM crawl_jobs WHERE job_id = ? AND owner = ?", (job_id, owner)
+                ).fetchone()
         return row is not None
 
     def close(self) -> None:
@@ -245,8 +312,13 @@ class JobStore:
     acreate_single_shot = atwin(create_single_shot)
     aset_status = atwin(set_status)
     aload = atwin(load)
+    aload_for_caller = atwin(load_for_caller)
     areload_state = atwin(reload_state)
     adelete = atwin(delete)
+    adelete_for_caller = atwin(delete_for_caller)
     alist_jobs = atwin(list_jobs)
+    alist_for_caller = atwin(list_for_caller)
     astatus = atwin(status_row)
+    astatus_for_caller = atwin(status_for_caller)
     aexists = atwin(exists)
+    aexists_for_caller = atwin(exists_for_caller)

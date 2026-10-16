@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 
 from app.models.crawl_policy import CrawlPolicy
+from app.storage.caller_key_store import CallerKeyStore
 from app.storage.coordination_cookies import SharedCookieStore
 from app.storage.coordination_counters import CoordinationCounters
 from app.storage.job_store import CrawlJobState, JobStatus, JobStore
@@ -35,7 +36,7 @@ _BOOKKEEPING_TABLES = {"_yoyo_log", "_yoyo_migration", "_yoyo_version", "yoyo_lo
 
 def _open_store(
     schema: StoreSchema, db_path: Path
-) -> JobStore | CrawlResultStore | CoordinationCounters | SharedCookieStore | WatchStore:
+) -> JobStore | CrawlResultStore | CoordinationCounters | SharedCookieStore | WatchStore | CallerKeyStore:
     if schema is StoreSchema.CRAWL_JOBS:
         return job_store(db_path)
     if schema is StoreSchema.RESULTS:
@@ -46,6 +47,8 @@ def _open_store(
         return SharedCookieStore(db_path)
     if schema is StoreSchema.WATCHES:
         return WatchStore(db_path)
+    if schema is StoreSchema.CALLER_KEYS:
+        return CallerKeyStore(db_path)
     # The parametrization above is derived from StoreSchema, so it grows whenever a schema is added.
     raise AssertionError(f"no store opener declared for {schema.value}")
 

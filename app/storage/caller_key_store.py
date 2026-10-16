@@ -1,0 +1,100 @@
+"""Inbound caller keys: the persisted secrets callers crawl as.
+
+The secret is shown once at issuance and never stored; verification hashes
+what the caller presents and compares hashes only.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import secrets
+import time
+from pathlib import Path
+
+from app.models.caller_key import CallerKey
+from app.models.issued_key import IssuedKey
+from app.storage.coordination_store import CoordinationStore, atwin
+from app.storage.migrations.manifest import StoreSchema
+
+_KEY_ID_BYTES = 8
+_SECRET_BYTES = 32
+
+
+def _hash_secret(secret: str) -> str:
+    return hashlib.sha256(secret.encode("utf-8")).hexdigest()
+
+
+def _record_from_row(row: tuple[str, str, str, int, int, float]) -> CallerKey:
+    """One key record from its selected columns, in select order."""
+    key_id, label, key_hash, max_pages, max_concurrency, created_at = row
+    return CallerKey(
+        key_id=key_id,
+        label=label,
+        key_hash=key_hash,
+        max_pages=max_pages,
+        max_concurrency=max_concurrency,
+        created_at=created_at,
+    )
+
+
+class CallerKeyStore(CoordinationStore):
+    """SQLite-backed store of inbound caller key records keyed by key id."""
+
+    schema = StoreSchema.CALLER_KEYS
+
+    def __init__(self, db_path: str | Path) -> None:
+        super().__init__(db_path)
+
+    def issue_key(self, label: str, *, max_pages: int = 0, max_concurrency: int = 0) -> IssuedKey:
+        """Mint a key for ``label``; the secret is returned once, never stored."""
+        name = label.strip()
+        if not name or len(name) > 128:
+            raise ValueError("key label must be 1..128 characters")
+        if max_pages < 0 or max_concurrency < 0:
+            raise ValueError("key quotas must be zero (unbounded) or positive")
+        key_id = f"key_{secrets.token_hex(_KEY_ID_BYTES)}"
+        secret = f"ck_{secrets.token_urlsafe(_SECRET_BYTES)}"
+        created_at = time.time()
+        with self._lock:
+            self._conn.execute(
+                "INSERT INTO caller_keys (key_id, label, key_hash, max_pages, max_concurrency,"
+                " created_at) VALUES (?, ?, ?, ?, ?, ?)",
+                (key_id, name, _hash_secret(secret), max_pages, max_concurrency, created_at),
+            )
+            self._conn.commit()
+        return IssuedKey(
+            key_id=key_id, label=name, secret=secret, max_pages=max_pages, max_concurrency=max_concurrency
+        )
+
+    def verify_key(self, secret: str) -> CallerKey | None:
+        """The record for ``secret``, or None when it names no live key."""
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT key_id, label, key_hash, max_pages, max_concurrency, created_at"
+                " FROM caller_keys WHERE key_hash = ?",
+                (_hash_secret(secret),),
+            ).fetchone()
+        if row is None:
+            return None
+        return _record_from_row(row)
+
+    def list_keys(self) -> list[CallerKey]:
+        """Every live key record, oldest first."""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT key_id, label, key_hash, max_pages, max_concurrency, created_at"
+                " FROM caller_keys ORDER BY created_at ASC"
+            ).fetchall()
+        return [_record_from_row(row) for row in rows]
+
+    def revoke_key(self, key_id: str) -> bool:
+        """Drop ``key_id``; True iff a live key went away."""
+        with self._lock:
+            cur = self._conn.execute("DELETE FROM caller_keys WHERE key_id = ?", (key_id,))
+            self._conn.commit()
+        return cur.rowcount > 0
+
+    aissue_key = atwin(issue_key)
+    averify_key = atwin(verify_key)
+    alist_keys = atwin(list_keys)
+    arevoke_key = atwin(revoke_key)

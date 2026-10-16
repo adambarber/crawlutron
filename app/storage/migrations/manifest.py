@@ -15,6 +15,7 @@ class StoreSchema(StrEnum):
     COORDINATION_COUNTERS = "coordination_counters"
     COORDINATION_COOKIES = "coordination_cookies"
     WATCHES = "watches"
+    CALLER_KEYS = "caller_keys"
 
 
 @dataclass(frozen=True)
@@ -62,6 +63,7 @@ CRAWL_JOBS_SCHEMA = TableSchema(
         ColumnSchema("updated_at", "REAL", True, None),
         ColumnSchema("error", "TEXT", False, None),
         ColumnSchema("stats", "TEXT", True, "'{}'"),
+        ColumnSchema("owner", "TEXT", True, "''"),
     ),
 )
 
@@ -98,6 +100,7 @@ RESULTS_SCHEMA = TableSchema(
         ColumnSchema("request_id", "TEXT", False, None, 1),
         ColumnSchema("stored_at", "REAL", True, None),
         ColumnSchema("payload", "TEXT", True, None),
+        ColumnSchema("owner", "TEXT", True, "''"),
     ),
 )
 
@@ -155,12 +158,26 @@ WATCHES_SCHEMA = TableSchema(
     ),
 )
 
+CALLER_KEYS_SCHEMA = TableSchema(
+    name="caller_keys",
+    columns=(
+        ColumnSchema("key_id", "TEXT", False, None, 1),
+        ColumnSchema("label", "TEXT", True, "''"),
+        ColumnSchema("key_hash", "TEXT", True, None),
+        ColumnSchema("max_pages", "INTEGER", True, "0"),
+        ColumnSchema("max_concurrency", "INTEGER", True, "0"),
+        ColumnSchema("created_at", "REAL", True, None),
+    ),
+    indexes=(IndexSchema("caller_keys_by_hash", ("key_hash",), unique=True),),
+)
+
 CURRENT_SCHEMAS = {
     StoreSchema.CRAWL_JOBS: CRAWL_JOBS_SCHEMA,
     StoreSchema.RESULTS: RESULTS_SCHEMA,
     StoreSchema.COORDINATION_COUNTERS: COORDINATION_COUNTERS_SCHEMA,
     StoreSchema.COORDINATION_COOKIES: COORDINATION_COOKIES_SCHEMA,
     StoreSchema.WATCHES: WATCHES_SCHEMA,
+    StoreSchema.CALLER_KEYS: CALLER_KEYS_SCHEMA,
 }
 
 LEGACY_COLUMNS = {
@@ -175,6 +192,7 @@ LEGACY_COLUMNS = {
     StoreSchema.COORDINATION_COUNTERS: (),
     StoreSchema.COORDINATION_COOKIES: (),
     StoreSchema.WATCHES: (),
+    StoreSchema.CALLER_KEYS: (),
 }
 
 MIGRATION_SEQUENCES = {
@@ -182,11 +200,13 @@ MIGRATION_SEQUENCES = {
         "0001_crawl_jobs_initial",
         "0002_crawl_jobs_drop_canonicalized",
         "0003_crawl_jobs_split_accumulators",
+        "0004_crawl_jobs_add_owner",
     ),
-    StoreSchema.RESULTS: ("0001_results_initial",),
+    StoreSchema.RESULTS: ("0001_results_initial", "0002_results_add_owner"),
     StoreSchema.COORDINATION_COUNTERS: ("0001_coordination_counters_initial",),
     StoreSchema.COORDINATION_COOKIES: ("0001_coordination_cookies_initial",),
     StoreSchema.WATCHES: ("0001_watches_initial",),
+    StoreSchema.CALLER_KEYS: ("0001_caller_keys_initial",),
 }
 
 MIGRATION_IDS = {schema: sequence[-1] for schema, sequence in MIGRATION_SEQUENCES.items()}

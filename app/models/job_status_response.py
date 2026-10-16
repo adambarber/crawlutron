@@ -12,6 +12,10 @@ class JobStatusResponse(BaseModel):
 
     job_id: str
     root_url: str
+    owner: Annotated[
+        str,
+        Field(description="The caller key id that owns this job; empty for pre-key anonymous rows."),
+    ] = ""
     status: str
     kind: Annotated[
         str,
