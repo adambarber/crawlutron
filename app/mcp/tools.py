@@ -173,7 +173,9 @@ async def _projected(crawled: Awaitable[UnifiedCrawlResponse], projection: _Unif
     return response if projection is _Unified.from_crawl else await _extracted(response)
 
 
-async def handle_crawl(payload: CrawlRequest, settings, shutdown_event) -> ToolResult:
+async def handle_crawl(
+    payload: CrawlRequest, settings, shutdown_event, concurrency_tracker=None
+) -> ToolResult:
     return await _guard_then_crawl(payload, settings, shutdown_event, _Unified.from_crawl)
 
 
@@ -197,15 +199,19 @@ async def _extracted(response: UnifiedCrawlResponse) -> CrawlAndExtractResponse:
     )
 
 
-async def handle_crawl_and_extract(payload: CrawlRequest, settings, shutdown_event) -> ToolResult:
+async def handle_crawl_and_extract(
+    payload: CrawlRequest, settings, shutdown_event, concurrency_tracker=None
+) -> ToolResult:
     return await _guard_then_crawl(payload, settings, shutdown_event, _Unified.from_extract)
 
 
-async def handle_map(payload: MapRequest, settings, shutdown_event) -> ToolResult:
+async def handle_map(payload: MapRequest, settings, shutdown_event, concurrency_tracker=None) -> ToolResult:
     return await _tool_result(map_site(payload, settings=settings, shutdown_event=shutdown_event))
 
 
-async def handle_render(payload: RenderRequest, settings, shutdown_event) -> ToolResult:
+async def handle_render(
+    payload: RenderRequest, settings, shutdown_event, concurrency_tracker=None
+) -> ToolResult:
     if get_browser_pool() is None:
         return ToolResult(
             text="Browser pool is not initialized; the service is starting up or shutting down.",
@@ -214,8 +220,22 @@ async def handle_render(payload: RenderRequest, settings, shutdown_event) -> Too
     return await _tool_result(render_endpoint_handler(payload, settings=settings))
 
 
-async def handle_search(payload: SearchRequest, settings, shutdown_event) -> ToolResult:
-    return await _tool_result(search_endpoint_handler(payload, settings=settings))
+async def handle_search(
+    payload: SearchRequest, settings, shutdown_event, concurrency_tracker=None
+) -> ToolResult:
+    # #298: MCP has no key, so it searches as the anonymous caller through the same
+    # concurrency-bound door (and same shared register) the HTTP /v1/search uses.
+
+    from app.models.caller_identity import CallerIdentity
+
+    return await _tool_result(
+        search_endpoint_handler(
+            payload,
+            settings=settings,
+            caller=CallerIdentity(),
+            concurrency_tracker=concurrency_tracker,
+        )
+    )
 
 
 def _schema(model: type[BaseModel]) -> dict[str, Any]:

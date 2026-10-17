@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 
-from app.api.dependencies import get_settings
+from app.api.dependencies import CallerDep, get_settings
 from app.models.error_response import ErrorResponse
 from app.models.search_request import SearchRequest
 from app.models.search_response import SearchResponse
@@ -40,9 +40,14 @@ router = APIRouter(tags=["Search"])
 )
 async def search(
     payload: SearchRequest,
+    request: Request,
+    caller: CallerDep,
     settings=Depends(get_settings),
 ) -> SearchResponse:
-    return await search_handler(payload, settings=settings)
+    # #298: the search door resolves the caller like the crawl doors; the per-caller
+    # search register (summed into max_concurrency) lives on app state.
+    tracker = getattr(request.app.state, "search_concurrency_tracker", None)
+    return await search_handler(payload, settings=settings, caller=caller, concurrency_tracker=tracker)
 
 
 __all__ = ["router"]

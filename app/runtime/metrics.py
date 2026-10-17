@@ -188,12 +188,15 @@ class MetricsStore:
         results: int = 0,
         elapsed_ms: float = 0.0,
         errors: int = 0,
+        caller_id: str = "",
     ) -> None:
         self._add(_SEARCH_REQUESTS, 1)
         self._add(_SEARCH_RESULTS, results)
         self._add(_SEARCH_ERRORS, errors)
         if provider:
             self._add(_PROVIDER_PREFIX + provider, results)
+        if caller_id:
+            self._add(_CALLER_PREFIX + caller_id, 1)
         self._add(_SEARCH_ELAPSED, elapsed_ms)
 
     def record_throttle(self) -> None:

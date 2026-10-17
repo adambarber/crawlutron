@@ -299,6 +299,7 @@ if FastAPI is not None:
     from app.api.caller_concurrency import CallerConcurrencyTracker
 
     app.state.concurrency_tracker = CallerConcurrencyTracker()
+    app.state.search_concurrency_tracker = CallerConcurrencyTracker()
 
     # Body-size guard: 16 MiB cap at the ASGI receive layer (see
     # app/api/middleware.py for how truncation and keep-alive are handled).

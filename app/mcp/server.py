@@ -176,6 +176,7 @@ async def call_tool(
     body: dict[str, JsonValue],
     settings,
     shutdown_event,
+    concurrency_tracker=None,
 ) -> JsonValue:
     from app.mcp.tools import TOOLS_BY_NAME, validation_message
 
@@ -203,7 +204,12 @@ async def call_tool(
                 "isError": True,
             },
         )
-    result = await spec.handler(payload, settings=settings, shutdown_event=shutdown_event)
+    result = await spec.handler(
+        payload,
+        settings=settings,
+        shutdown_event=shutdown_event,
+        concurrency_tracker=concurrency_tracker,
+    )
     success: dict[str, Any] = {
         "resultType": "complete",
         "content": [{"type": "text", "text": result.text}],
@@ -222,6 +228,7 @@ async def handle_mcp_request(
     name_header: str | None,
     settings,
     shutdown_event,
+    concurrency_tracker=None,
 ) -> tuple[int, JsonValue | None]:
     """Process one JSON-RPC message; returns ``(http_status, payload_or_None)``.
 
@@ -256,7 +263,9 @@ async def handle_mcp_request(
         if method == "tools/list":
             return 200, result_response(request_id, tools_list_result())
         if method == "tools/call":
-            return 200, await call_tool(request_id, params, settings, shutdown_event)
+            return 200, await call_tool(
+                request_id, params, settings, shutdown_event, concurrency_tracker=concurrency_tracker
+            )
         return 404, error_response(request_id, METHOD_NOT_FOUND, f"Method not found: {method}")
     except ProtocolValidationError as error:
         return error.status_code, error.payload
