@@ -177,6 +177,7 @@ async def call_tool(
     settings,
     shutdown_event,
     concurrency_tracker=None,
+    caller=None,
 ) -> JsonValue:
     from app.mcp.tools import TOOLS_BY_NAME, validation_message
 
@@ -209,6 +210,7 @@ async def call_tool(
         settings=settings,
         shutdown_event=shutdown_event,
         concurrency_tracker=concurrency_tracker,
+        caller=caller,
     )
     success: dict[str, Any] = {
         "resultType": "complete",
@@ -229,6 +231,7 @@ async def handle_mcp_request(
     settings,
     shutdown_event,
     concurrency_tracker=None,
+    caller=None,
 ) -> tuple[int, JsonValue | None]:
     """Process one JSON-RPC message; returns ``(http_status, payload_or_None)``.
 
@@ -264,7 +267,12 @@ async def handle_mcp_request(
             return 200, result_response(request_id, tools_list_result())
         if method == "tools/call":
             return 200, await call_tool(
-                request_id, params, settings, shutdown_event, concurrency_tracker=concurrency_tracker
+                request_id,
+                params,
+                settings,
+                shutdown_event,
+                concurrency_tracker=concurrency_tracker,
+                caller=caller,
             )
         return 404, error_response(request_id, METHOD_NOT_FOUND, f"Method not found: {method}")
     except ProtocolValidationError as error:

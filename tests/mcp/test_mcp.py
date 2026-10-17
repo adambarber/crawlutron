@@ -358,6 +358,29 @@ class TestToolsCall:
         assert payload["error"]["code"] == -32602
 
 
+class TestCallerAuth:
+    """#205: /mcp must refuse an invalid credential, not silently crawl as someone."""
+
+    @pytest.mark.usefixtures("browser_pool_stub")
+    async def test_wrong_key_on_tools_call_is_a_401_not_a_benign_200(self, async_client, base_url):
+        """A wrong key over /mcp must not return a successful 200 crawl; it is 401."""
+        body = _body(
+            "tools/call",
+            params={"name": "crawl", "arguments": {"url": f"{base_url}/"}, "_meta": _META},
+        )
+        resp = await _mcp(async_client, body, {"X-API-Key": "definitely-not-a-key"})
+        assert resp.status_code == 401, resp.text
+        error = resp.json()["error"]
+        assert "api key" in error["message"].lower()
+
+    @pytest.mark.usefixtures("browser_pool_stub")
+    async def test_wrong_key_on_discover_is_also_a_401(self, async_client):
+        """The route refuses an invalid credential for every method, not just tools/call."""
+        resp = await _mcp(async_client, _body("server/discover"), {"X-API-Key": "definitely-not-a-key"})
+        assert resp.status_code == 401, resp.text
+        assert "api key" in resp.json()["error"]["message"].lower()
+
+
 async def _call_tool(async_client, name, arguments):
     """POST a ``tools/call`` for ``name`` and return ``(response, payload)``.
 

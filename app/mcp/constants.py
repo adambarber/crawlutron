@@ -23,6 +23,7 @@ INTERNAL_ERROR = -32603
 # MCP-specified error codes (reserved sub-range -32020..-32099).
 HEADER_MISMATCH = -32020
 UNSUPPORTED_PROTOCOL_VERSION = -32022
+INVALID_API_KEY = -32001
 
 # Per-request / per-result metadata keys (see ``_meta`` in the spec).
 META_PROTOCOL_VERSION = "io.modelcontextprotocol/protocolVersion"
@@ -39,6 +40,7 @@ __all__ = [
     "DEFAULT_TTL_MS",
     "DISCOVER_TTL_MS",
     "HEADER_MISMATCH",
+    "INVALID_API_KEY",
     "INTERNAL_ERROR",
     "INVALID_PARAMS",
     "INVALID_REQUEST",

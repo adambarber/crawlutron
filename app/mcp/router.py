@@ -8,13 +8,16 @@ from __future__ import annotations
 
 import json
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse, Response
 
+from app.api.caller_auth import get_caller_identity
 from app.api.dependencies import get_settings, get_shutdown_event
-from app.mcp.constants import INVALID_REQUEST, PARSE_ERROR
+from app.mcp.constants import INVALID_API_KEY, INVALID_REQUEST, PARSE_ERROR
 from app.mcp.protocol import error_response
 from app.mcp.server import handle_mcp_request, origin_allowed
+from app.mcp.tools import _http_exception_message
+from app.models.caller_identity import CallerIdentity
 
 router = APIRouter(tags=["MCP"])
 
@@ -42,6 +45,15 @@ async def mcp_endpoint(
             status_code=403,
             content=error_response(None, INVALID_REQUEST, "Origin not allowed"),
         )
+    # #205: /mcp was the only door an invalid credential passed silently. Resolve
+    # the caller here so a wrong key is a 401, never a benign 200 (no key stays anonymous).
+    try:
+        caller: CallerIdentity = await get_caller_identity(request)
+    except HTTPException as error:
+        return JSONResponse(
+            status_code=401,
+            content=error_response(None, INVALID_API_KEY, _http_exception_message(error)),
+        )
     try:
         body = await request.json()
     except (json.JSONDecodeError, UnicodeDecodeError):
@@ -62,6 +74,7 @@ async def mcp_endpoint(
         settings=settings,
         shutdown_event=shutdown_event,
         concurrency_tracker=getattr(request.app.state, "search_concurrency_tracker", None),
+        caller=caller,
     )
     if payload is None:
         return Response(status_code=202)
