@@ -58,6 +58,16 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   publishes only to `127.0.0.1`, which Docker port mapping requires.
 
 ### Fixed
+- **Doc-pool tests assert the real per-worker contract, not a transient pool snapshot (M1).**
+  `test_extract_document_child_death_returns_empty` and `test_extract_document_normal_works`
+  in tests/crawl/test_document_workers.py asserted process-global invariants over the shared
+  `DOC_POOL` -- no slot busy anywhere, and `pids()` non-empty after a real conversion. A
+  natively-crashing worker subprocess under xdist (`libc++abi: recursive_mutex lock failed`)
+  can transiently leave a sibling slot busy or empty the pid registry, so the assertions
+  failed ~10-17% of load-set runs. The child-death test now isolates the pool it drives
+  (`teardown()` first, the same convention `normal_works` already used) so its `health()` loop
+  covers only the worker THIS call owns, and `normal_works` asserts no worker is left marked
+  busy mid-task instead of a raw pid count. No production behavior changed.
 - **A redirect to a different port on the same host kept `Cookie` and `Authorization`.**
   `pinned_transport._redirect_target` decided whether to strip credential headers
   by comparing `urlparse(...).hostname`, so `https://a.com/x` to
