@@ -20,6 +20,7 @@ from app.api.caller_auth import (
     effective_cookie_namespace,
     resolve_page_limit,
 )
+from app.api.caller_concurrency import CallerConcurrencyTracker
 from app.api.crawl_executor import execute_crawl
 from app.api.exceptions import http_error, validation_http_error
 from app.api.job_runner import start_tracked_task
@@ -86,6 +87,7 @@ async def crawl(
     shutdown_event: asyncio.Event,
     request: Request | None = None,
     caller: CallerIdentity | None = None,
+    concurrency_tracker: CallerConcurrencyTracker | None = None,
 ) -> Any:
     """Execute a policy-driven crawl (sync or async webhook mode)."""
     active_caller = caller if caller is not None else anonymous_caller()
@@ -103,7 +105,9 @@ async def crawl(
             settings.max_batch_size,
             host_policy=host_policy,
         )
-        owner = await _admit_caller_request(payload_dict, job_store, active_caller)
+        owner = await _admit_caller_request(
+            payload_dict, job_store, active_caller, concurrency_tracker=concurrency_tracker
+        )
         webhook_url = payload.webhook_url
         async_mode = payload.async_mode
         if async_mode or webhook_url:
@@ -148,54 +152,66 @@ async def crawl(
                 },
             )
         _crawl_started = time.monotonic()
-        # Disconnect-aware sync crawl: if the caller has gone away, halt the
-        # engine call instead of crawling to completion for a dead client.
-        crawl_awaitable = execute_crawl(
-            payload_dict, settings=settings, shutdown_event=shutdown_event, urls=checked
-        )
-        if request is None:
-            result = await crawl_awaitable
-        else:
-            result = await await_or_client_gone(crawl_awaitable, request)
-        record_crawl_completion(
-            result,
-            _crawl_started,
-            event="crawl_request_completed",
-            logger=logger,
-            caller_id=owner,
-        )
-        response_model = await aunified_response_from_result(result)
+        # The sync door has no job row to count with, so it holds a slot in the per-caller
+        # in-flight register for the crawl's life and releases it on every exit.
+        if concurrency_tracker is not None:
+            concurrency_tracker.reserve(owner)
         try:
-            await result_store.aput(result["request_id"], response_model.model_dump(), owner=owner)
-        except Exception:
-            logger.warning("crawl_result_store_failed", extra={"request_id": result["request_id"]})
-        output_format = payload.output_format
-        if output_format and output_format.lower() != "json":
-            body, media_type = _serialize_or_reject(
-                [u.model_dump() for u in response_model.results], output_format
+            # Disconnect-aware sync crawl: if the caller has gone away, halt the
+            # engine call instead of crawling to completion for a dead client.
+            crawl_awaitable = execute_crawl(
+                payload_dict, settings=settings, shutdown_event=shutdown_event, urls=checked
             )
-            return Response(content=body, media_type=media_type)
-        return response_model
+            if request is None:
+                result = await crawl_awaitable
+            else:
+                result = await await_or_client_gone(crawl_awaitable, request)
+            record_crawl_completion(
+                result,
+                _crawl_started,
+                event="crawl_request_completed",
+                logger=logger,
+                caller_id=owner,
+            )
+            response_model = await aunified_response_from_result(result)
+            try:
+                await result_store.aput(result["request_id"], response_model.model_dump(), owner=owner)
+            except Exception:
+                logger.warning("crawl_result_store_failed", extra={"request_id": result["request_id"]})
+            output_format = payload.output_format
+            if output_format and output_format.lower() != "json":
+                body, media_type = _serialize_or_reject(
+                    [u.model_dump() for u in response_model.results], output_format
+                )
+                return Response(content=body, media_type=media_type)
+            return response_model
+        finally:
+            if concurrency_tracker is not None:
+                concurrency_tracker.release(owner)
 
 
 async def _admit_caller_request(
     payload_dict: dict[str, JsonValue],
     job_store: JobStore,
     caller: CallerIdentity,
+    concurrency_tracker: CallerConcurrencyTracker | None = None,
 ) -> str:
-    """Quota checks and cookie-namespace defaulting for one crawl; returns the owner."""
+    """Quota checks and cookie-namespace defaulting for one crawl; returns the owner.
+    #194: ``resolve_page_limit`` applies to every caller so a key's positive page
+    ceiling binds an omitted/zero ``limits`` block, never degrading to unbounded."""
     resolved = read_policy(payload_dict.get("policy"), job_store.tier)
-    requested_pages = resolved.limits.max_pages
-    if not caller.authenticated:
-        requested_pages = resolve_page_limit(caller, requested_pages)
-        resolved = resolved.model_copy(
-            update={"limits": resolved.limits.model_copy(update={"max_pages": requested_pages})}
-        )
-        # Persist the resolved typed model, not the raw wire dict, so async storage
-        # and sync execution carry the bound; ``model_dump`` is the model's own edge.
-        payload_dict["policy"] = resolved.model_dump()
+    requested_pages = resolve_page_limit(caller, resolved.limits.max_pages)
+    resolved = resolved.model_copy(
+        update={"limits": resolved.limits.model_copy(update={"max_pages": requested_pages})}
+    )
+    # Persist the resolved typed model, not the raw wire dict, so async storage
+    # and sync execution carry the bound; ``model_dump`` is the model's own edge.
+    payload_dict["policy"] = resolved.model_dump()
     check_page_quota(caller, requested_pages)
-    check_concurrency_quota(caller, await job_store.aactive_count_for_caller(caller.caller_id))
+    active = await job_store.aactive_count_for_caller(caller.caller_id)
+    if concurrency_tracker is not None:
+        active += concurrency_tracker.sync_in_flight(caller.caller_id)
+    check_concurrency_quota(caller, active)
     namespace = effective_cookie_namespace(resolved.request_profile, caller)
     if namespace:
         request_profile = dict(resolved.request_profile)

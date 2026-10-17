@@ -68,12 +68,12 @@ async def create_job(
             host_policy=host_policy,
         )
         resolved_policy = read_policy(payload.policy, job_store.tier)
-        requested_pages = resolved_policy.limits.max_pages
-        if not caller.authenticated:
-            requested_pages = resolve_page_limit(caller, requested_pages)
-            resolved_policy = resolved_policy.model_copy(
-                update={"limits": resolved_policy.limits.model_copy(update={"max_pages": requested_pages})}
-            )
+        # #194: resolve the page bound for EVERY caller, keyed and anonymous, so a key
+        # with a positive ceiling never degrades an omitted/zero ``limits`` to unbounded.
+        requested_pages = resolve_page_limit(caller, resolved_policy.limits.max_pages)
+        resolved_policy = resolved_policy.model_copy(
+            update={"limits": resolved_policy.limits.model_copy(update={"max_pages": requested_pages})}
+        )
         check_page_quota(caller, requested_pages)
         check_concurrency_quota(caller, await job_store.aactive_count_for_caller(caller.caller_id))
         job = await job_store.acreate(checked[0], resolved_policy, owner=caller.caller_id)

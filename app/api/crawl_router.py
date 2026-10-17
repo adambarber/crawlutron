@@ -129,6 +129,7 @@ async def crawl(
         shutdown_event=shutdown_event,
         request=request,
         caller=caller,
+        concurrency_tracker=getattr(request.app.state, "concurrency_tracker", None),
     )
 
 
