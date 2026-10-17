@@ -250,6 +250,7 @@ def _isolation_app(job_store: JobStore, result_store: CrawlResultStore, keys: Ca
     app.include_router(crawl_router)
     app.include_router(keys_router)
     app.state.caller_key_store = keys
+    app.state.key_admin_token = "test-admin-token"
     app.dependency_overrides[get_job_store] = lambda: job_store
     app.dependency_overrides[get_result_store] = lambda: result_store
     return app
@@ -257,11 +258,12 @@ def _isolation_app(job_store: JobStore, result_store: CrawlResultStore, keys: Ca
 
 async def test_http_scoped_reads_and_key_issuance(tmp_path):
     async with _isolation_client(tmp_path) as (client, store, results, keys):
-        first = await client.post("/v1/keys", json={"label": "agent-a"})
+        admin = {"X-API-Key": "test-admin-token"}
+        first = await client.post("/v1/keys", json={"label": "agent-a"}, headers=admin)
         assert first.status_code == 201, first.text
-        other = await client.post("/v1/keys", json={"label": "agent-b"})
+        other = await client.post("/v1/keys", json={"label": "agent-b"}, headers=admin)
         assert other.status_code == 201, other.text
-        listed = await client.get("/v1/keys")
+        listed = await client.get("/v1/keys", headers=admin)
         assert listed.status_code == 200, listed.text
         assert {row["label"] for row in listed.json()} == {"agent-a", "agent-b"}
         assert "secret" not in listed.text

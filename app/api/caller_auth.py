@@ -6,7 +6,10 @@ caller, a wrong key is a 401. Ownership elsewhere is an exact id match.
 
 from __future__ import annotations
 
+import os
+import secrets
 from collections.abc import Mapping
+from typing import NoReturn
 
 from fastapi import Request
 
@@ -29,7 +32,7 @@ def identity_for_key(record: CallerKey) -> CallerIdentity:
 
 
 def anonymous_caller() -> CallerIdentity:
-    """The identity of a request that presented no key: fresh per call."""
+    """The shared anonymous bucket: one bounded single-user identity."""
     return CallerIdentity()
 
 
@@ -44,16 +47,59 @@ def presented_key(request: Request) -> str | None:
     return None
 
 
+def _raise_invalid_api_key() -> NoReturn:
+    """Shared 401 for any failed /v1/keys credential."""
+    raise http_error(401, "invalid_api_key", "Unknown or revoked API key")
+
+
+def _key_admin_token(request: Request) -> str:
+    """The configured operator token, or '' when unset."""
+    state = getattr(request, "app", None)
+    state = getattr(state, "state", None) if state is not None else None
+    if state is not None:
+        token = getattr(state, "key_admin_token", None)
+        if isinstance(token, str) and token:
+            return token
+        settings = getattr(state, "crawler_settings", None)
+        if settings is not None:
+            token = getattr(settings, "key_admin_token", None)
+            if isinstance(token, str) and token:
+                return token
+    return os.environ.get("CRAWLUTRON_KEY_ADMIN_TOKEN", "")
+
+
+async def get_keys_caller(request: Request) -> CallerIdentity:
+    """FastAPI dependency: a verified caller or the operator for /v1/keys."""
+    secret = presented_key(request)
+    if not secret:
+        raise http_error(401, "invalid_api_key", "Unknown or revoked API key")
+    admin_token = _key_admin_token(request)
+    if admin_token and secrets.compare_digest(secret, admin_token):
+        return CallerIdentity(
+            caller_id="admin",
+            label="admin",
+            authenticated=True,
+            max_pages=0,
+            max_concurrency=0,
+        )
+    return await _caller_from_secret(request, secret)
+
+
+async def _caller_from_secret(request: Request, secret: str) -> CallerIdentity:
+    """Resolve a presented secret to an identity or raise 401."""
+    store = getattr(request.app.state, "caller_key_store", None)
+    record = await store.averify_key(secret) if store is not None else None
+    if record is None:
+        _raise_invalid_api_key()
+    return identity_for_key(record)
+
+
 async def get_caller_identity(request: Request) -> CallerIdentity:
     """FastAPI dependency: who this request crawls as."""
     secret = presented_key(request)
     if not secret:
         return anonymous_caller()
-    store = getattr(request.app.state, "caller_key_store", None)
-    record = await store.averify_key(secret) if store is not None else None
-    if record is None:
-        raise http_error(401, "invalid_api_key", "Unknown or revoked API key")
-    return identity_for_key(record)
+    return await _caller_from_secret(request, secret)
 
 
 def effective_cookie_namespace(profile: Mapping[str, JsonValue], caller: CallerIdentity) -> str:
@@ -89,6 +135,7 @@ __all__ = [
     "check_page_quota",
     "effective_cookie_namespace",
     "get_caller_identity",
+    "get_keys_caller",
     "identity_for_key",
     "presented_key",
 ]

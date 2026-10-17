@@ -11,7 +11,7 @@ from typing import Annotated
 
 from fastapi import Depends, Request
 
-from app.api.caller_auth import get_caller_identity
+from app.api.caller_auth import get_caller_identity, get_keys_caller
 from app.config.settings import CrawlerSettings
 from app.models.caller_identity import CallerIdentity
 from app.storage.caller_key_store import CallerKeyStore
@@ -54,6 +54,7 @@ def get_caller_key_store(request: Request) -> CallerKeyStore:
 # declared: an unannotated provider makes the alias, and every endpoint, carry Any.
 CallerKeyStoreDep = Annotated[CallerKeyStore, Depends(get_caller_key_store)]
 CallerDep = Annotated[CallerIdentity, Depends(get_caller_identity)]
+KeysCallerDep = Annotated[CallerIdentity, Depends(get_keys_caller)]
 SettingsDep = Annotated[CrawlerSettings, Depends(get_settings)]
 ShutdownEventDep = Annotated[asyncio.Event, Depends(get_shutdown_event)]
 JobStoreDep = Annotated[JobStore, Depends(get_job_store)]
@@ -63,6 +64,7 @@ WatchStoreDep = Annotated[WatchStore, Depends(get_watch_store)]
 
 __all__ = [
     "CallerDep",
+    "KeysCallerDep",
     "CallerKeyStoreDep",
     "JobStoreDep",
     "ResultStoreDep",

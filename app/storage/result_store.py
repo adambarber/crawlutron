@@ -71,15 +71,19 @@ class CrawlResultStore(CoordinationStore):
         now = self._clock()
         cutoff = now - self._ttl_seconds if self._ttl_seconds > 0 else 0.0
         with self._lock:
-            row = self._conn.execute(
-                "SELECT stored_at, payload, owner FROM results WHERE request_id = ?",
-                (request_id,),
-            ).fetchone()
+            if caller_id is None:
+                row = self._conn.execute(
+                    "SELECT stored_at, payload, owner FROM results WHERE request_id = ?",
+                    (request_id,),
+                ).fetchone()
+            else:
+                row = self._conn.execute(
+                    "SELECT stored_at, payload, owner FROM results WHERE request_id = ? AND owner = ?",
+                    (request_id, caller_id),
+                ).fetchone()
         if row is None:
             return None
-        stored_at, payload, owner = row
-        if caller_id is not None and owner != caller_id:
-            return None
+        stored_at, payload, _owner = row
         if self._ttl_seconds > 0 and stored_at < cutoff:
             return None
         return json.loads(payload)

@@ -58,6 +58,8 @@ services:
       # enable that provider for production use.
       CRAWLUTRON_SEARCH_PROVIDER: "auto"
       CRAWLUTRON_TAVILY_API_KEY: "${CRAWLUTRON_TAVILY_API_KEY:-}"
+      # Operator token gating /v1/keys issuance, listing, and revocation.
+      CRAWLUTRON_KEY_ADMIN_TOKEN: "${CRAWLUTRON_KEY_ADMIN_TOKEN:-}"
       # CRAWLUTRON_BRAVE_API_KEY: ""
       # CRAWLUTRON_SERPER_API_KEY: ""
       # Belt over the image's baked value: guarantee ORT telemetry is off even if

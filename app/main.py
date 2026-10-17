@@ -115,18 +115,15 @@ logging.getLogger("trafilatura").setLevel(logging.ERROR)
 
 
 def warn_if_bound_off_loopback(host: str) -> None:
-    """Warn at startup when the API is reachable from off the machine: nothing authenticates
-    callers (every ``Authorization`` header is outbound), so loopback keeps the surface safe.
-    A warning, not a refusal -- compose binds 0.0.0.0 in the container, publishing to 127.0.0.1 only.
-    """
+    """Warn at startup when the API is reachable from off the machine."""
     if is_loopback_bind(host):
         return
     logger.warning(
-        "Binding to %s puts the crawl API on the network with no caller "
-        "authentication: crawl execution, job control, result retrieval and "
-        "webhooks are all reachable by anyone who can route to this port. "
-        "Bind 127.0.0.1, or keep this address and publish only to loopback "
-        "as docker-compose.yml does.",
+        "Binding to %s exposes the crawl API on the network; callers without a "
+        "key crawl anonymously (shared bucket, default policy limits), and "
+        "issuance/revocation require CRAWLUTRON_KEY_ADMIN_TOKEN. Bind "
+        "127.0.0.1, or keep this address and publish only to loopback as "
+        "docker-compose.yml does.",
         (host or "").strip(),
     )
 
@@ -296,6 +293,7 @@ if FastAPI is not None:
     app.state.result_store = result_store
     app.state.watch_store = watch_store
     app.state.caller_key_store = caller_key_store
+    app.state.key_admin_token = settings.key_admin_token
 
     # Body-size guard: 16 MiB cap at the ASGI receive layer (see
     # app/api/middleware.py for how truncation and keep-alive are handled).

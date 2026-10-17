@@ -115,6 +115,9 @@ class CrawlerSettings:
     search_limit_default: int = 5
     search_limit_max: int = 20
     search_timeout_seconds: int = 15
+    # Operator token gating /v1/keys issuance, listing, and revocation. Empty
+    # disables the HTTP surface for key management (no token, no minting).
+    key_admin_token: str = ""
 
     @classmethod
     def from_mapping(cls, values: Mapping[str, str] | None = None) -> CrawlerSettings:
@@ -267,4 +270,5 @@ class CrawlerSettings:
             search_timeout_seconds=get_mapping_int(
                 source, "CRAWLUTRON_SEARCH_TIMEOUT_SECONDS", cls.search_timeout_seconds
             ),
+            key_admin_token=source.get("CRAWLUTRON_KEY_ADMIN_TOKEN", cls.key_admin_token),
         )

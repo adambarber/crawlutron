@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class IssuedKey(BaseModel):
@@ -13,6 +13,6 @@ class IssuedKey(BaseModel):
 
     key_id: str
     label: str = ""
-    secret: str
+    secret: str = Field(repr=False)
     max_pages: int = 0
     max_concurrency: int = 0

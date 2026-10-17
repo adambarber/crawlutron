@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class CallerKey(BaseModel):
@@ -13,7 +13,7 @@ class CallerKey(BaseModel):
 
     key_id: str
     label: str = ""
-    key_hash: str
+    key_hash: str = Field(repr=False)
     max_pages: int = 0
     max_concurrency: int = 0
     created_at: float = 0.0
