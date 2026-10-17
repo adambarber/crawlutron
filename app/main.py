@@ -121,9 +121,9 @@ def warn_if_bound_off_loopback(host: str) -> None:
     logger.warning(
         "Binding to %s exposes the crawl API on the network; callers without a "
         "key crawl anonymously (shared bucket, default policy limits), and "
-        "issuance/revocation require CRAWLUTRON_KEY_ADMIN_TOKEN. Bind "
-        "127.0.0.1, or keep this address and publish only to loopback as "
-        "docker-compose.yml does.",
+        "issuance/revocation require CRAWLUTRON_KEY_ADMIN_TOKEN. Anonymous "
+        "callers have no caller authentication. Bind 127.0.0.1, or keep this "
+        "address and publish only to loopback as docker-compose.yml does.",
         (host or "").strip(),
     )
 

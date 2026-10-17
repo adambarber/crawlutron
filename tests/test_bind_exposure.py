@@ -30,7 +30,7 @@ def test_routable_bind_warns_that_nothing_authenticates_the_caller(caplog, host)
 
     assert caplog.records, f"{host} is routable and startup said nothing"
     message = caplog.text
-    assert "no caller authentication" in message, f"the warning does not say what is exposed: {message}"
+    assert "anonymous" in message, f"the warning does not say what is exposed: {message}"
     # The mitigation is the part an operator can act on. A warning naming the risk without naming the fix is a
     # worry, not a guard.
     assert host in message, f"the warning does not say which address: {message}"
