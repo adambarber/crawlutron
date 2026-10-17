@@ -2,6 +2,12 @@ from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict
 
+from app.admission.policy import DEFAULT_MAX_PAGES
+
+# Anonymous is a first-class bounded identity (capability defaults).
+DEFAULT_ANONYMOUS_MAX_PAGES = DEFAULT_MAX_PAGES
+DEFAULT_ANONYMOUS_MAX_CONCURRENCY = 4
+
 
 class CallerIdentity(BaseModel):
     """Who a request crawls as: a verified key or the anonymous caller.
@@ -14,5 +20,5 @@ class CallerIdentity(BaseModel):
     caller_id: str = ""
     label: str = "anonymous"
     authenticated: bool = False
-    max_pages: int = 0
-    max_concurrency: int = 0
+    max_pages: int = DEFAULT_ANONYMOUS_MAX_PAGES
+    max_concurrency: int = DEFAULT_ANONYMOUS_MAX_CONCURRENCY

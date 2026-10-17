@@ -13,7 +13,7 @@ from fastapi import APIRouter
 from app.admission.payload_helpers import checked_payload_urls
 from app.admission.policy import read_policy
 from app.api import job_runner
-from app.api.caller_auth import check_concurrency_quota, check_page_quota
+from app.api.caller_auth import check_concurrency_quota, check_page_quota, resolve_page_limit
 from app.api.dependencies import CallerDep, JobStoreDep, SettingsDep, ShutdownEventDep
 from app.api.exceptions import http_error, validation_http_error
 from app.api.main_helpers import build_job_status
@@ -67,9 +67,16 @@ async def create_job(
             settings.max_batch_size,
             host_policy=host_policy,
         )
-        check_page_quota(caller, read_policy(payload.policy, job_store.tier).limits.max_pages)
+        resolved_policy = read_policy(payload.policy, job_store.tier)
+        requested_pages = resolved_policy.limits.max_pages
+        if not caller.authenticated:
+            requested_pages = resolve_page_limit(caller, requested_pages)
+            resolved_policy = resolved_policy.model_copy(
+                update={"limits": resolved_policy.limits.model_copy(update={"max_pages": requested_pages})}
+            )
+        check_page_quota(caller, requested_pages)
         check_concurrency_quota(caller, await job_store.aactive_count_for_caller(caller.caller_id))
-        job = await job_store.acreate(checked[0], payload.policy, owner=caller.caller_id)
+        job = await job_store.acreate(checked[0], resolved_policy, owner=caller.caller_id)
     except ValueError as error:
         raise validation_http_error(error) from error
     job_runner.start_job(job.job_id, job_store, settings, shutdown_event)

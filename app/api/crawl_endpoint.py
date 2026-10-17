@@ -22,6 +22,7 @@ from app.api.caller_auth import (
     check_concurrency_quota,
     check_page_quota,
     effective_cookie_namespace,
+    resolve_page_limit,
 )
 from app.api.crawl_executor import execute_crawl
 from app.api.exceptions import http_error, validation_http_error
@@ -188,7 +189,10 @@ async def _admit_caller_request(
 ) -> str:
     """Quota checks and cookie-namespace defaulting for one crawl; returns the owner."""
     resolved = read_policy(payload_dict.get("policy"), job_store.tier)
-    check_page_quota(caller, resolved.limits.max_pages)
+    requested_pages = resolved.limits.max_pages
+    if not caller.authenticated:
+        requested_pages = resolve_page_limit(caller, requested_pages)
+    check_page_quota(caller, requested_pages)
     check_concurrency_quota(caller, await job_store.aactive_count_for_caller(caller.caller_id))
     namespace = effective_cookie_namespace(resolved.request_profile, caller)
     if namespace:

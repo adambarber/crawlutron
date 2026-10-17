@@ -32,7 +32,11 @@ def identity_for_key(record: CallerKey) -> CallerIdentity:
 
 
 def anonymous_caller() -> CallerIdentity:
-    """The shared anonymous bucket: one bounded single-user identity."""
+    """The shared anonymous bucket: a bounded single-user identity.
+
+    Quotas resolve to the service's capability defaults; identical to a keyed
+    caller that omits limits on the sync crawl path.
+    """
     return CallerIdentity()
 
 
@@ -107,6 +111,17 @@ def effective_cookie_namespace(profile: Mapping[str, JsonValue], caller: CallerI
     if caller.authenticated and caller.caller_id:
         return cookie_namespace_for(profile) or caller.caller_id
     return cookie_namespace_for(profile)
+
+
+def resolve_page_limit(caller: CallerIdentity, requested_max_pages: int) -> int:
+    """Resolve an omitted (zero) page limit to the caller's bound.
+
+    One path for every admission edge: a positive request stands; an omitted
+    request takes the caller's bound, else stays unbounded. ``#194`` extends.
+    """
+    if requested_max_pages > 0:
+        return requested_max_pages
+    return caller.max_pages if caller.max_pages > 0 else 0
 
 
 def check_page_quota(caller: CallerIdentity, requested_max_pages: int) -> None:

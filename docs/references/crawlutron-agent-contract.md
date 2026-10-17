@@ -54,6 +54,11 @@ quota is 429 `quota_exceeded`. Unless `request_profile.cookie_namespace` is set,
 a keyed crawl's cookies are namespaced to the key id. Per-caller request counts
 are exposed in `/metrics` as `crawler_crawl_requests_total{caller="<key_id>"}`.
 
+Operator token (`CRAWLUTRON_KEY_ADMIN_TOKEN`) rotation is a redeploy: set a new
+value and restart the service. Comparison is constant-time (`secrets.compare_digest`);
+there is no in-place hot rotation, so the previous value stops working only when
+the new process starts.
+
 ## Liveness and Readiness
 
 `GET /health` is intentionally lightweight: it confirms the FastAPI process can

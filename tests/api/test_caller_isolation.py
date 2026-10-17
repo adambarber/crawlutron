@@ -210,7 +210,10 @@ def test_page_quota_rejects_over_budget_crawls():
     caller = CallerIdentity(caller_id="key_a", authenticated=True, max_pages=10)
 
     check_page_quota(caller, 10)
-    check_page_quota(CallerIdentity(), 1000)
+
+    with pytest.raises(HTTPException) as raised:
+        check_page_quota(CallerIdentity(), 1000)
+    assert raised.value.status_code == 429
 
     with pytest.raises(HTTPException) as raised:
         check_page_quota(caller, 11)
@@ -317,7 +320,10 @@ def test_concurrency_quota_rejects_a_full_caller():
     caller = CallerIdentity(caller_id="key_a", authenticated=True, max_concurrency=1)
 
     check_concurrency_quota(caller, 0)
-    check_concurrency_quota(CallerIdentity(), 100)
+
+    with pytest.raises(HTTPException) as raised:
+        check_concurrency_quota(CallerIdentity(), 100)
+    assert raised.value.status_code == 429
 
     with pytest.raises(HTTPException) as raised:
         check_concurrency_quota(caller, 1)
