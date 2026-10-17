@@ -12,6 +12,7 @@ from app.api.crawl_executor import execute_crawl
 from app.api.main_helpers import record_crawl_completion, request_gate
 from app.api.site_map import build_site_map
 from app.config.settings import CrawlerSettings
+from app.models.crawl_request import CrawlRequest
 from app.models.discovery_config import DiscoveryConfig
 from app.models.host_policy import HostPolicy
 from app.models.map_request import MapRequest
@@ -28,8 +29,8 @@ async def map_site(
 ) -> SiteMapPayload:
     """Map ``payload.root_url`` to its discovered-link frontier."""
     with request_gate("map_request_rejected", logger=logger):
-        # Built on the model, not the dumped dict: the dict was the last place a policy
-        # was still mutated key-by-key, and the engine receives what pydantic validated.
+        # Built on the model, not a dumped dict: the engine receives what pydantic
+        # validated, reshaped into the declared request model discovery forces on.
         policy = payload.policy.model_copy(
             update={
                 "discovery": DiscoveryConfig(robots=True, sitemaps=True, feeds=True),
@@ -38,12 +39,11 @@ async def map_site(
                 ),
             }
         )
-        payload_dict = payload.model_dump(exclude_none=True)
-        payload_dict["policy"] = policy
+        crawl = CrawlRequest(url=payload.url, policy=policy)
         _crawl_started = time.monotonic()
         active_settings = settings or CrawlerSettings.from_mapping()
         result = await execute_crawl(
-            payload_dict,
+            crawl,
             settings=active_settings,
             shutdown_event=shutdown_event,
         )

@@ -13,3 +13,6 @@ class WatchStatus(StrEnum):
     """
 
     ACTIVE = "active"
+    # The owner's key was revoked; the sweep deactivates the watch so it stops
+    # issuing checks under a dead identity. Not deleted: the row keeps its history.
+    DEACTIVATED = "deactivated"

@@ -15,6 +15,7 @@ from app.admission.render_options import resolve_render_options
 from app.config.settings import CrawlerSettings
 from app.models.crawl_job import CrawlJob
 from app.models.crawl_policy import POLICY_SCHEMA_VERSION
+from app.models.crawl_request import CrawlRequest
 from app.models.crawl_result import CrawlResult, EngineCrawlResult
 from app.models.crawl_worker import CrawlWorker
 from app.models.host_policy import HostPolicy
@@ -72,7 +73,7 @@ async def render_request(
     # texts stay beside admitted values so the wire's original_url echoes text.
     submitted = list(
         checked_payload_urls(
-            payload,
+            CrawlRequest.model_validate({"url": payload.get("url"), "urls": payload.get("urls")}),
             active_settings.max_batch_size,
             host_policy=host_policy,
         )

@@ -13,7 +13,7 @@ import logging
 import os
 import tempfile
 import time
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from datetime import UTC, datetime
 from typing import Any, cast
 
@@ -23,6 +23,7 @@ from app.admission.policy import PolicyTier
 from app.config.env import get_env_int
 from app.config.settings import CrawlerSettings
 from app.models.crawl_policy import CrawlPolicy
+from app.models.crawl_request import CrawlRequest
 from app.models.crawl_result import EngineCrawlResult
 from app.models.crawl_worker import CrawlWorker
 from app.models.host_policy import HostPolicy
@@ -323,7 +324,7 @@ def _reset_cookie_namespace(token: Any) -> None:
 
 
 async def crawl_request(
-    payload: dict[str, Any],
+    payload: CrawlRequest | Mapping[str, object],
     *,
     settings: CrawlerSettings | None = None,
     urls: list[str] | None = None,
@@ -338,6 +339,12 @@ async def crawl_request(
     fetch_and_decode: FetchAndDecode | None = None,
     resource_gate: ResourceGate | None = None,
 ) -> ProducerEnvelope:
+    """One typed crawl through every entry point. ``payload`` is a model; a wire
+    mapping is validated once to it here (the seam's single coercion), so every
+    downstream read is typed -- ``payload.policy``, ``payload.url``, never a dict.
+    """
+    if not isinstance(payload, CrawlRequest):
+        payload = CrawlRequest.model_validate(dict(payload))
     active_settings = settings or CrawlerSettings.from_mapping()
     host_policy = HostPolicy.from_settings(active_settings)
     # One batch cap -- the same gate the async endpoint uses before accepting, so

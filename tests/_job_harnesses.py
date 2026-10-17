@@ -71,10 +71,13 @@ async def run_job_control_test(
             assert resp.status_code == expected_status
 
 
-async def _execution_urls(payload_dict, hang: asyncio.Event | None):
+async def _execution_urls(payload, hang: asyncio.Event | None):
     if hang is not None and not hang.is_set():
         await hang.wait()
-    urls = payload_dict.get("urls") or [payload_dict.get("url")]
+    if hasattr(payload, "urls") and hasattr(payload, "url"):
+        urls = payload.urls if payload.urls is not None else ([payload.url] if payload.url else [])
+    else:
+        urls = payload.get("urls") or [payload.get("url")]
     return [canonical(url) for url in urls]
 
 

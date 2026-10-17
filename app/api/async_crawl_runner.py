@@ -9,7 +9,6 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
-from typing import Any
 
 from app.api.crawl_executor import execute_crawl
 from app.api.job_runner import arecord_terminal_failure
@@ -20,6 +19,7 @@ from app.api.response_shaping import (
 )
 from app.config.env import get_env_int
 from app.config.settings import CrawlerSettings
+from app.models.crawl_request import CrawlRequest
 from app.models.host_policy import HostPolicy
 from app.runtime.metrics import get_metrics
 from app.storage.job_store import TERMINAL_STATUSES, JobStatus
@@ -74,7 +74,7 @@ def reset_process_state() -> None:
 
 async def run_async_crawl(
     request_id: str,
-    payload_dict: dict[str, Any],
+    payload: CrawlRequest,
     webhook_url: str | None,
     crawl_settings: CrawlerSettings,
     job_store,
@@ -82,10 +82,9 @@ async def run_async_crawl(
     shutdown_event: asyncio.Event,
     urls: list[str] | None = None,
 ) -> None:
-    """Run a single-shot crawl in the background, persisting results to job_store.
-
-    Updates the job through PENDING -> RUNNING -> COMPLETED/FAILED; POSTs the result
-    on completion if ``webhook_url`` is given. ``urls`` carries the gated batch forward.
+    """Run a single-shot crawl in the background, persisting results to job_store
+    through PENDING -> RUNNING -> COMPLETED/FAILED and POSTing when ``webhook_url``
+    is set. ``payload`` is the declared request model; ``urls`` carries the batch.
     """
     # Load job and mark RUNNING
     job = await job_store.aload(request_id)
@@ -102,7 +101,7 @@ async def run_async_crawl(
     try:
         async with _get_async_crawl_semaphore():
             result = await execute_crawl(
-                payload_dict,
+                payload,
                 settings=crawl_settings,
                 shutdown_event=shutdown_event,
                 urls=urls,

@@ -150,10 +150,13 @@ WATCHES_SCHEMA = TableSchema(
         ColumnSchema("consecutive_failures", "INTEGER", True, "0"),
         ColumnSchema("created_at", "REAL", True, None),
         ColumnSchema("updated_at", "REAL", True, None),
+        # Owner of the watch row: the anonymous bucket ("") or a keyed caller's id.
+        # Registration, list, read, delete are owner-scoped; the due read stays global.
+        ColumnSchema("owner", "TEXT", True, "''"),
     ),
     indexes=(
         # The due-claim sweep reads (status, next_check_at) and nothing else;
-        # this is the one query shape the sweeper runs per pass.
+        # ``owner`` is absent so the due scan keeps using this index.
         IndexSchema("watches_due", ("status", "next_check_at")),
     ),
 )
@@ -205,7 +208,7 @@ MIGRATION_SEQUENCES = {
     StoreSchema.RESULTS: ("0001_results_initial", "0002_results_add_owner"),
     StoreSchema.COORDINATION_COUNTERS: ("0001_coordination_counters_initial",),
     StoreSchema.COORDINATION_COOKIES: ("0001_coordination_cookies_initial",),
-    StoreSchema.WATCHES: ("0001_watches_initial",),
+    StoreSchema.WATCHES: ("0001_watches_initial", "0002_watches_add_owner"),
     StoreSchema.CALLER_KEYS: ("0001_caller_keys_initial",),
 }
 

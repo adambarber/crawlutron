@@ -22,6 +22,11 @@ def watch_client(store) -> AsyncClient:
     # real app rather than restated here: a harness that spelled them out would keep answering with the old
     for exception_class, handler in service_app().exception_handlers.items():
         app.add_exception_handler(exception_class, handler)
+    from tempfile import mkdtemp
+
+    from app.storage.caller_key_store import CallerKeyStore
+
+    app.state.caller_key_store = CallerKeyStore(mkdtemp() + "/keys.db")
     app.dependency_overrides[get_watch_store] = lambda: store
     app.dependency_overrides[get_settings] = lambda: CrawlerSettings.from_mapping({})
     return AsyncClient(transport=ASGITransport(app=app), base_url="http://test")

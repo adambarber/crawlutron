@@ -17,6 +17,7 @@ from app.api.caller_auth import check_concurrency_quota, check_page_quota, resol
 from app.api.dependencies import CallerDep, JobStoreDep, SettingsDep, ShutdownEventDep
 from app.api.exceptions import http_error, validation_http_error
 from app.api.main_helpers import build_job_status
+from app.models.crawl_request import CrawlRequest
 from app.models.error_response import ErrorResponse
 from app.models.host_policy import HostPolicy
 from app.models.job_control_request import JobControlRequest
@@ -63,7 +64,7 @@ async def create_job(
     try:
         host_policy = HostPolicy.from_settings(settings)
         checked = checked_payload_urls(
-            {"url": str(payload.root_url)},
+            CrawlRequest(url=str(payload.root_url)),
             settings.max_batch_size,
             host_policy=host_policy,
         )

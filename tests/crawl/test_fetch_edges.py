@@ -52,14 +52,15 @@ class TestCrawlRequest:
     def test_checked_payload_urls_is_the_shared_batch_gate(self) -> None:
         """One chokepoint returns in-range urls and rejects oversized batches."""
         from app.admission.payload_helpers import checked_payload_urls
+        from app.models.crawl_request import CrawlRequest
 
-        within = {"urls": ["http://example.com/a", "http://example.com/a", "http://example.com/b"]}
+        within = CrawlRequest(urls=["http://example.com/a", "http://example.com/a", "http://example.com/b"])
         assert checked_payload_urls(
             within,
             10,
             host_policy=HostPolicy.unrestricted(),
         ) == ["http://example.com/a", "http://example.com/b"]
-        oversized = {"urls": [f"http://example.com/{i}" for i in range(11)]}
+        oversized = CrawlRequest(urls=[f"http://example.com/{i}" for i in range(11)])
         with pytest.raises(ValueError, match=r"^batch_size_exceeded$"):
             checked_payload_urls(
                 oversized,
@@ -72,9 +73,10 @@ class TestCrawlRequest:
         the batch is parsed once per request. A forwarded batch is returned as
         the job set without re-deriving from the payload..."""
         from app.admission.payload_helpers import checked_payload_urls
+        from app.models.crawl_request import CrawlRequest
 
         forwarded = ["http://example.com/a", "http://example.com/b"]
-        oversized_payload = {"urls": [f"http://example.com/{i}" for i in range(11)]}
+        oversized_payload = CrawlRequest(urls=[f"http://example.com/{i}" for i in range(11)])
         assert (
             checked_payload_urls(
                 oversized_payload,
@@ -89,11 +91,12 @@ class TestCrawlRequest:
         """...but the cap still applies to a forwarded batch (invariant: the
         engine-internal ceiling cannot be bypassed by supplying urls)."""
         from app.admission.payload_helpers import checked_payload_urls
+        from app.models.crawl_request import CrawlRequest
 
         forwarded = [f"http://example.com/{i}" for i in range(11)]
         with pytest.raises(ValueError, match=r"^batch_size_exceeded$"):
             checked_payload_urls(
-                {"url": "http://example.com/x"},
+                CrawlRequest(url="http://example.com/x"),
                 10,
                 urls=forwarded,
                 host_policy=HostPolicy.unrestricted(),

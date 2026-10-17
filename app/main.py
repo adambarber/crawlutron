@@ -198,6 +198,7 @@ if FastAPI is not None:
                 host_policy=HostPolicy.from_settings(settings),
                 settings=settings,
                 shutdown_event=shutdown_event,
+                key_store=caller_key_store,
             )
         )
 
@@ -206,16 +207,16 @@ if FastAPI is not None:
         # Shutdown stops the world FIRST: no webhooks against cleared dependencies,
         # no cookies after the snapshot. The jar needs no step -- the store persists.
         shutdown_event.set()
-        from .api.job_runner import shutdown_job_runner
-
-        await shutdown_job_runner()
-        # The sweep is cancelled, not awaited: cancellation leaves the watch due
-        # (the at-least-once contract), and awaiting would web-hook against closing pools.
+        # The sweep is cancelled before the job runner drains, while the key store is
+        # still open: a pass that consults it for liveness must not race a closed handle.
         watch_sweep_task.cancel()
         try:
             await watch_sweep_task
         except asyncio.CancelledError:
             pass
+        from .api.job_runner import shutdown_job_runner
+
+        await shutdown_job_runner()
 
         from app.transport.http_client_pool import close_async_http_client, close_cffi_session
 

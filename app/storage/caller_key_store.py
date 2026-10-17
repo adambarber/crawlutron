@@ -94,7 +94,18 @@ class CallerKeyStore(CoordinationStore):
             self._conn.commit()
         return cur.rowcount > 0
 
+    def exists_key(self, key_id: str) -> bool:
+        """Whether a live key row for ``key_id`` exists, without materializing it.
+
+        A PK lookup: the sweeper uses it to deactivate a watch whose owner key was
+        revoked instead of letting a dead owner issue checks forever.
+        """
+        with self._lock:
+            row = self._conn.execute("SELECT 1 FROM caller_keys WHERE key_id = ?", (key_id,)).fetchone()
+        return row is not None
+
     aissue_key = atwin(issue_key)
     averify_key = atwin(verify_key)
     alist_keys = atwin(list_keys)
     arevoke_key = atwin(revoke_key)
+    aexists_key = atwin(exists_key)

@@ -12,6 +12,7 @@ from app.storage.job_store import JobStatus
 from tests._job_harnesses import (
     ScriptedExecute,
     _create_api_job,
+    _execution_urls,
     _wait_status,
     assert_settled,
     drive_job,
@@ -105,8 +106,8 @@ class TestTransientFailureRequeue:
         crawled: list[list[str]] = []
 
         async def recording_execute(payload_dict, *, settings, shutdown_event):
-            urls = payload_dict.get("urls") or [payload_dict.get("url")]
-            crawled.append(list(urls))
+            urls = await _execution_urls(payload_dict, None)
+            crawled.append([url.raw for url in urls])
             return await install(payload_dict, settings=settings, shutdown_event=shutdown_event)
 
         job_id = await _create_api_job(

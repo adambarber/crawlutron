@@ -48,8 +48,9 @@ def _record_probe_fetch(effects: MutableMapping[str, list], payload: Mapping[str
     spelled inline, a probe comparing a different value would record every URL and
     the assertion would still pass, since it only ever checked the blocked one.
     """
-    if payload.get("url") != _BLOCKED_URL:
-        effects["fetched"].append(payload.get("url"))
+    url = getattr(payload, "url", None) or payload.get("url")
+    if url != _BLOCKED_URL:
+        effects["fetched"].append(url)
 
 
 async def _assert_refused(awaitable, effects: Mapping[str, list]) -> None:

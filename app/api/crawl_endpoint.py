@@ -12,7 +12,6 @@ from fastapi import HTTPException, Request
 from fastapi.responses import JSONResponse, Response
 
 from app.admission.payload_helpers import checked_payload_urls
-from app.admission.policy import read_policy
 from app.api.caller_auth import (
     anonymous_caller,
     check_concurrency_quota,
@@ -96,17 +95,16 @@ async def crawl(
             # Validate the format before the branch commits to sync or async:
             # the async path only fails inside a detached task, unseen by the caller.
             _serialize_or_reject([], payload.output_format)
-        payload_dict = payload.model_dump(exclude_none=True)
         # Gate the batch size at the boundary, before the 202: the async branch
         # fails oversized batches inside a detached task the caller cannot see.
         host_policy = HostPolicy.from_settings(settings)
         checked = checked_payload_urls(
-            payload_dict,
+            payload,
             settings.max_batch_size,
             host_policy=host_policy,
         )
         owner = await _admit_caller_request(
-            payload_dict, job_store, active_caller, concurrency_tracker=concurrency_tracker
+            payload, job_store, active_caller, concurrency_tracker=concurrency_tracker
         )
         webhook_url = payload.webhook_url
         async_mode = payload.async_mode
@@ -123,7 +121,7 @@ async def crawl(
             await job_store.acreate_single_shot(
                 request_id,
                 checked[0],
-                read_policy(payload_dict.get("policy"), job_store.tier),
+                payload.policy,
                 owner=owner,
             )
             from app.api.async_crawl_runner import run_async_crawl
@@ -132,7 +130,7 @@ async def crawl(
                 request_id,
                 lambda: run_async_crawl(
                     request_id,
-                    payload_dict,
+                    payload,
                     webhook_url,
                     settings,
                     job_store,
@@ -160,7 +158,7 @@ async def crawl(
             # Disconnect-aware sync crawl: if the caller has gone away, halt the
             # engine call instead of crawling to completion for a dead client.
             crawl_awaitable = execute_crawl(
-                payload_dict, settings=settings, shutdown_event=shutdown_event, urls=checked
+                payload, settings=settings, shutdown_event=shutdown_event, urls=checked
             )
             if request is None:
                 result = await crawl_awaitable
@@ -191,22 +189,19 @@ async def crawl(
 
 
 async def _admit_caller_request(
-    payload_dict: dict[str, JsonValue],
+    payload: CrawlRequest,
     job_store: JobStore,
     caller: CallerIdentity,
     concurrency_tracker: CallerConcurrencyTracker | None = None,
 ) -> str:
     """Quota checks and cookie-namespace defaulting for one crawl; returns the owner.
-    #194: ``resolve_page_limit`` applies to every caller so a key's positive page
-    ceiling binds an omitted/zero ``limits`` block, never degrading to unbounded."""
-    resolved = read_policy(payload_dict.get("policy"), job_store.tier)
-    requested_pages = resolve_page_limit(caller, resolved.limits.max_pages)
-    resolved = resolved.model_copy(
-        update={"limits": resolved.limits.model_copy(update={"max_pages": requested_pages})}
+    #194: ``resolve_page_limit`` binds every caller; ``payload.policy`` is resolved
+    in place so the bound and the cookie namespace ride the typed seam.
+    """
+    requested_pages = resolve_page_limit(caller, payload.policy.limits.max_pages)
+    resolved = payload.policy.model_copy(
+        update={"limits": payload.policy.limits.model_copy(update={"max_pages": requested_pages})}
     )
-    # Persist the resolved typed model, not the raw wire dict, so async storage
-    # and sync execution carry the bound; ``model_dump`` is the model's own edge.
-    payload_dict["policy"] = resolved.model_dump()
     check_page_quota(caller, requested_pages)
     active = await job_store.aactive_count_for_caller(caller.caller_id)
     if concurrency_tracker is not None:
@@ -216,10 +211,8 @@ async def _admit_caller_request(
     if namespace:
         request_profile = dict(resolved.request_profile)
         request_profile["cookie_namespace"] = namespace
-        raw_policy = payload_dict.get("policy")
-        policy_block = dict(raw_policy) if isinstance(raw_policy, dict) else {}
-        policy_block["request_profile"] = request_profile
-        payload_dict["policy"] = policy_block
+        resolved = resolved.model_copy(update={"request_profile": request_profile})
+    payload.policy = resolved
     return caller.caller_id
 
 

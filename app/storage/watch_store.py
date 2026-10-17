@@ -42,14 +42,15 @@ class WatchStore(CoordinationStore):
         interval_seconds: int,
         now: float,
         webhook_url: str | None = None,
+        owner: str = "",
     ) -> WatchState:
-        """Register a watch, scheduled for its first check one interval out.
-
-        The state model is the invariant gate: a non-positive interval
-        cannot become a row here or be observed anywhere downstream.
+        """Register a watch, scheduled for its first check one interval out. The
+        state model gates a non-positive interval; ``owner`` is the anonymity
+        bucket ("") or the keyed caller's id.
         """
         state = WatchState(
             watch_id=new_watch_id(),
+            owner=owner,
             url=url.raw,
             webhook_url=webhook_url,
             interval_seconds=interval_seconds,
@@ -61,12 +62,13 @@ class WatchStore(CoordinationStore):
             self._conn.execute(
                 """
                 INSERT INTO watches (
-                    watch_id, url, webhook_url, interval_seconds, status,
+                    watch_id, owner, url, webhook_url, interval_seconds, status,
                     validators, next_check_at, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     state.watch_id,
+                    state.owner,
                     state.url,
                     state.webhook_url,
                     state.interval_seconds,
@@ -85,15 +87,46 @@ class WatchStore(CoordinationStore):
             row = self._conn.execute("SELECT * FROM watches WHERE watch_id = ?", (watch_id,)).fetchone()
         return None if row is None else _row_to_state(row)
 
+    def get_for_caller(self, watch_id: str, caller_id: str) -> WatchState | None:
+        """The watch iff ``caller_id`` owns it; a foreign row reads the same miss."""
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT * FROM watches WHERE watch_id = ? AND owner = ?", (watch_id, caller_id)
+            ).fetchone()
+        return None if row is None else _row_to_state(row)
+
     def list_watches(self) -> list[WatchState]:
         with self._lock:
             rows = self._conn.execute("SELECT * FROM watches ORDER BY created_at, watch_id").fetchall()
         return [_row_to_state(row) for row in rows]
 
+    def list_for_caller(self, caller_id: str) -> list[WatchState]:
+        """The caller's own watches; foreign rows are not listed."""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT * FROM watches WHERE owner = ? ORDER BY created_at, watch_id", (caller_id,)
+            ).fetchall()
+        return [_row_to_state(row) for row in rows]
+
+    def count_for_owner(self, owner: str) -> int:
+        """How many watches ``owner`` has registered; the per-caller cap reads it."""
+        with self._lock:
+            row = self._conn.execute("SELECT count(*) FROM watches WHERE owner = ?", (owner,)).fetchone()
+        return int(row[0])
+
     def delete(self, watch_id: str) -> bool:
         """Remove a watch; ``False`` means no such watch existed."""
         with self._lock:
             cursor = self._conn.execute("DELETE FROM watches WHERE watch_id = ?", (watch_id,))
+            self._conn.commit()
+        return cursor.rowcount == 1
+
+    def delete_for_caller(self, watch_id: str, caller_id: str) -> bool:
+        """Remove ``watch_id`` iff ``caller_id`` owns it; a foreign id deletes nothing."""
+        with self._lock:
+            cursor = self._conn.execute(
+                "DELETE FROM watches WHERE watch_id = ? AND owner = ?", (watch_id, caller_id)
+            )
             self._conn.commit()
         return cursor.rowcount == 1
 
@@ -117,11 +150,11 @@ class WatchStore(CoordinationStore):
         outcome: WatchOutcome,
         now: float,
         next_check_at: float,
-        validators: ContentValidators,
+        etag: str | None = None,
+        last_modified: str | None = None,
     ) -> None:
-        """Persist a completed check's result and reschedule. The caller hands back the
-        effective validators (200 → the origin's; 304/error → the stored ones), so the
-        row's set is a decision, not a ``COALESCE`` that could keep a dropped validator.
+        """Persist a completed check's result and reschedule. ``etag``/``last_modified``
+        are stored only on a ``modified`` outcome; other verdicts keep the stored set.
         """
         with self._lock:
             self._conn.execute(
@@ -133,7 +166,8 @@ class WatchStore(CoordinationStore):
                     last_changed_at = CASE WHEN ? = 'modified' THEN ? ELSE last_changed_at END,
                     -- an error extends the failure streak; any other outcome resets it
                     consecutive_failures = CASE WHEN ? = 'error' THEN consecutive_failures + 1 ELSE 0 END,
-                    validators = ?,
+                    -- a delivered body replaces the set outright; other verdicts keep it
+                    validators = CASE WHEN ? = 'modified' THEN ? ELSE validators END,
                     next_check_at = ?,
                     updated_at = ?
                 WHERE watch_id = ?
@@ -144,11 +178,34 @@ class WatchStore(CoordinationStore):
                     outcome,
                     now,
                     outcome,
-                    validators.model_dump_json(exclude_none=True),
+                    outcome,
+                    ContentValidators(
+                        etag=etag if outcome is WatchOutcome.MODIFIED else None,
+                        last_modified=(last_modified if outcome is WatchOutcome.MODIFIED else None),
+                    ).model_dump_json(exclude_none=True),
                     next_check_at,
                     now,
                     watch_id,
                 ),
+            )
+            self._conn.commit()
+
+    def deactivate(self, watch_id: str, *, now: float, next_check_at: float) -> None:
+        """Stop a watch being checked: terminal status plus a reschedule far out.
+        Used when the owner's key was revoked, so a dead identity cannot issue
+        checks forever; the row and its history stay for the operator to read.
+        """
+        with self._lock:
+            self._conn.execute(
+                """
+                UPDATE watches SET
+                    status = ?,
+                    last_outcome = ?,
+                    next_check_at = ?,
+                    updated_at = ?
+                WHERE watch_id = ?
+                """,
+                (WatchStatus.DEACTIVATED, WatchOutcome.ERROR, next_check_at, now, watch_id),
             )
             self._conn.commit()
 
@@ -157,9 +214,14 @@ class WatchStore(CoordinationStore):
 
     acreate = atwin(create)
     arecord_check = atwin(record_check)
+    adeactivate = atwin(deactivate)
     aget = atwin(get)
+    aget_for_caller = atwin(get_for_caller)
     alist_watches = atwin(list_watches)
+    alist_for_caller = atwin(list_for_caller)
+    acount_for_owner = atwin(count_for_owner)
     adelete = atwin(delete)
+    adelete_for_caller = atwin(delete_for_caller)
     adue = atwin(due)
 
 
@@ -167,6 +229,7 @@ def _row_to_state(row: sqlite3.Row) -> WatchState:
     """Named-value construction: a missing column is an error, not a default."""
     return WatchState(
         watch_id=row["watch_id"],
+        owner=row["owner"],
         url=row["url"],
         webhook_url=row["webhook_url"],
         interval_seconds=row["interval_seconds"],

@@ -24,6 +24,12 @@ class WatchState(BaseModel):
     """
 
     watch_id: str
+    # The caller that owns this row: "" (anonymous bucket) or a keyed caller's
+    # id. Registry CRUD is owner-scoped; the sweep reads it to inherit cookies.
+    owner: Annotated[
+        str,
+        Field(description="Owner id (empty means the anonymous bucket)."),
+    ] = ""
     url: str
     webhook_url: Annotated[
         str | None,

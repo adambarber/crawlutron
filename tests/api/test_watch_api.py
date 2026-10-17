@@ -6,7 +6,6 @@ reports was written by the sweep, so tests write via the store, read via the API
 import pytest
 from httpx import Response
 
-from app.models.content_validators import ContentValidators
 from app.models.watch_outcome import WatchOutcome
 from tests._assertions import block_private_targets
 from tests._policy_factories import canonical
@@ -92,12 +91,19 @@ async def test_listing_returns_every_registered_watch(watch_store):
 async def test_status_reports_what_the_sweep_recorded(watch_store):
     """The status endpoints read the row the sweep writes, not their own bookkeeping."""
     registered = watch_store.create(canonical(TARGET), interval_seconds=INTERVAL, now=1_000.0)
+    # A prior successful fetch established the etag; the revalidation below kept it.
+    watch_store.record_check(
+        registered.watch_id,
+        outcome=WatchOutcome.MODIFIED,
+        now=1_500.0,
+        next_check_at=2_000.0,
+        etag='"v1"',
+    )
     watch_store.record_check(
         registered.watch_id,
         outcome=WatchOutcome.NOT_MODIFIED,
         now=2_000.0,
         next_check_at=3_000.0,
-        validators=ContentValidators(etag='"v1"'),
     )
 
     async with watch_client(watch_store) as client:

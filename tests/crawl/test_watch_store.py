@@ -6,7 +6,6 @@ call, so no test (and no production path) depends on wall time.
 
 import pytest
 
-from app.models.content_validators import ContentValidators
 from app.models.watch_outcome import WatchOutcome
 from tests._policy_factories import canonical
 
@@ -17,11 +16,6 @@ INTERVAL = 3600
 def register(store, url="https://example.com/feed.xml", *, at=NOW, interval=INTERVAL, webhook=None):
     """Create a watch through the production seam, admitted the way production admits."""
     return store.create(canonical(url), webhook_url=webhook, interval_seconds=interval, now=at)
-
-
-def validators(etag=None, last_modified=None):
-    """The effective validator set a sweep would hand back after a check."""
-    return ContentValidators(etag=etag, last_modified=last_modified)
 
 
 def test_registration_round_trips_what_was_declared(watch_store):
@@ -76,13 +70,20 @@ def test_due_selects_matured_watches_earliest_first(watch_store):
 def test_record_check_moves_the_schedule(watch_store):
     state = register(watch_store)
     checked_at = NOW + INTERVAL
-
+    # A prior successful fetch established the etag; the revalidation below kept it
+    # and is the one whose schedule move this test reads.
+    watch_store.record_check(
+        state.watch_id,
+        outcome=WatchOutcome.MODIFIED,
+        now=NOW,
+        next_check_at=checked_at,
+        etag="v1",
+    )
     watch_store.record_check(
         state.watch_id,
         outcome=WatchOutcome.NOT_MODIFIED,
         now=checked_at,
         next_check_at=checked_at + INTERVAL,
-        validators=validators(etag="v1"),
     )
 
     reloaded = watch_store.get(state.watch_id)
@@ -103,7 +104,6 @@ def test_modified_outcome_moves_the_change_clock(watch_store):
         outcome=WatchOutcome.MODIFIED,
         now=first_seen,
         next_check_at=first_seen + INTERVAL,
-        validators=validators(),
     )
     later = first_seen + INTERVAL
     watch_store.record_check(
@@ -111,7 +111,6 @@ def test_modified_outcome_moves_the_change_clock(watch_store):
         outcome=WatchOutcome.NOT_MODIFIED,
         now=later,
         next_check_at=later + INTERVAL,
-        validators=validators(),
     )
 
     # The change clock holds the last modified check, not the last check.
@@ -127,7 +126,6 @@ def test_error_outcome_extends_the_failure_streak_and_success_resets_it(watch_st
             outcome=WatchOutcome.ERROR,
             now=NOW + INTERVAL + attempt,
             next_check_at=NOW + 2 * INTERVAL,
-            validators=validators(),
         )
     assert watch_store.get(state.watch_id).consecutive_failures == 2
 
@@ -136,7 +134,6 @@ def test_error_outcome_extends_the_failure_streak_and_success_resets_it(watch_st
         outcome=WatchOutcome.NOT_MODIFIED,
         now=NOW + 2 * INTERVAL,
         next_check_at=NOW + 3 * INTERVAL,
-        validators=validators(),
     )
     assert watch_store.get(state.watch_id).consecutive_failures == 0
 
@@ -149,14 +146,13 @@ def test_validator_replacement_is_wholesale(watch_store):
         outcome=WatchOutcome.MODIFIED,
         now=NOW,
         next_check_at=NOW + INTERVAL,
-        validators=validators(etag="v1"),
+        etag="v1",
     )
     watch_store.record_check(
         state.watch_id,
         outcome=WatchOutcome.MODIFIED,
         now=NOW + INTERVAL,
         next_check_at=NOW + 2 * INTERVAL,
-        validators=validators(),
     )
 
     assert watch_store.get(state.watch_id).validators.etag is None

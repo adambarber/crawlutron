@@ -52,9 +52,11 @@ async def _probe_crawl_executor(monkeypatch, tmp_path):
         return {"results": [{"status": "blocked", "classification": "blocked"}]}
 
     monkeypatch.setattr(crawl_executor, "crawl_request", denied_crawl_request)
+    from app.models.crawl_request import CrawlRequest
+
     await _assert_refused(
         crawl_executor.execute_crawl(
-            {"url": _BLOCKED_URL},
+            CrawlRequest(url=_BLOCKED_URL),
             settings=_denied_settings(),
             # A real event: the guard refuses before it reads this, and the parameter is required.
             shutdown_event=asyncio.Event(),
@@ -115,19 +117,24 @@ async def _probe_map_endpoint(monkeypatch, tmp_path):
 
 async def _probe_watch_router(monkeypatch, tmp_path):
     from app.api import watch_router
+    from app.models.caller_identity import CallerIdentity
     from app.models.watch_create_request import WatchCreateRequest
 
     effects = _effects()
     watch_store = type(
         "Store",
         (),
-        {"acreate": lambda self, *args, **kwargs: effects["persisted"].append(args)},
+        {
+            "acreate": lambda self, *args, **kwargs: effects["persisted"].append(args),
+            "acount_for_owner": lambda self, *args, **kwargs: 0,
+        },
     )()
     await _assert_refused(
         watch_router.create_watch(
             WatchCreateRequest(url=_BLOCKED_URL, interval_seconds=60),
             watch_store=watch_store,
             settings=_denied_settings(),
+            caller=CallerIdentity(),
         ),
         effects,
     )

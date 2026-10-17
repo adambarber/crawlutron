@@ -10,15 +10,15 @@ import asyncio
 import logging
 import time
 from collections.abc import Callable
+from typing import Any
 
-from app.admission.policy import read_policy
 from app.api.crawl_executor import execute_crawl
 from app.api.webhooks import post_webhook
 from app.config.settings import CrawlerSettings
-from app.models.content_validators import ContentValidators
+from app.models.crawl_policy import CrawlPolicy
+from app.models.crawl_request import CrawlRequest
 from app.models.fetch_validators import FetchValidators
 from app.models.host_policy import HostPolicy
-from app.models.normalized_url import NormalizedUrl
 from app.models.watch_announcement import WatchAnnouncement
 from app.models.watch_outcome import WatchOutcome
 from app.models.watch_state import WatchState
@@ -40,12 +40,15 @@ checks a watch early.
 __all__ = ["WATCH_SWEEP_INTERVAL_SECONDS", "WatchSweeper", "sweep_watches_forever"]
 
 
-def _check_policy():
-    """The single-URL policy a check runs under: HTTP alone, declared here, so a
-    climb to a browser would render a body the caller never received and need a
-    pool that is not part of the answer.
+def _check_policy(owner: str = "") -> CrawlPolicy:
+    """The single-URL policy a check runs under: HTTP alone. ``owner`` sets the
+    cookie namespace so a keyed watch inherits that caller's cookies; the model
+    constructor is the boundary, and ``execute_crawl`` resolves it from there.
     """
-    return read_policy({"strategies": [HTTP_DECLARED_CRAWLER], "limits": {}, "headers": {}})
+    policy: dict[str, Any] = {"strategies": [HTTP_DECLARED_CRAWLER], "limits": {}}
+    if owner:
+        policy["request_profile"] = {"cookie_namespace": owner}
+    return CrawlPolicy.model_validate(policy)
 
 
 def _announcement(watch: WatchState, *, outcome: WatchOutcome, checked_at: float) -> WatchAnnouncement:
@@ -72,28 +75,70 @@ class WatchSweeper:
         host_policy: HostPolicy,
         settings: CrawlerSettings,
         shutdown_event: asyncio.Event | None = None,
+        key_store=None,
     ) -> None:
         self._store = store
         self._host_policy = host_policy
         self._settings = settings
         self._shutdown_event = shutdown_event
+        self._key_store = key_store
 
     async def sweep_once(self, now: float) -> list[WatchOutcome]:
-        """Recheck every watch due at ``now``; return what each pass concluded.
-
-        One conclusion per due watch, in registry order -- the caller reports
-        progress from this, while the stored row is the record of what happened.
+        """Recheck every watch due at ``now``; one conclusion per due watch, in
+        registry order. A raising watch is isolated per-watch so it cannot starve
+        the watches sorted after it in the due list (#228).
         """
-        return [await self._check(watch, now=now) for watch in await self._store.adue(now)]
+        outcomes: list[WatchOutcome] = []
+        for watch in await self._store.adue(now):
+            revoked = (
+                self._key_store is not None
+                and watch.owner
+                and not await self._key_store.aexists_key(watch.owner)
+            )
+            if revoked:
+                # A revoked owner's watch must not issue checks under a dead
+                # identity: deactivate it, terminal, and move on (#207).
+                logger.warning(
+                    "watch_owner_revoked_deactivated",
+                    extra={"watch_id": watch.watch_id, "owner": watch.owner},
+                )
+                await self._store.adeactivate(
+                    watch.watch_id, now=now, next_check_at=now + watch.interval_seconds
+                )
+                outcomes.append(WatchOutcome.ERROR)
+                continue
+            try:
+                outcome = await self._check(watch, now=now)
+            except Exception:
+                # One watch that raises must not end the pass nor starve its
+                # co-scheduled watches: record the failure and reschedule anyway.
+                logger.exception(
+                    "watch_check_failed",
+                    extra={"watch_id": watch.watch_id, "url": watch.url},
+                )
+                try:
+                    await self._store.arecord_check(
+                        watch.watch_id,
+                        outcome=WatchOutcome.ERROR,
+                        now=now,
+                        next_check_at=now + watch.interval_seconds,
+                    )
+                except Exception:
+                    logger.exception("watch_check_record_failed", extra={"watch_id": watch.watch_id})
+                outcomes.append(WatchOutcome.ERROR)
+            else:
+                outcomes.append(outcome)
+        return outcomes
 
     async def _check(self, watch: WatchState, *, now: float) -> WatchOutcome:
-        outcome, validators = await self._revalidate(watch)
+        outcome, etag, last_modified = await self._revalidate(watch)
         await self._store.arecord_check(
             watch.watch_id,
             outcome=outcome,
             now=now,
             next_check_at=now + watch.interval_seconds,
-            validators=validators,
+            etag=etag,
+            last_modified=last_modified,
         )
         if outcome is WatchOutcome.MODIFIED and watch.webhook_url:
             await post_webhook(
@@ -103,49 +148,40 @@ class WatchSweeper:
             )
         return outcome
 
-    async def _revalidate(self, watch: WatchState) -> tuple[WatchOutcome, ContentValidators]:
+    async def _revalidate(self, watch: WatchState) -> tuple[WatchOutcome, str | None, str | None]:
         """One conditional check: stored validators in, the row's new ones out.
-
-        A ``304`` and a failure both keep what was already known; a delivered
-        body replaces the set outright, dropping a no-longer-sent validator.
+        A ``304``/failure keeps the stored set; a delivered body returns the
+        origin's new etag. ``execute_crawl`` re-admits and resolves policy.
         """
-        try:
-            NormalizedUrl(watch.url, policy=self._host_policy)
-        except ValueError:
-            logger.warning(
-                "watch_no_longer_admitted",
-                extra={"watch_id": watch.watch_id, "url": watch.url},
+        validators: dict[str, FetchValidators] = {}
+        if watch.validators.etag or watch.validators.last_modified:
+            validators[watch.url] = FetchValidators(
+                if_none_match=watch.validators.etag,
+                if_modified_since=watch.validators.last_modified,
             )
-            return WatchOutcome.ERROR, watch.validators
-
+        payload = CrawlRequest(
+            url=watch.url,
+            policy=_check_policy(watch.owner),
+            validators=validators,
+        )
         envelope = await execute_crawl(
-            {
-                "url": watch.url,
-                "policy": _check_policy(),
-                # dumped rather than hand-spelled: the keys stay the spellings the
-                # models and the pipeline already agree on.
-                "validators": {
-                    watch.url: FetchValidators(
-                        if_none_match=watch.validators.etag,
-                        if_modified_since=watch.validators.last_modified,
-                    ).model_dump()
-                },
-            },
+            payload,
             settings=self._settings,
             shutdown_event=self._shutdown_event,
             urls=[watch.url],
         )
         if not envelope["results"]:
             logger.warning("watch_check_produced_no_result", extra={"watch_id": watch.watch_id})
-            return WatchOutcome.ERROR, watch.validators
+            return WatchOutcome.ERROR, None, None
         result = envelope["results"][0]
         if result.classification == CrawlClassification.not_modified:
-            return WatchOutcome.NOT_MODIFIED, watch.validators
+            return WatchOutcome.NOT_MODIFIED, None, None
         if result.status != "success":
-            return WatchOutcome.ERROR, watch.validators
-        return WatchOutcome.MODIFIED, ContentValidators(
-            etag=result.validators.get("etag"),
-            last_modified=result.validators.get("last_modified"),
+            return WatchOutcome.ERROR, None, None
+        return (
+            WatchOutcome.MODIFIED,
+            result.validators.get("etag"),
+            result.validators.get("last_modified"),
         )
 
 
@@ -157,16 +193,18 @@ async def sweep_watches_forever(
     shutdown_event: asyncio.Event,
     interval_seconds: float = WATCH_SWEEP_INTERVAL_SECONDS,
     clock: Callable[[], float] = time.time,
+    key_store=None,
 ) -> None:
     """Sweep the registry until told to stop; the wait rides the shutdown event
-    so a stopping process leaves at once instead of finishing an idle cadence.
-    ``clock`` is a parameter for the loop's tests.
+    so a stopping process leaves at once. ``key_store`` answers the per-owner
+    liveness a revoked-owner watch needs (#207).
     """
     sweeper = WatchSweeper(
         store,
         host_policy=host_policy,
         settings=settings,
         shutdown_event=shutdown_event,
+        key_store=key_store,
     )
     while not shutdown_event.is_set():
         try:

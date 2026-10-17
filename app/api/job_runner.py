@@ -37,6 +37,7 @@ from app.api.job_recovery import (
 )
 from app.api.response_shaping import failed_unified_result
 from app.api.unified_shaping import abuild_unified_result
+from app.models.crawl_request import CrawlRequest
 from app.models.crawl_result import CrawlResult, EngineCrawlResult
 from app.models.crawl_task import CrawlTask
 from app.models.normalized_url import NormalizedUrl, admit_or_none
@@ -114,7 +115,7 @@ def _pop_frontier(job: Any) -> list[FrontierEntry]:
     return batch
 
 
-def job_engine_payload(job: Any, batch: Sequence[FrontierEntry]) -> dict[str, Any]:
+def job_engine_payload(job: Any, batch: Sequence[FrontierEntry]) -> CrawlRequest:
     """Build one non-recursive engine batch from a whole-site job.
 
     The runner owns the durable frontier; the engine is a single-page fetcher per
@@ -127,13 +128,7 @@ def job_engine_payload(job: Any, batch: Sequence[FrontierEntry]) -> dict[str, An
     # Model_copy is safe because max_depth=0 is a declared value and this line
     # is ours, not a caller's: one engine batch is one page deep by definition.
     policy = policy.model_copy(update={"limits": policy.limits.model_copy(update={"max_depth": 0})})
-    return {
-        "urls": urls,
-        "policy": policy,
-        "url": urls[0],
-        "headers": {},
-        "request_profile": {},
-    }
+    return CrawlRequest(urls=urls, policy=policy)
 
 
 async def _pace_delayed_batch(

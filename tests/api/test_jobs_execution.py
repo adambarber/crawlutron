@@ -217,20 +217,15 @@ class TestWholeSiteJobExecution:
         ]
 
         payload = job_runner.job_engine_payload(job, batch)
-        assert payload == {
-            "urls": [root, GRAPH_CHILD],
-            # Depth zero and nothing else moved: this builder exists to stop the per-call max_depth from
-            # re-expanding a whole-site job's frontier.
-            "policy": read_policy(limits(max_depth=0)),
-            "url": root,
-            "headers": {},
-            "request_profile": {},
-        }
+        # The typed request model carries the batch and the depth-zero policy; the
+        # raw-dict conveniences (``url``/``headers``/``request_profile``) are gone.
+        assert payload.urls == [root, GRAPH_CHILD]
+        assert payload.policy == read_policy(limits(max_depth=0))
         assert read_policy(job.policy) == read_policy(limits())
 
     async def test_run_job_uses_engine_payload_builder(self, client, job_store):
         root = GRAPH_ROOT
-        captured: list[dict[str, Any]] = []
+        captured: list[Any] = []
         engine = recording_execute(ScriptedExecute(results=[_canned_result(root)]), captured)
 
         await run_api_job(
@@ -248,14 +243,13 @@ class TestWholeSiteJobExecution:
         )
 
         assert len(captured) == 1
-        limits = captured[0]["policy"].limits
+        limits = captured[0].policy.limits
         assert limits.max_depth == 0
         assert limits.max_pages == 50
         assert limits.max_discovered_links == 17
-        assert captured[0]["urls"] == [root]
-        assert captured[0]["url"] == root
-        assert captured[0]["headers"] == {}
-        assert captured[0]["request_profile"] == {}
+        # The typed request model carries the batch in ``urls`` and the resolved
+        # policy; the raw-dict conveniences (``url``/``headers``/``request_profile``) are gone.
+        assert captured[0].urls == [root]
 
     async def test_max_pages_caps_the_whole_job_and_frontier_drains(self, client, job_store):
         job = await run_api_job(
@@ -288,7 +282,7 @@ class TestWholeSiteJobExecution:
             crawled=4,
         )
         assert captured
-        assert all(payload["policy"].limits.max_depth == 0 for payload in captured)
+        assert all(payload.policy.limits.max_depth == 0 for payload in captured)
 
     async def test_create_runs_to_completed(self, client, job_store):
         job_id = await _create_api_job(

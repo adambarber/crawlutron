@@ -120,13 +120,33 @@ class LoopGuardWatchStore(WatchStore):
         _refuse_on_loop("WatchStore.get")
         return super().get(watch_id)
 
+    def get_for_caller(self, watch_id, caller_id):
+        _refuse_on_loop("WatchStore.get_for_caller")
+        return super().get_for_caller(watch_id, caller_id)
+
     def list_watches(self):
         _refuse_on_loop("WatchStore.list_watches")
         return super().list_watches()
 
+    def list_for_caller(self, caller_id):
+        _refuse_on_loop("WatchStore.list_for_caller")
+        return super().list_for_caller(caller_id)
+
+    def count_for_owner(self, owner):
+        _refuse_on_loop("WatchStore.count_for_owner")
+        return super().count_for_owner(owner)
+
     def delete(self, watch_id):
         _refuse_on_loop("WatchStore.delete")
         return super().delete(watch_id)
+
+    def delete_for_caller(self, watch_id, caller_id):
+        _refuse_on_loop("WatchStore.delete_for_caller")
+        return super().delete_for_caller(watch_id, caller_id)
+
+    def deactivate(self, watch_id, **kwargs):
+        _refuse_on_loop("WatchStore.deactivate")
+        return super().deactivate(watch_id, **kwargs)
 
     def due(self, now):
         _refuse_on_loop("WatchStore.due")

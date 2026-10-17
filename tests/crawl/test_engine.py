@@ -6,12 +6,12 @@ from typing import Any
 
 import pytest
 
+from app.admission.payload_helpers import payload_policy
 from app.admission.policy import PolicyTier, read_policy
 from app.models.crawl_policy import CrawlPolicy
 from app.models.crawl_policy_limits import CrawlPolicyLimits
 from app.models.crawl_result import CrawlResult
 from app.models.serialization import to_dict
-from app.orchestration.engine import payload_policy
 from app.orchestration.render_result import terminal_attempt
 from app.orchestration.scheduler import DomainScheduler
 from app.transport.browser import BrowserRenderer

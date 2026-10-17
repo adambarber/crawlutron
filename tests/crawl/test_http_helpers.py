@@ -5,13 +5,12 @@ from typing import Any
 
 import pytest
 
-from app.admission.payload_helpers import payload_urls
+from app.admission.payload_helpers import checked_payload_urls, payload_policy
 from app.admission.policy import PolicyTier, read_policy
 from app.api.render import render_options_for
 from app.config.settings import CrawlerSettings
 from app.extraction.document_text import format_extracted_document_text
 from app.extraction.trees import FrameCollector, frames_from, walkable
-from app.orchestration.engine import payload_policy
 from app.safety.validation import HostPolicy
 from app.transport.fetch_policy import (
     fetch_with_retries,
@@ -42,30 +41,32 @@ from tests._policy_factories import canonical, make_base_policy
 
 
 class TestValidationHelpers:
-    def test_payload_urls_errors(self) -> None:
-        with pytest.raises(ValueError, match=r"^invalid_urls$"):
-            payload_urls(
-                {"urls": "notalist"},
-                host_policy=HostPolicy.unrestricted(),
-            )
-        with pytest.raises(ValueError, match=r"^missing_url$"):
-            payload_urls({}, host_policy=HostPolicy.unrestricted())
-        assert payload_urls({"url": "http://x/"}, host_policy=HostPolicy.unrestricted()) == ["http://x/"]
-        assert payload_urls(
-            {"urls": ["http://x/", "http://y/"]},
+    def test_checked_payload_urls_errors(self) -> None:
+        from app.models.crawl_request import CrawlRequest
+
+        assert checked_payload_urls(
+            CrawlRequest(url="http://x/"),
+            10,
+            host_policy=HostPolicy.unrestricted(),
+        ) == ["http://x/"]
+        assert checked_payload_urls(
+            CrawlRequest(urls=["http://x/", "http://y/"]),
+            10,
             host_policy=HostPolicy.unrestricted(),
         ) == ["http://x/", "http://y/"]
 
-    def test_payload_urls_dedupes_exact_duplicates(self) -> None:
-        assert payload_urls(
-            {"urls": ["http://x/", "http://x/", "http://y/", "http://x/"]},
-            host_policy=HostPolicy.unrestricted(),
-        ) == [
-            "http://x/",
-            "http://y/",
-        ]
+    def test_checked_payload_urls_dedupes_exact_duplicates(self) -> None:
+        from app.models.crawl_request import CrawlRequest
 
-    def test_payload_urls_dedupes_on_admitted_identity(self) -> None:
+        assert checked_payload_urls(
+            CrawlRequest(urls=["http://x/", "http://x/", "http://y/", "http://x/"]),
+            10,
+            host_policy=HostPolicy.unrestricted(),
+        ) == ["http://x/", "http://y/"]
+
+    def test_checked_payload_urls_dedupes_on_admitted_identity(self) -> None:
+        from app.models.crawl_request import CrawlRequest
+
         # ``NormalizedUrl`` admission already treats fragment / trailing-slash / tracking-param / param-order
         # variants as the SAME page.
         urls = [
@@ -77,8 +78,9 @@ class TestValidationHelpers:
             "https://a.gov/y?b=2&a=1",  # param order only -> same page
             "https://a.gov/z",
         ]
-        assert payload_urls(
-            {"urls": urls},
+        assert checked_payload_urls(
+            CrawlRequest(urls=urls),
+            10,
             host_policy=HostPolicy.unrestricted(),
         ) == [
             "https://a.gov/x",

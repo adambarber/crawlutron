@@ -118,6 +118,9 @@ class CrawlerSettings:
     # Operator token gating /v1/keys issuance, listing, and revocation. Empty
     # disables the HTTP surface for key management (no token, no minting).
     key_admin_token: str = ""
+    # Per-caller watch cap: registration refuses past this many live watches for
+    # one owner; the anonymous bucket shares one finite allowance.
+    max_watches_per_caller: int = 100
 
     @classmethod
     def from_mapping(cls, values: Mapping[str, str] | None = None) -> CrawlerSettings:
@@ -271,4 +274,7 @@ class CrawlerSettings:
                 source, "CRAWLUTRON_SEARCH_TIMEOUT_SECONDS", cls.search_timeout_seconds
             ),
             key_admin_token=source.get("CRAWLUTRON_KEY_ADMIN_TOKEN", cls.key_admin_token),
+            max_watches_per_caller=get_mapping_int(
+                source, "CRAWLUTRON_MAX_WATCHES_PER_CALLER", cls.max_watches_per_caller, lo=1
+            ),
         )

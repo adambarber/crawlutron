@@ -122,7 +122,7 @@ async def _crawled(payload: CrawlRequest, settings, shutdown_event):
     """Run the crawl endpoint and shape it, so the handler owns only the boundary."""
     return await aunified_response_from_result(
         await execute_crawl(
-            payload.model_dump(exclude_none=True),
+            payload,
             settings=settings,
             shutdown_event=shutdown_event,
         )

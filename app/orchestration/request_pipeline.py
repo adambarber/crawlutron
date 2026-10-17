@@ -15,6 +15,7 @@ from app.admission.render_options import policy_wants_html
 from app.config.settings import CrawlerSettings
 from app.models.crawl_extraction_method import CrawlExtractionMethod
 from app.models.crawl_policy import POLICY_SCHEMA_VERSION, CrawlPolicy
+from app.models.crawl_request import CrawlRequest
 from app.models.crawl_result import EngineCrawlResult
 from app.models.crawl_task import CrawlTask
 from app.models.crawl_worker import CrawlWorker
@@ -61,7 +62,7 @@ class _PipelineDependencies:
 
 @dataclass
 class _PipelineState:
-    payload: dict[str, Any]
+    payload: CrawlRequest
     settings: CrawlerSettings
     urls: list[str]
     policy: CrawlPolicy
@@ -123,15 +124,15 @@ def _build_scheduler(state: _PipelineState) -> DomainScheduler:
 
 def _build_validators(state: _PipelineState) -> dict[NormalizedUrl, dict[str, str]]:
     validators_by_url: dict[NormalizedUrl, dict[str, str]] = {}
-    for url, values in (state.payload.get("validators") or {}).items():
+    for url, values in state.payload.validators.items():
         admitted = admit_or_none(url, policy=state.host_policy)
         if admitted is None:
             continue
-        entry = {
-            "if_none_match": values.get("if_none_match"),
-            "if_modified_since": values.get("if_modified_since"),
-        }
-        entry = {key: value for key, value in entry.items() if value}
+        entry: dict[str, str] = {}
+        if values.if_none_match:
+            entry["if_none_match"] = values.if_none_match
+        if values.if_modified_since:
+            entry["if_modified_since"] = values.if_modified_since
         if not entry:
             continue
         validators_by_url[admitted] = entry
