@@ -105,6 +105,19 @@ async def get_caller_identity(request: Request) -> CallerIdentity:
     return await _caller_from_secret(request, secret)
 
 
+def is_operator(request: Request) -> bool:
+    """Whether the presented credential is the configured operator token.
+
+    Soft gate, not a 401: ``/metrics`` keeps its base exposition loopback-accessible
+    and only per-caller detail needs the token (constant-time compare).
+    """
+    secret = presented_key(request)
+    if not secret:
+        return False
+    admin_token = _key_admin_token(request)
+    return bool(admin_token) and secrets.compare_digest(secret, admin_token)
+
+
 def effective_cookie_namespace(profile: Mapping[str, JsonValue], caller: CallerIdentity) -> str:
     """The cookie namespace for one crawl: an explicit profile wins, else the key."""
     if caller.authenticated and caller.caller_id:
@@ -151,6 +164,7 @@ __all__ = [
     "get_caller_identity",
     "get_keys_caller",
     "identity_for_key",
+    "is_operator",
     "presented_key",
     "resolve_page_limit",
 ]

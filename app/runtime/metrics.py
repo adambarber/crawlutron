@@ -34,6 +34,11 @@ _PROVIDER_PREFIX = "search_provider:"
 _CALLER_PREFIX = "caller:"
 _SEARCH_CALLER_PREFIX = "search_caller:"
 
+# Fail-closed bound on distinct caller-labelled series per family; a NEW caller
+# past it folds into one reserved overflow series so bare and sum stay exact.
+_MAX_CALLER_SERIES = 256
+_OVERFLOW_SERIES = "__overflow__"
+
 # Counter name -> the observable field callers read, built once so a
 # counter cannot be recorded under one name and read under another.
 _COUNTERS = {
@@ -85,6 +90,19 @@ class MetricsStore:
     def _labelled(self, prefix: str) -> dict[str, float]:
         source = self._counters.snapshot() if self._counters is not None else self._local
         return {key[len(prefix) :]: value for key, value in source.items() if key.startswith(prefix)}
+
+    def _caller_series(self, prefix: str, caller_id: str) -> str:
+        """The series a caller id is written under, bounded by an overflow fold.
+
+        A NEW caller past the cap folds into one reserved overflow series so the
+        label dimension stays bounded while bare and sum(labels) stay exact.
+        """
+        key = prefix + caller_id
+        source = self._counters.snapshot() if self._counters is not None else self._local
+        if key in source:
+            return caller_id
+        distinct = sum(1 for existing in source if existing.startswith(prefix))
+        return _OVERFLOW_SERIES if distinct >= _MAX_CALLER_SERIES else caller_id
 
     @property
     def crawl_requests_total(self) -> float:
@@ -167,7 +185,7 @@ class MetricsStore:
     ) -> None:
         self._add(_CRAWL_REQUESTS, 1)
         if caller_id:
-            self._add(_CALLER_PREFIX + caller_id, 1)
+            self._add(_CALLER_PREFIX + self._caller_series(_CALLER_PREFIX, caller_id), 1)
         if accepted:
             self._add(_CRAWL_ACCEPTED, 1)
         if results:
@@ -201,7 +219,7 @@ class MetricsStore:
         if provider:
             self._add(_PROVIDER_PREFIX + provider, results)
         if caller_id:
-            self._add(_SEARCH_CALLER_PREFIX + caller_id, 1)
+            self._add(_SEARCH_CALLER_PREFIX + self._caller_series(_SEARCH_CALLER_PREFIX, caller_id), 1)
         self._add(_SEARCH_ELAPSED, elapsed_ms)
 
     def record_throttle(self) -> None:
@@ -244,14 +262,19 @@ class MetricsStore:
         self.resource_memory_utilization = 0.0
         self.resource_cpu_utilization = 0.0
 
-    def as_prometheus(self) -> str:
-        return _exposition(self)
+    def as_prometheus(self, *, caller_detail: bool = True) -> str:
+        """Render the exposition; ``caller_detail`` gates the per-caller families.
+
+        The router passes the operator-auth result so the caller-labelled series
+        (a key-identity oracle) only leave the door to an authenticated operator.
+        """
+        return _exposition(self, caller_detail=caller_detail)
 
 
 def _caller_lines(store: MetricsStore) -> list[str]:
     """Per-caller crawl request counts, sorted by caller id."""
     return [
-        f'crawler_crawl_requests_total{{caller="{caller}"}} {count}'
+        f'crawler_crawl_requests_by_caller_total{{caller="{caller}"}} {count}'
         for caller, count in sorted(store.caller_counts.items())
     ]
 
@@ -259,12 +282,38 @@ def _caller_lines(store: MetricsStore) -> list[str]:
 def _search_caller_lines(store: MetricsStore) -> list[str]:
     """Per-caller search request counts, sorted by caller id."""
     return [
-        f'crawler_search_requests_total{{caller="{caller}"}} {count}'
+        f'crawler_search_requests_by_caller_total{{caller="{caller}"}} {count}'
         for caller, count in sorted(store.search_caller_counts.items())
     ]
 
 
-def _exposition(store: MetricsStore) -> str:
+def _by_provider_lines(store: MetricsStore) -> list[str]:
+    """The per-provider search-results family (own name, one label set)."""
+    lines = [
+        "# HELP crawler_search_results_by_provider_total Total web search results returned, per provider.",
+        "# TYPE crawler_search_results_by_provider_total counter",
+    ]
+    lines.extend(
+        f'crawler_search_results_by_provider_total{{provider="{provider}"}} {count}'
+        for provider, count in sorted(store.search_provider_counts.items())
+    )
+    return lines
+
+
+def _by_caller_lines(store: MetricsStore) -> list[str]:
+    """The gated per-caller families (own names, one label set each)."""
+    lines = [
+        "# HELP crawler_crawl_requests_by_caller_total Crawl requests received, per caller id.",
+        "# TYPE crawler_crawl_requests_by_caller_total counter",
+    ]
+    lines.extend(_caller_lines(store))
+    lines.append("# HELP crawler_search_requests_by_caller_total Search requests received, per caller id.")
+    lines.append("# TYPE crawler_search_requests_by_caller_total counter")
+    lines.extend(_search_caller_lines(store))
+    return lines
+
+
+def _exposition(store: MetricsStore, *, caller_detail: bool) -> str:
     """Render the Prometheus text exposition for ``store``.
 
     A module function rather than a method: pure formatting over exposed values,
@@ -292,38 +341,44 @@ def _exposition(store: MetricsStore) -> str:
     )
     counter("crawler_search_results_total", store.search_results_total, "Total web search results returned.")
     counter("crawler_search_errors_total", store.search_errors_total, "Total failed web search requests.")
-    for provider, count in sorted(store.search_provider_counts.items()):
-        lines.append(f'crawler_search_results_total{{provider="{provider}"}} {count}')
-    lines.extend(_caller_lines(store) + _search_caller_lines(store))
+    lines.extend(_by_provider_lines(store))
+    if caller_detail:
+        lines.extend(_by_caller_lines(store))
     lines.append("# HELP crawler_search_seconds_total Total wall-clock time spent on web searches (seconds).")
     lines.append("# TYPE crawler_search_seconds_total counter")
     lines.append(f"crawler_search_seconds_total {store.search_total_elapsed_ms / 1000.0:.3f}")
     lines.append("# HELP crawler_crawl_seconds_total Total wall-clock time spent crawling (seconds).")
     lines.append("# TYPE crawler_crawl_seconds_total counter")
     lines.append(f"crawler_crawl_seconds_total {store.total_elapsed_ms / 1000.0:.3f}")
-    for strategy, count in sorted(store.strategy_counts.items()):
-        lines.append(f'crawler_strategy_results_total{{strategy="{strategy}"}} {count}')
-    for classification, count in sorted(store.classification_counts.items()):
-        lines.append(f'crawler_result_classification_total{{classification="{classification}"}} {count}')
-    lines.append(
-        "# HELP crawler_resource_memory_utilization Current memory usage as a fraction of the "
-        "cgroup memory limit (or host RAM). >1 means over the hard ceiling."
+    lines.extend(
+        f'crawler_strategy_results_total{{strategy="{strategy}"}} {count}'
+        for strategy, count in sorted(store.strategy_counts.items())
     )
-    lines.append("# TYPE crawler_resource_memory_utilization gauge")
-    lines.append(f"crawler_resource_memory_utilization {store.resource_memory_utilization:.4f}")
-    lines.append(
-        "# HELP crawler_resource_cpu_utilization Current CPU utilization as a fraction of the "
-        "cgroup CPU quota (or manual budget). >1 means over budget / being throttled."
+    lines.extend(
+        f'crawler_result_classification_total{{classification="{classification}"}} {count}'
+        for classification, count in sorted(store.classification_counts.items())
     )
-    lines.append("# TYPE crawler_resource_cpu_utilization gauge")
-    lines.append(f"crawler_resource_cpu_utilization {store.resource_cpu_utilization:.4f}")
-    lines.append(
-        "# HELP crawler_resource_throttle_batches_total Crawl batches shrunk by resource admission "
-        "control (memory and/or CPU pressure)."
-    )
-    lines.append("# TYPE crawler_resource_throttle_batches_total counter")
-    lines.append(f"crawler_resource_throttle_batches_total {store.resource_throttle_batches_total}")
+    lines.extend(_gauge_and_throttle_lines(store))
     return "\n".join(lines) + "\n"
+
+
+def _gauge_and_throttle_lines(store: MetricsStore) -> list[str]:
+    """The gauges and throttle counter that trail the exposition."""
+    lines = [
+        "# HELP crawler_resource_memory_utilization Current memory usage as a fraction of the "
+        "cgroup memory limit (or host RAM). >1 means over the hard ceiling.",
+        "# TYPE crawler_resource_memory_utilization gauge",
+        f"crawler_resource_memory_utilization {store.resource_memory_utilization:.4f}",
+        "# HELP crawler_resource_cpu_utilization Current CPU utilization as a fraction of the "
+        "cgroup CPU quota (or manual budget). >1 means over budget / being throttled.",
+        "# TYPE crawler_resource_cpu_utilization gauge",
+        f"crawler_resource_cpu_utilization {store.resource_cpu_utilization:.4f}",
+        "# HELP crawler_resource_throttle_batches_total Crawl batches shrunk by resource admission "
+        "control (memory and/or CPU pressure).",
+        "# TYPE crawler_resource_throttle_batches_total counter",
+        f"crawler_resource_throttle_batches_total {store.resource_throttle_batches_total}",
+    ]
+    return lines
 
 
 metrics = MetricsStore()

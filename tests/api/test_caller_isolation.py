@@ -435,8 +435,8 @@ def test_crawl_metrics_carry_a_caller_dimension(tmp_path):
 
     assert metrics.caller_counts == {"key_a": 2.0, "key_b": 1.0}
     exposition = metrics.as_prometheus()
-    assert 'crawler_crawl_requests_total{caller="key_a"} 2.0' in exposition
-    assert 'crawler_crawl_requests_total{caller="key_b"} 1.0' in exposition
+    assert 'crawler_crawl_requests_by_caller_total{caller="key_a"} 2.0' in exposition
+    assert 'crawler_crawl_requests_by_caller_total{caller="key_b"} 1.0' in exposition
 
 
 def test_search_metrics_have_their_own_caller_family(tmp_path):
@@ -451,8 +451,8 @@ def test_search_metrics_have_their_own_caller_family(tmp_path):
     assert metrics.caller_counts == {"key_a": 1.0}
     assert metrics.search_caller_counts == {"key_a": 1.0}
     exposition = metrics.as_prometheus()
-    assert 'crawler_crawl_requests_total{caller="key_a"} 1.0' in exposition
-    assert 'crawler_search_requests_total{caller="key_a"} 1.0' in exposition
+    assert 'crawler_crawl_requests_by_caller_total{caller="key_a"} 1.0' in exposition
+    assert 'crawler_search_requests_by_caller_total{caller="key_a"} 1.0' in exposition
 
 
 async def test_http_page_quota_rejects_over_budget_crawls(tmp_path):
