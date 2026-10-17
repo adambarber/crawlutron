@@ -37,7 +37,7 @@ class CrawlResultStore(CoordinationStore):
         self._clock = clock or time.time
 
     def put(self, request_id: str, payload: JsonValue, *, owner: str = "") -> None:
-        """Store a completed response; prune expired/oldest entries first."""
+        """Store a completed response; ``owner=""`` is the shared anonymous bucket."""
         stored_at = self._clock()
         with self._lock:
             self._prune(stored_at)
