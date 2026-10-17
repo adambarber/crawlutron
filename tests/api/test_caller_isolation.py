@@ -20,6 +20,7 @@ from app.api.dependencies import get_job_store, get_result_store, get_settings, 
 from app.config.settings import CrawlerSettings
 from app.models.caller_identity import CallerIdentity
 from app.models.json_value import JsonValue
+from app.runtime.metrics import MetricsStore
 from app.storage.caller_key_store import CallerKeyStore
 from app.storage.job_store import JobStatus, JobStore
 from app.storage.result_store import CrawlResultStore
@@ -417,11 +418,15 @@ async def test_http_concurrency_quota_rejects_a_full_caller(tmp_path):
         assert refused.status_code == 429, refused.text
 
 
-def test_crawl_metrics_carry_a_caller_dimension(tmp_path):
-    from app.runtime.metrics import MetricsStore
+def _caller_metrics(tmp_path: Path) -> MetricsStore:
+    """A metrics store backed by one isolated coordination counters file."""
     from app.storage.coordination_counters import CoordinationCounters
 
-    metrics = MetricsStore(counters=CoordinationCounters(tmp_path / "counters.db"))
+    return MetricsStore(counters=CoordinationCounters(tmp_path / "counters.db"))
+
+
+def test_crawl_metrics_carry_a_caller_dimension(tmp_path):
+    metrics = _caller_metrics(tmp_path)
 
     metrics.observe_crawl(caller_id="key_a")
     metrics.observe_crawl(caller_id="key_a")
@@ -432,6 +437,22 @@ def test_crawl_metrics_carry_a_caller_dimension(tmp_path):
     exposition = metrics.as_prometheus()
     assert 'crawler_crawl_requests_total{caller="key_a"} 2.0' in exposition
     assert 'crawler_crawl_requests_total{caller="key_b"} 1.0' in exposition
+
+
+def test_search_metrics_have_their_own_caller_family(tmp_path):
+    """#298: search caller counts live in a search-specific family, not the crawl one.
+    A search by the same caller id must not inflate the crawl request count for it.
+    """
+    metrics = _caller_metrics(tmp_path)
+
+    metrics.observe_crawl(caller_id="key_a")
+    metrics.observe_search(provider="tavily", caller_id="key_a")
+
+    assert metrics.caller_counts == {"key_a": 1.0}
+    assert metrics.search_caller_counts == {"key_a": 1.0}
+    exposition = metrics.as_prometheus()
+    assert 'crawler_crawl_requests_total{caller="key_a"} 1.0' in exposition
+    assert 'crawler_search_requests_total{caller="key_a"} 1.0' in exposition
 
 
 async def test_http_page_quota_rejects_over_budget_crawls(tmp_path):

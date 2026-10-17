@@ -32,6 +32,7 @@ _STRATEGY_PREFIX = "strategy:"
 _CLASSIFICATION_PREFIX = "classification:"
 _PROVIDER_PREFIX = "search_provider:"
 _CALLER_PREFIX = "caller:"
+_SEARCH_CALLER_PREFIX = "search_caller:"
 
 # Counter name -> the observable field callers read, built once so a
 # counter cannot be recorded under one name and read under another.
@@ -149,6 +150,10 @@ class MetricsStore:
     def caller_counts(self) -> dict[str, float]:
         return self._labelled(_CALLER_PREFIX)
 
+    @property
+    def search_caller_counts(self) -> dict[str, float]:
+        return self._labelled(_SEARCH_CALLER_PREFIX)
+
     # -- the only counter write paths --------------------------------------
 
     def observe_crawl(
@@ -196,7 +201,7 @@ class MetricsStore:
         if provider:
             self._add(_PROVIDER_PREFIX + provider, results)
         if caller_id:
-            self._add(_CALLER_PREFIX + caller_id, 1)
+            self._add(_SEARCH_CALLER_PREFIX + caller_id, 1)
         self._add(_SEARCH_ELAPSED, elapsed_ms)
 
     def record_throttle(self) -> None:
@@ -244,10 +249,18 @@ class MetricsStore:
 
 
 def _caller_lines(store: MetricsStore) -> list[str]:
-    """Per-caller request counts, sorted by key id."""
+    """Per-caller crawl request counts, sorted by caller id."""
     return [
         f'crawler_crawl_requests_total{{caller="{caller}"}} {count}'
         for caller, count in sorted(store.caller_counts.items())
+    ]
+
+
+def _search_caller_lines(store: MetricsStore) -> list[str]:
+    """Per-caller search request counts, sorted by caller id."""
+    return [
+        f'crawler_search_requests_total{{caller="{caller}"}} {count}'
+        for caller, count in sorted(store.search_caller_counts.items())
     ]
 
 
@@ -281,7 +294,7 @@ def _exposition(store: MetricsStore) -> str:
     counter("crawler_search_errors_total", store.search_errors_total, "Total failed web search requests.")
     for provider, count in sorted(store.search_provider_counts.items()):
         lines.append(f'crawler_search_results_total{{provider="{provider}"}} {count}')
-    lines.extend(_caller_lines(store))
+    lines.extend(_caller_lines(store) + _search_caller_lines(store))
     lines.append("# HELP crawler_search_seconds_total Total wall-clock time spent on web searches (seconds).")
     lines.append("# TYPE crawler_search_seconds_total counter")
     lines.append(f"crawler_search_seconds_total {store.search_total_elapsed_ms / 1000.0:.3f}")
