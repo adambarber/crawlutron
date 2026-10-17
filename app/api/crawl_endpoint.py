@@ -1,8 +1,4 @@
-"""``/v1/crawl`` endpoint handlers (sync + async + result retrieval).
-
-Split from ``app/main.py`` so handler logic and the FastAPI URL→handler mapping
-live apart; the router wires ``Depends`` for settings, stores and shutdown.
-"""
+"""``/v1/crawl`` endpoint handlers (sync + async + result retrieval)."""
 
 from __future__ import annotations
 
@@ -10,7 +6,7 @@ import asyncio
 import logging
 import time
 from collections.abc import Awaitable
-from typing import Any, cast
+from typing import Any
 
 from fastapi import HTTPException, Request
 from fastapi.responses import JSONResponse, Response
@@ -192,15 +188,12 @@ async def _admit_caller_request(
     requested_pages = resolved.limits.max_pages
     if not caller.authenticated:
         requested_pages = resolve_page_limit(caller, requested_pages)
-        # Normalize the policy's max_pages in payload_dict so both async single-shot
-        # storage (job_store.acreate_single_shot) and sync execution (execute_crawl)
-        # carry the bound. Placed before the cookie-namespace block.
         resolved = resolved.model_copy(
             update={"limits": resolved.limits.model_copy(update={"max_pages": requested_pages})}
         )
-        raw_policy = payload_dict.get("policy")
-        if isinstance(raw_policy, dict) and "limits" in raw_policy:
-            cast(dict[str, Any], raw_policy)["limits"]["max_pages"] = requested_pages
+        # Persist the resolved typed model, not the raw wire dict, so async storage
+        # and sync execution carry the bound; ``model_dump`` is the model's own edge.
+        payload_dict["policy"] = resolved.model_dump()
     check_page_quota(caller, requested_pages)
     check_concurrency_quota(caller, await job_store.aactive_count_for_caller(caller.caller_id))
     namespace = effective_cookie_namespace(resolved.request_profile, caller)

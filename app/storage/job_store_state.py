@@ -58,7 +58,9 @@ class CrawlJobState:
     kind: JobKind = JobKind.WHOLE_SITE
     root_url: str = ""
     owner: str = ""
-    policy: dict[str, Any] = field(default_factory=dict)
+    # The typed model, kept whole through the live job; only the write edge
+    # (``_job_row_params``) flattens it to the store's JSON spelling.
+    policy: CrawlPolicy = field(default_factory=CrawlPolicy)
     status: JobStatus = JobStatus.PENDING
     # Whole-site fields (used when kind == WHOLE_SITE)
     frontier: list[FrontierEntry] = field(default_factory=list)
@@ -117,7 +119,7 @@ class CrawlJobState:
             kind=JobKind(kind),
             root_url=root_url,
             owner=str(data.get("owner") or ""),
-            policy=_stored_policy(policy),
+            policy=policy,
             status=JobStatus(status),
             frontier=normalize_frontier(
                 data.get("frontier", []),
@@ -167,7 +169,7 @@ def normalize_job_state(job: CrawlJobState) -> CrawlJobState:
             continue
         transient_retries[url] = max(transient_retries.get(url, 0), value)
     job.root_url = root_url
-    job.policy = _stored_policy(policy)
+    job.policy = policy
     job.visited = visited
     job.frontier = frontier
     job.in_flight = in_flight
@@ -265,7 +267,7 @@ def _job_row_params(job: CrawlJobState) -> tuple:
         job.job_id,
         job.kind.value,
         job.root_url,
-        _json(job.policy),
+        _json(_stored_policy(job.policy)),
         job.status.value,
         _json([_entry_payload(entry) for entry in job.frontier]),
         job.created_at,
@@ -406,7 +408,7 @@ def _create_job(
         kind=kind,
         root_url=root_url,
         owner=owner,
-        policy=_stored_policy(policy),
+        policy=policy,
         status=JobStatus.PENDING,
         frontier=frontier or [],
         host_policy=store._host_policy,

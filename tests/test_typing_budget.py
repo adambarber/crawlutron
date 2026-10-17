@@ -23,7 +23,7 @@ from tests.chokepoint_walks import nodes_of
 
 _METRIC = "undeclared record"
 
-_BUDGETS = {_METRIC: 170}
+_BUDGETS = {_METRIC: 169}
 
 # A record is anything whose key set a caller might depend on.
 _RECORD_ROOTS = frozenset(

@@ -74,6 +74,34 @@ async def _quota_client(
         yield client, store, results, keys
 
 
+async def _post_crawl(client: AsyncClient, *, max_pages: int, key: str | None = None):
+    """POST one /v1/crawl for a caller; anonymous when no key is given."""
+    headers = {"X-API-Key": key} if key else None
+    return await client.post(
+        "/v1/crawl",
+        headers=headers,
+        json={
+            "url": "http://example.com/",
+            "async_mode": True,
+            "policy": {"limits": {"max_pages": max_pages}},
+        },
+    )
+
+
+def _expect_quota_refused(response) -> None:
+    """A 429 with the quota_exceeded code, as every quota test reads it."""
+    assert response.status_code == 429, response.text
+    assert response.json()["detail"]["code"] == "quota_exceeded"
+
+
+def _stored_request(store: JobStore, response):
+    """The stored job a 202 crawl response names; the post succeeded."""
+    assert response.status_code == 202, response.text
+    stored = store.load(response.json()["request_id"])
+    assert stored is not None
+    return stored
+
+
 def test_single_shot_job_carries_its_owner(tmp_path):
     store = make_store(tmp_path / "jobs.db")
 
@@ -363,17 +391,7 @@ def test_crawl_metrics_carry_a_caller_dimension(tmp_path):
 async def test_http_page_quota_rejects_over_budget_crawls(tmp_path):
     async with _quota_client(tmp_path) as (client, store, results, keys):
         issued = keys.issue_key("agent-a", max_pages=1)
-        refused = await client.post(
-            "/v1/crawl",
-            headers={"X-API-Key": issued.secret},
-            json={
-                "url": "http://example.com/",
-                "async_mode": True,
-                "policy": {"limits": {"max_pages": 50}},
-            },
-        )
-        assert refused.status_code == 429, refused.text
-        assert refused.json()["detail"]["code"] == "quota_exceeded"
+        _expect_quota_refused(await _post_crawl(client, max_pages=50, key=issued.secret))
 
 
 async def test_scoped_store_twins_round_trip_off_the_loop(tmp_path):
@@ -389,3 +407,27 @@ async def test_scoped_store_twins_round_trip_off_the_loop(tmp_path):
     assert await results.aget_for_caller("crawl_owned", "key_a") == {"request_id": "crawl_owned"}
     assert await store.adelete_for_caller("crawl_owned", "key_a") is True
     assert await store.aload_for_caller("crawl_owned", "key_a") is None
+
+
+async def test_anonymous_crawl_stores_the_resolved_page_limit(tmp_path):
+    """An anonymous /v1/crawl stores the resolved page bound, not the raw 0:
+    the model keeps ``max_pages=0`` legal, so admission writes the bound back."""
+    async with _quota_client(tmp_path) as (client, store, results, keys):
+        response = await _post_crawl(client, max_pages=0)
+        stored = _stored_request(store, response)
+        assert stored.policy.limits.max_pages == 100
+
+
+async def test_anonymous_page_quota_refuses_over_budget_crawls(tmp_path):
+    """The anonymous bucket's capability default is a real quota: 101 pages is a 429."""
+    async with _quota_client(tmp_path) as (client, store, results, keys):
+        _expect_quota_refused(await _post_crawl(client, max_pages=101))
+
+
+async def test_keyed_crawl_keeps_an_explicit_zero_page_limit(tmp_path):
+    """A keyed caller's explicit ``max_pages=0`` stays 0 in the stored row (#194)."""
+    async with _quota_client(tmp_path) as (client, store, results, keys):
+        issued = keys.issue_key("agent-a", max_pages=0)
+        response = await _post_crawl(client, max_pages=0, key=issued.secret)
+        stored = _stored_request(store, response)
+        assert stored.policy.limits.max_pages == 0
