@@ -32,10 +32,9 @@ def identity_for_key(record: CallerKey) -> CallerIdentity:
 
 
 def anonymous_caller() -> CallerIdentity:
-    """The shared anonymous bucket: a bounded single-user identity.
-
-    Quotas resolve to the service's capability defaults; identical to a keyed
-    caller that omits limits on the sync crawl path.
+    """The shared anonymous bucket: a bounded single-user identity; quotas resolve to
+    capability defaults (max_pages=100, max_concurrency=4), identical to a keyed caller
+    that omits limits.
     """
     return CallerIdentity()
 
@@ -153,4 +152,5 @@ __all__ = [
     "get_keys_caller",
     "identity_for_key",
     "presented_key",
+    "resolve_page_limit",
 ]
