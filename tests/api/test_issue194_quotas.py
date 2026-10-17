@@ -15,7 +15,6 @@ from app.config.settings import CrawlerSettings
 from app.storage.caller_key_store import CallerKeyStore
 from tests._policy_factories import job_store as make_store
 from tests.api.test_caller_isolation import (
-    _expect_quota_refused,
     _post_crawl,
     _quota_client,
     _stored_request,
@@ -92,41 +91,25 @@ def test_tracker_reserves_and_releases_per_caller():
 async def test_sync_crawl_counts_toward_concurrency(tmp_path, monkeypatch):
     """The second of two concurrent sync crawls is a 429 for ``max_concurrency=1``."""
     from app.api import crawl_endpoint
+    from tests._concurrency_probe import assert_second_concurrent_refused, make_blocking_callable
 
-    entered = asyncio.Event()
-    released = asyncio.Event()
-
-    async def _blocking_crawl(*args, **kwargs):
-        entered.set()
-        await released.wait()
-        return {"request_id": "sync", "results": [], "submitted_count": 0, "policy_schema_version": ""}
-
-    monkeypatch.setattr(crawl_endpoint, "execute_crawl", _blocking_crawl)
+    blocker, entered, released = make_blocking_callable(
+        result={"request_id": "sync", "results": [], "submitted_count": 0, "policy_schema_version": ""}
+    )
+    monkeypatch.setattr(crawl_endpoint, "execute_crawl", blocker)
     async with _quota_client(tmp_path) as (client, store, results, keys):
         _mount_tracker(client)
         issued = keys.issue_key("agent-a", max_concurrency=1)
         headers = _keyed_headers(issued.secret)
-        first = asyncio.create_task(
-            client.post("/v1/crawl", headers=headers, json={"url": "http://example.com/"})
+        await assert_second_concurrent_refused(
+            client,
+            url="/v1/crawl",
+            headers=headers,
+            body={"url": "http://example.com/"},
+            entered=entered,
+            released=released,
+            first_ok=(200, 201),
         )
-        await asyncio.wait_for(entered.wait(), timeout=5)
-        try:
-            second = await asyncio.wait_for(
-                client.post("/v1/crawl", headers=headers, json={"url": "http://example.com/"}),
-                timeout=3,
-            )
-        except TimeoutError:
-            released.set()
-            await asyncio.wait_for(first, timeout=5)
-            raise AssertionError(
-                "second concurrent sync crawl was not bounded by max_concurrency=1"
-            ) from None
-        _expect_quota_refused(second)
-        released.set()
-        response = await asyncio.wait_for(first, timeout=5)
-        assert response.status_code in (200, 201), response.text
-        third = await client.post("/v1/crawl", headers=headers, json={"url": "http://example.com/"})
-        assert third.status_code in (200, 201), third.text
 
 
 async def test_sync_crawl_releases_the_slot_when_the_engine_fails(tmp_path, monkeypatch):
