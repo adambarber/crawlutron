@@ -294,3 +294,21 @@ class TestAsyncCrawlShutdownOwnership:
         await job_runner.shutdown_job_runner()
         assert await asyncio.wait_for(cancelled.wait(), timeout=5), "shutdown did not stop the crawl"
         assert not job_runner.is_running(job_id)
+
+
+class TestAsyncCrawlTeardownIsolation:
+    """A prior async test's PENDING/RUNNING rows must not bleed into the next quota.
+    Anonymous concurrency counts every owned PENDING+RUNNING row, so a leftover row
+    from a cancelled test can push a later test over its quota of four."""
+
+    async def test_teardown_clears_a_stray_pending_anonymous_job(self):
+        from app.main import job_store
+        from tests._async_harnesses import _drain_running_crawls
+
+        job_store.create_single_shot("stray_pending", "http://example.com/", {}, owner="")
+        assert job_store.active_count_for_caller("") >= 1
+
+        # This is what the crawl_api fixture runs in its teardown.
+        await _drain_running_crawls()
+
+        assert job_store.active_count_for_caller("") == 0

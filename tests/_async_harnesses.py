@@ -78,24 +78,30 @@ async def crawl_api(async_client, base_url) -> CrawlApi:
 
 
 async def _drain_running_crawls(*, guard: float = 10.0) -> None:
-    """Wait for every job still ``RUNNING`` to leave it, or say which one did not.
+    """Wait for every still-active job to reach terminal, then clear strays.
 
     Bounded, not open-ended: a genuinely stuck crawl should fail at its own
     assertion, not hold later tests open."""
     from app.main import job_store
-    from app.storage.job_store import JobStatus
+    from app.storage.job_store import TERMINAL_STATUSES, JobStatus
 
-    def running() -> list[str]:
+    terminal_codes = {status.value for status in TERMINAL_STATUSES}
+
+    def acting() -> list[str]:
         # ``list_jobs`` is the status view, not the state, so this reads the row dict rather than
         # materialising every result payload to ask a question about the status column.
-        return [row["job_id"] for row in job_store.list_jobs() if row["status"] == JobStatus.RUNNING.value]
+        return [row["job_id"] for row in job_store.list_jobs() if row["status"] not in terminal_codes]
 
     try:
-        await await_until(running, "a crawl was still RUNNING when its test finished")
+        await await_until(lambda: not acting(), "a crawl was still active when its test finished")
     except AssertionError:
         # A stuck crawl is reported, not raised: raising here would mask the assertion of the test that
         # actually caused it.
         pass
+    # A stale PENDING/RUNNING anonymous row would bleed into the next test's quota; a
+    # bounded wait that cannot retire it force-cancels it so none leaks.
+    for job_id in acting():
+        job_store.set_status(job_id, JobStatus.CANCELLED, expected={JobStatus.PENDING, JobStatus.RUNNING})
 
 
 async def run_loop_rebind_scenario(get_client, *, guard: float | None = None):
