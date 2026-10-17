@@ -175,18 +175,27 @@ class JobStore:
         """
         return self._read_row(job_id, with_accumulators=False)
 
-    def _read_row(self, job_id: str, *, with_accumulators: bool) -> CrawlJobState | None:
+    def _read_row(
+        self, job_id: str, *, with_accumulators: bool, owner: str | None = None
+    ) -> CrawlJobState | None:
         """The one row read both loaders share.
-        Row, history and visited set are read under one hold of the lock, because
-        releasing it between queries would let a writer race the shared connection.
-        """
+        Row, history and visited set are read under one hold of the lock; ``owner``
+        narrows to the caller's own row before any deserialization."""
         with self._lock:
-            row = self._conn.execute(
-                "SELECT job_id, kind, owner, root_url, policy, status, frontier, "
-                "created_at, updated_at, error, stats, in_flight, transient_retries "
-                "FROM crawl_jobs WHERE job_id = ?",
-                (job_id,),
-            ).fetchone()
+            if owner is None:
+                row = self._conn.execute(
+                    "SELECT job_id, kind, owner, root_url, policy, status, frontier, "
+                    "created_at, updated_at, error, stats, in_flight, transient_retries "
+                    "FROM crawl_jobs WHERE job_id = ?",
+                    (job_id,),
+                ).fetchone()
+            else:
+                row = self._conn.execute(
+                    "SELECT job_id, kind, owner, root_url, policy, status, frontier, "
+                    "created_at, updated_at, error, stats, in_flight, transient_retries "
+                    "FROM crawl_jobs WHERE job_id = ? AND owner = ?",
+                    (job_id, owner),
+                ).fetchone()
             if row is None:
                 return None
             try:
@@ -198,12 +207,10 @@ class JobStore:
                 return None
 
     def load_for_caller(self, job_id: str, caller_id: str) -> CrawlJobState | None:
-        """The job iff ``caller_id`` owns it; a foreign id reads as missing.
-        Same miss for missing and foreign, so ownership is not an oracle."""
-        job = self.load(job_id)
-        if job is None or job.owner != caller_id:
-            return None
-        return job
+        """The job iff ``caller_id`` owns it; foreign/missing read the same miss.
+        The owner is filtered in SQL before deserialization, so a foreign job_id is
+        a cheap miss, not a full load then an owner compare (#196)."""
+        return self._read_row(job_id, with_accumulators=True, owner=caller_id)
 
     def delete(self, job_id: str) -> bool:
         """Delete job from SQLite. Returns True if it existed.

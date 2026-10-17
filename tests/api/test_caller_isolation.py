@@ -132,6 +132,52 @@ def test_load_for_caller_hides_foreign_jobs(tmp_path):
     assert owned is not None and owned.job_id == "crawl_owned"
 
 
+def _deserialize_count(store: JobStore) -> list:
+    """A sentinel the caller drives: count every full-row deserialization."""
+    calls: list = []
+    original = store._row_to_job
+
+    def _spy(row, *, with_accumulators):
+        calls.append(row["job_id"])
+        return original(row, with_accumulators=with_accumulators)
+
+    store._row_to_job = _spy
+    return calls
+
+
+def test_load_for_caller_never_deserializes_a_foreign_or_missing_row(tmp_path):
+    """#196: ownership is decided in SQL, not by loading the row and comparing owners,
+    so a foreign (or missing) job_id never pays for full deserialization."""
+    store = make_store(tmp_path / "jobs.db")
+    _seed_owned_job(store, owner="key_a")
+    calls = _deserialize_count(store)
+
+    assert store.load_for_caller("crawl_owned", "key_b") is None
+    assert store.load_for_caller("crawl_owned", "key_c") is None
+    assert store.load_for_caller("no_such_job", "key_a") is None
+    assert calls == [], f"foreign/missing rows must not be deserialized: {calls}"
+
+    owned = store.load_for_caller("crawl_owned", "key_a")
+    assert owned is not None and owned.job_id == "crawl_owned"
+    assert calls == ["crawl_owned"]
+
+
+def test_load_for_caller_filters_owner_in_sql(tmp_path):
+    """#196: the scoped read adds an ``owner = ?`` predicate so the row is rejected
+    at the cursor, not after a full load."""
+    store = make_store(tmp_path / "jobs.db")
+    _seed_owned_job(store, owner="key_a")
+    seen: list[str] = []
+    store._conn.set_trace_callback(lambda sql, seen=seen: seen.append(sql and sql.strip()))
+    try:
+        store.load_for_caller("crawl_owned", "key_b")
+    finally:
+        store._conn.set_trace_callback(None)
+    scoped = [s for s in seen if s and s.upper().startswith("SELECT")]
+    sql_text = " ".join(scoped)
+    assert "crawl_jobs" in sql_text and "owner" in sql_text and "crawl_owned" in sql_text, seen
+
+
 def test_load_for_caller_reads_legacy_anonymous_rows(tmp_path):
     store = make_store(tmp_path / "jobs.db")
     store.create_single_shot("crawl_legacy", "http://example.com/", {})
