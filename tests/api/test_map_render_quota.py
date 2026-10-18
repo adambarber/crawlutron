@@ -8,9 +8,8 @@ from __future__ import annotations
 import contextlib
 from pathlib import Path
 
+from app.api.identity_router import router as identity_router
 from app.api.keys_router import router as keys_router
-from app.api.map_router import router as map_router
-from app.api.render_router import router as render_router
 from tests._async_harnesses import expect_quota_refused, issue_key
 from tests._quota_harness import service_client
 
@@ -20,7 +19,7 @@ async def _map_render_client(tmp_path: Path):
     """Isolated app serving map, render, and keys routers over one register."""
     async with service_client(
         tmp_path,
-        routers={"map": map_router, "render": render_router, "keys": keys_router},
+        routers={"doors": identity_router, "keys": keys_router},
     ) as (client, job_store, keys):
         yield client
 

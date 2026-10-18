@@ -25,13 +25,13 @@ async def _search_client(
     tmp_path: Path,
 ) -> AsyncIterator[tuple[AsyncClient, FastAPI]]:
     """An app serving /v1/search + /v1/keys over isolated stores, Tavily configured."""
+    from app.api.identity_router import router as identity_router
     from app.api.keys_router import router as keys_router
-    from app.search.router import router as search_router
 
     keys = CallerKeyStore(tmp_path / "keys.db")
     jobs = make_job_store(tmp_path / "jobs.db")
     app = FastAPI()
-    app.include_router(search_router)
+    app.include_router(identity_router)
     app.include_router(keys_router)
     app.state.caller_key_store = keys
     app.state.key_admin_token = "test-admin-token"

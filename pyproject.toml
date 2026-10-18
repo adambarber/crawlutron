@@ -180,8 +180,6 @@ select = [
 #
 # B008: FastAPI dependency injection passes Depends(...) as a default argument
 # by design; calls listed here are recognized as immutable by bugbear.
-# app.api.router_surface.Depends is the same fastapi.Depends re-exported from the
-# shared router plane (the #322 direction), so it is whitelisted alongside it.
 # S311: random.uniform jitter in the scheduler is throughput shaping, not crypto.
 [tool.ruff.lint.flake8-bugbear]
 extend-immutable-calls = [
@@ -190,7 +188,6 @@ extend-immutable-calls = [
     "fastapi.Query",
     "fastapi.Body",
     "fastapi.Header",
-    "app.api.router_surface.Depends",
 ]
 
 # Complexity ratchets. These are 10% UNDER the worst offender in app/ at the time
