@@ -16,23 +16,26 @@ from app.config.settings import CrawlerSettings
 from app.models.crawl_job import CrawlJob
 from app.models.crawl_policy import POLICY_SCHEMA_VERSION
 from app.models.crawl_request import CrawlRequest
-from app.models.crawl_result import CrawlResult, EngineCrawlResult
-from app.models.crawl_worker import CrawlWorker
-from app.models.host_policy import HostPolicy
-from app.models.normalized_url import NormalizedUrl
-from app.models.render_options import RenderOptions
-from app.models.result_record import RenderEnvelope
 from app.orchestration import robots as _robots_policy
 from app.orchestration.classification import classify_error_code
-from app.orchestration.engine_result import failed_result_for
-from app.orchestration.render_result import (
+from app.orchestration.results import (
     crawl_result_from_engine_result,
+    failed_result_for,
     terminal_crawl_result,
 )
 from app.orchestration.scheduler import DomainScheduler
 from app.orchestration.worker import call_worker
 from app.storage.ids import new_request_id
 from app.transport.fetchers import default_http_fetcher
+from app.transport.render_surface import (
+    CrawlResult,
+    CrawlWorker,
+    EngineCrawlResult,
+    HostPolicy,
+    NormalizedUrl,
+    RenderEnvelope,
+    RenderOptions,
+)
 
 
 def render_options_for(payload: dict[str, Any], settings: CrawlerSettings) -> RenderOptions:

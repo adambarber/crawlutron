@@ -72,7 +72,7 @@ class TestDiscoveryAndRenderApi:
     async def test_v1_render_exhausted_pool_returns_503(self, monkeypatch):
         # When every renderer is wedged, the request surfaces as 503, not a hang or a 500.
         import app.api.render_endpoint as render_endpoint
-        from app.orchestration.render_result import crawl_result_from_exception
+        from app.orchestration.results import crawl_result_from_exception
         from app.transport.browser_pool import BrowserPoolExhaustedError
         from app.vocabulary.strategies import BROWSER_HEADLESS
 
@@ -148,7 +148,7 @@ class TestDiscoveryAndRenderApi:
         the wire model drops never reaches the assertion.
         """
         from app.models.crawl_result import CrawlResult
-        from app.orchestration.render_result import terminal_attempt
+        from app.orchestration.results import terminal_attempt
         from app.transport.browser_pool import BrowserPool
 
         class _FakeRenderer:

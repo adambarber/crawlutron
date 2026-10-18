@@ -148,7 +148,7 @@ class TestObservedLatencyCrossesPipelines:
     @staticmethod
     def _rendered_result(elapsed_ms: int):
         from app.models.crawl_result import CrawlResult
-        from app.orchestration.render_result import terminal_attempt
+        from app.orchestration.results import terminal_attempt
 
         return CrawlResult(
             url="https://example.com/x",
@@ -169,7 +169,7 @@ class TestObservedLatencyCrossesPipelines:
     @staticmethod
     def _crawled_result(elapsed_ms: int):
         from app.models.crawl_result import CrawlStrategyAttempt
-        from app.orchestration.engine_result import build_engine_result
+        from app.orchestration.results import build_engine_result
 
         return build_engine_result(
             original_url="https://example.com/x",

@@ -16,7 +16,7 @@ from app.config.settings import CrawlerSettings
 from app.models.browser_pool_exhausted import BrowserPoolExhaustedError
 from app.models.crawl_result import CrawlResult
 from app.models.taxonomy import CrawlStrategyName
-from app.orchestration.render_result import crawl_result_from_exception
+from app.orchestration.results import crawl_result_from_exception
 from app.runtime.resource_pressure import (
     BROWSER_RAM_FRACTION,
 )

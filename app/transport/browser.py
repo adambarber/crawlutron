@@ -17,12 +17,8 @@ from app.config.env import get_env_float, get_env_int
 from app.config.settings import CrawlerSettings
 from app.extraction.classify import classify_page
 from app.models.crawl_result import CrawlResult
-from app.models.host_policy import HostPolicy
-from app.models.normalized_url import NormalizedUrl
-from app.models.render_options import RenderOptions
-from app.models.taxonomy import Classification, CrawlError
 from app.orchestration.classification import classify_error_code
-from app.orchestration.render_result import (
+from app.orchestration.results import (
     terminal_attempt,
     terminal_crawl_result,
 )
@@ -41,6 +37,7 @@ from app.transport.browser_targets import (
     make_ssrf_websocket_handler,
     resolve_browser_target,
 )
+from app.transport.render_surface import Classification, CrawlError, HostPolicy, NormalizedUrl, RenderOptions
 
 __all__ = [
     "BrowserRenderer",

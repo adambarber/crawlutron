@@ -9,12 +9,9 @@ from typing import Any, cast, get_args
 from app.models.crawl_policy import CrawlPolicy
 from app.models.crawl_result import CrawlStrategyAttempt, EngineCrawlResult
 from app.models.crawl_strategy import CrawlStrategy
-from app.models.crawl_worker import CrawlWorker
-from app.models.host_policy import HostPolicy
-from app.models.http_fetcher import HttpFetcher
-from app.models.normalized_url import NormalizedUrl
 from app.models.taxonomy import Classification, CrawlError, CrawlStrategyName
-from app.orchestration.engine_result import (
+from app.orchestration.fetch_surface import CrawlWorker, HostPolicy, HttpFetcher, NormalizedUrl
+from app.orchestration.results import (
     TerminalResult,
     engine_result_from_exception,
     failed_engine_result,

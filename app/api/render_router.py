@@ -1,10 +1,9 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter
 
-from app.api.caller_auth import admit
-from app.api.dependencies import CallerDep, TrackingDep, get_settings
 from app.api.render_endpoint import render as render_handler
+from app.api.router_surface import CallerDep, TrackingDep, admit, settings_dep
 from app.models.error_response import ErrorResponse
 from app.models.render_request import RenderRequest
 from app.models.unified_crawl_response import UnifiedCrawlResponse
@@ -29,7 +28,7 @@ async def render(
     payload: RenderRequest,
     caller: CallerDep,
     tracking: TrackingDep,
-    settings=Depends(get_settings),
+    settings=settings_dep,
 ) -> UnifiedCrawlResponse:
     # #205/#320: admit the render through the one helper -- page quota, quotas
     # against the shared register, and a released slot for the request's life.

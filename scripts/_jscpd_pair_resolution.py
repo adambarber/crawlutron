@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 import argparse
-import ast
-import hashlib
 import json
 import subprocess
 import tempfile
@@ -13,7 +11,6 @@ from typing import Any
 from scripts.executables import require_repo_tool
 
 SERVICE_ROOT = Path(__file__).resolve().parents[1]
-EXPECTATIONS_PATH = SERVICE_ROOT / "jscpd-expectations.json"
 CONFIG_PATH = SERVICE_ROOT / ".jscpd.json"
 PRECOMMIT_CONFIG_PATH = SERVICE_ROOT / ".pre-commit-config.yaml"
 
@@ -144,110 +141,6 @@ def _validate_scan_config(path: Path) -> None:
         )
 
 
-def _fragment_hash(duplicate: dict[str, Any]) -> str:
-    fragment = duplicate.get("fragment")
-    if not isinstance(fragment, str):
-        raise ValueError("jscpd report is missing a duplicate fragment")
-    return hashlib.sha256(fragment.encode()).hexdigest()
-
-
-def _test_names(path: Path) -> set[str]:
-    try:
-        tree = ast.parse(path.read_text(encoding="utf-8"))
-    except SyntaxError as error:
-        raise ValueError(f"guard file cannot be parsed: {path}") from error
-
-    names: set[str] = set()
-
-    def collect(body: list[ast.stmt], prefix: str = "") -> None:
-        for node in body:
-            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name.startswith("test_"):
-                names.add(f"{prefix}{node.name}")
-            elif isinstance(node, ast.ClassDef) and node.name.startswith("Test"):
-                collect(node.body, f"{prefix}{node.name}::")
-
-    collect(tree.body)
-    return names
-
-
-def _validate_guard(guard: Any) -> None:
-    if not isinstance(guard, str) or not guard.strip():
-        raise ValueError("jscpd expectation guard must name a test")
-    parts = guard.split("::")
-    if len(parts) < 2 or not parts[0] or not parts[-1]:
-        raise ValueError(f"jscpd expectation guard has an invalid node id: {guard!r}")
-    relative = Path(parts[0])
-    if relative.is_absolute() or relative.parts[:1] != ("tests",) or ".." in relative.parts:
-        raise ValueError(f"jscpd expectation guard must point inside tests/: {guard!r}")
-    path = SERVICE_ROOT / relative
-    if not path.is_file() or path.suffix != ".py":
-        raise ValueError(f"jscpd expectation guard file does not exist: {guard!r}")
-    node = "::".join(parts[1:])
-    if node not in _test_names(path):
-        raise ValueError(f"jscpd expectation guard test does not exist: {guard!r}")
-
-
-def _validate_expectation(pair: Any) -> None:
-    if not isinstance(pair, dict):
-        raise ValueError("each jscpd expectation must be an object")
-    pair_id = pair.get("id")
-    if not isinstance(pair_id, str) or not pair_id.strip():
-        raise ValueError("each jscpd expectation needs a non-empty id")
-    if "profiles" in pair:
-        raise ValueError(f"jscpd expectation {pair_id!r} uses the legacy profiles shape")
-    reason = pair.get("reason")
-    if not isinstance(reason, str) or not reason.strip():
-        raise ValueError(f"jscpd expectation {pair_id!r} needs a non-empty reason")
-    _validate_guard(pair.get("guard"))
-    fragment_hash = pair.get("fragment_sha256")
-    if not isinstance(fragment_hash, str) or len(fragment_hash) != 64:
-        raise ValueError(f"jscpd expectation {pair_id!r} needs a fragment_sha256")
-    try:
-        int(fragment_hash, 16)
-    except ValueError as error:
-        raise ValueError(f"jscpd expectation {pair_id!r} has an invalid fragment_sha256") from error
-    for side in ("first", "second"):
-        location = pair.get(side)
-        if not isinstance(location, dict) or not isinstance(location.get("path"), str):
-            raise ValueError(f"jscpd expectation {pair_id!r} has an invalid {side} location")
-        path = Path(location["path"])
-        if path.is_absolute() or ".." in path.parts or not location["path"]:
-            raise ValueError(f"jscpd expectation {pair_id!r} has an unsafe {side} path")
-        if not all(
-            isinstance(location.get(field), int) and not isinstance(location.get(field), bool)
-            for field in ("start", "end")
-        ):
-            raise ValueError(f"jscpd expectation {pair_id!r} has invalid {side} bounds")
-        if location["start"] < 1 or location["end"] < location["start"]:
-            raise ValueError(f"jscpd expectation {pair_id!r} has invalid {side} bounds")
-
-
-def _expected_pairs() -> list[dict[str, Any]]:
-    document = json.loads(EXPECTATIONS_PATH.read_text(encoding="utf-8"))
-    if document.get("version") != 1 or not isinstance(document.get("pairs"), list):
-        raise ValueError("jscpd-expectations.json must have version 1 and a pairs list")
-    seen_ids: set[str] = set()
-    seen_locations: dict[LocationPair, str] = {}
-    for pair in document["pairs"]:
-        _validate_expectation(pair)
-        pair_id = pair["id"]
-        if pair_id in seen_ids:
-            raise ValueError(f"duplicate jscpd expectation id: {pair_id!r}")
-        seen_ids.add(pair_id)
-        # Two expectations on the same lines is not a duplicate the gate can
-        # resolve: at most one can ever be satisfied, and the loser is reported
-        # as a missing clone, which sends the reader after the duplication
-        # instead of after this file. Rejecting it names the actual mistake.
-        locations = _expected_locations(pair)
-        if locations in seen_locations:
-            raise ValueError(
-                f"jscpd expectations {seen_locations[locations]!r} and {pair_id!r} "
-                f"declare the same location: {list(locations)}"
-            )
-        seen_locations[locations] = pair_id
-    return document["pairs"]
-
-
 def _location_pair(entries: list[LocationKey]) -> LocationPair:
     first, second = sorted(entries)
     return (first, second)
@@ -255,10 +148,6 @@ def _location_pair(entries: list[LocationKey]) -> LocationPair:
 
 def _location(container: dict[str, Any], side: str, path_key: str) -> LocationKey:
     return (str(container[side][path_key]), int(container[side]["start"]), int(container[side]["end"]))
-
-
-def _expected_locations(pair: dict[str, Any]) -> LocationPair:
-    return _location_pair([_location(pair, side, "path") for side in ("first", "second")])
 
 
 def _scanned_roots(profile: str) -> tuple[str, ...]:
@@ -271,17 +160,6 @@ def _resolve_roots(name: str, profile: str) -> tuple[str, ...]:
     that could hold the name -- a name in two roots is undecidable, kept over guessed.
     """
     return tuple(root for root in _scanned_roots(profile) if _IS_FILE(SERVICE_ROOT / root / name))
-
-
-def _expected_tree(pair: dict[str, Any]) -> str:
-    """The tree label a declared pair is scored under, derived the same way the
-    observed pass derives it -- so a pair straddling two trees keys ``cross`` whether
-    declared or not, and a within-tree twin cannot satisfy a cross-tree expectation.
-    """
-    first, second = _expected_locations(pair)
-    if _tree_of(first[0]) != _tree_of(second[0]):
-        return CROSS_TREE
-    return _tree_of(first[0])
 
 
 def _pair_id(duplicate: dict[str, Any], root: str) -> LocationPair:
@@ -298,10 +176,6 @@ def _scoped(root: str, key: LocationKey) -> LocationKey:
     path = key[0]
     scoped = path if root == "." or path == root or path.startswith(root + "/") else f"{root}/{path}"
     return (scoped, key[1], key[2])
-
-
-def _short(fragment_hash: str) -> str:
-    return fragment_hash[:12]
 
 
 def jscpd_report(

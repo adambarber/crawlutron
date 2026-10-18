@@ -4,7 +4,7 @@ import time
 
 import pytest
 
-from app.admission.recursive_admission import batch_is_http_heavy
+from app.orchestration.recursive import batch_is_http_heavy
 from app.runtime.memory_pressure import batch_scale
 from app.runtime.resource_pressure import ResourceGate
 from app.vocabulary.strategies import BROWSER_HEADLESS, HTTP_DECLARED_CRAWLER

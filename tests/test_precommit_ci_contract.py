@@ -23,9 +23,6 @@ MAKEFILE_PATH = SERVICE_ROOT / "Makefile"
 WORKFLOW_PATH = SERVICE_ROOT / ".github" / "workflows" / "ci.yml"
 
 
-EXPECTATIONS_PATH = SERVICE_ROOT / "jscpd-expectations.json"
-
-
 # The config as the workflow must name it.
 WORKFLOW_ROOT_CONFIG = CONFIG_PATH.relative_to(SERVICE_ROOT).as_posix()
 
@@ -56,7 +53,6 @@ ENFORCEMENT_INPUTS = (
     "scripts/gate",
     ".pre-commit-config.yaml",
     ".jscpd.json",
-    "jscpd-expectations.json",
     "pyrightconfig.json",
     "mypy.ini",
     "pytest.ini",

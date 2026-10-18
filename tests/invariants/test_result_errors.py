@@ -86,7 +86,7 @@ def test_envelope_detector_bites():
 
 # --------------------------------------------------------------------------- Raw exception text never
 
-_TERMINAL_RESULT_SANCTIONED = frozenset({"engine_result.py", "render_result.py", "classification.py"})
+_TERMINAL_RESULT_SANCTIONED = frozenset({"results.py", "classification.py"})
 
 
 _RESULT_ERROR_SINKS = frozenset({"CrawlResult", "terminal_crawl_result"})

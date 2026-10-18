@@ -8,11 +8,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from app.admission.crawl_surface import CrawlPolicy, CrawlRequest, HostPolicy, NormalizedUrl
 from app.admission.policy import PolicyTier, validate_wire_policy
-from app.models.crawl_policy import CrawlPolicy
-from app.models.crawl_request import CrawlRequest
-from app.models.host_policy import HostPolicy
-from app.models.normalized_url import NormalizedUrl
 
 
 def _validated_url(url: str, *, host_policy: HostPolicy) -> str:

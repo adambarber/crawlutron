@@ -32,4 +32,14 @@ def watch_client(store) -> AsyncClient:
     return AsyncClient(transport=ASGITransport(app=app), base_url="http://test")
 
 
-__all__ = ["watch_client"]
+__all__ = [
+    "ASGITransport",
+    "AsyncClient",
+    "CrawlerSettings",
+    "FastAPI",
+    "get_settings",
+    "get_watch_store",
+    "service_app",
+    "watch_client",
+    "watch_router",
+]

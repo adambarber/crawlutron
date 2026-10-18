@@ -5,12 +5,9 @@ secrets into URLs; origin-keyed fields ride the existing cross-host scrub.
 
 import pytest
 
-from app.admission.payload_helpers import payload_policy
-from app.admission.policy import PolicyTier, read_policy
-from app.models.crawl_policy import CrawlPolicy
 from app.models.credential import Credential
 from app.transport.request_profile import apply_credentials
-from tests._policy_factories import canonical
+from tests._policy_factories import CrawlPolicy, PolicyTier, canonical, payload_policy, read_policy
 
 #: The settings a payload-policy test runs against: the defaults with nothing overridden.
 MODEL_DEFAULTS_TIER = PolicyTier.model_defaults()

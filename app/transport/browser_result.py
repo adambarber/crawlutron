@@ -7,13 +7,8 @@ from typing import Any
 from app.admission.render_options import resolve_render_options
 from app.models.crawl_job import CrawlJob
 from app.models.crawl_policy import CrawlPolicy
-from app.models.crawl_result import CrawlStrategyAttempt, EngineCrawlResult
-from app.models.crawl_worker import CrawlWorker
-from app.models.host_policy import HostPolicy
-from app.models.normalized_url import NormalizedUrl
-from app.models.render_options import RenderOptions
 from app.models.taxonomy import CrawlStrategyName
-from app.orchestration.engine_result import build_engine_result
+from app.orchestration.results import build_engine_result
 from app.orchestration.worker import call_worker
 from app.transport.body_decode import quality_score
 from app.transport.content_pipeline import (
@@ -22,6 +17,14 @@ from app.transport.content_pipeline import (
     discovery_result_fields,
     post_fetch_diagnostics,
     run_extraction,
+)
+from app.transport.render_surface import (
+    CrawlStrategyAttempt,
+    CrawlWorker,
+    EngineCrawlResult,
+    HostPolicy,
+    NormalizedUrl,
+    RenderOptions,
 )
 from app.transport.strategy_request import StrategyRequest
 from app.vocabulary.extraction import EXTRACTION_METHOD_DOM_TEXT

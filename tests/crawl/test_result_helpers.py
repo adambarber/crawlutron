@@ -7,7 +7,7 @@ class TestResultHelpersEdges:
     """Cover remaining branches in result_helpers.py"""
 
     def test_binary_no_text_result(self):
-        from app.orchestration.engine_result import binary_no_text_result
+        from app.orchestration.results import binary_no_text_result
 
         result = binary_no_text_result(
             original_url="http://x/file.bin",
@@ -33,7 +33,7 @@ class TestFunnelDerivesAxes:
 
     def test_the_funnel_derives_the_axis_values_from_the_attempt(self):
         from app.models.crawl_result import CrawlStrategyAttempt
-        from app.orchestration.engine_result import build_engine_result
+        from app.orchestration.results import build_engine_result
 
         attempt = CrawlStrategyAttempt(
             strategy="HTTP_DECLARED_CRAWLER",
@@ -77,7 +77,7 @@ class TestTerminalResultContract:
         }
 
     def test_failed_engine_result_fields(self):
-        from app.orchestration.engine_result import (
+        from app.orchestration.results import (
             TerminalResult,
             failed_engine_result,
         )
@@ -133,7 +133,7 @@ class TestTerminalCrawlResult:
     """
 
     def test_no_payload_and_carries_error_verbatim(self):
-        from app.orchestration.render_result import terminal_crawl_result
+        from app.orchestration.results import terminal_crawl_result
 
         result = terminal_crawl_result(
             url="http://x/page",

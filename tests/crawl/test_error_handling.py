@@ -13,7 +13,7 @@ from app.models.crawl_result import EngineCrawlResult
 from app.models.host_policy import HostPolicy
 from app.models.normalized_url import NormalizedUrl
 from app.orchestration.classification import classify_error_code
-from app.orchestration.engine_result import engine_result_from_exception
+from app.orchestration.results import engine_result_from_exception
 from app.transport.browser_pool import BrowserPoolExhaustedError
 from app.vocabulary.strategies import BROWSER_HEADED_WARMED, BROWSER_HEADLESS, HTTP_DECLARED_CRAWLER
 from tests._browser_doubles import _fake_browser

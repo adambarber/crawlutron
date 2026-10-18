@@ -9,13 +9,10 @@ import sqlite3
 from pathlib import Path
 
 from app.models.content_validators import ContentValidators
-from app.models.normalized_url import NormalizedUrl
-from app.models.watch_outcome import WatchOutcome
-from app.models.watch_state import WatchState
-from app.models.watch_status import WatchStatus
 from app.storage.coordination_store import CoordinationStore, atwin
 from app.storage.ids import new_watch_id
 from app.storage.migrations import StoreSchema
+from app.storage.watch_surface import NormalizedUrl, WatchOutcome, WatchState, WatchStatus
 
 __all__ = ["WatchStore"]
 

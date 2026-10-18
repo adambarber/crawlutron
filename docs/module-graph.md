@@ -22,17 +22,6 @@ graph LR
     admission_policy --> config_settings
     admission_policy --> models_crawl_policy
     admission_policy --> models_crawl_policy_limits
-    admission_recursive_admission --> admission_admission
-    admission_recursive_admission --> models_crawl_result
-    admission_recursive_admission --> models_crawl_task
-    admission_recursive_admission --> models_host_policy
-    admission_recursive_admission --> models_normalized_url
-    admission_recursive_admission --> orchestration_scheduler
-    admission_recursive_admission --> runtime_metrics
-    admission_recursive_admission --> runtime_resource_pressure
-    admission_recursive_admission --> safety_safe_regex
-    admission_recursive_admission --> vocabulary_limits
-    admission_recursive_admission --> vocabulary_strategies
     admission_render_options --> models_crawl_policy
     admission_render_options --> models_render_options
     admission_scope_match --> safety_safe_regex
@@ -439,12 +428,12 @@ graph LR
     orchestration_fetch_helpers --> transport_decompression
     orchestration_fetch_helpers --> vocabulary_limits
     orchestration_recursive --> admission_admission
-    orchestration_recursive --> admission_recursive_admission
+    orchestration_recursive --> admission_admission_links
     orchestration_recursive --> models_crawl_result
     orchestration_recursive --> models_crawl_task
     orchestration_recursive --> models_host_policy
     orchestration_recursive --> models_normalized_url
-    orchestration_recursive --> orchestration_engine_result
+    orchestration_recursive --> orchestration_results
     orchestration_recursive --> orchestration_scheduler
     orchestration_recursive --> runtime_metrics
     orchestration_recursive --> runtime_resource_pressure

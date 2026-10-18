@@ -5,18 +5,20 @@ from typing import Any
 from urllib.parse import urlparse
 
 from app.admission.policy import CrawlPolicy, read_policy
-from app.models.crawl_result import EngineCrawlResult
-from app.models.crawl_worker import CrawlWorker
-from app.models.host_policy import HostPolicy
-from app.models.http_fetcher import HttpFetcher
-from app.models.result_record import ProducerEnvelope
 from app.models.taxonomy import CrawlStrategyName
 from app.orchestration.engine import crawl_request
+from app.orchestration.fetch_surface import (
+    ContentCache,
+    CrawlWorker,
+    EngineCrawlResult,
+    HostPolicy,
+    HttpCache,
+    HttpFetcher,
+    ProducerEnvelope,
+    ResourceGate,
+    default_http_fetcher,
+)
 from app.orchestration.scheduler import DomainScheduler
-from app.runtime.resource_pressure import ResourceGate
-from app.transport.cache import HttpCache
-from app.transport.content_cache import ContentCache
-from app.transport.fetchers import default_http_fetcher
 from app.transport.strategy_request import StrategyRequest
 from app.vocabulary.strategies import HTTP_DECLARED_CRAWLER
 from tests._fetch_doubles import site_fetcher

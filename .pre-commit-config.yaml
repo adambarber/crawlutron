@@ -144,9 +144,9 @@ repos:
         stages: [pre-commit]
 
       # Copy/paste detection is a design gate, scored per tree. The checked-in
-      # wrapper reads jscpd JSON, requires a non-empty scan of every root, and
-      # compares every pair with the named expectations file; the command-line
-      # thresholds below are the only threshold source.
+      # wrapper reads jscpd JSON and requires a non-empty scan of every root;
+      # the command-line thresholds below are the only threshold source, and a
+      # duplicate at that floor is a finding with no exemption path.
       #
       # One floor for every root, because one flat floor cannot serve both
       # trees: at 8 lines / 40 tokens this whole service reported exactly one
@@ -155,17 +155,6 @@ repos:
       # is the other answer and is not taken either, because a single number that
       # every root is held to is the one that cannot be quietly relaxed for the
       # tree it is inconvenient in.
-      #
-      # The floor is 3 lines / 30 tokens, and at that floor both trees report
-      # zero pairs, so jscpd-expectations.json is empty. The file is the
-      # mechanism that would carry any pair that does appear, and it is
-      # deliberately empty rather than unused: an entry pins its fragment by
-      # content hash and names the guard test that compares the two sides, so a
-      # pair is carried on purpose instead of discovered by accident, and editing
-      # either side turns the entry into an unsanctioned clone and sends the
-      # change back through review. The contract runs both ways -- a declared
-      # pair whose fragment is gone also fails -- so the baseline cannot keep a
-      # stale approval alive after the duplication it approved has been deleted.
       #
       # `--min-lines N` counts NEWLINES, not lines: a fragment jscpd reports as
       # `139:5 - 142:18` spans four lines but contains three, so N admits
@@ -176,13 +165,10 @@ repos:
       # 79,971 lines while 17 real clones sat below it, and "green" was
       # reporting a mislabelled threshold rather than a clean tree.
       #
-      # Declaring a pair below the floor is preferred to raising the floor past
-      # it. Raising it would buy a tidy list at the cost of never seeing a
-      # 30-40 token clone anywhere, which is the band most real duplication in
-      # this tree actually measured at.
-      # Each root is still scanned by its own jscpd invocation, because jscpd's
-      # reported names are relative to the scan root. Zero tolerance; the number
-      # ratchets down, not up.
+      # Zero tolerance: a duplicate at the floor is removed, never carried. Each
+      # root is still scanned by its own jscpd invocation, because jscpd's
+      # reported names are relative to the scan root. The number ratchets down,
+      # not up.
       - id: jscpd
         name: jscpd per tree (3 lines / 30 tokens, zero tolerance)
         entry: >-

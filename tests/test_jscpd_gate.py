@@ -3,9 +3,7 @@
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
-import sys
 from pathlib import Path
 
 from scripts import _jscpd_pair_resolution as res
@@ -44,10 +42,6 @@ def _args_for(
         threshold=threshold,
         fail_on_empty=True,
     )
-
-
-def _write_expectations(path: Path, pairs: list[dict]) -> None:
-    path.write_text(json.dumps({"version": 1, "pairs": pairs}), encoding="utf-8")
 
 
 def _strip_root(name: str, root: str) -> str:
@@ -148,13 +142,11 @@ def _stub_report(
     return commands
 
 
-def _run_against_empty_tree(monkeypatch, tmp_path, **kwargs) -> list[list[str]]:
+def _run_against_empty_tree(monkeypatch, **kwargs) -> list[list[str]]:
     """Run the gate over a tree with no duplicates; return the commands issued. The
-    clean run is the precondition for most of this file, so the empty expectations
-    and report stub are set up here once rather than re-spelled per test.
+    clean run is the precondition for most of this file, so the report stub is set
+    up here once rather than re-spelled per test.
     """
-    _write_expectations(tmp_path / "expectations.json", [])
-    monkeypatch.setattr(res, "EXPECTATIONS_PATH", tmp_path / "expectations.json")
     commands = _stub_report(monkeypatch, [], **kwargs)
     assert gate._run(_args()) == 0
     return commands
@@ -186,50 +178,6 @@ def _duplicate(
     }
 
 
-_LITERAL_GUARD = (
-    "tests/invariants/test_taxonomy_construction.py::test_classification_literal_covers_the_enum_exactly"
-)
-
-
-def _valid_pair() -> dict:
-    return {
-        "id": "new-clone",
-        "first": {"path": "app/new.py", "start": 10, "end": 20},
-        "second": {"path": "app/other.py", "start": 30, "end": 40},
-        "reason": "intentional",
-        "guard": _LITERAL_GUARD,
-        "fragment_sha256": hashlib.sha256(b"duplicate").hexdigest(),
-    }
-
-
-_PROBE_BASENAME = "zz_probe_clone.py"
-
-
-# The real module the probe is a copy of, by its path inside the mirrored tree.
-PROBE_SOURCE = "app/storage/ids.py"
-
-
-def _mirrored_service_tree(tmp_path: Path, payload: str) -> Path:
-    """A throwaway tree carrying production's relative layout. The real
-    `app/storage/ids.py` is in the mirror -- it is the clone's other half -- and
-    jscpd matches ignore globs against its own CWD, not absolute paths.
-    """
-    mirror = tmp_path / "service"
-    # Two production files with identical content, plus the same content again under the excluded migrations
-    # subtree.
-    for relative in (PROBE_SOURCE, f"app/{_PROBE_BASENAME}", f"app/storage/migrations/{_PROBE_BASENAME}"):
-        planted = mirror / relative
-        planted.parent.mkdir(parents=True, exist_ok=True)
-        planted.write_text(payload, encoding="utf-8")
-    # One module per remaining root: enough for the gate's "analyzed 0 sources" check, and a single file per
-    # root cannot form a pair of its own.
-    for tree in ("tests", "scripts"):
-        filler = mirror / tree / "zz_tree_filler.py"
-        filler.parent.mkdir(parents=True, exist_ok=True)
-        filler.write_text(payload, encoding="utf-8")
-    return mirror
-
-
 _GATE_ARGV = [
     "gate",
     "all",
@@ -241,23 +189,3 @@ _GATE_ARGV = [
     str(_CONFIGURED_THRESHOLD),
     "--fail-on-empty",
 ]
-
-
-def _configure(monkeypatch, tmp_path, pair: dict, duplicate: list[dict]) -> list[list[str]]:
-    expectations = tmp_path / "expectations.json"
-    _write_expectations(expectations, [pair])
-    monkeypatch.setattr(res, "EXPECTATIONS_PATH", expectations)
-    commands = _stub_report(monkeypatch, duplicate)
-    monkeypatch.setattr(sys, "argv", _GATE_ARGV)
-    return commands
-
-
-def _expect_nothing_sanctioned(monkeypatch, tmp_path, duplicates, **report) -> None:
-    """An attestation file sanctioning nothing, plus a scan report we choose. Every
-    failure NOT about a sanctioned pair needs exactly these two, and ``_configure``
-    cannot stand in: it requires a declared pair, which these tests reject.
-    """
-    expectations = tmp_path / "expectations.json"
-    _write_expectations(expectations, [])
-    monkeypatch.setattr(res, "EXPECTATIONS_PATH", expectations)
-    _stub_report(monkeypatch, duplicates, **report)

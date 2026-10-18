@@ -1,10 +1,15 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter
 
-from app.api.caller_auth import admit
-from app.api.dependencies import CallerDep, TrackingDep, get_settings, get_shutdown_event
 from app.api.map_endpoint import map_site
+from app.api.router_surface import (
+    CallerDep,
+    TrackingDep,
+    admit,
+    settings_dep,
+    shutdown_event_dep,
+)
 from app.models.error_response import ErrorResponse
 from app.models.map_request import MapRequest
 from app.models.site_map_response import SiteMapPayload, SiteMapResponse
@@ -31,8 +36,8 @@ async def map(
     payload: MapRequest,
     caller: CallerDep,
     tracking: TrackingDep,
-    settings=Depends(get_settings),
-    shutdown_event=Depends(get_shutdown_event),
+    settings=settings_dep,
+    shutdown_event=shutdown_event_dep,
 ) -> SiteMapPayload:
     # #205/#320: admit the mapping crawl through the one helper -- page bound,
     # quotas against the shared register, cookie namespace, and a released slot.

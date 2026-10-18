@@ -43,7 +43,7 @@ from app.models.crawl_task import CrawlTask
 from app.models.normalized_url import NormalizedUrl, admit_or_none
 from app.models.result_record import ProducerEnvelope
 from app.models.taxonomy import Classification
-from app.orchestration.render_result import terminal_attempt
+from app.orchestration.results import terminal_attempt
 from app.orchestration.robots import FetchAndDecode
 from app.storage.job_store import (
     FrontierEntry,

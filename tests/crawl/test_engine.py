@@ -6,13 +6,10 @@ from typing import Any
 
 import pytest
 
-from app.admission.payload_helpers import payload_policy
-from app.admission.policy import PolicyTier, read_policy
-from app.models.crawl_policy import CrawlPolicy
 from app.models.crawl_policy_limits import CrawlPolicyLimits
 from app.models.crawl_result import CrawlResult
 from app.models.serialization import to_dict
-from app.orchestration.render_result import terminal_attempt
+from app.orchestration.results import terminal_attempt
 from app.orchestration.scheduler import DomainScheduler
 from app.transport.browser import BrowserRenderer
 from app.vocabulary.extraction import EXTRACTION_DOCUMENT, EXTRACTION_TRAFILATURA
@@ -27,7 +24,14 @@ from tests._fetcher_factories import (
     run_chain,
     scripted_fetcher,
 )
-from tests._policy_factories import canonical, http_strategy_policy
+from tests._policy_factories import (
+    CrawlPolicy,
+    PolicyTier,
+    canonical,
+    http_strategy_policy,
+    payload_policy,
+    read_policy,
+)
 
 
 def http_policy(*strategies: str, extraction: str = "full", **extra) -> CrawlPolicy:
@@ -312,7 +316,7 @@ class TestEngineScopeEdges:
     """Cover remaining branches in engine.py"""
 
     def test_crawl_chain_robots_disallowed(self):
-        from app.orchestration.engine_result import (
+        from app.orchestration.results import (
             TerminalResult,
             skipped_engine_result,
         )

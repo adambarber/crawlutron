@@ -1,9 +1,8 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter
 
-from app.api.caller_auth import admit
-from app.api.dependencies import CallerDep, TrackingDep, get_settings
+from app.api.router_surface import CallerDep, TrackingDep, admit, settings_dep
 from app.models.error_response import ErrorResponse
 from app.models.search_request import SearchRequest
 from app.models.search_response import SearchResponse
@@ -41,7 +40,7 @@ async def search(
     payload: SearchRequest,
     caller: CallerDep,
     tracking: TrackingDep,
-    settings=Depends(get_settings),
+    settings=settings_dep,
 ) -> SearchResponse:
     # #298/#320: the search door is admitted through the one register -- a search
     # counts against the caller's sync crawls and async job rows.

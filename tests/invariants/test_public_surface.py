@@ -48,8 +48,9 @@ _OWNER_PUBLIC_SURFACE_RATCHET = {
     # RAISED to (10, 9): terminal_attempt became public when CrawlResult stopped copying four axes out of the
     # attempt it holds.
     "app/orchestration/classification.py": (3, 2),
-    "app/orchestration/engine_result.py": (8, 7),
-    "app/orchestration/render_result.py": (4, 4),
+    # Designed RAISE: the engine and render result funnels were merged into one
+    # result-construction surface (single home, single import run) per #324.
+    "app/orchestration/results.py": (12, 11),
     "app/transport/fetch_policy.py": (5, 5),
     "app/models/host_policy.py": (6, 5),
 }

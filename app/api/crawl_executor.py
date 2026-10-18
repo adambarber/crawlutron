@@ -8,12 +8,9 @@ from __future__ import annotations
 
 import asyncio
 
+from app.admission.crawl_surface import CrawlPolicy, CrawlRequest, HostPolicy, NormalizedUrl
 from app.api.exceptions import browser_pool_unavailable
 from app.config.settings import CrawlerSettings
-from app.models.crawl_policy import CrawlPolicy
-from app.models.crawl_request import CrawlRequest
-from app.models.host_policy import HostPolicy
-from app.models.normalized_url import NormalizedUrl
 from app.models.result_record import ProducerEnvelope
 from app.orchestration.engine import crawl_request
 from app.transport.browser_pool import PooledBrowserWorker, get_browser_pool

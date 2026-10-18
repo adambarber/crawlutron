@@ -7,7 +7,7 @@ import pytest
 from app.models.crawl_job import CrawlJob
 from app.models.crawl_result import EngineCrawlResult
 from app.models.taxonomy import Classification
-from app.orchestration.engine_result import TerminalResult
+from app.orchestration.results import TerminalResult
 from app.orchestration.scheduler import DomainScheduler
 from tests._policy_factories import canonical
 from tests._result_builders import make_job, make_result
@@ -180,7 +180,7 @@ class TestSchedulerFailureAccountingIsAboutStatuses:
     @staticmethod
     def _terminal(job: CrawlJob, classification: Classification):
         """A real terminal result, with its status derived by the real chokepoint."""
-        from app.orchestration.engine_result import terminal_engine_result
+        from app.orchestration.results import terminal_engine_result
         from app.vocabulary.taxonomy import status_for_classification
 
         # Status is the outer function's own keyword, not a field of the shared value: it is what the

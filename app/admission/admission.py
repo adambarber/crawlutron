@@ -13,12 +13,15 @@ from app.admission.admission_links import (
     compile_scope_pattern,
     remaining_page_capacity,
 )
+from app.admission.crawl_surface import (
+    CrawlExtractionMethod,
+    CrawlPolicy,
+    HostPolicy,
+    NormalizedUrl,
+    admit_or_none,
+)
 from app.admission.policy import PolicyTier, discovery_flags, read_policy
 from app.admission.scope_match import scope_allows
-from app.models.crawl_extraction_method import CrawlExtractionMethod
-from app.models.crawl_policy import CrawlPolicy
-from app.models.host_policy import HostPolicy
-from app.models.normalized_url import NormalizedUrl, admit_or_none
 from app.orchestration.fetch_helpers import fetch_sitemap_urls
 from app.orchestration.robots import FetchAndDecode, load_robots_rules, robots_allows
 from app.orchestration.scheduler import DomainScheduler

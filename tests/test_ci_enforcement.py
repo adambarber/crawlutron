@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import re
 import subprocess
 
@@ -16,7 +15,6 @@ from tests.test_precommit_ci_contract import (
     ENFORCEMENT_COMMAND,
     ENFORCEMENT_TRIGGER_PATTERN,
     ERREXIT_SHELL,
-    EXPECTATIONS_PATH,
     REPORTING_JOBS,
     SERVICE_ROOT,
     WORKFLOW_PATH,
@@ -165,9 +163,6 @@ def test_ci_runs_every_precommit_hook_through_one_surface() -> None:
         "the per-tree floor split is gone; one number must serve both trees"
     )
     assert _field(jscpd, "files") == ENFORCEMENT_TRIGGER_PATTERN
-
-    expectations = json.loads(EXPECTATIONS_PATH.read_text(encoding="utf-8"))
-    assert all("profiles" not in pair for pair in expectations["pairs"])
 
     assert workflow.count(ENFORCEMENT_COMMAND) == 1
     assert "scripts/jscpd_gate.py" not in workflow

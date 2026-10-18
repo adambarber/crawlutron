@@ -9,7 +9,7 @@ from app.models.normalized_url import NormalizedUrl, admit_or_none
 from app.models.registrable_domain import registrable_domain
 from app.models.render_options import RenderOptions
 from app.models.taxonomy import Classification, CrawlError, CrawlStrategyName
-from app.orchestration.render_result import terminal_attempt
+from app.orchestration.results import terminal_attempt
 from app.vocabulary.strategies import HTTP_DECLARED_CRAWLER
 from app.vocabulary.taxonomy import ResultStatus
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY, canonical
@@ -100,7 +100,7 @@ def skipped_result(
 
     All five arguments must agree, because ``error`` and ``strategy`` once
     drifted from what the production builder emits for a classification."""
-    from app.orchestration.engine_result import (
+    from app.orchestration.results import (
         TerminalResult,
         skipped_engine_result,
     )
