@@ -2,9 +2,15 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 
-from app.api.dependencies import get_settings, get_shutdown_event
+from app.api.caller_auth import (
+    active_sync_for,
+    check_concurrency_quota,
+    check_page_quota,
+    resolve_page_limit,
+)
+from app.api.dependencies import CallerDep, get_settings, get_shutdown_event
 from app.api.map_endpoint import map_site
 from app.models.error_response import ErrorResponse
 from app.models.map_request import MapRequest
@@ -28,9 +34,15 @@ router = APIRouter(tags=["Crawler"])
 )
 async def map(
     payload: MapRequest,
+    caller: CallerDep,
+    request: Request,
     settings=Depends(get_settings),
     shutdown_event=Depends(get_shutdown_event),
 ) -> SiteMapPayload:
+    # #205: enforce the caller quota before the mapping crawl runs, like /v1/crawl.
+    requested = resolve_page_limit(caller, payload.policy.limits.max_pages)
+    check_page_quota(caller, requested)
+    check_concurrency_quota(caller, active_sync_for(caller, request))
     return await map_site(payload, settings=settings, shutdown_event=shutdown_event)
 
 

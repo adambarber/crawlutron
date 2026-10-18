@@ -65,7 +65,7 @@ async def test_no_browser_metadata_key_is_dropped_between_worker_and_wire():
     field and nothing failed (every result field carries a default).
     """
     envelope = await render_stub_request(
-        {"url": "http://127.0.0.1:1/x"},
+        {"url": "http://127.0.0.1:1/x", "options": {"respect_robots": False}},
         worker=_fake_browser(metadata={key: f"v-{key}" for key in _BROWSER_METADATA_KEYS}),
     )
     item = (await arender_response_from_result(envelope)).results[0]

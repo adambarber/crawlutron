@@ -10,7 +10,7 @@ class TestServiceRenderRequest:
 
     async def test_render_request_success(self):
         out = await render_stub_request(
-            {"url": "http://127.0.0.1:1/x", "options": {"include_html": True}},
+            {"url": "http://127.0.0.1:1/x", "options": {"include_html": True, "respect_robots": False}}
         )
         assert out["submitted_count"] == 1
         assert out["results"][0].status == "success"
@@ -21,7 +21,9 @@ class TestServiceRenderRequest:
 
     async def test_render_request_duplicate_urls_return_one_result_each(self):
         """Exact-duplicate URLs in one request collapse to a single submission."""
-        out = await render_stub_request({"urls": ["http://127.0.0.1:1/x", "http://127.0.0.1:1/x"]})
+        out = await render_stub_request(
+            {"urls": ["http://127.0.0.1:1/x", "http://127.0.0.1:1/x"], "options": {"respect_robots": False}}
+        )
         assert out["submitted_count"] == 1
         assert len(out["results"]) == 1
         assert out["results"][0].status == "success"
@@ -41,7 +43,9 @@ class TestServiceRenderRequest:
         def worker(job):
             raise RuntimeError(f"boom: {secret}")
 
-        out = await render_stub_request({"url": "http://127.0.0.1:1/x"}, worker=worker)
+        out = await render_stub_request(
+            {"url": "http://127.0.0.1:1/x", "options": {"respect_robots": False}}, worker=worker
+        )
         error = out["results"][0].error
         assert secret not in error, f"raw exception text leaked into the response: {error!r}"
         # RuntimeError classifies to the stable network_error code.

@@ -218,7 +218,12 @@ async def post_render_with_pool(client, pool, url: str):
 
     old = set_browser_pool(pool)
     try:
-        return await client.post("/v1/render", json={"url": url})
+        # Worker-behavior harness: the URL is unreachable by design (force the
+        # worker path), so robots must be off or fail-closed admission skips it.
+        return await client.post(
+            "/v1/render",
+            json={"url": url, "options": {"respect_robots": False}},
+        )
     finally:
         set_browser_pool(old)
 

@@ -67,8 +67,10 @@ def checked_payload_urls(
 
 
 def payload_policy(payload: CrawlRequest | dict[str, Any], tier: PolicyTier) -> CrawlPolicy:
-    """The validated crawl policy a request carries, tier defaults absorbed:
-    ``validate_wire_policy`` bounds a missing/zero ``max_pages`` either way.
+    """The validated crawl policy a request carries, tier defaults absorbed.
+
+    The ``dict`` arm is a documented wire-dict tolerance valve: the unverified
+    wire ``policy`` is validated here (not after coercion), keeping the wire path.
     """
     raw = payload.policy.model_dump() if isinstance(payload, CrawlRequest) else payload.get("policy") or {}
     return validate_wire_policy(raw, tier)

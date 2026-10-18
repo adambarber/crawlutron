@@ -22,6 +22,7 @@ from app.models.host_policy import HostPolicy
 from app.models.normalized_url import NormalizedUrl
 from app.models.render_options import RenderOptions
 from app.models.result_record import RenderEnvelope
+from app.orchestration import robots as _robots_policy
 from app.orchestration.classification import classify_error_code
 from app.orchestration.engine_result import failed_result_for
 from app.orchestration.render_result import (
@@ -31,6 +32,7 @@ from app.orchestration.render_result import (
 from app.orchestration.scheduler import DomainScheduler
 from app.orchestration.worker import call_worker
 from app.storage.ids import new_request_id
+from app.transport.fetchers import default_http_fetcher
 
 
 def render_options_for(payload: dict[str, Any], settings: CrawlerSettings) -> RenderOptions:
@@ -46,6 +48,29 @@ def render_options_for(payload: dict[str, Any], settings: CrawlerSettings) -> Re
             "respect_robots": settings.respect_robots,
         },
     )
+
+
+async def _robots_allow_set(
+    urls: list[NormalizedUrl],
+    options: RenderOptions,
+    settings: CrawlerSettings,
+    host_policy: HostPolicy,
+) -> list[bool]:
+    """One robots-admission pass over the render batch: True where the origin
+    allows the target (or robots are not honored). A None options means respect.
+    """
+    if not options.respect_robots:
+        return [True] * len(urls)
+    allowed: list[bool] = []
+    for url in urls:
+        rules, _sitemaps, _delay = await _robots_policy.load_robots_rules(
+            url,
+            default_http_fetcher,
+            options.timeout_seconds,
+            policy=host_policy,
+        )
+        allowed.append(_robots_policy.robots_allows(url, rules))
+    return allowed
 
 
 def _failed_render_result(job: CrawlJob, exc: BaseException, *, submitted_url: str) -> CrawlResult:
@@ -66,7 +91,11 @@ async def render_request(
     settings: CrawlerSettings | None = None,
     worker: CrawlWorker,
 ) -> RenderEnvelope:
-    """Run a /v1/render-shaped request through the per-domain scheduler."""
+    """Run one /v1/render request through the per-domain scheduler.
+
+    ``payload`` is a documented wire-dict tolerance valve; the render door's type
+    lives at the router, which validates RenderRequest before running this.
+    """
     active_settings = settings or CrawlerSettings.from_mapping()
     host_policy = HostPolicy.from_settings(active_settings)
     # One shared batch cap (a hand-rolled copy used to drift from it); submitted
@@ -84,12 +113,17 @@ async def render_request(
     started = time.monotonic()
     jobs: list[CrawlJob] = []
 
+    # #244: honor options.respect_robots before the browser reads the page.
+    # A disallowed target classifies as robots_disallowed, never reaching the worker.
+    robots_allowed = await _robots_allow_set(urls, options, active_settings, host_policy)
+
     for index, url in enumerate(urls):
-        normalized = url
+        if not robots_allowed[index]:
+            continue
         jobs.append(
             CrawlJob(
                 index=index,
-                url=normalized,
+                url=url,
                 options=options,
                 host_policy=host_policy,
             )
@@ -106,6 +140,21 @@ async def render_request(
 
     by_index: dict[int, CrawlResult] = {}
     worker_errors: dict[int, BaseException] = {}
+
+    # Terminal robots_disallowed results fill the slots the admission skipped.
+    for index, url in enumerate(urls):
+        if robots_allowed[index]:
+            continue
+        by_index[index] = terminal_crawl_result(
+            url=url,
+            status="skipped",
+            classification="robots_disallowed",
+            attempts=0,
+            elapsed_ms=int((time.monotonic() - started) * 1000),
+            domain=url.origin,
+            error="robots_txt_disallowed",
+            metadata={"robots": {"allowed": False}},
+        )
 
     async def _collect(index: int, result: EngineCrawlResult | CrawlResult) -> None:
         # The scheduler's worker-exception envelope is an EngineCrawlResult with no

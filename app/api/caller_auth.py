@@ -156,7 +156,14 @@ def check_concurrency_quota(caller: CallerIdentity, active_count: int) -> None:
         )
 
 
+def active_sync_for(caller: CallerIdentity, request: Request) -> int:
+    """The caller's live sync crawl count, from the per-process in-flight register."""
+    tracker = getattr(request.app.state, "concurrency_tracker", None)
+    return tracker.sync_in_flight(caller.caller_id) if tracker is not None else 0
+
+
 __all__ = [
+    "active_sync_for",
     "anonymous_caller",
     "check_concurrency_quota",
     "check_page_quota",
