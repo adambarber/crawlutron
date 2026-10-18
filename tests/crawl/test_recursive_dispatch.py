@@ -3,13 +3,17 @@
 Fake closures/scheduler/spill drive :func:`run_recursive_crawl` so the
 batch-sizing and admission-gate logic are covered without the full engine."""
 
+from collections import deque
 from urllib.parse import urlsplit
 
 import pytest
 
 from app.models.crawl_task import CrawlTask
 from app.models.discovered_link import DiscoveredLink
+from app.models.host_policy import HostPolicy
+from app.orchestration.recursive import RecursiveRunState, admit_recursive_batch
 from app.orchestration.scheduler import DomainScheduler
+from app.runtime.metrics import get_metrics
 from app.vocabulary.strategies import BROWSER_HEADLESS
 from tests._policy_factories import canonical
 from tests._recursive_harnesses import ContentionFreeGate, drive_recursive_crawl, make_crawl_task
@@ -374,3 +378,86 @@ async def test_in_flight_pages_count_against_the_cap_at_expansion():
     # permanent failure is finally recorded, which happens at the tail of the loop.
     assert statuses.get(canonical("http://a/real")) == "success", statuses
     assert statuses.get(canonical("http://a/seed")) == "failed", statuses
+
+
+def _minimum_admission_run(frontier, *, http_quota, browser_quota, batch_pages=10, browser_domains=()):
+    """A minimal run/state for ``admit_recursive_batch``: only the admission
+    path is exercised, with ``respect_robots=False`` short-circuiting robots.
+    """
+    from app.vocabulary.limits import ENGINE_BATCH_CONCURRENCY_MULTIPLIER
+
+    class FixedAdmission:
+        def __init__(self, h, b):
+            self.h, self.b = h, b
+            self.last_want = None
+
+        async def admit(self, want_http, want_browser):
+            self.last_want = (want_http, want_browser)
+            return min(want_http, self.h), min(want_browser, self.b)
+
+    admission = FixedAdmission(http_quota, browser_quota)
+    scheduler = DomainScheduler(global_limit=8, per_domain_limit=8, delay_seconds=0.0)
+    for domain in browser_domains:
+        scheduler.set_pinned_strategy(domain, BROWSER_HEADLESS)
+    run = RecursiveRunState(
+        scheduler=scheduler,
+        worker=None,
+        robots_allows=None,
+        robots_crawl_delay=None,
+        robots_disallowed=None,
+        sitemap_seeds=None,
+        spill=None,
+        max_depth=0,
+        max_pages=batch_pages,
+        respect_robots=False,
+        include_html=True,
+        want_document_bodies=False,
+        scope_pattern=None,
+        global_concurrency=4,
+        seed_sitemaps=False,
+        resource_gate=ContentionFreeGate(1.0),
+        admission=admission,
+        host_policy=HostPolicy.unrestricted(),
+        ramp_max=128,
+        http_heavy_lookahead=128 * ENGINE_BATCH_CONCURRENCY_MULTIPLIER,
+        spill_write=None,
+    )
+    state = type(
+        "State",
+        (),
+        {
+            # The frontier carries ``(depth, task)`` pairs, like the dispatch loop
+            # builds; ``_take_and_bucket`` subscriptable-addresses ``item[1]``.
+            "frontier": deque((0, task) for task in frontier),
+            "visited": set(),
+            "ramp": 4.0,
+            "page_count": 0,
+        },
+    )()
+    return run, state, admission
+
+
+async def test_under_throttling_the_full_admitted_http_quota_is_used_across_a_browser_heavy_head():
+    """Pin the tier-collapse rework (#324): when admission throttles browser to
+    zero, the full http quota must still reach dispatch across a browser-heavy
+    head -- a smaller pop window would waste the admitted slot.
+    """
+    browser_tasks = [make_crawl_task(i, f"b{i}") for i in range(5)]
+    http_tasks = [make_crawl_task(5 + i, f"h{i}") for i in range(2)]
+    run, state, _admission = _minimum_admission_run(
+        browser_tasks + http_tasks,
+        http_quota=2,
+        browser_quota=0,
+        browser_domains=[f"b{i}" for i in range(5)],
+    )
+
+    selected = await admit_recursive_batch(run, state, get_metrics())
+
+    # The admitted http quota (2) was the whole batch: both http tasks behind the
+    # browser head reached dispatch, and every browser task was pushed back.
+    assert len(selected) == 2
+    assert {task.normalized_url for _, task in selected} == {t.normalized_url for t in http_tasks}
+    # The browser-tier throttle was honored: nothing browser got out.
+    assert all(not (t.domain.startswith("b")) for _, t in selected)
+    # The browser head stays in the frontier for a later (browser-capable) batch.
+    assert len(state.frontier) == 5
