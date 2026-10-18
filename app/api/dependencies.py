@@ -11,7 +11,7 @@ from typing import Annotated
 
 from fastapi import Depends, Request
 
-from app.api.caller_auth import get_caller_identity, get_keys_caller
+from app.api.caller_auth import Tracking, get_caller_identity, get_keys_caller
 from app.config.settings import CrawlerSettings
 from app.models.caller_identity import CallerIdentity
 from app.storage.caller_key_store import CallerKeyStore
@@ -50,6 +50,12 @@ def get_caller_key_store(request: Request) -> CallerKeyStore:
     return request.app.state.caller_key_store
 
 
+def get_tracking(request: Request, job_store: JobStoreDep) -> Tracking:
+    """FastAPI dependency: the one per-caller register plus the job store for admission."""
+    tracker = getattr(request.app.state, "concurrency_tracker", None)
+    return Tracking(job_store=job_store, concurrency_tracker=tracker)
+
+
 # One declaration per provider, Annotated rather than a default so the dependency is
 # declared: an unannotated provider makes the alias, and every endpoint, carry Any.
 CallerKeyStoreDep = Annotated[CallerKeyStore, Depends(get_caller_key_store)]
@@ -60,6 +66,7 @@ ShutdownEventDep = Annotated[asyncio.Event, Depends(get_shutdown_event)]
 JobStoreDep = Annotated[JobStore, Depends(get_job_store)]
 ResultStoreDep = Annotated[CrawlResultStore, Depends(get_result_store)]
 WatchStoreDep = Annotated[WatchStore, Depends(get_watch_store)]
+TrackingDep = Annotated[Tracking, Depends(get_tracking)]
 
 
 __all__ = [
@@ -71,10 +78,12 @@ __all__ = [
     "SettingsDep",
     "ShutdownEventDep",
     "WatchStoreDep",
+    "TrackingDep",
     "get_caller_key_store",
     "get_job_store",
     "get_result_store",
     "get_settings",
     "get_shutdown_event",
+    "get_tracking",
     "get_watch_store",
 ]

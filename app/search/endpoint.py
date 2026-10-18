@@ -5,8 +5,7 @@ from __future__ import annotations
 import logging
 import time
 
-from app.api.caller_auth import anonymous_caller, check_concurrency_quota
-from app.api.caller_concurrency import CallerConcurrencyTracker
+from app.api.caller_auth import anonymous_caller
 from app.api.exceptions import http_error
 from app.health.readiness import READINESS_STATE as readiness_state
 from app.models.caller_identity import CallerIdentity
@@ -28,16 +27,13 @@ async def search(
     *,
     settings,
     caller: CallerIdentity | None = None,
-    concurrency_tracker: CallerConcurrencyTracker | None = None,
 ) -> SearchResponse:
     """Run a web search against the configured provider and shape the results.
-    The search door is caller-scoped: a caller's in-flight searches are bound by
-    the register the sync door uses, so one caller cannot fan out provider calls."""
+    Admission (page/concurrency quota, the one register, the slot held for the
+    request's life) is the caller's door; this runs only the provider search.
+    """
     active_caller = caller if caller is not None else anonymous_caller()
     caller_id = active_caller.caller_id
-    if concurrency_tracker is not None:
-        check_concurrency_quota(active_caller, concurrency_tracker.sync_in_flight(caller_id))
-        concurrency_tracker.reserve(caller_id)
     readiness_state.begin_request()
     try:
         try:
@@ -76,8 +72,6 @@ async def search(
         )
     finally:
         readiness_state.end_request()
-        if concurrency_tracker is not None:
-            concurrency_tracker.release(caller_id)
 
 
 __all__ = ["search"]

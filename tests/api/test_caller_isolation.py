@@ -8,7 +8,7 @@ from collections.abc import AsyncIterator
 from pathlib import Path
 
 from fastapi import FastAPI
-from httpx import ASGITransport, AsyncClient
+from httpx import AsyncClient
 
 from app.api.caller_auth import (
     check_page_quota,
@@ -24,7 +24,9 @@ from app.runtime.metrics import MetricsStore
 from app.storage.caller_key_store import CallerKeyStore
 from app.storage.job_store import JobStatus, JobStore
 from app.storage.result_store import CrawlResultStore
+from tests._async_harnesses import expect_quota_refused, serve
 from tests._policy_factories import job_store as make_store
+from tests._quota_harness import keyed_client, stores
 
 
 def _seed_owned_job(store: JobStore, job_id: str = "crawl_owned", owner: str = "key_a") -> None:
@@ -42,23 +44,14 @@ def _complete_job(store: JobStore, job_id: str, payload: JsonValue, owner: str =
     store.set_status(job_id, JobStatus.COMPLETED, expected=JobStatus.PENDING)
 
 
-def _isolation_stores(tmp_path: Path) -> tuple[JobStore, CrawlResultStore, CallerKeyStore]:
-    """One isolated triple per test: jobs, results, and keys on scratch files."""
-    return (
-        make_store(tmp_path / "jobs.db"),
-        CrawlResultStore(tmp_path / "results.db"),
-        CallerKeyStore(tmp_path / "keys.db"),
-    )
-
-
 @contextlib.asynccontextmanager
 async def _isolation_client(
     tmp_path: Path,
 ) -> AsyncIterator[tuple[AsyncClient, JobStore, CrawlResultStore, CallerKeyStore]]:
     """An HTTP client over isolated stores, yielding the client and the stores."""
-    store, results, keys = _isolation_stores(tmp_path)
+    store, results, keys = stores(tmp_path)
     app = _isolation_app(store, results, keys)
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+    async with serve(app) as client:
         yield client, store, results, keys
 
 
@@ -67,11 +60,16 @@ async def _quota_client(
     tmp_path: Path,
 ) -> AsyncIterator[tuple[AsyncClient, JobStore, CrawlResultStore, CallerKeyStore]]:
     """An HTTP client whose app can run the crawl POST: settings and shutdown wired."""
-    store, results, keys = _isolation_stores(tmp_path)
+    store, results, keys = stores(tmp_path)
     app = _isolation_app(store, results, keys)
-    app.dependency_overrides[get_settings] = lambda: CrawlerSettings.from_mapping({})
-    app.dependency_overrides[get_shutdown_event] = lambda: asyncio.Event()
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+    async with keyed_client(
+        app,
+        keys=keys,
+        overrides={
+            get_settings: lambda: CrawlerSettings.from_mapping({}),
+            get_shutdown_event: asyncio.Event,
+        },
+    ) as client:
         yield client, store, results, keys
 
 
@@ -91,8 +89,7 @@ async def _post_crawl(client: AsyncClient, *, max_pages: int, key: str | None = 
 
 def _expect_quota_refused(response) -> None:
     """A 429 with the quota_exceeded code, as every quota test reads it."""
-    assert response.status_code == 429, response.text
-    assert response.json()["detail"]["code"] == "quota_exceeded"
+    return expect_quota_refused(response)
 
 
 def _stored_request(store: JobStore, response):

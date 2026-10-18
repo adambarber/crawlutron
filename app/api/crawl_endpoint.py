@@ -12,13 +12,7 @@ from fastapi import HTTPException, Request
 from fastapi.responses import JSONResponse, Response
 
 from app.admission.payload_helpers import checked_payload_urls
-from app.api.caller_auth import (
-    anonymous_caller,
-    check_concurrency_quota,
-    check_page_quota,
-    effective_cookie_namespace,
-    resolve_page_limit,
-)
+from app.api.caller_auth import Tracking, admit, anonymous_caller
 from app.api.caller_concurrency import CallerConcurrencyTracker
 from app.api.crawl_executor import execute_crawl
 from app.api.exceptions import http_error, validation_http_error
@@ -103,58 +97,59 @@ async def crawl(
             settings.max_batch_size,
             host_policy=host_policy,
         )
-        owner = await _admit_caller_request(
-            payload, job_store, active_caller, concurrency_tracker=concurrency_tracker
-        )
         webhook_url = payload.webhook_url
         async_mode = payload.async_mode
-        if async_mode or webhook_url:
-            if webhook_url and (
-                not isinstance(webhook_url, str) or not webhook_url.startswith(("http://", "https://"))
-            ):
-                raise http_error(422, "validation_error", "Invalid webhook_url")
-            if webhook_url:
-                await validate_webhook_url_async(webhook_url, host_policy=host_policy)
-            request_id = new_request_id()
-            # The store's tier, not ``settings``: the row is read back with the
-            # store's tier, and two tier sources drift apart the moment they differ.
-            await job_store.acreate_single_shot(
-                request_id,
-                checked[0],
-                payload.policy,
-                owner=owner,
-            )
-            from app.api.async_crawl_runner import run_async_crawl
-
-            start_tracked_task(
-                request_id,
-                lambda: run_async_crawl(
+        # One admission for both doors: sync holds a slot for the crawl's life and
+        # releases on every exit; async persists a durable job row instead of a slot.
+        async with admit(
+            active_caller,
+            payload.policy.limits.max_pages,
+            tracking=Tracking(job_store=job_store, concurrency_tracker=concurrency_tracker),
+            payload=payload,
+            reserve_slot=not (async_mode or webhook_url),
+        ) as owner:
+            if async_mode or webhook_url:
+                if webhook_url and (
+                    not isinstance(webhook_url, str) or not webhook_url.startswith(("http://", "https://"))
+                ):
+                    raise http_error(422, "validation_error", "Invalid webhook_url")
+                if webhook_url:
+                    await validate_webhook_url_async(webhook_url, host_policy=host_policy)
+                request_id = new_request_id()
+                # The store's tier, not ``settings``: the row is read back with the
+                # store's tier, and two tier sources drift apart the moment they differ.
+                await job_store.acreate_single_shot(
                     request_id,
-                    payload,
-                    webhook_url,
-                    settings,
-                    job_store,
-                    result_store,
-                    shutdown_event,
-                    urls=checked,
-                ),
-            )
-            get_metrics().observe_crawl(accepted=True, caller_id=owner)
-            return JSONResponse(
-                status_code=202,
-                content={
-                    "status": "accepted",
-                    "request_id": request_id,
-                    "status_url": f"/v1/crawl/{request_id}",
-                    "webhook_url": webhook_url,
-                },
-            )
-        _crawl_started = time.monotonic()
-        # The sync door has no job row to count with, so it holds a slot in the per-caller
-        # in-flight register for the crawl's life and releases it on every exit.
-        if concurrency_tracker is not None:
-            concurrency_tracker.reserve(owner)
-        try:
+                    checked[0],
+                    payload.policy,
+                    owner=owner,
+                )
+                from app.api.async_crawl_runner import run_async_crawl
+
+                start_tracked_task(
+                    request_id,
+                    lambda: run_async_crawl(
+                        request_id,
+                        payload,
+                        webhook_url,
+                        settings,
+                        job_store,
+                        result_store,
+                        shutdown_event,
+                        urls=checked,
+                    ),
+                )
+                get_metrics().observe_crawl(accepted=True, caller_id=owner)
+                return JSONResponse(
+                    status_code=202,
+                    content={
+                        "status": "accepted",
+                        "request_id": request_id,
+                        "status_url": f"/v1/crawl/{request_id}",
+                        "webhook_url": webhook_url,
+                    },
+                )
+            _crawl_started = time.monotonic()
             # Disconnect-aware sync crawl: if the caller has gone away, halt the
             # engine call instead of crawling to completion for a dead client.
             crawl_awaitable = execute_crawl(
@@ -183,37 +178,6 @@ async def crawl(
                 )
                 return Response(content=body, media_type=media_type)
             return response_model
-        finally:
-            if concurrency_tracker is not None:
-                concurrency_tracker.release(owner)
-
-
-async def _admit_caller_request(
-    payload: CrawlRequest,
-    job_store: JobStore,
-    caller: CallerIdentity,
-    concurrency_tracker: CallerConcurrencyTracker | None = None,
-) -> str:
-    """Quota checks and cookie-namespace defaulting for one crawl; returns the owner.
-    #194: ``resolve_page_limit`` binds every caller; ``payload.policy`` is resolved
-    in place so the bound and the cookie namespace ride the typed seam.
-    """
-    requested_pages = resolve_page_limit(caller, payload.policy.limits.max_pages)
-    resolved = payload.policy.model_copy(
-        update={"limits": payload.policy.limits.model_copy(update={"max_pages": requested_pages})}
-    )
-    check_page_quota(caller, requested_pages)
-    active = await job_store.aactive_count_for_caller(caller.caller_id)
-    if concurrency_tracker is not None:
-        active += concurrency_tracker.sync_in_flight(caller.caller_id)
-    check_concurrency_quota(caller, active)
-    namespace = effective_cookie_namespace(resolved.request_profile, caller)
-    if namespace:
-        request_profile = dict(resolved.request_profile)
-        request_profile["cookie_namespace"] = namespace
-        resolved = resolved.model_copy(update={"request_profile": request_profile})
-    payload.policy = resolved
-    return caller.caller_id
 
 
 async def _stored_response_payload(

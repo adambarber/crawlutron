@@ -177,6 +177,7 @@ async def call_tool(
     settings,
     shutdown_event,
     concurrency_tracker=None,
+    job_store=None,
     caller=None,
 ) -> JsonValue:
     from app.mcp.tools import TOOLS_BY_NAME, validation_message
@@ -210,6 +211,7 @@ async def call_tool(
         settings=settings,
         shutdown_event=shutdown_event,
         concurrency_tracker=concurrency_tracker,
+        job_store=job_store,
         caller=caller,
     )
     success: dict[str, Any] = {
@@ -231,6 +233,7 @@ async def handle_mcp_request(
     settings,
     shutdown_event,
     concurrency_tracker=None,
+    job_store=None,
     caller=None,
 ) -> tuple[int, JsonValue | None]:
     """Process one JSON-RPC message; returns ``(http_status, payload_or_None)``.
@@ -272,6 +275,7 @@ async def handle_mcp_request(
                 settings,
                 shutdown_event,
                 concurrency_tracker=concurrency_tracker,
+                job_store=job_store,
                 caller=caller,
             )
         return 404, error_response(request_id, METHOD_NOT_FOUND, f"Method not found: {method}")

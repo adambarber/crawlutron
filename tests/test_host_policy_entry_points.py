@@ -15,6 +15,7 @@ from tests._host_policy_probes import (
     _effects,
     _record_probe_fetch,
 )
+from tests._http_test_helpers import minimal_request
 from tests._policy_factories import canonical
 from tests.invariants.test_host_policy_entry_points import _table_entries
 
@@ -89,6 +90,7 @@ async def _probe_jobs_router(monkeypatch, tmp_path):
             # ``asyncio.Event``.
             shutdown_event=asyncio.Event(),
             caller=CallerIdentity(),
+            request=minimal_request("/v1/jobs"),
         ),
         effects,
     )

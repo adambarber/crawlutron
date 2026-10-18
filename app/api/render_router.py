@@ -1,11 +1,9 @@
-"""``/v1/render`` URL→handler mapping."""
-
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends
 
-from app.api.caller_auth import active_sync_for, check_concurrency_quota, check_page_quota
-from app.api.dependencies import CallerDep, get_settings
+from app.api.caller_auth import admit
+from app.api.dependencies import CallerDep, TrackingDep, get_settings
 from app.api.render_endpoint import render as render_handler
 from app.models.error_response import ErrorResponse
 from app.models.render_request import RenderRequest
@@ -30,14 +28,14 @@ router = APIRouter(tags=["Crawler"])
 async def render(
     payload: RenderRequest,
     caller: CallerDep,
-    request: Request,
+    tracking: TrackingDep,
     settings=Depends(get_settings),
 ) -> UnifiedCrawlResponse:
-    # #205: enforce the caller concurrency+page quota before the render runs.
+    # #205/#320: admit the render through the one helper -- page quota, quotas
+    # against the shared register, and a released slot for the request's life.
     requested = len(payload.urls) if payload.urls is not None else 1
-    check_page_quota(caller, requested)
-    check_concurrency_quota(caller, active_sync_for(caller, request))
-    return await render_handler(payload, settings=settings)
+    async with admit(caller, requested, tracking=tracking):
+        return await render_handler(payload, settings=settings)
 
 
 __all__ = ["router"]

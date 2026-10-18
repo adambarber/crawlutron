@@ -295,12 +295,11 @@ if FastAPI is not None:
     app.state.watch_store = watch_store
     app.state.caller_key_store = caller_key_store
     app.state.key_admin_token = settings.key_admin_token
-    # Per-process register of in-flight sync crawls so the sync door's concurrency is
-    # counted (async concurrency comes from durable job rows). Set once per app.
+    # ONE per-process register of in-flight sync work (crawl/map/render/search)
+    # so every sync door counts against the caller's one concurrency ceiling.
     from app.api.caller_concurrency import CallerConcurrencyTracker
 
     app.state.concurrency_tracker = CallerConcurrencyTracker()
-    app.state.search_concurrency_tracker = CallerConcurrencyTracker()
 
     # Body-size guard: 16 MiB cap at the ASGI receive layer (see
     # app/api/middleware.py for how truncation and keep-alive are handled).

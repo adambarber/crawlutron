@@ -1,10 +1,9 @@
-"""``/v1/search`` URL→handler mapping."""
-
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends
 
-from app.api.dependencies import CallerDep, get_settings
+from app.api.caller_auth import admit
+from app.api.dependencies import CallerDep, TrackingDep, get_settings
 from app.models.error_response import ErrorResponse
 from app.models.search_request import SearchRequest
 from app.models.search_response import SearchResponse
@@ -40,14 +39,14 @@ router = APIRouter(tags=["Search"])
 )
 async def search(
     payload: SearchRequest,
-    request: Request,
     caller: CallerDep,
+    tracking: TrackingDep,
     settings=Depends(get_settings),
 ) -> SearchResponse:
-    # #298: the search door resolves the caller like the crawl doors; the per-caller
-    # search register (summed into max_concurrency) lives on app state.
-    tracker = getattr(request.app.state, "search_concurrency_tracker", None)
-    return await search_handler(payload, settings=settings, caller=caller, concurrency_tracker=tracker)
+    # #298/#320: the search door is admitted through the one register -- a search
+    # counts against the caller's sync crawls and async job rows.
+    async with admit(caller, 0, tracking=tracking):
+        return await search_handler(payload, settings=settings, caller=caller)
 
 
 __all__ = ["router"]

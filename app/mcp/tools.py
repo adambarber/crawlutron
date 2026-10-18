@@ -15,11 +15,7 @@ from typing import Any
 from fastapi import HTTPException
 from pydantic import BaseModel, ValidationError
 
-from app.api.caller_auth import (
-    check_concurrency_quota,
-    check_page_quota,
-    resolve_page_limit,
-)
+from app.api.caller_auth import Tracking, admit
 from app.api.crawl_executor import execute_crawl
 from app.api.map_endpoint import map_site
 from app.api.render_endpoint import render as render_endpoint_handler
@@ -161,26 +157,6 @@ def _caller_for(caller: CallerIdentity | None) -> CallerIdentity:
     return caller if caller is not None else CallerIdentity()
 
 
-def _active_sync(caller: CallerIdentity, concurrency_tracker) -> int:
-    """The caller's live sync-door count, or 0 when no tracker is wired."""
-    if concurrency_tracker is None:
-        return 0
-    return concurrency_tracker.sync_in_flight(caller.caller_id)
-
-
-def _admit_fetch(
-    caller: CallerIdentity | None,
-    concurrency_tracker,
-    requested_pages: int,
-) -> None:
-    """#205: quota a fetch door before it runs; raises an HTTPException the tool
-    boundary turns into an isError refusal. Every fetch tool shares this one check.
-    """
-    active = _caller_for(caller)
-    check_page_quota(active, resolve_page_limit(active, requested_pages))
-    check_concurrency_quota(active, _active_sync(active, concurrency_tracker))
-
-
 async def _guard_then_crawl(
     payload: CrawlRequest,
     settings,
@@ -188,8 +164,9 @@ async def _guard_then_crawl(
     projection: _Unified,
     caller: CallerIdentity | None = None,
     concurrency_tracker=None,
+    job_store=None,
 ) -> ToolResult:
-    """The delivery refusal check, the caller quota, then the crawl, in one place.
+    """The delivery refusal check, the caller admission, then the crawl, in one place.
 
     Both doors refuse webhook/async over MCP for the same reason, and the two
     refusals spelled out twice are two places a new door can forget the check.
@@ -197,8 +174,15 @@ async def _guard_then_crawl(
     refusal = _delivery_refusal(payload)
     if refusal is not None:
         return refusal
-    _admit_fetch(caller, concurrency_tracker, payload.policy.limits.max_pages)
-    return await _tool_result(_projected(_crawled(payload, settings, shutdown_event), projection))
+    pages = payload.policy.limits.max_pages
+    tracking = Tracking(job_store=job_store, concurrency_tracker=concurrency_tracker)
+    return await _admit_tool(
+        caller,
+        pages,
+        payload=payload,
+        tracking=tracking,
+        work=lambda: _tool_result(_projected(_crawled(payload, settings, shutdown_event), projection)),
+    )
 
 
 async def _projected(crawled: Awaitable[UnifiedCrawlResponse], projection: _Unified) -> BaseModel:
@@ -208,7 +192,7 @@ async def _projected(crawled: Awaitable[UnifiedCrawlResponse], projection: _Unif
 
 
 async def handle_crawl(
-    payload: CrawlRequest, settings, shutdown_event, concurrency_tracker=None, caller=None
+    payload: CrawlRequest, settings, shutdown_event, concurrency_tracker=None, caller=None, job_store=None
 ) -> ToolResult:
     return await _guard_then_crawl(
         payload,
@@ -217,6 +201,7 @@ async def handle_crawl(
         _Unified.from_crawl,
         caller=caller,
         concurrency_tracker=concurrency_tracker,
+        job_store=job_store,
     )
 
 
@@ -241,7 +226,7 @@ async def _extracted(response: UnifiedCrawlResponse) -> CrawlAndExtractResponse:
 
 
 async def handle_crawl_and_extract(
-    payload: CrawlRequest, settings, shutdown_event, concurrency_tracker=None, caller=None
+    payload: CrawlRequest, settings, shutdown_event, concurrency_tracker=None, caller=None, job_store=None
 ) -> ToolResult:
     # Both crawl doors run the same guarded, admitted crawl; the composite
     # differs only by its slimmer projection, rendered by the shared guard.
@@ -252,18 +237,40 @@ async def handle_crawl_and_extract(
         _Unified.from_extract,
         caller=caller,
         concurrency_tracker=concurrency_tracker,
+        job_store=job_store,
     )
 
 
-async def handle_map(
-    payload: MapRequest, settings, shutdown_event, concurrency_tracker=None, caller=None
+async def _admit_tool(
+    caller: CallerIdentity | None,
+    pages: int,
+    *,
+    tracking: Tracking,
+    payload: CrawlRequest | MapRequest | None = None,
+    work: Callable[[], Awaitable[ToolResult]],
 ) -> ToolResult:
-    _admit_fetch(caller, concurrency_tracker, payload.policy.limits.max_pages)
-    return await _tool_result(map_site(payload, settings=settings, shutdown_event=shutdown_event))
+    """Admit a fetch tool, then run its work under the held slot."""
+    try:
+        async with admit(caller, pages, tracking=tracking, payload=payload):
+            return await work()
+    except HTTPException as error:
+        return _tool_error(error)
+
+
+async def handle_map(
+    payload: MapRequest, settings, shutdown_event, concurrency_tracker=None, caller=None, job_store=None
+) -> ToolResult:
+    return await _admit_tool(
+        caller,
+        payload.policy.limits.max_pages,
+        payload=payload,
+        tracking=Tracking(job_store=job_store, concurrency_tracker=concurrency_tracker),
+        work=lambda: _tool_result(map_site(payload, settings=settings, shutdown_event=shutdown_event)),
+    )
 
 
 async def handle_render(
-    payload: RenderRequest, settings, shutdown_event, concurrency_tracker=None, caller=None
+    payload: RenderRequest, settings, shutdown_event, concurrency_tracker=None, caller=None, job_store=None
 ) -> ToolResult:
     if get_browser_pool() is None:
         return ToolResult(
@@ -271,23 +278,26 @@ async def handle_render(
             is_error=True,
         )
     requested = len(payload.urls) if payload.urls is not None else 1
-    _admit_fetch(caller, concurrency_tracker, requested)
-    return await _tool_result(render_endpoint_handler(payload, settings=settings))
+    return await _admit_tool(
+        caller,
+        requested,
+        tracking=Tracking(job_store=job_store, concurrency_tracker=concurrency_tracker),
+        work=lambda: _tool_result(render_endpoint_handler(payload, settings=settings)),
+    )
 
 
 async def handle_search(
-    payload: SearchRequest, settings, shutdown_event, concurrency_tracker=None, caller=None
+    payload: SearchRequest, settings, shutdown_event, concurrency_tracker=None, caller=None, job_store=None
 ) -> ToolResult:
-    # #298 / #205: the search door is caller-bound through the same concurrency
-    # register the HTTP /v1/search uses; a keyed caller keeps its identity.
-
-    return await _tool_result(
-        search_endpoint_handler(
-            payload,
-            settings=settings,
-            caller=_caller_for(caller),
-            concurrency_tracker=concurrency_tracker,
-        )
+    # #298 / #205 / #320: the search door is caller-bound through the one
+    # concurrency register every sync door uses; a keyed caller keeps its identity.
+    return await _admit_tool(
+        caller,
+        0,
+        tracking=Tracking(job_store=job_store, concurrency_tracker=concurrency_tracker),
+        work=lambda: _tool_result(
+            search_endpoint_handler(payload, settings=settings, caller=_caller_for(caller))
+        ),
     )
 
 

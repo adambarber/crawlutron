@@ -4,11 +4,14 @@ The ``crawl_api`` fixture answers the per-test questions (client, origin,
 webhook sink); the sink is process-global, so clearing and draining are its."""
 
 import asyncio
-from collections.abc import Sequence
+import contextlib
+from collections.abc import AsyncIterator, Sequence
 from dataclasses import dataclass
 from typing import Any
 
 import pytest
+from fastapi import FastAPI
+from httpx import ASGITransport, AsyncClient
 
 from tests._timing_harnesses import await_until
 
@@ -125,4 +128,36 @@ async def run_loop_rebind_scenario(get_client, *, guard: float | None = None):
     return first, second
 
 
-__all__ = ["CrawlApi", "crawl_api", "run_loop_rebind_scenario"]
+@contextlib.asynccontextmanager
+async def serve(app: FastAPI) -> AsyncIterator[AsyncClient]:
+    """The one ASGI test-client bootstrap: mount the app and speak HTTP to it."""
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        yield client
+
+
+async def issue_key(client: AsyncClient, *, max_pages: int = 0, max_concurrency: int = 0) -> str:
+    """Issue one keyed caller through the public keys door; returns its secret."""
+    body: dict[str, Any] = {"label": "agent-a"}
+    if max_pages:
+        body["max_pages"] = max_pages
+    if max_concurrency:
+        body["max_concurrency"] = max_concurrency
+    response = await client.post("/v1/keys", json=body, headers={"X-API-Key": "test-admin-token"})
+    assert response.status_code == 201, response.text
+    return response.json()["secret"]
+
+
+def expect_quota_refused(response) -> None:
+    """The 429 quota_exceeded shape every quota test reads back."""
+    assert response.status_code == 429, response.text
+    assert response.json()["detail"]["code"] == "quota_exceeded"
+
+
+__all__ = [
+    "CrawlApi",
+    "crawl_api",
+    "expect_quota_refused",
+    "issue_key",
+    "run_loop_rebind_scenario",
+    "serve",
+]

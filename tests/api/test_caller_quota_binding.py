@@ -15,6 +15,7 @@ from app.api.caller_auth import identity_for_key
 from app.api.caller_concurrency import CallerConcurrencyTracker
 from app.config.settings import CrawlerSettings
 from app.storage.caller_key_store import CallerKeyStore
+from tests._http_test_helpers import minimal_request
 from tests._policy_factories import job_store as make_store
 from tests.api.test_caller_isolation import (
     _expect_quota_refused,
@@ -155,6 +156,7 @@ async def test_keyed_job_stores_the_key_bound_when_limits_omitted(tmp_path, monk
         settings=CrawlerSettings.from_mapping({}),
         shutdown_event=asyncio.Event(),
         caller=caller,
+        request=minimal_request("/v1/jobs"),
     )
 
     job = store.load(response.job_id)

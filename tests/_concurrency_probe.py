@@ -6,8 +6,10 @@ then resuming the first, so that choreography lives here once, not in each door.
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from typing import Any
+
+_SYNC_RESULT = {"request_id": "sync", "results": [], "submitted_count": 0, "policy_schema_version": ""}
 
 
 def make_blocking_callable(*, result: Any):
@@ -22,6 +24,13 @@ def make_blocking_callable(*, result: Any):
         return result
 
     return _block, entered, released
+
+
+def block_execute_crawl(monkeypatch, module) -> tuple[Callable, asyncio.Event, asyncio.Event]:
+    """Stub a module's ``execute_crawl`` with a parked call; drives a sync-crawl probe."""
+    blocker, entered, released = make_blocking_callable(result=_SYNC_RESULT)
+    monkeypatch.setattr(module, "execute_crawl", blocker)
+    return blocker, entered, released
 
 
 async def assert_second_concurrent_refused(

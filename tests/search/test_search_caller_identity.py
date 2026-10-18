@@ -10,12 +10,14 @@ from collections.abc import AsyncIterator
 from pathlib import Path
 
 from fastapi import FastAPI
-from httpx import ASGITransport, AsyncClient
+from httpx import AsyncClient
 
 from app.api.caller_concurrency import CallerConcurrencyTracker
-from app.api.dependencies import get_settings
+from app.api.dependencies import get_job_store, get_settings
 from app.config.settings import CrawlerSettings
 from app.storage.caller_key_store import CallerKeyStore
+from tests._async_harnesses import expect_quota_refused, issue_key, serve
+from tests._policy_factories import job_store as make_job_store
 
 
 @contextlib.asynccontextmanager
@@ -27,16 +29,20 @@ async def _search_client(
     from app.search.router import router as search_router
 
     keys = CallerKeyStore(tmp_path / "keys.db")
+    jobs = make_job_store(tmp_path / "jobs.db")
     app = FastAPI()
     app.include_router(search_router)
     app.include_router(keys_router)
     app.state.caller_key_store = keys
     app.state.key_admin_token = "test-admin-token"
-    app.state.search_concurrency_tracker = CallerConcurrencyTracker()
+    # ONE per-caller register, named like the service's: the search door counts
+    # against the same in-flight ceiling as the caller's sync crawls.
+    app.state.concurrency_tracker = CallerConcurrencyTracker()
+    app.dependency_overrides[get_job_store] = lambda: jobs
     app.dependency_overrides[get_settings] = lambda: CrawlerSettings.from_mapping(
         {"CRAWLUTRON_SEARCH_PROVIDER": "tavily", "CRAWLUTRON_TAVILY_API_KEY": "test-key"}
     )
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+    async with serve(app) as client:
         yield client, app
 
 
@@ -45,19 +51,13 @@ def _admin() -> dict[str, str]:
 
 
 async def _issue(client: AsyncClient, *, max_concurrency: int = 4) -> str:
-    """Issue a key with ``max_concurrency`` and return its secret."""
-    response = await client.post(
-        "/v1/keys",
-        json={"label": "agent-a", "max_concurrency": max_concurrency},
-        headers=_admin(),
-    )
-    assert response.status_code == 201, response.text
-    return response.json()["secret"]
+    """Issue a key with ``max_concurrency`` and return its secret; the funnel."""
+    return await issue_key(client, max_concurrency=max_concurrency)
 
 
 def _expect_quota_refused(response) -> None:
-    assert response.status_code == 429, response.text
-    assert response.json()["detail"]["code"] == "quota_exceeded"
+    """The 429 quota shape, read through the funnel."""
+    return expect_quota_refused(response)
 
 
 def _provider_body() -> str:

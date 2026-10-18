@@ -8,12 +8,12 @@ from __future__ import annotations
 
 from typing import NoReturn, cast
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 
 from app.admission.payload_helpers import checked_payload_urls
 from app.admission.policy import read_policy
 from app.api import job_runner
-from app.api.caller_auth import check_concurrency_quota, check_page_quota, resolve_page_limit
+from app.api.caller_auth import Tracking, admit, resolve_page_limit
 from app.api.dependencies import CallerDep, JobStoreDep, SettingsDep, ShutdownEventDep
 from app.api.exceptions import http_error, validation_http_error
 from app.api.main_helpers import build_job_status
@@ -60,6 +60,7 @@ async def create_job(
     settings: SettingsDep,
     shutdown_event: ShutdownEventDep,
     caller: CallerDep,
+    request: Request,
 ) -> JobCreateResponse:
     try:
         host_policy = HostPolicy.from_settings(settings)
@@ -69,15 +70,19 @@ async def create_job(
             host_policy=host_policy,
         )
         resolved_policy = read_policy(payload.policy, job_store.tier)
-        # #194: resolve the page bound for EVERY caller, keyed and anonymous, so a key
-        # with a positive ceiling never degrades an omitted/zero ``limits`` to unbounded.
-        requested_pages = resolve_page_limit(caller, resolved_policy.limits.max_pages)
+        # #194: resolve the page bound for every caller (keyed and anonymous) and
+        # write it back so the durable row records the bound, not an unbounded 0.
+        bound = resolve_page_limit(caller, resolved_policy.limits.max_pages)
         resolved_policy = resolved_policy.model_copy(
-            update={"limits": resolved_policy.limits.model_copy(update={"max_pages": requested_pages})}
+            update={"limits": resolved_policy.limits.model_copy(update={"max_pages": bound})}
         )
-        check_page_quota(caller, requested_pages)
-        check_concurrency_quota(caller, await job_store.aactive_count_for_caller(caller.caller_id))
-        job = await job_store.acreate(checked[0], resolved_policy, owner=caller.caller_id)
+        # A whole-site job persists a durable row; admit counts the caller's rows and
+        # sync in-flight against one ceiling without reserving a slot of its own.
+        tracking = Tracking(
+            job_store=job_store, concurrency_tracker=getattr(request.app.state, "concurrency_tracker", None)
+        )
+        async with admit(caller, bound, tracking=tracking, reserve_slot=False):
+            job = await job_store.acreate(checked[0], resolved_policy, owner=caller.caller_id)
     except ValueError as error:
         raise validation_http_error(error) from error
     job_runner.start_job(job.job_id, job_store, settings, shutdown_event)

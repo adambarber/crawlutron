@@ -73,7 +73,8 @@ async def mcp_endpoint(
         name_header=request.headers.get("mcp-name"),
         settings=settings,
         shutdown_event=shutdown_event,
-        concurrency_tracker=getattr(request.app.state, "search_concurrency_tracker", None),
+        concurrency_tracker=getattr(request.app.state, "concurrency_tracker", None),
+        job_store=getattr(request.app.state, "job_store", None),
         caller=caller,
     )
     if payload is None:

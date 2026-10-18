@@ -8,8 +8,10 @@ from __future__ import annotations
 
 import os
 import secrets
-from collections.abc import Mapping
-from typing import NoReturn
+from collections.abc import AsyncIterator, Mapping
+from contextlib import asynccontextmanager
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, NoReturn
 
 from fastapi import Request
 
@@ -18,6 +20,24 @@ from app.models.caller_identity import CallerIdentity
 from app.models.caller_key import CallerKey
 from app.models.json_value import JsonValue
 from app.transport.request_profile import cookie_namespace_for
+
+if TYPE_CHECKING:
+    from app.api.caller_concurrency import CallerConcurrencyTracker
+    from app.models.crawl_request import CrawlRequest
+    from app.models.map_request import MapRequest
+    from app.storage.job_store import JobStore
+
+    #: Every carrier of a mutable ``CrawlPolicy`` the admit helper writes the resolved
+    #: page bound and cookie namespace into; crawl and map are the two today.
+    PolicyCarrier = CrawlRequest | MapRequest
+
+
+@dataclass(frozen=True)
+class Tracking:
+    """The per-request concurrency state one admit call reads and releases."""
+
+    job_store: JobStore | None = None
+    concurrency_tracker: CallerConcurrencyTracker | None = None
 
 
 def identity_for_key(record: CallerKey) -> CallerIdentity:
@@ -156,14 +176,50 @@ def check_concurrency_quota(caller: CallerIdentity, active_count: int) -> None:
         )
 
 
-def active_sync_for(caller: CallerIdentity, request: Request) -> int:
-    """The caller's live sync crawl count, from the per-process in-flight register."""
-    tracker = getattr(request.app.state, "concurrency_tracker", None)
-    return tracker.sync_in_flight(caller.caller_id) if tracker is not None else 0
+@asynccontextmanager
+async def admit(
+    caller: CallerIdentity | None,
+    requested_pages: int,
+    *,
+    tracking: Tracking,
+    payload: PolicyCarrier | None = None,
+    reserve_slot: bool = True,
+) -> AsyncIterator[str]:
+    """Admit one request: resolve the page bound, the quotas, the cookie namespace.
+
+    ``reserve_slot=False`` when a durable job row counts instead of a sync slot.
+    """
+    active = caller if caller is not None else anonymous_caller()
+    resolved = resolve_page_limit(active, requested_pages)
+    if payload is not None:
+        policy = payload.policy.model_copy(
+            update={"limits": payload.policy.limits.model_copy(update={"max_pages": resolved})}
+        )
+        namespace = effective_cookie_namespace(policy.request_profile, active)
+        if namespace:
+            profile = dict(policy.request_profile)
+            profile["cookie_namespace"] = namespace
+            policy = policy.model_copy(update={"request_profile": profile})
+        payload.policy = policy
+    check_page_quota(active, resolved)
+    job_store = tracking.job_store
+    concurrency_tracker = tracking.concurrency_tracker
+    active_count = await job_store.aactive_count_for_caller(active.caller_id) if job_store is not None else 0
+    if concurrency_tracker is not None:
+        active_count += concurrency_tracker.sync_in_flight(active.caller_id)
+    check_concurrency_quota(active, active_count)
+    if reserve_slot and concurrency_tracker is not None:
+        concurrency_tracker.reserve(active.caller_id)
+    try:
+        yield active.caller_id
+    finally:
+        if reserve_slot and concurrency_tracker is not None:
+            concurrency_tracker.release(active.caller_id)
 
 
 __all__ = [
-    "active_sync_for",
+    "Tracking",
+    "admit",
     "anonymous_caller",
     "check_concurrency_quota",
     "check_page_quota",
