@@ -4,23 +4,30 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from dataclasses import dataclass, replace
-from typing import Any, cast, get_args
+from typing import TYPE_CHECKING, Any, cast, get_args
 
-from app.models.crawl_policy import CrawlPolicy
-from app.models.crawl_result import CrawlStrategyAttempt, EngineCrawlResult
 from app.models.crawl_strategy import CrawlStrategy
-from app.models.taxonomy import Classification, CrawlError, CrawlStrategyName
-from app.orchestration.fetch_surface import CrawlWorker, HostPolicy, HttpFetcher, NormalizedUrl
+from app.models.taxonomy import CrawlStrategyName
 from app.orchestration.results import (
     TerminalResult,
     engine_result_from_exception,
     failed_engine_result,
 )
-from app.orchestration.scheduler import DomainScheduler
 from app.transport.browser_result import browser_strategy_result
 from app.transport.http import http_strategy_result
 from app.transport.strategy_request import StrategyRequest
 from app.vocabulary.strategies import BROWSER_STRATEGIES, HTTP_CFFI_IMPERSONATE, HTTP_STRATEGIES
+
+if TYPE_CHECKING:
+    from app.models.crawl_policy import CrawlPolicy
+    from app.models.crawl_result import CrawlStrategyAttempt, EngineCrawlResult
+    from app.models.crawl_worker import CrawlWorker
+    from app.models.host_policy import HostPolicy
+    from app.models.http_fetcher import HttpFetcher
+    from app.models.normalized_url import NormalizedUrl
+    from app.models.taxonomy import Classification, CrawlError
+    from app.orchestration.scheduler import DomainScheduler
+
 from app.vocabulary.taxonomy import BROWSER_BLOCKED_CLASSIFICATIONS, HTTP_BLOCKED_CLASSIFICATIONS
 
 BLOCKED_CLASSIFICATIONS = HTTP_BLOCKED_CLASSIFICATIONS | BROWSER_BLOCKED_CLASSIFICATIONS

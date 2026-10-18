@@ -6,10 +6,15 @@ Centralizes URL extraction and policy normalization used by both
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from app.admission.crawl_surface import CrawlPolicy, CrawlRequest, HostPolicy, NormalizedUrl
 from app.admission.policy import PolicyTier, validate_wire_policy
+from app.models.crawl_request import CrawlRequest
+from app.models.normalized_url import NormalizedUrl
+
+if TYPE_CHECKING:
+    from app.models.crawl_policy import CrawlPolicy
+    from app.models.host_policy import HostPolicy
 
 
 def _validated_url(url: str, *, host_policy: HostPolicy) -> str:

@@ -1,29 +1,32 @@
 """Crawl runners: payloads, pages, chains and strategy entry."""
 
+from __future__ import annotations
+
 from collections.abc import Callable, Sequence
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from urllib.parse import urlparse
 
-from app.admission.policy import CrawlPolicy, read_policy
-from app.models.taxonomy import CrawlStrategyName
+from app.admission.policy import read_policy
+from app.models.host_policy import HostPolicy
 from app.orchestration.engine import crawl_request
-from app.orchestration.fetch_surface import (
-    ContentCache,
-    CrawlWorker,
-    EngineCrawlResult,
-    HostPolicy,
-    HttpCache,
-    HttpFetcher,
-    ProducerEnvelope,
-    ResourceGate,
-    default_http_fetcher,
-)
-from app.orchestration.scheduler import DomainScheduler
+from app.transport.cache import HttpCache
+from app.transport.content_cache import ContentCache
+from app.transport.fetchers import default_http_fetcher
 from app.transport.strategy_request import StrategyRequest
 from app.vocabulary.strategies import HTTP_DECLARED_CRAWLER
 from tests._fetch_doubles import site_fetcher
 from tests._fetch_scripted import tap_fetcher
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY, canonical
+
+if TYPE_CHECKING:
+    from app.admission.policy import CrawlPolicy
+    from app.models.crawl_result import EngineCrawlResult
+    from app.models.crawl_worker import CrawlWorker
+    from app.models.http_fetcher import HttpFetcher
+    from app.models.result_record import ProducerEnvelope
+    from app.models.taxonomy import CrawlStrategyName
+    from app.orchestration.scheduler import DomainScheduler
+    from app.runtime.pressure_gates import ResourceGate
 
 #: One scripted page: (status, raw body, content type). The fetcher estimates
 #: the type when a page does not declare one; declaring it makes a sitemap.

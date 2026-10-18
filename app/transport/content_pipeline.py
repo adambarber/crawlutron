@@ -8,9 +8,8 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from app.admission.crawl_surface import CrawlExtractionMethod, CrawlPolicy, HostPolicy, NormalizedUrl
 from app.admission.policy import discovery_flags
 from app.extraction.content import (
     Selectors,
@@ -27,6 +26,12 @@ from app.vocabulary.extraction import (
     EXTRACTION_METHOD_TRAFILATURA,
     EXTRACTION_TRAFILATURA,
 )
+
+if TYPE_CHECKING:
+    from app.models.crawl_extraction_method import CrawlExtractionMethod
+    from app.models.crawl_policy import CrawlPolicy
+    from app.models.host_policy import HostPolicy
+    from app.models.normalized_url import NormalizedUrl
 
 
 @dataclass(frozen=True)

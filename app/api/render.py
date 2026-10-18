@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import time
 from dataclasses import replace
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from app.admission.payload_helpers import checked_payload_urls
 from app.admission.render_options import resolve_render_options
@@ -16,6 +16,9 @@ from app.config.settings import CrawlerSettings
 from app.models.crawl_job import CrawlJob
 from app.models.crawl_policy import POLICY_SCHEMA_VERSION
 from app.models.crawl_request import CrawlRequest
+from app.models.crawl_result import CrawlResult
+from app.models.host_policy import HostPolicy
+from app.models.normalized_url import NormalizedUrl
 from app.orchestration import robots as _robots_policy
 from app.orchestration.classification import classify_error_code
 from app.orchestration.results import (
@@ -27,15 +30,12 @@ from app.orchestration.scheduler import DomainScheduler
 from app.orchestration.worker import call_worker
 from app.storage.ids import new_request_id
 from app.transport.fetchers import default_http_fetcher
-from app.transport.render_surface import (
-    CrawlResult,
-    CrawlWorker,
-    EngineCrawlResult,
-    HostPolicy,
-    NormalizedUrl,
-    RenderEnvelope,
-    RenderOptions,
-)
+
+if TYPE_CHECKING:
+    from app.models.crawl_result import EngineCrawlResult
+    from app.models.crawl_worker import CrawlWorker
+    from app.models.render_options import RenderOptions
+    from app.models.result_record import RenderEnvelope
 
 
 def render_options_for(payload: dict[str, Any], settings: CrawlerSettings) -> RenderOptions:

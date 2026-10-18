@@ -15,32 +15,31 @@ import tempfile
 import time
 from collections.abc import Iterable, Mapping
 from datetime import UTC, datetime
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from app.admission.admission_links import compile_scope_pattern
 from app.admission.payload_helpers import checked_payload_urls, payload_policy
 from app.admission.policy import PolicyTier
 from app.config.env import get_env_int
 from app.config.settings import CrawlerSettings
-from app.models.crawl_policy import CrawlPolicy
 from app.models.crawl_request import CrawlRequest
+from app.models.crawl_result import EngineCrawlResult
+from app.models.host_policy import HostPolicy
 from app.models.serialization import from_wire, to_dict
 from app.orchestration import robots as _robots_policy
-from app.orchestration.fetch_surface import (
-    ContentCache,
-    CrawlWorker,
-    EngineCrawlResult,
-    HostPolicy,
-    HttpCache,
-    HttpFetcher,
-    NormalizedUrl,
-    ProducerEnvelope,
-    ResourceGate,
-    default_http_fetcher,
-    impersonating_fetcher,
-)
 from app.orchestration.request_pipeline import _PipelineDependencies, _PipelineState, run_crawl_request
 from app.orchestration.robots import FetchAndDecode
+from app.runtime.pressure_gates import ResourceGate
+from app.transport.cache import HttpCache
+from app.transport.content_cache import ContentCache
+from app.transport.fetchers import default_http_fetcher, impersonating_fetcher
+
+if TYPE_CHECKING:
+    from app.models.crawl_policy import CrawlPolicy
+    from app.models.crawl_worker import CrawlWorker
+    from app.models.http_fetcher import HttpFetcher
+    from app.models.normalized_url import NormalizedUrl
+    from app.models.result_record import ProducerEnvelope
 
 logger = logging.getLogger(__name__)
 

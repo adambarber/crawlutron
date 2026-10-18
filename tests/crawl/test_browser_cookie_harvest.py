@@ -66,7 +66,7 @@ class TestHarvestWaitBounded:
     whole per-URL budget; the finally-block caps the harvest wait."""
 
     async def test_render_finally_harvest_timeout(self, monkeypatch):
-        from app.transport.browser import RenderOptions
+        from app.models.render_options import RenderOptions
 
         url = canonical("http://example.com/page")
         with isolated_browser_cookies(url) as domain:

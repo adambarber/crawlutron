@@ -5,7 +5,8 @@ parse -- the same defect the to_thread sweeps killed -- so it is offloaded.
 """
 
 from app.models.normalized_url import NormalizedUrl
-from app.transport.browser import BrowserRenderer, RenderOptions
+from app.models.render_options import RenderOptions
+from app.transport.browser import BrowserRenderer
 from tests._assertions import install_to_thread_spy
 from tests._browser_doubles import BrowserFakePage, build_pinned_renderer
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY
