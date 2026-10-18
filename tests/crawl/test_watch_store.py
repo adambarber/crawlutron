@@ -6,7 +6,7 @@ call, so no test (and no production path) depends on wall time.
 
 import pytest
 
-from app.models.watch_outcome import WatchOutcome
+from app.vocabulary.taxonomy import CrawlClassification
 from tests._policy_factories import canonical
 
 NOW = 1_000_000.0
@@ -74,21 +74,21 @@ def test_record_check_moves_the_schedule(watch_store):
     # and is the one whose schedule move this test reads.
     watch_store.record_check(
         state.watch_id,
-        outcome=WatchOutcome.MODIFIED,
+        outcome=CrawlClassification.rendered,
         now=NOW,
         next_check_at=checked_at,
         etag="v1",
     )
     watch_store.record_check(
         state.watch_id,
-        outcome=WatchOutcome.NOT_MODIFIED,
+        outcome=CrawlClassification.not_modified,
         now=checked_at,
         next_check_at=checked_at + INTERVAL,
     )
 
     reloaded = watch_store.get(state.watch_id)
     assert reloaded.last_checked_at == checked_at
-    assert reloaded.last_outcome == WatchOutcome.NOT_MODIFIED
+    assert reloaded.last_outcome == CrawlClassification.not_modified
     assert reloaded.validators.etag == "v1"
     assert reloaded.next_check_at == checked_at + INTERVAL
     assert watch_store.due(checked_at) == []
@@ -101,14 +101,14 @@ def test_modified_outcome_moves_the_change_clock(watch_store):
 
     watch_store.record_check(
         state.watch_id,
-        outcome=WatchOutcome.MODIFIED,
+        outcome=CrawlClassification.rendered,
         now=first_seen,
         next_check_at=first_seen + INTERVAL,
     )
     later = first_seen + INTERVAL
     watch_store.record_check(
         state.watch_id,
-        outcome=WatchOutcome.NOT_MODIFIED,
+        outcome=CrawlClassification.not_modified,
         now=later,
         next_check_at=later + INTERVAL,
     )
@@ -123,7 +123,7 @@ def test_error_outcome_extends_the_failure_streak_and_success_resets_it(watch_st
     for attempt in range(2):
         watch_store.record_check(
             state.watch_id,
-            outcome=WatchOutcome.ERROR,
+            outcome=CrawlClassification.site_error,
             now=NOW + INTERVAL + attempt,
             next_check_at=NOW + 2 * INTERVAL,
         )
@@ -131,7 +131,7 @@ def test_error_outcome_extends_the_failure_streak_and_success_resets_it(watch_st
 
     watch_store.record_check(
         state.watch_id,
-        outcome=WatchOutcome.NOT_MODIFIED,
+        outcome=CrawlClassification.not_modified,
         now=NOW + 2 * INTERVAL,
         next_check_at=NOW + 3 * INTERVAL,
     )
@@ -143,14 +143,14 @@ def test_validator_replacement_is_wholesale(watch_store):
     state = register(watch_store)
     watch_store.record_check(
         state.watch_id,
-        outcome=WatchOutcome.MODIFIED,
+        outcome=CrawlClassification.rendered,
         now=NOW,
         next_check_at=NOW + INTERVAL,
         etag="v1",
     )
     watch_store.record_check(
         state.watch_id,
-        outcome=WatchOutcome.MODIFIED,
+        outcome=CrawlClassification.rendered,
         now=NOW + INTERVAL,
         next_check_at=NOW + 2 * INTERVAL,
     )

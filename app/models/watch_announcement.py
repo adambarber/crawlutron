@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import TypedDict
 
-from app.models.watch_outcome import WatchOutcome
+from app.vocabulary.taxonomy import CrawlClassification
 
 
 class WatchAnnouncement(TypedDict):
@@ -17,7 +17,7 @@ class WatchAnnouncement(TypedDict):
     watch_id: str
     url: str
     interval_seconds: int
-    outcome: WatchOutcome
+    outcome: CrawlClassification
     checked_at: float
 
 

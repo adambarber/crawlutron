@@ -9,10 +9,16 @@ import sqlite3
 from pathlib import Path
 
 from app.models.content_validators import ContentValidators
+from app.models.normalized_url import NormalizedUrl
+from app.models.watch_state import WatchState
+from app.models.watch_status import WatchStatus
 from app.storage.coordination_store import CoordinationStore, atwin
 from app.storage.ids import new_watch_id
 from app.storage.migrations import StoreSchema
-from app.storage.watch_surface import NormalizedUrl, WatchOutcome, WatchState, WatchStatus
+from app.vocabulary.taxonomy import (
+    CrawlClassification,
+    status_for_classification,
+)
 
 __all__ = ["WatchStore"]
 
@@ -144,27 +150,31 @@ class WatchStore(CoordinationStore):
         self,
         watch_id: str,
         *,
-        outcome: WatchOutcome,
+        outcome: CrawlClassification,
         now: float,
         next_check_at: float,
         etag: str | None = None,
         last_modified: str | None = None,
     ) -> None:
         """Persist a completed check's result and reschedule. ``etag``/``last_modified``
-        are stored only on a ``modified`` outcome; other verdicts keep the stored set.
+        are stored only on a delivered change; other verdicts keep the stored set.
+        The classification's status decides ``modified`` vs ``error`` directly.
         """
+        status = status_for_classification(outcome)
+        modified = status == "success" and outcome != CrawlClassification.not_modified
+        error = status != "success"
         with self._lock:
             self._conn.execute(
                 """
                 UPDATE watches SET
                     last_checked_at = ?,
                     last_outcome = ?,
-                    -- a modified check moves the change clock; nothing else does
-                    last_changed_at = CASE WHEN ? = 'modified' THEN ? ELSE last_changed_at END,
-                    -- an error extends the failure streak; any other outcome resets it
-                    consecutive_failures = CASE WHEN ? = 'error' THEN consecutive_failures + 1 ELSE 0 END,
+                    -- a delivered change moves the change clock; nothing else does
+                    last_changed_at = CASE WHEN ? THEN ? ELSE last_changed_at END,
+                    -- a failure check extends the streak; any other verdict resets it
+                    consecutive_failures = CASE WHEN ? THEN consecutive_failures + 1 ELSE 0 END,
                     -- a delivered body replaces the set outright; other verdicts keep it
-                    validators = CASE WHEN ? = 'modified' THEN ? ELSE validators END,
+                    validators = CASE WHEN ? THEN ? ELSE validators END,
                     next_check_at = ?,
                     updated_at = ?
                 WHERE watch_id = ?
@@ -172,13 +182,13 @@ class WatchStore(CoordinationStore):
                 (
                     now,
                     outcome,
-                    outcome,
+                    modified,
                     now,
-                    outcome,
-                    outcome,
+                    error,
+                    modified,
                     ContentValidators(
-                        etag=etag if outcome is WatchOutcome.MODIFIED else None,
-                        last_modified=(last_modified if outcome is WatchOutcome.MODIFIED else None),
+                        etag=etag if modified else None,
+                        last_modified=(last_modified if modified else None),
                     ).model_dump_json(exclude_none=True),
                     next_check_at,
                     now,
@@ -202,7 +212,7 @@ class WatchStore(CoordinationStore):
                     updated_at = ?
                 WHERE watch_id = ?
                 """,
-                (WatchStatus.DEACTIVATED, WatchOutcome.ERROR, next_check_at, now, watch_id),
+                (WatchStatus.DEACTIVATED, CrawlClassification.site_error, next_check_at, now, watch_id),
             )
             self._conn.commit()
 
@@ -234,7 +244,7 @@ def _row_to_state(row: sqlite3.Row) -> WatchState:
         validators=ContentValidators.model_validate_json(row["validators"]),
         next_check_at=row["next_check_at"],
         last_checked_at=row["last_checked_at"],
-        last_outcome=WatchOutcome(row["last_outcome"]) if row["last_outcome"] else None,
+        last_outcome=CrawlClassification(row["last_outcome"]) if row["last_outcome"] else None,
         last_changed_at=row["last_changed_at"],
         consecutive_failures=row["consecutive_failures"],
         created_at=row["created_at"],

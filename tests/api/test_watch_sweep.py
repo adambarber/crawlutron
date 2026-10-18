@@ -11,10 +11,13 @@ import pytest
 from app.api import watch_sweep
 from app.api.watch_sweep import WatchSweeper, sweep_watches_forever
 from app.config.settings import CrawlerSettings
+from app.models.normalized_url import NormalizedUrl
+from app.models.watch_state import WatchState
+from app.models.watch_status import WatchStatus
 from app.storage.caller_key_store import CallerKeyStore
+from app.vocabulary.taxonomy import CrawlClassification
 from tests._assertions import block_private_targets
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY, canonical
-from tests._surface import NormalizedUrl, WatchOutcome, WatchState, WatchStatus
 from tests.helpers.server import EtagHandler
 
 NOW = 1_700_000_000.0
@@ -91,7 +94,7 @@ async def test_a_first_check_records_what_the_origin_returned_and_announces_it(
 
     outcomes = await sweeper.sweep_once(now=NOW)
 
-    assert outcomes == [WatchOutcome.MODIFIED]
+    assert outcomes == [CrawlClassification.rendered]
     reloaded = watch_store.get(watch.watch_id)
     assert reloaded.validators.etag == EtagHandler.etag
     assert reloaded.last_changed_at == NOW
@@ -100,7 +103,7 @@ async def test_a_first_check_records_what_the_origin_returned_and_announces_it(
     delivered_url, payload = announced[0]
     assert delivered_url == WEBHOOK
     assert payload["watch_id"] == watch.watch_id
-    assert payload["outcome"] == WatchOutcome.MODIFIED
+    assert payload["outcome"] == CrawlClassification.rendered
 
 
 async def test_an_unchanged_origin_is_revalidated_conditionally_and_announces_nothing(
@@ -112,7 +115,7 @@ async def test_an_unchanged_origin_is_revalidated_conditionally_and_announces_no
 
     # A 304 is the whole point of the validators: the check cost a request and no body, and nothing downstream
     # heard about it.
-    assert outcomes == [WatchOutcome.NOT_MODIFIED]
+    assert outcomes == [CrawlClassification.not_modified]
     reloaded = watch_store.get(watch.watch_id)
     assert reloaded.validators.etag == EtagHandler.etag
     assert reloaded.consecutive_failures == 0
@@ -128,7 +131,7 @@ async def test_a_changed_origin_is_announced_again_with_the_new_validators(
 
     outcomes = await sweeper.sweep_once(now=NOW + INTERVAL)
 
-    assert outcomes == [WatchOutcome.MODIFIED]
+    assert outcomes == [CrawlClassification.rendered]
     assert watch_store.get(watch.watch_id).validators.etag == "v2"
     assert len(announced) == 1
     assert announced[0][1]["url"] == watch.url
@@ -141,7 +144,7 @@ async def test_a_poll_only_watch_is_checked_and_announces_to_nobody(
 
     outcomes = await sweeper.sweep_once(now=NOW)
 
-    assert outcomes == [WatchOutcome.MODIFIED]
+    assert outcomes == [CrawlClassification.rendered]
     assert announced == []
 
 
@@ -150,7 +153,7 @@ async def test_a_failed_check_keeps_what_it_knew_and_announces_nothing(sweeper, 
     watch = register(watch_store, canonical(DEAD_ORIGIN))
     watch_store.record_check(
         watch.watch_id,
-        outcome=WatchOutcome.MODIFIED,
+        outcome=CrawlClassification.rendered,
         now=0.0,
         next_check_at=INTERVAL,
         etag='"v1"',
@@ -158,7 +161,7 @@ async def test_a_failed_check_keeps_what_it_knew_and_announces_nothing(sweeper, 
 
     outcomes = await sweeper.sweep_once(now=INTERVAL)
 
-    assert outcomes == [WatchOutcome.ERROR]
+    assert outcomes == [CrawlClassification.robots_disallowed]
     reloaded = watch_store.get(watch.watch_id)
     assert reloaded.validators.etag == '"v1"'
     assert reloaded.consecutive_failures == 1
@@ -174,7 +177,7 @@ async def test_a_watch_the_live_policy_no_longer_admits_fails_its_check(
     block_private_targets(monkeypatch)
     outcomes = await sweeper.sweep_once(now=NOW)
 
-    assert outcomes == [WatchOutcome.ERROR]
+    assert outcomes == [CrawlClassification.unknown_error]
     assert watch_store.get(watch.watch_id).consecutive_failures == 1
     assert announced == []
 
@@ -269,7 +272,7 @@ async def test_a_raising_watch_does_not_starve_a_co_scheduled_watch(sweeper, wat
     # Both due watches were reached -- the raising one did not cut the pass short.
     assert set(calls) == {blocking.url, healthy.url}
     # The isolated failure is recorded as an error; the survivor is rescheduled.
-    assert WatchOutcome.ERROR in outcomes
+    assert CrawlClassification.unknown_error in outcomes
     blocked_after = watch_store.get(blocking.watch_id)
     assert blocked_after.consecutive_failures == 1
     # The isolated failure was rescheduled to its next natural check, not hot-looped.
@@ -297,7 +300,7 @@ async def test_a_revoked_owner_watch_is_deactivated_by_the_sweep(watch_store, tm
 
     outcomes = await sweeper.sweep_once(now=NOW)
 
-    assert WatchOutcome.ERROR in outcomes
+    assert CrawlClassification.site_error in outcomes
     revoked = watch_store.get(owned.watch_id)
     assert revoked.status is WatchStatus.DEACTIVATED
     # The anonymous watch has no key to revoke: it was checked just like before.

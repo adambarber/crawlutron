@@ -206,7 +206,6 @@ graph LR
     api_watch_sweep --> models_host_policy
     api_watch_sweep --> models_normalized_url
     api_watch_sweep --> models_watch_announcement
-    api_watch_sweep --> models_watch_outcome
     api_watch_sweep --> models_watch_state
     api_watch_sweep --> storage_watch_store
     api_watch_sweep --> vocabulary_strategies
@@ -380,11 +379,10 @@ graph LR
     models_unified_crawl_result --> models_page_metadata_response
     models_unified_crawl_result --> models_strategy_attempt
     models_unified_crawl_result --> vocabulary_taxonomy
-    models_watch_announcement --> models_watch_outcome
+    models_watch_announcement --> vocabulary_taxonomy
     models_watch_create_request --> models_watch_state
     models_watch_list_response --> models_watch_state
     models_watch_state --> models_content_validators
-    models_watch_state --> models_watch_outcome
     models_watch_state --> models_watch_status
     orchestration_classification --> models_browser_pool_exhausted
     orchestration_classification --> models_taxonomy
@@ -566,10 +564,10 @@ graph LR
     storage_sqlite_store --> storage_migrations_manifest
     storage_watch_store --> models_content_validators
     storage_watch_store --> models_normalized_url
-    storage_watch_store --> models_watch_outcome
     storage_watch_store --> models_watch_state
     storage_watch_store --> models_watch_status
     storage_watch_store --> storage_coordination_store
+    storage_watch_store --> vocabulary_taxonomy
     storage_watch_store --> storage_ids
     transport_browser --> config_env
     transport_browser --> config_settings

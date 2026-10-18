@@ -20,11 +20,10 @@ from app.models.crawl_request import CrawlRequest
 from app.models.fetch_validators import FetchValidators
 from app.models.host_policy import HostPolicy
 from app.models.watch_announcement import WatchAnnouncement
-from app.models.watch_outcome import WatchOutcome
 from app.models.watch_state import WatchState
 from app.storage.watch_store import WatchStore
 from app.vocabulary.strategies import HTTP_DECLARED_CRAWLER
-from app.vocabulary.taxonomy import CrawlClassification
+from app.vocabulary.taxonomy import CrawlClassification, status_for_classification
 
 logger = logging.getLogger(__name__)
 
@@ -51,7 +50,7 @@ def _check_policy(owner: str = "") -> CrawlPolicy:
     return CrawlPolicy.model_validate(policy)
 
 
-def _announcement(watch: WatchState, *, outcome: WatchOutcome, checked_at: float) -> WatchAnnouncement:
+def _announcement(watch: WatchState, *, outcome: CrawlClassification, checked_at: float) -> WatchAnnouncement:
     """This watch's notification for one pass."""
     return {
         "watch_id": watch.watch_id,
@@ -83,12 +82,12 @@ class WatchSweeper:
         self._shutdown_event = shutdown_event
         self._key_store = key_store
 
-    async def sweep_once(self, now: float) -> list[WatchOutcome]:
+    async def sweep_once(self, now: float) -> list[CrawlClassification]:
         """Recheck every watch due at ``now``; one conclusion per due watch, in
         registry order. A raising watch is isolated per-watch so it cannot starve
         the watches sorted after it in the due list (#228).
         """
-        outcomes: list[WatchOutcome] = []
+        outcomes: list[CrawlClassification] = []
         for watch in await self._store.adue(now):
             revoked = (
                 self._key_store is not None
@@ -105,7 +104,7 @@ class WatchSweeper:
                 await self._store.adeactivate(
                     watch.watch_id, now=now, next_check_at=now + watch.interval_seconds
                 )
-                outcomes.append(WatchOutcome.ERROR)
+                outcomes.append(CrawlClassification.site_error)
                 continue
             try:
                 outcome = await self._check(watch, now=now)
@@ -119,39 +118,45 @@ class WatchSweeper:
                 try:
                     await self._store.arecord_check(
                         watch.watch_id,
-                        outcome=WatchOutcome.ERROR,
+                        outcome=CrawlClassification.unknown_error,
                         now=now,
                         next_check_at=now + watch.interval_seconds,
                     )
                 except Exception:
                     logger.exception("watch_check_record_failed", extra={"watch_id": watch.watch_id})
-                outcomes.append(WatchOutcome.ERROR)
+                outcomes.append(CrawlClassification.unknown_error)
             else:
                 outcomes.append(outcome)
         return outcomes
 
-    async def _check(self, watch: WatchState, *, now: float) -> WatchOutcome:
-        outcome, etag, last_modified = await self._revalidate(watch)
+    async def _check(self, watch: WatchState, *, now: float) -> CrawlClassification:
+        classification, etag, last_modified = await self._revalidate(watch)
         await self._store.arecord_check(
             watch.watch_id,
-            outcome=outcome,
+            outcome=classification,
             now=now,
             next_check_at=now + watch.interval_seconds,
             etag=etag,
             last_modified=last_modified,
         )
-        if outcome is WatchOutcome.MODIFIED and watch.webhook_url:
+        # A delivered change is what a webhook exists to say: any success-status
+        # classification except "not_modified" (a 304 that proved freshness).
+        if (
+            status_for_classification(classification) == "success"
+            and classification != CrawlClassification.not_modified
+            and watch.webhook_url
+        ):
             await post_webhook(
                 watch.webhook_url,
-                _announcement(watch, outcome=outcome, checked_at=now),
+                _announcement(watch, outcome=classification, checked_at=now),
                 host_policy=self._host_policy,
             )
-        return outcome
+        return classification
 
-    async def _revalidate(self, watch: WatchState) -> tuple[WatchOutcome, str | None, str | None]:
+    async def _revalidate(self, watch: WatchState) -> tuple[CrawlClassification, str | None, str | None]:
         """One conditional check: stored validators in, the row's new ones out.
         A ``304``/failure keeps the stored set; a delivered body returns the
-        origin's new etag. ``execute_crawl`` re-admits and resolves policy.
+        origin's etag. The classification is read off the result directly.
         """
         validators: dict[str, FetchValidators] = {}
         if watch.validators.etag or watch.validators.last_modified:
@@ -172,14 +177,12 @@ class WatchSweeper:
         )
         if not envelope["results"]:
             logger.warning("watch_check_produced_no_result", extra={"watch_id": watch.watch_id})
-            return WatchOutcome.ERROR, None, None
+            return CrawlClassification.unknown_error, None, None
         result = envelope["results"][0]
-        if result.classification == CrawlClassification.not_modified:
-            return WatchOutcome.NOT_MODIFIED, None, None
-        if result.status != "success":
-            return WatchOutcome.ERROR, None, None
+        # The result classification IS the outcome, read directly: not_modified,
+        # a success classification for a delivered 200, or an error for failure.
         return (
-            WatchOutcome.MODIFIED,
+            CrawlClassification(result.classification),
             result.validators.get("etag"),
             result.validators.get("last_modified"),
         )

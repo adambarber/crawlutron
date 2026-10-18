@@ -7,8 +7,8 @@ from typing import Annotated
 from pydantic import BaseModel, Field
 
 from app.models.content_validators import ContentValidators
-from app.models.watch_outcome import WatchOutcome
 from app.models.watch_status import WatchStatus
+from app.vocabulary.taxonomy import CrawlClassification
 
 IntervalSeconds = Annotated[
     int,
@@ -40,7 +40,7 @@ class WatchState(BaseModel):
     validators: ContentValidators = Field(default_factory=ContentValidators)
     next_check_at: float = Field(description="Epoch time of the next scheduled check.")
     last_checked_at: float | None = None
-    last_outcome: WatchOutcome | None = None
+    last_outcome: CrawlClassification | None = None
     last_changed_at: float | None = None
     consecutive_failures: Annotated[int, Field(ge=0)] = 0
     created_at: float

@@ -6,7 +6,7 @@ reports was written by the sweep, so tests write via the store, read via the API
 import pytest
 from httpx import Response
 
-from app.models.watch_outcome import WatchOutcome
+from app.vocabulary.taxonomy import CrawlClassification
 from tests._assertions import block_private_targets
 from tests._policy_factories import canonical
 from tests._watch_harnesses import watch_client
@@ -94,14 +94,14 @@ async def test_status_reports_what_the_sweep_recorded(watch_store):
     # A prior successful fetch established the etag; the revalidation below kept it.
     watch_store.record_check(
         registered.watch_id,
-        outcome=WatchOutcome.MODIFIED,
+        outcome=CrawlClassification.rendered,
         now=1_500.0,
         next_check_at=2_000.0,
         etag='"v1"',
     )
     watch_store.record_check(
         registered.watch_id,
-        outcome=WatchOutcome.NOT_MODIFIED,
+        outcome=CrawlClassification.not_modified,
         now=2_000.0,
         next_check_at=3_000.0,
     )
