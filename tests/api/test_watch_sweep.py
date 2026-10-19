@@ -149,8 +149,12 @@ async def test_a_poll_only_watch_is_checked_and_announces_to_nobody(
     assert announced == []
 
 
-async def test_a_failed_check_keeps_what_it_knew_and_announces_nothing(sweeper, watch_store, announced):
-    """A check that reached no verdict is a failure, not a change."""
+async def test_a_failed_check_keeps_what_it_knew_and_announces_nothing(
+    sweeper, watch_store, announced, monkeypatch
+):
+    """A check that reached no verdict is a failure, not a change: the stored
+    validators survive and the streak grows, but it is not announced and is not
+    deactivated (that is for a terminal robots-txt refusal, #335)."""
     watch = register(watch_store, canonical(DEAD_ORIGIN))
     watch_store.record_check(
         watch.watch_id,
@@ -160,12 +164,14 @@ async def test_a_failed_check_keeps_what_it_knew_and_announces_nothing(sweeper, 
         etag='"v1"',
     )
 
+    block_private_targets(monkeypatch)
     outcomes = await sweeper.sweep_once(now=INTERVAL)
 
-    assert outcomes == [CrawlClassification.robots_disallowed]
+    assert outcomes == [CrawlClassification.unknown_error]
     reloaded = watch_store.get(watch.watch_id)
     assert reloaded.validators.etag == '"v1"'
     assert reloaded.consecutive_failures == 1
+    assert reloaded.status is WatchStatus.ACTIVE
     assert announced == []
 
 
@@ -190,9 +196,14 @@ async def test_a_pass_with_nothing_due_checks_nothing(sweeper, watch_store, etag
     assert announced == []
 
 
-async def test_the_sweep_loop_passes_on_the_injected_clock_and_stops_on_the_event(watch_store, announced):
-    """The loop ends when the deployment is told to, not when a timer happens to expire."""
+async def test_the_sweep_loop_passes_on_the_injected_clock_and_stops_on_the_event(
+    watch_store, announced, monkeypatch
+):
+    """The loop ends when the deployment is told to, not when a timer happens to expire.
+    The watch fails transiently (not a terminal robots refusal) so the streak drives
+    the injected clock to the stop event (#335)."""
     watch = register(watch_store, canonical(DEAD_ORIGIN))
+    block_private_targets(monkeypatch)
     stop = asyncio.Event()
 
     def clock() -> float:
@@ -280,9 +291,10 @@ async def test_a_raising_watch_does_not_starve_a_co_scheduled_watch(sweeper, wat
     assert blocked_after.next_check_at == NOW + INTERVAL
 
 
-async def test_a_revoked_owner_watch_is_deactivated_by_the_sweep(watch_store, tmp_path):
-    """A watch whose owner key is gone stops issuing checks: the sweep deactivates it
-    rather than running it under a dead identity forever (#207)."""
+async def test_a_revoked_owner_watch_is_deactivated_by_the_sweep(watch_store, tmp_path, monkeypatch):
+    """A watch whose owner key is gone stops issuing checks: the sweep deactivates
+    it rather than running it under a dead identity forever (#207). The anonymous
+    watch keeps checking and fails transiently, so it stays active (#335)."""
     keys = CallerKeyStore(tmp_path / "keys.db")
     secret = keys.issue_key("alice").secret
     record = keys.verify_key(secret)
@@ -291,6 +303,7 @@ async def test_a_revoked_owner_watch_is_deactivated_by_the_sweep(watch_store, tm
     # The anonymous watch, by contrast, has no key to revoke and keeps checking.
     anonymous = register(watch_store, canonical(DEAD_ORIGIN))
     keys.revoke_key(record.key_id)
+    block_private_targets(monkeypatch)
 
     sweeper = WatchSweeper(
         watch_store,
@@ -361,3 +374,17 @@ async def test_a_owner_watch_check_releases_the_slot_after_a_check(watch_store, 
 
     # A check that completed released its owner slot rather than leaking it.
     assert tracker.sync_in_flight(record.key_id) == 0
+
+
+async def test_a_robots_disallowed_watch_is_deactivated(sweeper, watch_store, announced):
+    """A target robots txt now refuses is a terminal watch outcome: the sweep
+    deactivates the watch instead of growing its failure streak forever (#335)."""
+    watch = register(watch_store, canonical(DEAD_ORIGIN))
+
+    outcomes = await sweeper.sweep_once(now=NOW)
+
+    assert outcomes == [CrawlClassification.robots_disallowed]
+    reloaded = watch_store.get(watch.watch_id)
+    assert reloaded.status is WatchStatus.DEACTIVATED
+    # A deactivated watch is no longer swept: it is not due next interval.
+    assert watch_store.due(NOW + INTERVAL) == []

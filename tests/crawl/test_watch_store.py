@@ -138,6 +138,21 @@ def test_error_outcome_extends_the_failure_streak_and_success_resets_it(watch_st
     assert watch_store.get(state.watch_id).consecutive_failures == 0
 
 
+def test_a_skipped_check_is_not_a_failure(watch_store):
+    """A robots-txt refusal is a deliberate non-attempt, not an error: it must not
+    grow the failure streak, so a persistent refusal cannot climb monotonically
+    without a deactivation path (#335)."""
+    state = register(watch_store)
+    watch_store.record_check(
+        state.watch_id,
+        outcome=CrawlClassification.robots_disallowed,
+        now=NOW,
+        next_check_at=NOW + INTERVAL,
+    )
+
+    assert watch_store.get(state.watch_id).consecutive_failures == 0
+
+
 def test_validator_replacement_is_wholesale(watch_store):
     """A 200 whose origin dropped the ETag clears it; no merge resurrects it."""
     state = register(watch_store)

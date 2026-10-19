@@ -158,11 +158,11 @@ class WatchStore(CoordinationStore):
     ) -> None:
         """Persist a completed check's result and reschedule. ``etag``/``last_modified``
         are stored only on a delivered change; other verdicts keep the stored set.
-        The classification's status decides ``modified`` vs ``error`` directly.
+        A ``skipped`` (robots refusal) is a non-attempt, not an error (#335).
         """
         status = status_for_classification(outcome)
         modified = status == "success" and outcome != CrawlClassification.not_modified
-        error = status != "success"
+        error = status not in ("success", "skipped")
         with self._lock:
             self._conn.execute(
                 """
