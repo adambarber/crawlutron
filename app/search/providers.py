@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from typing import Any, Protocol
 from urllib.parse import parse_qs, unquote, urlsplit
 
+import httpx
 from lxml import html as lxml_html
 
 from app.models.normalized_url import admit_or_none
@@ -83,21 +84,28 @@ async def provider_http(
     """
     client = get_async_http_client()
     timeout = Timeouts.for_request(timeout_seconds).as_httpx()
-    async with client.stream(
-        method,
-        url,
-        params=params,
-        json=json_body,
-        data=data,
-        headers=headers,
-        timeout=timeout,
-    ) as response:
-        try:
-            raw = await read_capped_async(response.aiter_bytes(), _SEARCH_RESPONSE_MAX_BYTES)
-        except BodyTooLarge as error:
-            raise SearchProviderError(f"provider body exceeded {_SEARCH_RESPONSE_MAX_BYTES} bytes") from error
-        text = raw.decode(response.encoding or "utf-8", errors="replace")
-        return response.status_code, text
+    try:
+        async with client.stream(
+            method,
+            url,
+            params=params,
+            json=json_body,
+            data=data,
+            headers=headers,
+            timeout=timeout,
+        ) as response:
+            try:
+                raw = await read_capped_async(response.aiter_bytes(), _SEARCH_RESPONSE_MAX_BYTES)
+            except BodyTooLarge as error:
+                raise SearchProviderError(
+                    f"provider body exceeded {_SEARCH_RESPONSE_MAX_BYTES} bytes"
+                ) from error
+            text = raw.decode(response.encoding or "utf-8", errors="replace")
+            return response.status_code, text
+    except httpx.TransportError as error:
+        # A refused connection, DNS failure, or read timeout is a provider
+        # fault, not a transport hole: shape it into the error envelope.
+        raise SearchProviderError(f"provider request failed: {error}") from error
 
 
 def _clip(text: str) -> str:

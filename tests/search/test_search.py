@@ -333,6 +333,28 @@ class TestSearchEndpoint:
         assert resp.status_code == 502
         assert resp.json()["code"] == "search_provider_error"
 
+    async def test_search_provider_network_failure_returns_error_envelope(
+        self, async_client, override_settings, monkeypatch
+    ):
+        # A refused connection / DNS / read-timeout fault on the provider must
+        # stay inside the declared envelope, not escape as a bare 500.
+        import httpx
+
+        import app.search.providers as providers_mod
+
+        override_settings(search_provider="tavily", tavily_api_key="k")
+
+        class _ConnRefused:
+            def stream(self, *args, **kwargs):
+                raise httpx.ConnectError("connection refused", request=None)
+
+        monkeypatch.setattr(providers_mod, "get_async_http_client", lambda: _ConnRefused())
+        resp = await async_client.post("/v1/search", json={"query": "x"})
+        assert resp.status_code == 502
+        body = resp.json()
+        assert body["code"] == "search_provider_error"
+        assert set(body) == {"code", "message", "details"}
+
     async def test_search_missing_query_is_rejected(self, async_client, override_settings):
         resp = await async_client.post("/v1/search", json={})
         assert resp.status_code == 422
