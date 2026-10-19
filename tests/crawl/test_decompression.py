@@ -354,6 +354,30 @@ def test_brotli_streaming_clamps_accumulated_output(monkeypatch):
     assert len(decoded) <= cap + 1
 
 
+def test_the_brotli_cap_bounds_allocation_not_just_the_result():
+    # Red for the OOM-class: the old clamp ran after process() materialised a slice's whole expansion, so a
+    # single-slice bomb peaked O(expansion); with a size bound per call it must peak O(cap).
+    import tracemalloc
+
+    # On-wire body far under the 16KB step so one process() call sees the entire expansion.
+    bomb = brotli.compress(b"Z" * 8_000_000)
+    assert len(bomb) < 16_384
+    cap = 1_000_000
+    tracemalloc.start()
+    tracemalloc.reset_peak()
+    try:
+        decompress_body(bomb, "br", max_output_bytes=cap)
+    except DecompressionTooLargeError:
+        pass
+    else:
+        raise AssertionError("bomb did not trip the cap")
+    _, peak = tracemalloc.get_traced_memory()
+    tracemalloc.stop()
+    # process() sizes its internal buffer up to ~cap and extends into the accumulating
+    # bytearray, so ~2x cap is reached; any expansion-following path peaks far higher.
+    assert peak <= cap * 2 + 65_536, f"peak {peak} exceeds 2x cap (+64KiB)"
+
+
 def test_brotli_refuses_uncapped_fallback(monkeypatch):
     # Without a bounded decoder the old span fell to an uncapped brotli.decompress; refuse instead.
 
