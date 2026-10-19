@@ -136,9 +136,11 @@ class JobStore:
 
     def _persist(self, job: CrawlJobState) -> None:
         """Write job state to SQLite. Caller must hold ``self._lock``.
-        No normalization pass: identity is established at ingress, and the read
-        boundary re-derives it once per load, not per URL per save.
+        No normalization pass: identity is established at ingress. A tombstoned
+        (deleted) job is a no-op here, so a late ``save`` cannot resurrect it.
         """
+        if self._is_tombstoned(job.job_id):
+            return
         job.updated_at = time.time()
         self._conn.execute(_UPSERT_JOB_ROW_SQL, _job_row_params(job))
         self._accumulators.append(job)
@@ -186,14 +188,14 @@ class JobStore:
                 row = self._conn.execute(
                     "SELECT job_id, kind, owner, root_url, policy, status, frontier, "
                     "created_at, updated_at, error, stats, in_flight, transient_retries "
-                    "FROM crawl_jobs WHERE job_id = ?",
+                    "FROM crawl_jobs WHERE job_id = ? AND deleted_at IS NULL",
                     (job_id,),
                 ).fetchone()
             else:
                 row = self._conn.execute(
                     "SELECT job_id, kind, owner, root_url, policy, status, frontier, "
                     "created_at, updated_at, error, stats, in_flight, transient_retries "
-                    "FROM crawl_jobs WHERE job_id = ? AND owner = ?",
+                    "FROM crawl_jobs WHERE job_id = ? AND owner = ? AND deleted_at IS NULL",
                     (job_id, owner),
                 ).fetchone()
             if row is None:
@@ -213,30 +215,41 @@ class JobStore:
         return self._read_row(job_id, with_accumulators=True, owner=caller_id)
 
     def delete(self, job_id: str) -> bool:
-        """Delete job from SQLite. Returns True if it existed.
-        The page history and visited set go with it -- child tables -- so deleting
-        only the row would orphan a job's entire crawl.
+        """Tombstone (hide) a job so DELETE is final: a late runner ``save`` cannot
+        resurrect it. Returns True iff a live row matched. The page history and
+        visited set go with the tombstone -- child tables of the deleted row.
         """
+        return self._tombstone_row(
+            job_id,
+            "UPDATE crawl_jobs SET deleted_at = ?, updated_at = ? WHERE job_id = ? AND deleted_at IS NULL",
+            (job_id,),
+        )
+
+    def delete_for_caller(self, job_id: str, caller_id: str) -> bool:
+        """Tombstone iff ``caller_id`` owns a live row; a foreign id marks nothing."""
+        return self._tombstone_row(
+            job_id,
+            "UPDATE crawl_jobs SET deleted_at = ?, updated_at = ? "
+            "WHERE job_id = ? AND owner = ? AND deleted_at IS NULL",
+            (job_id, caller_id),
+        )
+
+    def _tombstone_row(self, job_id: str, statement: str, params: tuple[object, ...]) -> bool:
+        """Mark a live row deleted under the lock, or False for a non-match."""
         with self._lock:
+            if self._is_tombstoned(job_id):
+                return False
             self._accumulators.delete(job_id)
-            cur = self._conn.execute("DELETE FROM crawl_jobs WHERE job_id = ?", (job_id,))
+            cur = self._conn.execute(statement, (time.time(), time.time(), *params))
             self._conn.commit()
         return cur.rowcount > 0
 
-    def delete_for_caller(self, job_id: str, caller_id: str) -> bool:
-        """Delete iff ``caller_id`` owns the row; a foreign id deletes nothing."""
-        with self._lock:
-            row = self._conn.execute(
-                "SELECT 1 FROM crawl_jobs WHERE job_id = ? AND owner = ?", (job_id, caller_id)
-            ).fetchone()
-            if row is None:
-                return False
-            self._accumulators.delete(job_id)
-            cur = self._conn.execute(
-                "DELETE FROM crawl_jobs WHERE job_id = ? AND owner = ?", (job_id, caller_id)
-            )
-            self._conn.commit()
-        return cur.rowcount > 0
+    def _is_tombstoned(self, job_id: str) -> bool:
+        """Whether a row exists marked deleted. Caller must hold ``self._lock``."""
+        row = self._conn.execute(
+            "SELECT 1 FROM crawl_jobs WHERE job_id = ? AND deleted_at IS NOT NULL", (job_id,)
+        ).fetchone()
+        return row is not None
 
     def list_jobs(self) -> list[JobStatusView]:
         """Every job's status view, newest first."""
@@ -251,10 +264,14 @@ class JobStore:
         with self._lock:
             counts = self._accumulators.counts_by_job()
             if owner is None:
-                rows = self._conn.execute(_JOB_STATUS_PROJECTION + " ORDER BY created_at DESC").fetchall()
+                rows = self._conn.execute(
+                    _JOB_STATUS_PROJECTION + " WHERE deleted_at IS NULL ORDER BY created_at DESC"
+                ).fetchall()
             else:
                 rows = self._conn.execute(
-                    _JOB_STATUS_PROJECTION + " WHERE owner = ? ORDER BY created_at DESC", (owner,)
+                    _JOB_STATUS_PROJECTION
+                    + " WHERE owner = ? AND deleted_at IS NULL ORDER BY created_at DESC",
+                    (owner,),
                 ).fetchall()
         return [_status_row(r, *counts.get(r["job_id"], (0, 0))) for r in rows]
 
@@ -273,10 +290,13 @@ class JobStore:
         """One job's status view, or None when no row matches the owner filter."""
         with self._lock:
             if owner is None:
-                row = self._conn.execute(_JOB_STATUS_PROJECTION + " WHERE job_id = ?", (job_id,)).fetchone()
+                row = self._conn.execute(
+                    _JOB_STATUS_PROJECTION + " WHERE job_id = ? AND deleted_at IS NULL", (job_id,)
+                ).fetchone()
             else:
                 row = self._conn.execute(
-                    _JOB_STATUS_PROJECTION + " WHERE job_id = ? AND owner = ?", (job_id, owner)
+                    _JOB_STATUS_PROJECTION + " WHERE job_id = ? AND owner = ? AND deleted_at IS NULL",
+                    (job_id, owner),
                 ).fetchone()
             if row is None:
                 return None
@@ -299,7 +319,7 @@ class JobStore:
         """Owned jobs still holding a runner slot: pending or running, never terminal."""
         with self._lock:
             row = self._conn.execute(
-                "SELECT count(*) FROM crawl_jobs WHERE owner = ? AND status IN (?, ?)",
+                "SELECT count(*) FROM crawl_jobs WHERE owner = ? AND status IN (?, ?) AND deleted_at IS NULL",
                 (caller_id, JobStatus.PENDING.value, JobStatus.RUNNING.value),
             ).fetchone()
         return int(row[0])
@@ -308,10 +328,13 @@ class JobStore:
         """Whether a row matches, filtered to ``owner`` when one is given."""
         with self._lock:
             if owner is None:
-                row = self._conn.execute("SELECT 1 FROM crawl_jobs WHERE job_id = ?", (job_id,)).fetchone()
+                row = self._conn.execute(
+                    "SELECT 1 FROM crawl_jobs WHERE job_id = ? AND deleted_at IS NULL", (job_id,)
+                ).fetchone()
             else:
                 row = self._conn.execute(
-                    "SELECT 1 FROM crawl_jobs WHERE job_id = ? AND owner = ?", (job_id, owner)
+                    "SELECT 1 FROM crawl_jobs WHERE job_id = ? AND owner = ? AND deleted_at IS NULL",
+                    (job_id, owner),
                 ).fetchone()
         return row is not None
 

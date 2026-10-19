@@ -7,6 +7,7 @@ mid-batch pause/cancel; ``save()`` never touches status (atomic CAS only).
 import ast
 import asyncio
 
+from app.models.crawl_policy import CrawlPolicy
 from app.storage.job_store import CrawlJobState, JobStatus, JobStore
 from tests._job_harnesses import frontier, loaded_job, make_job_store, run_to_terminal
 from tests._policy_factories import canonical
@@ -78,6 +79,40 @@ class TestStatusPlane:
 
         settled = await asyncio.wait_for(run_to_terminal(store, "j1"), timeout=5)
         assert settled.status is JobStatus.CANCELLED
+
+
+class TestDeleteFinality:
+    """DELETE is final: a late runner save must not resurrect the row, and restart
+    recovery must not resume a deleted job."""
+
+    @staticmethod
+    async def _deleted_job(tmp_path):
+        """A store whose job was deleted but then late-saved by its runner."""
+        store = _store(tmp_path)
+        job = store.create("http://example.com/", CrawlPolicy(), owner="key-a")
+        assert await store.adelete_for_caller(job.job_id, "key-a") is True
+        # A runner's final asave lands after the delete committed (delete cancels
+        # the task without awaiting it, so the save can win the race).
+        await store.asave(job)
+        return store, job
+
+    async def test_a_late_save_cannot_resurrect_a_deleted_job(self, tmp_path):
+        """The store's delete is a tombstone: a racing asave stays a no-op."""
+        store, job = await self._deleted_job(tmp_path)
+
+        assert store.load(job.job_id) is None, "a late save resurrected a deleted job"
+        assert store.exists(job.job_id) is False
+        assert store.list_for_caller("key-a") == []
+        assert store.list_jobs() == []
+
+    async def test_restart_recovery_does_not_resume_a_deleted_job(self, tmp_path):
+        """A deleted job's resurrected PENDING row must not be re-started on boot."""
+        from app.api.job_recovery import recover_orphaned_running_jobs
+
+        store, job = await self._deleted_job(tmp_path)
+        rewound = await recover_orphaned_running_jobs(store)
+        assert rewound == 0, "recovery resurrected a deleted job row"
+        assert store.load(job.job_id) is None, "the deleted job came back from the dead"
 
 
 def _status_assignment_offenders() -> list[str]:

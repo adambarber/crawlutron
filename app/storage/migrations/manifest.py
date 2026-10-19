@@ -64,6 +64,8 @@ CRAWL_JOBS_SCHEMA = TableSchema(
         ColumnSchema("error", "TEXT", False, None),
         ColumnSchema("stats", "TEXT", True, "'{}'"),
         ColumnSchema("owner", "TEXT", True, "''"),
+        # Deleted-at tombstone: a timestamp hides the row and a late save no-ops.
+        ColumnSchema("deleted_at", "REAL", False, None),
     ),
 )
 
@@ -204,6 +206,7 @@ MIGRATION_SEQUENCES = {
         "0002_crawl_jobs_drop_canonicalized",
         "0003_crawl_jobs_split_accumulators",
         "0004_crawl_jobs_add_owner",
+        "0005_crawl_jobs_add_deleted_at",
     ),
     StoreSchema.RESULTS: ("0001_results_initial", "0002_results_add_owner"),
     StoreSchema.COORDINATION_COUNTERS: ("0001_coordination_counters_initial",),
