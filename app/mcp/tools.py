@@ -41,7 +41,7 @@ Handler = Callable[..., Awaitable["ToolResult"]]
 
 #: The request fields the crawl tool advertises *and* rejects from one list, so
 #: the schema cannot offer a field the handler then refuses.
-_UNSUPPORTED_CRAWL_FIELDS = frozenset({"async_mode", "webhook_url"})
+_UNSUPPORTED_CRAWL_FIELDS = frozenset({"async_mode", "webhook_url", "output_format"})
 
 
 @dataclass(frozen=True)
@@ -133,15 +133,18 @@ async def _crawled(payload: CrawlRequest, settings, shutdown_event):
 
 
 def _delivery_refusal(payload: CrawlRequest) -> ToolResult | None:
-    """The one refusal both crawl tools make: delivery is a REST concern.
+    """The one refusal both crawl tools make: delivery/format is REST-only.
 
-    Shared so the message cannot differ between the two tools an agent chooses
-    between, and so a field added to that set is refused by both.
+    Keyed on the effective VALUE, not field presence: an explicit no-op
+    (async_mode=false, webhook_url=null, output_format=null) is accepted.
     """
-    if _UNSUPPORTED_CRAWL_FIELDS & payload.model_fields_set:
+    meaningful = [
+        field for field in _UNSUPPORTED_CRAWL_FIELDS if getattr(payload, field, None) not in (None, False)
+    ]
+    if meaningful:
         return ToolResult(
-            text="async_mode and webhook_url are not supported over MCP; "
-            "use POST /v1/crawl for webhook/async delivery.",
+            text="async_mode, webhook_url and output_format are not supported over MCP; "
+            "use POST /v1/crawl for webhook/async delivery or output formats.",
             is_error=True,
         )
     return None
