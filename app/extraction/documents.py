@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import concurrent.futures
+import functools
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -38,9 +40,25 @@ class Selectors:
         return self.css is not None or self.xpath is not None
 
 
-# Shared extraction pool, bounded to 4 workers; built on demand and torn down
-# to ``None`` by shutdown_doc_extraction_executor -- "not right now", not "finished".
+# Shared selector-extraction pool, bounded to 4 workers; built on demand and torn
+# down to ``None`` by shutdown_doc_extraction_executor.
 _EXTRACTION_EXECUTOR: concurrent.futures.ThreadPoolExecutor | None = None
+
+
+# Dedicated pool for the DOCUMENT branch: a blocked ``DOC_POOL.acquire`` wait lives
+# here, never on the shared default executor the store control plane needs.
+_DOC_EXECUTOR: concurrent.futures.ThreadPoolExecutor | None = None
+
+
+def _doc_executor() -> concurrent.futures.ThreadPoolExecutor:
+    """The document branch's own pool, created on first use, sized to the worker
+    count and torn down with extraction on shutdown."""
+    global _DOC_EXECUTOR
+    if _DOC_EXECUTOR is None:
+        _DOC_EXECUTOR = concurrent.futures.ThreadPoolExecutor(
+            max_workers=doc_worker_count(), thread_name_prefix="doc-extract"
+        )
+    return _DOC_EXECUTOR
 
 
 def _extraction_executor() -> concurrent.futures.ThreadPoolExecutor:
@@ -74,10 +92,13 @@ async def shutdown_doc_extraction_executor() -> None:
     and had to know there were two, so a new pool could ship never closed.
     """
     DOC_POOL.teardown()
-    global _EXTRACTION_EXECUTOR
+    global _EXTRACTION_EXECUTOR, _DOC_EXECUTOR
     executor, _EXTRACTION_EXECUTOR = _EXTRACTION_EXECUTOR, None
     if executor is not None:
         executor.shutdown(wait=False)
+    doc_executor, _DOC_EXECUTOR = _DOC_EXECUTOR, None
+    if doc_executor is not None:
+        doc_executor.shutdown(wait=False)
 
 
 # Extraction deadlines live in CrawlerSettings (env-mapped, operator-tunable).
@@ -345,3 +366,16 @@ def extract_document(
         md = md[:cap]
         logger.warning("extraction_document_truncated", extra={"max_chars": cap})
     return ExtractedContent(md, md)
+
+
+async def adocument_extract(
+    body: bytes, url: NormalizedUrl | None, settings: CrawlerSettings | None = None
+) -> ExtractedContent:
+    """Run one document extraction on the dedicated doc pool, off the default
+    executor: a blocked ``DOC_POOL.acquire`` wait lives here and here only, so the
+    store control plane's ``asyncio.to_thread`` calls are never starved by a crawl.
+    """
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(
+        _doc_executor(), functools.partial(extract_document, body, url, settings)
+    )

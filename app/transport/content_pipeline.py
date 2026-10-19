@@ -14,11 +14,11 @@ from app.admission.policy import discovery_flags
 from app.extraction.content import (
     Selectors,
     extract_content,
-    extract_document,
     extract_html,
     extract_post_fetch_discovery,
     normalized_extraction,
 )
+from app.extraction.documents import adocument_extract
 from app.safety.validation import filter_js_endpoints
 from app.vocabulary.extraction import (
     EXTRACTION_DOCUMENT,
@@ -65,7 +65,7 @@ async def run_extraction(
     if extraction == EXTRACTION_DOCUMENT:
         # The document extractor is typed for bytes; a browser render has text.
         payload = content.encode("utf-8", "replace") if isinstance(content, str) else content
-        extracted = await asyncio.to_thread(extract_document, payload, final_url)
+        extracted = await adocument_extract(payload, final_url)
         method = EXTRACTION_METHOD_DOCUMENT
     elif extraction == EXTRACTION_TRAFILATURA:
         if not html:
