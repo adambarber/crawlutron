@@ -12,13 +12,14 @@ from collections import deque
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass, field, replace
 from itertools import islice
-from typing import Any, NamedTuple, Protocol, cast
+from typing import NamedTuple, Protocol, cast
 
 from app.admission.admission_links import AdmittedLink, admit_discovered_links, gather_robots_decisions
 from app.models.crawl_result import EngineCrawlResult
 from app.models.crawl_task import CrawlTask
 from app.models.host_policy import HostPolicy
 from app.models.normalized_url import NormalizedUrl
+from app.orchestration.admission_stall import AdmissionStallGuard, crawl_batches
 from app.orchestration.results import failed_result_for
 from app.orchestration.scheduler import DomainScheduler
 from app.runtime.metrics import MetricsStore, get_metrics
@@ -442,6 +443,7 @@ async def run_recursive_crawl(
     resource_gate: ResourceGate,
     admission: WeightedAdmission | None = None,
     host_policy: HostPolicy,
+    stall_guard: AdmissionStallGuard | None = None,
 ) -> None:
     """Bounded recursive BFS with self-tuning resource admission: writes results
     to ``spill`` and expands the frontier from each result's discovered links.
@@ -472,12 +474,7 @@ async def run_recursive_crawl(
         spill_write=_spill_write,
     )
     state = await _start_recursive_state(run, jobs)
-    while state.frontier and (max_pages <= 0 or state.page_count < max_pages):
-        if shutdown_event.is_set():
-            break
-        allowed_jobs = await admit_recursive_batch(cast(Any, run), state, metrics)
-        scheduled_results = await _crawl_recursive_batch(run, allowed_jobs)
-        await _commit_recursive_results(run, state, allowed_jobs, scheduled_results)
+    await crawl_batches(run, state, stall_guard or AdmissionStallGuard(), shutdown_event, metrics, max_pages)
 
 
 __all__ = [

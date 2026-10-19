@@ -3,6 +3,7 @@
 Fake closures/scheduler/spill drive :func:`run_recursive_crawl` so the
 batch-sizing and admission-gate logic are covered without the full engine."""
 
+import asyncio
 from collections import deque
 from urllib.parse import urlsplit
 
@@ -11,6 +12,7 @@ import pytest
 from app.models.crawl_task import CrawlTask
 from app.models.discovered_link import DiscoveredLink
 from app.models.host_policy import HostPolicy
+from app.orchestration.admission_stall import AdmissionStallGuard
 from app.orchestration.recursive import RecursiveRunState, admit_recursive_batch
 from app.orchestration.scheduler import DomainScheduler
 from app.runtime.metrics import get_metrics
@@ -378,6 +380,41 @@ async def test_in_flight_pages_count_against_the_cap_at_expansion():
     # permanent failure is finally recorded, which happens at the tail of the loop.
     assert statuses.get(canonical("http://a/real")) == "success", statuses
     assert statuses.get(canonical("http://a/seed")) == "failed", statuses
+
+
+async def test_saturated_admission_loop_terminates_within_bounded_interval():
+    """A (0,0) admission must not spin: the loop stops at the injected-clock
+    bound and reports every unconsumed URL as a capacity-stalled failure."""
+
+    class SaturatedAdmission:
+        async def admit(self, want_http, want_browser):
+            await asyncio.sleep(0)  # yield so the injected-clock guard observes
+            return 0, 0
+
+    async def worker(job):
+        raise AssertionError(f"nothing dispatches under a (0,0) admission: {job}")
+
+    jobs = [make_crawl_task(0, "a"), make_crawl_task(1, "a")]
+    # A constant clock with a 0s bound trips on the first spin; the wait_for
+    # only defends a re-introduced infinite loop from hanging this suite.
+    result = await asyncio.wait_for(
+        drive_recursive_crawl(
+            jobs,
+            worker,
+            allows=_allows,
+            admission=SaturatedAdmission(),
+            stall_guard=AdmissionStallGuard(clock=lambda: 0.0, no_progress_seconds=0.0),
+        ),
+        timeout=0.5,
+    )
+
+    # Only at-stall failures were reported (never a real result): the loop
+    # stopped honestly and did not silently drop the two unconsumed URLs.
+    assert {i: r.classification for i, r in result.spill.writes.items()} == {
+        0: "browser_pool_exhausted",
+        1: "browser_pool_exhausted",
+    }
+    assert {i: r.status for i, r in result.spill.writes.items()} == {0: "failed", 1: "failed"}
 
 
 def _minimum_admission_run(frontier, *, http_quota, browser_quota, batch_pages=10, browser_domains=()):

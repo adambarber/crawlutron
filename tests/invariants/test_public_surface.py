@@ -94,6 +94,7 @@ _SURFACE_DECLARING_EXEMPT = frozenset(
         "app/mcp/router.py",
         "app/mcp/server.py",
         "app/mcp/tools.py",
+        "app/orchestration/admission_stall.py",
         "app/orchestration/recursive.py",
         "app/orchestration/request_pipeline.py",
         "app/orchestration/robots_parse.py",
