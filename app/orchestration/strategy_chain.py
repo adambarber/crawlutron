@@ -28,9 +28,22 @@ if TYPE_CHECKING:
     from app.models.taxonomy import Classification, CrawlError
     from app.orchestration.scheduler import DomainScheduler
 
-from app.vocabulary.taxonomy import BROWSER_BLOCKED_CLASSIFICATIONS, HTTP_BLOCKED_CLASSIFICATIONS
+from app.vocabulary.taxonomy import (
+    BROWSER_BLOCKED_CLASSIFICATIONS,
+    HTTP_BLOCKED_CLASSIFICATIONS,
+    CrawlClassification,
+)
 
 BLOCKED_CLASSIFICATIONS = HTTP_BLOCKED_CLASSIFICATIONS | BROWSER_BLOCKED_CLASSIFICATIONS
+
+# Failures that mean the pinned strategy is no longer viable, so the chain must
+# unpin and fall back to the base ladder instead of looping on a dead pin (#303).
+PIN_INVALIDATING_CLASSIFICATIONS = frozenset(
+    (
+        CrawlClassification.browser_pool_exhausted.value,
+        CrawlClassification.browser_crash.value,
+    )
+)
 
 
 @dataclass(frozen=True)
@@ -293,11 +306,34 @@ async def execute_crawl_chain(
         host_policy=host_policy,
         global_concurrency=global_concurrency,
     )
+    base_ladder = starting_strategies(context.policy.strategies, None, context.domain)
+    start = 0
+    if context.scheduler is not None:
+        pinned = context.scheduler.get_pinned_strategy(context.domain)
+        if pinned in base_ladder:
+            start = base_ladder.index(pinned)
     run = _ChainRun(context, _ChainState(attempts=[]))
-    for strategy in starting_strategies(context.policy.strategies, context.scheduler, context.domain):
+    return await _walk_ladder(run, context, base_ladder, start)
+
+
+async def _walk_ladder(
+    run: _ChainRun,
+    context: _ChainContext,
+    base_ladder: list[CrawlStrategyName],
+    start: int,
+) -> EngineCrawlResult:
+    """One escalation walk of the full ladder, starting at ``start``. A pin that
+    truncates the ladder may be cleared on a capacity failure so the domain falls
+    back below the pin instead of looping on a dead strategy (#303).
+    """
+    index = start
+    fell_back = False
+    while index < len(base_ladder):
+        strategy = base_ladder[index]
         result = await run.execute(strategy)
         run.record(strategy, result)
         if result.classification in BLOCKED_CLASSIFICATIONS:
+            index += 1
             continue
         retry_result = await run.retry_cookies(strategy, result)
         if retry_result is not None:
@@ -306,6 +342,19 @@ async def execute_crawl_chain(
             if context.scheduler is not None:
                 context.scheduler.set_pinned_strategy(context.domain, strategy)
             return replace(result, attempted_strategies=run.state.attempts)
+        # A pin-invalidating failure means the pinned strategy is no longer
+        # viable: unpin and re-climb from the base instead of a failure loop.
+        if (
+            start > 0
+            and context.scheduler is not None
+            and not fell_back
+            and result.classification in PIN_INVALIDATING_CLASSIFICATIONS
+        ):
+            context.scheduler.clear_pinned_strategy(context.domain)
+            fell_back = True
+            index = 0
+            continue
+        index += 1
     last = cast("EngineCrawlResult", run.state.last_result)
     return replace(last, attempted_strategies=run.state.attempts)
 

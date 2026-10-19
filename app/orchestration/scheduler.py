@@ -22,6 +22,10 @@ _JITTER = SystemRandom()
 # band spreads the retries without changing the configured mean.
 _JITTER_LOW, _JITTER_HIGH = 0.8, 1.2
 
+#: How long a successful strategy pin stays authoritative before the domain
+#: re-evaluates the whole ladder (#303); a browser-only page cannot pin forever.
+_STRATEGY_PIN_TTL_SECONDS = 300.0
+
 
 def jittered_delay(base_delay: float) -> float:
     """``base_delay`` with the crawl-delay jitter applied, or 0 for a zero base.
@@ -133,12 +137,13 @@ class DomainScheduler:
         adaptive_max_delay: float = 30.0,
         adaptive_latency_factor: float = 1.0,
         adaptive_smoothing: float = 0.2,
+        clock: Callable[[], float] = time.time,
     ) -> None:
+        self._clock = clock
         self._global_limit = max(1, global_limit)
         self._per_domain_limit = max(1, per_domain_limit)
         self._delay_seconds = max(0.0, delay_seconds)
-        # Per-domain minimum delay (e.g. robots Crawl-delay), applied in addition
-        # to the global/adaptive delay so the host's floor is always respected.
+        # Per-domain minimum delay (e.g. robots Crawl-delay); the host's floor is always respected.
         self._domain_min_delay: dict[str, float] = defaultdict(float)
         self._max_rps = max(0.0, max_rps)
         self._circuit_threshold = max(1, circuit_threshold)
@@ -172,7 +177,7 @@ class DomainScheduler:
 
         # Per-job strategy pinning: once a domain proves it needs a strategy,
         # later fetches in the same job start there, not from the cheapest rung.
-        self._domain_strategy_pins: dict[str, str] = {}
+        self._domain_strategy_pins: dict[str, tuple[str, float]] = {}
 
         # Purging both dicts per 429 made heavy crawls quadratic; the purge is
         # amortized to one per interval (``run`` still purges up front).
@@ -256,13 +261,29 @@ class DomainScheduler:
         )
 
     def get_pinned_strategy(self, domain: str) -> str | None:
-        """Return the strategy pinned for ``domain`` within this job, or None."""
-        return self._domain_strategy_pins.get(domain)
+        """Return the strategy pinned for ``domain`` within this job, or None.
+        An expired pin re-evaluates: it is dropped and the domain re-climbs.
+        """
+        pin = self._domain_strategy_pins.get(domain)
+        if pin is None:
+            return None
+        strategy, pinned_at = pin
+        if self._clock() - pinned_at > _STRATEGY_PIN_TTL_SECONDS:
+            self._domain_strategy_pins.pop(domain, None)
+            return None
+        return strategy
 
     def set_pinned_strategy(self, domain: str, strategy: str) -> None:
         """Record the strategy that succeeded for ``domain`` so future fetches
-        in this job start at this strategy instead of re-climbing the ladder."""
-        self._domain_strategy_pins[domain] = strategy
+        in this job start at this strategy instead of re-climbing the ladder.
+        """
+        self._domain_strategy_pins[domain] = (strategy, self._clock())
+
+    def clear_pinned_strategy(self, domain: str) -> None:
+        """Drop the pin for ``domain``; used when the pinned strategy is no longer
+        viable (e.g. the browser pool is exhausted) so the fallback is tried (#303).
+        """
+        self._domain_strategy_pins.pop(domain, None)
 
     def _recompute_delay(self, domain: str) -> float:
         """Target per-domain delay (seconds) from the latency EMA."""
@@ -295,6 +316,12 @@ class DomainScheduler:
         self._domain_cooldowns = {d: exp for d, exp in self._domain_cooldowns.items() if exp > now}
         now_mono = time.monotonic()
         self._circuit_open_until = {d: exp for d, exp in self._circuit_open_until.items() if exp > now_mono}
+        pin_now = self._clock()
+        self._domain_strategy_pins = {
+            d: (strat, at)
+            for d, (strat, at) in self._domain_strategy_pins.items()
+            if pin_now - at <= _STRATEGY_PIN_TTL_SECONDS
+        }
 
     async def run(
         self,

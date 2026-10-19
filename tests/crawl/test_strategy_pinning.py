@@ -41,6 +41,51 @@ class TestStrategyPinning:
         scheduler.set_pinned_strategy("example.com", BROWSER_HEADLESS)
         assert scheduler.get_pinned_strategy("example.com") == BROWSER_HEADLESS
 
+    def test_expired_pin_is_no_longer_consulted(self) -> None:
+        """A pinned strategy expires after its TTL, so a domain pins that later
+        loses that capability re-evaluates rather than staying on a stale pin."""
+        times = [1_000.0]
+        scheduler = DomainScheduler(
+            global_limit=10,
+            per_domain_limit=2,
+            delay_seconds=0.1,
+            clock=lambda: times[0],
+        )
+        scheduler.set_pinned_strategy("example.com", BROWSER_HEADLESS)
+        assert scheduler.get_pinned_strategy("example.com") == BROWSER_HEADLESS
+
+        times[0] += 6 * 60  # past the pin TTL: the stale pin re-evaluates
+        assert scheduler.get_pinned_strategy("example.com") is None
+
+
+class TestExecuteCrawlChainPinningFailureUnpin:
+    """A strategy that fails with a capacity signal is unpinned so the fallback
+    strategy is tried instead of a per-fetch failure loop (#303)."""
+
+    async def test_browser_pool_exhaustion_unpins_and_falls_back_to_http(self) -> None:
+        """When the pinned browser strategy exhausts its pool, the chain clears the
+        pin and serves the page over the HTTP fallback."""
+        from app.vocabulary.strategies import BROWSER_HEADLESS, HTTP_DECLARED_CRAWLER
+        from tests._browser_doubles import _fake_browser
+        from tests._fetcher_factories import request_fetcher, run_chain
+        from tests.crawl._chain_policies import chain_policy
+
+        http_fetcher = request_fetcher(lambda _url, _headers: (200, b"<html>ok</html>", "text/html"))
+        scheduler = DomainScheduler(global_limit=8, per_domain_limit=8, delay_seconds=0.0)
+        scheduler.set_pinned_strategy("example.com", BROWSER_HEADLESS)
+
+        result = await run_chain(
+            fetcher=http_fetcher,
+            scheduler=scheduler,
+            policy=chain_policy(HTTP_DECLARED_CRAWLER, BROWSER_HEADLESS),
+            browser_worker=_fake_browser(status="failed", classification="browser_pool_exhausted"),
+        )
+
+        # The HTTP fallback served the page, and the browser-only pin is gone
+        # (unpinned on the capacity failure, then re-pinned to the HTTP win).
+        assert result.status == "success"
+        assert scheduler.get_pinned_strategy("example.com") != BROWSER_HEADLESS
+
 
 class TestExecuteCrawlChainPinning:
     """Where ``starting_strategies`` puts the ladder start.
