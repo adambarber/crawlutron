@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Annotated, Any, ClassVar, Final
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validator
 
 from app.models.crawl_extraction_method import CrawlExtractionMethod
 from app.models.crawl_policy_limits import CrawlPolicyLimits
@@ -163,6 +163,25 @@ class CrawlPolicy(BaseModel):
             compile_untrusted(value, max_len=256)
         except UnsafePattern as exc:
             raise ValueError(f"scope_regex rejected: {exc}") from exc
+        return value
+
+    @field_validator("css_selector", "xpath")
+    @classmethod
+    def _validate_selector_syntax(cls, value: str | None, info: ValidationInfo) -> str | None:
+        # A malformed selector is a caller error surfaced here (invalid_policy at
+        # the wire edge), not parked until extraction as a flaky network_error.
+        from lxml import etree
+        from soupsieve import compile as compile_css
+
+        if value is None:
+            return None
+        try:
+            if info.field_name == "css_selector":
+                compile_css(value)
+            else:
+                etree.XPath(value)
+        except Exception as exc:
+            raise ValueError(f"{info.field_name} rejected: {exc}") from exc
         return value
 
     @field_validator("browser_profile")
