@@ -10,11 +10,13 @@ import asyncio
 import logging
 import time
 from collections.abc import Callable
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
+from app.api.caller_auth import Tracking, admit, anonymous_caller, identity_for_key
 from app.api.crawl_executor import execute_crawl
 from app.api.webhooks import post_webhook_guarded
 from app.config.settings import CrawlerSettings
+from app.models.caller_identity import CallerIdentity
 from app.models.crawl_policy import CrawlPolicy
 from app.models.crawl_request import CrawlRequest
 from app.models.fetch_validators import FetchValidators
@@ -24,6 +26,10 @@ from app.models.watch_state import WatchState
 from app.storage.watch_store import WatchStore
 from app.vocabulary.strategies import HTTP_DECLARED_CRAWLER
 from app.vocabulary.taxonomy import CrawlClassification, status_for_classification
+
+if TYPE_CHECKING:
+    from app.api.caller_concurrency import CallerConcurrencyTracker
+    from app.storage.job_store import JobStore
 
 logger = logging.getLogger(__name__)
 
@@ -75,12 +81,16 @@ class WatchSweeper:
         settings: CrawlerSettings,
         shutdown_event: asyncio.Event | None = None,
         key_store=None,
+        concurrency_tracker: CallerConcurrencyTracker | None = None,
+        job_store: JobStore | None = None,
     ) -> None:
         self._store = store
         self._host_policy = host_policy
         self._settings = settings
         self._shutdown_event = shutdown_event
         self._key_store = key_store
+        self._concurrency_tracker = concurrency_tracker
+        self._job_store = job_store
 
     async def sweep_once(self, now: float) -> list[CrawlClassification]:
         """Recheck every watch due at ``now``; one conclusion per due watch, in
@@ -129,8 +139,28 @@ class WatchSweeper:
                 outcomes.append(outcome)
         return outcomes
 
+    async def _owner_identity(self, owner: str) -> CallerIdentity:
+        """The owner as a caller identity, so a check is metered against the owner's
+        own ``max_concurrency`` budget; missing store/owner falls back to anonymous.
+        """
+        key_store = self._key_store
+        if owner and key_store is not None:
+            record = await key_store.aget_for_id(owner)
+            if record is not None:
+                return identity_for_key(record)
+        return anonymous_caller()
+
     async def _check(self, watch: WatchState, *, now: float) -> CrawlClassification:
-        classification, etag, last_modified = await self._revalidate(watch)
+        identity = await self._owner_identity(watch.owner)
+        async with admit(
+            identity,
+            1,
+            tracking=Tracking(
+                job_store=self._job_store,
+                concurrency_tracker=self._concurrency_tracker,
+            ),
+        ):
+            classification, etag, last_modified = await self._revalidate(watch)
         await self._store.arecord_check(
             watch.watch_id,
             outcome=classification,
@@ -197,10 +227,12 @@ async def sweep_watches_forever(
     interval_seconds: float = WATCH_SWEEP_INTERVAL_SECONDS,
     clock: Callable[[], float] = time.time,
     key_store=None,
+    concurrency_tracker: CallerConcurrencyTracker | None = None,
+    job_store: JobStore | None = None,
 ) -> None:
     """Sweep the registry until told to stop; the wait rides the shutdown event
-    so a stopping process leaves at once. ``key_store`` answers the per-owner
-    liveness a revoked-owner watch needs (#207).
+    so a stopping process leaves at once. ``key_store`` answers revoked-owner
+    liveness (#207); the tracker/store meter checks against the owner (#325).
     """
     sweeper = WatchSweeper(
         store,
@@ -208,6 +240,8 @@ async def sweep_watches_forever(
         settings=settings,
         shutdown_event=shutdown_event,
         key_store=key_store,
+        concurrency_tracker=concurrency_tracker,
+        job_store=job_store,
     )
     while not shutdown_event.is_set():
         try:

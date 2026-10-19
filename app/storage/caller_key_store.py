@@ -94,6 +94,18 @@ class CallerKeyStore(CoordinationStore):
             self._conn.commit()
         return cur.rowcount > 0
 
+    def get_for_id(self, key_id: str) -> CallerKey | None:
+        """The record for ``key_id``, or None when no live key has that id; the
+        watch sweep uses it to meter an owner's check against their concurrency.
+        """
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT key_id, label, key_hash, max_pages, max_concurrency, created_at"
+                " FROM caller_keys WHERE key_id = ?",
+                (key_id,),
+            ).fetchone()
+        return None if row is None else _record_from_row(row)
+
     def exists_key(self, key_id: str) -> bool:
         """Whether a live key row for ``key_id`` exists, without materializing it.
 
@@ -109,3 +121,4 @@ class CallerKeyStore(CoordinationStore):
     alist_keys = atwin(list_keys)
     arevoke_key = atwin(revoke_key)
     aexists_key = atwin(exists_key)
+    aget_for_id = atwin(get_for_id)

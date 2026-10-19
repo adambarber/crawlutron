@@ -9,6 +9,7 @@ from typing import Any
 import pytest
 
 from app.api import watch_sweep
+from app.api.caller_concurrency import CallerConcurrencyTracker
 from app.api.watch_sweep import WatchSweeper, sweep_watches_forever
 from app.config.settings import CrawlerSettings
 from app.models.normalized_url import NormalizedUrl
@@ -307,3 +308,56 @@ async def test_a_revoked_owner_watch_is_deactivated_by_the_sweep(watch_store, tm
     anonymous_after = watch_store.get(anonymous.watch_id)
     assert anonymous_after.status is WatchStatus.ACTIVE
     assert anonymous_after.last_checked_at is not None
+
+
+def _keyed_sweeper(watch_store, tmp_path, monkeypatch, *, capture: list[str] | None = None):
+    """A sweeper over a keyed owner (``max_concurrency=1``) with its register and
+    a recording ``execute_crawl``; returns ``(tracker, record, sweeper)``.
+    """
+    keys = CallerKeyStore(tmp_path / "keys.db")
+    record = keys.verify_key(keys.issue_key("agent-a", max_concurrency=1).secret)
+    assert record is not None
+    register(watch_store, canonical(DEAD_ORIGIN), owner=record.key_id)
+    tracker = CallerConcurrencyTracker()
+
+    async def _exec(payload, *, settings, shutdown_event, urls=None):
+        if capture is not None:
+            capture.append(payload.url)
+        return {"request_id": "x", "submitted_count": 1, "policy_schema_version": "", "results": []}
+
+    monkeypatch.setattr(watch_sweep, "execute_crawl", _exec)
+    sweeper = WatchSweeper(
+        watch_store,
+        host_policy=UNRESTRICTED_HOST_POLICY,
+        settings=CrawlerSettings.from_mapping(),
+        key_store=keys,
+        concurrency_tracker=tracker,
+        job_store=None,
+    )
+    return tracker, record, sweeper
+
+
+async def test_a_busy_owner_watch_check_is_refused_not_run_unbounded(watch_store, tmp_path, monkeypatch):
+    """A due watch whose owner is at their concurrency cap is refused at admission
+    rather than executing a check outside the unified concurrency register (#325)."""
+    calls: list[str] = []
+    tracker, record, sweeper = _keyed_sweeper(watch_store, tmp_path, monkeypatch, capture=calls)
+    tracker.reserve(record.key_id)  # the owner's one slot is already taken
+    watch = watch_store.list_watches()[0]
+
+    outcomes = await sweeper.sweep_once(now=NOW)
+
+    # The check never ran: the owner's concurrency cap refused it at admission.
+    assert calls == []
+    assert outcomes == [CrawlClassification.unknown_error]
+    assert watch_store.get(watch.watch_id).consecutive_failures == 1
+
+
+async def test_a_owner_watch_check_releases_the_slot_after_a_check(watch_store, tmp_path, monkeypatch):
+    """The concurrency slot a watch check reserves is released on completion (#325)."""
+    tracker, record, sweeper = _keyed_sweeper(watch_store, tmp_path, monkeypatch)
+
+    await sweeper.sweep_once(now=NOW)
+
+    # A check that completed released its owner slot rather than leaking it.
+    assert tracker.sync_in_flight(record.key_id) == 0

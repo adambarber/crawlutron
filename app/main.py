@@ -199,6 +199,8 @@ if FastAPI is not None:
                 settings=settings,
                 shutdown_event=shutdown_event,
                 key_store=caller_key_store,
+                concurrency_tracker=_app.state.concurrency_tracker,
+                job_store=job_store,
             )
         )
 
