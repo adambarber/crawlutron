@@ -32,7 +32,7 @@ from app.storage.ids import new_request_id
 from app.storage.job_store import TERMINAL_STATUSES, JobKind, JobStore
 from app.storage.result_store import CrawlResultStore
 
-logger = logging.getLogger(__name__)
+_logger = logging.getLogger(__name__)
 
 
 async def await_or_client_gone(work: Awaitable[Any], request: Request, *, poll_interval: float = 0.25) -> Any:
@@ -84,7 +84,7 @@ async def crawl(
 ) -> Any:
     """Execute a policy-driven crawl (sync or async webhook mode)."""
     active_caller = caller if caller is not None else anonymous_caller()
-    with request_gate("crawl_request_rejected", logger=logger, reject=_crawl_rejection):
+    with request_gate("crawl_request_rejected", logger=_logger, reject=_crawl_rejection):
         if payload.output_format:
             # Validate the format before the branch commits to sync or async:
             # the async path only fails inside a detached task, unseen by the caller.
@@ -163,14 +163,14 @@ async def crawl(
                 result,
                 _crawl_started,
                 event="crawl_request_completed",
-                logger=logger,
+                logger=_logger,
                 caller_id=owner,
             )
             response_model = await aunified_response_from_result(result)
             try:
                 await result_store.aput(result["request_id"], response_model.model_dump(), owner=owner)
             except Exception:
-                logger.warning("crawl_result_store_failed", extra={"request_id": result["request_id"]})
+                _logger.warning("crawl_result_store_failed", extra={"request_id": result["request_id"]})
             output_format = payload.output_format
             if output_format and output_format.lower() != "json":
                 body, media_type = _serialize_or_reject(
@@ -258,4 +258,4 @@ async def get_crawl_trace(
     return TraceResponse.model_validate(payload)
 
 
-__all__ = ["crawl", "get_crawl_result", "get_crawl_trace"]
+__all__ = ["await_or_client_gone", "crawl", "get_crawl_result", "get_crawl_trace"]

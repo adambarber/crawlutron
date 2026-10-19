@@ -53,7 +53,72 @@ _OWNER_PUBLIC_SURFACE_RATCHET = {
     "app/orchestration/results.py": (12, 11),
     "app/transport/fetch_policy.py": (5, 5),
     "app/models/host_policy.py": (6, 5),
+    # The two latest surface modules: the gate must not silently drop a module
+    # added since the list was pinned (these prune handlers/helpers via __all__).
+    "app/api/keys_router.py": (4, 3),
+    "app/api/crawl_endpoint.py": (4, 4),
 }
+
+
+# Every other module declaring a literal ``__all__`` is an explicit, self-validating
+# exemption: an entry must still declare ``__all__``, closing the unenumerated-module hole (#215).
+_SURFACE_DECLARING_EXEMPT = frozenset(
+    {
+        "app/admission/policy.py",
+        "app/api/_depends_singletons.py",
+        "app/api/async_crawl_runner.py",
+        "app/api/caller_auth.py",
+        "app/api/caller_concurrency.py",
+        "app/api/crawl_executor.py",
+        "app/api/crawl_router.py",
+        "app/api/dependencies.py",
+        "app/api/exceptions.py",
+        "app/api/identity_router.py",
+        "app/api/job_runner.py",
+        "app/api/jobs_router.py",
+        "app/api/main_helpers.py",
+        "app/api/map_endpoint.py",
+        "app/api/metrics_router.py",
+        "app/api/middleware.py",
+        "app/api/policy_defaults.py",
+        "app/api/policy_router.py",
+        "app/api/policy_suggestions.py",
+        "app/api/render.py",
+        "app/api/render_endpoint.py",
+        "app/api/watch_sweep.py",
+        "app/api/webhooks.py",
+        "app/extraction/content.py",
+        "app/extraction/llm_format.py",
+        "app/mcp/constants.py",
+        "app/mcp/protocol.py",
+        "app/mcp/router.py",
+        "app/mcp/server.py",
+        "app/mcp/tools.py",
+        "app/orchestration/recursive.py",
+        "app/orchestration/request_pipeline.py",
+        "app/orchestration/robots_parse.py",
+        "app/orchestration/strategy_chain.py",
+        "app/orchestration/worker.py",
+        "app/runtime/logging_config.py",
+        "app/runtime/resource_pressure.py",
+        "app/search/endpoint.py",
+        "app/search/providers.py",
+        "app/storage/coordination_cookies.py",
+        "app/storage/coordination_counters.py",
+        "app/storage/coordination_store.py",
+        "app/storage/job_store.py",
+        "app/storage/job_store_collections.py",
+        "app/storage/job_store_state.py",
+        "app/storage/migrations/runner.py",
+        "app/storage/watch_store.py",
+        "app/transport/browser.py",
+        "app/transport/browser_cookies.py",
+        "app/transport/browser_result.py",
+        "app/transport/content_pipeline.py",
+        "app/transport/http_client_pool.py",
+        "app/transport/strategy_request.py",
+    }
+)
 
 
 # Dynamic-pattern re.* calls: a non-literal first arg is a pattern built from attacker-influenced text (the
@@ -117,6 +182,40 @@ def test_property_owner_public_surfaces_equal_all():
         tree = ast.parse(path.read_text(encoding="utf-8"))
         offenders.extend(_public_surface_offenders(tree, path, _PUBLIC_SURFACE_PROPERTY))
     assert not offenders, "property owner public surface drifted: " + ", ".join(offenders)
+
+
+def _all_surface_modules(root: pathlib.Path = REPO_ROOT / "app") -> set[str]:
+    """Every module (outside ``app/models``) that declares a literal ``__all__``.
+    app/models is governed by the models section below, not this gate.
+    """
+    found: set[str] = set()
+    for path in sorted(root.rglob("*.py")):
+        rel = relative_posix(path)
+        if path.name == "__init__.py" or rel.startswith("app/models/"):
+            continue
+        if _declared_public_symbols(ast.parse(path.read_text(encoding="utf-8"))) is None:
+            continue
+        found.add(rel)
+    return found
+
+
+def test_public_surface_gate_covers_or_exempts_every_all_module():
+    """The hand-pinned enumeration must not silently drop a surface module added
+    since it was written: every module with ``__all__`` is either ratchet'd (budgeted)
+    or explicitly exempted, so a new module in neither fails this gate (#215)."""
+    covered = set(_OWNER_PUBLIC_SURFACE_RATCHET) | _SURFACE_DECLARING_EXEMPT
+    uncovered = sorted(_all_surface_modules() - covered)
+    assert not uncovered, (
+        "module(s) declare a public surface via __all__ but are not in the ratchet or the "
+        "exemption list: " + ", ".join(uncovered)
+    )
+
+
+def test_surface_exemptions_are_self_validating():
+    """An exemption must still declare ``__all__`` to stay exempt; a removed or renamed
+    module leaves a stale entry that silently exempts nothing and this test fails it."""
+    stale = sorted(_SURFACE_DECLARING_EXEMPT - _all_surface_modules())
+    assert not stale, "exempted modules no longer declare __all__ (or no longer exist): " + ", ".join(stale)
 
 
 def _surface_budget_offenders(*, grown: bool) -> list[str]:

@@ -70,4 +70,4 @@ async def revoke_key(
     return RevokedKey(status="revoked", key_id=key_id)
 
 
-__all__ = ["router"]
+__all__ = ["issue_key", "list_keys", "revoke_key", "router"]
