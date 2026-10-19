@@ -12,12 +12,14 @@ import pytest
 from fastapi import HTTPException
 
 from app.api import main_helpers, map_endpoint
+from app.api.caller_auth import Tracking
 from app.api.crawl_endpoint import crawl
 from app.api.exceptions import error_envelope_from_detail
+from app.api.identity_router import map as map_door
 from app.api.main_helpers import request_gate
-from app.api.map_endpoint import map_site
 from app.config.settings import CrawlerSettings
 from app.health.readiness import READINESS_STATE, ReadinessState
+from app.models.caller_identity import CallerIdentity
 from app.models.crawl_request import CrawlRequest
 from app.models.map_request import MapRequest
 from app.runtime.metrics import get_metrics
@@ -105,7 +107,7 @@ async def test_rejected_crawl_hands_its_slot_back_and_still_counts_the_error(cap
 
 
 async def test_map_holds_a_readiness_slot_only_while_it_runs(monkeypatch):
-    """The real /v1/map handler samples the counter from inside the crawl it waits
+    """The real /v1/map door samples the counter from inside the crawl it waits
     on, so the slot is proven taken for the work, not merely balanced -- a release
     before the body would pass a before/after check and hide a saturated service.
     """
@@ -118,7 +120,13 @@ async def test_map_holds_a_readiness_slot_only_while_it_runs(monkeypatch):
     monkeypatch.setattr(map_endpoint, "execute_crawl", _record_slot)
 
     before = _active()
-    site_map = await map_site(MapRequest(url="http://example.com/"), settings=CrawlerSettings.from_mapping())
+    site_map = await map_door(
+        MapRequest(url="http://example.com/"),
+        CallerIdentity(),
+        Tracking(),
+        CrawlerSettings.from_mapping(),
+        asyncio.Event(),
+    )
 
     assert held == [before + 1]
     assert _active() == before

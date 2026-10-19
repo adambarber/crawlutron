@@ -1,10 +1,12 @@
 """The identity-guarded door plane: map, render and search share one router.
 
-Each door admits the caller through the single register, then delegates to its endpoint.
+Each door wraps the caller's admission in ``request_gate`` (readiness OUTER) then
+admits through the single register (INNER) -- the one order every door shares.
 """
 
 from __future__ import annotations
 
+import logging
 from typing import TYPE_CHECKING
 
 from fastapi import APIRouter
@@ -12,7 +14,9 @@ from fastapi import APIRouter
 from app.api._depends_singletons import settings_dep, shutdown_event_dep
 from app.api.caller_auth import admit
 from app.api.dependencies import CallerDep, TrackingDep
+from app.api.main_helpers import request_gate
 from app.api.map_endpoint import map_site
+from app.api.render_endpoint import _render_rejection
 from app.api.render_endpoint import render as render_handler
 from app.models import map_request, render_request, search_request
 from app.models.error_response import ErrorResponse
@@ -23,6 +27,8 @@ from app.search.endpoint import search as search_handler
 
 if TYPE_CHECKING:
     from app.models.site_map_response import SiteMapPayload
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["Crawler"])
 
@@ -47,15 +53,16 @@ async def map(
     settings=settings_dep,
     shutdown_event=shutdown_event_dep,
 ) -> SiteMapPayload:
-    # #205/#320: admit the mapping crawl through the one helper -- page bound,
-    # quotas against the shared register, cookie namespace, and a released slot.
-    async with admit(
-        caller,
-        payload.policy.limits.max_pages,
-        tracking=tracking,
-        payload=payload,
-    ):
-        return await map_site(payload, settings=settings, shutdown_event=shutdown_event)
+    # #205/#320/#328: request_gate OUTER (the readiness count includes quota-
+    # rejected requests), admit INNER -- the one order every door shares.
+    with request_gate("map_request_rejected", logger=logger):
+        async with admit(
+            caller,
+            payload.policy.limits.max_pages,
+            tracking=tracking,
+            payload=payload,
+        ):
+            return await map_site(payload, settings=settings, shutdown_event=shutdown_event)
 
 
 @router.post(
@@ -72,8 +79,9 @@ async def render(
     settings=settings_dep,
 ) -> UnifiedCrawlResponse:
     requested = len(payload.urls) if payload.urls is not None else 1
-    async with admit(caller, requested, tracking=tracking):
-        return await render_handler(payload, settings=settings)
+    with request_gate("render_request_rejected", logger=logger, reject=_render_rejection):
+        async with admit(caller, requested, tracking=tracking):
+            return await render_handler(payload, settings=settings)
 
 
 @router.post(
@@ -102,8 +110,9 @@ async def search(
     tracking: TrackingDep,
     settings=settings_dep,
 ) -> SearchResponse:
-    async with admit(caller, 0, tracking=tracking):
-        return await search_handler(payload, settings=settings, caller=caller)
+    with request_gate("search_request_rejected", logger=logger):
+        async with admit(caller, 0, tracking=tracking):
+            return await search_handler(payload, settings=settings, caller=caller)
 
 
 __all__ = ["router"]

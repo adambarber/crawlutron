@@ -10,7 +10,7 @@ from collections.abc import AsyncIterator
 from pathlib import Path
 
 from fastapi import FastAPI
-from httpx import AsyncClient
+from httpx import AsyncClient, Response
 
 from app.api.caller_concurrency import CallerConcurrencyTracker
 from app.api.dependencies import get_job_store, get_settings
@@ -75,12 +75,18 @@ async def _happy_provider(*args, **kwargs):
     return 200, _provider_body()
 
 
+async def _search_response(tmp_path: Path, *, key: str | None = None) -> Response:
+    """POST a minimal search over the isolated client and return the response."""
+    headers = {"X-API-Key": key} if key else None
+    async with _search_client(tmp_path) as (client, app):
+        return await client.post("/v1/search", headers=headers, json={"query": "x"})
+
+
 async def test_search_rejects_a_wrong_key(tmp_path, monkeypatch):
     """A caller with a key that does not exist gets 401, not a 200 search."""
     _stub_search_provider(monkeypatch, _happy_provider)
-    async with _search_client(tmp_path) as (client, app):
-        response = await client.post("/v1/search", headers={"X-API-Key": "no-such-key"}, json={"query": "x"})
-        assert response.status_code == 401, response.text
+    response = await _search_response(tmp_path, key="no-such-key")
+    assert response.status_code == 401, response.text
 
 
 async def test_search_accepts_a_valid_key(tmp_path, monkeypatch):
@@ -88,16 +94,15 @@ async def test_search_accepts_a_valid_key(tmp_path, monkeypatch):
     _stub_search_provider(monkeypatch, _happy_provider)
     async with _search_client(tmp_path) as (client, app):
         secret = await _issue(client)
-        response = await client.post("/v1/search", headers={"X-API-Key": secret}, json={"query": "x"})
+        response = await _search_response(tmp_path, key=secret)
         assert response.status_code == 200, response.text
 
 
 async def test_search_anonymous_caller_is_bounded_and_succeeds(tmp_path, monkeypatch):
     """No header resolves to the anonymous bucket: the search still works."""
     _stub_search_provider(monkeypatch, _happy_provider)
-    async with _search_client(tmp_path) as (client, app):
-        response = await client.post("/v1/search", json={"query": "x"})
-        assert response.status_code == 200, response.text
+    response = await _search_response(tmp_path)
+    assert response.status_code == 200, response.text
 
 
 async def test_search_concurrency_is_bounded_per_caller(tmp_path, monkeypatch):
@@ -117,3 +122,47 @@ async def test_search_concurrency_is_bounded_per_caller(tmp_path, monkeypatch):
             released=released,
             first_ok=(200,),
         )
+
+
+async def test_search_is_refused_at_the_admission_cap(tmp_path, monkeypatch):
+    """#340/#328: search routes through request_gate and refuses with a 503 at the cap.
+
+    Search shares the cap's counter; it must take a slot and refuse at the bound
+    like every trackable door, not count-and-proceed with a discarded bool.
+    """
+    from app.api import main_helpers
+    from app.health.readiness import ReadinessState
+
+    state = ReadinessState(max_active_requests=1)
+    assert state.begin_request()  # fill the cap
+    monkeypatch.setattr(main_helpers, "readiness_state", state)
+
+    _stub_search_provider(monkeypatch, _happy_provider)
+    response = await _search_response(tmp_path)
+    assert response.status_code == 503, response.text
+    assert "capacity_exceeded" in response.text
+    # The refused request never held a slot: the cap population is unchanged.
+    assert state.snapshot().active_requests == 1
+
+
+async def test_search_readiness_slot_is_exactly_one_and_balanced(tmp_path, monkeypatch):
+    """#328: a search holds exactly one readiness slot for its life, released after.
+
+    The pairing must be exactly one begin/end per request regardless of door --
+    a search that both gates and hand-counts would double-count the population.
+    """
+    from app.health.readiness import READINESS_STATE
+
+    outside = READINESS_STATE.snapshot().active_requests
+    held: list[int] = []
+
+    async def _record_active(*args, **kwargs):
+        held.append(READINESS_STATE.snapshot().active_requests)
+        return 200, _provider_body()
+
+    _stub_search_provider(monkeypatch, _record_active)
+    response = await _search_response(tmp_path)
+    assert response.status_code == 200, response.text
+
+    assert held == [outside + 1]
+    assert READINESS_STATE.snapshot().active_requests == outside

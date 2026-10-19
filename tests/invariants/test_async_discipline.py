@@ -115,8 +115,6 @@ def test_admission_budget_detector_bites():
 _READINESS_GATE_EXEMPT = (
     # The owner itself.
     "app/api/main_helpers.py",
-    # PENDING: the fourth gated endpoint, outside app/api.
-    "app/search/endpoint.py",
 )
 
 

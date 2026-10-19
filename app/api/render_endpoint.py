@@ -1,7 +1,7 @@
 """``/v1/render`` endpoint handler.
 
 Backward-compatible browser-render endpoint wrapping
-:func:`app.api.render.render_request` with the readiness gate and unified shape.
+:func:`app.api.render.render_request` with the unified shape.
 """
 
 import logging
@@ -9,7 +9,6 @@ import logging
 from fastapi import HTTPException
 
 from app.api.exceptions import browser_pool_unavailable, http_error
-from app.api.main_helpers import request_gate
 from app.api.render import render_request
 from app.api.response_shaping import arender_response_from_result
 from app.config.settings import CrawlerSettings
@@ -34,29 +33,31 @@ def _render_rejection(error: ValueError) -> HTTPException:
 
 
 async def render(payload: RenderRequest, settings: CrawlerSettings) -> UnifiedCrawlResponse:
-    """Render ``payload`` URLs with the pooled browser worker."""
-    with request_gate("render_request_rejected", logger=logger, reject=_render_rejection):
-        # with a 503 when the pool is down (startup/shutdown) instead of an AttributeError 500.
-        pool = get_browser_pool()
-        if pool is None:
-            raise browser_pool_unavailable()
-        pooled_worker = PooledBrowserWorker(pool)
-        try:
-            result = await render_request(
-                payload.model_dump(exclude_none=True),
-                settings=settings,
-                worker=pooled_worker,
-            )
-        except BrowserPoolExhaustedError as error:
-            logger.warning("render_request_pool_exhausted", extra={"error": str(error)})
-            raise browser_pool_unavailable(str(error)) from error
-        logger.info(
-            "render_request_completed",
-            extra={"url_count": len(result.get("results", []))},
+    """Render ``payload`` URLs with the pooled browser worker.
+
+    Readiness and caller admission live at the door; refusals propagate as ``ValueError``.
+    """
+    # with a 503 when the pool is down (startup/shutdown) instead of an AttributeError 500.
+    pool = get_browser_pool()
+    if pool is None:
+        raise browser_pool_unavailable()
+    pooled_worker = PooledBrowserWorker(pool)
+    try:
+        result = await render_request(
+            payload.model_dump(exclude_none=True),
+            settings=settings,
+            worker=pooled_worker,
         )
-        # the SAME per-item shape guard /v1/crawl uses, so a result the adapter cannot read
-        # degrades to a terminal failure for that item instead of 500ing the response.
-        return await arender_response_from_result(result)
+    except BrowserPoolExhaustedError as error:
+        logger.warning("render_request_pool_exhausted", extra={"error": str(error)})
+        raise browser_pool_unavailable(str(error)) from error
+    logger.info(
+        "render_request_completed",
+        extra={"url_count": len(result.get("results", []))},
+    )
+    # the SAME per-item shape guard /v1/crawl uses, so a result the adapter cannot read
+    # degrades to a terminal failure for that item instead of 500ing the response.
+    return await arender_response_from_result(result)
 
 
 __all__ = ["render"]

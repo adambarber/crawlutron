@@ -6,9 +6,11 @@ and clients key error handling on ``code`` -- a free-text code is unenumerable.
 import pytest
 from fastapi import HTTPException
 
+from app.api.caller_auth import Tracking
 from app.api.exceptions import error_envelope_from_detail
-from app.api.render_endpoint import render
+from app.api.identity_router import render as render_door
 from app.config.settings import CrawlerSettings
+from app.models.caller_identity import CallerIdentity
 from app.models.render_request import RenderRequest
 from tests._browser_doubles import FakeBrowserPool, owned_browser_pool
 
@@ -31,7 +33,7 @@ async def test_render_value_error_reports_validation_error_code(monkeypatch, _po
 
     payload = RenderRequest(urls=["http://example.com/", "http://example.com/2"])
     with pytest.raises(HTTPException) as exc_info:
-        await render(payload, settings)
+        await render_door(payload, CallerIdentity(), Tracking(), settings)
 
     # Through the accessor the service itself uses.
     detail = error_envelope_from_detail(exc_info.value.detail, exc_info.value.status_code)
