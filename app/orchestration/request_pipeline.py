@@ -24,7 +24,7 @@ from app.models.normalized_url import NormalizedUrl, admit_or_none
 from app.models.result_record import ProducerEnvelope
 from app.orchestration import robots as robots_policy
 from app.orchestration.fetch_helpers import fetch_sitemap_urls
-from app.orchestration.recursive import RECURSIVE_RAMP_MAX, _spill_write, run_recursive_crawl
+from app.orchestration.recursive import _spill_write, run_recursive_crawl
 from app.orchestration.results import (
     TerminalResult,
     engine_result_from_exception,
@@ -41,12 +41,12 @@ from app.runtime.resource_pressure import (
     build_admission_policy,
     derive_browser_pool_size,
     doc_worker_count,
+    max_http_concurrency_for,
 )
 from app.safety.safe_regex import BoundedPattern
 from app.storage.ids import new_request_id
 from app.transport.cache import HttpCache
 from app.transport.content_cache import ContentCache
-from app.vocabulary.limits import ENGINE_BATCH_CONCURRENCY_MULTIPLIER
 
 
 @dataclass(frozen=True)
@@ -108,10 +108,19 @@ def _build_jobs(state: _PipelineState) -> list[CrawlTask]:
     return jobs
 
 
+def _compute_ram_derived_concurrency(state: _PipelineState) -> int:
+    """The RAM-derived HTTP concurrency ceiling this process may sustain, the
+    value weighted admission and the scheduler's connection ceiling both honor."""
+    limit = read_memory_stats().total_bytes or 0
+    return max(1, max_http_concurrency_for(limit, derive_browser_pool_size()))
+
+
 def _build_scheduler(state: _PipelineState) -> DomainScheduler:
     limits = state.policy.limits
     return DomainScheduler(
-        global_limit=RECURSIVE_RAMP_MAX * ENGINE_BATCH_CONCURRENCY_MULTIPLIER,
+        # The scheduler's own connection ceiling is the RAM-derived admission
+        # ceiling, not a hardcoded constant: the two cannot diverge (#350).
+        global_limit=_compute_ram_derived_concurrency(state),
         per_domain_limit=state.settings.per_domain_concurrency,
         delay_seconds=state.settings.per_domain_delay_ms / 1000,
         max_rps=limits.max_rps,
@@ -262,6 +271,48 @@ async def _spill_one(state: _PipelineState, index: int, result: EngineCrawlResul
     await _spill_write(state.spill, index, result)
 
 
+def _build_admission(state: _PipelineState) -> WeightedAdmission:
+    """The RAM-weighted admission gate for one crawl, shared by both the
+    recursive and non-recursive paths so they cannot drift on the same bound."""
+    return WeightedAdmission(
+        state.dependencies.resource_gate,
+        build_admission_policy(
+            read_memory_stats().total_bytes or 0,
+            pool_size=derive_browser_pool_size(),
+            max_concurrent_pages=state.settings.max_concurrent_pages,
+            budget=TaskRamBudget(doc_workers=doc_worker_count()),
+        ),
+    )
+
+
+async def _dispatch_paced(
+    state: _PipelineState,
+    scheduler: DomainScheduler,
+    jobs: list[CrawlTask],
+) -> None:
+    """Dispatch a sync batch in admission-sized chunks: the scheduler's own
+    ceiling (global_limit) is already RAM-derived, but a batch must not send the
+    whole frontier out at once either, so each chunk is admitted before submit."""
+    admission = _build_admission(state)
+    remaining = list(jobs)
+    while remaining:
+        admit_http, _admit_browser = await admission.admit(len(remaining), 0)
+        # Never stall a one-shot batch under a saturated gate: dispatch at least
+        # one job so a pinned gate cannot leave the crawl in flight forever.
+        chunk, remaining = remaining[: max(1, admit_http)], remaining[max(1, admit_http) :]
+        await scheduler.run(
+            chunk,
+            lambda job: _worker(state, job),
+            on_result=lambda index, result: _spill_one(state, index, result),
+            failed_result=lambda job, exc: engine_result_from_exception(
+                error=exc,
+                original_url=job.original_url,
+                normalized_url=job.normalized_url,
+                strategy=None,
+            ),
+        )
+
+
 async def _run_nonrecursive(state: _PipelineState) -> None:
     scheduler = cast("DomainScheduler", state.scheduler)
     decisions = (
@@ -282,30 +333,12 @@ async def _run_nonrecursive(state: _PipelineState) -> None:
             scheduler.set_domain_min_delay(job.domain, crawl_delay)
         allowed_jobs.append(job)
     if allowed_jobs:
-        await scheduler.run(
-            allowed_jobs,
-            lambda job: _worker(state, job),
-            on_result=lambda index, result: _spill_one(state, index, result),
-            failed_result=lambda job, exc: engine_result_from_exception(
-                error=exc,
-                original_url=job.original_url,
-                normalized_url=job.normalized_url,
-                strategy=None,
-            ),
-        )
+        await _dispatch_paced(state, scheduler, allowed_jobs)
 
 
 async def _run_recursive(state: _PipelineState) -> None:
     scheduler = cast("DomainScheduler", state.scheduler)
-    admission = WeightedAdmission(
-        state.dependencies.resource_gate,
-        build_admission_policy(
-            read_memory_stats().total_bytes or 0,
-            pool_size=derive_browser_pool_size(),
-            max_concurrent_pages=state.settings.max_concurrent_pages,
-            budget=TaskRamBudget(doc_workers=doc_worker_count()),
-        ),
-    )
+    admission = _build_admission(state)
     await run_recursive_crawl(
         jobs=state.jobs,
         scheduler=scheduler,
