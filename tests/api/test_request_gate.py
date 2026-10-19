@@ -11,13 +11,13 @@ import tempfile
 import pytest
 from fastapi import HTTPException
 
-from app.api import map_endpoint
+from app.api import main_helpers, map_endpoint
 from app.api.crawl_endpoint import crawl
 from app.api.exceptions import error_envelope_from_detail
 from app.api.main_helpers import request_gate
 from app.api.map_endpoint import map_site
 from app.config.settings import CrawlerSettings
-from app.health.readiness import READINESS_STATE
+from app.health.readiness import READINESS_STATE, ReadinessState
 from app.models.crawl_request import CrawlRequest
 from app.models.map_request import MapRequest
 from app.runtime.metrics import get_metrics
@@ -123,3 +123,43 @@ async def test_map_holds_a_readiness_slot_only_while_it_runs(monkeypatch):
     assert held == [before + 1]
     assert _active() == before
     assert site_map["links"] == []
+
+
+async def test_request_gate_refuses_requests_over_the_cap(monkeypatch):
+    """The configurable admission cap refuses with a 503 once active requests
+    sit AT the cap; the refusal must not end_request the slot it never took."""
+    state = ReadinessState(max_active_requests=2)
+    assert state.begin_request() and state.begin_request()  # fill the cap
+    monkeypatch.setattr(main_helpers, "readiness_state", state)
+
+    with pytest.raises(HTTPException) as exc_info:
+        with request_gate("test_request_rejected", logger=logger):
+            pass
+    assert exc_info.value.status_code == 503
+    envelope = error_envelope_from_detail(exc_info.value.detail, exc_info.value.status_code)
+    assert envelope["code"] == "capacity_exceeded"
+    assert state.snapshot().active_requests == 2  # the refused request never held a slot
+
+
+async def test_request_gate_admits_requests_under_the_cap(monkeypatch):
+    """One active request under a cap of 2 is admitted and released normally."""
+    state = ReadinessState(max_active_requests=2)
+    assert state.begin_request()
+    monkeypatch.setattr(main_helpers, "readiness_state", state)
+
+    with request_gate("test_request_rejected", logger=logger):
+        pass
+    assert state.snapshot().active_requests == 1
+
+
+async def test_request_gate_is_unbounded_without_a_cap(monkeypatch):
+    """No cap configured (the default) never refuses: every request is admitted."""
+    state = ReadinessState()
+    for _ in range(10):
+        assert state.begin_request() is True
+    monkeypatch.setattr(main_helpers, "readiness_state", state)
+
+    # No 503: unpinned states never refuse, and the gate's own slot is released.
+    with request_gate("test_request_rejected", logger=logger):
+        pass
+    assert state.snapshot().active_requests == 10

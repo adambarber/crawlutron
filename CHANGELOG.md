@@ -56,8 +56,23 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   naming the exposure and how to avoid it. It is a warning and not a refusal
   because the shipped compose file binds `0.0.0.0` inside the container and
   publishes only to `127.0.0.1`, which Docker port mapping requires.
+- **A fixed cap on concurrent tracked requests, behind `request_gate` (#299).**
+  The service had a resource-saturation guard but no second, absolute ceiling;
+  the readiness report already counted active requests, so the new knob rides
+  that counter. `CRAWLUTRON_MAX_ACTIVE_REQUESTS` is the knob (0 or unset
+  disables it; a positive value bounds concurrent /v1/crawl, /v1/map and
+  /v1/render requests). At the cap the `request_gate` edge refuses with HTTP
+  503 and a `capacity_exceeded` envelope — the same 503 the readiness report
+  already uses for backpressure — so an externally-configured ceiling sits
+  behind the quota system. Optional-presence is explicit: the internal bound
+  is `None` when unset/0, and the is-not-None guard is where the refusal
+  decision is made.
 
 ### Fixed
+- **`/ready` reported `max_active_requests = 0` even when a cap was set.** The
+  field hardcoded 0 ("self-managed: no fixed request cap"); with
+  `CRAWLUTRON_MAX_ACTIVE_REQUESTS` set, the report now reflects the real
+  bound, and 0 only when unrestricted.
 - **Doc-pool tests assert the real per-worker contract, not a transient pool snapshot (M1).**
   `test_extract_document_child_death_returns_empty` and `test_extract_document_normal_works`
   in tests/crawl/test_document_workers.py asserted process-global invariants over the shared

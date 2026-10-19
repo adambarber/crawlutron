@@ -21,13 +21,30 @@ class TestReadinessState:
 
     def test_begin_end_request(self):
         state = ReadinessState()
-        state.begin_request()
+        assert state.begin_request() is True
         snap = state.snapshot()
         assert snap.active_requests == 1
         assert snap.saturated is False
         state.end_request()
         snap = state.snapshot()
         assert snap.active_requests == 0
+
+    def test_fixed_cap_is_reported_and_refuses_at_the_bound(self):
+        """A configured cap is the readiness report's real bound, reached when
+        active requests sit AT it: refused (False) without taking a slot."""
+        state = ReadinessState(max_active_requests=2)
+        assert state.snapshot().max_active_requests == 2
+        assert state.begin_request() and state.begin_request()
+        assert state.snapshot().active_requests == 2
+        assert state.begin_request() is False  # at the cap: refused, no slot taken
+        assert state.snapshot().active_requests == 2
+
+    def test_zero_cap_is_off(self):
+        """0/None both mean unbounded (optional-presence): never refuses."""
+        for cap in (None, 0):
+            state = ReadinessState(max_active_requests=cap)
+            assert state.snapshot().max_active_requests == 0
+            assert state.begin_request() is True
 
     # Each gate rides at its own target (memory 0.92, cpu 0.90); the values below are over-the-line readings,
     # and they are the only data the property differs on.

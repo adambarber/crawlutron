@@ -8,6 +8,7 @@ from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
+from app.config.env import get_env_int
 from app.models.readiness_response import ReadinessResponse
 from app.runtime.metrics import get_metrics
 
@@ -31,17 +32,28 @@ class ReadinessSnapshot:
     saturated: bool
 
 
-class ReadinessState:
-    """Thread-safe readiness state tracker.
+def _read_max_active_cap() -> int | None:
+    """The configured admission cap from the env knob, or None when disabled.
 
-    Saturation derives from the resource-guard's measured cgroup utilization
-    (not a fixed concurrency cap); the active-request count is visibility only.
+    Unset and 0 both mean "no cap"; only a positive value is a real bound.
+    """
+    cap = get_env_int("CRAWLUTRON_MAX_ACTIVE_REQUESTS", 0, lo=0)
+    return cap if cap > 0 else None
+
+
+class ReadinessState:
+    """Thread-safe readiness tracker: saturation from the resource guard,
+    active-request count as visibility plus an optional fixed cap (#299).
     """
 
-    def __init__(self) -> None:
+    def __init__(self, max_active_requests: int | None = None) -> None:
         self._active_requests = 0
         self._lock = threading.Lock()
         self._utilization_sampler: Callable[[], tuple[float, float]] | None = None
+        # The cap: None means disabled (optional-presence), a positive value the
+        # bound; an injected value bypasses the env knob in tests.
+        configured = _read_max_active_cap() if max_active_requests is None else max(0, max_active_requests)
+        self._max_active_requests: int | None = configured if configured else None
 
     def set_utilization_sampler(self, sampler: Callable[[], tuple[float, float]] | None) -> None:
         """Install a live ``(memory, cpu)`` utilization source.
@@ -52,9 +64,16 @@ class ReadinessState:
         with self._lock:
             self._utilization_sampler = sampler
 
-    def begin_request(self) -> None:
+    def begin_request(self) -> bool:
+        """Admit one request: returns True and holds a slot, or False when the
+        fixed cap is reached -- the caller refuses, never taking the slot.
+        """
         with self._lock:
+            cap = self._max_active_requests
+            if cap is not None and self._active_requests >= cap:
+                return False
             self._active_requests += 1
+            return True
 
     def end_request(self) -> None:
         with self._lock:
@@ -77,8 +96,8 @@ class ReadinessState:
         return ReadinessSnapshot(
             status="saturated" if saturated else "ready",
             active_requests=active_requests,
-            # Self-managed: no fixed request cap. Saturation is resource-driven.
-            max_active_requests=0,
+            # The real bound: the configured cap, or 0 when none is set (off).
+            max_active_requests=self._max_active_requests or 0,
             saturated=saturated,
         )
 

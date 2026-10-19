@@ -11,7 +11,7 @@ from contextlib import contextmanager
 
 from fastapi import HTTPException
 
-from app.api.exceptions import validation_http_error
+from app.api.exceptions import http_error, validation_http_error
 from app.health.readiness import READINESS_STATE as readiness_state
 from app.models.job_status_response import JobStatusResponse
 from app.models.result_record import ProducerEnvelope
@@ -52,11 +52,16 @@ def request_gate(
     logger: logging.Logger,
     reject: Callable[[ValueError], HTTPException] = validation_http_error,
 ) -> Iterator[None]:
-    """Admit one readiness-tracked request and own the whole tail: the ``begin_request``
-    admission, the rejection (warning + 4xx envelope), and the ``end_request`` release in the
-    ``finally`` -- exactly once per exit, not repeated on reject (``end_request`` clamps at zero).
+    """Admit one readiness-tracked request and own the whole tail: the
+    ``begin_request`` admission, the rejection envelope, and the ``end_request``
+    release. A fixed-cap refusal (503) happens before admission, taking no slot.
     """
-    readiness_state.begin_request()
+    if not readiness_state.begin_request():
+        raise http_error(
+            503,
+            "capacity_exceeded",
+            "Request refused: active requests are at the configured cap (CRAWLUTRON_MAX_ACTIVE_REQUESTS)",
+        )
     try:
         yield
     except ValueError as error:
