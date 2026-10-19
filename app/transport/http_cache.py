@@ -11,6 +11,7 @@ from app.models.crawl_result import CrawlStrategyAttempt, EngineCrawlResult
 from app.models.taxonomy import Classification
 from app.orchestration.results import build_engine_result
 from app.transport import content_cache_key, fetch_policy, request_profile
+from app.transport.cache_control import forbids_store, requires_revalidation
 from app.transport.http_response import (
     FetchedResponse,
     HttpStrategyContext,
@@ -68,10 +69,21 @@ async def _revalidate_content_cache(ctx: HttpStrategyContext) -> None:
     if cached is None:
         return
 
+    must_revalidate = requires_revalidation(cached["headers"])
     validator = ctx.cache.conditional_headers(ctx.normalized_url) if ctx.cache is not None else {}
     if not validator and ctx.caller_conditional:
         validator = dict(ctx.caller_conditional)
+    if must_revalidate and not validator:
+        # no-cache/must-revalidate may be stored but never replayed stale: source a
+        # validator from the stored body, else re-fetch below rather than serve it (#247).
+        lowered = {str(k).lower(): v for k, v in cached["headers"].items()}
+        if lowered.get("etag"):
+            validator["If-None-Match"] = lowered["etag"]
+        if lowered.get("last-modified"):
+            validator["If-Modified-Since"] = lowered["last-modified"]
     if not validator:
+        if must_revalidate:
+            return  # no validator to revalidate with: never serve stale, re-fetch.
         ctx.response = rebuild_response(cached, ctx)
         ctx.content_hit = True
         ctx.retry_diagnostics = {"attempts": 0, "transient_errors": [], "content_cache": "hit"}
@@ -135,6 +147,10 @@ def _not_modified_result(ctx: HttpStrategyContext, resp: FetchedResponse) -> Eng
 
 async def _store_http_caches(ctx: HttpStrategyContext, resp: FetchedResponse) -> None:
     """Store origin validators and fresh content after a successful fetch."""
+    if forbids_store(resp.headers):
+        # no-store: never persist body or validator, so a single-use response is
+        # neither written to disk nor re-armed for replay (pins #247).
+        return
     if (
         ctx.cache is not None
         and resp.status_code < 400

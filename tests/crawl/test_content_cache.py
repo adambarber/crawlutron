@@ -12,6 +12,7 @@ from app.transport.cache import HttpCache
 from app.transport.content_cache import ContentCache
 from app.transport.fetchers import default_http_fetcher
 from app.vocabulary.strategies import HTTP_DECLARED_CRAWLER
+from tests._fetch_scripted import request_fetcher
 from tests._fetcher_factories import clocked_cache, crawled_results, run_http_strategy, tap_fetcher
 from tests.crawl._cache_fixtures import _make_cache, reopen_cache, scoped_cache
 from tests.helpers.server import EtagHandler
@@ -269,3 +270,45 @@ async def test_cold_aget_still_mirrors_small_envelope(tmp_path):
     got = await reader.aget("small-key")
     assert got == {"body": "tiny"}
     assert "small-key" in reader._memory_cache  # small: mirror is correct
+
+
+async def _directive_runner(url: str, headers: dict[str, str], tmp_path):
+    """A cached strategy runner over a response carrying ``headers``, counting fetches."""
+    fetches: dict[str, int] = {"n": 0}
+
+    def respond(url, _sent):
+        fetches["n"] += 1
+        return {"status": 200, "headers": headers, "body": b"<html>body</html>"}
+
+    run = cached_strategy_runner(
+        url,
+        {"strategies": [HTTP_DECLARED_CRAWLER], "extraction": "full", "headers": {}},
+        request_fetcher(respond),
+        content_cache=ContentCache(tmp_path),
+    )
+    return run, fetches
+
+
+async def test_no_store_response_not_persisted(tmp_path):
+    """A ``cache-control: no-store`` body must never be written to the disk content
+    cache: a second crawl re-fetches it, never serving the single-use body (pins #247)."""
+    run, fetches = await _directive_runner(
+        "http://example.com/secret", {"cache-control": "no-store", "etag": '"once"'}, tmp_path
+    )
+    await run()
+    await run()
+    # no-store: the second crawl must hit the network again, not serve a cached copy.
+    assert fetches["n"] == 2, fetches
+
+
+async def test_no_cache_response_revalidated_on_replay(tmp_path):
+    """A ``cache-control: no-cache`` body with no validator must not replay stale:
+    on the second crawl it is revalidated (a full re-fetch here, since no validator
+    exists to send) rather than served from the disk cache (pins #247)."""
+    run, fetches = await _directive_runner(
+        "http://example.com/must-revalidate", {"cache-control": "no-cache"}, tmp_path
+    )
+    await run()
+    await run()
+    # no-cache with no validator: the second crawl must not serve the stored body.
+    assert fetches["n"] == 2, fetches
