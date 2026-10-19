@@ -115,6 +115,32 @@ async def test_recursive_link_robots_checks_run_concurrently():
     )
 
 
+async def test_one_raising_robots_check_does_not_kill_the_batch():
+    """A robots check that raises for one URL must not abort the whole crawl.
+
+    Per-URL isolation: a single raising ``robots_allows`` fails closed to
+    disallow that URL and the rest of the batch still admits and crawls.
+    """
+
+    async def allows(url):
+        if url.raw == "http://poison.example/page0":
+            raise RuntimeError("robots fetch exploded")
+        return True
+
+    jobs = [_make_job(0, "poison.example"), _make_job(0, "ok0.example"), _make_job(1, "ok1.example")]
+
+    async def worker(job):
+        return make_engine_result(job.normalized_url)
+
+    run = await drive_recursive_crawl(jobs, worker, allows=allows)
+    written = [run.spill.writes[i].normalized_url for i in run.spill.writes]
+    assert canonical("http://poison.example/page0") not in written  # failed closed
+    assert set(written) == {
+        canonical("http://ok0.example/page0"),
+        canonical("http://ok1.example/page1"),
+    }
+
+
 async def test_nonrecursive_robots_checks_run_concurrently(monkeypatch):
     """The engine's non-recursive branch must screen its batch with overlap."""
     from app.orchestration.engine import crawl_request

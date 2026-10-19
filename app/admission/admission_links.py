@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import re
 from collections.abc import Awaitable, Callable, Iterable, Iterator, MutableSequence
 from dataclasses import dataclass
@@ -28,6 +29,8 @@ __all__ = [
     "gather_robots_decisions",
     "remaining_page_capacity",
 ]
+
+_logger = logging.getLogger(__name__)
 
 RobotsAllows = Callable[[NormalizedUrl], Awaitable[bool]]
 RobotsCrawlDelay = Callable[[NormalizedUrl], Awaitable[float | None]]
@@ -311,9 +314,15 @@ async def gather_robots_decisions(
     robots_crawl_delay: RobotsCrawlDelay | None = None,
 ) -> list[tuple[bool, float | None]]:
     async def check(url: NormalizedUrl) -> tuple[bool, float | None]:
-        allowed = await robots_allows(url)
-        delay = await robots_crawl_delay(url) if allowed and robots_crawl_delay is not None else None
-        return allowed, delay
+        try:
+            allowed = await robots_allows(url)
+            delay = await robots_crawl_delay(url) if allowed and robots_crawl_delay is not None else None
+            return allowed, delay
+        except Exception:
+            # One URL's robots fetch must not abort the whole batch: fail that URL
+            # closed and let the rest of the decision set complete.
+            _logger.warning("robots_check_failed", extra={"url": url.raw})
+            return False, None
 
     decisions: list[tuple[bool, float | None]] = []
     for offset in range(0, len(urls), _ROBOTS_ADMISSION_CHUNK_SIZE):
@@ -326,7 +335,16 @@ async def gather_robots_decisions(
 
 
 async def _gather_robots_allowed(urls: list[NormalizedUrl], robots_allows: RobotsAllows) -> list[bool]:
-    return list(await asyncio.gather(*(robots_allows(url) for url in urls)))
+    async def check(url: NormalizedUrl) -> bool:
+        try:
+            return await robots_allows(url)
+        except Exception:
+            # A single failing robots check disallows that URL without dropping the
+            # batch: fail closed, matching ``gather_robots_decisions``.
+            _logger.warning("robots_check_failed", extra={"url": url.raw})
+            return False
+
+    return list(await asyncio.gather(*(check(url) for url in urls)))
 
 
 def _is_url_text(value: Any) -> bool:

@@ -403,7 +403,13 @@ async def _commit_recursive_results(
             continue
         if depth >= run.max_depth:
             continue
-        await _expand_recursive_result(run, state, depth, result)
+        try:
+            await _expand_recursive_result(run, state, depth, result)
+        except Exception:
+            # One job's link admission must not abort the whole dispatch loop:
+            # drop that job's links and let the rest of the batch continue.
+            url_attr = result.normalized_url.raw if result.normalized_url else "<unknown>"
+            logger.warning("link_admission_failed", extra={"url": url_attr})
 
 
 async def _start_recursive_state(

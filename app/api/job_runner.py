@@ -20,7 +20,7 @@ from app.admission.admission import (
     record_cap_truncated,
     requeue_admitted_pages,
 )
-from app.admission.admission_links import remaining_page_capacity
+from app.admission.admission_links import AdmissionOutcome, remaining_page_capacity
 from app.admission.policy import read_policy
 from app.api.crawl_executor import execute_crawl as _real_execute_crawl
 from app.api.job_lifecycle import (
@@ -232,7 +232,14 @@ async def _entry_result(
         unified = failed_unified_result(item)
     job.results.append(unified.model_dump())
     failed = 1 if item.status == "failed" else 0
-    admitted = await admit_job_links(job, item.discovered_links, source_depth=depth, context=context)
+    try:
+        admitted = await admit_job_links(job, item.discovered_links, source_depth=depth, context=context)
+    except Exception:
+        # One entry's link admission must not lose the whole job: drop its links
+        # and let the remaining entries resolve.
+        url_attr = item.normalized_url.raw if item.normalized_url else "<unknown>"
+        logger.warning("link_admission_failed", extra={"url": url_attr})
+        admitted = AdmissionOutcome()
     job.stats["total_discovered"] = job.stats.get("total_discovered", 0) + admitted.accepted
     return failed
 
