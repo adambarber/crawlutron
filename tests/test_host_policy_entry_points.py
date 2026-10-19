@@ -242,10 +242,13 @@ async def _probe_webhook(monkeypatch, tmp_path):
         effects["wire"].append(args)
 
     monkeypatch.setattr(webhooks, "deliver_pinned_webhook", forbidden_delivery)
-    await _assert_refused(
-        webhooks.post_webhook(_BLOCKED_URL, {"status": "accepted"}, host_policy=_denied_policy()),
-        effects,
-    )
+    # Both webhook entry points refuse the same refused host without touching the wire:
+    # the plain funnel and its shielded drain-worthy twin share one admission seam.
+    for entry in (webhooks.post_webhook, webhooks.post_webhook_guarded):
+        await _assert_refused(
+            entry(_BLOCKED_URL, {"status": "accepted"}, host_policy=_denied_policy()),
+            effects,
+        )
 
 
 async def _probe_webhook_delivery(monkeypatch, tmp_path):
@@ -333,6 +336,7 @@ _PROBES = {
     "app/api/policy_suggestions.py:policy_suggestions": _probe_policy_suggestions,
     "app/api/policy_suggestions.py:build_policy_suggestions": _probe_policy_suggestions,
     "app/api/webhooks.py:post_webhook": _probe_webhook,
+    "app/api/webhooks.py:post_webhook_guarded": _probe_webhook,
     "app/api/webhooks.py:deliver_pinned_webhook": _probe_webhook_delivery,
 }
 

@@ -168,9 +168,9 @@ async def run_async_crawl(
                 # The webhook rides with the terminal write in both branches, so it
                 # means "finished" -- announcing a paused crawl hands back a dead one.
                 if webhook_url:
-                    from app.api.webhooks import post_webhook
+                    from app.api.webhooks import post_webhook_guarded
 
-                    await post_webhook(
+                    await post_webhook_guarded(
                         webhook_url,
                         response_payload,
                         host_policy=HostPolicy.from_settings(crawl_settings),
@@ -178,8 +178,10 @@ async def run_async_crawl(
 
     except Exception as exc:
         logger.error("async_crawl_failed", extra={"request_id": request_id, "error": str(exc)})
-        await arecord_terminal_failure(job_store, request_id, str(exc))
-        if webhook_url:
+        # The error webhook announces a terminal FAILED write; only deliver it when
+        # the CAS won. A paused/cancelled job's terminal write lost, so no callback.
+        recorded = await arecord_terminal_failure(job_store, request_id, str(exc))
+        if webhook_url and recorded:
             with contextlib.suppress(Exception):
                 error_payload = (
                     await abuild_unified_crawl_response(
@@ -188,9 +190,9 @@ async def run_async_crawl(
                         adapt=build_unified_result,
                     )
                 ).model_dump()
-                from app.api.webhooks import post_webhook
+                from app.api.webhooks import post_webhook_guarded
 
-                await post_webhook(
+                await post_webhook_guarded(
                     webhook_url,
                     error_payload,
                     host_policy=HostPolicy.from_settings(crawl_settings),

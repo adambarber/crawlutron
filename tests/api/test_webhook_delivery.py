@@ -4,6 +4,9 @@ Covers failure-webhook delivery and the requirement that validation and pinned
 delivery resolve DNS off the event loop."""
 
 import asyncio
+import contextlib
+import hashlib
+import hmac
 import pathlib
 import socket
 import threading
@@ -18,6 +21,37 @@ from app.storage.job_store import JobStatus
 from app.storage.result_store import CrawlResultStore
 from tests._assertions import block_private_targets, host_resolves_to
 from tests._webhook_doubles import record_webhook_delivery
+
+
+def _webhook_target() -> str:
+    """The loopback-safe host the delivery tests agree on."""
+    return "http://webhook.example.com/cb"
+
+
+async def _run_webhook_crawl(job_store, result_store, request_id) -> None:
+    """Drive one single-shot webhook crawl to completion (shared pace)."""
+    await run_async_crawl(
+        request_id,
+        {"url": "http://example.com/"},
+        _webhook_target(),
+        MagicMock(),
+        job_store,
+        result_store,
+        asyncio.Event(),
+    )
+
+
+async def _post_webhook(monkeypatch, *, status_code: int = 200) -> list:
+    """POST the canonical webhook payload and return the delivered requests."""
+    from app.api import webhooks
+
+    delivered = record_webhook_delivery(monkeypatch, status_code=status_code)
+    await webhooks.post_webhook(
+        _webhook_target(),
+        {"results": []},
+        host_policy=HostPolicy.unrestricted(),
+    )
+    return delivered
 
 
 def _spy_resolver_threads(monkeypatch: pytest.MonkeyPatch) -> list[threading.Thread]:
@@ -213,3 +247,132 @@ class TestWebhookValidationRunsOffLoop:
                 "http://evil.example.com/callback",
                 host_policy=HostPolicy.unrestricted(),
             )
+
+
+class TestErrorBranchTerminalCasGatesPublish:
+    """The error webhook publishes only when the terminal FAILED write won.
+
+    The error branch used to post unconditionally; a paused/cancelled job still
+    got an error callback for a run an operator already stopped."""
+
+    async def test_a_paused_job_that_fails_publishes_no_error_webhook(self, job_store, tmp_path):
+        request_id = "crawl_err_paused"
+        job_store.create_single_shot(request_id, "http://example.com/", {"url": "http://example.com/"})
+        result_store = CrawlResultStore(tmp_path / "results.db")
+
+        # The operator pauses while the crawl is failing; the terminal FAILED
+        # write lost the CAS, so no error callback may announce it.
+        async def explode_then_pause(*args, **kwargs):
+            await job_store.aset_status(request_id, JobStatus.PAUSED, expected=JobStatus.RUNNING)
+            raise RuntimeError("crawl blew up")
+
+        with patch("app.api.async_crawl_runner.execute_crawl", side_effect=explode_then_pause):
+            with patch("app.api.webhooks.post_webhook", new_callable=AsyncMock) as post_webhook:
+                await _run_webhook_crawl(job_store, result_store, request_id)
+
+        assert post_webhook.await_count == 0, (
+            f"error webhook fired {post_webhook.await_count} times for a PAUSED job; "
+            "the terminal FAILED CAS lost and must not publish"
+        )
+
+
+class TestWebhookSignature:
+    """Webhook callbacks must be HMAC-signed so a receiver can prove the delivery
+    came from this service and was not tampered with in transit."""
+
+    async def test_payload_is_hmac_signed_when_secret_is_set(self, monkeypatch):
+        monkeypatch.setenv("CRAWLUTRON_WEBHOOK_SECRET", "s3cret-webhook-key")
+        delivered = await _post_webhook(monkeypatch)
+
+        assert len(delivered) == 1, delivered
+        signature = delivered[0].headers.get("X-Crawlutron-Webhook-Signature", "")
+        assert signature.startswith("sha256="), (
+            f"no HMAC signature header; receiver cannot verify this callback: {signature!r}"
+        )
+        expected = hmac.new(b"s3cret-webhook-key", delivered[0].content, hashlib.sha256).hexdigest()
+        assert signature == f"sha256={expected}", "the signature does not cover the exact body"
+
+    async def test_no_signature_header_when_secret_unset(self, monkeypatch):
+        monkeypatch.delenv("CRAWLUTRON_WEBHOOK_SECRET", raising=False)
+        delivered = await _post_webhook(monkeypatch)
+
+        assert not delivered[0].headers.get("X-Crawlutron-Webhook-Signature"), (
+            "an unsigned callback claims to be signed; headers must be absent without a secret"
+        )
+
+
+class TestWebhookRetryBackoff:
+    """Transient webhook failures must be retried with backoff, not dropped."""
+
+    async def test_transient_5xx_is_retried(self, monkeypatch):
+        monkeypatch.setenv("CRAWLUTRON_WEBHOOK_BACKOFF_BASE_MS", "0")
+        delivered = await _post_webhook(monkeypatch, status_code=500)
+
+        assert len(delivered) >= 2, (
+            f"a 500 receiver was tried {len(delivered)} times; a transient webhook "
+            "failure is dropped without retry/backoff"
+        )
+
+    async def test_permanent_4xx_is_not_retried(self, monkeypatch):
+        monkeypatch.setenv("CRAWLUTRON_WEBHOOK_BACKOFF_BASE_MS", "0")
+        delivered = await _post_webhook(monkeypatch, status_code=400)
+
+        assert len(delivered) == 1, (
+            f"a 4xx receiver was tried {len(delivered)} times; a permanent refusal must not be retried"
+        )
+
+    async def test_retry_sleeps_with_exponential_backoff(self, monkeypatch):
+        """The gap between retries grows; a flat immediate re-fire is not a backoff."""
+        from app.api import webhooks
+
+        monkeypatch.setenv("CRAWLUTRON_WEBHOOK_BACKOFF_BASE_MS", "100")
+        waited: list[float] = []
+
+        async def fake_sleep(seconds: float) -> None:
+            waited.append(seconds)
+
+        monkeypatch.setattr(webhooks.asyncio, "sleep", fake_sleep)
+        await _post_webhook(monkeypatch, status_code=500)
+
+        assert len(waited) >= 2, f"no backoff between retries: {waited}"
+        assert waited == sorted(waited) and waited[-1] > waited[0], (
+            f"retries did not back off exponentially: {waited}"
+        )
+
+
+class TestShutdownDrainsInFlightWebhookDelivery:
+    """A cancelled runner must not drop the callback whose terminal write landed;
+    shutdown drains in-flight deliveries before the store closes."""
+
+    async def test_shutdown_drain_awaits_an_in_flight_webhook(self, monkeypatch):
+        from app.api import webhooks
+
+        started = asyncio.Event()
+        completed = asyncio.Event()
+        release = asyncio.Event()
+
+        async def slow_delivery(url, payload, *, host_policy):
+            started.set()
+            await release.wait()
+            completed.set()
+
+        monkeypatch.setattr(webhooks, "validate_webhook_url_async", AsyncMock())
+        monkeypatch.setattr(webhooks, "deliver_pinned_webhook", slow_delivery)
+
+        task = asyncio.create_task(
+            webhooks.post_webhook_guarded(
+                "http://webhook.example.com/cb",
+                {"results": []},
+                host_policy=HostPolicy.unrestricted(),
+            )
+        )
+        await started.wait()
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
+
+        # The terminal write is done; the in-flight webhook must not be dropped.
+        release.set()
+        await webhooks.drain_webhook_deliveries()
+
+        assert completed.is_set(), "the in-flight webhook callback was dropped at shutdown"

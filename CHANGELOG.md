@@ -68,6 +68,16 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   is `None` when unset/0, and the is-not-None guard is where the refusal
   decision is made.
 
+- **Outbound webhook callbacks are signed, retried, and drained on shutdown.**
+  Every delivery is now HMAC-SHA256-signed over the exact body (shared secret via
+  the new `CRAWLUTRON_WEBHOOK_SECRET` knob; empty disables signing so existing
+  setups are untouched), so a receiver can prove origin and integrity. Transient
+  failures (5xx/429/transport) are retried with exponential backoff controlled by
+  the new `CRAWLUTRON_WEBHOOK_MAX_ATTEMPTS` and `CRAWLUTRON_WEBHOOK_BACKOFF_BASE_MS`
+  knobs instead of being dropped after one attempt. And a runner cancelled at
+  shutdown no longer drops the callback whose terminal write already landed: the
+  shielded deliveries are drained by `shutdown_job_runner` before the stores close.
+
 ### Fixed
 - **`/ready` reported `max_active_requests = 0` even when a cap was set.** The
   field hardcoded 0 ("self-managed: no fixed request cap"); with

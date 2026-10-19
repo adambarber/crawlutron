@@ -21,7 +21,7 @@ def is_running(job_id: str) -> bool:
 
 
 async def shutdown_job_runner() -> None:
-    """Cancel all running job tasks and await their exit."""
+    """Cancel all running job tasks and await their exit, then drain webhooks."""
     for task in list(_tasks.values()):
         task.cancel()
     for job_id, task in list(_tasks.items()):
@@ -32,6 +32,11 @@ async def shutdown_job_runner() -> None:
         except Exception:
             logger.warning("job_runner_shutdown_task_error", extra={"job_id": job_id})
     _tasks.clear()
+    # A cancellation can land after a job's terminal write but before its webhook
+    # POST; drain the shielded deliveries so that callback is never dropped at exit.
+    from app.api.webhooks import drain_webhook_deliveries
+
+    await drain_webhook_deliveries()
 
 
 def reset_job_runner() -> None:

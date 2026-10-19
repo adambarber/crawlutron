@@ -72,17 +72,16 @@ def install_execute_crawl(fn: ExecuteCrawl) -> None:
     _execute_crawl = fn
 
 
-async def arecord_terminal_failure(job_store: JobStore, job_id: str, error: str) -> None:
-    """Stamp ``error`` on a RUNNING job and flip it to FAILED.
-
-    A job past RUNNING is left as-is, so a late batch failure never
-    overwrites an operator's cancel/pause."""
+async def arecord_terminal_failure(job_store: JobStore, job_id: str, error: str) -> bool:
+    """Stamp ``error`` on a RUNNING job and flip it to FAILED; True iff the FAILED
+    write landed. A job past RUNNING is left as-is and reports False.
+    """
     job = await job_store.aload(job_id)
     if job is None or job.status is not JobStatus.RUNNING:
-        return
+        return False
     job.error = error
     await job_store.asave(job)
-    await job_store.aset_status(job_id, JobStatus.FAILED, expected=JobStatus.RUNNING)
+    return await job_store.aset_status(job_id, JobStatus.FAILED, expected=JobStatus.RUNNING)
 
 
 def reset_execute_crawl() -> None:

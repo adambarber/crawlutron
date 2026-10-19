@@ -13,7 +13,7 @@ from collections.abc import Callable
 from typing import Any
 
 from app.api.crawl_executor import execute_crawl
-from app.api.webhooks import post_webhook
+from app.api.webhooks import post_webhook_guarded
 from app.config.settings import CrawlerSettings
 from app.models.crawl_policy import CrawlPolicy
 from app.models.crawl_request import CrawlRequest
@@ -146,7 +146,7 @@ class WatchSweeper:
             and classification != CrawlClassification.not_modified
             and watch.webhook_url
         ):
-            await post_webhook(
+            await post_webhook_guarded(
                 watch.webhook_url,
                 _announcement(watch, outcome=classification, checked_at=now),
                 host_policy=self._host_policy,

@@ -44,7 +44,7 @@ def announced(monkeypatch):
     async def _capture(webhook_url: str, payload: dict[str, Any], *, host_policy) -> None:
         calls.append((webhook_url, payload))
 
-    monkeypatch.setattr(watch_sweep, "post_webhook", _capture)
+    monkeypatch.setattr(watch_sweep, "post_webhook_guarded", _capture)
     return calls
 
 

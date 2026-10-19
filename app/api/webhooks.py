@@ -1,26 +1,63 @@
-"""Webhook delivery helpers (SSRF-safe, IP-pinned): every outbound callback routes
-through ``post_webhook`` -> ``deliver_pinned_webhook``, re-admitting and re-pinning
-via the fetchers' one rule so validation-to-delivery TOCTOU stays closed; nothing else composes deliver.
+"""Webhook delivery helpers (SSRF-safe, IP-pinned): every outbound callback
+routes through ``post_webhook``; deliveries are HMAC-signed, retried with
+backoff, and drained on shutdown so a finished job's callback is never dropped.
 """
 
 from __future__ import annotations
 
+import asyncio
 import functools
+import hashlib
+import hmac
 import json
 import logging
 import os
+import time
 from collections.abc import Mapping
 from typing import Any
 
 import httpx
 
-from app.config.env import get_mapping_int
+from app.config.env import get_env_int, get_mapping_int
 from app.models.host_policy import HostPolicy
 from app.models.normalized_url import NormalizedUrl
 from app.safety.bounded_io import BodyTooLarge, read_capped_async
 from app.transport.timeouts import Timeouts
 
 logger = logging.getLogger(__name__)
+
+_SIGNATURE_HEADER = "X-Crawlutron-Webhook-Signature"
+_TIMESTAMP_HEADER = "X-Crawlutron-Webhook-Timestamp"
+
+_WEBHOOK_MAX_ATTEMPTS_DEFAULT = 3
+_WEBHOOK_BACKOFF_MS_DEFAULT = 200
+
+# In-flight delivery tasks, tracked so shutdown drains a callback even when the
+# runner that scheduled it was cancelled after its terminal write landed.
+_DELIVERIES: set[asyncio.Task] = set()
+
+
+class DeliveryFailed(Exception):
+    """A webhook POST failed and either can be retried or is permanent."""
+
+    def __init__(self, message: str, *, retryable: bool) -> None:
+        super().__init__(message)
+        self.retryable = retryable
+
+
+def webhook_secret() -> str:
+    """The shared HMAC key for outbound webhook signatures; empty disables signing."""
+    return os.environ.get("CRAWLUTRON_WEBHOOK_SECRET", "")
+
+
+def webhook_max_attempts() -> int:
+    """How many times a webhook delivery is tried before giving up."""
+    return get_env_int("CRAWLUTRON_WEBHOOK_MAX_ATTEMPTS", _WEBHOOK_MAX_ATTEMPTS_DEFAULT, lo=1)
+
+
+def webhook_backoff_base_ms() -> int:
+    """First retry delay in ms; each retry doubles it (exponential backoff)."""
+    return get_env_int("CRAWLUTRON_WEBHOOK_BACKOFF_BASE_MS", _WEBHOOK_BACKOFF_MS_DEFAULT, lo=0)
 
 
 async def deliver_pinned_webhook(
@@ -30,8 +67,7 @@ async def deliver_pinned_webhook(
     host_policy: HostPolicy,
 ) -> None:
     """POST ``payload_bytes`` to ``webhook_url`` with DNS-rebinding safety.
-    No URL composition lives here -- build_pinned_request owns the pin, so
-    IPv6/Host handling cannot drift; the caller MUST have validated the URL first.
+    Raises :class:`DeliveryFailed` on a non-2xx so the retry loop can act on it.
     """
     # one place) rather than urlparse/check/pin inline -- manual composition is the
     # shape that produced the redirect findings, and this closes validation's window.
@@ -41,6 +77,10 @@ async def deliver_pinned_webhook(
         NormalizedUrl(webhook_url, policy=host_policy), {}
     )
     request_headers = {"Content-Type": "application/json", **connect_headers}
+    secret = webhook_secret()
+    if secret:
+        request_headers[_SIGNATURE_HEADER] = _signature(payload_bytes, secret)
+        request_headers[_TIMESTAMP_HEADER] = str(int(time.time()))
     # Deliberate one-per-delivery cost: pooling would re-resolve by hostname (defeating
     # the pin) or cache the IP across deliveries (reopening the rebinding window).
     async with httpx.AsyncClient(timeout=Timeouts.defaults().as_httpx()) as client:
@@ -56,6 +96,44 @@ async def deliver_pinned_webhook(
                     "webhook_response_too_large",
                     extra={"limit_bytes": max_webhook_size()},
                 )
+            status = response.status_code
+            if status >= 500 or status == 429:
+                raise DeliveryFailed(f"transient webhook status {status}", retryable=True)
+            if status >= 400:
+                raise DeliveryFailed(f"webhook receiver refused ({status})", retryable=False)
+
+
+def _signature(payload_bytes: bytes, secret: str) -> str:
+    """HMAC-SHA256 of the exact body; the receiver recomputes over the same bytes."""
+    digest = hmac.new(secret.encode(), payload_bytes, hashlib.sha256).hexdigest()
+    return f"sha256={digest}"
+
+
+async def _backoff_sleep(attempt: int, base_ms: int) -> None:
+    """Exponential backoff: base * 2**attempt ms, never more than one minute."""
+    delay = min(base_ms * (2**attempt), 60_000) / 1000.0
+    await asyncio.sleep(delay)
+
+
+async def drain_webhook_deliveries() -> None:
+    """Await every in-flight delivery once (shutdown), so a cancelled runner's
+    callback is delivered before the stores close."""
+    for task in list(_DELIVERIES):
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+        except Exception as exc:
+            # The delivery already logged its loss; a re-raised error is drained.
+            logger.warning("webhook_drain_error", extra={"error": str(exc)})
+
+
+def _should_retry(delivery_exc: Exception, attempt: int, attempts: int) -> bool:
+    """A retry/backoff decision: transient overflow-AX or a transport error retries."""
+    transient = isinstance(delivery_exc, httpx.HTTPError) or (
+        isinstance(delivery_exc, DeliveryFailed) and delivery_exc.retryable
+    )
+    return transient and attempt < attempts - 1
 
 
 _WEBHOOK_SIZE_DEFAULT = 10_485_760
@@ -85,9 +163,9 @@ async def post_webhook(
     *,
     host_policy: HostPolicy,
 ) -> None:
-    """POST a webhook payload with size limit and SSRF+IP pinning, via the same
-    validated delivery path (no TOCTOU window); size-capping and best-effort
-    failure handling live here so a dead callback never crashes the crawl worker.
+    """POST a webhook (SSRF/IP pinned, HMAC-signed, size-capped) with backoff retries.
+    Best-effort: a lost callback is logged, never raised, so a dead receiver cannot
+    crash the crawl worker. The size-cap/validation story lives only here.
     """
     payload_bytes = json.dumps(dict(payload)).encode("utf-8")
     if len(payload_bytes) > max_webhook_size():
@@ -96,18 +174,38 @@ async def post_webhook(
             extra={"url": webhook_url, "size": len(payload_bytes)},
         )
         return
+    await validate_webhook_url_async(webhook_url, host_policy=host_policy)
+    attempts = webhook_max_attempts()
+    for attempt in range(attempts):
+        try:
+            await deliver_pinned_webhook(webhook_url, payload_bytes, host_policy=host_policy)
+            return
+        except Exception as exc:
+            if not _should_retry(exc, attempt, attempts):
+                logger.warning(
+                    "webhook_delivery_failed",
+                    extra={"url": webhook_url, "error": str(exc), "attempt": attempt + 1},
+                )
+                return
+            await _backoff_sleep(attempt, webhook_backoff_base_ms())
+
+
+async def post_webhook_guarded(
+    webhook_url: str,
+    payload: Mapping[str, object],
+    *,
+    host_policy: HostPolicy,
+) -> None:
+    """Await ``post_webhook`` as a shielded, drained task: a runner cancelled at
+    shutdown does not drop the callback whose terminal write already landed."""
+    task = asyncio.create_task(post_webhook(webhook_url, payload, host_policy=host_policy))
+    _DELIVERIES.add(task)
+    task.add_done_callback(_DELIVERIES.discard)
     try:
-        await validate_webhook_url_async(webhook_url, host_policy=host_policy)
-        await deliver_pinned_webhook(
-            webhook_url,
-            payload_bytes,
-            host_policy=host_policy,
-        )
-    except Exception as exc:
-        logger.warning(
-            "webhook_delivery_failed",
-            extra={"url": webhook_url, "error": str(exc)},
-        )
+        await asyncio.shield(task)
+    except asyncio.CancelledError:
+        # The runner was cancelled; the tracked delivery continues for drain.
+        raise
 
 
 def validate_webhook_url(webhook_url: str, *, host_policy: HostPolicy) -> None:
