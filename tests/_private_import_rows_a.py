@@ -19,10 +19,11 @@ DECLARED: dict[str, Declaration] = {
     ),
     "app.transport.decompression._decompress_brotli": _d(
         "implementation step",
-        "Proof that the streaming brotli branch clamps its accumulated buffer to cap+1. The public\n"
-        "decompress_body swallows that bound behind its DecompressionTooLargeError raise, so the\n"
-        "remote-OOM property has no expression through the public surface; the stream is driven here\n"
-        "with the decoder substituted at the dependency boundary.\n",
+        "Proof that the streaming brotli branch bounds each process() call's peak to O(cap) by feeding"
+        " the size argument (only exposable by instrumenting the decoder) and then raises"
+        " DecompressionTooLargeError for bombs. The remote-OOM property has no expression through the"
+        " public surface; the stream is driven here with the decoder substituted at the dependency"
+        " boundary.\n",
         ["test"],
     ),
     "app.transport.browser_cookies.BROWSER_COOKIES_BY_DOMAIN._lock": _d(

@@ -301,9 +301,9 @@ def test_brotli_feeds_incrementally(monkeypatch):
     # Subclassing ``brotli.Decompressor`` directly, not a variable bound to it: the base class is resolved
     # when this statement runs, and the monkeypatch below replaces the module attribute afterwards, so the spy
     class SpyDecompressor(brotli.Decompressor):
-        def process(self, data):
+        def process(self, data, size):
             calls.append(len(data))
-            return super().process(data)
+            return super().process(data, size)
 
     monkeypatch.setattr(brotli, "Decompressor", SpyDecompressor)
     import os
@@ -345,7 +345,7 @@ def test_brotli_streaming_clamps_accumulated_output(monkeypatch):
     # than cap+1 bytes of it, or a small on-wire body becomes a remote OOM.
 
     class BombProcess(brotli.Decompressor):
-        def process(self, data):
+        def process(self, data, size):
             return b"Z" * 16_384_000  # one slice expands well past any small cap
 
     monkeypatch.setattr(brotli, "Decompressor", BombProcess)

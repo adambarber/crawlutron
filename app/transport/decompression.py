@@ -15,9 +15,11 @@ class _BoundedDecompressor(Protocol):
 
 
 class _StreamingDecompressor(Protocol):
-    """The google-brotli API: feed a slice at a time, no cap parameter."""
+    """The google-brotli API: feed a slice at a time; the second arg bounds the internal buffer."""
 
-    def process(self, data: bytes | bytearray | memoryview[int], /) -> bytes: ...
+    def process(self, data: bytes | bytearray | memoryview[int], size: int, /) -> bytes: ...
+
+    def is_finished(self) -> bool: ...
 
 
 # safe: a header naming anything else is passed through whole, because there is no
@@ -129,10 +131,44 @@ def decompress_body(
     return _passthrough(decoded)
 
 
+def _brotli_stream(
+    streaming: _StreamingDecompressor,
+    body: bytes | bytearray | memoryview[int],
+    cap: int,
+) -> bytearray:
+    """Feed google-brotli in slices; the size arg keeps each process() peak O(cap)."""
+    chunks = bytearray()
+    step = 16_384
+    for offset in range(0, len(body), step):
+        size = cap - len(chunks)
+        if size < 0:
+            break
+        raw = body[offset : offset + step]
+        chunks.extend(streaming.process(raw, size))
+        if len(chunks) > cap:
+            del chunks[cap:]
+            return chunks
+        if streaming.is_finished():
+            return chunks
+    # The size bound held output back; feed empty slices to drain it.
+    while len(chunks) <= cap and not streaming.is_finished():
+        size = cap - len(chunks)
+        if size < 0:
+            break
+        drained = streaming.process(b"", size)
+        if not drained:
+            break
+        chunks.extend(drained)
+        if len(chunks) > cap:
+            del chunks[cap:]
+            break
+    return chunks
+
+
 def _decompress_brotli(body: bytes | bytearray | memoryview[int], max_output_bytes: int) -> bytes | bytearray:
     """Decode a brotli body within a cap or raise a typed error. The two brotli
-    APIs differ (capped ``decompress`` vs uncapped ``process``); which is installed
-    is not statically knowable, so ``hasattr`` discriminates.
+    APIs differ (capped ``decompress`` vs size-bounded ``process``); which is
+    installed is not statically knowable, so ``hasattr`` discriminates.
     """
     try:
         decoder: object | None = brotli.Decompressor()
@@ -141,25 +177,13 @@ def _decompress_brotli(body: bytes | bytearray | memoryview[int], max_output_byt
 
     try:
         if decoder is not None and hasattr(decoder, "decompress"):
-            # Brotlicffi-style bounded API
             bounded = cast(_BoundedDecompressor, decoder)
             decoded: bytes | bytearray = bounded.decompress(body, max_output_bytes + 1)
         elif decoder is not None and hasattr(decoder, "process"):
             streaming = cast(_StreamingDecompressor, decoder)
-            # process() has no cap argument and materialises each slice's whole expansion, so clamp
-            # the accumulation to cap+1 and stop feeding -- never carry a bomb in the caller's buffer.
-            chunks = bytearray()
-            step = 16_384
-            cap = max_output_bytes + 1
-            for offset in range(0, len(body), step):
-                chunks.extend(streaming.process(body[offset : offset + step]))
-                if len(chunks) > cap:
-                    del chunks[cap:]
-                    break
-            decoded = chunks
+            decoded = _brotli_stream(streaming, body, max_output_bytes + 1)
         else:
-            # No bounded decoder is available; refuse rather than fall through to an uncapped
-            # brotli.decompress(body), which is a residual remote-OOM vector for attacker bytes.
+            # No bounded decoder: refuse rather than fall to an uncapped brotli.decompress().
             raise DecompressionError("no bounded brotli decoder available")
     except Exception as error:
         raise DecompressionError("invalid brotli stream") from error
