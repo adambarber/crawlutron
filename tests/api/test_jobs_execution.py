@@ -197,6 +197,27 @@ class TestCrashRecovery:
 
 
 class TestWholeSiteJobExecution:
+    async def test_keyed_job_crawls_under_its_key_derived_cookie_namespace(self, job_store):
+        """#195/#226: a keyed whole-site job must persist the key-derived cookie namespace so it
+        crawls in its own jar partition, not the anonymous shared one."""
+        from httpx import ASGITransport, AsyncClient
+
+        from app.models.caller_identity import CallerIdentity
+
+        app = _make_app(job_store)
+        app.dependency_overrides[get_caller_identity] = lambda: CallerIdentity(
+            caller_id="key_a", authenticated=True
+        )
+
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            response = await client.post("/v1/jobs", json={"root_url": GRAPH_ROOT, "policy": {}})
+        assert response.status_code == 200, response.text
+        job_id = response.json()["job_id"]
+
+        stored = job_store.load(job_id)
+        assert stored is not None
+        assert stored.policy.request_profile.get("cookie_namespace") == "key_a"
+
     def test_engine_payload_builder_disables_recursion_and_preserves_limits(self, job_store):
         root = GRAPH_ROOT
         # The limit block is stated once and the one field this test is about is the only thing that varies.

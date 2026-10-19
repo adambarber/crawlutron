@@ -139,9 +139,12 @@ def is_operator(request: Request) -> bool:
 
 
 def effective_cookie_namespace(profile: Mapping[str, JsonValue], caller: CallerIdentity) -> str:
-    """The cookie namespace for one crawl: an explicit profile wins, else the key."""
+    """The cookie namespace for one crawl: for an authenticated caller, pinned to the key id
+    (a caller-supplied override could claim another caller's key and share their jar); an anonymous
+    caller keeps whatever the profile declares.
+    """
     if caller.authenticated and caller.caller_id:
-        return cookie_namespace_for(profile) or caller.caller_id
+        return caller.caller_id
     return cookie_namespace_for(profile)
 
 

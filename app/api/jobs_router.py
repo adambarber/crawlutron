@@ -13,7 +13,7 @@ from fastapi import APIRouter, Request
 from app.admission.payload_helpers import checked_payload_urls
 from app.admission.policy import read_policy
 from app.api import job_runner
-from app.api.caller_auth import Tracking, admit, resolve_page_limit
+from app.api.caller_auth import Tracking, admit, effective_cookie_namespace, resolve_page_limit
 from app.api.dependencies import CallerDep, JobStoreDep, SettingsDep, ShutdownEventDep
 from app.api.exceptions import http_error, validation_http_error
 from app.api.main_helpers import build_job_status
@@ -76,6 +76,13 @@ async def create_job(
         resolved_policy = resolved_policy.model_copy(
             update={"limits": resolved_policy.limits.model_copy(update={"max_pages": bound})}
         )
+        # #195/#226: persist the caller's effective cookie namespace so a keyed whole-site job
+        # crawls under its own jar partition; the durable row outlives the admitting request.
+        namespace = effective_cookie_namespace(resolved_policy.request_profile, caller)
+        if namespace:
+            profile = dict(resolved_policy.request_profile)
+            profile["cookie_namespace"] = namespace
+            resolved_policy = resolved_policy.model_copy(update={"request_profile": profile})
         # A whole-site job persists a durable row; admit counts the caller's rows and
         # sync in-flight against one ceiling without reserving a slot of its own.
         tracking = Tracking(

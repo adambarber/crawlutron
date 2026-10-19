@@ -272,7 +272,10 @@ def test_effective_cookie_namespace_defaults_to_caller(tmp_path):
 
     assert effective_cookie_namespace({}, caller) == caller.caller_id
     assert effective_cookie_namespace({}, anonymous) == ""
-    assert effective_cookie_namespace({"cookie_namespace": "tenant-x"}, caller) == "tenant-x"
+    # #226: an authenticated caller's profile override must NOT reassign the key-derived
+    # namespace -- otherwise a tenant can claim another key_id and read/write its jar.
+    assert effective_cookie_namespace({"cookie_namespace": "tenant-x"}, caller) == caller.caller_id
+    assert effective_cookie_namespace({"cookie_namespace": "tenant-x"}, anonymous) == "tenant-x"
 
 
 def test_page_quota_rejects_over_budget_crawls():
