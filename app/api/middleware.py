@@ -36,10 +36,20 @@ async def reject_hostile_origin(request: Request, call_next):
 
 async def limit_request_body(request: Request, call_next, *, max_bytes: int = MAX_REQUEST_BODY_BYTES):
     """ASGI middleware: cap request bodies at ``max_bytes``."""
+    original_receive = request.receive
     content_length = request.headers.get("content-length")
     if content_length:
         try:
             if int(content_length) > max_bytes:
+                # Mirror the truncation path: mark the connection closing and
+                # drain (discard) the declared body before the 413.
+                async def _drain() -> None:
+                    while True:
+                        message = await original_receive()
+                        if not message.get("more_body", False):
+                            break
+
+                await _drain()
                 return JSONResponse(
                     status_code=413,
                     content=error_envelope(
@@ -47,10 +57,10 @@ async def limit_request_body(request: Request, call_next, *, max_bytes: int = MA
                         "Request body exceeds the maximum allowed size",
                         {"max_bytes": max_bytes},
                     ),
+                    headers={"Connection": "close"},
                 )
         except ValueError:
             pass
-    original_receive = request.receive
     bytes_delivered = 0
     truncated = False
 

@@ -129,6 +129,26 @@ async def test_declared_body_over_the_cap_is_refused_before_the_app_sees_it():
     assert not called, "the app was invoked for a body already refused"
 
 
+async def test_declared_body_over_cap_marks_connection_close_and_drains():
+    """The early Content-Length 413 must mirror the truncation path: mark the
+    connection closing AND drain (discard) the declared body, so a keep-alive
+    re-use of the socket cannot read the abandoned body as the next request."""
+    messages = [
+        {"type": "http.request", "body": b"X" * 512, "more_body": True},
+        {"type": "http.request", "body": b"", "more_body": False},
+    ]
+    request = _make_request(messages, headers=[(b"content-length", b"4096")])
+
+    async def call_next(req):
+        raise AssertionError("the app must not run for a body already refused")
+
+    response = await limit_request_body(request, call_next, max_bytes=CAP)
+
+    assert response.status_code == 413
+    assert response.headers["Connection"] == "close"
+    assert messages == [], "the declared body must be drained before the 413"
+
+
 @pytest.mark.parametrize("declared", [CAP, CAP - 1], ids=["at", "under"])
 async def test_declared_body_within_the_cap_is_admitted(declared):
     """The pre-check rejects only what it says it rejects: a declared body at
