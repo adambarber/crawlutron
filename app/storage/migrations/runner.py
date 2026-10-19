@@ -143,7 +143,7 @@ def stamp_store(db_path: str | Path, schema: StoreSchema | str) -> str:
             raise LegacySchemaMismatch(f"cannot stamp missing table {CURRENT_SCHEMAS[selected].name}")
         _require_stampable_schema(backend.connection, selected)
         pending = backend.to_apply(migrations)
-        if not schema_drift(backend.connection, CURRENT_SCHEMAS[selected]):
+        if not schema_drift(backend.connection, CURRENT_SCHEMAS[selected], selected):
             to_mark = pending
         else:
             initial_id = MIGRATION_SEQUENCES[selected][0]

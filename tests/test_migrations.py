@@ -221,6 +221,26 @@ def test_historical_canonicalized_column_is_removed_during_legacy_stamping(tmp_p
     store.close()
 
 
+def test_stamp_refuses_when_companion_tables_are_missing(tmp_path):
+    """A complete crawl_jobs row must not be stamped through the migrations whose
+    companion tables (0003's crawl_job_results/crawl_job_visited) do not exist:
+    doing so boot-loops connect_store (#233)."""
+    db_path = tmp_path / "missing-companions.db"
+    conn = sqlite3.connect(db_path)
+    conn.execute(create_table_sql(CURRENT_SCHEMAS[StoreSchema.CRAWL_JOBS]))
+    conn.commit()
+    conn.close()
+
+    stamp_store(db_path, StoreSchema.CRAWL_JOBS)
+
+    after = sqlite3.connect(db_path)
+    applied = _applied_migration_ids(after)
+    assert "0003_crawl_jobs_split_accumulators" not in applied, applied
+    assert "0004_crawl_jobs_add_owner" not in applied, applied
+    assert "0005_crawl_jobs_add_deleted_at" not in applied, applied
+    after.close()
+
+
 def test_explicit_legacy_stamp_records_only_satisfied_migration(tmp_path):
     db_path = tmp_path / "stamped-historical-jobs.db"
     _create_legacy_database(db_path, StoreSchema.CRAWL_JOBS)
