@@ -392,15 +392,15 @@ async def _run(state: _PipelineState) -> ProducerEnvelope:
     state.scope_pattern = state.dependencies.compile_scope_regex_safe(state.policy.scope_regex)
     state.want_document_bodies = state.policy.extraction is CrawlExtractionMethod.DOCUMENT
     state.spill = state.dependencies.make_spill(state.spill_path)
-    if state.max_depth > 0:
-        await _run_recursive(state)
-    else:
-        await _run_nonrecursive(state)
     try:
+        if state.max_depth > 0:
+            await _run_recursive(state)
+        else:
+            await _run_nonrecursive(state)
         response = await _response(state)
     finally:
-        # The spill must release its lock even when response assembly raises on a
-        # corrupt row, so a crashed worker does not accumulate orphaned files.
+        # The spill must release its lock on the WHOLE body, not only response
+        # assembly (#221); #337 had covered just the _response arm.
         state.spill.close()
     return response
 

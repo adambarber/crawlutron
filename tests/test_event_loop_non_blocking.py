@@ -445,3 +445,39 @@ class TestSpillAssemblyOffTheEventLoop:
                 raise AssertionError("spill is still locked: close() was skipped on the error path") from None
             finally:
                 fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
+
+    async def test_crawl_body_raise_still_closes_the_spill(self, monkeypatch, tmp_path):
+        """A raise in the crawl BODY (after the spill is created) must still close the
+        spill and release its lock; the old guard only wrapped ``_response`` (#221).
+        """
+        import app.orchestration.engine as engine
+        import app.orchestration.request_pipeline as pipeline
+
+        # GC releasing the lock is not the contract -- an explicit close() is. Track the call.
+        closed: list[bool] = []
+        real_close = engine.ResultSpill.close
+
+        def _recording_close(self):
+            closed.append(True)
+            return real_close(self)
+
+        monkeypatch.setattr(engine.ResultSpill, "close", _recording_close)
+
+        async def _raise_crawl(**kwargs):
+            raise RuntimeError("crawl body failed")
+
+        monkeypatch.setattr(pipeline, "run_recursive_crawl", _raise_crawl)
+
+        async def scenario():
+            try:
+                await crawled_results(
+                    {"/": (200, "<html><body>hello</body></html>", "text/html")},
+                    limits={"max_depth": 1, "max_pages": 5},
+                    spill_path=str(tmp_path / "crawl.body.spill.ndjson"),
+                )
+            except RuntimeError:
+                return
+            raise AssertionError("the crawl-body error must propagate")
+
+        await scenario()
+        assert closed, "close() was not called on the spill when the crawl body raised"
