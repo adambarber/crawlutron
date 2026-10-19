@@ -167,6 +167,16 @@ class TestProviderParsing:
         results = await provider.search("x", 5, 10.0)
         assert [r.url for r in results] == ["https://example.gov/a", "https://example.gov/b"]
 
+    async def test_keyed_provider_clamps_results_to_caller_limit(self, fake_provider_http):
+        # A provider that emits far more results than the caller asked for must not
+        # leak them into the response; only ``limit`` items are ever advertised.
+        too_many = [{"title": f"R{i}", "url": f"https://example.gov/{i}"} for i in range(7)]
+        fake_provider_http(200, provider_results(*too_many))
+        provider = TavilyProvider("key", HostPolicy.unrestricted())
+        results = await provider.search("x", 3, 10.0)
+        assert len(results) == 3
+        assert [r.url for r in results] == [f"https://example.gov/{i}" for i in range(3)]
+
 
 # --- Shared result collector (three provider loops were verbatim) ---------
 

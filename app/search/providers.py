@@ -199,7 +199,7 @@ class _ApiKeyProvider:
     async def search(self, query: str, limit: int, timeout_seconds: float) -> list[SearchResult]:
         """Query this provider and return SSRF-screened, normalized results."""
         status, body = await self._request(query, limit, timeout_seconds)
-        return self._results(status, body)
+        return self._results(status, body, limit)
 
     def _call(self, query: str, limit: int) -> _ProviderCall:
         """This provider's request shape for one query. Subclass hook.
@@ -232,10 +232,10 @@ class _ApiKeyProvider:
             node = node.get(key)
         return node
 
-    def _results(self, status: int, body: str) -> list[SearchResult]:
-        """The keyed-provider response contract, in one place.
-        The three field names come from the instance, not callers: they are
-        per-provider class state, and passing them let one provider's keys cross to another.
+    def _results(self, status: int, body: str, limit: int) -> list[SearchResult]:
+        """The keyed-provider response contract, in one place. The three field
+        names come from the instance, not callers; the list is clamped to the
+        caller's ``limit`` so an over-emitting provider leaks nothing beyond it.
         """
         payload = _parse_json(body)
         if status != 200:
@@ -246,7 +246,7 @@ class _ApiKeyProvider:
             title_key=self._title_key,
             description_key=self._description_key,
             policy=self._host_policy,
-        )
+        )[:limit]
 
 
 class TavilyProvider(_ApiKeyProvider):
