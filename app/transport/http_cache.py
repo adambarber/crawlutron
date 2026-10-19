@@ -159,6 +159,6 @@ async def _store_http_caches(ctx: HttpStrategyContext, resp: FetchedResponse) ->
         ctx.cache.store(ctx.normalized_url, dict(resp.headers))
     if ctx.content_cache is None or ctx.ckey is None or ctx.content_hit:
         return
-    if resp.status_code < 300 and resp.status_code != 304:
+    if resp.status_code < 300:
         with contextlib.suppress(Exception):
             await ctx.content_cache.aset(ctx.ckey, serialize_response(resp.raw))

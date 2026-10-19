@@ -6,6 +6,8 @@ import contextlib
 import sys
 from collections.abc import Iterator
 
+import pytest
+
 from app.models.normalized_url import NormalizedUrl
 from app.safety.validation import HostPolicy
 from app.transport.cache import HttpCache
@@ -60,6 +62,18 @@ def etag_serving(etag: str, body: bytes) -> Iterator[None]:
         yield
     finally:
         EtagHandler.etag, EtagHandler.body = original
+
+
+def test_read_paths_refuse_the_dead_ttl_argument():
+    """The read paths' ``ttl`` kwarg was dead (never read) and is gone: passing it
+    is a loud TypeError, not a silently-ignored knob (#222)."""
+    with scoped_cache(default_ttl=3600) as c:
+        c.set("k", "v")
+        for method in (c.get, c.cached_at_of):
+            with pytest.raises(TypeError):
+                method("k", ttl=0)
+        with pytest.raises(TypeError):
+            c.aget("k", ttl=0)
 
 
 def test_set_get_roundtrip():

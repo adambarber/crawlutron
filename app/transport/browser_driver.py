@@ -131,9 +131,11 @@ class BrowserDriver:
                 else get_env_int("CRAWLUTRON_MAX_BROWSER_RENDERS", DEFAULT_MAX_BROWSER_RENDERS, lo=1)
             )
         )
-        # A storage_state is honoured only against an operator allowlist; the
-        # platform temp dir is not one -- it is world-readable on most hosts.
-        self._cache_dir = cache_dir if settings is None else settings.cache_dir
+        # An explicit ``cache_dir=`` beats the settings default, so passing it
+        # alongside ``settings`` honors the caller's path instead (#222).
+        self._cache_dir = (
+            cache_dir if cache_dir is not None else (settings.cache_dir if settings is not None else None)
+        )
 
         self._lazy_scroll_steps = (
             lazy_scroll_steps if settings is None else int(settings.browser_lazy_scroll_steps)

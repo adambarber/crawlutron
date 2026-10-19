@@ -231,7 +231,7 @@ class ContentCache:
         with self._lock:
             return self._memory_hit_locked(key)
 
-    def get(self, key: str, ttl: int | None = None) -> Any | None:
+    def get(self, key: str) -> Any | None:
         """The cached value if present and unexpired, else ``None``.
 
         Memory first, then the on-disk envelope."""
@@ -241,7 +241,7 @@ class ContentCache:
         envelope = self._read_envelope(key)
         return None if envelope is None else envelope.get("value")
 
-    def cached_at_of(self, key: str, ttl: int | None = None) -> float | None:
+    def cached_at_of(self, key: str) -> float | None:
         """``cached_at`` for a valid (unexpired) entry, else ``None``.
         Served from the ``(expires, cached_at)`` mirror so a multi-MB
         envelope is never read for a timestamp."""
@@ -290,7 +290,7 @@ class ContentCache:
             self._remember_memory_locked(key, value, expires, len(data))
         self._enforce_limits()
 
-    async def aget(self, key: str, ttl: int | None = None) -> Any | None:
+    async def aget(self, key: str) -> Any | None:
         """Async ``get``: offload the envelope read + JSON parse off the loop.
         Runs outside ``self._lock``, so a concurrent ``aset`` is not queued
         behind it."""

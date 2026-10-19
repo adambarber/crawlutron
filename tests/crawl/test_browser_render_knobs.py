@@ -92,6 +92,17 @@ def test_headless_decision_uses_shared_bool_parser(monkeypatch, raw, expected):
     assert BrowserDriver().browser_kwargs({})["headless"] is expected
 
 
+def test_explicit_cache_dir_wins_over_settings():
+    """An explicit ``cache_dir=`` must not be silently discarded when ``settings`` is
+    also supplied: the explicit argument beats the settings default (#222)."""
+    explicit = tempfile.mkdtemp(prefix="explicit-")
+    driver = BrowserDriver(
+        cache_dir=explicit,
+        settings=_settings(cache_dir=tempfile.mkdtemp(prefix="settings-")),
+    )
+    assert str(driver.cache_dir) == explicit
+
+
 def test_browser_knob_env_mapping():
     """Env vars flow through CrawlerSettings; garbage falls back to defaults."""
     from app.config.settings import CrawlerSettings
