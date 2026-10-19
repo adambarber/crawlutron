@@ -219,28 +219,30 @@ class BrowserRenderer:
         started = time.monotonic()
 
         page = await self._driver.open_page(options.browser_profile)
-        # Abort any request (navigation, redirect, or subresource) that
-        # resolves to an SSRF-unsafe host before the browser connects.
-        await page.route(
-            "**/*",
-            make_ssrf_route_handler(
-                (options.browser_profile or {}).get("resource_mode"),
-                include_screenshot=bool((options.browser_profile or {}).get("include_screenshot")),
-                policy=policy,
-                pin=self._pin_sync,
-            ),
-        )
-        ws_guard = make_ssrf_websocket_handler(policy=policy)
-        ws_router = getattr(page, "route_websocket", None)
-        if ws_router is None:
-            logger.warning("websocket_interception_unsupported")
-        else:
-            # Route_websocket is sync in Playwright (unlike page.route); accept
-            # both sync and async implementations for test doubles.
-            outcome = ws_router("**/*", ws_guard)
-            if asyncio.iscoroutine(outcome):
-                await outcome
+        # The guarded body starts here, not after route wiring: an early raise
+        # still recycles via the finally's note_render (#223).
         try:
+            # Abort any request (navigation, redirect, or subresource) that
+            # resolves to an SSRF-unsafe host before the browser connects.
+            await page.route(
+                "**/*",
+                make_ssrf_route_handler(
+                    (options.browser_profile or {}).get("resource_mode"),
+                    include_screenshot=bool((options.browser_profile or {}).get("include_screenshot")),
+                    policy=policy,
+                    pin=self._pin_sync,
+                ),
+            )
+            ws_guard = make_ssrf_websocket_handler(policy=policy)
+            ws_router = getattr(page, "route_websocket", None)
+            if ws_router is None:
+                logger.warning("websocket_interception_unsupported")
+            else:
+                # Route_websocket is sync in Playwright (unlike page.route); accept
+                # both sync and async implementations for test doubles.
+                outcome = ws_router("**/*", ws_guard)
+                if asyncio.iscoroutine(outcome):
+                    await outcome
             # Katana-style XHR/fetch interception.
             intercepted_xhr: list[dict[str, Any]] = []
             page.on("response", make_response_handler(intercepted_xhr))
