@@ -304,8 +304,9 @@ if FastAPI is not None:
     # Body-size guard: 16 MiB cap at the ASGI receive layer (see
     # app/api/middleware.py for how truncation and keep-alive are handled).
     from app.api.exceptions import http_exception_handler, validation_exception_handler
-    from app.api.middleware import limit_request_body
+    from app.api.middleware import limit_request_body, reject_hostile_origin
 
+    app.middleware("http")(reject_hostile_origin)
     app.middleware("http")(limit_request_body)
     app.add_exception_handler(RequestValidationError, validation_exception_handler)
     app.add_exception_handler(HTTPException, http_exception_handler)

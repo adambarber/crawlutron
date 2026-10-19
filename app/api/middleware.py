@@ -1,7 +1,7 @@
-"""ASGI body-size guard middleware capping request bodies to 16 MiB at ``receive()``.
+"""ASGI middleware: body-size cap and the DNS-rebinding Origin guard.
 
-Truncated requests get ``Connection: close`` and drain until ``more_body=False``
-so keep-alive is not poisoned; per-chunk trailers are preserved via ``{**message, ...}``.
+``limit_request_body`` caps bodies at ``receive()``; ``reject_hostile_origin``
+refuses a present non-loopback browser Origin on every surface.
 """
 
 from __future__ import annotations
@@ -13,8 +13,25 @@ from fastapi import Request
 from fastapi.responses import JSONResponse
 
 from app.api.exceptions import error_envelope
+from app.mcp.server import origin_allowed
 
 MAX_REQUEST_BODY_BYTES = 16 * 1024 * 1024
+
+
+async def reject_hostile_origin(request: Request, call_next):
+    """Reject a present, non-loopback browser Origin (DNS-rebinding defense).
+
+    curl/bots/agents send no Origin, so absent stays allowed; only a present
+    but disallowed Origin is a 403, matching the MCP precedent on every surface (#224).
+    """
+    if not origin_allowed(request.headers.get("origin")):
+        return JSONResponse(
+            status_code=403,
+            content=error_envelope(
+                "origin_not_allowed", "Origin not allowed", {"origin": request.headers.get("origin")}
+            ),
+        )
+    return await call_next(request)
 
 
 async def limit_request_body(request: Request, call_next, *, max_bytes: int = MAX_REQUEST_BODY_BYTES):
@@ -66,4 +83,4 @@ async def limit_request_body(request: Request, call_next, *, max_bytes: int = MA
     return response
 
 
-__all__ = ["MAX_REQUEST_BODY_BYTES", "limit_request_body"]
+__all__ = ["MAX_REQUEST_BODY_BYTES", "limit_request_body", "reject_hostile_origin"]
