@@ -14,6 +14,8 @@ import time
 from collections.abc import AsyncIterator, Awaitable, Callable
 from typing import Any, Protocol
 
+import httpx
+
 from app.models.host_policy import allow_private_targets
 from app.models.http_fetch_result import HttpFetchResult
 from app.models.normalized_url import NormalizedUrl
@@ -201,10 +203,15 @@ def redirect_target(
 ) -> tuple[NormalizedUrl, dict[str, str]] | None:
     """Decide the next hop of a manual redirect loop (shared by both fetchers).
 
-    On an in-budget redirect returns ``(new_url, updated_headers)``, else ``None``
-    (terminal). Each hop re-pins; Cookie/Authorization strip cross-origin, catching https-to-http downgrades.
+    On an in-budget redirect returns ``(new_url, updated_headers)``; hop exhaustion
+    raises rather than reading the redirect body as a page. Each hop re-pins.
     """
-    if status_code not in _REDIRECT_STATUSES or not location or hops >= MAX_REDIRECT_HOPS:
+    if status_code in _REDIRECT_STATUSES and hops >= MAX_REDIRECT_HOPS:
+        # Distinguish hop exhaustion from a terminal answer: the response is still
+        # a redirect, so a fetcher must not read its body as rendered content.
+        message = f"redirect hop budget exhausted at {current_url.raw}"
+        raise httpx.TooManyRedirects(message)
+    if status_code not in _REDIRECT_STATUSES or not location:
         return None
     new_url = current_url.resolve(location)
     if new_url is None:

@@ -1,5 +1,8 @@
 """Unit tests for the shared manual-redirect decision helper (both fetchers)."""
 
+import httpx
+import pytest
+
 from app.transport.pinned_transport import MAX_REDIRECT_HOPS, redirect_target
 from tests._policy_factories import canonical
 
@@ -14,8 +17,11 @@ def test_redirect_target_none_on_terminal_status():
     assert redirect_target(canonical("http://a.com/"), {}, 404, "/elsewhere", 0) is None
 
 
-def test_redirect_target_none_when_hop_budget_exhausted():
-    assert redirect_target(canonical("http://a.com/"), {}, 301, "/y", MAX_REDIRECT_HOPS) is None
+def test_redirect_target_raises_when_hop_budget_exhausted():
+    # Hop exhaustion is distinct from a terminal answer: a 301 at the hop cap is
+    # still a redirect, so its body must not be read as page content (#217).
+    with pytest.raises(httpx.TooManyRedirects):
+        redirect_target(canonical("http://a.com/"), {}, 301, "/y", MAX_REDIRECT_HOPS)
 
 
 def test_redirect_target_strips_sensitive_headers_cross_host():

@@ -7,6 +7,7 @@ re-check; it now follows itself, re-pinning per hop on the real client.
 import httpx
 import pytest
 
+from app.orchestration.classification import classify_error_code
 from app.transport import http_client_pool as pool_mod
 from app.transport import pinned_transport as pinned_mod
 from tests._fetcher_factories import run_default_http_fetcher
@@ -97,8 +98,10 @@ async def test_redirect_loop_is_bounded_by_hop_limit(monkeypatch):
             for _ in range(pinned_mod.MAX_REDIRECT_HOPS + 1)
         ],
     )
-    result = await run_default_http_fetcher("http://public.example/", pin=_allow_every_host())
 
-    # Terminates at the hop cap and returns the last 302 rather than looping.
-    assert result.status_code == 302
+    # Terminates at the hop cap by surfacing the exhaustion, not by reading the
+    # last 302's body back as a rendered page (#217).
+    with pytest.raises(httpx.TooManyRedirects):
+        await run_default_http_fetcher("http://public.example/", pin=_allow_every_host())
     assert len(requested) == pinned_mod.MAX_REDIRECT_HOPS + 1
+    assert classify_error_code(httpx.TooManyRedirects("loop")) == "too_many_redirects"
