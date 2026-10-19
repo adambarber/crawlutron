@@ -36,6 +36,8 @@ class CrawlPolicy(BaseModel):
         "a raw header bypasses both",
         "host": "Host is owned by the pinned-request chokepoint and is never forwarded verbatim",
         "proxy-authorization": "proxy credentials are not a crawl input",
+        "authorization": "the origin-scoped credential door is policy.credentials; a raw header bypasses "
+        "its origin scoping and redirect re-scoping",
         "x-forwarded-for": "origin-side identity headers must not be caller-controlled",
         "x-forwarded-host": "origin-side identity headers must not be caller-controlled",
         "x-real-ip": "origin-side identity headers must not be caller-controlled",
@@ -202,12 +204,19 @@ class CrawlPolicy(BaseModel):
     @field_validator("headers")
     @classmethod
     def _reject_banned_headers(cls, value: dict[str, str]) -> dict[str, str]:
-        """Reject chokepoint-bypassing header names, anchored on ``CrawlPolicy`` so every
-        endpoint inherits the ban from one site -- rejection, never a silent strip; ``authorization``
-        is deliberately absent (``policy.credentials`` scopes it). A field validator, so the location maps.
+        """Reject chokepoint-bypassing and credential header names, anchored on
+        ``CrawlPolicy`` so every endpoint inherits the ban from one site.
         """
         for key in value:
-            reason = cls._BANNED_HEADERS.get(key.strip().lower())
+            lowered = key.strip().lower()
+            if lowered == "authorization":
+                # Authorization is a credential: it must go through
+                # policy.credentials, origin-scoped and redirect re-scoped.
+                raise ValueError(
+                    f"header '{key}' is not permitted in policy.headers: Authorization must be sent "
+                    "through policy.credentials, which scopes it to one origin"
+                )
+            reason = cls._BANNED_HEADERS.get(lowered)
             if reason is not None:
                 raise ValueError(f"header '{key}' is not permitted in policy.headers: {reason}")
         return value

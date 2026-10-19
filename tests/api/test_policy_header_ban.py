@@ -1,7 +1,8 @@
-"""Policy.headers may not carry chokepoint-bypassing header names.
+"""Policy.headers may not carry chokepoint-bypassing or credential header names.
 
 Conditional headers belong to ``validators``; cookie/host/x-real-ip bypass
-chokepoints. ``authorization`` stays (ruling 2026-09-22) until credentials."""
+chokepoints. ``authorization`` belongs to the origin-scoped ``credentials`` door.
+"""
 
 from __future__ import annotations
 
@@ -14,6 +15,7 @@ BANNED = (
     "cookie",
     "host",
     "proxy-authorization",
+    "authorization",
     "x-forwarded-for",
     "x-forwarded-host",
     "x-real-ip",
@@ -60,15 +62,14 @@ def test_render_request_has_no_header_smuggling_surface():
     assert "headers" not in RenderOptionsRequest.model_fields
 
 
-def test_authorization_stays_allowed_until_the_credentials_field_lands():
-    """Pin the ruling, not an accident.
-
-    A future ban of ``authorization`` must land WITH ``policy.credentials``
-    first; deleting the only credentialed-crawl option without one is caught."""
+def test_authorization_is_refused_at_the_policy_credential_door():
+    """A raw-header Authorization bypasses origin-scoped credentials, so it is
+    banned from ``headers`` and must be sent through ``policy.credentials``.
+    """
     from app.models.crawl_request import CrawlRequest
 
-    request = CrawlRequest(url="http://example.com/", policy={"headers": {"Authorization": "Bearer t"}})
-    assert request.policy.headers == {"Authorization": "Bearer t"}
+    with pytest.raises(ValidationError, match="credentials"):
+        CrawlRequest(url="http://example.com/", policy={"headers": {"Authorization": "Bearer t"}})
 
 
 def test_benign_headers_are_unaffected():
