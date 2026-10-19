@@ -97,6 +97,19 @@ def _validator_model(validators: dict[str, str]) -> ContentValidators | None:
     return ContentValidators.model_validate(validators) if validators else None
 
 
+def _metadata_response(extracted: ExtractedPageMetadata) -> PageMetadataResponse:
+    """Project an extractor metadata key-set to the wire model, loudly.
+
+    A key the wire model does not declare is an error, never the silent drop the
+    ``extra='ignore'`` splat would allow.
+    """
+    declared = set(PageMetadataResponse.model_fields)
+    unknown = set(extracted) - declared
+    if unknown:
+        raise ValueError(f"unhandled extractor metadata keys: {sorted(unknown)}")
+    return PageMetadataResponse(**extracted)
+
+
 def build_unified_result(item: EngineCrawlResult) -> UnifiedCrawlResult:
     """Map an internal engine result into the unified API response model.
     The response carries both LLM-friendly ``markdown`` and full ``diagnostics``;
@@ -104,7 +117,7 @@ def build_unified_result(item: EngineCrawlResult) -> UnifiedCrawlResult:
     """
     markdown, extracted = format_crawl_item(item)
     url = item.final_url or item.normalized_url
-    metadata = PageMetadataResponse(**extracted)
+    metadata = _metadata_response(extracted)
     if metadata.source_url is None:
         metadata.source_url = url.raw if url is not None else item.original_url
     return UnifiedCrawlResult(
