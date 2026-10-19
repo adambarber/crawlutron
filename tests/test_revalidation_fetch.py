@@ -109,9 +109,46 @@ class TestRevalidationFetchesOnce:
         assert "FRESH-BODY" in second.text or "FRESH-BODY" in second.markdown
         assert fetcher.calls == 1
 
-        third = await _crawl()  # crawl 3: conditional 304 -> serves the STORED body
+        third = await _crawl()  # crawl 3: conditional 200 -> serves the freshly-revalidated body
         body = third.text or third.markdown or ""
         assert "FRESH-BODY" in body, (
-            "a later 304 served the stale pre-revalidation body: the revalidated 200 was never stored"
+            "a later 200 served the stale pre-revalidation body: the revalidated 200 was never stored"
         )
         assert fetcher.calls == 2  # one conditional GET per crawl, as designed
+
+
+async def test_content_cache_revalidation_304_reports_not_modified(tmp_path):
+    """A content-cache revalidation that earns a 304 must classify not_modified, not a fresh render.
+    WatchSweeper keys on not_modified to suppress a change webhook; a 304 served as 'rendered'
+    fires modified forever (the #236 regression)."""
+    from tests._fetcher_factories import request_fetcher
+
+    etag = '"v1"'
+
+    def respond(url, headers):
+        if headers.get("If-None-Match") == etag:
+            return {"status": 304, "headers": {"etag": etag}, "body": b""}
+        return {"status": 200, "headers": {"etag": etag}, "body": b"<html>STOC</html>"}
+
+    fetcher = request_fetcher(respond)
+    cache = HttpCache()
+    content_cache = ContentCache(cache_dir=str(tmp_path / "cc"), default_ttl=3600)
+
+    async def _crawl():
+        return await run_http_strategy(
+            url="http://example.com/reval",
+            policy={},
+            http_fetcher=fetcher,
+            cache=cache,
+            content_cache=content_cache,
+        )
+
+    first = await _crawl()  # stores body + validator
+    assert first.status == "success"
+
+    second = await _crawl()  # content-cache revalidation -> origin 304
+    assert second.status == "success"
+    assert second.classification == "not_modified", second.classification
+    assert second.http_status == 304
+    # The stored body rides along so a watcher can diff, but the verdict is not_modified.
+    assert "STOC" in (second.text or second.markdown or "")

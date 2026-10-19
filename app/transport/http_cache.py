@@ -100,6 +100,8 @@ def _not_modified_result(ctx: HttpStrategyContext, resp: FetchedResponse) -> Eng
     """Build the terminal result for a negotiated HTTP 304 response."""
     echoed_validators = resp.validators(ctx.caller_conditional)
     sent_conditional = any(key in ctx.request_headers for key in ("If-None-Match", "If-Modified-Since"))
+    # The content-cache revalidated path is handled in ``_construct_http_result``, which keeps the
+    # cached body; here (a caller-validator 304 with no body) both sents must line up.
     if resp.status_code != 304 or ctx.revalidated_304 or not sent_conditional:
         return None
 
@@ -133,7 +135,11 @@ def _not_modified_result(ctx: HttpStrategyContext, resp: FetchedResponse) -> Eng
 
 async def _store_http_caches(ctx: HttpStrategyContext, resp: FetchedResponse) -> None:
     """Store origin validators and fresh content after a successful fetch."""
-    if ctx.cache is not None and (resp.headers.get("etag") or resp.headers.get("last-modified")):
+    if (
+        ctx.cache is not None
+        and resp.status_code < 400
+        and (resp.headers.get("etag") or resp.headers.get("last-modified"))
+    ):
         ctx.cache.store(ctx.normalized_url, dict(resp.headers))
     if ctx.content_cache is None or ctx.ckey is None or ctx.content_hit:
         return

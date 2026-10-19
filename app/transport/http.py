@@ -85,6 +85,12 @@ async def _construct_http_result(
 ) -> EngineCrawlResult:
     """Run discovery shaping and construct the successful strategy result."""
     classification, classification_evidence = _classify_extracted_content(ctx, resp, extracted)
+    # A content-cache revalidation that earned a 304 re-serves the cached body; it is not a fresh
+    # render, so report not_modified (kept content lets WatchSweeper diff, not fire a webhook).
+    revalidated_304 = ctx.revalidated_304
+    if revalidated_304:
+        classification = "not_modified"
+        classification_evidence = []
     status = status_for_classification(classification)
     diagnostics: dict[str, Any] = {
         "decompression_failed": extracted.strategy_decompression_failed or resp.decompression_failed,
@@ -148,20 +154,21 @@ async def _construct_http_result(
         quality = max(quality, 0.95)
 
     error_classification: Classification | None = None if status == "success" else classification
+    result_http_status = 304 if revalidated_304 else resp.status_code
     attempt = CrawlStrategyAttempt(
         strategy=ctx.strategy,
         status=status,
         classification=classification,
-        http_status=resp.status_code,
+        http_status=result_http_status,
         content_type=resp.content_type,
         elapsed_ms=resp.elapsed_ms,
         error=error_classification,
     )
     html = extracted.html if ctx.include_html else None
-    return build_engine_result(
+    result = build_engine_result(
         **response_result_fields(ctx, resp, attempt),
         selected_strategy=ctx.strategy if status == "success" else None,
-        http_status=resp.status_code,
+        http_status=result_http_status,
         content_type=resp.content_type,
         html=html,
         text=extracted.text,
@@ -176,6 +183,7 @@ async def _construct_http_result(
         next_page_url=next_page_url,
         validators=resp.validators(),
     )
+    return result
 
 
 def _http_error_result(ctx: HttpStrategyContext, error: Exception) -> EngineCrawlResult:

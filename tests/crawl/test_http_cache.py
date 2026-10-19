@@ -130,3 +130,67 @@ def test_eviction_touches_only_the_overflow_window():
     # ...then the cost bound: an old list(self._data)[:over] snapshot drew the full table (~200k keys) per
     # over-cap store; the bounded window draws at most the overflow plus one per store.
     assert table.consumed <= 200 * 3, table.consumed
+
+
+async def test_error_page_etag_does_not_seed_shared_cache():
+    """A 403/5xx carrying an ETag must not seed the conditional cache: the next crawl
+    would replay the denied page's validator and could serve an empty not_modified."""
+    from app.transport.cache import HttpCache
+    from tests._fetcher_factories import request_fetcher, run_http_strategy
+
+    cache = HttpCache()
+    seen: list[dict] = []
+    responses = iter(
+        [
+            {"status": 403, "headers": {"etag": "denied-v1"}, "body": b"denied"},
+            {"status": 200, "headers": {"etag": '"fresh-v1"'}, "body": b"<html>ok</html>"},
+        ]
+    )
+    fetcher = request_fetcher(lambda url, headers: next(responses), record_headers=seen)
+
+    async def run():
+        await run_http_strategy(
+            url="http://example.com/denied", policy={"limits": {}}, http_fetcher=fetcher, cache=cache
+        )
+
+    await run()
+    await run()
+    # The 403's validator must not be replayed; the second crawl fetches fresh, no If-None-Match.
+    assert seen[1].get("If-None-Match") is None
+
+
+async def test_http_cache_validators_isolated_across_cookie_namespaces():
+    """The shared ETag cache must scope keys by cookie namespace; one caller's
+    validator must not be replayed (as an empty not_modified) on another's crawl."""
+    from app.transport.cache import HttpCache
+    from app.transport.cookie_jar import COOKIE_NAMESPACE
+    from tests._fetcher_factories import request_fetcher, run_http_strategy
+
+    cache = HttpCache()
+    seen: list[dict] = []
+    fetcher = request_fetcher(
+        lambda url, headers: {"status": 200, "headers": {"etag": '"tenant-A-v1"'}, "body": b"<html>a</html>"},
+        record_headers=seen,
+    )
+    policy = {"limits": {}}
+
+    def crawl():
+        return run_http_strategy(
+            url="http://example.com/shared", policy=policy, http_fetcher=fetcher, cache=cache
+        )
+
+    token = COOKIE_NAMESPACE.set("k_tenant-a")
+    try:
+        await crawl()
+    finally:
+        COOKIE_NAMESPACE.reset(token)
+
+    token = COOKIE_NAMESPACE.set("k_tenant-b")
+    try:
+        result = await crawl()
+    finally:
+        COOKIE_NAMESPACE.reset(token)
+
+    # B's crawl must not inherit A's If-None-Match; a fresh full fetch yields a rendered page.
+    assert seen[1].get("If-None-Match") is None
+    assert result.classification != "not_modified"
