@@ -1,7 +1,7 @@
 """``/v1/map`` endpoint handler.
 
 Map a root URL to its discovered-link frontier (in-page links plus
-robots/sitemap/feed URLs). The router in :mod:`app.api.map_router` calls it.
+robots/sitemap/feed URLs). The door in :mod:`app.api.identity_router` gates it.
 """
 
 import asyncio

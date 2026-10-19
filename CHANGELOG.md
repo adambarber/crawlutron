@@ -60,8 +60,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   The service had a resource-saturation guard but no second, absolute ceiling;
   the readiness report already counted active requests, so the new knob rides
   that counter. `CRAWLUTRON_MAX_ACTIVE_REQUESTS` is the knob (0 or unset
-  disables it; a positive value bounds concurrent /v1/crawl, /v1/map and
-  /v1/render requests). At the cap the `request_gate` edge refuses with HTTP
+  disables it; a positive value bounds concurrent /v1/crawl, /v1/map, /v1/render
+  and /v1/search requests, plus the five MCP fetch tools). At the cap the `request_gate` edge refuses with HTTP
   503 and a `capacity_exceeded` envelope — the same 503 the readiness report
   already uses for backpressure — so an externally-configured ceiling sits
   behind the quota system. Optional-presence is explicit: the internal bound

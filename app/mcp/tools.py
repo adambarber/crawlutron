@@ -17,6 +17,7 @@ from pydantic import BaseModel, ValidationError
 
 from app.api.caller_auth import Tracking, admit
 from app.api.crawl_executor import execute_crawl
+from app.api.main_helpers import request_gate
 from app.api.map_endpoint import map_site
 from app.api.render_endpoint import render as render_endpoint_handler
 from app.api.response_shaping import aunified_response_from_result
@@ -249,10 +250,17 @@ async def _admit_tool(
     payload: CrawlRequest | MapRequest | None = None,
     work: Callable[[], Awaitable[ToolResult]],
 ) -> ToolResult:
-    """Admit a fetch tool, then run its work under the held slot."""
+    """Admit one fetch tool under the readiness gate: request_gate OUTER, admit INNER.
+
+    Every fetch tool funnels through here, so the MCP surface shares the HTTP
+    doors' single gate: /ready counts MCP work and the capacity cap refuses it.
+    """
+    # request_gate OUTER, admit INNER: the count takes the slot first, so a quota-
+    # rejected request holds it only for the brief admission (the HTTP door order).
     try:
-        async with admit(caller, pages, tracking=tracking, payload=payload):
-            return await work()
+        with request_gate("mcp_request_rejected", logger=logger):
+            async with admit(caller, pages, tracking=tracking, payload=payload):
+                return await work()
     except HTTPException as error:
         return _tool_error(error)
 

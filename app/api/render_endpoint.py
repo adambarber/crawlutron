@@ -23,7 +23,7 @@ from app.transport.browser_pool import (
 logger = logging.getLogger(__name__)
 
 
-def _render_rejection(error: ValueError) -> HTTPException:
+def render_rejection(error: ValueError) -> HTTPException:
     """``/v1/render``'s reject envelope: 400, ValueError text as the message.
 
     ``code`` is the machine-readable contract clients branch on, so this is a named
@@ -37,7 +37,7 @@ async def render(payload: RenderRequest, settings: CrawlerSettings) -> UnifiedCr
 
     Readiness and caller admission live at the door; refusals propagate as ``ValueError``.
     """
-    # with a 503 when the pool is down (startup/shutdown) instead of an AttributeError 500.
+    # An absent pool refuses 503 (startup/shutdown) rather than an AttributeError 500.
     pool = get_browser_pool()
     if pool is None:
         raise browser_pool_unavailable()
@@ -60,4 +60,4 @@ async def render(payload: RenderRequest, settings: CrawlerSettings) -> UnifiedCr
     return await arender_response_from_result(result)
 
 
-__all__ = ["render"]
+__all__ = ["render", "render_rejection"]

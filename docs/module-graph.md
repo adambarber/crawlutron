@@ -103,6 +103,7 @@ graph LR
     api_identity_router --> api__depends_singletons
     api_identity_router --> api_caller_auth
     api_identity_router --> api_dependencies
+    api_identity_router --> api_main_helpers
     api_identity_router --> api_map_endpoint
     api_identity_router --> api_render_endpoint
     api_identity_router --> models_error_response
@@ -174,6 +175,7 @@ graph LR
     api_metrics_router --> api_caller_auth
     api_metrics_router --> runtime_metrics
     api_middleware --> api_exceptions
+    api_middleware --> mcp_server
     api_policy_defaults --> vocabulary_extraction
     api_policy_defaults --> vocabulary_strategies
     api_policy_router --> api_dependencies
@@ -208,7 +210,6 @@ graph LR
     api_render --> transport_browser_pool
     api_render --> transport_fetchers
     api_render_endpoint --> api_exceptions
-    api_render_endpoint --> api_main_helpers
     api_render_endpoint --> api_render
     api_render_endpoint --> api_response_shaping
     api_render_endpoint --> config_settings
@@ -319,6 +320,7 @@ graph LR
     extraction_llm_format --> safety_bounded_io
     extraction_output_formats --> safety_json_safe
     extraction_trees --> models_normalized_url
+    health_readiness --> config_env
     health_readiness --> models_readiness_response
     health_readiness --> runtime_metrics
     main --> admission_policy
@@ -351,6 +353,7 @@ graph LR
     mcp_server --> models_json_value
     mcp_tools --> api_caller_auth
     mcp_tools --> api_crawl_executor
+    mcp_tools --> api_main_helpers
     mcp_tools --> api_map_endpoint
     mcp_tools --> api_render_endpoint
     mcp_tools --> api_response_shaping
@@ -465,6 +468,12 @@ graph LR
     models_watch_state --> models_content_validators
     models_watch_state --> models_watch_status
     models_watch_state --> vocabulary_taxonomy
+    orchestration_admission_stall --> models_crawl_result
+    orchestration_admission_stall --> models_crawl_task
+    orchestration_admission_stall --> models_taxonomy
+    orchestration_admission_stall --> orchestration_recursive
+    orchestration_admission_stall --> orchestration_results
+    orchestration_admission_stall --> vocabulary_taxonomy
     orchestration_classification --> models_browser_pool_exhausted
     orchestration_classification --> models_taxonomy
     orchestration_classification --> orchestration_scheduler_exceptions
@@ -507,6 +516,7 @@ graph LR
     orchestration_recursive --> models_crawl_task
     orchestration_recursive --> models_host_policy
     orchestration_recursive --> models_normalized_url
+    orchestration_recursive --> orchestration_admission_stall
     orchestration_recursive --> orchestration_results
     orchestration_recursive --> orchestration_scheduler
     orchestration_recursive --> runtime_metrics
@@ -592,7 +602,6 @@ graph LR
     search --> search_providers
     search_endpoint --> api_caller_auth
     search_endpoint --> api_exceptions
-    search_endpoint --> health_readiness
     search_endpoint --> models_caller_identity
     search_endpoint --> models_search_request
     search_endpoint --> models_search_response
@@ -722,6 +731,7 @@ graph LR
     transport_browser_targets --> transport_pinned_transport
     transport_browser_targets --> vocabulary_hosts
     transport_cache --> models_normalized_url
+    transport_cache --> transport_cookie_jar
     transport_content_cache --> models_cache_envelope
     transport_content_cache --> models_json_value
     transport_content_cache --> transport_content_cache_internals

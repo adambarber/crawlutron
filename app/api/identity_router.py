@@ -1,7 +1,7 @@
 """The identity-guarded door plane: map, render and search share one router.
 
-Each door wraps the caller's admission in ``request_gate`` (readiness OUTER) then
-admits through the single register (INNER) -- the one order every door shares.
+Each door wraps caller admission in request_gate (readiness OUTER) then admits
+via the single register (INNER); the ``*_request_rejected`` events log here.
 """
 
 from __future__ import annotations
@@ -16,8 +16,8 @@ from app.api.caller_auth import admit
 from app.api.dependencies import CallerDep, TrackingDep
 from app.api.main_helpers import request_gate
 from app.api.map_endpoint import map_site
-from app.api.render_endpoint import _render_rejection
 from app.api.render_endpoint import render as render_handler
+from app.api.render_endpoint import render_rejection
 from app.models import map_request, render_request, search_request
 from app.models.error_response import ErrorResponse
 from app.models.search_response import SearchResponse
@@ -79,7 +79,7 @@ async def render(
     settings=settings_dep,
 ) -> UnifiedCrawlResponse:
     requested = len(payload.urls) if payload.urls is not None else 1
-    with request_gate("render_request_rejected", logger=logger, reject=_render_rejection):
+    with request_gate("render_request_rejected", logger=logger, reject=render_rejection):
         async with admit(caller, requested, tracking=tracking):
             return await render_handler(payload, settings=settings)
 
