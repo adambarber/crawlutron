@@ -4,12 +4,12 @@ import time
 import app.extraction.content as ext_mod
 import app.extraction.documents as docex
 import app.orchestration.doc_pool as doc_pool_mod
-from app.orchestration.doc_pool import DocExtractionPool, DocWorker
+from app.orchestration.doc_pool import DocWorker
 from tests._app_factory import service_app
 from tests._extraction_helpers import settings_with
 from tests._lifespan_doubles import stub_heavy_teardown
 from tests._process_doubles import install_unkillable_doc_worker, stub_worker
-from tests.crawl._doc_pool_fixtures import _seeded
+from tests.crawl._doc_pool_fixtures import _seeded, fresh_doc_pool
 from tests.crawl.test_doc_pool import _acquire_the_replacement
 
 
@@ -37,8 +37,8 @@ class TestLifespanDocPoolTeardown:
         assert pool.pids() == [], "the document pool survived shutdown"
 
 
-def _counted_spawns(monkeypatch):
-    """Count pool worker constructions parent-side (spawn-safe: no pickling).
+def _counting_spawn(monkeypatch):
+    """A spawn wrapper counting constructions, and a read back for the count.
 
     Only the ``spawn`` collaborator is wrapped -- the seam that makes "how
     many children did this cost" answerable without counting children."""
@@ -50,23 +50,16 @@ def _counted_spawns(monkeypatch):
         constructions += 1
         return real_spawn()
 
-    monkeypatch.setattr(
-        docex,
-        "DOC_POOL",
-        DocExtractionPool(
-            spawn=counting_spawn,
-            worker_count=docex.doc_worker_count,
-            enabled=lambda: True,
-        ),
-    )
-    return lambda: constructions
+    return counting_spawn, lambda: constructions
 
 
-def _use_single_worker(monkeypatch):
+def _use_single_worker(monkeypatch, *, spawn=None):
     monkeypatch.setenv("CRAWLUTRON_EXTRACTION_DOC_WORKERS", "1")
     monkeypatch.setenv("CRAWLUTRON_TEST_HOOKS", "1")
     monkeypatch.setenv("TEST_MARKITDOWN_OUTPUT", "## Hello Markdown")
-    docex.DOC_POOL.teardown()
+    # teardown() is terminal since #246 -- it can no longer double as a reset, so
+    # an isolated test gets a fresh pool instead of closing the shared one.
+    fresh_doc_pool(monkeypatch, spawn=spawn)
 
 
 def _restore_pool():
@@ -74,13 +67,12 @@ def _restore_pool():
         os.environ.pop(var, None)
     os.environ.pop("CRAWLUTRON_TEST_HOOKS", None)
     os.environ.pop("CRAWLUTRON_EXTRACTION_DOC_WORKERS", None)
-    docex.DOC_POOL.teardown()
 
 
 def test_doc_workers_persist_across_documents(monkeypatch):
     """N documents cost one worker construction, not N spawns."""
-    constructions = _counted_spawns(monkeypatch)
-    _use_single_worker(monkeypatch)
+    counting_spawn, constructions = _counting_spawn(monkeypatch)
+    _use_single_worker(monkeypatch, spawn=counting_spawn)
     try:
         for _ in range(3):
             result = ext_mod.extract_document(b"%PDF-1.4 fake", "http://example.com/x.pdf")
@@ -107,8 +99,8 @@ def test_doc_worker_pids_stable_across_tasks(monkeypatch):
 
 def test_doc_timeout_kills_and_pool_recovers(monkeypatch):
     """A hung worker is killed on timeout; the pool serves the next document."""
-    constructions = _counted_spawns(monkeypatch)
-    _use_single_worker(monkeypatch)
+    counting_spawn, constructions = _counting_spawn(monkeypatch)
+    _use_single_worker(monkeypatch, spawn=counting_spawn)
     try:
         monkeypatch.setenv("TEST_MARKITDOWN_HANG", "1")
         started = time.monotonic()

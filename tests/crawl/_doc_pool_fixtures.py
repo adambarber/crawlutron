@@ -3,6 +3,22 @@ from app.orchestration.doc_pool import DocExtractionPool, DocWorker
 from tests._process_doubles import StubSpawner
 
 
+def fresh_doc_pool(monkeypatch, *, spawn=None) -> DocExtractionPool:
+    """A fresh, isolated real pool installed over both module bindings, so a test's
+    extraction (documents.DOC_POOL) and its health assertions (content's re-export) agree."""
+    import app.extraction.content as ext_mod
+    import app.orchestration.doc_pool as doc_pool_mod
+
+    pool = DocExtractionPool(
+        spawn=spawn or doc_pool_mod.spawn_doc_worker,
+        worker_count=docex.doc_worker_count,
+        enabled=lambda: True,
+    )
+    monkeypatch.setattr(docex, "DOC_POOL", pool)
+    monkeypatch.setattr(ext_mod, "DOC_POOL", pool)
+    return pool
+
+
 def _stub_pool(*, spawn, worker_count: int = 1, lock=None) -> DocExtractionPool:
     """A pool of stub workers: one worker wide unless told otherwise."""
     return DocExtractionPool(

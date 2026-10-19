@@ -108,6 +108,47 @@ def test_healthy_idle_worker_is_reused_not_respawned(fake_pool):
     assert spawner.asked == [], "a live idle worker must be reused, not replaced"
 
 
+def test_acquire_after_teardown_does_not_respawn(fake_pool):
+    """Teardown is terminal: a late acquire returns ``None`` (the degraded answer),
+    never re-spawning the subprocesses shutdown just reaped (pins #246)."""
+    live = stub_worker(4242)
+    pool, spawner = _seeded(fake_pool, live)
+
+    pool.teardown()
+    got = pool.acquire(settings_with().extraction_doc_acquire_timeout)
+
+    assert got is None, f"acquire resurrected the pool after teardown: {got!r}"
+    assert spawner.asked == [], "teardown was not terminal: acquire re-spawned a worker"
+    assert len(pool) == 0
+
+
+def test_parked_acquire_wakes_to_none_after_teardown(fake_pool):
+    """A thread parked in acquire when teardown runs must wake to ``None``, not a
+    TypeError iterating the now-``None`` slot list (pins #254)."""
+    busy = stub_worker(5555)
+    pool, _spawner = _seeded(fake_pool, busy)
+    busy.busy = True  # the only slot is busy, so the acquirer parks in the wait.
+    box: dict[str, object] = {"error": None, "worker": object()}
+    parked = threading.Event()
+
+    def _call() -> None:
+        try:
+            box["worker"] = pool.acquire(60)
+        except Exception as exc:  # pragma: no cover - a TypeError here fails the test
+            box["error"] = exc
+        finally:
+            parked.set()
+
+    thread = threading.Thread(target=_call, daemon=True)
+    thread.start()
+    time.sleep(0.2)  # let the acquirer reach the condition wait.
+    pool.teardown()
+    parked.wait(timeout=10)
+
+    assert box["error"] is None, f"parked acquirer escaped as {box['error']!r}"
+    assert box["worker"] is None
+
+
 # --- 3: bounded acquisition --------------------------------------------------
 
 

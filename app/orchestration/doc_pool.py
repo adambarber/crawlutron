@@ -164,6 +164,7 @@ class DocExtractionPool:
         # a budget starts only once the lock is held.
         self._lock = lock if lock is not None else threading.Condition(threading.Lock())
         self._slots: list[DocWorker] | None = None
+        self._closed = False
 
     def acquire(self, timeout: float) -> DocWorker | None:
         """Take an idle pool worker, spawning on demand up to the configured size.
@@ -177,6 +178,8 @@ class DocExtractionPool:
         dead_slots: list[DocWorker] = []
         try:
             with self._lock:
+                if self._closed:
+                    return None
                 if self._slots is None:
                     self._slots = []
                 # Reap retired slots first: one skipped by both scans (SIGKILL could
@@ -187,6 +190,8 @@ class DocExtractionPool:
                 # not pay a lock wait out of a budget it never consumed.
                 deadline = time.monotonic() + timeout
                 while True:
+                    if self._closed:  # a parked acquirer woken by teardown must see it here
+                        return None
                     for worker in self._slots:
                         if not worker.busy and not worker.retired and worker.proc.is_alive():
                             worker.busy = True
@@ -257,8 +262,11 @@ class DocExtractionPool:
             ]
 
     def teardown(self) -> None:
-        """Terminate every pooled worker and forget the slots."""
+        """Terminate every pooled worker, forget the slots, and close the pool.
+        A later acquire returns ``None`` (degraded) instead of resurrecting it."""
         with self._lock:
+            self._closed = True
+            self._lock.notify_all()
             pool, self._slots = self._slots, None
             for worker in pool or []:
                 self.retire(worker)

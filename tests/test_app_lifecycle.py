@@ -4,10 +4,21 @@ import asyncio
 import dataclasses
 from pathlib import Path
 
+import pytest
+
 from tests._app_factory import service_app
 from tests._assertions import assert_pool_unavailable
 from tests._job_harnesses import post_render_with_pool
 from tests._lifespan_doubles import stub_heavy_teardown
+
+
+@pytest.fixture(autouse=True)
+def _fresh_doc_pool_for_real_lifespan(monkeypatch):
+    """A real lifespan shutdown closes the doc pool terminally (#246); give each
+    test a fresh isolated pool so that shutdown never poisons later extraction."""
+    from tests.crawl._doc_pool_fixtures import fresh_doc_pool
+
+    fresh_doc_pool(monkeypatch)
 
 
 def _booted_app(monkeypatch, *, workers: str | None = None):

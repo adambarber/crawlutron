@@ -25,6 +25,18 @@ from tests._extraction_helpers import (
 from tests._policy_factories import canonical
 
 
+@pytest.fixture(autouse=True)
+def _isolated_doc_pool(monkeypatch):
+    """Hand every test a fresh, isolated doc pool.
+
+    ``teardown()``/``shutdown_doc_extraction_executor()`` are terminal since #246;
+    a fresh pool per test keeps those shutdown calls from poisoning the shared one."""
+    from tests.crawl._doc_pool_fixtures import fresh_doc_pool
+
+    fresh_doc_pool(monkeypatch)
+    yield
+
+
 class TestExtractionEdges:
     """Cover remaining branches in extraction.py"""
 

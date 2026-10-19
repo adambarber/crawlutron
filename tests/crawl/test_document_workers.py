@@ -113,11 +113,14 @@ class TestLinkExtraction:
 
 
 @pytest.fixture(autouse=True)
-def _reset_doc_extraction_pool():
-    """No persistent process pool to reset.
+def _reset_doc_extraction_pool(monkeypatch):
+    """Hand every test a fresh, isolated pool (teardown is terminal now, not a reset).
 
-    Each extraction spawns its own short-lived process (reaped on completion or
+    Each extraction spawns its own short-lived worker (reaped on completion or
     timeout); the injected env flags revert via ``monkeypatch`` teardown."""
+    from tests.crawl._doc_pool_fixtures import fresh_doc_pool
+
+    fresh_doc_pool(monkeypatch)
     yield
 
 
@@ -142,8 +145,7 @@ async def test_extract_document_child_death_returns_empty(monkeypatch):
     """A worker that dies before sending (segfault) yields empty extraction,
     not an unhandled EOFError, and leaves no zombie behind."""
     # Isolate the pool this call drives: the child-death contract is per worker,
-    # so the shared persistent pool must hold only this call's own worker.
-    ext_mod.DOC_POOL.teardown()
+    # so this test's pool must hold only this call's own worker.
 
     monkeypatch.setenv("TEST_MARKITDOWN_DIE", "1")
     monkeypatch.setenv("CRAWLUTRON_TEST_HOOKS", "1")
@@ -179,7 +181,6 @@ async def test_extract_document_normal_works():
 
     No hook: the echo path is covered elsewhere, and only a real conversion
     exercises the parent/child request-reply shape."""
-    ext_mod.DOC_POOL.teardown()
     result = extract_document(b"name,score\nada,10\n", "http://example.com/data.csv")
 
     assert result.markdown is not None

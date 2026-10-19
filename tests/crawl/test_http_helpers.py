@@ -316,6 +316,13 @@ async def _diagnostics_for_failed_probes(fetcher, **policy):
 class TestHttpStrategyResult:
     _run = staticmethod(_run_http_result)
 
+    @pytest.fixture(autouse=True)
+    def _isolated_doc_pool(self, monkeypatch):
+        """A fresh isolated doc pool, immune to a prior test's terminal teardown (#246)."""
+        from tests.crawl._doc_pool_fixtures import fresh_doc_pool
+
+        fresh_doc_pool(monkeypatch)
+
     async def test_success_html(self) -> None:
         assert_result_success(await self._run())
 
