@@ -281,7 +281,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   *reports* a challenge instead of clearing one, which is the behavior a reader
   needs to know. They now describe the mechanism and the condition it serves:
   a browser-shaped TLS fingerprint, for sites that reject non-browser clients.
-- `/v1/capabilities` no longer advertises a `cloudflare_bypass` field, and
+- **BREAKING:** `/v1/capabilities` no longer advertises a `cloudflare_bypass` field, and
   `credential_bypass` is now `credential_injection`. The field's own comment
   said "do not advertise bypass" while the line below it advertised bypass. It
   is removed rather than reworded because a Cloudflare interstitial *is* a

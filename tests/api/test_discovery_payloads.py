@@ -38,6 +38,46 @@ class TestCapabilitiesPayload:
         assert timing["per_url_budget_seconds"] == payload["default_limits"]["total_url_budget_seconds"]
         assert "async_mode" in timing["large_crawl_guidance"]
 
+    def test_capabilities_pins_the_advertised_feature_key_set(self):
+        """The /v1/capabilities feature dict is the contract agents key on, so its
+        key set is pinned: an unexpected key fails the test, and so does a
+        ``*_bypass`` key regressing (the ad-blocking break #30 fixed)."""
+        settings = CrawlerSettings.from_mapping()
+        features = capabilities_payload(settings)["features"]
+        assert set(features) == {
+            "headed_browser",
+            "pdf_extraction",
+            "direct_http",
+            "trafilatura",
+            "discovered_links",
+            "frame_discovery",
+            "form_discovery",
+            "conditional_fetch",
+            "per_request_trace",
+            "policy_suggestions",
+            "watches",
+            "recursive_frontier",
+            "warmup",
+            "request_profiles",
+            "browser_profiles",
+            "web_search",
+            "mcp",
+            "async_mode",
+            "captcha_solving",
+            "proxy_rotation",
+            "identity_rotation",
+            "credential_injection",
+            "robots_diagnostics",
+            "sitemap_discovery",
+            "feed_discovery",
+            "adaptive_retry",
+            "runtime_diagnostics",
+            "domain_aware_concurrency",
+            "readiness_endpoint",
+            "event_loop_thread_offload",
+        }
+        assert not [k for k in features if "bypass" in k], features
+
     def test_large_crawl_guidance_routes_to_durable_jobs(self):
         """The no-ceiling note must name BOTH escape hatches.
 
