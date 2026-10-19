@@ -38,6 +38,9 @@ CommitCrawlDelay = Callable[[str, float], None]
 T = TypeVar("T")
 _MAX_SCOPE_PATTERN_LEN = 256
 _ROBOTS_ADMISSION_CHUNK_SIZE = 16
+# How long a chunk may gather robots decisions past the per-check timeout before
+# the whole chunk fails closed: a slow origin must not cost chunks × timeout (#343).
+_ROBOTS_CHUNK_DEADLINE_SLACK_SECONDS = 5.0
 
 
 @dataclass(frozen=True)
@@ -312,6 +315,8 @@ async def gather_robots_decisions(
     urls: list[NormalizedUrl],
     robots_allows: RobotsAllows,
     robots_crawl_delay: RobotsCrawlDelay | None = None,
+    *,
+    timeout_seconds: float | None = None,
 ) -> list[tuple[bool, float | None]]:
     async def check(url: NormalizedUrl) -> tuple[bool, float | None]:
         try:
@@ -326,11 +331,21 @@ async def gather_robots_decisions(
 
     decisions: list[tuple[bool, float | None]] = []
     for offset in range(0, len(urls), _ROBOTS_ADMISSION_CHUNK_SIZE):
-        decisions.extend(
-            await asyncio.gather(
-                *(check(url) for url in urls[offset : offset + _ROBOTS_ADMISSION_CHUNK_SIZE])
-            )
-        )
+        chunk = urls[offset : offset + _ROBOTS_ADMISSION_CHUNK_SIZE]
+        if timeout_seconds is None:
+            chunk_decisions = await asyncio.gather(*(check(url) for url in chunk))
+        else:
+            # A per-chunk wall-clock deadline: a stalled origin must not hold up
+            # the pass, and a deadline-refusing chunk fails closed (#343).
+            try:
+                chunk_decisions = await asyncio.wait_for(
+                    asyncio.gather(*(check(url) for url in chunk)),
+                    timeout=timeout_seconds + _ROBOTS_CHUNK_DEADLINE_SLACK_SECONDS,
+                )
+            except TimeoutError:
+                _logger.warning("robots_chunk_deadline_exceeded", extra={"chunk_size": len(chunk)})
+                chunk_decisions = [(False, None)] * len(chunk)
+        decisions.extend(chunk_decisions)
     return decisions
 
 

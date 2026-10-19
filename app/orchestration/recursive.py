@@ -82,6 +82,7 @@ class RecursiveRunState:
     ramp_max: int
     http_heavy_lookahead: int
     spill_write: Callable[[_SpillSink | None, int, EngineCrawlResult], Awaitable[None]]
+    robots_timeout_seconds: float = 30.0
 
 
 class _BatchContext(NamedTuple):
@@ -160,11 +161,14 @@ async def _robots_admitted_batch(ctx: _BatchContext, batch: list[_Admitted]) -> 
         seen_in_batch.add(job.normalized_url)
         pending.append((depth, job))
     urls: list[NormalizedUrl] = [job.normalized_url for _, job in pending]
-    decisions = (
-        await gather_robots_decisions(urls, run.robots_allows, run.robots_crawl_delay)
-        if run.respect_robots
-        else [(True, None)] * len(pending)
-    )
+    decisions: list[tuple[bool, float | None]] = [(True, None)] * len(pending)
+    if run.respect_robots:
+        decisions = await gather_robots_decisions(
+            urls,
+            run.robots_allows,
+            run.robots_crawl_delay,
+            timeout_seconds=run.robots_timeout_seconds,
+        )
     allowed_jobs: list[_Admitted] = []
     for (depth, job), (allowed, delay) in zip(pending, decisions, strict=True):
         if run.respect_robots and not allowed:
@@ -449,6 +453,7 @@ async def run_recursive_crawl(
     resource_gate: ResourceGate,
     admission: WeightedAdmission | None = None,
     host_policy: HostPolicy,
+    robots_timeout_seconds: float = 30.0,
     stall_guard: AdmissionStallGuard | None = None,
 ) -> None:
     """Bounded recursive BFS with self-tuning resource admission: writes results
@@ -475,6 +480,7 @@ async def run_recursive_crawl(
         resource_gate=resource_gate,
         admission=admission or default_admission_policy(resource_gate),
         host_policy=host_policy,
+        robots_timeout_seconds=robots_timeout_seconds,
         ramp_max=RECURSIVE_RAMP_MAX,
         http_heavy_lookahead=_HTTP_HEAVY_LOOKAHEAD,
         spill_write=_spill_write,

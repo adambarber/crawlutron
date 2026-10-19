@@ -12,6 +12,13 @@ from tests._private_import_decl import (
 )
 
 DECLARED: dict[str, Declaration] = {
+    "app.admission.admission_links._ROBOTS_CHUNK_DEADLINE_SLACK_SECONDS": _d(
+        "implementation constant",
+        "The per-chunk robots-admission wall-clock slack; a test checks it off to shrink the "
+        "deadline from timeouts+5s to milliseconds so the bounded-latency property is asserted "
+        "quickly rather than with a real 5-second wait.",
+        ["test"],
+    ),
     "app.api.async_crawl_runner._build_async_crawl_semaphore": _SUBSTITUTED_COLLABORATOR,
     "app.api.job_lifecycle._tasks": _d(_CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]),
     "app.transport.content_cache.ContentCache._remember_memory_locked": _d(

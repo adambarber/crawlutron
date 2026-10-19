@@ -320,6 +320,7 @@ async def _run_nonrecursive(state: _PipelineState) -> None:
             [job.normalized_url for job in state.jobs],
             lambda url: _robots_allows(state, url),
             lambda url: _robots_delay(state, url),
+            timeout_seconds=state.policy.limits.timeout_seconds,
         )
         if state.respect_robots
         else [(True, None)] * len(state.jobs)
@@ -360,6 +361,7 @@ async def _run_recursive(state: _PipelineState) -> None:
         resource_gate=state.dependencies.resource_gate,
         admission=admission,
         host_policy=state.host_policy,
+        robots_timeout_seconds=state.policy.limits.timeout_seconds,
     )
 
 
