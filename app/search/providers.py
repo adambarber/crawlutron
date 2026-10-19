@@ -237,9 +237,15 @@ class _ApiKeyProvider:
         names come from the instance, not callers; the list is clamped to the
         caller's ``limit`` so an over-emitting provider leaks nothing beyond it.
         """
-        payload = _parse_json(body)
         if status != 200:
-            raise SearchProviderError(_provider_message(self.name, status, payload))
+            # The status is decided before the body is trusted: a non-2xx body
+            # may be non-JSON, so a blind parse must never swallow it.
+            try:
+                detail = _parse_json(body)
+            except SearchProviderError:
+                detail = {}
+            raise SearchProviderError(_provider_message(self.name, status, detail))
+        payload = _parse_json(body)
         return collect_results(
             self._items_of(payload),
             url_key=self._url_key,

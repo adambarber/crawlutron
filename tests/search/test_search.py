@@ -177,6 +177,20 @@ class TestProviderParsing:
         assert len(results) == 3
         assert [r.url for r in results] == [f"https://example.gov/{i}" for i in range(3)]
 
+    async def test_non_2xx_non_json_body_surfaces_the_status(self, fake_provider_http):
+        # An HTTP error body may be non-JSON (an HTML proxy page, a plain
+        # "Rate limited" line); the status must be surfaced, not swallowed.
+        fake_provider_http(403, "<html>nope</html>")
+        provider = TavilyProvider("key", HostPolicy.unrestricted())
+        with pytest.raises(SearchProviderError, match="HTTP 403"):
+            await provider.search("x", 3, 10.0)
+
+    async def test_rate_limited_non_json_body_surfaces_the_status(self, fake_provider_http):
+        fake_provider_http(429, "Rate limited")
+        provider = TavilyProvider("key", HostPolicy.unrestricted())
+        with pytest.raises(SearchProviderError, match="HTTP 429"):
+            await provider.search("x", 3, 10.0)
+
 
 # --- Shared result collector (three provider loops were verbatim) ---------
 
