@@ -145,6 +145,7 @@ def _refuse_malformed_profile_values(profile: dict[str, JsonValue]) -> None:
     key means" are different questions, and the latter used to raise inside the header builder.
     """
     from app.vocabulary.request_profiles import (
+        COOKIE_JAR_VALUES,
         MAX_COOKIE_NAMESPACE_LENGTH,
         MAX_PROFILE_COOKIE_HOSTS,
         MAX_PROFILE_COOKIE_PAIRS,
@@ -159,6 +160,13 @@ def _refuse_malformed_profile_values(profile: dict[str, JsonValue]) -> None:
             raise ValueError(f"request_profile {key} must be true or false, got {type(value).__name__}")
         if key in REQUEST_PROFILE_TEXT_KEYS and not isinstance(value, str):
             raise ValueError(f"request_profile {key} must be a string, got {type(value).__name__}")
+
+    jar = profile.get("cookie_jar")
+    if isinstance(jar, str) and jar not in COOKIE_JAR_VALUES:
+        raise ValueError(
+            f"request_profile cookie_jar {jar!r} is not permitted; valid values are: "
+            f"{', '.join(sorted(COOKIE_JAR_VALUES))}"
+        )
 
     namespace = profile.get("cookie_namespace")
     if isinstance(namespace, str) and len(namespace) > MAX_COOKIE_NAMESPACE_LENGTH:

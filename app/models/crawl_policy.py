@@ -108,8 +108,10 @@ class CrawlPolicy(BaseModel):
         default_factory=dict,
         description="Optional direct HTTP compatibility profile for HTTP_CFFI_IMPERSONATE. Supported keys: "
         "user_agent_family (for example desktop_chrome), user_agents, accept_languages, "
-        "fingerprint_seed, fingerprint_rotation, cookie_jar, and cookies for public sessions. Applied only "
-        "to direct HTTP strategies and echoed in diagnostics.",
+        "fingerprint_seed, fingerprint_rotation, cookie_jar, cookie_namespace, and cookies. "
+        "cookie_jar is one of per_host, session, or none; only per_host/session apply the static "
+        "cookies map (which stays inert without cookie_jar). cookie_namespace isolates the "
+        "persistent jar per tenant. Applied only to direct HTTP strategies and echoed in diagnostics.",
         json_schema_extra=REQUEST_PROFILE_KEYS_JSON,
     )
     browser_profile: dict[str, Any] = Field(

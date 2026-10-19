@@ -12,6 +12,25 @@ class TestRequestProfileVocabularyIsClosed:
     Every other caller-supplied mapping is closed; this one left a misspelling
     a silent no-op, and the description advertised a key the reader never reads."""
 
+    def test_a_misspelled_cookie_jar_value_is_refused(self):
+        """A ``cookie_jar`` value outside the closed set silently disables static
+        cookies (diagnostics echo the caller's spelling as a live mode) -- a
+        misspelling like ``per-host`` must be refused, not a silent no-op (#245)."""
+        from app.models.crawl_policy import CrawlPolicy
+
+        for bogus in ("per-host", "shared", "SESSION", "session-jar"):
+            with pytest.raises(ValidationError, match="cookie_jar"):
+                CrawlPolicy(request_profile={"cookie_jar": bogus})
+
+    def test_the_closed_cookie_jar_values_still_work(self):
+        """The valid ``cookie_jar`` vocabulary is accepted, so the closure never
+        rejects a spelling the header builder honours or a deliberate disable."""
+        from app.models.crawl_policy import CrawlPolicy
+
+        for value in ("per_host", "session", "none"):
+            profile = CrawlPolicy(request_profile={"cookie_jar": value})
+            assert profile.request_profile["cookie_jar"] == value
+
     def test_an_unknown_key_is_refused(self):
         from app.models.crawl_policy import CrawlPolicy
 
