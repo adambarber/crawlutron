@@ -361,8 +361,12 @@ async def _run(state: _PipelineState) -> ProducerEnvelope:
         await _run_recursive(state)
     else:
         await _run_nonrecursive(state)
-    response = await _response(state)
-    state.spill.close()
+    try:
+        response = await _response(state)
+    finally:
+        # The spill must release its lock even when response assembly raises on a
+        # corrupt row, so a crashed worker does not accumulate orphaned files.
+        state.spill.close()
     return response
 
 

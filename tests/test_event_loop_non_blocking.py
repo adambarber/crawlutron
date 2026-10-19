@@ -6,6 +6,7 @@ itself keeps advancing -- while the blocking work is in flight."""
 from __future__ import annotations
 
 import asyncio
+import fcntl
 import json
 import threading
 from pathlib import Path
@@ -407,3 +408,40 @@ class TestSpillAssemblyOffTheEventLoop:
         _serve_stale_envelope(monkeypatch, cache, stale)  # toggle stays on: whole read is stale
         assert cache.get("k") == {"v": "stale"}  # served the bytes that were read
         assert "k" not in cache._memory_cache  # but the stale read is not mirrored
+
+    async def test_corrupt_spill_line_closes_the_spill_and_propagates(self, monkeypatch, tmp_path) -> None:
+        """A corrupt spill row that makes ``_response`` raise must still close
+        the spill and release its lock before the error propagates.
+        """
+        from app.orchestration.engine import ResultSpill
+
+        spill_path = str(tmp_path / "crawl.spill.ndjson")
+        raised: list[BaseException] = []
+
+        def corrupt_load(self, *, policy):
+            # Simulate ``from_wire`` failing on a corrupt spill line read back out.
+            raise ValueError("corrupt spill line")
+
+        monkeypatch.setattr(ResultSpill, "load_ordered", corrupt_load)
+
+        async def scenario():
+            try:
+                await crawled_results(
+                    {"/": (200, "<html><body>hello</body></html>", "text/html")},
+                    spill_path=spill_path,
+                )
+            except ValueError as exc:
+                raised.append(exc)
+                return
+            raise AssertionError("the corrupt spill line must propagate out of run_crawl_request")
+
+        await scenario()
+        assert raised, "the error must not be swallowed"
+        # The spill must still be closed (lock released) despite the raise.
+        with open(spill_path) as fh:
+            try:
+                fcntl.flock(fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except OSError:
+                raise AssertionError("spill is still locked: close() was skipped on the error path") from None
+            finally:
+                fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
