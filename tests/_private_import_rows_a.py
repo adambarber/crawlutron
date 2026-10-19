@@ -17,6 +17,14 @@ DECLARED: dict[str, Declaration] = {
     "app.transport.content_cache.ContentCache._remember_memory_locked": _d(
         _PRIVATE_TYPE.kind, _PRIVATE_TYPE.reason, ["test"]
     ),
+    "app.transport.decompression._decompress_brotli": _d(
+        "implementation step",
+        "Proof that the streaming brotli branch clamps its accumulated buffer to cap+1. The public\n"
+        "decompress_body swallows that bound behind its DecompressionTooLargeError raise, so the\n"
+        "remote-OOM property has no expression through the public surface; the stream is driven here\n"
+        "with the decoder substituted at the dependency boundary.\n",
+        ["test"],
+    ),
     "app.transport.browser_cookies.BROWSER_COOKIES_BY_DOMAIN._lock": _d(
         _CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]
     ),

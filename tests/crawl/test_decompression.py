@@ -9,7 +9,12 @@ import pytest
 
 from app.transport import decompression as decompression_mod
 from app.transport.body_decode import decode_body
-from app.transport.decompression import DecompressionTooLargeError, decompress_body, decompress_bounded
+from app.transport.decompression import (
+    DecompressionError,
+    DecompressionTooLargeError,
+    decompress_body,
+    decompress_bounded,
+)
 
 _CAP = 10_000_000
 
@@ -333,3 +338,29 @@ class TestDecompressionSelection:
 
     def test_plain_passthrough(self):
         assert decompress_body(b"plain", "identity", max_output_bytes=_CAP) == b"plain"
+
+
+def test_brotli_streaming_clamps_accumulated_output(monkeypatch):
+    # One greedy process() materialises a slice's whole expansion; the stream must return no more
+    # than cap+1 bytes of it, or a small on-wire body becomes a remote OOM.
+
+    class BombProcess(brotli.Decompressor):
+        def process(self, data):
+            return b"Z" * 16_384_000  # one slice expands well past any small cap
+
+    monkeypatch.setattr(brotli, "Decompressor", BombProcess)
+    cap = 10_000
+    decoded = decompression_mod._decompress_brotli(b"\x00" * (16_384 * 3), cap)
+    assert len(decoded) <= cap + 1
+
+
+def test_brotli_refuses_uncapped_fallback(monkeypatch):
+    # Without a bounded decoder the old span fell to an uncapped brotli.decompress; refuse instead.
+
+    def boom():
+        raise RuntimeError("no decoder available")
+
+    monkeypatch.setattr(brotli, "Decompressor", boom)
+    bomb = brotli.compress(b"hello brotli")
+    with pytest.raises(DecompressionError):
+        decompress_body(bomb, "br", max_output_bytes=10_000)

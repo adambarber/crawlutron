@@ -146,17 +146,21 @@ def _decompress_brotli(body: bytes | bytearray | memoryview[int], max_output_byt
             decoded: bytes | bytearray = bounded.decompress(body, max_output_bytes + 1)
         elif decoder is not None and hasattr(decoder, "process"):
             streaming = cast(_StreamingDecompressor, decoder)
-            # Google-brotli streaming API: feed incrementally and stop past the cap,
-            # so the caller's post-hoc check turns over-cap output into the error.
+            # process() has no cap argument and materialises each slice's whole expansion, so clamp
+            # the accumulation to cap+1 and stop feeding -- never carry a bomb in the caller's buffer.
             chunks = bytearray()
             step = 16_384
+            cap = max_output_bytes + 1
             for offset in range(0, len(body), step):
                 chunks.extend(streaming.process(body[offset : offset + step]))
-                if len(chunks) > max_output_bytes:
+                if len(chunks) > cap:
+                    del chunks[cap:]
                     break
             decoded = chunks
         else:
-            decoded = brotli.decompress(cast(bytes, body))
+            # No bounded decoder is available; refuse rather than fall through to an uncapped
+            # brotli.decompress(body), which is a residual remote-OOM vector for attacker bytes.
+            raise DecompressionError("no bounded brotli decoder available")
     except Exception as error:
         raise DecompressionError("invalid brotli stream") from error
     return decoded
