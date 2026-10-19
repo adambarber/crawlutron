@@ -31,17 +31,16 @@ from .transport.browser_pool import (
 if TYPE_CHECKING:
     # FastAPI is imported only for annotations under type checking; the runtime
     # import below carries the real classes (a bare variable is not a valid annotation).
-    from fastapi import FastAPI, HTTPException
+    from fastapi import FastAPI
     from fastapi.exceptions import RequestValidationError
 else:
     try:
-        from fastapi import FastAPI, HTTPException
+        from fastapi import FastAPI
         from fastapi.exceptions import RequestValidationError
     except ImportError:
         # FastAPI is optional at import time (MCP/CLI/tests import this module
         # with no web server): FastAPI -> None, exceptions -> ``Exception``.
         FastAPI = None
-        HTTPException = Exception
         RequestValidationError = Exception
 
 
@@ -305,13 +304,18 @@ if FastAPI is not None:
 
     # Body-size guard: 16 MiB cap at the ASGI receive layer (see
     # app/api/middleware.py for how truncation and keep-alive are handled).
+    from starlette.exceptions import HTTPException as StarletteHTTPException
+
     from app.api.exceptions import http_exception_handler, validation_exception_handler
     from app.api.middleware import limit_request_body, reject_hostile_origin
 
     app.middleware("http")(reject_hostile_origin)
     app.middleware("http")(limit_request_body)
     app.add_exception_handler(RequestValidationError, validation_exception_handler)
-    app.add_exception_handler(HTTPException, http_exception_handler)
+    # Framework-level 404/405 raise Starlette's base HTTPException (parent of
+    # FastAPI's); register on the base + Exception for the last-resort 500.
+    app.add_exception_handler(StarletteHTTPException, http_exception_handler)
+    app.add_exception_handler(Exception, http_exception_handler)
 
     # Include modular routers
     health_router, _ = create_health_router()

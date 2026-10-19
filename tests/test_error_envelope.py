@@ -136,3 +136,56 @@ class TestEnvelopeFromDetail:
             "message": "Unknown job_id: definitely-not-a-job",
             "details": {},
         }
+
+    async def test_unknown_route_404_is_the_envelope_not_fastapi_detail(self, async_client):
+        """A route-miss is a framework-level starlette HTTPException, outside the
+        fastapi.HTTPException MRO match; it must still surface as the envelope."""
+        resp = await async_client.get("/v1/definitely-not-a-route")
+        assert resp.status_code == 404
+        body = resp.json()
+        assert set(body) == {"code", "message", "details"}, body
+        assert "detail" not in body, body
+
+    async def test_unknown_route_404_reports_the_malformed_synthetic_code(self, async_client):
+        """Starlette's route-miss detail is the opaque string 'Not Found', so it takes
+        the declared synthetic code, never a laundered http_404."""
+        from app.api.exceptions import MALFORMED_DETAIL_CODE
+
+        resp = await async_client.get("/v1/definitely-not-a-route")
+        assert resp.json()["code"] == MALFORMED_DETAIL_CODE
+        assert resp.json()["details"] == {"status_code": 404}
+
+    async def test_method_not_allowed_405_is_the_envelope(self, async_client):
+        """A 405 on a known route is also a framework-level starlette HTTPException and
+        must surface as the envelope, not fastapi's {"detail": ...}."""
+        resp = await async_client.post("/health")
+        assert resp.status_code == 405
+        body = resp.json()
+        assert set(body) == {"code", "message", "details"}, body
+        assert body["details"] == {"status_code": 405}
+
+    async def test_unhandled_in_handler_exception_is_a_envelope_500(self, async_client):
+        """A generic exception escaping a handler must yield the envelope, not
+        Starlette's text/plain 'Internal Server Error' (raise_app_exceptions=False, as
+        ServerErrorMiddleware always re-raises after sending for logging)."""
+        import httpx
+
+        from tests._app_factory import service_app
+
+        app = service_app()
+
+        @app.get("/boom")
+        async def _boom():
+            raise RuntimeError("kaboom")
+
+        async with httpx.ASGITransport(app=app, raise_app_exceptions=False) as transport:
+            async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+                resp = await client.get("/boom")
+
+        assert resp.status_code == 500
+        assert resp.headers["content-type"].startswith("application/json")
+        assert resp.json() == {
+            "code": "internal_error",
+            "message": "Unhandled exception in request handling",
+            "details": {},
+        }

@@ -11,6 +11,7 @@ from typing import Any, cast
 from fastapi import HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.models.error_response import ErrorEnvelope
 from app.models.json_value import JsonValue
@@ -91,12 +92,12 @@ async def validation_exception_handler(request: Request, exc: Exception) -> JSON
 
 
 async def http_exception_handler(request: Request, exc: Exception) -> JSONResponse:
-    """Unwrap FastAPI's ``{"detail": ...}`` envelope to ``{code, message, details}``.
+    """Unwrap ``{"detail": ...}`` to ``{code, message, details}``.
 
-    ``exc`` typed ``Exception`` satisfies Starlette's contravariant handler contract;
-    the isinstance check preserves the unwrap and anything else degrades to a 500.
+    isinstance uses Starlette's base HTTPException so framework and FastAPI exceptions
+    (a Starlette child) stay on the unwrap; anything else is a 500 envelope.
     """
-    if not isinstance(exc, HTTPException):
+    if not isinstance(exc, StarletteHTTPException):
         return JSONResponse(
             status_code=500,
             content=error_envelope("internal_error", "Unhandled exception in request handling"),
