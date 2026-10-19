@@ -1,7 +1,7 @@
 """``POST /mcp`` — MCP 2026-07-28 streamable-HTTP endpoint.
 
-Pure router: parses the raw JSON-RPC body, validates the Origin header, and delegates
-to :func:`app.mcp.server.handle_mcp_request`; responses are single JSON objects.
+Pure router: parses the raw JSON-RPC body and delegates to
+:func:`app.mcp.server.handle_mcp_request`; results are single JSON objects.
 """
 
 from __future__ import annotations
@@ -15,7 +15,7 @@ from app.api.caller_auth import get_caller_identity
 from app.api.dependencies import get_settings, get_shutdown_event
 from app.mcp.constants import INVALID_API_KEY, INVALID_REQUEST, PARSE_ERROR
 from app.mcp.protocol import error_response
-from app.mcp.server import handle_mcp_request, origin_allowed
+from app.mcp.server import handle_mcp_request
 from app.mcp.tools import _http_exception_message
 from app.models.caller_identity import CallerIdentity
 
@@ -40,13 +40,8 @@ async def mcp_endpoint(
     settings=Depends(get_settings),
     shutdown_event=Depends(get_shutdown_event),
 ):
-    if not origin_allowed(request.headers.get("origin")):
-        return JSONResponse(
-            status_code=403,
-            content=error_response(None, INVALID_REQUEST, "Origin not allowed"),
-        )
-    # #205: /mcp was the only door an invalid credential passed silently. Resolve
-    # the caller here so a wrong key is a 401, never a benign 200 (no key stays anonymous).
+    # The disallowed-Origin gate is the middleware's (one gate, per-surface shape).
+    # #205: an invalid credential must be a 401, never a benign 200 (no key stays anonymous).
     try:
         caller: CallerIdentity = await get_caller_identity(request)
     except HTTPException as error:

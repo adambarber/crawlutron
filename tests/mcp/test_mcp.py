@@ -187,8 +187,14 @@ class TestRequestMetadataValidation:
         assert resp.json()["error"]["code"] == -32601
 
     async def test_non_loopback_origin_rejected(self, async_client):
+        """A disallowed Origin on /mcp must yield the JSON-RPC error shape, not the
+        REST envelope; the middleware is the single Origin gate, emitting per surface."""
         resp = await _mcp(async_client, _body("server/discover"), {"Origin": "http://evil.example"})
         assert resp.status_code == 403
+        body = resp.json()
+        assert body.get("jsonrpc") == "2.0"
+        assert body["error"]["code"] == -32600
+        assert "code" not in body and "message" not in body and "details" not in body
 
     async def test_notification_accepted_without_response(self, async_client):
         notification = {"jsonrpc": "2.0", "method": "notifications/cancelled", "params": {}}

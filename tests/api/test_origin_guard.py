@@ -12,6 +12,16 @@ async def test_rest_get_with_hostile_origin_is_rejected(async_client):
     assert resp.status_code == 403
 
 
+async def test_rest_get_hostile_origin_returns_the_envelope(async_client):
+    """The REST surface keeps the envelope body; only /mcp answers with JSON-RPC (#326)."""
+    resp = await async_client.get("/v1/capabilities", headers={"Origin": "http://evil.example"})
+    assert resp.status_code == 403
+    body = resp.json()
+    assert set(body) == {"code", "message", "details"}
+    assert body["code"] == "origin_not_allowed"
+    assert "jsonrpc" not in body
+
+
 async def test_rest_get_without_origin_allowed(async_client):
     """Tooling that sends no Origin (curl, bots, agents) keeps working."""
     resp = await async_client.get("/v1/capabilities")

@@ -13,6 +13,8 @@ from fastapi import Request
 from fastapi.responses import JSONResponse
 
 from app.api.exceptions import error_envelope
+from app.mcp.constants import INVALID_REQUEST
+from app.mcp.protocol import error_response
 from app.mcp.server import origin_allowed
 
 MAX_REQUEST_BODY_BYTES = 16 * 1024 * 1024
@@ -21,15 +23,19 @@ MAX_REQUEST_BODY_BYTES = 16 * 1024 * 1024
 async def reject_hostile_origin(request: Request, call_next):
     """Reject a present, non-loopback browser Origin (DNS-rebinding defense).
 
-    curl/bots/agents send no Origin, so absent stays allowed; only a present
-    but disallowed Origin is a 403, matching the MCP precedent on every surface (#224).
+    Only a present but disallowed Origin is a 403; the shape follows the surface:
+    /mcp answers with the JSON-RPC error object, every REST route the envelope (#326).
     """
-    if not origin_allowed(request.headers.get("origin")):
+    origin = request.headers.get("origin")
+    if not origin_allowed(origin):
+        if request.url.path.startswith("/mcp"):
+            return JSONResponse(
+                status_code=403,
+                content=error_response(None, INVALID_REQUEST, "Origin not allowed"),
+            )
         return JSONResponse(
             status_code=403,
-            content=error_envelope(
-                "origin_not_allowed", "Origin not allowed", {"origin": request.headers.get("origin")}
-            ),
+            content=error_envelope("origin_not_allowed", "Origin not allowed", {"origin": origin}),
         )
     return await call_next(request)
 
