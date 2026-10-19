@@ -163,12 +163,21 @@ class TestValidateWirePolicyRejects:
         assert raw == {"limits": {}}
 
     def test_an_absent_max_pages_becomes_the_documented_default(self):
-        """ "0 means the default page budget" is a wire meaning, not a model one.
-
-        The model declares ``0`` as unbounded (the whole-site runner relies on
-        it), so the absent/zero translation happens only on the wire edge."""
+        """Both edges resolve an absent ``max_pages`` to the documented default."""
         assert validate_wire_policy({"limits": {}}).limits.max_pages == policy_module.DEFAULT_MAX_PAGES
-        assert read_policy({"limits": {}}).limits.max_pages == 0
+        assert read_policy({"limits": {}}).limits.max_pages == policy_module.DEFAULT_MAX_PAGES
+
+    def test_an_omitted_max_pages_and_an_explicit_default_agree(self):
+        """#313: an omitted ``max_pages`` resolves the same as an explicit 100."""
+        omitted = read_policy({"limits": {}})
+        explicit = read_policy({"limits": {"max_pages": policy_module.DEFAULT_MAX_PAGES}})
+
+        assert omitted == explicit
+        assert omitted.limits.max_pages == policy_module.DEFAULT_MAX_PAGES
+
+    def test_an_explicit_zero_stays_unbounded(self):
+        """#313: an explicit ``0`` keeps the model's unbounded, never default."""
+        assert read_policy({"limits": {"max_pages": 0}}).limits.max_pages == 0
 
 
 class TestErrorCodeTable:
@@ -232,7 +241,12 @@ class TestOperatorTier:
         assert read_policy({}, tier).limits == read_policy(stored_row, tier).limits
 
     def test_no_tier_means_the_model_defaults(self):
-        assert read_policy({}) == CrawlPolicy()
+        """No operator tier yields model defaults, with the #313 max_pages default."""
+        resolved = read_policy({})
+        model = CrawlPolicy()
+        assert resolved.limits.timeout_seconds == model.limits.timeout_seconds
+        assert resolved.limits.max_retries == model.limits.max_retries
+        assert resolved.limits.max_pages == policy_module.DEFAULT_MAX_PAGES
 
 
 class TestDiscoveryFlags:
@@ -271,11 +285,8 @@ class TestStoredPolicy:
         assert stored_policy(model) == model.model_dump()
 
     def test_a_corrupt_row_stores_the_repaired_policy_not_the_corrupt_text(self):
-        """What goes on disk is what the model accepts.
-
-        The old version forwarded whatever it was handed, so the repair ran on
-        every load instead of once."""
-        assert stored_policy({"limits": {"max_retries": _OVER_MAX_RETRIES}}) == CrawlPolicy().model_dump()
+        """What goes on disk is what the model accepts, not the corrupt text."""
+        assert stored_policy({"limits": {"max_retries": _OVER_MAX_RETRIES}}) == read_policy({}).model_dump()
 
 
 def test_read_policy_does_not_call_model_validate_with_a_raw_model() -> None:
