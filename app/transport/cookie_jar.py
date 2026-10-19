@@ -23,8 +23,8 @@ COOKIE_NAMESPACE: contextvars.ContextVar[str] = contextvars.ContextVar(
     "crawlutron_cookie_namespace", default=""
 )
 
-# Cap on distinct (namespace, host) cookie slots: the jar is module-global and
-# long-lived, and it is defined once by the shared store, never re-declared here.
+# Cap on distinct (namespace, host) cookie slots PER NAMESPACE: each tenant's
+# budget is independent, so one crawl cannot evict another's. Kept on the store.
 COOKIE_JAR_MAX_HOSTS = DEFAULT_MAX_HOSTS
 
 
@@ -61,8 +61,14 @@ class CookieJar:
         cap is a slow leak only the boundary test would notice); a read counts as a use.
         """
         self._cookies.move_to_end(ns_key)
-        while len(self._cookies) > COOKIE_JAR_MAX_HOSTS:
-            self._cookies.popitem(last=False)
+        namespace = ns_key[0]
+        # Per-namespace cap: evict only this namespace's stale slots (oldest first),
+        # leaving a sibling's jar untouched -- one crawl cannot evict another's (#234).
+        stale = [key for key in self._cookies if key[0] == namespace]
+        over = len(stale) - COOKIE_JAR_MAX_HOSTS
+        if over > 0:
+            for key in stale[:over]:
+                del self._cookies[key]
 
     def add_cookie_header(self, url: NormalizedUrl, set_cookie_header: str, *, namespace: str = "") -> None:
         """Parse a ``Set-Cookie`` header and store the cookie for the URL's domain.

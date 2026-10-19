@@ -53,10 +53,9 @@ class SharedCookieStore(CoordinationStore):
         return self._decode(row[0])
 
     def merge(self, namespace: str, host: str, cookies: dict[str, str]) -> None:
-        """Union ``cookies`` into the slot, then evict past the cap.
-
-        Read and write are one transaction -- the JSON file's replace-everything
-        write is what lost a sibling's cookies, and only an in-transaction union avoids it.
+        """Union ``cookies`` into the slot, then evict past the per-namespace cap.
+        Eviction scopes to the slot being written, so one tenant's crawl cannot
+        evict another tenant's sessions (#234). The union stays transactional.
         """
         now = time.time()
         key = (namespace or "", host)
@@ -76,9 +75,9 @@ class SharedCookieStore(CoordinationStore):
                 )
                 self._conn.execute(
                     "DELETE FROM coordination_cookies WHERE (namespace, host) IN ("
-                    "SELECT namespace, host FROM coordination_cookies "
+                    "SELECT namespace, host FROM coordination_cookies WHERE namespace = ? "
                     "ORDER BY touched_at ASC LIMIT -1 OFFSET ?)",
-                    (self._max_hosts,),
+                    (key[0], self._max_hosts),
                 )
                 self._conn.execute("COMMIT")
             except BaseException:

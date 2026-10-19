@@ -4,7 +4,8 @@ Without isolation the shared jar leaks cookies across tenants; the namespace
 contextvar is set per ``crawl_request`` from ``cookie_namespace``, keying jars.
 """
 
-from app.transport.cookie_jar import COOKIE_NAMESPACE, CookieJar
+from app.storage.coordination_cookies import DEFAULT_MAX_HOSTS
+from app.transport.cookie_jar import COOKIE_JAR_MAX_HOSTS, COOKIE_NAMESPACE, CookieJar
 from app.transport.request_profile import cookie_namespace_for
 from tests._cookie_helpers import cookie_file, read_cookie_file
 from tests._policy_factories import canonical
@@ -82,3 +83,34 @@ def test_cookie_namespace_for_helper_reads_profile():
 
 def test_cookie_namespace_contextvar_default_is_empty():
     assert COOKIE_NAMESPACE.get() == ""
+
+
+def _cookie_jar_max_hosts() -> int:
+    """The jar's per-namespace LRU cap, read from the module that owns it."""
+    return COOKIE_JAR_MAX_HOSTS
+
+
+def test_one_tenant_crawl_does_not_evict_sibling_tenant_sessions():
+    """The LRU cap is per-namespace: tenant A flooding past the cap must not
+    evict tenant B's held session (the adjudicated #234 isolation shape)."""
+    cap = _cookie_jar_max_hosts()
+    jar = CookieJar()
+    jar.add_cookie_header(canonical("http://held.example/"), "b=1; Path=/", namespace=TENANT_B)
+    for i in range(cap + 5):
+        jar.add_cookie_header(canonical(f"http://host{i}.example/"), "a=1; Path=/", namespace=TENANT_A)
+    assert jar.cookie_header_for(canonical("http://held.example/"), namespace=TENANT_B) == "b=1"
+    # A's flood is bounded by the cap; B's slot still lives alongside it.
+    assert len(jar._cookies) == cap + 1
+
+
+def test_store_backed_crawl_does_not_evict_sibling_tenant_past_cap(tmp_path):
+    """The store-backed eviction is also per-namespace (#234). A floods first, then
+    B writes, so the global budget is already spent; B's single slot must survive.
+    """
+    from app.storage.coordination_cookies import SharedCookieStore
+
+    jar = CookieJar(SharedCookieStore(tmp_path / "coordination.db", max_hosts=DEFAULT_MAX_HOSTS))
+    for i in range(DEFAULT_MAX_HOSTS + 5):
+        jar.add_cookie_header(canonical(f"http://host{i}.example/"), "a=1; Path=/", namespace=TENANT_A)
+    jar.add_cookie_header(canonical("http://held.example/"), "b=1; Path=/", namespace=TENANT_B)
+    assert jar.cookie_header_for(canonical("http://held.example/"), namespace=TENANT_B) == "b=1"
