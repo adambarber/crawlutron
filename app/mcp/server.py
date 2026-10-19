@@ -224,6 +224,20 @@ async def call_tool(
     return result_response(request_id, success)
 
 
+def _envelope_rejection(body: dict[str, JsonValue]) -> tuple[int, JsonValue] | None:
+    """Return the Invalid Request rejection for a malformed JSON-RPC envelope.
+    A wrong/absent ``jsonrpc`` version or a boolean/non-str-or-int ``id`` is
+    refused here, before the request is dispatched.
+    """
+    if body.get("jsonrpc") != "2.0":
+        return 400, error_response(None, INVALID_REQUEST, "Invalid JSON-RPC request")
+    if "id" in body:
+        request_id = body.get("id")
+        if isinstance(request_id, bool) or not isinstance(request_id, (int, str)):
+            return 400, error_response(None, INVALID_REQUEST, "Request id must be an integer or string")
+    return None
+
+
 async def handle_mcp_request(
     body: dict[str, JsonValue],
     *,
@@ -240,16 +254,14 @@ async def handle_mcp_request(
 
     A ``None`` payload means the request was accepted as a notification (202).
     """
+    rejection = _envelope_rejection(body)
+    if rejection is not None:
+        return rejection
     if "id" not in body:
         # This revision defines no client-sent notifications over streamable
         # HTTP that the server must act on; accept and drain.
         return 202, None
-
-        # JSON-RPC requires a request id to be an integer or string (never null); reject any
-        # other shape before it reaches the response builders, which echo the id verbatim.
-    request_id = body.get("id")
-    if not isinstance(request_id, (int, str)):
-        return 400, error_response(None, INVALID_REQUEST, "Request id must be an integer or string")
+    request_id = cast(int | str, body.get("id"))
     method = body.get("method")
     params = body.get("params")
     if not isinstance(params, dict):

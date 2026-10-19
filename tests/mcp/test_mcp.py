@@ -87,6 +87,13 @@ async def _assert_header_mismatch(
     assert resp.json()["error"]["code"] == code, resp.text
 
 
+async def _assert_invalid_request(client, *, body: dict) -> None:
+    """Assert a malformed JSON-RPC envelope is refused as Invalid Request."""
+    resp = await _mcp(client, body)
+    assert resp.status_code == 400, resp.text
+    assert resp.json()["error"]["code"] == -32600, resp.text
+
+
 async def _tool_call(client, name: str, arguments: dict) -> dict:
     """Invoke one MCP tool; return its structuredContent on success."""
     return (
@@ -415,3 +422,29 @@ class TestInternalErrorContract:
         assert payload is not None
         assert payload["error"]["code"] == -32603
         assert payload["id"] == 1
+
+
+class TestEnvelopeValidation:
+    """#230: the JSON-RPC 2.0 envelope is validated, not just echoed."""
+
+    @pytest.mark.parametrize("request_id", [True, False])
+    async def test_boolean_id_is_refused(self, async_client, request_id):
+        # JSON-RPC 2.0 restricts id to String/Number/NULL; bool is neither (it is
+        # a subclass of int only by accident) and must be refused as invalid.
+        body = _body("server/discover")
+        body["id"] = request_id
+        await _assert_invalid_request(async_client, body=body)
+
+    @pytest.mark.parametrize("version", [None, "1.0", 2.0, "3.0"])
+    async def test_wrong_or_absent_jsonrpc_is_refused(self, async_client, version):
+        body = _body("server/discover")
+        if version is None:
+            del body["jsonrpc"]
+        else:
+            body["jsonrpc"] = version
+        await _assert_invalid_request(async_client, body=body)
+
+    async def test_correct_jsonrpc_with_int_id_still_works(self, async_client):
+        # The new validation must not reject the valid envelope the helpers build.
+        result = await _assert_complete(async_client, _body("server/discover"))
+        assert _PROTOCOL_VERSION in result["supportedVersions"]
