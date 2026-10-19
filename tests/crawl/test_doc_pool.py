@@ -8,6 +8,7 @@ import threading
 import time
 
 import app.extraction.content as ext_mod
+import app.extraction.documents as docex
 from app.extraction.content import ExtractedContent
 from app.orchestration.doc_pool import DocExtractionPool, DocWorker, terminate_doc_process
 from tests._extraction_helpers import settings_with
@@ -48,6 +49,15 @@ def _acquire_with_bound(pool: DocExtractionPool, bound: float = 0.25):
     thread.start()
     thread.join(timeout=bound * 20 + 5)
     return box.get("worker"), thread.is_alive(), time.monotonic() - started
+
+
+def _failing_spawn_pool() -> DocExtractionPool:
+    """An empty pool whose every spawn raises OSError (an unforkable host)."""
+
+    def failing_spawn() -> DocWorker:
+        raise OSError("Resource temporarily unavailable")
+
+    return DocExtractionPool(spawn=failing_spawn, worker_count=lambda: 1, enabled=lambda: True)
 
 
 # --- 1: SIGKILL escalation ---------------------------------------------------
@@ -147,6 +157,26 @@ def test_parked_acquire_wakes_to_none_after_teardown(fake_pool):
 
     assert box["error"] is None, f"parked acquirer escaped as {box['error']!r}"
     assert box["worker"] is None
+
+
+def test_acquire_returns_none_when_spawn_fails():
+    """A spawn failure (e.g. OSError on fork at the cgroup ceiling) degrades to
+    ``None`` per the contract, never raising out of acquire (pins #269)."""
+    pool = _failing_spawn_pool()
+    worker = pool.acquire(0.1)
+
+    assert worker is None
+
+
+def test_extract_document_degrades_on_spawn_failure(monkeypatch):
+    """A failed spawn surfaces from extract_document as the degraded empty result,
+    never as an unhandled raise in the crawl path (pins #269)."""
+    pool = _failing_spawn_pool()
+    monkeypatch.setattr(docex, "DOC_POOL", pool)
+
+    result = ext_mod.extract_document(b"%PDF-1.4 fake", "http://example.com/x.pdf")
+
+    assert result.text is None and result.markdown is None
 
 
 # --- 3: bounded acquisition --------------------------------------------------

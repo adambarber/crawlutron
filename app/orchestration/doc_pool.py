@@ -166,6 +166,14 @@ class DocExtractionPool:
         self._slots: list[DocWorker] | None = None
         self._closed = False
 
+    def _try_spawn(self) -> DocWorker | None:
+        """Spawn a worker, or ``None`` when the process cannot fork (OSError).
+        A spawn failure is transient (cgroup ceiling), distinct from a teardown (#269)."""
+        try:
+            return self._spawn()
+        except OSError:
+            return None
+
     def acquire(self, timeout: float) -> DocWorker | None:
         """Take an idle pool worker, spawning on demand up to the configured size.
         Dead idle slots respawn in place; retired slots are never handed out, and
@@ -182,8 +190,7 @@ class DocExtractionPool:
                     return None
                 if self._slots is None:
                     self._slots = []
-                # Reap retired slots first: one skipped by both scans (SIGKILL could
-                # not reap it) would strand a PID while the budget grew past it.
+                # Reap retired slots first: one skipped by both scans strands a PID.
                 self._slots = [each for each in self._slots if not each.retired]
                 want = self._worker_count()
                 # The budget starts once the lock is held: a queued caller must
@@ -198,16 +205,17 @@ class DocExtractionPool:
                             return worker
                     for index, worker in enumerate(self._slots):
                         if not worker.busy and not worker.proc.is_alive():
-                            fresh = self._spawn()
+                            if (fresh := self._try_spawn()) is None:
+                                return None
                             fresh.busy = True
                             self._slots[index] = fresh
                             dead_slots.append(worker)
                             return fresh
-                    # A short live set grows the pool by one rather than degrading
-                    # to "no worker" -- the failure a stranded slot used to cause.
+                    # A short live set grows by one rather than degrading to no worker.
                     usable = sum(1 for each in self._slots if not each.retired)
                     if usable < want:
-                        fresh = self._spawn()
+                        if (fresh := self._try_spawn()) is None:
+                            return None
                         fresh.busy = True
                         self._slots.append(fresh)
                         return fresh
@@ -218,7 +226,7 @@ class DocExtractionPool:
                             extra={"slots": len(self._slots), "workers": want},
                         )
                         return None
-                    # A condition wait, not a poll: a release notifies immediately.
+                    # A condition wait (not a poll): a release notifies immediately.
                     # The bounded re-check only guards a busy flag nothing clears.
                     self._lock.wait(timeout=min(remaining, self._recheck_seconds))
         finally:
