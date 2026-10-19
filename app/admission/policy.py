@@ -205,16 +205,20 @@ def read_policy(raw: Any, tier: PolicyTier | None = None) -> CrawlPolicy:
     """
     resolved = _policy_input(raw)
     if not isinstance(resolved, dict):
-        return resolved if resolved is not None else CrawlPolicy()
+        if resolved is None:
+            # Nothing supplied is the empty policy's answer, not the model's raw 0.
+            resolved = {}
+        else:
+            return resolved
     candidate = _with_omitted_defaults(resolved, tier)
-    limits = candidate.get("limits")
-    if limits is None or (isinstance(limits, Mapping) and "max_pages" not in limits):
-        # #313: an omitted max_pages defaults on the read edge too, matching the
-        # wire edge; an explicit 0 alone keeps the model's unbounded meaning.
-        merged = dict(limits) if isinstance(limits, Mapping) else {}
-        merged["max_pages"] = DEFAULT_MAX_PAGES
-        candidate = {**candidate, "limits": merged}
     for _ in range(len(CrawlPolicy.model_fields)):
+        # A stated value (0 or valid positive) stands; absent or repair-dropped
+        # max_pages, and a non-mapping limits, resolve to the default cap (never 0).
+        _limits = candidate.get("limits")
+        if not isinstance(_limits, Mapping):
+            candidate = {**candidate, "limits": {"max_pages": DEFAULT_MAX_PAGES}}
+        elif "max_pages" not in _limits:
+            candidate = {**candidate, "limits": {**dict(_limits), "max_pages": DEFAULT_MAX_PAGES}}
         try:
             return CrawlPolicy.model_validate(candidate)
         except ValidationError as exc:
@@ -222,7 +226,7 @@ def read_policy(raw: Any, tier: PolicyTier | None = None) -> CrawlPolicy:
             if trimmed is None:
                 break
             candidate = trimmed
-    return CrawlPolicy()
+    return CrawlPolicy.model_validate({"limits": {"max_pages": DEFAULT_MAX_PAGES}})
 
 
 def stored_policy(policy: Any) -> dict[str, Any]:
