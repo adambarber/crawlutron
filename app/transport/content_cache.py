@@ -8,6 +8,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import os
 import threading
 from collections import OrderedDict
 from collections.abc import Callable
@@ -17,6 +18,7 @@ from typing import Any
 from app.models.cache_envelope import CacheEnvelope
 from app.models.json_value import JsonValue
 from app.transport.content_cache_internals import (
+    TMP_ORPHAN_MAX_AGE_SECONDS,
     atomic_write,
     default_clock,
     resolve_expiry,
@@ -27,6 +29,42 @@ from app.vocabulary.limits import (
     CONTENT_CACHE_MAX_TOTAL_BYTES,
     DEFAULT_CACHE_TTL_SECONDS,
 )
+
+
+def _tmp_is_owned(path: Path) -> bool:
+    """Whether a live ``atomic_write_text`` holds the temp's advisory lock.
+    Taking the lock IS the ownership test: a held or unopenable path reports
+    owned, so a live write is never unlinked by age alone (#241)."""
+    import fcntl
+
+    try:
+        probe = os.open(path, os.O_RDONLY)
+    except OSError:
+        return True
+    try:
+        fcntl.flock(probe, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        return True
+    else:
+        return False
+    finally:
+        os.close(probe)
+
+
+def _sweep_orphan_tmps(cache_dir: Path, namespace: str, now: float) -> int:
+    """Remove ``.tmp`` leftovers from a crashed atomic_write; age spares a live
+    write, since neither the value glob nor budget ever sees the file (#241)."""
+    cutoff = now - TMP_ORPHAN_MAX_AGE_SECONDS
+    removed = 0
+    for path in cache_dir.glob(f".{namespace}.*.tmp"):
+        try:
+            if path.stat().st_mtime > cutoff or _tmp_is_owned(path):
+                continue
+            path.unlink()
+            removed += 1
+        except OSError:
+            continue
+    return removed
 
 
 class ContentCache:
@@ -68,8 +106,7 @@ class ContentCache:
         # In-memory LRU index (key -> path) so eviction never globs the cache
         # directory on the hot path; disk stays the source of truth for values.
         self._index: OrderedDict[str, Path] = OrderedDict()
-        # Small-value RAM mirror (bounded LRU, shallow size < 1MB) so hot reads
-        # never touch disk; entries carry (expires, value) to honor TTL inline.
+        # Small-value RAM mirror (bounded LRU, shallow < 1MB) for hot reads.
         self._memory_cache: OrderedDict[str, tuple[float | None, Any]] = OrderedDict()
         self._MEMORY_CACHE_MAX = 100
         self._MEMORY_CACHE_MAX_SIZE = 1024 * 1024
@@ -376,7 +413,8 @@ class ContentCache:
             # Drop expired in-memory value entries (TTL honored even in RAM).
             for _k in [k for k, (exp, _v) in self._memory_cache.items() if exp is not None and now > exp]:
                 self._memory_cache.pop(_k, None)
-        return self._unlink_doomed(doomed)
+        removed = self._unlink_doomed(doomed)
+        return removed + _sweep_orphan_tmps(self.cache_dir, self.namespace, now)
 
     def clear(self) -> int:
         """Delete all entries in this namespace; return the number removed."""

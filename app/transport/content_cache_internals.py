@@ -17,6 +17,10 @@ from app.safety.atomic_write import atomic_write_text
 #: freshness comparison reads it as expired rather than raising.
 UNPARSEABLE_EXPIRY = float("-inf")
 
+#: A ``.tmp`` orphan older than this is swept: atomic_write's crash window
+#: (mkstemp -> os.replace) leaves it behind, invisible to glob and budget (#241).
+TMP_ORPHAN_MAX_AGE_SECONDS = 3600
+
 
 def resolve_expiry(envelope: CacheEnvelope) -> float | None:
     """The row's expiry as a comparable number, or ``None`` when not one.
