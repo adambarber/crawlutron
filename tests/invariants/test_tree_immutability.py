@@ -259,7 +259,7 @@ MIRRORED_SCRATCH_TREE = (
     "    (app / 'zz_probe.py').write_text('payload')\n"
     "    (tmp_path / 'tests' / 'fixtures' / 'app' / 'x.py').write_text('fixture')\n"
     "    Path = __import__('pathlib').Path\n"
-    "    (Path(__file__).resolve().parent / 'test_jscpd_gate.py').read_text()\n"
+    "    (Path(__file__).resolve().parent / '_jscpd_gate_helpers.py').read_text()\n"
 )
 
 

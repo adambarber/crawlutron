@@ -7,7 +7,7 @@ import pytest
 from scripts import _jscpd_pair_resolution as res
 from scripts import jscpd_gate as gate
 from scripts.executables import require_repo_tool
-from tests.test_jscpd_gate import (
+from tests._jscpd_gate_helpers import (
     _args,
     _duplicate,
     _run_against_empty_tree,

@@ -43,7 +43,7 @@ ERREXIT_SHELL = "bash -e {0}"
 # enforcement: the config that decides what is checked cannot itself be the one change that skips the check.
 ENFORCEMENT_INPUTS = (
     "app/config/settings.py",
-    "tests/test_jscpd_gate.py",
+    "tests/_jscpd_gate_helpers.py",
     # The duplication gate's own implementation.
     "scripts/jscpd_gate.py",
     "scripts/module_graph.py",

@@ -2,14 +2,16 @@
 
 from __future__ import annotations
 
+import ast
 import json
 import sys
+from pathlib import Path
 
 import pytest
 
 from scripts import _jscpd_pair_resolution as res
 from scripts import jscpd_gate as gate
-from tests.test_jscpd_gate import (
+from tests._jscpd_gate_helpers import (
     _CONFIGURED_MIN_LINES,
     _CONFIGURED_MIN_TOKENS,
     _GATE_ARGV,
@@ -30,6 +32,22 @@ def test_the_test_suite_reads_the_floor_the_hook_runs() -> None:
         str(_CONFIGURED_MIN_TOKENS),
     )
     assert _args_for().min_tokens == _CONFIGURED_MIN_TOKENS
+
+
+def test_the_jscpd_gate_helpers_live_in_the_helper_namespace() -> None:
+    """A test_* file with zero tests is a lie; the gate helpers are _-prefixed.
+
+    This suite reads its fixtures off ``tests/_jscpd_gate_helpers.py`` (above);
+    that file must itself define no collectible test.
+    """
+    helper = Path(__file__).resolve().parent / "_jscpd_gate_helpers.py"
+    tree = ast.parse(helper.read_text(encoding="utf-8"))
+    test_defs = [
+        n.name
+        for n in tree.body
+        if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and n.name.startswith("test")
+    ]
+    assert test_defs == [], f"a helper file must not also define test_* defs: {test_defs}"
 
 
 def test_a_laxer_floor_is_refused_because_it_cannot_report_the_truth() -> None:
