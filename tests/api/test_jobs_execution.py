@@ -64,16 +64,23 @@ def test_every_job_endpoint_declares_its_providers_through_an_alias():
         assert isinstance(route, APIRoute), f"the jobs router registered a {type(route).__name__}"
         for name, param in inspect.signature(route.endpoint, eval_str=True).parameters.items():
             where = f"{route.endpoint.__name__}.{name}"
-            assert param.default is inspect.Parameter.empty, (
-                f"{where} uses an invisible default; a provider belongs in the annotation"
+            provider = next(
+                (
+                    meta
+                    for meta in getattr(param.annotation, "__metadata__", ())
+                    if isinstance(meta, DependsParam) and meta.dependency is not None
+                ),
+                None,
             )
-            for meta in getattr(param.annotation, "__metadata__", ()):
-                # ``Depends()`` with no argument carries no callable, so there is no dependency to name an
-                # alias for.
-                if isinstance(meta, DependsParam) and meta.dependency is not None:
-                    assert any(param.annotation is alias for alias in aliases), (
-                        f"{where} wires {meta.dependency.__name__} outside a declared alias"
-                    )
+            if provider is not None:
+                # The invisible-default ban is a provider rule: only a ``= Depends()``
+                # default hides a provider, while a query default is a declared param.
+                assert any(param.annotation is alias for alias in aliases), (
+                    f"{where} wires {provider.dependency.__name__} outside a declared alias"
+                )
+                assert param.default is inspect.Parameter.empty, (
+                    f"{where} uses an invisible default; a provider belongs in the annotation"
+                )
 
 
 def test_creating_and_controlling_a_job_need_the_same_providers():

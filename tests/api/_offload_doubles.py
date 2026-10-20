@@ -52,9 +52,9 @@ class LoopGuardJobStore(JobStore):
         _refuse_on_loop("JobStore.list_jobs")
         return super().list_jobs()
 
-    def list_for_caller(self, caller_id):
+    def list_for_caller(self, caller_id, *, limit=None, offset=0):
         _refuse_on_loop("JobStore.list_for_caller")
-        return super().list_for_caller(caller_id)
+        return super().list_for_caller(caller_id, limit=limit, offset=offset)
 
     def status_row(self, job_id):
         _refuse_on_loop("JobStore.status_row")
@@ -75,6 +75,14 @@ class LoopGuardJobStore(JobStore):
     def active_count_for_caller(self, caller_id):
         _refuse_on_loop("JobStore.active_count_for_caller")
         return super().active_count_for_caller(caller_id)
+
+    def count_jobs(self):
+        _refuse_on_loop("JobStore.count_jobs")
+        return super().count_jobs()
+
+    def count_for_caller(self, caller_id):
+        _refuse_on_loop("JobStore.count_for_caller")
+        return super().count_for_caller(caller_id)
 
     def close(self):
         _refuse_on_loop("JobStore.close")

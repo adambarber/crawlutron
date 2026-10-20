@@ -265,29 +265,59 @@ class JobStore:
         ).fetchone()
         return row is not None
 
-    def list_jobs(self) -> list[JobStatusView]:
-        """Every job's status view, newest first."""
-        return self._read_job_list(None)
+    def list_jobs(self, *, limit: int | None = None, offset: int = 0) -> list[JobStatusView]:
+        """Every job's status view, newest first; an optional pagination slice."""
+        return self._read_job_list(None, limit=limit, offset=offset)
 
-    def list_for_caller(self, caller_id: str) -> list[JobStatusView]:
-        """The caller's own jobs, newest first; foreign rows are not listed."""
-        return self._read_job_list(caller_id)
+    def list_for_caller(
+        self, caller_id: str, *, limit: int | None = None, offset: int = 0
+    ) -> list[JobStatusView]:
+        """The caller's own jobs, newest first; foreign rows are not listed. An
+        optional ``limit``/``offset`` slices the page at the SQL level so a
+        caller with many rows never re-materializes the whole set (##384)."""
+        return self._read_job_list(caller_id, limit=limit, offset=offset)
 
-    def _read_job_list(self, owner: str | None) -> list[JobStatusView]:
-        """The status views owned by ``owner``, or every row when None."""
+    def _read_job_list(self, owner: str | None, *, limit: int | None, offset: int = 0) -> list[JobStatusView]:
+        """The status views owned by ``owner``, or every row when None, sliced
+        by optional ``limit``/``offset`` (LIMIT is appended iff ``limit`` given)."""
+        params: tuple[object, ...]
         with self._lock:
             counts = self._accumulators.counts_by_job()
             if owner is None:
-                rows = self._conn.execute(
-                    _JOB_STATUS_PROJECTION + " WHERE deleted_at IS NULL ORDER BY created_at DESC"
-                ).fetchall()
+                statement = _JOB_STATUS_PROJECTION + " WHERE deleted_at IS NULL ORDER BY created_at DESC"
+                params = ()
             else:
-                rows = self._conn.execute(
+                statement = (
                     _JOB_STATUS_PROJECTION
-                    + " WHERE owner = ? AND deleted_at IS NULL ORDER BY created_at DESC",
-                    (owner,),
-                ).fetchall()
+                    + " WHERE owner = ? AND deleted_at IS NULL ORDER BY created_at DESC"
+                )
+                params = (owner,)
+            if limit is not None:
+                statement += " LIMIT ? OFFSET ?"
+                params = (*params, max(0, limit), max(0, offset))
+            rows = self._conn.execute(statement, params).fetchall()
         return [_status_row(r, *counts.get(r["job_id"], (0, 0))) for r in rows]
+
+    def count_jobs(self) -> int:
+        """Total live job rows (mirrors the unfiltered ``list_jobs`` primary)."""
+        return self._count_jobs(None)
+
+    def count_for_caller(self, caller_id: str) -> int:
+        """Total live job rows owned by ``caller_id`` (mirrors ``list_for_caller``)."""
+        return self._count_jobs(caller_id)
+
+    def _count_jobs(self, owner: str | None) -> int:
+        """Live row count, filtered to ``owner`` when one is given."""
+        with self._lock:
+            if owner is None:
+                row = self._conn.execute(
+                    "SELECT count(*) FROM crawl_jobs WHERE deleted_at IS NULL"
+                ).fetchone()
+            else:
+                row = self._conn.execute(
+                    "SELECT count(*) FROM crawl_jobs WHERE owner = ? AND deleted_at IS NULL", (owner,)
+                ).fetchone()
+        return int(row[0])
 
     def status_row(self, job_id: str) -> JobStatusView | None:
         """The status view for one job, or None if there is no such job.
@@ -371,6 +401,8 @@ class JobStore:
     adelete_for_caller = atwin(delete_for_caller)
     alist_jobs = atwin(list_jobs)
     alist_for_caller = atwin(list_for_caller)
+    acount_jobs = atwin(count_jobs)
+    acount_for_caller = atwin(count_for_caller)
     astatus = atwin(status_row)
     astatus_for_caller = atwin(status_for_caller)
     aexists = atwin(exists)

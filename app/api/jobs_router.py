@@ -6,9 +6,9 @@ frontier; list/get/delete stay direct JobStore operations.
 
 from __future__ import annotations
 
-from typing import NoReturn, cast
+from typing import Annotated, NoReturn, cast
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Query, Request
 
 from app.admission.payload_helpers import checked_payload_urls
 from app.admission.policy import read_policy
@@ -26,6 +26,7 @@ from app.models.job_create_response import JobCreateResponse
 from app.models.job_list_response import JobListResponse
 from app.models.job_status_response import JobStatusResponse
 from app.storage.job_store import JobStatusView
+from app.vocabulary.limits import DEFAULT_JOB_LIST_LIMIT, MAX_JOB_LIST_LIMIT
 
 router = APIRouter(prefix="/v1/jobs", tags=["Crawler"])
 
@@ -108,11 +109,27 @@ async def create_job(
 @router.get(
     "",
     summary="List crawl jobs with live status",
-    description="Return a list of all crawl jobs with basic status info.",
+    description=(
+        "Return a page of the caller's crawl jobs with basic status info, newest "
+        "first. The page is bounded by ``limit`` (default "
+        f"{DEFAULT_JOB_LIST_LIMIT}, capped at {MAX_JOB_LIST_LIMIT}); ``offset`` "
+        "skips that many rows. ``total`` reports the caller's full row count across "
+        "every page."
+    ),
+    responses={422: {"model": ErrorResponse, "description": "Invalid limit/offset."}},
 )
-async def list_jobs(job_store: JobStoreDep, caller: CallerDep) -> JobListResponse:
-    jobs = await job_store.alist_for_caller(caller.caller_id)
-    return JobListResponse(jobs=[build_job_status(row) for row in jobs])
+async def list_jobs(
+    job_store: JobStoreDep,
+    caller: CallerDep,
+    limit: Annotated[int | None, Query(ge=1, le=MAX_JOB_LIST_LIMIT)] = None,
+    offset: Annotated[int, Query(ge=0)] = 0,
+) -> JobListResponse:
+    # FastAPI's Query le/ge bound the page; the store's SQL slice then
+    # spares a caller with thousands of rows from re-materializing all of them.
+    page_limit = limit if limit is not None else DEFAULT_JOB_LIST_LIMIT
+    jobs = await job_store.alist_for_caller(caller.caller_id, limit=page_limit, offset=offset)
+    total = await job_store.acount_for_caller(caller.caller_id)
+    return JobListResponse(jobs=[build_job_status(row) for row in jobs], total=total)
 
 
 @router.get(

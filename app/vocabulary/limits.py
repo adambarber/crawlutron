@@ -27,6 +27,11 @@ DEFAULT_MAX_DISCOVERED_LINKS: int = 100
 # discovery path (intentionally the maximum, not the conservative 100).
 MAX_DISCOVERED_LINKS: int = 2000
 
+# Job-list pagination: limit held for the GET /v1/jobs slice. `offset` is
+# caller-chosen and unbounded; only the page keeps a default and a cap.
+DEFAULT_JOB_LIST_LIMIT: Final[int] = 20
+MAX_JOB_LIST_LIMIT: Final[int] = 100
+
 # Passive browser challenge observation budget (seconds).
 DEFAULT_CHALLENGE_WAIT_SECONDS: int = 15
 
