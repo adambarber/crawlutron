@@ -33,9 +33,16 @@ def _total_system_ram() -> int:
         return 0
 
 
-def read_memory_stats(cgroup_root: str = "/sys/fs/cgroup") -> MemoryStats:
-    """Current (limit, usage) in bytes; cgroup v2 -> v1 -> host-RAM fallbacks."""
-    total_ram = _total_system_ram()
+def read_memory_stats(
+    cgroup_root: str = "/sys/fs/cgroup",
+    *,
+    total_ram: int | None = None,
+) -> MemoryStats:
+    """Current (limit, usage) in bytes; cgroup v2 -> v1 -> host-RAM fallbacks.
+
+    ``total_ram`` overrides the auto-detected host figure when a caller knows
+    the ceiling ahead of time; it also bounds the v1 cgroup-limit check."""
+    total_ram = _total_system_ram() if total_ram is None else total_ram
 
     # cgroup v2
     v2_max = read_int(os.path.join(cgroup_root, "memory.max"))

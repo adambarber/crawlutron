@@ -12,13 +12,6 @@ from tests._private_import_decl import (
 )
 
 DECLARED: dict[str, Declaration] = {
-    "app.admission.admission_links._ROBOTS_CHUNK_DEADLINE_SLACK_SECONDS": _d(
-        "implementation constant",
-        "The per-chunk robots-admission wall-clock slack; a test checks it off to shrink the "
-        "deadline from timeouts+5s to milliseconds so the bounded-latency property is asserted "
-        "quickly rather than with a real 5-second wait.",
-        ["test"],
-    ),
     "app.api.async_crawl_runner._build_async_crawl_semaphore": _SUBSTITUTED_COLLABORATOR,
     "app.api.job_lifecycle._tasks": _d(_CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]),
     "app.transport.content_cache.ContentCache._remember_memory_locked": _d(
@@ -88,11 +81,6 @@ DECLARED: dict[str, Declaration] = {
     "app.runtime.resource_pressure.ResourceGate._lag_probe": _INSTANCE_STATE,
     "app.runtime.resource_pressure.WeightedAdmission._p": _INSTANCE_STATE,
     "app.storage.job_store.JobStore._conn": _INSTANCE_STATE,
-    "app.runtime.memory_pressure._total_system_ram": _d(
-        "chokepoint state",
-        "A base RAM figure the admission test shrinks via string-setattr so the cap fires quickly.",
-        ["test"],
-    ),
     "app.api.job_runner._execute_crawl": _d(
         "substituted seam",
         "The engine entry the runner calls at job time; the requeue test substitutes it for a fresh run.",

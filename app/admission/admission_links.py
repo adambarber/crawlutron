@@ -317,6 +317,7 @@ async def gather_robots_decisions(
     robots_crawl_delay: RobotsCrawlDelay | None = None,
     *,
     timeout_seconds: float | None = None,
+    deadline_slack_seconds: float = _ROBOTS_CHUNK_DEADLINE_SLACK_SECONDS,
 ) -> list[tuple[bool, float | None]]:
     async def check(url: NormalizedUrl) -> tuple[bool, float | None]:
         try:
@@ -340,7 +341,7 @@ async def gather_robots_decisions(
             try:
                 chunk_decisions = await asyncio.wait_for(
                     asyncio.gather(*(check(url) for url in chunk)),
-                    timeout=timeout_seconds + _ROBOTS_CHUNK_DEADLINE_SLACK_SECONDS,
+                    timeout=timeout_seconds + deadline_slack_seconds,
                 )
             except TimeoutError:
                 _logger.warning("robots_chunk_deadline_exceeded", extra={"chunk_size": len(chunk)})

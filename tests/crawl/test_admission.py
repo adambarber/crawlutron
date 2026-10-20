@@ -329,13 +329,12 @@ def test_read_memory_stats_v2(tmp_path):
     assert stats == MemoryStats(total_bytes=3221225472, used_bytes=1610612736)
 
 
-def test_read_memory_stats_v2_max_string_falls_back_to_total_ram(tmp_path, monkeypatch):
+def test_read_memory_stats_v2_max_string_falls_back_to_total_ram(tmp_path):
     cg = tmp_path / "cgroup"
     cg.mkdir()
     (cg / "memory.max").write_text("max\n")
     (cg / "memory.current").write_text("104857600\n")
-    monkeypatch.setattr("app.runtime.memory_pressure._total_system_ram", lambda: 8 * 1024**3)
-    stats = read_memory_stats(cgroup_root=str(cg))
+    stats = read_memory_stats(cgroup_root=str(cg), total_ram=8 * 1024**3)
     assert stats.total_bytes == 8 * 1024**3
 
 
@@ -349,8 +348,7 @@ def test_read_memory_stats_v1(tmp_path):
     assert stats.used_bytes == 536870912
 
 
-def test_read_memory_stats_missing_files_falls_back_to_total_ram(tmp_path, monkeypatch):
-    monkeypatch.setattr("app.runtime.memory_pressure._total_system_ram", lambda: 4 * 1024**3)
-    stats = read_memory_stats(cgroup_root=str(tmp_path / "does-not-exist"))
+def test_read_memory_stats_missing_files_falls_back_to_total_ram(tmp_path):
+    stats = read_memory_stats(cgroup_root=str(tmp_path / "does-not-exist"), total_ram=4 * 1024**3)
     assert stats.total_bytes == 4 * 1024**3
     assert stats.used_bytes == 0
