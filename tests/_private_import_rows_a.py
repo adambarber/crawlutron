@@ -20,7 +20,6 @@ DECLARED: dict[str, Declaration] = {
     "app.transport.content_cache.ContentCache._unlink_doomed": _INSTANCE_STATE,
     "app.transport.content_cache.ContentCache._read_envelope": _INSTANCE_STATE,
     "app.transport.content_cache.ContentCache._MEMORY_CACHE_MAX_SIZE": _INSTANCE_STATE,
-    "app.transport.cookie_jar.CookieJar._inmemory": _INSTANCE_STATE,
     "app.transport.browser_pool.BrowserPool._available": _INSTANCE_STATE,
     "app.transport.browser_pool.BrowserPool._pool_size": _INSTANCE_STATE,
     "app.transport.browser_pool.BrowserPool._renderers": _INSTANCE_STATE,

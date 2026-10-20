@@ -99,8 +99,10 @@ def test_one_tenant_crawl_does_not_evict_sibling_tenant_sessions():
     for i in range(cap + 5):
         jar.add_cookie_header(canonical(f"http://host{i}.example/"), "a=1; Path=/", namespace=TENANT_A)
     assert jar.cookie_header_for(canonical("http://held.example/"), namespace=TENANT_B) == "b=1"
-    # A's flood is bounded by the cap; B's slot still lives alongside it.
-    assert len(jar._inmemory) == cap + 1
+    # A's flood is bounded by its own cap (its oldest is evicted, its newest survives)
+    # while B's slot still lives alongside it -- per-namespace isolation, behaviorally.
+    assert jar.cookie_header_for(canonical("http://host0.example/"), namespace=TENANT_A) == ""
+    assert jar.cookie_header_for(canonical(f"http://host{cap + 4}.example/"), namespace=TENANT_A) == "a=1"
 
 
 def test_store_backed_crawl_does_not_evict_sibling_tenant_past_cap(tmp_path):
