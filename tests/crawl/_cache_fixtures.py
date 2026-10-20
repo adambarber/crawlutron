@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import contextlib
 import tempfile
+import threading
 from collections.abc import Iterator
 from typing import Any
 
@@ -23,38 +24,73 @@ def scoped_cache(**settings) -> Iterator[ContentCache]:
 
 
 @contextlib.contextmanager
-def watching_entry_unlinks(monkeypatch, cache) -> Iterator[list[bool]]:
-    """Record, per cache-entry unlink, whether the cache lock was held.
-
-    Scoped to the cache's own entry files: the writer's ``.tmp`` cleanup
-    unlinks under the lock and would otherwise read as an eviction.
+def parked_entry_unlink(monkeypatch, cache) -> Iterator[tuple[threading.Event, threading.Event]]:
+    """Park entry unlinks until released; return ``(started, release)``. A
+    parked unlink proves the commit lock is free while disk I/O runs.
     """
     real_unlink = cc.Path.unlink
-    held: list[bool] = []
+    started = threading.Event()
+    release = threading.Event()
 
-    def watched(self, *args, **kwargs):
-        if self.parent == cache.cache_dir and not self.name.startswith("."):
-            held.append(cache.is_locked)
-        return real_unlink(self, *args, **kwargs)
+    def parked(self_, *args, **kwargs):
+        if self_.parent == cache.cache_dir and not self_.name.startswith("."):
+            started.set()
+            release.wait(timeout=30)
+        return real_unlink(self_, *args, **kwargs)
 
-    monkeypatch.setattr(cc.Path, "unlink", watched)
-    yield held
+    monkeypatch.setattr(cc.Path, "unlink", parked)
+    yield started, release
 
 
 @contextlib.contextmanager
 def entry_replaced_by_directory(cache, key) -> Iterator[Any]:
-    """Swap an entry's file for a directory, so reading it raises OSError.
-
-    A file-for-directory swap is the only unpatched way to fail a read, and it
-    must be undone or the cache's directory is left dirty for the next test.
+    """Swap an entry's file for a directory so reading it raises OSError.
+    Undone on exit; a RAM-resident value serves while a disk-hit is None.
     """
-    path = cache.path_of(key)
+    path = entry_path(cache, key)
     path.unlink()
     path.mkdir()
     try:
         yield path
     finally:
         path.rmdir()
+
+
+@contextlib.contextmanager
+def counting_entry_reads(monkeypatch, cache, key) -> Iterator[list[int]]:
+    """Count one entry's ``read_bytes`` calls while active (non-destructive).
+    A RAM hit reads 0 bytes, a disk hit 1 -- the observable told apart.
+    """
+    path = entry_path(cache, key)
+    real_read_bytes = cc.Path.read_bytes
+    count: list[int] = [0]
+
+    def counted(self_, *args, **kwargs):
+        if self_ == path:
+            count[0] += 1
+        return real_read_bytes(self_, *args, **kwargs)
+
+    monkeypatch.setattr(cc.Path, "read_bytes", counted)
+    yield count
+
+
+def entry_path(cache, key: str):
+    """The deterministic on-disk file for ``key``, from public cache_dir and
+    namespace, so a test can stat, corrupt or remove a key's exact file.
+    """
+    import hashlib
+
+    digest = hashlib.sha256(key.encode("utf-8")).hexdigest()
+    return cache.cache_dir / f"{cache.namespace}.{digest}.json"
+
+
+def on_disk_bytes(cache) -> int:
+    """Sum of the JSON entry files on disk for this cache's namespace.
+
+    A behavioral stand-in for the cache's internal byte accounting: the eviction
+    budget must track the live on-disk footprint, so tests assert the real files.
+    """
+    return sum(p.stat().st_size for p in cache.cache_dir.glob(f"{cache.namespace}.*.json"))
 
 
 def watch_writes(cache, *, calls=None, on_write=None, fail=None):

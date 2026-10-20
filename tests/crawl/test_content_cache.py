@@ -17,7 +17,7 @@ from app.transport.fetchers import default_http_fetcher
 from app.vocabulary.strategies import HTTP_DECLARED_CRAWLER
 from tests._fetch_scripted import request_fetcher
 from tests._fetcher_factories import clocked_cache, crawled_results, run_http_strategy, tap_fetcher
-from tests.crawl._cache_fixtures import _make_cache, reopen_cache, scoped_cache
+from tests.crawl._cache_fixtures import _make_cache, counting_entry_reads, reopen_cache, scoped_cache
 from tests.helpers.server import EtagHandler
 
 
@@ -248,7 +248,7 @@ async def test_crawl_request_serves_recursive_pages_from_content_cache(tmp_path)
     assert second == [], f"recursive pages should be served from content cache, re-fetched: {second}"
 
 
-async def test_mirror_gate_uses_serialized_size_not_shallow_getsizeof(tmp_path):
+async def test_mirror_gate_uses_serialized_size_not_shallow_getsizeof(tmp_path, monkeypatch):
     """Shallow sys.getsizeof on a dict sees only the container (~200 B), so a
     multi-MB serialized entry passed the old mirror gate and landed in RAM
     (worst case MEMORY_CACHE_MAX x full-size entries)."""
@@ -258,41 +258,50 @@ async def test_mirror_gate_uses_serialized_size_not_shallow_getsizeof(tmp_path):
 
     await cache.aset("fat-key", fat)
     assert await cache.aget("fat-key") is not None  # disk: written
-    assert cache.peek("fat-key") is None  # RAM mirror: must skip
+    # Not mirrored: each aget falls through to a fresh disk read.
+    with counting_entry_reads(monkeypatch, cache, "fat-key") as reads:
+        assert await cache.aget("fat-key") is not None
+        assert reads == [1]
 
 
-async def test_mirror_gate_small_value_still_mirrors(tmp_path):
+async def test_mirror_gate_small_value_still_mirrors(tmp_path, monkeypatch):
     cache = ContentCache(tmp_path)
     await cache.aset("small-key", {"body": "tiny"})
-    assert cache.peek("small-key") == {"body": "tiny"}
+    # Mirrored: a RAM hit reads no bytes.
+    with counting_entry_reads(monkeypatch, cache, "small-key") as reads:
+        assert await cache.aget("small-key") == {"body": "tiny"}
+        assert reads == [0]
 
 
-async def test_cold_aget_does_not_mirror_oversized_envelope(tmp_path):
+async def test_cold_aget_does_not_mirror_oversized_envelope(tmp_path, monkeypatch):
     """After a warm restart the index is cold for pre-existing files: ``aget``
     must gate the mirror on the actual bytes, not a zero default, so a multi-MB
     read never lands in RAM."""
     fat = {"body": "x" * (1024 * 1024 + 1024)}  # > MEMORY_CACHE_MAX_SIZE
     writer = ContentCache(tmp_path)
     await writer.aset("fat-key", fat)
-    assert writer.peek("fat-key") is None  # write gate already refuses
 
     # Fresh instance over the same dir: cold index, pre-existing disk file.
     reader = ContentCache(tmp_path)
-    assert reader.peek("fat-key") is None  # the fresh mirror is empty
     got = await reader.aget("fat-key")
     assert got is not None  # served from disk
-    assert reader.peek("fat-key") is None  # must NOT land in RAM mirror
+    # Still not mirrored by the cold read: the next aget is one disk read.
+    with counting_entry_reads(monkeypatch, reader, "fat-key") as reads:
+        assert await reader.aget("fat-key") is not None
+        assert reads == [1]
 
 
-async def test_cold_aget_still_mirrors_small_envelope(tmp_path):
+async def test_cold_aget_still_mirrors_small_envelope(tmp_path, monkeypatch):
     """Parity: a genuinely small cold read keeps the RAM-mirror benefit."""
     writer = ContentCache(tmp_path)
     await writer.aset("small-key", {"body": "tiny"})
     reader = ContentCache(tmp_path)
-    assert reader.peek("small-key") is None
     got = await reader.aget("small-key")
     assert got == {"body": "tiny"}
-    assert reader.peek("small-key") == {"body": "tiny"}  # small: mirror is correct
+    # The cold read warmed the mirror: a later aget is served from RAM.
+    with counting_entry_reads(monkeypatch, reader, "small-key") as reads:
+        assert await reader.aget("small-key") == {"body": "tiny"}
+        assert reads == [0]
 
 
 async def _directive_runner(url: str, headers: dict[str, str], tmp_path):

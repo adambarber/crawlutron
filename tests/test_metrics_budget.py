@@ -46,7 +46,7 @@ BLOCK_LENGTH = 40
 _BUDGETS = {
     "function length": 22,
     "abc size": 1,
-    "largest class": 365,
+    "largest class": 358,
     "block length": 8,
 }
 

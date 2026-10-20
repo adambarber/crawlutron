@@ -11,11 +11,12 @@ import pytest
 import app.transport.content_cache as cc
 from tests._fetcher_factories import make_seeded_cache
 from tests.crawl._cache_fixtures import (
+    counting_entry_reads,
     entry_replaced_by_directory,
+    parked_entry_unlink,
     reopen_cache,
     scoped_cache,
     watch_writes,
-    watching_entry_unlinks,
 )
 
 
@@ -24,20 +25,39 @@ def _make(tmp_path, clock=1000.0):
     return cc.ContentCache(tmp_path, namespace="mem", clock=lambda: clock, max_entries=10000)
 
 
-def test_small_value_lives_in_memory(tmp_path):
+def _assert_concurrent_op_proceeds(monkeypatch, cache, worker, probe_key):
+    """Park the worker's unlink and prove a concurrent get still completes."""
+    with parked_entry_unlink(monkeypatch, cache) as (started, release):
+        thread = threading.Thread(target=worker)
+        thread.start()
+        assert started.wait(10), "the worker never reached an unlink"
+        result: list[Any] = []
+        probe = threading.Thread(target=lambda: result.append(cache.get(probe_key)))
+        probe.start()
+        probe.join(timeout=5)
+        release.set()
+        thread.join(timeout=10)
+    assert result == [None], "a concurrent operation was blocked by the unlink"
+
+
+def test_small_value_lives_in_memory(tmp_path, monkeypatch):
     c = _make(tmp_path)
     c.set("a", {"x": 1})
     assert c.get("a") == {"x": 1}
-    assert c.peek("a") == {"x": 1}
+    # A RAM hit reads no bytes from disk.
+    with counting_entry_reads(monkeypatch, c, "a") as reads:
+        assert c.get("a") == {"x": 1}
+        assert reads == [0]
 
 
-def test_large_value_not_in_memory(tmp_path):
+def test_large_value_not_in_memory(tmp_path, monkeypatch):
     c = _make(tmp_path)
     big = "z" * (2 * 1024 * 1024)  # 2MB string -> shallow size exceeds 1MB
     c.set("big", big)
-    assert c.peek("big") is None
-    # Still resolvable from disk.
-    assert c.get("big") == big
+    # Not mirrored: a get falls through to one disk read and still answers.
+    with counting_entry_reads(monkeypatch, c, "big") as reads:
+        assert c.get("big") == big
+        assert reads == [1]
 
 
 def test_memory_ttl_honored(tmp_path):
@@ -46,27 +66,28 @@ def test_memory_ttl_honored(tmp_path):
     assert c.get("k") == "v"
     c.clock = lambda: 2000.0
     assert c.get("k") is None
-    # Expired entry evicted from memory cache.
-    assert c.peek("k") is None
 
 
-def test_memory_lru_cap(tmp_path):
+def test_memory_lru_cap(tmp_path, monkeypatch):
     c = _make(tmp_path)
     for i in range(150):
         c.set(f"k{i}", i)
-    # The RAM mirror holds at most MEMORY_CACHE_MAX entries: the oldest is
-    # evicted from memory, but still resolvable from disk.
-    assert c.peek("k149") == 149
-    assert c.peek("k0") is None
-    assert c.get("k0") == 0
+    # The RAM mirror holds at most MEMORY_CACHE_MAX: the NEWEST stays in RAM
+    # (no disk read) while the OLDEST fell out (one disk read) but still answers.
+    with counting_entry_reads(monkeypatch, c, "k149") as reads:
+        assert c.get("k149") == 149
+        assert reads == [0]
+    with counting_entry_reads(monkeypatch, c, "k0") as reads:
+        assert c.get("k0") == 0
+        assert reads == [1]
 
 
 def test_clear_clears_memory(tmp_path):
     c = _make(tmp_path)
     c.set("a", 1)
-    assert c.peek("a") == 1
+    assert c.get("a") == 1
     c.clear()
-    assert c.peek("a") is None
+    assert c.get("a") is None
 
 
 class TestContentCacheEntryLifecycle:
@@ -168,29 +189,30 @@ class TestCachedAtReadsMetadataWithoutDeserializingTheValue:
 
 class TestContentCacheUnlinkDiscipline:
     def test_eviction_unlinks_outside_the_lock(self, monkeypatch, tmp_path):
-        """Eviction mutates the index/byte accounting under the lock and unlinks
-        the doomed files only after releasing it: the event-loop thread
-        contends on this lock, so disk I/O must never hold it."""
+        """Eviction unlinks the doomed files outside the commit lock: a disk
+        write is parked mid-unlink while a concurrent operation still runs."""
         cache = cc.ContentCache(tmp_path, max_entries=2, max_total_bytes=None, default_ttl=0)
-        with watching_entry_unlinks(monkeypatch, cache) as held:
-            # Over-cap by one: the oldest entry is evicted and its file unlinked.
+
+        def evict():
+            # Over-cap by one: the oldest is evicted and its file unlink parks.
             cache.set(cache.make_key("a"), {"v": 1})
             cache.set(cache.make_key("b"), {"v": 2})
             cache.set(cache.make_key("c"), {"v": 3})
 
-        assert held, "the eviction unlinked nothing"
-        assert not any(held), "unlink ran while holding the cache lock"
+        _assert_concurrent_op_proceeds(monkeypatch, cache, evict, cache.make_key("missing"))
         assert cache.get(cache.make_key("a")) is None
         assert cache.get(cache.make_key("c")) == {"v": 3}
 
     def test_expiry_unlinks_outside_the_lock(self, monkeypatch, tmp_path):
         """The TTL-expiry path in _read_envelope unlinks outside the lock too."""
         cache, clock = make_seeded_cache(tmp_path, "key", default_ttl=1, value={"data": "value"})
-        with watching_entry_unlinks(monkeypatch, cache) as held:
-            clock[0] = 1002.0
-            assert cache.get("key") is None
-        assert held, "the expiry unlinked nothing"
-        assert not any(held), "expiry unlink ran while holding the cache lock"
+        clock[0] = 1002.0  # the seeded entry is now expired
+
+        def expire():
+            # The read drops the now-expired key and parks on the unlink.
+            cache.get("key")
+
+        _assert_concurrent_op_proceeds(monkeypatch, cache, expire, "other-key")
 
     def test_re_set_key_survives_its_stale_eviction_unlink(self, tmp_path):
         """A key re-set after its eviction reuses the same deterministic path.

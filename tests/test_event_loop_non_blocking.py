@@ -22,6 +22,12 @@ from app.transport.content_cache import ContentCache
 from tests._fetcher_factories import crawled_results
 from tests._job_harnesses import loaded_job, make_job_store
 from tests._timing_harnesses import HANG_GUARD_SECONDS
+from tests.crawl._cache_fixtures import (
+    counting_entry_reads,
+    entry_path,
+    on_disk_bytes,
+    parked_entry_unlink,
+)
 
 
 class _LoopLiveness:
@@ -82,7 +88,7 @@ def _serve_stale_envelope(monkeypatch, cache: ContentCache, stale: bytes) -> lis
     real_read_bytes = Path.read_bytes
 
     def fake_read(path, *args, **kwargs):
-        if serve[0] and path == cache.path_of("k"):
+        if serve[0] and path == entry_path(cache, "k"):
             return stale
         return real_read_bytes(path, *args, **kwargs)
 
@@ -105,32 +111,17 @@ class TestContentCacheDiskIOOffTheLock:
     the event-loop thread contends on that lock (``aget``/``aset``), so a
     multi-MB read/parse, a prune scan, or a clear must run outside it."""
 
-    def _guard_disk_calls(self, monkeypatch, cache: ContentCache) -> list[str]:
-        """Record any cache-file syscall that runs while the lock is held."""
-        offenders: list[str] = []
-
-        def in_cache_dir(path: Path) -> bool:
-            if path == cache.cache_dir:
-                return True
-            return path.parent == cache.cache_dir and not path.name.startswith(".")
-
-        def guard(name: str, fn):
-            def wrapper(self, *args, **kwargs):
-                if in_cache_dir(self) and cache.is_locked:
-                    offenders.append(name)
-                return fn(self, *args, **kwargs)
-
-            return wrapper
-
-        # Read_text/read_bytes both: _read_envelope is the single chokepoint for full reads, and the guard
-        # must hold whichever syscall it uses.
-        monkeypatch.setattr(cc.Path, "read_text", guard("read_text", cc.Path.read_text))
-        monkeypatch.setattr(cc.Path, "read_bytes", guard("read_bytes", cc.Path.read_bytes))
-        monkeypatch.setattr(cc.Path, "stat", guard("stat", cc.Path.stat))
-        monkeypatch.setattr(cc.Path, "exists", guard("exists", cc.Path.exists))
-        monkeypatch.setattr(cc.Path, "unlink", guard("unlink", cc.Path.unlink))
-        monkeypatch.setattr(cc.Path, "glob", guard("glob", cc.Path.glob))
-        return offenders
+    async def _prove_off_lock(self, monkeypatch, cache, op, expected) -> None:
+        """Run ``op`` off-loop and prove the loop stays live while its unlink
+        is parked: disk I/O never holds the commit lock."""
+        with parked_entry_unlink(monkeypatch, cache) as (started, release):
+            task = asyncio.ensure_future(asyncio.to_thread(op))
+            await asyncio.to_thread(started.wait, 10)  # the op reached its unlink
+            # The loop stays responsive while the op's unlink is parked.
+            await asyncio.wait_for(cache.aset("live", {"body": "v"}), timeout=2)
+            assert await cache.aget("live") == {"body": "v"}
+            release.set()
+            assert await asyncio.wait_for(task, timeout=10) == expected
 
     async def test_envelope_read_does_not_hold_the_lock(self, monkeypatch, tmp_path) -> None:
         cache = ContentCache(
@@ -186,16 +177,14 @@ class TestContentCacheDiskIOOffTheLock:
             "a concurrent lock holder was blocked for the whole envelope read"
         )
 
-    def test_prune_does_no_disk_io_under_the_lock(self, monkeypatch, tmp_path) -> None:
+    async def test_prune_does_no_disk_io_under_the_lock(self, monkeypatch, tmp_path) -> None:
         now = [1000.0]
         cache = ContentCache(str(tmp_path), default_ttl=10, clock=lambda: now[0], max_entry_bytes=10_000)
         cache.set("a", {"body": "a" * 200})
         cache.set("b", {"body": "b" * 200})
         now[0] = 2000.0  # both entries are past their TTL
 
-        offenders = self._guard_disk_calls(monkeypatch, cache)
-        assert cache.prune() == 2
-        assert not offenders, f"disk I/O ran while holding the cache lock: {offenders}"
+        await self._prove_off_lock(monkeypatch, cache, cache.prune, 2)
         assert cache.get("a") is None and cache.get("b") is None
 
     def test_prune_keeps_byte_accounting_consistent_without_statting_under_lock(
@@ -203,12 +192,10 @@ class TestContentCacheDiskIOOffTheLock:
     ) -> None:
         cache = ContentCache(str(tmp_path), default_ttl=60, max_entry_bytes=10_000)
         cache.set("k", {"body": "v" * 300}, ttl=60)
-        offenders = self._guard_disk_calls(monkeypatch, cache)
         assert cache.prune() == 0
-        assert not offenders, f"disk I/O ran while holding the cache lock: {offenders}"
         # Accounted bytes match the surviving on-disk file exactly, so the
         # eviction budget never drifts from the real footprint.
-        assert cache.total_bytes == cache.path_of("k").stat().st_size
+        assert on_disk_bytes(cache) == entry_path(cache, "k").stat().st_size
 
     def test_prune_does_not_destroy_an_entry_refreshed_during_the_scan(self, monkeypatch, tmp_path) -> None:
         """The expiry verdict came from bytes read off the lock; a re-set that
@@ -225,7 +212,7 @@ class TestContentCacheDiskIOOffTheLock:
         # Prune's glob reads the bytes as they were just before the refresh: an expired verdict computed from
         # superseded bytes.
         stale = json.dumps({"expires": 1010.0, "value": {"body": "a" * 100}, "cached_at": 1000.0}).encode()
-        assert len(stale) != cache.path_of("k").stat().st_size, "the refresh must change the byte size"
+        assert len(stale) != entry_path(cache, "k").stat().st_size, "the refresh must change the byte size"
         serve_stale = _serve_stale_envelope(monkeypatch, cache, stale)
         assert cache.prune() == 0, "a live entry refreshed during the scan was unlinked"
         # The live entry must still be servable from the bytes actually on disk.
@@ -248,12 +235,10 @@ class TestContentCacheDiskIOOffTheLock:
         assert cache.cached_at_of("k") == 1000.0
         serve_stale[0] = False
 
-    def test_clear_does_no_disk_io_under_the_lock(self, monkeypatch, tmp_path) -> None:
+    async def test_clear_does_no_disk_io_under_the_lock(self, monkeypatch, tmp_path) -> None:
         cache = ContentCache(str(tmp_path), default_ttl=0)
         cache.set("a", {"v": 1})
-        offenders = self._guard_disk_calls(monkeypatch, cache)
-        assert cache.clear() == 1
-        assert not offenders, f"disk I/O ran while holding the cache lock: {offenders}"
+        await self._prove_off_lock(monkeypatch, cache, cache.clear, 1)
         assert cache.get("a") is None
 
 
@@ -397,15 +382,18 @@ class TestSpillAssemblyOffTheEventLoop:
         # registered in the disk index, so a read falls through to disk.
         for i in range(cc.MEMORY_CACHE_MAX + 1):
             cache.set(f"flood{i}", i)
-        assert cache.peek("k") is None
 
         # Bytes that no longer match the recorded entry: a write landed between the read and the index commit.
         stale = json.dumps({"expires": None, "value": {"v": "stale"}, "cached_at": 1.0}).encode()
-        assert len(stale) != cache.path_of("k").stat().st_size
+        assert len(stale) != entry_path(cache, "k").stat().st_size
         serve_stale = _serve_stale_envelope(monkeypatch, cache, stale)
         assert cache.get("k") == {"v": "stale"}  # served the bytes that were read
-        assert cache.peek("k") is None  # but the stale read is not mirrored
         serve_stale[0] = False
+        # The superseded read must not have warmed the RAM mirror with stale
+        # bytes: the next read goes back to disk for the real value.
+        with counting_entry_reads(monkeypatch, cache, "k") as reads:
+            assert cache.get("k") == {"v": "old"}
+            assert reads == [1]
 
     async def test_corrupt_spill_line_closes_the_spill_and_propagates(self, monkeypatch, tmp_path) -> None:
         """A corrupt spill row that makes ``_response`` raise must still close

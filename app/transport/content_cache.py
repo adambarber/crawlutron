@@ -126,26 +126,6 @@ class ContentCache:
         digest = hashlib.sha256(key.encode("utf-8")).hexdigest()
         return self.cache_dir / f"{self.namespace}.{digest}.json"
 
-    def path_of(self, key: str) -> Path:
-        """The on-disk file for ``key`` (deterministic from the name)."""
-        return self._path_for(key)
-
-    @property
-    def total_bytes(self) -> int:
-        """Live on-disk byte total the eviction budget accounts against."""
-        return self._index_total_bytes
-
-    @property
-    def is_locked(self) -> bool:
-        """Whether a cache operation currently holds the commit lock."""
-        return self._lock.locked()
-
-    def peek(self, key: str) -> Any:
-        """The RAM-resident value for ``key`` if mirrored, else ``None`` (no disk fallback)."""
-        with self._lock:
-            entry = self._memory_cache.get(key)
-            return None if entry is None or is_expired(self.clock(), entry[0]) else entry[1]
-
     def _drop_locked(self, key: str, doomed: list[tuple[str | None, Path]]) -> None:
         """Remove one entry from the index, byte accounting and RAM.
         Caller holds ``self._lock``; the doomed file unlinks after release,
