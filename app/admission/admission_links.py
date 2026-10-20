@@ -63,6 +63,9 @@ class AdmissionOutcome:
     # Candidates dropped because their canonical identity was already admitted;
     # counted apart from cap_blocked so a cap report never hides a dedupe.
     duplicates_skipped: int = 0
+    # The caller's ``known`` set after the run (their own is never mutated, #159),
+    # so the next pass dedupes against the occupied set instead of re-deriving it.
+    known_after: frozenset[NormalizedUrl] = frozenset()
 
 
 def _link_values(link: Any) -> tuple[str, str] | None:
@@ -96,11 +99,9 @@ class _ChunkOutcome:
 
 @dataclass
 class _AdmissionPass[T]:
-    """The policy, dedupe sets, and output frontier one admission run carries.
-
-    Built by the public entry and threaded through the chunk loop unchanged;
-    ``reserved`` and ``known`` are mutated in place as candidates are admitted.
-    """
+    """The policy, dedupe set, and output frontier one admission run carries; ``reserved``
+    is the run's own occupied set. The caller's ``known`` is read-only: it seeds ``reserved``
+    once and is never handed to the front line for in-place growth (#159)."""
 
     robots_allows: RobotsAllows
     respect_robots: bool
@@ -108,10 +109,8 @@ class _AdmissionPass[T]:
     commit_crawl_delay: CommitCrawlDelay
     max_pages: int
     reserved: set[NormalizedUrl]
-    known: set[NormalizedUrl]
     frontier: MutableSequence[T]
     make_entry: Callable[[AdmittedLink], T]
-    reserve_admitted: bool
 
 
 def _prepare_admission[T](
@@ -199,8 +198,6 @@ async def _admit_chunk[T](
         pass_.frontier.append(pass_.make_entry(candidate))
         accepted += 1
         reserved.add(candidate.normalized_url)
-        if pass_.reserve_admitted:
-            pass_.known.add(candidate.normalized_url)
         occupied_delta += 1
     return _ChunkOutcome(accepted, robots_blocked, duplicates_skipped, False, False, occupied_delta)
 
@@ -250,7 +247,6 @@ async def admit_discovered_links[T](
     robots_crawl_delay: RobotsCrawlDelay | None,
     commit_crawl_delay: CommitCrawlDelay,
     host_policy: HostPolicy,
-    reserve_admitted: bool = False,
 ) -> AdmissionOutcome:
     if source_depth >= max_depth:
         return AdmissionOutcome()
@@ -270,10 +266,8 @@ async def admit_discovered_links[T](
         commit_crawl_delay=commit_crawl_delay,
         max_pages=max_pages,
         reserved=reserved,
-        known=known,
         frontier=frontier,
         make_entry=make_entry,
-        reserve_admitted=reserve_admitted,
     )
     accepted, cap_blocked, robots_blocked, duplicates_skipped = await _admission_loop(
         admission_pass, candidates
@@ -283,6 +277,7 @@ async def admit_discovered_links[T](
         cap_blocked=cap_blocked,
         robots_blocked=robots_blocked,
         duplicates_skipped=duplicates_skipped,
+        known_after=frozenset(reserved),
     )
 
 

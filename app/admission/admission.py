@@ -208,7 +208,6 @@ async def admit_job_links(
         robots_crawl_delay=context.robots.crawl_delay,
         commit_crawl_delay=context.commit_crawl_delay,
         host_policy=context.host_policy,
-        reserve_admitted=True,
     )
     if outcome.cap_blocked:
         record_cap_truncated(job)
