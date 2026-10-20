@@ -4,6 +4,7 @@ Usage: ``python scripts/e2e_verify.py [base_url] [target_url]`` — defaults
 127.0.0.1:8765; requires the service running and outbound access.
 """
 
+import os
 import sys
 import time
 
@@ -98,6 +99,81 @@ def _validation(c: httpx.Client, base: str, target: str) -> None:
     check("map endpoint", r.status_code == 200 and isinstance(r.json().get("links"), list))
 
 
+def _well_known(c: httpx.Client, base: str) -> None:
+    """Discovery surface the agent contract names first (#291)."""
+    wk = c.get(f"{base}/.well-known/crawler-service")
+    body = wk.json() if wk.status_code == 200 else {}
+    links = body.get("links", {})
+    check("well-known crawler-service", wk.status_code == 200, wk.text[:160])
+    check(
+        "well-known advertises discovery links",
+        "capabilities" in links
+        and "result_retrieval" in links
+        and isinstance(body.get("recommended_endpoints"), list),
+        wk.text[:160],
+    )
+    check("well-known service identity", bool(body.get("service")) and bool(body.get("version")))
+
+
+def _auth(c: httpx.Client, base: str, target: str) -> None:
+    """Keyed-caller surface: issuance, 401, 429, and the isolation edge (#291)."""
+    admin = os.environ.get("CRAWLUTRON_KEY_ADMIN_TOKEN", "")
+    if not admin:
+        print("INFO CRAWLUTRON_KEY_ADMIN_TOKEN unset; keyed/401/429 checks skipped")
+        return
+    check("keys missing key -> 401", _refused_401(c.get(f"{base}/v1/keys")))
+    check("keys wrong key -> 401", _refused_401(c.get(f"{base}/v1/keys", headers={"X-API-Key": "bad-token"})))
+    issued = c.post(
+        f"{base}/v1/keys",
+        headers={"X-API-Key": admin},
+        json={"label": "e2e-verify", "max_pages": 1},
+    )
+    if issued.status_code != 201:
+        check("key issued 201", False, issued.text[:160])
+        return
+    secret = issued.json()["secret"]
+    check("key issued 201", True)
+    kr = c.post(f"{base}/v1/crawl", headers={"X-API-Key": secret}, json={"url": target})
+    check("keyed crawl works", kr.status_code == 200, kr.text[:120])
+    ridb = kr.json().get("request_id", "")
+
+    other = c.post(f"{base}/v1/keys", headers={"X-API-Key": admin}, json={"label": "e2e-other"})
+    if other.status_code == 201:
+        _isolation(c, base, ridb, secret, other.json()["secret"])
+    else:
+        check("cross-key read isolation", False, other.text[:120])
+
+    over = c.post(
+        f"{base}/v1/crawl",
+        headers={"X-API-Key": secret},
+        json={"url": target, "policy": {"limits": {"max_pages": 50}}},
+    )
+    check(
+        "over-budget keyed crawl -> 429",
+        over.status_code == 429 and over.json().get("code") == "quota_exceeded",
+        over.text[:120],
+    )
+
+
+def _isolation(c: httpx.Client, base: str, rid: str, owner: str, other: str) -> None:
+    """Caller A's job is 404 to caller B, and readable to A (#291)."""
+    if not rid:
+        check("cross-key read isolation", False, "keyed crawl returned no request_id")
+        return
+    mine = c.get(f"{base}/v1/crawl/{rid}", headers={"X-API-Key": owner})
+    theirs = c.get(f"{base}/v1/crawl/{rid}", headers={"X-API-Key": other})
+    check(
+        "cross-key read isolation (B can't read A)",
+        theirs.status_code == 404 and mine.status_code == 200,
+        f"mine={mine.status_code} theirs={theirs.status_code}",
+    )
+
+
+def _refused_401(response: httpx.Response) -> bool:
+    """A 401 with the invalid_api_key envelope (live service unwraps it)."""
+    return response.status_code == 401 and response.json().get("code") == "invalid_api_key"
+
+
 def main(argv: list[str] | None = None) -> int:
     args = argv if argv is not None else sys.argv[1:]
     base = args[0] if len(args) > 0 else "http://127.0.0.1:8765"
@@ -105,9 +181,11 @@ def main(argv: list[str] | None = None) -> int:
 
     with httpx.Client(timeout=180) as c:
         _health(c, base)
+        _well_known(c, base)
         rid = _single_crawl(c, base, target)
         _retrieval(c, base, rid)
         _validation(c, base, target)
+        _auth(c, base, target)
 
     passed = sum(1 for _, ok in results if ok)
     print(f"===== {passed}/{len(results)} checks passed =====")

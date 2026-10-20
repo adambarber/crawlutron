@@ -33,6 +33,23 @@ required.
 ./scripts/run-tests.sh -o addopts=
 ```
 
+## Live End-to-End Verification
+
+Beyond the in-process suite, `scripts/e2e_verify.py` drives a *running*
+service (default `http://127.0.0.1:8765`) and asserts on live responses:
+health/discovery, anonymous and keyed crawls, `/.well-known`, 401/429
+refusals, and cross-key read isolation.
+
+```bash
+python scripts/e2e_verify.py            # against the default service
+python scripts/e2e_verify.py http://host:port https://example.org
+```
+
+Run `scripts/probe_session.py` to probe an arbitrary site through the real
+browser + curl_cffi fetch ladder. Both scripts are import-safe: importing
+them has no side effects, and the keyed checks only run when
+`CRAWLUTRON_KEY_ADMIN_TOKEN` is set.
+
 ## Coding Style
 
 - Python 3.11+ syntax; ruff enforces import order, pyupgrade, and the
