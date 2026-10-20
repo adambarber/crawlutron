@@ -371,13 +371,31 @@ class TestCloseLeavesNoStaleRendererToAcquire:
         finally:
             await pool.close()
 
-    async def test_a_recycled_pool_holds_exactly_pool_size_renderers(self):
+    async def test_a_recycled_pool_hands_out_only_live_renderers(self):
+        """A recycled generation serves exactly ``pool_size`` renders and
+        never a renderer the prior generation retired. Plants the one real
+        leak path -- release after close -- and asserts acquire is clean."""
         pool = self._pool()
         await pool.initialize()
+        # Plant the leak: a renderer checked out when close() runs, then released
+        # back afterwards -- the one caller able to re-queue a retired renderer.
+        checked_out = await pool.acquire()
         await pool.close()
+        pool.release(checked_out)
+
         await pool.initialize()
         try:
-            assert len(pool) == pool.pool_size
+            acquired = [await pool.acquire() for _ in range(pool.pool_size)]
+            try:
+                # A resurrected renderer in the queue would be handed out here.
+                assert all(r is not checked_out for r in acquired)
+                # A leaked queued renderer would make a pool_size+1-th acquire
+                # succeed; a clean pool must be exhausted instead.
+                with pytest.raises(BrowserPoolExhaustedError):
+                    await pool.acquire(timeout=0.05)
+            finally:
+                for renderer in acquired:
+                    pool.release(renderer)
         finally:
             await pool.close()
         assert len(pool) == 0, "close left closed renderers in the queue"
