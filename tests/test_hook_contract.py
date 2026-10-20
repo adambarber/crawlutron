@@ -17,6 +17,7 @@ from tests.test_precommit_ci_contract import (
     GATE_ENTRY_PROLOGUE,
     GATE_HELPER,
     GATE_HELPER_PATH,
+    SERVICE_ROOT,
     WORKFLOW_PATH,
     WORKFLOW_ROOT_CONFIG,
     _entry,
@@ -149,6 +150,62 @@ def test_every_hook_shares_one_gate_entry_preamble() -> None:
     )
 
 
+def test_the_gate_helper_fails_loudly_with_no_argument() -> None:
+    """`scripts/gate` with no command is a dropped hook; it must fail.
+
+    `exec "$@"` with an empty list is a bash no-op, so a hook that dropped its
+    command reported success. A guard fails it instead of confirming nothing.
+    """
+    completed = _run_gate(GATE_HELPER, [], SERVICE_ROOT)
+    assert completed.returncode != 0, "scripts/gate with no args must not silently exit 0"
+    assert "no gate command" in completed.stderr
+
+
+def test_the_gate_venv_guard_names_the_dev_extra(tmp_path_factory) -> None:
+    """A missing venv fails, naming pyproject.toml's dev extra -- not
+    requirements-dev.txt, which no workflow reads -- and exercises the branch.
+    """
+    repo = tmp_path_factory.mktemp("novenv")
+    service_root = _gate_repo(repo, layout="root", venv=False)
+    completed = _run_gate(service_root / "scripts" / "gate", [".venv/bin/python", "-c", "print(1)"], repo)
+    assert completed.returncode != 0, "a missing venv must fail the gate helper"
+    assert "pyproject.toml's dev extra" in completed.stderr
+    assert "requirements-dev.txt" not in completed.stderr
+
+
+def _gate_repo(repo: Path, *, layout: str, venv: bool) -> Path:
+    """A synthetic git repo holding scripts/gate; returns the service root.
+
+    ``nested`` builds ``<repo>/docker/browser-crawler``; ``root`` builds the service
+    at the repo root; ``venv`` plants a stub interpreter for the helper to exec.
+    """
+    service_root = repo / "docker" / "browser-crawler" if layout == "nested" else repo
+    subprocess.run([require_executable(GIT), "init", "-q", str(repo)], check=True, capture_output=True)
+    scripts = service_root / "scripts"
+    scripts.mkdir(parents=True)
+    (scripts / "gate").write_text(GATE_HELPER.read_text(encoding="utf-8"), encoding="utf-8")
+    (scripts / "gate").chmod(0o755)
+    if venv:
+        bin_dir = service_root / ".venv" / "bin"
+        bin_dir.mkdir(parents=True)
+        interpreter = bin_dir / "python"
+        interpreter.write_text('#!/bin/sh\nexec python3 "$@"\n', encoding="utf-8")
+        interpreter.chmod(0o755)
+    return service_root
+
+
+def _run_gate(gate_path: Path, args: list[str], cwd: Path) -> subprocess.CompletedProcess[str]:
+    """Run scripts/gate with ``args`` from ``cwd``, returning the result."""
+    return subprocess.run(
+        [require_executable("bash"), str(gate_path), *args],
+        cwd=cwd,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=30,
+    )
+
+
 def _split_gate_entry(entry: str) -> tuple[str, str]:
     """The entry as ``(bash -c prologue, command)``.
 
@@ -166,17 +223,7 @@ def _run_gate_entry_in_layout(repo: Path, layout: str) -> tuple[Path, subprocess
     service at the repo root. Real files, not re-typed stand-ins."""
     # `browser-crawler` here is the pre-extraction layout the hook's prologue still probes for, not this
     # project's name; the nested branch exists to prove the helper resolves there too.
-    service_root = repo / "docker" / "browser-crawler" if layout == "nested" else repo
-    subprocess.run([require_executable(GIT), "init", "-q", str(repo)], check=True, capture_output=True)
-    (service_root / "scripts").mkdir(parents=True)
-    (service_root / "scripts" / "gate").write_text(GATE_HELPER.read_text(encoding="utf-8"), encoding="utf-8")
-    (service_root / "scripts" / "gate").chmod(0o755)
-    # The helper execs the command it is handed; the synthetic service has no venv of its own, so the command
-    # names the stub interpreter directly.
-    (service_root / ".venv" / "bin").mkdir(parents=True)
-    interpreter = service_root / ".venv" / "bin" / "python"
-    interpreter.write_text('#!/bin/sh\nexec python3 "$@"\n', encoding="utf-8")
-    interpreter.chmod(0o755)
+    service_root = _gate_repo(repo, layout=layout, venv=True)
     subprocess.run([require_executable(GIT), "-C", str(repo), "add", "-A"], check=True, capture_output=True)
 
     # pre-commit runs an entry as `shlex.split(entry)` with the repository root as the working directory, so

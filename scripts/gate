@@ -35,6 +35,15 @@
 # requires this helper to run and to resolve the right service root.
 set -euo pipefail
 
+# A gate that runs nothing is a gate that confirms nothing: pre-commit hands
+# every hook a command, so a zero-argument call is a dropped command, not a
+# valid run. Fail loudly rather than let `exec "$@"` below no-op to exit 0.
+if [ "$#" -eq 0 ]; then
+    echo "scripts/gate: no gate command supplied; a hook must name what to run" >&2
+    echo "scripts/gate: invoke as 'scripts/gate <command...>' (see .pre-commit-config.yaml)" >&2
+    exit 1
+fi
+
 # Dual layout, tried in the same order the old inline preamble used: the nested
 # service directory first, the repository root when that directory is not there.
 # In this repository the first candidate never exists, so the second one wins;
@@ -56,7 +65,7 @@ cd "$service_root"
 # the reader looking in the wrong file entirely.
 if [ ! -x .venv/bin/python ]; then
     echo "scripts/gate: no interpreter at $service_root/.venv/bin/python" >&2
-    echo "scripts/gate: these gates run against the pinned toolchain in requirements-dev.txt" >&2
+    echo "scripts/gate: these gates run against the pinned toolchain in pyproject.toml's dev extra" >&2
     echo "scripts/gate: create the service venv before committing" >&2
     exit 1
 fi
