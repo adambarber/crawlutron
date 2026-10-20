@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import inspect
-from typing import TypeGuard, overload
+from typing import TypeGuard
 
 from app.models.crawl_job import CrawlJob
 from app.models.crawl_result import CrawlResult
@@ -16,6 +16,8 @@ def _is_sync_worker(worker: CrawlWorker) -> TypeGuard[SyncCrawlWorker]:
 
 
 def _is_async_worker(worker: CrawlWorker) -> TypeGuard[AsyncCrawlWorker]:
+    # Positive-only guard: negating this does not narrow the callable union,
+    # so the two complements must both stay to type the sync/async branches.
     return inspect.iscoroutinefunction(worker) or inspect.iscoroutinefunction(type(worker).__call__)
 
 
@@ -33,14 +35,6 @@ def _invoke_sync_worker(worker: SyncCrawlWorker, job: CrawlJob) -> CrawlResult:
             "coroutine function or a plain function returning a CrawlResult"
         )
     return result
-
-
-@overload
-async def call_worker(worker: AsyncCrawlWorker, job: CrawlJob) -> CrawlResult: ...
-
-
-@overload
-async def call_worker(worker: SyncCrawlWorker, job: CrawlJob) -> CrawlResult: ...
 
 
 async def call_worker(worker: CrawlWorker, job: CrawlJob) -> CrawlResult:
