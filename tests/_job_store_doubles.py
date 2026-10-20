@@ -8,8 +8,7 @@ from contextlib import contextmanager
 from app.admission.policy import PolicyTier
 from app.models.crawl_policy import CrawlPolicy
 from app.safety.validation import HostPolicy
-from app.storage.job_store import CrawlJobState, FrontierEntry, JobStatus, JobStore
-from app.storage.job_store import _Expected as _Expected
+from app.storage.job_store import CrawlJobState, Expected, FrontierEntry, JobStatus, JobStore
 from tests._policy_factories import canonical, job_store
 
 
@@ -84,7 +83,7 @@ class InstrumentedJobStore(JobStore):
         self._real_set_status: Callable[..., bool] = JobStore.set_status.__get__(self)
         self._real_save: Callable[[CrawlJobState], None] = JobStore.save.__get__(self)
 
-    def set_status(self, job_id: str, new: JobStatus, *, expected: _Expected) -> bool:
+    def set_status(self, job_id: str, new: JobStatus, *, expected: Expected) -> bool:
         changed = self._real_set_status(job_id, new, expected=expected)
         if changed:
             self.status_bus.publish(job_id)

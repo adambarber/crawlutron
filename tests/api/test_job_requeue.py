@@ -254,7 +254,7 @@ class TestWholeSiteRedirectedUrlResolution:
                 ]
             }
 
-        monkeypatch.setattr("app.api.job_runner._execute_crawl", fake_execute_crawl)
+        job_runner.install_execute_crawl(fake_execute_crawl)
 
         await drive_job(job_id, job_store, settings=MagicMock())
 

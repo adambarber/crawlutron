@@ -7,22 +7,22 @@ import json
 
 from app.safety.validation import HostPolicy
 from app.search.providers import (
+    ApiKeyProvider,
     BraveProvider,
+    ProviderCall,
     SearchProviderError,
     SerperProvider,
     TavilyProvider,
-    _ApiKeyProvider,
-    _ProviderCall,
 )
 
 
 def test_keyed_provider_entry_is_folded_into_the_base():
     """None of the keyed providers re-implements ``search``: they all drive it."""
     for cls in (TavilyProvider, BraveProvider, SerperProvider):
-        assert cls.search is _ApiKeyProvider.search, f"{cls.__name__} re-implemented the entry"
+        assert cls.search is ApiKeyProvider.search, f"{cls.__name__} re-implemented the entry"
 
 
-class _MinimalProvider(_ApiKeyProvider):
+class _MinimalProvider(ApiKeyProvider):
     """A fresh provider carrying only per-provider fields; no ``search``."""
 
     name = "minimal"
@@ -31,8 +31,8 @@ class _MinimalProvider(_ApiKeyProvider):
     _description_key = "blurb"
     _items_path = ("hits",)
 
-    def _call(self, query: str, limit: int) -> _ProviderCall:
-        return _ProviderCall("POST", "https://example.test/q", json_body={"q": query, "n": limit})
+    def _call(self, query: str, limit: int) -> ProviderCall:
+        return ProviderCall("POST", "https://example.test/q", json_body={"q": query, "n": limit})
 
 
 def test_new_provider_with_only_per_provider_fields_works(fake_provider_http):

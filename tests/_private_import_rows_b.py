@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from tests._private_import_decl import (
     _APP_INTERNAL_WELD,
-    _CHOKEPOINT_STATE,
     _LIFECYCLE_DRAIN_PENDING_CLIENT_CLOSES,
     _SUBSTITUTED_COLLABORATOR,
     Declaration,
@@ -12,16 +11,6 @@ from tests._private_import_decl import (
 )
 
 DECLARED: dict[str, Declaration] = {
-    "app.search.providers._ApiKeyProvider": _d(
-        "private type",
-        "#128 folding test subclasses the shared keyed base to prove the entry is folded.",
-        ["test"],
-    ),
-    "app.search.providers._ProviderCall": _d(
-        "private type",
-        "#128 folding test builds the minimal provider's request via the shared call shape.",
-        ["test"],
-    ),
     "app.transport.pooled_clients._drain_pending_client_closes": _d(
         _LIFECYCLE_DRAIN_PENDING_CLIENT_CLOSES.kind,
         _LIFECYCLE_DRAIN_PENDING_CLIENT_CLOSES.reason,
@@ -33,7 +22,6 @@ DECLARED: dict[str, Declaration] = {
         "Builds the too-large 413 HttpFetchResult verdict fetchers share within the transport package.",
         ["app"],
     ),
-    "app.models.registrable_domain._PSL": _d(_CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]),
     "app.mcp.tools._http_exception_message": _APP_INTERNAL_WELD,
     "app.orchestration.recursive._RecursiveState": _APP_INTERNAL_WELD,
     "app.orchestration.recursive._commit_recursive_results": _APP_INTERNAL_WELD,

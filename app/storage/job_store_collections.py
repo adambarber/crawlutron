@@ -36,7 +36,7 @@ class JobStatus(StrEnum):
 
 #: The states a compare-and-set accepts: one status, or the set a transition is
 #: legal from. Named once so the sync method and its twin cannot diverge.
-type _Expected = JobStatus | frozenset[JobStatus]
+type Expected = JobStatus | frozenset[JobStatus]
 
 #: The states a job never leaves. PAUSED is absent: stopped is not finished.
 TERMINAL_STATUSES = frozenset({JobStatus.COMPLETED, JobStatus.FAILED, JobStatus.CANCELLED})

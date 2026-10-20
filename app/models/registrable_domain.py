@@ -48,14 +48,15 @@ def _heuristic_registrable_domain(host: str) -> str:
     return ".".join(labels[-2:])
 
 
-def registrable_domain(host: str) -> str:
-    """The registrable site a host belongs to, or the host itself when there is no site."""
+def registrable_domain(host: str, *, psl: _PublicSuffixDataset | None = None) -> str:
+    """The registrable site a host belongs to, or the host itself when no site."""
     host = host.lower().rstrip(".")
     try:
         ascii_host = host.encode("idna").decode("ascii")
     except Exception:
         ascii_host = host
-    psl = _public_suffix_list()
+    if psl is None:
+        psl = _public_suffix_list()
     if psl is not None:
         with suppress(Exception):
             registrable = psl.privatesuffix(ascii_host)

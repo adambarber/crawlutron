@@ -171,7 +171,7 @@ def _provider_message(provider: str, status: int, payload: dict[str, Any]) -> st
 
 
 @dataclass(frozen=True)
-class _ProviderCall:
+class ProviderCall:
     """One provider request, minus the credential: method, endpoint and payload are
     the only per-provider facts about going over the wire, and carrying them in
     one value lets :meth:`_ApiKeyProvider._request` be written once.
@@ -184,7 +184,7 @@ class _ProviderCall:
     headers: dict[str, str] | None = None
 
 
-class _ApiKeyProvider:
+class ApiKeyProvider:
     """Shared credential slot and shared flow for the keyed providers, which differ
     only in endpoint, method, key placement and key names; everything else --
     issue, refuse a non-200, normalize -- must not be reachable a new way.
@@ -209,7 +209,7 @@ class _ApiKeyProvider:
         status, body = await self._request(query, limit, timeout_seconds)
         return self._results(status, body, limit)
 
-    def _call(self, query: str, limit: int) -> _ProviderCall:
+    def _call(self, query: str, limit: int) -> ProviderCall:
         """This provider's request shape for one query. Subclass hook.
         Endpoint, method and key travel (header or body) are per-provider facts;
         none of them is a fact about what to do with the response.
@@ -263,7 +263,7 @@ class _ApiKeyProvider:
         )[:limit]
 
 
-class TavilyProvider(_ApiKeyProvider):
+class TavilyProvider(ApiKeyProvider):
     """Tavily Search API (api.tavily.com). Free tier ~1000 credits/month."""
 
     name = "tavily"
@@ -272,9 +272,9 @@ class TavilyProvider(_ApiKeyProvider):
     _description_key = "content"
     _items_path = ("results",)
 
-    def _call(self, query: str, limit: int) -> _ProviderCall:
+    def _call(self, query: str, limit: int) -> ProviderCall:
         # Tavily carries the key in the JSON body, not a header.
-        return _ProviderCall(
+        return ProviderCall(
             "POST",
             _TAVILY_URL,
             json_body={
@@ -289,7 +289,7 @@ class TavilyProvider(_ApiKeyProvider):
         )
 
 
-class BraveProvider(_ApiKeyProvider):
+class BraveProvider(ApiKeyProvider):
     """Brave Search API (api.search.brave.com). Free tier 2000 queries/month."""
 
     name = "brave"
@@ -298,8 +298,8 @@ class BraveProvider(_ApiKeyProvider):
     _description_key = "description"
     _items_path = ("web", "results")
 
-    def _call(self, query: str, limit: int) -> _ProviderCall:
-        return _ProviderCall(
+    def _call(self, query: str, limit: int) -> ProviderCall:
+        return ProviderCall(
             "GET",
             _BRAVE_URL,
             params={"q": query, "count": limit, "safesearch": "off"},
@@ -307,7 +307,7 @@ class BraveProvider(_ApiKeyProvider):
         )
 
 
-class SerperProvider(_ApiKeyProvider):
+class SerperProvider(ApiKeyProvider):
     """Serper.dev Google SERP proxy. Free tier 2500 queries."""
 
     name = "serper"
@@ -316,8 +316,8 @@ class SerperProvider(_ApiKeyProvider):
     _description_key = "snippet"
     _items_path = ("organic",)
 
-    def _call(self, query: str, limit: int) -> _ProviderCall:
-        return _ProviderCall(
+    def _call(self, query: str, limit: int) -> ProviderCall:
+        return ProviderCall(
             "POST",
             _SERPER_URL,
             json_body={"q": query, "num": limit},
@@ -458,8 +458,10 @@ def get_search_provider(settings: Any) -> SearchProvider:
 
 
 __all__ = [
+    "ApiKeyProvider",
     "BraveProvider",
     "DuckDuckGoProvider",
+    "ProviderCall",
     "SearchProvider",
     "SearchProviderError",
     "SearchProviderUnavailable",

@@ -341,17 +341,16 @@ class TestDecompressionSelection:
 
 
 def test_brotli_streaming_clamps_accumulated_output(monkeypatch):
-    # One greedy process() materialises a slice's whole expansion; the stream must return no more
-    # than cap+1 bytes of it, or a small on-wire body becomes a remote OOM.
-
+    # One greedy process() materialises a slice's whole expansion; the stream must not return that huge blob
+    # (or a small on-wire body becomes a remote OOM). Drive the public entry so the bounded decode runs.
     class BombProcess(brotli.Decompressor):
         def process(self, data, size):
             return b"Z" * 16_384_000  # one slice expands well past any small cap
 
     monkeypatch.setattr(brotli, "Decompressor", BombProcess)
     cap = 10_000
-    decoded = decompression_mod._decompress_brotli(b"\x00" * (16_384 * 3), cap)
-    assert len(decoded) <= cap + 1
+    with pytest.raises(DecompressionTooLargeError):
+        decompress_body(b"\x00" * (16_384 * 3), "br", max_output_bytes=cap)
 
 
 def test_the_brotli_cap_bounds_allocation_not_just_the_result():

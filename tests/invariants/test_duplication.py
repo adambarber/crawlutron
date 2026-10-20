@@ -176,7 +176,7 @@ def _keyed_provider_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
     offenders: list[str] = []
     for node in class_defs(tree):
         if not any(
-            resolved_expr_name(tree, base).rsplit(".", 1)[-1] == "_ApiKeyProvider" for base in node.bases
+            resolved_expr_name(tree, base).rsplit(".", 1)[-1] == "ApiKeyProvider" for base in node.bases
         ):
             continue
         methods = {
@@ -211,12 +211,12 @@ KEYED_PROVIDERS_INHERIT_THE_SHARED_RESPONSE_FLOW = Rule(
     ),
     bite=lambda: (
         Bites(
-            "from app.search.providers import _ApiKeyProvider\n"
-            "class SerperProvider(_ApiKeyProvider):\n"
+            "from app.search.providers import ApiKeyProvider\n"
+            "class SerperProvider(ApiKeyProvider):\n"
             "    name = 'serper'\n"
             "    _items_path = ('organic',)\n"
             "    def _call(self, query, limit):\n"
-            "        return _ProviderCall('POST', url)\n"
+            "        return ProviderCall('POST', url)\n"
             "    async def search(self, query, limit, timeout_seconds):\n"
             "        status, body = await self._request(query, limit, timeout_seconds)\n"
             "        return self._results(status, body, lambda p: p.get('organic'),\n"
@@ -224,41 +224,41 @@ KEYED_PROVIDERS_INHERIT_THE_SHARED_RESPONSE_FLOW = Rule(
             "re-spells the shared provider flow in search()",
         ),
         Bites(
-            "from app.search.providers import _ApiKeyProvider\n"
-            "class BraveProvider(_ApiKeyProvider):\n"
+            "from app.search.providers import ApiKeyProvider\n"
+            "class BraveProvider(ApiKeyProvider):\n"
             "    name = 'brave'\n"
             "    _items_path = ('web', 'results')\n"
             "    def _call(self, query, limit):\n"
-            "        return _ProviderCall('GET', url)\n"
+            "        return ProviderCall('GET', url)\n"
             "    async def _request(self, query, limit, timeout_seconds):\n"
             "        return await provider_http('GET', url)\n",
             "re-spells the shared provider flow in _request()",
         ),
         Bites(
-            "from app.search.providers import _ApiKeyProvider\n"
-            "class TavilyProvider(_ApiKeyProvider):\n"
+            "from app.search.providers import ApiKeyProvider\n"
+            "class TavilyProvider(ApiKeyProvider):\n"
             "    name = 'tavily'\n"
             "    _items_path = ('results',)\n",
             "does not state a _call()",
         ),
         Bites(
-            "from app.search.providers import _ApiKeyProvider\n"
-            "class BingProvider(_ApiKeyProvider):\n"
+            "from app.search.providers import ApiKeyProvider\n"
+            "class BingProvider(ApiKeyProvider):\n"
             "    name = 'bing'\n"
             "    def _call(self, query, limit):\n"
-            "        return _ProviderCall('GET', url)\n",
+            "        return ProviderCall('GET', url)\n",
             "does not declare _items_path",
         ),
     ),
     clean=lambda: (
-        "class TavilyProvider(_ApiKeyProvider):\n"
+        "class TavilyProvider(ApiKeyProvider):\n"
         "    name = 'tavily'\n"
         "    _url_key = 'url'\n"
         "    _title_key = 'title'\n"
         "    _description_key = 'content'\n"
         "    _items_path = ('results',)\n"
         "    def _call(self, query, limit):\n"
-        "        return _ProviderCall('POST', url, json_body={'api_key': self._api_key})\n",
+        "        return ProviderCall('POST', url, json_body={'api_key': self._api_key})\n",
         # A provider that does not inherit the keyed flow (DuckDuckGo) is not this guard's business; the loop
         # guard above owns its shape.
         "class DuckDuckGoProvider:\n"

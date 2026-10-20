@@ -18,10 +18,10 @@ from app.storage.sqlite_store import connect_store, process_lock, store_lock_key
 
 from .job_store_collections import (
     TERMINAL_STATUSES,
+    Expected,
     FrontierEntry,
     JobKind,
     JobStatus,
-    _Expected,
     job_max_pages,
 )
 from .job_store_state import (
@@ -46,7 +46,7 @@ __all__ = [
     "JobStatus",
     "JobStatusView",
     "JobStore",
-    "_Expected",
+    "Expected",
     "job_max_pages",
     "normalize_job_state",
 ]
@@ -146,7 +146,7 @@ class JobStore:
         self._accumulators.append(job)
         self._conn.commit()
 
-    def set_status(self, job_id: str, new: JobStatus, *, expected: _Expected) -> bool:
+    def set_status(self, job_id: str, new: JobStatus, *, expected: Expected) -> bool:
         """Atomic compare-and-set on the row's status (the control plane).
         Returns True iff the row existed in one of the ``expected`` states and now
         holds ``new``; False means missing-or-conflict, so the caller's view is stale.

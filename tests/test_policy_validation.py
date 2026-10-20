@@ -118,28 +118,11 @@ class TestPolicyValidation:
         assert registrable_domain("www.example.com.br") == "example.com.br"
         assert registrable_domain("shop.example.gov.in") == "example.gov.in"
 
-    def test_registrable_domain_falls_back_without_dataset(self, monkeypatch):
+    def test_registrable_domain_falls_back_without_dataset(self):
         # The heuristic fallback must keep working when the dataset is absent (import safety), even though
-        # correctness needs the PSL.
-        import sys
-
-        import app.models.registrable_domain as suffix_module
-
-        # NOTE: the loader caches the failed None and monkeypatch cannot restore a never-existing attribute,
-        # so save/restore or the cache poisons later tests.
-        had_psl = "_PSL" in vars(suffix_module)
-        old_psl = vars(suffix_module).get("_PSL")
-        try:
-            monkeypatch.setitem(sys.modules, "publicsuffixlist", None)
-            if had_psl:
-                monkeypatch.delattr(suffix_module, "_PSL")
-            assert registrable_domain("a.b.example.co.uk") == "example.co.uk"
-            assert registrable_domain("a.b.c.example.com") == "example.com"
-        finally:
-            if had_psl:
-                suffix_module._PSL = old_psl
-            else:
-                vars(suffix_module).pop("_PSL", None)
+        # correctness needs the PSL. Passing ``psl=None`` forces the fallback without touching module state.
+        assert registrable_domain("a.b.example.co.uk", psl=None) == "example.co.uk"
+        assert registrable_domain("a.b.c.example.com", psl=None) == "example.com"
 
 
 class TestResolveEgress:

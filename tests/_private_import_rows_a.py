@@ -17,15 +17,6 @@ DECLARED: dict[str, Declaration] = {
     "app.transport.content_cache.ContentCache._remember_memory_locked": _d(
         _PRIVATE_TYPE.kind, _PRIVATE_TYPE.reason, ["test"]
     ),
-    "app.transport.decompression._decompress_brotli": _d(
-        "implementation step",
-        "Proof that the streaming brotli branch bounds each process() call's peak to O(cap) by feeding"
-        " the size argument (only exposable by instrumenting the decoder) and then raises"
-        " DecompressionTooLargeError for bombs. The remote-OOM property has no expression through the"
-        " public surface; the stream is driven here with the decoder substituted at the dependency"
-        " boundary.\n",
-        ["test"],
-    ),
     "app.transport.browser_cookies.BROWSER_COOKIES_BY_DOMAIN._store": _d(
         "private state",
         "#123: probe inspects the medium the process-global browser store shares with the jar.",
@@ -36,7 +27,6 @@ DECLARED: dict[str, Declaration] = {
         "#123: the concurrency probe swaps the medium's lock for a recording double.",
         ["test"],
     ),
-    "app.storage.job_store._Expected": _d(_CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]),
     "app.orchestration.robots._RobotsPathMatcher": _d(
         "private type",
         "A private class nothing outside the module constructs -- production only ever builds a\n"
@@ -79,11 +69,6 @@ DECLARED: dict[str, Declaration] = {
     "app.runtime.resource_pressure.ResourceGate._lag_probe": _INSTANCE_STATE,
     "app.runtime.resource_pressure.WeightedAdmission._p": _INSTANCE_STATE,
     "app.storage.job_store.JobStore._conn": _INSTANCE_STATE,
-    "app.api.job_runner._execute_crawl": _d(
-        "substituted seam",
-        "The engine entry the runner calls at job time; the requeue test substitutes it for a fresh run.",
-        ["test"],
-    ),
     "app.storage.job_store.JobStore._row_to_job": _d(
         "implementation step",
         "A row-to-model mapping the isolation test drives to round out an ownership assertion with no seam.",
