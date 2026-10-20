@@ -19,11 +19,15 @@ from tests._ratchet import (
 from tests._ratchet import (
     report as ratchet_report,
 )
-from tests.chokepoint_walks import nodes_of
+from tests.chokepoint_walks import REPO_ROOT, nodes_of, trees_under
 
 _METRIC = "undeclared record"
 
 _BUDGETS = {_METRIC: 146}
+
+#: The scripts/ tree, which #293 brings under this gate for the first time; its
+#: measured baseline is declared first (value-ratchet rule).
+_SCRIPTS_BUDGETS = {_METRIC: 16}
 
 # A record is anything whose key set a caller might depend on.
 _RECORD_ROOTS = frozenset(
@@ -95,6 +99,30 @@ def measurement(metric: str) -> int:
     return len(offenders(metric))
 
 
+def scripts_candidates(tree: ast.AST) -> Iterator[tuple[str, int, str]]:
+    """Every candidate a scripts module offers, reusing the shared record detector."""
+    return candidates(tree)
+
+
+def _scripts_walk() -> Iterator[tuple[str, str, str]]:
+    """The scripts tree through the same record classifier, labeled by module."""
+    for path, tree in trees_under(REPO_ROOT / "scripts"):
+        relative = path.relative_to(REPO_ROOT / "scripts").as_posix()
+        for candidate, line, source in candidates(tree):
+            if candidate == _METRIC:
+                yield candidate, f"{relative}:{line}", source
+
+
+def scripts_offenders(metric: str) -> list[Offender]:
+    """The scripts work list for `metric` -- the reach #293 adds to this gate."""
+    return [Offender(where, detail) for _candidate, where, detail in _scripts_walk()]
+
+
+def scripts_measurement(metric: str) -> int:
+    """The number the scripts typing budget is compared against."""
+    return len(scripts_offenders(metric))
+
+
 def report() -> None:
     ratchet_report(
         _BUDGETS,
@@ -123,6 +151,37 @@ test_budget_is_tight = budget_is_tight(_BUDGETS, (measurement, offenders), subje
 test_collection_is_deterministic = collection_is_deterministic(
     _BUDGETS, (measurement, offenders), subject="typing"
 )
+
+
+_SCRIPTS_REMEDY = (
+    "scripts/ was outside the typing budget before #293; its baseline is the 16 "
+    "undeclared records it shipped with. Declare, or name the system type, and lower it."
+)
+
+
+test_scripts_budget_is_not_exceeded = budget_not_exceeded(
+    _SCRIPTS_BUDGETS,
+    (scripts_measurement, scripts_offenders),
+    subject="scripts typing",
+    remedy=_SCRIPTS_REMEDY,
+)
+test_scripts_budget_is_tight = budget_is_tight(
+    _SCRIPTS_BUDGETS, (scripts_measurement, scripts_offenders), subject="scripts typing"
+)
+test_scripts_collection_is_deterministic = collection_is_deterministic(
+    _SCRIPTS_BUDGETS, (scripts_measurement, scripts_offenders), subject="scripts typing"
+)
+
+
+def test_the_scripts_typing_budget_reaches_scripts() -> None:
+    """The H1 reach: the typing budget now sweeps scripts/, which had none.
+    The real tree shows it (16 records are counted, not invisible) and the shared
+    classifier fires on a synthetic undeclared record, so one in scripts/ fires."""
+    assert scripts_measurement(_METRIC) == 16, "the scripts typing budget stopped reaching the real tree"
+    defective = ast.parse("def load() -> dict[str, Any]: ...")
+    assert list(candidates(defective))[:1] and list(candidates(defective))[0][0] == _METRIC
+    clean = ast.parse("def load() -> dict[str, str]: ...")
+    assert not list(candidates(clean))
 
 
 def _walked() -> dict[str, int]:

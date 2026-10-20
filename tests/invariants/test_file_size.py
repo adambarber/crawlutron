@@ -21,12 +21,18 @@ _BUDGETS = {
 }
 
 
-def scan(base: pathlib.Path) -> dict[str, int]:
-    """Every ``*.py`` over ``LIMIT`` under ``base``, as ``{file: lines}``."""
+def scan(base: pathlib.Path, *, include_gate: bool = False) -> dict[str, int]:
+    """Every ``*.py`` over ``LIMIT`` under ``base``, as ``{file: lines}``.
+
+    ``include_gate`` also reads the extensionless ``scripts/gate`` helper, which
+    every hook routes through and every ``*.py`` glob misses."""
+    paths = sorted(p for p in base.rglob("*.py") if "__pycache__" not in p.parts)
+    if include_gate and base.name == "scripts":
+        gate = base / "gate"
+        if gate.exists():
+            paths.append(gate)
     found: dict[str, int] = {}
-    for path in sorted(base.rglob("*.py")):
-        if "__pycache__" in path.parts:
-            continue
+    for path in paths:
         lines = len(path.read_text(encoding="utf-8").splitlines())
         if lines > LIMIT:
             found[path.as_posix()] = lines
@@ -34,8 +40,11 @@ def scan(base: pathlib.Path) -> dict[str, int]:
 
 
 def overlong(root: str) -> dict[str, int]:
-    """Every overlong file under one repo root, as ``{file: lines}``."""
-    return scan(REPO_ROOT / root)
+    """Every overlong file under one repo root, as ``{file: lines}``.
+
+    ``scripts`` is the one root with an extensionless helper every hook routes
+    through, so it is swept with the gate included."""
+    return scan(REPO_ROOT / root, include_gate=(root == "scripts"))
 
 
 def test_the_detector_bites_over_the_ceiling(
@@ -49,6 +58,21 @@ def test_the_detector_bites_over_the_ceiling(
     found = scan(tmp_path)
     assert list(found) == [over.as_posix()]
     assert found[over.as_posix()] == 501
+
+
+def test_scan_includes_the_extensionless_gate_helper(tmp_path: pathlib.Path) -> None:
+    """The H1 reach: the extensionless scripts/gate is not invisible to the file gate.
+
+    Every hook routes through scripts/gate and a ``*.py`` glob misses it; a gate
+    that cannot see the helper it is supposed to bound is no gate."""
+    scripts = tmp_path / "scripts"
+    scripts.mkdir(parents=True)
+    gate = scripts / "gate"
+    gate.write_text("#!/bin/sh\n" + "\n".join(f"# step {i}" for i in range(501)) + "\n")
+    (scripts / "gate.py").write_text("x = 1\n")
+    found = scan(scripts, include_gate=True)
+    assert list(found) == [gate.as_posix()], f"the gate helper was not scanned: {found}"
+    assert found[gate.as_posix()] == 502
 
 
 def test_every_root_is_at_its_declared_file_budget() -> None:

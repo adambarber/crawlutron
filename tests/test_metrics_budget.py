@@ -11,6 +11,7 @@ import pathlib
 import re
 import subprocess
 from collections import defaultdict
+from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -30,7 +31,7 @@ from tests._ratchet import (
 from tests._ratchet import (
     report as ratchet_report,
 )
-from tests.chokepoint_walks import app_trees, nodes_of
+from tests.chokepoint_walks import REPO_ROOT, app_trees, nodes_of, trees_under
 
 # Every collector in this file reads the same app tree, and they are called once per metric per test that
 # reads a number: the budget test reads both `offenders()` and `measurement()`, the tight test reads
@@ -47,6 +48,15 @@ _BUDGETS = {
     "abc size": 1,
     "largest class": 369,
     "block length": 8,
+}
+
+#: The scripts/ tree, outside this gate before #293; its measured baseline,
+#: declared first (value-ratchet rule). ``largest class`` is zero: none declared.
+_SCRIPTS_BUDGETS = {
+    "function length": 2,
+    "abc size": 1,
+    "largest class": 0,
+    "block length": 0,
 }
 
 # The complexity approximation counts every node that introduces a branch, which is the sweep's own
@@ -134,37 +144,57 @@ def _candidates(tree: ast.AST) -> list[tuple[str, int, tuple[int, str]]]:
     return found
 
 
-def offenders(metric: str) -> list[Offender]:
-    """The work list for `metric`, worst first.
+def _build_gate(candidates, trees, budgets):
+    """(offenders, measurement) for one walk + budget pair, written once.
+    The app and scripts halves differ only in tree and table; the work-list
+    filter and worse-class scan are shared, not duplicated per root."""
 
-    Every candidate over its limit for a count; for ``largest class`` the
-    single worst class, only when over budget."""
-    limit = _METRIC_LIMITS.get(metric)
-    budget = _BUDGETS[metric]
-    found: list[Offender] = []
-    for candidate_metric, where, detail in walk(_candidates):
-        if candidate_metric != metric:
-            continue
-        size, label = detail
-        if size > (budget if metric == "largest class" else limit):
-            found.append(Offender(metric, where, label, size))
-    found.sort(key=lambda item: (-item.size, item.where))
-    return found[:1] if metric == "largest class" else found
+    def offenders(metric: str) -> list[Offender]:
+        limit = _METRIC_LIMITS.get(metric)
+        budget = budgets[metric]
+        found: list[Offender] = []
+        for candidate_metric, where, detail in candidates():
+            if candidate_metric != metric:
+                continue
+            size, label = detail
+            if size > (budget if metric == "largest class" else limit):
+                found.append(Offender(metric, where, label, size))
+        found.sort(key=lambda item: (-item.size, item.where))
+        return found[:1] if metric == "largest class" else found
+
+    def measurement(metric: str) -> int:
+        if metric != "largest class":
+            return len(offenders(metric))
+        worst = 0
+        for _path, tree in trees():
+            for node in nodes_of(tree):
+                if isinstance(node, ast.ClassDef):
+                    worst = max(worst, _span(node, node.body))
+        return worst
+
+    return offenders, measurement
 
 
-def measurement(metric: str) -> int:
-    """The number `metric` is compared against.
+offenders, measurement = _build_gate(
+    lambda: walk(_candidates),
+    lambda: app_trees(exclude=_ALL_APP),
+    _BUDGETS,
+)
 
-    A count for three metrics, the worst class's size for ``largest class``; a
-    budget over ``len(offenders(...))`` would demand zero on landing day."""
-    if metric != "largest class":
-        return len(offenders(metric))
-    worst = 0
-    for _path, tree in app_trees(exclude=_ALL_APP):
-        for node in nodes_of(tree):
-            if isinstance(node, ast.ClassDef):
-                worst = max(worst, _span(node, node.body))
-    return worst
+
+def _scripts_candidates() -> Iterator[tuple[str, str, tuple[int, str]]]:
+    """Every candidate the scripts tree offers, as ``(metric, where, detail)``."""
+    for path, tree in trees_under(REPO_ROOT / "scripts"):
+        relative = path.relative_to(REPO_ROOT).as_posix()
+        for metric, line, detail in _candidates(tree):
+            yield metric, f"{relative}:{line}", detail
+
+
+scripts_offenders, scripts_measurement = _build_gate(
+    _scripts_candidates,
+    lambda: trees_under(REPO_ROOT / "scripts"),
+    _SCRIPTS_BUDGETS,
+)
 
 
 def report() -> None:
@@ -191,6 +221,39 @@ test_budget_is_tight = budget_is_tight(_BUDGETS, (measurement, offenders), subje
 test_collection_is_deterministic = collection_is_deterministic(
     _BUDGETS, (measurement, offenders), subject="metrics"
 )
+
+
+_SCRIPTS_REMEDY = (
+    "scripts/ was outside the complexity budget before #293; its baseline is the "
+    "two over-long functions it shipped with. Split them and lower this budget."
+)
+
+
+test_scripts_budget_is_not_exceeded = budget_not_exceeded(
+    _SCRIPTS_BUDGETS,
+    (scripts_measurement, scripts_offenders),
+    subject="scripts metrics",
+    remedy=_SCRIPTS_REMEDY,
+)
+test_scripts_budget_is_tight = budget_is_tight(
+    _SCRIPTS_BUDGETS, (scripts_measurement, scripts_offenders), subject="scripts metrics"
+)
+test_scripts_collection_is_deterministic = collection_is_deterministic(
+    _SCRIPTS_BUDGETS, (scripts_measurement, scripts_offenders), subject="scripts metrics"
+)
+
+
+def test_the_scripts_budget_measurement_reaches_scripts() -> None:
+    """The H1 reach: the complexity budget now sweeps scripts/, which had none.
+    The real tree shows it, and the collector fires on a synthetic over-long fn."""
+    assert scripts_measurement("function length") == 2, (
+        "the scripts function-length budget stopped reaching the real tree"
+    )
+    assert scripts_measurement("abc size") == 1
+    assert scripts_measurement("largest class") == 0
+    overlong_fn = ast.parse("def runner():" + "\n    x = 1\n" * 65)
+    over = [d for m, _w, d in _candidates(overlong_fn) if m == "function length"]
+    assert over and over[0][0] > FUNCTION_LENGTH, "a 65-statement function must be an over-length offender"
 
 
 test_collector_sees_the_whole_tree = collector_sees_the_whole_tree(

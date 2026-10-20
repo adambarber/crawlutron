@@ -206,8 +206,57 @@ APP_PRIVATE_WELDS = Rule(
 APP_RULES = Registry((APP_PRIVATE_WELDS,))
 
 
+_SCRIPTS_DIR = REPO_ROOT / "scripts"
+
+
+def _scripts_private_import_offenders(tree: ast.Module, path: pathlib.Path) -> list[str]:
+    """Every private ``app`` name a ``scripts`` module reaches, unledgered.
+
+    Same rule of thumb as the test tree: a helper reaching into an ``app``
+    private is a weld that needs declaring, and scripts/ was outside this gate."""
+    return [
+        f"{relative_posix(path)}:{lineno}: {key} is a private app name with no ledger row"
+        for key, lineno in sorted(_private_app_names(tree).items())
+        if key not in LEDGER
+    ]
+
+
+SCRIPTS_PRIVATE_IMPORTS = Rule(
+    name="scripts-reach-app-through-public-or-declared-names",
+    find=_scripts_private_import_offenders,
+    summary=(
+        "a scripts/ module reaches an app private name the ledger does not declare; "
+        "give the app module a public door or record the name in the private_import_ledger"
+    ),
+    scope=lambda *, exclude: trees_under(_SCRIPTS_DIR),
+    bite=lambda: (
+        "from app.safety.validation import _undeclared_script_probe\n",
+        "import app.orchestration.engine as engine\n\ncall(engine._private_lift)\n",
+    ),
+    clean=lambda: (
+        # A public app door needs no ledger row.
+        "from app.transport.browser_driver import BrowserDriver\n",
+        # A non-app import is not this rule's business.
+        "import pathlib\n\nroot = pathlib.Path('.')\n",
+    ),
+)
+
+SCRIPTS_RULES = Registry((SCRIPTS_PRIVATE_IMPORTS,))
+
+
 def test_app_has_no_cross_module_private_welds():
     APP_RULES.check_all_clean()
+
+
+def test_scripts_reach_no_undeclared_private_app_name():
+    SCRIPTS_RULES.check_all_clean()
+
+
+def test_scripts_weld_rule_bites():
+    """The H1 reach: a scripts/ private app import fires instead of passing silently.
+    scripts/ was outside every private-import rule; a helper importing an app
+    private went unledgered. The bite proves the rule now sweeps the scripts tree."""
+    SCRIPTS_RULES.check_all_bite()
 
 
 def test_app_weld_rule_bites():
