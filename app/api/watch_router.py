@@ -11,6 +11,7 @@ from typing import NoReturn
 
 from fastapi import APIRouter, Response
 
+from app.api.caller_auth import auth_denials
 from app.api.dependencies import CallerDep, SettingsDep, WatchStoreDep
 from app.api.exceptions import http_error, validation_http_error
 from app.api.watch_sweep import WATCH_SWEEP_INTERVAL_SECONDS
@@ -22,7 +23,7 @@ from app.models.watch_create_request import WatchCreateRequest
 from app.models.watch_list_response import WatchListResponse
 from app.models.watch_state import WatchState
 
-router = APIRouter(prefix="/v1/watches", tags=["Crawler"])
+router = APIRouter(prefix="/v1/watches", tags=["Crawler"], responses=auth_denials())
 
 
 # The minimum registration interval: the sweep cadence is the natural politeness
@@ -47,6 +48,7 @@ def _raise_not_found(watch_id: str) -> NoReturn:
     ),
     status_code=201,
     responses={
+        429: {"model": ErrorResponse, "description": "Caller watch limit exceeded."},
         422: {"model": ErrorResponse, "description": "URL or webhook this deployment will not deliver to."},
     },
 )
@@ -93,6 +95,7 @@ async def create_watch(
     "",
     summary="List registered watches with live status",
     description="Return every registered watch with the state of its most recent check.",
+    responses={},
 )
 async def list_watches(watch_store: WatchStoreDep, caller: CallerDep) -> WatchListResponse:
     return WatchListResponse(watches=await watch_store.alist_for_caller(caller.caller_id))
@@ -105,7 +108,9 @@ async def list_watches(watch_store: WatchStoreDep, caller: CallerDep) -> WatchLi
         "Return the watch's schedule, the validators the next check will send, and "
         "what its last check concluded."
     ),
-    responses={404: {"model": ErrorResponse, "description": "Watch not found."}},
+    responses={
+        404: {"model": ErrorResponse, "description": "Watch not found."},
+    },
 )
 async def get_watch(watch_id: str, watch_store: WatchStoreDep, caller: CallerDep) -> WatchState:
     watch = await watch_store.aget_for_caller(watch_id, caller.caller_id)
@@ -118,7 +123,9 @@ async def get_watch(watch_id: str, watch_store: WatchStoreDep, caller: CallerDep
     "/{watch_id}",
     summary="Delete a watch",
     description="Stop checking the URL. The row and its revalidation history are removed.",
-    responses={404: {"model": ErrorResponse, "description": "Watch not found."}},
+    responses={
+        404: {"model": ErrorResponse, "description": "Watch not found."},
+    },
 )
 async def delete_watch(watch_id: str, watch_store: WatchStoreDep, caller: CallerDep) -> Response:
     if not await watch_store.adelete_for_caller(watch_id, caller.caller_id):

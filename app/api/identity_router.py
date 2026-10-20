@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING
 from fastapi import APIRouter
 
 from app.api._depends_singletons import settings_dep, shutdown_event_dep
-from app.api.caller_auth import admit
+from app.api.caller_auth import admit, auth_denials, quota_denials
 from app.api.dependencies import CallerDep, TrackingDep
 from app.api.main_helpers import request_gate
 from app.api.map_endpoint import map_site
@@ -30,7 +30,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(tags=["Crawler"])
+router = APIRouter(tags=["Crawler"], responses=auth_denials())
 
 
 @router.post(
@@ -43,7 +43,10 @@ router = APIRouter(tags=["Crawler"])
         "the de-duplicated frontier but does not recursively enqueue it; callers own recursion, "
         "dedupe, persistence, and host-policy decisions."
     ),
-    responses={400: {"model": ErrorResponse, "description": "Invalid map request."}},
+    responses={
+        **quota_denials(),
+        400: {"model": ErrorResponse, "description": "Invalid map request."},
+    },
     response_model=SiteMapResponse,
 )
 async def map(
@@ -69,7 +72,10 @@ async def map(
     "/v1/render",
     summary="Render pages with the browser worker",
     description="Browser-render endpoint. Prefer POST /v1/crawl for policy-driven universal crawling.",
-    responses={400: {"model": ErrorResponse, "description": "Invalid render request."}},
+    responses={
+        **quota_denials(),
+        400: {"model": ErrorResponse, "description": "Invalid render request."},
+    },
     response_model=UnifiedCrawlResponse,
 )
 async def render(
@@ -98,6 +104,7 @@ async def render(
         "public HTTP(S) URLs; loopback/private targets are dropped."
     ),
     responses={
+        **quota_denials(),
         200: {"model": SearchResponse, "description": "Search results (JSON)."},
         422: {"model": ErrorResponse, "description": "Invalid search request."},
         502: {"model": ErrorResponse, "description": "The search provider returned an error."},

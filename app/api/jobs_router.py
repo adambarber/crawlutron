@@ -13,7 +13,14 @@ from fastapi import APIRouter, Query, Request
 from app.admission.payload_helpers import checked_payload_urls
 from app.admission.policy import read_policy
 from app.api import job_runner
-from app.api.caller_auth import Tracking, admit, effective_cookie_namespace, resolve_page_limit
+from app.api.caller_auth import (
+    Tracking,
+    admit,
+    auth_denials,
+    effective_cookie_namespace,
+    quota_denials,
+    resolve_page_limit,
+)
 from app.api.dependencies import CallerDep, JobStoreDep, SettingsDep, ShutdownEventDep
 from app.api.exceptions import http_error, validation_http_error
 from app.api.main_helpers import build_job_status
@@ -28,7 +35,7 @@ from app.models.job_status_response import JobStatusResponse
 from app.storage.job_store import JobStatusView
 from app.vocabulary.limits import DEFAULT_JOB_LIST_LIMIT, MAX_JOB_LIST_LIMIT
 
-router = APIRouter(prefix="/v1/jobs", tags=["Crawler"])
+router = APIRouter(prefix="/v1/jobs", tags=["Crawler"], responses=auth_denials())
 
 
 # ``NoReturn``, not ``None``: both of these always raise, and saying so lets the
@@ -52,6 +59,7 @@ def _raise_conflict(message: str) -> NoReturn:
         "Control the job via POST /v1/jobs/{job_id}/control."
     ),
     responses={
+        **quota_denials(),
         422: {"model": ErrorResponse, "description": "Invalid job request."},
     },
 )
@@ -116,7 +124,9 @@ async def create_job(
         "skips that many rows. ``total`` reports the caller's full row count across "
         "every page."
     ),
-    responses={422: {"model": ErrorResponse, "description": "Invalid limit/offset."}},
+    responses={
+        422: {"model": ErrorResponse, "description": "Invalid limit/offset."},
+    },
 )
 async def list_jobs(
     job_store: JobStoreDep,
@@ -139,7 +149,9 @@ async def list_jobs(
         "Return current status, frontier/visited/result counts, stats, and the "
         "persisted cap_truncated signal. Durable URL/depth entries remain internal."
     ),
-    responses={404: {"model": ErrorResponse, "description": "Job not found."}},
+    responses={
+        404: {"model": ErrorResponse, "description": "Job not found."},
+    },
 )
 async def get_job(job_id: str, job_store: JobStoreDep, caller: CallerDep) -> JobStatusResponse:
     row = await job_store.astatus_for_caller(job_id, caller.caller_id)
@@ -201,7 +213,9 @@ async def control_job(
     summary="Cancel (if running) and delete a crawl job",
     description="Permanently remove a crawl job and its data. Deleting a running job cancels its runner task "
     "first.",
-    responses={404: {"model": ErrorResponse, "description": "Job not found."}},
+    responses={
+        404: {"model": ErrorResponse, "description": "Job not found."},
+    },
 )
 async def delete_job(job_id: str, job_store: JobStoreDep, caller: CallerDep) -> dict[str, str]:
     if not await job_store.aexists_for_caller(job_id, caller.caller_id):

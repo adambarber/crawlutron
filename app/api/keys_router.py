@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
+from app.api.caller_auth import auth_denials
 from app.api.dependencies import CallerKeyStoreDep, KeysCallerDep
 from app.api.exceptions import http_error
 from app.models.error_response import ErrorResponse
@@ -16,7 +17,7 @@ from app.models.key_create_request import KeyCreateRequest
 from app.models.key_summary import KeySummary
 from app.models.revoked_key import RevokedKey
 
-router = APIRouter(prefix="/v1/keys", tags=["Crawler"])
+router = APIRouter(prefix="/v1/keys", tags=["Crawler"], responses=auth_denials())
 
 
 @router.post(
@@ -28,7 +29,9 @@ router = APIRouter(prefix="/v1/keys", tags=["Crawler"])
         "Mint a key a caller presents as X-API-Key. Jobs and results created "
         "under it are readable only under it; the secret is shown once here."
     ),
-    responses={422: {"model": ErrorResponse, "description": "Invalid key request."}},
+    responses={
+        422: {"model": ErrorResponse, "description": "Invalid key request."},
+    },
 )
 async def issue_key(
     payload: KeyCreateRequest,
@@ -45,6 +48,7 @@ async def issue_key(
     response_model=list[KeySummary],
     summary="List live caller keys",
     description="Every live key's public row; hashes and secrets are never listed.",
+    responses={},
 )
 async def list_keys(
     key_store: CallerKeyStoreDep,
@@ -58,7 +62,9 @@ async def list_keys(
     response_model=RevokedKey,
     summary="Revoke a caller API key",
     description="Revoke a key; its rows stay but no new request can crawl as it.",
-    responses={404: {"model": ErrorResponse, "description": "Key not found."}},
+    responses={
+        404: {"model": ErrorResponse, "description": "Key not found."},
+    },
 )
 async def revoke_key(
     key_id: str,

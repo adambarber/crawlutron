@@ -9,6 +9,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Body, Depends, Request
 from fastapi.responses import Response
 
+from app.api.caller_auth import auth_denials, quota_denials
 from app.api.crawl_endpoint import crawl as crawl_handler
 from app.api.crawl_endpoint import get_crawl_result as get_crawl_result_handler
 from app.api.crawl_endpoint import get_crawl_trace as get_crawl_trace_handler
@@ -26,7 +27,15 @@ from app.models.trace_response import TraceResponse
 from app.models.unified_crawl_response import UnifiedCrawlResponse
 from app.vocabulary.limits import LARGE_CRAWL_GUIDANCE
 
-router = APIRouter(tags=["Crawler"])
+router = APIRouter(tags=["Crawler"], responses=auth_denials())
+
+
+#: The two replay reads (result and trace) share one response surface: the async-202
+#: and gone-404 states both projections report. The 401 comes from the router.
+_REPLAY_RESPONSES: dict[int | str, dict[str, object]] = {
+    202: {"model": ErrorResponse, "description": "The crawl is still running."},
+    404: {"model": ErrorResponse, "description": "The stored crawl record is gone."},
+}
 
 
 @router.post(
@@ -72,6 +81,7 @@ router = APIRouter(tags=["Crawler"])
         "CAPTCHA solving, proxy or identity rotation, credential injection, or bypass behavior."
     ),
     responses={
+        **quota_denials(),
         200: {"model": UnifiedCrawlResponse, "description": "Successful crawl results (JSON output format)."},
         202: {
             "model": ErrorResponse,
@@ -144,6 +154,7 @@ async def crawl(
         "Results are retained for CRAWLUTRON_RESULT_TTL_SECONDS "
         "(default 1h, capped at CRAWLUTRON_RESULT_MAX_ENTRIES entries)."
     ),
+    responses=_REPLAY_RESPONSES,
 )
 async def get_crawl_result(
     request_id: str,
@@ -169,6 +180,7 @@ async def get_crawl_result(
         "response /v1/crawl/{request_id} replays, so it reports 202 while the crawl "
         "is still running and 404 once the record is gone."
     ),
+    responses=_REPLAY_RESPONSES,
 )
 async def get_crawl_trace(
     request_id: str,

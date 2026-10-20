@@ -11,13 +11,14 @@ import secrets
 from collections.abc import AsyncIterator, Mapping
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, NoReturn
+from typing import TYPE_CHECKING, NoReturn, TypedDict
 
 from fastapi import Request
 
 from app.api.exceptions import http_error
 from app.models.caller_identity import CallerIdentity
 from app.models.caller_key import CallerKey
+from app.models.error_response import ErrorResponse
 from app.models.json_value import JsonValue
 from app.transport.request_profile import cookie_namespace_for
 
@@ -73,6 +74,39 @@ def presented_key(request: Request) -> str | None:
 def _raise_invalid_api_key() -> NoReturn:
     """Shared 401 for any failed /v1/keys credential."""
     raise http_error(401, "invalid_api_key", "Unknown or revoked API key")
+
+
+#: The refusal declarations an auth-bearing route carries. Both are raised in
+#: dependency body, so FastAPI cannot infer them from the handler signature.
+class _ResponseSpec(TypedDict):
+    """FastAPI ``responses`` entry: the wire error model plus its description."""
+
+    model: type[ErrorResponse]
+    description: str
+
+
+#: Every auth-bearing route refuses a wrong or revoked key.
+AUTH_DENIAL: dict[int | str, _ResponseSpec] = {
+    401: {"model": ErrorResponse, "description": "Unknown or revoked API key."},
+}
+
+#: Only a route that spends quota can be told the quota is spent.
+QUOTA_DENIAL: dict[int | str, _ResponseSpec] = {
+    429: {"model": ErrorResponse, "description": "Caller page or concurrency quota exceeded."},
+}
+
+
+def auth_denials() -> dict[int | str, dict[str, object]]:
+    """The 401 declaration in the response-map shape FastAPI reads.
+
+    Declared on the router, so every route it guards documents the refusal.
+    """
+    return {k: dict(v) for k, v in AUTH_DENIAL.items()}
+
+
+def quota_denials() -> dict[int | str, dict[str, object]]:
+    """The 429 declaration, for the routes that spend quota."""
+    return {k: dict(v) for k, v in QUOTA_DENIAL.items()}
 
 
 def _key_admin_token(request: Request) -> str:
@@ -232,9 +266,12 @@ async def admit(
 
 
 __all__ = [
+    "AUTH_DENIAL",
+    "QUOTA_DENIAL",
     "Tracking",
     "admit",
     "anonymous_caller",
+    "auth_denials",
     "check_concurrency_quota",
     "check_page_quota",
     "effective_cookie_namespace",
@@ -243,5 +280,6 @@ __all__ = [
     "identity_for_key",
     "is_operator",
     "presented_key",
+    "quota_denials",
     "resolve_page_limit",
 ]
