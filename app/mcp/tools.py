@@ -83,7 +83,12 @@ class ToolSpec:
         }
 
 
-def _http_exception_message(error: HTTPException) -> str:
+def http_exception_message(error: HTTPException) -> str:
+    """Render an ``HTTPException``'s detail as the human message an MCP caller sees.
+
+    Conforming detail (a ``dict`` with a ``message`` key) unwraps to that message;
+    a plain detail is its string; neither falls back to the exception itself.
+    """
     detail = error.detail
     if isinstance(detail, dict):
         return str(detail.get("message") or detail)
@@ -100,7 +105,7 @@ def validation_message(error: Exception) -> str:
 
 
 def _tool_error(error: HTTPException | ValueError) -> ToolResult:
-    message = _http_exception_message(error) if isinstance(error, HTTPException) else str(error)
+    message = http_exception_message(error) if isinstance(error, HTTPException) else str(error)
     return ToolResult(text=message, is_error=True)
 
 

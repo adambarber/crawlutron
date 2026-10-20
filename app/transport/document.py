@@ -81,7 +81,7 @@ async def _afetch_document_bytes(url: NormalizedUrl, pin: pinned_transport.PinRu
     from app.safety.bounded_io import read_capped_async
     from app.transport import http_client_pool, pinned_transport, pooled_clients
 
-    await pooled_clients._drain_pending_client_closes()
+    await pooled_clients.drain_pending_client_closes()
     client = http_client_pool.get_async_http_client()
     timeout = Timeouts.defaults().as_httpx()
     async for chain, pinned_url, hop_headers in pinned_transport.apinned_hops(url, {}, pin=pin):

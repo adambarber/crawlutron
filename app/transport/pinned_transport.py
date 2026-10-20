@@ -10,14 +10,12 @@ import asyncio
 import concurrent.futures
 import functools
 import socket
-import time
 from collections.abc import AsyncIterator, Awaitable, Callable
 from typing import Any, Protocol
 
 import httpx
 
 from app.models.host_policy import allow_private_targets
-from app.models.http_fetch_result import HttpFetchResult
 from app.models.normalized_url import NormalizedUrl
 from app.safety.bounded_ttl import BoundedTTLCache
 from app.safety.validation import is_public_ip_value
@@ -114,22 +112,6 @@ def declared_length_exceeds(header_value: str | None, limit: int) -> bool:
     except ValueError:
         return False
     return declared > limit
-
-
-def _http_413(url: NormalizedUrl, final_url: NormalizedUrl, started: float) -> HttpFetchResult:
-    """Standard 413 (payload too large) result for size/cap violations.
-
-    Takes the logical ``final_url``, never ``current_url``: a pinned plain-HTTP
-    response url is the resolved-IP literal, which leaks topology and mis-keys cookies by IP.
-    """
-    return HttpFetchResult(
-        url=url,
-        final_url=final_url,
-        status_code=413,
-        headers={"content-type": "application/octet-stream"},
-        body=b"",
-        elapsed_ms=int((time.monotonic() - started) * 1000),
-    )
 
 
 def build_pinned_request(url: NormalizedUrl, headers: dict[str, str]) -> tuple[str, dict[str, str]]:

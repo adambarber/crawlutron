@@ -12,9 +12,9 @@ from typing import TYPE_CHECKING, Any
 import curl_cffi.requests as cffi_requests
 
 from app.transport.pooled_clients import (
-    _bind_to_running_loop,
-    _discard_if_unowned_loop,
-    _LoopBoundPooledClient,
+    LoopBoundPooledClient,
+    bind_to_running_loop,
+    discard_if_unowned_loop,
 )
 
 if TYPE_CHECKING:
@@ -37,10 +37,10 @@ def _build_cffi_session(settings: CrawlerSettings | None = None) -> Any:
     session: cffi_requests.AsyncSession = cffi_requests.AsyncSession(
         impersonate=CFFI_IMPERSONATE_TARGET, discard_cookies=True
     )
-    return _bind_to_running_loop(session)
+    return bind_to_running_loop(session)
 
 
-_CFFI_SESSION_SINGLETON = _LoopBoundPooledClient(
+_CFFI_SESSION_SINGLETON = LoopBoundPooledClient(
     slot="_DEFAULT_CFFI_SESSION",
     build=_build_cffi_session,
     # AsyncSession publishes no is_closed flag and nothing else closes it in
@@ -81,9 +81,9 @@ def owns_process_state() -> bool:
 
 def close_queued_session() -> None:
     """Release the pooled session, closing it only when no loop owns it."""
-    _discard_if_unowned_loop(close_cffi_session, "_DEFAULT_CFFI_SESSION", globals())
+    discard_if_unowned_loop(close_cffi_session, "_DEFAULT_CFFI_SESSION", globals())
 
 
-def session_singleton() -> _LoopBoundPooledClient:
+def session_singleton() -> LoopBoundPooledClient:
     """The pooled descriptor, for builder substitution at the shared seam."""
     return _CFFI_SESSION_SINGLETON

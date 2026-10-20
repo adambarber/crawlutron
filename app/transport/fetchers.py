@@ -49,7 +49,7 @@ async def default_http_fetcher(
         )
         if attempted is not None:
             return attempted
-    await pooled_clients._drain_pending_client_closes()
+    await pooled_clients.drain_pending_client_closes()
     client = http_client_pool.get_async_http_client()
     started = time.monotonic()
     timeout = Timeouts.for_request(timeout_seconds).as_httpx()
@@ -60,7 +60,7 @@ async def default_http_fetcher(
         ) as response:
             content_length = response.headers.get("content-length")
             if pinned_transport.declared_length_exceeds(content_length, max_content_length):
-                return pinned_transport._http_413(url, chain.url, started)
+                return http_413(url, chain.url, started)
             status_code = response.status_code
             if chain.advance(response):
                 continue
@@ -70,7 +70,7 @@ async def default_http_fetcher(
             async for chunk in response.aiter_raw():
                 raw.extend(chunk)
                 if len(raw) > max_content_length:
-                    return pinned_transport._http_413(url, chain.url, started)
+                    return http_413(url, chain.url, started)
             final_url = chain.url
             response_headers = response.headers
         elapsed_ms = int((time.monotonic() - started) * 1000)
@@ -82,7 +82,7 @@ async def default_http_fetcher(
             response_headers=response_headers,
             max_content_length=max_content_length,
             elapsed_ms=elapsed_ms,
-            too_large=functools.partial(pinned_transport._http_413, url, final_url, started),
+            too_large=functools.partial(http_413, url, final_url, started),
         )
     raise AssertionError("apinned_hops raises on a body that neither returned nor advanced")
 
@@ -139,7 +139,7 @@ async def cffi_fetch(
     """
     # Same release point as the http fetcher: any pooled client superseded by a
     # loop change (either kind) is closed here, on this live loop.
-    await pooled_clients._drain_pending_client_closes()
+    await pooled_clients.drain_pending_client_closes()
     # One shared session per event loop. The class is AsyncSession
     # (curl_cffi>=0.7): AsyncClient does not exist, and naming it breaks every fetch.
     client = http_client_pool.get_cffi_session()
@@ -238,6 +238,22 @@ def impersonating_fetcher() -> HttpFetcher:
     here, next to the function it binds, as the one place that decision is made.
     """
     return functools.partial(default_http_fetcher, impersonate=True)
+
+
+def http_413(url: NormalizedUrl, final_url: NormalizedUrl, started: float) -> HttpFetchResult:
+    """Standard 413 (payload too large) result for the httpx size/cap violations.
+
+    Takes the logical ``final_url``, never ``current_url``: a pinned plain-HTTP
+    response url is the resolved-IP literal, which leaks topology and mis-keys cookies by IP.
+    """
+    return HttpFetchResult(
+        url=url,
+        final_url=final_url,
+        status_code=413,
+        headers={"content-type": "application/octet-stream"},
+        body=b"",
+        elapsed_ms=int((time.monotonic() - started) * 1000),
+    )
 
 
 def _cffi_too_large_result(

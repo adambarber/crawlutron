@@ -44,7 +44,7 @@ def _build_async_client(settings: CrawlerSettings | None = None) -> httpx.AsyncC
         # _GLOBAL_COOKIE_JAR chokepoint.
         cookies=_NoStoreCookieJar(),
     )
-    return _bind_to_running_loop(client)
+    return bind_to_running_loop(client)
 
 
 # Superseded loop-bound pooled clients awaiting a loop to close on -- one bounded
@@ -96,7 +96,7 @@ def _release_dropped_client(stale_to_release: Any, *, is_closed: Callable[[Any],
     )
 
 
-async def _drain_pending_client_closes() -> None:
+async def drain_pending_client_closes() -> None:
     """Close any superseded pooled clients on the current (live) loop.
 
     Schedule fires on the *dying* loop, where the task is cancelled before
@@ -142,7 +142,7 @@ def _schedule_client_close(client, *, is_closed: Callable[[Any], bool]) -> None:
     task.add_done_callback(_INFLIGHT_CLIENT_CLOSES.discard)
 
 
-class _LoopBoundPooledClient:
+class LoopBoundPooledClient:
     """One pooled client per running loop, released on loop change.
     :meth:`current` reads the module global; :meth:`_supersede` and :meth:`_rebuild`
     implement the three-step lifecycle, and ``is_closed`` is the kind's own close predicate.
@@ -228,7 +228,7 @@ class _LoopBoundPooledClient:
 
     async def shutdown(self) -> None:
         """Release the pooled client, and anything still queued, on teardown."""
-        await _drain_pending_client_closes()
+        await drain_pending_client_closes()
         current = self.current
         self._set_current(None)
         if current is not None:
@@ -236,7 +236,7 @@ class _LoopBoundPooledClient:
 
 
 # The two pooled clients, described once and managed by the code above.
-_HTTP_CLIENT_SINGLETON = _LoopBoundPooledClient(
+_HTTP_CLIENT_SINGLETON = LoopBoundPooledClient(
     slot="_DEFAULT_HTTP_CLIENT",
     build=_build_async_client,
     is_closed=lambda client: bool(client.is_closed),
@@ -284,7 +284,7 @@ class _LoopBound(Protocol):
     _bound_loop: asyncio.AbstractEventLoop | None
 
 
-def _bind_to_running_loop[T](client: T) -> T:
+def bind_to_running_loop[T](client: T) -> T:
     """Stamp a freshly built pooled client with the loop it was built on -- the
     single reader-safe writer of ``_bound_loop``. None is an answer, not a failure:
     a client built outside a loop has none, so the next ``get`` rebuilds rather than hand out an unusable one.
@@ -318,7 +318,7 @@ async def _safe_aclose(client):
 T = TypeVar("T")
 
 
-def _discard_if_unowned_loop(close: Callable[[], Any], slot: str, namespace: dict[str, Any]) -> None:
+def discard_if_unowned_loop(close: Callable[[], Any], slot: str, namespace: dict[str, Any]) -> None:
     """Release ``slot``'s object, closing it only when no loop owns it.
 
     ``namespace`` is the module holding the pooled object, so one helper serves
@@ -343,12 +343,12 @@ def reset_process_state() -> None:
     queue holding a released client outlives its loop, so resetting one without the rest leaves a wrong state.
     """
     if _DEFAULT_HTTP_CLIENT is not None:
-        _discard_if_unowned_loop(close_async_http_client, "_DEFAULT_HTTP_CLIENT", globals())
+        discard_if_unowned_loop(close_async_http_client, "_DEFAULT_HTTP_CLIENT", globals())
     with _PENDING_CLIENT_CLOSE_LOCK:
         _PENDING_CLIENT_CLOSE.clear()
 
 
-def http_singleton() -> _LoopBoundPooledClient:
+def http_singleton() -> LoopBoundPooledClient:
     """The pooled httpx descriptor, for builder substitution at the shared seam."""
     return _HTTP_CLIENT_SINGLETON
 

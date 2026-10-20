@@ -16,7 +16,7 @@ from app.api.dependencies import get_settings, get_shutdown_event
 from app.mcp.constants import INVALID_API_KEY, INVALID_REQUEST, PARSE_ERROR
 from app.mcp.protocol import error_response
 from app.mcp.server import handle_mcp_request
-from app.mcp.tools import _http_exception_message
+from app.mcp.tools import http_exception_message
 from app.models.caller_identity import CallerIdentity
 
 router = APIRouter(tags=["MCP"])
@@ -47,7 +47,7 @@ async def mcp_endpoint(
     except HTTPException as error:
         return JSONResponse(
             status_code=401,
-            content=error_response(None, INVALID_API_KEY, _http_exception_message(error)),
+            content=error_response(None, INVALID_API_KEY, http_exception_message(error)),
         )
     try:
         body = await request.json()
