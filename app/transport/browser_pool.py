@@ -135,6 +135,10 @@ class BrowserPool:
             self._initialized = False
             logger.info("browser_pool_closed", extra={"available": self._available.qsize()})
 
+    def __len__(self) -> int:
+        """How many renderers the pool holds (before init, none)."""
+        return len(self._renderers)
+
     @property
     def browser_strategy(self) -> CrawlStrategyName:
         """The ``CrawlStrategyName`` label for this pool's homogeneous renders.
