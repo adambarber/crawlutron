@@ -9,7 +9,6 @@ import threading
 import time
 from contextlib import contextmanager
 
-from app.storage import sqlite_store
 from app.storage.sqlite_store import configure_store_connection
 
 
@@ -78,31 +77,27 @@ def _peer_locked_store(tmp_path, name: str, *, already_wal: bool = False, releas
         peer.release()
 
 
-def test_setup_outlasts_a_peer_beyond_the_busy_timeout(tmp_path, monkeypatch):
+def test_setup_outlasts_a_peer_beyond_the_busy_timeout(tmp_path):
     """Proves the retry loop, not `busy_timeout`, is what carries the wait.
 
     The timeout is cut to 50ms so a 0.6s peer cannot be outwaited by it -- it
     never fired for this statement, so success can only come from the retry.
     """
-    monkeypatch.setattr(sqlite_store, "_BUSY_TIMEOUT_MS", 50)
-
     with _peer_locked_store(tmp_path, "retry", release_after=0.6) as conn:
-        configure_store_connection(conn)
+        configure_store_connection(conn, busy_timeout_ms=50)
         assert conn.execute("PRAGMA journal_mode").fetchone()[0].lower() == "wal"
 
 
-def test_setup_refuses_a_peer_that_never_releases(tmp_path, monkeypatch):
+def test_setup_refuses_a_peer_that_never_releases(tmp_path):
     """Bounded, not forever: a hard lock must not become an unkillable hang.
 
     The bound is the caller's, asserted tightly; a loose "under ten seconds"
     once let a budget checked only between attempts pass.
     """
-    monkeypatch.setattr(sqlite_store, "_WAL_RETRY_SECONDS", 0.5)
-
     with _peer_locked_store(tmp_path, "stuck") as conn:
         started = time.monotonic()
         try:
-            configure_store_connection(conn)
+            configure_store_connection(conn, wal_retry_seconds=0.5)
         except sqlite3.OperationalError:
             waited = time.monotonic() - started
             assert waited < 0.75, f"waited {waited:.2f}s against a 0.5s budget"

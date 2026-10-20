@@ -22,6 +22,9 @@ _BUSY_TIMEOUT_MS = 5000
 _WAL_RETRY_SECONDS = 15.0
 _WAL_RETRY_BACKOFF_SECONDS = 0.05
 
+#: The two bounds become ``configure_store_connection`` keyword arguments; the
+#: module constants only hold the shipped defaults.
+
 
 @dataclass(frozen=True)
 class ColumnInfo:
@@ -50,23 +53,36 @@ def _set_busy_timeout(conn: sqlite3.Connection, milliseconds: int) -> None:
     conn.execute(f"PRAGMA busy_timeout={_validated_identifier(str(milliseconds))}")
 
 
-def configure_store_connection(conn: sqlite3.Connection) -> sqlite3.Connection:
-    """Apply every connection-scoped service SQLite PRAGMA in this one function."""
-    _set_busy_timeout(conn, _BUSY_TIMEOUT_MS)
-    _ensure_wal(conn)
+def configure_store_connection(
+    conn: sqlite3.Connection,
+    *,
+    busy_timeout_ms: int = _BUSY_TIMEOUT_MS,
+    wal_retry_seconds: float = _WAL_RETRY_SECONDS,
+) -> sqlite3.Connection:
+    """Apply every connection-scoped service SQLite PRAGMA in this one function.
+
+    ``busy_timeout_ms`` and ``wal_retry_seconds`` bound the WAL-conversion
+    retry a caller tunes for a contended or already-configured store."""
+    _set_busy_timeout(conn, busy_timeout_ms)
+    _ensure_wal(conn, busy_timeout_ms=busy_timeout_ms, wal_retry_seconds=wal_retry_seconds)
     return conn
 
 
-def _ensure_wal(conn: sqlite3.Connection) -> None:
+def _ensure_wal(
+    conn: sqlite3.Connection,
+    *,
+    busy_timeout_ms: int,
+    wal_retry_seconds: float,
+) -> None:
     """Put the database in WAL, retrying while a sibling process holds the file.
     Each attempt runs under its own timeout OR the deadline's remainder --
     whichever is smaller -- and the connection's configured timeout is restored on the way out.
     """
-    deadline = time.monotonic() + _WAL_RETRY_SECONDS
+    deadline = time.monotonic() + wal_retry_seconds
     try:
         while True:
             remaining_ms = int((deadline - time.monotonic()) * 1000)
-            _set_busy_timeout(conn, max(1, min(_BUSY_TIMEOUT_MS, remaining_ms)))
+            _set_busy_timeout(conn, max(1, min(busy_timeout_ms, remaining_ms)))
             try:
                 conn.execute("PRAGMA journal_mode=WAL")
                 return
@@ -75,7 +91,7 @@ def _ensure_wal(conn: sqlite3.Connection) -> None:
                     raise
                 time.sleep(_WAL_RETRY_BACKOFF_SECONDS)
     finally:
-        _set_busy_timeout(conn, _BUSY_TIMEOUT_MS)
+        _set_busy_timeout(conn, busy_timeout_ms)
 
 
 def _open_raw_store_connection(
