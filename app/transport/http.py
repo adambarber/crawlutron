@@ -11,12 +11,9 @@ from app.models.crawl_diagnostics import CrawlDiagnostics
 from app.models.crawl_result import EngineCrawlResult
 from app.models.crawl_strategy_attempt import CrawlStrategyAttempt
 from app.models.fetch_envelope import RetryDiagnostics
+from app.models.result_factory import binary_no_text_result, build_engine_result
 from app.models.taxonomy import Classification
-from app.orchestration.results import (
-    binary_no_text_result,
-    build_engine_result,
-    engine_result_from_exception,
-)
+from app.orchestration.results import engine_result_from_exception
 from app.transport import body_decode, fetch_policy
 from app.transport.cache import HttpCache
 from app.transport.content_cache import ContentCache

@@ -44,7 +44,9 @@ BLOCK_LENGTH = 40
 # What the tree is currently allowed to hold: offender counts for three metrics, and the size of the worst
 # class for the fourth.
 _BUDGETS = {
-    "function length": 22,
+    # LOWERED 22 -> 21 when #160 moved the pure result constructors out of
+    # app/orchestration/results.py, shrinking its longest function.
+    "function length": 21,
     "abc size": 1,
     "largest class": 358,
     "block length": 8,

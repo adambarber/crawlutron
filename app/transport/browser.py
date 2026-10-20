@@ -18,11 +18,8 @@ from app.config.settings import CrawlerSettings
 from app.extraction.classify import classify_page
 from app.models.crawl_result import CrawlResult
 from app.models.normalized_url import NormalizedUrl
+from app.models.result_factory import terminal_attempt, terminal_crawl_result
 from app.orchestration.classification import classify_error_code
-from app.orchestration.results import (
-    terminal_attempt,
-    terminal_crawl_result,
-)
 from app.transport.browser_cookies import (
     BROWSER_COOKIES_MAX,
     get_browser_cookies_for,

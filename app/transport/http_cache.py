@@ -9,8 +9,8 @@ from app.admission.render_options import policy_wants_html
 from app.models.crawl_diagnostics import CrawlDiagnostics
 from app.models.crawl_result import EngineCrawlResult
 from app.models.crawl_strategy_attempt import CrawlStrategyAttempt
+from app.models.result_factory import build_engine_result
 from app.models.taxonomy import Classification
-from app.orchestration.results import build_engine_result
 from app.transport import content_cache_key, fetch_policy, request_profile
 from app.transport.cache_control import forbids_store, requires_revalidation
 from app.transport.http_response import (

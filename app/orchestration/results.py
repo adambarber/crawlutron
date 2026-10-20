@@ -7,12 +7,17 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, TypeVar
+from typing import TypeVar
 
 from app.models.crawl_diagnostics import CrawlDiagnostics
 from app.models.crawl_result import CrawlResult, EngineCrawlResult
 from app.models.crawl_strategy_attempt import CrawlStrategyAttempt
 from app.models.normalized_url import NormalizedUrl
+from app.models.result_factory import (
+    build_engine_result,
+    terminal_attempt,
+    terminal_crawl_result,
+)
 from app.models.taxonomy import Classification, CrawlError, CrawlStrategyName
 from app.orchestration.classification import classify_and_log
 from app.vocabulary.taxonomy import ResultStatus
@@ -22,8 +27,6 @@ _JobT = TypeVar("_JobT")
 
 __all__ = [
     "TerminalResult",
-    "binary_no_text_result",
-    "build_engine_result",
     "engine_result_from_exception",
     "failed_engine_result",
     "failed_result_for",
@@ -31,8 +34,6 @@ __all__ = [
     "terminal_engine_result",
     "crawl_result_from_engine_result",
     "crawl_result_from_exception",
-    "terminal_attempt",
-    "terminal_crawl_result",
 ]
 
 
@@ -116,70 +117,6 @@ def failed_result_for[JobT](
     )
 
 
-def build_engine_result(
-    *,
-    original_url: str,
-    normalized_url: NormalizedUrl,
-    final_url: NormalizedUrl | None,
-    attempt: CrawlStrategyAttempt,
-    http_status: int | None,
-    selected_strategy: CrawlStrategyName | None = None,
-    headers: dict[str, str] | None = None,
-    content_type: str | None = None,
-    html: str | None = None,
-    text: str | None = None,
-    markdown: str | None = None,
-    extraction_method: str | None = None,
-    quality_score: float = 0.0,
-    classification_evidence: list | None = None,
-    diagnostics: CrawlDiagnostics | None = None,
-    discovered_link_count: int = 0,
-    discovered_links_truncated: bool = False,
-    discovered_links: list | None = None,
-    next_page_url: NormalizedUrl | None = None,
-    validators: dict[str, str] | None = None,
-    llm_metadata: dict[str, Any] | None = None,
-) -> EngineCrawlResult:
-    """Construct an EngineCrawlResult from a pre-built attempt.
-    Status, classification and error are DERIVED from the attempt, not accepted
-    as parameters -- a funnel that took them too held a second spelling nothing checked.
-    """
-    if headers is None:
-        headers = {}
-    if classification_evidence is None:
-        classification_evidence = []
-    if diagnostics is None:
-        diagnostics = {}
-    if discovered_links is None:
-        discovered_links = []
-    return EngineCrawlResult(
-        original_url=original_url,
-        normalized_url=normalized_url,
-        final_url=final_url,
-        status=attempt.status,
-        classification=attempt.classification,
-        selected_strategy=selected_strategy,
-        attempted_strategies=[attempt],
-        http_status=http_status,
-        headers=headers,
-        content_type=content_type,
-        html=html,
-        text=text,
-        markdown=markdown,
-        extraction_method=extraction_method,
-        quality_score=quality_score,
-        classification_evidence=classification_evidence,
-        diagnostics=diagnostics,
-        discovered_link_count=discovered_link_count,
-        discovered_links_truncated=discovered_links_truncated,
-        discovered_links=discovered_links,
-        error=attempt.error,
-        next_page_url=next_page_url,
-        validators=validators or {},
-        llm_metadata=llm_metadata,
-    )
-
-
 @dataclass(frozen=True)
 class TerminalResult:
     """The per-attempt fields every terminal result carries, bound as one value.
@@ -240,97 +177,6 @@ def skipped_engine_result(result: TerminalResult) -> EngineCrawlResult:
     # A skipped page never carries a final URL or an HTTP status, and the
     # shared value defaults both to None, so the forward is total.
     return terminal_engine_result(result, status="skipped")
-
-
-def binary_no_text_result(
-    *,
-    original_url: str,
-    normalized_url: NormalizedUrl,
-    final_url: NormalizedUrl | None,
-    strategy: CrawlStrategyName | None,
-    http_status: int | None,
-    headers: dict[str, str],
-    content_type: str | None,
-    elapsed_ms: int,
-) -> EngineCrawlResult:
-    """Construct a binary/no-text EngineCrawlResult."""
-    attempt = CrawlStrategyAttempt(
-        strategy=strategy,
-        status="failed",
-        classification="binary_no_text",
-        http_status=http_status,
-        content_type=content_type,
-        elapsed_ms=elapsed_ms,
-        error="binary_no_text",
-    )
-    return build_engine_result(
-        original_url=original_url,
-        normalized_url=normalized_url,
-        final_url=final_url,
-        attempt=attempt,
-        http_status=http_status,
-        headers=headers,
-        content_type=content_type,
-        extraction_method="binary_no_text",
-        diagnostics=CrawlDiagnostics(),
-    )
-
-
-def terminal_crawl_result(
-    *,
-    url: NormalizedUrl,
-    status: ResultStatus,
-    classification: Classification,
-    attempts: int,
-    elapsed_ms: int,
-    domain: str,
-    error: CrawlError | None,
-    metadata: dict[str, Any] | None = None,
-    selected_strategy: CrawlStrategyName | None = None,
-) -> CrawlResult:
-    """Construct a terminal ``CrawlResult`` (no payload) -- the single site where
-    ``error`` must be a stable ``classify_error_code``, never raw exception text
-    that once reached the body. ``selected_strategy`` is the mode, or None.
-    """
-    return CrawlResult(
-        url=url,
-        attempt=terminal_attempt(
-            strategy=selected_strategy,
-            status=status,
-            classification=classification,
-            elapsed_ms=elapsed_ms,
-            error=error,
-        ),
-        final_url=None,
-        html=None,
-        text=None,
-        attempts=attempts,
-        domain=domain,
-        metadata=metadata or {},
-    )
-
-
-def terminal_attempt(
-    *,
-    strategy: CrawlStrategyName | None,
-    status: ResultStatus,
-    classification: Classification,
-    elapsed_ms: int,
-    error: CrawlError | None,
-) -> CrawlStrategyAttempt:
-    """The attempt a terminal result reports -- no HTTP status, body, or content
-    type. Public because results built elsewhere need the same attempt, and
-    building it by hand per site is how they would drift.
-    """
-    return CrawlStrategyAttempt(
-        strategy=strategy,
-        status=status,
-        classification=classification,
-        http_status=None,
-        content_type=None,
-        elapsed_ms=elapsed_ms,
-        error=error,
-    )
 
 
 def crawl_result_from_engine_result(engine: EngineCrawlResult, *, url: NormalizedUrl) -> CrawlResult:

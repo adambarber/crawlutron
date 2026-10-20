@@ -315,19 +315,21 @@ def _constructor_keywords(tree: ast.Module, function_name: str, callee: str) -> 
     return {kw.arg for kw in call.keywords if kw.arg is not None}
 
 
-# The two terminal funnels re-spell the shared attempt shape (memory #4729:
-# single declarations); a one-sided field cannot escape a per-funnel check.
-_FUNNEL_ATTEMPT_FIELDS = ("terminal_attempt", "terminal_engine_result")
-
-
-_FUNNEL_MODULE = "app/orchestration/results.py"
+# The two terminal funnels re-spell the shared attempt shape (memory #4729);
+# they now live in two modules -- terminal_attempt below transport, the engine funnel here.
+_FUNNEL_ATTEMPT_FIELDS = (
+    "app/models/result_factory.py:terminal_attempt",
+    "app/orchestration/results.py:terminal_engine_result",
+)
 
 
 def _attempt_funnel_field_sets() -> dict[str, set[str]]:
-    tree = ast.parse((REPO_ROOT / _FUNNEL_MODULE).read_text(encoding="utf-8"))
-    return {
-        name: _constructor_keywords(tree, name, "CrawlStrategyAttempt") for name in _FUNNEL_ATTEMPT_FIELDS
-    }
+    sets: dict[str, set[str]] = {}
+    for spec in _FUNNEL_ATTEMPT_FIELDS:
+        module_path, function_name = spec.split(":")
+        tree = ast.parse((REPO_ROOT / module_path).read_text(encoding="utf-8"))
+        sets[spec] = _constructor_keywords(tree, function_name, "CrawlStrategyAttempt")
+    return sets
 
 
 def test_the_two_terminal_funnels_construct_the_attempt_with_the_same_fields():
@@ -360,10 +362,12 @@ def test_attempt_constructor_mirror_detector_bites():
     )
     clean_tree = ast.parse(both)
     clean_fields = {
-        name: _constructor_keywords(clean_tree, name, "CrawlStrategyAttempt")
-        for name in _FUNNEL_ATTEMPT_FIELDS
+        spec.split(":", 1)[1]: _constructor_keywords(
+            clean_tree, spec.split(":", 1)[1], "CrawlStrategyAttempt"
+        )
+        for spec in _FUNNEL_ATTEMPT_FIELDS
     }
-    assert clean_fields[_FUNNEL_ATTEMPT_FIELDS[0]] == clean_fields[_FUNNEL_ATTEMPT_FIELDS[1]]
+    assert clean_fields["terminal_attempt"] == clean_fields["terminal_engine_result"]
 
     drifted = both.replace(
         "error=None)\n",
@@ -371,8 +375,8 @@ def test_attempt_constructor_mirror_detector_bites():
         1,
     )
     drifted_tree = ast.parse(drifted)
-    first = _constructor_keywords(drifted_tree, _FUNNEL_ATTEMPT_FIELDS[0], "CrawlStrategyAttempt")
-    second = _constructor_keywords(drifted_tree, _FUNNEL_ATTEMPT_FIELDS[1], "CrawlStrategyAttempt")
+    first = _constructor_keywords(drifted_tree, "terminal_attempt", "CrawlStrategyAttempt")
+    second = _constructor_keywords(drifted_tree, "terminal_engine_result", "CrawlStrategyAttempt")
     assert first != second and "drifted_field" in (first ^ second)
 
 
