@@ -5,13 +5,12 @@ connection. Payloads store keyed by ``request_id`` with TTL + count guardrails.
 
 from __future__ import annotations
 
-import asyncio
 import json
 import time
 from pathlib import Path
 
 from app.models.json_value import JsonValue
-from app.storage.coordination_store import CoordinationStore
+from app.storage.coordination_store import CoordinationStore, atwin
 from app.storage.migrations import StoreSchema
 
 
@@ -102,21 +101,12 @@ class CrawlResultStore(CoordinationStore):
             ).fetchall()
         return [json.loads(row[0]) for row in rows]
 
-    async def aput(self, request_id: str, payload: JsonValue, *, owner: str = "") -> None:
-        """Async :meth:`put`: the prune, the payload dumps and both commits off-loop."""
-        await asyncio.to_thread(self.put, request_id, payload, owner=owner)
-
-    async def aget(self, request_id: str) -> JsonValue | None:
-        """Async :meth:`get`: a status-poll read must not park the loop."""
-        return await asyncio.to_thread(self.get, request_id)
-
-    async def aget_for_caller(self, request_id: str, caller_id: str) -> JsonValue | None:
-        """Async :meth:`get_for_caller`: a scoped poll read stays off the loop."""
-        return await asyncio.to_thread(self.get_for_caller, request_id, caller_id)
-
-    async def apayloads(self) -> list[JsonValue]:
-        """Async :meth:`payloads`: a whole-cache rollup must not park the loop."""
-        return await asyncio.to_thread(self.payloads)
+    # One ``atwin`` twin per operation: the sync signature is declared once and
+    # ``owner=`` rides through **kwargs, so the twins cannot drift from the base.
+    aput = atwin(put)
+    aget = atwin(get)
+    aget_for_caller = atwin(get_for_caller)
+    apayloads = atwin(payloads)
 
     def _prune(self, now: float) -> None:
         if self._ttl_seconds <= 0:
