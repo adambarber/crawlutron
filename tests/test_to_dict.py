@@ -7,7 +7,8 @@ from dataclasses import dataclass, field
 
 import pytest
 
-from app.models.crawl_result import CrawlStrategyAttempt, EngineCrawlResult
+from app.models.crawl_result import EngineCrawlResult
+from app.models.crawl_strategy_attempt import CrawlStrategyAttempt
 from app.models.discovered_link import DiscoveredLink
 from app.models.serialization import from_wire, to_dict
 from app.vocabulary.strategies import HTTP_DECLARED_CRAWLER

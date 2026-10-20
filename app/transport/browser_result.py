@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Any
 from app.admission.render_options import resolve_render_options
 from app.models.crawl_job import CrawlJob
 from app.models.crawl_policy import CrawlPolicy
-from app.models.crawl_result import CrawlStrategyAttempt
+from app.models.crawl_strategy_attempt import CrawlStrategyAttempt
 from app.models.taxonomy import CrawlStrategyName
 from app.orchestration.results import build_engine_result
 from app.orchestration.worker import call_worker

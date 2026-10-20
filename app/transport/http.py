@@ -7,7 +7,8 @@ from dataclasses import replace
 from typing import Any
 
 from app.admission.policy import discovery_flags
-from app.models.crawl_result import CrawlStrategyAttempt, EngineCrawlResult
+from app.models.crawl_result import EngineCrawlResult
+from app.models.crawl_strategy_attempt import CrawlStrategyAttempt
 from app.models.fetch_envelope import RetryDiagnostics
 from app.models.taxonomy import Classification
 from app.orchestration.results import (

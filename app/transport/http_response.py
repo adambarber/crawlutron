@@ -9,7 +9,7 @@ from typing import Any
 from app.models.crawl_extraction_method import CrawlExtractionMethod
 from app.models.crawl_policy import CrawlPolicy
 from app.models.crawl_policy_limits import CrawlPolicyLimits
-from app.models.crawl_result import CrawlStrategyAttempt
+from app.models.crawl_strategy_attempt import CrawlStrategyAttempt
 from app.models.fetch_envelope import RetryDiagnostics, SerializedResponse
 from app.models.host_policy import HostPolicy
 from app.models.http_fetch_result import HttpFetchResult

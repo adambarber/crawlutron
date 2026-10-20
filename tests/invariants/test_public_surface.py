@@ -354,6 +354,46 @@ def test_models_package_reexports_nothing():
     assert not (offenders := _models_reexport_offenders()), "; ".join(offenders)
 
 
+def _models_multitype_offenders(root: pathlib.Path = _MODELS_ROOT) -> list[str]:
+    """A module that co-locates two or more unrelated public types -- a grab-bag
+    no reader can find from a type's name. ``*_response.py``, concern and
+    ``_COHESIVE_MODULES`` one-concept families are excluded, not grab-bags.
+    """
+    offenders: list[str] = []
+    for path in sorted(root.glob("*.py")):
+        if path.name == "__init__.py" or path.name.endswith("_response.py"):
+            continue
+        if path.name in _COHESIVE_MODULES or path.name in _MODELS_CONCERN_MODULES:
+            continue
+        declared = _declared_types(ast.parse(path.read_text(encoding="utf-8")))
+        public_types = {name for name in declared if not name.startswith("_")}
+        if len(public_types) > 1:
+            offenders.append(f"{path.name} co-locates {sorted(public_types)}")
+    return offenders
+
+
+#: One-concept families pending the full per-type collapse: a union plus its
+#: members, or a model plus the helper it declares. Fully split in #121's remainder.
+_COHESIVE_MODULES = frozenset(
+    {
+        "crawl_result.py",  # CrawlResult + EngineCrawlResult: the shared result family
+        "crawl_worker.py",  # CrawlWorker = SyncCrawlWorker | AsyncCrawlWorker
+        "fetch_envelope.py",  # SerializedResponse + its RetryDiagnostics
+        "host_policy_suggestion.py",  # HostPolicySuggestion + CandidateRule
+        "result_record.py",  # AnyResult union + Producer/RenderEnvelope
+        "watch_state.py",  # WatchState + IntervalSeconds field helper
+    }
+)
+
+
+def test_no_model_surface_co_locates_unrelated_types():
+    """Nothing in ``app/models`` is a grab-bag of unrelated, co-located types:
+    a type's name must find its home. The exceptions are a ``*_response.py`` wire
+    projection, a concern module, and ``_COHESIVE_MODULES`` one-concept families.
+    """
+    assert not (offenders := _models_multitype_offenders()), "; ".join(offenders)
+
+
 def test_models_concern_modules_still_exist():
     """The exemptions above must name files that exist and still hold no type.
 

@@ -20,7 +20,8 @@ from app.vocabulary.strategies import BROWSER_STRATEGIES, HTTP_CFFI_IMPERSONATE,
 
 if TYPE_CHECKING:
     from app.models.crawl_policy import CrawlPolicy
-    from app.models.crawl_result import CrawlStrategyAttempt, EngineCrawlResult
+    from app.models.crawl_result import EngineCrawlResult
+    from app.models.crawl_strategy_attempt import CrawlStrategyAttempt
     from app.models.crawl_worker import CrawlWorker
     from app.models.host_policy import HostPolicy
     from app.models.http_fetcher import HttpFetcher

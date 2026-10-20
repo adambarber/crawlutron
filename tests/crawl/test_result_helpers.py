@@ -32,7 +32,7 @@ class TestFunnelDerivesAxes:
     """
 
     def test_the_funnel_derives_the_axis_values_from_the_attempt(self):
-        from app.models.crawl_result import CrawlStrategyAttempt
+        from app.models.crawl_strategy_attempt import CrawlStrategyAttempt
         from app.orchestration.results import build_engine_result
 
         attempt = CrawlStrategyAttempt(

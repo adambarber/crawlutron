@@ -156,7 +156,8 @@ def test_result_construction_enforces_membership_at_the_dataclass():
     build site can escape membership checking; a bad direct construction raises."""
     from dataclasses import asdict
 
-    from app.models.crawl_result import CrawlResult, CrawlStrategyAttempt, EngineCrawlResult
+    from app.models.crawl_result import CrawlResult, EngineCrawlResult
+    from app.models.crawl_strategy_attempt import CrawlStrategyAttempt
     from tests._result_builders import engine_result
 
     # The all-member baseline, named once and DERIVED rather than restated.

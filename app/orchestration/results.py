@@ -9,7 +9,8 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, TypeVar
 
-from app.models.crawl_result import CrawlResult, CrawlStrategyAttempt, EngineCrawlResult
+from app.models.crawl_result import CrawlResult, EngineCrawlResult
+from app.models.crawl_strategy_attempt import CrawlStrategyAttempt
 from app.models.normalized_url import NormalizedUrl
 from app.models.taxonomy import Classification, CrawlError, CrawlStrategyName
 from app.orchestration.classification import classify_and_log

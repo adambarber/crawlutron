@@ -12,9 +12,10 @@ from app.extraction.llm_format import (
 )
 from app.models.classification_evidence import ClassificationEvidence
 from app.models.content_validators import ContentValidators
-from app.models.crawl_result import CrawlResult, CrawlStrategyAttempt, EngineCrawlResult
+from app.models.crawl_result import CrawlResult, EngineCrawlResult
 from app.models.crawl_status import CrawlStatus
 from app.models.crawl_strategy import CrawlStrategy
+from app.models.crawl_strategy_attempt import CrawlStrategyAttempt
 from app.models.discovered_link import DiscoveredLink
 from app.models.discovered_link_response import DiscoveredLinkResponse as WireDiscoveredLink
 from app.models.page_metadata_response import PageMetadataResponse

@@ -1,6 +1,7 @@
-"""The result records and the strategy attempt they record. A ``CrawlResult``
-HOLDS its attempt, exposing the wire attributes as properties so the two cannot
-disagree; both serializations are derived from this declaration.
+"""The result records a crawl renders or reports -- the render ``CrawlResult`` and
+
+A shared family: both hold a ``CrawlStrategyAttempt`` and the classification and
+error vocabularies, so they are declared together here and each stays findable.
 """
 
 from __future__ import annotations
@@ -8,24 +9,12 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
+from app.models.crawl_strategy_attempt import CrawlStrategyAttempt
 from app.models.discovered_link import DiscoveredLink
 from app.models.literal_checked import LiteralChecked
 from app.models.normalized_url import NormalizedUrl
 from app.models.taxonomy import Classification, CrawlError, CrawlStrategyName
 from app.vocabulary.taxonomy import ResultStatus
-
-
-@dataclass(frozen=True)
-class CrawlStrategyAttempt(LiteralChecked):
-    # None, not a bare CrawlStrategyName: envelopes built after a failure that
-    # preceded any attempt carry "no strategy attempted", serialized as null.
-    strategy: CrawlStrategyName | None
-    status: ResultStatus
-    classification: Classification
-    http_status: int | None
-    content_type: str | None
-    elapsed_ms: int
-    error: CrawlError | None = None
 
 
 @dataclass(frozen=True)
@@ -98,8 +87,8 @@ class EngineCrawlResult(LiteralChecked):
     # Origin validators ("etag"/"last_modified") for conditional revalidation;
     # empty when the origin supplied none.
     validators: dict[str, str] = field(default_factory=dict)
-    # Page metadata from the engine's discovery tree; None when no tree
-    # existed. Persisted in the spill, never on the wire (shaping maps it).
+    # Page metadata from the engine's discovery tree; None when no tree existed.
+    # Persisted in the spill, never on the wire (shaping maps it).
     llm_metadata: dict[str, Any] | None = None
 
     @property
