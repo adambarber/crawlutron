@@ -12,9 +12,11 @@ import inspect
 import pathlib
 
 from tests.chokepoint_walks import (
+    assignments,
     async_function_defs,
     attribute_calls,
     calls_to_any,
+    class_defs,
     functions,
     nodes_of,
     offender_at,
@@ -251,13 +253,18 @@ def test_whole_site_visited_gate_detector_bites():
     WHOLE_SITE_VISIT_IS_TRANSIENT_GATED.check_bites()
 
 
-# The store-offload invariant: inside an async def, a store is reached through its async twin. The sink is a
-# direct call to a SYNCHRONOUS store method; the requirement is that no async frame in app/ makes one.
-_STORE_CLASSES = ("JobStore", "CrawlResultStore", "WatchStore")
+# No async frame in app/ may call a SYNCHRONOUS store method directly.
+_STORE_CLASSES = (
+    "JobStore",
+    "CrawlResultStore",
+    "WatchStore",
+    "CoordinationCounters",
+    "SharedCookieStore",
+    "CallerKeyStore",
+)
 
 
-# The two stores are injected unannotated (FastAPI ``Depends``, lifespan globals, runner arguments), so a
-# type-annotation-only resolution would see nothing.
+# Injected unannotated (FastAPI ``Depends``, lifespan globals, runner args), so a type-only scan sees nothing.
 _CONVENTIONAL_STORE_NAMES = {
     "job_store": "JobStore",
     "result_store": "CrawlResultStore",
@@ -266,28 +273,33 @@ _CONVENTIONAL_STORE_NAMES = {
 
 
 def _sync_store_methods() -> dict[str, frozenset[str]]:
-    """Store class name -> its public synchronous method names.
+    """Store class name -> its public synchronous method names; derived not listed."""
+    import app.storage.caller_key_store as caller_key_store
+    import app.storage.coordination_cookies as coordination_cookies
+    import app.storage.coordination_counters as coordination_counters
+    import app.storage.job_store as job_store
+    import app.storage.result_store as result_store
+    import app.storage.watch_store as watch_store
 
-    Derived from the classes rather than listed, so a new method is covered the
-    day it lands; import is safe because schemas run on construction, not import."""
-    from app.storage.job_store import JobStore
-    from app.storage.result_store import CrawlResultStore
-    from app.storage.watch_store import WatchStore
-
-    derived: dict[str, frozenset[str]] = {}
-    for class_name, store_class in (
-        ("JobStore", JobStore),
-        ("CrawlResultStore", CrawlResultStore),
-        ("WatchStore", WatchStore),
-    ):
-        derived[class_name] = frozenset(
+    modules = {
+        "JobStore": job_store,
+        "CrawlResultStore": result_store,
+        "WatchStore": watch_store,
+        "CoordinationCounters": coordination_counters,
+        "SharedCookieStore": coordination_cookies,
+        "CallerKeyStore": caller_key_store,
+    }
+    sync: dict[str, frozenset[str]] = {}
+    for name, module in modules.items():
+        store_class = getattr(module, name)
+        sync[name] = frozenset(
             member
             for member in dir(store_class)
             if not member.startswith("_")
             and callable(getattr(store_class, member, None))
             and not inspect.iscoroutinefunction(getattr(store_class, member))
         )
-    return derived
+    return sync
 
 
 def _stores_still_have_sync_methods() -> None:
@@ -304,7 +316,36 @@ def _stores_still_have_sync_methods() -> None:
     )
 
 
-def _store_receivers(function: ast.AST) -> dict[str, str]:
+def _named_store(expr: ast.expr | None) -> str | None:
+    if not isinstance(expr, (ast.Call, ast.Name)):
+        return None
+    leaf = expr.func if isinstance(expr, ast.Call) else expr
+    if isinstance(leaf, ast.Name) and leaf.id in _STORE_CLASSES:
+        return leaf.id
+    return None
+
+
+def _self_attr_receivers(tree: ast.AST | None) -> dict[str, str]:
+    if tree is None:
+        return {}
+    receivers: dict[str, str] = {}
+    for cls in class_defs(tree):
+        for node, target, value in assignments(nodes_of(cls)):
+            if not (
+                isinstance(target, ast.Attribute)
+                and isinstance(target.value, ast.Name)
+                and target.value.id == "self"
+            ):
+                continue
+            owned = _named_store(value)
+            if owned is None and isinstance(node, ast.AnnAssign):
+                owned = _named_store(node.annotation)
+            if owned is not None:
+                receivers[ast.unparse(target)] = owned
+    return receivers
+
+
+def _store_receivers(function: ast.AST, tree: ast.AST | None = None) -> dict[str, str]:
     """Name -> store class, for the store-typed bindings of one function."""
     receivers: dict[str, str] = {}
     for node in nodes_of(function):
@@ -314,12 +355,15 @@ def _store_receivers(function: ast.AST) -> dict[str, str]:
                 receivers[node.arg] = annotation
         elif isinstance(node, ast.Assign):
             for target in node.targets:
-                if not isinstance(target, ast.Name) or not isinstance(node.value, ast.Call):
-                    continue
-                constructor = ast.unparse(node.value.func)
-                if constructor in _STORE_CLASSES:
-                    receivers[target.id] = constructor
+                if isinstance(target, ast.Name) and (owned := _named_store(node.value)):
+                    receivers[target.id] = owned
     receivers.update(_CONVENTIONAL_STORE_NAMES)
+    receivers.update(_self_attr_receivers(tree))
+    for _stmt, target, value in assignments(nodes_of(function)):
+        if not isinstance(target, ast.Name) or value is None or not isinstance(value, ast.Name):
+            continue
+        if value.id in receivers:
+            receivers[target.id] = receivers[value.id]
     return receivers
 
 
@@ -327,20 +371,14 @@ def _sync_store_call_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
     sync_methods = _sync_store_methods()
     offenders: list[str] = []
     for node in async_function_defs(tree):
-        receivers = _store_receivers(node)
+        receivers = _store_receivers(node, tree)
         for inner in nodes_of(node):
             if not (isinstance(inner, ast.Call) and isinstance(inner.func, ast.Attribute)):
                 continue
             owner = receivers.get(ast.unparse(inner.func.value))
             if owner is not None and inner.func.attr in sync_methods[owner]:
-                offenders.append(
-                    offender_at(
-                        path,
-                        inner,
-                        f"{ast.unparse(inner.func.value)}.{inner.func.attr} "
-                        f"is synchronous; await the async twin",
-                    )
-                )
+                msg = f"{ast.unparse(inner.func.value)}.{inner.func.attr} is synchronous"
+                offenders.append(offender_at(path, inner, msg))
     return offenders
 
 
@@ -362,6 +400,15 @@ STORE_CALLS_ON_THE_LOOP = Rule(
             "    store = JobStore(path, policy=policy)\n"
             "    return store.delete(job_id)\n",
             "store.delete",
+        ),
+        Bites(
+            "from app.storage.coordination_cookies import SharedCookieStore\n"
+            "class Jar:\n"
+            "    def __init__(self, path):\n"
+            "        self._store = SharedCookieStore(path)\n"
+            "    async def headers_for(self, url):\n"
+            "        return self._store.load('ns', url)\n",
+            "self._store.load",
         ),
     ),
     clean=lambda: (
