@@ -20,7 +20,7 @@ from tests._assertions import set_optional_env
 from tests._extraction_helpers import doc_worker_acquisitions, extract_discovered_links, settings_with
 from tests._policy_factories import BOOL_ENV_CASES, canonical
 from tests._process_doubles import StubSpawner, stub_worker
-from tests.crawl.test_extraction import assert_extraction_empty
+from tests.extraction.test_extraction import assert_extraction_empty
 
 
 @pytest.mark.parametrize(("raw", "expected"), BOOL_ENV_CASES)
