@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from tests._private_import_decl import (
+    _APP_INTERNAL_WELD,
     _CHOKEPOINT_STATE,
     _LIFECYCLE_DRAIN_PENDING_CLIENT_CLOSES,
     _SUBSTITUTED_COLLABORATOR,
@@ -33,4 +34,22 @@ DECLARED: dict[str, Declaration] = {
         ["app"],
     ),
     "app.models.registrable_domain._PSL": _d(_CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]),
+    "app.mcp.tools._http_exception_message": _APP_INTERNAL_WELD,
+    "app.orchestration.recursive._RecursiveState": _APP_INTERNAL_WELD,
+    "app.orchestration.recursive._commit_recursive_results": _APP_INTERNAL_WELD,
+    "app.orchestration.recursive._crawl_recursive_batch": _APP_INTERNAL_WELD,
+    "app.orchestration.recursive._spill_write": _APP_INTERNAL_WELD,
+    "app.orchestration.request_pipeline._PipelineDependencies": _APP_INTERNAL_WELD,
+    "app.orchestration.request_pipeline._PipelineState": _APP_INTERNAL_WELD,
+    "app.orchestration.spill_sink._SpillSink": _APP_INTERNAL_WELD,
+    "app.transport.http_cache._not_modified_result": _APP_INTERNAL_WELD,
+    "app.transport.http_cache._resolve_http_limits": _APP_INTERNAL_WELD,
+    "app.transport.http_cache._revalidate_content_cache": _APP_INTERNAL_WELD,
+    "app.transport.http_cache._store_http_caches": _APP_INTERNAL_WELD,
+    "app.transport.http_classify._classify_extracted_content": _APP_INTERNAL_WELD,
+    "app.transport.http_classify._extract_http_phase": _APP_INTERNAL_WELD,
+    "app.transport.http_classify._request_profile_diagnostics": _APP_INTERNAL_WELD,
+    "app.transport.pooled_clients._bind_to_running_loop": _APP_INTERNAL_WELD,
+    "app.transport.pooled_clients._discard_if_unowned_loop": _APP_INTERNAL_WELD,
+    "app.transport.pooled_clients._LoopBoundPooledClient": _APP_INTERNAL_WELD,
 }

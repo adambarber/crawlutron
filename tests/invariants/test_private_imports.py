@@ -7,11 +7,13 @@ from __future__ import annotations
 
 import ast
 import pathlib
+from collections.abc import Iterator
 
 import pytest
 
 from tests.chokepoint_walks import (
     REPO_ROOT,
+    assignment_targets,
     from_imports,
     nodes_of,
     relative_posix,
@@ -32,12 +34,77 @@ _LIFECYCLE_OWNER = "conftest"
 _PATCH_CALLS = frozenset({"setattr", "object", "delattr"})
 
 
+def _app_class_instances(tree: ast.Module) -> dict[str, str]:
+    """``local -> app class path`` for identifiers typed as an ``app`` class.
+
+    An instance-private reach (``cache._index``) names no module, so only a
+    base whose type names an ``app`` class can pin it to that class' home."""
+    typed: dict[str, str] = {}
+    for node in nodes_of(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            for arg in node.args.args + node.args.kwonlyargs + node.args.posonlyargs:
+                if arg.annotation is not None and isinstance(arg.annotation, ast.Name):
+                    home = resolved_expr_name(tree, arg.annotation)
+                    if home.startswith("app."):
+                        typed[arg.arg] = home
+    for node in nodes_of(tree):
+        if not isinstance(node, ast.AnnAssign) or isinstance(node.target, ast.Attribute):
+            continue
+        if isinstance(node.target, ast.Name) and isinstance(node.annotation, ast.Name):
+            home = resolved_expr_name(tree, node.annotation)
+            if home.startswith("app."):
+                typed[node.target.id] = home
+    for node in nodes_of(tree):
+        if not isinstance(node, (ast.Assign, ast.AnnAssign)) or not isinstance(node.value, ast.Call):
+            continue
+        home = resolved_expr_name(tree, node.value.func)
+        if not home.startswith("app."):
+            continue
+        # A call result is an app-class instance only when the callee is a class
+        # name; PascalCase is the tree's class convention.
+        if home.rsplit(".", 1)[-1][:1].islower():
+            continue
+        for target in assignment_targets(node):
+            if isinstance(target, ast.Name):
+                typed.setdefault(target.id, home)
+    return typed
+
+
+def _instance_private_key(tree: ast.Module, node: ast.Attribute, instances: dict[str, str]) -> str:
+    """Class-qualified reach key for ``inst._private`` on an app-class instance.
+
+    ``cache._index`` with ``cache: ContentCache`` is the same weld as
+    ``ContentCache._index``, so the key must share the class' ledger row."""
+    if not node.attr.startswith("_") or node.attr.startswith("__"):
+        return ""
+    if not isinstance(node.value, ast.Name):
+        return ""
+    home = instances.get(node.value.id)
+    if not home:
+        return ""
+    return f"{home}.{node.attr}"
+
+
+def _attribute_reach_keys(tree: ast.Module, instances: dict[str, str]) -> Iterator[tuple[str, int]]:
+    """Resolved reach key and line for every private app attribute read.
+
+    An instance base resolves to its class home via ``_instance_private_key``;
+    any other base falls through to the import-resolved dotted name."""
+    for node in nodes_of(tree):
+        if not isinstance(node, ast.Attribute) or node.attr.startswith("__"):
+            continue
+        key = _instance_private_key(tree, node, instances) or resolved_expr_name(tree, node)
+        if key:
+            yield key, node.lineno
+
+
 def _private_app_names(tree: ast.Module) -> dict[str, int]:
     """``"module.name" -> lineno`` for every private ``app`` name the file reaches.
 
-    Three forms (import, bound module object, ``setattr``) resolve to one key;
-    non-``app`` targets are skipped; a locally-held OBJECT names no module."""
+    Import, bound module object, instance attribute and ``setattr`` (both
+    orders) all resolve to one key; non-``app`` targets are skipped."""
     found: dict[str, int] = {}
+    instances = _app_class_instances(tree)
 
     def record(key: str, lineno: int) -> None:
         module, _, name = key.rpartition(".")
@@ -49,10 +116,8 @@ def _private_app_names(tree: ast.Module) -> dict[str, int]:
             continue
         for alias in node.names:
             record(f"{node.module}.{alias.name}", node.lineno)
-    for node in nodes_of(tree):
-        if not isinstance(node, ast.Attribute) or node.attr.startswith("__"):
-            continue
-        record(resolved_expr_name(tree, node), node.lineno)
+    for key, lineno in _attribute_reach_keys(tree, instances):
+        record(key, lineno)
     for node in nodes_of(tree):
         if not isinstance(node, ast.Call) or len(node.args) < 2:
             continue
@@ -60,12 +125,13 @@ def _private_app_names(tree: ast.Module) -> dict[str, int]:
         spelling = callee.attr if isinstance(callee, ast.Attribute) else getattr(callee, "id", "")
         if spelling not in _PATCH_CALLS:
             continue
-        literal = node.args[1]
-        if not isinstance(literal, ast.Constant) or not isinstance(literal.value, str):
-            continue
         target = resolved_expr_name(tree, node.args[0])
-        if target:
+        literal = node.args[1]
+        if isinstance(literal, ast.Constant) and isinstance(literal.value, str) and target:
             record(f"{target}.{literal.value}", node.lineno)
+        first = node.args[0]
+        if isinstance(first, ast.Constant) and isinstance(first.value, str):
+            record(first.value, node.lineno)
     return found
 
 
@@ -98,6 +164,12 @@ PRIVATE_IMPORT_LEDGER = Rule(
         # private name is a literal argument, so a detector reading imports and attribute reads sees nothing
         "import app.orchestration.engine as engine\n\n"
         'monkeypatch.setattr(engine, "_undeclared_probe_name", lambda: None)\n',
+        # An instance private: `cache._index` has no module in its own spelling, so only the base's type
+        # (an app class) can pin the reach to the class that owns the member.
+        "from app.transport.content_cache import ContentCache\n\n"
+        'cache = ContentCache("/tmp/x")\n\nassert cache._undeclared_probe_index\n',
+        # And the string-FIRST form, where the target is the first argument, not the replacement.
+        'import pytest\n\nmonkeypatch.setattr("app.api.job_runner._undeclared_probe", lambda: None)\n',
     ),
     clean=lambda: (
         # A public name needs no ledger row -- that is the whole point of the fix.
@@ -112,6 +184,14 @@ PRIVATE_IMPORT_LEDGER = Rule(
         # the suite substituting its own double.
         "import tests.membership_gate as gate\n\n"
         'monkeypatch.setattr(gate, "_local_probe_name", lambda: None)\n',
+        # A PUBLIC member on an app-class instance is not a weld.
+        "from app.transport.content_cache import ContentCache\n\n"
+        'cache = ContentCache("/tmp/x")\n\nassert cache.cache_dir\n',
+        # A private member on an unrelated local object is not an app reach.
+        "class _LocalProbe:\n    def __init__(self):\n        self._probe = 1\n\n"
+        "p = _LocalProbe()\n\nassert p._probe\n",
+        # A string-first setattr of a PUBLIC app name still needs no row.
+        'monkeypatch.setattr("app.api.job_runner.run_job", fake)\n',
     ),
 )
 
@@ -158,14 +238,20 @@ def _module_of(path: pathlib.Path) -> str:
 def _cross_module_private_names(tree: ast.Module, path: pathlib.Path) -> dict[str, int]:
     """``"module.name" -> lineno`` for private names reached across a module boundary.
 
-    A module reaching its own privates is ordinary; the owner is resolved, so
-    ``body_decode.decode_body`` names the owner module, not the bind."""
+    ``body_decode.decode_body`` names the owner module, not the bind; a private
+    from-import (``from app.other import _priv``) is the same weld as a read."""
     here = _module_of(path)
     found: dict[str, int] = {}
-    for node in nodes_of(tree):
-        if not isinstance(node, ast.Attribute) or node.attr.startswith("__"):
+    for node in from_imports(tree):
+        if not node.module or not node.module.startswith("app") or node.level:
             continue
-        key = resolved_expr_name(tree, node)
+        owner, _, attr = node.module.rpartition(".")
+        if owner == here or node.module == here:
+            continue
+        for alias in node.names:
+            if alias.name.startswith("_") and not alias.name.startswith("__"):
+                found.setdefault(f"{node.module}.{alias.name}", node.lineno)
+    for key, lineno in _attribute_reach_keys(tree, {}):
         if not key.startswith("app."):
             continue
         owner, _, attr = key.rpartition(".")
@@ -173,7 +259,7 @@ def _cross_module_private_names(tree: ast.Module, path: pathlib.Path) -> dict[st
             continue
         if owner == here or owner == f"{here}.{attr}":
             continue
-        found.setdefault(key, node.lineno)
+        found.setdefault(key, lineno)
     return found
 
 
@@ -192,7 +278,14 @@ APP_PRIVATE_WELDS = Rule(
         "reaches into another module's private name; a sibling module is a caller, so the name is "
         "part of the seam between them and the module boundary is a fiction until it is public"
     ),
-    bite=lambda: ("from app.transport import body_decode\n\ntext = body_decode._undeclared_probe\n",),
+    bite=lambda: (
+        "from app.transport import body_decode\n\ntext = body_decode._undeclared_probe\n",
+        # The from-import spelling of the same weld: `from app.other import _priv` in an app
+        # module is a cross-module reach an attribute-only walk never sees.
+        "from app.transport.http_cache import _undeclared_fromimport_probe\n",
+        # A private TYPE from-import is the same removable seam.
+        "from app.orchestration.request_pipeline import _UndeclaredPipelineState\n",
+    ),
     clean=lambda: (
         # The public name for the same reach.
         "from app.transport import body_decode\n\ntext = body_decode.decode_body\n",
@@ -200,6 +293,8 @@ APP_PRIVATE_WELDS = Rule(
         "def helper():\n    return _internal_step()\n",
         # A declared lifecycle drain.
         "from app.transport import pooled_clients as pool\n\npool._drain_pending_client_closes()\n",
+        # A from-import of a PUBLIC name is not a weld.
+        "from app.transport.http_cache import is_expired\n",
     ),
 )
 

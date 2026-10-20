@@ -145,3 +145,23 @@ _PRIVATE_TYPE = _d(
     "*class* is a judgement -- it stays private if nothing constructs it from outside, and\n"
     "becomes public if it has a lifecycle the caller owns, as `_ResultSpill` does.",
 )
+_INSTANCE_STATE = _d(
+    "chokepoint state",
+    "An instance-private member -- a lock, a cache index, a byte counter -- that a test\n"
+    "reads because it is proving the member's own invariant. The instance is the test's\n"
+    "subject, so the reach is bound to the class as its owner: `cache._index` and\n"
+    "`ContentCache._index` are the same weld. No public surface exists for it without\n"
+    "promoting the index itself, which would make a mechanism part of the class' promise --\n"
+    "the alias the ledger exists to stop.",
+    side=("test",),
+)
+
+
+_APP_INTERNAL_WELD = _d(
+    "implementation step",
+    "A private reached by a sibling module in the same package -- shared vocabulary within\n"
+    "a layer, not a layering inversion. The name stays private because no module outside the\n"
+    "package may touch it either; the weld is cross-module, so it is declared rather than\n"
+    "invisible to the from-import spelling that carries it.",
+    side=("app",),
+)
