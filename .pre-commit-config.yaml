@@ -182,6 +182,20 @@ repos:
         pass_filenames: false
         stages: [pre-commit]
 
+      # The second sweep, wired as a real gate: the 3/30 per-tree gate cannot see
+      # a two-line repetition between two helper files (app/, scripts/, tests/_*),
+      # so this 2/30 gate over the helper surface fails on any cross-file LOGIC
+      # clone. Preamble and within-file repetition are not findings.
+      - id: helper-clone-sweep
+        name: jscpd helper surface (2 lines / 30 tokens, logic clones)
+        entry: >-
+          bash -c 'for d in "$(git rev-parse --show-toplevel)/docker/browser-crawler" "$(git rev-parse --show-toplevel)"; do [ -x "$d/scripts/gate" ] && exec bash "$d/scripts/gate" "$@"; done; echo "scripts/gate not found in either layout" >&2; exit 1' gate
+          .venv/bin/python -m scripts.jscpd_logic_gate
+        language: system
+        files: *service_trigger
+        pass_filenames: false
+        stages: [pre-commit]
+
       # Type gate: catches the stringly-typed-identity class statically, and is
       # the same command CI runs. No path argument: `mypy.ini`'s `files` is the
       # scope, and this hook restating it as `mypy app` is how a second checker

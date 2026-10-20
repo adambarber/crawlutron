@@ -12,15 +12,10 @@ from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 
 from app.api.crawl_router import router as crawl_router
-from app.api.dependencies import (
-    get_job_store,
-    get_result_store,
-    get_settings,
-    get_shutdown_event,
-)
+from app.api.dependencies import get_result_store
 from app.api.policy_router import router as policy_router
-from app.config.settings import CrawlerSettings
 from tests._app_factory import service_app
+from tests._dependency_overrides import bind_base_overrides
 
 
 def policy_client(result_store, job_store) -> AsyncClient:
@@ -34,9 +29,7 @@ def policy_client(result_store, job_store) -> AsyncClient:
     for exception_class, handler in service_app().exception_handlers.items():
         app.add_exception_handler(exception_class, handler)
     app.dependency_overrides[get_result_store] = lambda: result_store
-    app.dependency_overrides[get_job_store] = lambda: job_store
-    app.dependency_overrides[get_settings] = lambda: CrawlerSettings.from_mapping({})
-    app.dependency_overrides[get_shutdown_event] = lambda: asyncio.Event()
+    bind_base_overrides(app, job_store=job_store, shutdown_event=asyncio.Event())
     return AsyncClient(transport=ASGITransport(app=app), base_url="http://test")
 
 

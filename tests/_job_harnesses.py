@@ -15,6 +15,7 @@ from app.models.normalized_url import NormalizedUrl
 from app.models.result_record import ProducerEnvelope
 from app.models.taxonomy import Classification
 from app.storage.job_store import TERMINAL_STATUSES, JobStatus, JobStore
+from tests._dependency_overrides import bind_base_overrides
 from tests._job_drivers import (
     _create_api_job,
     _seed_job,
@@ -128,16 +129,12 @@ class ScriptedExecute:
 
 
 def _make_app(job_store):
-    from app.api.dependencies import get_job_store, get_settings, get_shutdown_event
     from app.api.jobs_router import router as jobs_router
-    from app.config.settings import CrawlerSettings
 
     app = FastAPI()
     app.include_router(jobs_router)
     shutdown = asyncio.Event()
-    app.dependency_overrides[get_job_store] = lambda: job_store
-    app.dependency_overrides[get_settings] = lambda: CrawlerSettings.from_mapping({})
-    app.dependency_overrides[get_shutdown_event] = lambda: shutdown
+    bind_base_overrides(app, job_store=job_store, shutdown_event=shutdown)
     return app
 
 
