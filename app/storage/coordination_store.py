@@ -32,6 +32,7 @@ class CoordinationStore:
     schema: ClassVar[StoreSchema]
 
     def __init__(self, db_path: str | Path) -> None:
+        self.db_path = Path(db_path)
         Path(db_path).parent.mkdir(parents=True, exist_ok=True)
         # The store chokepoint owns the PRAGMAs and the migration: a store that
         # opened its own connection could run the migration twice, or drift WAL.
@@ -39,11 +40,6 @@ class CoordinationStore:
         # The same file-wide lock the migration took, not a private one: a
         # per-instance lock excludes this store from nothing.
         self._lock = process_lock(store_lock_key(db_path))
-
-    @property
-    def conn(self) -> sqlite3.Connection:
-        """The store's connection, for diagnostics and migrations."""
-        return self._conn
 
     def close(self) -> None:
         """Close the connection under the lock -- on the base, not per store, since

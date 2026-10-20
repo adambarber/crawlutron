@@ -87,11 +87,6 @@ class JobStore:
         # the append-only side has its own owner so neither pays for the other.
         self._accumulators = JobAccumulators(self._conn)
 
-    @property
-    def conn(self) -> sqlite3.Connection:
-        """The store's connection, for diagnostics and migrations."""
-        return self._conn
-
     def _row_to_job(self, row: sqlite3.Row, *, with_accumulators: bool = True) -> CrawlJobState:
         job_id = row["job_id"]
         return CrawlJobState.from_json(

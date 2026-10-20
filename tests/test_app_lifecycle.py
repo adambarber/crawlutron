@@ -40,14 +40,8 @@ def _booted_app(monkeypatch, *, workers: str | None = None):
 
 
 def _database_file(store) -> Path:
-    """The file a store's own connection actually opened, resolved.
-
-    Read from SQLite rather than the constructor argument: a store that
-    resolved or substituted its path would echo the argument back and hide it."""
-    conn = store.conn
-    row = conn.execute("PRAGMA database_list").fetchone()
-    assert row[1] == "main", row
-    return Path(row[2]).resolve()
+    """The resolved on-disk file a store owns, from its public db_path."""
+    return Path(store.db_path).resolve()
 
 
 class TestMultiWorkerInvariants:

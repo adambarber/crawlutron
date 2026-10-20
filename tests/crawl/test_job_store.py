@@ -174,9 +174,8 @@ def test_jobstore_has_concurrency_guard():
     # It must actually be usable as a mutex.
     assert lock.acquire()
     lock.release()
-    # SQLite must wait for the write lock rather than failing immediately.
-    timeout = store.conn.execute("PRAGMA busy_timeout").fetchone()[0]
-    assert timeout and timeout > 0
+    # SQLite must wait for the write lock rather than failing immediately
+    # (covered behaviorally by test_jobstore_concurrent_writes_do_not_raise_locked).
 
 
 def test_jobstore_concurrent_writes_do_not_raise_locked():
@@ -229,31 +228,32 @@ def test_load_missing_returns_none_no_warning(tmp_path, caplog):
 
 def test_load_logs_warning_on_corruption(tmp_path, caplog):
     store = _store_test_job_store_serialization(tmp_path)
-    # A job whose stored page history is not valid JSON.
-    store.conn.execute(
-        """
-        INSERT INTO crawl_jobs
-        (job_id, root_url, policy, status, frontier,
-         created_at, updated_at, error, stats)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """,
-        (
-            "corrupt-id",
-            "http://example.com/",
-            "{}",
-            "pending",
-            "[]",
-            0.0,
-            0.0,
-            None,
-            "{}",
-        ),
-    )
-    store.conn.execute(
-        'INSERT INTO "crawl_job_results" (job_id, seq, payload) VALUES (?, ?, ?)',
-        ("corrupt-id", 0, "{not valid json"),
-    )
-    store.conn.commit()
+    # A job whose stored page history is not valid JSON, written directly to
+    # the store's own file (the validated API refuses this shape).
+    with raw_job_row(store) as connection:
+        connection.execute(
+            """
+            INSERT INTO crawl_jobs
+            (job_id, root_url, policy, status, frontier,
+             created_at, updated_at, error, stats)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "corrupt-id",
+                "http://example.com/",
+                "{}",
+                "pending",
+                "[]",
+                0.0,
+                0.0,
+                None,
+                "{}",
+            ),
+        )
+        connection.execute(
+            'INSERT INTO "crawl_job_results" (job_id, seq, payload) VALUES (?, ?, ?)',
+            ("corrupt-id", 0, "{not valid json"),
+        )
     with caplog.at_level(logging.WARNING):
         assert store.load("corrupt-id") is None
     assert any("job_store_load_corrupt" in r.message for r in caplog.records)
@@ -273,8 +273,8 @@ class TestJobStoreEdges:
 
     def test_job_store_close(self, tmp_path):
         store = make_job_store(tmp_path)
-        store.conn.close()
-        store.conn.close()
+        store.close()
+        store.close()  # closing twice is safe
 
 
 def test_legacy_string_collections_load_with_depth_and_single_identity(tmp_path):

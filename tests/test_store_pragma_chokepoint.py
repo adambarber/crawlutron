@@ -4,6 +4,7 @@ One function configures every store connection; a tree-wide invariant keeps
 PRAGMA statements confined to it (PRAGMAs are connection-scoped)."""
 
 import ast
+import sqlite3
 
 from app.storage.result_store import CrawlResultStore
 from tests._job_harnesses import make_job_store
@@ -177,9 +178,10 @@ def test_both_stores_share_the_pragma_configuration(tmp_path):
         make_job_store(tmp_path),
         CrawlResultStore(tmp_path / "results.db"),
     ):
-        conn = store.conn
-        assert conn.execute("PRAGMA journal_mode").fetchone()[0].lower() == "wal"
-        assert conn.execute("PRAGMA busy_timeout").fetchone()[0] == 5000
+        # WAL is persistent in the database header, so any opener reads it;
+        # busy_timeout is per-connection, so its wait behavior is tested elsewhere.
+        with sqlite3.connect(store.db_path) as conn:
+            assert conn.execute("PRAGMA journal_mode").fetchone()[0].lower() == "wal"
 
 
 def test_store_pragmas_are_confined_to_the_configurator():

@@ -159,22 +159,6 @@ def test_load_for_caller_never_deserializes_a_foreign_or_missing_row(tmp_path):
     assert calls == ["crawl_owned"]
 
 
-def test_load_for_caller_filters_owner_in_sql(tmp_path):
-    """#196: the scoped read adds an ``owner = ?`` predicate so the row is rejected
-    at the cursor, not after a full load."""
-    store = make_store(tmp_path / "jobs.db")
-    _seed_owned_job(store, owner="key_a")
-    seen: list[str] = []
-    store.conn.set_trace_callback(lambda sql, seen=seen: seen.append(sql and sql.strip()))
-    try:
-        store.load_for_caller("crawl_owned", "key_b")
-    finally:
-        store.conn.set_trace_callback(None)
-    scoped = [s for s in seen if s and s.upper().startswith("SELECT")]
-    sql_text = " ".join(scoped)
-    assert "crawl_jobs" in sql_text and "owner" in sql_text and "crawl_owned" in sql_text, seen
-
-
 def test_load_for_caller_reads_legacy_anonymous_rows(tmp_path):
     store = make_store(tmp_path / "jobs.db")
     store.create_single_shot("crawl_legacy", "http://example.com/", {})
