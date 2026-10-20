@@ -34,7 +34,7 @@ def watching_entry_unlinks(monkeypatch, cache) -> Iterator[list[bool]]:
 
     def watched(self, *args, **kwargs):
         if self.parent == cache.cache_dir and not self.name.startswith("."):
-            held.append(cache._lock.locked())
+            held.append(cache.is_locked)
         return real_unlink(self, *args, **kwargs)
 
     monkeypatch.setattr(cc.Path, "unlink", watched)
@@ -48,34 +48,13 @@ def entry_replaced_by_directory(cache, key) -> Iterator[Any]:
     A file-for-directory swap is the only unpatched way to fail a read, and it
     must be undone or the cache's directory is left dirty for the next test.
     """
-    path = cache._path_for(key)
+    path = cache.path_of(key)
     path.unlink()
     path.mkdir()
     try:
         yield path
     finally:
         path.rmdir()
-
-
-@contextlib.contextmanager
-def watching_envelope_reads(cache) -> Iterator[list[str]]:
-    """Record the keys that reach the full-envelope read, then restore the seam.
-
-    ``cached_at_of`` is contractually a metadata question; this is what proves a
-    test proved it, and the patch/restore pair was re-spelled at each site.
-    """
-    calls: list[str] = []
-    original = cache._read_envelope
-
-    def counting(key):
-        calls.append(key)
-        return original(key)
-
-    cache._read_envelope = counting
-    try:
-        yield calls
-    finally:
-        cache._read_envelope = original
 
 
 def watch_writes(cache, *, calls=None, on_write=None, fail=None):

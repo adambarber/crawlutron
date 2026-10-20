@@ -8,6 +8,7 @@ from collections.abc import Iterator
 
 import pytest
 
+import app.transport.content_cache as cc
 from app.models.normalized_url import NormalizedUrl
 from app.safety.validation import HostPolicy
 from app.transport.cache import HttpCache
@@ -137,13 +138,14 @@ def test_prune_sweeps_orphaned_tmp_files(tmp_path):
 def test_get_serves_a_disk_hit_after_the_ram_mirror_goes_cold(tmp_path):
     """A cold RAM mirror does not lose a value: get() falls through to disk.
 
-    The disk-hit read path returns the envelope even when nothing is mirrored.
+    The disk-hit read path returns the envelope even when nothing is mirrored,
+    which the oversized (never-mirrored) value under the gate forces.
     """
     c = ContentCache(cache_dir=tmp_path / "m", default_ttl=3600)
-    c.set("k", {"v": 1})
-    c._memory_cache.clear()  # force the disk-hit path on the next get()
+    big = "x" * (2 * 1024 * 1024)  # past the mirror size gate: cold in RAM
+    c.set("big", big)
 
-    assert c.get("k") == {"v": 1}
+    assert c.get("big") == big
 
 
 # --------------------------- integration: real server, no mocks ---------------------------
@@ -249,39 +251,37 @@ async def test_crawl_request_serves_recursive_pages_from_content_cache(tmp_path)
 async def test_mirror_gate_uses_serialized_size_not_shallow_getsizeof(tmp_path):
     """Shallow sys.getsizeof on a dict sees only the container (~200 B), so a
     multi-MB serialized entry passed the old mirror gate and landed in RAM
-    (worst case _MEMORY_CACHE_MAX x full-size entries)."""
+    (worst case MEMORY_CACHE_MAX x full-size entries)."""
     cache = ContentCache(tmp_path)
-    fat = {"body": "x" * (cache._MEMORY_CACHE_MAX_SIZE + 1024)}
-    assert sys.getsizeof(fat) < cache._MEMORY_CACHE_MAX_SIZE  # shallow size: tiny
+    fat = {"body": "x" * (cc.MEMORY_CACHE_MAX_SIZE + 1024)}
+    assert sys.getsizeof(fat) < cc.MEMORY_CACHE_MAX_SIZE  # shallow size: tiny
 
     await cache.aset("fat-key", fat)
-    assert cache._read_envelope("fat-key") is not None  # disk: written
-    assert "fat-key" not in cache._memory_cache  # RAM mirror: must skip
+    assert await cache.aget("fat-key") is not None  # disk: written
+    assert cache.peek("fat-key") is None  # RAM mirror: must skip
 
 
 async def test_mirror_gate_small_value_still_mirrors(tmp_path):
     cache = ContentCache(tmp_path)
     await cache.aset("small-key", {"body": "tiny"})
-    assert "small-key" in cache._memory_cache
+    assert cache.peek("small-key") == {"body": "tiny"}
 
 
 async def test_cold_aget_does_not_mirror_oversized_envelope(tmp_path):
-    """After a warm restart ``_index_sizes`` is empty for pre-existing files.
-
-    ``aget`` must gate the mirror on the actual bytes (stat), not
-    ``_index_sizes.get(key, 0)``, which defaults to 0 and admits a multi-MB read.
-    """
-    fat = {"body": "x" * (1024 * 1024 + 1024)}  # > _MEMORY_CACHE_MAX_SIZE
+    """After a warm restart the index is cold for pre-existing files: ``aget``
+    must gate the mirror on the actual bytes, not a zero default, so a multi-MB
+    read never lands in RAM."""
+    fat = {"body": "x" * (1024 * 1024 + 1024)}  # > MEMORY_CACHE_MAX_SIZE
     writer = ContentCache(tmp_path)
     await writer.aset("fat-key", fat)
-    assert "fat-key" not in writer._memory_cache  # write gate already refuses
+    assert writer.peek("fat-key") is None  # write gate already refuses
 
     # Fresh instance over the same dir: cold index, pre-existing disk file.
     reader = ContentCache(tmp_path)
-    assert reader._index_sizes.get("fat-key") is None  # truly cold
+    assert reader.peek("fat-key") is None  # the fresh mirror is empty
     got = await reader.aget("fat-key")
     assert got is not None  # served from disk
-    assert "fat-key" not in reader._memory_cache  # must NOT land in RAM mirror
+    assert reader.peek("fat-key") is None  # must NOT land in RAM mirror
 
 
 async def test_cold_aget_still_mirrors_small_envelope(tmp_path):
@@ -289,10 +289,10 @@ async def test_cold_aget_still_mirrors_small_envelope(tmp_path):
     writer = ContentCache(tmp_path)
     await writer.aset("small-key", {"body": "tiny"})
     reader = ContentCache(tmp_path)
-    assert reader._index_sizes.get("small-key") is None
+    assert reader.peek("small-key") is None
     got = await reader.aget("small-key")
     assert got == {"body": "tiny"}
-    assert "small-key" in reader._memory_cache  # small: mirror is correct
+    assert reader.peek("small-key") == {"body": "tiny"}  # small: mirror is correct
 
 
 async def _directive_runner(url: str, headers: dict[str, str], tmp_path):

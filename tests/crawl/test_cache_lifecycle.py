@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import shutil
 import threading
-from pathlib import Path
 from typing import Any
 
 import pytest
@@ -12,11 +11,11 @@ import pytest
 import app.transport.content_cache as cc
 from tests._fetcher_factories import make_seeded_cache
 from tests.crawl._cache_fixtures import (
+    entry_replaced_by_directory,
     reopen_cache,
     scoped_cache,
     watch_writes,
     watching_entry_unlinks,
-    watching_envelope_reads,
 )
 
 
@@ -29,14 +28,14 @@ def test_small_value_lives_in_memory(tmp_path):
     c = _make(tmp_path)
     c.set("a", {"x": 1})
     assert c.get("a") == {"x": 1}
-    assert "a" in c._memory_cache
+    assert c.peek("a") == {"x": 1}
 
 
 def test_large_value_not_in_memory(tmp_path):
     c = _make(tmp_path)
     big = "z" * (2 * 1024 * 1024)  # 2MB string -> shallow size exceeds 1MB
     c.set("big", big)
-    assert "big" not in c._memory_cache
+    assert c.peek("big") is None
     # Still resolvable from disk.
     assert c.get("big") == big
 
@@ -48,26 +47,26 @@ def test_memory_ttl_honored(tmp_path):
     c.clock = lambda: 2000.0
     assert c.get("k") is None
     # Expired entry evicted from memory cache.
-    assert "k" not in c._memory_cache
+    assert c.peek("k") is None
 
 
 def test_memory_lru_cap(tmp_path):
     c = _make(tmp_path)
     for i in range(150):
         c.set(f"k{i}", i)
-    assert len(c._memory_cache) <= c._MEMORY_CACHE_MAX
-    # Oldest evicted from memory, but still resolvable from disk.
-    assert "k0" not in c._memory_cache
-    assert "k149" in c._memory_cache
+    # The RAM mirror holds at most MEMORY_CACHE_MAX entries: the oldest is
+    # evicted from memory, but still resolvable from disk.
+    assert c.peek("k149") == 149
+    assert c.peek("k0") is None
     assert c.get("k0") == 0
 
 
 def test_clear_clears_memory(tmp_path):
     c = _make(tmp_path)
     c.set("a", 1)
-    assert "a" in c._memory_cache
+    assert c.peek("a") == 1
     c.clear()
-    assert len(c._memory_cache) == 0
+    assert c.peek("a") is None
 
 
 class TestContentCacheEntryLifecycle:
@@ -121,10 +120,11 @@ class TestCachedAtReadsMetadataWithoutDeserializingTheValue:
         cache, _ = make_seeded_cache(tmp_path, "k", default_ttl=60, value={"big": "x" * 100})
         cache.set("k", {"big": "y" * 100})  # ensure the mirror is refreshed
 
-        with watching_envelope_reads(cache) as reads:
+        # The freshness answer comes from the metadata mirror, not the value
+        # bytes: swap the file for an unreadable dir and the answer still holds.
+        with entry_replaced_by_directory(cache, "k"):
             assert cache.cached_at_of("k") is not None
             assert cache.cached_at_of("k") is not None
-        assert reads == [], f"freshness check deserialized the envelope: {reads}"
 
     def test_cached_at_value_matches_the_envelope(self, tmp_path):
         cache, clock = make_seeded_cache(tmp_path, "k", default_ttl=60, value={"data": "value"})
@@ -139,12 +139,12 @@ class TestCachedAtReadsMetadataWithoutDeserializingTheValue:
         # The restarted instance reads the same time base, or the entry it finds is expired before it is ever
         # looked at.
         reopened = reopen_cache(tmp_path, default_ttl=60, clock=lambda: clock[0])
-        with watching_envelope_reads(reopened) as reads:
-            # Cold mirror: one full read is unavoidable and correct.
+        # Cold mirror: one full read answers correctly.
+        assert reopened.cached_at_of("k") == cached_at
+        # Now warm: later freshness checks never touch the envelope, so even an
+        # unreadable entry file doesn't lose the metadata answer.
+        with entry_replaced_by_directory(reopened, "k"):
             assert reopened.cached_at_of("k") == cached_at
-            # Now warm: later freshness checks never touch the envelope.
-            assert reopened.cached_at_of("k") == cached_at
-        assert len(reads) == 1, f"expected one cold read, got {reads}"
 
     def test_expired_entry_reports_none_through_the_chokepoint(self, tmp_path):
         """An expired mirror entry must still be expired and dropped by the
@@ -153,8 +153,8 @@ class TestCachedAtReadsMetadataWithoutDeserializingTheValue:
         assert cache.cached_at_of("k") is not None
         clock[0] += 1000.0
         assert cache.cached_at_of("k") is None
-        # The expired entry is gone from the index, not just unanswered.
-        assert "k" not in cache._index
+        # The expired entry is gone, not just unanswered: a later read misses too.
+        assert cache.get("k") is None
 
     def test_evicted_entry_is_not_answered_from_stale_metadata(self, tmp_path):
         with scoped_cache(default_ttl=60, clock=lambda: 1000.0, max_entries=1) as cache:
@@ -162,7 +162,6 @@ class TestCachedAtReadsMetadataWithoutDeserializingTheValue:
             assert cache.cached_at_of("k1") is not None
             # Evict k1 via the LRU cap.
             cache.set("k2", {"data": "two"})
-            assert "k1" not in cache._index
             assert cache.cached_at_of("k1") is None
             assert cache.cached_at_of("k2") is not None
 
@@ -202,15 +201,9 @@ class TestContentCacheUnlinkDiscipline:
         cache = cc.ContentCache(tmp_path, max_entries=1, max_total_bytes=None, default_ttl=0)
         key = cache.make_key("hot")
         cache.set(key, {"v": 1})
-
-        # Evict exactly as _enforce_limits does, but leave the unlink pending so the re-registration can land
-        # inside the deferral window.
-        doomed: list[tuple[str | None, Path]] = []
-        with cache._lock:
-            cache._drop_locked(key, doomed)
-
-        # The key is written again to the same deterministic path.
+        # Evict the hot key through the LRU cap; its unlink is now pending.
+        cache.set(cache.make_key("other"), {"v": 2})
+        # The key is written again to the same deterministic path before the
+        # pending unlink runs: the fresh write must survive.
         cache.set(key, {"v": "fresh"})
-        cache._unlink_doomed(doomed)
-
         assert cache.get(key) == {"v": "fresh"}

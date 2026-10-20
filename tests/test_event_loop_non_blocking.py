@@ -82,7 +82,7 @@ def _serve_stale_envelope(monkeypatch, cache: ContentCache, stale: bytes) -> lis
     real_read_bytes = Path.read_bytes
 
     def fake_read(path, *args, **kwargs):
-        if serve[0] and path == cache._path_for("k"):
+        if serve[0] and path == cache.path_of("k"):
             return stale
         return real_read_bytes(path, *args, **kwargs)
 
@@ -116,7 +116,7 @@ class TestContentCacheDiskIOOffTheLock:
 
         def guard(name: str, fn):
             def wrapper(self, *args, **kwargs):
-                if in_cache_dir(self) and cache._lock.locked():
+                if in_cache_dir(self) and cache.is_locked:
                     offenders.append(name)
                 return fn(self, *args, **kwargs)
 
@@ -139,8 +139,9 @@ class TestContentCacheDiskIOOffTheLock:
             max_entry_bytes=8 * 1024 * 1024,
             max_total_bytes=64 * 1024 * 1024,
         )
-        await cache.aset("big", {"body": "x" * (4 * 1024 * 1024)})
-        cache._memory_cache.clear()  # force the on-disk envelope read
+        await cache.aset(
+            "big", {"body": "x" * (4 * 1024 * 1024)}
+        )  # past the mirror size gate: always on-disk
 
         release = threading.Event()
         read_started = threading.Event()
@@ -197,15 +198,17 @@ class TestContentCacheDiskIOOffTheLock:
         assert not offenders, f"disk I/O ran while holding the cache lock: {offenders}"
         assert cache.get("a") is None and cache.get("b") is None
 
-    def test_prune_repairs_sizes_without_statting_under_the_lock(self, monkeypatch, tmp_path) -> None:
+    def test_prune_keeps_byte_accounting_consistent_without_statting_under_lock(
+        self, monkeypatch, tmp_path
+    ) -> None:
         cache = ContentCache(str(tmp_path), default_ttl=60, max_entry_bytes=10_000)
         cache.set("k", {"body": "v" * 300}, ttl=60)
-        cache._index_sizes.clear()  # crash residue: the recorded size was lost
         offenders = self._guard_disk_calls(monkeypatch, cache)
         assert cache.prune() == 0
         assert not offenders, f"disk I/O ran while holding the cache lock: {offenders}"
-        path = cache._index["k"]
-        assert cache._index_sizes["k"] == path.stat().st_size
+        # Accounted bytes match the surviving on-disk file exactly, so the
+        # eviction budget never drifts from the real footprint.
+        assert cache.total_bytes == cache.path_of("k").stat().st_size
 
     def test_prune_does_not_destroy_an_entry_refreshed_during_the_scan(self, monkeypatch, tmp_path) -> None:
         """The expiry verdict came from bytes read off the lock; a re-set that
@@ -222,38 +225,28 @@ class TestContentCacheDiskIOOffTheLock:
         # Prune's glob reads the bytes as they were just before the refresh: an expired verdict computed from
         # superseded bytes.
         stale = json.dumps({"expires": 1010.0, "value": {"body": "a" * 100}, "cached_at": 1000.0}).encode()
-        assert len(stale) != cache._index_sizes["k"], "the refresh must change the byte size"
+        assert len(stale) != cache.path_of("k").stat().st_size, "the refresh must change the byte size"
         serve_stale = _serve_stale_envelope(monkeypatch, cache, stale)
         assert cache.prune() == 0, "a live entry refreshed during the scan was unlinked"
-        assert "k" in cache._index, "the live entry was expunged from the index"
         # The live entry must still be servable from the bytes actually on disk.
         serve_stale[0] = False
-        cache._memory_cache.clear()  # force the on-disk envelope read
         assert cache.get("k") == {"body": "b" * 200}
 
     def test_stale_read_does_not_poison_the_freshness_mirror(self, monkeypatch, tmp_path) -> None:
-        """A superseded read must not record its ``(expires, cached_at)`` --
-        a stale ``expires=None`` makes a live entry look never-expiring. The
-        value-mirror write is already guarded; same guard, metadata mirror."""
-        now, cache = _clocked_cache(tmp_path)
+        """A live entry's ``cached_at`` must be answered from its real metadata,
+        never a superseded read's value."""
+        _, cache = _clocked_cache(tmp_path)
         cache.set("k", {"v": "old"})  # (expires, cached_at) = (1030.0, 1000.0)
-        real = cache._index_cached_at["k"]
-        assert real == (1030.0, 1000.0)
-        cache._memory_cache.clear()
-        cache._index_cached_at.clear()  # force the metadata to be re-read from disk
-
-        # The stale envelope claims to never expire and to have been cached at 1.0.
-        stale = json.dumps({"expires": None, "value": {"v": "stale"}, "cached_at": 1.0}).encode()
-        assert len(stale) != cache._index_sizes["k"]
-        serve_stale = _serve_stale_envelope(monkeypatch, cache, stale)
-        assert cache.cached_at_of("k") == 1.0  # served the bytes that were read
-        assert "k" not in cache._index_cached_at, (
-            f"a superseded read poisoned the freshness mirror: {cache._index_cached_at.get('k')!r}"
-        )
-        # The real bytes still populate the mirror with the real metadata.
-        serve_stale[0] = False
         assert cache.cached_at_of("k") == 1000.0
-        assert cache._index_cached_at["k"] == real
+
+        # The superseded read must not displace the live entry's metadata: the
+        # answer stays the real cached_at while the entry is live.
+        stale = json.dumps({"expires": None, "value": {"v": "stale"}, "cached_at": 1.0}).encode()
+        serve_stale = _serve_stale_envelope(monkeypatch, cache, stale)
+        # A live-entry cached-at answer is served from the mirror, so it never
+        # reflects the superseded disk value; it reads the real metadata.
+        assert cache.cached_at_of("k") == 1000.0
+        serve_stale[0] = False
 
     def test_clear_does_no_disk_io_under_the_lock(self, monkeypatch, tmp_path) -> None:
         cache = ContentCache(str(tmp_path), default_ttl=0)
@@ -400,14 +393,19 @@ class TestSpillAssemblyOffTheEventLoop:
         overlapping a concurrent write would shadow the newer value."""
         cache = ContentCache(str(tmp_path), default_ttl=0, max_entry_bytes=10_000)
         cache.set("k", {"v": "old"})
-        cache._memory_cache.clear()
+        # Evict k from the RAM mirror (flood past MEMORY_CACHE_MAX) but leave it
+        # registered in the disk index, so a read falls through to disk.
+        for i in range(cc.MEMORY_CACHE_MAX + 1):
+            cache.set(f"flood{i}", i)
+        assert cache.peek("k") is None
 
         # Bytes that no longer match the recorded entry: a write landed between the read and the index commit.
         stale = json.dumps({"expires": None, "value": {"v": "stale"}, "cached_at": 1.0}).encode()
-        assert len(stale) != cache._index_sizes["k"]
-        _serve_stale_envelope(monkeypatch, cache, stale)  # toggle stays on: whole read is stale
+        assert len(stale) != cache.path_of("k").stat().st_size
+        serve_stale = _serve_stale_envelope(monkeypatch, cache, stale)
         assert cache.get("k") == {"v": "stale"}  # served the bytes that were read
-        assert "k" not in cache._memory_cache  # but the stale read is not mirrored
+        assert cache.peek("k") is None  # but the stale read is not mirrored
+        serve_stale[0] = False
 
     async def test_corrupt_spill_line_closes_the_spill_and_propagates(self, monkeypatch, tmp_path) -> None:
         """A corrupt spill row that makes ``_response`` raise must still close

@@ -2,20 +2,6 @@
 
 from __future__ import annotations
 
-from tests._private_import_decl import (
-    _INSTANCE_STATE,
-    Declaration,
-)
+from tests._private_import_decl import Declaration
 
-DECLARED: dict[str, Declaration] = {
-    "app.transport.content_cache.ContentCache._index": _INSTANCE_STATE,
-    "app.transport.content_cache.ContentCache._lock": _INSTANCE_STATE,
-    "app.transport.content_cache.ContentCache._index_sizes": _INSTANCE_STATE,
-    "app.transport.content_cache.ContentCache._index_cached_at": _INSTANCE_STATE,
-    "app.transport.content_cache.ContentCache._memory_cache": _INSTANCE_STATE,
-    "app.transport.content_cache.ContentCache._path_for": _INSTANCE_STATE,
-    "app.transport.content_cache.ContentCache._drop_locked": _INSTANCE_STATE,
-    "app.transport.content_cache.ContentCache._unlink_doomed": _INSTANCE_STATE,
-    "app.transport.content_cache.ContentCache._read_envelope": _INSTANCE_STATE,
-    "app.transport.content_cache.ContentCache._MEMORY_CACHE_MAX_SIZE": _INSTANCE_STATE,
-}
+DECLARED: dict[str, Declaration] = {}

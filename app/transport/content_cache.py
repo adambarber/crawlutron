@@ -30,6 +30,11 @@ from app.vocabulary.limits import (
     DEFAULT_CACHE_TTL_SECONDS,
 )
 
+# RAM mirror bounds for small-valued hot reads: a value at or past the size gate
+# is never mirrored, and at most this many small entries stay resident in memory.
+MEMORY_CACHE_MAX_SIZE = 1024 * 1024
+MEMORY_CACHE_MAX = 100
+
 
 def _tmp_is_owned(path: Path) -> bool:
     """Whether a live ``atomic_write_text`` holds the temp's advisory lock.
@@ -108,8 +113,8 @@ class ContentCache:
         self._index: OrderedDict[str, Path] = OrderedDict()
         # Small-value RAM mirror (bounded LRU, shallow < 1MB) for hot reads.
         self._memory_cache: OrderedDict[str, tuple[float | None, Any]] = OrderedDict()
-        self._MEMORY_CACHE_MAX = 100
-        self._MEMORY_CACHE_MAX_SIZE = 1024 * 1024
+        self._MEMORY_CACHE_MAX = MEMORY_CACHE_MAX
+        self._MEMORY_CACHE_MAX_SIZE = MEMORY_CACHE_MAX_SIZE
 
     # -- key handling -------------------------------------------------------
     @staticmethod
@@ -120,6 +125,26 @@ class ContentCache:
     def _path_for(self, key: str) -> Path:
         digest = hashlib.sha256(key.encode("utf-8")).hexdigest()
         return self.cache_dir / f"{self.namespace}.{digest}.json"
+
+    def path_of(self, key: str) -> Path:
+        """The on-disk file for ``key`` (deterministic from the name)."""
+        return self._path_for(key)
+
+    @property
+    def total_bytes(self) -> int:
+        """Live on-disk byte total the eviction budget accounts against."""
+        return self._index_total_bytes
+
+    @property
+    def is_locked(self) -> bool:
+        """Whether a cache operation currently holds the commit lock."""
+        return self._lock.locked()
+
+    def peek(self, key: str) -> Any:
+        """The RAM-resident value for ``key`` if mirrored, else ``None`` (no disk fallback)."""
+        with self._lock:
+            entry = self._memory_cache.get(key)
+            return None if entry is None or is_expired(self.clock(), entry[0]) else entry[1]
 
     def _drop_locked(self, key: str, doomed: list[tuple[str | None, Path]]) -> None:
         """Remove one entry from the index, byte accounting and RAM.
@@ -176,9 +201,7 @@ class ContentCache:
 
     # -- public API ---------------------------------------------------------
     def _read_envelope(self, key: str) -> CacheEnvelope | None:
-        """The unexpired envelope for ``key`` (LRU-registered), else ``None``.
-        Reads + parses OUTSIDE the lock (multi-MB work the loop thread must
-        not hold); only RAM state is touched under it."""
+        """The unexpired envelope for ``key`` (LRU-registered), else ``None``. Reads outside the lock."""
         path = self._path_for(key)
         try:
             raw = path.read_bytes()
@@ -232,9 +255,7 @@ class ContentCache:
             self._unlink_doomed(doomed)
 
     def _memory_hit_locked(self, key: str) -> Any | None:
-        """RAM-mirror probe (callers must hold ``self._lock``).
-
-        Value on a fresh hit (bumping RAM + disk recency), ``None`` on miss."""
+        """RAM-mirror probe: value on a fresh hit (bumping recency), else ``None``."""
         if key not in self._memory_cache:
             return None
         expires, value = self._memory_cache[key]
@@ -249,9 +270,7 @@ class ContentCache:
         return value
 
     def _remember_memory_locked(self, key: str, value: Any, expires: float | None, size: int) -> None:
-        """Store into the RAM mirror under the size gate and count cap.
-
-        Oversized values are dropped, never mirrored."""
+        """Store into the RAM mirror under the size gate and count cap."""
         if value is None or size >= self._MEMORY_CACHE_MAX_SIZE:
             # A large value must not linger in the small-value cache.
             self._memory_cache.pop(key, None)
@@ -262,9 +281,7 @@ class ContentCache:
             self._memory_cache.popitem(last=False)
 
     def _memory_probe(self, key: str) -> Any | None:
-        """The RAM-mirror probe with ``self._lock`` taken.
-        ``_memory_hit_locked`` owns the rules; this spells the lock dance
-        once, where a missing lock would be the data race."""
+        """The RAM-mirror probe with ``self._lock`` taken."""
         with self._lock:
             return self._memory_hit_locked(key)
 
@@ -303,13 +320,9 @@ class ContentCache:
         return {"expires": expires, "value": value, "cached_at": now}, expires
 
     def set(self, key: str, value: Any, ttl: int | None = None) -> None:
-        """Store ``value`` (must be JSON-serializable) with a TTL in seconds.
-
-        ``ttl <= 0`` means "never expires".
-        """
+        """Store ``value`` (JSON-serializable) with a TTL in seconds; ``ttl <= 0`` never expires."""
         envelope, expires = self._entry_to_store(value, ttl)
-        # Serialize first: entries over the per-entry cap are refused before
-        # any disk write, and the byte size feeds total-budget accounting.
+        # Serialize first: the size feeds the per-entry cap and byte accounting.
         data = json.dumps(envelope)
         path = self._path_for(key)
         with self._lock:
@@ -328,9 +341,7 @@ class ContentCache:
         self._enforce_limits()
 
     async def aget(self, key: str) -> Any | None:
-        """Async ``get``: offload the envelope read + JSON parse off the loop.
-        Runs outside ``self._lock``, so a concurrent ``aset`` is not queued
-        behind it."""
+        """Async ``get``: the envelope read + parse go off the loop and off the lock."""
         hit = self._memory_probe(key)
         if hit is not None:
             return hit
@@ -339,15 +350,11 @@ class ContentCache:
         return None if envelope is None else envelope.get("value")
 
     async def aset(self, key: str, value: Any, ttl: int | None = None) -> None:
-        """Async ``set`` with the same byte-budget contract.
-
-        Serialize off the loop, decide size under the lock, write off-loop."""
-        # Built off the loop with the serialize: it is pure, and the envelope is
-        # the sync path's own contract (``_entry_to_store``).
+        """Async ``set`` with the same byte-budget contract."""
+        # Serialize off the loop: pure, and the sync path's own contract.
         envelope, expires = await asyncio.to_thread(self._entry_to_store, value, ttl)
         path = self._path_for(key)
-        # Serialize FIRST: the refuse/keep decision must be made from the
-        # exact bytes that will hit disk, before anything is mutated.
+        # Serialize FIRST: the refuse/keep decision is made from the exact bytes.
         data = await asyncio.to_thread(json.dumps, envelope)
         size = len(data)
         with self._lock:
@@ -370,9 +377,7 @@ class ContentCache:
         self._enforce_limits()
 
     def _commit_entry_locked(self, key: str, path: Path, size: int) -> None:
-        """Record ``key``'s path and size in the index, and the byte delta.
-        Index, per-entry sizes, running total and LRU order are one accounting
-        fact with four fields; callers must hold ``self._lock``."""
+        """Record path, per-entry size and byte delta in the index; caller holds the lock."""
         old_size = self._index_sizes.get(key, 0)
         self._index[key] = path
         self._index.move_to_end(key)
@@ -396,11 +401,8 @@ class ContentCache:
                 elif self._index_sizes.get(key) == size:
                     self._drop_locked(key, doomed)
                 else:
-                    # A re-set landed during the scan: spare the file, keep the
-                    # entry registered under its current recorded size.
-                    surviving[path] = self._index_sizes[key]
-            # Rebuild index and byte accounting from what survived on disk;
-            # a dropped entry re-registers from disk later, like a warm restart.
+                    surviving[path] = self._index_sizes[key]  # re-set during the scan: spare it
+            # Rebuild index and byte accounting from what survived on disk.
             live: OrderedDict[str, Path] = OrderedDict(
                 (k, p) for k, p in self._index.items() if p in surviving
             )
@@ -418,8 +420,7 @@ class ContentCache:
 
     def clear(self) -> int:
         """Delete all entries in this namespace; return the number removed."""
-        # Snapshot the files outside the lock; the RAM state is dropped under
-        # it and the unlinks run afterwards (disk I/O must never hold it).
+        # Snapshot the files outside the lock; the unlinks run afterwards.
         paths = list(self.cache_dir.glob(f"{self.namespace}.*.json"))
         doomed: list[tuple[str | None, Path]] = []
         with self._lock:

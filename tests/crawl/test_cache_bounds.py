@@ -24,7 +24,7 @@ class TestContentCacheOverwrite:
         """
 
         warm, _clock = make_seeded_cache(tmp_path, "key1")
-        path = warm._path_for("key1")
+        path = warm.path_of("key1")
         envelope = json.loads(path.read_text())
         envelope["expires"] = "not-a-timestamp"
         path.write_text(json.dumps(envelope))
@@ -39,7 +39,7 @@ class TestContentCacheOverwrite:
         cache, clock = make_seeded_cache(tmp_path, "key1")
         # The corrupt file carries the name prune would compute, so a prune that cannot read it must skip it
         # rather than count it as removed.
-        cache._path_for("badkey").write_text("not valid json")
+        cache.path_of("badkey").write_text("not valid json")
         clock[0] = 1002.0  # advance past the TTL
         assert cache.prune() == 1  # only key1 is expired and removable
 
@@ -50,7 +50,7 @@ class TestContentCacheOverwrite:
         clock[0] = 1002.0
         with entry_replaced_by_directory(cache, "key1"):
             assert cache.prune() == 1
-        assert cache._path_for("key2").exists() is False
+        assert cache.path_of("key2").exists() is False
 
     def test_content_cache_clear_os_error(self):
         # Same continuation contract as prune: an undeletable entry is skipped and the rest of the namespace
@@ -60,7 +60,7 @@ class TestContentCacheOverwrite:
             cache.set("key2", {"data": "2"})
             with entry_replaced_by_directory(cache, "key1"):
                 assert cache.clear() == 1
-            assert cache._path_for("key2").exists() is False
+            assert cache.path_of("key2").exists() is False
 
 
 class TestSharedContentCache:
