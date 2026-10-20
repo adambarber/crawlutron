@@ -1,7 +1,6 @@
 """Count the invariant suite's detectors, so its coverage of itself is knowable.
-
-A detector is a hand-written AST walk; ``unaccounted`` (walks no ``Rule`` names)
-is the migration gap, exact and worth zero. Deliberately reported, not enforced."""
+A walk a ``Rule`` names or that the hand-rolled arming registry declares is
+accounted; the suite enforces zero stand outside both."""
 
 from __future__ import annotations
 
@@ -10,6 +9,7 @@ import pathlib
 from dataclasses import dataclass
 
 from tests.chokepoint_walks import REPO_ROOT, calls_to_any, from_imports, functions
+from tests.invariants._armed_detectors import hand_rolled_detectors
 
 INVARIANTS_ROOT = REPO_ROOT / "tests" / "invariants"
 
@@ -47,7 +47,7 @@ class DetectorAudit:
 
     @property
     def unaccounted(self) -> int:
-        """Detectors no ``Rule`` names: the migration gap, exact and worth zero."""
+        """Detectors neither a ``Rule`` nor the arming registry declares."""
         return len(self.detectors) - len(self.declared)
 
 
@@ -90,6 +90,7 @@ def _survey(root: pathlib.Path) -> tuple[list[DetectorEntry], list[DetectorEntry
     detectors: list[DetectorEntry] = []
     declared: list[DetectorEntry] = []
     not_detectors: list[DetectorEntry] = []
+    regimens = _armed_registry(root)
     for path in sorted(root.rglob("*.py")):
         if "__pycache__" in path.parts:
             continue
@@ -103,9 +104,24 @@ def _survey(root: pathlib.Path) -> tuple[list[DetectorEntry], list[DetectorEntry
                 not_detectors.append(entry)
                 continue
             detectors.append(entry)
-            if node.name in wired:
+            if node.name in wired or _registered(entry, regimens):
                 declared.append(entry)
     return detectors, declared, not_detectors
+
+
+def _armed_registry(root: pathlib.Path) -> frozenset[tuple[pathlib.Path, str]]:
+    """The hand-rolled arming registry when ``root`` is the invariants tree.
+    A bite's synthetic root stays unchanged, so the planted cases still count."""
+    if root != INVARIANTS_ROOT:
+        return frozenset()
+    return frozenset((e.module, e.function) for e in hand_rolled_detectors())
+
+
+def _registered(
+    entry: DetectorEntry,
+    regimens: frozenset[tuple[pathlib.Path, str]],
+) -> bool:
+    return (entry.path, entry.name) in regimens
 
 
 def _reads_a_tree(node: ast.FunctionDef | ast.AsyncFunctionDef) -> bool:
@@ -154,6 +170,18 @@ def test_the_walk_sees_every_detector_in_the_suite() -> None:
         f"{[e for e in found if not e.path.is_relative_to(INVARIANTS_ROOT)]}"
     )
     assert all(entry.name.endswith(DETECTOR_SUFFIX) for entry in found)
+
+
+def test_no_detector_is_unaccounted() -> None:
+    """The #297 enforcement: a detector outside both the ``Rule`` machinery and the
+    arming registry is a gate nobody audits. Every walk must name an owner, so the
+    H2 hole (a hand-rolled detector going silent undiscovered) is closed by count."""
+    result = audit()
+    assert not result.unaccounted, (
+        f"{result.unaccounted} detector(s) are neither a Rule find nor armed in the hand-rolled "
+        "registry; register each in tests/invariants/_armed_detectors.py or declare it as a Rule:\n"
+        + "\n".join(str(e) for e in result.detectors if e not in result.declared)
+    )
 
 
 def test_planting_a_detector_moves_the_count_by_one(tmp_path: pathlib.Path) -> None:
