@@ -67,8 +67,8 @@ class TestExecuteCrawlChainPinningFailureUnpin:
         pin and serves the page over the HTTP fallback."""
         from app.vocabulary.strategies import BROWSER_HEADLESS, HTTP_DECLARED_CRAWLER
         from tests._browser_doubles import _fake_browser
+        from tests._chain_policies import chain_policy
         from tests._fetcher_factories import request_fetcher, run_chain
-        from tests.crawl._chain_policies import chain_policy
 
         http_fetcher = request_fetcher(lambda _url, _headers: (200, b"<html>ok</html>", "text/html"))
         scheduler = DomainScheduler(global_limit=8, per_domain_limit=8, delay_seconds=0.0)

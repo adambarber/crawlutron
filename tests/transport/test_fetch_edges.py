@@ -34,7 +34,7 @@ from tests._worker_doubles import (
     assert_coroutine_worker_is_awaited_directly,
     assert_sync_worker_runs_once_in_a_thread,
 )
-from tests.crawl.test_http_helpers import FEED_ADVERTISING_PAGE, _diagnostics_for_failed_probes
+from tests.transport.test_http_helpers import FEED_ADVERTISING_PAGE, _diagnostics_for_failed_probes
 
 
 class TestCrawlRequest:

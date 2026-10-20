@@ -29,7 +29,7 @@ from app.vocabulary.identity import SERVICE_ID
 from tests._fetcher_factories import routed_fetcher
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY, canonical, crawl_policy
 from tests._timing_harnesses import cpu_seconds
-from tests.crawl.test_robots_crawler import _fake_fetcher
+from tests.transport.test_robots_crawler import _fake_fetcher
 
 
 def robots_entry_key(origin: str) -> tuple[str, HostPolicy]:

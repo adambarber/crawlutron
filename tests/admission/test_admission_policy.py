@@ -19,7 +19,7 @@ from app.runtime.resource_pressure import (
 from app.storage.job_store import FrontierEntry
 from tests._fetcher_factories import crawled_results
 from tests._policy_factories import admit, canonical
-from tests.crawl.test_admission_scaling import PinnedGate
+from tests.admission.test_admission_scaling import PinnedGate
 
 
 async def test_max_pages_default_is_bounded_not_unlimited():

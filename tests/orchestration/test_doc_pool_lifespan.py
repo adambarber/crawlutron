@@ -6,11 +6,11 @@ import app.extraction.documents as docex
 import app.orchestration.doc_pool as doc_pool_mod
 from app.orchestration.doc_pool import DocWorker
 from tests._app_factory import service_app
+from tests._doc_pool_fixtures import _seeded, fresh_doc_pool
 from tests._extraction_helpers import settings_with
 from tests._lifespan_doubles import stub_heavy_teardown
 from tests._process_doubles import install_unkillable_doc_worker, stub_worker
-from tests.crawl._doc_pool_fixtures import _seeded, fresh_doc_pool
-from tests.crawl.test_doc_pool import _acquire_the_replacement
+from tests.orchestration.test_doc_pool import _acquire_the_replacement
 
 
 class TestLifespanDocPoolTeardown:

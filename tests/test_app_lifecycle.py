@@ -16,7 +16,7 @@ from tests._lifespan_doubles import stub_heavy_teardown
 def _fresh_doc_pool_for_real_lifespan(monkeypatch):
     """A real lifespan shutdown closes the doc pool terminally (#246); give each
     test a fresh isolated pool so that shutdown never poisons later extraction."""
-    from tests.crawl._doc_pool_fixtures import fresh_doc_pool
+    from tests._doc_pool_fixtures import fresh_doc_pool
 
     fresh_doc_pool(monkeypatch)
 

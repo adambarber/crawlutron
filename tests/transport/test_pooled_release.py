@@ -10,8 +10,8 @@ import app.transport.http_client_pool as http_mod
 from app.config import settings as settings_mod
 from app.transport.http_client_pool import get_async_http_client
 from tests._async_harnesses import run_loop_rebind_scenario
-from tests.crawl.test_http_client_pool import _FakeClient
-from tests.crawl.test_pooled_supersede import _bind_to_running_loop
+from tests.transport.test_http_client_pool import _FakeClient
+from tests.transport.test_pooled_supersede import _bind_to_running_loop
 
 
 class _PooledClientDouble:

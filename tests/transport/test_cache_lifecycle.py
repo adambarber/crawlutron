@@ -9,8 +9,7 @@ from typing import Any
 import pytest
 
 import app.transport.content_cache as cc
-from tests._fetcher_factories import make_seeded_cache
-from tests.crawl._cache_fixtures import (
+from tests._cache_fixtures import (
     counting_entry_reads,
     entry_replaced_by_directory,
     parked_entry_unlink,
@@ -18,6 +17,7 @@ from tests.crawl._cache_fixtures import (
     scoped_cache,
     watch_writes,
 )
+from tests._fetcher_factories import make_seeded_cache
 
 
 def _make(tmp_path, clock=1000.0):

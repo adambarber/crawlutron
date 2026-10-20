@@ -1,4 +1,4 @@
-"""Crawl-package fixtures shared by the doc-pool suites."""
+"""Orchestration-package fixtures shared by the doc-pool suites."""
 
 from __future__ import annotations
 
@@ -23,7 +23,7 @@ def fake_pool(monkeypatch):
 @pytest.fixture
 def seeded_doc_pool(monkeypatch):
     """A live document worker in the pool, restored afterwards."""
-    from tests.crawl._doc_pool_fixtures import _seeded
+    from tests._doc_pool_fixtures import _seeded
 
     worker = stub_worker(4242)
     pool, _spawner = _seeded(monkeypatch, worker)

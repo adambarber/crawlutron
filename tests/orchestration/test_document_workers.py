@@ -118,7 +118,7 @@ def _reset_doc_extraction_pool(monkeypatch):
 
     Each extraction spawns its own short-lived worker (reaped on completion or
     timeout); the injected env flags revert via ``monkeypatch`` teardown."""
-    from tests.crawl._doc_pool_fixtures import fresh_doc_pool
+    from tests._doc_pool_fixtures import fresh_doc_pool
 
     fresh_doc_pool(monkeypatch)
     yield

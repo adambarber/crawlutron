@@ -5,8 +5,8 @@ from __future__ import annotations
 import json
 
 from app.transport.content_cache import ContentCache
+from tests._cache_fixtures import _make_cache, entry_path, entry_replaced_by_directory, scoped_cache
 from tests._fetcher_factories import make_seeded_cache
-from tests.crawl._cache_fixtures import _make_cache, entry_path, entry_replaced_by_directory, scoped_cache
 
 
 class TestContentCacheOverwrite:

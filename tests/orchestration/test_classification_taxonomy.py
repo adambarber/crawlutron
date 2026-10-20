@@ -18,7 +18,7 @@ from app.vocabulary.taxonomy import (
 )
 from tests._result_builders import skipped_result
 from tests.chokepoint_walks import app_trees, nodes_of
-from tests.crawl.test_classification import _GROUPING_ASSIGNMENTS, _GROUPINGS, UNRECOGNIZED_LABELS
+from tests.orchestration.test_classification import _GROUPING_ASSIGNMENTS, _GROUPINGS, UNRECOGNIZED_LABELS
 
 
 def _classifiable_labels() -> list[str]:

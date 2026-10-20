@@ -4,7 +4,7 @@ import pytest
 
 from app.models.normalized_url import NormalizedUrl
 from tests._policy_factories import admit, canonical
-from tests.crawl.test_admission_policy import _no_crawl_delay
+from tests.admission.test_admission_policy import _no_crawl_delay
 
 
 async def test_discovered_link_delay_commits_in_order_and_breaks_at_cap():

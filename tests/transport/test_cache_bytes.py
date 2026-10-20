@@ -8,8 +8,7 @@ import pytest
 
 import app.transport.content_cache as cc
 from app.transport.content_cache import ContentCache
-from tests._fetcher_factories import make_expiring_cache
-from tests.crawl._cache_fixtures import (
+from tests._cache_fixtures import (
     _make_cache,
     _seeded_then_write_fails,
     counting_entry_reads,
@@ -17,6 +16,7 @@ from tests.crawl._cache_fixtures import (
     on_disk_bytes,
     watch_writes,
 )
+from tests._fetcher_factories import make_expiring_cache
 
 
 def budgeted_cache(tmp_path, *, max_total_bytes: int = 400, **settings) -> ContentCache:

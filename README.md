@@ -69,11 +69,11 @@ to defeat:
 - **File-descriptor ownership** (`tests/test_spill_stream.py`,
   `tests/invariants/test_ownership.py`) — `_ResultSpill` deletes the file it
   owns and leaves the one it borrowed.
-- **Cache locking** (`tests/crawl/test_dns_cache.py`,
-  `tests/crawl/test_robots_policy_consolidation.py`) — concurrent access to
+- **Cache locking** (`tests/transport/test_dns_cache.py`,
+  `tests/transport/test_robots_policy_consolidation.py`) — concurrent access to
   the DNS and robots caches, including that robots reads go through the one
   chokepoint.
-- **Cookie namespacing** (`tests/crawl/test_cookie_namespace.py`) — per-tenant
+- **Cookie namespacing** (`tests/transport/test_cookie_namespace.py`) — per-tenant
   cookies cannot cross a tenant boundary.
 - **Env parsing** (`tests/test_env_parsing.py`) — `parse_bool_env` edge cases,
   including that a typo cannot silently open a policy.
@@ -82,7 +82,7 @@ to defeat:
 - **Decompression bomb tests** — a real gzip bomb (`~1 KB` compressed →
   `1 MB` expanded), plus deflate and brotli bomb cases, verify the decompression
   guard rejects over-cap output before OOM.
-- **SSRF tests** (`tests/test_ssrf_*`, `tests/crawl/test_ssrf_*`) — DNS
+- **SSRF tests** (`tests/test_ssrf_*`, `tests/transport/test_ssrf_*`) — DNS
   pinning, route-level interception, WebSocket guard, hostname pinning
   even after a redirect chain, IPv6 private range blocking.
 - **Classification corroboration tests** — soft phrases (e.g. "blocked")

@@ -17,13 +17,13 @@ from app.orchestration.results import engine_result_from_exception
 from app.transport.browser_pool import BrowserPoolExhaustedError
 from app.vocabulary.strategies import BROWSER_HEADED_WARMED, BROWSER_HEADLESS, HTTP_DECLARED_CRAWLER
 from tests._browser_doubles import _fake_browser
+from tests._chain_policies import chain_policy
 from tests._fetcher_factories import failing_fetcher, raise_fetcher, run_chain
 from tests._worker_doubles import (
     assert_coroutine_worker_is_awaited_directly,
     assert_sync_worker_returning_awaitable_is_named,
     assert_sync_worker_runs_once_in_a_thread,
 )
-from tests.crawl._chain_policies import chain_policy
 
 # --------------------------------------------------------------------------- Classification: the taxonomy is
 # the single source of "what went wrong"

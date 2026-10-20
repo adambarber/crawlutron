@@ -31,7 +31,7 @@ def _isolated_doc_pool(monkeypatch):
 
     ``teardown()``/``shutdown_doc_extraction_executor()`` are terminal since #246;
     a fresh pool per test keeps those shutdown calls from poisoning the shared one."""
-    from tests.crawl._doc_pool_fixtures import fresh_doc_pool
+    from tests._doc_pool_fixtures import fresh_doc_pool
 
     fresh_doc_pool(monkeypatch)
     yield

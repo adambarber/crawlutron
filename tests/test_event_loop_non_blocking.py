@@ -19,15 +19,15 @@ from app.models.crawl_policy import CrawlPolicy
 from app.orchestration.engine import ResultSpill
 from app.storage.job_store import JobStatus
 from app.transport.content_cache import ContentCache
-from tests._fetcher_factories import crawled_results
-from tests._job_harnesses import loaded_job, make_job_store
-from tests._timing_harnesses import HANG_GUARD_SECONDS
-from tests.crawl._cache_fixtures import (
+from tests._cache_fixtures import (
     counting_entry_reads,
     entry_path,
     on_disk_bytes,
     parked_entry_unlink,
 )
+from tests._fetcher_factories import crawled_results
+from tests._job_harnesses import loaded_job, make_job_store
+from tests._timing_harnesses import HANG_GUARD_SECONDS
 
 
 class _LoopLiveness:

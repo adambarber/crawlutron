@@ -195,7 +195,7 @@ TEST_HELPERS_IMPORTED_BY_PACKAGE_PATH = Rule(
         "import httpx\n"
         "import pytest\n"
         "from tests._policy_factories import _policy\n"
-        "from tests.crawl._chain_policies import chain_policy\n"
+        "from tests._chain_policies import chain_policy\n"
         "from app.admission.policy import read_policy\n",
     ),
 )

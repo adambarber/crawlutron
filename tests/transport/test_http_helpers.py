@@ -319,7 +319,7 @@ class TestHttpStrategyResult:
     @pytest.fixture(autouse=True)
     def _isolated_doc_pool(self, monkeypatch):
         """A fresh isolated doc pool, immune to a prior test's terminal teardown (#246)."""
-        from tests.crawl._doc_pool_fixtures import fresh_doc_pool
+        from tests._doc_pool_fixtures import fresh_doc_pool
 
         fresh_doc_pool(monkeypatch)
 

@@ -15,9 +15,9 @@ from app.transport.cache import HttpCache
 from app.transport.content_cache import ContentCache
 from app.transport.fetchers import default_http_fetcher
 from app.vocabulary.strategies import HTTP_DECLARED_CRAWLER
+from tests._cache_fixtures import _make_cache, counting_entry_reads, reopen_cache, scoped_cache
 from tests._fetch_scripted import request_fetcher
 from tests._fetcher_factories import clocked_cache, crawled_results, run_http_strategy, tap_fetcher
-from tests.crawl._cache_fixtures import _make_cache, counting_entry_reads, reopen_cache, scoped_cache
 from tests.helpers.server import EtagHandler
 
 

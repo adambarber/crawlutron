@@ -11,7 +11,7 @@ from app.vocabulary.strategies import BROWSER_HEADLESS, HTTP_DECLARED_CRAWLER
 from tests._fetcher_factories import LINKED_PAIR_LIMITS, crawled_results, site_linking_to
 from tests._recursive_harnesses import drive_recursive_crawl, make_crawl_task
 from tests._scheduler_doubles import FakeScheduler as _Scheduler
-from tests.crawl.test_admission import _pinned_resource_gate
+from tests.admission.test_admission import _pinned_resource_gate
 
 # --- governance ---
 

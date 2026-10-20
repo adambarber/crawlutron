@@ -127,7 +127,7 @@ def _scope_compiler_definitions() -> list[str]:
 
 
 def test_scope_regex_compiler_has_exactly_one_definition():
-    """Behavior parity across the dedupe is covered by tests/crawl/test_scope_regex.py;
+    """Behavior parity across the dedupe is covered by tests/orchestration/test_scope_regex.py;
     this pins that no second copy of the compiler or of its bound can creep back."""
     found = _scope_compiler_definitions()
     compilers = [label for label in found if "compiler" in label]

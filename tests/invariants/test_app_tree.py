@@ -83,7 +83,7 @@ def test_the_tests_tree_is_walked_once_too():
     first = trees_under(TESTS_DIR)
     assert first, "the tests/ walk found no modules"
     assert trees_under(TESTS_DIR) is first, "the tests/ tree is re-walked per detector"
-    assert trees_under(TESTS_DIR / "crawl") is not first, "a different tree must be its own snapshot"
+    assert trees_under(TESTS_DIR / "invariants") is not first, "a different tree must be its own snapshot"
 
 
 def test_every_detector_sees_the_same_nodes():

@@ -11,6 +11,7 @@ import app.extraction.content as ext_mod
 import app.extraction.documents as docex
 from app.extraction.content import ExtractedContent
 from app.orchestration.doc_pool import DocExtractionPool, DocWorker, terminate_doc_process
+from tests._doc_pool_fixtures import _seeded
 from tests._extraction_helpers import settings_with
 from tests._lock_doubles import DelegatingLock
 from tests._process_doubles import (
@@ -21,7 +22,6 @@ from tests._process_doubles import (
     stub_proc,
     stub_worker,
 )
-from tests.crawl._doc_pool_fixtures import _seeded
 
 
 def _acquire_the_replacement(pool: DocExtractionPool, spawner: StubSpawner, pid: int, bound: float = 0.3):
