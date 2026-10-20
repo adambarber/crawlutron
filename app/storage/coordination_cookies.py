@@ -13,11 +13,11 @@ from pathlib import Path
 from app.storage.coordination_store import CoordinationStore
 from app.storage.migrations.manifest import StoreSchema
 
-__all__ = ["DEFAULT_MAX_HOSTS", "SharedCookieStore"]
+__all__ = ["DEFAULT_MAX_HOSTS_PER_NAMESPACE", "SharedCookieStore"]
 
 # The DNS, robots and sitemap caches are all bounded for the same reason: an unbounded
 # eviction accumulates every host forever.
-DEFAULT_MAX_HOSTS = 1024
+DEFAULT_MAX_HOSTS_PER_NAMESPACE = 1024
 
 
 class SharedCookieStore(CoordinationStore):
@@ -29,7 +29,7 @@ class SharedCookieStore(CoordinationStore):
 
     schema = StoreSchema.COORDINATION_COOKIES
 
-    def __init__(self, db_path: str | Path, *, max_hosts: int = DEFAULT_MAX_HOSTS) -> None:
+    def __init__(self, db_path: str | Path, *, max_hosts: int = DEFAULT_MAX_HOSTS_PER_NAMESPACE) -> None:
         super().__init__(db_path)
         self._max_hosts = max(1, int(max_hosts))
 

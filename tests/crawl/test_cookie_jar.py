@@ -72,9 +72,9 @@ def test_concurrent_cookie_writes_do_not_raise():
 
 def _cookie_jar_max_hosts() -> int:
     """The jar's LRU cap, read from the module that owns it."""
-    from app.transport.cookie_jar import COOKIE_JAR_MAX_HOSTS
+    from app.transport.cookie_jar import COOKIE_JAR_MAX_HOSTS_PER_NAMESPACE
 
-    return COOKIE_JAR_MAX_HOSTS
+    return COOKIE_JAR_MAX_HOSTS_PER_NAMESPACE
 
 
 def _jar_with_hosts(count: int):

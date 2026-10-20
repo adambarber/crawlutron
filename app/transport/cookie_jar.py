@@ -12,7 +12,7 @@ from collections import OrderedDict
 from typing import TYPE_CHECKING
 
 from app.models.normalized_url import NormalizedUrl
-from app.storage.coordination_cookies import DEFAULT_MAX_HOSTS
+from app.storage.coordination_cookies import DEFAULT_MAX_HOSTS_PER_NAMESPACE
 
 if TYPE_CHECKING:
     from app.storage.coordination_cookies import SharedCookieStore
@@ -25,7 +25,7 @@ COOKIE_NAMESPACE: contextvars.ContextVar[str] = contextvars.ContextVar(
 
 # Cap on distinct (namespace, host) cookie slots PER NAMESPACE: each tenant's
 # budget is independent, so one crawl cannot evict another's. Kept on the store.
-COOKIE_JAR_MAX_HOSTS = DEFAULT_MAX_HOSTS
+COOKIE_JAR_MAX_HOSTS_PER_NAMESPACE = DEFAULT_MAX_HOSTS_PER_NAMESPACE
 
 
 class CookieJar:
@@ -65,7 +65,7 @@ class CookieJar:
         # Per-namespace cap: evict only this namespace's stale slots (oldest first),
         # leaving a sibling's jar untouched -- one crawl cannot evict another's (#234).
         stale = [key for key in self._cookies if key[0] == namespace]
-        over = len(stale) - COOKIE_JAR_MAX_HOSTS
+        over = len(stale) - COOKIE_JAR_MAX_HOSTS_PER_NAMESPACE
         if over > 0:
             for key in stale[:over]:
                 del self._cookies[key]
