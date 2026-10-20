@@ -20,7 +20,7 @@ from app.vocabulary.extraction import (
 )
 
 
-async def _extract_http_phase(ctx: HttpStrategyContext, resp: FetchedResponse) -> ExtractedHttpContent:
+async def extract_http_phase(ctx: HttpStrategyContext, resp: FetchedResponse) -> ExtractedHttpContent:
     """Decode the body, run the selected extractor, measure content.
 
     ``is_html`` is :func:`app.extraction.content.is_html`, the one predicate the funnel
@@ -65,14 +65,15 @@ async def _extract_http_phase(ctx: HttpStrategyContext, resp: FetchedResponse) -
     )
 
 
-def _request_profile_diagnostics(profile: dict[str, Any]) -> dict[str, str]:
+def request_profile_diagnostics(profile: dict[str, Any]) -> dict[str, str]:
+    """The request-profile frame a crawl result carries in its diagnostics."""
     return {
         "user_agent_family": str(profile.get("user_agent_family", "generic_crawler")),
         "cookie_jar": str(profile.get("cookie_jar", "none")),
     }
 
 
-def _classify_extracted_content(
+def classify_extracted_content(
     ctx: HttpStrategyContext,
     resp: FetchedResponse,
     extracted: ExtractedHttpContent,

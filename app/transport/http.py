@@ -26,15 +26,15 @@ from app.transport.content_pipeline import (
     post_fetch_diagnostics,
 )
 from app.transport.http_cache import (
-    _not_modified_result,
-    _resolve_http_limits,
-    _revalidate_content_cache,
-    _store_http_caches,
+    not_modified_result,
+    resolve_http_limits,
+    revalidate_content_cache,
+    store_http_caches,
 )
 from app.transport.http_classify import (
-    _classify_extracted_content,
-    _extract_http_phase,
-    _request_profile_diagnostics,
+    classify_extracted_content,
+    extract_http_phase,
+    request_profile_diagnostics,
 )
 from app.transport.http_response import (
     ExtractedHttpContent,
@@ -86,7 +86,7 @@ async def _construct_http_result(
     extracted: ExtractedHttpContent,
 ) -> EngineCrawlResult:
     """Run discovery shaping and construct the successful strategy result."""
-    classification, classification_evidence = _classify_extracted_content(ctx, resp, extracted)
+    classification, classification_evidence = classify_extracted_content(ctx, resp, extracted)
     # A content-cache revalidation that earned a 304 re-serves the cached body; it is not a fresh
     # render, so report not_modified (kept content lets WatchSweeper diff, not fire a webhook).
     revalidated_304 = ctx.revalidated_304
@@ -96,7 +96,7 @@ async def _construct_http_result(
     status = status_for_classification(classification)
     diagnostics: CrawlDiagnostics = {
         "decompression_failed": extracted.strategy_decompression_failed or resp.decompression_failed,
-        "request_profile": _request_profile_diagnostics(ctx.profile),
+        "request_profile": request_profile_diagnostics(ctx.profile),
         "retry": ctx.retry_diagnostics,
         "runtime": {"elapsed_ms": resp.elapsed_ms, "final_url": resp.final_url},
         "content_metrics": extracted.content_metrics,
@@ -200,7 +200,7 @@ def _http_error_result(ctx: HttpStrategyContext, error: Exception) -> EngineCraw
         extra_diagnostics={
             "retry": ctx.retry_diagnostics,
             "runtime": {"elapsed_ms": elapsed_ms},
-            "request_profile": _request_profile_diagnostics(ctx.profile),
+            "request_profile": request_profile_diagnostics(ctx.profile),
         },
     )
 
@@ -230,20 +230,20 @@ async def http_strategy_result(
         global_concurrency=global_concurrency,
         started=time.monotonic(),
     )
-    _resolve_http_limits(ctx)
-    await _revalidate_content_cache(ctx)
+    resolve_http_limits(ctx)
+    await revalidate_content_cache(ctx)
     try:
         if ctx.response is None:
             ctx.response, ctx.retry_diagnostics = await _fetch_http_phase(ctx)
         resp = FetchedResponse.of(ctx.response)
-        not_modified = _not_modified_result(ctx, resp)
+        not_modified = not_modified_result(ctx, resp)
         if not_modified is not None:
             return not_modified
-        await _store_http_caches(ctx, resp)
+        await store_http_caches(ctx, resp)
         binary_result = _binary_result_if_needed(ctx, resp)
         if binary_result is not None:
             return binary_result
-        extracted = await _extract_http_phase(ctx, resp)
+        extracted = await extract_http_phase(ctx, resp)
         return await _construct_http_result(ctx, resp, extracted)
     except Exception as error:
         return _http_error_result(ctx, error)

@@ -23,7 +23,7 @@ from app.transport.http_response import (
 from app.vocabulary.taxonomy import status_for_classification
 
 
-def _resolve_http_limits(ctx: HttpStrategyContext) -> None:
+def resolve_http_limits(ctx: HttpStrategyContext) -> None:
     """Resolve request validators, limits, headers, and extraction settings."""
     validators = ctx.caller_validators or {}
     for source, header in (
@@ -53,7 +53,7 @@ def _resolve_http_limits(ctx: HttpStrategyContext) -> None:
     ctx.include_html = policy_wants_html(ctx.policy)
 
 
-async def _revalidate_content_cache(ctx: HttpStrategyContext) -> None:
+async def revalidate_content_cache(ctx: HttpStrategyContext) -> None:
     """Serve or revalidate a disk content-cache entry when one is available."""
     if ctx.content_cache is None:
         return
@@ -109,7 +109,7 @@ async def _revalidate_content_cache(ctx: HttpStrategyContext) -> None:
         ctx.retry_diagnostics = {**ctx.retry_diagnostics, "content_cache": "revalidated_fresh"}
 
 
-def _not_modified_result(ctx: HttpStrategyContext, resp: FetchedResponse) -> EngineCrawlResult | None:
+def not_modified_result(ctx: HttpStrategyContext, resp: FetchedResponse) -> EngineCrawlResult | None:
     """Build the terminal result for a negotiated HTTP 304 response."""
     echoed_validators = resp.validators(ctx.caller_conditional)
     sent_conditional = any(key in ctx.request_headers for key in ("If-None-Match", "If-Modified-Since"))
@@ -146,7 +146,7 @@ def _not_modified_result(ctx: HttpStrategyContext, resp: FetchedResponse) -> Eng
     )
 
 
-async def _store_http_caches(ctx: HttpStrategyContext, resp: FetchedResponse) -> None:
+async def store_http_caches(ctx: HttpStrategyContext, resp: FetchedResponse) -> None:
     """Store origin validators and fresh content after a successful fetch."""
     if forbids_store(resp.headers):
         # no-store: never persist body or validator, so a single-use response is

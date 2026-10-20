@@ -15,11 +15,4 @@ DECLARED: dict[str, Declaration] = {
     "app.orchestration.request_pipeline._PipelineDependencies": _APP_INTERNAL_WELD,
     "app.orchestration.request_pipeline._PipelineState": _APP_INTERNAL_WELD,
     "app.orchestration.spill_sink._SpillSink": _APP_INTERNAL_WELD,
-    "app.transport.http_cache._not_modified_result": _APP_INTERNAL_WELD,
-    "app.transport.http_cache._resolve_http_limits": _APP_INTERNAL_WELD,
-    "app.transport.http_cache._revalidate_content_cache": _APP_INTERNAL_WELD,
-    "app.transport.http_cache._store_http_caches": _APP_INTERNAL_WELD,
-    "app.transport.http_classify._classify_extracted_content": _APP_INTERNAL_WELD,
-    "app.transport.http_classify._extract_http_phase": _APP_INTERNAL_WELD,
-    "app.transport.http_classify._request_profile_diagnostics": _APP_INTERNAL_WELD,
 }
