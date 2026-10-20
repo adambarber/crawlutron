@@ -7,6 +7,8 @@ from typing import Any
 
 import pytest
 
+from app.api.policy_suggestions import policy_suggestions
+from app.config.settings import CrawlerSettings
 from app.storage.result_store import CrawlResultStore
 from tests._assertions import completed_crawl
 from tests._fetcher_factories import make_crawl_payload
@@ -91,6 +93,31 @@ async def test_no_retained_records_means_no_suggestions(client):
 
     assert response.status_code == 200, response.text
     assert response.json() == {"records_examined": 0, "suggestions": []}
+
+
+async def test_one_malformed_retained_row_does_not_kill_the_rollup(tmp_path):
+    """Per-record isolation (#212): a row that fails to validate as a trace is
+    skipped and reported rather than 500ing every suggestion from the same store.
+    """
+    store = CrawlResultStore(tmp_path / "results.db")
+    good_page = {
+        "normalized_url": "https://good.test/x",
+        "status": "blocked",
+        "classification": "access_denied",
+        "selected_strategy": None,
+        "attempted_strategies": [],
+        "classification_evidence": [],
+    }
+    await store.aput("crawl_good", {"request_id": "crawl_good", "results": [good_page]})
+    # A retained row whose results are not a list -- TraceResponse.model_validate rejects it.
+    await store.aput("crawl_bad", {"request_id": "crawl_bad", "results": "not-a-list"})
+
+    body = await store.apayloads()
+    assert len(body) == 2
+    response = await policy_suggestions(result_store=store, settings=CrawlerSettings.from_mapping({}))
+    assert response.records_examined == 1
+    assert len(response.suggestions) == 1
+    assert response.suggestions[0].host == canonical("https://good.test/x").site
 
 
 async def test_an_expired_record_is_not_offered_as_evidence(tmp_path):

@@ -8,11 +8,14 @@ from __future__ import annotations
 
 import logging
 
+from pydantic import ValidationError
+
 from app.api.dependencies import ResultStoreDep, SettingsDep
 from app.models.classification_evidence import ClassificationEvidence
 from app.models.crawl_status import CrawlStatus
 from app.models.host_policy import HostPolicy
 from app.models.host_policy_suggestion import CandidateRule, HostPolicySuggestion
+from app.models.json_value import JsonValue
 from app.models.normalized_url import admit_or_none
 from app.models.policy_suggestions_response import PolicySuggestionsResponse
 from app.models.trace_response import TraceResponse
@@ -111,12 +114,27 @@ def _rationale(
     )
 
 
+def _valid_traces(payloads: list[JsonValue]) -> list[TraceResponse]:
+    """The retained payloads that parse as traces, one row at a time.
+
+    A single malformed retained row must not 500 the whole rollup: it is skipped
+    and reported here, matching the per-row isolation in ``job_store``.
+    """
+    traces: list[TraceResponse] = []
+    for payload in payloads:
+        try:
+            traces.append(TraceResponse.model_validate(payload))
+        except ValidationError as exc:
+            logger.warning("policy_suggestions_skip_malformed", extra={"error": str(exc)})
+    return traces
+
+
 async def policy_suggestions(
     result_store: ResultStoreDep,
     settings: SettingsDep,
 ) -> PolicySuggestionsResponse:
     """Propose candidate host rules from every retained crawl record."""
-    records = [TraceResponse.model_validate(payload) for payload in await result_store.apayloads()]
+    records = _valid_traces(await result_store.apayloads())
     return build_policy_suggestions(records, host_policy=HostPolicy.from_settings(settings))
 
 
