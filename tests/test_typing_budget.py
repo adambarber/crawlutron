@@ -6,8 +6,9 @@ nowhere, so a dropped key reached no response until one TypedDict fixed it.
 from __future__ import annotations
 
 import ast
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass
+from pathlib import Path
 
 from tests._ratchet import (
     budget_is_tight,
@@ -104,23 +105,33 @@ def scripts_candidates(tree: ast.AST) -> Iterator[tuple[str, int, str]]:
     return candidates(tree)
 
 
-def _scripts_walk() -> Iterator[tuple[str, str, str]]:
-    """The scripts tree through the same record classifier, labeled by module."""
-    for path, tree in trees_under(REPO_ROOT / "scripts"):
-        relative = path.relative_to(REPO_ROOT / "scripts").as_posix()
+def _walk(root: Path) -> Iterator[tuple[str, str, str]]:
+    """A whole root through the shared record classifier, labeled by module."""
+    for path, tree in trees_under(root):
+        relative = path.relative_to(REPO_ROOT).as_posix()
         for candidate, line, source in candidates(tree):
             if candidate == _METRIC:
                 yield candidate, f"{relative}:{line}", source
 
 
-def scripts_offenders(metric: str) -> list[Offender]:
-    """The scripts work list for `metric` -- the reach #293 adds to this gate."""
-    return [Offender(where, detail) for _candidate, where, detail in _scripts_walk()]
+def _offenders(walk) -> list[Offender]:
+    """The work list a root's walk offers, in tree order."""
+    return [Offender(where, detail) for _candidate, where, detail in walk]
 
 
-def scripts_measurement(metric: str) -> int:
-    """The number the scripts typing budget is compared against."""
-    return len(scripts_offenders(metric))
+def _gate(root: Path) -> tuple[Callable[[str], list[Offender]], Callable[[str], int]]:
+    """The (offenders, measurement) pair a root's typing gate reads."""
+
+    def work(metric: str) -> list[Offender]:
+        return _offenders(_walk(root))
+
+    def measure(metric: str) -> int:
+        return len(work(metric))
+
+    return work, measure
+
+
+scripts_offenders, scripts_measurement = _gate(REPO_ROOT / "scripts")
 
 
 def report() -> None:
@@ -173,15 +184,56 @@ test_scripts_collection_is_deterministic = collection_is_deterministic(
 )
 
 
+def _assert_undeclared_record_fires() -> None:
+    """The classifier fires on an undeclared record and not on a declared one."""
+    defective = ast.parse("def load() -> dict[str, Any]: ...")
+    assert list(candidates(defective))[:1] and list(candidates(defective))[0][0] == _METRIC
+    clean = ast.parse("def load() -> dict[str, str]: ...")
+    assert not list(candidates(clean))
+
+
 def test_the_scripts_typing_budget_reaches_scripts() -> None:
     """The H1 reach: the typing budget now sweeps scripts/, which had none.
     The real tree shows it (16 records are counted, not invisible) and the shared
     classifier fires on a synthetic undeclared record, so one in scripts/ fires."""
     assert scripts_measurement(_METRIC) == 16, "the scripts typing budget stopped reaching the real tree"
-    defective = ast.parse("def load() -> dict[str, Any]: ...")
-    assert list(candidates(defective))[:1] and list(candidates(defective))[0][0] == _METRIC
-    clean = ast.parse("def load() -> dict[str, str]: ...")
-    assert not list(candidates(clean))
+    _assert_undeclared_record_fires()
+
+
+#: The tests/ tree. It had a file-size and comment-length budget but no typing
+#: budget; its measured baseline is declared first (value-ratchet rule).
+_TESTS_BUDGETS = {_METRIC: 153}
+
+
+suite_offenders, suite_measurement = _gate(REPO_ROOT / "tests")
+
+
+_TESTS_REMEDY = (
+    "tests/ had no typing budget before this cohort; its baseline is the 153 "
+    "undeclared records it shipped with. Declare, or name the system type, and lower it."
+)
+
+
+test_tests_budget_is_not_exceeded = budget_not_exceeded(
+    _TESTS_BUDGETS,
+    (suite_measurement, suite_offenders),
+    subject="tests typing",
+    remedy=_TESTS_REMEDY,
+)
+test_tests_budget_is_tight = budget_is_tight(
+    _TESTS_BUDGETS, (suite_measurement, suite_offenders), subject="tests typing"
+)
+test_tests_collection_is_deterministic = collection_is_deterministic(
+    _TESTS_BUDGETS, (suite_measurement, suite_offenders), subject="tests typing"
+)
+
+
+def test_the_tests_typing_budget_reaches_tests() -> None:
+    """The H1 reach: the typing budget now sweeps tests/, which had none. The real
+    tree shows it (153 records are counted, not invisible) and the shared classifier
+    fires on a synthetic undeclared record, so one in tests/ fires."""
+    assert suite_measurement(_METRIC) == 153, "the tests typing budget stopped reaching the real tree"
+    _assert_undeclared_record_fires()
 
 
 def _walked() -> dict[str, int]:

@@ -11,7 +11,7 @@ import pathlib
 import re
 import subprocess
 from collections import defaultdict
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -184,19 +184,56 @@ offenders, measurement = _build_gate(
 )
 
 
-def _scripts_candidates() -> Iterator[tuple[str, str, tuple[int, str]]]:
-    """Every candidate the scripts tree offers, as ``(metric, where, detail)``."""
-    for path, tree in trees_under(REPO_ROOT / "scripts"):
+def _root_candidates(root: Path) -> Iterator[tuple[str, str, tuple[int, str]]]:
+    """Every candidate a whole root offers, as ``(metric, where, detail)``."""
+    for path, tree in trees_under(root):
         relative = path.relative_to(REPO_ROOT).as_posix()
         for metric, line, detail in _candidates(tree):
             yield metric, f"{relative}:{line}", detail
 
 
-scripts_offenders, scripts_measurement = _build_gate(
-    _scripts_candidates,
-    lambda: trees_under(REPO_ROOT / "scripts"),
-    _SCRIPTS_BUDGETS,
-)
+def _root_gate(
+    root: Path, budgets: dict[str, int]
+) -> tuple[Callable[[str], list[Offender]], Callable[[str], int]]:
+    """The offenders/measurement pair one root gate builds, written once."""
+    candidates = lambda: _root_candidates(root)  # noqa: E731
+    trees = lambda: trees_under(root)  # noqa: E731
+    return _build_gate(candidates, trees, budgets)
+
+
+scripts_offenders, scripts_measurement = _root_gate(REPO_ROOT / "scripts", _SCRIPTS_BUDGETS)
+
+
+#: The tests/ tree had a file-size and comment-length budget but no complexity
+#: ceiling; its measured baseline is declared first (value-ratchet rule).
+_TESTS_BUDGETS = {
+    "function length": 11,
+    "abc size": 2,
+    "largest class": 330,
+    "block length": 1,
+}
+
+suite_offenders, suite_measurement = _root_gate(REPO_ROOT / "tests", _TESTS_BUDGETS)
+
+
+def _assert_overlong_fn() -> None:
+    """The collector fires on a synthetic over-long function (65 statements)."""
+    assert any(
+        m == "function length" and size > FUNCTION_LENGTH
+        for m, _w, (size, _n) in _candidates(ast.parse("def runner():\n" + "    x = 1\n" * 65))
+    ), "a 65-statement function must be an over-length offender"
+
+
+def test_the_tests_budget_measurement_reaches_tests() -> None:
+    """The H1 reach: the complexity ceiling now sweeps tests/, which had none.
+    The real tree shows it (11 over-long functions are counted, not invisible) and
+    the shared collector fires on a synthetic over-long fn in tests/."""
+    assert suite_measurement("function length") == 11, (
+        "the tests function-length budget stopped reaching the real tree"
+    )
+    assert suite_measurement("abc size") == 2
+    assert suite_measurement("largest class") == 330
+    _assert_overlong_fn()
 
 
 def report() -> None:
@@ -245,6 +282,29 @@ test_scripts_collection_is_deterministic = collection_is_deterministic(
 )
 
 
+#: The tests/ tie to the same ratchet pattern: the baseline is fixed at the first
+#: declaration and only ever lowers (value-ratchet rule).
+_TESTS_REMEDY = (
+    "tests/ had no complexity ceiling before this cohort; its baseline is the 11 "
+    "over-long functions, 2 over-ABC functions, 1 oversized block and the 330-line "
+    "class it shipped with. Split them and lower this budget."
+)
+
+
+test_tests_budget_is_not_exceeded = budget_not_exceeded(
+    _TESTS_BUDGETS,
+    (suite_measurement, suite_offenders),
+    subject="tests metrics",
+    remedy=_TESTS_REMEDY,
+)
+test_tests_budget_is_tight = budget_is_tight(
+    _TESTS_BUDGETS, (suite_measurement, suite_offenders), subject="tests metrics"
+)
+test_tests_collection_is_deterministic = collection_is_deterministic(
+    _TESTS_BUDGETS, (suite_measurement, suite_offenders), subject="tests metrics"
+)
+
+
 def test_the_scripts_budget_measurement_reaches_scripts() -> None:
     """The H1 reach: the complexity budget now sweeps scripts/, which had none.
     The real tree shows it, and the collector fires on a synthetic over-long fn."""
@@ -253,9 +313,7 @@ def test_the_scripts_budget_measurement_reaches_scripts() -> None:
     )
     assert scripts_measurement("abc size") == 1
     assert scripts_measurement("largest class") == 0
-    overlong_fn = ast.parse("def runner():" + "\n    x = 1\n" * 65)
-    over = [d for m, _w, d in _candidates(overlong_fn) if m == "function length"]
-    assert over and over[0][0] > FUNCTION_LENGTH, "a 65-statement function must be an over-length offender"
+    _assert_overlong_fn()
 
 
 test_collector_sees_the_whole_tree = collector_sees_the_whole_tree(
