@@ -154,10 +154,11 @@ async def test_render_request_never_invokes_worker_for_policy_blocked_host():
         return rendered(job)
 
     from app.api.render import render_request
+    from app.models.render_request import RenderRequest
 
     with pytest.raises(ValueError, match="host_denied"):
         await render_request(
-            {"url": "https://blocked.test/secret"},
+            RenderRequest.model_validate({"url": "https://blocked.test/secret"}),
             settings=_settings(denied="blocked.test"),
             worker=worker,
         )

@@ -13,9 +13,10 @@ async def render_stub_request(payload: dict, *, worker=None) -> dict:
     """
     from app.api.render import render_request
     from app.config.settings import CrawlerSettings
+    from app.models.render_request import RenderRequest
 
     return await render_request(
-        payload,
+        RenderRequest.model_validate(payload),
         settings=CrawlerSettings.from_mapping(),
         worker=_fake_browser(html="<html></html>", text="t") if worker is None else worker,
     )

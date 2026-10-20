@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, Any
 from app.admission.policy import PolicyTier, validate_wire_policy
 from app.models.crawl_request import CrawlRequest
 from app.models.normalized_url import NormalizedUrl
+from app.models.single_url_source_request import SingleUrlSourceRequest
 
 if TYPE_CHECKING:
     from app.models.crawl_policy import CrawlPolicy
@@ -27,9 +28,10 @@ def _validated_url(url: str, *, host_policy: HostPolicy) -> str:
         raise ValueError(reason) from error
 
 
-def _single_or_batch_urls(payload: CrawlRequest) -> list[str]:
-    """The URL list a request carries -- ``urls`` else ``[url]``. ``CrawlRequest``
-    enforces at least one URL at construction, so this never comes up empty.
+def _single_or_batch_urls(payload: SingleUrlSourceRequest) -> list[str]:
+    """The URL list a request carries -- ``urls`` else ``[url]``. The source contract
+    (``SingleUrlSourceRequest``) enforces at least one URL at construction, so this
+    never comes up empty -- shared by crawl and render, which follow the same door.
     """
     if payload.urls is not None:
         return payload.urls
@@ -39,7 +41,7 @@ def _single_or_batch_urls(payload: CrawlRequest) -> list[str]:
 
 
 def checked_payload_urls(
-    payload: CrawlRequest,
+    payload: SingleUrlSourceRequest,
     max_batch_size: int,
     *,
     host_policy: HostPolicy,

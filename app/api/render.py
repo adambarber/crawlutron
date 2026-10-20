@@ -15,10 +15,10 @@ from app.admission.render_options import resolve_render_options
 from app.config.settings import CrawlerSettings
 from app.models.crawl_job import CrawlJob
 from app.models.crawl_policy import POLICY_SCHEMA_VERSION
-from app.models.crawl_request import CrawlRequest
 from app.models.crawl_result import CrawlResult
 from app.models.host_policy import HostPolicy
 from app.models.normalized_url import NormalizedUrl
+from app.models.render_request import RenderRequest
 from app.orchestration import robots as _robots_policy
 from app.orchestration.classification import classify_error_code
 from app.orchestration.results import (
@@ -38,10 +38,13 @@ if TYPE_CHECKING:
     from app.models.result_record import RenderEnvelope
 
 
-def render_options_for(payload: dict[str, Any], settings: CrawlerSettings) -> RenderOptions:
-    options = payload.get("options") or {}
-    if not isinstance(options, dict):
-        raise ValueError("invalid_options")
+def render_options_for(payload: RenderRequest | dict[str, Any], settings: CrawlerSettings) -> RenderOptions:
+    if isinstance(payload, RenderRequest):
+        options = payload.options.model_dump(exclude_none=True) if payload.options is not None else {}
+    else:
+        options = payload.get("options") or {}
+        if not isinstance(options, dict):
+            raise ValueError("invalid_options")
     # The /v1/render caller owns every capture knob, browser_profile included.
     return resolve_render_options(
         options,
@@ -89,15 +92,15 @@ def _failed_render_result(job: CrawlJob, exc: BaseException, *, submitted_url: s
 
 
 async def render_request(
-    payload: dict[str, Any],
+    payload: RenderRequest,
     *,
     settings: CrawlerSettings | None = None,
     worker: CrawlWorker,
 ) -> RenderEnvelope:
     """Run one /v1/render request through the per-domain scheduler.
 
-    ``payload`` is a documented wire-dict tolerance valve; the render door's type
-    lives at the router, which validates RenderRequest before running this.
+    ``payload`` is the request the router already validated and admitted; the
+    door's type lives there, so this funnel never melts back to wire shape.
     """
     active_settings = settings or CrawlerSettings.from_mapping()
     host_policy = HostPolicy.from_settings(active_settings)
@@ -105,7 +108,7 @@ async def render_request(
     # texts stay beside admitted values so the wire's original_url echoes text.
     submitted = list(
         checked_payload_urls(
-            CrawlRequest.model_validate({"url": payload.get("url"), "urls": payload.get("urls")}),
+            payload,
             active_settings.max_batch_size,
             host_policy=host_policy,
         )

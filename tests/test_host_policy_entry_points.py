@@ -185,8 +185,14 @@ async def _probe_render(monkeypatch, tmp_path):
         effects["worker"].append(job.url.raw)
         raise AssertionError("blocked render reached the worker")
 
+    from app.models.render_request import RenderRequest
+
     await _assert_refused(
-        render_request({"url": _BLOCKED_URL}, settings=_denied_settings(), worker=worker),
+        render_request(
+            RenderRequest.model_validate({"url": _BLOCKED_URL}),
+            settings=_denied_settings(),
+            worker=worker,
+        ),
         effects,
     )
 

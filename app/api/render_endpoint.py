@@ -44,7 +44,7 @@ async def render(payload: RenderRequest, settings: CrawlerSettings) -> UnifiedCr
     pooled_worker = PooledBrowserWorker(pool)
     try:
         result = await render_request(
-            payload.model_dump(exclude_none=True),
+            payload,
             settings=settings,
             worker=pooled_worker,
         )
