@@ -65,7 +65,7 @@ class TestHarvestWaitBounded:
     """A wedged cookies() must not hold the pooled renderer for the
     whole per-URL budget; the finally-block caps the harvest wait."""
 
-    async def test_render_finally_harvest_timeout(self, monkeypatch):
+    async def test_render_finally_harvest_timeout(self):
         from app.models.render_options import RenderOptions
 
         url = canonical("http://example.com/page")
@@ -78,7 +78,6 @@ class TestHarvestWaitBounded:
 
             renderer = build_pinned_renderer(
                 page,
-                monkeypatch,
                 driver=FakeBrowserDriver(page, harvest_timeout=0.05, on_close=record_close),
             )
             # The cap is the thing under test, so the driver reports the short deadline rather than the
