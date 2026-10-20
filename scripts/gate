@@ -30,7 +30,7 @@
 # vendored back into a monorepo without editing five hook entries.
 #
 # The dual-layout behaviour this preserves is asserted by EXECUTION, not by
-# substring-matching the config: tests/test_precommit_ci_contract.py builds a
+# substring-matching the config: tests/test_hook_contract.py builds a
 # synthetic repository in each layout, runs the real entry string in it, and
 # requires this helper to run and to resolve the right service root.
 set -euo pipefail

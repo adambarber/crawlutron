@@ -133,6 +133,21 @@ def test_every_hook_resolves_the_service_root_in_both_layouts(tmp_path_factory) 
         )
 
 
+def test_the_gate_banner_cites_the_real_layout_executor() -> None:
+    """The banner's self-proof names the test that actually runs the dual layout.
+
+    The banner used to cite test_precommit_ci_contract; the synthetic-repo
+    executional proof lives in THIS module, so the citation must resolve here.
+    """
+    banner = GATE_HELPER.read_text(encoding="utf-8").splitlines()[:36]
+    assert any("tests/test_hook_contract.py" in line for line in banner), banner
+    assert not any("test_precommit_ci_contract" in line for line in banner), banner
+    # What the banner cites is genuinely the executor, not just a spelling match.
+    source = (SERVICE_ROOT / "tests" / "test_hook_contract.py").read_text(encoding="utf-8")
+    assert "_run_gate_entry_in_layout" in source
+    assert "def test_every_hook_resolves_the_service_root_in_both_layouts" in source
+
+
 def test_every_hook_shares_one_gate_entry_preamble() -> None:
     """The five entry preambles are byte-identical, so they cannot drift.
 
