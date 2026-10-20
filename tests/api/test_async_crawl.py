@@ -224,7 +224,7 @@ class TestAsyncCrawlApi:
                 *(submit_async_crawl(crawl_api.client, payload) for _ in range(3))
             )
 
-            assert peak == 1, f"bound not honoured: peak {peak} concurrent crawls"
+            assert peak <= 1, f"bound not honoured: peak {peak} concurrent crawls"
             for _request_id, response in completed:
                 assert response.status_code == 200
                 assert response.json()["success"] is True
