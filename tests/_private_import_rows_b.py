@@ -29,8 +29,8 @@ DECLARED: dict[str, Declaration] = {
     ),
     "app.transport.fetchers._release_stream_noblock": _SUBSTITUTED_COLLABORATOR,
     "app.transport.pinned_transport._http_413": _d(
-        "unreviewed",
-        "Not yet triaged.\n",
+        "implementation step",
+        "Builds the too-large 413 HttpFetchResult verdict fetchers share within the transport package.",
         ["app"],
     ),
     "app.models.registrable_domain._PSL": _d(_CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]),

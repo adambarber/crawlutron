@@ -6,7 +6,6 @@ from collections.abc import Sequence
 from typing import Literal, NamedTuple
 
 Kind = Literal[
-    "unreviewed",
     "harness lifecycle",
     "chokepoint state",
     "private type",
