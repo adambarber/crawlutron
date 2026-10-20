@@ -14,7 +14,7 @@ from app.models.host_policy import HostPolicy
 from app.models.normalized_url import NormalizedUrl
 from app.orchestration import engine as engine_mod
 from app.orchestration.engine import crawl_request
-from app.orchestration.robots import _robots_pattern_to_regex, robots_allows
+from app.orchestration.robots import robots_allows, robots_pattern_to_regex
 from app.orchestration.robots_parse import (
     iter_robots_fields,
     parse_robots_crawl_delay,
@@ -248,7 +248,7 @@ def test_pathological_wildcard_rule_matches_in_linear_time():
     Old regex backtracking took 8.5s for 30 wildcards x 2000 chars; the
     matcher is linear, so doubling both dimensions must stay fast."""
     pattern = "/*a*" * 30
-    matcher = _robots_pattern_to_regex("example.com", pattern)
+    matcher = robots_pattern_to_regex("example.com", pattern)
     path = "/" + "b" * 2000 + "a"
 
     assert matcher.match(path) is False
@@ -259,17 +259,17 @@ def test_pathological_wildcard_rule_matches_in_linear_time():
 
 
 def test_pathological_pattern_match_parity_with_simple_cases():
-    m = _robots_pattern_to_regex("example.com", "/*a*")
+    m = robots_pattern_to_regex("example.com", "/*a*")
     assert m.match("/aaa") is True
     assert m.match("/b") is False
     assert m.match("/b/a") is True
-    m2 = _robots_pattern_to_regex("example.com", "/page$")
+    m2 = robots_pattern_to_regex("example.com", "/page$")
     assert m2.match("/page") is True
     assert m2.match("/page/x") is False
-    m3 = _robots_pattern_to_regex("example.com", "a")
+    m3 = robots_pattern_to_regex("example.com", "a")
     assert m3.match("abc") is True
     assert m3.match("xabc") is False
-    m4 = _robots_pattern_to_regex("example.com", "")
+    m4 = robots_pattern_to_regex("example.com", "")
     assert m4.match("anything") is True
 
 
@@ -279,13 +279,13 @@ def test_pattern_cache_is_bound_per_host_so_one_site_cannot_evict_another():
     A hostile robots.txt with distinct patterns can only evict its own
     entries, never a legitimate site's cached matcher."""
     # Warm a legitimate site's matcher.
-    legit = _robots_pattern_to_regex("good.example", "/allowed/*")
+    legit = robots_pattern_to_regex("good.example", "/allowed/*")
 
     # A hostile site sprays far more patterns than any per-host cap holds.
     for i in range(3000):
-        _robots_pattern_to_regex("evil.example", f"/spam/{i}/*")
+        robots_pattern_to_regex("evil.example", f"/spam/{i}/*")
 
-    assert _robots_pattern_to_regex("good.example", "/allowed/*") is legit, (
+    assert robots_pattern_to_regex("good.example", "/allowed/*") is legit, (
         "a hostile site's patterns evicted another host's cached matcher"
     )
 
@@ -293,13 +293,13 @@ def test_pattern_cache_is_bound_per_host_so_one_site_cannot_evict_another():
 def test_identical_patterns_on_different_hosts_are_isolated():
     """The same pattern string on two hosts stays two independent cache slots:
     per-host binding must not collapse distinct sites onto one entry."""
-    a = _robots_pattern_to_regex("a.example", "/shared/*")
-    b = _robots_pattern_to_regex("b.example", "/shared/*")
+    a = robots_pattern_to_regex("a.example", "/shared/*")
+    b = robots_pattern_to_regex("b.example", "/shared/*")
 
     assert a is not b, "two hosts collapsed onto one shared cache entry"
     # Each host still caches its own matcher.
-    assert _robots_pattern_to_regex("a.example", "/shared/*") is a
-    assert _robots_pattern_to_regex("b.example", "/shared/*") is b
+    assert robots_pattern_to_regex("a.example", "/shared/*") is a
+    assert robots_pattern_to_regex("b.example", "/shared/*") is b
 
 
 def test_purge_removes_only_expired_production_tuples():
@@ -419,8 +419,8 @@ async def test_robots_cache_shared_across_requests():
 
 
 def test_robots_pattern_to_regex_is_cached():
-    p1 = _robots_pattern_to_regex("example.com", "/admin/*")
-    p2 = _robots_pattern_to_regex("example.com", "/admin/*")
+    p1 = robots_pattern_to_regex("example.com", "/admin/*")
+    p2 = robots_pattern_to_regex("example.com", "/admin/*")
     # Same compiled object: no redundant recompilation.
     assert p1 is p2
 

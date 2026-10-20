@@ -97,7 +97,7 @@ def cached_sitemaps(target: NormalizedUrl, *, policy: HostPolicy) -> list[str] |
     return None if cached is None else list(cached[1])
 
 
-class _RobotsPathMatcher:
+class RobotsPathMatcher:
     __slots__ = ("_literals", "_anchored_end")
 
     def __init__(self, pattern: str) -> None:
@@ -153,7 +153,7 @@ class _PrefixMatcher:
 
 ROBOTS_PATTERN_CACHE_PER_HOST = 1024
 ROBOTS_PATTERN_CACHE_MAX_HOSTS = 1024
-type RobotsMatcher = re.Pattern[str] | _RobotsPathMatcher | _MatchAll | _PrefixMatcher
+type RobotsMatcher = re.Pattern[str] | RobotsPathMatcher | _MatchAll | _PrefixMatcher
 
 
 class _RobotsPatternCache:
@@ -192,10 +192,10 @@ def _compile_robots_pattern(pattern: str) -> RobotsMatcher:
         return _MatchAll()
     if "*" not in pattern and not (pattern.endswith("$") and len(pattern) > 1):
         return _PrefixMatcher(pattern)
-    return _RobotsPathMatcher(pattern)
+    return RobotsPathMatcher(pattern)
 
 
-def _robots_pattern_to_regex(host: str, pattern: str) -> RobotsMatcher:
+def robots_pattern_to_regex(host: str, pattern: str) -> RobotsMatcher:
     return _robots_pattern_cache.get(host, pattern)
 
 
@@ -211,7 +211,7 @@ def robots_allows(target_url: NormalizedUrl, rules: list[tuple[bool, str]]) -> b
     for is_allow, pattern in rules:
         if not pattern:
             continue
-        if _robots_pattern_to_regex(host, pattern).match(path):
+        if robots_pattern_to_regex(host, pattern).match(path):
             plen = len(pattern)
             if plen > best_len:
                 best_len = plen
@@ -229,9 +229,11 @@ __all__ = [
     "ROBOTS_PATTERN_CACHE_PER_HOST",
     "FetchAndDecode",
     "RobotsMatcher",
+    "RobotsPathMatcher",
     "RobotsRules",
     "cached_sitemaps",
     "load_robots_rules",
     "robots_allows",
     "robots_cache",
+    "robots_pattern_to_regex",
 ]

@@ -20,6 +20,14 @@ def is_running(job_id: str) -> bool:
     return task is not None and not task.done()
 
 
+def tracked_task(job_id: str) -> asyncio.Task | None:
+    """The live task registered for ``job_id``, or ``None`` when none/finished.
+
+    Lets a supervisor await the exact task owning a job instead of polling."""
+    task = _tasks.get(job_id)
+    return task if task is not None and not task.done() else None
+
+
 async def shutdown_job_runner() -> None:
     """Cancel all running job tasks and await their exit, then drain webhooks."""
     for task in list(_tasks.values()):

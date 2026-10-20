@@ -3,51 +3,13 @@
 from __future__ import annotations
 
 from tests._private_import_decl import (
-    _CHOKEPOINT_STATE,
     _INSTANCE_STATE,
-    _PRIVATE_TYPE,
     _SUBSTITUTED_COLLABORATOR,
     Declaration,
-    _d,
 )
 
 DECLARED: dict[str, Declaration] = {
     "app.api.async_crawl_runner._build_async_crawl_semaphore": _SUBSTITUTED_COLLABORATOR,
-    "app.api.job_lifecycle._tasks": _d(_CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]),
-    "app.transport.content_cache.ContentCache._remember_memory_locked": _d(
-        _PRIVATE_TYPE.kind, _PRIVATE_TYPE.reason, ["test"]
-    ),
-    "app.transport.browser_cookies.BROWSER_COOKIES_BY_DOMAIN._store": _d(
-        "private state",
-        "#123: probe inspects the medium the process-global browser store shares with the jar.",
-        ["test"],
-    ),
-    "app.transport.browser_cookies.BROWSER_COOKIES_BY_DOMAIN._store._lock": _d(
-        "private state",
-        "#123: the concurrency probe swaps the medium's lock for a recording double.",
-        ["test"],
-    ),
-    "app.orchestration.robots._RobotsPathMatcher": _d(
-        "private type",
-        "A private class nothing outside the module constructs -- production only ever builds a\n"
-        "matcher through _RobotsPatternCache. The suite has to construct one because the parity\n"
-        "oracle generates group compositions and feeds them in; that is the test's subject, not a\n"
-        "hole in the class's surface.\n"
-        "\n"
-        "This used to be reached through app.orchestration.engine, which re-exported six robots privates\n"
-        "for no production reason at all -- the aliases were dead in engine and alive only in the\n"
-        "suite. Reaching the class where it is defined removes an alias chain rather than adding\n"
-        "a door.\n",
-        ["test"],
-    ),
-    "app.orchestration.robots._robots_pattern_to_regex": _d(
-        "implementation step",
-        "Pattern-to-matcher compilation, reached to prove per-host binding and that a pathological\n"
-        "pattern stays linear. Asserting on the compiled matcher is asserting the mechanism; the\n"
-        "step stays private and the suite drives it here because the property under test -- one\n"
-        "cache slot per (host, pattern) -- has no expression through robots_allows.\n",
-        ["test"],
-    ),
     "app.transport.content_cache.ContentCache._index": _INSTANCE_STATE,
     "app.transport.content_cache.ContentCache._lock": _INSTANCE_STATE,
     "app.transport.content_cache.ContentCache._index_sizes": _INSTANCE_STATE,
@@ -69,9 +31,4 @@ DECLARED: dict[str, Declaration] = {
     "app.runtime.resource_pressure.ResourceGate._lag_probe": _INSTANCE_STATE,
     "app.runtime.resource_pressure.WeightedAdmission._p": _INSTANCE_STATE,
     "app.storage.job_store.JobStore._conn": _INSTANCE_STATE,
-    "app.storage.job_store.JobStore._row_to_job": _d(
-        "implementation step",
-        "A row-to-model mapping the isolation test drives to round out an ownership assertion with no seam.",
-        ["test"],
-    ),
 }

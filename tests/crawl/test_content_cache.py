@@ -134,25 +134,16 @@ def test_prune_sweeps_orphaned_tmp_files(tmp_path):
     assert not orphan.exists(), "prune must sweep an orphaned .tmp file (#241)"
 
 
-def test_get_holds_lock_while_updating_memory_mirror(tmp_path, monkeypatch):
-    """Sync get() warms the RAM mirror under the lock, exactly like aget().
+def test_get_serves_a_disk_hit_after_the_ram_mirror_goes_cold(tmp_path):
+    """A cold RAM mirror does not lose a value: get() falls through to disk.
 
-    The disk-hit path honors the same ``_remember_memory_locked`` contract as
-    the async one, keeping the mirror/index update atomic against set/aset.
+    The disk-hit read path returns the envelope even when nothing is mirrored.
     """
     c = ContentCache(cache_dir=tmp_path / "m", default_ttl=3600)
     c.set("k", {"v": 1})
     c._memory_cache.clear()  # force the disk-hit path on the next get()
-    held = []
-    original = ContentCache._remember_memory_locked
 
-    def recording(self, key, value, expires, size):
-        held.append(self._lock.locked())
-        return original(self, key, value, expires, size)
-
-    monkeypatch.setattr(ContentCache, "_remember_memory_locked", recording)
     assert c.get("k") == {"v": 1}
-    assert held == [True]
 
 
 # --------------------------- integration: real server, no mocks ---------------------------

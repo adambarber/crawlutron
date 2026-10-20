@@ -145,7 +145,7 @@ async def _join_runner_task(job_id: str) -> bool:
     deadline to race; ``asyncio.wait`` resolves however the task finished."""
     from app.api import job_lifecycle
 
-    task = job_lifecycle._tasks.get(job_id)
+    task = job_lifecycle.tracked_task(job_id)
     if task is None or task.done():
         return False
     await asyncio.wait({task})

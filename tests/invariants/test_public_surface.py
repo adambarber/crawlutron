@@ -37,7 +37,9 @@ _OWNER_PUBLIC_SURFACE_RATCHET = {
     "app/api/unified_shaping.py": (5, 5),
     "app/storage/sqlite_store.py": (9, 7),
     "app/safety/safe_regex.py": (7, 2),
-    "app/orchestration/robots.py": (12, 3),
+    # RAISED to (14, 5): the matcher and its compiler became public (#190) so the
+    # parity oracle and per-host cache tests drive the real public surface.
+    "app/orchestration/robots.py": (14, 5),
     "app/safety/bounded_io.py": (4, 2),
     "app/transport/decompression.py": (5, 2),
     "app/admission/credentials.py": (3, 3),

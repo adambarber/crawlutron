@@ -133,13 +133,13 @@ def test_load_for_caller_hides_foreign_jobs(tmp_path):
 def _deserialize_count(store: JobStore) -> list:
     """A sentinel the caller drives: count every full-row deserialization."""
     calls: list = []
-    original = store._row_to_job
+    original = store.row_to_job
 
     def _spy(row, *, with_accumulators):
         calls.append(row["job_id"])
         return original(row, with_accumulators=with_accumulators)
 
-    store._row_to_job = _spy
+    store.row_to_job = _spy
     return calls
 
 

@@ -19,7 +19,7 @@ def test_inmemory_medium_is_the_jar_and_the_browser_backing():
     assert isinstance(jar._inmemory, InMemoryCookieStore)
     from app.transport import browser_cookies
 
-    assert isinstance(browser_cookies.BROWSER_COOKIES_BY_DOMAIN._store, InMemoryCookieStore)
+    assert isinstance(browser_cookies.BROWSER_COOKIES_BY_DOMAIN.medium, InMemoryCookieStore)
 
 
 def test_jar_browser_and_shared_store_round_trip_through_the_concept():

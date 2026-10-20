@@ -22,16 +22,16 @@ class CookieStore(Protocol):
 class InMemoryCookieStore:
     """The process-local cookie medium: per-namespace LRU, thread-safe."""
 
-    __slots__ = ("_data", "_lock", "_max")
+    __slots__ = ("_data", "lock", "_max")
 
     def __init__(self, *, max_hosts_per_namespace: int) -> None:
         self._max = max(1, int(max_hosts_per_namespace))
         self._data: OrderedDict[tuple[str, str], dict[str, str]] = OrderedDict()
-        self._lock = threading.Lock()
+        self.lock = threading.Lock()
 
     def load(self, namespace: str, host: str) -> dict[str, str]:
         key = (namespace or "", host)
-        with self._lock:
+        with self.lock:
             cookies = dict(self._data.get(key, {}))
             if key in self._data:
                 self._data.move_to_end(key)
@@ -39,7 +39,7 @@ class InMemoryCookieStore:
 
     def merge(self, namespace: str, host: str, cookies: Mapping[str, str]) -> None:
         key = (namespace or "", host)
-        with self._lock:
+        with self.lock:
             self._data.setdefault(key, {}).update(cookies)
             self._data.move_to_end(key)
             self._evict(key[0])
@@ -50,12 +50,12 @@ class InMemoryCookieStore:
         the plain-mapping semantics the browser path always had (no move-to-end).
         """
         key = (namespace or "", host)
-        with self._lock:
+        with self.lock:
             self._data[key] = dict(value)
             self._evict(key[0])
 
     def clear(self, namespace: str = "") -> None:
-        with self._lock:
+        with self.lock:
             if namespace:
                 for key in [k for k in self._data if k[0] == namespace]:
                     del self._data[key]
@@ -63,14 +63,14 @@ class InMemoryCookieStore:
                 self._data.clear()
 
     def __len__(self) -> int:
-        with self._lock:
+        with self.lock:
             return len(self._data)
 
     def snapshot(self) -> dict[tuple[str, str], dict[str, str]]:
         """A copied view of every slot, consistent under the store's lock.
         The export/legacy path reads whole namespaces; a copy avoids holding the lock.
         """
-        with self._lock:
+        with self.lock:
             return {key: dict(value) for key, value in self._data.items()}
 
     def _evict(self, namespace: str) -> None:

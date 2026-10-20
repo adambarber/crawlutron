@@ -8,7 +8,6 @@ from typing import Literal, NamedTuple
 Kind = Literal[
     "harness lifecycle",
     "chokepoint state",
-    "private type",
     "implementation step",
     "substituted seam",
 ]
@@ -27,20 +26,6 @@ def _d(kind: Kind, reason: str, side: Sequence[Side] = ()) -> Declaration:
     Rows read as literals (``["test"]``) while the field stays hashable."""
     return Declaration(kind, reason, tuple(side))
 
-
-_CHOKEPOINT_STATE = _d(
-    "chokepoint state",
-    "Module-private data -- a cap, a cache, a lock, a counter. Not a missing seam.\n"
-    "A constant is private because nobody outside the module may change it, and promoting\n"
-    "one would be exactly the alias this file exists to prevent: the name would be public\n"
-    "and still unwelded. A caller reading a configured cap is white-box by nature and fine;\n"
-    "what would not be fine is the caller being able to write it.\n"
-    "\n"
-    "The check that this is really state and not a hole: the name appears in a public\n"
-    "default, a public return type, or nowhere at all. A constant a caller is expected to\n"
-    "*set* is not chokepoint state, it is a missing seam, and it belongs in the public\n"
-    "surface instead.",
-)
 
 _IMPLEMENTATION_STEP = _d(
     "implementation step",
@@ -137,13 +122,6 @@ _OWNED_POOL_MACHINERY = _d(
 )
 
 
-_PRIVATE_TYPE = _d(
-    "private type",
-    "A private class, or a private method on a public one. A private *method* is an\n"
-    "implementation step by definition: the class is public and the method is not. A private\n"
-    "*class* is a judgement -- it stays private if nothing constructs it from outside, and\n"
-    "becomes public if it has a lifecycle the caller owns, as `_ResultSpill` does.",
-)
 _INSTANCE_STATE = _d(
     "chokepoint state",
     "An instance-private member -- a lock, a cache index, a byte counter -- that a test\n"

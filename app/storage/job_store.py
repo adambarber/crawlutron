@@ -76,7 +76,7 @@ class JobStore:
         # the append-only side has its own owner so neither pays for the other.
         self._accumulators = JobAccumulators(self._conn)
 
-    def _row_to_job(self, row: sqlite3.Row, *, with_accumulators: bool = True) -> CrawlJobState:
+    def row_to_job(self, row: sqlite3.Row, *, with_accumulators: bool = True) -> CrawlJobState:
         job_id = row["job_id"]
         return CrawlJobState.from_json(
             {
@@ -201,7 +201,7 @@ class JobStore:
             if row is None:
                 return None
             try:
-                return self._row_to_job(row, with_accumulators=with_accumulators)
+                return self.row_to_job(row, with_accumulators=with_accumulators)
             except (json.JSONDecodeError, ValueError, TypeError) as exc:
                 # Surface corruption instead of silently returning None so a
                 # broken row is observable in logs rather than masked.
