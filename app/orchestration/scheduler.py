@@ -146,7 +146,7 @@ class DomainScheduler:
         # Per-domain minimum delay (e.g. robots Crawl-delay); the host's floor is always respected.
         self._domain_min_delay: dict[str, float] = defaultdict(float)
         self._max_rps = max(0.0, max_rps)
-        self._circuit_threshold = max(1, circuit_threshold)
+        self.circuit_threshold = max(1, circuit_threshold)
         # Exponential breaker cooldown: first trip waits ``base``, each
         # consecutive trip doubles (capped) -- a tarpit parks progressively longer.
         self._circuit_cooldown_base = max(1.0, circuit_cooldown_base)
@@ -224,7 +224,7 @@ class DomainScheduler:
         self._domain_failures[domain] += 1
         # Each ``threshold`` failures escalates one step (base, base*2, ...,
         # capped); forty consecutive failures park a domain for the max cooldown.
-        n = self._domain_failures[domain] // self._circuit_threshold
+        n = self._domain_failures[domain] // self.circuit_threshold
         if n >= 1 and n > self._circuit_trip_count.get(domain, 0):
             self._circuit_trip_count[domain] = n
             cooldown = min(

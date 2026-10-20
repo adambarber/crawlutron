@@ -241,8 +241,8 @@ class TestCooldownPurgeCadence:
         # Burn past the interval so the amortized purge fires.
         for i in range(COOLDOWN_PURGE_INTERVAL + 1):
             scheduler.set_domain_cooldown(f"d{i}.test", 5.0)
-        assert "old.test" not in scheduler._domain_cooldowns
-        assert scheduler._domain_cooldowns, "fresh cooldowns were dropped"
+        assert "old.test" not in scheduler.domain_cooldowns
+        assert scheduler.domain_cooldowns, "fresh cooldowns were dropped"
 
     def test_a_fresh_cooldown_is_never_purged_by_the_amortized_run(self, monkeypatch):
         """The domain that just earned a cooldown is never removed by the purge
@@ -250,5 +250,5 @@ class TestCooldownPurgeCadence:
         monkeypatch.setattr("app.orchestration.scheduler.time.time", lambda: 1000.0)
         scheduler = make_scheduler()
         scheduler.set_domain_cooldown("rate-limited.test", 30.0)
-        assert "rate-limited.test" in scheduler._domain_cooldowns
-        assert scheduler._domain_cooldowns["rate-limited.test"] > 1000.0
+        assert "rate-limited.test" in scheduler.domain_cooldowns
+        assert scheduler.domain_cooldowns["rate-limited.test"] > 1000.0

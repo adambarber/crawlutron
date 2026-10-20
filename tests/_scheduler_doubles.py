@@ -42,9 +42,9 @@ def make_scheduler(of: type[DomainScheduler] = DomainScheduler, **overrides) -> 
 def trip_circuit(scheduler: DomainScheduler, domain: str, *, failures: int | None = None) -> None:
     """Record consecutive failures for ``domain`` until the circuit opens.
 
-    ``failures`` defaults to the scheduler's ``_circuit_threshold``, so the
+    ``failures`` defaults to the scheduler's ``circuit_threshold``, so the
     count that opens the breaker is read from the built constructor."""
-    for _ in range(scheduler._circuit_threshold if failures is None else failures):
+    for _ in range(scheduler.circuit_threshold if failures is None else failures):
         scheduler.record_failure(domain)
 
 

@@ -15,15 +15,18 @@ from tests._scheduler_doubles import FailingSink, engine_envelope, make_schedule
 from tests._timing_harnesses import recorder
 
 
-def test_run_still_purges_up_front():
+def test_run_still_purges_up_front(monkeypatch):
     """The batch entry point keeps its up-front purge so a long run cannot grow
     the dicts without bound even when no 429 fires."""
+    now = [1000.0]
+    monkeypatch.setattr("app.orchestration.scheduler.time.time", lambda: now[0])
     scheduler = make_scheduler()
-    scheduler._domain_cooldowns["stale.test"] = 0.0  # already expired
-    assert "stale.test" in scheduler._domain_cooldowns
+    scheduler.set_domain_cooldown("stale.test", 10.0)
+    assert "stale.test" in scheduler.domain_cooldowns
+    now[0] = 1011.0  # the cooldown has elapsed
     # The up-front purge fires before any job runs.
     scheduler.purge_expired()
-    assert "stale.test" not in scheduler._domain_cooldowns
+    assert "stale.test" not in scheduler.domain_cooldowns
 
 
 class TestSchedulerResilience:

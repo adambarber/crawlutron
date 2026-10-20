@@ -38,8 +38,9 @@ class TestScheduler:
     def test_set_domain_cooldown_is_in_future(self):
         scheduler = make_scheduler(global_limit=5, per_domain_limit=3, delay_seconds=0.1)
         scheduler.set_domain_cooldown("example.com", 5.0)
-        assert "example.com" in scheduler._domain_cooldowns
-        expiry = scheduler._domain_cooldowns["example.com"]
+        cooldowns = scheduler.domain_cooldowns
+        assert "example.com" in cooldowns
+        expiry = cooldowns["example.com"]
         assert expiry > time.time()
         assert expiry - time.time() > 4.0
 

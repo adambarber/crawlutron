@@ -257,8 +257,9 @@ class TestEngineChainEdges:
             "http://example.com/", fetcher, policy=http_policy(extraction="dom"), scheduler=scheduler
         )
         assert result.classification == "rate_limited"
-        assert "example.com" in scheduler._domain_cooldowns
-        assert abs(scheduler._domain_cooldowns["example.com"] - (time.time() + 30)) <= 5
+        cooldowns = scheduler.domain_cooldowns
+        assert "example.com" in cooldowns
+        assert abs(cooldowns["example.com"] - (time.time() + 30)) <= 5
 
     async def test_robots_crawl_delay_sets_domain_min_delay(self, monkeypatch):
         """A host's robots Crawl-delay is honored as a
