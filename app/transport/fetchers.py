@@ -34,13 +34,19 @@ async def default_http_fetcher(
     *,
     impersonate: bool = False,
     pin: pinned_transport.PinRule | None = None,
+    release_stream_noblock: Callable[[Any], None] | None = None,
 ) -> HttpFetchResult:
     """The one fetcher: TLS impersonation first when asked, the pooled httpx
-    client otherwise -- ``impersonate`` bound via ``partial`` so no twin can
-    drift, the URL arrives already admitted, and failed impersonation falls back.
-    """
+    client otherwise; ``impersonate`` bound via ``partial`` so no twin can drift."""
     if impersonate:
-        attempted = await cffi_fetch(url, headers, timeout_seconds, max_content_length, pin=pin)
+        attempted = await cffi_fetch(
+            url,
+            headers,
+            timeout_seconds,
+            max_content_length,
+            pin=pin,
+            release_stream_noblock=release_stream_noblock,
+        )
         if attempted is not None:
             return attempted
     await pooled_clients._drain_pending_client_closes()
@@ -124,6 +130,7 @@ async def cffi_fetch(
     timeout_seconds: int,
     max_content_length: int,
     *,
+    release_stream_noblock: Callable[[Any], None] | None = None,
     pin: pinned_transport.PinRule | None = None,
 ) -> HttpFetchResult | None:
     """The curl_cffi transport behind ``impersonate=True``: TLS-impersonated,
@@ -193,7 +200,10 @@ async def cffi_fetch(
                         return _cffi_too_large_result(url, chain.url, response, elapsed_ms)
             finally:
                 if not stream_completed:
-                    _release_stream_noblock(response)
+                    if release_stream_noblock is not None:
+                        release_stream_noblock(response)
+                    else:
+                        _release_stream_noblock(response)
             # STREAM_END means the producer is done, so awaiting close is safe -- and
             # now required: an unreleased handle stalls the next streamed request.
             await response.aclose()

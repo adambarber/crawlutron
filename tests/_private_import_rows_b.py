@@ -5,7 +5,6 @@ from __future__ import annotations
 from tests._private_import_decl import (
     _APP_INTERNAL_WELD,
     _LIFECYCLE_DRAIN_PENDING_CLIENT_CLOSES,
-    _SUBSTITUTED_COLLABORATOR,
     Declaration,
     _d,
 )
@@ -16,7 +15,6 @@ DECLARED: dict[str, Declaration] = {
         _LIFECYCLE_DRAIN_PENDING_CLIENT_CLOSES.reason,
         ["app"],
     ),
-    "app.transport.fetchers._release_stream_noblock": _SUBSTITUTED_COLLABORATOR,
     "app.transport.pinned_transport._http_413": _d(
         "implementation step",
         "Builds the too-large 413 HttpFetchResult verdict fetchers share within the transport package.",

@@ -1,6 +1,7 @@
 """curl_cffi impersonation and streaming: shared session, handle release, timeout and byte caps."""
 
 import asyncio
+import functools
 import threading
 from typing import Literal
 
@@ -9,9 +10,8 @@ import pytest
 from curl_cffi.requests.exceptions import RequestException
 from curl_cffi.requests.models import STREAM_END
 
-import app.transport.fetchers as fetchers_mod
 import app.transport.http_client_pool as http_mod
-from app.transport.fetchers import impersonating_fetcher
+from app.transport.fetchers import default_http_fetcher, impersonating_fetcher
 from app.vocabulary.strategies import HTTP_CFFI_IMPERSONATE
 from tests._fetch_outcome import FetchFailed
 from tests._fetcher_factories import scripted_fetcher, strategy_request
@@ -119,34 +119,40 @@ def _clean_pooled_client_queue():
     http_mod.reset_process_state()
 
 
-def _scheduled_closes(monkeypatch):
-    """Capture ``_release_stream_noblock`` calls instead of the real scheduling."""
+def _scheduled_closes():
+    """Return the release log plus a fetcher pre-bound to record releases.
+
+    The seam is a constructor knob, not a module swap: production still uses the
+    private scheduler, and the test observes the same contract by supplying its own."""
     released: list[object] = []
-    monkeypatch.setattr(fetchers_mod, "_release_stream_noblock", lambda response: released.append(response))
-    return released
+    fetcher = functools.partial(
+        default_http_fetcher,
+        impersonate=True,
+        release_stream_noblock=lambda response: released.append(response),
+    )
+    return released, fetcher
 
 
 def _scripted_stream(
-    stub_builder, monkeypatch, items, *, headers=None
-) -> tuple[_Response, _Session, list[object]]:
-    """A cffi session whose queue replays `items`; return it and the release log.
+    stub_builder, items, *, headers=None
+) -> tuple[_Response, _Session, list[object], object]:
+    """A cffi session whose queue replays `items`; return it and an injected fetcher.
 
     One scripted queue, one session, one release log; ``items`` is the only
     thing that varies, and a dry queue wedges rather than ending."""
     response = _Response(items, headers=headers)
-    return response, _patch_session(stub_builder, response), _scheduled_closes(monkeypatch)
+    released, fetcher = _scheduled_closes()
+    return response, _patch_session(stub_builder, response), released, fetcher
 
 
-async def test_request_exception_from_the_queue_releases_the_handle(
-    stub_builder, monkeypatch, counting_server
-):
+async def test_request_exception_from_the_queue_releases_the_handle(stub_builder, counting_server):
     """The error exit: a queued RequestException must not orphan the handle."""
     url = f"http://127.0.0.1:{counting_server.server_port}/"
-    response, _session, released = _scripted_stream(
-        stub_builder, monkeypatch, [b"partial", RequestException("boom")]
+    response, _session, released, fetcher = _scripted_stream(
+        stub_builder, [b"partial", RequestException("boom")]
     )
 
-    result = await _DEFAULT_CFFI_FETCHER(canonical(url), {}, 5, 4096)
+    result = await fetcher(canonical(url), {}, 5, 4096)
 
     assert result.status_code == 200, "the documented httpx fallback must still serve"
     # Served by the local server, so this is the fallback and not the scripted cffi session: the assertion is
@@ -156,16 +162,16 @@ async def test_request_exception_from_the_queue_releases_the_handle(
     assert response.awaited is False, "abandoning must not await a live producer"
 
 
-async def test_cancellation_of_the_queue_wait_releases_the_handle(stub_builder, monkeypatch):
+async def test_cancellation_of_the_queue_wait_releases_the_handle(stub_builder):
     """The cancel exit: the engine's per-URL budget cancels fetches routinely.
 
     The wait is on named state, not a deadline of seconds -- the zero-second
     sleep patch yields, so the poll needs no wall time."""
-    response, session, released = _scripted_stream(
-        stub_builder, monkeypatch, [b"first"]
+    response, session, released, fetcher = _scripted_stream(
+        stub_builder, [b"first"]
     )  # then the producer wedges
 
-    fetch = asyncio.create_task(_DEFAULT_CFFI_FETCHER(canonical(URL), {}, 5, 4096))
+    fetch = asyncio.create_task(fetcher(canonical(URL), {}, 5, 4096))
     await await_until(
         lambda: bool(session.gets) and response.queue.drained,
         "the cffi fetch never reached the streaming queue wait",
@@ -183,24 +189,22 @@ async def test_cap_exceeded_and_still_releases_exactly_once(stub_builder, monkey
 
     A release-on-any-exit guard that also fires on the paths releasing by hand
     schedules two closes. One release per fetch, whichever exit was taken."""
-    response, _session, released = _scripted_stream(stub_builder, monkeypatch, [b"x" * 100] * 5)
+    response, _session, released, fetcher = _scripted_stream(stub_builder, [b"x" * 100] * 5)
 
-    result = await _DEFAULT_CFFI_FETCHER(canonical(URL), {}, 5, 50)
+    result = await fetcher(canonical(URL), {}, 5, 50)
 
     assert result.status_code == 413
     assert len(released) == 1, f"expected one release, got {len(released)}"
 
 
-async def test_clean_stream_end_awaits_the_close_and_never_abandons(stub_builder, monkeypatch):
+async def test_clean_stream_end_awaits_the_close_and_never_abandons(stub_builder):
     """Inverse case: a finished producer is safe to await, and required now.
 
     The shared session only recovers the handle if the completed fetch closed
     it, so the success path must NOT downgrade to the non-blocking release."""
-    response, _session, released = _scripted_stream(
-        stub_builder, monkeypatch, [b"<html>ok</html>", STREAM_END]
-    )
+    response, _session, released, fetcher = _scripted_stream(stub_builder, [b"<html>ok</html>", STREAM_END])
 
-    result = await _DEFAULT_CFFI_FETCHER(canonical(URL), {}, 5, 4096)
+    result = await fetcher(canonical(URL), {}, 5, 4096)
 
     assert result.status_code == 200
     assert released == [], "a completed stream must be closed, not abandoned"
