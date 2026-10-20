@@ -205,17 +205,23 @@ _ADVERTISED_PAYLOADS = (
 )
 
 
+def _top_level_function(tree: ast.Module, function_name: str) -> ast.FunctionDef:
+    """The module-level ``def`` named ``function_name``, asserted to exist."""
+    function = next(
+        (n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == function_name),
+        None,
+    )
+    assert function is not None, f"{function_name} not found; update the caller"
+    return function
+
+
 def _advertised_keys(tree: ast.Module, function_name: str) -> set[str]:
     """Top-level string keys of a payload function's single returned dict.
 
     Asserts rather than degrading: reporting "nothing dropped" for a shape this
     gate cannot see would recreate the defect it exists to catch.
     """
-    function = next(
-        (n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == function_name),
-        None,
-    )
-    assert function is not None, f"{function_name} not found; update _ADVERTISED_PAYLOADS"
+    function = _top_level_function(tree, function_name)
     returns = [n for n in ast.walk(function) if isinstance(n, ast.Return)]
     assert len(returns) == 1, (
         f"{function_name} must be a single `return {{...}}` so its advertised keys can be "
@@ -293,6 +299,81 @@ def _taxonomy_members(enum: type[StrEnum]) -> set[str]:
 
 def literal_members(alias: object) -> set[str]:
     return set(get_args(alias))
+
+
+def _constructor_keywords(tree: ast.Module, function_name: str, callee: str) -> set[str]:
+    """The keyword field names of the ``callee(...)`` call inside ``function_name``.
+    Two internally-consistent spellings of one record are compared field- by-field;
+    the pydantic wire model sees neither.
+    """
+    function = _top_level_function(tree, function_name)
+    call = next(
+        (n for n in ast.walk(function) if isinstance(n, ast.Call) and getattr(n.func, "id", None) == callee),
+        None,
+    )
+    assert call is not None, f"{callee}(...) not constructed in {function_name}"
+    return {kw.arg for kw in call.keywords if kw.arg is not None}
+
+
+# The two terminal funnels re-spell the shared attempt shape (memory #4729:
+# single declarations); a one-sided field cannot escape a per-funnel check.
+_FUNNEL_ATTEMPT_FIELDS = ("terminal_attempt", "terminal_engine_result")
+
+
+_FUNNEL_MODULE = "app/orchestration/results.py"
+
+
+def _attempt_funnel_field_sets() -> dict[str, set[str]]:
+    tree = ast.parse((REPO_ROOT / _FUNNEL_MODULE).read_text(encoding="utf-8"))
+    return {
+        name: _constructor_keywords(tree, name, "CrawlStrategyAttempt") for name in _FUNNEL_ATTEMPT_FIELDS
+    }
+
+
+def test_the_two_terminal_funnels_construct_the_attempt_with_the_same_fields():
+    """A field added to one terminal funnel and not the other is red: the
+    constructor field list is the shape the two funnels must agree on.
+    """
+    fields = _attempt_funnel_field_sets()
+    reference, other = _FUNNEL_ATTEMPT_FIELDS
+    assert fields[reference], (
+        f"{reference} constructs CrawlStrategyAttempt with no explicit fields; the gate "
+        f"compares nothing and must fail rather than pass empty."
+    )
+    assert fields[other] == fields[reference], (
+        f"{reference} and {other} no longer build the attempt with the same fields. "
+        f"{reference}: {sorted(fields[reference])} {other}: {sorted(fields[other])}. "
+        f"A field added to one terminal funnel and not the other silently diverges "
+        f"the shared attempt shape -- add it to both in the same change."
+    )
+
+
+def test_attempt_constructor_mirror_detector_bites():
+    """The funnel field-set comparison fires on a planted one-sided field."""
+    both = (
+        "def terminal_attempt(**kw):\n"
+        "    return CrawlStrategyAttempt(strategy=None, status='failed', "
+        "classification='x', http_status=None, content_type=None, elapsed_ms=0, error=None)\n"
+        "def terminal_engine_result(**kw):\n"
+        "    return CrawlStrategyAttempt(strategy=None, status='failed', "
+        "classification='x', http_status=None, content_type=None, elapsed_ms=0, error=None)\n"
+    )
+    clean_tree = ast.parse(both)
+    clean_fields = {
+        name: _constructor_keywords(clean_tree, name, "CrawlStrategyAttempt")
+        for name in _FUNNEL_ATTEMPT_FIELDS
+    }
+    assert clean_fields[_FUNNEL_ATTEMPT_FIELDS[0]] == clean_fields[_FUNNEL_ATTEMPT_FIELDS[1]]
+
+    drifted = both.replace(
+        "error=None)\n",
+        "error=None, drifted_field=1)\n",
+        1,
+    )
+    drifted_tree = ast.parse(drifted)
+    first = _constructor_keywords(drifted_tree, _FUNNEL_ATTEMPT_FIELDS[0], "CrawlStrategyAttempt")
+    second = _constructor_keywords(drifted_tree, _FUNNEL_ATTEMPT_FIELDS[1], "CrawlStrategyAttempt")
+    assert first != second and "drifted_field" in (first ^ second)
 
 
 def test_the_internal_and_wire_taxonomies_name_the_same_members():
