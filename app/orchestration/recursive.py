@@ -6,7 +6,6 @@ and the dispatch loop that drives them.
 from __future__ import annotations
 
 import asyncio
-import inspect
 import logging
 from collections import deque
 from collections.abc import Awaitable, Callable, Sequence
@@ -22,7 +21,7 @@ from app.models.normalized_url import NormalizedUrl
 from app.orchestration.admission_stall import AdmissionStallGuard, crawl_batches
 from app.orchestration.results import failed_result_for
 from app.orchestration.scheduler import DomainScheduler
-from app.orchestration.spill_sink import _SpillSink
+from app.orchestration.spill_sink import SpillSink, write_spill
 from app.runtime.metrics import MetricsStore, get_metrics
 from app.runtime.resource_pressure import (
     ResourceGate,
@@ -63,7 +62,7 @@ class RecursiveRunState:
     robots_crawl_delay: Callable[[NormalizedUrl], Awaitable[float | None]] | None
     robots_disallowed: Callable[[CrawlTask], EngineCrawlResult]
     sitemap_seeds: Callable[[], Awaitable[list[NormalizedUrl]]]
-    spill: _SpillSink | None
+    spill: SpillSink | None
     max_depth: int
     max_pages: int
     respect_robots: bool
@@ -77,7 +76,7 @@ class RecursiveRunState:
     host_policy: HostPolicy
     ramp_max: int
     http_heavy_lookahead: int
-    spill_write: Callable[[_SpillSink | None, int, EngineCrawlResult], Awaitable[None]]
+    spill_write: Callable[[SpillSink | None, int, EngineCrawlResult], Awaitable[None]]
     robots_timeout_seconds: float = 30.0
 
 
@@ -278,19 +277,8 @@ RECURSIVE_RAMP_MAX: int = 128
 _HTTP_HEAVY_LOOKAHEAD: int = RECURSIVE_RAMP_MAX * ENGINE_BATCH_CONCURRENCY_MULTIPLIER
 
 
-async def _spill_write(spill: _SpillSink | None, index: int, result: EngineCrawlResult) -> None:
-    """Write a result to ``spill`` if present, awaiting the async seam (a sync
-    ``write`` returning None is a test double and needs no await). ``None`` is a no-op.
-    """
-    if spill is None:
-        return
-    res = spill.write(index, result)
-    if inspect.isawaitable(res):
-        await res
-
-
 @dataclass
-class _RecursiveState:
+class RecursiveState:
     frontier: deque[tuple[int, CrawlTask]]
     visited: set[NormalizedUrl]
     next_index: int
@@ -311,7 +299,7 @@ class _RecursiveState:
 
 async def _seed_recursive_frontier(
     run: RecursiveRunState,
-    state: _RecursiveState,
+    state: RecursiveState,
     frontier: deque[tuple[int, CrawlTask]],
     seed_identities: set[NormalizedUrl],
 ) -> None:
@@ -331,7 +319,7 @@ async def _seed_recursive_frontier(
         state.next_index += 1
 
 
-async def _crawl_recursive_batch(
+async def crawl_recursive_batch(
     run: RecursiveRunState,
     allowed_jobs: list[tuple[int, CrawlTask]],
 ) -> dict[int, EngineCrawlResult] | None:
@@ -346,7 +334,7 @@ async def _crawl_recursive_batch(
 
 async def _commit_recursive_result(
     run: RecursiveRunState,
-    state: _RecursiveState,
+    state: RecursiveState,
     job: CrawlTask,
     depth: int,
     result: EngineCrawlResult,
@@ -368,7 +356,7 @@ async def _commit_recursive_result(
 
 async def _expand_recursive_result(
     run: RecursiveRunState,
-    state: _RecursiveState,
+    state: RecursiveState,
     depth: int,
     result: EngineCrawlResult,
 ) -> None:
@@ -390,9 +378,9 @@ async def _expand_recursive_result(
     )
 
 
-async def _commit_recursive_results(
+async def commit_recursive_results(
     run: RecursiveRunState,
-    state: _RecursiveState,
+    state: RecursiveState,
     allowed_jobs: list[tuple[int, CrawlTask]],
     scheduled_results: dict[int, EngineCrawlResult] | None,
 ) -> None:
@@ -415,8 +403,8 @@ async def _commit_recursive_results(
 async def _start_recursive_state(
     run: RecursiveRunState,
     jobs: list[CrawlTask],
-) -> _RecursiveState:
-    state = _RecursiveState(
+) -> RecursiveState:
+    state = RecursiveState(
         frontier=deque((0, job) for job in jobs),
         visited=set(),
         next_index=len(jobs),
@@ -436,7 +424,7 @@ async def run_recursive_crawl(
     robots_crawl_delay: Callable[[NormalizedUrl], Awaitable[float | None]] | None = None,
     robots_disallowed: Callable[[CrawlTask], EngineCrawlResult],
     sitemap_seeds: Callable[[], Awaitable[list[NormalizedUrl]]],
-    spill: _SpillSink | None,
+    spill: SpillSink | None,
     shutdown_event: asyncio.Event,
     max_depth: int,
     max_pages: int,
@@ -479,7 +467,7 @@ async def run_recursive_crawl(
         robots_timeout_seconds=robots_timeout_seconds,
         ramp_max=RECURSIVE_RAMP_MAX,
         http_heavy_lookahead=_HTTP_HEAVY_LOOKAHEAD,
-        spill_write=_spill_write,
+        spill_write=write_spill,
     )
     state = await _start_recursive_state(run, jobs)
     await crawl_batches(run, state, stall_guard or AdmissionStallGuard(), shutdown_event, metrics, max_pages)
@@ -488,8 +476,11 @@ async def run_recursive_crawl(
 __all__ = [
     "RECURSIVE_RAMP_MAX",
     "RecursiveRunState",
+    "RecursiveState",
     "admit_recursive_batch",
     "batch_is_http_heavy",
+    "commit_recursive_results",
+    "crawl_recursive_batch",
     "requeue_transient",
     "run_recursive_crawl",
 ]

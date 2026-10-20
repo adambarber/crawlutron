@@ -24,7 +24,7 @@ from app.models.normalized_url import NormalizedUrl, admit_or_none
 from app.models.result_record import ProducerEnvelope
 from app.orchestration import robots as robots_policy
 from app.orchestration.fetch_helpers import fetch_sitemap_urls
-from app.orchestration.recursive import _spill_write, run_recursive_crawl
+from app.orchestration.recursive import run_recursive_crawl
 from app.orchestration.results import (
     TerminalResult,
     engine_result_from_exception,
@@ -32,7 +32,7 @@ from app.orchestration.results import (
 )
 from app.orchestration.robots import FetchAndDecode
 from app.orchestration.scheduler import DomainScheduler
-from app.orchestration.spill_sink import _SpillSink
+from app.orchestration.spill_sink import SpillSink, write_spill
 from app.orchestration.strategy_chain import execute_crawl_chain
 from app.runtime.memory_pressure import read_memory_stats
 from app.runtime.resource_pressure import (
@@ -54,9 +54,9 @@ if TYPE_CHECKING:
 
 
 @dataclass(frozen=True)
-class _PipelineDependencies:
+class PipelineDependencies:
     get_content_cache: Callable[[], ContentCache]
-    make_spill: Callable[[str | None], _SpillSink]
+    make_spill: Callable[[str | None], SpillSink]
     compile_scope_regex_safe: Callable[[str | None], BoundedPattern | None]
     stale_seeds: Callable[[Iterable[tuple[NormalizedUrl, str | None]], Any, CrawlPolicy], set[NormalizedUrl]]
     fetch_and_decode: FetchAndDecode | None
@@ -65,7 +65,7 @@ class _PipelineDependencies:
 
 
 @dataclass
-class _PipelineState:
+class PipelineState:
     payload: CrawlRequest
     settings: CrawlerSettings
     urls: list[str]
@@ -79,7 +79,7 @@ class _PipelineState:
     content_cache: ContentCache | None
     webhook_url: str | None
     spill_path: str | None
-    dependencies: _PipelineDependencies
+    dependencies: PipelineDependencies
     jobs: list[CrawlTask] = field(default_factory=list)
     scheduler: DomainScheduler | None = None
     validators_by_url: dict[NormalizedUrl, dict[str, str]] = field(default_factory=dict)
@@ -90,10 +90,10 @@ class _PipelineState:
     want_document_bodies: bool = False
     scope_pattern: BoundedPattern | None = None
     discovery: DiscoveryFlags = DiscoveryFlags(False, False, False)
-    spill: _SpillSink | None = None
+    spill: SpillSink | None = None
 
 
-def _build_jobs(state: _PipelineState) -> list[CrawlTask]:
+def _build_jobs(state: PipelineState) -> list[CrawlTask]:
     jobs: list[CrawlTask] = []
     for index, original_url in enumerate(state.urls):
         try:
@@ -112,14 +112,14 @@ def _build_jobs(state: _PipelineState) -> list[CrawlTask]:
     return jobs
 
 
-def _compute_ram_derived_concurrency(state: _PipelineState) -> int:
+def _compute_ram_derived_concurrency(state: PipelineState) -> int:
     """The RAM-derived HTTP concurrency ceiling this process may sustain, the
     value weighted admission and the scheduler's connection ceiling both honor."""
     limit = read_memory_stats().total_bytes or 0
     return max(1, max_http_concurrency_for(limit, derive_browser_pool_size()))
 
 
-def _build_scheduler(state: _PipelineState) -> DomainScheduler:
+def _build_scheduler(state: PipelineState) -> DomainScheduler:
     limits = state.policy.limits
     return DomainScheduler(
         # The scheduler's own connection ceiling is the RAM-derived admission
@@ -135,7 +135,7 @@ def _build_scheduler(state: _PipelineState) -> DomainScheduler:
     )
 
 
-def _build_validators(state: _PipelineState) -> dict[NormalizedUrl, dict[str, str]]:
+def _build_validators(state: PipelineState) -> dict[NormalizedUrl, dict[str, str]]:
     validators_by_url: dict[NormalizedUrl, dict[str, str]] = {}
     for url, values in state.payload.validators.items():
         admitted = admit_or_none(url, policy=state.host_policy)
@@ -152,11 +152,11 @@ def _build_validators(state: _PipelineState) -> dict[NormalizedUrl, dict[str, st
     return validators_by_url
 
 
-def _validators_for(state: _PipelineState, job: CrawlTask) -> dict[str, str] | None:
+def _validators_for(state: PipelineState, job: CrawlTask) -> dict[str, str] | None:
     return state.validators_by_url.get(job.normalized_url)
 
 
-async def _run_job(state: _PipelineState, job: CrawlTask) -> tuple[int, EngineCrawlResult]:
+async def _run_job(state: PipelineState, job: CrawlTask) -> tuple[int, EngineCrawlResult]:
     robots_sitemaps = (
         []
         if not state.respect_robots
@@ -199,7 +199,7 @@ async def _run_job(state: _PipelineState, job: CrawlTask) -> tuple[int, EngineCr
     return job.index, result
 
 
-async def _load_robots(state: _PipelineState, target_url: NormalizedUrl):
+async def _load_robots(state: PipelineState, target_url: NormalizedUrl):
     return await robots_policy.load_robots_rules(
         target_url,
         state.fetcher,
@@ -209,17 +209,17 @@ async def _load_robots(state: _PipelineState, target_url: NormalizedUrl):
     )
 
 
-async def _robots_allows(state: _PipelineState, target_url: NormalizedUrl) -> bool:
+async def _robots_allows(state: PipelineState, target_url: NormalizedUrl) -> bool:
     rules, _sitemaps, _delay = await _load_robots(state, target_url)
     return robots_policy.robots_allows(target_url, rules)
 
 
-async def _robots_delay(state: _PipelineState, target_url: NormalizedUrl) -> float | None:
+async def _robots_delay(state: PipelineState, target_url: NormalizedUrl) -> float | None:
     _rules, _sitemaps, delay = await _load_robots(state, target_url)
     return delay
 
 
-def _robots_disallowed(state: _PipelineState, job: CrawlTask) -> EngineCrawlResult:
+def _robots_disallowed(state: PipelineState, job: CrawlTask) -> EngineCrawlResult:
     return skipped_engine_result(
         TerminalResult(
             original_url=job.original_url,
@@ -232,7 +232,7 @@ def _robots_disallowed(state: _PipelineState, job: CrawlTask) -> EngineCrawlResu
     )
 
 
-async def _seeds_for_job(state: _PipelineState, job: CrawlTask) -> list[NormalizedUrl]:
+async def _seeds_for_job(state: PipelineState, job: CrawlTask) -> list[NormalizedUrl]:
     sitemap_url = admit_or_none(f"{job.normalized_url.origin}/sitemap.xml", policy=state.host_policy)
     if sitemap_url is None:
         return []
@@ -259,23 +259,23 @@ async def _seeds_for_job(state: _PipelineState, job: CrawlTask) -> list[Normaliz
     return [url for url, _lastmod in candidates if url not in stale]
 
 
-async def _sitemap_seed_urls(state: _PipelineState) -> list[NormalizedUrl]:
+async def _sitemap_seed_urls(state: PipelineState) -> list[NormalizedUrl]:
     per_job = await asyncio.gather(*[_seeds_for_job(state, job) for job in state.jobs])
     return [seed for seeds in per_job for seed in seeds]
 
 
-async def _worker(state: _PipelineState, job: CrawlTask) -> EngineCrawlResult:
+async def _worker(state: PipelineState, job: CrawlTask) -> EngineCrawlResult:
     _index, result = await _run_job(state, job)
     return result
 
 
-async def _spill_one(state: _PipelineState, index: int, result: EngineCrawlResult) -> None:
+async def _spill_one(state: PipelineState, index: int, result: EngineCrawlResult) -> None:
     if not state.include_html:
         result = replace(result, html=None, text=None)
-    await _spill_write(state.spill, index, result)
+    await write_spill(state.spill, index, result)
 
 
-def _build_admission(state: _PipelineState) -> WeightedAdmission:
+def _build_admission(state: PipelineState) -> WeightedAdmission:
     """The RAM-weighted admission gate for one crawl, shared by both the
     recursive and non-recursive paths so they cannot drift on the same bound."""
     return WeightedAdmission(
@@ -290,7 +290,7 @@ def _build_admission(state: _PipelineState) -> WeightedAdmission:
 
 
 async def _dispatch_paced(
-    state: _PipelineState,
+    state: PipelineState,
     scheduler: DomainScheduler,
     jobs: list[CrawlTask],
 ) -> None:
@@ -317,7 +317,7 @@ async def _dispatch_paced(
         )
 
 
-async def _run_nonrecursive(state: _PipelineState) -> None:
+async def _run_nonrecursive(state: PipelineState) -> None:
     scheduler = cast("DomainScheduler", state.scheduler)
     decisions = (
         await gather_robots_decisions(
@@ -332,7 +332,7 @@ async def _run_nonrecursive(state: _PipelineState) -> None:
     allowed_jobs: list[CrawlTask] = []
     for job, (allowed, crawl_delay) in zip(state.jobs, decisions, strict=True):
         if state.respect_robots and not allowed:
-            await _spill_write(state.spill, job.index, _robots_disallowed(state, job))
+            await write_spill(state.spill, job.index, _robots_disallowed(state, job))
             continue
         if state.respect_robots and crawl_delay and crawl_delay > 0:
             scheduler.set_domain_min_delay(job.domain, crawl_delay)
@@ -341,7 +341,7 @@ async def _run_nonrecursive(state: _PipelineState) -> None:
         await _dispatch_paced(state, scheduler, allowed_jobs)
 
 
-async def _run_recursive(state: _PipelineState) -> None:
+async def _run_recursive(state: PipelineState) -> None:
     scheduler = cast("DomainScheduler", state.scheduler)
     admission = _build_admission(state)
     await run_recursive_crawl(
@@ -369,7 +369,7 @@ async def _run_recursive(state: _PipelineState) -> None:
     )
 
 
-async def _response(state: _PipelineState) -> ProducerEnvelope:
+async def _response(state: PipelineState) -> ProducerEnvelope:
     if state.spill is None:
         raise TypeError("spill must be set before the response is assembled")
     response: ProducerEnvelope = {
@@ -385,7 +385,7 @@ async def _response(state: _PipelineState) -> ProducerEnvelope:
     return response
 
 
-async def _run(state: _PipelineState) -> ProducerEnvelope:
+async def _run(state: PipelineState) -> ProducerEnvelope:
     state.jobs = _build_jobs(state)
     state.scheduler = _build_scheduler(state)
     state.validators_by_url = _build_validators(state)
@@ -412,7 +412,7 @@ async def _run(state: _PipelineState) -> ProducerEnvelope:
     return response
 
 
-async def run_crawl_request(state: _PipelineState) -> ProducerEnvelope:
+async def run_crawl_request(state: PipelineState) -> ProducerEnvelope:
     return await _run(state)
 
 

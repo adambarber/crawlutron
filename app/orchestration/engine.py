@@ -27,7 +27,11 @@ from app.models.crawl_result import EngineCrawlResult
 from app.models.host_policy import HostPolicy
 from app.models.serialization import from_wire, to_dict
 from app.orchestration import robots as _robots_policy
-from app.orchestration.request_pipeline import _PipelineDependencies, _PipelineState, run_crawl_request
+from app.orchestration.request_pipeline import (
+    PipelineDependencies,
+    PipelineState,
+    run_crawl_request,
+)
 from app.orchestration.robots import FetchAndDecode
 from app.runtime.pressure_gates import ResourceGate
 from app.transport.cache import HttpCache
@@ -367,7 +371,7 @@ async def crawl_request(
     # cannot leak through the shared jar; "" keeps single-tenant callers unchanged.
     _cookie_token = _set_cookie_namespace(policy)
     try:
-        state = _PipelineState(
+        state = PipelineState(
             payload=payload,
             settings=active_settings,
             urls=urls,
@@ -381,7 +385,7 @@ async def crawl_request(
             content_cache=content_cache,
             webhook_url=webhook_url,
             spill_path=spill_path,
-            dependencies=_PipelineDependencies(
+            dependencies=PipelineDependencies(
                 get_content_cache=get_shared_content_cache,
                 make_spill=ResultSpill,
                 compile_scope_regex_safe=compile_scope_pattern,

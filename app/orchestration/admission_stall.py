@@ -20,7 +20,7 @@ from app.orchestration.results import TerminalResult, failed_engine_result
 from app.vocabulary.taxonomy import CrawlClassification
 
 if TYPE_CHECKING:
-    from app.orchestration.recursive import RecursiveRunState, _RecursiveState
+    from app.orchestration.recursive import RecursiveRunState, RecursiveState
 
 logger = logging.getLogger(__name__)
 
@@ -79,7 +79,7 @@ async def fail_remaining_frontier(
 
 async def crawl_batches(
     run: RecursiveRunState,
-    state: _RecursiveState,
+    state: RecursiveState,
     stall_guard: AdmissionStallGuard,
     shutdown_event: asyncio.Event,
     metrics: Any,
@@ -90,9 +90,9 @@ async def crawl_batches(
     Imported lazily so this module does not import ``recursive`` at load time.
     """
     from app.orchestration.recursive import (
-        _commit_recursive_results,
-        _crawl_recursive_batch,
         admit_recursive_batch,
+        commit_recursive_results,
+        crawl_recursive_batch,
     )
 
     while state.frontier and (max_pages <= 0 or state.page_count < max_pages):
@@ -103,8 +103,8 @@ async def crawl_batches(
         if not allowed_jobs and stall_guard.stalled():
             await fail_remaining_frontier(run.spill, run.spill_write, state.frontier)
             return
-        scheduled_results = await _crawl_recursive_batch(run, allowed_jobs)
-        await _commit_recursive_results(run, state, allowed_jobs, scheduled_results)
+        scheduled_results = await crawl_recursive_batch(run, allowed_jobs)
+        await commit_recursive_results(run, state, allowed_jobs, scheduled_results)
         if allowed_jobs or state.page_count > page_count_before:
             stall_guard.record_progress()
 
