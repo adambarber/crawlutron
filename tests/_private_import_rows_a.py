@@ -91,14 +91,4 @@ DECLARED: dict[str, Declaration] = {
         "A row-to-model mapping the isolation test drives to round out an ownership assertion with no seam.",
         ["test"],
     ),
-    "app.transport.browser.BrowserRenderer._looks_like_pdf": _d(
-        "implementation step",
-        "A classifier predicate the test drives directly because the is-pdf verdict has no message seam.",
-        ["test"],
-    ),
-    "app.transport.browser.BrowserRenderer._render_with_browser": _d(
-        "substituted seam",
-        "Test doubles replace the renderer's browser-collaborator driver rather than reading returns.",
-        ["test"],
-    ),
 }

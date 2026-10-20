@@ -149,7 +149,7 @@ async def render_pinned(monkeypatch, url: str = "http://example.com/"):
     from tests._policy_factories import UNRESTRICTED_HOST_POLICY, canonical
 
     page, renderer = pinned_page_renderer(monkeypatch)
-    result = await renderer._render_with_browser(
+    result = await renderer.render_once(
         canonical(url),
         RenderOptions(browser_profile={}),
         policy=UNRESTRICTED_HOST_POLICY,
@@ -328,12 +328,12 @@ def scripted_renderer(browser, cm=None, *, sleep=None):
 async def render_bare(renderer, url: str = "http://example.com/"):
     """One render at the empty browser profile over `renderer`, as a raw call.
 
-    ``_render_with_browser`` rather than ``render``: these tests are about what
-    the browser half registers and refuses, not the pool-consulted entry."""
+    ``render_once`` rather than ``render``: these tests are about what
+    the browser half registers and refuses, not the pooling entry."""
     from app.models.render_options import RenderOptions
     from tests._policy_factories import UNRESTRICTED_HOST_POLICY, canonical
 
-    return await renderer._render_with_browser(
+    return await renderer.render_once(
         canonical(url), RenderOptions(browser_profile={}), policy=UNRESTRICTED_HOST_POLICY
     )
 

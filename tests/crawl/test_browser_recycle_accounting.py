@@ -42,7 +42,7 @@ async def test_route_raise_after_page_open_still_counts_recycle():
         pin=stub_pinned_request(),
     )
     with pytest.raises(RuntimeError, match="route setup failed"):
-        await renderer._render_with_browser(
+        await renderer.render_once(
             canonical("http://example.com/"),
             RenderOptions(browser_profile={}),
             policy=UNRESTRICTED_HOST_POLICY,

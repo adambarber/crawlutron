@@ -1,16 +1,15 @@
 """Tests for browser.py module."""
 
-from app.transport.browser import BrowserRenderer
+from app.transport.browser import BrowserRenderer, looks_like_pdf
 
 
 class TestBrowserRendererStatus:
     def test_looks_like_pdf(self):
-        renderer = BrowserRenderer()
-        assert renderer._looks_like_pdf("https://example.com/document.pdf")
-        assert renderer._looks_like_pdf("https://example.com/document.PDF")
-        assert renderer._looks_like_pdf("https://example.com/path/file.pdf?query=1")
-        assert not renderer._looks_like_pdf("https://example.com/document.html")
-        assert not renderer._looks_like_pdf("https://example.com/")
+        assert looks_like_pdf("https://example.com/document.pdf")
+        assert looks_like_pdf("https://example.com/document.PDF")
+        assert looks_like_pdf("https://example.com/path/file.pdf?query=1")
+        assert not looks_like_pdf("https://example.com/document.html")
+        assert not looks_like_pdf("https://example.com/")
 
     def test_headless_enabled_default(self, monkeypatch):
         monkeypatch.delenv("CRAWLUTRON_HEADLESS", raising=False)

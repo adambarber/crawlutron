@@ -53,6 +53,7 @@ __all__ = [
     "make_response_handler",
     "make_ssrf_route_handler",
     "make_ssrf_websocket_handler",
+    "looks_like_pdf",
     "reset_process_state",
     "resolve_browser_target",
 ]
@@ -66,6 +67,13 @@ if TYPE_CHECKING:
 
 
 logger = logging.getLogger(__name__)
+
+
+def looks_like_pdf(url: str) -> bool:
+    """Whether ``url`` (query stripped) is a PDF by path suffix.
+    The is-pdf verdict is reeled into the render pipeline's no-text
+    decision, so it lives as a reusable predicate, not a class secret."""
+    return url.split("?", 1)[0].lower().endswith(".pdf")
 
 
 class BrowserRenderer:
@@ -153,6 +161,19 @@ class BrowserRenderer:
         """
         return self._warmup_urls
 
+    async def render_once(
+        self,
+        url: NormalizedUrl,
+        options: RenderOptions,
+        *,
+        policy: HostPolicy,
+    ) -> CrawlResult:
+        """Perform exactly one render attempt, concurrency-bound.
+        The retrying entry (:meth:`render`) composes this; a caller that
+        owns its own retry policy calls it directly."""
+        async with self._page_semaphore:
+            return await self._render_with_page_unlocked(url, options, policy=policy)
+
     async def render(
         self,
         url: NormalizedUrl,
@@ -168,7 +189,7 @@ class BrowserRenderer:
         while attempts < max_attempts:
             attempts += 1
             try:
-                result = await self._render_with_browser(url, options, policy=policy)
+                result = await self.render_once(url, options, policy=policy)
                 return result
             except Exception as error:
                 classification: Literal["navigation_timeout", "unknown_error"] = (
@@ -187,18 +208,6 @@ class BrowserRenderer:
     async def close(self) -> None:
         """Release the reused browser instance at service shutdown."""
         await self._driver.close()
-
-    async def _render_with_browser(
-        self,
-        url: NormalizedUrl,
-        options: RenderOptions,
-        *,
-        policy: HostPolicy,
-    ) -> CrawlResult:
-        # Cap concurrent page renders: each render opens a browser tab, and an
-        # unbounded burst of tabs crashes/OOMs the shared Camoufox process.
-        async with self._page_semaphore:
-            return await self._render_with_page_unlocked(url, options, policy=policy)
 
     async def _navigate_and_settle(self, page: Any, pinned_url: str) -> None:
         """Goto the pinned URL and wait for a settled ready state."""
@@ -424,4 +433,4 @@ class BrowserRenderer:
         return [url.strip() for url in value.split(",") if url.strip()]
 
     def _looks_like_pdf(self, url: str) -> bool:
-        return url.split("?", 1)[0].lower().endswith(".pdf")
+        return looks_like_pdf(url)
