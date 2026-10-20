@@ -110,14 +110,18 @@ def make_ssrf_route_handler(
 def make_ssrf_websocket_handler(*, policy: HostPolicy):
     """A Playwright websocket-route handler blocking SSRF-unsafe WS targets:
     ``page.route`` cannot intercept WebSocket upgrades, so this closes any that
-    resolve internal, reusing ``check_ssrf_protection`` with ws/wss mapped to http.
+    resolve internal and forwards the rest (``connect_to_server``).
     """
 
     async def _ws_handler(ws):
         url = getattr(ws, "url", "") or ""
         scheme = url.split(":", 1)[0].lower()
         if scheme not in ("ws", "wss"):
-            return  # not a websocket target
+            # Not a websocket upgrade: hand back to the browser unchanged.
+            connect = getattr(ws, "connect_to_server", None)
+            if connect is not None:
+                connect()
+            return
         http_equivalent = ("https" if scheme == "wss" else "http") + url[len(scheme) :]
         try:
             normalized = await asyncio.to_thread(
@@ -132,6 +136,12 @@ def make_ssrf_websocket_handler(*, policy: HostPolicy):
                 result = close()
                 if asyncio.iscoroutine(result):
                     await result
+        else:
+            # An allowed target must actually forward to keep the socket working:
+            # before, the handler dead-ended every allowed connection.
+            connect = getattr(ws, "connect_to_server", None)
+            if connect is not None:
+                connect()
 
     return _ws_handler
 

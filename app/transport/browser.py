@@ -240,12 +240,12 @@ class BrowserRenderer:
                 ),
             )
             ws_guard = make_ssrf_websocket_handler(policy=policy)
-            ws_router = getattr(page, "route_websocket", None)
+            ws_router = getattr(page, "route_web_socket", None)
             if ws_router is None:
                 logger.warning("websocket_interception_unsupported")
             else:
-                # Route_websocket is sync in Playwright (unlike page.route); accept
-                # both sync and async implementations for test doubles.
+                # route_web_socket is async in Playwright 1.62+ (verified from the
+                # installed source); accept both sync and async for doubles.
                 outcome = ws_router("**/*", ws_guard)
                 if asyncio.iscoroutine(outcome):
                     await outcome

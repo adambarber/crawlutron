@@ -1,0 +1,78 @@
+"""WebSocket SSRF guard: installed on the render path and forwards allowed sockets.
+The wrong attribute name (route_web_socket) once skipped the guard; the dead handler
+never connected allowed targets. These tests cover both, on the installed-Playwright API.
+"""
+
+from __future__ import annotations
+
+from tests._assertions import block_private_targets, host_resolves_to
+from tests._browser_doubles import BrowserFakePage, pinned_page_renderer, render_bare
+
+_PUBLIC = "1.2.3.4"
+
+
+class _WSBearingPage(BrowserFakePage):
+    """A page whose WebSocket-route surface matches the installed Playwright 1.62.0 API:
+    ``route_web_socket(url, handler)`` records the handler the renderer installs."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.ws_handler = None
+
+    async def route_web_socket(self, url, handler):
+        self.ws_handler = handler
+
+
+class _FakeWS:
+    """A stand-in for Playwright's ``WebSocketRoute``: ``url``/``close()``/``connect_to_server()``."""
+
+    def __init__(self, url):
+        self.url = url
+        self.closed_count = 0
+        self.connect_calls = 0
+
+    async def close(self, **kwargs):
+        self.closed_count += 1
+
+    def connect_to_server(self):
+        self.connect_calls += 1
+        return self
+
+
+async def test_ws_guard_is_installed_and_closes_unsafe_connects_safe(monkeypatch):
+    block_private_targets(monkeypatch)
+    page = _WSBearingPage()
+    _page2, renderer = pinned_page_renderer(monkeypatch, page=page)
+    await render_bare(renderer)
+
+    # The guard must actually be installed on the render path (the old wrong
+    # attribute name skipped it entirely).
+    assert page.ws_handler is not None, "websocket SSRF guard was never installed"
+
+    # (a) an unsafe (private/loopback) websocket target is closed, not connected.
+    unsafe = _FakeWS("wss://127.0.0.1:9/secret")
+    await page.ws_handler(unsafe)
+    assert unsafe.closed_count == 1, "unsafe websocket was not closed"
+    assert unsafe.connect_calls == 0
+
+    # (b) a safe target's connect_to_server is actually invoked so the socket works.
+    with host_resolves_to(monkeypatch, _PUBLIC):
+        good = _FakeWS("wss://example.com/chat")
+        await page.ws_handler(good)
+    assert good.connect_calls == 1, "safe websocket never connected to the server"
+    assert good.closed_count == 0
+
+
+async def test_ws_guard_uses_the_playwright_route_web_socket_api(monkeypatch):
+    """The renderer must reach the installed API surface ``route_web_socket`` (not the
+    invented ``route_websocket``): a page exposing the real method must have the guard
+    installed through it."""
+    block_private_targets(monkeypatch)
+    page = _WSBearingPage()
+    _page2, renderer = pinned_page_renderer(monkeypatch, page=page)
+    await render_bare(renderer)
+
+    assert page.ws_handler is not None
+
+    # The renderer does not treat the invented attribute as the seam.
+    assert not hasattr(page, "route_websocket")
