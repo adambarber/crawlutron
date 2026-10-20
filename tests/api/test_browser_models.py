@@ -259,3 +259,23 @@ class TestTheRendererAgreesWithTheVocabulary:
             "the chain's guards and the model's requirement set disagree: "
             f"model-only={declared - requiring}, chain-only={requiring - declared}"
         )
+
+    def test_the_dispatch_handlers_are_typed_against_the_closed_vocabulary(self):
+        """An action reaches a handler as the declared ``BrowserAction``, not.
+        ``dict[str, Any]``: the closed vocabulary must be the type, so a caller
+        that hands the chain an undeclared action key is a type error."""
+        import ast
+
+        from tests.chokepoint_walks import REPO_ROOT
+
+        tree = ast.parse((REPO_ROOT / "app" / "transport" / "browser_driver.py").read_text(encoding="utf-8"))
+        action_class = next(n for n in tree.body if isinstance(n, ast.ClassDef) and n.name == "_ActionStep")
+        annotation = next(
+            stmt.annotation
+            for stmt in ast.walk(action_class)
+            if isinstance(stmt, ast.AnnAssign) and getattr(stmt.target, "id", None) == "handler"
+        )
+        source = ast.unparse(annotation)
+        assert "BrowserAction" in source and "dict[str, Any]" not in source, (
+            f"the dispatch handler must be typed on the closed vocabulary, got: {source}"
+        )

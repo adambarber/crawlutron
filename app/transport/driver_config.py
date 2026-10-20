@@ -13,6 +13,7 @@ from typing import Any, TypeVar
 from camoufox.async_api import AsyncCamoufox
 
 from app.config.env import parse_bool_value
+from app.vocabulary.browser import BrowserAction
 from app.vocabulary.limits import DEFAULT_LAZY_SCROLL_DELAY_SECONDS, DEFAULT_LAZY_SCROLL_STEPS
 
 # Records keep the driver's name: a test pins the refusal's logger, and the
@@ -68,7 +69,7 @@ LAZY_SCROLL_DELAY_SECONDS = DEFAULT_LAZY_SCROLL_DELAY_SECONDS
 MAX_ACTION_WAIT_SECONDS = 10.0
 
 
-def ACTION_WAIT_MS(action: dict[str, Any]) -> int:
+def ACTION_WAIT_MS(action: BrowserAction) -> int:
     """Clamp a caller-supplied ``wait`` timeout the way ``wait_seconds`` is.
 
     Unbounded values park the render arbitrarily and 0 disables the timeout

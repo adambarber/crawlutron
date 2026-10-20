@@ -35,7 +35,7 @@ from app.transport.driver_pages import (
     flatten_shadow_dom,
     safe_close_page,
 )
-from app.vocabulary.browser import ACTIONS_REQUIRING_SELECTOR, BROWSER_ACTION_TYPES
+from app.vocabulary.browser import ACTIONS_REQUIRING_SELECTOR, BROWSER_ACTION_TYPES, BrowserAction
 from app.vocabulary.limits import DEFAULT_COOKIE_HARVEST_TIMEOUT_SECONDS, DEFAULT_MAX_BROWSER_RENDERS
 
 if TYPE_CHECKING:
@@ -45,43 +45,43 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-async def _click_verb(driver: BrowserDriver, page: Any, action: dict[str, Any]) -> None:
-    await page.click(str(action["selector"]))
+async def _click_verb(driver: BrowserDriver, page: Any, action: BrowserAction) -> None:
+    await page.click(str(action.get("selector", "")))
 
 
-async def _fill_verb(driver: BrowserDriver, page: Any, action: dict[str, Any]) -> None:
-    await page.fill(str(action["selector"]), str(action.get("value", "")))
+async def _fill_verb(driver: BrowserDriver, page: Any, action: BrowserAction) -> None:
+    await page.fill(str(action.get("selector", "")), str(action.get("value", "")))
 
 
-async def _hover_verb(driver: BrowserDriver, page: Any, action: dict[str, Any]) -> None:
-    await page.hover(str(action["selector"]))
+async def _hover_verb(driver: BrowserDriver, page: Any, action: BrowserAction) -> None:
+    await page.hover(str(action.get("selector", "")))
 
 
-async def _scroll_verb(driver: BrowserDriver, page: Any, action: dict[str, Any]) -> None:
-    element = await page.query_selector(str(action["selector"]))
+async def _scroll_verb(driver: BrowserDriver, page: Any, action: BrowserAction) -> None:
+    element = await page.query_selector(str(action.get("selector", "")))
     if element is not None:
         await element.scroll_into_view_if_needed()
 
 
-async def _scroll_bottom_verb(driver: BrowserDriver, page: Any, action: dict[str, Any]) -> None:
+async def _scroll_bottom_verb(driver: BrowserDriver, page: Any, action: BrowserAction) -> None:
     await page.evaluate("() => window.scrollTo(0, document.body.scrollHeight)")
 
 
-async def _wait_verb(driver: BrowserDriver, page: Any, action: dict[str, Any]) -> None:
-    await page.wait_for_selector(str(action["selector"]), timeout=ACTION_WAIT_MS(action))
+async def _wait_verb(driver: BrowserDriver, page: Any, action: BrowserAction) -> None:
+    await page.wait_for_selector(str(action.get("selector", "")), timeout=ACTION_WAIT_MS(action))
 
 
-async def _wait_seconds_verb(driver: BrowserDriver, page: Any, action: dict[str, Any]) -> None:
+async def _wait_seconds_verb(driver: BrowserDriver, page: Any, action: BrowserAction) -> None:
     await driver._async_sleep(min(float(action.get("seconds", 1)), MAX_ACTION_WAIT_SECONDS))
 
 
-async def _refuse_execute_js(driver: BrowserDriver, page: Any, action: dict[str, Any]) -> None:
+async def _refuse_execute_js(driver: BrowserDriver, page: Any, action: BrowserAction) -> None:
     """Refuse arbitrary JS execution (RCE-class risk)."""
     return None
 
 
 class _ActionStep(NamedTuple):
-    handler: Callable[[BrowserDriver, Any, dict[str, Any]], Awaitable[None]]
+    handler: Callable[[BrowserDriver, Any, BrowserAction], Awaitable[None]]
     needs_selector: bool
 
 
@@ -264,7 +264,7 @@ class BrowserDriver:
     async def run_action_chain(
         self,
         page: Any,
-        actions: list[dict[str, Any]],
+        actions: list[BrowserAction],
         *,
         url: str = "",
         budget_seconds: float | None = None,
@@ -290,7 +290,7 @@ class BrowserDriver:
                 },
             )
 
-    async def _perform_action_chain(self, page: Any, actions: list[dict[str, Any]], *, url: str) -> None:
+    async def _perform_action_chain(self, page: Any, actions: list[BrowserAction], *, url: str) -> None:
         """Execute a sequence of browser actions before extraction: click, fill, hover,
         scroll, scroll_bottom, wait, wait_seconds. ``execute_js`` is refused (RCE-class
         risk); actions are best-effort but not silent -- a wait that never resolves is a real quality loss.
@@ -322,7 +322,7 @@ class BrowserDriver:
                     },
                 )
 
-    async def _dispatch_action(self, page: Any, action: dict[str, Any], action_type: str) -> None:
+    async def _dispatch_action(self, page: Any, action: BrowserAction, action_type: str) -> None:
         """Perform ONE recognised action via :data:`_ACTION_STEPS`.
         ``execute_js`` is recognised and refused here as at the model, because this
         is the chokepoint a policy arriving by any route cannot run script through.

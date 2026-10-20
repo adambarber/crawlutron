@@ -6,7 +6,22 @@ A closed set answers WHICH actions a caller may name; value ceilings live in
 
 from __future__ import annotations
 
-from typing import Final
+from typing import Final, TypedDict
+
+
+class BrowserAction(TypedDict, total=False):
+    """One closed browser action: keys from ``BROWSER_ACTION_KEYS`` only.
+
+    ``type`` selects the verb; ``selector``/``timeout``/``seconds``/``value``
+    are the per-verb payload the chain's handlers read.
+    """
+
+    type: str
+    selector: str
+    timeout: int
+    seconds: float
+    value: str
+
 
 # --- Browser action vocabulary: the single source of truth ---
 # The driver's dispatch chain and the model's refusal check share this set.
