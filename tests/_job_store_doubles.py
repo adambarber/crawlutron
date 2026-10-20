@@ -5,9 +5,7 @@ import threading
 from collections.abc import Callable
 from contextlib import contextmanager
 
-from app.admission.policy import PolicyTier
 from app.models.crawl_policy import CrawlPolicy
-from app.safety.validation import HostPolicy
 from app.storage.job_store import CrawlJobState, Expected, FrontierEntry, JobStatus, JobStore
 from tests._policy_factories import canonical, job_store
 
@@ -75,8 +73,8 @@ class InstrumentedJobStore(JobStore):
     subclass (not instance poking) because ``status_bus`` is not a ``JobStore`` field.
     """
 
-    def __init__(self, db_path: str | pathlib.Path, *, policy: HostPolicy, tier: PolicyTier) -> None:
-        super().__init__(db_path, policy=policy, tier=tier)
+    def __init__(self, db_path, *, policy, tier, row_to_job=None) -> None:
+        super().__init__(db_path, policy=policy, tier=tier, row_to_job=row_to_job)
         self.status_bus = _StatusBus()
         # Bound off the CLASS, not off ``self``: by this point ``self.set_status`` already resolves to the
         # override below, and capturing that would make every publish an infinite recursion.

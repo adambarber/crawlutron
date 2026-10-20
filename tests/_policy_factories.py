@@ -4,6 +4,7 @@ The policy sub-mappings were re-typed at every site -- each copy a place a
 change lands in only one test. Factories return the MODEL, not the wire mapping."""
 
 import pathlib
+from collections.abc import Callable
 from typing import Any
 
 from app.admission.admission_links import admit_discovered_links
@@ -13,7 +14,7 @@ from app.config.settings import CrawlerSettings
 from app.models.crawl_policy import CrawlPolicy
 from app.models.normalized_url import NormalizedUrl
 from app.safety.validation import HostPolicy
-from app.storage.job_store import JobStore
+from app.storage.job_store import CrawlJobState, JobStore
 from app.vocabulary.strategies import HTTP_DECLARED_CRAWLER
 
 UNRESTRICTED_HOST_POLICY = HostPolicy.unrestricted()
@@ -205,6 +206,7 @@ def job_store(
     policy: HostPolicy | None = None,
     tier: PolicyTier | None = None,
     of: type[JobStore] = JobStore,
+    row_to_job: Callable[..., CrawlJobState] | None = None,
 ) -> JobStore:
     """A ``JobStore`` bound to a test deployment.
 
@@ -214,4 +216,5 @@ def job_store(
         db_path,
         policy=policy if policy is not None else UNRESTRICTED_HOST_POLICY,
         tier=tier if tier is not None else deployment_tier(),
+        row_to_job=row_to_job,
     )

@@ -130,25 +130,24 @@ def test_load_for_caller_hides_foreign_jobs(tmp_path):
     assert owned is not None and owned.job_id == "crawl_owned"
 
 
-def _deserialize_count(store: JobStore) -> list:
-    """A sentinel the caller drives: count every full-row deserialization."""
+def _deserialize_count(tmp_path: Path, owner: str = "key_a") -> tuple[JobStore, list]:
+    """A store that counts every full-row deserialization, via the public
+    ``row_to_job`` constructor knob rather than an instance poke."""
     calls: list = []
-    original = store.row_to_job
 
-    def _spy(row, *, with_accumulators):
+    def _spy(row, delegate, *, with_accumulators):
         calls.append(row["job_id"])
-        return original(row, with_accumulators=with_accumulators)
+        return delegate(row, with_accumulators=with_accumulators)
 
-    store.row_to_job = _spy
-    return calls
+    store = make_store(tmp_path / "jobs.db", row_to_job=_spy)
+    _seed_owned_job(store, owner=owner)
+    return store, calls
 
 
 def test_load_for_caller_never_deserializes_a_foreign_or_missing_row(tmp_path):
     """#196: ownership is decided in SQL, not by loading the row and comparing owners,
     so a foreign (or missing) job_id never pays for full deserialization."""
-    store = make_store(tmp_path / "jobs.db")
-    _seed_owned_job(store, owner="key_a")
-    calls = _deserialize_count(store)
+    store, calls = _deserialize_count(tmp_path)
 
     assert store.load_for_caller("crawl_owned", "key_b") is None
     assert store.load_for_caller("crawl_owned", "key_c") is None

@@ -6,6 +6,7 @@ import json
 import logging
 import sqlite3
 import time
+from collections.abc import Callable
 from pathlib import Path
 
 from app.admission.policy import PolicyLike, PolicyTier, read_policy
@@ -58,7 +59,14 @@ class JobStore:
     running off the loop; ``self._lock`` serializes every connection use.
     """
 
-    def __init__(self, db_path: str | Path, *, policy: HostPolicy, tier: PolicyTier):
+    def __init__(
+        self,
+        db_path: str | Path,
+        *,
+        policy: HostPolicy,
+        tier: PolicyTier,
+        row_to_job: Callable[..., CrawlJobState] | None = None,
+    ):
         self.db_path = Path(db_path)
         self._host_policy = policy
         # Operator tier required: a stored row that omitted a limit must
@@ -72,11 +80,14 @@ class JobStore:
         # Column-addressed rows: the schema grows by migration, so positional
         # indexing would couple reads to ALTER ordering.
         self._conn.row_factory = sqlite3.Row
+        # A caller-supplied row-to-model mapping replaces the default for
+        # observation or a custom projection; it runs under the same lock.
+        self._row_to_job_factory: Callable[..., CrawlJobState] | None = row_to_job
         # Live state is rewritten wholesale each batch, history only appended;
         # the append-only side has its own owner so neither pays for the other.
         self._accumulators = JobAccumulators(self._conn)
 
-    def row_to_job(self, row: sqlite3.Row, *, with_accumulators: bool = True) -> CrawlJobState:
+    def _row_to_job(self, row: sqlite3.Row, *, with_accumulators: bool = True) -> CrawlJobState:
         job_id = row["job_id"]
         return CrawlJobState.from_json(
             {
@@ -200,8 +211,11 @@ class JobStore:
                 ).fetchone()
             if row is None:
                 return None
+            factory = self._row_to_job_factory
             try:
-                return self.row_to_job(row, with_accumulators=with_accumulators)
+                if factory is None:
+                    return self._row_to_job(row, with_accumulators=with_accumulators)
+                return factory(row, self._row_to_job, with_accumulators=with_accumulators)
             except (json.JSONDecodeError, ValueError, TypeError) as exc:
                 # Surface corruption instead of silently returning None so a
                 # broken row is observable in logs rather than masked.
