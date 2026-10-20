@@ -7,11 +7,11 @@ from __future__ import annotations
 
 import itertools
 import threading
-import time
 from collections.abc import Callable
 
 from app.models.normalized_url import NormalizedUrl
 from app.transport.cookie_jar import COOKIE_NAMESPACE
+from app.transport.freshness import default_clock, expiry_for, is_expired
 
 _DEFAULT_TTL_SECONDS = 3600.0
 _MAX_ENTRIES = 100_000
@@ -25,15 +25,15 @@ class HttpCache:
         *,
         ttl_seconds: float = _DEFAULT_TTL_SECONDS,
         max_entries: int = _MAX_ENTRIES,
-        clock: Callable[[], float] = time.time,
+        clock: Callable[[], float] = default_clock,
     ) -> None:
         self._ttl_seconds = max(0.0, ttl_seconds)
         self._max_entries = max(1, max_entries)
         self._clock = clock
         self._lock = threading.Lock()
-        # (namespace, url) -> (etag, last_modified, expires_at), namespaced so one caller's
+        # (namespace, url) -> (etag, last_modified, expires|None), namespaced so one caller's
         # validator is never replayed on another's crawl; mirrors the content-cache partitioning.
-        self._data: dict[tuple[str, NormalizedUrl], tuple[str | None, str | None, float]] = {}
+        self._data: dict[tuple[str, NormalizedUrl], tuple[str | None, str | None, float | None]] = {}
         self._closed = False
 
     def _evict_if_needed(self) -> None:
@@ -56,7 +56,7 @@ class HttpCache:
             if entry is None:
                 return None, None
             etag, last_modified, expires = entry
-            if self._ttl_seconds and expires <= now:
+            if is_expired(now, expires):
                 self._data.pop(key, None)
                 return None, None
             return etag, last_modified
@@ -70,7 +70,7 @@ class HttpCache:
         etag = lowered.get("etag")
         last_modified = lowered.get("last-modified")
         now = self._clock()
-        expires = now + self._ttl_seconds if self._ttl_seconds else 0.0
+        expires = expiry_for(now, self._ttl_seconds)
         key = self._key(url)
         with self._lock:
             # Re-insert so a refreshed entry moves to the back of the FIFO order.

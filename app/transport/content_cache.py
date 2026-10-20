@@ -20,10 +20,10 @@ from app.models.json_value import JsonValue
 from app.transport.content_cache_internals import (
     TMP_ORPHAN_MAX_AGE_SECONDS,
     atomic_write,
-    default_clock,
     resolve_expiry,
     scan_cache_dir,
 )
+from app.transport.freshness import default_clock, expiry_for, is_expired
 from app.vocabulary.limits import (
     CONTENT_CACHE_MAX_ENTRY_BYTES,
     CONTENT_CACHE_MAX_TOTAL_BYTES,
@@ -205,7 +205,7 @@ class ContentCache:
                     self._drop_locked(key, doomed)
                     return None
                 expires = resolve_expiry(envelope)
-                if expires is not None and self.clock() > expires:
+                if is_expired(self.clock(), expires):
                     # Free the byte accounting too: phantom bytes would keep
                     # ``_over_limits`` true and evict LIVE entries later.
                     self._drop_locked(key, doomed)
@@ -238,7 +238,7 @@ class ContentCache:
         if key not in self._memory_cache:
             return None
         expires, value = self._memory_cache[key]
-        if expires is not None and self.clock() > expires:
+        if is_expired(self.clock(), expires):
             self._memory_cache.pop(key, None)
             return None
         self._memory_cache.move_to_end(key)
@@ -286,7 +286,7 @@ class ContentCache:
             entry = self._index_cached_at.get(key)
             if entry is not None:
                 expires, cached_at = entry
-                if expires is None or self.clock() <= expires:
+                if not is_expired(self.clock(), expires):
                     return cached_at
         envelope = self._read_envelope(key)
         return envelope.get("cached_at") if envelope is not None else None
@@ -299,7 +299,7 @@ class ContentCache:
         # cached_at records when this entry was written so callers can compare a
         # remote "last modified" signal against our local fetch time.
         now = self.clock()
-        expires = None if effective_ttl <= 0 else now + effective_ttl
+        expires = expiry_for(now, float(effective_ttl))
         return {"expires": expires, "value": value, "cached_at": now}, expires
 
     def set(self, key: str, value: Any, ttl: int | None = None) -> None:
@@ -411,7 +411,7 @@ class ContentCache:
             self._index_sizes = {k: surviving[p] for k, p in live.items()}
             self._index_total_bytes = sum(self._index_sizes.values())
             # Drop expired in-memory value entries (TTL honored even in RAM).
-            for _k in [k for k, (exp, _v) in self._memory_cache.items() if exp is not None and now > exp]:
+            for _k in [k for k, (exp, _v) in self._memory_cache.items() if is_expired(now, exp)]:
                 self._memory_cache.pop(_k, None)
         removed = self._unlink_doomed(doomed)
         return removed + _sweep_orphan_tmps(self.cache_dir, self.namespace, now)

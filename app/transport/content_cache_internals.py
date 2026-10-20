@@ -6,12 +6,12 @@ contract."""
 from __future__ import annotations
 
 import json
-import time
 from collections.abc import Callable
 from pathlib import Path
 
 from app.models.cache_envelope import CacheEnvelope
 from app.safety.atomic_write import atomic_write_text
+from app.transport.freshness import is_expired
 
 #: An unparsable stored expiry resolves to before the clock, so every
 #: freshness comparison reads it as expired rather than raising.
@@ -33,11 +33,6 @@ def resolve_expiry(envelope: CacheEnvelope) -> float | None:
     if isinstance(raw, bool) or not isinstance(raw, int | float):
         return UNPARSEABLE_EXPIRY
     return float(raw)
-
-
-def default_clock() -> float:
-    """The wall clock behind every TTL decision; injectable for tests."""
-    return time.time()
 
 
 def atomic_write(path: Path, data: str) -> None:
@@ -69,7 +64,7 @@ def scan_cache_dir(
             surviving[path] = len(raw)
             continue
         expires = expiry_of(envelope)
-        if expires is not None and now > expires:
+        if is_expired(now, expires):
             expired.append((path, len(raw)))
         else:
             surviving[path] = len(raw)
