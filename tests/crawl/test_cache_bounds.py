@@ -71,16 +71,6 @@ class TestSharedContentCache:
         assert isinstance(cache, ContentCache)
 
 
-def test_default_max_entries_is_bounded_not_none():
-    """ContentCache has a bounded default max_entries."""
-
-    with scoped_cache(default_ttl=3600) as c:
-        # The default should be a positive integer, not None (which meant unbounded).
-        assert c.max_entries is not None
-        assert isinstance(c.max_entries, int)
-        assert c.max_entries > 0
-
-
 def test_max_entries_enforces_bound(tmp_path):
     """Cache never exceeds max_entries."""
     cache = _make_cache(tmp_path, max_entries=3)

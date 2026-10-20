@@ -29,11 +29,6 @@ from tests.crawl._chain_policies import chain_policy
 # the single source of "what went wrong"
 
 
-def test_classifier_lives_in_the_neutral_classification_module():
-    """The classifier is strategy-neutral; browser.py must import it from the module
-    that owns what a failure means."""
-
-
 def test_pool_exhaustion_classifies_distinctly():
     """Pool exhaustion means 'not attempted, capacity unavailable' -- never network_error."""
     assert classify_error_code(BrowserPoolExhaustedError("none free")) == "browser_pool_exhausted"

@@ -194,9 +194,6 @@ class Spill:
     def write(self, index: int, result: Any) -> None:
         self.writes[index] = result
 
-    def load_ordered(self) -> list[Any]:
-        return [self.writes[i] for i in sorted(self.writes)]
-
     def close(self) -> None:
         """A spill is closable; a no-op here, the writes are already held in RAM."""
         return None

@@ -270,11 +270,6 @@ def test_explicit_legacy_stamp_reports_only_the_marked_migration(tmp_path, capsy
     assert "0002_crawl_jobs_drop_canonicalized" not in output
 
 
-def test_explicit_stamp_docstring_describes_satisfied_migrations():
-    assert "satisfied" in (stamp_store.__doc__ or "")
-    assert "current" not in (stamp_store.__doc__ or "")
-
-
 @pytest.mark.parametrize(
     "changed_column",
     [

@@ -272,9 +272,16 @@ class TestJobStoreEdges:
         assert (result) is None
 
     def test_job_store_close(self, tmp_path):
+        """A closed store refuses operations; a second close is safe."""
         store = make_job_store(tmp_path)
         store.close()
         store.close()  # closing twice is safe
+        try:
+            store.load("anything")
+        except sqlite3.ProgrammingError:
+            pass
+        else:
+            raise AssertionError("a closed job store must refuse operations")
 
 
 def test_legacy_string_collections_load_with_depth_and_single_identity(tmp_path):
