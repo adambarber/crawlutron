@@ -14,7 +14,6 @@ logger = logging.getLogger(__name__)
 __all__ = [
     "BROWSER_COOKIES_BY_DOMAIN",
     "BROWSER_COOKIES_MAX",
-    "LockedDomainCookieStore",
     "harvest_session_cookies",
     "store_browser_cookies",
 ]
@@ -33,33 +32,33 @@ def _split_header(header: str) -> dict[str, str]:
     return parsed
 
 
-class LockedDomainCookieStore:
+class _LockedDomainCookieStore:
     """Browser-harvest store: the in-memory medium at one implicit namespace."""
 
-    __slots__ = ("medium",)
+    __slots__ = ("_store",)
 
     def __init__(self, max_entries: int) -> None:
         # The medium owns the lock discipline for every op; the wrapper holds no
         # lock of its own (no delegating-lock alias to deadlock against).
-        self.medium = InMemoryCookieStore(max_hosts_per_namespace=max_entries)
+        self._store = InMemoryCookieStore(max_hosts_per_namespace=max_entries)
 
     def store(self, domain: str, header: str) -> None:
-        self.medium.put("", domain, _split_header(header))
+        self._store.put("", domain, _split_header(header))
 
     def touch_get(self, domain: str) -> str | None:
-        cookies = self.medium.load("", domain)
+        cookies = self._store.load("", domain)
         if not cookies:
             return None
         return "; ".join(f"{name}={value}" for name, value in cookies.items())
 
     def clear(self) -> None:
-        self.medium.clear()
+        self._store.clear()
 
     def __len__(self) -> int:
-        return len(self.medium)
+        return len(self._store)
 
 
-BROWSER_COOKIES_BY_DOMAIN = LockedDomainCookieStore(BROWSER_COOKIES_MAX)
+BROWSER_COOKIES_BY_DOMAIN = _LockedDomainCookieStore(BROWSER_COOKIES_MAX)
 
 
 def reset_process_state() -> None:

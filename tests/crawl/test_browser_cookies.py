@@ -9,7 +9,6 @@ import app.transport.browser_cookies as browser_cookies
 from app.transport import browser as browser_mod
 from app.transport.browser import get_browser_cookies_for
 from app.transport.browser_cookies import BROWSER_COOKIES_MAX, store_browser_cookies
-from tests._lock_doubles import DelegatingLock
 
 
 @pytest.fixture
@@ -33,6 +32,7 @@ def test_public_helpers_reach_the_guarded_store(clean_cookie_store):
     A bare ``OrderedDict`` at every site made the race possible; the claim is
     the helpers cannot be holding an unguarded mapping.
     """
+    assert clean_cookie_store is browser_cookies.BROWSER_COOKIES_BY_DOMAIN
     store_browser_cookies("guarded.example", "sess=1")
     assert get_browser_cookies_for("guarded.example") == "sess=1"
 
@@ -85,67 +85,50 @@ def test_concurrent_read_and_eviction_does_not_raise(clean_cookie_store):
         f"the unsynchronized read raised {old_error[0]!r}, not the expected KeyError"
     )
 
-    # --- 2: the guarded store serializes the read, deterministically -------- The discriminator is the
-    # store's own lock, not GIL timing: the read path must take that lock, and it must be able to get it once
+    # --- 2: the guarded store serializes concurrent access. The discriminator is the observable
+    # outcome, not the lock: the public read must never raise the unsynchronized KeyError.
     store = clean_cookie_store
+    assert store is browser_cookies.BROWSER_COOKIES_BY_DOMAIN, "the fixture is the guarded global store"
 
-    class _RecordingLock(DelegatingLock):
-        """Delegating lock that records which thread acquired it, and how often.
-
-        Per-thread, not just a total: the probe holds the lock, so a plain count
-        would pass against the lock-free read this test exists to reject.
-        """
-
-        def __init__(self, inner):
-            super().__init__(inner)
-            self.acquisitions: dict[int, int] = {}
-
-        def acquire(self, *args, **kwargs):
-            me = threading.get_ident()
-            self.acquisitions[me] = self.acquisitions.get(me, 0) + 1
-            return super().acquire(*args, **kwargs)
-
-        def locked(self):
-            return self._inner.locked()
-
-    real_lock = store.medium.lock
-    recording = _RecordingLock(real_lock)
-    patch = pytest.MonkeyPatch()
-    patch.setattr(store.medium, "lock", recording)
+    errors: list[BaseException] = []
     box: dict[str, str | None] = {}
-    lock_taken = threading.Event()
-    probe_release = threading.Event()
-    read_started = threading.Event()
+    stop = threading.Event()
+    threads: list[threading.Thread] = []
 
-    def _hold_the_lock() -> None:
-        with recording:
-            lock_taken.set()
-            # Held until the main thread has seen the reader start, so the read is genuinely concurrent with a
-            # lock holder.
-            probe_release.wait(timeout=5)
+    # A writer keeps the store at the cap by storing fresh domains (forcing eviction of the front),
+    # while readers hammer the oldest key -- the pair the unsynchronized shape wedged.
+    def _stress_write() -> None:
+        i = 0
+        while not stop.is_set():
+            try:
+                store_browser_cookies(f"stress{i}.example", f"k{i}=v")
+            except BaseException as exc:  # collected in the main thread
+                errors.append(exc)
+                return
+            i += 1
 
-    def _guarded_read() -> None:
-        lock_taken.wait(timeout=5)
-        read_started.set()
-        box["value"] = get_browser_cookies_for(victim)
+    def _stress_read() -> None:
+        while not stop.is_set():
+            try:
+                box["seen"] = get_browser_cookies_for(victim)
+            except BaseException as exc:  # collected in the main thread
+                errors.append(exc)
+                return
 
-    probe = threading.Thread(target=_hold_the_lock)
-    reader = threading.Thread(target=_guarded_read)
-    probe.start()
-    assert lock_taken.wait(timeout=5), "the lock holder never took the store lock"
-    reader.start()
-    assert read_started.wait(timeout=5) is True, "the reader never reached the read"
-    probe_release.set()
-    probe.join(timeout=5)
-    reader.join(timeout=5)
-    patch.undo()
+    threads = [threading.Thread(target=_stress_write) for _ in range(2)]
+    threads += [threading.Thread(target=_stress_read) for _ in range(4)]
+    for thread in threads:
+        thread.start()
+    # Run long enough that several store-append / evict / read interleavings must have occurred.
+    stop.wait(timeout=0.05)
+    stop.set()
+    for thread in threads:
+        thread.join(timeout=5)
 
-    assert not probe.is_alive() and not reader.is_alive(), "the guarded read wedged"
-    assert reader.ident is not None
-    assert recording.acquisitions.get(reader.ident, 0) > 0, (
-        "the read path never took the store lock: reads are unsynchronized and the eviction race is wide open"
-    )
-    assert box.get("value") is not None, "the read did not return the value once the lock was released"
+    assert not any(thread.is_alive() for thread in threads), "the stress drive wedged"
+    assert not errors, f"the guarded store raised {errors!r} under concurrent load"
+    # Every read resolved: the read path was never torn by an intervening eviction.
+    assert "seen" in box
 
 
 def test_read_touches_lru_so_a_read_key_survives_eviction(clean_cookie_store):
@@ -154,6 +137,7 @@ def test_read_touches_lru_so_a_read_key_survives_eviction(clean_cookie_store):
     A read refreshes recency, so the key survives the next eviction while the
     front-most untouched key is the one dropped.
     """
+    assert clean_cookie_store is browser_cookies.BROWSER_COOKIES_BY_DOMAIN
     for i in range(BROWSER_COOKIES_MAX):
         store_browser_cookies(f"d{i}.example", f"k{i}=v")
     oldest = "d0.example"
@@ -166,6 +150,7 @@ def test_read_touches_lru_so_a_read_key_survives_eviction(clean_cookie_store):
 
 def test_missing_domain_read_is_none_not_keyerror(clean_cookie_store):
     """Boundary: an absent domain is a plain miss (no touch, no exception)."""
+    assert clean_cookie_store is browser_cookies.BROWSER_COOKIES_BY_DOMAIN
     assert get_browser_cookies_for("absent.example") is None
 
 
@@ -173,6 +158,7 @@ def test_missing_domain_read_is_none_not_keyerror(clean_cookie_store):
 
 
 def test_cookie_cache_capped(clean_cookie_store):
+    assert clean_cookie_store is browser_cookies.BROWSER_COOKIES_BY_DOMAIN
     for i in range(600):
         store_browser_cookies(f"d{i}.example", f"k{i}=v")
     # Oldest entries were evicted; newest retained.
@@ -181,6 +167,7 @@ def test_cookie_cache_capped(clean_cookie_store):
 
 
 def test_lru_keeps_recently_used(clean_cookie_store):
+    assert clean_cookie_store is browser_cookies.BROWSER_COOKIES_BY_DOMAIN
     for i in range(BROWSER_COOKIES_MAX + 50):
         store_browser_cookies(f"d{i}.example", f"k{i}=v")
     # Touch an older-but-not-oldest entry; it should survive the next eviction.

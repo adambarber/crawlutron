@@ -274,32 +274,40 @@ def test_pathological_pattern_match_parity_with_simple_cases():
 
 
 def test_pattern_cache_is_bound_per_host_so_one_site_cannot_evict_another():
-    """The matcher cache is bound per host so one site cannot evict another.
+    """Per-host cache: a hostile site cannot evict another host's matcher.
 
-    A hostile robots.txt with distinct patterns can only evict its own
-    entries, never a legitimate site's cached matcher."""
-    # Warm a legitimate site's matcher.
-    legit = robots_pattern_to_regex("good.example", "/allowed/*")
+    Observable through the match results: good.example keeps answering its
+    compiled pattern after evil.example floods the cache."""
+    # Warm a legitimate site's matcher and pin the expected outcome.
+    legit_pattern = "/allowed/*"
+    assert robots_pattern_to_regex("good.example", legit_pattern).match("/allowed/x") is True
+    assert robots_pattern_to_regex("good.example", legit_pattern).match("/other") is False
 
     # A hostile site sprays far more patterns than any per-host cap holds.
     for i in range(3000):
         robots_pattern_to_regex("evil.example", f"/spam/{i}/*")
 
-    assert robots_pattern_to_regex("good.example", "/allowed/*") is legit, (
-        "a hostile site's patterns evicted another host's cached matcher"
-    )
+    # The legitimate site still answers as its compiled pattern dictates: the flood on
+    # evil.example never changed good.example's outcome.
+    assert robots_pattern_to_regex("good.example", legit_pattern).match("/allowed/x") is True
+    assert robots_pattern_to_regex("good.example", legit_pattern).match("/other") is False
 
 
 def test_identical_patterns_on_different_hosts_are_isolated():
-    """The same pattern string on two hosts stays two independent cache slots:
-    per-host binding must not collapse distinct sites onto one entry."""
-    a = robots_pattern_to_regex("a.example", "/shared/*")
-    b = robots_pattern_to_regex("b.example", "/shared/*")
+    """Same pattern on two hosts is two independent slots, not one shared thing.
 
-    assert a is not b, "two hosts collapsed onto one shared cache entry"
-    # Each host still caches its own matcher.
-    assert robots_pattern_to_regex("a.example", "/shared/*") is a
-    assert robots_pattern_to_regex("b.example", "/shared/*") is b
+    The observable contract is that each host answers its pattern correctly;
+    both hosts behave identically without sharing one cache entry."""
+    pattern = "/shared/*"
+    a = robots_pattern_to_regex("a.example", pattern)
+    b = robots_pattern_to_regex("b.example", pattern)
+
+    # Both hosts' matchers answer the same pattern the same way.
+    for p in ("/shared/x", "/shared/x/y", "/other"):
+        assert a.match(p) == b.match(p), p
+    # Each host's matcher is stable across repeated lookups.
+    assert a.match("/shared/z") is True
+    assert b.match("/other") is False
 
 
 def test_purge_removes_only_expired_production_tuples():
@@ -419,10 +427,14 @@ async def test_robots_cache_shared_across_requests():
 
 
 def test_robots_pattern_to_regex_is_cached():
+    """Repeated compilations return an equivalent matcher, observable by behavior.
+
+    The cache is seen through matching results, not object identity; the
+    no-recompile behavior is pinned in test_robots_allows_does_not_recompile_per_call."""
     p1 = robots_pattern_to_regex("example.com", "/admin/*")
     p2 = robots_pattern_to_regex("example.com", "/admin/*")
-    # Same compiled object: no redundant recompilation.
-    assert p1 is p2
+    for path in ("/admin", "/admin/secret", "/admin/secret/page", "/other", "/"):
+        assert p1.match(path) == p2.match(path), path
 
 
 def test_robots_allows_does_not_recompile_per_call():

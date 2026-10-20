@@ -9,7 +9,7 @@ import re
 
 import pytest
 
-from app.orchestration.robots import RobotsPathMatcher, robots_allows
+from app.orchestration.robots import robots_allows, robots_pattern_to_regex
 from tests._policy_factories import canonical
 
 
@@ -94,15 +94,15 @@ def test_matcher_matches_the_regex_dialect_on_generated_inputs(seed: int):
         if pattern.endswith("$") and len(pattern) > 1:
             pass  # valid anchor
         path = "/" + "".join(rng.choice(["a", "b", ".", "$", "ab", "ba"]) for _ in range(rng.randint(0, 6)))
-        matcher = RobotsPathMatcher(pattern)
+        matcher = robots_pattern_to_regex("example.com", pattern)
         assert matcher.match(path) == _reference(pattern, path), (pattern, path)
         cases += 1
 
 
 def test_anchored_pattern_matches_when_anchor_literal_also_occurs_earlier():
     """The shipped regression: greedy-leftmost + end-exact undermatched."""
-    assert RobotsPathMatcher("/*a$").match("/aba") is True
-    assert RobotsPathMatcher("/*.pdf$").match("/x.pdf/y.pdf") is True
-    assert RobotsPathMatcher("/*a$").match("/abb") is False  # does not end in a
-    assert RobotsPathMatcher("/foo$").match("/foo") is True
-    assert RobotsPathMatcher("/foo$").match("/foobar") is False
+    assert robots_pattern_to_regex("example.com", "/*a$").match("/aba") is True
+    assert robots_pattern_to_regex("example.com", "/*.pdf$").match("/x.pdf/y.pdf") is True
+    assert robots_pattern_to_regex("example.com", "/*a$").match("/abb") is False  # does not end in a
+    assert robots_pattern_to_regex("example.com", "/foo$").match("/foo") is True
+    assert robots_pattern_to_regex("example.com", "/foo$").match("/foobar") is False

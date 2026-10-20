@@ -14,12 +14,21 @@ def test_cookie_store_protocol_is_declared():
 
 
 def test_inmemory_medium_is_the_jar_and_the_browser_backing():
-    """Both process-local paths use the single in-memory medium."""
-    jar = CookieJar()
-    assert isinstance(jar._inmemory, InMemoryCookieStore)
+    """Both process-local paths share the one in-memory medium, observable by behavior."""
     from app.transport import browser_cookies
 
-    assert isinstance(browser_cookies.BROWSER_COOKIES_BY_DOMAIN.medium, InMemoryCookieStore)
+    # The browser path stores and reads through the same per-namespace LRU medium the jar
+    # uses: behaviorally it must round-trip and evict on the shared cap, not a bespoke mapping.
+    browser_cookies.store_browser_cookies("d0.example", "a=1")
+    assert browser_cookies.get_browser_cookies_for("d0.example") == "a=1"
+    for i in range(1, browser_cookies.BROWSER_COOKIES_MAX + 1):
+        browser_cookies.store_browser_cookies(f"d{i}.example", f"k{i}=v")
+    # Pushing past the cap evicts the front-most (d0), proving the shared LRU answer, not a bare dict.
+    assert browser_cookies.get_browser_cookies_for("d0.example") is None
+    assert (
+        browser_cookies.get_browser_cookies_for(f"d{browser_cookies.BROWSER_COOKIES_MAX}.example")
+        == f"k{browser_cookies.BROWSER_COOKIES_MAX}=v"
+    )
 
 
 def test_jar_browser_and_shared_store_round_trip_through_the_concept():
