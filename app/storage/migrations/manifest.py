@@ -339,8 +339,8 @@ def schema_drift(
 def _companion_drift(conn: sqlite3.Connection, store_schema: StoreSchema) -> tuple[str, ...]:
     """Check the tables a store schema owns beyond its primary table.
 
-    An absent companion is drift too, so its creating migration cannot be
-    marked applied without the tables -- the boot loop #233 closes ("""
+    An absent companion is drift too: its creating migration cannot be marked
+    applied without the tables present (#233)."""
     drift: list[str] = []
     for companion in COMPANION_SCHEMAS.get(store_schema, ()):
         if not _table_named(conn, companion.name):
