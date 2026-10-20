@@ -2,5 +2,3 @@
 ``logging_config`` (one JSON logger), ``resource_pressure`` (asks ``cgroup_sense`` +
 ``memory_pressure``), ``process_state``. Process-wide, so layers consult them, never own them.
 """
-
-from __future__ import annotations

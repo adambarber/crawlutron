@@ -3,5 +3,3 @@
 The engine admits nothing (that is ``app.admission``) and fetches nothing (``app.transport``);
 ``strategy_chain`` decides strategy order; ``engine_result``/``render_result`` are the output boundary.
 """
-
-from __future__ import annotations

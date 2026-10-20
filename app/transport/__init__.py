@@ -3,5 +3,3 @@
 Every way this service retrieves a page body lives here -- fetchers, browser renderer,
 pinned transport, request profile, body decode; meaning is ``app.extraction``, permission ``app.admission``.
 """
-
-from __future__ import annotations
