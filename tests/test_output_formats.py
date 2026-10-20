@@ -212,12 +212,10 @@ def test_serialize_results_csv_neutralizes_attacker_content():
     assert media_type == "text/csv; charset=utf-8"
     # The formula trigger must be preceded by a single quote.
     assert ",'=cmd" in body
-    # And the raw unescaped formula must NOT appear (it would mean the attacker payload was emitted unquoted).
-    assert (
-        "'" not in body.split("\n")[1].split(",")[1]
-        or "=cmd" not in body.split("\n")[1].split(",")[1]
-        or body.split("\n")[1].split(",")[1].startswith("'")
-    )
+    # The raw unescaped formula must NOT appear (it would mean the attacker payload was emitted unquoted) in
+    # the error column where the payload lands (column index 8, per _CSV_COLUMNS).
+    error_cell = body.splitlines()[1].split(",")[8]
+    assert error_cell.startswith("'"), error_cell
 
 
 def test_serialize_results_csv_preserves_url_columns():
