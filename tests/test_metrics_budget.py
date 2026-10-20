@@ -7,18 +7,11 @@ from __future__ import annotations
 
 import ast
 import math
-import pathlib
-import re
-import subprocess
-from collections import defaultdict
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from pathlib import Path
 
-import pytest
-
 from scripts.ast_scopes import is_scope_opener
-from scripts.executables import GIT, require_executable
 from scripts.jscpd_sweep import COMPOUND_NODES
 from tests._ratchet import (
     budget_is_tight,
@@ -207,7 +200,7 @@ scripts_offenders, scripts_measurement = _root_gate(REPO_ROOT / "scripts", _SCRI
 #: The tests/ tree had a file-size and comment-length budget but no complexity
 #: ceiling; its measured baseline is declared first (value-ratchet rule).
 _TESTS_BUDGETS = {
-    "function length": 11,
+    "function length": 10,
     "abc size": 2,
     "largest class": 330,
     "block length": 1,
@@ -228,7 +221,7 @@ def test_the_tests_budget_measurement_reaches_tests() -> None:
     """The H1 reach: the complexity ceiling now sweeps tests/, which had none.
     The real tree shows it (11 over-long functions are counted, not invisible) and
     the shared collector fires on a synthetic over-long fn in tests/."""
-    assert suite_measurement("function length") == 11, (
+    assert suite_measurement("function length") == 10, (
         "the tests function-length budget stopped reaching the real tree"
     )
     assert suite_measurement("abc size") == 2
@@ -321,83 +314,52 @@ test_collector_sees_the_whole_tree = collector_sees_the_whole_tree(
 )
 
 
-def _git(root: Path, *args: str) -> subprocess.CompletedProcess[str]:
-    """One non-raising ``git`` call rooted at `root`, as decoded text.
-
-    The third call site stopped checking ``returncode`` and read ``stdout == ""``
-    as "no budget at this revision" -- a silently weakened history."""
-    return subprocess.run(
-        [require_executable(GIT), *args], cwd=root, capture_output=True, text=True, check=False
-    )
-
-
 def test_metric_budgets_have_never_risen() -> None:
-    """The budget gate and the tight check can both be satisfied by RAISING a budget.
+    """A raised budget satisfies the gate and the tight check.
 
-    Not hypothetical: raised ten times in one day, invisible to a tight check
-    reading the same table. History comes from git -- raising means rewriting it."""
-    service_root = pathlib.Path(__file__).resolve().parent.parent
-    # Git paths are repo-root-relative, not service-relative.
-    root = pathlib.Path(
-        subprocess.run(
-            [require_executable(GIT), "rev-parse", "--show-toplevel"],
-            cwd=service_root,
-            capture_output=True,
-            text=True,
-            check=True,
-        ).stdout.strip()
+    History lives in the hermetic ledger (``tests/_metrics_budget_ledger.py``),
+    never a git invocation -- raising means rewriting it (#253).
+    """
+    from tests._metrics_budget_ledger import (
+        _BUDGET_HISTORY,
+        _SCRIPTS_BUDGET_HISTORY,
+        _TESTS_BUDGET_HISTORY,
     )
-    tracked = str(pathlib.Path(__file__).resolve().relative_to(root))
-    try:
-        log = subprocess.run(
-            [require_executable(GIT), "log", "--format=%H", "--", tracked],
-            cwd=root,
-            capture_output=True,
-            text=True,
-            check=True,
-        ).stdout.split()
-    except (subprocess.CalledProcessError, FileNotFoundError) as error:
-        pytest.skip(f"git history unavailable: {error}")
-    if not log:
-        pytest.skip("no history for this file in this clone")
 
-    shallow = _git(root, "rev-parse", "--is-shallow-repository")
-    if shallow.stdout.strip() == "true" and len(log) < 5:
-        pytest.skip("shallow clone: cannot see the budget's history")
+    # (live table, ledger). Importing the ledger inside the gate means a missing
+    # or unparseable fixture raises here -- the gate fails closed, never skips.
+    _assert_ledger_agrees(_BUDGETS, _BUDGET_HISTORY, subject="app")
+    _assert_ledger_agrees(_SCRIPTS_BUDGETS, _SCRIPTS_BUDGET_HISTORY, subject="scripts")
+    _assert_ledger_agrees(_TESTS_BUDGETS, _TESTS_BUDGET_HISTORY, subject="tests")
 
-    pattern = re.compile(r'^\s{4}"(?P<name>[a-z ]+)":\s*(?P<value>\d+),$')
-    # The scripts budget (#293) shares this file; the walk reads only the
-    # _BUDGETS block so scripts entries are not misread as older values.
-    block = re.compile(r"^_BUDGETS = \{$")
-    history: dict[str, list[tuple[str, int]]] = defaultdict(list)
-    for revision in log:
-        source = _git(root, "show", f"{revision}:{tracked}")
-        if source.returncode != 0:
-            continue
-        in_budgets = False
-        for line in source.stdout.splitlines():
-            if block.match(line):
-                in_budgets = True
-                continue
-            if in_budgets and line.startswith("}"):
-                in_budgets = False
-            found = pattern.match(line)
-            if in_budgets and found and found.group("name") in _BUDGETS:
-                history[found.group("name")].append((revision[:9], int(found.group("value"))))
 
-    assert history, (
-        f"read {len(log)} revisions of {tracked} and found no budget values in any of "
-        f"them. The parse pattern has drifted from the file it reads; a gate that "
-        f"collects nothing must fail rather than pass."
+def _assert_ledger_agrees(live: dict[str, int], ledger: dict[str, list[int]], *, subject: str) -> None:
+    """Every live budget matches the ledger's current value, monotonic given.
+
+    A missing record, a raised value, or a non-monotonic ledger all fail closed.
+    """
+    for metric, value in live.items():
+        history = ledger.get(metric)
+        assert history, (
+            f"{subject} budget: {metric} has no record in the hermetic ledger. Add its "
+            "first-declared value, or a gate with no record cannot be a ratchet."
+        )
+        assert history[-1] == value, (
+            f"{subject} budget: {metric} is {value} in the code but {history[-1]} in the "
+            "ledger. Lower (raise) the budget in the same commit that edits the ledger."
+        )
+        _assert_monotonic(metric, history, subject=subject)
+    missing = set(ledger) - set(live)
+    assert not missing, (
+        f"{subject} budgets: ledger records {sorted(missing)} that the live table does not "
+        "define. Delete the stale records."
     )
-    regressions = []
-    for name, entries in history.items():
-        # `entries` is newest-first, so each adjacent pair runs (newer, older). the budget went up over time.
-        for (newer, newer_value), (_, older) in zip(entries, entries[1:], strict=False):
-            if newer_value > older:
-                regressions.append(f"  {name}: rose from {older} to {newer_value} in {newer}")
-    assert not regressions, (
-        "a complexity budget rose in this repository's history. The rule is that "
-        "these only fall; each wave lowers the number it reduced. Fix the offenders "
-        "instead, or delete the entry that no longer applies.\n" + "\n".join(regressions)
-    )
+
+
+def _assert_monotonic(metric: str, history: list[int], *, subject: str) -> None:
+    """Values never rise: each older entry is >= the next, oldest-first."""
+    for older, newer in zip(history, history[1:], strict=False):
+        assert older >= newer, (
+            f"{subject} budget: {metric} rose from {newer} to {older} in the hermetic "
+            "ledger. A budget may only fall; rewrite the offenders instead."
+        )
