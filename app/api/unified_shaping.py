@@ -142,7 +142,7 @@ def build_unified_result(item: EngineCrawlResult) -> UnifiedCrawlResult:
         headers=item.headers,
         content_type=item.content_type,
         extraction_method=item.extraction_method,
-        diagnostics=item.diagnostics,
+        diagnostics=dict(item.diagnostics),
         discovered_link_count=item.discovered_link_count,
         discovered_links_truncated=item.discovered_links_truncated,
         discovered_links=_link_models(item.discovered_links),

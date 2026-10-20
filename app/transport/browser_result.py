@@ -23,6 +23,7 @@ from app.transport.strategy_request import StrategyRequest
 from app.vocabulary.extraction import EXTRACTION_METHOD_DOM_TEXT
 
 if TYPE_CHECKING:
+    from app.models.crawl_diagnostics import CrawlDiagnostics
     from app.models.crawl_result import EngineCrawlResult
     from app.models.crawl_worker import CrawlWorker
     from app.models.host_policy import HostPolicy
@@ -99,16 +100,16 @@ def _browser_diagnostics(
     policy: CrawlPolicy,
     host_policy: HostPolicy,
     post_fetch: dict[str, Any],
-) -> dict[str, Any]:
-    diagnostics: dict[str, Any] = {
+) -> CrawlDiagnostics:
+    diagnostics: CrawlDiagnostics = {
         "browser_profile": policy.browser_profile,
         "runtime": {"elapsed_ms": result.elapsed_ms, "final_url": result.final_url},
         "content_metrics": {
             "visible_text_length": len(content.text.strip()),
             "html_length": len((result.html or "").strip()),
         },
-        **post_fetch["diagnostics"],
     }
+    diagnostics.update(post_fetch["diagnostics"])
     for key in ("intercepted_xhr", "screenshot"):
         value = result.metadata.get(key)
         if value:
@@ -124,7 +125,7 @@ def _build_browser_result(
     strategy: CrawlStrategyName,
     result: Any,
     content: ExtractedContent,
-    diagnostics: dict[str, Any],
+    diagnostics: CrawlDiagnostics,
     post_fetch: dict[str, Any],
 ) -> EngineCrawlResult:
     attempt = CrawlStrategyAttempt(

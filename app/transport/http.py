@@ -7,6 +7,7 @@ from dataclasses import replace
 from typing import Any
 
 from app.admission.policy import discovery_flags
+from app.models.crawl_diagnostics import CrawlDiagnostics
 from app.models.crawl_result import EngineCrawlResult
 from app.models.crawl_strategy_attempt import CrawlStrategyAttempt
 from app.models.fetch_envelope import RetryDiagnostics
@@ -93,7 +94,7 @@ async def _construct_http_result(
         classification = "not_modified"
         classification_evidence = []
     status = status_for_classification(classification)
-    diagnostics: dict[str, Any] = {
+    diagnostics: CrawlDiagnostics = {
         "decompression_failed": extracted.strategy_decompression_failed or resp.decompression_failed,
         "request_profile": _request_profile_diagnostics(ctx.profile),
         "retry": ctx.retry_diagnostics,

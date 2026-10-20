@@ -6,6 +6,8 @@ feeds, gathered in a normal crawl); ``build_site_map`` yields a de-duplicated, s
 
 from __future__ import annotations
 
+from typing import Any
+
 from app.api.response_shaping import frontier_link_url
 from app.models.host_policy import HostPolicy
 from app.models.normalized_url import admit_or_none
@@ -22,8 +24,8 @@ def build_site_map(crawl_response: ProducerEnvelope, *, host_policy: HostPolicy)
     results = crawl_response["results"]
     result = results[0] if results else None
     diagnostics = result.diagnostics if result is not None else {}
-    robots = diagnostics.get("robots") or {}
-    discovery = diagnostics.get("discovery") or {}
+    robots: dict[str, Any] = dict(diagnostics.get("robots") or {})
+    discovery: dict[str, Any] = dict(diagnostics.get("discovery") or {})
 
     root = (result.final_url or result.normalized_url) if result is not None else None
     if root is None and result is not None:

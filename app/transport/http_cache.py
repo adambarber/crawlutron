@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import contextlib
 import time
-from typing import Any
 
 from app.admission.render_options import policy_wants_html
+from app.models.crawl_diagnostics import CrawlDiagnostics
 from app.models.crawl_result import EngineCrawlResult
 from app.models.crawl_strategy_attempt import CrawlStrategyAttempt
 from app.models.taxonomy import Classification
@@ -132,7 +132,7 @@ def _not_modified_result(ctx: HttpStrategyContext, resp: FetchedResponse) -> Eng
         elapsed_ms=elapsed_ms,
         error=None,
     )
-    diagnostics: dict[str, Any] = {"retry": ctx.retry_diagnostics}
+    diagnostics: CrawlDiagnostics = {"retry": ctx.retry_diagnostics}
     if ctx.cache is not None:
         diagnostics["cache"] = "not_modified"
     if ctx.caller_conditional:

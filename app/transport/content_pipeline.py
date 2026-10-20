@@ -28,6 +28,7 @@ from app.vocabulary.extraction import (
 )
 
 if TYPE_CHECKING:
+    from app.models.crawl_diagnostics import CrawlDiagnostics
     from app.models.crawl_extraction_method import CrawlExtractionMethod
     from app.models.crawl_policy import CrawlPolicy
     from app.models.host_policy import HostPolicy
@@ -136,13 +137,12 @@ def post_fetch_diagnostics(
     post_fetch: dict[str, Any],
     final_url: NormalizedUrl | None,
     host_policy: HostPolicy,
-) -> dict[str, Any]:
+) -> CrawlDiagnostics:
     """The per-strategy diagnostics taken from one envelope, spelled once: the
-
     pagination hint rides only when the envelope found one, and the scraped JS
     endpoints always leave through ``filter_js_endpoints``.
     """
-    diagnostics: dict[str, Any] = {}
+    diagnostics: CrawlDiagnostics = {}
     if post_fetch["next_page_url"]:
         # The envelope holds the admitted value; the diagnostics dict is a JSON
         # payload, so the wire projection happens here and nowhere else.

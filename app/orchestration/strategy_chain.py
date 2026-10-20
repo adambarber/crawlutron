@@ -19,6 +19,7 @@ from app.transport.strategy_request import StrategyRequest
 from app.vocabulary.strategies import BROWSER_STRATEGIES, HTTP_CFFI_IMPERSONATE, HTTP_STRATEGIES
 
 if TYPE_CHECKING:
+    from app.models.crawl_diagnostics import CrawlDiagnostics
     from app.models.crawl_policy import CrawlPolicy
     from app.models.crawl_result import EngineCrawlResult
     from app.models.crawl_strategy_attempt import CrawlStrategyAttempt
@@ -143,7 +144,7 @@ class _ChainRun:
         *,
         classification: Classification,
         error: CrawlError,
-        diagnostics: dict[str, Any] | None = None,
+        diagnostics: CrawlDiagnostics | None = None,
     ) -> EngineCrawlResult:
         """A classified failed result for a step that never reached a strategy.
         The two pre-chain refusals (no renderer; strategy outside the ladder) are the

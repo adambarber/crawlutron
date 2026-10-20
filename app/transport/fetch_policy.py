@@ -14,6 +14,7 @@ from collections.abc import Iterable
 from typing import Any, cast
 
 from app.admission.policy import DiscoveryFlags, discovery_flags
+from app.models.crawl_diagnostics import CrawlDiagnostics
 from app.models.crawl_policy import CrawlPolicy
 from app.models.fetch_envelope import RetryDiagnostics
 from app.models.host_policy import HostPolicy
@@ -267,10 +268,10 @@ async def discovery_diagnostics(
     http_fetcher: Any,
     engine_robots_sitemaps: list[str] | None,
     robots_evaluated: bool,
-) -> dict[str, Any]:
+) -> CrawlDiagnostics:
     flags = discovery_flags(policy)
     limits = policy.limits
-    diagnostics: dict[str, Any] = {}
+    diagnostics: CrawlDiagnostics = {}
     robots_diag, robots_sitemaps = await _diagnose_robots(
         normalized_url=normalized_url,
         flags=flags,

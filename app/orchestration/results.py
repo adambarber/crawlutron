@@ -9,6 +9,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, TypeVar
 
+from app.models.crawl_diagnostics import CrawlDiagnostics
 from app.models.crawl_result import CrawlResult, EngineCrawlResult
 from app.models.crawl_strategy_attempt import CrawlStrategyAttempt
 from app.models.normalized_url import NormalizedUrl
@@ -42,7 +43,7 @@ def engine_result_from_exception(
     normalized_url: NormalizedUrl,
     strategy: CrawlStrategyName | None,
     elapsed_ms: int | None = None,
-    extra_diagnostics: dict | None = None,
+    extra_diagnostics: CrawlDiagnostics | None = None,
     known_classification: Classification | None = None,
 ) -> EngineCrawlResult:
     """Convert ANY strategy exception into a classified terminal result -- the one
@@ -58,7 +59,7 @@ def engine_result_from_exception(
     elapsed = elapsed_ms if elapsed_ms is not None else 0
     # A capacity skip is not a dead page: the URL was never attempted, so the
     # frontier can re-queue rather than record a permanent failure.
-    diagnostics: dict = {"retryable": retryable, "error_code": classification}
+    diagnostics: CrawlDiagnostics = {"retryable": retryable, "error_code": classification}
     # A domain circuit opening is scheduler capacity, not a page failure:
     # dashboards key off it to tell "unreachable" from "not tried".
     if classification == "circuit_breaker_open":
@@ -131,7 +132,7 @@ def build_engine_result(
     extraction_method: str | None = None,
     quality_score: float = 0.0,
     classification_evidence: list | None = None,
-    diagnostics: dict | None = None,
+    diagnostics: CrawlDiagnostics | None = None,
     discovered_link_count: int = 0,
     discovered_links_truncated: bool = False,
     discovered_links: list | None = None,
@@ -191,7 +192,7 @@ class TerminalResult:
     strategy: CrawlStrategyName | None
     classification: Classification
     error: CrawlError
-    diagnostics: dict | None = None
+    diagnostics: CrawlDiagnostics | None = None
     http_status: int | None = None
     final_url: NormalizedUrl | None = None
     attempt_elapsed_ms: int = 0
@@ -218,7 +219,7 @@ def terminal_engine_result(result: TerminalResult, *, status: ResultStatus) -> E
         final_url=result.final_url,
         attempt=attempt,
         http_status=result.http_status,
-        diagnostics=result.diagnostics or {},
+        diagnostics=result.diagnostics,
     )
 
 
@@ -271,7 +272,7 @@ def binary_no_text_result(
         headers=headers,
         content_type=content_type,
         extraction_method="binary_no_text",
-        diagnostics={},
+        diagnostics=CrawlDiagnostics(),
     )
 
 
@@ -355,7 +356,7 @@ def crawl_result_from_engine_result(engine: EngineCrawlResult, *, url: Normalize
         text=engine.text,
         attempts=len(engine.attempted_strategies),
         domain="",
-        metadata=engine.diagnostics or {},
+        metadata=dict(engine.diagnostics) or {},
     )
 
 

@@ -227,7 +227,7 @@ def _robots_disallowed(state: _PipelineState, job: CrawlTask) -> EngineCrawlResu
             strategy=None,
             classification="robots_disallowed",
             error="robots_txt_disallowed",
-            diagnostics={"robots": {"allowed": False}},
+            diagnostics={"robots": {"allowed": False, "sitemaps": [], "evaluation": "disabled"}},
         )
     )
 
