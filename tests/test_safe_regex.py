@@ -61,7 +61,9 @@ class TestMatchBounded:
         elapsed = time.perf_counter() - start
         # Tight bound: the native C-loop timeout fires at ~the budget.
         assert elapsed < 0.5, f"timeout did not bound the match: {elapsed:.2f}s"
-        time.sleep(0.2)  # let any abandoned worker reveal itself
+        # A real bounded wait (via threading, not time.sleep) lets a leaked thread
+        # reveal itself even under fast_sleeps, which no-ops time.sleep.
+        threading.Event().wait(0.2)
         assert threading.active_count() <= threads_before, "match left a thread behind"
 
     def test_pathological_pattern_times_out_instead_of_hanging(self):
