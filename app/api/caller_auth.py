@@ -91,13 +91,24 @@ def _key_admin_token(request: Request) -> str:
     return os.environ.get("CRAWLUTRON_KEY_ADMIN_TOKEN", "")
 
 
+def _constant_time_eq(secret: str, token: str) -> bool:
+    """Constant-time compare that tolerates non-ASCII str.
+
+    ``secrets.compare_digest`` raises TypeError on non-ASCII str, which would
+    500 a keys-door denial; encoding both sides to bytes fixes it (#199).
+    """
+    return (
+        bool(secret) and bool(token) and secrets.compare_digest(secret.encode("utf-8"), token.encode("utf-8"))
+    )
+
+
 async def get_keys_caller(request: Request) -> CallerIdentity:
     """FastAPI dependency: a verified caller or the operator for /v1/keys."""
     secret = presented_key(request)
     if not secret:
         raise http_error(401, "invalid_api_key", "Unknown or revoked API key")
     admin_token = _key_admin_token(request)
-    if admin_token and secrets.compare_digest(secret, admin_token):
+    if admin_token and _constant_time_eq(secret, admin_token):
         return CallerIdentity(
             caller_id="admin",
             label="admin",
@@ -135,7 +146,7 @@ def is_operator(request: Request) -> bool:
     if not secret:
         return False
     admin_token = _key_admin_token(request)
-    return bool(admin_token) and secrets.compare_digest(secret, admin_token)
+    return bool(admin_token) and _constant_time_eq(secret, admin_token)
 
 
 def effective_cookie_namespace(profile: Mapping[str, JsonValue], caller: CallerIdentity) -> str:
