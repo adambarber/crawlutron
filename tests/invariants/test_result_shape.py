@@ -23,7 +23,7 @@ from tests.chokepoint_walks import (
     relative_posix,
     string_literals,
 )
-from tests.rules import Bites, Rule, Silent
+from tests.rules import Bites, Registry, Rule, Silent
 
 
 def _cache_envelope_literals(tree: ast.AST, path: pathlib.Path) -> list[str]:
@@ -60,23 +60,6 @@ CACHE_ENVELOPE_IS_BUILT_BY_ONE_OWNER = Rule(
 )
 
 
-def test_cache_envelope_is_built_by_one_owner():
-    """The content-cache entry envelope has one builder.
-
-    ``set``/``aset`` each built it, so a field added for one path was missing
-    from the other; ``ContentCache._entry_to_store`` owns the shape."""
-    CACHE_ENVELOPE_IS_BUILT_BY_ONE_OWNER.scan()
-
-
-def test_cache_envelope_detector_bites():
-    """The envelope sweep must fire on a hand-rolled envelope elsewhere.
-
-    Without this, an exhausted or renamed sink pattern would report zero
-    offenders and the guard above would pass forever while covering nothing.
-    """
-    CACHE_ENVELOPE_IS_BUILT_BY_ONE_OWNER.check_bites()
-
-
 # --------------------------------------------------------------------------- Crawl-response shaping
 # chokepoint ---------------------------------------------------------------------------
 
@@ -109,16 +92,6 @@ CRAWL_RESPONSE_BUILT_ONLY_BY_THE_SHAPING_CHOKEPOINT = Rule(
     ),
     clean=lambda: ("def f(stored):\n    return UnifiedCrawlResponse(**stored)\n",),
 )
-
-
-def test_crawl_response_built_only_by_shaping_chokepoint():
-    """Every UnifiedCrawlResponse-with-results flows through the shaper."""
-    CRAWL_RESPONSE_BUILT_ONLY_BY_THE_SHAPING_CHOKEPOINT.scan()
-
-
-def test_crawl_response_chokepoint_detector_bites():
-    """Synthetic bypass fires; **stored deserialization splat stays clean."""
-    CRAWL_RESPONSE_BUILT_ONLY_BY_THE_SHAPING_CHOKEPOINT.check_bites()
 
 
 # The rules below close both ends of that: the envelope is adapted in one module, and its scalar fields are
@@ -199,16 +172,6 @@ CRAWL_RESPONSE_ENVELOPE_IS_ADAPTED_BY_ONE_OWNER = Rule(
 )
 
 
-def test_crawl_response_envelope_is_adapted_by_one_owner():
-    """Endpoints read a producer envelope through the shaping owner, not by hand."""
-    CRAWL_RESPONSE_ENVELOPE_IS_ADAPTED_BY_ONE_OWNER.scan()
-
-
-def test_crawl_response_envelope_adapter_detector_bites():
-    """A hand-rolled adapter fires; the owner module and the exempt producers stay clean."""
-    CRAWL_RESPONSE_ENVELOPE_IS_ADAPTED_BY_ONE_OWNER.check_bites()
-
-
 def _hand_rolled_envelope_fields_offenders(tree, path):
     """Flag the unified envelope's scalar fields being passed outside their owner.
 
@@ -279,16 +242,6 @@ CRAWL_RESPONSE_ENVELOPE_FIELDS_ARE_PASSED_BY_ONE_OWNER = Rule(
 )
 
 
-def test_crawl_response_envelope_fields_are_passed_by_one_owner():
-    CRAWL_RESPONSE_ENVELOPE_FIELDS_ARE_PASSED_BY_ONE_OWNER.scan()
-
-
-def test_crawl_response_envelope_fields_detector_bites():
-    """A second field spelling fires, anywhere; the owner's own build and a
-    ``**stored`` deserialization stay clean."""
-    CRAWL_RESPONSE_ENVELOPE_FIELDS_ARE_PASSED_BY_ONE_OWNER.check_bites()
-
-
 # --------------------------------------------------------------------------- Job-row accumulator chokepoint
 # (write amplification) ---------------------------------------------------------------------------
 
@@ -336,16 +289,6 @@ CRAWL_JOBS_ACCUMULATORS_ARE_NEVER_ROW_COLUMNS = Rule(
 )
 
 
-def test_crawl_jobs_accumulators_are_never_row_columns():
-    """No SQL outside the migrations may name a column the row no longer has."""
-    CRAWL_JOBS_ACCUMULATORS_ARE_NEVER_ROW_COLUMNS.scan()
-
-
-def test_job_row_accumulator_detector_bites():
-    """A synthetic wide-row write fires; the accumulator tables and the queue stay clean."""
-    CRAWL_JOBS_ACCUMULATORS_ARE_NEVER_ROW_COLUMNS.check_bites()
-
-
 # --------------------------------------------------------------------------- Render-options construction
 # chokepoint ---------------------------------------------------------------------------
 
@@ -386,11 +329,22 @@ RENDER_OPTIONS_BUILT_ONLY_BY_THE_RESOLVER = Rule(
 )
 
 
-def test_render_options_built_only_by_resolver():
-    """Every effective RenderOptions flows through resolve_render_options."""
-    RENDER_OPTIONS_BUILT_ONLY_BY_THE_RESOLVER.scan()
+RULES = Registry(
+    (
+        CACHE_ENVELOPE_IS_BUILT_BY_ONE_OWNER,
+        CRAWL_RESPONSE_BUILT_ONLY_BY_THE_SHAPING_CHOKEPOINT,
+        CRAWL_RESPONSE_ENVELOPE_IS_ADAPTED_BY_ONE_OWNER,
+        CRAWL_RESPONSE_ENVELOPE_FIELDS_ARE_PASSED_BY_ONE_OWNER,
+        CRAWL_JOBS_ACCUMULATORS_ARE_NEVER_ROW_COLUMNS,
+        RENDER_OPTIONS_BUILT_ONLY_BY_THE_RESOLVER,
+    )
+)
 
 
-def test_render_options_chokepoint_detector_bites():
-    """Synthetic bypass fires; the resolver's own construction stays clean."""
-    RENDER_OPTIONS_BUILT_ONLY_BY_THE_RESOLVER.check_bites()
+def test_no_rule_violations():
+    RULES.check_all_clean()
+
+
+def test_every_rule_bites():
+    """Every rule must reject what it forbids, and spare what it resembles."""
+    RULES.check_all_bite()

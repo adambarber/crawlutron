@@ -16,7 +16,7 @@ from tests.chokepoint_walks import (
     relative_posix,
 )
 from tests.invariants._shared import _enclosing_defs
-from tests.rules import Bites, Rule, Silent
+from tests.rules import Bites, Registry, Rule, Silent
 
 _JS_ENDPOINTS_FILTER_SANCTIONED = frozenset({"validation.py"})
 
@@ -87,16 +87,6 @@ JS_ENDPOINTS_FILTER_IS_NOT_REINLINED = Rule(
 )
 
 
-def test_js_endpoints_filter_is_not_reinlined():
-    """Scraped JS endpoints are filtered through ``filter_js_endpoints``."""
-    JS_ENDPOINTS_FILTER_IS_NOT_REINLINED.scan()
-
-
-def test_reinline_js_endpoints_detector_bites():
-    """The historical inline shape fires; the chokepoint call stays clean."""
-    JS_ENDPOINTS_FILTER_IS_NOT_REINLINED.check_bites()
-
-
 # --- 4a: the robots matcher compiler is reachable only via its host cache ----
 
 _ROBOTS_COMPILE = "_compile_robots_pattern"
@@ -162,15 +152,6 @@ ROBOTS_PATTERN_COMPILE_LIVES_BEHIND_THE_PER_HOST_CACHE = Rule(
     ),
     proof_path=REPO_ROOT / "app" / "_synthetic.py",
 )
-
-
-def test_robots_pattern_compile_lives_behind_the_per_host_cache():
-    ROBOTS_PATTERN_COMPILE_LIVES_BEHIND_THE_PER_HOST_CACHE.scan()
-
-
-def test_robots_pattern_compile_detector_bites():
-    ROBOTS_PATTERN_COMPILE_LIVES_BEHIND_THE_PER_HOST_CACHE.check_bites()
-
 
 _COMMENT_CLONE_MIN_LINES = 3
 
@@ -289,3 +270,20 @@ def test_comment_clone_detector_bites():
         ]
     )
     assert len(across) == 1 and "app/a.py:2 and app/b.py:2" in across[0], across
+
+
+RULES = Registry(
+    (
+        JS_ENDPOINTS_FILTER_IS_NOT_REINLINED,
+        ROBOTS_PATTERN_COMPILE_LIVES_BEHIND_THE_PER_HOST_CACHE,
+    )
+)
+
+
+def test_no_rule_violations():
+    RULES.check_all_clean()
+
+
+def test_every_rule_bites():
+    """Every rule must reject what it forbids, and spare what it resembles."""
+    RULES.check_all_bite()

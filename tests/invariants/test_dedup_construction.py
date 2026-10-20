@@ -14,7 +14,7 @@ from tests.chokepoint_walks import (
     offenders_over_functions,
     trees_excluding,
 )
-from tests.rules import Bites, Rule
+from tests.rules import Bites, Registry, Rule
 
 # --------------------------------------------------------------------------- robots.txt scanning
 # ---------------------------------------------------------------------------
@@ -70,15 +70,6 @@ ROBOTS_LINE_SCANNER_LIVES_IN_ONE_PLACE = Rule(
 )
 
 
-def test_robots_line_scanner_lives_in_one_place():
-    """Every robots consumer walks lines through the shared tokenizer."""
-    ROBOTS_LINE_SCANNER_LIVES_IN_ONE_PLACE.scan()
-
-
-def test_robots_scanner_detector_bites():
-    ROBOTS_LINE_SCANNER_LIVES_IN_ONE_PLACE.check_bites()
-
-
 # --------------------------------------------------------------------------- Test-fake construction:
 # sanctioned builders over hand-built fakes
 
@@ -113,15 +104,6 @@ FETCH_FAKES_COME_FROM_THE_SANCTIONED_BUILDER = Rule(
     scope=lambda *, exclude: trees_excluding(TESTS_DIR, *exclude),
     proof_path=REPO_ROOT / "tests" / "_synthetic.py",
 )
-
-
-def test_tests_do_not_hand_build_http_fetch_results():
-    """Every fetch fake comes from the one sanctioned builder."""
-    FETCH_FAKES_COME_FROM_THE_SANCTIONED_BUILDER.scan()
-
-
-def test_fetch_builder_detector_bites():
-    FETCH_FAKES_COME_FROM_THE_SANCTIONED_BUILDER.check_bites()
 
 
 def _call_node_names(node: ast.AST) -> set[str]:
@@ -180,15 +162,6 @@ TESTS_USE_THE_SANCTIONED_POLLER = Rule(
     scope=lambda *, exclude: trees_excluding(TESTS_DIR, *exclude),
     proof_path=REPO_ROOT / "tests" / "_synthetic.py",
 )
-
-
-def test_tests_do_not_relinline_poll_loop():
-    """One sanctioned poller; tests must not re-roll their own."""
-    TESTS_USE_THE_SANCTIONED_POLLER.scan()
-
-
-def test_poll_loop_detector_bites():
-    TESTS_USE_THE_SANCTIONED_POLLER.check_bites()
 
 
 # --------------------------------------------------------------------------- dataclass copying: replace, not
@@ -254,11 +227,20 @@ ASDICT_IS_NEVER_UNPACKED_INTO_A_CONSTRUCTOR = Rule(
 )
 
 
-def test_asdict_is_never_unpacked_into_a_constructor():
-    """Copying a dataclass with asdict must not survive anywhere in app/."""
-    ASDICT_IS_NEVER_UNPACKED_INTO_A_CONSTRUCTOR.scan()
+RULES = Registry(
+    (
+        ROBOTS_LINE_SCANNER_LIVES_IN_ONE_PLACE,
+        FETCH_FAKES_COME_FROM_THE_SANCTIONED_BUILDER,
+        TESTS_USE_THE_SANCTIONED_POLLER,
+        ASDICT_IS_NEVER_UNPACKED_INTO_A_CONSTRUCTOR,
+    )
+)
 
 
-def test_asdict_rebuild_detector_bites():
-    """The rebuild shape fires; genuine serialization does not."""
-    ASDICT_IS_NEVER_UNPACKED_INTO_A_CONSTRUCTOR.check_bites()
+def test_no_rule_violations():
+    RULES.check_all_clean()
+
+
+def test_every_rule_bites():
+    """Every rule must reject what it forbids, and spare what it resembles."""
+    RULES.check_all_bite()

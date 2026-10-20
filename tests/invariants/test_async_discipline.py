@@ -22,7 +22,7 @@ from tests.chokepoint_walks import (
     offender_at,
 )
 from tests.invariants._shared import app_names
-from tests.rules import Bites, Rule, Trips
+from tests.rules import Bites, Registry, Rule, Trips
 
 # The weights are now one frozen ``resource_pressure.TaskRamBudget`` that the caller builds and the policy
 # function hands on unchanged. The drift this guards is a caller going back to the flat list.
@@ -98,19 +98,6 @@ ADMISSION_BUDGET_ARRIVES_AS_A_BUDGET = Rule(
 )
 
 
-def test_admission_sizing_reaches_the_policy_as_one_budget():
-    """No caller re-spells the four sizing weights as keywords to the policy builder."""
-    ADMISSION_BUDGET_ARRIVES_AS_A_BUDGET.scan()
-
-
-def test_admission_budget_detector_bites():
-    """The flat keyword fires on every weight; the budget form is clean.
-
-    max_http_concurrency_for still takes the weights flat by design -- it is
-    the per-call computation the budget is bound for."""
-    ADMISSION_BUDGET_ARRIVES_AS_A_BUDGET.check_bites()
-
-
 # --------------------------------------------------------------------------- Endpoint readiness gate (the
 # rejection tail) ``request_gate`` (app/api/main_helpers.py) owns the whole gated tail: admit, reject
 
@@ -153,15 +140,6 @@ READINESS_SLOTS_GO_THROUGH_THE_GATE = Rule(
         "def f():\n    get_metrics().observe_crawl(errors=1)\n",
     ),
 )
-
-
-def test_readiness_slots_are_admitted_and_released_by_the_gate():
-    READINESS_SLOTS_GO_THROUGH_THE_GATE.scan()
-
-
-def test_readiness_counter_detector_bites():
-    """A hand-rolled admit, and a hand-rolled release, both fire; the gate stays clean."""
-    READINESS_SLOTS_GO_THROUGH_THE_GATE.check_bites()
 
 
 # --------------------------------------------------------------------------- Whole-site frontier must not
@@ -239,18 +217,6 @@ WHOLE_SITE_VISIT_IS_TRANSIENT_GATED = Rule(
         "        job.visited.add(url)\n",
     ),
 )
-
-
-def test_whole_site_visited_commit_is_transient_gated():
-    """A transiently-failed whole-site URL is re-queued, never counted done."""
-    WHOLE_SITE_VISIT_IS_TRANSIENT_GATED.scan()
-
-
-def test_whole_site_visited_gate_detector_bites():
-    """An unguarded whole-site visited commit fires; both gate spellings stay
-    clean. The message must name the seam to route through, so this is a
-    Bites proof rather than a bare firing check."""
-    WHOLE_SITE_VISIT_IS_TRANSIENT_GATED.check_bites()
 
 
 # No async frame in app/ may call a SYNCHRONOUS store method directly.
@@ -422,18 +388,6 @@ STORE_CALLS_ON_THE_LOOP = Rule(
 )
 
 
-def test_no_sync_store_method_is_called_from_an_async_frame():
-    """A store call on the event loop stalls every in-flight request.
-
-    The proof covers the four ways a frame names a store, so a detector
-    resolving only one of them cannot pass on the other three."""
-    STORE_CALLS_ON_THE_LOOP.scan()
-
-
-def test_sync_store_call_detector_bites():
-    STORE_CALLS_ON_THE_LOOP.check_bites()
-
-
 #: The driver's method that runs a scripted action chain. One constant makes the rename a one-line edit.
 _ACTION_CHAIN = "run_action_chain"
 
@@ -492,9 +446,21 @@ ACTION_CHAIN_ALWAYS_CARRIES_A_BUDGET = Rule(
 )
 
 
-def test_the_action_chain_is_always_invoked_with_a_budget():
-    ACTION_CHAIN_ALWAYS_CARRIES_A_BUDGET.scan()
+RULES = Registry(
+    (
+        ADMISSION_BUDGET_ARRIVES_AS_A_BUDGET,
+        READINESS_SLOTS_GO_THROUGH_THE_GATE,
+        WHOLE_SITE_VISIT_IS_TRANSIENT_GATED,
+        STORE_CALLS_ON_THE_LOOP,
+        ACTION_CHAIN_ALWAYS_CARRIES_A_BUDGET,
+    )
+)
 
 
-def test_action_chain_budget_detector_bites():
-    ACTION_CHAIN_ALWAYS_CARRIES_A_BUDGET.check_bites()
+def test_no_rule_violations():
+    RULES.check_all_clean()
+
+
+def test_every_rule_bites():
+    """Every rule must reject what it forbids, and spare what it resembles."""
+    RULES.check_all_bite()

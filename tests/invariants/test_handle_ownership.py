@@ -16,7 +16,7 @@ from tests.chokepoint_walks import (
     unannotated_writes,
 )
 from tests.invariants._shared import _enclosing_defs
-from tests.rules import Bites, Rule, Trips
+from tests.rules import Bites, Registry, Rule, Trips
 
 # --------------------------------------------------------------------------- Handle minting is single-sourced
 # (entropy policy)
@@ -53,15 +53,6 @@ HANDLE_MINTING_IS_SINGLE_SOURCED = Rule(
     ),
     clean=lambda: ("from app.storage.ids import new_request_id\n\ndef f():\n    return new_request_id()\n",),
 )
-
-
-def test_handles_are_minted_in_one_place():
-    """Only app/storage/ids.py calls uuid4 or slices its hex ()."""
-    HANDLE_MINTING_IS_SINGLE_SOURCED.scan()
-
-
-def test_id_mint_detector_bites():
-    HANDLE_MINTING_IS_SINGLE_SOURCED.check_bites()
 
 
 # --------------------------------------------------------------------------- Robots politeness floor is
@@ -115,15 +106,6 @@ DOMAIN_POLITENESS_FLOOR_ONLY_VIA_THE_SETTER = Rule(
         "    def read(self, d):\n        return self._domain_min_delay.get(d, 0.0)\n",
     ),
 )
-
-
-def test_domain_politeness_floor_is_committed_only_via_the_setter():
-    """Only set_domain_min_delay writes _domain_min_delay (chokepoint)."""
-    DOMAIN_POLITENESS_FLOOR_ONLY_VIA_THE_SETTER.scan()
-
-
-def test_domain_delay_detector_bites():
-    DOMAIN_POLITENESS_FLOOR_ONLY_VIA_THE_SETTER.check_bites()
 
 
 # --------------------------------------------------------------------------- Age-based deletion must consult
@@ -197,15 +179,6 @@ AGE_BASED_DELETION_CONSULTS_OWNERSHIP = Rule(
 )
 
 
-def test_age_based_deletion_consults_ownership_first():
-    AGE_BASED_DELETION_CONSULTS_OWNERSHIP.scan()
-
-
-def test_unowned_age_deletion_detector_bites():
-    # The shape that lost a live crawl result: a sweep that unlinks by age only.
-    AGE_BASED_DELETION_CONSULTS_OWNERSHIP.check_bites()
-
-
 # --- 4c: the webhook semaphore is touched only through its loop accessor -----
 
 _SEMAPHORE_GLOBALS = frozenset({"_async_crawl_semaphore", "_async_crawl_semaphore_loop"})
@@ -273,9 +246,20 @@ SEMAPHORE_GLOBALS_ARE_LOOP_BOUND = Rule(
 )
 
 
-def test_async_crawl_semaphore_globals_are_loop_bound():
-    SEMAPHORE_GLOBALS_ARE_LOOP_BOUND.scan()
+RULES = Registry(
+    (
+        HANDLE_MINTING_IS_SINGLE_SOURCED,
+        DOMAIN_POLITENESS_FLOOR_ONLY_VIA_THE_SETTER,
+        AGE_BASED_DELETION_CONSULTS_OWNERSHIP,
+        SEMAPHORE_GLOBALS_ARE_LOOP_BOUND,
+    )
+)
 
 
-def test_async_crawl_semaphore_loop_binding_detector_bites():
-    SEMAPHORE_GLOBALS_ARE_LOOP_BOUND.check_bites()
+def test_no_rule_violations():
+    RULES.check_all_clean()
+
+
+def test_every_rule_bites():
+    """Every rule must reject what it forbids, and spare what it resembles."""
+    RULES.check_all_bite()

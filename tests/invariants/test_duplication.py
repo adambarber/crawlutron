@@ -6,7 +6,7 @@ import ast
 import pathlib
 
 from tests.chokepoint_walks import REPO_ROOT, class_defs, functions, nodes_of, offender_at, resolved_expr_name
-from tests.rules import Bites, Rule
+from tests.rules import Bites, Registry, Rule
 
 # --------------------------------------------------------------------------- Search-provider result
 # normalization ---------------------------------------------------------------------------
@@ -68,16 +68,6 @@ PROVIDER_DEDUPE_LOOP_LIVES_IN_THE_COLLECTOR = Rule(
         "    return results\n",
     ),
 )
-
-
-def test_no_provider_dedupe_loop_reinlines():
-    """One normalize/dedupe/clip contract for all keyed providers."""
-    PROVIDER_DEDUPE_LOOP_LIVES_IN_THE_COLLECTOR.scan()
-
-
-def test_provider_loop_detector_bites():
-    """The three-provider copy fires; the DDG lxml-walk shape stays clean."""
-    PROVIDER_DEDUPE_LOOP_LIVES_IN_THE_COLLECTOR.check_bites()
 
 
 # The names of the one selector contract, and the single parameter that carries them; see
@@ -155,16 +145,6 @@ THE_SELECTOR_PAIR_IS_ONE_CONTRACT = Rule(
     ),
     proof_path=REPO_ROOT / "app" / "crawl" / "_synthetic.py",
 )
-
-
-def test_the_selector_pair_is_one_contract():
-    """A narrowing extractor carries the pair in one value, never as two names."""
-    THE_SELECTOR_PAIR_IS_ONE_CONTRACT.scan()
-
-
-def test_selector_contract_detector_bites():
-    """A re-spelled pair fires, a lone name fires, the real shape passes."""
-    THE_SELECTOR_PAIR_IS_ONE_CONTRACT.check_bites()
 
 
 def _keyed_provider_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
@@ -270,15 +250,19 @@ KEYED_PROVIDERS_INHERIT_THE_SHARED_RESPONSE_FLOW = Rule(
 )
 
 
-def test_keyed_providers_inherit_the_shared_response_flow():
-    """One flow for the keyed providers: a request declared, never written."""
-    KEYED_PROVIDERS_INHERIT_THE_SHARED_RESPONSE_FLOW.scan()
+RULES = Registry(
+    (
+        PROVIDER_DEDUPE_LOOP_LIVES_IN_THE_COLLECTOR,
+        THE_SELECTOR_PAIR_IS_ONE_CONTRACT,
+        KEYED_PROVIDERS_INHERIT_THE_SHARED_RESPONSE_FLOW,
+    )
+)
 
 
-def test_keyed_provider_flow_detector_bites():
-    """The re-spelled flow fires, the incomplete subclass fires, the data passes.
+def test_no_rule_violations():
+    RULES.check_all_clean()
 
-    Each source trips exactly one rule, so a rule firing for the wrong reason
-    shows up as a count change rather than a green run.
-    """
-    KEYED_PROVIDERS_INHERIT_THE_SHARED_RESPONSE_FLOW.check_bites()
+
+def test_every_rule_bites():
+    """Every rule must reject what it forbids, and spare what it resembles."""
+    RULES.check_all_bite()

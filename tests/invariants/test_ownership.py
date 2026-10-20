@@ -9,7 +9,7 @@ import pathlib
 
 from tests.chokepoint_walks import REPO_ROOT, call_nodes, nodes_of, offender_at, subscript_reads, with_blocks
 from tests.invariants._shared import function_defs
-from tests.rules import Bites, Rule
+from tests.rules import Bites, Registry, Rule
 
 
 def _lock_bodies_with_awaits(tree: ast.AST, path: pathlib.Path) -> list[str]:
@@ -115,16 +115,6 @@ LOCK_HELD_ACROSS_AN_AWAIT = Rule(
 )
 
 
-def test_no_await_inside_lock_bodies():
-    """A lock held across an await blocks the loop and can deadlock."""
-    LOCK_HELD_ACROSS_AN_AWAIT.scan()
-
-
-def test_lock_detector_bites():
-    """Name stems beyond 'lock' and threading-bound aliases must fire."""
-    LOCK_HELD_ACROSS_AN_AWAIT.check_bites()
-
-
 # --------------------------------------------------------------------------- ContentCache mirror twins
 # ---------------------------------------------------------------------------
 
@@ -167,16 +157,6 @@ MEMORY_CACHE_TWINS_MUST_GO_THROUGH_THE_LOCKED_HELPERS = Rule(
         "class C:\n    async def aget(self, key):\n        return self._take_memory_locked(key)\n",
     ),
 )
-
-
-def test_memory_cache_only_via_locked_helpers():
-    """Get/set/aget/aset never touch the raw RAM-mirror dict."""
-    MEMORY_CACHE_TWINS_MUST_GO_THROUGH_THE_LOCKED_HELPERS.scan()
-
-
-def test_memory_cache_twin_detector_bites():
-    """Synthetic drifted twin fires; helper-shaped code stays clean."""
-    MEMORY_CACHE_TWINS_MUST_GO_THROUGH_THE_LOCKED_HELPERS.check_bites()
 
 
 # --------------------------------------------------------------------------- Lock ownership: a *_locked
@@ -247,11 +227,19 @@ LOCKED_HELPERS_ARE_CALLED_UNDER_THE_LOCK = Rule(
 )
 
 
-def test_locked_cache_helpers_are_called_under_the_lock():
-    """Every ``_*_locked`` call sits inside a ``with...lock`` block."""
-    LOCKED_HELPERS_ARE_CALLED_UNDER_THE_LOCK.scan()
+RULES = Registry(
+    (
+        LOCK_HELD_ACROSS_AN_AWAIT,
+        MEMORY_CACHE_TWINS_MUST_GO_THROUGH_THE_LOCKED_HELPERS,
+        LOCKED_HELPERS_ARE_CALLED_UNDER_THE_LOCK,
+    )
+)
 
 
-def test_locked_helper_lock_ownership_detector_bites():
-    """An off-lock *_locked call fires; the guarded form stays clean."""
-    LOCKED_HELPERS_ARE_CALLED_UNDER_THE_LOCK.check_bites()
+def test_no_rule_violations():
+    RULES.check_all_clean()
+
+
+def test_every_rule_bites():
+    """Every rule must reject what it forbids, and spare what it resembles."""
+    RULES.check_all_bite()

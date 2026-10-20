@@ -13,7 +13,7 @@ from tests.chokepoint_walks import (
     offender_at,
     real_members,
 )
-from tests.rules import Bites, Rule
+from tests.rules import Bites, Registry, Rule
 
 # This detector closes the class, not the instance: any classification handed to the primitives as a literal
 # must be a CrawlClassification member.
@@ -98,14 +98,6 @@ CLASSIFICATIONS_PASSED_ARE_ENUM_MEMBERS = Rule(
 )
 
 
-def test_engine_emitted_classifications_are_enum_members():
-    CLASSIFICATIONS_PASSED_ARE_ENUM_MEMBERS.scan()
-
-
-def test_non_member_classification_detector_bites():
-    CLASSIFICATIONS_PASSED_ARE_ENUM_MEMBERS.check_bites()
-
-
 # --------------------------------------------------------------------------- Strategy-label validity
 
 _STRATEGY_VALUE_SOURCES = ("strategy",)
@@ -170,14 +162,6 @@ STRATEGIES_PASSED_ARE_ENUM_MEMBERS = Rule(
 )
 
 
-def test_engine_emitted_strategies_are_enum_members():
-    STRATEGIES_PASSED_ARE_ENUM_MEMBERS.scan()
-
-
-def test_non_member_strategy_detector_bites():
-    STRATEGIES_PASSED_ARE_ENUM_MEMBERS.check_bites()
-
-
 # --- 4b: result-primitive status values are real ResultStatus members --------
 
 _STATUS_VALUE_SOURCES = ("status",)
@@ -222,14 +206,6 @@ STATUSES_PASSED_ARE_ENUM_MEMBERS = Rule(
         "def f(s):\n    return terminal_crawl_result(status=s)\n",
     ),
 )
-
-
-def test_result_primitives_emit_real_status_members():
-    STATUSES_PASSED_ARE_ENUM_MEMBERS.scan()
-
-
-def test_non_member_status_detector_bites():
-    STATUSES_PASSED_ARE_ENUM_MEMBERS.check_bites()
 
 
 _ATTEMPT_CLASS = "CrawlStrategyAttempt"
@@ -283,9 +259,20 @@ CRAWL_STRATEGY_ATTEMPT_SITES_USE_REAL_MEMBERS = Rule(
 )
 
 
-def test_crawl_strategy_attempt_sites_usereal_members():
-    CRAWL_STRATEGY_ATTEMPT_SITES_USE_REAL_MEMBERS.scan()
+RULES = Registry(
+    (
+        CLASSIFICATIONS_PASSED_ARE_ENUM_MEMBERS,
+        STRATEGIES_PASSED_ARE_ENUM_MEMBERS,
+        STATUSES_PASSED_ARE_ENUM_MEMBERS,
+        CRAWL_STRATEGY_ATTEMPT_SITES_USE_REAL_MEMBERS,
+    )
+)
 
 
-def test_crawl_strategy_attempt_detector_bites():
-    CRAWL_STRATEGY_ATTEMPT_SITES_USE_REAL_MEMBERS.check_bites()
+def test_no_rule_violations():
+    RULES.check_all_clean()
+
+
+def test_every_rule_bites():
+    """Every rule must reject what it forbids, and spare what it resembles."""
+    RULES.check_all_bite()
