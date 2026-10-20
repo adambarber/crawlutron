@@ -40,7 +40,6 @@ def _args_for(
         min_lines=min_lines,
         min_tokens=min_tokens,
         threshold=threshold,
-        fail_on_empty=True,
     )
 
 
@@ -187,5 +186,4 @@ _GATE_ARGV = [
     str(_CONFIGURED_MIN_TOKENS),
     "--threshold",
     str(_CONFIGURED_THRESHOLD),
-    "--fail-on-empty",
 ]

@@ -90,7 +90,6 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--min-lines", type=int, required=True)
     parser.add_argument("--min-tokens", type=int, required=True)
     parser.add_argument("--threshold", type=float, required=True)
-    parser.add_argument("--fail-on-empty", action="store_true", required=True)
     return parser.parse_args()
 
 

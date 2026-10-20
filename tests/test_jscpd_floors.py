@@ -66,6 +66,21 @@ def test_a_floor_the_hook_does_not_state_is_unreadable_rather_than_defaulted(mon
         gate.configured_floor()
 
 
+def test_fail_on_empty_is_no_longer_a_required_cli_flag(monkeypatch, capsys) -> None:
+    """Bites: the gate runs with argv carrying no --fail-on-empty at all.
+
+    The flag was required and read by nothing, so it was deleted as dead gate
+    machinery; the gate still fails closed.
+    """
+    commands = _stub_report(monkeypatch, [])
+    monkeypatch.setattr(sys, "argv", _GATE_ARGV)
+    assert "--fail-on-empty" not in _GATE_ARGV
+    assert gate.main() == 0
+    assert commands, "the gate really ran, it did not no-op"
+    for command in commands:
+        assert "--fail-on-empty" in command, "a fail-closed gate keeps the flag on the jscpd command"
+
+
 def test_source_floor_fails_on_thin_scan(monkeypatch) -> None:
     _stub_report(monkeypatch, [], sources=60)
 
