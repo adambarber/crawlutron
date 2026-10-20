@@ -136,12 +136,12 @@ def test_every_hook_resolves_the_service_root_in_both_layouts(tmp_path_factory) 
 def test_the_gate_banner_cites_the_real_layout_executor() -> None:
     """The banner's self-proof names the test that actually runs the dual layout.
 
-    The banner used to cite test_precommit_ci_contract; the synthetic-repo
-    executional proof lives in THIS module, so the citation must resolve here.
+    The banner used to cite test_precommit_ci_contract; #265 moved the rationale
+    to docs/gate-helper.md, but the citation must still resolve to a real executor.
     """
-    banner = GATE_HELPER.read_text(encoding="utf-8").splitlines()[:36]
-    assert any("tests/test_hook_contract.py" in line for line in banner), banner
-    assert not any("test_precommit_ci_contract" in line for line in banner), banner
+    cited = (SERVICE_ROOT / "docs" / "gate-helper.md").read_text(encoding="utf-8")
+    assert "tests/test_hook_contract.py" in cited
+    assert "test_precommit_ci_contract" not in cited
     # What the banner cites is genuinely the executor, not just a spelling match.
     source = (SERVICE_ROOT / "tests" / "test_hook_contract.py").read_text(encoding="utf-8")
     assert "_run_gate_entry_in_layout" in source

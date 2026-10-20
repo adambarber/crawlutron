@@ -32,6 +32,7 @@ _DOC_BUDGETS = {
 _BUDGETS = {
     "app": 0,
     "tests": 0,
+    "scripts": 20,
 }
 
 #: A block's last line may not stop mid-clause: connectives, trailing commas and dangling dashes are a cut
@@ -91,10 +92,21 @@ def dangling_comment_blocks(source: str) -> list[tuple[int, int, str]]:
     ]
 
 
-def _root_findings[T](root: str, collect: Callable[[str], list[T]]) -> dict[str, list[T]]:
-    """Every ``collect`` hit under one root, as ``{file: [findings]}``."""
+def _root_findings[T](
+    root: str, collect: Callable[[str], list[T]], *, include_gate_bash: bool = False
+) -> dict[str, list[T]]:
+    """Every ``collect`` hit under one root, as ``{file: [findings]}``.
+
+    ``include_gate_bash`` adds the extensionless scripts/gate, so the comment-
+    block budget covers it; the docstring scan never asks for it.
+    """
+    files = sorted((REPO_ROOT / root).rglob("*.py"))
+    if include_gate_bash and root == "scripts":
+        gate = REPO_ROOT / "scripts" / "gate"
+        if gate.exists():
+            files.append(gate)
     found: dict[str, list[T]] = {}
-    for path in sorted((REPO_ROOT / root).rglob("*.py")):
+    for path in files:
         if "__pycache__" in path.parts:
             continue
         findings = collect(path.read_text(encoding="utf-8"))
@@ -105,7 +117,7 @@ def _root_findings[T](root: str, collect: Callable[[str], list[T]]) -> dict[str,
 
 def _root_runs(root: str) -> dict[str, list[tuple[int, int]]]:
     """Every long run under one root, as ``{file: [(start, end), ...]}``."""
-    return _root_findings(root, long_comment_runs)
+    return _root_findings(root, long_comment_runs, include_gate_bash=True)
 
 
 def _root_docstrings(root: str) -> dict[str, list[tuple[int, int, str]]]:
@@ -125,6 +137,19 @@ def _root_docstrings(root: str) -> dict[str, list[tuple[int, int, str]]]:
 def _root_all_blocks(root: str) -> dict[str, list[tuple[int, int, str]]]:
     """Every dangling block under one root, as ``{file: [(start, end, text)]}``."""
     return _root_findings(root, dangling_comment_blocks)
+
+
+def test_scripts_is_part_of_the_comment_budget_surface() -> None:
+    """The gate sweeps scripts/, including the extensionless gate helper.
+
+    The banner used to survive because scripts/ was outside the comment-budget
+    surface and a bash script has no ``.py`` suffix to be picked up by the glob.
+    """
+    assert "scripts" in _BUDGETS
+    runs = _root_runs("scripts")
+    assert sum(len(v) for v in runs.values()) == _BUDGETS["scripts"]
+    # A three-line block in the helper surface fires; the banner shape is gone.
+    assert long_comment_runs("#!/bin/sh\n# one\n# two\n# three\n") == [(1, 4)]
 
 
 def test_the_detector_bites_on_a_third_consecutive_comment() -> None:
