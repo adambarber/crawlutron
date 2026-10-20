@@ -1,10 +1,12 @@
 """Tests for async single-shot crawl jobs."""
 
 import asyncio
+import threading
+import time
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from app.api import job_runner
 from tests._assertions import accepted_crawl, completed_crawl, poll_webhook_delivery, submit_async_crawl
-from tests._async_harnesses import CountingSemaphore
 from tests._async_harnesses import crawl_api as _crawl_api
 from tests._fetcher_factories import make_crawl_payload
 from tests._job_harnesses import loaded_job, single_shot_job
@@ -181,24 +183,55 @@ class TestAsyncCrawlApi:
         assert resp.json()["code"] == "validation_error"
 
     async def test_v1_crawl_async_mode_concurrent_limit(self, crawl_api, monkeypatch):
-        """The bound is asserted, not assumed: a width-one semaphore measures the
-        peak, which stays 1 only while the crawler holds the ``async with`` (drop
-        it and the peak drops to 0); a prior version tested under the limit.
+        """The bound is asserted behaviorally: with the width knobs at one, three
+        concurrent async crawls must serialize -- the page server sees at most one
+        in-flight request at a time, never three overlapping fetches.
         """
-        from app.api import async_crawl_runner
-
-        counter = CountingSemaphore(1)
-        monkeypatch.setattr(async_crawl_runner, "_build_async_crawl_semaphore", lambda: counter)
-        # The cache is reset so the patch is visible to this test's first crawl.
+        monkeypatch.setenv("CRAWLUTRON_MAX_WEBHOOK_CONCURRENCY", "1")
+        async_crawl_runner = __import__("app.api.async_crawl_runner", fromlist=["x"])
+        # The cached loop-bound semaphore is rebuilt from the new width.
         async_crawl_runner.reset_process_state()
 
-        payload = crawl_api.payload(async_mode=True)
-        completed = await asyncio.gather(*(submit_async_crawl(crawl_api.client, payload) for _ in range(3)))
+        active = 0
+        peak = 0
+        lock = threading.Lock()
 
-        assert counter.peak_holders == 1, f"bound not honoured: peak {counter.peak_holders} concurrent crawls"
-        for _request_id, response in completed:
-            assert response.status_code == 200
-            assert response.json()["success"] is True
+        class _Handler(BaseHTTPRequestHandler):
+            def do_GET(self):
+                nonlocal active, peak
+                with lock:
+                    active += 1
+                    peak = max(peak, active)
+                try:
+                    time.sleep(0.05)
+                    self.send_response(200)
+                    self.end_headers()
+                    self.wfile.write(b"<html>slow</html>")
+                finally:
+                    with lock:
+                        active -= 1
+
+            def log_message(self, *args):
+                pass
+
+        server = ThreadingHTTPServer(("127.0.0.1", 0), _Handler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            url = f"http://127.0.0.1:{server.server_port}/"
+            payload = make_crawl_payload(url, async_mode=True)
+            completed = await asyncio.gather(
+                *(submit_async_crawl(crawl_api.client, payload) for _ in range(3))
+            )
+
+            assert peak == 1, f"bound not honoured: peak {peak} concurrent crawls"
+            for _request_id, response in completed:
+                assert response.status_code == 200
+                assert response.json()["success"] is True
+        finally:
+            server.shutdown()
+            thread.join(timeout=5)
+            server.server_close()
 
 
 class TestAsyncCrawlJobStoreIntegration:

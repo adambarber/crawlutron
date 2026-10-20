@@ -16,28 +16,6 @@ from httpx import ASGITransport, AsyncClient
 from tests._timing_harnesses import await_until
 
 
-class CountingSemaphore:
-    """A fixed-width semaphore that records the peak number of holders.
-
-    Replaces the runner's semaphore so a test asserts the BOUND, not
-    throughput: "N complete" proves nothing under the limit."""
-
-    def __init__(self, width: int) -> None:
-        self._semaphore = asyncio.Semaphore(width)
-        self._holders = 0
-        self.peak_holders = 0
-
-    async def __aenter__(self) -> "CountingSemaphore":
-        await self._semaphore.acquire()
-        self._holders += 1
-        self.peak_holders = max(self.peak_holders, self._holders)
-        return self
-
-    async def __aexit__(self, *exc: object) -> None:
-        self._holders -= 1
-        self._semaphore.release()
-
-
 @dataclass(frozen=True)
 class CrawlApi:
     """The client, the origin, and the request payloads rooted at that origin."""

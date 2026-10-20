@@ -66,21 +66,6 @@ _PROCESS_WIDE_JAR = _d(
 )
 
 
-_SUBSTITUTED_COLLABORATOR = _d(
-    "substituted seam",
-    "The suite replaces this name with a double rather than reading what it returns.\n"
-    "A read asserts on a mechanism; a substitution asserts that the code under test\n"
-    "takes this collaborator at all, which is a contract -- and the only way to observe\n"
-    "that contract from outside the module is to *be* the collaborator.\n"
-    "\n"
-    "It stays private on purpose. A public collaborator is one production can reach too,\n"
-    "and a double production can reach is a double production can be broken by. So the\n"
-    "reach is correct and the fix for it is nothing; promoting the name would quiet this\n"
-    "gate and lose the property that made the gate worth having.\n",
-    side=("test",),
-)
-
-
 _SUBSTITUTED_CAP = _d(
     "substituted seam",
     "A private cap, timeout or retry delay the suite shrinks until the path behind it is\n"

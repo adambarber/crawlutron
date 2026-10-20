@@ -4,12 +4,10 @@ from __future__ import annotations
 
 from tests._private_import_decl import (
     _INSTANCE_STATE,
-    _SUBSTITUTED_COLLABORATOR,
     Declaration,
 )
 
 DECLARED: dict[str, Declaration] = {
-    "app.api.async_crawl_runner._build_async_crawl_semaphore": _SUBSTITUTED_COLLABORATOR,
     "app.transport.content_cache.ContentCache._index": _INSTANCE_STATE,
     "app.transport.content_cache.ContentCache._lock": _INSTANCE_STATE,
     "app.transport.content_cache.ContentCache._index_sizes": _INSTANCE_STATE,
