@@ -306,14 +306,23 @@ def test_metric_budgets_have_never_risen() -> None:
         pytest.skip("shallow clone: cannot see the budget's history")
 
     pattern = re.compile(r'^\s{4}"(?P<name>[a-z ]+)":\s*(?P<value>\d+),$')
+    # The scripts budget (#293) shares this file; the walk reads only the
+    # _BUDGETS block so scripts entries are not misread as older values.
+    block = re.compile(r"^_BUDGETS = \{$")
     history: dict[str, list[tuple[str, int]]] = defaultdict(list)
     for revision in log:
         source = _git(root, "show", f"{revision}:{tracked}")
         if source.returncode != 0:
             continue
+        in_budgets = False
         for line in source.stdout.splitlines():
+            if block.match(line):
+                in_budgets = True
+                continue
+            if in_budgets and line.startswith("}"):
+                in_budgets = False
             found = pattern.match(line)
-            if found and found.group("name") in _BUDGETS:
+            if in_budgets and found and found.group("name") in _BUDGETS:
                 history[found.group("name")].append((revision[:9], int(found.group("value"))))
 
     assert history, (
