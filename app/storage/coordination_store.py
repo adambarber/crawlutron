@@ -40,6 +40,11 @@ class CoordinationStore:
         # per-instance lock excludes this store from nothing.
         self._lock = process_lock(store_lock_key(db_path))
 
+    @property
+    def conn(self) -> sqlite3.Connection:
+        """The store's connection, for diagnostics and migrations."""
+        return self._conn
+
     def close(self) -> None:
         """Close the connection under the lock -- on the base, not per store, since
         a store nobody extended once silently held a connection open forever.

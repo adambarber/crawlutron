@@ -177,7 +177,7 @@ def test_both_stores_share_the_pragma_configuration(tmp_path):
         make_job_store(tmp_path),
         CrawlResultStore(tmp_path / "results.db"),
     ):
-        conn = store._conn
+        conn = store.conn
         assert conn.execute("PRAGMA journal_mode").fetchone()[0].lower() == "wal"
         assert conn.execute("PRAGMA busy_timeout").fetchone()[0] == 5000
 

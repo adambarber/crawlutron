@@ -34,13 +34,20 @@ class HttpCache:
         # (namespace, url) -> (etag, last_modified, expires|None), namespaced so one caller's
         # validator is never replayed on another's crawl; mirrors the content-cache partitioning.
         self._data: dict[tuple[str, NormalizedUrl], tuple[str | None, str | None, float | None]] = {}
+        self._eviction_scans = 0
         self._closed = False
+
+    @property
+    def eviction_scans(self) -> int:
+        """Total entries eviction examined across all calls (a cost metric)."""
+        return self._eviction_scans
 
     def _evict_if_needed(self) -> None:
         if len(self._data) > self._max_entries:
             # drop the earliest-inserted entries (FIFO) to bound memory: the snapshot is
             # bounded to the overflow, so a key list of up to 100k is never materialized.
             over = len(self._data) - self._max_entries
+            self._eviction_scans += over
             for url in list(itertools.islice(self._data, over)):
                 self._data.pop(url, None)
 

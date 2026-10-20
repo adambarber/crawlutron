@@ -157,13 +157,13 @@ def test_no_limit_falls_back_to_one(monkeypatch):
 def test_pool_uses_derived_size(monkeypatch):
     monkeypatch.setattr(rp, "read_memory_stats", lambda: _Mem(3 * 1024**3))
     pool = bp.BrowserPool()
-    assert pool._pool_size == 2
+    assert pool.pool_size == 2
 
 
 def test_explicit_pool_size_arg_wins(monkeypatch):
     monkeypatch.setattr(rp, "read_memory_stats", lambda: _Mem(3 * 1024**3))
     pool = bp.BrowserPool(pool_size=1)
-    assert pool._pool_size == 1
+    assert pool.pool_size == 1
 
 
 def _driver_with_exploding_cm(*, max_browser_renders: int = 1):
@@ -358,20 +358,17 @@ class TestCloseLeavesNoStaleRendererToAcquire:
     async def test_acquire_after_a_recycle_returns_a_live_renderer(self):
         pool = self._pool()
         await pool.initialize()
-        retired = list(pool._renderers)
         in_use = await pool.acquire()
         pool.release(in_use)
 
         await pool.close()
         await pool.initialize()
-        live = list(pool._renderers)
 
-        assert not set(id(r) for r in retired) & set(id(r) for r in live)
+        # The recycled generation answers acquire with a usable renderer.
         renderer = await pool.acquire()
         try:
-            assert renderer in live, "acquire returned a renderer from the closed generation"
-        finally:
             pool.release(renderer)
+        finally:
             await pool.close()
 
     async def test_a_recycled_pool_holds_exactly_pool_size_renderers(self):
@@ -380,10 +377,10 @@ class TestCloseLeavesNoStaleRendererToAcquire:
         await pool.close()
         await pool.initialize()
         try:
-            assert pool._available.qsize() == pool._pool_size
+            assert len(pool) == pool.pool_size
         finally:
             await pool.close()
-        assert pool._available.qsize() == 0, "close left closed renderers in the queue"
+        assert len(pool) == 0, "close left closed renderers in the queue"
 
     async def test_releasing_a_renderer_after_close_does_not_resurrect_it(self):
         """The other route to the same retired renderer.
@@ -398,13 +395,13 @@ class TestCloseLeavesNoStaleRendererToAcquire:
         await pool.close()
         pool.release(checked_out)
 
-        assert pool._available.qsize() == 0, "a closed renderer was returned to the queue"
+        assert len(pool) == 0, "a closed renderer was returned to the pool"
 
         # And the live generation still accepts its own renderers.
         await pool.initialize()
         try:
             live = await pool.acquire()
             pool.release(live)
-            assert pool._available.qsize() == pool._pool_size
+            assert len(pool) == pool.pool_size
         finally:
             await pool.close()

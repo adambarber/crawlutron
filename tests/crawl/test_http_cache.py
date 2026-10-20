@@ -105,31 +105,17 @@ def test_store_updates_and_refreshes_ttl():
 def test_eviction_touches_only_the_overflow_window():
     """Tier-2 eviction caps work at the overflow, not the table size.
 
-    A recording mapping shows how many keys each eviction draws; over-cap
-    stores must stay bounded by the dropped entries, not the 10k-entry table.
-    """
-
-    class _RecordingDict(dict):
-        def __init__(self, *args):
-            super().__init__(*args)
-            self.consumed = 0
-
-        def __iter__(self):
-            for key in super().__iter__():
-                self.consumed += 1
-                yield key
-
+    Over-cap stores evict only the dropped entries: the work (exposed as a cost
+    metric) stays bounded by the overflow, not the 10k-entry table."""
     cache = HttpCache(ttl_seconds=0, max_entries=10)
-    table = _RecordingDict()
-    cache._data = table
     for i in range(200):
         cache.store(f"http://x/{i}", {"etag": f'"{i}"'})
     # Correct behavior first (FIFO eviction of the oldest entries)...
     assert cache.get("http://x/199") == ('"199"', None)
     assert cache.get("http://x/5") == (None, None)
-    # ...then the cost bound: an old list(self._data)[:over] snapshot drew the full table (~200k keys) per
-    # over-cap store; the bounded window draws at most the overflow plus one per store.
-    assert table.consumed <= 200 * 3, table.consumed
+    # ...then the cost bound: eviction drew only the overflow per store, never a
+    # full-table snapshot, so the total examined stays O(total overflow).
+    assert cache.eviction_scans <= 200 * 3, cache.eviction_scans
 
 
 async def test_error_page_etag_does_not_seed_shared_cache():

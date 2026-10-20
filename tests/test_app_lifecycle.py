@@ -44,7 +44,7 @@ def _database_file(store) -> Path:
 
     Read from SQLite rather than the constructor argument: a store that
     resolved or substituted its path would echo the argument back and hide it."""
-    conn = store.conn if hasattr(store, "conn") else store._conn
+    conn = store.conn
     row = conn.execute("PRAGMA database_list").fetchone()
     assert row[1] == "main", row
     return Path(row[2]).resolve()

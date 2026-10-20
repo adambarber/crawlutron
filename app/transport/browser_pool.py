@@ -60,6 +60,16 @@ class BrowserPool:
         self._lock = asyncio.Lock()
         self._initialized = False
 
+    @property
+    def pool_size(self) -> int:
+        """The number of renderers this pool manages."""
+        return self._pool_size
+
+    @property
+    def available(self) -> int:
+        """How many renderers are currently free for acquisition."""
+        return self._available.qsize()
+
     async def initialize(self) -> None:
         """Create and warm up all browser renderers."""
         async with self._lock:

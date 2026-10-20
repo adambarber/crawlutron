@@ -217,7 +217,7 @@ def test_a_batch_save_inserts_only_the_pages_it_added(job_db):
     job = _job_with_pages(store, 30)
 
     def page_rows():
-        return store._conn.execute(
+        return store.conn.execute(
             'SELECT count(*) AS n FROM "crawl_job_results" WHERE job_id = ?', (job.job_id,)
         ).fetchone()["n"]
 
@@ -241,7 +241,7 @@ def test_a_batch_save_visits_only_the_pages_it_added(job_db):
     job = _job_with_pages(store, 30)
 
     def visited_rows():
-        return store._conn.execute(
+        return store.conn.execute(
             'SELECT count(*) AS n FROM "crawl_job_visited" WHERE job_id = ?', (job.job_id,)
         ).fetchone()["n"]
 

@@ -175,7 +175,7 @@ def test_jobstore_has_concurrency_guard():
     assert lock.acquire()
     lock.release()
     # SQLite must wait for the write lock rather than failing immediately.
-    timeout = store._conn.execute("PRAGMA busy_timeout").fetchone()[0]
+    timeout = store.conn.execute("PRAGMA busy_timeout").fetchone()[0]
     assert timeout and timeout > 0
 
 
@@ -230,7 +230,7 @@ def test_load_missing_returns_none_no_warning(tmp_path, caplog):
 def test_load_logs_warning_on_corruption(tmp_path, caplog):
     store = _store_test_job_store_serialization(tmp_path)
     # A job whose stored page history is not valid JSON.
-    store._conn.execute(
+    store.conn.execute(
         """
         INSERT INTO crawl_jobs
         (job_id, root_url, policy, status, frontier,
@@ -249,11 +249,11 @@ def test_load_logs_warning_on_corruption(tmp_path, caplog):
             "{}",
         ),
     )
-    store._conn.execute(
+    store.conn.execute(
         'INSERT INTO "crawl_job_results" (job_id, seq, payload) VALUES (?, ?, ?)',
         ("corrupt-id", 0, "{not valid json"),
     )
-    store._conn.commit()
+    store.conn.commit()
     with caplog.at_level(logging.WARNING):
         assert store.load("corrupt-id") is None
     assert any("job_store_load_corrupt" in r.message for r in caplog.records)
@@ -273,8 +273,8 @@ class TestJobStoreEdges:
 
     def test_job_store_close(self, tmp_path):
         store = make_job_store(tmp_path)
-        store._conn.close()
-        store._conn.close()
+        store.conn.close()
+        store.conn.close()
 
 
 def test_legacy_string_collections_load_with_depth_and_single_identity(tmp_path):

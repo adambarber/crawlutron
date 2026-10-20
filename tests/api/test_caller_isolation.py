@@ -165,11 +165,11 @@ def test_load_for_caller_filters_owner_in_sql(tmp_path):
     store = make_store(tmp_path / "jobs.db")
     _seed_owned_job(store, owner="key_a")
     seen: list[str] = []
-    store._conn.set_trace_callback(lambda sql, seen=seen: seen.append(sql and sql.strip()))
+    store.conn.set_trace_callback(lambda sql, seen=seen: seen.append(sql and sql.strip()))
     try:
         store.load_for_caller("crawl_owned", "key_b")
     finally:
-        store._conn.set_trace_callback(None)
+        store.conn.set_trace_callback(None)
     scoped = [s for s in seen if s and s.upper().startswith("SELECT")]
     sql_text = " ".join(scoped)
     assert "crawl_jobs" in sql_text and "owner" in sql_text and "crawl_owned" in sql_text, seen
