@@ -99,7 +99,7 @@ async def crawl_batches(
         if shutdown_event.is_set():
             return
         page_count_before = state.page_count
-        allowed_jobs = await admit_recursive_batch(cast(Any, run), state, metrics)
+        allowed_jobs = await admit_recursive_batch(run, state, metrics)
         if not allowed_jobs and stall_guard.stalled():
             await fail_remaining_frontier(run.spill, run.spill_write, state.frontier)
             return
