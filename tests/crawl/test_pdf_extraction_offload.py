@@ -43,14 +43,14 @@ async def _looks_like_pdf(url):
     return url.lower().endswith(".pdf")
 
 
-def _build_pdf_renderer(monkeypatch, page):
-    return build_pinned_renderer(page, monkeypatch, extract=_real_extraction, looks_like_pdf=_looks_like_pdf)
+def _build_pdf_renderer(page):
+    return build_pinned_renderer(page, extract=_real_extraction, looks_like_pdf=_looks_like_pdf)
 
 
-async def _render_pdf(monkeypatch):
+async def _render_pdf():
     """Drive the real PDF fallback with a blocking extractor at the shared URL."""
     page = _PdfPage()
-    renderer = _build_pdf_renderer(monkeypatch, page)
+    renderer = _build_pdf_renderer(page)
 
     def blocking_pdf_extractor(url) -> str:
         # The extractor seam takes the admitted value: the value object carries the policy, and a downloader
@@ -70,7 +70,7 @@ class TestPdfExtractorIsOffloaded:
     async def test_pdf_fallback_runs_in_worker_thread(self, monkeypatch):
         seen = install_to_thread_spy(monkeypatch)
 
-        result = await _render_pdf(monkeypatch)
+        result = await _render_pdf()
 
         assert (result.metadata or {}).get("extraction_method") == "pdf_text", (
             "the PDF fallback branch never ran -- the test would pass vacuously"
@@ -79,7 +79,7 @@ class TestPdfExtractorIsOffloaded:
             "pdf extractor ran on the event loop: expected an asyncio.to_thread offload"
         )
 
-    async def test_result_text_comes_from_the_extractor(self, monkeypatch):
-        result = await _render_pdf(monkeypatch)
+    async def test_result_text_comes_from_the_extractor(self):
+        result = await _render_pdf()
         assert (result.metadata or {}).get("extraction_method") == "pdf_text"
         assert result.text == "extracted pdf text"

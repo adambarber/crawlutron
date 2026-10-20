@@ -74,7 +74,9 @@ async def _drain_running_crawls(*, guard: float = 10.0) -> None:
         return [row["job_id"] for row in job_store.list_jobs() if row["status"] not in terminal_codes]
 
     try:
-        await await_until(lambda: not acting(), "a crawl was still active when its test finished")
+        await await_until(
+            lambda: not acting(), "a crawl was still active when its test finished", guard=guard
+        )
     except AssertionError:
         # A stuck crawl is reported, not raised: raising here would mask the assertion of the test that
         # actually caused it.

@@ -93,7 +93,7 @@ def _always_success(classification: str) -> ResultStatus:
     return "success"
 
 
-def build_pinned_renderer(page, monkeypatch=None, **overrides):
+def build_pinned_renderer(page, **overrides):
     """A renderer whose page work is a fake driver and whose output is fixed.
 
     ``overrides`` steer the two renderer-owned collaborators a test varies:
