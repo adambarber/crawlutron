@@ -146,7 +146,7 @@ def _poll_loop_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
         # only a real call node counts.
         if any(name == "fail" or name.endswith(".fail") for name in _call_node_names(node)):
             return []
-        return [offender_at(path, node, "use _testkit.poll_until instead of a hand-rolled poll loop")]
+        return [offender_at(path, node, "use _assertions.poll_until instead of a hand-rolled poll loop")]
 
     return offenders_over_functions(tree, check)
 
@@ -154,7 +154,7 @@ def _poll_loop_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
 TESTS_USE_THE_SANCTIONED_POLLER = Rule(
     name="tests-use-the-sanctioned-poller",
     find=_poll_loop_offenders,
-    summary="Use _testkit.poll_until",
+    summary="Use _assertions.poll_until",
     excludes=_FAKE_BUILDER_SANCTIONED,
     bite=lambda: Bites(
         "async def _poll_until(pred, *, timeout=10.0):\n"
