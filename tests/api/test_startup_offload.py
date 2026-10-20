@@ -170,6 +170,26 @@ class TestStartupRecoveryStaysOffTheLoop:
         reloaded = await _off_loop(loop_guard_store.load, job.job_id)
         assert reloaded is not None and reloaded.status.value == "pending"
 
+    async def test_recovery_skips_a_running_job_owned_by_this_process(self, loop_guard_store):
+        """A booting/other worker must not rewind a RUNNING job its own process is
+        driving: the task registry is the ownership check, so a live task means
+        the row is not a crash orphan (#220)."""
+        from app.api.job_lifecycle import start_tracked_task
+        from app.api.job_runner import recover_orphaned_running_jobs
+
+        owned = await _off_loop(
+            _seed_job, loop_guard_store, _ROOT, {"limits": {"max_depth": 1}}, running=True
+        )
+        blocker = asyncio.Event()
+        start_tracked_task(owned.job_id, lambda: blocker.wait())
+        try:
+            rewound = await recover_orphaned_running_jobs(loop_guard_store)
+        finally:
+            blocker.set()
+        assert rewound == 0, "recovery rewound a job this process is still running"
+        reloaded = await _off_loop(loop_guard_store.load, owned.job_id)
+        assert reloaded is not None and reloaded.status.value == "running"
+
 
 class TestSingleShotResultStoreStaysOffTheLoop:
     """``/v1/crawl/{request_id}`` read the result store, then the job store.

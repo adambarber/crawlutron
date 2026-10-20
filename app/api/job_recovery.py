@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
-from app.api.job_lifecycle import start_job
+from app.api.job_lifecycle import is_running, start_job
 from app.storage.job_store import JobKind, JobStatus, JobStore
 
 
@@ -24,14 +24,19 @@ async def recover_orphaned_running_jobs(job_store: JobStore) -> int:
     """
     recovered = 0
     for summary in await job_store.alist_jobs():
-        if summary.get("status") == JobStatus.RUNNING.value:
-            # A job that cannot be resumed gets its terminal status here, while
-            # this is the only place that knows the service gave up on it.
-            retired = JobStatus.PENDING if _is_resumable_kind(summary["kind"]) else JobStatus.FAILED
-            # Control-plane CAS: retires the row without rewriting its data;
-            # save() no longer carries status anyway.
-            if await job_store.aset_status(summary["job_id"], retired, expected=JobStatus.RUNNING):
-                recovered += 1
+        if summary.get("status") != JobStatus.RUNNING.value:
+            continue
+        # A RUNNING job this process still drives is owned, not orphaned; boot
+        # time recovery must not rewind another live worker's in-flight work.
+        if is_running(summary["job_id"]):
+            continue
+        # A job that cannot be resumed gets its terminal status here, while
+        # this is the only place that knows the service gave up on it.
+        retired = JobStatus.PENDING if _is_resumable_kind(summary["kind"]) else JobStatus.FAILED
+        # Control-plane CAS: retires the row without rewriting its data;
+        # save() no longer carries status anyway.
+        if await job_store.aset_status(summary["job_id"], retired, expected=JobStatus.RUNNING):
+            recovered += 1
     return recovered
 
 
