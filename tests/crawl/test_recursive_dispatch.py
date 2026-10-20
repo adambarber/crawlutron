@@ -301,7 +301,42 @@ async def test_failed_job_does_not_shift_other_results():
     assert spill.writes[1].status == "failed"
 
 
-async def test_pool_exhaustion_requeue_does_not_consume_a_max_pages_slot(): ...
+async def test_pool_exhaustion_requeue_does_not_consume_a_max_pages_slot():
+    """A re-queued transiently-failed URL costs nothing against ``max_pages``.
+
+    The seed exhausts the pool and is re-queued to the cap; its final permanent
+    failure releases one real page, which must still fit the budget.
+    """
+    from app.orchestration.recursive import MAX_TRANSIENT_REQUEUES
+
+    total_attempts = 1 + MAX_TRANSIENT_REQUEUES
+
+    async def worker(job):
+        if job.normalized_url == canonical("http://a/seed"):
+            return engine_result(
+                job.normalized_url,
+                "browser_pool_exhausted",
+                error="browser_pool_exhausted",
+                # Links from an eternally-exhausted URL are expanded only when its result is recorded, so the
+                # real page rides on the seed's final permanent failure, not on any re-queue.
+                discovered_links=[_link("http://a/real")],
+            )
+        return make_engine_result(job.normalized_url)
+
+    jobs = [_task("http://a/seed")]
+
+    spill, _scheduler, _gate = await _run(
+        jobs,
+        worker,
+        max_depth=2,
+        max_pages=total_attempts,
+    )
+
+    statuses = {r.normalized_url: r.status for r in spill.writes.values()}
+    # The real page must have been crawled despite the retry budget: it is discovered only when the seed's
+    # permanent failure is finally recorded, which happens at the tail of the loop.
+    assert statuses.get(canonical("http://a/real")) == "success", statuses
+    assert statuses.get(canonical("http://a/seed")) == "failed", statuses
 
 
 async def test_in_flight_pages_count_against_the_cap_at_expansion():
@@ -340,46 +375,6 @@ async def test_in_flight_pages_count_against_the_cap_at_expansion():
         canonical("http://a/x"),
         canonical("http://a/1"),
     }
-    """A re-queued transiently-failed URL was never crawled, so it must not cost a
-    page against ``max_pages``. Before the fix each re-queue incremented
-    ``page_count`` and a burst of exhaustion events could terminate the crawl
-    before its real page budget was spent.
-
-    The seed URL exhausts the pool on every attempt and is re-queued up to the
-    cap; it also discovers one real page, which renders successfully. The
-    budget admits exactly that real page after all the retries, so it is
-    reached only when the retries themselves cost nothing.
-    """
-    from app.orchestration.recursive import MAX_TRANSIENT_REQUEUES
-
-    total_attempts = 1 + MAX_TRANSIENT_REQUEUES
-
-    async def worker(job):
-        if job.normalized_url == canonical("http://a/seed"):
-            return engine_result(
-                job.normalized_url,
-                "browser_pool_exhausted",
-                error="browser_pool_exhausted",
-                # Links from an eternally-exhausted URL are expanded only when its result is recorded, so the
-                # real page rides on the seed's final permanent failure, not on any re-queue.
-                discovered_links=[_link("http://a/real")],
-            )
-        return make_engine_result(job.normalized_url)
-
-    jobs = [_task("http://a/seed")]
-
-    spill, _scheduler, _gate = await _run(
-        jobs,
-        worker,
-        max_depth=2,
-        max_pages=total_attempts,
-    )
-
-    statuses = {r.normalized_url: r.status for r in spill.writes.values()}
-    # The real page must have been crawled despite the retry budget: it is discovered only when the seed's
-    # permanent failure is finally recorded, which happens at the tail of the loop.
-    assert statuses.get(canonical("http://a/real")) == "success", statuses
-    assert statuses.get(canonical("http://a/seed")) == "failed", statuses
 
 
 async def test_saturated_admission_loop_terminates_within_bounded_interval():
