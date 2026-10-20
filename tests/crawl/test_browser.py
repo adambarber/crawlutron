@@ -58,7 +58,7 @@ class TestBrowserRenderer:
         assert isinstance(screenshot, str)
         assert len(screenshot) > 0
         decoded = base64.b64decode(screenshot)
-        assert decoded.startswith(b"\x89PNG") or len(decoded) > 0
+        assert decoded.startswith(b"\x89PNG")
 
     async def test_browser_classifies_access_denied_page(self, base_url):
         result = await self._render("/blocked", base_url)

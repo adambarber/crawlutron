@@ -186,7 +186,7 @@ class TestEngineChainEdges:
             browser_worker=_fake_browser(html="<html><body>doc table</body></html>"),
         )
         assert result.status == "success"
-        assert "doc table" in result.markdown or ""
+        assert "doc table" in (result.markdown or "")
 
     async def test_browser_strategy_trafilatura_extraction(self, base_url):
         result = await crawled_result(
