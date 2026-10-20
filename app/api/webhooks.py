@@ -73,19 +73,27 @@ async def deliver_pinned_webhook(
     # shape that produced the redirect findings, and this closes validation's window.
     from app.transport.pinned_transport import build_pinned_request_async
 
-    connect_url, connect_headers = await build_pinned_request_async(
-        NormalizedUrl(webhook_url, policy=host_policy), {}
-    )
+    normalized = NormalizedUrl(webhook_url, policy=host_policy)
+    connect_url, connect_headers = await build_pinned_request_async(normalized, {})
     request_headers = {"Content-Type": "application/json", **connect_headers}
     secret = webhook_secret()
     if secret:
         request_headers[_SIGNATURE_HEADER] = _signature(payload_bytes, secret)
         request_headers[_TIMESTAMP_HEADER] = str(int(time.time()))
+    # The pin connect URL now carries the validated IP for HTTPS too; keep the
+    # original hostname as TLS SNI so real-site TLS still attests and routes.
+    extensions = None
+    if normalized.scheme == "https":
+        extensions = {"sni_hostname": normalized.host}
     # Deliberate one-per-delivery cost: pooling would re-resolve by hostname (defeating
     # the pin) or cache the IP across deliveries (reopening the rebinding window).
     async with httpx.AsyncClient(timeout=Timeouts.defaults().as_httpx()) as client:
         async with client.stream(
-            "POST", connect_url, content=payload_bytes, headers=request_headers
+            "POST",
+            connect_url,
+            content=payload_bytes,
+            headers=request_headers,
+            extensions=extensions,
         ) as response:
             try:
                 # The webhook RESPONSE is attacker-controlled: drain it through

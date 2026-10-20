@@ -35,14 +35,18 @@ class TestBuildPinnedRequest:
         assert parsed.query == "x=1"
         assert headers["Host"] == "example.com:8080"
 
-    def test_https_keeps_hostname_for_sni(self, monkeypatch):
+    def test_https_now_pins_to_the_ip_and_keeps_host_header(self, monkeypatch):
         block_private_targets(monkeypatch)
         https_addrs = [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 443))]
         with _resolve_as(https_addrs):
             connect_url, headers = build_pinned_request(canonical("https://example.com/secure.pdf"), {})
         parsed = urlparse(connect_url)
-        assert parsed.hostname == "example.com"  # never the IP (breaks SNI)
-        assert "Host" not in headers
+        # HTTPS must be IP-pinned like HTTP so a DNS rebind cannot redirect it; the
+        # original hostname is preserved for TLS SNI (httpx) and as the Host header.
+        assert parsed.hostname == "93.184.216.34"
+        assert parsed.scheme == "https"
+        assert parsed.path == "/secure.pdf"
+        assert headers["Host"] == "example.com"
 
     def test_plain_http_brackets_ipv6_literal(self, monkeypatch):
         # getaddrinfo can hand back a public IPv6 address; an unbracketed literal corrupts the URL netloc (its

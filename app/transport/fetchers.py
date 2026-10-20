@@ -26,6 +26,14 @@ from app.transport.timeouts import Timeouts
 from app.vocabulary.limits import DEFAULT_MAX_CONTENT_LENGTH_BYTES
 
 
+#: The hop is pinned to its validated IP; HTTPS must still attest/rout the original
+#: hostname, so a hop carries its SNI as this httpx request extension.
+def _sni_extensions(chain) -> dict[str, str] | None:
+    if chain.url.scheme == "https":
+        return {"sni_hostname": chain.url.host}
+    return None
+
+
 async def default_http_fetcher(
     url: NormalizedUrl,
     headers: dict[str, str],
@@ -54,37 +62,64 @@ async def default_http_fetcher(
     started = time.monotonic()
     timeout = Timeouts.for_request(timeout_seconds).as_httpx()
     async for chain, pinned_url, hop_headers in pinned_transport.apinned_hops(url, headers, pin=pin):
-        # Follow_redirects=False: we follow manually so each hop is SSRF-checked.
-        async with client.stream(
-            "GET", pinned_url, headers=hop_headers, timeout=timeout, follow_redirects=False
-        ) as response:
-            content_length = response.headers.get("content-length")
-            if pinned_transport.declared_length_exceeds(content_length, max_content_length):
+        terminal = await _stream_terminal_hop(
+            client,
+            chain=chain,
+            url=url,
+            pinned_url=pinned_url,
+            hop_headers=hop_headers,
+            timeout=timeout,
+            max_content_length=max_content_length,
+            started=started,
+        )
+        if terminal is None:
+            continue
+        return terminal
+    raise AssertionError("apinned_hops raises on a body that neither returned nor advanced")
+
+
+async def _stream_terminal_hop(
+    client,
+    *,
+    chain,
+    url,
+    pinned_url,
+    hop_headers,
+    timeout,
+    max_content_length,
+    started,
+) -> HttpFetchResult | None:
+    """Send one SSRF-pinned hop and return its terminal result, or None when the
+    hop is a redirect asking for another (re-pinned) request."""
+    async with client.stream(
+        "GET",
+        pinned_url,
+        headers=hop_headers,
+        timeout=timeout,
+        follow_redirects=False,
+        extensions=_sni_extensions(chain),
+    ) as response:
+        content_length = response.headers.get("content-length")
+        if pinned_transport.declared_length_exceeds(content_length, max_content_length):
+            return http_413(url, chain.url, started)
+        status_code = response.status_code
+        if chain.advance(response):
+            return None
+        raw = bytearray()
+        async for chunk in response.aiter_raw():
+            raw.extend(chunk)
+            if len(raw) > max_content_length:
                 return http_413(url, chain.url, started)
-            status_code = response.status_code
-            if chain.advance(response):
-                continue
-            # Terminal response: stream RAW bytes with a cap; a non-2xx takes the
-            # same loop, since raise_for_status is never called out of stream().
-            raw = bytearray()
-            async for chunk in response.aiter_raw():
-                raw.extend(chunk)
-                if len(raw) > max_content_length:
-                    return http_413(url, chain.url, started)
-            final_url = chain.url
-            response_headers = response.headers
-        elapsed_ms = int((time.monotonic() - started) * 1000)
         return _finish_fetch(
             url=url,
-            final_url=final_url,
+            final_url=chain.url,
             status_code=status_code,
             raw=raw,
-            response_headers=response_headers,
+            response_headers=response.headers,
             max_content_length=max_content_length,
-            elapsed_ms=elapsed_ms,
-            too_large=functools.partial(http_413, url, final_url, started),
+            elapsed_ms=int((time.monotonic() - started) * 1000),
+            too_large=functools.partial(http_413, url, chain.url, started),
         )
-    raise AssertionError("apinned_hops raises on a body that neither returned nor advanced")
 
 
 def _finish_fetch(

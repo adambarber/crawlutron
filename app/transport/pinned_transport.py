@@ -115,13 +115,11 @@ def declared_length_exceeds(header_value: str | None, limit: int) -> bool:
 
 
 def build_pinned_request(url: NormalizedUrl, headers: dict[str, str]) -> tuple[str, dict[str, str]]:
-    """Build the pinned request for an admitted URL, in one step -- the sole owner
-    of the composition (IP blocklist, fresh pin, exact-IP plain-HTTP pin with
-    Host header preserved; HTTPS keeps the hostname for TLS SNI). Always pins; one place prevents drift.
+    """Build the pinned request for an admitted URL -- the sole owner of the
+    composition (IP blocklist, fresh pin, exact-IP connect with Host preserved).
+    Both schemes pin the connect to the validated IP; HTTPS SNI is kept by the caller.
     """
     check_ssrf_protection(url)
-    if url.scheme == "https":
-        return url.raw, dict(headers)
     _, pinned = resolve_and_pin_host(url)
     port = f":{url.port}" if url.port else ""
     # An IPv6 literal must be bracketed in a URL netloc or its colons
