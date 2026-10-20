@@ -16,9 +16,14 @@ from tests._policy_factories import canonical
 from tests._thread_fanout import run_thread_fanout
 
 
-def test_cookie_jar_is_locked():
-    # Concurrent access must be guarded by a lock.
-    assert hasattr(CookieJar(), "_lock")
+def test_cookie_jar_delegates_through_one_thread_safe_medium():
+    # The jar holds no lock of its own; the in-memory medium owns the single
+    # guard, so two nested locks would be redundant rather than safer.
+    jar = CookieJar()
+    assert hasattr(jar, "_inmemory")
+    from app.transport.cookie_store import InMemoryCookieStore
+
+    assert isinstance(jar._inmemory, InMemoryCookieStore)
 
 
 def test_save_to_file_is_atomic_on_failure():
@@ -94,7 +99,7 @@ def test_cookie_jar_evicts_oldest_host_past_cap():
     slots are LRU-bounded so every crawled host cannot accumulate forever."""
     cap = _cookie_jar_max_hosts()
     jar = _jar_with_hosts(cap + 5)
-    assert len(jar._cookies) == cap
+    assert len(jar._inmemory) == cap
     newest = cap + 4
     assert jar.cookie_header_for(canonical(f"http://host{newest}.example/")) == f"k=v{newest}"
 
@@ -107,7 +112,7 @@ def test_cookie_jar_read_refreshes_host_recency():
     assert jar.cookie_header_for(canonical("http://host0.example/")) == "k=v0"
     jar.add_cookie_header(canonical("http://fresh.example/"), "k=fresh; Path=/")
     assert jar.cookie_header_for(canonical("http://host0.example/")) == "k=v0"
-    assert len(jar._cookies) == cap
+    assert len(jar._inmemory) == cap
 
 
 class TestCookieJarHeaderHandling:

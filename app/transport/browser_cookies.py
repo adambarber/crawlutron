@@ -35,13 +35,12 @@ def _split_header(header: str) -> dict[str, str]:
 class _LockedDomainCookieStore:
     """Browser-harvest store: the in-memory medium at one implicit namespace."""
 
-    __slots__ = ("_store", "_lock")
+    __slots__ = ("_store",)
 
     def __init__(self, max_entries: int) -> None:
+        # The medium owns the lock discipline for every op; the wrapper holds no
+        # lock of its own (no delegating-lock alias to deadlock against).
         self._store = InMemoryCookieStore(max_hosts_per_namespace=max_entries)
-        # The single guard for every data op is the medium's own lock; this exposes
-        # that same lock so the concurrency probe never double-acquires it.
-        self._lock = self._store._lock
 
     def store(self, domain: str, header: str) -> None:
         self._store.put("", domain, _split_header(header))

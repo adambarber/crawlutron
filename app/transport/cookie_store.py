@@ -45,11 +45,13 @@ class InMemoryCookieStore:
             self._evict(key[0])
 
     def put(self, namespace: str, host: str, value: Mapping[str, str]) -> None:
-        """Replace the slot wholesale; a union would merge stale keys."""
+        """Replace the slot wholesale; a union would merge stale keys.
+        Re-storing a known host updates it in place without touching recency, matching
+        the plain-mapping semantics the browser path always had (no move-to-end).
+        """
         key = (namespace or "", host)
         with self._lock:
             self._data[key] = dict(value)
-            self._data.move_to_end(key)
             self._evict(key[0])
 
     def clear(self, namespace: str = "") -> None:
@@ -63,6 +65,13 @@ class InMemoryCookieStore:
     def __len__(self) -> int:
         with self._lock:
             return len(self._data)
+
+    def snapshot(self) -> dict[tuple[str, str], dict[str, str]]:
+        """A copied view of every slot, consistent under the store's lock.
+        The export/legacy path reads whole namespaces; a copy avoids holding the lock.
+        """
+        with self._lock:
+            return {key: dict(value) for key, value in self._data.items()}
 
     def _evict(self, namespace: str) -> None:
         stale = [key for key in self._data if key[0] == namespace]

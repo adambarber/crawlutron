@@ -7,8 +7,6 @@ from __future__ import annotations
 
 import contextvars
 import os
-import threading
-from collections import OrderedDict
 from typing import TYPE_CHECKING
 
 from app.models.normalized_url import NormalizedUrl
@@ -37,14 +35,9 @@ class CookieJar:
 
     def __init__(self, store: SharedCookieStore | None = None) -> None:
         self._store = store
-        # The process-local medium: per-namespace LRU over (namespace, host) slots.
+        # The process-local medium owns the lock discipline for every op; the
+        # jar holds no lock of its own (one thread-safe guard, never two).
         self._inmemory = InMemoryCookieStore(max_hosts_per_namespace=COOKIE_JAR_MAX_HOSTS_PER_NAMESPACE)
-        # The in-memory backing's mapping, exposed for lease/boundary probes; the
-        # store object owns the lock discipline this jar applies around it.
-        self._cookies: OrderedDict[tuple[str, str], dict[str, str]] = self._inmemory._data
-        # No per-namespace isolation is enforced here: callers opt in with a
-        # non-empty ``namespace``, and the shared default is preserved as-is.
-        self._lock = threading.Lock()
 
     @property
     def store(self) -> SharedCookieStore | None:
@@ -79,8 +72,7 @@ class CookieJar:
         if self._store is not None:
             self._store.merge(ns_key[0], ns_key[1], parsed)
             return
-        with self._lock:
-            self._inmemory.merge(ns_key[0], ns_key[1], parsed)
+        self._inmemory.merge(ns_key[0], ns_key[1], parsed)
 
     def cookie_header_for(self, url: NormalizedUrl, *, namespace: str = "") -> str:
         """Return a ``Cookie`` header string for the given URL's domain.
@@ -93,8 +85,7 @@ class CookieJar:
         if self._store is not None:
             domain_cookies = self._store.load(ns_key[0], ns_key[1])
         else:
-            with self._lock:
-                domain_cookies = self._inmemory.load(ns_key[0], ns_key[1])
+            domain_cookies = self._inmemory.load(ns_key[0], ns_key[1])
         if not domain_cookies:
             return ""
         return "; ".join(f"{key}={value}" for key, value in domain_cookies.items())
@@ -104,8 +95,7 @@ class CookieJar:
         if self._store is not None:
             self._store.clear(namespace or "")
             return
-        with self._lock:
-            self._inmemory.clear(namespace or "")
+        self._inmemory.clear(namespace or "")
 
     def export_to_file(self, path: str) -> None:
         """Write the jar's legacy shared namespace to a JSON file atomically --
@@ -127,8 +117,7 @@ class CookieJar:
             if self._store is not None:
                 self._store.merge("", host, cookies)
                 continue
-            with self._lock:
-                self._inmemory.merge("", host, cookies)
+            self._inmemory.merge("", host, cookies)
 
     @classmethod
     def import_from_file(cls, path: str) -> CookieJar:
@@ -145,8 +134,7 @@ class CookieJar:
         if self._store is not None:
             slots = self._store.all_slots()
             return {host: cookies for (ns, host), cookies in slots.items() if not ns}
-        with self._lock:
-            return {host: dict(cookies) for (ns, host), cookies in self._cookies.items() if not ns}
+        return {host: dict(cookies) for (ns, host), cookies in self._inmemory.snapshot().items() if not ns}
 
     @staticmethod
     def _read_legacy_file(path: str) -> dict[str, dict[str, str]]:
@@ -195,5 +183,5 @@ def reset_process_state() -> None:
 def has_process_state() -> bool:
     """Whether the jar holds a cookie, or a request namespace is still selected."""
     # Not ``bool(_GLOBAL_COOKIE_JAR)``: the jar defines no ``__len__`` or
-    # ``__bool__``, so truthiness is constant True; this reads its cookie mapping.
-    return bool(_GLOBAL_COOKIE_JAR._cookies) or COOKIE_NAMESPACE.get() != ""
+    # ``__bool__``, so truthiness is constant True; ask the medium instead.
+    return len(_GLOBAL_COOKIE_JAR._inmemory) > 0 or COOKIE_NAMESPACE.get() != ""
