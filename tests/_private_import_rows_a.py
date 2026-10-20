@@ -24,10 +24,5 @@ DECLARED: dict[str, Declaration] = {
     "app.transport.browser_pool.BrowserPool._pool_size": _INSTANCE_STATE,
     "app.transport.browser_pool.BrowserPool._renderers": _INSTANCE_STATE,
     "app.transport.cache.HttpCache._data": _INSTANCE_STATE,
-    "app.runtime.memory_pressure.MemoryGate._lag_probe": _INSTANCE_STATE,
-    "app.runtime.resource_pressure.LoopLagProbe._lag": _INSTANCE_STATE,
-    "app.runtime.resource_pressure.LoopLagProbe._task": _INSTANCE_STATE,
-    "app.runtime.resource_pressure.ResourceGate._lag_probe": _INSTANCE_STATE,
-    "app.runtime.resource_pressure.WeightedAdmission._p": _INSTANCE_STATE,
     "app.storage.job_store.JobStore._conn": _INSTANCE_STATE,
 }

@@ -1,10 +1,13 @@
 """Resource gauge: cgroup reads, cached utilization, leading memory signal and loop-lag probe."""
 
+import asyncio
+
 import pytest
 
 from app.runtime.cgroup_sense import read_int, reset_process_state
 from app.runtime.memory_pressure import MemoryGate, ResourceGauge
-from app.runtime.resource_pressure import LoopLagProbe, ResourceGate
+from app.runtime.resource_pressure import LoopLagProbe
+from tests._lag_scheduling import lag_clock, scripted_sleep
 
 
 def _sensor(sequence: list[float]):
@@ -104,21 +107,37 @@ def test_leading_memory_signal_anticipates_climb(tmp_path, monkeypatch):
     assert 0.0 <= scale_early <= 1.0
 
 
-def test_loop_lag_probe_factor_ramps_to_zero():
-    probe = LoopLagProbe(ok_threshold=0.05, hard_threshold=0.30)
-    probe._lag = 0.0
-    assert probe.factor() == 1.0
-    probe._lag = 0.30
-    assert probe.factor() == 0.0
-    probe._lag = 0.175  # midpoint -> ~0.5
-    assert abs(probe.factor() - 0.5) < 1e-6
+@pytest.mark.parametrize("lag,expected", [(0.0, 1.0), (0.30, 0.0), (0.175, 0.5)])
+async def test_loop_lag_probe_factor_ramps_to_zero(lag, expected):
+    """The probe's scale factor ramps 1.0 -> 0.0 as observed lag rises past ok."""
+    probe = LoopLagProbe(
+        interval=0.05,
+        ok_threshold=0.05,
+        hard_threshold=0.30,
+        smoothing=1.0,
+        clock=lag_clock(lag),
+        sleep=scripted_sleep,
+    )
+    probe.start()
+    try:
+        for _ in range(30):
+            await asyncio.sleep(0)
+        assert probe.get() == pytest.approx(lag, abs=lag * 0.2 + 1e-9)
+        assert probe.factor() == pytest.approx(expected, abs=1e-6)
+    finally:
+        probe.stop()
 
 
-async def test_resource_gate_folds_loop_lag_into_scale(monkeypatch):
-    gate = ResourceGate(memory_ratio=lambda: 0.0, cpu_ratio=lambda: 0.0)
-    # No lag -> full scale.
-    gate._lag_probe._lag = 0.0
-    assert gate.batch_scale_factor() == 1.0
-    # Saturated loop -> full throttle.
-    gate._lag_probe._lag = 0.30
-    assert gate.batch_scale_factor() == 0.0
+async def test_resource_gate_folds_loop_lag_into_scale():
+    from tests._lag_scheduling import lagged_gate
+
+    gate = lagged_gate(lag=0.30)
+    gate.start_lag_probe()
+    try:
+        for _ in range(30):
+            await asyncio.sleep(0)
+        # No lag -> full scale, saturated loop -> full throttle: the fold is the
+        # observable via batch_scale_factor(), not the probe internals.
+        assert gate.batch_scale_factor() == pytest.approx(0.0, abs=0.01)
+    finally:
+        gate.close()

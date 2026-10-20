@@ -4,18 +4,19 @@ startup is explicit once lifespan runs a loop.
 """
 
 import asyncio
-import itertools
 
 import pytest
 
 import app.runtime.pressure_probes as rp
-from app.runtime.resource_pressure import LoopLagProbe, ResourceGate
+from app.runtime.resource_pressure import LoopLagProbe
+from tests._lag_scheduling import lag_clock, lagged_gate, scripted_sleep
 
 
 def test_probe_does_not_start_without_running_loop():
-    probe = LoopLagProbe()
+    # A scripted laggy clock would report 0.30 of lag IF a sampler ever ran; on a
+    # no-loop ``start()`` it never does, so the baseline stays untouched.
+    probe = LoopLagProbe(interval=0.05, smoothing=1.0, clock=lag_clock(0.30), sleep=scripted_sleep)
     probe.start()
-    assert probe._task is None
     assert probe.get() == 0.0
 
 
@@ -31,22 +32,34 @@ def test_loop_lag_probe_flag_accepts_shared_bool_spellings(monkeypatch):
 
 
 def test_gate_construction_never_starts_probe():
-    gate = ResourceGate(lag_probe_enabled=True)
-    assert gate._lag_probe._task is None
+    # An enabled probe is built but not started by the constructor; even with a
+    # delay clock that would throttle once sampling, no lag is applied.
+    gate = lagged_gate(lag=0.30)
+    assert gate.batch_scale_factor() == 1.0
 
 
 async def test_gate_probe_starts_explicitly_on_running_loop():
-    gate = ResourceGate(lag_probe_enabled=True)
+    gate = lagged_gate(lag=0.30)
+    # Not started at construction: no throttle yet.
+    assert gate.batch_scale_factor() == 1.0
     gate.start_lag_probe()
     try:
-        task = gate._lag_probe._task
-        assert task is not None and not task.done()
-        # Idempotent: a second start reuses the running task.
+        for _ in range(30):
+            await asyncio.sleep(0)
+        # Idempotent: a second start reuses the running sampler, so the factor
+        # keeps reflecting one lag reading (0.30 -> full throttle), not doubled.
         gate.start_lag_probe()
-        assert gate._lag_probe._task is task
+        for _ in range(30):
+            await asyncio.sleep(0)
+        assert gate.batch_scale_factor() == pytest.approx(0.0, abs=0.01)
     finally:
         gate.close()
-    assert gate._lag_probe._task is None
+    # After close() the sampler stops: further would-be samples never change the
+    # throttle -- the scale is frozen at its last settled value.
+    settled = gate.batch_scale_factor()
+    for _ in range(30):
+        await asyncio.sleep(0)
+    assert gate.batch_scale_factor() == settled
 
 
 @pytest.mark.parametrize("overshoot", [0.0, 0.25, 0.9])
@@ -56,20 +69,12 @@ async def test_probe_reports_the_overshoot_it_observed(monkeypatch, overshoot):
     interval and the interval itself never appears -- ``smoothing=1.0`` lets the newest sample win.
     """
     interval = 0.1
-    step = interval + overshoot
-    calls = itertools.count()
-
-    # Each clock read advances the scripted time by ``step``, so the probe's
-    # two reads per iteration span ``interval + overshoot``: lag reads as the overshoot.
-    def scripted_clock() -> float:
-        return next(calls) * step
-
-    async def scripted_sleep(seconds: float) -> None:
-        # Yield once; the scripted clock supplies the elapsed reading.
-        await asyncio.sleep(0)
-        del seconds
-
-    probe = LoopLagProbe(interval=interval, smoothing=1.0, clock=scripted_clock, sleep=scripted_sleep)
+    probe = LoopLagProbe(
+        interval=interval,
+        smoothing=1.0,
+        clock=lag_clock(overshoot, interval=interval),
+        sleep=scripted_sleep,
+    )
     probe.start()
     try:
         for _ in range(20):

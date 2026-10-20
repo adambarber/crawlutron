@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import time
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 from app.runtime.memory_pressure import MemoryGate, ResourceGauge
@@ -130,6 +130,8 @@ class ResourceGate:
         memory_ratio: Callable[[], float] | None = None,
         cpu_ratio: Callable[[], float] | None = None,
         lag_probe_enabled: bool = LOOP_LAG_PROBE_ENABLED,
+        lag_probe_clock: Callable[[], float] | None = None,
+        lag_probe_sleep: Callable[[float], Awaitable[None]] | None = None,
     ):
         self.memory = MemoryGate(
             target=target_mem,
@@ -151,7 +153,10 @@ class ResourceGate:
         self._poll_seconds = poll_seconds
         # Opt-in throttle signal (module probe above); injected, not global, so
         # a test can enable it without rebinding a name the whole tree reads.
-        self._lag_probe = LoopLagProbe()
+        self._lag_probe = LoopLagProbe(
+            clock=lag_probe_clock or time.monotonic,
+            sleep=lag_probe_sleep or asyncio.sleep,
+        )
         self._lag_probe_enabled = lag_probe_enabled
 
     def start_lag_probe(self) -> None:
