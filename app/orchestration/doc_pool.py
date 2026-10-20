@@ -11,10 +11,12 @@ import threading
 import time
 from collections.abc import Callable
 from contextlib import suppress
+from typing import TYPE_CHECKING
 
 from markitdown import MarkItDown
 
 from app.config.env import parse_bool_env
+from app.orchestration.pool import SyncPool
 
 logger = logging.getLogger(__name__)
 
@@ -283,3 +285,11 @@ class DocExtractionPool:
         """How many slots the pool holds (none before the first acquisition)."""
         with self._lock:
             return len(self._slots or [])
+
+
+if TYPE_CHECKING:
+    # Static conformance, checked by mypy (the type gate): DocExtractionPool must
+    # satisfy SyncPool[DocWorker]. A drift in acquire/release/__len__ fails the gate.
+    _DOC_POOL_IS_A_SYNC_POOL: SyncPool[DocWorker] = DocExtractionPool(
+        worker_count=lambda: 1, enabled=lambda: True
+    )

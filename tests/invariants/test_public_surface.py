@@ -57,8 +57,9 @@ _OWNER_PUBLIC_SURFACE_RATCHET = {
     # added since the list was pinned (these prune handlers/helpers via __all__).
     "app/api/keys_router.py": (4, 3),
     "app/api/crawl_endpoint.py": (4, 4),
-    # #127 consolidation: one shared pool protocol, a single declared surface.
-    "app/orchestration/pool.py": (1, 1),
+    # #127: the pool concept splits on a real async/sync axis -- AsyncPool for
+    # BrowserPool, SyncPool for DocExtractionPool -- so the surface is two protocols.
+    "app/orchestration/pool.py": (2, 2),
 }
 
 

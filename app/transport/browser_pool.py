@@ -10,12 +10,13 @@ import asyncio
 import logging
 import time
 from dataclasses import replace
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from app.config.settings import CrawlerSettings
 from app.models.browser_pool_exhausted import BrowserPoolExhaustedError
 from app.models.crawl_result import CrawlResult
 from app.models.taxonomy import CrawlStrategyName
+from app.orchestration.pool import AsyncPool
 from app.orchestration.results import crawl_result_from_exception
 from app.runtime.resource_pressure import (
     BROWSER_RAM_FRACTION,
@@ -101,18 +102,18 @@ class BrowserPool:
         logger.debug("browser_pool_acquired", extra={"available": self._available.qsize()})
         return renderer
 
-    def release(self, renderer: BrowserRenderer) -> None:
+    def release(self, worker: BrowserRenderer) -> None:
         """Return a renderer to the pool, unless its generation was retired: one
         closed by ``close`` during checkout would otherwise re-enter the queue for
         the next acquire -- dropped here, the only place that can reintroduce it.
         """
-        if not self._initialized or not any(r is renderer for r in self._renderers):
+        if not self._initialized or not any(r is worker for r in self._renderers):
             logger.debug(
                 "browser_pool_release_retired",
                 extra={"initialized": self._initialized, "available": self._available.qsize()},
             )
             return
-        self._available.put_nowait(renderer)
+        self._available.put_nowait(worker)
         logger.debug("browser_pool_released", extra={"available": self._available.qsize()})
 
     async def close(self) -> None:
@@ -154,6 +155,12 @@ class BrowserPool:
         if warmup:
             return BROWSER_HEADED_WARMED
         return BROWSER_HEADLESS
+
+
+if TYPE_CHECKING:
+    # Static conformance, checked by mypy (the type gate): BrowserPool must satisfy
+    # AsyncPool[BrowserRenderer]. A drift in acquire/release/__len__ fails the gate.
+    _BROWSER_POOL_IS_AN_ASYNC_POOL: AsyncPool[BrowserRenderer] = BrowserPool(pool_size=1)
 
 
 _BROWSER_STRATEGIES: frozenset[CrawlStrategyName] = frozenset({BROWSER_HEADLESS, BROWSER_HEADED_WARMED})
