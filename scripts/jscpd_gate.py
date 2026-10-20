@@ -23,6 +23,10 @@ PROFILE_PATHS = resolver.PROFILE_PATHS
 SANCTIONED_IGNORE_GLOBS = resolver.SANCTIONED_IGNORE_GLOBS
 SERVICE_ROOT = resolver.SERVICE_ROOT
 TREE_ROOTS = resolver.TREE_ROOTS
+# jscpd_report is the ONE invocation of jscpd; the sweep feeds it a root and a
+# floor and gets back the parsed report, so it is part of the contract surface
+# rather than a resolver detail.
+jscpd_report = resolver.jscpd_report
 
 
 def configured_floor() -> tuple[int, int, float]:
@@ -74,6 +78,7 @@ __all__ = [
     "SANCTIONED_IGNORE_GLOBS",
     "SERVICE_ROOT",
     "TREE_ROOTS",
+    "jscpd_report",
 ]
 
 MIN_SOURCES = {"all": 200}

@@ -137,7 +137,7 @@ def _validate_scan_config(path: Path) -> None:
         raise ValueError(
             f"{path.name} ignore list is not the sanctioned set "
             f"(added={added}, removed={removed}); the sanctioned globs live in "
-            f"_jscpd_gate.SANCTIONED_IGNORE_GLOBS"
+            f"jscpd_gate.SANCTIONED_IGNORE_GLOBS"
         )
 
 

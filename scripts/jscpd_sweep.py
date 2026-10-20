@@ -203,6 +203,8 @@ def main() -> int:
     parser.add_argument("--json", type=Path, help="write the raw sweep here")
     args = parser.parse_args()
 
+    current_lines, current_tokens, _ = gate.configured_floor()
+
     results = sweep(args.min_lines, args.max_lines, args.min_tokens, args.max_tokens)
     floors = sorted(results)
     roots = sorted(results[floors[0]])
@@ -210,7 +212,7 @@ def main() -> int:
     print(f"jscpd frontier sweep  roots={roots}")
     print(
         f"floors: {args.min_lines}/{args.min_tokens} .. "
-        "{args.max_lines}/{args.max_tokens}  ({len(floors)} runs per root)\n"
+        f"{args.max_lines}/{args.max_tokens}  ({len(floors)} runs per root)\n"
     )
 
     print("PAIRS PER FLOOR")
@@ -246,7 +248,7 @@ def main() -> int:
     print(f"  {'floor':>6} | {'total':>6} {'logic':>6} {'preamble':>9} {'logic%':>7} {'logic tokens':>13}")
     tipping = []
     for floor in floors:
-        if floor[0] != 4:
+        if floor[0] != current_lines:
             continue
         pairs = _all(results[floor])
         kinds = [(duplicate, classify(duplicate.get("fragment", ""))) for duplicate in pairs]
@@ -255,7 +257,7 @@ def main() -> int:
         share = len(logic) / len(pairs) * 100 if pairs else 0.0
         print(
             f"  {floor[0]:>2}/{floor[1]:<3} | {len(pairs):>6} "
-            "{len(logic):>6} {len(pairs) - len(logic):>9} {share:>6.0f}% {mass:>13}"
+            f"{len(logic):>6} {len(pairs) - len(logic):>9} {share:>6.0f}% {mass:>13}"
         )
         tipping.append((floor[1], len(logic), share, mass))
     print("\n  the tipping point is the highest token floor at which logic still outnumbers preamble")
@@ -280,8 +282,8 @@ def main() -> int:
             break
         print(f"  {count:>4} pairs  app/{name}")
 
-    print("\nAT THE CURRENT FLOOR (4/39), and at 2/20, what is left")
-    for floor in ((4, 39), (2, 20)):
+    print(f"\nAT THE CURRENT FLOOR ({current_lines}/{current_tokens}), and at 2/20, what is left")
+    for floor in ((current_lines, current_tokens), (2, 20)):
         if floor not in results:
             continue
         pairs = _all(results[floor])
