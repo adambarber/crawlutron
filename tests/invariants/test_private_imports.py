@@ -1,7 +1,7 @@
-"""The suite reaches an ``app`` module through a public name, or through the ledger.
+"""The suite reaches an ``app`` module only through a public name.
 
-43 of the 49 structural commits that moved ``app/`` also moved ``tests/``; a
-private import reports no public door, and only a declared row admits one."""
+A private name is the owner's seam; a test that needs a name the module does not
+make public is asking the module to widen its promise, not a reach to excuse."""
 
 from __future__ import annotations
 
@@ -20,7 +20,6 @@ from tests.chokepoint_walks import (
     resolved_expr_name,
     trees_under,
 )
-from tests.private_import_ledger import DECLARED as LEDGER
 from tests.rules import Registry, Rule
 
 _TESTS_DIR = REPO_ROOT / "tests"
@@ -139,18 +138,17 @@ def _undeclared_private_import_offenders(tree: ast.Module, path: pathlib.Path) -
     relative = relative_posix(path)
     where = " (harness owner)" if path.name == _LIFECYCLE_OWNER else ""
     return [
-        f"{relative}{where}:{lineno}: {key} is a private app name with no ledger row"
+        f"{relative}{where}:{lineno}: {key} is a private app name with no public door"
         for key, lineno in sorted(_private_app_names(tree).items())
-        if key not in LEDGER
     ]
 
 
 PRIVATE_IMPORT_LEDGER = Rule(
-    name="the-suite-imports-only-public-or-declared-app-names",
+    name="the-suite-imports-only-public-app-names",
     find=_undeclared_private_import_offenders,
     summary=(
-        "imports a private app name that the ledger does not declare; give the module a public "
-        "surface, or record the name in tests/private_import_ledger.py with its kind and reason"
+        "imports a private app name; a private name is the owner's seam, so the test needs a "
+        "public door through the module's own surface"
     ),
     scope=lambda *, exclude: trees_under(_TESTS_DIR),
     bite=lambda: (
@@ -172,12 +170,12 @@ PRIVATE_IMPORT_LEDGER = Rule(
         'import pytest\n\nmonkeypatch.setattr("app.api.job_runner._undeclared_probe", lambda: None)\n',
     ),
     clean=lambda: (
-        # A public name needs no ledger row -- that is the whole point of the fix.
+        # A public name is the whole point -- it carries no exemption.
         "from app.orchestration.engine import crawl_request\n",
-        # A declared lifecycle weld is allowed, and says why.
+        # The doc-extraction executor's public teardown is callable.
         "from app.extraction.content import shutdown_doc_extraction_executor\n",
         # A name from outside app/ is not this rule's business.
-        "from tests.private_import_ledger import LEDGER\n",
+        "from app.models.crawl_result import EngineCrawlResult\n",
         # A public name through a bound module object is the same name publicly, so it needs no row either.
         "import app.extraction.content as extraction\n\nvalue = extraction.extract_content\n",
         # And the same exemption for the string form: a private name on a *test* module, patched by string, is
@@ -203,26 +201,11 @@ def test_no_rule_violations():
 
 
 def test_every_rule_bites():
-    """A ledger gate that can only fire is indistinguishable from no gate.
+    """A gate that can only fire is indistinguishable from no gate.
 
-    Both directions proved: an undeclared private import bites; a public name,
-    a declared row and a non-``app`` module stay clean."""
+    Both directions proved: a private import bites; a public name
+    and a non-``app`` module stay clean."""
     RULES.check_all_bite()
-
-
-def test_ledger_rows_all_correspond_to_a_real_import():
-    """A row the suite no longer imports is a lie about the code.
-
-    Names are verified both ways every run, so only a reason can drift;
-    otherwise a deleted row lingers as debt and the ledger grows a false floor."""
-    actual: set[str] = set()
-    for _, tree in trees_under(_TESTS_DIR):
-        actual |= set(_private_app_names(tree))
-    stale = sorted(key for key, dec in LEDGER.items() if "test" in dec.side and key not in actual)
-    assert not stale, (
-        f"{len(stale)} ledger row(s) name a private import the suite no longer makes; "
-        f"delete them: {', '.join(stale)}"
-    )
 
 
 # --------------------------------------------------------------------------- app/ reaching into app/
@@ -267,7 +250,6 @@ def _cross_module_private_offenders(tree: ast.Module, path: pathlib.Path) -> lis
     return [
         f"{relative_posix(path)}:{lineno}: {key} is private to another module"
         for key, lineno in sorted(_cross_module_private_names(tree, path).items())
-        if key not in LEDGER
     ]
 
 
@@ -291,7 +273,7 @@ APP_PRIVATE_WELDS = Rule(
         "from app.transport import body_decode\n\ntext = body_decode.decode_body\n",
         # A module's own private name is what private means.
         "def helper():\n    return _internal_step()\n",
-        # A declared lifecycle drain.
+        # A cross-module PUBLIC call (drain is this module's public door).
         "from app.transport import pooled_clients as pool\n\npool.drain_pending_client_closes()\n",
         # A from-import of a PUBLIC name is not a weld.
         "from app.transport.http_cache import is_expired\n",
@@ -305,23 +287,22 @@ _SCRIPTS_DIR = REPO_ROOT / "scripts"
 
 
 def _scripts_private_import_offenders(tree: ast.Module, path: pathlib.Path) -> list[str]:
-    """Every private ``app`` name a ``scripts`` module reaches, unledgered.
+    """Every private ``app`` name a ``scripts`` module reaches.
 
     Same rule of thumb as the test tree: a helper reaching into an ``app``
-    private is a weld that needs declaring, and scripts/ was outside this gate."""
+    private is a weld that needs a public door, and scripts/ was outside this gate."""
     return [
-        f"{relative_posix(path)}:{lineno}: {key} is a private app name with no ledger row"
+        f"{relative_posix(path)}:{lineno}: {key} is a private app name with no public door"
         for key, lineno in sorted(_private_app_names(tree).items())
-        if key not in LEDGER
     ]
 
 
 SCRIPTS_PRIVATE_IMPORTS = Rule(
-    name="scripts-reach-app-through-public-or-declared-names",
+    name="scripts-reach-app-through-public-names",
     find=_scripts_private_import_offenders,
     summary=(
-        "a scripts/ module reaches an app private name the ledger does not declare; "
-        "give the app module a public door or record the name in the private_import_ledger"
+        "a scripts/ module reaches an app private name; the app module should expose "
+        "a public door for a caller outside its package"
     ),
     scope=lambda *, exclude: trees_under(_SCRIPTS_DIR),
     bite=lambda: (
@@ -349,24 +330,14 @@ def test_scripts_reach_no_undeclared_private_app_name():
 
 def test_scripts_weld_rule_bites():
     """The H1 reach: a scripts/ private app import fires instead of passing silently.
+
     scripts/ was outside every private-import rule; a helper importing an app
-    private went unledgered. The bite proves the rule now sweeps the scripts tree."""
+    private went unseen. The bite proves the rule now sweeps the scripts tree."""
     SCRIPTS_RULES.check_all_bite()
 
 
 def test_app_weld_rule_bites():
     APP_RULES.check_all_bite()
-
-
-def test_app_weld_rows_all_correspond_to_a_real_reach():
-    """Same both-directions guard as the test-side ledger, for the same reason."""
-    actual: set[str] = set()
-    for path, tree in trees_under(_APP_DIR):
-        actual |= set(_cross_module_private_names(tree, path))
-    stale = sorted(key for key, dec in LEDGER.items() if "app" in dec.side and key not in actual)
-    assert not stale, (
-        f"{len(stale)} app weld row(s) name a reach that no longer happens; delete them: {', '.join(stale)}"
-    )
 
 
 # --------------------------------------------------------------------------- the harness reaches through a

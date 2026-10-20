@@ -16,21 +16,16 @@ whole tree without a hand-maintained exception list, table, or ledger row.
 | block length | same | 11 | 0 |
 | typing: undeclared records | tests/test_typing_budget.py `_BUDGETS` | 204 | 0 |
 
-## 2. Private-import ledger (15 rows, each a sanctioned weld)
+## 2. Private-import ledger — ELIMINATED (2026-10-20, #190)
 
-tests/_private_import_rows_a.py (11) + _private_import_rows_b.py (4).
-
-- SEMAPHORE (#191): `_build_async_crawl_semaphore`, `_async_crawl_semaphore`,
-  `_async_crawl_semaphore_loop` — own the state in the runner.
-- CHOKEPOINT_STATE (whole-suite state): `job_lifecycle._tasks`,
-  `job_store._Expected`, `registrable_domain._PSL`.
-- LIFECYCLE (app-side weld): `pooled_clients._drain_pending_client_closes`.
-- SUBSTITUTED_COLLABORATOR (network/process seams): `fetchers._release_stream_noblock`.
-- SUBSTITUTED_CAP (config caps): `sqlite_store._BUSY_TIMEOUT_MS`,
-  `sqlite_store._WAL_RETRY_SECONDS`.
-- UNREVIEWED: `pinned_transport._http_413` (app), `robots._RobotsPathMatcher`,
-  `robots._robots_pattern_to_regex`, `_remember_memory_locked`,
-  `BROWSER_COOKIES_BY_DOMAIN._lock`, `main._dependencies`.
+A uniform private-import wait-list once held every sanctioned reach (row tables
+in tests/ feeding a `Kind`/`Declaration` shape with a both-ways correspondence
+gate). Every row was resolved by design -- ownership moves and genuine-API
+promotions, never test-accommodation -- so the ledger fell to zero. The row
+tables, the `Kind` union, the `Declaration` type and the two correspondence tests
+were deleted with the last row. What remains is enforcement only: the
+app-to-app cross-module weld detector, the suite/scripts private-name detector,
+and the conftest door detector all still bite, now with zero exemptions.
 
 ## 3. Rule-level skip/excludes lists
 
@@ -66,7 +61,7 @@ reason" shape.
 1. **Metrics gate → zero** (function length 30, abc 5, block 11 are counts;
    largest class 369) — one agent does the whole file plus class split.
 2. **Typing budget 204 → 0** — substantive type work, one agent.
-3. **Private-import ledger 15 → 0** — promote/dehome per row (see #190/#191).
+3. **Private-import ledger — done** (machinery + rows removed in #190).
 4. **Docstring budget 1677 → 0** — large mechanical wave, agent per tree.
 5. **Rule skip/excludes listed above** — structural encoding per list.
 6. **safe_regex / validation.py / bounds owners** — fold the sanctioned file
