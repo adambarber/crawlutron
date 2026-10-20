@@ -22,6 +22,7 @@ from app.models.normalized_url import NormalizedUrl
 from app.orchestration.admission_stall import AdmissionStallGuard, crawl_batches
 from app.orchestration.results import failed_result_for
 from app.orchestration.scheduler import DomainScheduler
+from app.orchestration.spill_sink import _SpillSink
 from app.runtime.metrics import MetricsStore, get_metrics
 from app.runtime.resource_pressure import (
     ResourceGate,
@@ -41,11 +42,6 @@ MAX_TRANSIENT_REQUEUES = 3
 # One admitted item as it flows down the pipeline: (depth, task), named once so every
 # stage boundary states the shape by reference instead of re-spelling it.
 type _Admitted = tuple[int, CrawlTask]
-
-
-#: The spill a run writes results to -- typed (#193) so a sink must accept ``(index, result)``.
-class _SpillSink(Protocol):
-    def write(self, index: int, result: EngineCrawlResult) -> Awaitable[None] | None: ...
 
 
 class _BatchState(Protocol):

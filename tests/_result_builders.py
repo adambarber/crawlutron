@@ -196,6 +196,10 @@ class Spill:
     def load_ordered(self) -> list[Any]:
         return [self.writes[i] for i in sorted(self.writes)]
 
+    def close(self) -> None:
+        """A spill is closable; a no-op here, the writes are already held in RAM."""
+        return None
+
 
 def _link(url: str, source_url: str, *, normalized: str | None = None) -> DiscoveredLink:
     """A discovered link as the record the engine carries.

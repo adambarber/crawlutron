@@ -6,7 +6,7 @@ import asyncio
 import functools
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field, replace
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from app.admission.admission import normalize_sitemap_candidates
 from app.admission.admission_links import gather_robots_decisions
@@ -32,6 +32,7 @@ from app.orchestration.results import (
 )
 from app.orchestration.robots import FetchAndDecode
 from app.orchestration.scheduler import DomainScheduler
+from app.orchestration.spill_sink import _SpillSink
 from app.orchestration.strategy_chain import execute_crawl_chain
 from app.runtime.memory_pressure import read_memory_stats
 from app.runtime.resource_pressure import (
@@ -48,11 +49,14 @@ from app.storage.ids import new_request_id
 from app.transport.cache import HttpCache
 from app.transport.content_cache import ContentCache
 
+if TYPE_CHECKING:
+    from app.models.http_fetcher import HttpFetcher
+
 
 @dataclass(frozen=True)
 class _PipelineDependencies:
     get_content_cache: Callable[[], ContentCache]
-    make_spill: Callable[[str | None], Any]
+    make_spill: Callable[[str | None], _SpillSink]
     compile_scope_regex_safe: Callable[[str | None], BoundedPattern | None]
     stale_seeds: Callable[[Iterable[tuple[NormalizedUrl, str | None]], Any, CrawlPolicy], set[NormalizedUrl]]
     fetch_and_decode: FetchAndDecode | None
@@ -66,8 +70,8 @@ class _PipelineState:
     settings: CrawlerSettings
     urls: list[str]
     policy: CrawlPolicy
-    fetcher: Any
-    cffi: Any
+    fetcher: HttpFetcher
+    cffi: HttpFetcher
     host_policy: HostPolicy
     shutdown_event: asyncio.Event
     browser_worker: CrawlWorker | None
@@ -86,7 +90,7 @@ class _PipelineState:
     want_document_bodies: bool = False
     scope_pattern: BoundedPattern | None = None
     discovery: DiscoveryFlags = DiscoveryFlags(False, False, False)
-    spill: Any = None
+    spill: _SpillSink | None = None
 
 
 def _build_jobs(state: _PipelineState) -> list[CrawlTask]:
@@ -366,6 +370,8 @@ async def _run_recursive(state: _PipelineState) -> None:
 
 
 async def _response(state: _PipelineState) -> ProducerEnvelope:
+    if state.spill is None:
+        raise TypeError("spill must be set before the response is assembled")
     response: ProducerEnvelope = {
         "request_id": new_request_id(),
         "submitted_count": len(state.urls),
@@ -401,7 +407,8 @@ async def _run(state: _PipelineState) -> ProducerEnvelope:
     finally:
         # The spill must release its lock on the WHOLE body, not only response
         # assembly (#221); #337 had covered just the _response arm.
-        state.spill.close()
+        if state.spill is not None:
+            state.spill.close()
     return response
 
 

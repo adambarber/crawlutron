@@ -14,6 +14,13 @@ def test_spill_load_ordered_rebuilds_in_one_pass():
     for path, tree in app_trees():
         for node in ast.walk(tree):
             if isinstance(node, ast.FunctionDef) and node.name == "load_ordered" and "spill" in str(path):
+                # A Protocol ``...`` stub declares the shape, it does not implement it.
+                if (
+                    len(node.body) == 1
+                    and isinstance(node.body[0], ast.Expr)
+                    and isinstance(node.body[0].value, ast.Constant)
+                ):
+                    continue
                 slots_seen = 0
                 for child in ast.walk(node):
                     if (
