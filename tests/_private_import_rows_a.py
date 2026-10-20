@@ -33,8 +33,15 @@ DECLARED: dict[str, Declaration] = {
         " boundary.\n",
         ["test"],
     ),
-    "app.transport.browser_cookies.BROWSER_COOKIES_BY_DOMAIN._lock": _d(
-        _CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]
+    "app.transport.browser_cookies.BROWSER_COOKIES_BY_DOMAIN._store": _d(
+        "private state",
+        "#123: probe inspects the medium the process-global browser store shares with the jar.",
+        ["test"],
+    ),
+    "app.transport.browser_cookies.BROWSER_COOKIES_BY_DOMAIN._store._lock": _d(
+        "private state",
+        "#123: the concurrency probe swaps the medium's lock for a recording double.",
+        ["test"],
     ),
     "app.storage.job_store._Expected": _d(_CHOKEPOINT_STATE.kind, _CHOKEPOINT_STATE.reason, ["test"]),
     "app.orchestration.robots._RobotsPathMatcher": _d(

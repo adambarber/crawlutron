@@ -3,11 +3,10 @@
 from __future__ import annotations
 
 import logging
-import threading
-from collections import OrderedDict
 from typing import Any
 
 from app.models.normalized_url import NormalizedUrl
+from app.transport.cookie_store import InMemoryCookieStore
 
 logger = logging.getLogger(__name__)
 
@@ -23,54 +22,41 @@ __all__ = [
 BROWSER_COOKIES_MAX = 500
 
 
+def _split_header(header: str) -> dict[str, str]:
+    """The name->value mapping a coalesced HTTP ``Cookie`` header holds."""
+    parsed: dict[str, str] = {}
+    for part in header.split(";"):
+        name, _, value = part.partition("=")
+        if name.strip():
+            parsed[name.strip()] = value.strip()
+    return parsed
+
+
 class _LockedDomainCookieStore:
-    """LRU cookie store whose every read and mutation is internally guarded.
+    """Browser-harvest store: the in-memory medium at one implicit namespace."""
 
-    Module-global and concurrent (render writes while the engine reads), so every op holds
-    ``_lock`` whole-duration; no container protocol (a ``MutableMapping`` once promised 10 dead methods).
-    """
-
-    __slots__ = ("_data", "_lock", "_max_entries")
+    __slots__ = ("_store", "_lock")
 
     def __init__(self, max_entries: int) -> None:
-        # OrderedDict: insertion order doubles as the eviction order (plain
-        # dict has no move_to_end/popitem(last=False)).
-        self._data: OrderedDict[str, str] = OrderedDict()
-        self._lock = threading.Lock()
-        self._max_entries = max_entries
+        self._store = InMemoryCookieStore(max_hosts_per_namespace=max_entries)
+        # The single guard for every data op is the medium's own lock; this exposes
+        # that same lock so the concurrency probe never double-acquires it.
+        self._lock = self._store._lock
 
     def store(self, domain: str, header: str) -> None:
-        """Record a harvested cookie header, evicting LRU entries past the cap.
-
-        Assignment and eviction hold one acquisition, so a concurrent reader never sees
-        the store over the cap, and the inserted entry cannot be the one it evicts.
-        """
-        with self._lock:
-            # Deliberately not move_to_end: re-storing a known domain updates
-            # the value in place, matching plain-mapping semantics.
-            self._data[domain] = header
-            while len(self._data) > self._max_entries:
-                self._data.popitem(last=False)
+        self._store.put("", domain, _split_header(header))
 
     def touch_get(self, domain: str) -> str | None:
-        """Look up a domain and mark it most-recently-used when present.
-
-        Membership check, touch and value read are one critical section: this
-        is the operation that used to race ``popitem`` eviction.
-        """
-        with self._lock:
-            value = self._data.get(domain)
-            if value is not None:
-                self._data.move_to_end(domain)
-            return value
+        cookies = self._store.load("", domain)
+        if not cookies:
+            return None
+        return "; ".join(f"{name}={value}" for name, value in cookies.items())
 
     def clear(self) -> None:
-        with self._lock:
-            self._data.clear()
+        self._store.clear()
 
     def __len__(self) -> int:
-        with self._lock:
-            return len(self._data)
+        return len(self._store)
 
 
 BROWSER_COOKIES_BY_DOMAIN = _LockedDomainCookieStore(BROWSER_COOKIES_MAX)

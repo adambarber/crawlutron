@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import time
+from collections.abc import Mapping
 from pathlib import Path
 
 from app.storage.coordination_store import CoordinationStore
@@ -33,7 +34,7 @@ class SharedCookieStore(CoordinationStore):
         super().__init__(db_path)
         self._max_hosts = max(1, int(max_hosts))
 
-    def get(self, namespace: str, host: str) -> dict[str, str]:
+    def load(self, namespace: str, host: str) -> dict[str, str]:
         """Return the cookies for one slot and mark it recently used."""
         now = time.time()
         with self._lock:
@@ -52,7 +53,7 @@ class SharedCookieStore(CoordinationStore):
             self._conn.commit()
         return self._decode(row[0])
 
-    def merge(self, namespace: str, host: str, cookies: dict[str, str]) -> None:
+    def merge(self, namespace: str, host: str, cookies: Mapping[str, str]) -> None:
         """Union ``cookies`` into the slot, then evict past the per-namespace cap.
         Eviction scopes to the slot being written, so one tenant's crawl cannot
         evict another tenant's sessions (#234). The union stays transactional.

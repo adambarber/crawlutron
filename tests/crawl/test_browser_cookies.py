@@ -108,10 +108,10 @@ def test_concurrent_read_and_eviction_does_not_raise(clean_cookie_store):
         def locked(self):
             return self._inner.locked()
 
-    real_lock = store._lock
+    real_lock = store._store._lock
     recording = _RecordingLock(real_lock)
     patch = pytest.MonkeyPatch()
-    patch.setattr(store, "_lock", recording)
+    patch.setattr(store._store, "_lock", recording)
     box: dict[str, str | None] = {}
     lock_taken = threading.Event()
     probe_release = threading.Event()

@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING
 
 from app.models.normalized_url import NormalizedUrl
 from app.storage.coordination_cookies import DEFAULT_MAX_HOSTS_PER_NAMESPACE
+from app.transport.cookie_store import InMemoryCookieStore
 
 if TYPE_CHECKING:
     from app.storage.coordination_cookies import SharedCookieStore
@@ -36,9 +37,11 @@ class CookieJar:
 
     def __init__(self, store: SharedCookieStore | None = None) -> None:
         self._store = store
-        # OrderedDict: insertion order doubles as the eviction order for the
-        # (namespace, host) LRU cap — plain dict has no move_to_end.
-        self._cookies: OrderedDict[tuple[str, str], dict[str, str]] = OrderedDict()
+        # The process-local medium: per-namespace LRU over (namespace, host) slots.
+        self._inmemory = InMemoryCookieStore(max_hosts_per_namespace=COOKIE_JAR_MAX_HOSTS_PER_NAMESPACE)
+        # The in-memory backing's mapping, exposed for lease/boundary probes; the
+        # store object owns the lock discipline this jar applies around it.
+        self._cookies: OrderedDict[tuple[str, str], dict[str, str]] = self._inmemory._data
         # No per-namespace isolation is enforced here: callers opt in with a
         # non-empty ``namespace``, and the shared default is preserved as-is.
         self._lock = threading.Lock()
@@ -54,21 +57,6 @@ class CookieJar:
     @staticmethod
     def _ns_key(namespace: str, host: str) -> tuple[str, str]:
         return (namespace or "", host)
-
-    def _touch(self, ns_key: tuple[str, str]) -> None:
-        """Mark `ns_key` most-recently-used and evict past the host cap; called with
-        the lock already held. One LRU discipline for both write paths (a forgotten
-        cap is a slow leak only the boundary test would notice); a read counts as a use.
-        """
-        self._cookies.move_to_end(ns_key)
-        namespace = ns_key[0]
-        # Per-namespace cap: evict only this namespace's stale slots (oldest first),
-        # leaving a sibling's jar untouched -- one crawl cannot evict another's (#234).
-        stale = [key for key in self._cookies if key[0] == namespace]
-        over = len(stale) - COOKIE_JAR_MAX_HOSTS_PER_NAMESPACE
-        if over > 0:
-            for key in stale[:over]:
-                del self._cookies[key]
 
     def add_cookie_header(self, url: NormalizedUrl, set_cookie_header: str, *, namespace: str = "") -> None:
         """Parse a ``Set-Cookie`` header and store the cookie for the URL's domain.
@@ -92,9 +80,7 @@ class CookieJar:
             self._store.merge(ns_key[0], ns_key[1], parsed)
             return
         with self._lock:
-            target = self._cookies.setdefault(ns_key, {})
-            target.update(parsed)
-            self._touch(ns_key)
+            self._inmemory.merge(ns_key[0], ns_key[1], parsed)
 
     def cookie_header_for(self, url: NormalizedUrl, *, namespace: str = "") -> str:
         """Return a ``Cookie`` header string for the given URL's domain.
@@ -105,12 +91,10 @@ class CookieJar:
         host = url.host
         ns_key = self._ns_key(namespace, host)
         if self._store is not None:
-            domain_cookies = self._store.get(ns_key[0], ns_key[1])
+            domain_cookies = self._store.load(ns_key[0], ns_key[1])
         else:
             with self._lock:
-                domain_cookies = dict(self._cookies.get(ns_key, {}))
-                if ns_key in self._cookies:
-                    self._cookies.move_to_end(ns_key)
+                domain_cookies = self._inmemory.load(ns_key[0], ns_key[1])
         if not domain_cookies:
             return ""
         return "; ".join(f"{key}={value}" for key, value in domain_cookies.items())
@@ -121,12 +105,7 @@ class CookieJar:
             self._store.clear(namespace or "")
             return
         with self._lock:
-            if not namespace:
-                self._cookies.clear()
-                return
-            stale = [key for key in self._cookies if key[0] == namespace]
-            for key in stale:
-                del self._cookies[key]
+            self._inmemory.clear(namespace or "")
 
     def export_to_file(self, path: str) -> None:
         """Write the jar's legacy shared namespace to a JSON file atomically --
@@ -149,8 +128,7 @@ class CookieJar:
                 self._store.merge("", host, cookies)
                 continue
             with self._lock:
-                self._cookies.setdefault(("", host), {}).update(cookies)
-                self._touch(("", host))
+                self._inmemory.merge("", host, cookies)
 
     @classmethod
     def import_from_file(cls, path: str) -> CookieJar:

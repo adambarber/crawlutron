@@ -122,5 +122,5 @@ def test_store_rejects_a_hostile_namespace_as_data(tmp_path):
 
     store.merge(hostile, "example.com", {"a": "1"})
 
-    assert store.get(hostile, "example.com") == {"a": "1"}
-    assert store.get("", "example.com") == {}
+    assert store.load(hostile, "example.com") == {"a": "1"}
+    assert store.load("", "example.com") == {}
