@@ -16,6 +16,14 @@ from tests._assertions import block_private_targets, host_resolves_to
 from tests._webhook_doubles import assert_delivered_once, record_webhook_delivery
 
 
+def _assert_pinned_delivery(delivered) -> None:
+    """A delivery must connect to the pinned validated IP (never a re-resolved
+    hostname) with the original Host header preserved -- DNS-rebinding safe."""
+    assert_delivered_once(delivered)
+    assert "8.8.8.8" in str(delivered[0].url), delivered
+    assert delivered[0].headers.get("Host") == "webhook.example.com", delivered
+
+
 class TestWebhookUrlValidation:
     def test_blocks_private_dns_hostname(self, monkeypatch):
         """A DNS name that resolves to a private IP must be rejected."""
@@ -63,14 +71,11 @@ class TestWebhookDeliveryPinning:
                 host_policy=HostPolicy.unrestricted(),
             )
 
-        assert_delivered_once(delivered)
-        assert "8.8.8.8" in str(delivered[0].url), delivered
-        assert delivered[0].headers.get("Host") == "webhook.example.com", delivered
+        _assert_pinned_delivery(delivered)
 
-    async def test_https_delivery_uses_validated_hostname_not_ip(self, monkeypatch):
-        """Rewriting an https URL to the pinned IP breaks TLS (certs
-        never carry IP SANs), so HTTPS webhooks were effectively dead.
-        HTTPS delivery POSTs to the validated hostname; HTTP keeps IP pinning."""
+    async def test_https_delivery_connects_to_the_validated_ip(self, monkeypatch):
+        """HTTPS webhooks now connect to the validated pinned IP like HTTP (DNS-rebinding
+        safe); the logical hostname is preserved for TLS SNI via the request extension."""
         from app.api.webhooks import deliver_pinned_webhook
 
         delivered = record_webhook_delivery(monkeypatch)
@@ -81,9 +86,7 @@ class TestWebhookDeliveryPinning:
                 host_policy=HostPolicy.unrestricted(),
             )
 
-        assert_delivered_once(delivered)
-        assert str(delivered[0].url) == "https://webhook.example.com/cb", delivered
-        assert "8.8.8.8" not in str(delivered[0].url), delivered
+        _assert_pinned_delivery(delivered)
 
     async def test_delivery_response_body_is_capped(self, monkeypatch, caplog):
         """The webhook RESPONSE is attacker-controlled and must never be

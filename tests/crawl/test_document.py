@@ -140,12 +140,9 @@ class TestDocumentRedirectSsrf:
         assert connect_urls, "extractor must issue a pinned connect"
         assert urlparse(connect_urls[0]).hostname == self.PINNED_IP
 
-    def test_https_document_connects_by_hostname_not_ip(self, monkeypatch):
-        """-A: https keeps the hostname, since certs carry no IP SANs.
-
-        The pinned IP must never surface in an https request URL, or every site
-        would fail TLS; the assertion is about the https HOP only, not the http.
-        """
+    def test_https_document_connects_to_the_validated_ip_with_sni_kept(self, monkeypatch):
+        """HTTPS connects to the validated IP (so a DNS rebind cannot redirect it)
+        with the logical hostname preserved for TLS SNI via the request extension."""
         run = self._drive_extraction(
             monkeypatch,
             {"initial.test/doc.pdf": self.ALLOWED_PATH},
@@ -155,8 +152,10 @@ class TestDocumentRedirectSsrf:
         assert run.connect_urls
         https_hop = urlparse(run.connect_urls[0])
         assert https_hop.scheme == "https"
-        assert https_hop.hostname == "initial.test", "SNI needs the logical hostname"
-        assert https_hop.hostname != self.PINNED_IP, "the pinned IP must not surface in an https URL"
+        # The connect target is the freshly-validated pinned IP (the DNS-rebinding fix);
+        # SNI rides separately via the fetch layer's sni_hostname extension.
+        assert https_hop.hostname == self.PINNED_IP
+        assert https_hop.hostname != "initial.test"
 
     def test_second_hop_dns_rebind_aborts(self, monkeypatch):
         """-B: hops 2+ re-validate and re-pin. A hop whose resolution is

@@ -133,6 +133,29 @@ def build_pinned_request(url: NormalizedUrl, headers: dict[str, str]) -> tuple[s
     return connect_url, out_headers
 
 
+def sni_extension(scheme: str, host: str) -> dict[str, str] | None:
+    """The httpx request extension that keeps TLS SNI on the logical hostname
+    when the connect URL carries the pinned IP (the optional one here so a
+    caller can pass it straight to ``client.stream``).
+    """
+    if scheme == "https":
+        return {"sni_hostname": host}
+    return None
+
+
+def apinned_stream(client, chain, pinned_url, hop_headers, timeout):
+    """Open the one SSRF-pinned httpx stream for a hop: GET to the validated IP
+    with the logical hostname carried as TLS SNI and redirects left to the chain."""
+    return client.stream(
+        "GET",
+        pinned_url,
+        headers=hop_headers,
+        timeout=timeout,
+        follow_redirects=False,
+        extensions=sni_extension(chain.url.scheme, chain.url.host),
+    )
+
+
 class PinRule(Protocol):
     """The rule that turns a URL into a request safe to connect to; named and injected.
     It is the rule, not the resolver, that travels -- the resolver is the

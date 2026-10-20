@@ -116,7 +116,7 @@ class _Client:
         self.response = response
         self.calls: list[tuple[str, bool]] = []
 
-    def stream(self, method, url, headers=None, timeout=None, follow_redirects=False):
+    def stream(self, method, url, headers=None, timeout=None, follow_redirects=False, extensions=None):
         self.calls.append((url, follow_redirects))
         return _Stream(self.response)
 
@@ -131,7 +131,8 @@ async def test_redirect_to_policy_blocked_host_is_refused_before_fetch(monkeypat
     )
     monkeypatch.setattr(pool_mod, "get_async_http_client", lambda: client)
     monkeypatch.setattr(pinned_mod, "check_ssrf_protection", lambda url: None)
-    monkeypatch.setattr(pinned_mod, "resolve_and_pin_host", lambda url: ("93.184.216.34", ""))
+    # HTTPS is pinned like plain HTTP: the connect host is the validated IP.
+    monkeypatch.setattr(pinned_mod, "resolve_and_pin_host", lambda url: (url.host, "93.184.216.34"))
 
     policy = HostPolicy.from_strings("allowed.test", "blocked.test")
     with pytest.raises(ValueError, match="refused admission"):
@@ -141,7 +142,7 @@ async def test_redirect_to_policy_blocked_host_is_refused_before_fetch(monkeypat
             30,
         )
 
-    assert [url for url, _follow in client.calls] == ["https://allowed.test"]
+    assert [url for url, _follow in client.calls] == ["https://93.184.216.34/"]
     assert all(follow is False for _url, follow in client.calls)
 
 

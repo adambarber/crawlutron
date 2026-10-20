@@ -26,14 +26,6 @@ from app.transport.timeouts import Timeouts
 from app.vocabulary.limits import DEFAULT_MAX_CONTENT_LENGTH_BYTES
 
 
-#: The hop is pinned to its validated IP; HTTPS must still attest/rout the original
-#: hostname, so a hop carries its SNI as this httpx request extension.
-def _sni_extensions(chain) -> dict[str, str] | None:
-    if chain.url.scheme == "https":
-        return {"sni_hostname": chain.url.host}
-    return None
-
-
 async def default_http_fetcher(
     url: NormalizedUrl,
     headers: dict[str, str],
@@ -91,14 +83,7 @@ async def _stream_terminal_hop(
 ) -> HttpFetchResult | None:
     """Send one SSRF-pinned hop and return its terminal result, or None when the
     hop is a redirect asking for another (re-pinned) request."""
-    async with client.stream(
-        "GET",
-        pinned_url,
-        headers=hop_headers,
-        timeout=timeout,
-        follow_redirects=False,
-        extensions=_sni_extensions(chain),
-    ) as response:
+    async with pinned_transport.apinned_stream(client, chain, pinned_url, hop_headers, timeout) as response:
         content_length = response.headers.get("content-length")
         if pinned_transport.declared_length_exceeds(content_length, max_content_length):
             return http_413(url, chain.url, started)
