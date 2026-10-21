@@ -124,7 +124,20 @@ _COOKIE_TAIL = "app/transport/fetchers.py"
 _COOKIE_HELPER = "app/transport/request_profile.py"
 
 
+# The door's own implementation module: the jar's methods are the write door,
+# including its RFC 6265 send matching, which shares the stdlib method name.
+_COOKIE_DOOR = "app/transport/cookie_jar.py"
+
+
 _COOKIE_TAIL_FN = "_finish_fetch"
+
+
+# The redirect-hop door: a 302's Set-Cookie must persist before the walk
+# advances, so the two redirect loops persist through this named helper.
+_COOKIE_TAIL_HOP_FN = "_store_hop_cookies"
+
+
+_COOKIE_TAIL_FNS = frozenset((_COOKIE_TAIL_FN, _COOKIE_TAIL_HOP_FN))
 
 
 _COOKIE_HELPER_FN = "store_set_cookies"
@@ -135,10 +148,12 @@ def _cookie_writes_off_the_fetch_tail(tree: ast.AST, path: pathlib.Path) -> list
     relative = relative_posix(path)
     offenders: list[str] = []
     for call, enclosing in _enclosing_calls(tree, "store_set_cookies"):
-        if relative == _COOKIE_TAIL and enclosing == _COOKIE_TAIL_FN:
+        if relative == _COOKIE_TAIL and enclosing in _COOKIE_TAIL_FNS:
             continue
         offenders.append(offender_at(path, call, f"store_set_cookies() outside {_COOKIE_TAIL_FN}()"))
     for call, enclosing in _enclosing_calls(tree, "add_cookie_header"):
+        if relative == _COOKIE_DOOR:
+            continue  # the jar's own implementation, send matching included
         if relative == _COOKIE_HELPER and enclosing == _COOKIE_HELPER_FN:
             continue
         offenders.append(offender_at(path, call, f"add_cookie_header() outside {_COOKIE_HELPER_FN}()"))

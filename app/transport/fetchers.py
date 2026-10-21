@@ -88,7 +88,11 @@ async def _stream_terminal_hop(
         if pinned_transport.declared_length_exceeds(content_length, max_content_length):
             return http_413(url, chain.url, started)
         status_code = response.status_code
+        hop_url = chain.url
         if chain.advance(response):
+            # The redirect hop's Set-Cookie is a real cookie: store it for the
+            # hop's URL before walking on, or login redirects lose it.
+            _store_hop_cookies(hop_url, response.headers)
             return None
         raw = bytearray()
         async for chunk in response.aiter_raw():
@@ -105,6 +109,11 @@ async def _stream_terminal_hop(
             elapsed_ms=int((time.monotonic() - started) * 1000),
             too_large=functools.partial(http_413, url, chain.url, started),
         )
+
+
+def _store_hop_cookies(hop_url: NormalizedUrl, response_headers: TransportHeaders) -> None:
+    """The redirect-hop cookie door: same tail, one hop earlier."""
+    store_set_cookies(hop_url, response_headers)
 
 
 def _finish_fetch(
@@ -184,8 +193,10 @@ async def cffi_fetch(
                 elapsed_ms = int((time.monotonic() - started) * 1000)
                 return _cffi_too_large_result(url, chain.url, response, elapsed_ms)
             status_code = response.status_code
+            hop_url = chain.url
             if chain.advance(response):
                 await response.aclose()  # release the curl handle
+                _store_hop_cookies(hop_url, response.headers)  # a hop's Set-Cookie persists
                 continue
             # Never trust response.elapsed across curl_cffi versions: a timedelta
             # there TypeErrors and silently downgrades every fetch to plain httpx.

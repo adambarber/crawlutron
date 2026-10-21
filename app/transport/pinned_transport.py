@@ -19,6 +19,7 @@ from app.models.host_policy import allow_private_targets
 from app.models.normalized_url import NormalizedUrl
 from app.safety.bounded_ttl import BoundedTTLCache
 from app.safety.validation import is_public_ip_value
+from app.transport.cookie_jar import COOKIE_NAMESPACE, global_cookie_jar
 
 
 def is_private_or_loopback_ip(ip: str) -> bool:
@@ -222,8 +223,21 @@ def redirect_target(
         # walk refuses loudly, so a refused hop never reads as page success.
         raise ValueError(f"redirect target refused admission: {location!r}")
     if _crosses_origin(new_url, current_url):
-        request_headers = {k: v for k, v in request_headers.items() if k.lower() not in _CREDENTIAL_HEADERS}
+        request_headers = _stripped_credentials(request_headers, new_url)
     return new_url, request_headers
+
+
+def _stripped_credentials(headers: dict[str, str], new_url: NormalizedUrl) -> dict[str, str]:
+    """Drop caller credentials, then attach the new origin's own jar cookies.
+
+    The jar cookies were set by that origin's responses, so attaching them is
+    the browser rule; caller-supplied Cookie/Authorization never cross origins.
+    """
+    stripped = {k: v for k, v in headers.items() if k.lower() not in _CREDENTIAL_HEADERS}
+    jar_cookie = global_cookie_jar().cookie_header_for(new_url, namespace=COOKIE_NAMESPACE.get())
+    if jar_cookie:
+        stripped["Cookie"] = jar_cookie
+    return stripped
 
 
 def _crosses_origin(new_url: NormalizedUrl, current_url: NormalizedUrl) -> bool:

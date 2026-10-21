@@ -16,6 +16,10 @@ class CookieStore(Protocol):
 
     def merge(self, namespace: str, host: str, cookies: Mapping[str, str]) -> None: ...
 
+    def touch(self, namespace: str, host: str) -> None:
+        """Mark one slot recently used (the read path)."""
+        ...
+
     def clear(self, namespace: str = "") -> None: ...
 
 
@@ -61,6 +65,13 @@ class InMemoryCookieStore:
                     del self._data[key]
             else:
                 self._data.clear()
+
+    def touch(self, namespace: str, host: str) -> None:
+        """Mark one slot recently used (the read path)."""
+        key = (namespace or "", host)
+        with self._lock:
+            if key in self._data:
+                self._data.move_to_end(key)
 
     def __len__(self) -> int:
         with self._lock:

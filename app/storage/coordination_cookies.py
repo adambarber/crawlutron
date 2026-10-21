@@ -94,6 +94,15 @@ class SharedCookieStore(CoordinationStore):
                 self._conn.execute("DELETE FROM coordination_cookies")
             self._conn.commit()
 
+    def touch(self, namespace: str, host: str) -> None:
+        """Mark one slot recently used (the read path)."""
+        with self._lock:
+            self._conn.execute(
+                "UPDATE coordination_cookies SET touched_at = ? WHERE namespace = ? AND host = ?",
+                (time.time(), namespace or "", host),
+            )
+            self._conn.commit()
+
     def all_slots(self) -> dict[tuple[str, str], dict[str, str]]:
         """Every stored slot, for the import/export path."""
         with self._lock:
