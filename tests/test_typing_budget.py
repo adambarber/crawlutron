@@ -24,7 +24,7 @@ from tests.chokepoint_walks import REPO_ROOT, nodes_of, trees_under
 
 _METRIC = "undeclared record"
 
-_BUDGETS = {_METRIC: 146}
+_BUDGETS = {_METRIC: 143}
 
 #: The scripts/ tree, which #293 brings under this gate for the first time; its
 #: measured baseline is declared first (value-ratchet rule).
@@ -241,7 +241,7 @@ def _walked() -> dict[str, int]:
 
 
 test_collector_sees_the_whole_tree = collector_sees_the_whole_tree(
-    _walked, {"annotation": 145}, subject="typing"
+    _walked, {"annotation": 142}, subject="typing"
 )
 
 

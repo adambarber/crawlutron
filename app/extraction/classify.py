@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 from typing import Any, Final
 
+from app.models.classification_evidence import ClassificationEvidenceRecord
 from app.models.taxonomy import Classification, as_classification
 from app.safety.bounded_io import truncate_html_input
 
@@ -146,18 +147,18 @@ SOFT_SINGLE_SIGNAL_CLASSIFICATIONS = frozenset(
 
 def classify_page_with_evidence(
     html: str | None, text: str | None, *, title: str | None = None
-) -> tuple[Classification, list[dict[str, Any]]]:
+) -> tuple[Classification, list[ClassificationEvidenceRecord]]:
     stripped_html = strip_html_noise(html).lower()
     visible_haystack = f"{title or ''}\n{text or ''}".lower()
     html_haystack = stripped_html
     if not (text or "").strip() and not (title or "").strip() and _html_has_no_user_visible_content(html):
         return _BINARY_NO_TEXT, [
-            {
-                "classification": "binary_no_text",
-                "signature": "empty_visible_content",
-                "source": "visible_text",
-                "context": "",
-            }
+            ClassificationEvidenceRecord(
+                classification="binary_no_text",
+                signature="empty_visible_content",
+                source="visible_text",
+                context="",
+            )
         ]
 
     # Pass 0: structural markers win immediately (one hit suffices). Scan the RAW
@@ -230,16 +231,16 @@ def classify_page_with_evidence(
 
 def _evidence(
     classification: Classification, signature: str, source: str, haystack: str, index: int
-) -> dict[str, str]:
+) -> ClassificationEvidenceRecord:
     start = max(0, index - 80)
     end = min(len(haystack), index + len(signature) + 120)
     context = " ".join(haystack[start:end].split())
-    return {
-        "classification": classification,
-        "signature": signature,
-        "source": source,
-        "context": context,
-    }
+    return ClassificationEvidenceRecord(
+        classification=classification,
+        signature=signature,
+        source=source,
+        context=context,
+    )
 
 
 # Compiled at import: strip_html_noise runs per page on every strategy attempt,

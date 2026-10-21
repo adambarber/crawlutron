@@ -7,6 +7,7 @@ from typing import Any
 from app.extraction.classify import classify_page_with_evidence
 from app.extraction.content import is_html
 from app.extraction.document_text import format_extracted_document_text
+from app.models.classification_evidence import ClassificationEvidenceRecord
 from app.models.taxonomy import Classification
 from app.transport import body_decode
 from app.transport.content_pipeline import run_extraction
@@ -73,66 +74,53 @@ def request_profile_diagnostics(profile: dict[str, Any]) -> dict[str, str]:
     }
 
 
+def _status_evidence(
+    classification: Classification, signature: str, status_code: int
+) -> list[ClassificationEvidenceRecord]:
+    """The one http_status evidence shape every status override emits."""
+    return [
+        {
+            "classification": classification,
+            "signature": signature,
+            "source": "http_status",
+            "context": f"HTTP {status_code}",
+        }
+    ]
+
+
+# The status overrides as one table: (status, classification, signature). 403
+# only bites when the page classifier read the page as rendered.
+_STATUS_OVERRIDES: tuple[tuple[int, Classification, str], ...] = (
+    (403, "access_denied", "403"),
+    (404, "not_found", "404"),
+    (410, "gone", "410"),
+    (429, "rate_limited", "429"),
+)
+
+
 def classify_extracted_content(
     ctx: HttpStrategyContext,
     resp: FetchedResponse,
     extracted: ExtractedHttpContent,
-) -> tuple[Classification, list[dict[str, Any]]]:
+) -> tuple[Classification, list[ClassificationEvidenceRecord]]:
     """Apply status overrides to the page classifier's evidence."""
     classification, evidence = classify_page_with_evidence(extracted.html, extracted.text)
-    if resp.status_code == 403 and classification == "rendered":
-        classification = "access_denied"
-        evidence = [
-            {
-                "classification": "access_denied",
-                "signature": "403",
-                "source": "http_status",
-                "context": "HTTP 403",
-            }
-        ]
-    elif resp.status_code == 404:
-        classification = "not_found"
-        evidence = [
-            {
-                "classification": "not_found",
-                "signature": "404",
-                "source": "http_status",
-                "context": "HTTP 404",
-            }
-        ]
-    elif resp.status_code == 410:
-        classification = "gone"
-        evidence = [
-            {"classification": "gone", "signature": "410", "source": "http_status", "context": "HTTP 410"}
-        ]
-    elif resp.status_code == 429:
-        classification = "rate_limited"
-        evidence = [
-            {
-                "classification": "rate_limited",
-                "signature": "429",
-                "source": "http_status",
-                "context": "HTTP 429",
-            }
-        ]
-    elif resp.status_code >= 500:
-        classification = "site_error"
-        evidence = [
-            {
-                "classification": "site_error",
-                "signature": str(resp.status_code),
-                "source": "http_status",
-                "context": f"HTTP {resp.status_code}",
-            }
-        ]
+    status = resp.status_code
+    override: tuple[int, Classification, str] | None = next(
+        (row for row in _STATUS_OVERRIDES if row[0] == status),
+        (status, "site_error", str(status)) if status >= 500 else None,
+    )
+    if override is not None and (status != 403 or classification == "rendered"):
+        classification = override[1]
+        evidence = _status_evidence(classification, override[2], status)
     if ctx.extraction == EXTRACTION_TRAFILATURA and extracted.html is None and classification == "rendered":
-        classification = "binary_no_text"
         evidence = [
-            {
-                "classification": "binary_no_text",
-                "signature": "non_html_body",
-                "source": "content_type",
-                "context": extracted.content_type or "",
-            }
+            ClassificationEvidenceRecord(
+                classification="binary_no_text",
+                signature="non_html_body",
+                source="content_type",
+                context=extracted.content_type or "",
+            )
         ]
+        classification = "binary_no_text"
     return classification, evidence

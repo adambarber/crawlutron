@@ -19,6 +19,7 @@ from app.extraction.content import (
     normalized_extraction,
 )
 from app.extraction.documents import adocument_extract
+from app.models.classification_evidence import ClassificationEvidenceRecord
 from app.safety.validation import filter_js_endpoints
 from app.vocabulary.extraction import (
     EXTRACTION_DOCUMENT,
@@ -117,7 +118,7 @@ async def discover_after_fetch(
 def discovery_result_fields(
     post_fetch: dict[str, Any],
     *,
-    classification_evidence: list[dict[str, Any]],
+    classification_evidence: list[ClassificationEvidenceRecord],
 ) -> dict[str, Any]:
     """The result fields both strategies take from one envelope. Spreads into
 

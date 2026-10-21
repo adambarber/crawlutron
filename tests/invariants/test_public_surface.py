@@ -383,6 +383,7 @@ def _models_multitype_offenders(root: pathlib.Path = _MODELS_ROOT) -> list[str]:
 _COHESIVE_MODULES = frozenset(
     {
         "crawl_diagnostics.py",  # CrawlDiagnostics + RuntimeDiagnostics: the bag and its runtime block
+        "classification_evidence.py",  # ClassificationEvidence + its runtime TypedDict record
         "crawl_result.py",  # CrawlResult + EngineCrawlResult: the shared result family
         "crawl_worker.py",  # CrawlWorker = SyncCrawlWorker | AsyncCrawlWorker
         "fetch_envelope.py",  # SerializedResponse + its RetryDiagnostics

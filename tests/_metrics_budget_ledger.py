@@ -9,9 +9,9 @@ from __future__ import annotations
 #: Oldest-first history per ``_BUDGETS`` metric (app/). The first entry is the
 #: value at first declaration; a later entry is a lowering, never a raise.
 _BUDGET_HISTORY: dict[str, list[int]] = {
-    #: 22 first declared; lowered to 21 by #160 when the pure result constructors
-    #: left app/orchestration/results.py and its longest function shrank.
-    "function length": [22, 21],
+    #: 22 -> 21 (#160, result constructors left results.py); 21 -> 20 (#330,
+    #: the five-branch evidence chain in _classify_extracted_content became one table).
+    "function length": [22, 21, 20],
     "abc size": [1],
     "largest class": [358],
     #: 8 first declared; lowered to 7 when the document pool's acquisition split
