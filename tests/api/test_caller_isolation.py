@@ -239,7 +239,6 @@ def test_identity_for_key_carries_quotas(tmp_path):
 
     assert caller == CallerIdentity(
         caller_id=record.key_id,
-        label="agent-a",
         authenticated=True,
         max_pages=25,
         max_concurrency=3,

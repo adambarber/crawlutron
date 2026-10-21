@@ -14,6 +14,22 @@ from tests.api.test_caller_isolation import (
 )
 
 
+def test_presented_key_is_not_a_public_export():
+    # #203: presented_key is an internal helper (three call sites, all in
+    # caller_auth.py), so it is private, not exported.
+    import app.api.caller_auth as caller_auth
+
+    assert "presented_key" not in caller_auth.__all__
+    assert not hasattr(caller_auth, "presented_key")
+
+
+def test_caller_identity_has_no_write_only_label_field():
+    # #203: CallerIdentity.label is written but never read in app/.
+    from app.models.caller_identity import CallerIdentity
+
+    assert "label" not in CallerIdentity.model_fields
+
+
 def _assert_401(response) -> None:
     """A 401 with the invalid_api_key code, as every auth-refusal reads it."""
     assert response.status_code == 401, response.text

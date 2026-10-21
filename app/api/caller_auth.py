@@ -45,7 +45,6 @@ def identity_for_key(record: CallerKey) -> CallerIdentity:
     """The identity a verified key crawls as, quotas included."""
     return CallerIdentity(
         caller_id=record.key_id,
-        label=record.label,
         authenticated=True,
         max_pages=record.max_pages,
         max_concurrency=record.max_concurrency,
@@ -60,7 +59,7 @@ def anonymous_caller() -> CallerIdentity:
     return CallerIdentity()
 
 
-def presented_key(request: Request) -> str | None:
+def _presented_key(request: Request) -> str | None:
     """The caller's key from the header or Bearer token, if one was sent."""
     header = request.headers.get("x-api-key", "").strip()
     if header:
@@ -138,14 +137,13 @@ def _constant_time_eq(secret: str, token: str) -> bool:
 
 async def get_keys_caller(request: Request) -> CallerIdentity:
     """FastAPI dependency: a verified caller or the operator for /v1/keys."""
-    secret = presented_key(request)
+    secret = _presented_key(request)
     if not secret:
         raise http_error(401, "invalid_api_key", "Unknown or revoked API key")
     admin_token = _key_admin_token(request)
     if admin_token and _constant_time_eq(secret, admin_token):
         return CallerIdentity(
             caller_id="admin",
-            label="admin",
             authenticated=True,
             max_pages=0,
             max_concurrency=0,
@@ -164,7 +162,7 @@ async def _caller_from_secret(request: Request, secret: str) -> CallerIdentity:
 
 async def get_caller_identity(request: Request) -> CallerIdentity:
     """FastAPI dependency: who this request crawls as."""
-    secret = presented_key(request)
+    secret = _presented_key(request)
     if not secret:
         return anonymous_caller()
     return await _caller_from_secret(request, secret)
@@ -176,7 +174,7 @@ def is_operator(request: Request) -> bool:
     Soft gate, not a 401: ``/metrics`` keeps its base exposition loopback-accessible
     and only per-caller detail needs the token (constant-time compare).
     """
-    secret = presented_key(request)
+    secret = _presented_key(request)
     if not secret:
         return False
     admin_token = _key_admin_token(request)
@@ -279,7 +277,6 @@ __all__ = [
     "get_keys_caller",
     "identity_for_key",
     "is_operator",
-    "presented_key",
     "quota_denials",
     "resolve_page_limit",
 ]

@@ -18,7 +18,6 @@ class CallerIdentity(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     caller_id: str = ""
-    label: str = "anonymous"
     authenticated: bool = False
     max_pages: int = DEFAULT_ANONYMOUS_MAX_PAGES
     max_concurrency: int = DEFAULT_ANONYMOUS_MAX_CONCURRENCY
