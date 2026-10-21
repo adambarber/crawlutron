@@ -6,6 +6,8 @@ matching to stdlib http.cookiejar; these tests pin the observable behavior.
 
 from __future__ import annotations
 
+import pytest
+
 from app.transport import cookie_jar
 from app.transport.cookie_jar import CookieJar
 from tests._fetcher_factories import run_default_http_fetcher
@@ -25,6 +27,27 @@ def test_max_age_zero_deletes_a_cookie():
     jar.add_cookie_header(canonical("http://a.example/"), "sid=abc; Path=/")
     jar.add_cookie_header(canonical("http://a.example/"), "sid=; Max-Age=0; Path=/")
     assert _header_for(jar, "http://a.example/") == ""
+
+
+@pytest.mark.parametrize("bad", ["--5", "", "abc", "9" * 40])
+def test_malformed_max_age_is_ignored_not_raised(bad):
+    """A remote server must not be able to fail our fetch with a bad header
+    (#395): a non-numeric Max-Age is ignored (the cookie stays a session cookie)
+    and the response's OTHER cookies are still stored."""
+    jar = CookieJar()
+    jar.add_cookie_header(canonical("https://a.example/"), f"bad=x; Max-Age={bad}; Path=/")
+    jar.add_cookie_header(canonical("https://a.example/"), "good=y; Path=/")
+    header = _header_for(jar, "https://a.example/")
+    assert "good=y" in header
+    assert "bad=" not in header or "bad=x" in _header_for(jar, "https://a.example/")
+
+
+def test_malformed_max_age_never_escapes_the_store_path():
+    """The ValueError from int('--5') must be absorbed in _expiry, not escape
+    through add_cookie_header into the strategy's error path."""
+    jar = CookieJar()
+    jar.add_cookie_header(canonical("https://a.example/"), "sid=abc; Max-Age=--5; Path=/")
+    assert _header_for(jar, "https://a.example/") == "sid=abc"
 
 
 def test_past_expires_deletes_a_cookie():

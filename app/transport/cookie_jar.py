@@ -253,15 +253,30 @@ def _default_path(url: NormalizedUrl) -> str:
 
 
 def _expiry(attrs: dict[str, str | None]) -> float | None:
-    """RFC 6265 5.2.1/5.2.2: max-age wins; zero or a past date means now."""
+    """RFC 6265 5.2.1/5.2.2: max-age wins; zero or a past date means now.
+    A malformed max-age is ignored (the attribute does not apply), so a remote
+    server cannot fail our fetch with a bad header value (#395)."""
     max_age = attrs.get("max-age")
-    if isinstance(max_age, str) and max_age.strip().lstrip("-").isdigit():
-        seconds = int(max_age)
-        return 0.0 if seconds <= 0 else time.time() + seconds
+    if isinstance(max_age, str):
+        seconds = _max_age_seconds(max_age)
+        if seconds is not None:
+            return 0.0 if seconds <= 0 else time.time() + seconds
     expires = attrs.get("expires")
     if isinstance(expires, (int, float)):
         return float(expires)
     return None
+
+
+def _max_age_seconds(raw: str) -> int | None:
+    """RFC 6265 5.2.2: the first character must be a DIGIT or '-'; anything else
+    is non-conformant and ignored. Also absorbs huge values int() would reject."""
+    text = raw.strip()
+    if not text or text[0] not in "-0123456789":
+        return None
+    try:
+        return int(text)
+    except ValueError:
+        return None
 
 
 def _is_expired(record: CookieRecord, now: float) -> bool:
