@@ -306,16 +306,29 @@ def _expiry(attrs: dict[str, str | None]) -> float | None:
     if isinstance(max_age, str):
         seconds = _max_age_seconds(max_age)
         if seconds is not None:
-            return 0.0 if seconds <= 0 else time.time() + seconds
+            return 0.0 if seconds <= 0 else _capped_expiry(time.time() + seconds)
     expires = attrs.get("expires")
     if isinstance(expires, (int, float)):
-        return float(expires)
+        return _capped_expiry(float(expires))
     return None
+
+
+# RFC 6265bis 4.1.2.2/5.5 (#399): no cookie outlives this, whichever attribute set it.
+MAX_COOKIE_LIFETIME_SECONDS = 400 * 24 * 60 * 60
+
+
+def _capped_expiry(expiry: float) -> float:
+    """The expiry the RFC allows: never past now + MAX_COOKIE_LIFETIME_SECONDS.
+
+    A 40-digit Max-Age otherwise parses fine (Python integers are unbounded) and
+    pins a cookie in the caller's jar for ever (#399)."""
+    return min(expiry, time.time() + MAX_COOKIE_LIFETIME_SECONDS)
 
 
 def _max_age_seconds(raw: str) -> int | None:
     """RFC 6265 5.2.2: the first character must be a DIGIT or '-'; anything else
-    is non-conformant and ignored. Also absorbs huge values int() would reject."""
+    is non-conformant and ignored. Python integers are unbounded, so any digit
+    string parses; the lifetime cap lives on ``_capped_expiry`` (#399)."""
     text = raw.strip()
     if not text or text[0] not in "-0123456789":
         return None

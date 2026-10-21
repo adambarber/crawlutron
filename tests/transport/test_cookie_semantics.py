@@ -32,17 +32,52 @@ def test_max_age_zero_deletes_a_cookie():
     assert _header_for(jar, "http://a.example/") == ""
 
 
-@pytest.mark.parametrize("bad", ["--5", "", "abc", "9" * 40])
+@pytest.mark.parametrize("bad", ["--5", "", "abc", "1.5", "+5"])
 def test_malformed_max_age_is_ignored_not_raised(bad):
     """A remote server must not be able to fail our fetch with a bad header
-    (#395): a non-numeric Max-Age is ignored (the cookie stays a session cookie)
-    and the response's OTHER cookies are still stored."""
+    (#395): a non-numeric Max-Age is ignored -- the cookie is stored as a session
+    cookie and the response's OTHER cookies are still stored."""
     jar = CookieJar()
     jar.add_cookie_header(canonical("https://a.example/"), f"bad=x; Max-Age={bad}; Path=/")
     jar.add_cookie_header(canonical("https://a.example/"), "good=y; Path=/")
     header = _header_for(jar, "https://a.example/")
     assert "good=y" in header
-    assert "bad=" not in header or "bad=x" in _header_for(jar, "https://a.example/")
+    assert "bad=x" in header
+
+
+# RFC 6265bis 4.1.2.2/5.5 (#399): a cookie's lifetime is capped at 400 days.
+
+_RFC_MAX_LIFETIME_SECONDS = 400 * 24 * 60 * 60
+
+
+def test_huge_numeric_max_age_is_clamped_to_the_rfc_lifetime(monkeypatch):
+    """A 40-digit Max-Age parses fine (Python integers are unbounded), so without
+    the cap time.time() + 10**40 pins the cookie in the jar for ever (#399)."""
+    jar = CookieJar()
+    now = 1_000_000.0
+    monkeypatch.setattr(cookie_jar.time, "time", lambda: now)
+    jar.add_cookie_header(canonical("https://a.example/"), "bad=x; Max-Age=" + "9" * 40)
+    # The module names the RFC number as the one constant both read and enforced.
+    assert cookie_jar.MAX_COOKIE_LIFETIME_SECONDS == _RFC_MAX_LIFETIME_SECONDS
+    # Clamped, not dropped: inside the cap the cookie is still stored and sent.
+    monkeypatch.setattr(cookie_jar.time, "time", lambda: now + _RFC_MAX_LIFETIME_SECONDS - 60)
+    assert _header_for(jar, "https://a.example/") == "bad=x"
+    # Past the cap it is dead: a site cannot pin a cookie in the jar for ever.
+    monkeypatch.setattr(cookie_jar.time, "time", lambda: now + _RFC_MAX_LIFETIME_SECONDS + 60)
+    assert _header_for(jar, "https://a.example/") == ""
+
+
+def test_huge_expires_date_is_clamped_to_the_rfc_lifetime_too(monkeypatch):
+    """The cap bounds the cookie, not one attribute: an Expires far in the future
+    lands on the same 400-day ceiling."""
+    jar = CookieJar()
+    now = 1_000_000.0
+    monkeypatch.setattr(cookie_jar.time, "time", lambda: now)
+    # parse_ns_headers folds an Expires date into an epoch; a year-3000 date is
+    # a far-future epoch without ever being a malformed one.
+    jar.add_cookie_header(canonical("https://a.example/"), "bad=x; Expires=Fri, 01 Jan 3000 00:00:00 GMT")
+    monkeypatch.setattr(cookie_jar.time, "time", lambda: now + _RFC_MAX_LIFETIME_SECONDS + 60)
+    assert _header_for(jar, "https://a.example/") == ""
 
 
 def test_malformed_max_age_never_escapes_the_store_path():
