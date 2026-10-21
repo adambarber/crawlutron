@@ -41,7 +41,9 @@ _BUDGETS = {
     # LOWERED 21 -> 20 (#330): _classify_extracted_content's five branches became one table.
     "function length": 20,
     "abc size": 1,
-    "largest class": 358,
+    # LOWERED 358 -> 357 (#383): BrowserRenderer's render loop lost a declaration
+    # line while threading the request budget through its pin rule.
+    "largest class": 357,
     "block length": 7,
 }
 

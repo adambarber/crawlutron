@@ -21,12 +21,13 @@ async def resolve_browser_target(
     url: NormalizedUrl,
     *,
     pin: Callable[..., Awaitable[tuple[str, dict[str, str]]]],
+    timeout_seconds: float | None = None,
 ) -> tuple[str, dict[str, str]]:
     """SSRF-check and IP-pin ``url`` for browser navigation: the browser connects
     to the resolved IP (no DNS rebinding) while keeping the original ``Host``;
     unsafe targets raise. Async because pinning resolves DNS; ``pin`` is required.
     """
-    pinned_url, request_headers = await pin(url, {})
+    pinned_url, request_headers = await pin(url, {}, timeout_seconds=timeout_seconds)
     host = request_headers.get("Host")
     return pinned_url, ({"Host": host} if host else {})
 

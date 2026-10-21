@@ -185,8 +185,8 @@ def dns_wait_for(timeout_seconds: float | None) -> float:
 def _off_loop[**P, R](resolve: Callable[[], Callable[P, R]]) -> Callable[P, Awaitable[R]]:
     """The one way to run blocking call machinery off the loop: it owns the
     pool (DNS_EXECUTOR) and the builder's argument list, carried whole via the
-    ParamSpec so the wrapper cannot disagree. ``resolve`` is a thunk -- the rule is unknown at wrap time.
-    """  # the WAIT is bounded at the DNS posture (#383); the thread keeps running.
+    ParamSpec so the wrapper cannot disagree. ``resolve`` is a thunk.
+    """
 
     async def _run(*args: P.args, **kwargs: P.kwargs) -> R:
         loop = asyncio.get_running_loop()
@@ -200,9 +200,25 @@ def _off_loop[**P, R](resolve: Callable[[], Callable[P, R]]) -> Callable[P, Awai
     return functools.wraps(resolve())(_run)
 
 
-# Off-loop entry to the pin rule -- SSRF-safe build, getaddrinfo included -- on a
-# worker thread, so a resolver lookup never stalls the event loop.
-build_pinned_request_async = _off_loop(lambda: build_pinned_request)
+async def build_pinned_request_async(
+    url: NormalizedUrl,
+    headers: dict[str, str],
+    *,
+    timeout_seconds: float | None = None,
+) -> tuple[str, dict[str, str]]:
+    """Off-loop entry to the pin rule: SSRF-safe build, getaddrinfo included, on a
+    worker thread so a resolver lookup never stalls the event loop.
+    """
+    loop = asyncio.get_running_loop()
+    future = loop.run_in_executor(DNS_EXECUTOR, functools.partial(build_pinned_request, url, headers))
+    # The resolver wait is derived from the request's budget (#383): no budget in
+    # hand means the DNS posture; a tighter budget tightens the wait.
+    wait_for = dns_wait_for(timeout_seconds)
+    try:
+        return await asyncio.wait_for(future, timeout=wait_for)
+    except TimeoutError:
+        future.cancel()
+        raise TimeoutError(f"DNS resolution exceeded the {wait_for:.1f}s budget") from None
 
 
 MAX_REDIRECT_HOPS = 5

@@ -122,7 +122,7 @@ def stub_pinned_request(pinned: tuple[str, dict[str, str]] = PINNED_PUBLIC_IP):
     The real builder is a coroutine produced by ``_off_loop``; returning one
     built here keeps the tests on a fixed pin, not the live resolver."""
 
-    async def _stub(url, headers: dict[str, str]):
+    async def _stub(url, headers: dict[str, str], timeout_seconds: float | None = None):
         return pinned[0], {**headers, **pinned[1]}
 
     return _stub

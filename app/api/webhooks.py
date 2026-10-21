@@ -74,7 +74,9 @@ async def deliver_pinned_webhook(
     from app.transport.pinned_transport import build_pinned_request_async, sni_extension
 
     normalized = NormalizedUrl(webhook_url, policy=host_policy)
-    connect_url, connect_headers = await build_pinned_request_async(normalized, {})
+    connect_url, connect_headers = await build_pinned_request_async(
+        normalized, {}, timeout_seconds=Timeouts.defaults().read
+    )
     request_headers = {"Content-Type": "application/json", **connect_headers}
     secret = webhook_secret()
     if secret:

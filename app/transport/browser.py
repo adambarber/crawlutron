@@ -95,15 +95,14 @@ class BrowserRenderer:
         self._sleep = sleep
         # Policy limit, then the settings field, then env, then the canonical
         # default: the number itself lives only in app.vocabulary.limits.
-        if challenge_wait_seconds is None:
-            if settings is not None:
-                self._challenge_wait_seconds = float(settings.challenge_wait_seconds)
-            else:
-                self._challenge_wait_seconds = get_env_float(
-                    "CRAWLUTRON_CHALLENGE_WAIT_SECONDS", DEFAULT_CHALLENGE_WAIT_SECONDS, lo=0.0, hi=300.0
-                )
-        else:
+        if challenge_wait_seconds is not None:
             self._challenge_wait_seconds = challenge_wait_seconds
+        elif settings is not None:
+            self._challenge_wait_seconds = float(settings.challenge_wait_seconds)
+        else:
+            self._challenge_wait_seconds = get_env_float(
+                "CRAWLUTRON_CHALLENGE_WAIT_SECONDS", DEFAULT_CHALLENGE_WAIT_SECONDS, lo=0.0, hi=300.0
+            )
         self._pdf_text_extractor = pdf_text_extractor or default_document_text_extractor
         # The two renderer-owned predicates a test steers (page yield, PDF);
         # overridable collaborators, so a test substitutes behaviour, not internals.
@@ -117,15 +116,15 @@ class BrowserRenderer:
         self._status_for = status_for or status_for_classification
         # The browser and every page step live in the driver (recycle bound, scroll/
         # harvest knobs, storage_state allowlist); a test substitutes the driver.
-        self._driver = driver if driver is not None else BrowserDriver(sleep=sleep, settings=settings)
-        # Cap concurrent page renders: N simultaneous requests each open a tab,
-        # which otherwise crashes/OOMs the browser under burst load.
-        _concurrent_pages = (
+        driver = driver if driver is not None else BrowserDriver(sleep=sleep, settings=settings)
+        # Cap concurrent page renders: N tabs at once, or burst load OOMs the browser.
+        pages = (
             settings.max_concurrent_pages
             if settings is not None
             else get_env_int("CRAWLUTRON_MAX_CONCURRENT_PAGES", DEFAULT_MAX_CONCURRENT_PAGES, lo=1)
         )
-        self._page_semaphore = asyncio.Semaphore(max(1, _concurrent_pages))
+        self._driver = driver
+        self._page_semaphore = asyncio.Semaphore(max(1, pages))
 
     async def _async_sleep(self, seconds: float) -> None:
         """Non-blocking sleep for use inside coroutines: the injectable clock, run
@@ -178,9 +177,7 @@ class BrowserRenderer:
         *,
         policy: HostPolicy,
     ) -> CrawlResult:
-        started = time.monotonic()
-        attempts = 0
-        last_error = None
+        started, attempts, last_error = time.monotonic(), 0, None
         max_attempts = max(1, options.max_retries + 1)
 
         while attempts < max_attempts:
@@ -220,7 +217,9 @@ class BrowserRenderer:
     ) -> CrawlResult:
         # SSRF: validate + IP-pin the target (DNS-rebinding safe, Host preserved).
         # Raises ValueError if the target is unsafe.
-        pinned_url, goto_headers = await resolve_browser_target(url, pin=self._pin)
+        pinned_url, goto_headers = await resolve_browser_target(
+            url, pin=self._pin, timeout_seconds=options.timeout_seconds
+        )
 
         started = time.monotonic()
 

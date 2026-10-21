@@ -15,6 +15,7 @@ from app.transport.pinned_transport import (
     DNS_WAIT_SECONDS,
     apinned_hops,
     build_pinned_request,
+    build_pinned_request_async,
     dns_wait_for,
 )
 from tests._assertions import block_private_targets
@@ -95,19 +96,26 @@ class TestOneResolutionPerHop:
         assert connect_url == f"{scheme}://93.184.216.34/a"
 
 
+def _stalling_resolver(monkeypatch, seconds: float, addrs=None):
+    """Script the resolver to stall past a budget and answer ``addrs``; the Event
+    keeps the wait real without tripping the suite's fast-sleep patch."""
+    block_private_targets(monkeypatch)
+    stall = threading.Event()
+
+    def resolver(host, *args, **kwargs):
+        stall.wait(seconds)
+        return addrs if addrs is not None else _PUBLIC
+
+    monkeypatch.setattr(socket, "getaddrinfo", resolver)
+    return stall
+
+
 class TestResolverDeadline:
     """#383: a resolver that sleeps past the deadline must surface a
     caller-classifiable timeout, not an indefinite hang off the pool."""
 
     async def test_slow_resolver_surfaces_a_classifiable_timeout(self, monkeypatch):
-        block_private_targets(monkeypatch)
-        stall = threading.Event()
-
-        def slow_resolver(host, *args, **kwargs):
-            stall.wait(1.0)  # far past the budget the request hands the walk
-            return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 80))]
-
-        monkeypatch.setattr(socket, "getaddrinfo", slow_resolver)
+        _stalling_resolver(monkeypatch, 1.0)
         started = time.monotonic()
         with pytest.raises(TimeoutError):
             await anext(
@@ -125,14 +133,7 @@ class TestResolverDeadline:
     async def test_a_resolver_within_the_budget_still_resolves(self, monkeypatch):
         """The budget cuts both ways: a resolver that answers inside the request's
         budget resolves, even though the posture alone would have cut it off."""
-        block_private_targets(monkeypatch)
-        stall = threading.Event()
-
-        def slowish_resolver(host, *args, **kwargs):
-            stall.wait(0.4)
-            return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 80))]
-
-        monkeypatch.setattr(socket, "getaddrinfo", slowish_resolver)
+        _stalling_resolver(monkeypatch, 0.4)
         chain, pinned_url, _hop_headers = await anext(
             apinned_hops(
                 canonical("http://ok.example/"),
@@ -150,3 +151,23 @@ class TestResolverDeadline:
         assert dns_wait_for(2) == 2
         assert dns_wait_for(30) == DNS_WAIT_SECONDS
         assert dns_wait_for(None) == DNS_WAIT_SECONDS
+
+
+class TestWrapperBudget:
+    """#383 follow-up: the off-loop executor wrapper derives its own wait from the
+    request's budget -- the browser and webhook paths resolve through it, so a tight
+    request tightens the wrapper too, not only the redirect-walk chain."""
+
+    async def test_a_tight_budget_raises_promptly_off_the_pool(self, monkeypatch):
+        _stalling_resolver(monkeypatch, 1.5)
+        started = time.monotonic()
+        with pytest.raises(TimeoutError):
+            await build_pinned_request_async(canonical("http://slow.example/"), {}, timeout_seconds=0.2)
+        assert time.monotonic() - started < 1.0  # the budget, not the 1.5s stall
+
+    async def test_without_a_budget_the_wrapper_keeps_the_posture(self, monkeypatch):
+        """No budget in hand means the DNS posture, not the caller's guess: a stall
+        the posture tolerates still resolves."""
+        _stalling_resolver(monkeypatch, 1.2)
+        connect_url, _headers = await build_pinned_request_async(canonical("http://ok.example/"), {})
+        assert urlparse(connect_url).hostname == "93.184.216.34"

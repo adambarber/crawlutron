@@ -13,7 +13,9 @@ _BUDGET_HISTORY: dict[str, list[int]] = {
     #: the five-branch evidence chain in _classify_extracted_content became one table).
     "function length": [22, 21, 20],
     "abc size": [1],
-    "largest class": [358],
+    #: 358 -> 357 (#383): BrowserRenderer's render retry loop lost a declaration
+    #: line while threading the request budget through its pin rule.
+    "largest class": [358, 357],
     #: 8 first declared; lowered to 7 when the document pool's acquisition split
     #: its growth logic out, and one oversized block left the tree.
     "block length": [8, 7],
