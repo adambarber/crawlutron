@@ -14,7 +14,13 @@ class JobStatusResponse(BaseModel):
     root_url: str
     owner: Annotated[
         str,
-        Field(description="The caller key id that owns this job; empty for pre-key anonymous rows."),
+        Field(
+            description="The caller key id that owns this job; empty for every anonymous "
+            "caller, past or present -- an anonymous POST /v1/jobs also writes an empty "
+            "owner. A key-holder's id appears here, and is visible to any caller of "
+            "GET /v1/jobs and the list endpoint, so treat it as a caller-visible label, "
+            "not a secret.",
+        ),
     ] = ""
     status: str
     kind: Annotated[
