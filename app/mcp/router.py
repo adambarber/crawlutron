@@ -18,6 +18,7 @@ from app.mcp.protocol import error_response
 from app.mcp.server import handle_mcp_request
 from app.mcp.tools import http_exception_message
 from app.models.caller_identity import CallerIdentity
+from app.models.error_response import ErrorResponse
 
 router = APIRouter(tags=["MCP"])
 
@@ -34,6 +35,11 @@ router = APIRouter(tags=["MCP"])
         "search, crawl, map, or render. Requests must include MCP-Protocol-Version, "
         "Mcp-Method, and (for tools/call) Mcp-Name headers matching the body."
     ),
+    responses={
+        202: {"description": "Accepted for delivery; the result arrives on the webhook."},
+        400: {"model": ErrorResponse, "description": "The body is not a JSON-RPC request."},
+        401: {"model": ErrorResponse, "description": "Unknown or revoked API key."},
+    },
 )
 async def mcp_endpoint(
     request: Request,

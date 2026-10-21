@@ -49,11 +49,12 @@ def build_policy_suggestions(
     records: list[TraceResponse],
     *,
     host_policy: HostPolicy,
+    records_skipped: int = 0,
 ) -> PolicySuggestionsResponse:
     """Propose candidate rules from the blocked attempts in ``records``.
 
-    Every attempt counts toward its host's observed total; only blocked ones count toward
-    a candidate, and an evidence-less block still counts (contributing none, not dropped).
+    Every attempt counts toward its host's observed total; only blocked ones
+    count toward a candidate. ``records_skipped`` are the rows left unread.
     """
     blocked_attempts: dict[str, int] = {}
     observed_attempts: dict[str, int] = {}
@@ -97,7 +98,11 @@ def build_policy_suggestions(
         )
         for host in sorted(blocked_attempts)
     ]
-    return PolicySuggestionsResponse(records_examined=len(records), suggestions=suggestions)
+    return PolicySuggestionsResponse(
+        records_examined=len(records) + records_skipped,
+        records_skipped=records_skipped,
+        suggestions=suggestions,
+    )
 
 
 def _rationale(
@@ -114,19 +119,32 @@ def _rationale(
     )
 
 
-def _valid_traces(payloads: list[JsonValue]) -> list[TraceResponse]:
-    """The retained payloads that parse as traces, one row at a time.
+def _valid_traces(payloads: list[JsonValue]) -> tuple[list[TraceResponse], int]:
+    """The retained payloads that parse as traces, one row at a time, and how many did not.
 
     A single malformed retained row must not 500 the whole rollup: it is skipped
-    and reported here, matching the per-row isolation in ``job_store``.
+    and reported, matching the per-row isolation in ``job_store``.
     """
     traces: list[TraceResponse] = []
+    skipped = 0
     for payload in payloads:
         try:
             traces.append(TraceResponse.model_validate(payload))
         except ValidationError as exc:
-            logger.warning("policy_suggestions_skip_malformed", extra={"error": str(exc)})
-    return traces
+            skipped += 1
+            logger.warning(
+                "policy_suggestions_skip_malformed",
+                extra={"error": str(exc), "request_id": _request_id_of(payload)},
+            )
+    return traces, skipped
+
+
+def _request_id_of(payload: JsonValue) -> str | None:
+    """The retained row's own id, so a skip names the row it skipped."""
+    if isinstance(payload, dict):
+        value = payload.get("request_id")
+        return value if isinstance(value, str) else None
+    return None
 
 
 async def policy_suggestions(
@@ -134,8 +152,10 @@ async def policy_suggestions(
     settings: SettingsDep,
 ) -> PolicySuggestionsResponse:
     """Propose candidate host rules from every retained crawl record."""
-    records = _valid_traces(await result_store.apayloads())
-    return build_policy_suggestions(records, host_policy=HostPolicy.from_settings(settings))
+    records, skipped = _valid_traces(await result_store.apayloads())
+    return build_policy_suggestions(
+        records, host_policy=HostPolicy.from_settings(settings), records_skipped=skipped
+    )
 
 
 __all__ = ["build_policy_suggestions", "policy_suggestions"]

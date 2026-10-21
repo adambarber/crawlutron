@@ -3,6 +3,7 @@ result store (the rollup reads every record), and nothing here applies one
 -- the service proposes, a caller owns host policy.
 """
 
+import logging
 from typing import Any
 
 import pytest
@@ -92,12 +93,14 @@ async def test_no_retained_records_means_no_suggestions(client):
     response = await client.get("/v1/policy-suggestions")
 
     assert response.status_code == 200, response.text
-    assert response.json() == {"records_examined": 0, "suggestions": []}
+    assert response.json() == {"records_examined": 0, "records_skipped": 0, "suggestions": []}
 
 
-async def test_one_malformed_retained_row_does_not_kill_the_rollup(tmp_path):
-    """Per-record isolation (#212): a row that fails to validate as a trace is
-    skipped and reported rather than 500ing every suggestion from the same store.
+async def test_one_malformed_retained_row_does_not_kill_the_rollup(tmp_path, caplog):
+    """Per-record isolation (#212): a row that fails to validate is skipped and
+    reported rather than 500ing every suggestion from the same store.
+
+    The window's size is reported honestly, and the skip names the row.
     """
     store = CrawlResultStore(tmp_path / "results.db")
     good_page = {
@@ -114,10 +117,29 @@ async def test_one_malformed_retained_row_does_not_kill_the_rollup(tmp_path):
 
     body = await store.apayloads()
     assert len(body) == 2
-    response = await policy_suggestions(result_store=store, settings=CrawlerSettings.from_mapping({}))
-    assert response.records_examined == 1
+    with caplog.at_level(logging.WARNING):
+        response = await policy_suggestions(result_store=store, settings=CrawlerSettings.from_mapping({}))
+    assert response.records_examined == 2
+    assert response.records_skipped == 1
     assert len(response.suggestions) == 1
     assert response.suggestions[0].host == canonical("https://good.test/x").site
+    skipped = [r for r in caplog.records if r.getMessage() == "policy_suggestions_skip_malformed"]
+    assert [r.request_id for r in skipped] == ["crawl_bad"], "the skip did not name the row it skipped"
+
+
+async def test_a_window_of_only_malformed_rows_is_not_an_empty_window(tmp_path):
+    """Every retained row unreadable is not the same answer as nothing retained.
+
+    Both answer 200 with no suggestions, so the counts are what tell them apart.
+    """
+    store = CrawlResultStore(tmp_path / "all-bad.db")
+    await store.aput("crawl_bad", {"request_id": "crawl_bad", "results": "not-a-list"})
+
+    response = await policy_suggestions(result_store=store, settings=CrawlerSettings.from_mapping({}))
+
+    assert response.records_examined == 1
+    assert response.records_skipped == 1
+    assert response.suggestions == []
 
 
 async def test_an_expired_record_is_not_offered_as_evidence(tmp_path):

@@ -41,16 +41,16 @@ async def test_offset_past_the_end_returns_an_empty_page(client, job_store):
     assert body["jobs"] == []
 
 
-async def test_offset_0_limit_0_shows_only_foreign_jobs_are_excluded(client, job_store):
+async def test_a_keyed_caller_never_sees_another_callers_jobs(client, job_store):
     """A keyed caller never sees another caller's jobs, paged or not."""
     job_store.create("https://example.test/foreign", UNRESTRICTED_HOST_POLICY, owner="other")
-    _seed_jobs(job_store, 2)
+    job_ids = _seed_jobs(job_store, 2)
 
     resp = await client.get("/v1/jobs", params={"limit": 10, "offset": 0})
     assert resp.status_code == 200
     body = resp.json()
     assert body["total"] == 2
-    assert all(row["job_id"] for row in body["jobs"])
+    assert [row["job_id"] for row in body["jobs"]] == list(reversed(job_ids))
 
 
 async def test_limit_above_the_cap_is_rejected(client, job_store):

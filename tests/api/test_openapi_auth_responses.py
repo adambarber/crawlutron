@@ -16,6 +16,10 @@ from app.api.caller_auth import get_caller_identity, get_keys_caller
 _AUTH_DEPS = {get_caller_identity.__name__, get_keys_caller.__name__}
 _AUTH_ROUTERS = (crawl_router, identity_router, jobs_router, keys_router, watch_router)
 
+#: The MCP endpoint resolves the caller inside its handler, so it is not a
+#: dependency route: it refuses a wrong key with a 401 all the same.
+_HAND_ROLLED_AUTH_ROUTES = (("post", "/mcp"),)
+
 #: The routes that spend caller quota; the admit() in their path is what refuses.
 _QUOTA_ROUTES = frozenset(
     {
@@ -43,14 +47,14 @@ def _is_auth_route(route: APIRoute) -> bool:
 
 
 def _auth_ops() -> list[tuple[str, str]]:
-    """Every (method, path) across the caller-auth routers."""
+    """Every (method, path) that can refuse a wrong key."""
     ops = []
     for module in _AUTH_ROUTERS:
         for route in module.router.routes:
             if isinstance(route, APIRoute) and _is_auth_route(route):
                 method = next(iter(route.methods or ()))
                 ops.append((method.lower(), route.path))
-    return ops
+    return ops + list(_HAND_ROLLED_AUTH_ROUTES)
 
 
 def _spec_responses() -> dict[tuple[str, str], set[str]]:
