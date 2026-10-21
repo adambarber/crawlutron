@@ -204,11 +204,13 @@ def _trace_store_connection(
     )
 
 
-def connect_store(db_path: str | Path, *, schema: StoreSchema) -> sqlite3.Connection:
+def connect_store(db_path: str | Path, *, schema: StoreSchema) -> tuple[sqlite3.Connection, str | None]:
     """Open and configure the long-lived store connection, then migrate its database.
-    Service PRAGMAs come from ``configure_store_connection``; the migration's own
-    connection carries the same PRAGMAs, which is why writes serialize on the file's process lock.
+
+    The memory name is returned so the caller can lock on the identity the migration took.
     """
+    # Service PRAGMAs come from ``configure_store_connection``; the migration's own
+    # connection carries the same PRAGMAs, which is why writes serialize on the file's lock.
     conn, memory_name = _open_raw_store_connection(db_path)
     try:
         configure_store_connection(conn)
@@ -219,7 +221,7 @@ def connect_store(db_path: str | Path, *, schema: StoreSchema) -> sqlite3.Connec
     except BaseException:
         conn.close()
         raise
-    return conn
+    return conn, memory_name
 
 
 def _validated_identifier(value: str) -> str:

@@ -54,6 +54,7 @@ __all__ = [
 
 
 class JobStore:
+    _conn: sqlite3.Connection
     """SQLite-backed store for crawl job states.
     Every method is synchronous SQLite work, so each has an ``a``-prefixed twin
     running off the loop; ``self._lock`` serializes every connection use.
@@ -73,10 +74,11 @@ class JobStore:
         # resolve to the API path's number, not the model default.
         self.tier = tier
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        self._conn = connect_store(self.db_path, schema=StoreSchema.CRAWL_JOBS)
+        self._conn, memory_name = connect_store(self.db_path, schema=StoreSchema.CRAWL_JOBS)
         # Serialize all connection use: sqlite3 connections are unsafe across
         # threads, and every other store instance and migration touches this file.
-        self._lock = process_lock(store_lock_key(self.db_path))
+        self.lock_key = store_lock_key(self.db_path, memory_name)
+        self._lock = process_lock(self.lock_key)
         # Column-addressed rows: the schema grows by migration, so positional
         # indexing would couple reads to ALTER ordering.
         self._conn.row_factory = sqlite3.Row
