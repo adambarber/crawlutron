@@ -73,7 +73,9 @@ def _resolve_ips(hostname: str, *, use_cache: bool = True) -> list[str]:
     return ips
 
 
-def check_ssrf_protection(url: NormalizedUrl) -> None:
+# Pass ``use_cache=False`` where the caller cannot pin its connect (the browser
+# re-resolves at connect), so validation is contemporaneous with that connect (#387).
+def check_ssrf_protection(url: NormalizedUrl, *, use_cache: bool = True) -> None:
     """Resolve the URL's host and abort if any IP is private/loopback. The host
     is read off the admitted value (nothing left to re-parse). Set
     "CRAWLUTRON_ALLOW_PRIVATE_TARGETS=1" (or "true"/"yes"/"on") to disable.
@@ -82,7 +84,7 @@ def check_ssrf_protection(url: NormalizedUrl) -> None:
         return
     hostname = url.host
     try:
-        ips = _resolve_ips(hostname)
+        ips = _resolve_ips(hostname, use_cache=use_cache)
     except socket.gaierror:
         # An unresolvable hostname is not a valid public target: fail closed rather
         # than let it reach loopback via the pin fallback.

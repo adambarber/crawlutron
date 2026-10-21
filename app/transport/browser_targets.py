@@ -87,9 +87,12 @@ def make_ssrf_route_handler(
             # branch's empty literal to the dict type the http pin rule returns.
             host_headers: dict[str, str]
             if request_scheme == "https":
-                # https discards the pinned IP (TLS SNI/certs need the hostname), so
-                # validate via the cached TTL'd check: one resolve per host, fail-closed.
-                await _BOUNDED(lambda: check_ssrf_protection(admitted), timeout_seconds=timeout_seconds)
+                # The browser dials its own connect (SNI/certs need the hostname), so we
+                # cannot pin it like the fetch family; validation must be fresh, never TTL-cached (#387).
+                await _BOUNDED(
+                    lambda: check_ssrf_protection(admitted, use_cache=False),
+                    timeout_seconds=timeout_seconds,
+                )
                 pinned_url, host_headers = request.url, {}
             else:
                 pinned_url, host_headers = await _BOUNDED(
@@ -133,7 +136,12 @@ def make_ssrf_websocket_handler(*, policy: HostPolicy, timeout_seconds: float | 
             normalized = await _BOUNDED(
                 lambda: NormalizedUrl(http_equivalent, policy=policy), timeout_seconds=timeout_seconds
             )
-            await _BOUNDED(lambda: check_ssrf_protection(normalized), timeout_seconds=timeout_seconds)
+            # The browser dials its own WS connect too; validation must be fresh, never
+            # TTL-cached, so a rebind in the cache window cannot reach a private address (#387).
+            await _BOUNDED(
+                lambda: check_ssrf_protection(normalized, use_cache=False),
+                timeout_seconds=timeout_seconds,
+            )
         except Exception:
             close = getattr(ws, "close", None)
             if close is not None:

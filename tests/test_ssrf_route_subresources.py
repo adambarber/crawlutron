@@ -43,9 +43,10 @@ async def test_https_subresource_is_not_rewritten_to_a_pinned_ip(monkeypatch) ->
     assert route.continued_headers is ROUTE_ARG_UNSET
 
 
-async def test_https_subresource_reuses_the_dns_lookup(monkeypatch) -> None:
-    """HTTPS validation is served by the shared TTL'd resolver: one lookup per
-    host, not one uncached resolve per subresource."""
+async def test_https_subresource_revalidates_fresh_per_request(monkeypatch) -> None:
+    """HTTPS validation must not trust a cached answer: the browser re-resolves
+    at connect, so a cached validation up to the TTL stale would let a rebind in
+    that window past -- each subresource validates against a fresh resolve (#387)."""
     block_private_targets(monkeypatch)
     lookups: list[str] = []
     real_getaddrinfo = socket.getaddrinfo
@@ -58,7 +59,27 @@ async def test_https_subresource_reuses_the_dns_lookup(monkeypatch) -> None:
     handler = ssrf_route_handler()
     await handler(FakeRoute(), FakeRequest("https://1.2.3.4/a", "document"))
     await handler(FakeRoute(), FakeRequest("https://1.2.3.4/b", "document"))
-    assert len(lookups) == 1, f"expected one shared lookup, got {lookups}"
+    # Two subresources -> two fresh validations, never one cached answer reused.
+    assert len(lookups) == 2, f"expected one fresh lookup per subresource, got {lookups}"
+
+
+async def test_https_subresource_refuses_a_mixed_public_private_answer(monkeypatch) -> None:
+    """A mixed public/private DNS answer is refused on the browser https path: the
+    browser dials its own connect and may pick the private member, so it cannot
+    select the public one the way the fetch pin does (which owns its dial) (#387)."""
+    block_private_targets(monkeypatch)
+
+    def mixed(host, *args, **kwargs):
+        del host, args, kwargs
+        return [
+            (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 443)),
+            (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("127.0.0.1", 443)),
+        ]
+
+    monkeypatch.setattr(socket, "getaddrinfo", mixed)
+    route = FakeRoute()
+    await ssrf_route_handler()(route, FakeRequest("https://example.com/x", "document"))
+    assert route.decision == "abort"
 
 
 async def test_http_subresource_still_connects_to_the_fresh_pinned_ip(monkeypatch) -> None:
