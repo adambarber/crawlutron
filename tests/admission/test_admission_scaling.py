@@ -1,5 +1,6 @@
 """Batches scale with pressure; HTTP-heavy work escapes memory accounting."""
 
+import itertools
 import time
 
 import pytest
@@ -66,8 +67,17 @@ def test_direct_reads_do_not_perturb_slope(monkeypatch):
     single stray sample invents a climb that is not there."""
     import app.runtime.memory_pressure as mp
 
-    ratios = iter([0.5, 0.5, 0.1, 0.5, 0.5])
-    ticks = iter([0.0, 10.0, 20.0, 30.0, 40.0])
+    # The clock and the sensor keep going: the event loop and the framework's
+    # teardown read the global clock too, and a finite sequence ran out.
+    ratios = itertools.chain([0.5, 0.5, 0.1, 0.5, 0.5], itertools.repeat(0.5))
+    ticks = itertools.count(0.0, 10.0)
+    sampled: list[float] = []
+
+    def _clock() -> float:
+        value = next(ticks)
+        sampled.append(value)
+        return value
+
     monkeypatch.setattr(
         mp,
         "read_memory_stats",
@@ -75,12 +85,17 @@ def test_direct_reads_do_not_perturb_slope(monkeypatch):
             total_bytes=1000, used_bytes=int(next(ratios) * 1000)
         ),
     )
-    monkeypatch.setattr(time, "monotonic", lambda: next(ticks))
+    monkeypatch.setattr(time, "monotonic", _clock)
     gate = mp.MemoryGate(target=0.9, hard=1.0)
     assert gate.leading_usage_ratio() == 0.5
     assert gate.leading_usage_ratio() == 0.5
     gate.usage_ratio()  # stray readiness/metrics read of a dip sample
     assert gate.leading_usage_ratio() == 0.5
+    # The series holds one sample per scale computation, and the direct read
+    # took none: the leading ratio cannot show it, so the series is read here.
+    assert len(sampled) == 3, (
+        f"the slope series holds {len(sampled)} samples for three scale computations: a direct read took one"
+    )
 
 
 # --------------------------------------------------------------------------- Pure helper: does the upcoming

@@ -262,6 +262,24 @@ def _cleanup_extraction_executors():
     asyncio.run(shutdown_doc_extraction_executor())
 
 
+@pytest.fixture(autouse=True)
+def _document_pool_per_test(monkeypatch):
+    """Each test gets its own document pool.
+
+    The pool is a process global whose teardown is terminal: a test that ran
+    the lifespan closed it for every later test in the same worker.
+    """
+    import app.extraction.content as ext_mod
+    import app.extraction.documents as docex
+
+    pool = docex.build_doc_pool()
+    monkeypatch.setattr(docex, "DOC_POOL", pool)
+    monkeypatch.setattr(ext_mod, "DOC_POOL", pool)
+    yield pool
+    # The pool this test used, and any worker it spawned, dies with the test.
+    pool.teardown()
+
+
 @pytest.fixture
 def recording_worker():
     """``(seen, worker)``: a recursive-crawl worker that records its job URLs.

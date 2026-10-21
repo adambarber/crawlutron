@@ -80,10 +80,19 @@ def _document_extraction_enabled() -> bool:
 
 # Real workers, configured count, environment opt-out -- every knob is a
 # constructor argument, so no caller reaches into another module's state.
-DOC_POOL = DocExtractionPool(
-    worker_count=doc_worker_count,
-    enabled=_document_extraction_enabled,
-)
+def build_doc_pool() -> DocExtractionPool:
+    """A document pool configured the way this module configures its own.
+
+    The module's pool is one of these. A caller that needs a pool of its own
+    builds one the same way rather than reaching for the module's.
+    """
+    return DocExtractionPool(
+        worker_count=doc_worker_count,
+        enabled=_document_extraction_enabled,
+    )
+
+
+DOC_POOL = build_doc_pool()
 
 
 async def shutdown_doc_extraction_executor() -> None:
