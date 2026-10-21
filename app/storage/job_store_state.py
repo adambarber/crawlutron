@@ -371,25 +371,22 @@ class JobAccumulators:
         )
 
     def _append_visited(self, job: CrawlJobState) -> None:
-        """Insert newly visited pages. The count check skips no-growth batches; on
-        growth the INSERT OR IGNORE collapses a page visited twice to one row (set
-        semantics = the primary key). "New" is a set difference, not a slice.
+        """Insert newly visited pages, the ones the stored rows do not hold.
+
+        The difference is by RAW URL (a NormalizedUrl never equals a string), and
+        the stored COUNT is not a growth test: a sibling's pages can drop ours.
         """
         job_id = job.job_id
-        visited = job.visited
-        stored = self._conn.execute(
-            'SELECT count(*) AS n FROM "crawl_job_visited" WHERE job_id = ?', (job_id,)
-        ).fetchone()["n"]
-        if len(visited) <= stored:
-            return
-        already = {
+        stored = {
             row["url"]
             for row in self._conn.execute('SELECT url FROM "crawl_job_visited" WHERE job_id = ?', (job_id,))
         }
-        fresh = visited - already
+        fresh = {url.raw for url in job.visited} - stored
+        if not fresh:
+            return
         self._conn.executemany(
             'INSERT OR IGNORE INTO "crawl_job_visited" (job_id, url) VALUES (?, ?)',
-            ((job_id, url.raw) for url in fresh),
+            ((job_id, url) for url in fresh),
         )
 
 

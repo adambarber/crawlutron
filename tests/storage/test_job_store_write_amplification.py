@@ -13,8 +13,9 @@ import pytest
 
 from app.models.crawl_policy import CrawlPolicy
 from app.storage.job_store import CrawlJobState, JobStore
-from tests._job_harnesses import make_crawled_job_store, make_job_store
+from tests._job_harnesses import loaded_job, make_crawled_job_store, make_job_store
 from tests._policy_factories import canonical
+from tests._policy_factories import job_store as store_on
 
 _BODY = "x" * 2000
 
@@ -256,3 +257,65 @@ def test_a_batch_save_visits_only_the_pages_it_added(job_db):
     assert visited_rows() == 35, "a five-page batch did not add exactly five visited rows"
     store.save(job)
     assert visited_rows() == 35, "a resave re-inserted the visited set"
+
+
+def _sibling_adds_a_page(store_a, db_path, pages: int = 30):
+    """A holds `pages` pages; a second store on the same file adds one of its own.
+
+    Returns A's pre-sibling job state and the sibling's store.
+    """
+    job = _job_with_pages(store_a, pages)
+    store_b = store_on(db_path)
+    b_job = loaded_job(store_b, job.job_id)
+    b_job.visited.add(canonical("https://example.com/from-b"))
+    store_b.save(b_job)
+    return job, store_b
+
+
+def test_a_second_processs_visited_pages_survive_the_watermark(job_db):
+    """#140: a sibling process's pages must not be dropped by a growth save.
+
+    A holds 30 pages, B adds one, then A saves having added one: the reload
+    must show 32. The old count check skipped the write and lost A's page.
+    """
+    store_a, db_path = job_db
+    job, _ = _sibling_adds_a_page(store_a, db_path)
+    assert _visited_rows(db_path, job.job_id) == 31
+
+    # A still holds its pre-B snapshot (the loaded `job`), and saves having
+    # added its own page: only a delta read past A's own writes sees B's page.
+    job.visited.add(canonical("https://example.com/from-a"))
+    store_a.save(job)
+
+    reloaded = loaded_job(store_a, job.job_id)
+    assert len(reloaded.visited) == 32
+    assert canonical("https://example.com/from-b") in reloaded.visited
+
+
+def _visited_rows(db_path, job_id: str) -> int:
+    with sqlite3.connect(db_path) as conn:
+        return conn.execute(
+            'SELECT count(*) AS n FROM "crawl_job_visited" WHERE job_id = ?', (job_id,)
+        ).fetchone()[0]
+
+
+def test_a_fresh_process_resaves_an_existing_job_without_loss_or_duplication(job_db):
+    """#140 walk-past: a process that never wrote the job starts at mark 0.
+
+    Its first save reads the stored set once; a resave neither duplicates rows
+    nor drops a sibling's page.
+    """
+    store_a, db_path = job_db
+    job, store_b = _sibling_adds_a_page(store_a, db_path)
+
+    store_b.save(loaded_job(store_b, job.job_id))
+    assert _visited_rows(db_path, job.job_id) == 31
+
+    store_c = store_on(db_path)
+    c_job = loaded_job(store_c, job.job_id)
+    c_job.visited.add(canonical("https://example.com/from-c"))
+    store_c.save(c_job)
+    assert _visited_rows(db_path, job.job_id) == 32
+    reloaded = loaded_job(store_c, job.job_id)
+    assert canonical("https://example.com/from-b") in reloaded.visited
+    assert canonical("https://example.com/from-c") in reloaded.visited
