@@ -191,7 +191,7 @@ class TestContentCacheUnlinkDiscipline:
     def test_eviction_unlinks_outside_the_lock(self, monkeypatch, tmp_path):
         """Eviction unlinks the doomed files outside the commit lock: a disk
         write is parked mid-unlink while a concurrent operation still runs."""
-        cache = cc.ContentCache(tmp_path, max_entries=2, max_total_bytes=None, default_ttl=0)
+        cache = cc.ContentCache(tmp_path, max_entries=2, max_total_bytes=None, default_ttl=60)
 
         def evict():
             # Over-cap by one: the oldest is evicted and its file unlink parks.
@@ -220,7 +220,7 @@ class TestContentCacheUnlinkDiscipline:
         The deferred unlink must spare a file that has become live again, or the
         fresh write is destroyed and only a self-healing miss hides the loss.
         """
-        cache = cc.ContentCache(tmp_path, max_entries=1, max_total_bytes=None, default_ttl=0)
+        cache = cc.ContentCache(tmp_path, max_entries=1, max_total_bytes=None, default_ttl=60)
         key = cache.make_key("hot")
         cache.set(key, {"v": 1})
         # Evict the hot key through the LRU cap; its unlink is now pending.

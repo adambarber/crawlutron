@@ -11,7 +11,7 @@ from collections.abc import Callable
 
 from app.models.normalized_url import NormalizedUrl
 from app.transport.cookie_jar import COOKIE_NAMESPACE
-from app.transport.freshness import default_clock, expiry_for, is_expired
+from app.transport.freshness import default_clock, expiry_for, is_expired, stores_for_ttl
 
 _DEFAULT_TTL_SECONDS = 3600.0
 _MAX_ENTRIES = 100_000
@@ -76,6 +76,10 @@ class HttpCache:
         lowered = {str(key).lower(): value for key, value in (headers or {}).items()}
         etag = lowered.get("etag")
         last_modified = lowered.get("last-modified")
+        if not stores_for_ttl(self._ttl_seconds):
+            # The OFF convention (#394): ttl 0 stores nothing -- a validator that
+            # is never expiring would pin a stale 304 answer forever.
+            return
         now = self._clock()
         expires = expiry_for(now, self._ttl_seconds)
         key = self._key(url)

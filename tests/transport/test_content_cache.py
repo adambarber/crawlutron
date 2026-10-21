@@ -15,7 +15,7 @@ from app.transport.cache import HttpCache
 from app.transport.content_cache import ContentCache
 from app.transport.fetchers import default_http_fetcher
 from app.vocabulary.strategies import HTTP_DECLARED_CRAWLER
-from tests._cache_fixtures import _make_cache, counting_entry_reads, reopen_cache, scoped_cache
+from tests._cache_fixtures import _make_cache, counting_entry_reads, on_disk_bytes, reopen_cache, scoped_cache
 from tests._fetch_scripted import request_fetcher
 from tests._fetcher_factories import clocked_cache, crawled_results, run_http_strategy, tap_fetcher
 from tests.helpers.server import EtagHandler
@@ -99,11 +99,17 @@ def test_ttl_expiry_via_injected_clock(tmp_path):
     assert c.get("k") is None
 
 
-def test_zero_ttl_means_no_expiry(tmp_path):
+def test_zero_ttl_stores_nothing(tmp_path):
+    """Convention (#394): ttl 0 or less means OFF -- the entry is never stored,
+    never served. 'Never expires' is not expressible through a TTL."""
     c, clock = clocked_cache(tmp_path / "z", default_ttl=0, clock_start=0.0)
     c.set("k", "v")
-    clock[0] = 10**9
-    assert c.get("k") == "v"
+    assert c.get("k") is None
+    c.set("k", "v", ttl=0)
+    assert c.get("k") is None
+    c.set("k", "v", ttl=-5)
+    assert c.get("k") is None
+    assert on_disk_bytes(c) == 0
 
 
 def test_prune_removes_only_expired(tmp_path):

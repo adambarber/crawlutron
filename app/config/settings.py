@@ -182,7 +182,13 @@ class CrawlerSettings:
                 cls.log_file_backup_count,
             ),
             cache_dir=source.get("CRAWLUTRON_CACHE_DIR", cls.cache_dir),
-            cache_ttl_seconds=get_mapping_int(source, "CRAWLUTRON_CACHE_TTL_SECONDS", cls.cache_ttl_seconds),
+            cache_ttl_seconds=get_mapping_int(
+                source,
+                "CRAWLUTRON_CACHE_TTL_SECONDS",
+                cls.cache_ttl_seconds,
+                lo=0,
+                hi=86_400,
+            ),
             content_cache_enabled=parse_bool_value(
                 source.get("CRAWLUTRON_CONTENT_CACHE_ENABLED"),
                 cls.content_cache_enabled,

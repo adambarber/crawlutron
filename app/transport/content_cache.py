@@ -23,7 +23,7 @@ from app.transport.content_cache_internals import (
     resolve_expiry,
     scan_cache_dir,
 )
-from app.transport.freshness import default_clock, expiry_for, is_expired
+from app.transport.freshness import default_clock, expiry_for, is_expired, stores_for_ttl
 from app.vocabulary.limits import (
     CONTENT_CACHE_MAX_ENTRY_BYTES,
     CONTENT_CACHE_MAX_TOTAL_BYTES,
@@ -300,7 +300,11 @@ class ContentCache:
         return {"expires": expires, "value": value, "cached_at": now}, expires
 
     def set(self, key: str, value: Any, ttl: int | None = None) -> None:
-        """Store ``value`` (JSON-serializable) with a TTL in seconds; ``ttl <= 0`` never expires."""
+        """Store ``value`` (JSON-serializable) with a TTL in seconds; ``ttl <= 0`` stores nothing (#394)."""
+        if not stores_for_ttl(self.default_ttl if ttl is None else ttl):
+            # The OFF convention: a non-positive TTL refuses the store, so the
+            # knob's 0 can never invert into a permanent entry.
+            return
         envelope, expires = self._entry_to_store(value, ttl)
         # Serialize first: the size feeds the per-entry cap and byte accounting.
         data = json.dumps(envelope)
@@ -330,7 +334,9 @@ class ContentCache:
         return None if envelope is None else envelope.get("value")
 
     async def aset(self, key: str, value: Any, ttl: int | None = None) -> None:
-        """Async ``set`` with the same byte-budget contract."""
+        """Async ``set`` with the same byte-budget and OFF-convention contract."""
+        if not stores_for_ttl(self.default_ttl if ttl is None else ttl):
+            return  # ttl <= 0 stores nothing (#394), like the sync path.
         # Serialize off the loop: pure, and the sync path's own contract.
         envelope, expires = await asyncio.to_thread(self._entry_to_store, value, ttl)
         path = self._path_for(key)

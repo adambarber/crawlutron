@@ -13,3 +13,14 @@ def test_default_bind_is_loopback():
 def test_bind_override_from_env():
     settings = CrawlerSettings.from_mapping({"CRAWLUTRON_HOST": "0.0.0.0"})
     assert settings.host == "0.0.0.0"
+
+
+def test_cache_ttl_knob_zero_is_off_not_forever():
+    """The OFF convention (#394): CRAWLUTRON_CACHE_TTL_SECONDS=0 reads as 'no
+    content cache', never 'every default-TTL entry is permanent'."""
+    zero = CrawlerSettings.from_mapping({"CRAWLUTRON_CACHE_TTL_SECONDS": "0"})
+    assert zero.cache_ttl_seconds == 0
+    negative = CrawlerSettings.from_mapping({"CRAWLUTRON_CACHE_TTL_SECONDS": "-10"})
+    assert negative.cache_ttl_seconds == 0
+    huge = CrawlerSettings.from_mapping({"CRAWLUTRON_CACHE_TTL_SECONDS": "999999"})
+    assert huge.cache_ttl_seconds == 86_400

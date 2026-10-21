@@ -126,7 +126,7 @@ class TestContentCacheDiskIOOffTheLock:
     async def test_envelope_read_does_not_hold_the_lock(self, monkeypatch, tmp_path) -> None:
         cache = ContentCache(
             str(tmp_path),
-            default_ttl=0,
+            default_ttl=60,
             max_entry_bytes=8 * 1024 * 1024,
             max_total_bytes=64 * 1024 * 1024,
         )
@@ -236,7 +236,7 @@ class TestContentCacheDiskIOOffTheLock:
         serve_stale[0] = False
 
     async def test_clear_does_no_disk_io_under_the_lock(self, monkeypatch, tmp_path) -> None:
-        cache = ContentCache(str(tmp_path), default_ttl=0)
+        cache = ContentCache(str(tmp_path), default_ttl=60)
         cache.set("a", {"v": 1})
         await self._prove_off_lock(monkeypatch, cache, cache.clear, 1)
         assert cache.get("a") is None
@@ -376,7 +376,7 @@ class TestSpillAssemblyOffTheEventLoop:
         """The envelope read runs off the lock, so only a read that still
         matches the recorded entry may warm the RAM mirror: otherwise a read
         overlapping a concurrent write would shadow the newer value."""
-        cache = ContentCache(str(tmp_path), default_ttl=0, max_entry_bytes=10_000)
+        cache = ContentCache(str(tmp_path), default_ttl=60, max_entry_bytes=10_000)
         cache.set("k", {"v": "old"})
         # Evict k from the RAM mirror (flood past MEMORY_CACHE_MAX) but leave it
         # registered in the disk index, so a read falls through to disk.

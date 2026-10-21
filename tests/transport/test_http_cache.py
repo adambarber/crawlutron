@@ -57,14 +57,18 @@ def test_ttl_expiry_returns_none():
     assert cache.get("http://x/1") == (None, None)
 
 
-def test_ttl_zero_never_expires():
+def test_ttl_zero_stores_nothing():
+    """The OFF convention (#394): ttl 0 or less stores nothing at all."""
     cache = HttpCache(ttl_seconds=0)
     cache.store("http://x/1", {"etag": '"v1"'})
-    assert cache.get("http://x/1") == ('"v1"', None)
+    assert cache.get("http://x/1") == (None, None)
+    negative = HttpCache(ttl_seconds=-5)
+    negative.store("http://x/2", {"etag": '"v2"'})
+    assert negative.get("http://x/2") == (None, None)
 
 
 def test_lru_eviction_bounds_memory():
-    cache = HttpCache(ttl_seconds=0, max_entries=3)
+    cache = HttpCache(ttl_seconds=3600, max_entries=3)
     for i in range(5):
         cache.store(f"http://x/{i}", {"etag": f'"{i}"'})
     # Only the most-recently-stored entries survive.
@@ -77,7 +81,7 @@ def test_lru_eviction_bounds_memory():
 
 
 def test_concurrent_store_get_is_safe():
-    cache = HttpCache(ttl_seconds=0)
+    cache = HttpCache(ttl_seconds=3600)
 
     def worker(prefix: str) -> None:
         for i in range(200):
@@ -109,7 +113,7 @@ def test_eviction_touches_only_the_overflow_window():
 
     Over-cap stores evict only the dropped entries: the work (exposed as a cost
     metric) stays bounded by the overflow, not the 10k-entry table."""
-    cache = HttpCache(ttl_seconds=0, max_entries=10)
+    cache = HttpCache(ttl_seconds=3600, max_entries=10)
     for i in range(200):
         cache.store(f"http://x/{i}", {"etag": f'"{i}"'})
     # Correct behavior first (FIFO eviction of the oldest entries)...
