@@ -1,6 +1,6 @@
-"""POST /v1/search behavior: provider parsing, SSRF hygiene, selection, and the
-endpoint. Provider HTTP is injected via ``provider_http`` so no real network is
-touched; the endpoint runs over the ASGI transport against the real app.
+"""The shared search contract: ``provider_http``, ``collect_results``, the
+registry, the endpoint skip and the #386 pin boundary. Per-family providers
+are tested in ``test_providers_api.py`` and ``test_providers_html.py``.
 """
 
 from __future__ import annotations
@@ -12,24 +12,20 @@ import pytest
 
 from app.safety.validation import HostPolicy
 from app.search.providers import (
-    BraveProvider,
-    DuckDuckGoProvider,
+    PROVIDER_ENDPOINTS,
     SearchProviderError,
     SearchProviderUnavailable,
-    SerperProvider,
-    TavilyProvider,
     collect_results,
     configured_search_providers,
     get_search_provider,
 )
+from app.search.providers_api import BraveProvider, SerperProvider, TavilyProvider
+from app.search.providers_html import DuckDuckGoProvider
 from tests._assertions import one_search_result, provider_results
 
 
 def _collect(items):
-    """``collect_results`` with this file's uniform provider key names: every provider
-    spells the same three keys, so the call shape is a constant here, and a copy that
-    drops ``description_key`` silently asserts against a blank description.
-    """
+    """collect_results at this file's uniform key names."""
     return collect_results(
         items,
         url_key="url",
@@ -39,160 +35,7 @@ def _collect(items):
     )
 
 
-# --- Provider parsing -------------------------------------------------------
-
-
-class TestProviderParsing:
-    async def test_tavily_parses_results_and_filters_private_urls(self, fake_provider_http, monkeypatch):
-        # The suite defaults to private-targets ON for the loopback fixture server; this test exercises the
-        # SSRF hygiene on results, so opt out.
-        from tests._assertions import block_private_targets
-
-        block_private_targets(monkeypatch)
-        fake_provider_http(
-            200,
-            json.dumps(
-                {
-                    "results": [
-                        {"title": "Good", "url": "https://example.gov/1", "content": "snippet one"},
-                        {"title": "Private", "url": "http://127.0.0.1:8000/admin", "content": "sneaky"},
-                        {"title": "No url", "content": "missing"},
-                    ]
-                }
-            ),
-        )
-        provider = TavilyProvider("test-key", HostPolicy.unrestricted())
-        results = await provider.search("worcester agenda", 5, 10.0)
-        assert [r.url for r in results] == ["https://example.gov/1"]
-        assert results[0].title == "Good"
-        assert results[0].description == "snippet one"
-
-    async def test_brave_parses_web_results(self, fake_provider_http):
-        fake_provider_http(
-            200,
-            json.dumps(
-                {
-                    "web": {
-                        "results": [
-                            {"title": "B", "url": "https://example.gov/b", "description": "b desc"},
-                            {"title": "B2", "url": "https://example.gov/b2", "description": "b2 desc"},
-                        ]
-                    }
-                }
-            ),
-        )
-        provider = BraveProvider("test-key", HostPolicy.unrestricted())
-        results = await provider.search("records", 5, 10.0)
-        assert [r.url for r in results] == ["https://example.gov/b", "https://example.gov/b2"]
-        assert results[0].description == "b desc"
-
-    async def test_serper_parses_organic_results(self, fake_provider_http):
-        fake_provider_http(
-            200,
-            json.dumps(
-                {
-                    "organic": [
-                        {"title": "S", "link": "https://example.gov/s", "snippet": "s snippet"},
-                    ]
-                }
-            ),
-        )
-        provider = SerperProvider("test-key", HostPolicy.unrestricted())
-        results = await provider.search("minutes", 5, 10.0)
-        assert results[0].url == "https://example.gov/s"
-        assert results[0].title == "S"
-        assert results[0].description == "s snippet"
-
-    async def test_keyed_providers_transmit_their_configured_key(self, fake_provider_http):
-        """Each keyed provider sends the key it was constructed with."""
-        capture: list = []
-        fake_provider_http(200, json.dumps({"results": []}), capture=capture)
-        await TavilyProvider("tavily-key", HostPolicy.unrestricted()).search("x", 1, 5.0)
-        await BraveProvider("brave-key", HostPolicy.unrestricted()).search("x", 1, 5.0)
-        await SerperProvider("serper-key", HostPolicy.unrestricted()).search("x", 1, 5.0)
-        assert capture[0]["json_body"]["api_key"] == "tavily-key"
-        assert capture[1]["headers"]["X-Subscription-Token"] == "brave-key"
-        assert capture[2]["headers"]["X-API-KEY"] == "serper-key"
-
-    async def test_duckduckgo_parses_html_and_unwraps_redirect(self, fake_provider_http):
-        from urllib.parse import quote
-
-        target = "https://example.gov/agenda"
-        wrapped = f"//duckduckgo.com/l/?uddg={quote(target, safe='')}&rut=abc"
-        fake_provider_http(
-            200,
-            f"""
-            <html><body>
-              <div class="result">
-                <a class="result__a" href="{wrapped}">Agenda page</a>
-                <a class="result__snippet">A snippet of the agenda.</a>
-              </div>
-            </body></html>
-            """,
-        )
-        provider = DuckDuckGoProvider(HostPolicy.unrestricted())
-        results = await provider.search("agenda", 5, 10.0)
-        assert [r.url for r in results] == [target]
-        assert results[0].title == "Agenda page"
-        assert "snippet" in results[0].description
-
-    async def test_duckduckgo_bot_challenge_raises(self, fake_provider_http):
-        fake_provider_http(200, "<html>Anomaly detected. Please complete the following challenge.</html>")
-        provider = DuckDuckGoProvider(HostPolicy.unrestricted())
-        with pytest.raises(SearchProviderError, match="bot challenge"):
-            await provider.search("x", 5, 10.0)
-
-    async def test_non_2xx_provider_status_raises_with_detail(self, fake_provider_http):
-        fake_provider_http(401, json.dumps({"detail": "invalid api key"}))
-        provider = TavilyProvider("bad-key", HostPolicy.unrestricted())
-        with pytest.raises(SearchProviderError, match="HTTP 401.*invalid api key"):
-            await provider.search("x", 5, 10.0)
-
-    async def test_non_json_body_raises(self, fake_provider_http):
-        fake_provider_http(200, "not json at all")
-        provider = TavilyProvider("key", HostPolicy.unrestricted())
-        with pytest.raises(SearchProviderError, match="non-JSON"):
-            await provider.search("x", 5, 10.0)
-
-    async def test_results_are_deduplicated_by_url(self, fake_provider_http):
-        fake_provider_http(
-            200,
-            provider_results(
-                {"title": "A", "url": "https://example.gov/a"},
-                {"title": "A dup", "url": "https://example.gov/a"},
-                {"title": "B", "url": "https://example.gov/b"},
-            ),
-        )
-        provider = TavilyProvider("key", HostPolicy.unrestricted())
-        results = await provider.search("x", 5, 10.0)
-        assert [r.url for r in results] == ["https://example.gov/a", "https://example.gov/b"]
-
-    async def test_keyed_provider_clamps_results_to_caller_limit(self, fake_provider_http):
-        # A provider that emits far more results than the caller asked for must not
-        # leak them into the response; only ``limit`` items are ever advertised.
-        too_many = [{"title": f"R{i}", "url": f"https://example.gov/{i}"} for i in range(7)]
-        fake_provider_http(200, provider_results(*too_many))
-        provider = TavilyProvider("key", HostPolicy.unrestricted())
-        results = await provider.search("x", 3, 10.0)
-        assert len(results) == 3
-        assert [r.url for r in results] == [f"https://example.gov/{i}" for i in range(3)]
-
-    async def test_non_2xx_non_json_body_surfaces_the_status(self, fake_provider_http):
-        # An HTTP error body may be non-JSON (an HTML proxy page, a plain
-        # "Rate limited" line); the status must be surfaced, not swallowed.
-        fake_provider_http(403, "<html>nope</html>")
-        provider = TavilyProvider("key", HostPolicy.unrestricted())
-        with pytest.raises(SearchProviderError, match="HTTP 403"):
-            await provider.search("x", 3, 10.0)
-
-    async def test_rate_limited_non_json_body_surfaces_the_status(self, fake_provider_http):
-        fake_provider_http(429, "Rate limited")
-        provider = TavilyProvider("key", HostPolicy.unrestricted())
-        with pytest.raises(SearchProviderError, match="HTTP 429"):
-            await provider.search("x", 3, 10.0)
-
-
-# --- Shared result collector (three provider loops were verbatim) ---------
+# --- Shared result collector -------------------------------------------------
 
 
 class TestCollectResults:
@@ -238,7 +81,7 @@ class TestCollectResults:
         assert _collect(None) == []
 
 
-# --- Provider selection -----------------------------------------------------
+# --- Provider selection -------------------------------------------------------
 
 
 class TestProviderSelection:
@@ -272,57 +115,55 @@ class TestProviderSelection:
         assert configured_search_providers(settings) == ["tavily", "brave", "serper"]
 
 
-# --- Endpoint behavior ------------------------------------------------------
+# --- Endpoint behavior --------------------------------------------------------
 
 
 class TestSearchEndpoint:
     async def test_search_returns_shaped_results(self, async_client, override_settings, fake_provider_http):
         one_search_result(override_settings, fake_provider_http)
         resp = await async_client.post("/v1/search", json={"query": "worcester", "limit": 3})
-        assert resp.status_code == 200
         body = resp.json()
-        assert body["success"] is True
-        assert body["provider"] == "tavily"
-        assert body["query"] == "worcester"
+        assert (resp.status_code, body["success"], body["provider"], body["query"]) == (
+            200,
+            True,
+            "tavily",
+            "worcester",
+        )
         assert body["limit"] == 1
         assert body["data"][0] == {"url": "https://example.gov/a", "title": "A", "description": "desc"}
 
     async def test_search_clamps_limit_to_server_max(self, async_client, override_settings, monkeypatch):
         override_settings(search_provider="tavily", tavily_api_key="k", search_limit_max=3)
-        capture: list = []
+        capture = []
 
         async def _honoring_provider(method, url, **kwargs):
-            asked = kwargs["json_body"]["max_results"]
             capture.append(kwargs)
-            return 200, json.dumps(
-                {"results": [{"title": f"R{i}", "url": f"https://example.gov/{i}"} for i in range(asked)]}
-            )
+            asked = kwargs["json_body"]["max_results"]
+            results = [{"title": f"R{i}", "url": f"https://example.gov/{i}"} for i in range(asked)]
+            return 200, json.dumps({"results": results})
 
         monkeypatch.setattr("app.search.providers.provider_http", _honoring_provider)
         resp = await async_client.post("/v1/search", json={"query": "x", "limit": 10})
+        assert (capture[0]["json_body"]["max_results"], len(resp.json()["data"])) == (3, 3)
         assert resp.status_code == 200
-        assert capture[0]["json_body"]["max_results"] == 3
-        assert len(resp.json()["data"]) == 3
 
     async def test_search_uses_default_limit_when_omitted(
         self, async_client, override_settings, fake_provider_http
     ):
         override_settings(search_provider="tavily", tavily_api_key="k", search_limit_default=2)
-        capture: list = []
+        capture = []
         fake_provider_http(
             200,
             json.dumps({"results": [{"title": "R", "url": f"https://example.gov/{i}"} for i in range(3)]}),
             capture=capture,
         )
-        resp = await async_client.post("/v1/search", json={"query": "x"})
-        assert resp.status_code == 200
+        await async_client.post("/v1/search", json={"query": "x"})
         assert capture[0]["json_body"]["max_results"] == 2
 
     async def test_search_unconfigured_provider_returns_503(self, async_client, override_settings):
         override_settings(search_provider="brave")  # no CRAWLUTRON_BRAVE_API_KEY
         resp = await async_client.post("/v1/search", json={"query": "x"})
-        assert resp.status_code == 503
-        assert resp.json()["code"] == "search_provider_unavailable"
+        assert (resp.status_code, resp.json()["code"]) == (503, "search_provider_unavailable")
 
     async def test_search_provider_error_returns_502(
         self, async_client, override_settings, fake_provider_http
@@ -330,14 +171,12 @@ class TestSearchEndpoint:
         override_settings(search_provider="tavily", tavily_api_key="bad")
         fake_provider_http(401, json.dumps({"detail": "invalid api key"}))
         resp = await async_client.post("/v1/search", json={"query": "x"})
-        assert resp.status_code == 502
-        assert resp.json()["code"] == "search_provider_error"
+        assert (resp.status_code, resp.json()["code"]) == (502, "search_provider_error")
 
     async def test_search_provider_network_failure_returns_error_envelope(
         self, async_client, override_settings, monkeypatch
     ):
-        # A refused connection / DNS / read-timeout fault on the provider must
-        # stay inside the declared envelope, not escape as a bare 500.
+        # A refused/DNS/read-timeout provider fault must stay in the envelope.
         import httpx
 
         import app.search.providers as providers_mod
@@ -350,14 +189,12 @@ class TestSearchEndpoint:
 
         monkeypatch.setattr(providers_mod, "get_async_http_client", lambda: _ConnRefused())
         resp = await async_client.post("/v1/search", json={"query": "x"})
-        assert resp.status_code == 502
         body = resp.json()
-        assert body["code"] == "search_provider_error"
+        assert (resp.status_code, body["code"]) == (502, "search_provider_error")
         assert set(body) == {"code", "message", "details"}
 
     async def test_search_missing_query_is_rejected(self, async_client, override_settings):
-        resp = await async_client.post("/v1/search", json={})
-        assert resp.status_code == 422
+        assert (await async_client.post("/v1/search", json={})).status_code == 422
 
     async def test_search_rejects_unknown_fields(self, async_client, override_settings):
         resp = await async_client.post("/v1/search", json={"query": "x", "bogus": 1})
@@ -370,19 +207,15 @@ class TestSearchEndpoint:
         fake_provider_http(200, provider_results({"title": "A", "url": "https://example.gov/a"}))
         await async_client.post("/v1/search", json={"query": "x"})
         metrics = get_metrics()
-        assert metrics.search_requests_total == 1
-        assert metrics.search_results_total == 1
+        assert (metrics.search_requests_total, metrics.search_results_total) == (1, 1)
         assert metrics.search_provider_counts["tavily"] == 1
 
     async def test_search_endpoint_reports_active_provider_in_capabilities(
         self, async_client, override_settings
     ):
         override_settings(search_provider="auto", brave_api_key="b")
-        resp = await async_client.get("/v1/capabilities")
-        assert resp.status_code == 200
-        body = resp.json()
-        assert body["features"]["web_search"] is True
-        assert body["features"]["mcp"] is True
+        body = (await async_client.get("/v1/capabilities")).json()
+        assert (body["features"]["web_search"], body["features"]["mcp"]) == (True, True)
         assert body["search"]["active_provider"] == "brave"
         assert "brave" in body["search"]["configured_providers"]
         assert body["mcp"]["endpoint"] == "/mcp"
@@ -400,8 +233,7 @@ class TestProviderHttpCaps:
             status, body = await providers_mod.provider_http(
                 "GET", "http://example.test/", timeout_seconds=5.0
             )
-        assert status == 200
-        assert json.loads(body) == {"results": []}
+        assert (status, json.loads(body)) == (200, {"results": []})
 
     async def test_search_unbounded_body_is_refused(self):
         import app.search.providers as providers_mod
@@ -417,14 +249,10 @@ class TestProviderHttpCaps:
 
 
 class _FakeStreamResponse:
-    """httpx-faithful stream response mirroring the real attribute surface
-    ``provider_http`` relies on (``encoding``, ``status_code``, ``aiter_bytes``), so a
-    reference to an attribute httpx does not have fails loudly, not at 500.
-    """
+    """httpx-faithful stream response: the attribute surface ``provider_http``
+    relies on (``encoding``, ``status_code``, ``aiter_bytes``), chunks like httpx."""
 
     def __init__(self, body, encoding: str | None = "utf-8"):
-        # ``body`` is bytes for a single yield, or an iterable of chunks for multi-chunk streams (the cap
-        # tests drip unbounded input) — the real httpx surface yields chunks, so the fake does too.
         if isinstance(body, (bytes, bytearray)):
             body = [bytes(body)]
         self._chunks = body
@@ -454,11 +282,7 @@ class _FakeStreamClient:
 
 
 async def _provider_decode(monkeypatch, body: bytes, encoding):
-    """Drive the real ``provider_http`` decode path over a faked response.
-
-    The provider, the request and the return pair are fixed here so a decode
-    test states only the encoding it is about; the decode itself is production's.
-    """
+    """Drive the real ``provider_http`` decode path over a faked response."""
     import app.search.providers as providers_module
 
     fake = _FakeStreamClient(_FakeStreamResponse(body, encoding=encoding))
@@ -475,7 +299,56 @@ async def test_provider_http_decodes_via_httpx_encoding(monkeypatch):
 
 async def test_provider_http_decodes_utf8_when_encoding_unknown(monkeypatch):
     """No declared/detectable charset must fall back to UTF-8, not crash."""
-
     status, text = await _provider_decode(monkeypatch, b"<html>ok</html>", None)
     assert status == 200
     assert text == "<html>ok</html>"
+
+
+# --- #386: provider fetches are pinned like the rest of the egress family ----
+
+
+async def test_provider_registry_urls_are_not_caller_influenced(fake_provider_http):
+    """The trust-boundary claim for the provider pin (#386): no caller input
+    reaches the request URL. Every provider's search must target one of the
+    fixed registry endpoints for any query, limit, and key."""
+    capture = []
+    fake_provider_http(200, "{}", capture=capture)
+    for hostile_query in ("", "x" * 500, "https://evil.test/?q="):
+        for limit in (1, 100):
+            await TavilyProvider("k", HostPolicy.unrestricted()).search(hostile_query, limit, 5.0)
+            await BraveProvider("k", HostPolicy.unrestricted()).search(hostile_query, limit, 5.0)
+            await SerperProvider("k", HostPolicy.unrestricted()).search(hostile_query, limit, 5.0)
+            await DuckDuckGoProvider(HostPolicy.unrestricted()).search(hostile_query, limit, 5.0)
+    assert capture, "no provider call was observed"
+    assert all(call["url"] in PROVIDER_ENDPOINTS for call in capture), [c["url"] for c in capture]
+
+
+async def test_provider_http_pins_the_connect_to_the_resolved_ip(monkeypatch):
+    """The provider fetch must connect to the IP it just validated (#377's
+    answer, on our own egress too): a rebind can never move the connection."""
+    import socket
+
+    import app.search.providers as providers_module
+    from tests._assertions import block_private_targets
+
+    block_private_targets(monkeypatch)
+    state = {"resolves": 0}
+
+    def two_phase(host, *args, **kwargs):
+        _ = (args, kwargs)
+        state["resolves"] += 1
+        ip = "1.2.3.4" if state["resolves"] == 1 else "169.254.169.254"
+        return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", (ip, 80))]
+
+    monkeypatch.setattr(socket, "getaddrinfo", two_phase)
+    seen: list[str] = []
+
+    class _RecordingClient(_FakeStreamClient):
+        def stream(self, method, url, **kwargs):
+            seen.append(url)
+            return super().stream(method, url, **kwargs)
+
+    client = _RecordingClient(_FakeStreamResponse(b"{}"))
+    monkeypatch.setattr(providers_module, "get_async_http_client", lambda: client)
+    await providers_module.provider_http("GET", "https://provider.test/search", timeout_seconds=5.0)
+    assert seen == ["https://1.2.3.4/search"], "fetch was not pinned to the validated IP"

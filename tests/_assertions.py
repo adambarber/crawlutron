@@ -154,6 +154,17 @@ def one_search_result(override_settings, fake_provider_http, **overrides):
     fake_provider_http(200, provider_results(*items))
 
 
+def awaitable_search(provider, query: str, limit: int):
+    """Run one provider query to completion from a synchronous test.
+
+    The provider's contract is async; a test that wants its results runs them
+    here rather than each test module growing its own copy of this.
+    """
+    import asyncio
+
+    return asyncio.run(provider.search(query, limit, timeout_seconds=1.0))
+
+
 @functools.lru_cache(maxsize=1)
 def browser_available() -> bool:
     # Both probes import inside the function, matching the idiom the playwright probe below already used.

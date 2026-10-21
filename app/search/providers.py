@@ -1,6 +1,6 @@
 """Search providers for ``POST /v1/search``; which index backs it is a config
-decision, not a code one. ``auto`` picks the first configured provider, and
-every result URL is SSRF-admitted via NormalizedUrl before it is advertised.
+decision, not a code one. The provider families live beside this module; this
+one owns the shared request/collect contract and the registry.
 """
 
 from __future__ import annotations
@@ -8,16 +8,20 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import dataclass
-from typing import Any, Protocol
-from urllib.parse import parse_qs, unquote, urlsplit
+from typing import Any
 
 import httpx
-from lxml import html as lxml_html
 
-from app.models.normalized_url import admit_or_none
+from app.models.normalized_url import NormalizedUrl, admit_or_none
 from app.safety.bounded_io import BodyTooLarge, read_capped_async
 from app.safety.validation import HostPolicy
 from app.transport.http_client_pool import get_async_http_client
+from app.transport.pinned_transport import (
+    ResolverBudgetExceeded,
+    bounded_thread_resolve,
+    build_pinned_request,
+    sni_extension,
+)
 from app.transport.timeouts import Timeouts
 
 logger = logging.getLogger(__name__)
@@ -28,13 +32,13 @@ _SERPER_URL = "https://google.serper.dev/search"
 _DUCKDUCKGO_URL = "https://html.duckduckgo.com/html/"
 _DUCKDUCKGO_REDIRECT = "//duckduckgo.com/l/"
 
+#: The whole provider endpoint registry: every URL a provider fetch may target.
+#: Read by the #386 trust-boundary test (no caller input reaches this set).
+PROVIDER_ENDPOINTS = frozenset((_TAVILY_URL, _BRAVE_URL, _SERPER_URL, _DUCKDUCKGO_URL))
+
 # Result text from a search engine is untrusted; truncate titles/snippets so a
 # hostile provider cannot push unbounded strings into responses.
 MAX_TEXT_LENGTH = 2000
-
-_DUCKDUCKGO_UA = (
-    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"
-)
 
 
 @dataclass(frozen=True)
@@ -59,12 +63,30 @@ class SearchProviderUnavailable(Exception):
     """A provider was selected but its credentials are not configured."""
 
 
-class SearchProvider(Protocol):
-    """A provider that turns a query into normalized ``SearchResult``s."""
+class BaseProvider:
+    """What every search provider shares: a name, the policy, and the shape.
+
+    A provider fetches a response and then turns it into results. The two
+    families differ in both halves, so each supplies its own fetch and parse.
+    """
 
     name: str
 
-    async def search(self, query: str, limit: int, timeout_seconds: float) -> list[SearchResult]: ...
+    def __init__(self, host_policy: HostPolicy) -> None:
+        self._host_policy = host_policy
+
+    async def search(self, query: str, limit: int, timeout_seconds: float) -> list[SearchResult]:
+        """Query this provider and return SSRF-screened, normalized results."""
+        status, body = await self._fetch(query, limit, timeout_seconds)
+        return self._results(status, body, limit)
+
+    async def _fetch(self, query: str, limit: int, timeout_seconds: float) -> tuple[int, str]:
+        """This provider's HTTP exchange: the status and the body it returned."""
+        raise NotImplementedError
+
+    def _results(self, status: int, body: str, limit: int) -> list[SearchResult]:
+        """This provider's response shape, read into normalized results."""
+        raise NotImplementedError
 
 
 async def provider_http(
@@ -79,20 +101,25 @@ async def provider_http(
 ) -> tuple[int, str]:
     """Issue a provider request over the shared pooled HTTP client.
 
-    Module-level so tests can patch ``provider_http`` to inject fixture
-    responses without touching the providers themselves.
+    Module-level so tests can patch ``provider_http`` to inject fixture responses.
     """
     client = get_async_http_client()
     timeout = Timeouts.for_request(timeout_seconds).as_httpx()
+    request_url = httpx.URL(url)
+    if params:
+        request_url = request_url.copy_merge_params(params)
+    pinned_url, hop_headers, extensions = await _pinned_provider_request(
+        request_url, headers, timeout_seconds
+    )
     try:
         async with client.stream(
             method,
-            url,
-            params=params,
+            pinned_url,
             json=json_body,
             data=data,
-            headers=headers,
+            headers=hop_headers,
             timeout=timeout,
+            extensions=extensions,
         ) as response:
             try:
                 raw = await read_capped_async(response.aiter_bytes(), _SEARCH_RESPONSE_MAX_BYTES)
@@ -108,12 +135,33 @@ async def provider_http(
         raise SearchProviderError(f"provider request failed: {error}") from error
 
 
-def _clip(text: str) -> str:
+async def _pinned_provider_request(
+    request_url: httpx.URL,
+    headers: dict[str, str] | None,
+    timeout_seconds: float,
+) -> tuple[str, dict[str, str], dict[str, str] | None]:
+    """The pinned provider request (#386): the merged URL admitted, the connect
+    pinned to the freshly validated IP, SNI on the hostname. Fixed endpoint
+    registry, no caller input in the URL (pinned by test)."""
+    admitted = NormalizedUrl(str(request_url), policy=HostPolicy.unrestricted())
+    hop_headers = dict(headers or {})
+
+    def pin() -> tuple[str, dict[str, str]]:
+        return build_pinned_request(admitted, hop_headers)
+
+    try:
+        connect_url, hop_headers = await bounded_thread_resolve(pin, timeout_seconds=timeout_seconds)
+    except (ValueError, ResolverBudgetExceeded):
+        raise SearchProviderError("provider endpoint could not be resolved to a public address") from None
+    return connect_url, hop_headers, sni_extension(admitted.scheme, admitted.host)
+
+
+def clip_text(text: str) -> str:
     text = " ".join(text.split())
     return text if len(text) <= MAX_TEXT_LENGTH else text[:MAX_TEXT_LENGTH].rstrip() + "…"
 
 
-def _normalize_url(raw: str, *, policy: HostPolicy) -> str | None:
+def normalize_result_url(raw: str, *, policy: HostPolicy) -> str | None:
     """Return ``raw`` when it is a crawlable public HTTP(S) URL, else ``None``.
     Invalid targets are dropped, never rewritten, to keep the response honest:
     a loopback/private result is not a URL a caller can legally crawl.
@@ -139,21 +187,21 @@ def collect_results(
     for item in items if isinstance(items, list) else []:
         if not isinstance(item, dict):
             continue
-        url = _normalize_url(str(item.get(url_key) or ""), policy=policy)
+        url = normalize_result_url(str(item.get(url_key) or ""), policy=policy)
         if not url or url in seen:
             continue
         seen.add(url)
         results.append(
             SearchResult(
                 url=url,
-                title=_clip(str(item.get(title_key) or "")),
-                description=_clip(str(item.get(description_key) or "")),
+                title=clip_text(str(item.get(title_key) or "")),
+                description=clip_text(str(item.get(description_key) or "")),
             )
         )
     return results
 
 
-def _parse_json(body: str) -> dict[str, Any]:
+def parse_provider_json(body: str) -> dict[str, Any]:
     try:
         payload = json.loads(body)
     except (json.JSONDecodeError, TypeError) as error:
@@ -163,7 +211,7 @@ def _parse_json(body: str) -> dict[str, Any]:
     return payload
 
 
-def _provider_message(provider: str, status: int, payload: dict[str, Any]) -> str:
+def provider_message(provider: str, status: int, payload: dict[str, Any]) -> str:
     detail = payload.get("detail") or payload.get("error") or payload.get("message")
     if isinstance(detail, dict):
         detail = detail.get("message")
@@ -172,10 +220,8 @@ def _provider_message(provider: str, status: int, payload: dict[str, Any]) -> st
 
 @dataclass(frozen=True)
 class ProviderCall:
-    """One provider request, minus the credential: method, endpoint and payload are
-    the only per-provider facts about going over the wire, and carrying them in
-    one value lets :meth:`_ApiKeyProvider._request` be written once.
-    """
+    """One provider request, minus the credential: method, endpoint and payload
+    are the only per-provider facts about going over the wire."""
 
     method: str
     url: str
@@ -184,241 +230,19 @@ class ProviderCall:
     headers: dict[str, str] | None = None
 
 
-class ApiKeyProvider:
-    """Shared credential slot and shared flow for the keyed providers, which differ
-    only in endpoint, method, key placement and key names; everything else --
-    issue, refuse a non-200, normalize -- must not be reachable a new way.
-    """
-
-    name: str
-    # Declared here so `_results` has one shape to read; a subclass that omits one fails
-    # loudly on the first result rather than reporting a blank title for every hit.
-    _url_key: str
-    _title_key: str
-    _description_key: str
-    #: Keys walked from the parsed payload to the raw result list. Brave nests
-    #: under ``web.results``, so this is a path rather than a single key.
-    _items_path: tuple[str, ...]
-
-    def __init__(self, api_key: str, host_policy: HostPolicy) -> None:
-        self._api_key = api_key
-        self._host_policy = host_policy
-
-    async def search(self, query: str, limit: int, timeout_seconds: float) -> list[SearchResult]:
-        """Query this provider and return SSRF-screened, normalized results."""
-        status, body = await self._request(query, limit, timeout_seconds)
-        return self._results(status, body, limit)
-
-    def _call(self, query: str, limit: int) -> ProviderCall:
-        """This provider's request shape for one query. Subclass hook.
-        Endpoint, method and key travel (header or body) are per-provider facts;
-        none of them is a fact about what to do with the response.
-        """
-        raise NotImplementedError
-
-    async def _request(self, query: str, limit: int, timeout_seconds: float) -> tuple[int, str]:
-        """Issue this provider's request over the shared pooled client."""
-        call = self._call(query, limit)
-        return await provider_http(
-            call.method,
-            call.url,
-            params=call.params,
-            json_body=call.json_body,
-            headers=call.headers,
-            timeout_seconds=timeout_seconds,
-        )
-
-    def _items_of(self, payload: dict[str, Any]) -> object:
-        """Walk :attr:`_items_path` down to the raw result list.
-        A missing or non-object node yields ``None``, not a raise: the collector
-        reads a non-list as no results, so a shaped-unexpected 200 is empty, not a crash.
-        """
-        node: object = payload
-        for key in self._items_path:
-            if not isinstance(node, dict):
-                return None
-            node = node.get(key)
-        return node
-
-    def _results(self, status: int, body: str, limit: int) -> list[SearchResult]:
-        """The keyed-provider response contract, in one place. The three field
-        names come from the instance, not callers; the list is clamped to the
-        caller's ``limit`` so an over-emitting provider leaks nothing beyond it.
-        """
-        if status != 200:
-            # The status is decided before the body is trusted: a non-2xx body
-            # may be non-JSON, so a blind parse must never swallow it.
-            try:
-                detail = _parse_json(body)
-            except SearchProviderError:
-                detail = {}
-            raise SearchProviderError(_provider_message(self.name, status, detail))
-        payload = _parse_json(body)
-        return collect_results(
-            self._items_of(payload),
-            url_key=self._url_key,
-            title_key=self._title_key,
-            description_key=self._description_key,
-            policy=self._host_policy,
-        )[:limit]
-
-
-class TavilyProvider(ApiKeyProvider):
-    """Tavily Search API (api.tavily.com). Free tier ~1000 credits/month."""
-
-    name = "tavily"
-    _url_key = "url"
-    _title_key = "title"
-    _description_key = "content"
-    _items_path = ("results",)
-
-    def _call(self, query: str, limit: int) -> ProviderCall:
-        # Tavily carries the key in the JSON body, not a header.
-        return ProviderCall(
-            "POST",
-            _TAVILY_URL,
-            json_body={
-                "api_key": self._api_key,
-                "query": query,
-                "max_results": limit,
-                "search_depth": "basic",
-                "include_answer": False,
-                "include_raw_content": False,
-            },
-            headers={"Content-Type": "application/json"},
-        )
-
-
-class BraveProvider(ApiKeyProvider):
-    """Brave Search API (api.search.brave.com). Free tier 2000 queries/month."""
-
-    name = "brave"
-    _url_key = "url"
-    _title_key = "title"
-    _description_key = "description"
-    _items_path = ("web", "results")
-
-    def _call(self, query: str, limit: int) -> ProviderCall:
-        return ProviderCall(
-            "GET",
-            _BRAVE_URL,
-            params={"q": query, "count": limit, "safesearch": "off"},
-            headers={"X-Subscription-Token": self._api_key, "Accept": "application/json"},
-        )
-
-
-class SerperProvider(ApiKeyProvider):
-    """Serper.dev Google SERP proxy. Free tier 2500 queries."""
-
-    name = "serper"
-    _url_key = "link"
-    _title_key = "title"
-    _description_key = "snippet"
-    _items_path = ("organic",)
-
-    def _call(self, query: str, limit: int) -> ProviderCall:
-        return ProviderCall(
-            "POST",
-            _SERPER_URL,
-            json_body={"q": query, "num": limit},
-            headers={"X-API-KEY": self._api_key, "Content-Type": "application/json"},
-        )
-
-
-class DuckDuckGoProvider:
-    """Keyless DuckDuckGo HTML endpoint (best-effort; captcha-prone from datacenters)."""
-
-    name = "duckduckgo"
-
-    def __init__(self, host_policy: HostPolicy) -> None:
-        self._host_policy = host_policy
-
-    async def search(self, query: str, limit: int, timeout_seconds: float) -> list[SearchResult]:
-        status, body = await provider_http(
-            "POST",
-            _DUCKDUCKGO_URL,
-            data={"q": query},
-            headers={"User-Agent": _DUCKDUCKGO_UA},
-            timeout_seconds=timeout_seconds,
-        )
-        if status != 200:
-            raise SearchProviderError(
-                f"duckduckgo HTTP {status}; the keyless provider is unreliable from "
-                "datacenter IPs — configure a keyed provider via CRAWLUTRON_*_API_KEY"
-            )
-        lowered = body.lower()
-        if "anomaly" in lowered or "challenge to confirm" in lowered:
-            raise SearchProviderError(
-                "duckduckgo returned a bot challenge; the keyless provider is unreliable "
-                "from datacenter IPs — configure a keyed provider via CRAWLUTRON_*_API_KEY"
-            )
-        results: list[SearchResult] = []
-        seen: set[str] = set()
-        # the thing that SHOULD fail here: this import used to sit inside the
-        # `except Exception` below, so a missing lxml read as a fault.
-        try:
-            tree = lxml_html.fromstring(body)
-        except Exception:
-            raise SearchProviderError("duckduckgo returned unparsable HTML") from None
-        for node in tree.xpath("//div[contains(concat(' ', normalize-space(@class), ' '), ' result ')]"):
-            link = node.xpath(".//a[contains(@class, 'result__a')]")
-            if not link:
-                continue
-            url = _duckduckgo_target(
-                str(link[0].get("href") or ""),
-                policy=self._host_policy,
-            )
-            if not url:
-                continue
-            normalized = _normalize_url(url, policy=self._host_policy)
-            if not normalized or normalized in seen:
-                continue
-            snippet_node = node.xpath(".//a[contains(@class, 'result__snippet')]") or node.xpath(
-                ".//*[contains(@class, 'result__snippet')]"
-            )
-            seen.add(normalized)
-            results.append(
-                SearchResult(
-                    url=normalized,
-                    title=_clip(" ".join(link[0].text_content().split())),
-                    description=_clip(" ".join(snippet_node[0].text_content().split()))
-                    if snippet_node
-                    else "",
-                )
-            )
-            if len(results) >= limit:
-                break
-        return results
-
-
-def _duckduckgo_target(href: str, *, policy: HostPolicy) -> str | None:
-    """Resolve a DuckDuckGo result link to its real URL.
-
-    DuckDuckGo wraps results as ``//duckduckgo.com/l/?uddg=<encoded>&rut=...``;
-    extract and decode the ``uddg`` parameter when present.
-    """
-    if href.startswith(_DUCKDUCKGO_REDIRECT):
-        parsed = urlsplit(href)
-        uddg = parse_qs(parsed.query).get("uddg")
-        if uddg:
-            return _normalize_url(unquote(uddg[0]), policy=policy)
-        return None
-    return _normalize_url(href, policy=policy)
-
-
 def configured_search_providers(settings: Any) -> list[str]:
     """Names of providers that have the credentials they need, in priority order.
 
-    ``auto`` selection walks this list and falls back to the keyless
-    DuckDuckGo provider when it is empty.
+    ``auto`` falls back to the keyless DuckDuckGo provider when this is empty.
     """
     names: list[str] = []
-    if settings.tavily_api_key:
-        names.append("tavily")
-    if settings.brave_api_key:
-        names.append("brave")
-    if settings.serper_api_key:
-        names.append("serper")
+    for name, key in (
+        ("tavily", settings.tavily_api_key),
+        ("brave", settings.brave_api_key),
+        ("serper", settings.serper_api_key),
+    ):
+        if key:
+            names.append(name)
     return names
 
 
@@ -428,14 +252,17 @@ def active_search_provider_name(settings: Any) -> str:
     return providers[0] if providers else "duckduckgo"
 
 
-def get_search_provider(settings: Any) -> SearchProvider:
-    """Resolve the configured search provider for ``settings``.
-    Raises :class:`SearchProviderUnavailable` when an explicit provider was
-    selected but its API key is missing, so the endpoint fails with an actionable message.
-    """
+def get_search_provider(settings: Any) -> BaseProvider:
+    """Resolve the configured search provider; raise :class:`SearchProviderUnavailable`
+    when an explicit provider was selected but its API key is missing."""
+    # Imported here, not at module top, to break the provider-family cycle: the
+    # api/html modules import the shared contract from this module.
+    from app.search.providers_api import BraveProvider, SerperProvider, TavilyProvider
+    from app.search.providers_html import DuckDuckGoProvider
+
     requested = (settings.search_provider or "auto").strip().lower()
     host_policy = HostPolicy.from_settings(settings)
-    available: dict[str, SearchProvider] = {
+    available: dict[str, BaseProvider] = {
         provider.name: provider
         for provider in (
             TavilyProvider(settings.tavily_api_key, host_policy) if settings.tavily_api_key else None,
@@ -458,17 +285,18 @@ def get_search_provider(settings: Any) -> SearchProvider:
 
 
 __all__ = [
-    "ApiKeyProvider",
-    "BraveProvider",
-    "DuckDuckGoProvider",
+    "PROVIDER_ENDPOINTS",
+    "BaseProvider",
     "ProviderCall",
-    "SearchProvider",
     "SearchProviderError",
     "SearchProviderUnavailable",
     "SearchResult",
-    "SerperProvider",
-    "TavilyProvider",
     "active_search_provider_name",
+    "clip_text",
+    "collect_results",
     "configured_search_providers",
     "get_search_provider",
+    "normalize_result_url",
+    "parse_provider_json",
+    "provider_message",
 ]

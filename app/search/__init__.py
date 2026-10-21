@@ -1,7 +1,7 @@
 """Web search capability (``POST /v1/search``)."""
 
 from app.search.providers import (
-    SearchProvider,
+    BaseProvider,
     SearchProviderError,
     SearchProviderUnavailable,
     active_search_provider_name,
@@ -10,7 +10,7 @@ from app.search.providers import (
 )
 
 __all__ = [
-    "SearchProvider",
+    "BaseProvider",
     "SearchProviderError",
     "SearchProviderUnavailable",
     "active_search_provider_name",

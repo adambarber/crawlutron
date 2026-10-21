@@ -109,6 +109,8 @@ _SURFACE_DECLARING_EXEMPT = frozenset(
         "app/runtime/resource_pressure.py",
         "app/search/endpoint.py",
         "app/search/providers.py",
+        "app/search/providers_api.py",
+        "app/search/providers_html.py",
         "app/storage/coordination_cookies.py",
         "app/storage/coordination_counters.py",
         "app/storage/coordination_store.py",

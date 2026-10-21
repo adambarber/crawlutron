@@ -173,7 +173,7 @@ def _keyed_provider_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
             offenders.append(offender_at(path, node, f"{node.name} does not state a _call()"))
         if "_items_path" not in attributes:
             offenders.append(offender_at(path, node, f"{node.name} does not declare _items_path"))
-        for hook in ("search", "_request", "_results", "_items_of"):
+        for hook in ("search", "_fetch", "_results", "_items_of"):
             if hook in methods:
                 offenders.append(
                     offender_at(path, node, f"{node.name} re-spells the shared provider flow in {hook}()")
@@ -186,7 +186,7 @@ KEYED_PROVIDERS_INHERIT_THE_SHARED_RESPONSE_FLOW = Rule(
     find=_keyed_provider_offenders,
     summary=(
         "a keyed search provider must state a _call() and an _items_path and not"
-        " define search()/_request()/_results()/_items_of(), so the non-200 check"
+        " define search()/_fetch()/_results()/_items_of(), so the non-200 check"
         " cannot be re-spelled or dropped"
     ),
     bite=lambda: (
@@ -210,9 +210,9 @@ KEYED_PROVIDERS_INHERIT_THE_SHARED_RESPONSE_FLOW = Rule(
             "    _items_path = ('web', 'results')\n"
             "    def _call(self, query, limit):\n"
             "        return ProviderCall('GET', url)\n"
-            "    async def _request(self, query, limit, timeout_seconds):\n"
+            "    async def _fetch(self, query, limit, timeout_seconds):\n"
             "        return await provider_http('GET', url)\n",
-            "re-spells the shared provider flow in _request()",
+            "re-spells the shared provider flow in _fetch()",
         ),
         Bites(
             "from app.search.providers import ApiKeyProvider\n"
