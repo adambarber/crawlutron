@@ -1,5 +1,6 @@
 """Document model: text parsing, bytearray paths and document-level extraction edges."""
 
+import logging
 import socket
 from pathlib import Path
 from typing import NamedTuple
@@ -12,6 +13,7 @@ from app.transport.document import (
     extract_pdf_bytes_to_markdown,
     format_table,
 )
+from tests._doc_pool_fixtures import fresh_doc_pool
 from tests._extraction_helpers import format_extracted_document_text
 from tests._fetcher_factories import run_http_strategy, scripted_fetcher
 from tests._policy_factories import canonical
@@ -183,12 +185,13 @@ class TestDocumentRedirectSsrf:
         assert "initial.test" in run.fetched
 
 
-async def test_document_extraction_with_uncompressed_bytearray_body(base_url):
-    """Simulate fetcher delivering CSV body as bytearray (no content-encoding)."""
-    # csv served WITHOUT compression -> decompress_body returns the raw buffer unchanged, which is a bytearray
-    fetcher = scripted_fetcher(status=200, ctype="text/csv", body=bytearray(b"name,age\nAlice,30\nBob,25"))
+async def _document_extraction_of_a_csv():
+    """The document strategy's answer for a CSV body served uncompressed.
 
-    result = await run_http_strategy(
+    The body arrives as a bytearray (no content-encoding), which is the path
+    the decompressor must pass through unchanged."""
+    fetcher = scripted_fetcher(status=200, ctype="text/csv", body=bytearray(b"name,age\nAlice,30\nBob,25"))
+    return await run_http_strategy(
         url="https://sudbury.ma.us/x.csv",
         policy={
             "strategies": ["HTTP_DECLARED_CRAWLER"],
@@ -198,8 +201,52 @@ async def test_document_extraction_with_uncompressed_bytearray_body(base_url):
         },
         http_fetcher=fetcher,
     )
+
+
+def _assert_the_csv_survived(result) -> None:
+    """The document arrived whole: a success, and the CSV's own text."""
     assert result.status == "success", (result.status, result.classification)
-    assert "Alice" in (result.text or "")
+    assert "Alice" in (result.text or ""), "the CSV did not survive the extraction"
+
+
+async def test_document_extraction_with_uncompressed_bytearray_body(base_url):
+    """Simulate fetcher delivering CSV body as bytearray (no content-encoding)."""
+    result = await _document_extraction_of_a_csv()
+    _assert_the_csv_survived(result)
+
+
+async def test_a_cold_worker_startup_is_not_charged_to_the_conversion_budget(monkeypatch, caplog):
+    """The worker's start-up is the acquisition's cost, not the conversion's.
+
+    A worker imports markitdown before it can serve. Charging that import to
+    the conversion budget degrades a document that converts in milliseconds.
+    """
+    fresh_doc_pool(monkeypatch)
+    # A budget no worker can start inside: the child needs its import first.
+    monkeypatch.setenv("CRAWLUTRON_EXTRACTION_DOC_ACQUIRE_TIMEOUT", "0.01")
+    monkeypatch.setenv("CRAWLUTRON_EXTRACTION_DOC_TIMEOUT", "10")
+
+    with caplog.at_level(logging.WARNING):
+        result = await _document_extraction_of_a_csv()
+
+    messages = [record.getMessage() for record in caplog.records]
+    assert "extraction_document_timeout" not in messages, (
+        f"the worker's start-up was charged to the conversion budget: {messages}"
+    )
+    assert any("extraction_document_spawn_failed" in message for message in messages), (
+        f"the pool could not start a worker and said nothing: {messages}"
+    )
+    assert not (result.text or "").strip(), "a document that never got a worker must degrade"
+
+
+async def test_a_cold_pool_extracts_its_first_document(monkeypatch):
+    """The first document on a cold pool arrives whole.
+
+    The acquisition budget covers the worker's start-up, so the conversion
+    budget is spent on the conversion."""
+    fresh_doc_pool(monkeypatch)
+    result = await _document_extraction_of_a_csv()
+    _assert_the_csv_survived(result)
 
 
 class TestDocumentExtractionEdges:

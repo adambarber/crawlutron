@@ -84,8 +84,11 @@ async def test_stale_spills_garbage_collected_on_next_crawl(monkeypatch):
     # that performs the sweep the test exists to observe.
     monkeypatch.setattr(engine, "spill_gc_last_run", None)
 
-    stale = os.path.join(tempfile.gettempdir(), engine.SPILL_PREFIX + "stale.ndjson")
-    fresh = os.path.join(tempfile.gettempdir(), engine.SPILL_PREFIX + "fresh.ndjson")
+    # The names are per-process: the sweep looks in the shared system temp
+    # directory, so a fixed name would let one process delete another's file.
+    tag = f"{os.getpid()}"
+    stale = os.path.join(tempfile.gettempdir(), engine.SPILL_PREFIX + f"stale-{tag}.ndjson")
+    fresh = os.path.join(tempfile.gettempdir(), engine.SPILL_PREFIX + f"fresh-{tag}.ndjson")
     for path in (stale, fresh):
         with open(path, "w") as fh:
             fh.write("{}\n")

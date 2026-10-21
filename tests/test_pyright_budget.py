@@ -31,6 +31,10 @@ _THIS_MODULE = sys.modules[__name__]
 # Fourteen on first run. The four that remain are: 2 engine.py the regex.Pattern / re.Pattern lie.
 BUDGET = 0
 
+# The whole-tree analysis tests are ``slow``: a checker subprocess is not a fast
+# behavioral test. The gate is the pre-commit hook, which runs this file whole.
+PYRIGHT_TIMEOUT_SECONDS = 600.0
+
 
 def _strip_jsonc(text: str) -> str:
     """pyrightconfig.json is JSONC, so `json.loads` cannot read it directly."""
@@ -117,13 +121,20 @@ def _pyright_report() -> tuple[int, str]:
         capture_output=True,
         text=True,
         check=False,
+        timeout=PYRIGHT_TIMEOUT_SECONDS,
     )
     return completed.returncode, completed.stdout
 
 
+@pytest.mark.slow
 def test_pyright_whole_tree_is_clean() -> None:
     returncode, stdout = _pyright_report()
-    assert returncode in (0, 1), f"pyright failed to run with status {returncode}"
+    assert returncode in (0, 1), (
+        f"pyright failed to run with status {returncode}.\n"
+        f"It is a whole-tree analysis in a separate process: on a machine under "
+        f"load the checker itself is killed, and a budget gate that reports a "
+        f"code failure it did not find is lying about what it proved."
+    )
 
     report = json.loads(stdout)
     diagnostics = report["generalDiagnostics"]
@@ -142,6 +153,7 @@ def test_pyright_whole_tree_is_clean() -> None:
     )
 
 
+@pytest.mark.slow
 def test_pyright_budget_is_tight() -> None:
     """A budget above the measurement is a standing allowance, not a ratchet."""
     _returncode, stdout = _pyright_report()

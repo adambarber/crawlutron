@@ -14,7 +14,7 @@ from app.extraction.content import (
     extract_selected,
     parse_html_tree,
 )
-from app.orchestration.doc_pool import DocExtractionPool
+from app.orchestration.doc_pool import DocExtractionPool, spawn_doc_worker, terminate_doc_process
 from app.vocabulary.limits import DEFAULT_EXTRACTION_MAX_MARKDOWN
 from tests._assertions import set_optional_env
 from tests._extraction_helpers import doc_worker_acquisitions, extract_discovered_links, settings_with
@@ -47,6 +47,19 @@ def _enabled_from_env() -> bool:
     Re-derived rather than imported because the reader is private; this test is
     about the parser's verdict, and the pool honoring it is asserted above."""
     return parse_bool_env("CRAWLUTRON_EXTRACTION_DOC_ENABLED", default=True)
+
+
+def test_a_spawned_worker_is_ready_before_it_is_handed_out():
+    """The spawner waits for the child's readiness.
+
+    The child imports markitdown before it can serve, so the parent must not
+    hand the worker out before that finishes."""
+    worker = spawn_doc_worker(30.0)
+    try:
+        assert worker.proc.is_alive(), "the worker process did not start"
+        assert worker.conn.poll(0) is False, "the readiness signal was left in the pipe"
+    finally:
+        terminate_doc_process(worker.proc)
 
 
 async def test_extract_document_kill_switch(monkeypatch):

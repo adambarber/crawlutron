@@ -45,7 +45,7 @@ def _counting_spawn(monkeypatch):
     constructions = 0
     real_spawn = doc_pool_mod.spawn_doc_worker
 
-    def counting_spawn() -> DocWorker:
+    def counting_spawn(ready_timeout: float) -> DocWorker:
         nonlocal constructions
         constructions += 1
         return real_spawn()

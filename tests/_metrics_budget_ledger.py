@@ -14,7 +14,9 @@ _BUDGET_HISTORY: dict[str, list[int]] = {
     "function length": [22, 21],
     "abc size": [1],
     "largest class": [358],
-    "block length": [8],
+    #: 8 first declared; lowered to 7 when the document pool's acquisition split
+    #: its growth logic out, and one oversized block left the tree.
+    "block length": [8, 7],
 }
 
 #: Oldest-first history per ``_SCRIPTS_BUDGETS`` metric, declared at #293.

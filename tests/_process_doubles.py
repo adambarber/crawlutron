@@ -107,7 +107,7 @@ class StubSpawner:
         self._last: DocWorker | None = None
         self.asked: list[DocWorker] = []
 
-    def __call__(self) -> DocWorker:
+    def __call__(self, ready_timeout: float) -> DocWorker:
         """The next queued worker, or the last one out once the queue runs dry.
 
         Repeating rather than raising is what a pool growing one slot at a time

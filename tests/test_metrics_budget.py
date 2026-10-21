@@ -42,7 +42,7 @@ _BUDGETS = {
     "function length": 21,
     "abc size": 1,
     "largest class": 358,
-    "block length": 8,
+    "block length": 7,
 }
 
 #: The scripts/ tree, outside this gate before #293; its measured baseline,

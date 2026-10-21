@@ -31,6 +31,10 @@ ACQUIRE_RECHECK_SECONDS = 1.0
 # Grace period for a document worker to honor SIGTERM before we escalate.
 TERMINATE_GRACE_SECONDS = 5.0
 
+# How long a spawned worker may take to finish importing and report ready.
+# The pool passes the caller's remaining acquisition budget instead.
+SPAWN_READY_TIMEOUT = 30.0
+
 
 class DocWorker:
     """One persistent markitdown worker: process + parent end of its task pipe."""
@@ -107,6 +111,9 @@ def _doc_worker_main(conn) -> None:
     """
     try:
         configure_doc_worker_logging()
+        # Readiness is signalled here, after the child's imports: the parent's
+        # conversion budget must not pay for this worker's start-up.
+        conn.send(("ready", None))
         while True:
             try:
                 body, hooks = conn.recv()
@@ -134,13 +141,32 @@ def _doc_worker_main(conn) -> None:
             conn.close()
 
 
-def spawn_doc_worker() -> DocWorker:
-    """Start one persistent worker and return its parent-side handle."""
+class DocWorkerSpawnError(RuntimeError):
+    """A worker that never became ready: it died, or it never finished importing."""
+
+
+def spawn_doc_worker(ready_timeout: float = SPAWN_READY_TIMEOUT) -> DocWorker:
+    """Start one persistent worker and wait until it can serve a task.
+
+    The wait is bounded by the caller's acquisition budget: a cold worker pays
+    for its own imports here, not inside the caller's conversion budget.
+    """
     parent_conn, child_conn = WORKER_CONTEXT.Pipe(duplex=True)
     proc = WORKER_CONTEXT.Process(target=_doc_worker_main, args=(child_conn,), daemon=True)
     proc.start()
     child_conn.close()  # parent keeps only its end of the pipe
-    return DocWorker(proc, parent_conn)
+    worker = DocWorker(proc, parent_conn)
+    try:
+        if not parent_conn.poll(ready_timeout):
+            raise DocWorkerSpawnError("worker did not become ready")
+        parent_conn.recv()
+    except DocWorkerSpawnError:
+        terminate_doc_process(proc)
+        raise
+    except (EOFError, OSError) as exc:
+        terminate_doc_process(proc)
+        raise DocWorkerSpawnError(str(exc)) from exc
+    return worker
 
 
 class DocExtractionPool:
@@ -152,7 +178,7 @@ class DocExtractionPool:
     def __init__(
         self,
         *,
-        spawn: Callable[[], DocWorker] = spawn_doc_worker,
+        spawn: Callable[[float], DocWorker] = spawn_doc_worker,
         worker_count: Callable[[], int],
         enabled: Callable[[], bool],
         recheck_seconds: float = ACQUIRE_RECHECK_SECONDS,
@@ -168,13 +194,56 @@ class DocExtractionPool:
         self._slots: list[DocWorker] | None = None
         self._closed = False
 
-    def _try_spawn(self) -> DocWorker | None:
-        """Spawn a worker, or ``None`` when the process cannot fork (OSError).
-        A spawn failure is transient (cgroup ceiling), distinct from a teardown (#269)."""
+    def _spawn_ready(self, ready_timeout: float) -> DocWorker:
+        """A worker ready to serve, or the failure that ends the acquisition.
+
+        A spawn failure is transient (cgroup ceiling) and distinct from a
+        teardown (#269); it ends this acquisition rather than being waited out."""
         try:
-            return self._spawn()
-        except OSError:
+            return self._spawn(ready_timeout)
+        except (OSError, DocWorkerSpawnError) as exc:
+            logger.warning(
+                "extraction_document_spawn_failed",
+                extra={"error": str(exc), "ready_timeout": ready_timeout},
+            )
+            raise DocWorkerSpawnError(str(exc)) from exc
+
+    def _idle_worker(self) -> DocWorker | None:
+        """A slot that is free, not retired, and still alive."""
+        for worker in self._slots or []:
+            if not worker.busy and not worker.retired and worker.proc.is_alive():
+                return worker
+        return None
+
+    def _budget_left(self, deadline: float, want: int) -> bool:
+        """Whether the acquisition budget still has time, and say so when it does not."""
+        if deadline - time.monotonic() > 0:
+            return True
+        logger.warning(
+            "extraction_document_pool_unavailable",
+            extra={"slots": len(self._slots or []), "workers": want},
+        )
+        return False
+
+    def _grow(self, deadline: float, want: int) -> tuple[DocWorker, DocWorker | None] | None:
+        """A replacement for a dead slot, or one more slot: (worker, replaced).
+
+        ``None`` means the pool is the size it wants; a spawn that fails raises.
+        """
+        slots = self._slots
+        if slots is None:
             return None
+        for index, worker in enumerate(slots):
+            if not worker.busy and not worker.proc.is_alive():
+                fresh = self._spawn_ready(max(0.0, deadline - time.monotonic()))
+                slots[index] = fresh
+                return fresh, worker
+        usable = sum(1 for each in slots if not each.retired)
+        if usable < want:
+            fresh = self._spawn_ready(max(0.0, deadline - time.monotonic()))
+            slots.append(fresh)
+            return fresh, None
+        return None
 
     def acquire(self, timeout: float) -> DocWorker | None:
         """Take an idle pool worker, spawning on demand up to the configured size.
@@ -201,33 +270,25 @@ class DocExtractionPool:
                 while True:
                     if self._closed:  # a parked acquirer woken by teardown must see it here
                         return None
-                    for worker in self._slots:
-                        if not worker.busy and not worker.retired and worker.proc.is_alive():
-                            worker.busy = True
-                            return worker
-                    for index, worker in enumerate(self._slots):
-                        if not worker.busy and not worker.proc.is_alive():
-                            if (fresh := self._try_spawn()) is None:
-                                return None
-                            fresh.busy = True
-                            self._slots[index] = fresh
-                            dead_slots.append(worker)
-                            return fresh
-                    # A short live set grows by one rather than degrading to no worker.
-                    usable = sum(1 for each in self._slots if not each.retired)
-                    if usable < want:
-                        if (fresh := self._try_spawn()) is None:
-                            return None
-                        fresh.busy = True
-                        self._slots.append(fresh)
-                        return fresh
-                    remaining = deadline - time.monotonic()
-                    if remaining <= 0:
-                        logger.warning(
-                            "extraction_document_pool_unavailable",
-                            extra={"slots": len(self._slots), "workers": want},
-                        )
+                    idle = self._idle_worker()
+                    if idle is not None:
+                        idle.busy = True
+                        return idle
+                    if not self._budget_left(deadline, want):
                         return None
+                    try:
+                        grown = self._grow(deadline, want)
+                    except DocWorkerSpawnError:
+                        return None
+                    if grown is not None:
+                        fresh, replaced = grown
+                        fresh.busy = True
+                        if replaced is not None:
+                            dead_slots.append(replaced)
+                        return fresh
+                    if not self._budget_left(deadline, want):
+                        return None
+                    remaining = deadline - time.monotonic()
                     # A condition wait (not a poll): a release notifies immediately.
                     # The bounded re-check only guards a busy flag nothing clears.
                     self._lock.wait(timeout=min(remaining, self._recheck_seconds))

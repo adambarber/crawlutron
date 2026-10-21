@@ -10,7 +10,12 @@ import time
 import app.extraction.content as ext_mod
 import app.extraction.documents as docex
 from app.extraction.content import ExtractedContent
-from app.orchestration.doc_pool import DocExtractionPool, DocWorker, terminate_doc_process
+from app.orchestration.doc_pool import (
+    DocExtractionPool,
+    DocWorker,
+    DocWorkerSpawnError,
+    terminate_doc_process,
+)
 from tests._doc_pool_fixtures import _seeded
 from tests._extraction_helpers import settings_with
 from tests._lock_doubles import DelegatingLock
@@ -54,10 +59,19 @@ def _acquire_with_bound(pool: DocExtractionPool, bound: float = 0.25):
 def _failing_spawn_pool() -> DocExtractionPool:
     """An empty pool whose every spawn raises OSError (an unforkable host)."""
 
-    def failing_spawn() -> DocWorker:
+    def failing_spawn(ready_timeout: float) -> DocWorker:
         raise OSError("Resource temporarily unavailable")
 
     return DocExtractionPool(spawn=failing_spawn, worker_count=lambda: 1, enabled=lambda: True)
+
+
+def _never_ready_spawn_pool() -> DocExtractionPool:
+    """A pool whose every spawn reports a worker that never became ready."""
+
+    def never_ready_spawn(ready_timeout: float) -> DocWorker:
+        raise DocWorkerSpawnError("worker did not become ready")
+
+    return DocExtractionPool(spawn=never_ready_spawn, worker_count=lambda: 1, enabled=lambda: True)
 
 
 # --- 1: SIGKILL escalation ---------------------------------------------------
@@ -166,6 +180,36 @@ def test_acquire_returns_none_when_spawn_fails():
     worker = pool.acquire(0.1)
 
     assert worker is None
+
+
+def test_a_worker_that_never_readies_degrades_the_acquisition():
+    """A worker that never reports ready degrades the acquisition, not the document.
+
+    The failure belongs to the pool: the caller's conversion budget must not
+    be spent discovering that the worker never started."""
+    pool = _never_ready_spawn_pool()
+    worker = pool.acquire(0.1)
+
+    assert worker is None
+
+
+def test_the_spawn_is_bounded_by_the_remaining_acquisition_budget():
+    """A cold worker's start-up is paid by the acquisition, not the conversion.
+
+    The pool hands its spawner the budget it has left, so the child's import
+    can never eat into the caller's conversion budget."""
+    seen: list[float] = []
+
+    def recording_spawn(ready_timeout: float) -> DocWorker:
+        seen.append(ready_timeout)
+        return stub_worker(1)
+
+    pool = DocExtractionPool(spawn=recording_spawn, worker_count=lambda: 1, enabled=lambda: True)
+
+    pool.acquire(5.0)
+
+    assert seen, "the pool spawned without telling the spawner its budget"
+    assert 0 < seen[0] <= 5.0, f"the spawn budget {seen[0]} is not the acquisition's remainder"
 
 
 def test_extract_document_degrades_on_spawn_failure(monkeypatch):
