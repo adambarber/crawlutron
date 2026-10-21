@@ -399,3 +399,27 @@ class TestWholeSiteJobExecution:
             canonical(GRAPH_CHILD),
             canonical("http://example.test/c"),
         }
+
+    async def test_batch_admission_derives_the_occupied_set_once_per_batch(
+        self, client, job_store, monkeypatch
+    ):
+        """#381: the occupied set is derived once per batch and threaded by value
+        (``known_after``), not re-derived from job state for every entry."""
+        import app.api.job_runner as job_runner_module
+
+        calls: list[int] = []
+        real = job_runner_module.admitted_page_identities
+
+        def counting(job, *, host_policy):
+            calls.append(len(job.frontier))
+            return real(job, host_policy=host_policy)
+
+        monkeypatch.setattr(job_runner_module, "admitted_page_identities", counting)
+        job = await run_scripted_api_job(
+            client,
+            job_store,
+            GRAPH_ROOT,
+            results=[_canned_result(GRAPH_ROOT, links=[GRAPH_CHILD, "http://example.test/c"])],
+        )
+        assert_settled(job, visited=[GRAPH_ROOT, GRAPH_CHILD, "http://example.test/c"], crawled=3)
+        assert len(calls) == 2  # one per batch (root, then the two-entry batch), not per entry

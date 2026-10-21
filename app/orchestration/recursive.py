@@ -283,6 +283,9 @@ class RecursiveState:
     visited: set[NormalizedUrl]
     next_index: int
     ramp: float
+    # The threaded occupied set (#381): the previous admission's ``known_after``,
+    # so each expansion dedupes against the value instead of re-deriving it.
+    known: set[NormalizedUrl]
     page_count: int = 0
     transient_requeues: dict[NormalizedUrl, int] = field(default_factory=dict)
 
@@ -360,12 +363,12 @@ async def _expand_recursive_result(
     depth: int,
     result: EngineCrawlResult,
 ) -> None:
-    await admit_discovered_links(
+    outcome = await admit_discovered_links(
         result.discovered_links,
         source_depth=depth,
         max_depth=run.max_depth,
         max_pages=run.max_pages,
-        known=state.visited,
+        known=state.known,
         frontier=state.frontier,
         make_entry=state.make_admitted_task,
         scope_pattern=run.scope_pattern,
@@ -376,6 +379,9 @@ async def _expand_recursive_result(
         commit_crawl_delay=lambda domain, delay: run.scheduler.set_domain_min_delay(domain, delay),
         host_policy=run.host_policy,
     )
+    # Empty only on the max-depth early return: never wipe a seeded set with it.
+    if outcome.known_after:
+        state.known = set(outcome.known_after)
 
 
 async def commit_recursive_results(
@@ -404,14 +410,16 @@ async def _start_recursive_state(
     run: RecursiveRunState,
     jobs: list[CrawlTask],
 ) -> RecursiveState:
+    seed_identities: set[NormalizedUrl] = {job.normalized_url for job in jobs}
     state = RecursiveState(
         frontier=deque((0, job) for job in jobs),
         visited=set(),
         next_index=len(jobs),
         ramp=float(run.global_concurrency),
+        known=set(seed_identities),
     )
-    seed_identities: set[NormalizedUrl] = {job.normalized_url for job in jobs}
     await _seed_recursive_frontier(run, state, state.frontier, seed_identities)
+    state.known |= seed_identities  # the sitemap seeds the seeding call added
     return state
 
 

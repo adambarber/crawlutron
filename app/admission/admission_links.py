@@ -117,18 +117,17 @@ def _prepare_admission[T](
     links: Iterable[Any],
     *,
     known: set[NormalizedUrl],
-    frontier: MutableSequence[T],
     next_depth: int,
     scope_pattern: BoundedPattern | None,
     want_document_bodies: bool,
     host_policy: HostPolicy,
 ) -> tuple[set[NormalizedUrl], int, Iterator[AdmittedLink]]:
-    """The occupied set and candidate stream a link-admission pass runs over."""
+    """The occupied set and candidate stream a link-admission pass runs over.
+
+    ``known`` is the caller's FULL occupied set -- visited, in-flight and frontier
+    identities together (#381): it seeds ``reserved`` by value and is never mutated.
+    """
     reserved: set[NormalizedUrl] = set(known)
-    for value in frontier:
-        identity = frontier_identity(value, host_policy=host_policy)
-        if identity is not None:
-            reserved.add(identity)
     candidates = iter(
         _candidate_stream(
             links,
@@ -248,12 +247,13 @@ async def admit_discovered_links[T](
     commit_crawl_delay: CommitCrawlDelay,
     host_policy: HostPolicy,
 ) -> AdmissionOutcome:
+    """Admit ``links`` against the occupied set ``known`` (full: visited, in-flight,
+    frontier -- #381); ``known_after`` returns the updated value to thread."""
     if source_depth >= max_depth:
         return AdmissionOutcome()
     reserved, _occupied, candidates = _prepare_admission(
         links,
         known=known,
-        frontier=frontier,
         next_depth=source_depth + 1,
         scope_pattern=scope_pattern,
         want_document_bodies=want_document_bodies,

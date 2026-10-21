@@ -14,6 +14,7 @@ from typing import Any
 from app.admission.admission import (
     JobAdmissionContext,
     admit_job_links,
+    admitted_page_identities,
     fetch_job_sitemap_candidates,
     job_max_pages,
     record_cap_overcommitted,
@@ -213,8 +214,13 @@ async def _entry_result(
     item: EngineCrawlResult | None,
     depth: int,
     context: JobAdmissionContext,
+    known: set[NormalizedUrl],
 ) -> int:
-    """Record one entry's result into ``job``; returns ``1`` if it failed."""
+    """Record one entry's result into ``job``; returns ``1`` if it failed.
+
+    ``known`` is the batch's threaded occupied set (#381): admission folds its
+    ``known_after`` back in, so the next entry dedupes against the value.
+    """
     if item is None:
         # The batch's own shaping envelope names the unanswered URL and carries
         # the admitted value, reused rather than reinvented.
@@ -232,13 +238,16 @@ async def _entry_result(
     job.results.append(unified.model_dump())
     failed = 1 if item.status == "failed" else 0
     try:
-        admitted = await admit_job_links(job, item.discovered_links, source_depth=depth, context=context)
+        admitted = await admit_job_links(
+            job, item.discovered_links, source_depth=depth, context=context, known=known
+        )
     except Exception:
         # One entry's link admission must not lose the whole job: drop its links
         # and let the remaining entries resolve.
         url_attr = item.normalized_url.raw if item.normalized_url else "<unknown>"
         logger.warning("link_admission_failed", extra={"url": url_attr})
         admitted = AdmissionOutcome()
+    known |= admitted.known_after
     job.stats["total_discovered"] = job.stats.get("total_discovered", 0) + admitted.accepted
     return failed
 
@@ -270,6 +279,7 @@ async def _absorb_batch(
 ) -> int:
     """Fold one resolved batch into ``job``; returns the failed count."""
     failed = 0
+    known = admitted_page_identities(job, host_policy=context.host_policy)
     for entry in batch:
         identity = entry.url
         job.in_flight = [pending for pending in job.in_flight if pending.url != identity]
@@ -285,7 +295,7 @@ async def _absorb_batch(
             continue
         job.transient_retries.pop(identity, None)
         job.visited.add(identity)
-        failed += await _entry_result(job, identity, item, entry.depth, context)
+        failed += await _entry_result(job, identity, item, entry.depth, context, known)
     return failed
 
 

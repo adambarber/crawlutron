@@ -7,7 +7,6 @@ matching to stdlib http.cookiejar; these tests pin the observable behavior.
 from __future__ import annotations
 
 import json
-import time
 
 import pytest
 

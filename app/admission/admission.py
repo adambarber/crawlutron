@@ -191,8 +191,12 @@ async def admit_job_links(
     *,
     source_depth: int,
     context: JobAdmissionContext,
+    known: set[NormalizedUrl] | None = None,
 ) -> AdmissionOutcome:
-    known = admitted_page_identities(job, host_policy=context.host_policy)
+    """Admit ``links`` for ``job``; pass ``known`` to thread the occupied set by
+    value (#381) -- ``None`` derives it from job state (the first admission)."""
+    if known is None:
+        known = admitted_page_identities(job, host_policy=context.host_policy)
     outcome = await admit_discovered_links(
         links,
         source_depth=source_depth,
