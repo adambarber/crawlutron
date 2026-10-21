@@ -344,3 +344,40 @@ async def test_no_cache_response_revalidated_on_replay(tmp_path):
     await run()
     # no-cache with no validator: the second crawl must not serve the stored body.
     assert fetches["n"] == 2, fetches
+
+
+async def test_private_response_is_never_stored_for_replay(tmp_path):
+    """RFC 9111 5.2.2.6: ``private`` marks single-user content; a shared cache stores nothing.
+
+    Two callers (different cookie namespaces) share the key when neither sends a
+    Cookie yet, so only forbidding the store keeps B from being served A's body.
+    """
+    from app.transport.cookie_jar import COOKIE_NAMESPACE
+
+    run, fetches = await _directive_runner(
+        "http://example.com/private", {"cache-control": "private"}, tmp_path
+    )
+    token = COOKIE_NAMESPACE.set("tenant-a")
+    try:
+        await run()
+    finally:
+        COOKIE_NAMESPACE.reset(token)
+    token = COOKIE_NAMESPACE.set("tenant-b")
+    try:
+        await run()
+    finally:
+        COOKIE_NAMESPACE.reset(token)
+    # Caller B must re-fetch; replaying A's private body is the leak.
+    assert fetches["n"] == 2, fetches
+
+
+async def test_max_age_bounds_the_replay_window(tmp_path):
+    """RFC 9111 5.2.2.1: freshness comes from the origin's max-age, not the local
+    default TTL -- a max-age=0 response must be stale immediately, so the second
+    crawl re-fetches instead of replaying the stored body (pins #385)."""
+    run, fetches = await _directive_runner(
+        "http://example.com/zero", {"cache-control": "max-age=0"}, tmp_path
+    )
+    await run()
+    await run()
+    assert fetches["n"] == 2, fetches

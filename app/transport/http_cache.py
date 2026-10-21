@@ -12,7 +12,11 @@ from app.models.crawl_strategy_attempt import CrawlStrategyAttempt
 from app.models.result_factory import build_engine_result
 from app.models.taxonomy import Classification
 from app.transport import content_cache_key, fetch_policy, request_profile
-from app.transport.cache_control import forbids_store, requires_revalidation
+from app.transport.cache_control import (
+    forbids_shared_store,
+    max_age_seconds,
+    requires_revalidation,
+)
 from app.transport.http_response import (
     FetchedResponse,
     HttpStrategyContext,
@@ -148,10 +152,11 @@ def not_modified_result(ctx: HttpStrategyContext, resp: FetchedResponse) -> Engi
 
 async def store_http_caches(ctx: HttpStrategyContext, resp: FetchedResponse) -> None:
     """Store origin validators and fresh content after a successful fetch."""
-    if forbids_store(resp.headers):
-        # no-store: never persist body or validator, so a single-use response is
-        # neither written to disk nor re-armed for replay (pins #247).
+    if forbids_shared_store(resp.headers):
+        # no-store bans every cache; private bans the shared one (RFC 9111 5.2.2.6)
+        # -- a single-user body must never persist for another caller's replay.
         return
+    origin_ttl = max_age_seconds(resp.headers)
     if (
         ctx.cache is not None
         and resp.status_code < 400
@@ -161,5 +166,12 @@ async def store_http_caches(ctx: HttpStrategyContext, resp: FetchedResponse) -> 
     if ctx.content_cache is None or ctx.ckey is None or ctx.content_hit:
         return
     if resp.status_code < 300:
+        # The origin's freshness lifetime wins over the local default (RFC 9111
+        # 5.2.2.1): store at min(local TTL, max-age) when max-age is present.
+        ttl = int(min(ctx.content_cache.default_ttl, origin_ttl)) if origin_ttl is not None else None
+        if ttl is not None and ttl <= 0:
+            # Already stale at write time (max-age=0): the cache's ttl<=0 means
+            # "never expires", so storing would invert the directive.
+            return
         with contextlib.suppress(Exception):
-            await ctx.content_cache.aset(ctx.ckey, serialize_response(resp.raw))
+            await ctx.content_cache.aset(ctx.ckey, serialize_response(resp.raw), ttl=ttl)

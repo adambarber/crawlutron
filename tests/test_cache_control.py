@@ -1,8 +1,16 @@
 """cache_control directive parser: no-store bans persisting, no-cache/must-revalidate
-and pragma: no-cache force revalidation. Pins the seam the content cache honors (#247).
+and pragma: no-cache force revalidation, private bans SHARED persistence, max-age
+bounds replay. Pins the seam the content cache honors (#247, #385).
 """
 
-from app.transport.cache_control import forbids_store, requires_revalidation
+import pytest
+
+from app.transport.cache_control import (
+    forbids_shared_store,
+    forbids_store,
+    max_age_seconds,
+    requires_revalidation,
+)
 
 
 def test_forbids_store_detects_no_store():
@@ -27,3 +35,35 @@ def test_requires_revalidation_covers_no_cache_and_must_revalidate():
 def test_no_store_is_separate_from_no_cache():
     assert not requires_revalidation({"cache-control": "no-store"})
     assert not forbids_store({"cache-control": "no-cache"})
+
+
+# RFC 9111 5.2.2.6: private marks a response single-user; a shared cache stores nothing.
+
+
+def test_private_forbids_shared_store_but_not_plain_store_ban():
+    assert forbids_shared_store({"cache-control": "private"})
+    assert forbids_shared_store({"cache-control": "private, max-age=3600"})
+    assert forbids_shared_store({"cache-control": "no-store"})
+    assert not forbids_shared_store({"cache-control": "max-age=3600"})
+    assert not forbids_shared_store({})
+    # plain forbids_store stays a no-store-only question (pins #247's seam)
+    assert not forbids_store({"cache-control": "private"})
+
+
+# RFC 9111 5.2.2.1/5.2.2.9: max-age sets freshness; s-maxage wins in a shared cache.
+
+
+@pytest.mark.parametrize(
+    ("headers", "expected"),
+    [
+        ({"cache-control": "max-age=60"}, 60.0),
+        ({"cache-control": "public, max-age=10"}, 10.0),
+        ({"cache-control": "max-age=0"}, 0.0),
+        ({"cache-control": "s-maxage=5, max-age=999"}, 5.0),
+        ({"cache-control": "max-age=abc"}, None),
+        ({"cache-control": "no-store"}, None),
+        ({}, None),
+    ],
+)
+def test_max_age_seconds_parses_the_origin_freshness(headers, expected):
+    assert max_age_seconds(headers) == expected
