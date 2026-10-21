@@ -134,6 +134,28 @@ def _root_docstrings(root: str) -> dict[str, list[tuple[int, int, str]]]:
     return _root_findings(root, collect)
 
 
+def demoted_docstrings(source: str) -> list[tuple[int, int, str]]:
+    """Every docstring that sits below the first statement, so it documents nothing.
+
+    A string expression is a docstring only when it is the first statement;
+    below an annotation it is a dead string the object does not carry.
+    """
+    tree = ast.parse(source)
+    found: list[tuple[int, int, str]] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        if ast.get_docstring(node) is not None:
+            continue
+        for statement in node.body:
+            if not isinstance(statement, ast.Expr):
+                continue
+            if isinstance(statement.value, ast.Constant) and isinstance(statement.value.value, str):
+                found.append((statement.lineno, statement.end_lineno or statement.lineno, node.name))
+                break
+    return found
+
+
 def _root_all_blocks(root: str) -> dict[str, list[tuple[int, int, str]]]:
     """Every dangling block under one root, as ``{file: [(start, end, text)]}``."""
     return _root_findings(root, dangling_comment_blocks)
@@ -210,6 +232,20 @@ def test_every_root_is_at_its_declared_docstring_budget() -> None:
                 f"({detail}). A new over-limit docstring fails; a rewritten tree must "
                 "lower the budget in the same commit."
             )
+    assert not failures, "\n".join(failures)
+
+
+def test_no_docstring_sits_below_the_first_statement() -> None:
+    """A docstring below the first statement documents nothing.
+
+    The length gate could not see this: the string was a statement, so it had
+    a length, and the object it claimed to document carried no documentation.
+    """
+    failures: list[str] = []
+    for root in _DOC_BUDGETS:
+        for name, items in _root_findings(root, demoted_docstrings).items():
+            for lineno, _end, symbol in items:
+                failures.append(f"{name}:{lineno}: {symbol} has a docstring that documents nothing")
     assert not failures, "\n".join(failures)
 
 

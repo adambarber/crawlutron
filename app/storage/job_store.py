@@ -26,6 +26,7 @@ from .job_store_collections import (
     job_max_pages,
 )
 from .job_store_state import (
+    _JOB_LIST_ORDER,
     _JOB_STATUS_PROJECTION,
     _UPSERT_JOB_ROW_SQL,
     CrawlJobState,
@@ -54,11 +55,12 @@ __all__ = [
 
 
 class JobStore:
-    _conn: sqlite3.Connection
     """SQLite-backed store for crawl job states.
     Every method is synchronous SQLite work, so each has an ``a``-prefixed twin
     running off the loop; ``self._lock`` serializes every connection use.
     """
+
+    _conn: sqlite3.Connection
 
     def __init__(
         self,
@@ -286,12 +288,11 @@ class JobStore:
         with self._lock:
             counts = self._accumulators.counts_by_job()
             if owner is None:
-                statement = _JOB_STATUS_PROJECTION + " WHERE deleted_at IS NULL ORDER BY created_at DESC"
+                statement = _JOB_STATUS_PROJECTION + " WHERE deleted_at IS NULL" + _JOB_LIST_ORDER
                 params = ()
             else:
                 statement = (
-                    _JOB_STATUS_PROJECTION
-                    + " WHERE owner = ? AND deleted_at IS NULL ORDER BY created_at DESC"
+                    _JOB_STATUS_PROJECTION + " WHERE owner = ? AND deleted_at IS NULL" + _JOB_LIST_ORDER
                 )
                 params = (owner,)
             if limit is not None:

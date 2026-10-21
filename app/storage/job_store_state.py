@@ -205,6 +205,10 @@ _JOB_STATUS_PROJECTION = """
       FROM crawl_jobs
 """
 
+# The list order: newest first, with the job id breaking a tie, so a page of
+# two rows created in the same instant has one order and not two.
+_JOB_LIST_ORDER = " ORDER BY created_at DESC, job_id DESC"
+
 
 class JobStatusView(TypedDict):
     """The status view: one record, one declared shape, every key mandatory.
