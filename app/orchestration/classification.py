@@ -16,6 +16,7 @@ from app.models.browser_pool_exhausted import BrowserPoolExhaustedError
 from app.models.taxonomy import Classification, CrawlStrategyName
 from app.orchestration.scheduler_exceptions import CircuitBreakerOpen
 from app.transport.decompression import DecompressionError, DecompressionTooLargeError
+from app.transport.pinned_transport import ResolverBudgetExceeded
 from app.vocabulary.taxonomy import is_transient_classification
 
 _logger = logging.getLogger(__name__)
@@ -36,6 +37,9 @@ CLASSIFICATION_BY_EXCEPTION: tuple[tuple[tuple[type[BaseException], ...], Classi
     # Name resolution never got off the host; without this row it read as
     # "connection_error" and the declared dns_error member had no producer.
     ((socket.gaierror, socket.herror), "dns_error"),
+    # The bounded resolver's own verdict (#383/#405): the resolve outlasted the
+    # request's budget -- a resolution failure, not a navigation or connection one.
+    ((ResolverBudgetExceeded,), "dns_error"),
     (
         (
             httpx.ConnectTimeout,

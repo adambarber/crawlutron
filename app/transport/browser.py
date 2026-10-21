@@ -11,7 +11,7 @@ from collections.abc import (
     Awaitable,
     Callable,
 )
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any
 
 from app.config.env import get_env_float, get_env_int
 from app.config.settings import CrawlerSettings
@@ -35,6 +35,7 @@ from app.transport.browser_targets import (
     make_ssrf_websocket_handler,
     resolve_browser_target,
 )
+from app.transport.pinned_transport import ResolverBudgetExceeded
 
 if TYPE_CHECKING:
     from app.models.host_policy import HostPolicy
@@ -64,6 +65,26 @@ if TYPE_CHECKING:
 
 
 logger = logging.getLogger(__name__)
+
+
+def _render_classification(error: BaseException) -> Classification:
+    """The attempt verdict for a failed render. A bounded-resolver timeout is a
+    resolution failure (dns_error), never a navigation one (#405): the request
+    never got to navigate."""
+    if isinstance(error, ResolverBudgetExceeded):
+        return "dns_error"
+    if isinstance(error, TimeoutError):
+        return "navigation_timeout"
+    return "unknown_error"
+
+
+def _render_failure_status(classification: Classification) -> ResultStatus:
+    """The failure result's status, agreeing with the classification table: the
+    loop's own verdict (retry_exhausted) belongs to navigation_timeout and the
+    untriaged unknown_error only."""
+    if classification == "unknown_error":
+        return "retry_exhausted"
+    return status_for_classification(classification)
 
 
 def looks_like_pdf(url: str) -> bool:
@@ -186,15 +207,12 @@ class BrowserRenderer:
                 result = await self.render_once(url, options, policy=policy)
                 return result
             except Exception as error:
-                classification: Literal["navigation_timeout", "unknown_error"] = (
-                    "navigation_timeout" if isinstance(error, TimeoutError) else "unknown_error"
-                )
+                classification: Classification = _render_classification(error)
                 last_error = classify_error_code(error)
                 await self._driver.close()
                 if attempts >= max_attempts:
-                    return self._failure_result(
-                        url, "retry_exhausted", classification, attempts, started, last_error
-                    )
+                    status = _render_failure_status(classification)
+                    return self._failure_result(url, status, classification, attempts, started, last_error)
                 await self._async_sleep(min(2 ** (attempts - 1), 5))
 
         return self._failure_result(url, "failed", "unknown_error", attempts, started, last_error)
@@ -236,9 +254,10 @@ class BrowserRenderer:
                     include_screenshot=bool((options.browser_profile or {}).get("include_screenshot")),
                     policy=policy,
                     pin=self._pin_sync,
+                    timeout_seconds=options.timeout_seconds,
                 ),
             )
-            ws_guard = make_ssrf_websocket_handler(policy=policy)
+            ws_guard = make_ssrf_websocket_handler(policy=policy, timeout_seconds=options.timeout_seconds)
             ws_router = getattr(page, "route_web_socket", None)
             if ws_router is None:
                 logger.warning("websocket_interception_unsupported")

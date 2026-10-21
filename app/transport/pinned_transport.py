@@ -8,9 +8,8 @@ from __future__ import annotations
 
 import asyncio
 import concurrent.futures
-import functools
 import socket
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import AsyncIterator, Callable
 from typing import Any, Protocol
 
 import httpx
@@ -25,6 +24,26 @@ from app.transport.cookie_jar import COOKIE_NAMESPACE, global_cookie_jar
 def is_private_or_loopback_ip(ip: str) -> bool:
     """Return whether an address is outside the shared public-target policy."""
     return not is_public_ip_value(ip)
+
+
+class ResolverBudgetExceeded(TimeoutError):
+    """A DNS resolve outlasted the budget derived from the request it serves
+    (#383, #405): classifiable as a resolution failure (dns_error), never as a
+    navigation one -- the request never got to navigate."""
+
+
+async def bounded_thread_resolve[T](work: Callable[[], T], *, timeout_seconds: float | None) -> T:
+    """Run one blocking resolve off the loop, bounded by the DNS posture tightened
+    by the caller's own budget (#383). A resolver that outlasts the wait raises
+    the classifiable resolution failure; the future is cancelled first."""
+    wait_for = dns_wait_for(timeout_seconds)
+    loop = asyncio.get_running_loop()
+    future = loop.run_in_executor(DNS_EXECUTOR, work)
+    try:
+        return await asyncio.wait_for(future, timeout=wait_for)
+    except TimeoutError:
+        future.cancel()
+        raise ResolverBudgetExceeded(f"DNS resolution exceeded the {wait_for:.1f}s budget") from None
 
 
 # Per-host DNS cache; the TTL is short so rebinds stay bounded, with IP
@@ -182,24 +201,6 @@ def dns_wait_for(timeout_seconds: float | None) -> float:
     return min(max(0.1, float(timeout_seconds)), DNS_WAIT_SECONDS)
 
 
-def _off_loop[**P, R](resolve: Callable[[], Callable[P, R]]) -> Callable[P, Awaitable[R]]:
-    """The one way to run blocking call machinery off the loop: it owns the
-    pool (DNS_EXECUTOR) and the builder's argument list, carried whole via the
-    ParamSpec so the wrapper cannot disagree. ``resolve`` is a thunk.
-    """
-
-    async def _run(*args: P.args, **kwargs: P.kwargs) -> R:
-        loop = asyncio.get_running_loop()
-        future = loop.run_in_executor(DNS_EXECUTOR, functools.partial(resolve(), *args, **kwargs))
-        try:
-            return await asyncio.wait_for(future, timeout=DNS_WAIT_SECONDS)
-        except TimeoutError:
-            future.cancel()
-            raise TimeoutError(f"DNS resolution exceeded the {DNS_WAIT_SECONDS:.0f}s posture") from None
-
-    return functools.wraps(resolve())(_run)
-
-
 async def build_pinned_request_async(
     url: NormalizedUrl,
     headers: dict[str, str],
@@ -209,16 +210,11 @@ async def build_pinned_request_async(
     """Off-loop entry to the pin rule: SSRF-safe build, getaddrinfo included, on a
     worker thread so a resolver lookup never stalls the event loop.
     """
-    loop = asyncio.get_running_loop()
-    future = loop.run_in_executor(DNS_EXECUTOR, functools.partial(build_pinned_request, url, headers))
     # The resolver wait is derived from the request's budget (#383): no budget in
     # hand means the DNS posture; a tighter budget tightens the wait.
-    wait_for = dns_wait_for(timeout_seconds)
-    try:
-        return await asyncio.wait_for(future, timeout=wait_for)
-    except TimeoutError:
-        future.cancel()
-        raise TimeoutError(f"DNS resolution exceeded the {wait_for:.1f}s budget") from None
+    return await bounded_thread_resolve(
+        lambda: build_pinned_request(url, headers), timeout_seconds=timeout_seconds
+    )
 
 
 MAX_REDIRECT_HOPS = 5
@@ -287,7 +283,7 @@ class _RedirectChain:
     un-revalidated target); the state each carried as locals is one value here.
     """
 
-    __slots__ = ("_off_loop", "hops", "headers", "timeout_seconds", "url")
+    __slots__ = ("_rule", "hops", "headers", "timeout_seconds", "url")
 
     def __init__(
         self,
@@ -305,19 +301,16 @@ class _RedirectChain:
         # The request's own budget bounds the resolver wait (#383): a slow
         # getaddrinfo surfaces a classifiable timeout, not an indefinite hang.
         self.timeout_seconds = timeout_seconds
-        # Off-loading belongs to the call site, not the rule (a substituted builder
-        # goes to the pool too); ``None`` resolves the real rule once, per chain.
-        self._off_loop = _off_loop(lambda: pin)
+        # The rule travels whole; the bounded off-loop resolve wraps it at pin
+        # time, so a substituted builder goes to the pool with the same bound.
+        self._rule = pin
 
     async def pin(self) -> tuple[str, dict[str, str]]:
-        """The connect-ready request for the current hop (DNS off the loop)."""
-        wait_for = dns_wait_for(self.timeout_seconds)
-        pin_task = asyncio.ensure_future(self._off_loop(self.url, self.headers))
-        try:
-            return await asyncio.wait_for(pin_task, timeout=wait_for)
-        except TimeoutError:
-            pin_task.cancel()
-            raise TimeoutError(f"DNS past the {wait_for:.1f}s budget for {self.url.host}") from None
+        """The connect-ready request for the current hop (DNS off the loop, wait
+        bounded by the request's own budget)."""
+        return await bounded_thread_resolve(
+            lambda: self._rule(self.url, self.headers), timeout_seconds=self.timeout_seconds
+        )
 
     def advance(self, response: Any) -> bool:
         """Step to the next hop; return True when the caller should re-request.
