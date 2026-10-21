@@ -9,8 +9,8 @@ from app.models.discovered_link import DiscoveredLink
 from app.models.normalized_url import NormalizedUrl, admit_or_none
 from app.models.registrable_domain import registrable_domain
 from app.models.render_options import RenderOptions
+from app.models.result_factory import terminal_attempt
 from app.models.taxonomy import Classification, CrawlError, CrawlStrategyName
-from app.orchestration.results import terminal_attempt
 from app.vocabulary.strategies import HTTP_DECLARED_CRAWLER
 from app.vocabulary.taxonomy import ResultStatus
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY, canonical

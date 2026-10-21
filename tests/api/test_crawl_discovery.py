@@ -148,7 +148,7 @@ class TestDiscoveryAndRenderApi:
         the wire model drops never reaches the assertion.
         """
         from app.models.crawl_result import CrawlResult
-        from app.orchestration.results import terminal_attempt
+        from app.models.result_factory import terminal_attempt
         from app.transport.browser_pool import BrowserPool
 
         class _FakeRenderer:

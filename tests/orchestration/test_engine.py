@@ -8,8 +8,8 @@ import pytest
 
 from app.models.crawl_policy_limits import CrawlPolicyLimits
 from app.models.crawl_result import CrawlResult
+from app.models.result_factory import terminal_attempt
 from app.models.serialization import to_dict
-from app.orchestration.results import terminal_attempt
 from app.orchestration.scheduler import DomainScheduler
 from app.transport.browser import BrowserRenderer
 from app.vocabulary.extraction import EXTRACTION_DOCUMENT, EXTRACTION_TRAFILATURA

@@ -335,7 +335,7 @@ class TestStatusAgreesWithClassification:
 
     def test_browser_retry_exhausted_status_matches_the_table(self):
         """The browser retry loop's terminal verdict for a navigation timeout."""
-        from app.orchestration.results import terminal_crawl_result
+        from app.models.result_factory import terminal_crawl_result
         from app.vocabulary.taxonomy import status_for_classification
 
         result = terminal_crawl_result(
