@@ -5,6 +5,7 @@ import base64
 import pytest
 
 from app.models.crawl_result import CrawlResult
+from app.models.normalized_url import NormalizedUrl
 from app.models.render_options import RenderOptions
 from app.orchestration.engine import crawl_request
 from app.safety.validation import HostPolicy
@@ -25,7 +26,9 @@ class TestBrowserRenderer:
         await self.renderer.close()
 
     async def _render(self, path: str, base_url: str, **options) -> CrawlResult:
-        url = f"{base_url}{path}"
+        url = NormalizedUrl(
+            f"{base_url}{path}", policy=HostPolicy.unrestricted()
+        )  # the fetch layer takes an admitted URL, never raw text
         opts = RenderOptions(browser_profile=options.pop("browser_profile", {}), **options)
         return await self.renderer.render(
             url,
@@ -75,7 +78,7 @@ class TestBrowserRenderer:
         }
 
         async def browser_worker(job):
-            return await self.renderer.render(job.url.raw, job.options, policy=job.host_policy)
+            return await self.renderer.render(job.url, job.options, policy=job.host_policy)
 
         response = await crawl_request(
             payload,
@@ -83,4 +86,4 @@ class TestBrowserRenderer:
             cache=HttpCache(),
         )
         assert response["submitted_count"] == 1
-        assert "Example Org" in response["results"][0]["markdown"]
+        assert "Example Org" in (response["results"][0].text or "")
