@@ -15,6 +15,7 @@ from app.api import job_runner
 from app.orchestration.robots import RobotsRules
 from app.orchestration.robots_parse import parse_robots_rules
 from app.storage.job_store import CrawlJobState, JobStatus
+from app.vocabulary.robots import RobotsSource
 from tests._job_harnesses import (
     ScriptedExecute,
     _create_api_job,
@@ -46,7 +47,7 @@ def _rules_from(
     async def load(origin, fetcher, timeout_seconds, *, policy, fetch_and_decode=None):
         body, status = await fetch_robots(fetcher, f"{origin}/robots.txt", {}, timeout_seconds)
         del status
-        return parse_robots_rules(body or ""), [], None
+        return RobotsRules(parse_robots_rules(body or ""), [], None, RobotsSource.policy)
 
     return load
 

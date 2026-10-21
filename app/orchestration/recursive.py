@@ -60,7 +60,7 @@ class RecursiveRunState:
     worker: Callable[[CrawlTask], Awaitable[EngineCrawlResult]]
     robots_allows: Callable[[NormalizedUrl], Awaitable[bool]]
     robots_crawl_delay: Callable[[NormalizedUrl], Awaitable[float | None]] | None
-    robots_disallowed: Callable[[CrawlTask], EngineCrawlResult]
+    robots_disallowed: Callable[[CrawlTask], Awaitable[EngineCrawlResult]]
     sitemap_seeds: Callable[[], Awaitable[list[NormalizedUrl]]]
     spill: SpillSink | None
     max_depth: int
@@ -167,7 +167,7 @@ async def _robots_admitted_batch(ctx: _BatchContext, batch: list[_Admitted]) -> 
     allowed_jobs: list[_Admitted] = []
     for (depth, job), (allowed, delay) in zip(pending, decisions, strict=True):
         if run.respect_robots and not allowed:
-            await run.spill_write(run.spill, job.index, run.robots_disallowed(job))
+            await run.spill_write(run.spill, job.index, await run.robots_disallowed(job))
             state.visited.add(job.normalized_url)
             state.page_count += 1
             continue
@@ -430,7 +430,7 @@ async def run_recursive_crawl(
     worker: Callable[[CrawlTask], Awaitable[EngineCrawlResult]],
     robots_allows: Callable[[NormalizedUrl], Awaitable[bool]],
     robots_crawl_delay: Callable[[NormalizedUrl], Awaitable[float | None]] | None = None,
-    robots_disallowed: Callable[[CrawlTask], EngineCrawlResult],
+    robots_disallowed: Callable[[CrawlTask], Awaitable[EngineCrawlResult]],
     sitemap_seeds: Callable[[], Awaitable[list[NormalizedUrl]]],
     spill: SpillSink | None,
     shutdown_event: asyncio.Event,

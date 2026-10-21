@@ -1,8 +1,7 @@
-"""Robots.txt non-200 status classes: two verdicts.
+"""Robots.txt non-200 status classes: two verdicts, and the source that says which.
 
-401/403/429 are an application-layer refusal -- decline (AGENTS.md forbids
-continuing an explicit denial); other 4xx stay "unavailable" (RFC 9309 2.3.1.3).
-"""
+401/403/429 are an application-layer refusal -- decline (AGENTS.md forbids continuing an
+explicit denial); other 4xx are "unavailable" (RFC 9309). The value says which."""
 
 from __future__ import annotations
 
@@ -11,9 +10,11 @@ import pytest
 from app.models.host_policy import HostPolicy
 from app.orchestration.robots import (
     ROBOTS_FAILURE_TTL_SECONDS,
+    RobotsRules,
     load_robots_rules,
     robots_cache,
 )
+from app.vocabulary.robots import RobotsSource
 from tests._policy_factories import canonical
 
 _ROBOTS_URL = "https://waf.test/robots.txt"
@@ -48,15 +49,17 @@ async def test_unavailable_status_4xx_allows_crawling(status):
     """RFC 9309 2.3.1.3: a plain 4xx means robots.txt is unavailable, so the
     crawler MAY access any resources on the server (empty rule set)."""
     rules, _ = await _load("https://waf.test", (None, status))
-    assert rules == ([], [], None), status
+    assert rules.rules == [], status
+    assert rules.source is RobotsSource.unavailable, status
 
 
 @pytest.mark.parametrize("status", [401, 403, 429])
 async def test_application_layer_refusal_denies(status):
     """401/403/429 are an explicit application-layer denial, not an unavailable
-    robots.txt -- fail closed (complete disallow)."""
+    robots.txt -- fail closed (complete disallow), and say it was a refusal."""
     rules, _ = await _load("https://waf.test", (None, status))
-    assert rules == ([(False, "/")], [], None), status
+    assert rules.rules == [(False, "/")], status
+    assert rules.source is RobotsSource.refused, status
 
 
 async def test_robots_403_refusal_is_fail_closed_on_the_short_clock():
@@ -66,7 +69,7 @@ async def test_robots_403_refusal_is_fail_closed_on_the_short_clock():
     robots_cache.clear()
     try:
         rules, _ = await _load("https://waf.test", (None, 403))
-        assert rules == ([(False, "/")], [], None)
+        assert rules.rules == [(False, "/")]
         delta = robots_cache.time_until_expiry(("https://waf.test", policy))
         assert delta is not None and delta <= ROBOTS_FAILURE_TTL_SECONDS
     finally:
@@ -84,7 +87,7 @@ async def test_refusal_status_is_not_cached_as_a_denial():
         again = await load_robots_rules(
             canonical("https://waf.test"), object(), 5, fetch_and_decode=decode, policy=policy
         )
-        assert again == ([(False, "/")], [], None)
+        assert again.rules == [(False, "/")]
         assert len(calls) == 1
     finally:
         robots_cache.clear()
@@ -98,12 +101,17 @@ async def test_later_robots_200_wins_after_unavailable_status():
     try:
         await _load("https://waf.test", (None, 403))
         # Lapse the short-lived unavailable entry.
-        robots_cache.put(("https://waf.test", policy), ([], [], None), ttl=-1.0)
+        robots_cache.put(
+            ("https://waf.test", policy),
+            RobotsRules([], [], None, RobotsSource.unavailable),
+            ttl=-1.0,
+        )
         decode, calls = _decode_queue(("User-agent: *\nDisallow: /private\n", 200))
         rules = await load_robots_rules(
             canonical("https://waf.test"), object(), 5, fetch_and_decode=decode, policy=policy
         )
-        assert rules[0] == [(False, "/private")]
+        assert rules.rules == [(False, "/private")]
+        assert rules.source is RobotsSource.policy
         assert len(calls) == 1
     finally:
         robots_cache.clear()
@@ -112,7 +120,8 @@ async def test_later_robots_200_wins_after_unavailable_status():
 async def test_robots_5xx_still_fails_closed():
     """RFC 9309 2.3.1.4: 5xx means unreachable -- complete disallow."""
     rules, _ = await _load("https://down.test", (None, 500))
-    assert rules == ([(False, "/")], [], None)
+    assert rules.rules == [(False, "/")]
+    assert rules.source is RobotsSource.unreachable
 
 
 async def test_robots_5xx_refusal_ttl_is_the_short_failure_ttl():

@@ -26,10 +26,16 @@ from app.orchestration.results import (
     crawl_result_from_engine_result,
     failed_result_for,
 )
+from app.orchestration.robots import RobotsRules
 from app.orchestration.scheduler import DomainScheduler
 from app.orchestration.worker import call_worker
 from app.storage.ids import new_request_id
 from app.transport.fetchers import default_http_fetcher
+from app.vocabulary.robots import RobotsSource
+
+#: The policy a render batch that does not honor robots is judged against: one
+#: that forbids nothing, so a denial can never be reported from it.
+_ALLOWED_POLICY = RobotsRules([], [], None, RobotsSource.policy)
 
 if TYPE_CHECKING:
     from app.models.crawl_result import EngineCrawlResult
@@ -61,21 +67,22 @@ async def _robots_allow_set(
     options: RenderOptions,
     settings: CrawlerSettings,
     host_policy: HostPolicy,
-) -> list[bool]:
+) -> list[tuple[bool, RobotsRules]]:
     """One robots-admission pass over the render batch: True where the origin
-    allows the target (or robots are not honored). A None options means respect.
+    allows the target (or robots are not honored), and the loaded policy, so a
+    refusal is not reported as a forbidding policy.
     """
     if not options.respect_robots:
-        return [True] * len(urls)
-    allowed: list[bool] = []
+        return [(True, _ALLOWED_POLICY)] * len(urls)
+    allowed: list[tuple[bool, RobotsRules]] = []
     for url in urls:
-        rules, _sitemaps, _delay = await _robots_policy.load_robots_rules(
+        loaded = await _robots_policy.load_robots_rules(
             url,
             default_http_fetcher,
             options.timeout_seconds,
             policy=host_policy,
         )
-        allowed.append(_robots_policy.robots_allows(url, rules))
+        allowed.append((_robots_policy.robots_allows(url, loaded.rules), loaded))
     return allowed
 
 
@@ -124,7 +131,7 @@ async def render_request(
     robots_allowed = await _robots_allow_set(urls, options, active_settings, host_policy)
 
     for index, url in enumerate(urls):
-        if not robots_allowed[index]:
+        if not robots_allowed[index][0]:
             continue
         jobs.append(
             CrawlJob(
@@ -149,7 +156,8 @@ async def render_request(
 
     # Terminal robots_disallowed results fill the slots the admission skipped.
     for index, url in enumerate(urls):
-        if robots_allowed[index]:
+        allowed, loaded = robots_allowed[index]
+        if allowed:
             continue
         by_index[index] = terminal_crawl_result(
             url=url,
@@ -158,8 +166,8 @@ async def render_request(
             attempts=0,
             elapsed_ms=int((time.monotonic() - started) * 1000),
             domain=url.origin,
-            error="robots_txt_disallowed",
-            metadata={"robots": {"allowed": False}},
+            error=loaded.source.error_code,
+            metadata={"robots": {"allowed": False, "evaluation": loaded.source.value}},
         )
 
     async def _collect(index: int, result: EngineCrawlResult | CrawlResult) -> None:

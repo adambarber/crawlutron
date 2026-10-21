@@ -66,6 +66,8 @@ def test_crawl_error_is_the_pipeline_additions_over_classification():
     classification = literal_members(Classification)
     assert pipeline_only == {
         "robots_txt_disallowed",
+        "robots_txt_refused",
+        "robots_txt_unreachable",
         "browser_worker_unavailable",
         "unsupported_strategy",
         "retries_exhausted",

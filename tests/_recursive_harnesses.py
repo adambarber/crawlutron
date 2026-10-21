@@ -8,13 +8,21 @@ from __future__ import annotations
 import asyncio
 import inspect
 from collections.abc import Awaitable, Callable
-from typing import Any, NamedTuple
+from typing import TYPE_CHECKING, Any, NamedTuple
 
 from app.models.crawl_task import CrawlTask
 from app.orchestration.recursive import run_recursive_crawl
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY, canonical
 from tests._result_builders import Spill, make_engine_result
 from tests._scheduler_doubles import FakeScheduler
+
+if TYPE_CHECKING:
+    # The types the harness only names, not the ones it builds: kept out of the
+    # runtime imports so this file does not restate the module's own import block.
+    from app.models.crawl_result import EngineCrawlResult
+    from app.models.host_policy import HostPolicy
+    from app.models.normalized_url import NormalizedUrl
+    from app.runtime.resource_pressure import WeightedAdmission
 
 __all__ = ["ContentionFreeGate", "RecursiveRun", "drive_recursive_crawl", "make_crawl_task"]
 
@@ -60,18 +68,18 @@ def make_crawl_task(index: int, host: str) -> CrawlTask:
 
 async def drive_recursive_crawl(
     jobs: list[CrawlTask],
-    worker: Callable[[CrawlTask], Awaitable[Any]],
+    worker: Callable[[CrawlTask], Awaitable[EngineCrawlResult]],
     *,
-    allows: Callable[[str], Awaitable[bool]],
-    crawl_delay: Callable[[str], Awaitable[float | None]] | None = None,
-    robots_disallowed: Callable[[CrawlTask], Any] | None = None,
-    sitemap_seeds: Callable[[], Awaitable[list[Any]]] | None = None,
+    allows: Callable[[NormalizedUrl], Awaitable[bool]],
+    crawl_delay: Callable[[NormalizedUrl], Awaitable[float | None]] | None = None,
+    robots_disallowed: Callable[[CrawlTask], Awaitable[EngineCrawlResult]] | None = None,
+    sitemap_seeds: Callable[[], Awaitable[list[NormalizedUrl]]] | None = None,
     spill: Spill | None = None,
     scheduler: FakeScheduler | None = None,
     gate: ContentionFreeGate | None = None,
     gate_scale: float = 1.0,
-    admission: Any | None = None,
-    host_policy: Any | None = None,
+    admission: WeightedAdmission | None = None,
+    host_policy: HostPolicy | None = None,
     **overrides: Any,
 ) -> RecursiveRun:
     """Run one recursive crawl with the uncontested defaults filled in; every keyword
@@ -106,18 +114,16 @@ _CRAWL_SIGNATURE = inspect.signature(run_recursive_crawl)
 
 
 def _crawl_defaults(
-    *, robots_disallowed: Callable[[CrawlTask], Any] | None, sitemap_seeds: Any
+    *,
+    robots_disallowed: Callable[[CrawlTask], Awaitable[EngineCrawlResult]] | None,
+    sitemap_seeds: Callable[[], Awaitable[list[NormalizedUrl]]] | None,
 ) -> dict[str, Any]:
     """The values for the keywords a crawl test is not about: factories, not values,
     so ``shutdown_event`` is a fresh ``Event`` per call -- a shared one carries
     ``is_set()`` state between tests and would stop a crawl that should have run.
     """
     return {
-        "robots_disallowed": (
-            robots_disallowed
-            if robots_disallowed is not None
-            else (lambda job: make_engine_result(job.normalized_url))
-        ),
+        "robots_disallowed": (robots_disallowed if robots_disallowed is not None else _allowed_result),
         "sitemap_seeds": sitemap_seeds if sitemap_seeds is not None else _no_seeds,
         "shutdown_event": asyncio.Event(),
         "max_depth": 0,
@@ -131,7 +137,12 @@ def _crawl_defaults(
     }
 
 
-async def _no_seeds() -> list[Any]:
+async def _allowed_result(job: CrawlTask) -> EngineCrawlResult:
+    """The result for a URL a crawl test did not expect to be denied."""
+    return make_engine_result(job.normalized_url.raw)
+
+
+async def _no_seeds() -> list[NormalizedUrl]:
     """No sitemap seeds. Yields once, because the closures a test passes do."""
     await asyncio.sleep(0)
     return []

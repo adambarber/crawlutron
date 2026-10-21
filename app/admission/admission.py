@@ -19,7 +19,7 @@ from app.models.crawl_extraction_method import CrawlExtractionMethod
 from app.models.host_policy import HostPolicy
 from app.models.normalized_url import NormalizedUrl, admit_or_none
 from app.orchestration.fetch_helpers import fetch_sitemap_urls
-from app.orchestration.robots import FetchAndDecode, load_robots_rules, robots_allows
+from app.orchestration.robots import FetchAndDecode, RobotsRules, load_robots_rules, robots_allows
 from app.orchestration.scheduler import DomainScheduler
 from app.safety.safe_regex import BoundedPattern
 from app.storage.job_store import FrontierEntry, job_max_pages
@@ -42,23 +42,22 @@ class RobotsGate:
         self._timeout_seconds = policy.limits.timeout_seconds
         self._fetch_and_decode = fetch_and_decode
 
-    async def _rules(self, url: NormalizedUrl) -> tuple[list[tuple[bool, str]], float | None]:
-        rules, _sitemaps, delay = await load_robots_rules(
+    async def _rules(self, url: NormalizedUrl) -> RobotsRules:
+        return await load_robots_rules(
             url,
             default_http_fetcher,
             self._timeout_seconds,
             fetch_and_decode=self._fetch_and_decode,
             policy=self._host_policy,
         )
-        return rules, delay
 
     async def allows(self, url: NormalizedUrl) -> bool:
-        rules, _delay = await self._rules(url)
-        return robots_allows(url, rules)
+        loaded = await self._rules(url)
+        return robots_allows(url, loaded.rules)
 
     async def crawl_delay(self, url: NormalizedUrl) -> float | None:
-        _rules, delay = await self._rules(url)
-        return delay
+        loaded = await self._rules(url)
+        return loaded.crawl_delay
 
 
 @dataclass

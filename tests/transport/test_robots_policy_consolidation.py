@@ -14,6 +14,7 @@ from app.orchestration.robots import (
     load_robots_rules,
     robots_cache,
 )
+from app.vocabulary.robots import RobotsSource
 from tests._fetcher_factories import make_html_fetcher
 from tests._policy_factories import canonical, crawl_policy
 
@@ -51,11 +52,12 @@ async def test_job_fetch_populates_cache_seen_by_engine():
     )
     assert result["results"][0].status == "success"
     assert fetch_calls == 1
-    assert robots_cache.get(("https://shared.test", HostPolicy.unrestricted())) == (
-        [(False, "/private")],
-        ["https://shared.test/sitemap.xml"],
-        2.0,
-    )
+    cached = robots_cache.get(("https://shared.test", HostPolicy.unrestricted()))
+    assert cached is not None
+    assert cached.rules == [(False, "/private")]
+    assert cached.sitemaps == ["https://shared.test/sitemap.xml"]
+    assert cached.crawl_delay == 2.0
+    assert cached.source is RobotsSource.policy
     assert page_calls and all("/robots.txt" not in url for url in page_calls)
 
 
@@ -134,10 +136,14 @@ async def test_owner_preserves_4xx_and_5xx_ttl_semantics():
     failure_again = await load_robots_rules(
         canonical("https://failure.test"), object(), 5, fetch_and_decode=decode, policy=policy
     )
-    assert missing == ([], [], None)
-    assert missing_again == ([], [], None)
-    assert failure == ([(False, "/")], [], None)
-    assert failure_again == ([(False, "/")], [], None)
+    assert missing.rules == []
+    assert missing.source is RobotsSource.unavailable
+    assert missing_again.rules == []
+    assert missing_again.source is RobotsSource.unavailable
+    assert failure.rules == [(False, "/")]
+    assert failure.source is RobotsSource.unreachable
+    assert failure_again.rules == [(False, "/")]
+    assert failure_again.source is RobotsSource.unreachable
     assert calls == 2
     # RFC 9309 2.3.1.3: 404 is an unavailable status, not a settled absence --
     # it rides the short failure clock so a later 200 is honored promptly.

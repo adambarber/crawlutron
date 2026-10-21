@@ -56,6 +56,33 @@ class TestRobotsFailClosed:
         assert item.status == "success"
 
 
+class TestRobotsDenialSaysWhy:
+    """#398: a refusal and a forbidding policy both deny, and the caller is told which.
+
+    A site that refused to serve its robots policy is not a site that forbids
+    the path: the first is a site problem to report, the second a route to skip.
+    """
+
+    async def test_a_refused_robots_fetch_is_not_reported_as_a_forbidding_policy(self):
+        item = await _crawl_page("robots-refused.test", _make_fetcher(403))
+        assert item.classification == "robots_disallowed"
+        assert item.error == "robots_txt_refused"
+
+    async def test_a_forbidding_policy_is_reported_as_such(self):
+        item = await _crawl_page("robots-forbid.test", _make_fetcher(200, "User-agent: *\nDisallow: /\n"))
+        assert item.classification == "robots_disallowed"
+        assert item.error == "robots_txt_disallowed"
+
+    async def test_an_unreachable_policy_is_reported_as_such(self):
+        item = await _crawl_page("robots-down.test", _make_fetcher(500))
+        assert item.classification == "robots_disallowed"
+        assert item.error == "robots_txt_unreachable"
+
+    async def test_the_denial_names_the_source_in_its_diagnostics(self):
+        item = await _crawl_page("robots-refused.test", _make_fetcher(403))
+        assert item.diagnostics["robots"]["evaluation"] == "refused"
+
+
 def _fake_fetcher(calls):
     return routed_fetcher(
         {

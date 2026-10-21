@@ -7,6 +7,7 @@ import re
 import threading
 from collections import OrderedDict
 from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 
 from app.models.host_policy import HostPolicy
 from app.models.http_fetcher import HttpFetcher
@@ -19,11 +20,27 @@ from app.orchestration.robots_parse import (
     parse_robots_sitemaps,
 )
 from app.safety.bounded_ttl import BoundedTTLCache
+from app.vocabulary.robots import RobotsSource
 
 ROBOTS_CACHE_MAX_ENTRIES = 2048
 ROBOTS_CACHE_TTL_SECONDS = 600.0
 ROBOTS_FAILURE_TTL_SECONDS = 60.0
-type RobotsRules = tuple[list[tuple[bool, str]], list[str], float | None]
+
+
+@dataclass(frozen=True)
+class RobotsRules:
+    """One origin's robots policy: the rules, and how they were obtained.
+
+    The source is part of the value: a forbidding policy, a refused one and
+    an unreachable one all deny, and the caller is told which.
+    """
+
+    rules: list[tuple[bool, str]]
+    sitemaps: list[str]
+    crawl_delay: float | None
+    source: RobotsSource
+
+
 FetchAndDecode = Callable[
     [HttpFetcher, NormalizedUrl, dict[str, str], int], Awaitable[tuple[str | None, int | None]]
 ]
@@ -51,25 +68,26 @@ async def _load_uncached(
         else await fetch_and_decode(fetcher, robots_url, {}, timeout_seconds)
     )
     if status == 200 and body is not None:
-        value: RobotsRules = (
-            parse_robots_rules(body),
-            [loc for loc in parse_robots_sitemaps(body) if target.resolve(loc) is not None],
-            parse_robots_crawl_delay(body),
+        value = RobotsRules(
+            rules=parse_robots_rules(body),
+            sitemaps=[loc for loc in parse_robots_sitemaps(body) if target.resolve(loc) is not None],
+            crawl_delay=parse_robots_crawl_delay(body),
+            source=RobotsSource.policy,
         )
         ttl = ROBOTS_CACHE_TTL_SECONDS
     elif status is not None and 400 <= status < 500:
         if status in (401, 403, 429):
             # RFC 9309 2.3.1.3's MAY is permission, not obligation; RFC 9309 3 puts access
             # control at the application layer, and AGENTS.md denies continuing a refusal.
-            value = ([(False, "/")], [], None)
+            value = RobotsRules([(False, "/")], [], None, RobotsSource.refused)
         else:
             # RFC 9309 2.3.1.3: other 4xx mean "unavailable" -- the crawler MAY crawl.
-            value = ([], [], None)
+            value = RobotsRules([], [], None, RobotsSource.unavailable)
         # Not a standing decision: the short TTL keeps a later 200 honored.
         ttl = ROBOTS_FAILURE_TTL_SECONDS
     else:
         # RFC 9309 2.3.1.4: 5xx / no answer -- assume complete disallow.
-        value = ([(False, "/")], [], None)
+        value = RobotsRules([(False, "/")], [], None, RobotsSource.unreachable)
         ttl = ROBOTS_FAILURE_TTL_SECONDS
     robots_cache.put((target.origin, policy), value, ttl=ttl)
     return value
@@ -102,7 +120,7 @@ async def load_robots_rules(
 
 def cached_sitemaps(target: NormalizedUrl, *, policy: HostPolicy) -> list[str] | None:
     cached = robots_cache.get((target.origin, policy))
-    return None if cached is None else list(cached[1])
+    return None if cached is None else list(cached.sitemaps)
 
 
 class _RobotsPathMatcher:

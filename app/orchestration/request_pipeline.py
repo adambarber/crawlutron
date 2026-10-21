@@ -30,7 +30,7 @@ from app.orchestration.results import (
     engine_result_from_exception,
     skipped_engine_result,
 )
-from app.orchestration.robots import FetchAndDecode
+from app.orchestration.robots import FetchAndDecode, RobotsRules
 from app.orchestration.scheduler import DomainScheduler
 from app.orchestration.spill_sink import SpillSink, write_spill
 from app.orchestration.strategy_chain import execute_crawl_chain
@@ -199,7 +199,7 @@ async def _run_job(state: PipelineState, job: CrawlTask) -> tuple[int, EngineCra
     return job.index, result
 
 
-async def _load_robots(state: PipelineState, target_url: NormalizedUrl):
+async def _load_robots(state: PipelineState, target_url: NormalizedUrl) -> RobotsRules:
     return await robots_policy.load_robots_rules(
         target_url,
         state.fetcher,
@@ -210,24 +210,36 @@ async def _load_robots(state: PipelineState, target_url: NormalizedUrl):
 
 
 async def _robots_allows(state: PipelineState, target_url: NormalizedUrl) -> bool:
-    rules, _sitemaps, _delay = await _load_robots(state, target_url)
-    return robots_policy.robots_allows(target_url, rules)
+    loaded = await _load_robots(state, target_url)
+    return robots_policy.robots_allows(target_url, loaded.rules)
 
 
 async def _robots_delay(state: PipelineState, target_url: NormalizedUrl) -> float | None:
-    _rules, _sitemaps, delay = await _load_robots(state, target_url)
-    return delay
+    loaded = await _load_robots(state, target_url)
+    return loaded.crawl_delay
 
 
-def _robots_disallowed(state: PipelineState, job: CrawlTask) -> EngineCrawlResult:
+async def _robots_disallowed(state: PipelineState, job: CrawlTask) -> EngineCrawlResult:
+    """The result for a URL the robots policy refused to admit.
+
+    The loaded policy says WHY: a forbidding policy, a refused one and an
+    unreachable one all deny, and the caller is told which.
+    """
+    loaded = await _load_robots(state, job.normalized_url)
     return skipped_engine_result(
         TerminalResult(
             original_url=job.original_url,
             normalized_url=job.normalized_url,
             strategy=None,
             classification="robots_disallowed",
-            error="robots_txt_disallowed",
-            diagnostics={"robots": {"allowed": False, "sitemaps": [], "evaluation": "disabled"}},
+            error=loaded.source.error_code,
+            diagnostics={
+                "robots": {
+                    "allowed": False,
+                    "sitemaps": [],
+                    "evaluation": loaded.source.value,
+                }
+            },
         )
     )
 
@@ -332,7 +344,7 @@ async def _run_nonrecursive(state: PipelineState) -> None:
     allowed_jobs: list[CrawlTask] = []
     for job, (allowed, crawl_delay) in zip(state.jobs, decisions, strict=True):
         if state.respect_robots and not allowed:
-            await write_spill(state.spill, job.index, _robots_disallowed(state, job))
+            await write_spill(state.spill, job.index, await _robots_disallowed(state, job))
             continue
         if state.respect_robots and crawl_delay and crawl_delay > 0:
             scheduler.set_domain_min_delay(job.domain, crawl_delay)

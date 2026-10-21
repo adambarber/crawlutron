@@ -65,6 +65,11 @@ PIPELINE_ONLY_CRAWL_ERRORS = Literal[
     # Deliberately NOT spelled like its robots_disallowed Classification
     # member: this is the stable ERROR code, asserted disjoint from the set.
     "robots_txt_disallowed",
+    # The site REFUSED to serve its robots policy (401/403/429), so no policy
+    # was read; distinct from a policy that forbids the path.
+    "robots_txt_refused",
+    # The site's robots policy could not be reached at all (5xx, no answer).
+    "robots_txt_unreachable",
     "browser_worker_unavailable",
     "unsupported_strategy",
     "retries_exhausted",
