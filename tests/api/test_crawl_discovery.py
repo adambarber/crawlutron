@@ -21,6 +21,19 @@ class TestDiscoveryAndRenderApi:
         assert resp.status_code == 200
         assert resp.json()["status"] == "ok"
 
+    async def test_health_response_model_is_homed_under_models(self):
+        # The /health wire model must live at its findable home in app/models
+        # (memory #4740), not inline in the router module (#305).
+        from app.health.readiness import create_health_router
+        from tests.model_index import resolve_declared_type
+
+        router, _ = create_health_router()
+        health_route = next(route for route in router.routes if route.path == "/health")
+        model = health_route.response_model
+        homed = resolve_declared_type("HealthResponse")
+        assert model is homed, f"/health uses {model}, but the homed wire model is {homed}"
+        assert homed.__module__ == "app.models.health_response"
+
     async def test_readiness_reports_capacity(self):
         resp = await self.client.get("/ready")
         assert resp.status_code in (200, 503)

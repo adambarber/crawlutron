@@ -6,9 +6,9 @@ from dataclasses import dataclass
 
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field
 
 from app.config.env import get_env_int
+from app.models.health_response import HealthResponse
 from app.models.readiness_response import ReadinessResponse
 from app.runtime.metrics import get_metrics
 
@@ -111,9 +111,6 @@ def create_health_router() -> "tuple[APIRouter, ReadinessState]":
     """Create health and readiness router (self-managed; no external config)."""
     router = APIRouter(tags=["Health"])
     readiness_state = READINESS_STATE
-
-    class HealthResponse(BaseModel):
-        status: str = Field(description="Always 'ok' for liveness check.")
 
     @router.get(
         "/health",
