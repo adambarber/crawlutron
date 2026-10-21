@@ -8,7 +8,6 @@ from app.config.env import get_mapping_float, get_mapping_int, in_range, parse_b
 from app.runtime.memory_pressure import read_memory_stats
 from app.runtime.resource_pressure import derive_browser_pool_size, max_http_concurrency_for
 from app.vocabulary.limits import (
-    DEFAULT_BROWSER_POOL_SIZE,
     DEFAULT_CHALLENGE_WAIT_SECONDS,
     DEFAULT_COOKIE_HARVEST_TIMEOUT_SECONDS,
     DEFAULT_EXTRACTION_DOC_ACQUIRE_TIMEOUT,
@@ -93,7 +92,6 @@ class CrawlerSettings:
     # visible in the capabilities config surface.
     max_browser_renders: int = DEFAULT_MAX_BROWSER_RENDERS
     max_concurrent_pages: int = DEFAULT_MAX_CONCURRENT_PAGES
-    browser_pool_size: int = DEFAULT_BROWSER_POOL_SIZE
     challenge_wait_seconds: int = DEFAULT_CHALLENGE_WAIT_SECONDS
     # Browser fixed-overhead knobs (defaults equal the built-in behavior); the
     # per-request browser_profile keys override them per render.
@@ -225,7 +223,6 @@ class CrawlerSettings:
             max_concurrent_pages=get_mapping_int(
                 source, "CRAWLUTRON_MAX_CONCURRENT_PAGES", cls.max_concurrent_pages
             ),
-            browser_pool_size=get_mapping_int(source, "CRAWLUTRON_BROWSER_POOL_SIZE", cls.browser_pool_size),
             challenge_wait_seconds=get_mapping_int(
                 source, "CRAWLUTRON_CHALLENGE_WAIT_SECONDS", cls.challenge_wait_seconds
             ),

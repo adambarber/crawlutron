@@ -119,6 +119,5 @@ DEFAULT_EXTRACTION_DOC_ACQUIRE_TIMEOUT: float = 90.0
 # sizes every link, content-hash and SQLite row downstream.
 DEFAULT_EXTRACTION_MAX_MARKDOWN: int = 5 * 1024 * 1024
 
-# Persistent browsers per worker: ~300MB each (200 binary + ~100 extensions);
-# 4 workers x 1 = ~1.2GB, leaving ~1.8GB for HTTP + orchestrator.
-DEFAULT_BROWSER_POOL_SIZE: int = 1
+# Persistent browsers per worker fallback lives in derive_browser_pool_size
+# (resource_pressure.py): sizing is RAM-derived, not a fixed constant.
