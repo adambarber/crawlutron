@@ -26,9 +26,7 @@ async def test_expansions_thread_the_occupied_set(monkeypatch):
     async def worker(job):
         return make_engine_result(job.normalized_url, [_link("http://a/dup")])
 
-    spill, _scheduler, _gate = await _run(
-        [_task("http://a/A"), _task("http://a/B", index=1)], worker
-    )
+    spill, _scheduler, _gate = await _run([_task("http://a/A"), _task("http://a/B", index=1)], worker)
     assert walked == [], f"the frontier was rewalked for admission: {walked}"
     # Behavior is unchanged: /dup is admitted exactly once across the discoverers.
     assert {r.normalized_url for r in spill.writes.values()} == {

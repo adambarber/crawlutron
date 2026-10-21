@@ -4,10 +4,9 @@ import threading
 import pytest
 
 import app.transport.document as doc_mod
-import app.transport.pinned_transport as http_mod
 from app.transport.browser import make_ssrf_route_handler, resolve_browser_target
 from app.transport.pinned_transport import build_pinned_request, build_pinned_request_async
-from tests._assertions import block_private_targets, host_resolves_to
+from tests._assertions import block_private_targets
 from tests._browser_doubles import (
     FakeRequest,
     FakeRoute,
@@ -33,8 +32,8 @@ async def test_document_extractor_blocks_internal_url(monkeypatch):
 async def test_document_extractor_invokes_ssrf_check(monkeypatch):
     """The document fetch must gate the URL before any socket opens.
 
-    The fetch walk's first pin: the extractor swallows every failure, so the
-    recording gate entry -- not an escaping sentinel -- is the observable.
+    The gate IS the pin (#383): the extractor swallows every failure, so the
+    recording resolver entry -- not an escaping sentinel -- is the observable.
     """
     from unittest.mock import patch
 
@@ -42,21 +41,18 @@ async def test_document_extractor_invokes_ssrf_check(monkeypatch):
 
     seen = {}
 
-    def fake_check(url):
-        seen["url"] = url
+    def fake_resolve(host, *args, **kwargs):
+        seen["url"] = host
+        return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 80))]
 
-    monkeypatch.setattr(http_mod, "check_ssrf_protection", fake_check)
-    with (
-        host_resolves_to(monkeypatch, "93.184.216.34"),
-        patch(
-            "app.transport.http_client_pool.get_async_http_client",
-            return_value=scripted_transport_client(
-                [MockResponse(200, {"content-type": "application/pdf"}, b"")]
-            ),
-        ),
+    monkeypatch.setenv("CRAWLUTRON_ALLOW_PRIVATE_TARGETS", "0")
+    monkeypatch.setattr(socket, "getaddrinfo", fake_resolve)
+    with patch(
+        "app.transport.http_client_pool.get_async_http_client",
+        return_value=scripted_transport_client([MockResponse(200, {"content-type": "application/pdf"}, b"")]),
     ):
         doc_mod.default_document_text_extractor(canonical("http://example.com/x.pdf"))
-    assert seen.get("url") == canonical("http://example.com/x.pdf")
+    assert seen.get("url") == "example.com"
 
 
 # -------------------------------------------------------------------------- browser.py helpers: pinning +

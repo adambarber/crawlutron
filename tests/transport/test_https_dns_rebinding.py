@@ -125,8 +125,11 @@ def _stable_public_resolver(monkeypatch):
 
 class TestHttpsDnsRebindingFetchIsBlocked:
     async def test_rebound_private_target_is_never_connected(self, monkeypatch):
-        """A two-phase resolver (public at validation, private at connect) must NOT reach
-        the private address. Today the HTTPS fetcher connects straight to it."""
+        """A two-phase resolver (public at pin time, private after) must NEVER reach
+        the private address: the pin connects only to the IP it just validated (#383).
+
+        The private second-phase answer is never used -- it must appear in no connection.
+        """
         block_private_targets(monkeypatch)
         pinned.reset_process_state()
         backend = _RecordingBackend()
@@ -134,35 +137,58 @@ class TestHttpsDnsRebindingFetchIsBlocked:
         _two_phase_resolver(monkeypatch)
 
         # The real production path: the real fetcher over the real transport.
-        with pytest.raises(ValueError):
+        result = await default_http_fetcher(
+            canonical("https://evil.example/ws"),
+            {},
+            30,
+        )
+
+        assert result.status_code == 200
+        for _host, _port, ip in backend.connects:
+            assert ip == _PUBLIC_IP, f"connected to a non-public IP {ip}: {backend.connects}"
+        assert all(ip != _PRIVATE_IP for _h, _p, ip in backend.connects)
+
+    async def test_private_answer_at_pin_time_is_fail_closed(self, monkeypatch):
+        """The fail-closed discipline lives at the pin: a resolver whose answer AT
+        PIN TIME is private/loopback is refused before any connection (the SSRF
+        guarantee the double-resolve used to surface one hop later)."""
+        block_private_targets(monkeypatch)
+        pinned.reset_process_state()
+        backend = _RecordingBackend()
+        _install_client(monkeypatch, backend)
+
+        def private_resolver(host, *args, **kwargs):
+            _ = (args, kwargs)
+            return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", (_PRIVATE_IP, 443))]
+
+        monkeypatch.setattr(socket, "getaddrinfo", private_resolver)
+
+        with pytest.raises(ValueError, match="no public IP"):
             await default_http_fetcher(
                 canonical("https://evil.example/ws"),
                 {},
                 30,
             )
+        assert backend.connects == [], f"the private-target request connected: {backend.connects}"
 
-        # Fail closed: nothing must connect, and certainly never to a private IP.
-        assert backend.connects == [], f"the rebound HTTPS request connected: {backend.connects}"
-        for _host, _port, ip in backend.connects:
-            assert ip == _PUBLIC_IP, f"connected to a non-public IP {ip}: {backend.connects}"
-
-    async def test_plain_http_rebind_is_also_fail_closed(self, monkeypatch):
-        """Regressions guard: plain HTTP pins to a freshly validated IP too, so the same
-        two-phase rebind must fail closed and never reach the private address."""
+    async def test_plain_http_rebind_connects_only_to_the_validated_ip(self, monkeypatch):
+        """Plain HTTP pins to a freshly validated IP, so a two-phase rebind cannot
+        move the connection: every connect is the IP the pin itself validated."""
         block_private_targets(monkeypatch)
         pinned.reset_process_state()
         backend = _RecordingBackend()
         _install_client(monkeypatch, backend)
         _two_phase_resolver(monkeypatch)
 
-        with pytest.raises(ValueError):
-            await default_http_fetcher(
-                canonical("http://evil.example/ws"),
-                {},
-                30,
-            )
+        result = await default_http_fetcher(
+            canonical("http://evil.example/ws"),
+            {},
+            30,
+        )
 
-        assert backend.connects == [], f"the rebound HTTP request connected: {backend.connects}"
+        assert result.status_code == 200
+        assert backend.connects, "the fetch never connected"
+        assert all(ip == _PUBLIC_IP for _h, _p, ip in backend.connects), backend.connects
 
 
 class TestHttpsSafeTargetFetchesWithSniPreserved:

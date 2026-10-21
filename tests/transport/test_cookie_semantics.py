@@ -174,6 +174,7 @@ async def test_cross_origin_redirect_reattaches_the_new_origins_cookies(monkeypa
     assert hop2_cookie == "sid=atk", hop2_cookie
     assert "user=example" not in hop2_cookie
 
+
 # Tombstone reaping (#393): a deletion record must not accumulate forever, and
 # a reaped slot must not resurrect the deleted cookie it carried.
 

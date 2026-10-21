@@ -84,7 +84,9 @@ async def _afetch_document_bytes(url: NormalizedUrl, pin: pinned_transport.PinRu
     await pooled_clients.drain_pending_client_closes()
     client = http_client_pool.get_async_http_client()
     timeout = Timeouts.defaults().as_httpx()
-    async for chain, pinned_url, hop_headers in pinned_transport.apinned_hops(url, {}, pin=pin):
+    async for chain, pinned_url, hop_headers in pinned_transport.apinned_hops(
+        url, {}, pin=pin, timeout_seconds=Timeouts.defaults().read
+    ):
         # Follow_redirects=False: the chain below is the redirect loop, so httpx
         # following one too would connect to a target nobody re-validated.
         async with pinned_transport.apinned_stream(

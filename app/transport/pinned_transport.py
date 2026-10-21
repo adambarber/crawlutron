@@ -118,9 +118,8 @@ def declared_length_exceeds(header_value: str | None, limit: int) -> bool:
 def build_pinned_request(url: NormalizedUrl, headers: dict[str, str]) -> tuple[str, dict[str, str]]:
     """Build the pinned request for an admitted URL -- the sole owner of the
     composition (IP blocklist, fresh pin, exact-IP connect with Host preserved).
-    Both schemes pin the connect to the validated IP; HTTPS SNI is kept by the caller.
+    Both schemes pin the connect to the validated IP; one resolution per hop (#383).
     """
-    check_ssrf_protection(url)
     _, pinned = resolve_and_pin_host(url)
     port = f":{url.port}" if url.port else ""
     # An IPv6 literal must be bracketed in a URL netloc or its colons
@@ -170,16 +169,33 @@ class PinRule(Protocol):
 # event loop or contend with the default executor used for extraction.
 DNS_EXECUTOR = concurrent.futures.ThreadPoolExecutor(max_workers=32, thread_name_prefix="dns-resolve")
 
+# The DNS wait posture (#383): the ceiling on the resolver wait, derived from
+# the request's budget by ``dns_wait_for`` so a tight request tightens it.
+DNS_WAIT_SECONDS = 5.0
+
+
+def dns_wait_for(timeout_seconds: float | None) -> float:
+    """The resolver wait for a request with ``timeout_seconds`` of budget (#383):
+    the request's own budget when it is the tighter one, else the DNS posture."""
+    if timeout_seconds is None:
+        return DNS_WAIT_SECONDS
+    return min(max(0.1, float(timeout_seconds)), DNS_WAIT_SECONDS)
+
 
 def _off_loop[**P, R](resolve: Callable[[], Callable[P, R]]) -> Callable[P, Awaitable[R]]:
     """The one way to run blocking call machinery off the loop: it owns the
     pool (DNS_EXECUTOR) and the builder's argument list, carried whole via the
     ParamSpec so the wrapper cannot disagree. ``resolve`` is a thunk -- the rule is unknown at wrap time.
-    """
+    """  # the WAIT is bounded at the DNS posture (#383); the thread keeps running.
 
     async def _run(*args: P.args, **kwargs: P.kwargs) -> R:
         loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(DNS_EXECUTOR, functools.partial(resolve(), *args, **kwargs))
+        future = loop.run_in_executor(DNS_EXECUTOR, functools.partial(resolve(), *args, **kwargs))
+        try:
+            return await asyncio.wait_for(future, timeout=DNS_WAIT_SECONDS)
+        except TimeoutError:
+            future.cancel()
+            raise TimeoutError(f"DNS resolution exceeded the {DNS_WAIT_SECONDS:.0f}s posture") from None
 
     return functools.wraps(resolve())(_run)
 
@@ -255,21 +271,37 @@ class _RedirectChain:
     un-revalidated target); the state each carried as locals is one value here.
     """
 
-    __slots__ = ("_off_loop", "hops", "headers", "url")
+    __slots__ = ("_off_loop", "hops", "headers", "timeout_seconds", "url")
 
-    def __init__(self, url: NormalizedUrl, headers: dict[str, str], *, pin: PinRule) -> None:
+    def __init__(
+        self,
+        url: NormalizedUrl,
+        headers: dict[str, str],
+        *,
+        pin: PinRule,
+        timeout_seconds: float | None = None,
+    ) -> None:
         self.url = url
         # Copied, not aliased: a cross-host hop strips credentials by rebuilding
         # the mapping, and the caller's dict must not be rewritten underneath it.
         self.headers = dict(headers)
         self.hops = 0
+        # The request's own budget bounds the resolver wait (#383): a slow
+        # getaddrinfo surfaces a classifiable timeout, not an indefinite hang.
+        self.timeout_seconds = timeout_seconds
         # Off-loading belongs to the call site, not the rule (a substituted builder
         # goes to the pool too); ``None`` resolves the real rule once, per chain.
         self._off_loop = _off_loop(lambda: pin)
 
     async def pin(self) -> tuple[str, dict[str, str]]:
         """The connect-ready request for the current hop (DNS off the loop)."""
-        return await self._off_loop(self.url, self.headers)
+        wait_for = dns_wait_for(self.timeout_seconds)
+        pin_task = asyncio.ensure_future(self._off_loop(self.url, self.headers))
+        try:
+            return await asyncio.wait_for(pin_task, timeout=wait_for)
+        except TimeoutError:
+            pin_task.cancel()
+            raise TimeoutError(f"DNS past the {wait_for:.1f}s budget for {self.url.host}") from None
 
     def advance(self, response: Any) -> bool:
         """Step to the next hop; return True when the caller should re-request.
@@ -296,13 +328,15 @@ async def apinned_hops(
     headers: dict[str, str],
     *,
     pin: PinRule | None = None,
+    timeout_seconds: float | None = None,
 ) -> AsyncIterator[tuple[_RedirectChain, str, dict[str, str]]]:
     """Yield each hop of the manual redirect walk, already SSRF-checked and re-pinned.
 
     The body receives ``(chain, pinned_url, hop_headers)``, sends, then leaves;
     ``continue`` after ``chain.advance(response)`` asks for the next hop.
     """
-    chain = _RedirectChain(url, headers, pin=pin or build_pinned_request)
+    # timeout_seconds is the request budget; it bounds the resolver wait (#383).
+    chain = _RedirectChain(url, headers, pin=pin or build_pinned_request, timeout_seconds=timeout_seconds)
     while True:
         pinned_url, hop_headers = await chain.pin()
         served_hops = chain.hops

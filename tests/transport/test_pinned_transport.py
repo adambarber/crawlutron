@@ -1,10 +1,22 @@
 """The pinned-request composition contract: one builder, every transport."""
 
+from __future__ import annotations
+
 import socket
+import threading
+import time
 from unittest.mock import patch
 from urllib.parse import urlparse
 
-from app.transport.pinned_transport import build_pinned_request
+import pytest
+
+from app.orchestration.classification import classify_error_code
+from app.transport.pinned_transport import (
+    DNS_WAIT_SECONDS,
+    apinned_hops,
+    build_pinned_request,
+    dns_wait_for,
+)
 from tests._assertions import block_private_targets
 from tests._policy_factories import canonical
 
@@ -62,3 +74,79 @@ class TestBuildPinnedRequest:
         assert parsed.path == "/docs.pdf"
         assert parsed.query == "x=1"
         assert headers["Host"] == "v6.example"
+
+
+class TestOneResolutionPerHop:
+    """#383: the fresh pin IS the SSRF validation, so the builder must not
+    resolve the host a second time through the cached check."""
+
+    @pytest.mark.parametrize("scheme", ("http", "https"))
+    def test_pin_path_resolves_once_per_hop(self, monkeypatch, scheme):
+        block_private_targets(monkeypatch)
+        calls = {"n": 0}
+
+        def fake(host, *args, **kwargs):
+            calls["n"] += 1
+            return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 80))]
+
+        monkeypatch.setattr(socket, "getaddrinfo", fake)
+        connect_url, _headers = build_pinned_request(canonical(f"{scheme}://example.com/a"), {})
+        assert calls["n"] == 1, calls
+        assert connect_url == f"{scheme}://93.184.216.34/a"
+
+
+class TestResolverDeadline:
+    """#383: a resolver that sleeps past the deadline must surface a
+    caller-classifiable timeout, not an indefinite hang off the pool."""
+
+    async def test_slow_resolver_surfaces_a_classifiable_timeout(self, monkeypatch):
+        block_private_targets(monkeypatch)
+        stall = threading.Event()
+
+        def slow_resolver(host, *args, **kwargs):
+            stall.wait(1.0)  # far past the budget the request hands the walk
+            return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 80))]
+
+        monkeypatch.setattr(socket, "getaddrinfo", slow_resolver)
+        started = time.monotonic()
+        with pytest.raises(TimeoutError):
+            await anext(
+                apinned_hops(
+                    canonical("http://slow.example/"),
+                    {},
+                    pin=build_pinned_request,
+                    timeout_seconds=0.3,
+                )
+            )
+        assert time.monotonic() - started < 0.9  # bounded, not the resolver's full stall
+        # The surfaced type is one the classification table maps.
+        assert classify_error_code(TimeoutError("dns")) == "connection_error"
+
+    async def test_a_resolver_within_the_budget_still_resolves(self, monkeypatch):
+        """The budget cuts both ways: a resolver that answers inside the request's
+        budget resolves, even though the posture alone would have cut it off."""
+        block_private_targets(monkeypatch)
+        stall = threading.Event()
+
+        def slowish_resolver(host, *args, **kwargs):
+            stall.wait(0.4)
+            return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 80))]
+
+        monkeypatch.setattr(socket, "getaddrinfo", slowish_resolver)
+        chain, pinned_url, _hop_headers = await anext(
+            apinned_hops(
+                canonical("http://ok.example/"),
+                {},
+                pin=build_pinned_request,
+                timeout_seconds=2,
+            )
+        )
+        assert pinned_url == "http://93.184.216.34/"
+        assert chain.url == canonical("http://ok.example/")
+
+    def test_the_derivation_never_exceeds_the_posture(self):
+        """The request budget tightens the wait; the posture is the ceiling."""
+        assert dns_wait_for(0.3) == 0.3
+        assert dns_wait_for(2) == 2
+        assert dns_wait_for(30) == DNS_WAIT_SECONDS
+        assert dns_wait_for(None) == DNS_WAIT_SECONDS

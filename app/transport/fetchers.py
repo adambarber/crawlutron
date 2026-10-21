@@ -53,7 +53,9 @@ async def default_http_fetcher(
     client = http_client_pool.get_async_http_client()
     started = time.monotonic()
     timeout = Timeouts.for_request(timeout_seconds).as_httpx()
-    async for chain, pinned_url, hop_headers in pinned_transport.apinned_hops(url, headers, pin=pin):
+    async for chain, pinned_url, hop_headers in pinned_transport.apinned_hops(
+        url, headers, pin=pin, timeout_seconds=timeout_seconds
+    ):
         terminal = await _stream_terminal_hop(
             client,
             chain=chain,
@@ -174,7 +176,9 @@ async def cffi_fetch(
     client = http_client_pool.get_cffi_session()
     try:
         started = time.monotonic()
-        async for chain, pinned_url, hop_headers in pinned_transport.apinned_hops(url, headers, pin=pin):
+        async for chain, pinned_url, hop_headers in pinned_transport.apinned_hops(
+            url, headers, pin=pin, timeout_seconds=timeout_seconds
+        ):
             try:
                 response = await client.get(
                     pinned_url,
