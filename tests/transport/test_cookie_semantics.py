@@ -6,8 +6,12 @@ matching to stdlib http.cookiejar; these tests pin the observable behavior.
 
 from __future__ import annotations
 
+import json
+import time
+
 import pytest
 
+from app.storage.coordination_cookies import SharedCookieStore
 from app.transport import cookie_jar
 from app.transport.cookie_jar import CookieJar
 from tests._fetcher_factories import run_default_http_fetcher
@@ -170,3 +174,56 @@ async def test_cross_origin_redirect_reattaches_the_new_origins_cookies(monkeypa
     hop2_cookie = client.captured_headers[1].get("Cookie")
     assert hop2_cookie == "sid=atk", hop2_cookie
     assert "user=example" not in hop2_cookie
+
+# Tombstone reaping (#393): a deletion record must not accumulate forever, and
+# a reaped slot must not resurrect the deleted cookie it carried.
+
+
+def test_reap_drops_the_deleted_cookie_its_record_and_keeps_the_deletion(tmp_path, monkeypatch):
+    """#393: a host that sets and deletes N distinct cookie names must not leave
+    N records behind once the union window has passed, the live cookie must
+    survive its neighbour's reap, and the deletion must still hold after it."""
+    monkeypatch.setattr(cookie_jar, "TOMBSTONE_WINDOW_SECONDS", 0.0)
+    store = SharedCookieStore(tmp_path / "coordination.db")
+    jar = CookieJar(store=store)
+    for i in range(10):
+        name = f"tmp{i}"
+        jar.add_cookie_header(canonical("http://a.example/"), f"{name}=v; Path=/")
+        jar.add_cookie_header(canonical("http://a.example/"), f"{name}=; Max-Age=0; Path=/")
+    jar.add_cookie_header(canonical("http://a.example/"), "sid=abc; Path=/")
+    # A zero window means every read past the deletion reaps the tombstones.
+    assert _header_for(jar, "http://a.example/") == "sid=abc"  # deletion still holds
+    assert _header_for(jar, "http://a.example/") == "sid=abc"  # no resurrection on re-read
+    slot = store.load("", "a.example")
+    assert set(slot) == {"sid"}, slot
+
+
+def test_tombstone_within_the_window_is_retained_and_propagates(tmp_path, monkeypatch):
+    """#393: inside the union window the tombstone stays in the slot, so a
+    sibling reading the slot still sees the deletion."""
+    monkeypatch.setattr(cookie_jar, "TOMBSTONE_WINDOW_SECONDS", 3600.0)
+    store = SharedCookieStore(tmp_path / "coordination.db")
+    jar = CookieJar(store=store)
+    jar.add_cookie_header(canonical("http://a.example/"), "sid=abc; Path=/")
+    jar.add_cookie_header(canonical("http://a.example/"), "sid=; Max-Age=0; Path=/")
+    slot = store.load("", "a.example")
+    record = json.loads(slot["sid"])
+    assert record["value"] == "" and record["expires"] == 0.0
+    # And a fresh process reading through a new jar sees the deletion too.
+    sibling = CookieJar(store=store)
+    assert _header_for(sibling, "http://a.example/") == ""
+
+
+def test_prune_never_crosses_the_namespace_boundary(tmp_path, monkeypatch):
+    """#393 walk-past: reaping one namespace's tombstones must not touch another
+    namespace's slot, and a deletion in one namespace never deletes another's."""
+    monkeypatch.setattr(cookie_jar, "TOMBSTONE_WINDOW_SECONDS", 0.0)
+    store = SharedCookieStore(tmp_path / "coordination.db")
+    jar = CookieJar(store=store)
+    jar.add_cookie_header(canonical("http://a.example/"), "k=v; Path=/", namespace="t1")
+    jar.add_cookie_header(canonical("http://a.example/"), "k=v; Path=/", namespace="t2")
+    jar.add_cookie_header(canonical("http://a.example/"), "k=; Max-Age=0; Path=/", namespace="t1")
+    jar.add_cookie_header(canonical("http://a.example/"), "other=w; Path=/", namespace="t2")
+    assert jar.cookie_header_for(canonical("http://a.example/"), namespace="t1") == ""
+    assert jar.cookie_header_for(canonical("http://a.example/"), namespace="t2") == "k=v; other=w"
+    assert set(store.load("t2", "a.example")) == {"k", "other"}

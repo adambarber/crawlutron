@@ -109,6 +109,26 @@ class SharedCookieStore(CoordinationStore):
             rows = self._conn.execute("SELECT namespace, host, payload FROM coordination_cookies").fetchall()
         return {(str(namespace), str(host)): self._decode(payload) for namespace, host, payload in rows}
 
+    def put(self, namespace: str, host: str, value: Mapping[str, str]) -> None:
+        """Replace one slot's payload wholesale (the prune path, #393).
+
+        Scoped to exactly this (namespace, host); only removes records, so a
+        prune cannot resurrect a deleted cookie.
+        """
+        with self._lock:
+            self._conn.execute("BEGIN IMMEDIATE")
+            try:
+                self._conn.execute(
+                    "INSERT INTO coordination_cookies (namespace, host, payload, touched_at) "
+                    "VALUES (?, ?, ?, ?) ON CONFLICT(namespace, host) DO UPDATE SET "
+                    "payload = excluded.payload, touched_at = excluded.touched_at",
+                    (namespace or "", host, json.dumps(dict(value)), time.time()),
+                )
+                self._conn.execute("COMMIT")
+            except BaseException:
+                self._conn.execute("ROLLBACK")
+                raise
+
     @staticmethod
     def _decode(payload: str) -> dict[str, str]:
         try:

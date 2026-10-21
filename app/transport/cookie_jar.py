@@ -40,6 +40,10 @@ COOKIE_NAMESPACE: contextvars.ContextVar[str] = contextvars.ContextVar(
 # budget is independent, so one crawl cannot evict another's. Kept on the store.
 COOKIE_JAR_MAX_HOSTS_PER_NAMESPACE = DEFAULT_MAX_HOSTS_PER_NAMESPACE
 
+# The tombstone reap window (#393): deletions propagate for this long, then
+# their own writer prunes them. Same order as the DNS cache's 60s union window.
+TOMBSTONE_WINDOW_SECONDS = 60.0
+
 
 class CookieRecord(TypedDict):
     """One cookie's RFC 6265 state; stored as the slot dict value's JSON."""
@@ -70,6 +74,9 @@ class CookieJar:
         # The process-local medium owns the lock discipline for every op; the
         # jar holds no lock of its own (one thread-safe guard, never two).
         self._inmemory = InMemoryCookieStore(max_hosts_per_namespace=COOKIE_JAR_MAX_HOSTS_PER_NAMESPACE)
+        # (namespace, slot host) -> {name: deleted_at epoch}: the tombstones
+        # this jar wrote, pruned after the union window (#393).
+        self._deleted: dict[tuple[str, str], dict[str, float]] = {}
 
     @property
     def store(self) -> SharedCookieStore | None:
@@ -90,10 +97,15 @@ class CookieJar:
             return
         name, record = parsed
         payload = {name: json.dumps(record)}
+        key = (namespace or "", record["domain"])
+        if record["value"] == "":
+            self._deleted.setdefault(key, {})[name] = time.time()
+        else:
+            self._deleted.get(key, {}).pop(name, None)
         if self._store is not None:
-            self._store.merge(namespace or "", record["domain"], payload)
+            self._store.merge(key[0], key[1], payload)
             return
-        self._inmemory.merge(namespace or "", record["domain"], payload)
+        self._inmemory.merge(key[0], key[1], payload)
 
     def cookie_header_for(self, url: NormalizedUrl, *, namespace: str = "") -> str:
         """Return a ``Cookie`` header for the given URL under RFC 6265 send rules.
@@ -104,6 +116,7 @@ class CookieJar:
         ns = namespace or ""
         records = self._records_for(ns)
         header, contributors = _sendable_cookie_header(records, url)
+        self._prune_deleted()
         medium = self._store if self._store is not None else self._inmemory
         for host in contributors:
             medium.touch(ns, host)
@@ -113,6 +126,39 @@ class CookieJar:
         """Every live record in one namespace as (name, slot host, record)."""
         slots = self._store.all_slots() if self._store is not None else self._inmemory.snapshot()
         return list(_live_records(slots, namespace))
+
+    def _prune_deleted(self, *, now: float | None = None) -> None:
+        """Reap this jar's tombstones older than TOMBSTONE_WINDOW_SECONDS (#393).
+
+        The tombstone's own writer rewrites its slot minus dead records, scoped
+        to the (namespace, host) slots holding them -- never another namespace.
+        """
+        if not self._deleted:
+            return
+        clock = time.time() if now is None else now
+        medium = self._store if self._store is not None else self._inmemory
+        for (ns, host), deleted in list(self._deleted.items()):
+            expired = [n for n, at in deleted.items() if clock - at >= TOMBSTONE_WINDOW_SECONDS]
+            if not expired:
+                continue
+            slot = medium.load(ns, host)
+            if not slot:
+                self._deleted.pop((ns, host), None)
+                continue
+            keep: dict[str, str] = {}
+            changed = False
+            for name, payload in slot.items():
+                record = _load_record(payload)
+                if record is not None and not _is_expired(record, clock):
+                    keep[name] = payload
+                else:
+                    changed = True
+            if changed:
+                medium.put(ns, host, keep)
+            for name in expired:
+                deleted.pop(name, None)
+            if not deleted:
+                self._deleted.pop((ns, host), None)
 
     def clear(self, *, namespace: str = "") -> None:
         """Clear cookies. With a ``namespace``, only that namespace is cleared."""
