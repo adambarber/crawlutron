@@ -387,3 +387,41 @@ async def test_max_age_bounds_the_replay_window(tmp_path):
     await run()
     await run()
     assert fetches["n"] == 2, fetches
+
+
+_PAST_EXPIRES = "Sun, 22 Aug 1982 00:00:00 GMT"
+_FAR_FUTURE_EXPIRES = "Sun, 22 Aug 2032 00:00:00 GMT"
+
+
+async def test_expires_in_the_past_is_never_served_from_the_cache(tmp_path):
+    """RFC 9111 5.3 (#392): a response carrying only a past Expires is already
+    stale -- the second crawl must re-fetch, never replay the stored body."""
+    run, fetches = await _directive_runner("http://example.com/stale", {"expires": _PAST_EXPIRES}, tmp_path)
+    await run()
+    await run()
+    assert fetches["n"] == 2, fetches
+
+
+async def test_future_expires_bounds_the_replay_window(tmp_path):
+    """RFC 9111 5.3 (#392): a response with only a future Expires is fresh until
+    that instant -- the second crawl replays from the cache (with the local
+    default TTL also bounding it, the entry does not outlive its envelope)."""
+    run, fetches = await _directive_runner(
+        "http://example.com/fresh", {"expires": _FAR_FUTURE_EXPIRES}, tmp_path
+    )
+    await run()
+    await run()
+    assert fetches["n"] == 1, fetches
+
+
+async def test_max_age_beats_a_conflicting_expires(tmp_path):
+    """RFC 9111 5.2.2.1 / 5.3 (#392): when both are present, max-age wins --
+    a max-age=0 must re-fetch even though Expires claims far-future freshness."""
+    run, fetches = await _directive_runner(
+        "http://example.com/conflict",
+        {"cache-control": "max-age=0", "expires": _FAR_FUTURE_EXPIRES},
+        tmp_path,
+    )
+    await run()
+    await run()
+    assert fetches["n"] == 2, fetches

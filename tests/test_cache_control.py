@@ -67,3 +67,22 @@ def test_private_forbids_shared_store_but_not_plain_store_ban():
 )
 def test_max_age_seconds_parses_the_origin_freshness(headers, expected):
     assert max_age_seconds(headers) == expected
+
+
+# RFC 9111 5.3: Expires is the older form of the same freshness directive (#392).
+
+
+_NOW = 1_500_000_000.0  # 2017: between the past and future header instants
+_FUTURE = "Sun, 22 Aug 2032 00:00:00 GMT"
+_PAST = "Sun, 22 Aug 1982 00:00:00 GMT"
+
+
+def test_expires_seconds_parses_the_origin_instant():
+    from app.transport.cache_control import expires_seconds
+
+    seconds = expires_seconds({"expires": _FUTURE}, now=_NOW)
+    assert seconds is not None and seconds > 0
+    assert expires_seconds({"expires": _PAST}, now=_NOW) is not None
+    assert expires_seconds({"expires": _PAST}, now=_NOW) <= 0.0  # already stale
+    assert expires_seconds({"expires": "not a date"}, now=_NOW) is None
+    assert expires_seconds({}, now=_NOW) is None

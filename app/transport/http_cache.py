@@ -13,6 +13,7 @@ from app.models.result_factory import build_engine_result
 from app.models.taxonomy import Classification
 from app.transport import content_cache_key, fetch_policy, request_profile
 from app.transport.cache_control import (
+    expires_seconds,
     forbids_shared_store,
     max_age_seconds,
     requires_revalidation,
@@ -167,11 +168,14 @@ async def store_http_caches(ctx: HttpStrategyContext, resp: FetchedResponse) -> 
         return
     if resp.status_code < 300:
         # The origin's freshness lifetime wins over the local default (RFC 9111
-        # 5.2.2.1): store at min(local TTL, max-age) when max-age is present.
+        # 5.2.2.1), and max-age beats a conflicting Expires (5.3).
+        origin_ttl = max_age_seconds(resp.headers)
+        if origin_ttl is None:
+            origin_ttl = expires_seconds(resp.headers, now=time.time())
         ttl = int(min(ctx.content_cache.default_ttl, origin_ttl)) if origin_ttl is not None else None
         if ttl is not None and ttl <= 0:
-            # Already stale at write time (max-age=0): the cache's ttl<=0 means
-            # "never expires", so storing would invert the directive.
+            # Already stale at write time (max-age=0 or a past Expires): the
+            # OFF convention (#394) stores nothing rather than inverting it.
             return
         with contextlib.suppress(Exception):
             await ctx.content_cache.aset(ctx.ckey, serialize_response(resp.raw), ttl=ttl)

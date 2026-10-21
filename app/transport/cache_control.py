@@ -67,6 +67,22 @@ def max_age_seconds(headers: Mapping[str, str]) -> float | None:
     return None
 
 
+def expires_seconds(headers: Mapping[str, str], *, now: float) -> float | None:
+    """The freshness lifetime implied by the ``Expires`` instant (RFC 9111 5.3):
+    the header date minus ``now``; None when absent or unparsable."""
+    from email.utils import parsedate_to_datetime
+
+    lowered = {str(k).lower(): str(v) for k, v in headers.items()}
+    raw = lowered.get("expires")
+    if not raw:
+        return None
+    try:
+        instant = parsedate_to_datetime(raw).timestamp()
+    except (TypeError, ValueError, OverflowError):
+        return None
+    return instant - now
+
+
 def requires_revalidation(headers: Mapping[str, str]) -> bool:
     """True when a stored response must be revalidated before it is replayed.
 
