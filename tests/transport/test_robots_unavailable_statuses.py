@@ -1,7 +1,7 @@
-"""RFC 9309 2.3.1.3: robots.txt 4xx statuses mean "unavailable", not "disallow-all".
+"""Robots.txt non-200 status classes: two verdicts.
 
-The crawler MAY crawl; the refusal is never cached as a standing decision
-(a later 200 wins), and 5xx stays fail-closed per 2.3.1.4.
+401/403/429 are an application-layer refusal -- decline (AGENTS.md forbids
+continuing an explicit denial); other 4xx stay "unavailable" (RFC 9309 2.3.1.3).
 """
 
 from __future__ import annotations
@@ -40,37 +40,51 @@ async def _load(origin: str, *answers):
     return rules, calls
 
 
-@pytest.mark.parametrize("status", [401, 403, 410, 429])
+UNAVAILABLE_STATUSES = [400, 404, 410, 451]
+
+
+@pytest.mark.parametrize("status", UNAVAILABLE_STATUSES)
 async def test_unavailable_status_4xx_allows_crawling(status):
-    """RFC 9309 2.3.1.3: any 4xx means robots.txt is unavailable, so the
+    """RFC 9309 2.3.1.3: a plain 4xx means robots.txt is unavailable, so the
     crawler MAY access any resources on the server (empty rule set)."""
     rules, _ = await _load("https://waf.test", (None, status))
     assert rules == ([], [], None), status
 
 
-async def test_robots_403_response_is_not_treated_as_disallow_all():
-    """The defect: 403 fell into the disallow-all branch and blocked the site."""
-    rules, _ = await _load("https://waf.test", (None, 403))
-    assert rules != ([(False, "/")], [], None)
+@pytest.mark.parametrize("status", [401, 403, 429])
+async def test_application_layer_refusal_denies(status):
+    """401/403/429 are an explicit application-layer denial, not an unavailable
+    robots.txt -- fail closed (complete disallow)."""
+    rules, _ = await _load("https://waf.test", (None, status))
+    assert rules == ([(False, "/")], [], None), status
 
 
-async def test_unavailable_status_is_not_cached_as_a_denial():
-    """One transient 403 must not outlive the failure TTL: the entry expires on
-    the short clock, so a later 200 is honored on the next load."""
+async def test_robots_403_refusal_is_fail_closed_on_the_short_clock():
+    """The rework ruling: 403 is an application-layer refusal -- deny, but the
+    entry still expires on the short clock so a later 200 is honored."""
+    policy = HostPolicy.unrestricted()
+    robots_cache.clear()
+    try:
+        rules, _ = await _load("https://waf.test", (None, 403))
+        assert rules == ([(False, "/")], [], None)
+        delta = robots_cache.time_until_expiry(("https://waf.test", policy))
+        assert delta is not None and delta <= ROBOTS_FAILURE_TTL_SECONDS
+    finally:
+        robots_cache.clear()
+
+
+async def test_refusal_status_is_not_cached_as_a_denial():
+    """One transient refusal (403 here) must not outlive the failure TTL: the
+    entry expires on the short clock, so a later 200 is honored on the next load."""
     policy = HostPolicy.unrestricted()
     robots_cache.clear()
     try:
         decode, calls = _decode_queue((None, 403))
-        await load_robots_rules(
-            canonical("https://waf.test"), object(), 5, fetch_and_decode=decode, policy=policy
-        )
-        delta = robots_cache.time_until_expiry(("https://waf.test", policy))
-        assert delta is not None and delta <= ROBOTS_FAILURE_TTL_SECONDS
         # The short-lived entry still serves the window without re-fetching.
         again = await load_robots_rules(
             canonical("https://waf.test"), object(), 5, fetch_and_decode=decode, policy=policy
         )
-        assert again == ([], [], None)
+        assert again == ([(False, "/")], [], None)
         assert len(calls) == 1
     finally:
         robots_cache.clear()

@@ -58,9 +58,14 @@ async def _load_uncached(
         )
         ttl = ROBOTS_CACHE_TTL_SECONDS
     elif status is not None and 400 <= status < 500:
-        # RFC 9309 2.3.1.3: 4xx means "unavailable" -- the crawler MAY crawl.
-        # Not a standing denial: the short TTL keeps a later 200 honored.
-        value = ([], [], None)
+        if status in (401, 403, 429):
+            # RFC 9309 2.3.1.3's MAY is permission, not obligation; RFC 9309 3 puts access
+            # control at the application layer, and AGENTS.md denies continuing a refusal.
+            value = ([(False, "/")], [], None)
+        else:
+            # RFC 9309 2.3.1.3: other 4xx mean "unavailable" -- the crawler MAY crawl.
+            value = ([], [], None)
+        # Not a standing decision: the short TTL keeps a later 200 honored.
         ttl = ROBOTS_FAILURE_TTL_SECONDS
     else:
         # RFC 9309 2.3.1.4: 5xx / no answer -- assume complete disallow.
