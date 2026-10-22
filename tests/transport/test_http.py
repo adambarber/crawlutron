@@ -74,6 +74,38 @@ def _run_kwargs(fetcher):
 
 
 class TestHttpStrategy:
+    async def test_fetch_boundary_lowercases_response_headers(self):
+        """The fetch boundary lowercases response headers (pins `_finish_fetch`
+        and `FetchedResponse.of`); unit test pins expires_seconds."""
+
+        # Serve a response with mixed-case headers including ETag (required for cache store)
+        def respond(url, sent_headers):
+            return {
+                "status": 200,
+                "body": b"<html>ok</html>",
+                "ctype": "text/html",
+                "headers": {"ETag": "'test-etag'", "Content-Type": "text/html"},
+            }
+
+        fetcher = request_fetcher(respond)
+        # Custom cache that captures headers before lowercasing them
+
+        class _CaptureCache(HttpCache):
+            captured_headers: dict[str, str] | None = None
+
+            def store(self, url, headers):
+                self.captured_headers = dict(headers)
+                super().store(url, headers)
+
+        cache = _CaptureCache()
+        result = await _run(url="http://x.test/", http_fetcher=fetcher, cache=cache)
+
+        assert result.status == "success"
+        assert cache.captured_headers is not None
+        # All header keys must already be lowercased by the fetch boundary
+        for key in cache.captured_headers:
+            assert key == key.lower(), f"Header key '{key}' not lowercased by fetch boundary"
+
     async def test_discovery_fetch_omits_page_conditional_headers(self):
         # If-None-Match / If-Modified-Since belong to the HTML page request. Forwarding them to
         # robots.txt/sitemap fetches invites false 304s -- discovery fetches get base headers only.
