@@ -59,9 +59,22 @@ class CookieRecord(TypedDict):
 
 _RECORD_KEYS = frozenset(CookieRecord.__annotations__)
 
-# Send matching: RFC 6265 domain/path/secure rules. DomainStrict keeps a
-# host-only cookie on its exact host; rfc2965 stays off (Set-Cookie2 is dead).
-_SEND_POLICY = DefaultCookiePolicy(rfc2965=False, strict_ns_domain=DefaultCookiePolicy.DomainStrict)
+
+class _RecordingSendPolicy(DefaultCookiePolicy):
+    """The send policy (RFC 6265, DomainStrict host-only pin, rfc2965 off) with a
+    memory of what it accepted (#414): ``return_ok`` is the final send gate stdlib
+    matching applies, so its acceptances are what the request carried.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(rfc2965=False, strict_ns_domain=DefaultCookiePolicy.DomainStrict)
+        self.accepted: list[Cookie] = []
+
+    def return_ok(self, cookie: Cookie, request: urllib.request.Request) -> bool:
+        ok = super().return_ok(cookie, request)
+        if ok:
+            self.accepted.append(cookie)
+        return ok
 
 
 class CookieJar:
@@ -394,18 +407,21 @@ def _sendable_cookie_header(
 ) -> tuple[str, set[str]]:
     """The Cookie header RFC 6265 5.4 allows for ``url``, longest path first.
 
-    Matching and ordering delegate to stdlib http.cookiejar; DomainStrict pins host-only
-    cookies to their exact host. Contributing slot hosts come back for LRU recency.
+    Matching and ordering delegate to stdlib http.cookiejar; contributors (#414)
+    come back as the policy's acceptances, not header-carried names.
     """
-    jar = StdCookieJar(policy=_SEND_POLICY)
-    for name, _slot, record in sorted(records, key=lambda item: -len(item[2]["path"])):
-        jar.set_cookie(_cookie_from(name, record))
+    policy = _RecordingSendPolicy()
+    jar = StdCookieJar(policy=policy)
+    slots: dict[int, str] = {}
+    for name, slot, record in sorted(records, key=lambda item: -len(item[2]["path"])):
+        cookie = _cookie_from(name, record)
+        slots[id(cookie)] = slot
+        jar.set_cookie(cookie)
     # Header-carrier for cookiejar matching only; never opened.
     request = urllib.request.Request(url.raw)  # noqa: S310
     jar.add_cookie_header(request)
     header = request.get_header("Cookie") or ""
-    sent = {part.strip().split("=", 1)[0] for part in header.split(";")} if header else set()
-    return header, {slot for name, slot, _record in records if name in sent}
+    return header, {slots[id(cookie)] for cookie in policy.accepted}
 
 
 def _cookie_from(name: str, record: CookieRecord) -> Cookie:

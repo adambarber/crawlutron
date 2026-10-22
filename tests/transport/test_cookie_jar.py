@@ -85,14 +85,14 @@ def _cookie_jar_max_hosts() -> int:
 
 
 def _jar_with_hosts(count: int):
-    """A jar holding ``host0..host{count - 1}``, each with a distinct cookie.
+    """A jar holding ``host0..host{count - 1}``, each with its own distinct cookie.
 
-    The LRU tests are about *which* host is evicted, so the population must be
-    named and identical -- per-test loops filled different slot counts.
+    Distinct names (``k0..k{count - 1}``) keep every test off the name-collision
+    behaviour (#414): a same-named population made these tests pass on luck.
     """
     jar = CookieJar()
     for i in range(count):
-        jar.add_cookie_header(canonical(f"http://host{i}.example/"), f"k=v{i}; Path=/")
+        jar.add_cookie_header(canonical(f"http://host{i}.example/"), f"k{i}=v{i}; Path=/")
     return jar
 
 
@@ -105,7 +105,7 @@ def test_cookie_jar_evicts_oldest_host_past_cap():
     assert jar.cookie_header_for(canonical("http://host0.example/")) == ""
     assert jar.cookie_header_for(canonical("http://host4.example/")) == ""
     newest = cap + 4
-    assert jar.cookie_header_for(canonical(f"http://host{newest}.example/")) == f"k=v{newest}"
+    assert jar.cookie_header_for(canonical(f"http://host{newest}.example/")) == f"k{newest}=v{newest}"
 
 
 def test_cookie_jar_read_refreshes_host_recency():
@@ -113,10 +113,10 @@ def test_cookie_jar_read_refreshes_host_recency():
     the next eviction instead of the oldest-unread slot."""
     cap = _cookie_jar_max_hosts()
     jar = _jar_with_hosts(cap)
-    assert jar.cookie_header_for(canonical("http://host0.example/")) == "k=v0"
+    assert jar.cookie_header_for(canonical("http://host0.example/")) == "k0=v0"
     jar.add_cookie_header(canonical("http://fresh.example/"), "k=fresh; Path=/")
     # The freshly-read host0 survived the eviction the new host forced.
-    assert jar.cookie_header_for(canonical("http://host0.example/")) == "k=v0"
+    assert jar.cookie_header_for(canonical("http://host0.example/")) == "k0=v0"
     assert jar.cookie_header_for(canonical("http://fresh.example/")) == "k=fresh"
 
 
@@ -147,3 +147,20 @@ def test_reset_process_state_rebinds_a_fresh_default_jar():
         assert type(cookie_jar.global_cookie_jar()) is cookie_jar.CookieJar
     finally:
         cookie_jar.reset_process_state()
+
+
+def test_cookie_jar_read_refreshes_only_the_slots_it_carried():
+    """A read refreshes only the slots whose cookies it carried (#414): a
+    name-derived contributor set refreshed every same-named slot, making the
+    next eviction hash-arbitrary instead of LRU-oldest."""
+    cap = _cookie_jar_max_hosts()
+    jar = CookieJar()
+    for i in range(cap):
+        jar.add_cookie_header(canonical(f"http://host{i}.example/"), "k=v; Path=/")
+    assert jar.cookie_header_for(canonical("http://host0.example/")) == "k=v"
+    jar.add_cookie_header(canonical("http://fresh.example/"), "k=fresh; Path=/")
+    # The read refreshed host0 only: the eviction the new host forced takes the
+    # LRU-oldest unread slot (host1), and the just-read host0 survives.
+    assert jar.cookie_header_for(canonical("http://host0.example/")) == "k=v"
+    assert jar.cookie_header_for(canonical("http://host1.example/")) == ""
+    assert jar.cookie_header_for(canonical("http://fresh.example/")) == "k=fresh"
