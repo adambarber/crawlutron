@@ -133,6 +133,20 @@ def test_deployment_knob_detector_bites(tmp_path):
     assert "CRAWLUTRON_TYPO_PROBE" not in (_deployment_knobs() or set())
 
 
+def test_document_enumeration_uses_relative_not_absolute_parts(monkeypatch, tmp_path):
+    """Relative-path enumeration survives a CI checkout rooted under ``work``/;
+
+    a document.parts rewrite would skip every document there and go green for
+    looking at zero files.
+    """
+    fake_root = tmp_path / "home" / "runner" / "work" / "crawlutron" / "crawlutron"
+    fake_root.mkdir(parents=True)
+    (fake_root / "README.md").write_text("# readme\n", encoding="utf-8")
+    monkeypatch.setattr("tests.invariants.test_doc_contracts.REPO_ROOT", fake_root)
+    docs = _markdown_documents()
+    assert "README.md" in docs, f"README.md was skipped under a work/-prefixed root: {docs}"
+
+
 def test_live_documents_are_derived_not_enumerated():
     """The gate on the gate: coverage must equal the tree.
 
