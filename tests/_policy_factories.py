@@ -95,7 +95,7 @@ def http_strategy_policy(*, extraction: str = "full", discovery: bool | None = N
     return read_policy(policy)
 
 
-async def _robots_allow_all(url: str) -> bool:
+async def _robots_allow_all(_url: NormalizedUrl) -> bool:
     return True
 
 
@@ -110,7 +110,7 @@ async def admit(
     max_depth: int = 1,
     max_pages: int = 1,
     source_depth: int = 0,
-    known: set[str] | None = None,
+    known: set[NormalizedUrl] | None = None,
     make_entry=lambda link: link.normalized_url,
     scope_pattern=None,
     want_document_bodies: bool = False,
@@ -153,12 +153,12 @@ __all__ = [
 ]
 
 
-def crawl_limits(*, respect_robots: bool | None = None, **over) -> dict:
+def crawl_limits(*, respect_robots: bool | None = None, **over: Any) -> dict[str, Any]:
     """The limits block a crawl fixture needs, with overrides merged over it.
 
     ``timeout_seconds: 10`` is the live-server profile -- a too-tight fixture
     reports a transport problem. ``respect_robots`` is a keyword tests flip."""
-    limits: dict = {"timeout_seconds": 10, "max_retries": 0, "max_discovered_links": 10}
+    limits: dict[str, Any] = {"timeout_seconds": 10, "max_retries": 0, "max_discovered_links": 10}
     if respect_robots is not None:
         limits["respect_robots"] = respect_robots
     limits.update(over)
@@ -168,16 +168,16 @@ def crawl_limits(*, respect_robots: bool | None = None, **over) -> dict:
 def crawl_policy(
     strategies=None,
     *,
-    limits: dict | None = None,
-    discovery: dict | None = None,
+    limits: dict[str, Any] | None = None,
+    discovery: dict[str, Any] | None = None,
     scope_regex: str | None = None,
     extraction: str | None = None,
-) -> dict:
+) -> dict[str, Any]:
     """A crawl policy carrying strategies, limits, and the named extra blocks.
 
     Each extra block is a named keyword, so a typo'd name is a ``TypeError``;
-    ``scope_regex`` is omitted when not given (validators distinguish unset)."""
-    policy: dict = {
+    the dict is the WIRE shape production's ``payload_policy`` declares."""
+    policy: dict[str, Any] = {
         "strategies": list(strategies) if strategies is not None else [HTTP_DECLARED_CRAWLER],
         "limits": crawl_limits(**(limits or {})),
     }

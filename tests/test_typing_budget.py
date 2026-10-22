@@ -204,7 +204,7 @@ def test_the_scripts_typing_budget_reaches_scripts() -> None:
 
 #: The tests/ tree. It had a file-size and comment-length budget but no typing
 #: budget; its measured baseline is declared first (value-ratchet rule).
-_TESTS_BUDGETS = {_METRIC: 148}
+_TESTS_BUDGETS = {_METRIC: 147}
 
 
 suite_offenders, suite_measurement = _gate(REPO_ROOT / "tests")
@@ -234,7 +234,7 @@ def test_the_tests_typing_budget_reaches_tests() -> None:
     """The H1 reach: the typing budget now sweeps tests/, which had none. The real
     tree shows it (148 records are counted, not invisible) and the shared classifier
     fires on a synthetic undeclared record, so one in tests/ fires."""
-    assert suite_measurement(_METRIC) == 148, "the tests typing budget stopped reaching the real tree"
+    assert suite_measurement(_METRIC) == 147, "the tests typing budget stopped reaching the real tree"
     _assert_undeclared_record_fires()
 
 

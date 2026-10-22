@@ -188,10 +188,12 @@ def make_engine_result(url: str, links=()):
 
 
 class Spill:
-    def __init__(self):
-        self.writes: dict[int, Any] = {}
+    """The in-RAM ``SpillSink`` double; writes carry the record production carries."""
 
-    def write(self, index: int, result: Any) -> None:
+    def __init__(self):
+        self.writes: dict[int, EngineCrawlResult] = {}
+
+    def write(self, index: int, result: EngineCrawlResult) -> None:
         self.writes[index] = result
 
     def close(self) -> None:
@@ -223,7 +225,7 @@ def _link(url: str, source_url: str, *, normalized: str | None = None) -> Discov
 
 
 def _canned_result(
-    url: str,
+    url: str | NormalizedUrl,
     *,
     classification: Classification = "rendered",
     status: ResultStatus | None = None,
@@ -235,12 +237,13 @@ def _canned_result(
     Every field the batch tests read is real, so a runner bug cannot hide
     behind a double; ``classification`` is named, ``status`` follows.
     """
+    text = _text(url)
     return engine_result(
-        url,
+        text,
         classification,
         status=status,
-        final_url=url,
-        discovered_links=[_link(link, url) for link in links or []] + (raw_links or []),
+        final_url=text,
+        discovered_links=[_link(link, text) for link in links or []] + (raw_links or []),
     )
 
 
