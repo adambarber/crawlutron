@@ -99,6 +99,15 @@ dev = [
     # the same reason as mypy: a new release must not turn a build red with no
     # repository change.
     "pyright==1.1.406",
+    # Dead-code gate, run by the vulture hook through scripts/gate. It was pinned
+    # only in requirements-dev.txt -- which no workflow reads -- so the enforcement
+    # job, built from this extra alone, hit ModuleNotFoundError on `python -m
+    # vulture` and failed on a clean checkout. Pinned for the same reason as the
+    # other gate tools: a new release must not turn a build red with no
+    # repository change. tests/test_precommit_ci_contract.py resolves every hook
+    # module against this extra, so a future undeclared hook tool fails a test
+    # instead of CI.
+    "vulture==2.16",
 ]
 
 [project.urls]
