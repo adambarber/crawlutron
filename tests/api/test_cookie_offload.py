@@ -57,7 +57,7 @@ def _policy_with_cookie_jar():
     from tests._policy_factories import http_strategy_policy
 
     policy = http_strategy_policy()
-    policy.request_profile = {"cookie_jar": "per_host"}  # type: ignore[union-attr]
+    policy.request_profile = {"cookie_jar": "per_host"}
     return policy
 
 
@@ -103,7 +103,7 @@ async def test_building_request_headers_from_the_async_frame_stays_off_the_loop(
     ctx = HttpStrategyContext(
         original_url="https://example.test/a",
         normalized_url=_url(),
-        strategy="http",
+        strategy="HTTP_DECLARED_CRAWLER",
         policy=_policy_with_cookie_jar(),
         host_policy=UNRESTRICTED_HOST_POLICY,
         http_fetcher=None,
