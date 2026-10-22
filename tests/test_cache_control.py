@@ -77,12 +77,18 @@ _FUTURE = "Sun, 22 Aug 2032 00:00:00 GMT"
 _PAST = "Sun, 22 Aug 1982 00:00:00 GMT"
 
 
-def test_expires_seconds_parses_the_origin_instant():
+@pytest.mark.parametrize(
+    "header_case",
+    ["expires", "Expires", "EXPIRES"],
+)
+def test_expires_seconds_parses_the_origin_instant(header_case):
     from app.transport.cache_control import expires_seconds
 
-    seconds = expires_seconds({"expires": _FUTURE}, now=_NOW)
+    # Real origins send the canonical capitalization; the lookup must not depend
+    # on it (#400) -- the case-insensitivity is the .lower() in the comprehension.
+    seconds = expires_seconds({header_case: _FUTURE}, now=_NOW)
     assert seconds is not None and seconds > 0
-    assert expires_seconds({"expires": _PAST}, now=_NOW) is not None
-    assert expires_seconds({"expires": _PAST}, now=_NOW) <= 0.0  # already stale
-    assert expires_seconds({"expires": "not a date"}, now=_NOW) is None
+    assert expires_seconds({header_case: _PAST}, now=_NOW) is not None
+    assert expires_seconds({header_case: _PAST}, now=_NOW) <= 0.0  # already stale
+    assert expires_seconds({header_case: "not a date"}, now=_NOW) is None
     assert expires_seconds({}, now=_NOW) is None

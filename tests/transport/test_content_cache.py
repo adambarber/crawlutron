@@ -414,6 +414,17 @@ async def test_future_expires_bounds_the_replay_window(tmp_path):
     assert fetches["n"] == 1, fetches
 
 
+async def test_expires_lookup_is_case_insensitive_end_to_end(tmp_path):
+    """Real origins send the canonical ``Expires`` capitalization (#400); the
+    second crawl must replay exactly as the lowercase header allows."""
+    run, fetches = await _directive_runner(
+        "http://example.com/caps", {"Expires": _FAR_FUTURE_EXPIRES}, tmp_path
+    )
+    await run()
+    await run()
+    assert fetches["n"] == 1, fetches
+
+
 async def test_max_age_beats_a_conflicting_expires(tmp_path):
     """RFC 9111 5.2.2.1 / 5.3 (#392): when both are present, max-age wins --
     a max-age=0 must re-fetch even though Expires claims far-future freshness."""
