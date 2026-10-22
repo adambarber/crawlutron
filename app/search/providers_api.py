@@ -6,8 +6,8 @@ and SSRF screening live in the base. The registry stays in ``providers.py``.
 from __future__ import annotations
 
 import abc
-from typing import Any
 
+from app.models.json_value import JsonValue
 from app.safety.validation import HostPolicy
 from app.search import providers as _providers
 from app.search.providers import (
@@ -58,7 +58,7 @@ class ApiKeyProvider(BaseProvider):
             timeout_seconds=timeout_seconds,
         )
 
-    def _items_of(self, payload: dict[str, Any]) -> object:
+    def _items_of(self, payload: dict[str, JsonValue]) -> object:
         """Walk :attr:`_items_path` down to the raw result list.
         A missing or non-object node yields ``None``, not a raise: the collector
         reads a non-list as no results, so a shaped-unexpected 200 is empty.

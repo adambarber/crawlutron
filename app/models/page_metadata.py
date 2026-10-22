@@ -4,12 +4,14 @@ from __future__ import annotations
 
 from typing import TypedDict
 
+from app.models.json_value import JsonValue
+
 
 class PageMetadata(TypedDict, total=False):
     """What the extractor can fill, owned here, projected by ``PageMetadataResponse``.
 
         ``total=False`` (a key exists only when the page carries it); the mirror invariant
-    pairs owner/projection by module name; ``json_ld`` stays ``dict | list``.
+    pairs owner/projection by module name; ``json_ld`` is the system type, no shape promised.
     """
 
     source_url: str
@@ -28,4 +30,4 @@ class PageMetadata(TypedDict, total=False):
     twitter_image: str
     canonical_url: str
     favicon: str
-    json_ld: dict | list
+    json_ld: JsonValue

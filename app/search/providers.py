@@ -13,6 +13,7 @@ from typing import Any
 
 import httpx
 
+from app.models.json_value import JsonValue
 from app.models.normalized_url import NormalizedUrl, admit_or_none
 from app.safety.bounded_io import BodyTooLarge, read_capped_async
 from app.safety.validation import HostPolicy
@@ -202,9 +203,11 @@ def collect_results(
     return results
 
 
-def parse_provider_json(body: str) -> dict[str, Any]:
+def parse_provider_json(body: str) -> dict[str, JsonValue]:
+    """An external provider body parsed as the JSON object it must be: keys the
+    reader checks, values ``JsonValue`` -- a non-object body is an error at the door."""
     try:
-        payload = json.loads(body)
+        payload: JsonValue = json.loads(body)
     except (json.JSONDecodeError, TypeError) as error:
         raise SearchProviderError("provider returned non-JSON body") from error
     if not isinstance(payload, dict):
@@ -212,7 +215,7 @@ def parse_provider_json(body: str) -> dict[str, Any]:
     return payload
 
 
-def provider_message(provider: str, status: int, payload: dict[str, Any]) -> str:
+def provider_message(provider: str, status: int, payload: dict[str, JsonValue]) -> str:
     detail = payload.get("detail") or payload.get("error") or payload.get("message")
     if isinstance(detail, dict):
         detail = detail.get("message")

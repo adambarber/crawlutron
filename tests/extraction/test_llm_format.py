@@ -1,6 +1,9 @@
 """LLM output formatting: metadata extraction and markdown edges."""
 
 from app.extraction.llm_format import extract_llm_metadata, text_from_html
+from app.models.json_value import JsonValue
+from app.models.page_metadata import PageMetadata
+from app.models.page_metadata_response import PageMetadataResponse
 from tests._extraction_helpers import extract_content
 from tests._fetcher_factories import LLM_FORMAT_TEST_HTML
 from tests._parse_budget import ParseBudget
@@ -46,6 +49,27 @@ class TestJsonLdExtraction:
     def test_json_ld_absent_when_no_script(self):
         meta = extract_llm_metadata("<html><body>x</body></html>", canonical("https://example.com"))
         assert "json_ld" not in meta
+
+    def test_a_scalar_json_ld_block_survives_to_the_wire(self):
+        """A JSON-LD script is arbitrary JSON: a bare scalar is valid JSON, the
+        extractor produces it, and the wire model must admit it."""
+        html = '<html><head><script type="application/ld+json">42</script></head><body>x</body></html>'
+        meta = extract_llm_metadata(html, canonical("https://example.com"))
+        assert meta["json_ld"] == 42
+        # The wire model admits what the extractor can produce.
+        projected = PageMetadataResponse(
+            **{k: meta[k] for k in PageMetadataResponse.model_fields & meta.keys()}
+        )
+        assert projected.json_ld == 42
+
+    def test_page_metadata_declares_json_ld_as_the_system_type(self):
+        """Both declarations of the passthrough payload name the system type, not a
+        shape the arbitrary-JSON door never promised."""
+        json_ld_annotation = PageMetadata.__annotations__["json_ld"]
+        assert getattr(json_ld_annotation, "__forward_arg__", json_ld_annotation) == "JsonValue", (
+            "the owner must name the system type"
+        )
+        assert PageMetadataResponse.model_fields["json_ld"].annotation == JsonValue | None
 
     def test_single_parse_per_html(self):
         budget = ParseBudget()

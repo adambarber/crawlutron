@@ -5,9 +5,9 @@
 
 from __future__ import annotations
 
-# The project floor is 3.11, so the 3.12 type alias is written as a string forward
-# reference: the same deferral one release earlier, with the recursion still resolving.
-JsonValue = None | bool | int | float | str | list["JsonValue"] | dict[str, "JsonValue"]
+# A PEP 695 alias, not a plain one: the recursion makes pydantic's evaluation of the
+# plain string-forward form diverge; the type keyword is the spelling that builds.
+type JsonValue = None | bool | int | float | str | list["JsonValue"] | dict[str, "JsonValue"]
 """Any value JSON can carry, and nothing else.
 
 Recursive on purpose: a JSON object may nest arbitrarily, and a non-recursive

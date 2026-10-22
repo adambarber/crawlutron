@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pydantic import BaseModel
 
+from app.models.json_value import JsonValue
+
 
 class PageMetadataResponse(BaseModel):
     """The wire projection of :class:`~app.models.page_metadata.PageMetadata`."""
@@ -24,4 +26,4 @@ class PageMetadataResponse(BaseModel):
     canonical_url: str | None = None
     favicon: str | None = None
     source_url: str | None = None
-    json_ld: dict | list | None = None
+    json_ld: JsonValue | None = None

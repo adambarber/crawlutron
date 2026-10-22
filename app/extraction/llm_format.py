@@ -8,14 +8,19 @@ import re
 from html import unescape
 from typing import Any, cast, get_args, get_type_hints
 
+from app.models.json_value import JsonValue
 from app.models.normalized_url import NormalizedUrl
 from app.models.page_metadata import PageMetadata
 from app.safety.bounded_io import truncate_html_input
 
-#: a field added there is admitted here without a second edit. A bare str has no union
-#: members -- the hint IS the type -- so only None is stripped from a union.
+#: a field added there is admitted here without a second edit; only None is stripped
+#: from a union, and the system-type field resolves to the JSON union's membership.
+_JSON_MEMBERSHIP = (type(None), bool, int, float, str, list, dict)
 _FIELD_TYPES: dict[str, type | tuple[type, ...]] = {}
 for _field, _hint in get_type_hints(PageMetadata).items():
+    if _hint is JsonValue:
+        _FIELD_TYPES[_field] = _JSON_MEMBERSHIP
+        continue
     _members = get_args(_hint)
     if not _members:
         _FIELD_TYPES[_field] = _hint
@@ -75,8 +80,9 @@ def llm_metadata_from_tree(tree: Any, url: NormalizedUrl | None) -> PageMetadata
     if title:
         metadata["title"] = re.sub(r"\s+", " ", title).strip()
 
-    # JSON-LD structured data
-    parsed_json_ld: list[Any] = []
+    # JSON-LD structured data -- arbitrary third-party JSON: the system type, not
+    # ``Any``; malformed blocks are skipped.
+    parsed_json_ld: list[JsonValue] = []
     for script in tree.iter("script"):
         if (script.get("type") or "").lower() != "application/ld+json":
             continue
