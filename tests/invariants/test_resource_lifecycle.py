@@ -95,13 +95,16 @@ def test_the_protocol_names_the_release_shape():
 
 _RELEASE_VERBS = ("close", "release", "shutdown", "dispose", "teardown")
 _RELEASE_CALL_ATTRS = frozenset({"close", "shutdown", "teardown", "dispose", "terminate", "aclose", "cancel"})
+_RELEASE_CALL_NAMES = frozenset({"discard_if_unowned_loop"})
 
 
 def _module_release_paths(trees) -> set[str]:
     """Module-level function names that release a resource, across ``trees``.
 
     A release VERB in the name AND a release-shaped call in the body; a
-    shutdown-shaped name that releases nothing is bookkeeping, not a release path."""
+    shutdown-shaped name that releases nothing is bookkeeping, not a release path.
+    """  # discard_if_unowned_loop is itself a release call (#415): a close* that
+    # delegates to it is release-shaped without any ``.attr`` call.
     found: set[str] = set()
     for _path, tree in trees:
         for node in tree.body:
@@ -112,8 +115,10 @@ def _module_release_paths(trees) -> set[str]:
                 continue
             if any(
                 isinstance(call, ast.Call)
-                and isinstance(call.func, ast.Attribute)
-                and call.func.attr in _RELEASE_CALL_ATTRS
+                and (
+                    (isinstance(call.func, ast.Attribute) and call.func.attr in _RELEASE_CALL_ATTRS)
+                    or (isinstance(call.func, ast.Name) and call.func.id in _RELEASE_CALL_NAMES)
+                )
                 for call in ast.walk(node)
             ):
                 found.add(node.name)
@@ -127,11 +132,12 @@ _MODULE_RELEASE_NAMES = frozenset(
         "close_browser_pool",
         "shutdown_doc_extraction_executor",
         "shutdown_job_runner",
+        "close_queued_session",
     }
 )
 
 
-def test_the_module_level_release_census_is_still_the_declared_five():
+def test_the_module_level_release_census_is_still_the_declared_six():
     """Module-level release paths are pinned by name; a new one edits this gate.
 
     The class protocol does not fit shutdown wiring's heterogeneous shapes, so
@@ -142,14 +148,19 @@ def test_the_module_level_release_census_is_still_the_declared_five():
 
 
 def test_the_module_release_detector_bites_on_a_new_release_path():
-    """A synthetic module-level release function is caught: a function whose name
-    says it closes/releases/shuts down and whose body releases a resource."""
+    """A synthetic release function is caught, via an ``.attr`` release call or the
+    shared ``discard_if_unowned_loop`` helper (#415)."""
     synthetic = ast.parse(
+        "from app.transport.pooled_clients import discard_if_unowned_loop\n"
         "POOL = build_pool()\n"
         "async def close_new_resource() -> None:\n"
         "    POOL.shutdown()\n"
+        "def close_queued_resource() -> None:\n"
+        "    discard_if_unowned_loop(_close, '_SLOT', globals())\n"
         "async def shutdown_unrelated() -> None:\n"  # a shutdown-shaped name that releases nothing
         "    logger.info('done')\n"
     )
     found = _module_release_paths([(REPO_ROOT / "app" / "_synthetic.py", synthetic)])
-    assert found == {"close_new_resource"}, f"the module release detector is blind: {sorted(found)}"
+    assert found == {"close_new_resource", "close_queued_resource"}, (
+        f"the module release detector is blind: {sorted(found)}"
+    )
