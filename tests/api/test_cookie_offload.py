@@ -1,7 +1,7 @@
 """The shared cookie store never runs on the event loop (#141, #5833).
 
 With persistence on the jar is SQLite-backed; the async path crosses it for
-the Cookie-header read and the Set-Cookie store. The guard: the real store.
+the Cookie-header read, the Set-Cookie store, and the redirect re-attach.
 """
 
 from __future__ import annotations
@@ -11,33 +11,9 @@ import asyncio
 import pytest
 
 from app.models.normalized_url import NormalizedUrl
-from app.storage.coordination_cookies import SharedCookieStore
 from app.transport import cookie_jar
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY
-
-
-class LoopGuardSharedCookieStore(SharedCookieStore):
-    """The real cookie store, every sync entry point refusing the loop."""
-
-    def load(self, namespace: str, host: str) -> dict[str, str]:
-        _refuse_on_loop("SharedCookieStore.load")
-        return super().load(namespace, host)
-
-    def merge(self, namespace: str, host: str, cookies) -> None:
-        _refuse_on_loop("SharedCookieStore.merge")
-        return super().merge(namespace, host, cookies)
-
-    def touch(self, namespace: str, host: str) -> None:
-        _refuse_on_loop("SharedCookieStore.touch")
-        return super().touch(namespace, host)
-
-    def all_slots(self):
-        _refuse_on_loop("SharedCookieStore.all_slots")
-        return super().all_slots()
-
-    def clear(self, namespace: str = "") -> None:
-        _refuse_on_loop("SharedCookieStore.clear")
-        return super().clear(namespace)
+from tests.api._offload_doubles import LoopGuardSharedCookieStore
 
 
 def _refuse_on_loop(name: str) -> None:
@@ -46,6 +22,10 @@ def _refuse_on_loop(name: str) -> None:
     except RuntimeError:
         return
     raise AssertionError(f"sync cookie-store method {name} ran on the event loop")
+
+
+# LoopGuardSharedCookieStore lives in tests/api/_offload_doubles.py with the
+# other loop-guard store doubles; the redirect door's test imports it there.
 
 
 def _url(path: str = "https://example.test/a") -> NormalizedUrl:
@@ -116,3 +96,31 @@ async def test_building_request_headers_from_the_async_frame_stays_off_the_loop(
     )
     await resolve_http_limits(ctx)
     assert ctx.base_headers.get("Cookie") == "session=abc"
+
+
+async def test_a_cross_origin_redirect_reattach_stays_off_the_loop(monkeypatch, guarded_jar):
+    """The redirect hop's cookie re-attach must not run the SQLite store on the
+    loop. The fetcher's own redirect loop is driven for real -- a scripted 302
+    to another origin -- and the store itself refuses the loop.
+    """
+    from tests._fetcher_factories import run_default_http_fetcher
+    from tests._transport_doubles import MockResponse, patch_http_fetcher_transport
+
+    jar = cookie_jar.global_cookie_jar()
+    # Seed the jar off the loop through its derived twin: the cookie the new
+    # origin's re-attach would look for, so the read path really runs.
+    await jar.aadd_cookie_header(_url(), "session=abc; Path=/", namespace="")
+    client = patch_http_fetcher_transport(
+        monkeypatch,
+        [
+            MockResponse(302, {"location": "http://other.example/steal"}),
+            MockResponse(200, {"content-type": "text/html"}, b"<html>ok</html>"),
+        ],
+        allow_ssrf_bypass=True,
+    )
+    result = await run_default_http_fetcher("http://example.test/", {"Cookie": "caller=1"})
+    assert result.status_code == 200, "the redirected fetch must complete for the verdict to count"
+    # The re-attach attached the NEW origin's own jar cookie (none here: the
+    # seed is example.test's), and the caller's credential never crossed over.
+    second_hop = client.captured_headers[1]
+    assert second_hop.get("Cookie") is None, second_hop

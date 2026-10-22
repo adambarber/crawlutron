@@ -91,7 +91,7 @@ async def _stream_terminal_hop(
             return http_413(url, chain.url, started)
         status_code = response.status_code
         hop_url = chain.url
-        if chain.advance(response):
+        if await chain.advance(response):
             # The redirect hop's Set-Cookie is a real cookie: store it for the
             # hop's URL before walking on, or login redirects lose it.
             await _store_hop_cookies(hop_url, response.headers)
@@ -198,7 +198,7 @@ async def cffi_fetch(
                 return _cffi_too_large_result(url, chain.url, response, elapsed_ms)
             status_code = response.status_code
             hop_url = chain.url
-            if chain.advance(response):
+            if await chain.advance(response):
                 await response.aclose()  # release the curl handle
                 await _store_hop_cookies(hop_url, response.headers)  # a hop's Set-Cookie persists
                 continue

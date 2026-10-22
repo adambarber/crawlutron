@@ -132,6 +132,10 @@ class CookieJar:
     # from the sync method: the fetch tails' Set-Cookie path never holds the loop.
     aadd_cookie_header = atwin(add_cookie_header)
 
+    # The redirect re-attach's door, same declared direction: the cross-origin hop
+    # reads the jar (SQLite under the store lock) from a fetcher's redirect loop.
+    acookie_header_for = atwin(cookie_header_for)
+
     def _prune_deleted(self, *, now: float | None = None) -> None:
         """Reap this jar's tombstones older than TOMBSTONE_WINDOW_SECONDS (#393).
 

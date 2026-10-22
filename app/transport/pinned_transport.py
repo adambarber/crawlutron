@@ -228,7 +228,7 @@ _REDIRECT_STATUSES = frozenset((301, 302, 303, 307, 308))
 _CREDENTIAL_HEADERS = frozenset({"cookie", "authorization", "proxy-authorization"})
 
 
-def redirect_target(
+async def redirect_target(
     current_url: NormalizedUrl,
     request_headers: dict[str, str],
     status_code: int,
@@ -238,7 +238,7 @@ def redirect_target(
     """Decide the next hop of a manual redirect loop (shared by both fetchers).
 
     On an in-budget redirect returns ``(new_url, updated_headers)``; hop exhaustion
-    raises rather than reading the redirect body as a page. Each hop re-pins.
+    raises rather than reading the redirect body as a page. Awaited (#141).
     """
     if status_code in _REDIRECT_STATUSES and hops >= MAX_REDIRECT_HOPS:
         # Distinguish hop exhaustion from a terminal answer: the response is still
@@ -253,18 +253,18 @@ def redirect_target(
         # walk refuses loudly, so a refused hop never reads as page success.
         raise ValueError(f"redirect target refused admission: {location!r}")
     if _crosses_origin(new_url, current_url):
-        request_headers = _stripped_credentials(request_headers, new_url)
+        request_headers = await _stripped_credentials(request_headers, new_url)
     return new_url, request_headers
 
 
-def _stripped_credentials(headers: dict[str, str], new_url: NormalizedUrl) -> dict[str, str]:
+async def _stripped_credentials(headers: dict[str, str], new_url: NormalizedUrl) -> dict[str, str]:
     """Drop caller credentials, then attach the new origin's own jar cookies.
 
-    The jar cookies were set by that origin's responses, so attaching them is
-    the browser rule; caller-supplied Cookie/Authorization never cross origins.
+    Caller-supplied credentials never cross origins; the jar read is SQLite
+    under the store lock, so this is awaited, never on the loop (#141).
     """
     stripped = {k: v for k, v in headers.items() if k.lower() not in _CREDENTIAL_HEADERS}
-    jar_cookie = global_cookie_jar().cookie_header_for(new_url, namespace=COOKIE_NAMESPACE.get())
+    jar_cookie = await global_cookie_jar().acookie_header_for(new_url, namespace=COOKIE_NAMESPACE.get())
     if jar_cookie:
         stripped["Cookie"] = jar_cookie
     return stripped
@@ -314,13 +314,13 @@ class _RedirectChain:
             lambda: self._rule(self.url, self.headers), timeout_seconds=self.timeout_seconds
         )
 
-    def advance(self, response: Any) -> bool:
+    async def advance(self, response: Any) -> bool:
         """Step to the next hop; return True when the caller should re-request.
 
-        False means terminal - read the body; the next hop re-runs :meth:`pin`,
-        re-validating SSRF. It takes the response so the redirect read is part of the hop decision.
+        False means terminal - read the body. Awaited: a cross-origin hop reads
+        the persistent jar off the loop (#141).
         """
-        target = redirect_target(
+        target = await redirect_target(
             self.url,
             self.headers,
             response.status_code,

@@ -3,6 +3,7 @@
 import asyncio
 import functools
 
+from app.storage.coordination_cookies import SharedCookieStore
 from app.storage.job_store import JobStore
 from app.storage.job_store_state import JobStatus
 from app.storage.result_store import CrawlResultStore
@@ -169,6 +170,30 @@ class LoopGuardWatchStore(WatchStore):
     def close(self):
         _refuse_on_loop("WatchStore.close")
         return super().close()
+
+
+class LoopGuardSharedCookieStore(SharedCookieStore):
+    """The real cookie store, every sync entry point refusing the loop."""
+
+    def load(self, namespace: str, host: str) -> dict[str, str]:
+        _refuse_on_loop("SharedCookieStore.load")
+        return super().load(namespace, host)
+
+    def merge(self, namespace: str, host: str, cookies) -> None:
+        _refuse_on_loop("SharedCookieStore.merge")
+        return super().merge(namespace, host, cookies)
+
+    def touch(self, namespace: str, host: str) -> None:
+        _refuse_on_loop("SharedCookieStore.touch")
+        return super().touch(namespace, host)
+
+    def all_slots(self):
+        _refuse_on_loop("SharedCookieStore.all_slots")
+        return super().all_slots()
+
+    def clear(self, namespace: str = "") -> None:
+        _refuse_on_loop("SharedCookieStore.clear")
+        return super().clear(namespace)
 
 
 async def _off_loop(func, *args, **kwargs):
