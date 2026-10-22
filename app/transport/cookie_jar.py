@@ -18,6 +18,7 @@ from typing import TYPE_CHECKING, TypedDict, cast
 
 from app.models.normalized_url import NormalizedUrl
 from app.storage.coordination_cookies import DEFAULT_MAX_HOSTS_PER_NAMESPACE
+from app.storage.coordination_store import atwin
 from app.transport.cookie_store import InMemoryCookieStore
 
 if TYPE_CHECKING:
@@ -126,6 +127,10 @@ class CookieJar:
         """Every live record in one namespace as (name, slot host, record)."""
         slots = self._store.all_slots() if self._store is not None else self._inmemory.snapshot()
         return list(_live_records(slots, namespace))
+
+    # One async twin for the one door async crawl frames await (#141), derived
+    # from the sync method: the fetch tails' Set-Cookie path never holds the loop.
+    aadd_cookie_header = atwin(add_cookie_header)
 
     def _prune_deleted(self, *, now: float | None = None) -> None:
         """Reap this jar's tombstones older than TOMBSTONE_WINDOW_SECONDS (#393).

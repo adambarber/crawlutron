@@ -112,16 +112,16 @@ async def test_http_fetcher_persists_every_set_cookie_header():
     assert "csrf=xyz" in cookie_header, cookie_header
 
 
-def test_store_set_cookies_handles_multiple_set_cookie_headers():
+async def test_store_set_cookies_handles_multiple_set_cookie_headers():
     """store_set_cookies must capture all Set-Cookie headers, not just one.
 
     httpx 0.28+ comma-joins duplicate keys in ``items()``; ``get_list`` gives
-    each header separately. Reads the process-wide jar the conftest empties.
+    each header separately. Awaited: the function is the tails' async door.
     """
     jar = cookie_jar.global_cookie_jar()
 
     headers = _TransportHeadersDouble()
-    store_set_cookies(canonical("http://example.com/"), headers)
+    await store_set_cookies(canonical("http://example.com/"), headers)
 
     assert headers.get_list_calls == ["set-cookie"]
     cookie_header = jar.cookie_header_for(canonical("http://example.com/"))

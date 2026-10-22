@@ -64,7 +64,7 @@ class TransportHeaders(Protocol):
     def items(self) -> Iterable[tuple[str, str]]: ...
 
 
-def store_set_cookies(
+async def store_set_cookies(
     url: NormalizedUrl,
     response_headers: TransportHeaders | dict[str, str],
     *,
@@ -72,7 +72,7 @@ def store_set_cookies(
 ) -> None:
     """Extract all Set-Cookie headers into the persistent jar (via ``get_list``,
     since a dict comma-joins duplicates); ``namespace`` isolates multi-tenant
-    cookies. The parameter is typed ``TransportHeaders`` because the body branches.
+    cookies. Awaited from async frames: the jar twin keeps SQLite off the loop.
     """
     if namespace is None:
         namespace = COOKIE_NAMESPACE.get()
@@ -82,8 +82,9 @@ def store_set_cookies(
         set_cookies = response_headers.get_list("set-cookie")
     else:
         set_cookies = [v for k, v in response_headers.items() if k.lower() == "set-cookie"]
+    jar = cookie_jar.global_cookie_jar()
     for cookie in set_cookies:
-        cookie_jar.global_cookie_jar().add_cookie_header(url, cookie, namespace=namespace)
+        await jar.aadd_cookie_header(url, cookie, namespace=namespace)
 
 
 _BUILTIN_USER_AGENTS = [

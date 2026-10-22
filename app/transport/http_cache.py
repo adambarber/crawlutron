@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import time
 
@@ -28,8 +29,12 @@ from app.transport.http_response import (
 from app.vocabulary.taxonomy import status_for_classification
 
 
-def resolve_http_limits(ctx: HttpStrategyContext) -> None:
-    """Resolve request validators, limits, headers, and extraction settings."""
+async def resolve_http_limits(ctx: HttpStrategyContext) -> None:
+    """Resolve request validators, limits, headers, and extraction settings.
+
+    The header build reads the persistent jar (SQLite when persistence is on),
+    so the async strategy frame awaits this and the jar runs off the loop.
+    """
     validators = ctx.caller_validators or {}
     for source, header in (
         ("if_none_match", "If-None-Match"),
@@ -47,8 +52,12 @@ def resolve_http_limits(ctx: HttpStrategyContext) -> None:
     ctx.max_content_length = content_cache_key.effective_max_content_length(
         ctx.limits, ctx.global_concurrency
     )
-    ctx.base_headers = request_profile.headers_for_strategy(
-        ctx.strategy, ctx.policy, ctx.normalized_url, profile=ctx.profile
+    ctx.base_headers = await asyncio.to_thread(
+        request_profile.headers_for_strategy,
+        ctx.strategy,
+        ctx.policy,
+        ctx.normalized_url,
+        profile=ctx.profile,
     )
     ctx.request_headers = dict(ctx.base_headers)
     if ctx.cache is not None:

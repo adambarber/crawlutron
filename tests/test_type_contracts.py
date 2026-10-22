@@ -152,8 +152,8 @@ def test_http_fetcher_alias_marks_the_content_length_cap_optional():
 def _concrete_fetchers_in_app() -> list[tuple[str, str, ast.AsyncFunctionDef]]:
     """Every module-level async function in app/ whose return is a fetch result.
 
-    Found by walking ``app/``, so a new fetcher is covered without being named;
-    module-level only, so the Protocol's own ``__call__`` escapes the sweep."""
+    Found by walking ``app/``: a new fetcher is covered unnamed; the Protocol's
+    own ``__call__`` escapes; tail helpers returning a result are not fetchers."""
     found: list[tuple[str, str, ast.AsyncFunctionDef]] = []
     for path in app_python_files():
         tree = ast.parse(path.read_text(encoding="utf-8"))
@@ -164,7 +164,9 @@ def _concrete_fetchers_in_app() -> list[tuple[str, str, ast.AsyncFunctionDef]]:
             if not (isinstance(returns, ast.Name) and returns.id == "HttpFetchResult"):
                 continue
             first_args = [*node.args.posonlyargs, *node.args.args]
-            first = first_args[0].annotation if first_args else None
+            if not first_args:
+                continue
+            first = first_args[0].annotation
             if isinstance(first, ast.Name) and first.id == "HttpFetcher":
                 continue
             found.append((path.name, node.name, node))

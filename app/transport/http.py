@@ -227,7 +227,8 @@ async def http_strategy_result(
         global_concurrency=global_concurrency,
         started=time.monotonic(),
     )
-    resolve_http_limits(ctx)
+    # The resolver's jar read is SQLite when persistence is on: awaited, off-loop.
+    await resolve_http_limits(ctx)
     await revalidate_content_cache(ctx)
     try:
         if ctx.response is None:

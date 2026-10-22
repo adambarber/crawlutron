@@ -94,14 +94,14 @@ async def _stream_terminal_hop(
         if chain.advance(response):
             # The redirect hop's Set-Cookie is a real cookie: store it for the
             # hop's URL before walking on, or login redirects lose it.
-            _store_hop_cookies(hop_url, response.headers)
+            await _store_hop_cookies(hop_url, response.headers)
             return None
         raw = bytearray()
         async for chunk in response.aiter_raw():
             raw.extend(chunk)
             if len(raw) > max_content_length:
                 return http_413(url, chain.url, started)
-        return _finish_fetch(
+        return await _finish_fetch(
             url=url,
             final_url=chain.url,
             status_code=status_code,
@@ -113,12 +113,12 @@ async def _stream_terminal_hop(
         )
 
 
-def _store_hop_cookies(hop_url: NormalizedUrl, response_headers: TransportHeaders) -> None:
+async def _store_hop_cookies(hop_url: NormalizedUrl, response_headers: TransportHeaders) -> None:
     """The redirect-hop cookie door: same tail, one hop earlier."""
-    store_set_cookies(hop_url, response_headers)
+    await store_set_cookies(hop_url, response_headers)
 
 
-def _finish_fetch(
+async def _finish_fetch(
     *,
     url: NormalizedUrl,
     final_url: NormalizedUrl,
@@ -141,7 +141,7 @@ def _finish_fetch(
         )
     except DecompressionTooLargeError:
         return too_large()
-    store_set_cookies(final_url, response_headers)
+    await store_set_cookies(final_url, response_headers)
     headers = {key.lower(): value for key, value in response_headers.items()}
     # Already decompressed above; drop the header to avoid a second pass.
     headers.pop("content-encoding", None)
@@ -200,7 +200,7 @@ async def cffi_fetch(
             hop_url = chain.url
             if chain.advance(response):
                 await response.aclose()  # release the curl handle
-                _store_hop_cookies(hop_url, response.headers)  # a hop's Set-Cookie persists
+                await _store_hop_cookies(hop_url, response.headers)  # a hop's Set-Cookie persists
                 continue
             # Never trust response.elapsed across curl_cffi versions: a timedelta
             # there TypeErrors and silently downgrades every fetch to plain httpx.
@@ -244,7 +244,7 @@ async def cffi_fetch(
             await response.aclose()
             # Decompress with a size cap (decompression-bomb guard), normalise
             # headers and persist cookies via the shared tail.
-            return _finish_fetch(
+            return await _finish_fetch(
                 url=url,
                 final_url=chain.url,
                 status_code=status_code,
