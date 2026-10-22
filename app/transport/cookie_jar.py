@@ -46,6 +46,23 @@ COOKIE_JAR_MAX_HOSTS_PER_NAMESPACE = DEFAULT_MAX_HOSTS_PER_NAMESPACE
 TOMBSTONE_WINDOW_SECONDS = 60.0
 
 
+__all__ = [
+    "CookieRecord",
+    "CookieJar",
+    "global_cookie_jar",
+    "set_global_cookie_jar",
+    "reset_process_state",
+    "has_process_state",
+    "sendable_cookie_header",
+    "RecordingSendPolicy",
+    "cookie_from",
+    "COOKIE_JAR_MAX_HOSTS_PER_NAMESPACE",
+    "COOKIE_NAMESPACE",
+    "MAX_COOKIE_LIFETIME_SECONDS",
+    "TOMBSTONE_WINDOW_SECONDS",
+]
+
+
 class CookieRecord(TypedDict):
     """One cookie's RFC 6265 state; stored as the slot dict value's JSON."""
 
@@ -60,7 +77,7 @@ class CookieRecord(TypedDict):
 _RECORD_KEYS = frozenset(CookieRecord.__annotations__)
 
 
-class _RecordingSendPolicy(DefaultCookiePolicy):
+class RecordingSendPolicy(DefaultCookiePolicy):
     """The send policy (RFC 6265, DomainStrict host-only pin, rfc2965 off) with a
     memory of what it accepted (#414): ``return_ok`` is the final send gate stdlib
     matching applies, so its acceptances are what the request carried.
@@ -129,7 +146,7 @@ class CookieJar:
         """
         ns = namespace or ""
         records = self._records_for(ns)
-        header, contributors = _sendable_cookie_header(records, url)
+        header, contributors = sendable_cookie_header(records, url)
         self._prune_deleted()
         medium = self._store if self._store is not None else self._inmemory
         for host in contributors:
@@ -402,7 +419,7 @@ def _host_cookie(host: str, value: str) -> CookieRecord:
     return CookieRecord(value=value, domain=host, path="/", secure=False, expires=None, host_only=True)
 
 
-def _sendable_cookie_header(
+def sendable_cookie_header(
     records: list[tuple[str, str, CookieRecord]], url: NormalizedUrl
 ) -> tuple[str, set[str]]:
     """The Cookie header RFC 6265 5.4 allows for ``url``, longest path first.
@@ -410,11 +427,11 @@ def _sendable_cookie_header(
     Matching and ordering delegate to stdlib http.cookiejar; contributors (#414)
     come back as the policy's acceptances, not header-carried names.
     """
-    policy = _RecordingSendPolicy()
+    policy = RecordingSendPolicy()
     jar = StdCookieJar(policy=policy)
     slots: dict[int, str] = {}
     for name, slot, record in sorted(records, key=lambda item: -len(item[2]["path"])):
-        cookie = _cookie_from(name, record)
+        cookie = cookie_from(name, record)
         slots[id(cookie)] = slot
         jar.set_cookie(cookie)
     # Header-carrier for cookiejar matching only; never opened.
@@ -424,7 +441,7 @@ def _sendable_cookie_header(
     return header, {slots[id(cookie)] for cookie in policy.accepted}
 
 
-def _cookie_from(name: str, record: CookieRecord) -> Cookie:
+def cookie_from(name: str, record: CookieRecord) -> Cookie:
     """The stdlib Cookie shape for one record, mirroring its attributes."""
     domain_specified = not record["host_only"]
     return Cookie(

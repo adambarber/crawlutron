@@ -7,10 +7,13 @@ could leave a truncated jar that silently lost all persisted cookies.
 import contextlib
 import json
 import os
+import re
 import tempfile
+import urllib.request
+from http.cookiejar import CookieJar as StdCookieJar
 from unittest.mock import patch
 
-from app.transport.cookie_jar import CookieJar, global_cookie_jar
+from app.transport.cookie_jar import CookieJar, RecordingSendPolicy, cookie_from, global_cookie_jar
 from tests._cookie_helpers import cookie_file, read_cookie_file
 from tests._policy_factories import canonical
 from tests._thread_fanout import run_thread_fanout
@@ -150,17 +153,117 @@ def test_reset_process_state_rebinds_a_fresh_default_jar():
 
 
 def test_cookie_jar_read_refreshes_only_the_slots_it_carried():
-    """A read refreshes only the slots whose cookies it carried (#414): a
-    name-derived contributor set refreshed every same-named slot, making the
-    next eviction hash-arbitrary instead of LRU-oldest."""
+    """A read refreshes only the slots whose cookies it carried (#414)."""
     cap = _cookie_jar_max_hosts()
     jar = CookieJar()
     for i in range(cap):
         jar.add_cookie_header(canonical(f"http://host{i}.example/"), "k=v; Path=/")
     assert jar.cookie_header_for(canonical("http://host0.example/")) == "k=v"
     jar.add_cookie_header(canonical("http://fresh.example/"), "k=fresh; Path=/")
-    # The read refreshed host0 only: the eviction the new host forced takes the
-    # LRU-oldest unread slot (host1), and the just-read host0 survives.
+    # Read refreshed host0 only; eviction takes LRU-oldest unread slot (host1)
     assert jar.cookie_header_for(canonical("http://host0.example/")) == "k=v"
     assert jar.cookie_header_for(canonical("http://host1.example/")) == ""
     assert jar.cookie_header_for(canonical("http://fresh.example/")) == "k=fresh"
+
+
+def test_contributor_derivation_equivalence_pin():
+    """Equivalence pin for #414/#418: contributors == slots whose cookies stdlib sends.
+    Case 1: same-named cookies at different paths -> both contributors.
+    Case 2: secure cookie on plain HTTP filtered -> only non-secure contributor; OLD fails."""
+    from app.transport.cookie_jar import CookieRecord, sendable_cookie_header
+    from tests._policy_factories import canonical
+
+    # Case 1: two same-named cookies at different paths on same host
+    rec1 = CookieRecord(
+        value="v1", domain="example.com", path="/a", secure=False, expires=None, host_only=True
+    )
+    rec2 = CookieRecord(
+        value="v2", domain="example.com", path="/a/b", secure=False, expires=None, host_only=True
+    )
+    records = [
+        ("same", "example.com", rec1),
+        ("same", "example.com", rec2),
+    ]
+    url = canonical("http://example.com/a/b/page")
+    _header, contributors = sendable_cookie_header(records, url)
+    assert contributors == {"example.com"}, f"case 1 failed: {contributors}"
+
+    # Case 2: secure cookie filtered on plain HTTP + same-named non-secure
+    rec_secure = CookieRecord(
+        value="secure_val", domain="example.com", path="/", secure=True, expires=None, host_only=True
+    )
+    rec_plain = CookieRecord(
+        value="plain_val", domain="example.com", path="/", secure=False, expires=None, host_only=True
+    )
+    records2 = [
+        ("shared", "example.com", rec_secure),
+        ("shared", "example.com", rec_plain),
+    ]
+    url2 = canonical("http://example.com/page")
+    _header2, contributors2 = sendable_cookie_header(records2, url2)
+    assert "shared=plain_val" in _header2, f"secure cookie leaked: {_header2}"
+    assert "shared=secure_val" not in _header2, f"secure cookie in header: {_header2}"
+    assert contributors2 == {"example.com"}, f"case 2 failed: {contributors2}"
+
+
+def _build_jar_slots(records):
+    """Build slots map by populating a stdlib CookieJar (test-only helper)."""
+    policy = RecordingSendPolicy()
+    jar = StdCookieJar(policy=policy)
+    slots_map: dict[int, str] = {}
+    items = sorted(records, key=lambda item: -len(item[2]["path"]))
+    i = 0
+    while i < len(items):
+        name, slot, record = items[i]
+        cookie = cookie_from(name, record)
+        slots_map[id(cookie)] = slot
+        jar.set_cookie(cookie)
+        i += 1
+    return policy, jar, slots_map
+
+
+def _old_derive_contributors(records, url):
+    """OLD derivation: contributors = all slots whose cookie name is in header."""
+    policy, jar, slots_map = _build_jar_slots(records)
+    request = urllib.request.Request(url.raw)  # noqa: S310
+    jar.add_cookie_header(request)
+    header = request.get_header("Cookie") or ""
+    # OLD: parse header for names, then ALL slots with those names are contributors
+
+    header_names = set(re.findall(r"([^=;]+)=", header))
+    return {slot for name, slot, _ in records if name in header_names}
+
+
+def test_contributor_derivation_equivalence_pin_old_fails():
+    """WALK-PAST for #418: OLD name-membership fails pin on case 2.
+    Not run by default; run manually to verify walk-past.
+    """
+    from app.transport.cookie_jar import CookieRecord
+    from tests._policy_factories import canonical
+
+    # Case 2: secure cookie filtered on plain HTTP + same-named non-secure
+    rec_secure = CookieRecord(
+        value="secure_val", domain=".example.com", path="/", secure=True, expires=None, host_only=False
+    )
+    rec_plain = CookieRecord(
+        value="plain_val", domain=".example.com", path="/", secure=False, expires=None, host_only=False
+    )
+    records = [
+        ("shared", "secure.example.com", rec_secure),
+        ("shared", "plain.example.com", rec_plain),
+    ]
+    url = canonical("http://sub.example.com/page")
+
+    # OLD derivation: both slots contributors (name in header)
+    old_contributors = _old_derive_contributors(records, url)
+    assert old_contributors == {"secure.example.com", "plain.example.com"}, f"OLD: {old_contributors}"
+
+    # NEW derivation: only plain cookie contributor (secure filtered)
+    from app.transport.cookie_jar import sendable_cookie_header
+
+    _header, new_contributors = sendable_cookie_header(records, url)
+    assert new_contributors == {"plain.example.com"}, f"NEW: {new_contributors}"
+
+    # OLD != NEW on case 2
+    assert old_contributors != new_contributors
+    assert new_contributors == {"plain.example.com"}

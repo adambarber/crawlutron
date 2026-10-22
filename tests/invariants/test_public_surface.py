@@ -62,6 +62,8 @@ _OWNER_PUBLIC_SURFACE_RATCHET = {
     # #127: the pool concept splits on a real async/sync axis -- AsyncPool for
     # BrowserPool, SyncPool for DocExtractionPool -- so the surface is two protocols.
     "app/orchestration/pool.py": (2, 2),
+    # CookieJar transport module with equivalence pin for contributor derivation (#418).
+    "app/transport/cookie_jar.py": (13, 8),
 }
 
 
