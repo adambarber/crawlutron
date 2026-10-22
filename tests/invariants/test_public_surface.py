@@ -118,6 +118,7 @@ _SURFACE_DECLARING_EXEMPT = frozenset(
         "app/storage/job_store_collections.py",
         "app/storage/job_store_read.py",
         "app/storage/job_store_state.py",
+        "app/runtime/resource_lifecycle.py",
         "app/storage/migrations/runner.py",
         "app/storage/migrations/ddl.py",
         "app/storage/watch_store.py",

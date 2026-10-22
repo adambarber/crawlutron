@@ -1,7 +1,7 @@
 """The sink a crawl writes spilled results to -- one declaration for its surface.
 
 ``write`` feeds the dispatch loops; ``load_ordered``/``close`` are the pipeline's
-read-and-release on the same value, so one protocol names all three.
+read-and-release on the same value. ``close`` conforms to the lifecycle protocol.
 """
 
 from __future__ import annotations
@@ -12,6 +12,7 @@ from typing import Protocol
 
 from app.models.crawl_result import EngineCrawlResult
 from app.models.host_policy import HostPolicy
+from app.runtime.resource_lifecycle import ResourceLifecycle
 
 
 class SpillSink(Protocol):
@@ -19,6 +20,8 @@ class SpillSink(Protocol):
 
     def load_ordered(self, *, policy: HostPolicy) -> list[EngineCrawlResult]: ...
 
+    # close conforms to ResourceLifecycle: sync here, awaited-able for the async
+    # implementers of the same declared shape.
     def close(self) -> None: ...
 
 
@@ -32,3 +35,6 @@ async def write_spill(spill: SpillSink | None, index: int, result: EngineCrawlRe
     res = spill.write(index, result)
     if inspect.isawaitable(res):
         await res
+
+
+_ = ResourceLifecycle  # the conformance contract this module's close declares
