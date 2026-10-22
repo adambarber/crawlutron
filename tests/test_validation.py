@@ -1,10 +1,11 @@
 """Deep URL normalization: sort query params, strip default ports, drop fragments."""
 
+import logging
 from functools import partial
 
 import pytest
 
-from app.models.host_policy import HostPolicy
+from app.models.host_policy import HostPolicy, allow_private_targets, reset_private_target_memo
 from app.models.normalized_url import NormalizedUrl
 from app.safety.validation import filter_js_endpoints as _filter_js_endpoints
 
@@ -120,3 +121,52 @@ class TestFilterJsEndpoints:
 
     def test_empty_endpoints(self):
         assert filter_js_endpoints([]) == []
+
+
+class TestSsrfPrivateTargetGuardWarning:
+    """The SSRF guard emits one WARNING naming the env var when disabled."""
+
+    @pytest.mark.parametrize("env", [None, "0"], ids=["guard-on-default", "explicitly-falsey"])
+    def test_no_warning_when_guard_on(self, env, caplog, monkeypatch):
+        if env is None:
+            monkeypatch.delenv("CRAWLUTRON_ALLOW_PRIVATE_TARGETS", raising=False)
+        else:
+            monkeypatch.setenv("CRAWLUTRON_ALLOW_PRIVATE_TARGETS", env)
+        reset_private_target_memo()
+        with caplog.at_level(logging.WARNING, logger="app.models.host_policy"):
+            allow_private_targets()
+        warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
+        assert len(warnings) == 0
+
+    @pytest.mark.parametrize(
+        "env, calls",
+        [
+            pytest.param("1", 1, id="guard-disabled-once"),
+            pytest.param("true", 3, id="guard-disabled-memoized"),
+        ],
+    )
+    def test_warning_emitted_when_guard_disabled(self, env, calls, caplog, monkeypatch):
+        monkeypatch.setenv("CRAWLUTRON_ALLOW_PRIVATE_TARGETS", env)
+        reset_private_target_memo()
+        with caplog.at_level(logging.WARNING, logger="app.models.host_policy"):
+            for _ in range(calls):
+                allow_private_targets()
+        recorded = [r for r in caplog.records if r.levelno == logging.WARNING]
+        assert len(recorded) == 1
+        assert recorded[0].env_name == "CRAWLUTRON_ALLOW_PRIVATE_TARGETS"
+        assert "SSRF private-target guard DISABLED" in recorded[0].message
+
+    def test_warning_fires_again_on_env_change(self, caplog, monkeypatch):
+        """A change to the env value triggers a new warning."""
+        monkeypatch.setenv("CRAWLUTRON_ALLOW_PRIVATE_TARGETS", "1")
+        reset_private_target_memo()
+        with caplog.at_level(logging.WARNING, logger="app.models.host_policy"):
+            allow_private_targets()
+        first_warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
+        assert len(first_warnings) == 1
+        monkeypatch.setenv("CRAWLUTRON_ALLOW_PRIVATE_TARGETS", "yes")
+        caplog.clear()
+        allow_private_targets()
+        second_warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
+        assert len(second_warnings) == 1
+        assert second_warnings[0].env_name == "CRAWLUTRON_ALLOW_PRIVATE_TARGETS"
