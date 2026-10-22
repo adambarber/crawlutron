@@ -5,6 +5,7 @@ and SSRF screening live in the base. The registry stays in ``providers.py``.
 
 from __future__ import annotations
 
+import abc
 from typing import Any
 
 from app.safety.validation import HostPolicy
@@ -29,8 +30,7 @@ class ApiKeyProvider(BaseProvider):
     differ only in endpoint, method and key placement."""
 
     name: str
-    # Declared here so `_results` has one shape to read; a subclass that omits one
-    # fails loudly on the first result rather than reporting a blank title.
+    # Field declarations are data, not hooks; the duplication rule pins them.
     _url_key: str
     _title_key: str
     _description_key: str
@@ -42,9 +42,9 @@ class ApiKeyProvider(BaseProvider):
         super().__init__(host_policy)
         self._api_key = api_key
 
+    @abc.abstractmethod
     def _call(self, query: str, limit: int) -> ProviderCall:
         """This provider's request shape for one query (subclass hook)."""
-        raise NotImplementedError
 
     async def _fetch(self, query: str, limit: int, timeout_seconds: float) -> tuple[int, str]:
         """Issue this provider's request over the shared pooled client."""

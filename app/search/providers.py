@@ -5,6 +5,7 @@ one owns the shared request/collect contract and the registry.
 
 from __future__ import annotations
 
+import abc
 import json
 import logging
 from dataclasses import dataclass
@@ -63,11 +64,11 @@ class SearchProviderUnavailable(Exception):
     """A provider was selected but its credentials are not configured."""
 
 
-class BaseProvider:
+class BaseProvider(abc.ABC):
     """What every search provider shares: a name, the policy, and the shape.
 
-    A provider fetches a response and then turns it into results. The two
-    families differ in both halves, so each supplies its own fetch and parse.
+    Each family supplies its own fetch and parse, so both hooks are abstract:
+    an incomplete provider fails at construction, not at the first search.
     """
 
     name: str
@@ -80,13 +81,13 @@ class BaseProvider:
         status, body = await self._fetch(query, limit, timeout_seconds)
         return self._results(status, body, limit)
 
+    @abc.abstractmethod
     async def _fetch(self, query: str, limit: int, timeout_seconds: float) -> tuple[int, str]:
         """This provider's HTTP exchange: the status and the body it returned."""
-        raise NotImplementedError
 
+    @abc.abstractmethod
     def _results(self, status: int, body: str, limit: int) -> list[SearchResult]:
         """This provider's response shape, read into normalized results."""
-        raise NotImplementedError
 
 
 async def provider_http(

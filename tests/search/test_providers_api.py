@@ -10,7 +10,7 @@ import json
 import pytest
 
 from app.safety.validation import HostPolicy
-from app.search.providers import ProviderCall, SearchProviderError
+from app.search.providers import BaseProvider, ProviderCall, SearchProviderError
 from app.search.providers_api import ApiKeyProvider, BraveProvider, SerperProvider, TavilyProvider
 from tests._assertions import awaitable_search, block_private_targets, provider_results
 
@@ -150,6 +150,29 @@ def test_keyed_provider_entry_is_folded_into_the_base():
     """None of the keyed providers re-implements ``search``: they all drive it."""
     for cls in (TavilyProvider, BraveProvider, SerperProvider):
         assert cls.search is ApiKeyProvider.search, f"{cls.__name__} re-implemented the entry"
+
+
+def test_an_incomplete_base_provider_fails_at_construction():
+    """The subclass hooks are declared, not defaulted: a BaseProvider with neither
+    hook implemented is a construction error, not a NotImplementedError thrown at
+    the first search after the provider was wired in."""
+    with pytest.raises(TypeError):
+        BaseProvider(HostPolicy.unrestricted())
+
+
+def test_a_keyed_provider_without_a_call_fails_at_construction():
+    """A keyed provider that states its fields but not its request shape is an
+    incomplete class: it must fail when instantiated, not on the first query."""
+
+    class _CalllessProvider(ApiKeyProvider):
+        name = "callless"
+        _url_key = "url"
+        _title_key = "title"
+        _description_key = "description"
+        _items_path = ("results",)
+
+    with pytest.raises(TypeError):
+        _CalllessProvider("key", HostPolicy.unrestricted())
 
 
 def test_new_provider_with_only_per_provider_fields_works(fake_provider_http):

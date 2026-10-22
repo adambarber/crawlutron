@@ -32,6 +32,14 @@ def _stub(sequence: list[float]) -> ResourceGauge:
     return ResourceGauge(target=0.90, poll_seconds=0.01, max_wait_seconds=1.0, usage_ratio=_sensor(sequence))
 
 
+def test_an_incomplete_resource_gauge_fails_at_construction():
+    """``_read_usage`` is a declared subclass hook, not a defaulted one: a gauge
+    that neither overrides it nor injects ``usage_ratio`` is a construction
+    error, not a NotImplementedError at the first batch dispatch."""
+    with pytest.raises(TypeError):
+        ResourceGauge(target=0.90, poll_seconds=0.01, max_wait_seconds=1.0)
+
+
 def test_scale_full_below_target():
     g = _stub([0.50])
     assert g.batch_scale_factor() == 1.0

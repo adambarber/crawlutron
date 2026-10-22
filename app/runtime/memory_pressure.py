@@ -112,6 +112,12 @@ class ResourceGauge:
         # Assigned after _hard so an injected sensor cannot be re-derived from
         # a target it does not control.
         self.usage_ratio = self._read_usage if usage_ratio is None else usage_ratio
+        # No usage signal at all (no override, no injected sensor) is a
+        # construction error, not a first-dispatch NotImplementedError.
+        if usage_ratio is None and type(self)._read_usage is ResourceGauge._read_usage:
+            raise TypeError(
+                f"{type(self).__name__} has no usage signal: override _read_usage() or inject usage_ratio"
+            )
 
     def _read_usage(self) -> float:
         """Current pressure as a fraction of the resource ceiling -- the real reading
