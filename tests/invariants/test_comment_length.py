@@ -92,19 +92,25 @@ def dangling_comment_blocks(source: str) -> list[tuple[int, int, str]]:
     ]
 
 
+# Extensionless-ish entry points the project actually runs, swept with the .py
+# files so a long run in them IS caught.
+_ENTRY_POINTS = ("scripts/gate", "scripts/run-tests.sh")
+
+
 def _root_findings[T](
     root: str, collect: Callable[[str], list[T]], *, include_gate_bash: bool = False
 ) -> dict[str, list[T]]:
     """Every ``collect`` hit under one root, as ``{file: [findings]}``.
 
-    ``include_gate_bash`` adds the extensionless scripts/gate, so the comment-
-    block budget covers it; the docstring scan never asks for it.
+    ``include_gate_bash`` adds the entry-point scripts (scripts/gate and
+    scripts/run-tests.sh) to the sweep; the docstring scan never asks for them.
     """
     files = sorted((REPO_ROOT / root).rglob("*.py"))
     if include_gate_bash and root == "scripts":
-        gate = REPO_ROOT / "scripts" / "gate"
-        if gate.exists():
-            files.append(gate)
+        for name in _ENTRY_POINTS:
+            path = REPO_ROOT / name
+            if path.exists():
+                files.append(path)
     found: dict[str, list[T]] = {}
     for path in files:
         if "__pycache__" in path.parts:
@@ -172,6 +178,20 @@ def test_scripts_is_part_of_the_comment_budget_surface() -> None:
     assert sum(len(v) for v in runs.values()) == _BUDGETS["scripts"]
     # A three-line block in the helper surface fires; the banner shape is gone.
     assert long_comment_runs("#!/bin/sh\n# one\n# two\n# three\n") == [(1, 4)]
+
+
+def test_the_run_tests_entry_point_is_inside_the_surface() -> None:
+    # scripts/run-tests.sh is swept: a planted long run in it FAILS the budget.
+    # The file was invisible after its move into scripts/.
+
+    surface_files = sorted((REPO_ROOT / "scripts").rglob("*.py")) + [
+        p for name in _ENTRY_POINTS if (p := REPO_ROOT / name).exists()
+    ]
+    assert REPO_ROOT / "scripts" / "run-tests.sh" in surface_files
+    source = (REPO_ROOT / "scripts" / "run-tests.sh").read_text(encoding="utf-8")
+    assert long_comment_runs(source) == [], "a run here is trimmed, never budgeted"
+    planted = source + "\n# one\n# two\n# three\n"
+    assert long_comment_runs(planted), "the detector must fire on a planted run"
 
 
 def test_the_detector_bites_on_a_third_consecutive_comment() -> None:

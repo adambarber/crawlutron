@@ -1,7 +1,5 @@
 #!/usr/bin/env zsh
-# Run the crawlutron pytest suite from the repository root.
-# This is the suite's entry point, so a caller needs no harness knowledge:
-# forward any arguments (e.g. -k name) straight to pytest.
+# The pytest suite's entry point: forwards all arguments to pytest.
 
 set -e -u -o pipefail
 
