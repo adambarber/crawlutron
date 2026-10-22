@@ -23,14 +23,15 @@ from tests._ratchet import (
 from tests.chokepoint_walks import REPO_ROOT, nodes_of, trees_under
 
 _METRIC = "undeclared record"
+_ANY = "bare Any"
 
-# 143 -> 137 -> 134: #135 declared the two open-JSON doors and the json_ld field
-# pair; #136 declared the job row, status stats and spill/envelope reads.
-_BUDGETS = {_METRIC: 134}
+# 143 -> 137 -> 134: #135/#136 declared the open-JSON, job-row and spill reads.
+# "bare Any" is #193's second accounting, a measured baseline, not sanctioned.
+_BUDGETS = {_METRIC: 134, _ANY: 161}
 
 #: The scripts/ tree, which #293 brings under this gate for the first time; its
 #: measured baseline is declared first (value-ratchet rule).
-_SCRIPTS_BUDGETS = {_METRIC: 16}
+_SCRIPTS_BUDGETS = {_METRIC: 16, _ANY: 0}
 
 # A record is anything whose key set a caller might depend on.
 _RECORD_ROOTS = frozenset(
@@ -84,6 +85,10 @@ def candidates(tree: ast.AST) -> Iterator[tuple[str, int, str]]:
             if annotation is None:
                 continue
             source = ast.unparse(annotation)
+            # The annotation itself, never its spine: a Callable's parameter Any
+            # is not an exit (the record test below pins that distinction).
+            if isinstance(annotation, ast.Name) and annotation.id == "Any":
+                yield (_ANY, node.lineno, source)
             if _is_record(annotation) and (not _has_subscript(annotation) or _mentions_any(annotation)):
                 yield (_METRIC, node.lineno, source)
 
@@ -112,20 +117,19 @@ def _walk(root: Path) -> Iterator[tuple[str, str, str]]:
     for path, tree in trees_under(root):
         relative = path.relative_to(REPO_ROOT).as_posix()
         for candidate, line, source in candidates(tree):
-            if candidate == _METRIC:
-                yield candidate, f"{relative}:{line}", source
+            yield candidate, f"{relative}:{line}", source
 
 
-def _offenders(walk) -> list[Offender]:
+def _offenders(walk, metric: str) -> list[Offender]:
     """The work list a root's walk offers, in tree order."""
-    return [Offender(where, detail) for _candidate, where, detail in walk]
+    return [Offender(where, detail) for candidate, where, detail in walk if candidate == metric]
 
 
 def _gate(root: Path) -> tuple[Callable[[str], list[Offender]], Callable[[str], int]]:
     """The (offenders, measurement) pair a root's typing gate reads."""
 
     def work(metric: str) -> list[Offender]:
-        return _offenders(_walk(root))
+        return _offenders(_walk(root), metric)
 
     def measure(metric: str) -> int:
         return len(work(metric))
@@ -204,7 +208,7 @@ def test_the_scripts_typing_budget_reaches_scripts() -> None:
 
 #: The tests/ tree. It had a file-size and comment-length budget but no typing
 #: budget; its measured baseline is declared first (value-ratchet rule).
-_TESTS_BUDGETS = {_METRIC: 147}
+_TESTS_BUDGETS = {_METRIC: 147, _ANY: 60}
 
 
 suite_offenders, suite_measurement = _gate(REPO_ROOT / "tests")
@@ -232,9 +236,10 @@ test_tests_collection_is_deterministic = collection_is_deterministic(
 
 def test_the_tests_typing_budget_reaches_tests() -> None:
     """The H1 reach: the typing budget now sweeps tests/, which had none. The real
-    tree shows it (148 records are counted, not invisible) and the shared classifier
+    tree shows it (147 records are counted, not invisible) and the shared classifier
     fires on a synthetic undeclared record, so one in tests/ fires."""
     assert suite_measurement(_METRIC) == 147, "the tests typing budget stopped reaching the real tree"
+    assert suite_measurement(_ANY) == 60, "the bare-Any budget stopped reaching the real tree"
     _assert_undeclared_record_fires()
 
 
@@ -247,6 +252,21 @@ def _walked() -> dict[str, int]:
 test_collector_sees_the_whole_tree = collector_sees_the_whole_tree(
     _walked, {"annotation": 130}, subject="typing"
 )
+
+
+def test_the_collector_counts_a_bare_any_and_not_a_callables_spine() -> None:
+    """#193's second metric bites on the position the record detector misses: a
+    parameter annotated bare ``Any``; and does not count the ``Any`` inside a
+    ``Callable``'s spine, which the record test above pins as honest."""
+    bare = ast.parse("def f(profile: Any) -> Any: ...")
+    counted = {metric for metric, _line, _source in candidates(bare)}
+    assert counted == {_ANY}, f"a bare Any must be its own counted defect: {counted}"
+
+    spine = ast.parse("def g(fn: Callable[[Any, set[int]], Any]) -> None: ...")
+    assert list(candidates(spine)) == [], "a Callable's spine is not an exit"
+
+    declared = ast.parse("def h(profile: dict[str, str]) -> None: ...")
+    assert list(candidates(declared)) == [], "a declared position is not an exit"
 
 
 def test_the_collector_classifies_records_the_way_the_remedy_assumes() -> None:
