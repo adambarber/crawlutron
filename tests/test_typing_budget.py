@@ -24,9 +24,9 @@ from tests.chokepoint_walks import REPO_ROOT, nodes_of, trees_under
 
 _METRIC = "undeclared record"
 
-# 143 -> 137: #135 turned the two open-JSON doors (JSON-LD extractor value, search
-# provider parse payload) and the json_ld field pair into the system type.
-_BUDGETS = {_METRIC: 137}
+# 143 -> 137 -> 134: #135 declared the two open-JSON doors and the json_ld field
+# pair; #136 declared the job row, status stats and spill/envelope reads.
+_BUDGETS = {_METRIC: 134}
 
 #: The scripts/ tree, which #293 brings under this gate for the first time; its
 #: measured baseline is declared first (value-ratchet rule).

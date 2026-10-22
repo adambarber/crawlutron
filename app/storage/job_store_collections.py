@@ -5,7 +5,6 @@ drops what does not survive; identity is derived on read, never from a stored fl
 
 from __future__ import annotations
 
-from collections.abc import Iterable
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any, TypedDict
@@ -60,17 +59,34 @@ class FrontierEntryDict(TypedDict):
     depth: int
 
 
-# A persisted row is ``json.loads`` of TEXT, so collections may be absent, bare
-# or corrupt. ``object`` not ``Any``: it keeps the isinstance narrowing visible.
-_PersistedJSON = object
+#: The historical bare-text entry a pre-entry-shape row carried. The reader no
+#: longer forgives it (the write side cannot emit it); it names what was lost.
+type _PersistedJSON = object
 
 
 def job_max_pages(policy: Any, tier: PolicyTier | None = None) -> int:
     return read_policy(policy, tier).limits.max_pages
 
 
-def _entry_depth(value: Any, fallback: int) -> int:
+def read_transient_retries(retries: dict[str, int], *, host_policy: HostPolicy) -> dict[NormalizedUrl, int]:
+    """The retry column's text keys re-admitted against the live policy."""
+    admitted_retries: dict[NormalizedUrl, int] = {}
+    for url, attempts in retries.items():
+        if not isinstance(url, str):
+            continue
+        try:
+            key = admit_or_none(url, policy=host_policy)
+            if key is not None:
+                admitted_retries[key] = max(0, int(attempts))
+        except (TypeError, ValueError):
+            continue
+    return admitted_retries
+
+
+def _entry_depth(value: object, fallback: int) -> int:
     if isinstance(value, bool):
+        return fallback
+    if not isinstance(value, int | float | str):
         return fallback
     try:
         return max(0, int(value))
@@ -78,26 +94,26 @@ def _entry_depth(value: Any, fallback: int) -> int:
         return fallback
 
 
-def _entry_payload(entry: Any) -> Any:
-    """Serialize a frontier entry, tolerating the legacy bare-string shape: the
-    store does not rewrite a caller's collections, and ``from_json`` normalizes
-    a legacy bare row once on read.
-    """
-    return entry.to_dict() if isinstance(entry, FrontierEntry) else entry
+def _entry_payload(entry: FrontierEntry) -> FrontierEntryDict:
+    """The write edge: one record to its declared wire form. A non-entry in the
+    frontier is a writer bug and dies here (AttributeError), never lands as a
+    row the reader has to forgive."""
+    return entry.to_dict()
 
 
 def normalize_frontier(
-    values: _PersistedJSON,
+    values: object,
     *,
     root_url: str | NormalizedUrl | None,
     policy: CrawlPolicy,
     host_policy: HostPolicy,
 ) -> list[FrontierEntry]:
-    """Coerce persisted frontier values into ``FrontierEntry`` records: always
-    canonicalize -- coerce shape, keep the shallowest depth, drop unusable ones.
-    A stored "already canonical" flag is why migration 0002 dropped it.
+    """Coerce a persisted frontier's entry records into ``FrontierEntry``s.
+
+    Always canonicalize: coerce shape, keep the shallowest depth, drop the
+    unusable. A non-list column reads as an empty queue, fail-closed.
     """
-    if not isinstance(values, (list, tuple)):
+    if not isinstance(values, list):
         return []
     canonical_root = (
         root_url if isinstance(root_url, NormalizedUrl) else admit_or_none(root_url, policy=host_policy)
@@ -116,17 +132,10 @@ def normalize_frontier(
             entries[url] = FrontierEntry(url=url, depth=entry_depth)
 
     for value in values:
-        if isinstance(value, FrontierEntry):
-            entry = value
-            entry_depth = 0 if entry.url == canonical_root else _entry_depth(entry.depth, legacy_depth)
-            _keep_shallowest(entry.url, entry_depth)
+        if not isinstance(value, dict):
             continue
-        if isinstance(value, dict):
-            raw_url = value.get("url")
-            depth = value.get("depth", legacy_depth)
-        else:
-            raw_url = value
-            depth = legacy_depth
+        raw_url = value.get("url")
+        depth = value.get("depth", legacy_depth)
         if not isinstance(raw_url, str) or not raw_url:
             continue
         url = admit_or_none(raw_url, policy=host_policy)
@@ -137,70 +146,17 @@ def normalize_frontier(
     return [entries[url] for url in order]
 
 
-def _normalize_visited(visited: _PersistedJSON, *, host_policy: HostPolicy) -> set[NormalizedUrl]:
+def normalize_visited(visited: list[str], *, host_policy: HostPolicy) -> set[NormalizedUrl]:
     """Coerce a persisted visited column to admitted values, keeping only what
-    admits: text must pass admission, an admitted value keeps its identity. A
-    non-sequence column costs the visited history, not a crash.
+    admits: text must pass admission, an admitted value keeps its identity.
     """
-    if isinstance(visited, str):
-        visited_values: list[object] = [visited]
-    elif isinstance(visited, Iterable):
-        visited_values = list(visited)
-    else:
-        visited_values = []
     normalized: set[NormalizedUrl] = set()
-    for url in visited_values:
-        if isinstance(url, NormalizedUrl):
-            normalized.add(url)
-        elif isinstance(url, str) and url:
+    for url in visited:
+        if isinstance(url, str) and url:
             admitted = admit_or_none(url, policy=host_policy)
             if admitted is not None:
                 normalized.add(admitted)
     return normalized
-
-
-def normalize_job_collections(
-    *,
-    root_url: str,
-    policy: CrawlPolicy,
-    visited: _PersistedJSON,
-    frontier: _PersistedJSON,
-    in_flight: _PersistedJSON,
-    host_policy: HostPolicy,
-) -> tuple[set[NormalizedUrl], list[FrontierEntry], list[FrontierEntry]]:
-    normalized_visited = _normalize_visited(visited, host_policy=host_policy)
-    # normalize_frontier admits the root text itself; the str here is the
-    # row's durable identity, not a live URL value.
-    normalized_frontier = normalize_frontier(
-        frontier,
-        root_url=root_url,
-        policy=policy,
-        host_policy=host_policy,
-    )
-    normalized_in_flight = normalize_frontier(
-        in_flight,
-        root_url=root_url,
-        policy=policy,
-        host_policy=host_policy,
-    )
-    frontier_by_url = {entry.url: entry for entry in normalized_frontier}
-    normalized_in_flight = [
-        FrontierEntry(
-            url=entry.url,
-            depth=min(entry.depth, frontier_by_url[entry.url].depth)
-            if entry.url in frontier_by_url
-            else entry.depth,
-        )
-        for entry in normalized_in_flight
-        if entry.url not in normalized_visited
-    ]
-    in_flight_ids = {entry.url for entry in normalized_in_flight}
-    normalized_frontier = [
-        entry
-        for entry in normalized_frontier
-        if entry.url not in normalized_visited and entry.url not in in_flight_ids
-    ]
-    return normalized_visited, normalized_frontier, normalized_in_flight
 
 
 __all__ = [
@@ -210,5 +166,6 @@ __all__ = [
     "JobStatus",
     "job_max_pages",
     "normalize_frontier",
-    "normalize_job_collections",
+    "normalize_visited",
+    "read_transient_retries",
 ]

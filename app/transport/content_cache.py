@@ -20,6 +20,7 @@ from app.models.json_value import JsonValue
 from app.transport.content_cache_internals import (
     TMP_ORPHAN_MAX_AGE_SECONDS,
     atomic_write,
+    decode_envelope,
     resolve_expiry,
     scan_cache_dir,
 )
@@ -189,10 +190,7 @@ class ContentCache:
             raw = None
         envelope: CacheEnvelope | None = None
         if raw is not None:
-            try:
-                envelope = json.loads(raw)
-            except ValueError:
-                envelope = None
+            envelope = decode_envelope(raw)
         doomed: list[tuple[str | None, Path]] = []
         try:
             with self._lock:

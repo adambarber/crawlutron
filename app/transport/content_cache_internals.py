@@ -8,8 +8,10 @@ from __future__ import annotations
 import json
 from collections.abc import Callable
 from pathlib import Path
+from typing import cast
 
 from app.models.cache_envelope import CacheEnvelope
+from app.models.json_value import JsonValue
 from app.safety.atomic_write import atomic_write_text
 from app.transport.freshness import is_expired
 
@@ -35,6 +37,23 @@ def resolve_expiry(envelope: CacheEnvelope) -> float | None:
     return float(raw)
 
 
+def decode_envelope(raw: bytes) -> CacheEnvelope | None:
+    """One on-disk envelope, checked against the record the writer declared.
+
+    Not an envelope (or not JSON) reads as a miss, never a crash out of
+    ``resolve_expiry``, which used to receive ``json.loads``'s ``Any`` raw.
+    """
+    try:
+        parsed: JsonValue = json.loads(raw)
+    except ValueError:
+        return None
+    if not isinstance(parsed, dict):
+        return None
+    if not isinstance(parsed.get("cached_at"), int | float):
+        return None
+    return cast(CacheEnvelope, parsed)
+
+
 def atomic_write(path: Path, data: str) -> None:
     """Persist a pre-serialized envelope atomically (the default disk writer)."""
     atomic_write_text(path, data)
@@ -56,11 +75,10 @@ def scan_cache_dir(
             raw = path.read_bytes()
         except OSError:
             continue
-        try:
-            envelope = json.loads(raw)
-        except ValueError:
-            # Corrupt but present: keep the file (the read path drops it on
-            # the next access) and repair its recorded size below.
+        envelope = decode_envelope(raw)
+        if envelope is None:
+            # Corrupt or not an envelope but present: keep the file (the read
+            # path drops it on the next access) and repair its size below.
             surviving[path] = len(raw)
             continue
         expires = expiry_of(envelope)

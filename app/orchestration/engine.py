@@ -15,7 +15,7 @@ import tempfile
 import time
 from collections.abc import Iterable, Mapping
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, TypedDict, cast
 
 from app.admission.admission_links import compile_scope_pattern
 from app.admission.payload_helpers import checked_payload_urls, payload_policy
@@ -25,6 +25,7 @@ from app.config.settings import CrawlerSettings
 from app.models.crawl_request import CrawlRequest
 from app.models.crawl_result import EngineCrawlResult
 from app.models.host_policy import HostPolicy
+from app.models.json_value import JsonValue
 from app.models.serialization import from_wire, to_dict
 from app.orchestration import robots as _robots_policy
 from app.orchestration.request_pipeline import (
@@ -198,6 +199,31 @@ def spill_is_unowned(path: str) -> bool:
         os.close(probe)
 
 
+class _SpillLine(TypedDict):
+    """One NDJSON line the writer (``write``) emitted: its submission index and the
+    result's wire form. The declared shape the loader checks, not guesses."""
+
+    i: int
+    r: dict[str, JsonValue]
+
+
+def _spill_line(line: str) -> _SpillLine:
+    """One spill line, checked: a line this writer did not write (wrong keys, a
+    non-int index) raises instead of slipping a corrupt record into the ordering."""
+    entry: JsonValue = json.loads(line)
+    shape_ok = (
+        isinstance(entry, dict) and isinstance(entry.get("i"), int) and isinstance(entry.get("r"), dict)
+    )
+    if not shape_ok:
+        raise TypeError(f"spill line is not a {_SpillLine.__name__}: {line[:80]!r}")
+    return cast(_SpillLine, entry)
+
+
+def _spill_index(entry: _SpillLine) -> int:
+    """The line's submission index as the integer the writer wrote."""
+    return entry["i"]
+
+
 class ResultSpill:
     """Append-only NDJSON spill of page results: each page hits disk when its batch
     finishes, so peak RSS scales with batch size and RAM keeps only the running
@@ -300,8 +326,9 @@ class ResultSpill:
                 line = line.strip()
                 if not line:
                     continue
-                entry = json.loads(line)
-                slots[entry["i"]] = from_wire(EngineCrawlResult, entry["r"], policy=policy)
+                slots[_spill_index(_spill_line(line))] = from_wire(
+                    EngineCrawlResult, _spill_line(line)["r"], policy=policy
+                )
         return [slots[key] for key in sorted(slots)]
 
     def close(self) -> None:

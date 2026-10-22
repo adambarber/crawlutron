@@ -235,7 +235,7 @@ JOB_FRONTIER_GROWTH_ONLY_USES_FUNNEL = Rule(
     skip=frozenset({"app/admission/admission.py"}),  # admit_job_links lives here
     kwargs_for=lambda relative: (
         {"allowed_functions": frozenset({"normalize_job_state"})}
-        if relative == "app/storage/job_store_state.py"
+        if relative in ("app/storage/job_store_state.py", "app/storage/job_store_read.py")
         else {"allowed_functions": frozenset({"_persist"})}
         if relative == "app/storage/job_store.py"
         else {"allowed_functions": frozenset({"admit_discovered_links", "_admit_chunk"})}

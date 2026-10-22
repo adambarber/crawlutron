@@ -1,3 +1,9 @@
+"""The crawl-job record, the row's write spelling, and the accumulators.
+
+``_job_row_params`` is the only place the record flattens to the store's JSON
+spelling; the read side (``job_store_read``) consumes that declared shape.
+"""
+
 from __future__ import annotations
 
 import json
@@ -10,16 +16,19 @@ from app.admission.policy import PolicyTier, read_policy
 from app.admission.policy import stored_policy as _stored_policy
 from app.models.crawl_policy import CrawlPolicy
 from app.models.host_policy import HostPolicy
+from app.models.json_value import JsonValue
 from app.models.normalized_url import NormalizedUrl, admit_or_none
 from app.safety.json_safe import json_default
 
 from .job_store_collections import (
     FrontierEntry,
+    FrontierEntryDict,
     JobKind,
     JobStatus,
     _entry_payload,
     normalize_frontier,
-    normalize_job_collections,
+    normalize_visited,
+    read_transient_retries,
 )
 
 if TYPE_CHECKING:
@@ -50,6 +59,30 @@ def _normalized_stats(value: Any) -> dict[str, int]:
     return stats
 
 
+class CrawlJobRow(TypedDict):
+    """The row one load reads, declared field by field.
+
+    The inverse of ``_job_row_params``' write spelling: every ``json.loads``
+    column lands here under its declared type, not as an undeclared guess.
+    """
+
+    job_id: str
+    kind: str
+    owner: str
+    root_url: str
+    policy: dict[str, JsonValue]
+    status: str
+    frontier: list[FrontierEntryDict]
+    visited: list[str]
+    results: list[dict[str, JsonValue]]
+    created_at: float
+    updated_at: float
+    error: str | None
+    stats: dict[str, int]
+    in_flight: list[FrontierEntryDict]
+    transient_retries: dict[str, int]
+
+
 @dataclass
 class CrawlJobState:
     """Persistent state of a crawl job (whole-site or single-shot)."""
@@ -67,9 +100,9 @@ class CrawlJobState:
     visited: set[NormalizedUrl] = field(default_factory=set)
     in_flight: list[FrontierEntry] = field(default_factory=list)
     transient_retries: dict[NormalizedUrl, int] = field(default_factory=dict)  # admitted url -> retry count
-    # Single-shot fields (used when kind == SINGLE_SHOT)
-    # root_url holds the first URL (or "" for batch); results holds completed crawl results
-    results: list[dict[str, Any]] = field(default_factory=list)  # Completed results
+    # Single-shot fields (kind == SINGLE_SHOT): root_url holds the first URL (or
+    # "" for batch); results holds the response model's own dump per entry.
+    results: list[dict[str, JsonValue]] = field(default_factory=list)
     created_at: float = field(default_factory=time.time)
     updated_at: float = field(default_factory=time.time)
     error: str | None = None
@@ -80,40 +113,18 @@ class CrawlJobState:
     tier: PolicyTier = field(default_factory=PolicyTier.model_defaults, repr=False, compare=False)
 
     @classmethod
-    def from_json(cls, data: dict[str, Any], *, host_policy: HostPolicy, tier: PolicyTier) -> CrawlJobState:
-        """Deserialize from JSON dict; the read boundary always normalizes canonical
-        identity, cross-list dedupe and depths, so no writer can reintroduce a second
-        identity for a page. One path, no persisted ``canonicalized`` flag (migration 0002 removed it).
+    def from_json(cls, data: CrawlJobRow, *, host_policy: HostPolicy, tier: PolicyTier) -> CrawlJobState:
+        """Build one live record from the declared row record.
+
+        Collections normalize here; the cross-list identity re-derivation runs
+        once per load at the read walk.
         """
         status = data.get("status", JobStatus.PENDING.value)
         kind = data.get("kind", JobKind.WHOLE_SITE.value)
-        policy = read_policy(data.get("policy"), tier)
+        policy = read_policy(data["policy"], tier)
         root_url = str(data.get("root_url") or "")
         admitted_root = admit_or_none(root_url, policy=host_policy)
         root_url = admitted_root.raw if admitted_root is not None else ""
-        visited_raw = data.get("visited", [])
-        if isinstance(visited_raw, list):
-            visited = {
-                admitted
-                for url in visited_raw
-                if isinstance(url, str) and url
-                for admitted in (admit_or_none(url, policy=host_policy),)
-                if admitted is not None
-            }
-        else:
-            visited = set()
-        transient_raw = data.get("transient_retries", {})
-        transient_retries: dict[NormalizedUrl, int] = {}
-        if isinstance(transient_raw, dict):
-            for url, attempts in transient_raw.items():
-                if not isinstance(url, str):
-                    continue
-                try:
-                    key = admit_or_none(url, policy=host_policy)
-                    if key is not None:
-                        transient_retries[key] = max(0, int(attempts))
-                except (TypeError, ValueError):
-                    continue
         job = cls(
             job_id=str(data.get("job_id") or ""),
             kind=JobKind(kind),
@@ -127,15 +138,17 @@ class CrawlJobState:
                 policy=policy,
                 host_policy=host_policy,
             ),
-            visited=visited,
+            visited=normalize_visited(list(data.get("visited", [])), host_policy=host_policy),
             in_flight=normalize_frontier(
                 data.get("in_flight", []),
                 root_url=root_url,
                 policy=policy,
                 host_policy=host_policy,
             ),
-            transient_retries=transient_retries,
-            results=list(data.get("results", [])) if isinstance(data.get("results", []), list) else [],
+            transient_retries=read_transient_retries(
+                dict(data.get("transient_retries", {})), host_policy=host_policy
+            ),
+            results=list(data.get("results", [])),
             created_at=float(data.get("created_at", 0.0)),
             updated_at=float(data.get("updated_at", 0.0)),
             error=data.get("error") if isinstance(data.get("error"), str) else None,
@@ -143,39 +156,7 @@ class CrawlJobState:
             host_policy=host_policy,
             tier=tier,
         )
-        # from_json establishes identity; this re-derives it over the assembled
-        # collections once per load, so no writer can leave a row reading as two.
-        normalize_job_state(job)
         return job
-
-
-def normalize_job_state(job: CrawlJobState) -> CrawlJobState:
-    admitted_root = admit_or_none(job.root_url, policy=job.host_policy)
-    root_url = admitted_root.raw if admitted_root is not None else ""
-    policy = read_policy(job.policy, job.tier)
-    visited, frontier, in_flight = normalize_job_collections(
-        root_url=root_url,
-        policy=policy,
-        visited=job.visited,
-        frontier=job.frontier,
-        in_flight=job.in_flight,
-        host_policy=job.host_policy,
-    )
-    transient_retries: dict[NormalizedUrl, int] = {}
-    for url, attempts in job.transient_retries.items():
-        try:
-            value = max(0, int(attempts))
-        except (TypeError, ValueError):
-            continue
-        transient_retries[url] = max(transient_retries.get(url, 0), value)
-    job.root_url = root_url
-    job.policy = policy
-    job.visited = visited
-    job.frontier = frontier
-    job.in_flight = in_flight
-    job.transient_retries = transient_retries
-    job.stats = _normalized_stats(job.stats)
-    return job
 
 
 _UPSERT_JOB_ROW_SQL = """
@@ -194,63 +175,6 @@ ON CONFLICT(job_id) DO UPDATE SET
           in_flight=excluded.in_flight,
           transient_retries=excluded.transient_retries
 """
-
-# Every field the job response exposes, shared by single and list reads so the
-# two cannot drift into describing different jobs.
-_JOB_STATUS_PROJECTION = """
-    SELECT job_id, root_url, status, created_at, updated_at, stats, error, owner,
-           COALESCE(kind, 'whole_site') AS kind,
-           json_array_length(frontier) AS frontier_size,
-           COALESCE(json_extract(stats, '$.cap_truncated'), 0) AS cap_truncated
-      FROM crawl_jobs
-"""
-
-# The list order: newest first, with the job id breaking a tie, so a page of
-# two rows created in the same instant has one order and not two.
-_JOB_LIST_ORDER = " ORDER BY created_at DESC, job_id DESC"
-
-
-class JobStatusView(TypedDict):
-    """The status view: one record, one declared shape, every key mandatory.
-    A TypedDict so the compiler catches a view/response-model key mismatch (the
-    old dict[str, Any] dropped kind silently, which recovery read as whole-site).
-    """
-
-    job_id: str
-    root_url: str
-    owner: str
-    status: str
-    kind: str
-    created_at: float
-    updated_at: float
-    frontier_size: int
-    visited_size: int
-    results_count: int
-    cap_truncated: bool
-    stats: dict[str, int]
-    error: str | None
-
-
-def _status_row(row: sqlite3.Row, visited: int, results: int) -> JobStatusView:
-    """Shape one projected row into the status view the API returns: frontier_size
-    and cap_truncated are NULL on a fresh job, and ``kind`` is selected because
-    recovery reads it from this view (it was missing, so every job read as whole-site).
-    """
-    return {
-        "job_id": row["job_id"],
-        "root_url": row["root_url"],
-        "owner": row["owner"],
-        "status": row["status"],
-        "kind": row["kind"],
-        "created_at": row["created_at"],
-        "updated_at": row["updated_at"],
-        "frontier_size": row["frontier_size"] or 0,
-        "visited_size": visited,
-        "results_count": results,
-        "cap_truncated": bool(row["cap_truncated"]),
-        "stats": json.loads(row["stats"]) if row["stats"] else {},
-        "error": row["error"],
-    }
 
 
 def _json(value) -> str:
@@ -293,11 +217,11 @@ class JobAccumulators:
     def __init__(self, conn: sqlite3.Connection) -> None:
         self._conn = conn
 
-    def read_results(self, job_id: str) -> list[Any]:
+    def read_results(self, job_id: str) -> list[dict[str, JsonValue]]:
         """The page history, in the order it was crawled.
 
-        ``seq`` is the crawl order and the insert key at once, so reading the
-        history back is one ordered index scan rather than a sort.
+        Each payload is the response model's own dump (the write edge), so the
+        declared read is the dump's shape, not ``Any``.
         """
         rows = self._conn.execute(
             'SELECT payload FROM "crawl_job_results" WHERE job_id = ? ORDER BY seq', (job_id,)
@@ -423,6 +347,4 @@ def _create_job(
 __all__ = [
     "CrawlJobState",
     "JobAccumulators",
-    "JobStatusView",
-    "normalize_job_state",
 ]

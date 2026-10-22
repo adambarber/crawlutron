@@ -38,12 +38,12 @@ BLOCK_LENGTH = 40
 # class for the fourth.
 _BUDGETS = {
     # LOWERED 22 -> 21 (#160): result constructors left app/orchestration/results.py.
-    # LOWERED 21 -> 20 (#330): _classify_extracted_content's five branches became one table.
-    "function length": 20,
+    # LOWERED 21 -> 20 (#330); 20 -> 19 (#136): from_json reads the declared row record.
+    "function length": 19,
     "abc size": 1,
-    # LOWERED 358 -> 357 (#383): BrowserRenderer's render loop lost a declaration
-    # line while threading the request budget through its pin rule.
-    "largest class": 357,
+    # LOWERED 358 -> 357 (#383): BrowserRenderer's render loop lost a declaration line.
+    # LOWERED 357 -> 355 (#136): the row walk moved to job_store_state's row_to_state.
+    "largest class": 355,
     "block length": 7,
 }
 

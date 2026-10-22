@@ -25,17 +25,20 @@ from .job_store_collections import (
     JobStatus,
     job_max_pages,
 )
-from .job_store_state import (
+from .job_store_read import (
     _JOB_LIST_ORDER,
     _JOB_STATUS_PROJECTION,
+    JobStatusView,
+    _status_row,
+    normalize_job_state,
+    row_to_state,
+)
+from .job_store_state import (
     _UPSERT_JOB_ROW_SQL,
     CrawlJobState,
     JobAccumulators,
-    JobStatusView,
     _create_job,
     _job_row_params,
-    _status_row,
-    normalize_job_state,
 )
 
 logger = logging.getLogger(__name__)
@@ -92,25 +95,11 @@ class JobStore:
         self._accumulators = JobAccumulators(self._conn)
 
     def _row_to_job(self, row: sqlite3.Row, *, with_accumulators: bool = True) -> CrawlJobState:
-        job_id = row["job_id"]
-        return CrawlJobState.from_json(
-            {
-                "job_id": job_id,
-                "kind": row["kind"],
-                "owner": row["owner"],
-                "root_url": row["root_url"],
-                "policy": json.loads(row["policy"]),
-                "status": row["status"],
-                "frontier": json.loads(row["frontier"]),
-                "visited": self._accumulators.read_visited(job_id) if with_accumulators else [],
-                "results": self._accumulators.read_results(job_id) if with_accumulators else [],
-                "created_at": row["created_at"],
-                "updated_at": row["updated_at"],
-                "error": row["error"],
-                "stats": json.loads(row["stats"]),
-                "in_flight": json.loads(row["in_flight"]),
-                "transient_retries": json.loads(row["transient_retries"]),
-            },
+        """One row, read through the declared record (the walk lives beside it)."""
+        return row_to_state(
+            row,
+            visited=self._accumulators.read_visited(row["job_id"]) if with_accumulators else [],
+            results=self._accumulators.read_results(row["job_id"]) if with_accumulators else [],
             host_policy=self._host_policy,
             tier=self.tier,
         )

@@ -284,7 +284,12 @@ class TestJobStoreEdges:
             raise AssertionError("a closed job store must refuse operations")
 
 
-def test_legacy_string_collections_load_with_depth_and_single_identity(tmp_path):
+def test_a_bare_text_frontier_element_is_not_an_entry(tmp_path):
+    """The text-or-value tolerance is gone: the write side emits entry records only.
+
+    A row carrying bare text (only possible from a foreign writer) reads that
+    element as nothing, fail-closed, instead of re-deriving an undeclared shape.
+    """
     store = make_job_store(tmp_path)
     root = "https://example.test/root"
     child = "https://example.test/child"
@@ -297,11 +302,8 @@ def test_legacy_string_collections_load_with_depth_and_single_identity(tmp_path)
 
     loaded = loaded_job(store, job.job_id)
 
-    assert loaded.frontier == []
-    assert loaded.in_flight == [
-        FrontierEntry(url=canonical("https://example.test/root"), depth=0),
-        FrontierEntry(url=canonical("https://example.test/child"), depth=2),
-    ]
+    assert loaded.frontier == [], "bare text must not be read as a frontier entry"
+    assert loaded.in_flight == [], "bare text must not be read as an in-flight entry"
 
 
 def test_create_canonicalizes_root_and_initial_frontier(tmp_path):
@@ -365,16 +367,41 @@ def test_normalize_frontier_keeps_shallowest_duplicate_depth(tmp_path):
 
 
 def test_cross_list_duplicate_keeps_shallowest_depth():
-    from app.storage.job_store import FrontierEntry
+    """A URL in both lists folds to in_flight at the frontier's shallower depth.
 
-    loaded = CrawlJobState.from_json(
-        {
-            "job_id": "cross-list",
-            "root_url": "https://example.test/root",
-            "policy": {"limits": {"max_depth": 4}},
-            "frontier": [{"url": "https://example.test/child", "depth": 1}],
-            "in_flight": [{"url": "https://example.test/child", "depth": 3}],
-        },
+    Locked at ``row_to_state``, the walk a real load runs."""
+    import sqlite3
+
+    from app.storage.job_store import FrontierEntry
+    from app.storage.job_store_read import row_to_state
+
+    connection = sqlite3.connect("file:crosslist?mode=memory&cache=shared", uri=True)
+    connection.row_factory = sqlite3.Row
+    connection.execute(
+        "CREATE TABLE crawl_jobs (job_id TEXT, kind TEXT, owner TEXT, root_url TEXT, policy TEXT,"
+        " status TEXT, frontier TEXT, created_at REAL, updated_at REAL, error TEXT, stats TEXT,"
+        " in_flight TEXT, transient_retries TEXT)"
+    )
+    row_values = (
+        "cross-list",
+        "whole_site",
+        "",
+        "https://example.test/root",
+        json.dumps({"limits": {"max_depth": 4}}),
+        "running",
+        json.dumps([{"url": "https://example.test/child", "depth": 1}]),
+        1.0,
+        1.0,
+        None,
+        "{}",
+        json.dumps([{"url": "https://example.test/child", "depth": 3}]),
+        "{}",
+    )
+    connection.execute("INSERT INTO crawl_jobs VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", row_values)
+    loaded = row_to_state(
+        connection.execute("SELECT * FROM crawl_jobs").fetchone(),
+        visited=[],
+        results=[],
         host_policy=UNRESTRICTED_HOST_POLICY,
         tier=deployment_tier(),
     )
