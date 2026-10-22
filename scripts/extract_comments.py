@@ -134,13 +134,17 @@ def _python_records(path: pathlib.Path, *, include_docstrings: bool) -> Iterator
     """
     source = path.read_text(encoding="utf-8")
     records: list[tuple[int, int, str]] = []
-    for token in tokenize.generate_tokens(io.StringIO(source).readline):
-        if token.type == tokenize.COMMENT:
-            records.append((token.start[0], token.start[1], token.string.strip()))
+    try:
+        for token in tokenize.generate_tokens(io.StringIO(source).readline):
+            if token.type == tokenize.COMMENT:
+                records.append((token.start[0], token.start[1], token.string.strip()))
+    except SyntaxError:
+        # IndentationError (a SyntaxError subclass, never a TokenError) escapes
+        # generate_tokens; it propagates so the caller names the skipped file.
+        raise
     if include_docstrings:
         # A file the tokenizer accepted but the parser rejects is not silent:
-        # its comments are still reported above, and the docstrings are the
-        # part this project can live without reading.
+        # its comments are still reported; docstrings are what can be missed.
         try:
             tree = ast.parse(source)
         except SyntaxError:
@@ -197,7 +201,9 @@ def main(argv: list[str] | None = None) -> int:
             continue
         try:
             records = list(_records(path, include_docstrings=include_docstrings))
-        except (OSError, UnicodeDecodeError, tokenize.TokenError) as error:
+        except (OSError, UnicodeDecodeError, tokenize.TokenError, SyntaxError) as error:
+            # SyntaxError here is the tokenizer's (IndentationError escapes
+            # generate_tokens): the file is named and skipped, never silent.
             print(f"skipping {relative}: {error}", file=sys.stderr)
             continue
         scanned += 1

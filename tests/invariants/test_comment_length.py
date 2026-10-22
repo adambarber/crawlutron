@@ -32,7 +32,9 @@ _DOC_BUDGETS = {
 _BUDGETS = {
     "app": 0,
     "tests": 0,
-    "scripts": 20,
+    # LOWERED 21 -> 20 (#287): run-tests.sh joined the surface and its banner was trimmed.
+    # LOWERED 20 -> 19 (#32): the SyntaxError guard's comments were written inside the limit.
+    "scripts": 19,
 }
 
 #: A block's last line may not stop mid-clause: connectives, trailing commas and dangling dashes are a cut
