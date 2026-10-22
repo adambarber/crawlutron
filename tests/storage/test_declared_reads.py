@@ -6,11 +6,15 @@ trusting ``json.loads``'s ``Any`` -- a corrupt record is a miss, never a 500.
 
 import json
 
+import pytest
+
+from app.models.serialization import to_dict
 from app.orchestration.engine import ResultSpill
 from app.transport.content_cache import ContentCache
 from tests._job_drivers import raw_job_row
 from tests._job_harnesses import make_job_store
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY
+from tests._result_builders import engine_result
 
 
 async def test_a_non_integer_stats_column_reads_as_its_declared_zeros(tmp_path):
@@ -52,17 +56,20 @@ def test_a_frontier_entry_that_is_not_an_entry_fails_at_persist(tmp_path):
 
 async def test_a_corrupt_spill_index_is_not_served_as_a_result(tmp_path):
     """A line whose ``i`` is not the integer the writer wrote must not slip through
-    reassembly; the read checks the declared line shape instead of trusting it."""
+    reassembly; the read checks the declared line shape instead of trusting it. The
+    spill stays OPEN as production leaves it: a closed handle raises before any read.
+    """
     spill = ResultSpill(str(tmp_path / "spill.ndjson"))
-    spill.close()  # the constructor owns the write; the closed file is the history
-    with open(spill.path, "a", encoding="utf-8") as fh:
-        fh.write(json.dumps({"i": "5", "r": {}}) + "\n")
+    payload = to_dict(engine_result("https://example.test/a", "rendered"))
     try:
-        spill.load_ordered(policy=UNRESTRICTED_HOST_POLICY)
-    except (ValueError, TypeError, KeyError):
-        pass  # the checked read refuses the line
-    else:
-        raise AssertionError("a corrupt spill line was served as a result")
+        with open(spill.path, "a", encoding="utf-8") as fh:
+            # A full valid ``r`` payload with a corrupt index: the ONLY defect is
+            # the ``i`` the writer declares int, so the refusal must name it.
+            fh.write(json.dumps({"i": "5", "r": payload}) + "\n")
+        with pytest.raises(TypeError, match="spill line is not a _SpillLine"):
+            spill.load_ordered(policy=UNRESTRICTED_HOST_POLICY)
+    finally:
+        spill.close()
 
 
 async def test_a_valid_json_non_envelope_cache_file_is_a_miss_not_a_crash(tmp_path):
