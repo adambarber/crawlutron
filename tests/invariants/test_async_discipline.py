@@ -290,7 +290,12 @@ def _sync_store_call_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
 STORE_CALLS_ON_THE_LOOP = Rule(
     name="store-calls-on-the-loop",
     find=_sync_store_call_offenders,
-    summary="A store call on the event loop stalls every in-flight request",
+    summary=(
+        "A store call on the event loop stalls every in-flight request. One hop of "
+        "same-module helper indirection is followed (a sync helper called by an async "
+        "frame that reaches a sync store method through it); cross-module helpers are a "
+        "deliberate out-of-scope boundary named in the detector's docstring."
+    ),
     premise=_stores_still_have_sync_methods,
     bite=lambda: (
         Trips(
@@ -329,6 +334,25 @@ STORE_CALLS_ON_THE_LOOP = Rule(
             "_SHARED = JobStore(path, policy=policy)\nasync def handler():\n    return _SHARED.list_jobs()\n",
             "_SHARED.list_jobs",
         ),
+        # Module-global through helper: receiver set composes module globals with
+        # helper bindings, so _h(_STORE) reaches the sync method on the loop.
+        Bites(
+            "_SHARED = JobStore(path, policy=policy)\n"
+            "def _h(store):\n"
+            "    return store.list_jobs()\n"
+            "async def handler():\n"
+            "    return _h(_SHARED)\n",
+            "_h",
+        ),
+        # Keyword-argument passing escapes a positional-only probe: _h(store=store) reaches
+        # the sync store method through the helper on the loop.
+        Bites(
+            "def _h(store):\n"
+            "    return store.list_jobs()\n"
+            "async def handler(store: JobStore):\n"
+            "    return _h(store=store)\n",
+            "_h",
+        ),
     ),
     clean=lambda: (
         "async def get_crawl_result(job_store, result_store):\n"
@@ -343,6 +367,17 @@ STORE_CALLS_ON_THE_LOOP = Rule(
         "    return await _fetch_all(store)\n"
         "async def _fetch_all(store: JobStore):\n"
         "    return await store.aload(job_id)\n",
+        # Module-global through helper: async twin keeps the call off the loop.
+        "_SHARED = JobStore(path, policy=policy)\n"
+        "async def _h(store):\n"
+        "    return await store.aload(job_id)\n"
+        "async def handler():\n"
+        "    return await _h(_SHARED)\n",
+        # Keyword-argument passing: async twin keeps the call off the loop.
+        "async def _h(store):\n"
+        "    return await store.aload(job_id)\n"
+        "async def handler(store):\n"
+        "    return await _h(store=store)\n",
     ),
 )
 

@@ -1,7 +1,4 @@
-"""Where a store-typed receiver comes from: the resolution vocabulary for the
-on-the-loop detector. Parameters, local binds, conventional names, ``self.attr``
-binds, module-level store globals and one hop of helper indirection resolve here.
-"""
+"""Receiver resolution vocabulary for the on-the-loop store detector."""
 
 from __future__ import annotations
 
@@ -86,6 +83,12 @@ def _store_receivers(function: ast.AST, tree: ast.AST | None = None) -> dict[str
             continue
         if value.id in receivers:
             receivers[target.id] = receivers[value.id]
+    # Compose with module-level store globals: an unannotated parameter that shares
+    # a name with a module-level store global IS that store.
+    module_globals = _module_store_globals(tree) if tree is not None else {}
+    for node in nodes_of(function):
+        if isinstance(node, ast.arg) and node.arg not in receivers and node.arg in module_globals:
+            receivers[node.arg] = module_globals[node.arg]
     return receivers
 
 
@@ -103,24 +106,62 @@ def _module_store_globals(tree: ast.AST | None) -> dict[str, str]:
     return globals_
 
 
-def _helper_store_bites(function, tree, sync_methods, path):
-    """Sync store calls one hop of same-module helper indirection reaches.
+def _caller_receivers(call: ast.Call, callers: dict[str, str]) -> dict[str, str]:
+    """Argument-name -> receiver name for every argument the caller passes."""
+    receivers: dict[str, str] = {}
+    for arg in call.args:
+        if isinstance(arg, ast.Name) and arg.id in callers:
+            receivers[arg.id] = callers[arg.id]
+    for keyword in call.keywords:
+        if keyword.value is not None and isinstance(keyword.value, ast.Name):
+            receiver = callers.get(keyword.value.id)
+            if receiver is not None:
+                receivers[keyword.value.id] = receiver
+    return receivers
 
-    A sync helper taking a known receiver and calling a store method on it runs
-    that call on the caller's loop; one hop only, deeper is a call-graph question.
-    """
+
+def _bind_receivers_to_params(
+    helper: ast.FunctionDef,
+    inner: ast.Call,
+    caller_receivers: dict[str, str],
+    helper_receivers: dict[str, str],
+) -> None:
+    """Bind caller-supplied receivers to helper parameters in place."""
+    for index, param in enumerate(helper.args.args):
+        if index < len(inner.args):
+            arg = inner.args[index]
+            if isinstance(arg, ast.Name) and arg.id in caller_receivers:
+                helper_receivers[param.arg] = caller_receivers[arg.id]
+    for keyword in inner.keywords:
+        if (
+            keyword.arg is not None
+            and isinstance(keyword.value, ast.Name)
+            and keyword.value.id in caller_receivers
+        ):
+            for param in helper.args.args:
+                if param.arg == keyword.arg:
+                    helper_receivers[keyword.arg] = caller_receivers[keyword.value.id]
+
+
+def _helper_store_bites(function, tree, sync_methods, path):
+    """Sync store calls one hop of same-module helper indirection reaches."""
     if tree is None:
         return []
     helpers = {f.name: f for f in functions(tree) if isinstance(f, ast.FunctionDef)}
     callers = _store_receivers(function, tree)
+    callers.update(_module_store_globals(tree))
     offenders: list[str] = []
     for inner in nodes_of(function):
         if not (isinstance(inner, ast.Call) and isinstance(inner.func, ast.Name)):
             continue
         helper = helpers.get(inner.func.id)
-        if helper is None or not any(isinstance(a, ast.Name) and a.id in callers for a in inner.args):
+        if helper is None:
+            continue
+        caller_receivers = _caller_receivers(inner, callers)
+        if not caller_receivers:
             continue
         helper_receivers = _store_receivers(helper, tree)
+        _bind_receivers_to_params(helper, inner, caller_receivers, helper_receivers)
         offenders.extend(
             offender_at(
                 path,
