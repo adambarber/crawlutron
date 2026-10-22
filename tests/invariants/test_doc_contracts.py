@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 import pathlib
 import re
 
@@ -18,6 +19,7 @@ from tests.invariants.test_knob_contracts import (
     _settings_alias_failures,
 )
 from tests.property_registry import Property
+from tests.rules import Bites, Rule
 
 _DOC_REFERENCE_EXCLUSIONS = {
     "CHANGELOG.md": "a record of what shipped; its citations name modules that were refactored away",
@@ -77,11 +79,227 @@ def _broken_doc_reference_offenders(
         document = root / name
         for span in re.findall(r"`([^`\n]+)`", document.read_text(encoding="utf-8")):
             candidate = span.strip()
+            if not candidate:
+                # Double backticks (``word``) leave whitespace captures.
+                continue
             if not _is_tree_path_claim(candidate):
                 continue
             if not (root / candidate.split(":")[0]).exists():
                 offenders.append(f"{name} points at `{candidate}`, which does not exist")
     return offenders
+
+
+_DOTTED_APP_SYMBOL = re.compile(r"^app[\w./]+$")
+_FILE_EXTENSIONS = frozenset(
+    {".py", ".md", ".toml", ".json", ".yaml", ".yml", ".ini", ".cfg", ".txt", ".in", ".sh"}
+)
+
+
+def _is_app_symbol_reference(candidate: str) -> bool:
+    """Whether a backticked token is an app module.symbol reference (not a file path)."""
+    if not _DOTTED_APP_SYMBOL.match(candidate):
+        return False
+    if candidate.endswith("/"):
+        return False
+    last_segment = candidate.split("/")[-1]
+    # A real file reference ends with a known source/doc extension; a symbol
+    # reference (app/logging_config.configure_service_logging) does not.
+    if any(last_segment.endswith(ext) for ext in _FILE_EXTENSIONS):
+        return False
+    return True
+
+
+_BARE_IDENT = re.compile(r"^[_A-Za-z][\w]*$")
+
+# Bare words used as prose, shell commands, or feature option keys -- never app symbols.
+_NON_SYMBOL_WORDS = frozenset(
+    {
+        "git",
+        "python3",
+        "pip",
+        "python",
+        "docker",
+        "curl",
+        "bash",
+        "sh",
+        "make",
+        "npm",
+        "node",
+        "main",
+        "run",
+        "test",
+        "build",
+        "clone",
+        "enter",
+        "source",
+        "activate",
+        "checkout",
+        "branch",
+        "merge",
+        "commit",
+        "push",
+        "pull",
+        "note",
+        "code",
+        "field",
+        "value",
+        "type",
+        "port",
+        "host",
+        "http",
+        "https",
+        "venv",
+        "PEP",
+        "True",
+        "False",
+        "None",
+        # Python keywords that look like identifiers but are never app symbols.
+        "and",
+        "as",
+        "assert",
+        "async",
+        "await",
+        "break",
+        "class",
+        "continue",
+        "def",
+        "del",
+        "elif",
+        "else",
+        "except",
+        "finally",
+        "for",
+        "from",
+        "global",
+        "if",
+        "import",
+        "in",
+        "is",
+        "lambda",
+        "nonlocal",
+        "not",
+        "or",
+        "pass",
+        "raise",
+        "return",
+        "try",
+        "while",
+        "with",
+        "yield",
+    }
+)
+
+
+def _app_symbol_definitions(root: pathlib.Path = REPO_ROOT) -> dict[str, frozenset[str]]:
+    """Every top-level name defined in app/, mapped to the module files that define it.
+
+    A bare backticked name in a doc can only be checked against this index: if no
+    module defines it, the doc is citing something that doesn't exist as an app symbol.
+    """
+    definitions: dict[str, set[str]] = {}
+    for path in sorted((root / "app").rglob("*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        relative = path.relative_to(root).as_posix()
+        for node in tree.body:
+            if isinstance(node, ast.ClassDef | ast.FunctionDef | ast.AsyncFunctionDef):
+                definitions.setdefault(node.name, set()).add(relative)
+            elif isinstance(node, ast.Assign):
+                for target in node.targets:
+                    if isinstance(target, ast.Name):
+                        definitions.setdefault(target.id, set()).add(relative)
+            elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+                definitions.setdefault(node.target.id, set()).add(relative)
+    return {name: frozenset(modules) for name, modules in definitions.items()}
+
+
+def _symbol_defined_in(tree: ast.AST, symbol: str) -> bool:
+    """Whether ``symbol`` is defined at top level of the given module tree."""
+    for node in tree.body:
+        if isinstance(node, ast.ClassDef | ast.FunctionDef | ast.AsyncFunctionDef) and node.name == symbol:
+            return True
+        if isinstance(node, ast.Assign) and any(
+            isinstance(t, ast.Name) and t.id == symbol for t in node.targets
+        ):
+            return True
+        if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name) and node.target.id == symbol:
+            return True
+    return False
+
+
+def _doc_symbol_offenders(
+    root: pathlib.Path = REPO_ROOT,
+    app_root: pathlib.Path = REPO_ROOT,
+    documents: list[str] | None = None,
+    symbols: dict[str, frozenset[str]] | None = None,
+) -> list[str]:
+    """Backticked app symbols in live docs must resolve to definitions."""
+    if symbols is None:
+        symbols = _app_symbol_definitions(app_root)
+    docs = _live_documents() if documents is None else documents
+    offenders: list[str] = []
+    for name in docs:
+        document = root / name
+        text = document.read_text(encoding="utf-8")
+        for span in re.findall(r"`([^`\n]+)`", text):
+            candidate = span.strip()
+            if not candidate:
+                continue
+            if _is_app_symbol_reference(candidate):
+                offenders.extend(_check_dotted_symbol(name, candidate, app_root))
+                continue
+            if name != "CONTRIBUTING.md":
+                continue
+            offenders.extend(_check_bare_symbol(name, candidate, symbols))
+    return offenders
+
+
+def _check_dotted_symbol(name: str, candidate: str, app_root: pathlib.Path) -> list[str]:
+    """Offenders for one dotted ``app...symbol`` reference."""
+    parts = candidate.replace("/", ".").split(".")
+    if len(parts) < 3:
+        return []
+    symbol = parts[-1]
+    module_path = app_root / "app" / pathlib.Path(*parts[1:-1]).with_suffix(".py")
+    if not module_path.exists():
+        return [f"{name}: `{candidate}` module does not exist"]
+    tree = ast.parse(module_path.read_text(encoding="utf-8"))
+    if not _symbol_defined_in(tree, symbol):
+        return [f"{name}: `{candidate}` symbol not defined in {module_path.relative_to(app_root)}"]
+    return []
+
+
+def _check_bare_symbol(name: str, candidate: str, symbols: dict[str, frozenset[str]]) -> list[str]:
+    """Offenders for one bare identifier in CONTRIBUTING.md."""
+    if not _BARE_IDENT.match(candidate):
+        return []
+    if candidate.isupper() or candidate in _NON_SYMBOL_WORDS:
+        return []
+    defining = symbols.get(candidate, frozenset())
+    if defining:
+        return []
+    return [f"{name}: `{candidate}` names no app symbol"]
+
+
+DOC_SYMBOLS_RESOLVE_TO_DEFINITIONS = Rule(
+    name="doc-symbols-resolve-to-definitions",
+    find=_doc_symbol_offenders,
+    summary=(
+        "A backticked app symbol in a live doc must name something app/ actually defines, "
+        "so a rename or deletion can't leave docs citing ghosts."
+    ),
+    proof_path=REPO_ROOT / "CONTRIBUTING.md",
+    bite=lambda: (
+        Bites(
+            "Logging is configured by ``app/logging_config.configure_service_logging``",
+            "symbol not defined in app/logging_config.py",
+        ),
+        Bites(
+            "CSV injection (``_csv_neutralize``)",
+            "names no app symbol",
+        ),
+    ),
+    clean=lambda: ("Logging is configured by ``app/runtime.logging_config.configure_service_logging``",),
+)
 
 
 def _compose_file() -> pathlib.Path:
@@ -191,6 +409,42 @@ def test_live_doc_reference_detector_bites(tmp_path):
         )
         offenders = _broken_doc_reference_offenders(root=tmp_path, documents=["README.md"])
         assert f"README.md points at `{claim}`, which does not exist" in offenders
+
+
+def test_doc_symbols_resolve_to_definitions():
+    """Live docs cite no app symbols that don't exist."""
+    assert not (failures := _doc_symbol_offenders()), "; ".join(failures)
+
+
+def test_doc_symbol_detector_bites(tmp_path):
+    """The gate must catch a stale dotted path and a stale bare symbol."""
+    symbols = _app_symbol_definitions()
+    assert _doc_symbol_offenders(symbols=symbols) == []
+    document = REPO_ROOT / "CONTRIBUTING.md"
+    (tmp_path / "CONTRIBUTING.md").write_text(
+        document.read_text(encoding="utf-8")
+        + "\nSee ``app/ghost_module.configure_service_logging``.\n"
+        + "And ``_ghost_symbol`` is also gone.\n",
+        encoding="utf-8",
+    )
+    offenders = _doc_symbol_offenders(root=tmp_path, documents=["CONTRIBUTING.md"], symbols=symbols)
+    assert any(
+        "ghost_module.configure_service_logging" in o and "module does not exist" in o for o in offenders
+    ), offenders
+    assert any("_ghost_symbol" in o and "names no app symbol" in o for o in offenders), offenders
+
+
+def test_doc_symbol_detector_spared_clean_references(tmp_path):
+    """Real symbols and non-symbol bare words don't fire the gate."""
+    symbols = _app_symbol_definitions()
+    document = REPO_ROOT / "CONTRIBUTING.md"
+    (tmp_path / "CONTRIBUTING.md").write_text(
+        document.read_text(encoding="utf-8")
+        + "\nSee ``app/models/host_policy.HostPolicy`` and ``filter_js_endpoints``.\n"
+        + "And ``git``, ``main`` and ``PEP 8`` are not symbols.\n",
+        encoding="utf-8",
+    )
+    assert _doc_symbol_offenders(root=tmp_path, documents=["CONTRIBUTING.md"], symbols=symbols) == []
 
 
 def test_documented_knob_detector_bites():

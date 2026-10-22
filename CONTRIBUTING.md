@@ -16,7 +16,7 @@ source .venv/bin/activate
 pip install -e ".[dev]"
 ```
 
-Logging is configured by ``app/logging_config.configure_service_logging``
+Logging is configured by ``app/runtime.logging_config.configure_service_logging``
 and lives entirely in this repository; no external shared-tree package is
 required.
 
@@ -90,8 +90,7 @@ These require explicit review from a maintainer before merge:
 - `app/transport/cookie_jar.py` — per-tenant cookie namespace
   (`COOKIE_NAMESPACE` ContextVar) and cookie isolation.
 - `app/transport/browser.py` and `browser_driver.py` — browser SSRF,
-  storage_state path validation, opt-in cookie-consent auto-acceptance
-  (`auto_accept_cookie_consent`).
+  storage_state path validation, opt-in cookie-consent auto-acceptance.
 - `app/orchestration/robots.py` and `app/orchestration/robots_parse.py` — robots policy and
   rule cache; `parse_robots_rules` / `parse_robots_crawl_delay` must use
   `USER_AGENT_TOKEN`.
@@ -104,7 +103,7 @@ These require explicit review from a maintainer before merge:
 - `app/api/webhooks.py` — webhook delivery (`deliver_pinned_webhook`).
 - `app/config/env.py` — `parse_bool_env` and the operator environment reads,
   including the private-target opt-in.
-- `app/extraction/output_formats.py` — CSV injection (`_csv_neutralize`),
+- `app/extraction/output_formats.py` — CSV serialization (``_to_csv``),
   response serialization.
 - `app/config/settings.py` — defaults (paths, security knobs); changing a
   default is a security decision.
