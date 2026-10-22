@@ -12,16 +12,19 @@ import inspect
 import pathlib
 
 from tests.chokepoint_walks import (
-    assignments,
     async_function_defs,
     attribute_calls,
     calls_to_any,
-    class_defs,
     functions,
     nodes_of,
     offender_at,
 )
 from tests.invariants._shared import app_names
+from tests.invariants._store_receivers import (
+    _helper_store_bites,
+    _module_store_globals,
+    _store_receivers,
+)
 from tests.rules import Bites, Registry, Rule, Trips
 
 # The weights are now one frozen ``resource_pressure.TaskRamBudget`` that the caller builds and the policy
@@ -219,23 +222,8 @@ WHOLE_SITE_VISIT_IS_TRANSIENT_GATED = Rule(
 )
 
 
-# No async frame in app/ may call a SYNCHRONOUS store method directly.
-_STORE_CLASSES = (
-    "JobStore",
-    "CrawlResultStore",
-    "WatchStore",
-    "CoordinationCounters",
-    "SharedCookieStore",
-    "CallerKeyStore",
-)
-
-
-# Injected unannotated (FastAPI ``Depends``, lifespan globals, runner args), so a type-only scan sees nothing.
-_CONVENTIONAL_STORE_NAMES = {
-    "job_store": "JobStore",
-    "result_store": "CrawlResultStore",
-    "watch_store": "WatchStore",
-}
+# The receiver-resolution vocabulary (params, binds, conventional names, self.attr,
+# module-level store globals, one hop of helper indirection) lives next door.
 
 
 def _sync_store_methods() -> dict[str, frozenset[str]]:
@@ -282,62 +270,12 @@ def _stores_still_have_sync_methods() -> None:
     )
 
 
-def _named_store(expr: ast.expr | None) -> str | None:
-    if not isinstance(expr, (ast.Call, ast.Name)):
-        return None
-    leaf = expr.func if isinstance(expr, ast.Call) else expr
-    if isinstance(leaf, ast.Name) and leaf.id in _STORE_CLASSES:
-        return leaf.id
-    return None
-
-
-def _self_attr_receivers(tree: ast.AST | None) -> dict[str, str]:
-    if tree is None:
-        return {}
-    receivers: dict[str, str] = {}
-    for cls in class_defs(tree):
-        for node, target, value in assignments(nodes_of(cls)):
-            if not (
-                isinstance(target, ast.Attribute)
-                and isinstance(target.value, ast.Name)
-                and target.value.id == "self"
-            ):
-                continue
-            owned = _named_store(value)
-            if owned is None and isinstance(node, ast.AnnAssign):
-                owned = _named_store(node.annotation)
-            if owned is not None:
-                receivers[ast.unparse(target)] = owned
-    return receivers
-
-
-def _store_receivers(function: ast.AST, tree: ast.AST | None = None) -> dict[str, str]:
-    """Name -> store class, for the store-typed bindings of one function."""
-    receivers: dict[str, str] = {}
-    for node in nodes_of(function):
-        if isinstance(node, ast.arg) and node.annotation is not None:
-            annotation = ast.unparse(node.annotation)
-            if annotation in _STORE_CLASSES:
-                receivers[node.arg] = annotation
-        elif isinstance(node, ast.Assign):
-            for target in node.targets:
-                if isinstance(target, ast.Name) and (owned := _named_store(node.value)):
-                    receivers[target.id] = owned
-    receivers.update(_CONVENTIONAL_STORE_NAMES)
-    receivers.update(_self_attr_receivers(tree))
-    for _stmt, target, value in assignments(nodes_of(function)):
-        if not isinstance(target, ast.Name) or value is None or not isinstance(value, ast.Name):
-            continue
-        if value.id in receivers:
-            receivers[target.id] = receivers[value.id]
-    return receivers
-
-
 def _sync_store_call_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
     sync_methods = _sync_store_methods()
     offenders: list[str] = []
     for node in async_function_defs(tree):
         receivers = _store_receivers(node, tree)
+        receivers.update(_module_store_globals(tree))
         for inner in nodes_of(node):
             if not (isinstance(inner, ast.Call) and isinstance(inner.func, ast.Attribute)):
                 continue
@@ -345,6 +283,7 @@ def _sync_store_call_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
             if owner is not None and inner.func.attr in sync_methods[owner]:
                 msg = f"{ast.unparse(inner.func.value)}.{inner.func.attr} is synchronous"
                 offenders.append(offender_at(path, inner, msg))
+        offenders.extend(_helper_store_bites(node, tree, sync_methods, path))
     return offenders
 
 
@@ -376,6 +315,20 @@ STORE_CALLS_ON_THE_LOOP = Rule(
             "        return self._store.load('ns', url)\n",
             "self._store.load",
         ),
+        # One level of helper indirection must not hide the hazard: the async caller
+        # reaches the sync store method through the sync helper it calls on the loop.
+        Bites(
+            "def _fetch_all(store: JobStore):\n"
+            "    return store.list_jobs()\n"
+            "async def handler(store: JobStore):\n"
+            "    return _fetch_all(store)\n",
+            "_fetch_all",
+        ),
+        # A module-level store global is a receiver every function in the module sees.
+        Bites(
+            "_SHARED = JobStore(path, policy=policy)\nasync def handler():\n    return _SHARED.list_jobs()\n",
+            "_SHARED.list_jobs",
+        ),
     ),
     clean=lambda: (
         "async def get_crawl_result(job_store, result_store):\n"
@@ -384,6 +337,12 @@ STORE_CALLS_ON_THE_LOOP = Rule(
         # A sync frame is not the hazard: startup recovery before the loop exists and test setup are both
         # entitled to the synchronous methods.
         "def seed(job_store):\n    return job_store.load(job_id)\n",
+        # The helper itself is entitled to the sync methods when it is not on the loop:
+        # an async twin helper awaited by the async caller keeps the store call off it.
+        "async def handler(store: JobStore):\n"
+        "    return await _fetch_all(store)\n"
+        "async def _fetch_all(store: JobStore):\n"
+        "    return await store.aload(job_id)\n",
     ),
 )
 
