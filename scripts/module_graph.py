@@ -35,8 +35,33 @@ def _resolve(name: str) -> str | None:
 
 
 def _imports(tree: ast.AST) -> set[str]:
+    """Runtime import targets of one module tree.
+
+    Imports under ``if TYPE_CHECKING`` are excluded: a type-only import is not a
+    runtime dependency, and a cycle that exists only there is a phantom.
+    """
+    return _resolved(_runtime_imports(tree))
+
+
+def _runtime_imports(tree: ast.AST) -> list[ast.AST]:
+    """Every import statement NOT inside an ``if TYPE_CHECKING`` guard."""
+    guarded_ids = {
+        id(child)
+        for node in ast.walk(tree)
+        if isinstance(node, ast.If) and _is_type_checking_guard(node)
+        for child in ast.iter_child_nodes(node)
+    }
+    return [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, (ast.Import, ast.ImportFrom)) and id(node) not in guarded_ids
+    ]
+
+
+def _resolved(statements: list[ast.AST]) -> set[str]:
+    """The modules a set of import statements pulls in, resolved to this tree."""
     found: set[str] = set()
-    for node in ast.walk(tree):
+    for node in statements:
         if isinstance(node, ast.Import):
             for alias in node.names:
                 if (resolved := _resolve(alias.name)) is not None:
@@ -47,6 +72,10 @@ def _imports(tree: ast.AST) -> set[str]:
             if node.module and (resolved := _resolve(node.module)) is not None:
                 found.add(resolved)
     return found
+
+
+def _is_type_checking_guard(node: ast.If) -> bool:
+    return any(isinstance(sub, ast.Name) and sub.id == "TYPE_CHECKING" for sub in ast.walk(node.test))
 
 
 def build_graph() -> tuple[dict[str, set[str]], dict[str, set[str]]]:
