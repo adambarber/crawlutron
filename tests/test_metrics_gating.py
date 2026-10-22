@@ -56,12 +56,12 @@ def test_caller_label_dimension_is_capped_by_overflow_fold(tmp_path):
     # must stop growing (overflow fold) instead of minting a series per caller.
     for i in range(300):
         store.observe_crawl(caller_id=f"key_{i}")
-    counts = store.caller_counts
+    counts = store.snapshot().caller_counts
     # cap distinct series + one reserved overflow series -- bounded, not 300.
     assert len(counts) <= 257
     assert "__overflow__" in counts
 
-    bare = store.crawl_requests_total
+    bare = store.snapshot().crawl_requests_total
     summed = sum(counts.values())
     assert bare == summed  # sum(labels) always equals bare
 
@@ -73,8 +73,9 @@ def test_search_and_crawl_caller_families_stay_distinct(tmp_path):
     store.observe_search(provider="tavily", caller_id="key_a")
 
     # A search by key_a must not inflate its crawl family, nor vice versa.
-    assert store.caller_counts == {"key_a": 1.0}
-    assert store.search_caller_counts == {"key_a": 1.0}
+    record = store.snapshot()
+    assert record.caller_counts == {"key_a": 1.0}
+    assert record.search_caller_counts == {"key_a": 1.0}
     text = store.as_prometheus(caller_detail=True)
     assert 'crawler_crawl_requests_by_caller_total{caller="key_a"} 1.0' in text
     assert 'crawler_search_requests_by_caller_total{caller="key_a"} 1.0' in text

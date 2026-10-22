@@ -102,6 +102,50 @@ def test_reset_clears_the_shared_store_not_just_local_fields(tmp_path):
     assert "crawler_crawl_results_total 0.0" in second.as_prometheus()
 
 
+def test_the_counters_read_as_one_record(tmp_path):
+    """The counters read as one typed record handed out by the store, not as a
+    pile of per-name accessors: every family lands on a named field built from
+    one read of the backing store."""
+    store = MetricsStore(counters=CoordinationCounters(tmp_path / "record.db"))
+    store.observe_crawl(
+        results=[engine_result("http://example.com/a", "rendered", selected_strategy=HTTP_DECLARED_CRAWLER)],
+        elapsed_ms=12.5,
+    )
+    store.observe_search(provider="tavily", results=2, elapsed_ms=3.5)
+    store.record_throttle()
+
+    record = store.snapshot()
+
+    assert record.crawl_requests_total == 1.0
+    assert record.crawl_results_total == 1.0
+    assert record.total_elapsed_ms == 12.5
+    assert record.search_requests_total == 1.0
+    assert record.search_results_total == 2.0
+    assert record.search_total_elapsed_ms == 3.5
+    assert record.resource_throttle_batches_total == 1.0
+    assert record.strategy_counts == {HTTP_DECLARED_CRAWLER: 1.0}
+    assert record.search_provider_counts == {"tavily": 2.0}
+
+
+def test_the_exposition_reads_the_backing_store_once(tmp_path, monkeypatch):
+    """One scrape is one snapshot: the exposition reads the shared store a
+    single time, not once per labelled family (three SELECTs per scrape was
+    the accessor pile paying per property)."""
+    counters = CoordinationCounters(tmp_path / "scrape.db")
+    store = MetricsStore(counters=counters)
+    reads = [0]
+    original = CoordinationCounters.snapshot
+
+    def counted(self):
+        reads[0] += 1
+        return original(self)
+
+    monkeypatch.setattr(CoordinationCounters, "snapshot", counted)
+    store.as_prometheus()
+
+    assert reads[0] == 1, f"the exposition read the backing store {reads[0]} times"
+
+
 def test_a_late_bind_carries_counters_recorded_before_it(tmp_path):
     """The bind must add to the shared store, never replace what it finds: a worker
     that served requests during boot has counters the new store lacks, and treating a

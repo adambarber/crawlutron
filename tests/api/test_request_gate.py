@@ -82,7 +82,7 @@ async def test_rejected_crawl_hands_its_slot_back_and_still_counts_the_error(cap
     metric -- passed in as ``on_reject``, so a refactor dropping it stays visible.
     """
     metrics = get_metrics()
-    before_active, before_errors = _active(), metrics.crawl_errors_total
+    before_active, before_errors = _active(), metrics.snapshot().crawl_errors_total
 
     # Real dependencies, not ``object()``. A store also asserts what the production ``crawl`` signature
     # promises it will be handed.
@@ -103,7 +103,7 @@ async def test_rejected_crawl_hands_its_slot_back_and_still_counts_the_error(cap
     assert envelope["details"] == {"errors": [{"msg": "batch_size_exceeded"}]}
     assert "crawl_request_rejected" in caplog.text
     assert _active() == before_active
-    assert metrics.crawl_errors_total == before_errors + 1
+    assert metrics.snapshot().crawl_errors_total == before_errors + 1
 
 
 async def test_map_holds_a_readiness_slot_only_while_it_runs(monkeypatch):
