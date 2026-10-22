@@ -452,7 +452,10 @@ def reset_process_state() -> None:
     One door for one piece of state: the jar and the namespace contextvar are
     one unit, so resetting one without the other leaves a state production never reaches.
     """
-    _GLOBAL_COOKIE_JAR.clear()
+    # Rebuild, not merely clear: a swapped-in double must not stay installed
+    # after the reset -- the engine's reset door rebuilds its objects the same way.
+    global _GLOBAL_COOKIE_JAR
+    _GLOBAL_COOKIE_JAR = CookieJar()
     COOKIE_NAMESPACE.set("")
 
 

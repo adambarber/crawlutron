@@ -43,9 +43,15 @@ def _policy_with_cookie_jar():
 
 @pytest.fixture
 def guarded_jar(tmp_path):
+    """Install a loop-guarded jar, and restore the jar object it replaced.
+
+    The fixture made the swap, so the fixture owns undoing it (belt vs the door).
+    """
+    previous = cookie_jar.global_cookie_jar()
     jar = cookie_jar.CookieJar(LoopGuardSharedCookieStore(tmp_path / "cookies.db"))
     cookie_jar.set_global_cookie_jar(jar)
     yield jar
+    cookie_jar.set_global_cookie_jar(previous)
     cookie_jar.reset_process_state()
 
 

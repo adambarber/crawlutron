@@ -124,3 +124,26 @@ class TestCookieJarHeaderHandling:
     def test_http_cookie_invalid(self):
         # Call with an invalid cookie header - should not raise.
         global_cookie_jar().add_cookie_header(canonical("http://x.example/"), "http://example.com/")
+
+
+def test_reset_process_state_rebinds_a_fresh_default_jar():
+    """Reset must drop the installed jar object, not just its contents.
+
+        A test that swaps the process global for a guarded double and resets left that
+    double installed for every later test in the worker -- the engine's reset rebuilds.
+    """
+    from app.transport import cookie_jar
+
+    class _SentinelJar(cookie_jar.CookieJar):
+        """A jar identity the reset cannot produce, so a mere clear cannot pass."""
+
+    sentinel = _SentinelJar()
+    cookie_jar.set_global_cookie_jar(sentinel)
+    try:
+        cookie_jar.reset_process_state()
+        assert cookie_jar.global_cookie_jar() is not sentinel, (
+            "reset_process_state left the swapped-in jar installed as the process global"
+        )
+        assert type(cookie_jar.global_cookie_jar()) is cookie_jar.CookieJar
+    finally:
+        cookie_jar.reset_process_state()
