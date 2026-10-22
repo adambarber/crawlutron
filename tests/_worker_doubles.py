@@ -67,3 +67,13 @@ async def assert_sync_worker_returning_awaitable_is_named() -> None:
     mistaken = cast("SyncCrawlWorker", lambda received: render(received))
     with pytest.raises(TypeError, match="returned an awaitable"):
         await call_worker(mistaken, job)
+
+
+async def test_coroutine_never_awaited_is_an_error() -> None:
+    """Proof for #411: un-awaited coroutine fails the suite (warning as error)."""
+
+    async def dummy() -> None:
+        pass
+
+    _ = dummy()  # un-awaited -> RuntimeWarning (error via filterwarnings)
+    # Walk-past: re-add ignore filter and this test passes silently.

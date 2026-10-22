@@ -28,7 +28,10 @@ async def _invoke_async_worker(worker: AsyncCrawlWorker, job: CrawlJob) -> Crawl
 def _invoke_sync_worker(worker: SyncCrawlWorker, job: CrawlJob) -> CrawlResult:
     result = worker(job)
     if inspect.isawaitable(result):
-        # it used to surface ~100 lines away as a strategy error -- a browser
+        # Close the un-awaited coroutine to avoid RuntimeWarning.
+        if hasattr(result, "close"):
+            result.close()  # pyright: ignore[reportAttributeAccessIssue]
+        # It used to surface ~100 lines away as a strategy error -- a browser
         # page's .html on a never-awaited coroutine, as a network_error.
         raise TypeError(
             f"sync worker {worker!r} returned an awaitable; a worker is either a "

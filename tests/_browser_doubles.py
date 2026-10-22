@@ -80,7 +80,7 @@ async def _static_extraction(page, options):
     return ("<html>hi</html>", "hi", "rendered", False)
 
 
-async def _never_pdf(url):
+def _never_pdf(url):
     return False
 
 

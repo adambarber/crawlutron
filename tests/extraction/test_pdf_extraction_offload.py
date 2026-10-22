@@ -39,7 +39,7 @@ async def _real_extraction(page, options):
     return html, text, "rendered", False
 
 
-async def _looks_like_pdf(url):
+def _looks_like_pdf(url):
     return url.lower().endswith(".pdf")
 
 
