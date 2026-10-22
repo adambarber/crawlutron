@@ -9,10 +9,14 @@ from __future__ import annotations
 import ast
 from typing import TypeGuard
 
-#: The statements that open a nested scope -- the compound statements. This is
-#: the vocabulary for "can contain a definition", and the metrics gate imports it
-#: rather than restating it: two lists that happen to agree on these seven are
-#: two lists that can stop agreeing.
+#: The statements that open a nested scope. Beyond the classic compound
+#: statements, ``ast.ExceptHandler`` owns a real suite a walk can treat as a
+#: block (a definition inside ``except:`` is legal Python). ``ast.Match`` is
+#: deliberately NOT here: it owns ``.cases``, not ``.body``, so walks that read
+#: ``node.body`` would break on it, and the metrics budgets are measured without
+#: it. This is the vocabulary for "can contain a definition", and every consumer
+#: imports it rather than restating it: two lists that happen to agree are two
+#: lists that can stop agreeing (tests/test_ast_scopes.py holds that line).
 SCOPE_OPENING_NODES: tuple[type[ast.AST], ...] = (
     ast.If,
     ast.For,
@@ -21,6 +25,7 @@ SCOPE_OPENING_NODES: tuple[type[ast.AST], ...] = (
     ast.With,
     ast.AsyncWith,
     ast.Try,
+    ast.ExceptHandler,
 )
 
 #: A statement that owns a body -- a suite of statements. A walk asking "is this
@@ -38,33 +43,17 @@ BODY_OWNING_NODES: tuple[type[ast.AST], ...] = (
 ) + SCOPE_OPENING_NODES
 
 
-def is_scope_opener(
-    node: ast.AST,
-) -> TypeGuard[ast.If | ast.For | ast.AsyncFor | ast.While | ast.With | ast.AsyncWith | ast.Try]:
-    """Whether ``node`` is a compound statement, narrowed to the kinds that are.
+def is_scope_opener(node: ast.AST) -> TypeGuard[ast.stmt | ast.ExceptHandler]:
+    """Whether ``node`` is a scope-opening node, narrowed to the kinds that are.
 
     The narrowed companion to :data:`SCOPE_OPENING_NODES`, for walks that read
-    ``node.body`` off the answer -- membership and type are one fact, kept together.
+    ``node.body`` off the answer.
     """
     return isinstance(node, SCOPE_OPENING_NODES)
 
 
-def is_body_owner(
-    node: ast.AST,
-) -> TypeGuard[
-    ast.Module
-    | ast.FunctionDef
-    | ast.AsyncFunctionDef
-    | ast.ClassDef
-    | ast.If
-    | ast.For
-    | ast.AsyncFor
-    | ast.While
-    | ast.With
-    | ast.AsyncWith
-    | ast.Try
-]:
-    """Whether ``node`` is a statement that owns a body, narrowed to the kinds that do.
+def is_body_owner(node: ast.AST) -> TypeGuard[ast.Module | ast.stmt | ast.ExceptHandler]:
+    """Whether ``node`` is a node that owns a body, narrowed to the kinds that do.
 
     The predicate a walk needs rather than a bare ``isinstance`` -- membership test and
     narrowed type are the same fact, and separating them lets a check miss the type.

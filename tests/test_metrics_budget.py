@@ -56,9 +56,9 @@ _SCRIPTS_BUDGETS = {
     "block length": 0,
 }
 
-# The complexity approximation counts every node that introduces a branch, which is the sweep's own
-# compound-statement vocabulary plus the three that can appear without opening a block.
-_BRANCH_NODES = COMPOUND_NODES + (ast.ExceptHandler, ast.Assert, ast.BoolOp)
+# Branch vocabulary: the shared scope vocabulary whole (except handlers branch
+# too) plus the two that can appear without opening a block. No restatement.
+_BRANCH_NODES = COMPOUND_NODES + (ast.Assert, ast.BoolOp)
 
 
 @dataclass(frozen=True)
