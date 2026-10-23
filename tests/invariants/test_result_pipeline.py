@@ -16,7 +16,7 @@ from tests.chokepoint_walks import (
     offender_at,
     resolved_expr_name,
 )
-from tests.rules import Bites, Rule
+from tests.rules import Bites, Registry, Rule
 
 # --------------------------------------------------------------------------- The content pipeline: one
 # dispatch, one discovery call, one projection The browser and HTTP strategies each carried the same
@@ -128,14 +128,8 @@ EXTRACTION_IS_DISPATCHED_BY_THE_CONTENT_PIPELINE_ALONE = Rule(
 )
 
 
-def test_extraction_is_dispatched_by_the_content_pipeline_alone():
-    """The three extraction modes are dispatched in one module, not per strategy."""
-    EXTRACTION_IS_DISPATCHED_BY_THE_CONTENT_PIPELINE_ALONE.scan()
-
-
-def test_extraction_reach_past_detector_bites():
-    """A re-spelled dispatch fires, offloaded and aliased; routing through it stays clean."""
-    EXTRACTION_IS_DISPATCHED_BY_THE_CONTENT_PIPELINE_ALONE.check_bites()
+# The discovery projection's one-definition census sits with the rules it guards:
+# a second definition would satisfy every structural guard while reintroducing the duplication.
 
 
 def _respelled_discovery_result_fields_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
@@ -190,16 +184,6 @@ DISCOVERED_LINK_RESULT_FIELDS_COME_FROM_THE_PIPELINE = Rule(
 )
 
 
-def test_discovered_link_result_fields_come_from_the_pipeline():
-    """A discovery envelope reaches a result through one projection."""
-    DISCOVERED_LINK_RESULT_FIELDS_COME_FROM_THE_PIPELINE.scan()
-
-
-def test_discovery_result_field_detector_bites():
-    """A re-spelled projection fires; the spread, and a non-result sink, stay clean."""
-    DISCOVERED_LINK_RESULT_FIELDS_COME_FROM_THE_PIPELINE.check_bites()
-
-
 def test_discovery_result_projection_has_exactly_one_definition():
     """The projection is one function, so it cannot be forked per strategy.
 
@@ -214,3 +198,21 @@ def test_discovery_result_projection_has_exactly_one_definition():
     ]
     assert len(definitions) == 1, f"the discovery projection was defined again: {definitions}"
     assert "app/transport/content_pipeline.py" in definitions[0], definitions
+
+
+RULES = Registry(
+    (
+        EXTRACTION_IS_DISPATCHED_BY_THE_CONTENT_PIPELINE_ALONE,
+        DISCOVERED_LINK_RESULT_FIELDS_COME_FROM_THE_PIPELINE,
+    )
+)
+
+
+def test_no_rule_violations():
+    """The three extraction modes are dispatched in one module, not per strategy."""
+    RULES.check_all_clean()
+
+
+def test_every_rule_bites():
+    """A re-spelled dispatch or projection fires; the sanctioned shape stays clean."""
+    RULES.check_all_bite()

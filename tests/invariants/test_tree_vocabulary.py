@@ -16,7 +16,7 @@ from tests.chokepoint_walks import (
 )
 from tests.invariants.test_tree_immutability import _tests_tree
 from tests.invariants.test_tree_imports import _test_tree_module_names
-from tests.rules import Bites, Rule, Silent
+from tests.rules import Bites, Registry, Rule, Silent
 
 # =========================================================================== NO PUBLIC PRIMITIVE IN THE
 # VOCABULARY LAYER MAY GO UNREFERENCED The suite has a convention rather than a registry for this: a leading
@@ -155,22 +155,6 @@ VOCABULARY_PRIMITIVES_ARE_REFERENCED = Rule(
 )
 
 
-def test_vocabulary_primitives_are_referenced():
-    """Every public name in the shared vocabulary layer has a caller somewhere.
-
-    A deleted caller leaves a well-formed, well-documented, unreferenced
-    function, and nothing else in the suite can notice."""
-    VOCABULARY_PRIMITIVES_ARE_REFERENCED.scan()
-
-
-def test_vocabulary_primitive_detector_bites():
-    """Bites, and the two neighbours that must stay quiet.
-
-    The offender is an unreferenced public function at a real vocabulary path.
-    A private helper elsewhere and a public one outside the layer stay clean."""
-    VOCABULARY_PRIMITIVES_ARE_REFERENCED.check_bites()
-
-
 # =========================================================================== The retired vocabulary bucket
 _RETIRED_VOCABULARY = "app.constants"
 
@@ -193,6 +177,8 @@ def _retired_vocabulary_offenders(tree: ast.AST, path: pathlib.Path) -> list[str
     return offenders
 
 
+# #149's definition of done, as a gate rather than a one-time sweep: a sweep satisfies for one
+# commit, this stops the retired bucket regrowing.
 RETIRED_VOCABULARY_IS_NOT_IMPORTABLE = Rule(
     name="vocabulary-imports-name-a-topic",
     find=_retired_vocabulary_offenders,
@@ -219,19 +205,17 @@ RETIRED_VOCABULARY_IS_NOT_IMPORTABLE = Rule(
     ),
 )
 
-
-def test_no_module_imports_the_retired_vocabulary_bucket():
-    """Every vocabulary import names a topic module.
-
-    The measurable half of #149's definition of done; a one-time sweep would
-    satisfy it for one commit, and this stops the retired bucket regrowing."""
-    RETIRED_VOCABULARY_IS_NOT_IMPORTABLE.scan()
+RULES = Registry((VOCABULARY_PRIMITIVES_ARE_REFERENCED, RETIRED_VOCABULARY_IS_NOT_IMPORTABLE))
 
 
-def test_retired_vocabulary_detector_bites():
-    """The rule bites on both import spellings, and stays quiet on lookalikes.
+RULES = Registry((VOCABULARY_PRIMITIVES_ARE_REFERENCED, RETIRED_VOCABULARY_IS_NOT_IMPORTABLE))
 
-    Without the clean half this would also pass as "no import whose module ends
-    in the word constants", which is a different and much less useful rule.
-    """
-    RETIRED_VOCABULARY_IS_NOT_IMPORTABLE.check_bites()
+
+def test_no_rule_violations():
+    """Vocabulary primitives are referenced; retired buckets are not imported."""
+    RULES.check_all_clean()
+
+
+def test_every_rule_bites():
+    """Bites, and the neighbours that must stay quiet."""
+    RULES.check_all_bite()

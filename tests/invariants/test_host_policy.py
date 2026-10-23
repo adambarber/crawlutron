@@ -18,7 +18,7 @@ from tests.chokepoint_walks import (
     parent_map,
     resolved_call_name,
 )
-from tests.rules import Bites, Rule
+from tests.rules import Bites, Rule, Trips
 
 _HOST_POLICY_VALIDATORS = frozenset(
     {
@@ -360,6 +360,15 @@ URL_RETURNING_HELPERS_REQUIRE_HOST_POLICY = Rule(
             "from urllib.parse import urlunsplit\ndef rebuild(parts):\n    return urlunsplit(parts)\n",
             "returns URLs without required HostPolicy",
         ),
+        # Two helper shapes at once, each its own finding: a bare passthrough and a comprehension
+        # filter -- the shape a future helper actually arrives as.
+        Trips(
+            "def passthrough_url(url: str) -> str:\n"
+            "    return url\n"
+            "def filter_endpoints(endpoints: list[dict[str, str]]) -> list[dict[str, str]]:\n"
+            "    return [item for item in endpoints if item.get('url')]\n",
+            count=2,
+        ),
     ),
     clean=lambda: (
         "from app.models.normalized_url import admit_or_none\n"
@@ -392,25 +401,12 @@ URL_RETURNING_HELPERS_REQUIRE_HOST_POLICY = Rule(
 )
 
 
-def test_required_host_policy_detector_bites():
-    URL_RETURNING_HELPERS_REQUIRE_HOST_POLICY.check_bites()
-
-
-def test_required_host_policy_detector_covers_new_url_helper_shapes():
-    source = ast.parse(
-        "def passthrough_url(url: str) -> str:\n"
-        "    return url\n"
-        "def filter_endpoints(endpoints: list[dict[str, str]]) -> list[dict[str, str]]:\n"
-        "    return [item for item in endpoints if item.get('url')]\n"
-    )
-    offenders = _required_host_policy_offenders(
-        source,
-        REPO_ROOT / "app" / "_synthetic.py",
-    )
-    assert len(offenders) == 2, offenders
-
-
 def test_host_policy_detector_accepts_fixed_extraction_boundaries():
+    """Sanction narrowness: frames_from/forms_from stay unflagged.
+
+    An extraction boundary takes a bound, not a policy; if the detector
+    ever flags these, the sanction needs a second look.
+    """
     path = REPO_ROOT / "app" / "extraction" / "content.py"
     tree = ast.parse(path.read_text(encoding="utf-8"))
     assert not [
@@ -422,3 +418,7 @@ def test_host_policy_detector_accepts_fixed_extraction_boundaries():
 
 def test_url_returning_helpers_require_host_policy():
     URL_RETURNING_HELPERS_REQUIRE_HOST_POLICY.scan()
+
+
+def test_required_host_policy_detector_bites():
+    URL_RETURNING_HELPERS_REQUIRE_HOST_POLICY.check_bites()

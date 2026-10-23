@@ -16,7 +16,7 @@ from tests.chokepoint_walks import (
     try_blocks,
 )
 from tests.invariants._shared import function_defs
-from tests.rules import Bites, Rule
+from tests.rules import Bites, Registry, Rule
 
 # --------------------------------------------------------------------------- Frontier raw-href sinks ()
 # ---------------------------------------------------------------------------
@@ -136,15 +136,6 @@ HOST_POLICY_IS_NEVER_OPTIONAL = Rule(
 )
 
 
-def test_the_host_policy_is_never_optional():
-    HOST_POLICY_IS_NEVER_OPTIONAL.scan()
-
-
-def test_optional_host_policy_detector_bites():
-    """A defaulted keyword or positional HostPolicy fires; required stays clean."""
-    HOST_POLICY_IS_NEVER_OPTIONAL.check_bites()
-
-
 FRONTIER_CARRIES_ONLY_LINK_VALIDATED_URLS = Rule(
     name="frontier-carries-only-link-validated-urls",
     find=_frontier_sink_offenders,
@@ -169,16 +160,6 @@ FRONTIER_CARRIES_ONLY_LINK_VALIDATED_URLS = Rule(
         "            job.frontier.append(link_url)\n",
     ),
 )
-
-
-def test_no_raw_href_frontier_sinks():
-    """The frontier only ever carries frontier_link_url()-validated URLs."""
-    FRONTIER_CARRIES_ONLY_LINK_VALIDATED_URLS.scan()
-
-
-def test_raw_href_frontier_detector_bites():
-    """Prove the detector fires on the historical shape."""
-    FRONTIER_CARRIES_ONLY_LINK_VALIDATED_URLS.check_bites()
 
 
 _CONTAINMENT_CALL = "relative_to"
@@ -249,15 +230,6 @@ PATH_VALIDATORS_RETURN_AN_ALLOWLISTED_VALUE_OR_NONE = Rule(
         "    return str(path)\n",
     ),
 )
-
-
-def test_path_validators_never_return_an_unchecked_parameter():
-    PATH_VALIDATORS_RETURN_AN_ALLOWLISTED_VALUE_OR_NONE.scan()
-
-
-def test_unchecked_parameter_return_detector_bites():
-    """The allowlist-vs-return drift shape fires; fixed, derived and None stay clean."""
-    PATH_VALIDATORS_RETURN_AN_ALLOWLISTED_VALUE_OR_NONE.check_bites()
 
 
 def test_resolved_call_name_handles_getattr_alias_and_static_name():
@@ -346,10 +318,21 @@ NORMALIZE_OR_NONE_IS_NOT_REINLINED = Rule(
 )
 
 
-def test_normalize_or_none_is_not_reinlined():
-    # The chokepoint's own definition is the sanctioned site.
-    NORMALIZE_OR_NONE_IS_NOT_REINLINED.scan()
+RULES = Registry(
+    (
+        HOST_POLICY_IS_NEVER_OPTIONAL,
+        FRONTIER_CARRIES_ONLY_LINK_VALIDATED_URLS,
+        PATH_VALIDATORS_RETURN_AN_ALLOWLISTED_VALUE_OR_NONE,
+        NORMALIZE_OR_NONE_IS_NOT_REINLINED,
+    )
+)
 
 
-def test_normalize_or_none_detector_bites():
-    NORMALIZE_OR_NONE_IS_NOT_REINLINED.check_bites()
+def test_no_rule_violations():
+    """Policies are required, frontiers validated, validators allowlisted, admits chokepointed."""
+    RULES.check_all_clean()
+
+
+def test_every_rule_bites():
+    """Every rule must reject what it forbids, and spare what it resembles."""
+    RULES.check_all_bite()

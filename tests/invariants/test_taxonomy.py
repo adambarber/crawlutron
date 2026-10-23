@@ -16,7 +16,7 @@ from tests.chokepoint_walks import (
     nodes_of,
     offender_at,
 )
-from tests.rules import Bites, Rule
+from tests.rules import Bites, Registry, Rule
 
 """Each taxonomy artifact has one home and one spelling."""
 
@@ -193,18 +193,8 @@ TRANSIENCE_VERDICT_HAS_ONE_HOME = Rule(
 )
 
 
-def test_transience_verdict_has_one_home():
-    """No module outside app/vocabulary/taxonomy.py may hold its own transient/retry set."""
-    TRANSIENCE_VERDICT_HAS_ONE_HOME.scan()
-
-
-def test_transience_home_detector_bites():
-    """A local transience verdict fires; re-exports, budgets and count-shaped
-    constants do not."""
-    TRANSIENCE_VERDICT_HAS_ONE_HOME.check_bites()
-
-
-# --------------------------------------------------------------------------- Error-handling chokepoint
+# --------------------------------------------------------------------------- Classification transience: one
+# verdict, owned by the taxonomy ---------------------------------------------------------------------------
 _ERROR_CHOKEPOINT_SANCTIONED = frozenset({"classification.py"})
 
 
@@ -266,14 +256,6 @@ HAND_ROLLED_FAILED_RESULTS_GO_THROUGH_THE_CHOKEPOINT = Rule(
 )
 
 
-def test_no_hand_rolled_failed_results_outside_the_chokepoint():
-    HAND_ROLLED_FAILED_RESULTS_GO_THROUGH_THE_CHOKEPOINT.scan()
-
-
-def test_hand_rolled_failed_result_detector_bites():
-    HAND_ROLLED_FAILED_RESULTS_GO_THROUGH_THE_CHOKEPOINT.check_bites()
-
-
 _POOL_EXHAUSTION_CATCH_SANCTIONED = frozenset({"render.py", "render_endpoint.py", "browser_pool.py"})
 
 
@@ -319,14 +301,6 @@ POOL_EXHAUSTION_CATCH_SITES_ARE_SANCTIONED = Rule(
 )
 
 
-def test_pool_exhaustion_catch_sites_are_sanctioned():
-    POOL_EXHAUSTION_CATCH_SITES_ARE_SANCTIONED.scan()
-
-
-def test_pool_exhaustion_catch_detector_bites():
-    POOL_EXHAUSTION_CATCH_SITES_ARE_SANCTIONED.check_bites()
-
-
 def test_status_resolver_lives_in_the_vocabulary_home():
     """status_for_classification is defined once, in the taxonomy module."""
     for path, tree in app_trees(exclude=SANCTIONED | frozenset({"taxonomy.py"})):
@@ -347,3 +321,22 @@ def test_classifier_lives_in_the_neutral_home():
                 raise AssertionError(
                     offender_at(path, node, "classify_error_code defined outside the classification module")
                 )
+
+
+RULES = Registry(
+    (
+        TRANSIENCE_VERDICT_HAS_ONE_HOME,
+        HAND_ROLLED_FAILED_RESULTS_GO_THROUGH_THE_CHOKEPOINT,
+        POOL_EXHAUSTION_CATCH_SITES_ARE_SANCTIONED,
+    )
+)
+
+
+def test_no_rule_violations():
+    """One transience home, failed results chokepointed, exhaustion catches sanctioned."""
+    RULES.check_all_clean()
+
+
+def test_every_rule_bites():
+    """Every rule must reject what it forbids, and spare what it resembles."""
+    RULES.check_all_bite()

@@ -16,7 +16,7 @@ from tests.chokepoint_walks import (
     parent_map,
 )
 from tests.invariants._shared import _SCOPE_COMPILER_NAMES, _SCOPE_PATTERN_LENGTH_BOUND
-from tests.rules import Bites, Rule
+from tests.rules import Bites, Registry, Rule
 
 # --------------------------------------------------------------------------- Unfiltered urljoin egress doors
 # (H class) detect_pagination read an href out of attacker-controlled HTML and returned
@@ -88,16 +88,6 @@ JOINED_URLS_ARE_EGRESS_FILTERED = Rule(
     ),
     clean=lambda: ("def f(base, href):\n    return base.resolve(href)\n",),
 )
-
-
-def test_no_unfiltered_urljoin_returns():
-    """A URL joined from untrusted input is egress-filtered before it leaves."""
-    JOINED_URLS_ARE_EGRESS_FILTERED.scan()
-
-
-def test_unfiltered_urljoin_detector_bites():
-    """The historical leak shape fires; the filtered and sanctioned shapes stay clean."""
-    JOINED_URLS_ARE_EGRESS_FILTERED.check_bites()
 
 
 def _definitions_in(tree: ast.AST, path: pathlib.Path) -> list[str]:
@@ -269,14 +259,6 @@ JOB_FRONTIER_GROWTH_ONLY_USES_FUNNEL = Rule(
 )
 
 
-def test_job_frontier_growth_only_uses_funnel():
-    JOB_FRONTIER_GROWTH_ONLY_USES_FUNNEL.scan()
-
-
-def test_job_frontier_growth_detector_bites():
-    JOB_FRONTIER_GROWTH_ONLY_USES_FUNNEL.check_bites()
-
-
 _FILTER_NAMES = {
     "app.vocabulary.hosts.is_analytics_host": "is_analytics_host",
     "app.vocabulary.hosts.is_document_url": "is_document_url",
@@ -350,14 +332,6 @@ SHARED_ADMISSION_FILTER_SET_HAS_NO_TWIN_LIST = Rule(
 )
 
 
-def test_shared_admission_filter_set_has_no_twin_list():
-    SHARED_ADMISSION_FILTER_SET_HAS_NO_TWIN_LIST.scan()
-
-
-def test_shared_admission_filter_detector_bites():
-    SHARED_ADMISSION_FILTER_SET_HAS_NO_TWIN_LIST.check_bites()
-
-
 def test_job_frontier_detector_sanction_is_narrow():
     path = REPO_ROOT / "app" / "crawl" / "job_store.py"
     allowed = frozenset({"normalize_job_state", "_persist"})
@@ -365,3 +339,22 @@ def test_job_frontier_detector_sanction_is_narrow():
     assert _direct_frontier_growth_offenders(bad, path, allowed_functions=allowed)
     sanctioned = ast.parse("def normalize_job_state(job):\n    frontier = []\n    job.frontier = frontier\n")
     assert not _direct_frontier_growth_offenders(sanctioned, path, allowed_functions=allowed)
+
+
+RULES = Registry(
+    (
+        JOINED_URLS_ARE_EGRESS_FILTERED,
+        JOB_FRONTIER_GROWTH_ONLY_USES_FUNNEL,
+        SHARED_ADMISSION_FILTER_SET_HAS_NO_TWIN_LIST,
+    )
+)
+
+
+def test_no_rule_violations():
+    """Joined URLs filter out, frontier growth funnels, the filter ladder stays shared."""
+    RULES.check_all_clean()
+
+
+def test_every_rule_bites():
+    """Every rule must reject what it forbids, and spare what it resembles."""
+    RULES.check_all_bite()

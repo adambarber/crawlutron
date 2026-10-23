@@ -16,7 +16,7 @@ from tests.chokepoint_walks import (
     offender,
     offender_at,
 )
-from tests.rules import Bites, Rule
+from tests.rules import Bites, Registry, Rule
 
 _CANONICALIZER = frozenset({"NormalizedUrl", "_validated_url", "admit_or_none"})
 
@@ -74,16 +74,6 @@ BATCH_DEDUP_KEYS_ON_ADMITTED_IDENTITY = Rule(
 )
 
 
-def test_batch_dedup_keys_on_admitted_identity():
-    """URL-batch dedup must collapse by admitted identity, never raw strings."""
-    BATCH_DEDUP_KEYS_ON_ADMITTED_IDENTITY.scan()
-
-
-def test_batch_dedup_detector_bites():
-    """A raw dict.fromkeys batch dedup fires; the canonicalized form stays clean."""
-    BATCH_DEDUP_KEYS_ON_ADMITTED_IDENTITY.check_bites()
-
-
 def _bare_body_reads(tree: ast.AST, path: pathlib.Path) -> list[str]:
     """Flag an unbounded body acquisition on a response-like object.
 
@@ -125,20 +115,6 @@ EVERY_HTTP_BODY_READ_IS_CAPPED = Rule(
     ),
     clean=lambda: ("def f(resp):\n    return read_capped_async(resp)\n",),
 )
-
-
-def test_no_bare_body_reads():
-    """Every HTTP body read anywhere must be capped.
-
-    ``bounded_io.py`` IS the chokepoint and exempt by receiver, not path; the
-    response-object convention avoids flagging file/socket reads.
-    """
-    EVERY_HTTP_BODY_READ_IS_CAPPED.scan()
-
-
-def test_bare_body_read_detector_bites():
-    """Both unbounded read() and .content fire on a response-like receiver."""
-    EVERY_HTTP_BODY_READ_IS_CAPPED.check_bites()
 
 
 def _scope_matcher_definitions() -> list[str]:
@@ -228,3 +204,16 @@ def test_no_inline_pinned_url_composition():
     assert not offenders, "compose pinned URLs via build_pinned_request(), never inline:\n" + "\n".join(
         offenders
     )
+
+
+RULES = Registry((BATCH_DEDUP_KEYS_ON_ADMITTED_IDENTITY, EVERY_HTTP_BODY_READ_IS_CAPPED))
+
+
+def test_no_rule_violations():
+    """Batch dedup keys on admitted identity; every body read is capped."""
+    RULES.check_all_clean()
+
+
+def test_every_rule_bites():
+    """The raw dedup and both unbounded read shapes fire; the chokepoint forms stay clean."""
+    RULES.check_all_bite()
