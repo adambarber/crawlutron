@@ -111,129 +111,63 @@ CSV_BODY = "name,age\nAlice,30\nBob,25\n"
 JSON_BODY = '{"a":1,"b":2}'
 
 
-def _build_routes() -> dict[str, dict[str, Any]]:
+def _route(status: int, content_type: str, body: bytes, extra: dict[str, str] | None = None) -> RouteEntry:
+    """One route entry: status, headers (extra merged over the content type), body."""
+    headers = {"content-type": content_type, **(extra or {})}
+    return {"status": status, "headers": headers, "body": body}
+
+
+RouteEntry = dict[str, Any]
+"""One fixture route: status, headers, body -- the shape the handler serves."""
+
+
+def _build_routes() -> dict[str, RouteEntry]:
     with open(_FIXTURE_PDF, "rb") as handle:
         pdf_bytes = handle.read()
+    html = "text/html; charset=utf-8"
     return {
-        "/": {
-            "status": 200,
-            "headers": {"content-type": "text/html; charset=utf-8"},
-            "body": JSONLD_HTML.encode("utf-8"),
-        },
-        "/page2": {
-            "status": 200,
-            "headers": {"content-type": "text/html; charset=utf-8"},
-            "body": PAGE2_HTML.encode("utf-8"),
-        },
-        "/set-cookie": {
-            "status": 200,
-            "headers": {
-                "content-type": "text/plain; charset=utf-8",
-                "set-cookie": "session_id=abc123; Path=/; HttpOnly; SameSite=Lax",
-            },
-            "body": b"cookie set",
-        },
-        "/shadow": {
-            "status": 200,
-            "headers": {"content-type": "text/html; charset=utf-8"},
-            "body": SHADOW_HTML.encode("utf-8"),
-        },
-        "/dynamic": {
-            "status": 200,
-            "headers": {"content-type": "text/html; charset=utf-8"},
-            "body": DYNAMIC_HTML.encode("utf-8"),
-        },
-        "/lazy": {
-            "status": 200,
-            "headers": {"content-type": "text/html; charset=utf-8"},
-            "body": LAZY_HTML.encode("utf-8"),
-        },
-        "/blog": {
-            "status": 200,
-            "headers": {"content-type": "text/html; charset=utf-8"},
-            "body": BLOG_HTML.encode("utf-8"),
-        },
-        "/blocked": {
-            "status": 200,
-            "headers": {"content-type": "text/html; charset=utf-8"},
-            "body": BLOCKED_HTML.encode("utf-8"),
-        },
-        "/robots.txt": {
-            "status": 200,
-            "headers": {"content-type": "text/plain"},
-            "body": ROBOTS_TXT.encode("utf-8"),
-        },
-        "/sitemap.xml": {
-            "status": 200,
-            "headers": {"content-type": "application/xml"},
-            "body": SITEMAP_XML.encode("utf-8"),
-        },
-        "/feed.xml": {
-            "status": 200,
-            "headers": {"content-type": "application/rss+xml"},
-            "body": FEED_XML.encode("utf-8"),
-        },
-        "/api/data": {
-            "status": 200,
-            "headers": {"content-type": "application/json"},
-            "body": b'{"items":[1,2,3]}',
-        },
-        "/api/widgets": {
-            "status": 200,
-            "headers": {"content-type": "application/json"},
-            "body": b'{"widgets":42}',
-        },
-        "/sample_table.pdf": {
-            "status": 200,
-            "headers": {"content-type": "application/pdf"},
-            "body": pdf_bytes,
-        },
-        "/sample.csv": {
-            "status": 200,
-            "headers": {"content-type": "text/csv"},
-            "body": CSV_BODY.encode("utf-8"),
-        },
-        "/sample.json": {
-            "status": 200,
-            "headers": {"content-type": "application/json"},
-            "body": JSON_BODY.encode("utf-8"),
-        },
-        "/with_etag": {
-            "status": 200,
-            "headers": {"content-type": "text/html; charset=utf-8", "etag": "v1"},
-            "body": b"<html><body>version one</body></html>",
-        },
-        "/broken.pdf": {
-            "status": 200,
-            "headers": {"content-type": "application/pdf"},
-            "body": b"this is not actually a pdf",
-        },
-        "/with_lastmod": {
-            "status": 200,
-            "headers": {
-                "content-type": "text/html; charset=utf-8",
-                "etag": "v2",
-                "last-modified": "Wed, 01 Jan 2025 00:00:00 GMT",
-            },
-            "body": b"<html><body>last modified page</body></html>",
-        },
-        "/ratelimit": {
-            "status": 429,
-            "headers": {"content-type": "text/plain", "retry-after": "30"},
-            "body": b"rate limited",
-        },
-        "/legacy": {
-            "status": 200,
-            "headers": {"content-type": "text/html; charset=utf-8"},
-            "body": (
+        "/": _route(200, html, JSONLD_HTML.encode("utf-8")),
+        "/page2": _route(200, html, PAGE2_HTML.encode("utf-8")),
+        "/set-cookie": _route(
+            200,
+            "text/plain; charset=utf-8",
+            b"cookie set",
+            extra={"set-cookie": "session_id=abc123; Path=/; HttpOnly; SameSite=Lax"},
+        ),
+        "/shadow": _route(200, html, SHADOW_HTML.encode("utf-8")),
+        "/dynamic": _route(200, html, DYNAMIC_HTML.encode("utf-8")),
+        "/lazy": _route(200, html, LAZY_HTML.encode("utf-8")),
+        "/blog": _route(200, html, BLOG_HTML.encode("utf-8")),
+        "/blocked": _route(200, html, BLOCKED_HTML.encode("utf-8")),
+        "/robots.txt": _route(200, "text/plain", ROBOTS_TXT.encode("utf-8")),
+        "/sitemap.xml": _route(200, "application/xml", SITEMAP_XML.encode("utf-8")),
+        "/feed.xml": _route(200, "application/rss+xml", FEED_XML.encode("utf-8")),
+        "/api/data": _route(200, "application/json", b'{"items":[1,2,3]}'),
+        "/api/widgets": _route(200, "application/json", b'{"widgets":42}'),
+        "/sample_table.pdf": _route(200, "application/pdf", pdf_bytes),
+        "/sample.csv": _route(200, "text/csv", CSV_BODY.encode("utf-8")),
+        "/sample.json": _route(200, "application/json", JSON_BODY.encode("utf-8")),
+        "/with_etag": _route(200, html, b"<html><body>version one</body></html>", extra={"etag": "v1"}),
+        "/broken.pdf": _route(200, "application/pdf", b"this is not actually a pdf"),
+        "/with_lastmod": _route(
+            200,
+            html,
+            b"<html><body>last modified page</body></html>",
+            extra={"etag": "v2", "last-modified": "Wed, 01 Jan 2025 00:00:00 GMT"},
+        ),
+        "/ratelimit": _route(429, "text/plain", b"rate limited", extra={"retry-after": "30"}),
+        "/legacy": _route(
+            200,
+            html,
+            (
                 b"<html><head><title>Legacy</title></head><body>"
                 b'<frameset><frame src="/a"></frameset>'
                 b'<form action="/submit" method="post"><input name="q" value="x"></form>'
                 b'<a href="/page2">Next</a><a href="/page2">Next</a>'
                 b"</body></html>"
             ),
-        },
-        "/missing": {"status": 404, "headers": {"content-type": "text/plain"}, "body": b"not found"},
+        ),
+        "/missing": _route(404, "text/plain", b"not found"),
     }
 
 

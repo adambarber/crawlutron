@@ -197,9 +197,9 @@ scripts_offenders, scripts_measurement = _root_gate(REPO_ROOT / "scripts", _SCRI
 #: The tests/ tree had a file-size and comment-length budget but no complexity
 #: ceiling; its measured baseline is declared first (value-ratchet rule).
 _TESTS_BUDGETS = {
-    # 11 -> 10 -> 9 -> 8 (#419: the host-policy expression state, its loop
-    # fixed-point walk, and its return-shape check split by concept).
-    "function length": 8,
+    # 11 -> 10 -> 9 -> 8 -> 7 (#419: the host-policy state machine, then the
+    # server's route table via the _route constructor).
+    "function length": 7,
     "abc size": 0,
     "largest class": 330,
     "block length": 0,
@@ -220,7 +220,7 @@ def test_the_tests_budget_measurement_reaches_tests() -> None:
     """The H1 reach: the complexity ceiling now sweeps tests/, which had none.
     The real tree shows it (11 over-long functions are counted, not invisible) and
     the shared collector fires on a synthetic over-long fn in tests/."""
-    assert suite_measurement("function length") == 8, (
+    assert suite_measurement("function length") == 7, (
         "the tests function-length budget stopped reaching the real tree"
     )
     assert suite_measurement("abc size") == 0

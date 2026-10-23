@@ -29,9 +29,9 @@ _SCRIPTS_BUDGET_HISTORY: dict[str, list[int]] = {
 
 #: Oldest-first history per ``_TESTS_BUDGETS`` metric, declared at #375.
 _TESTS_BUDGET_HISTORY: dict[str, list[int]] = {
-    #: 11 first declared; 10 by #253 (the git-history ratchet became a ledger);
-    #: 10 -> 9 -> 8 (#419, the host-policy state machine split by concept).
-    "function length": [11, 10, 9, 8],
+    #: 11 -> 10 (#253) -> 9 -> 8 -> 7 (#419: host-policy split, then the server
+    #: route table).
+    "function length": [11, 10, 9, 8, 7],
     #: 2 -> 0 (#419, same splits); the While went with the fixed-point walk.
     "abc size": [2, 0],
     "largest class": [330],
