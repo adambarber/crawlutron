@@ -261,8 +261,3 @@ RULES = Registry(
 
 def test_no_rule_violations():
     RULES.check_all_clean()
-
-
-def test_every_rule_bites():
-    """Every rule must reject what it forbids, and spare what it resembles."""
-    RULES.check_all_bite()

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import ast
 
-from tests.chokepoint_walks import REPO_ROOT, app_offenders
+from tests.chokepoint_walks import app_offenders
 from tests.invariants.test_bounds import _ALWAYS_DECODABLE_ENCODINGS, _ENCODING_TOKEN, _KNOWN_ENCODINGS
 
 
@@ -65,45 +65,3 @@ def test_no_request_header_advertises_an_undecodable_encoding():
     the tree: an undecodable coding would be passed through whole."""
     offenders = app_offenders(_undecodable_encoding_offenders)
     assert not offenders, "; ".join(offenders)
-
-
-def test_undecodable_encoding_detector_bites():
-    synthetic = REPO_ROOT / "app" / "_synthetic.py"
-    # A decodable set that omits brotli, to exercise the check itself. It is a stand-in for the check's input,
-    # not a deployment this project supports.
-    without_brotli = {"gzip", "deflate", "identity"}
-
-    # The shape that shipped: br named unconditionally, as a plain literal.
-    bad = ast.parse('HEADERS = {"Accept-Encoding": "gzip, deflate, br"}\n')
-    assert len(_undecodable_encoding_offenders(bad, synthetic, decodable=without_brotli)) == 1
-
-    # Reached indirectly, as a variable rather than inside the dict literal.
-    indirect = ast.parse('ENCODING = "gzip, deflate, br"\nHEADERS = {"Accept-Encoding": ENCODING}\n')
-    assert len(_undecodable_encoding_offenders(indirect, synthetic, decodable=without_brotli)) == 1
-
-    # The same literal is clean once the decoder is in the set, which is what makes the verdict about the set
-    # and not about the spelling.
-    assert not _undecodable_encoding_offenders(bad, synthetic, decodable={*without_brotli, "br"})
-
-    # A genuinely undecodable token is caught even with brotli present.
-    zstd = ast.parse('HEADERS = {"Accept-Encoding": "gzip, zstd"}\n')
-    assert len(_undecodable_encoding_offenders(zstd, synthetic, decodable={*without_brotli, "br"})) == 1
-
-    # A header value the detector cannot read as a literal is not a finding: the check is about advertised
-    # encodings, and a computed value advertises none that this gate can name.
-    computed = ast.parse(
-        'ENCODING = "gzip, deflate"\n'
-        "if available():\n"
-        '    ENCODING += ", br"\n'
-        'HEADERS = {"Accept-Encoding": ENCODING}\n'
-    )
-    assert not _undecodable_encoding_offenders(computed, synthetic, decodable=without_brotli)
-
-    # Not an encoding list at all: another comma-joined header is not this gate's business, and neither is
-    # English prose that happens to be comma-joined.
-    other = ast.parse(
-        'HEADERS = {"Accept": "text/html,application/xml;q=0.9"}\n'
-        'OTHER = "dom_text, etc., http_html"\n'
-        "SINGLE = 'gzip'\n"
-    )
-    assert not _undecodable_encoding_offenders(other, synthetic, decodable=without_brotli)

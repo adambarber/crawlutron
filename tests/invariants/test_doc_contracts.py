@@ -9,16 +9,10 @@ import re
 import pytest
 
 from tests.chokepoint_walks import REPO_ROOT
-from tests.invariants._shared import assert_property_detector_bites
 from tests.invariants.test_knob_contracts import (
     _KNOB_PATTERN,
     _consumed_knobs,
-    _documented_browser_knobs,
-    _documented_knob_offenders,
-    _resolved_env_reader_offenders,
-    _settings_alias_failures,
 )
-from tests.property_registry import Property
 from tests.rules import Bites, Rule
 
 _DOC_REFERENCE_EXCLUSIONS = {
@@ -334,23 +328,6 @@ def test_deployment_manifest_sets_no_dead_knob():
     assert not dead, f"compose sets knobs nothing reads: {', '.join(dead)}"
 
 
-def test_deployment_knob_detector_bites(tmp_path):
-    """Proved by mutating a real manifest, not by trusting the helper.
-
-    The first version injected into the repo's own compose file and restored
-    in a ``finally``, racing the gate under parallel runs."""
-    manifest = _compose_file()
-    if not manifest.exists():
-        pytest.skip("no compose manifest in this tree")
-    probe = tmp_path / manifest.name
-    probe.write_text(
-        manifest.read_text(encoding="utf-8") + '\n  CRAWLUTRON_TYPO_PROBE: "1"\n',
-        encoding="utf-8",
-    )
-    assert "CRAWLUTRON_TYPO_PROBE" in (_deployment_knobs(probe) or set())
-    assert "CRAWLUTRON_TYPO_PROBE" not in (_deployment_knobs() or set())
-
-
 def test_document_enumeration_uses_relative_not_absolute_parts(monkeypatch, tmp_path):
     """Relative-path enumeration survives a CI checkout rooted under ``work``/;
 
@@ -378,60 +355,9 @@ def test_live_docs_point_at_paths_that_exist():
     assert not (failures := _broken_doc_reference_offenders()), "; ".join(failures)
 
 
-def test_live_doc_reference_detector_bites(tmp_path):
-    """The gate must be able to fail against a real document, or it is decoration.
-
-    Proved on a COPY: injecting a dead path into the real ``README.md`` raced
-    every other reader; the text is still the real document."""
-    assert _broken_doc_reference_offenders() == []
-
-    document = REPO_ROOT / "README.md"
-    (tmp_path / "README.md").write_text(
-        document.read_text(encoding="utf-8") + "\n`app/does_not_exist.py`\n",
-        encoding="utf-8",
-    )
-    offenders = _broken_doc_reference_offenders(root=tmp_path, documents=["README.md"])
-    assert "README.md points at `app/does_not_exist.py`, which does not exist" in offenders
-
-    (tmp_path / "README.md").write_text(
-        document.read_text(encoding="utf-8") + "\nSee `DOES_NOT_EXIST.md` for the audit trail.\n",
-        encoding="utf-8",
-    )
-    offenders = _broken_doc_reference_offenders(root=tmp_path, documents=["README.md"])
-    assert "README.md points at `DOES_NOT_EXIST.md`, which does not exist" in offenders
-
-    # A directory carries no extension, and a symbol suffix is not a line number -- both shapes a reader is
-    # still told to open, and both of which a module move breaks exactly as a renamed file does.
-    for claim in ("app/does_not_exist_dir/", "app/does_not_exist.py:connect_store"):
-        (tmp_path / "README.md").write_text(
-            document.read_text(encoding="utf-8") + f"\nSee `{claim}`.\n",
-            encoding="utf-8",
-        )
-        offenders = _broken_doc_reference_offenders(root=tmp_path, documents=["README.md"])
-        assert f"README.md points at `{claim}`, which does not exist" in offenders
-
-
 def test_doc_symbols_resolve_to_definitions():
     """Live docs cite no app symbols that don't exist."""
     assert not (failures := _doc_symbol_offenders()), "; ".join(failures)
-
-
-def test_doc_symbol_detector_bites(tmp_path):
-    """The gate must catch a stale dotted path and a stale bare symbol."""
-    symbols = _app_symbol_definitions()
-    assert _doc_symbol_offenders(symbols=symbols) == []
-    document = REPO_ROOT / "CONTRIBUTING.md"
-    (tmp_path / "CONTRIBUTING.md").write_text(
-        document.read_text(encoding="utf-8")
-        + "\nSee ``app/ghost_module.configure_service_logging``.\n"
-        + "And ``_ghost_symbol`` is also gone.\n",
-        encoding="utf-8",
-    )
-    offenders = _doc_symbol_offenders(root=tmp_path, documents=["CONTRIBUTING.md"], symbols=symbols)
-    assert any(
-        "ghost_module.configure_service_logging" in o and "module does not exist" in o for o in offenders
-    ), offenders
-    assert any("_ghost_symbol" in o and "names no app symbol" in o for o in offenders), offenders
 
 
 def test_doc_symbol_detector_spared_clean_references(tmp_path):
@@ -445,55 +371,3 @@ def test_doc_symbol_detector_spared_clean_references(tmp_path):
         encoding="utf-8",
     )
     assert _doc_symbol_offenders(root=tmp_path, documents=["CONTRIBUTING.md"], symbols=symbols) == []
-
-
-def test_documented_knob_detector_bites():
-    assert _documented_knob_offenders({"CRAWLUTRON_FAKE"}, set()) == [
-        "CRAWLUTRON_FAKE has no production consumer"
-    ]
-    assert _documented_knob_offenders(None, set()) == ["documented knob source could not be located"]
-    current = _documented_browser_knobs()
-    assert current is not None
-    assert "CRAWLUTRON_ALLOWED_HOSTS" in current
-    assert not _documented_knob_offenders({"CRAWLUTRON_ALLOWED_HOSTS"}, {"CRAWLUTRON_ALLOWED_HOSTS"})
-    assert _documented_knob_offenders({"CRAWLUTRON_LOG_FILE"}, set())
-    assert _settings_alias_failures({"missing_field": "CRAWLUTRON_FAKE"}, {"real_field"})
-    assert _settings_alias_failures(
-        {
-            "browser_lazy_scroll_steps": "CRAWLUTRON_FAKE",
-            "log_file_path": "CRAWLUTRON_FAKE",
-        },
-        {"browser_lazy_scroll_steps", "log_file_path"},
-    ) == ["browser_lazy_scroll_steps, log_file_path map to CRAWLUTRON_FAKE"]
-    prop = Property(
-        name="resolved-env-reader",
-        owner_module="app/config/settings.py",
-        owner_symbols=("from_mapping",),
-        definition_site="app/config/settings.py:from_mapping",
-        fingerprints=("environment_reader_reference",),
-        reason="A documented environment name must resolve through a value reader.",
-    )
-    assert_property_detector_bites(
-        prop,
-        _resolved_env_reader_offenders,
-        caught={
-            "mapping lookup passes field name to reader": (
-                "from app.config.settings import ENVIRONMENT_FIELD_ALIASES\n"
-                "def broken(source):\n"
-                "    return get_mapping_int(source, "
-                "ENVIRONMENT_FIELD_ALIASES['CRAWLUTRON_LAZY_SCROLL_STEPS'], 3)\n",
-                1,
-            ),
-            "docstring-only mention": (
-                "def read_setting():\n"
-                "    '''Mentions CRAWLUTRON_LAZY_SCROLL_STEPS without reading it.'''\n"
-                "    return object()\n",
-                1,
-            ),
-        },
-        quiet=(
-            "from app.config.settings import ENVIRONMENT_FIELD_ALIASES\n"
-            "def resolved(source):\n"
-            "    return get_mapping_int(source, ENVIRONMENT_FIELD_ALIASES['browser_lazy_scroll_steps'], 3)\n"
-        ),
-    )

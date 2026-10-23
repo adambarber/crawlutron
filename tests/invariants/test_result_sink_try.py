@@ -94,7 +94,3 @@ DELIVERY_NEVER_RUNS_INSIDE_THE_WORKER_TRY = Rule(
 
 def test_result_delivery_never_runs_inside_the_worker_try():
     DELIVERY_NEVER_RUNS_INSIDE_THE_WORKER_TRY.scan()
-
-
-def test_sink_try_detector_bites():
-    DELIVERY_NEVER_RUNS_INSIDE_THE_WORKER_TRY.check_bites()

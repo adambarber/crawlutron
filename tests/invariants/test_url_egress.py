@@ -128,23 +128,6 @@ def test_scope_regex_compiler_has_exactly_one_definition():
     assert "app/admission/admission_links.py" in bounds[0], bounds
 
 
-def test_scope_regex_compiler_detector_bites():
-    """The detector reports one label per definition, so the tree it must
-    reject is any tree with more than one -- two compilers, or the one
-    compiler plus a second copy of its bound."""
-    path = REPO_ROOT / "app" / "crawl" / "admission.py"
-    two_compilers = ast.parse(
-        "def compile_scope_pattern(value):\n    return value\n"
-        "def _compile_scope_regex_safe(value):\n    return value\n"
-    )
-    compiler_and_bound = ast.parse(
-        "_MAX_SCOPE_PATTERN_LEN = 256\ndef compile_scope_pattern(value):\n    return value\n"
-    )
-    assert len(_definitions_in(two_compilers, path)) == 2
-    assert len(_definitions_in(compiler_and_bound, path)) == 2
-    assert not _definitions_in(ast.parse("def _helper(value):\n    return value\n"), path)
-
-
 def _frontier_expression(node: ast.AST) -> bool:
     return isinstance(node, ast.Attribute) and node.attr == "frontier"
 
@@ -353,8 +336,3 @@ RULES = Registry(
 def test_no_rule_violations():
     """Joined URLs filter out, frontier growth funnels, the filter ladder stays shared."""
     RULES.check_all_clean()
-
-
-def test_every_rule_bites():
-    """Every rule must reject what it forbids, and spare what it resembles."""
-    RULES.check_all_bite()

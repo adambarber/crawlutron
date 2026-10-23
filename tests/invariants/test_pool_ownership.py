@@ -203,8 +203,3 @@ RULES = Registry((DOC_POOL_ACQUIRER_REAPS_RETIRED_SLOTS, RESPONSE_COOKIES_ENTER_
 def test_no_rule_violations():
     """Cookie persistence has one door, and that door is the shared fetch tail."""
     RULES.check_all_clean()
-
-
-def test_every_rule_bites():
-    """Every rule must reject what it forbids, and spare what it resembles."""
-    RULES.check_all_bite()

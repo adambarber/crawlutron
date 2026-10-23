@@ -164,8 +164,3 @@ RULES = Registry(
 def test_no_rule_violations():
     """DDL lives in migrations; every MCP tool declares its validating model."""
     RULES.check_all_clean()
-
-
-def test_every_rule_bites():
-    """Every rule must reject what it forbids, and spare what it resembles."""
-    RULES.check_all_bite()

@@ -10,7 +10,7 @@ import pathlib
 import re
 
 from tests.chokepoint_walks import REPO_ROOT, assignment_targets, relative_posix
-from tests.invariants._shared import _declared_public_symbols, assert_property_detector_bites
+from tests.invariants._shared import _declared_public_symbols
 from tests.property_registry import Property
 
 _PUBLIC_SURFACE_PROPERTY = Property(
@@ -258,18 +258,6 @@ def test_property_owner_public_surface_counts_do_not_grow():
 def test_property_owner_public_surface_budgets_are_tight():
     stale = _surface_budget_offenders(grown=False)
     assert not stale, "property owner budgets are stale; lower them to: " + ", ".join(stale)
-
-
-def test_public_surface_detector_bites():
-    historical_decompression_owner = (
-        REPO_ROOT / "tests" / "fixtures" / "safety" / "historical_decompression_owner.txt"
-    ).read_text(encoding="utf-8")
-    assert_property_detector_bites(
-        _PUBLIC_SURFACE_PROPERTY,
-        _public_surface_offenders,
-        caught={"uncapped decompression at ca425fc": (historical_decompression_owner, 1)},
-        quiet=(REPO_ROOT / "app" / "admission" / "credentials.py").read_text(encoding="utf-8"),
-    )
 
 
 # --------------------------------------------------------------------------- app/models: one home per

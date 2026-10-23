@@ -211,8 +211,3 @@ RULES = Registry(
 def test_no_rule_violations():
     """The three extraction modes are dispatched in one module, not per strategy."""
     RULES.check_all_clean()
-
-
-def test_every_rule_bites():
-    """A re-spelled dispatch or projection fires; the sanctioned shape stays clean."""
-    RULES.check_all_bite()

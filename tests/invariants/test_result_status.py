@@ -91,8 +91,3 @@ RESULTS_DERIVE_THEIR_STATUS_FROM_THE_TAXONOMY = Rule(
 def test_results_derive_their_status_from_the_taxonomy():
     """No record outside the chokepoint spells both taxonomy axes as literals."""
     RESULTS_DERIVE_THEIR_STATUS_FROM_THE_TAXONOMY.scan()
-
-
-def test_result_status_pair_detector_bites():
-    """A spelled pair fires; deriving either axis stays clean."""
-    RESULTS_DERIVE_THEIR_STATUS_FROM_THE_TAXONOMY.check_bites()

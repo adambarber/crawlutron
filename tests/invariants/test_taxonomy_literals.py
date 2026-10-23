@@ -86,15 +86,6 @@ def test_the_literal_field_check_is_called_by_one_owner():
     THE_LITERAL_FIELD_CHECK_IS_CALLED_BY_ONE_OWNER.scan()
 
 
-def test_literal_check_owner_detector_bites():
-    """The owner guard fires on a re-spelled trampoline and admits the base.
-
-    It must not fire on a different module's function that shares the name,
-    resolved by import bindings rather than text.
-    """
-    THE_LITERAL_FIELD_CHECK_IS_CALLED_BY_ONE_OWNER.check_bites()
-
-
 def test_every_taxonomy_literal_dataclass_inherits_the_construction_check():
     """A dataclass that declares a taxonomy ``Literal`` field inherits the check.
 

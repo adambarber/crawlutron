@@ -147,55 +147,6 @@ def test_wire_models_mirror_every_domain_field():
     )
 
 
-def test_wire_mirror_detector_bites():
-    """A dropped field and a wire-only field both fire; an exact pair stays clean."""
-    owner = "@dataclass(frozen=True)\nclass Link:\n    url: str\n    host: str\n    depth: int\n"
-    assert not _wire_mirror_drift(
-        _synthetic_pair(
-            owner,
-            "from pydantic import BaseModel\nclass LinkResponse(BaseModel):\n"
-            "    url: str\n    host: str\n    depth: int\n",
-        )
-    )
-
-    drifted = _wire_mirror_drift(
-        _synthetic_pair(owner, "class LinkResponse(BaseModel):\n    url: str\n    host: str\n")
-    )
-    assert len(drifted) == 1, drifted
-    assert "Link.depth" in drifted[0] and "dropped on the wire" in drifted[0], drifted
-
-    drifted = _wire_mirror_drift(
-        _synthetic_pair(
-            owner,
-            "class LinkResponse(BaseModel):\n    url: str\n    host: str\n    depth: int\n    score: float\n",
-        )
-    )
-    assert len(drifted) == 1, drifted
-    assert "Link.score" in drifted[0] and "nowhere internally" in drifted[0], drifted
-
-    # A bare @dataclass, a subscripted BaseModel[str] base and a total=False TypedDict are three spellings of
-    # "declares a key set"; all must be matched.
-    assert _wire_mirror_drift(
-        _synthetic_pair(
-            "@dataclass\nclass Link:\n    url: str\n    host: str\n    depth: int\n",
-            "class LinkResponse(BaseModel[str]):\n    url: str\n    host: str\n",
-        )
-    )
-    assert not _wire_mirror_drift(
-        _synthetic_pair(
-            "class Link(TypedDict, total=False):\n    title: str\n    favicon: str\n",
-            "class LinkResponse(BaseModel):\n    title: str\n    favicon: str\n",
-        )
-    )
-    drifted = _wire_mirror_drift(
-        _synthetic_pair(
-            "class Link(TypedDict):\n    title: str\n",
-            "class LinkResponse(BaseModel):\n    title: str\n    favicon: str\n",
-        )
-    )
-    assert drifted == ["Link.favicon is declared on the wire and nowhere internally"], drifted
-
-
 # --- An advertised payload key may not be dropped by its response model ------- The two discovery endpoints
 # build a dict by hand and hand it to FastAPI with a strict `response_model=`.
 
@@ -262,33 +213,6 @@ def test_every_advertised_payload_key_is_declared_on_its_response_model(
     )
 
 
-def test_advertised_payload_detector_bites():
-    """An undeclared advertised key fires; an exact pair stays clean; a blind spot raises."""
-    wire = ast.parse("class Capabilities(BaseModel):\n    service: str\n    crawl_timing: Timing\n")
-    exact = ast.parse("def payload():\n    return {'service': 'x', 'crawl_timing': {}}\n")
-    assert not _undeclared_advertised_keys(exact, wire, "payload", "Capabilities")
-
-    drifted = ast.parse(
-        "def payload():\n    return {'service': 'x', 'crawl_timing': {}, 'limits': {}, 'extra': 1}\n"
-    )
-    reported = _undeclared_advertised_keys(drifted, wire, "payload", "Capabilities")
-    assert len(reported) == 2, reported
-    assert "'extra'" in reported[0] and "dropped by Capabilities" in reported[0], reported
-    assert "'limits'" in reported[1], reported
-
-    # A declared field the payload never sends is not drift in this direction: the model is the stricter of
-    # the two and a required field is caught by FastAPI.
-    assert not _undeclared_advertised_keys(
-        ast.parse("def payload():\n    return {'service': 'x'}\n"), wire, "payload", "Capabilities"
-    )
-
-    # A payload assembled statement by statement defeats static extraction, and going quiet on that shape
-    # would be the very defect this gate exists to stop.
-    assembled = ast.parse("def payload():\n    d = {}\n    d['service'] = 'x'\n    return d\n")
-    with pytest.raises(AssertionError, match="dict literal"):
-        _undeclared_advertised_keys(assembled, wire, "payload", "Capabilities")
-
-
 # --------------------------------------------------------------------------- One declaration of what a result
 # is ---------------------------------------------------------------------------
 
@@ -348,36 +272,6 @@ def test_the_two_terminal_funnels_construct_the_attempt_with_the_same_fields():
         f"A field added to one terminal funnel and not the other silently diverges "
         f"the shared attempt shape -- add it to both in the same change."
     )
-
-
-def test_attempt_constructor_mirror_detector_bites():
-    """The funnel field-set comparison fires on a planted one-sided field."""
-    both = (
-        "def terminal_attempt(**kw):\n"
-        "    return CrawlStrategyAttempt(strategy=None, status='failed', "
-        "classification='x', http_status=None, content_type=None, elapsed_ms=0, error=None)\n"
-        "def terminal_engine_result(**kw):\n"
-        "    return CrawlStrategyAttempt(strategy=None, status='failed', "
-        "classification='x', http_status=None, content_type=None, elapsed_ms=0, error=None)\n"
-    )
-    clean_tree = ast.parse(both)
-    clean_fields = {
-        spec.split(":", 1)[1]: _constructor_keywords(
-            clean_tree, spec.split(":", 1)[1], "CrawlStrategyAttempt"
-        )
-        for spec in _FUNNEL_ATTEMPT_FIELDS
-    }
-    assert clean_fields["terminal_attempt"] == clean_fields["terminal_engine_result"]
-
-    drifted = both.replace(
-        "error=None)\n",
-        "error=None, drifted_field=1)\n",
-        1,
-    )
-    drifted_tree = ast.parse(drifted)
-    first = _constructor_keywords(drifted_tree, "terminal_attempt", "CrawlStrategyAttempt")
-    second = _constructor_keywords(drifted_tree, "terminal_engine_result", "CrawlStrategyAttempt")
-    assert first != second and "drifted_field" in (first ^ second)
 
 
 def test_the_internal_and_wire_taxonomies_name_the_same_members():

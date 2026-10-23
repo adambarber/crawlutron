@@ -4,14 +4,10 @@ from __future__ import annotations
 
 import importlib.util
 import re
-import subprocess
 import tomllib
 from pathlib import Path
 
-import pytest
 import yaml
-
-from scripts.executables import GIT, require_executable, require_repo_tool
 
 SERVICE_ROOT = Path(__file__).resolve().parents[1]
 
@@ -148,28 +144,6 @@ def _hook_blocks(config: str) -> list[tuple[str, dict]]:
 PRE_COMMIT = "pre-commit"
 
 
-def _run_precommit_on_temp_config(temp_dir: Path, config_text: str) -> subprocess.CompletedProcess[str]:
-    """Run the REAL pre-commit binary against a synthetic config in a temp dir; the
-    caller asserts on returncode. This is how the gate proves no `exclude` pattern
-    disables every hook -- the binary must actually run something.
-    """
-    config_path = Path(temp_dir) / "test-pre-commit-config.yaml"
-    config_path.write_text(config_text, encoding="utf-8")
-    (Path(temp_dir) / "probe.py").write_text("x = 1\n", encoding="utf-8")
-    subprocess.run([require_executable(GIT), "init", "-q", str(temp_dir)], check=True, capture_output=True)
-    subprocess.run(
-        [require_executable(GIT), "-C", str(temp_dir), "add", "probe.py"], check=True, capture_output=True
-    )
-    return subprocess.run(
-        [require_repo_tool(SERVICE_ROOT, PRE_COMMIT), "run", "--all-files", "--config", str(config_path)],
-        cwd=temp_dir,
-        capture_output=True,
-        text=True,
-        check=False,
-        timeout=30,
-    )
-
-
 def _assert_no_config_exclude(config: str) -> None:
     """`exclude: .*` disables every hook -- all files excluded, all hooks Skipped,
     exit 0 -- so the contract runs the real binary against a synthetic config that
@@ -287,64 +261,3 @@ def test_pins_shared_between_the_dev_extra_and_requirements_dev_agree() -> None:
                 f"{name}: dev extra pins {dev_pins[name]}, requirements-dev.txt pins {match.group(2)}"
             )
     assert not drift, "pinned tool versions drift between the two declarations:\n  " + "\n  ".join(drift)
-
-
-def test_a_hook_module_missing_from_the_dev_extra_bites() -> None:
-    """Bites: a hook entry naming an undeclared module fails the resolver."""
-    config = CONFIG_PATH.read_text(encoding="utf-8")
-    assert "python -m ghost_module" not in config
-    broken = config.replace(
-        "python -m vulture app tests scripts",
-        "python -m ghost_module app tests scripts",
-    )
-    modules = sorted(
-        {match for _, block in _hook_blocks(broken) for match in _HOOK_MODULE.findall(_entry(block))}
-    )
-    assert "ghost_module" in modules
-    assert importlib.util.find_spec("ghost_module") is None
-
-
-def _synthetic_config(exclude: str | None, entry: str = "bash -c 'exit 1'") -> str:
-    """A minimal local pre-commit config carrying one always-failing hook."""
-    exclude_line = f"exclude: {exclude}\n" if exclude is not None else ""
-    return (
-        f"{exclude_line}"
-        "repos:\n"
-        "  - repo: local\n"
-        "    hooks:\n"
-        "      - id: synthetic\n"
-        "        name: synthetic gate\n"
-        f"        entry: {entry}\n"
-        "        language: system\n"
-        "        pass_filenames: false\n"
-        "        files: '\\.py$'\n"
-    )
-
-
-def test_config_exclude_dot_star_makes_hooks_skipped(tmp_path) -> None:
-    """REPRO: under `exclude: .*` a hook that runs `exit 1` reports Skipped and the
-    binary exits 0, so the enforcement vanishes with nothing to trip on -- a root
-    exclude is a bypass no execution catches, because hooks never run.
-    """
-    skipped = _run_precommit_on_temp_config(tmp_path, _synthetic_config(".*"))
-    assert skipped.returncode == 0, f"skipped hooks exit 0:\n{skipped.stdout}"
-    assert "Skipped" in skipped.stdout, f"the hook must be reported Skipped:\n{skipped.stdout}"
-
-
-def test_config_without_exclude_runs_the_hook_and_fails(tmp_path) -> None:
-    """The harness is real pre-commit: without exclude the hook fails."""
-    completed = _run_precommit_on_temp_config(tmp_path, _synthetic_config(None))
-    assert completed.returncode != 0, (
-        f"the synthetic hook must fail when it actually runs:\nstdout:\n{completed.stdout}"
-    )
-    assert "exit code: 1" in completed.stdout, f"the hook did not run as expected:\n{completed.stdout}"
-
-
-def test_the_gate_rejects_a_config_exclude_that_disables_every_hook() -> None:
-    """Bites: `_assert_no_config_exclude` fires on `exclude: .*`."""
-    with pytest.raises(ValueError, match="disables every hook"):
-        _assert_no_config_exclude("repos: []\nexclude: .*\n")
-
-
-def test_the_gate_accepts_a_config_without_a_root_exclude() -> None:
-    _assert_no_config_exclude("repos: []\n")

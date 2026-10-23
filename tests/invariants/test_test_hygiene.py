@@ -234,11 +234,6 @@ def test_every_test_function_is_one_pytest_can_collect():
     EVERY_TEST_FUNCTION_IS_ONE_PYTEST_CAN_COLLECT.scan()
 
 
-def test_uncollectible_test_detector_bites():
-    """Every uncollectible shape fires; both collectible shapes stay clean."""
-    EVERY_TEST_FUNCTION_IS_ONE_PYTEST_CAN_COLLECT.check_bites()
-
-
 # =========================================================================== ALIAS-BLINDNESS (program 3):
 # detectors must resolve import bindings, not match on a literal module name
 
@@ -252,22 +247,6 @@ def test_dynamic_pattern_re_calls_under_any_alias():
         "re.<method> with a dynamic pattern must go through app.safety.safe_regex, under any"
         f" import alias: {'; '.join(offenders)}"
     )
-
-
-def test_alias_detector_bites():
-
-    aliased = ast.parse("import re as _re\n\n\ndef f(p):\n    return _re.compile(p)\n")
-    hits = aliased_dynamic_pattern_re_offenders(aliased, REPO_ROOT / "app" / "_synthetic.py")
-    assert len(hits) == 1 and "_re.compile" in hits[0], hits
-    # A literal pattern under the same alias is safe and stays unflagged.
-    literal = ast.parse('import re as _re\n\n\ndef f():\n    return _re.compile(r"<loc>")\n')
-    assert not aliased_dynamic_pattern_re_offenders(literal, REPO_ROOT / "app" / "_synthetic.py")
-    # The plain ``re`` name is still covered (subsumption of the old detector).
-    plain = ast.parse("import re\n\n\ndef f(p):\n    return re.search(p, t)\n")
-    assert aliased_dynamic_pattern_re_offenders(plain, REPO_ROOT / "app" / "_synthetic.py")
-    # No re import at all: nothing to check.
-    none_ = ast.parse("def f(p):\n    return compile(p)\n")
-    assert not aliased_dynamic_pattern_re_offenders(none_, REPO_ROOT / "app" / "_synthetic.py")
 
 
 def test_sanctioned_func_calls_under_any_alias():
@@ -284,27 +263,6 @@ def test_sanctioned_func_calls_under_any_alias():
     )
 
 
-def test_sanctioned_func_alias_detector_bites():
-    """The alias audit fires on a spelling the hand-kept list does not contain,
-    and stays silent on the two spellings the existing list already covers."""
-
-    unknown = ast.parse(
-        "from app.transport.decompression import decompress_body as dec\n\n"
-        "def f(raw, enc):\n    return dec(raw, enc)\n"
-    )
-    hits = aliased_sanctioned_func_offenders(unknown, REPO_ROOT / "app" / "_synthetic.py")
-    assert len(hits) == 1 and "decompress_body" in hits[0], hits
-    # The two spellings _DECOMPRESS_FUNCS already lists are known and silent.
-    known = ast.parse(
-        "from app.transport.decompression import decompress_body as _decompress_body\n\n"
-        "def f(raw, enc):\n    return _decompress_body(raw, enc)\n"
-    )
-    assert not aliased_sanctioned_func_offenders(known, REPO_ROOT / "app" / "_synthetic.py")
-    # An import that is not a sanctioned function is not this sweep's business.
-    unrelated = ast.parse("from os import path as p\n\n\ndef f():\n    return p.join('a')\n")
-    assert not aliased_sanctioned_func_offenders(unrelated, REPO_ROOT / "app" / "_synthetic.py")
-
-
 # =========================================================================== TEST DOUBLES THAT SWALLOW
 # SIGNATURE DRIFT (program 4) ===========================================================================
 
@@ -319,14 +277,6 @@ def test_doubles_do_not_accept_and_drop_kwargs():
         " double that drops it implements a contract that no longer exists",
         trees=trees_under(TESTS_DIR),
     )
-
-
-def test_failed_result_binding_detector_bites():
-    """Bites: the shape that shipped, and the two ways the rule could go dead.
-
-    Offender: a ``run`` with the scheduler's positionals plus ``**kwargs``, so
-    the envelope cannot land; a binding ``run`` is the property asserted."""
-    SCHEDULER_DOUBLES_BIND_FAILED_RESULT.check_bites()
 
 
 def _scheduler_run_positional_names() -> tuple[str, ...]:

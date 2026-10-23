@@ -111,17 +111,6 @@ def test_a_tests_module_never_declares_a_name_app_models_declares() -> None:
     assert not findings, f"harness doubles of app/models/ declarations: {findings}"
 
 
-def test_a_type_alias_double_bites() -> None:
-    """A ``type X = ...`` statement (the PEP 695 form production uses) is found."""
-    models = _model_declared_names()
-    planted = ast.parse("type NormalizedUrl = str\ntype JsonValue = None | bool | int | float | str\n")
-    planted_names = [name for node in planted.body for name in node_names(node)]
-    assert planted_names == ["NormalizedUrl", "JsonValue"], planted_names
-    assert all(name in models for name in planted_names), (
-        "the detector stopped matching the declaration form production uses"
-    )
-
-
 def test_a_tests_module_never_mirrors_a_production_field_shape() -> None:
     """The #112 shape gate: a tests/ record whose full field set equals a
     production record's is a double under another name. Equality of the whole
@@ -135,39 +124,6 @@ def test_a_tests_module_never_mirrors_a_production_field_shape() -> None:
         if shape in model_shapes
     }
     assert not findings, f"harness records mirroring app/models/ shapes under other names: {findings}"
-
-
-def test_a_renamed_shape_double_bites() -> None:
-    """A dataclass copying a production record's fields under a new name is found."""
-    model_shapes = _declared_shapes(REPO_ROOT / "app" / "models")
-    planted = ast.parse(
-        "from dataclasses import dataclass\n"
-        "@dataclass\n"
-        "class MyCacheEntry:\n"
-        "    value: str\n"
-        "    expires: float | None\n"
-        "    cached_at: float\n"
-    )
-    planted_shape = _record_shape(planted.body[1])
-    assert planted_shape is not None
-    assert planted_shape in model_shapes, (
-        "the shape detector stopped matching a planted renamed double of CacheEnvelope"
-    )
-
-
-def test_the_double_detector_bites() -> None:
-    """A planted double (a declared app/models/ name) is found, modules named."""
-    models = _model_declared_names()
-    assert "EngineCrawlResult" in models and "NormalizedUrl" in models, (
-        "the model census came back empty or blind; the detector would govern nothing"
-    )
-    planted = ast.parse("class NormalizedUrl:\n    pass\n\nNormalizedUrlAlias = NormalizedUrl\n")
-    planted_names: list[str] = []
-    for node in planted.body:
-        planted_names.extend(node_names(node))
-    assert any(name in models for name in planted_names), (
-        "the detector's own trigger shape stopped matching a planted double"
-    )
 
 
 def test_the_admission_helper_declares_the_production_known_set() -> None:

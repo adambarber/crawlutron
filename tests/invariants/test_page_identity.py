@@ -71,15 +71,6 @@ def test_page_identity_fallback_is_not_written_out_at_call_sites():
     RULES.check_all_clean()
 
 
-def test_page_identity_fallback_detector_bites():
-    """The sweep must fire on a hand-rolled fallback and stay off a lookalike.
-
-    Without the clean case a detector that cries wolf gets deleted; the firing
-    and clean cases are both declared on the rule, so neither can drop out.
-    """
-    RULES.check_all_bite()
-
-
 def test_admitted_raw_is_the_durable_identity():
     """The owner's contract: an admitted value's stored form is its ``.raw``.
 

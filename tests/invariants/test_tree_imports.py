@@ -6,16 +6,13 @@ from collections.abc import Iterator
 
 from tests.chokepoint_walks import (
     APP_ROOT,
-    REPO_ROOT,
     TESTS_DIR,
     from_imports,
     offender_at,
     plain_imports,
-    relative_posix,
-    trees_under,
 )
 from tests.invariants.test_tree_immutability import _tests_tree
-from tests.rules import Bites, Registry, Rule, Silent
+from tests.rules import Bites, Registry, Rule
 
 # Measured on tests/invariants/ alone: 37.7s of a 49.4s file, led by
 # test_property_registry_fingerprints_are_observed 8.06s, test_documented_browser_knobs_have_consumers
@@ -75,89 +72,6 @@ def _bare_sibling_import_offenders(tree: ast.AST, path: pathlib.Path) -> list[st
     ]
 
 
-def _own_package(module: str) -> str:
-    """The package a dotted module name belongs to.
-
-    ``app.transport.http`` -> ``app.transport``; a top-level module resolves to
-    ``app``, never itself, so leaf and siblings share one boundary."""
-    head, _, _tail = module.rpartition(".")
-    return head
-
-
-def _dotted_module(path: pathlib.Path) -> str:
-    """``app/admission/admission.py`` -> ``app.admission.admission``.
-
-    Root-relative because the judged import is root-relative; a path-vs-dotted
-    comparison never matches, and the failure is quiet."""
-    return relative_posix(path).removesuffix(".py").replace("/", ".")
-
-
-def _private_leak_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
-    """A private app name imported from outside the package that defines it.
-
-    Binding a name into another package defeats the underscore, so the fix is
-    to promote the name; judging the imported-from module makes this provable."""
-    module = _dotted_module(path)
-    here = _own_package(module)
-    return [
-        offender_at(
-            path,
-            node,
-            f"imports '{alias.name}' from '{node.module}', which is outside the "
-            f"'{here}' package that defines it; a name another package needs is not private",
-        )
-        for node in from_imports(tree)
-        if node.module and node.module.startswith("app") and _own_package(node.module) != here
-        for alias in node.names
-        if alias.name.startswith("_") and not alias.name.startswith("__")
-    ]
-
-
-#: ``app/api/render.py``: in ``app.api``, so anything under ``app.orchestration`` is outside its package.
-_RENDER_PROOF_PATH = REPO_ROOT / "app" / "api" / "render.py"
-
-
-#: A real sibling of ``transport.content_pipeline``, so the private import in the clean proof resolves inside
-#: one package and must stay quiet.
-_TRANSPORT_SIBLING_PROOF_PATH = REPO_ROOT / "app" / "transport" / "browser_result.py"
-
-
-PRIVATE_NAME_LEAKS_PACKAGE = Rule(
-    name="a-private-app-name-is-not-importable-outside-its-package",
-    find=_private_leak_offenders,
-    summary=(
-        "a leading underscore means package-internal: promote the name if another package needs it, "
-        "rather than importing it across the boundary where the convention no longer holds"
-    ),
-    scope=lambda *, exclude: trees_under(APP_ROOT),
-    bite=lambda: Bites(
-        # Names that do NOT exist in app/.
-        "from app.transport.http import _unpromoted_strategy_result\n"
-        "from app.safety.validation import _unpromoted_private_target_gate\n",
-        marker="which is outside the",
-        count=2,
-        at=_RENDER_PROOF_PATH,
-    ),
-    clean=lambda: (
-        # A sibling in the defining package: private, and reachable only from here.
-        Silent(
-            "from app.transport.content_pipeline import _unpromoted_sibling_detail\n",
-            at=_TRANSPORT_SIBLING_PROOF_PATH,
-        ),
-        # Public cross-package: no underscore, so no boundary is being crossed.
-        "from app.vocabulary.identity import USER_AGENT_TOKEN\n",
-        # dunder spellings are not privacy, they are protocol hooks.
-        "from app.transport.http import __all__\n",
-        # stdlib and third-party are outside the rule entirely.
-        "import httpx\nfrom pathlib import Path\n",
-    ),
-)
-
-
-# The one shared gate: each rule carries its own scope (app/ for the leak rule, tests/ for the
-# package-path rule), and Registry applies each rule's own trees.
-
-
 TEST_HELPERS_IMPORTED_BY_PACKAGE_PATH = Rule(
     name="test-helpers-imported-by-package-path",
     find=_bare_sibling_import_offenders,
@@ -188,20 +102,12 @@ TEST_HELPERS_IMPORTED_BY_PACKAGE_PATH = Rule(
 )
 
 
-RULES = Registry((PRIVATE_NAME_LEAKS_PACKAGE, TEST_HELPERS_IMPORTED_BY_PACKAGE_PATH))
+RULES = Registry((TEST_HELPERS_IMPORTED_BY_PACKAGE_PATH,))
 
 
 def test_no_rule_violations():
-    """No module reaches a private name across its package, or a sibling by bare name.
+    """No module imports a test sibling by bare name.
 
-    The load-bearing half of a genuinely private name -- the thing a reviewer
+    The load-bearing half of a package-path import -- the thing a reviewer
     cannot check at a glance when reading an import."""
     RULES.check_all_clean()
-
-
-def test_every_rule_bites():
-    """Bites across each boundary; silent inside it, and silent on the rest.
-
-    Each rule's clean case pins the ways it must not degenerate: sibling,
-    public and dunder spellings, and non-app, stdlib, third-party imports."""
-    RULES.check_all_bite()

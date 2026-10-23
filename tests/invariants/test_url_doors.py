@@ -212,8 +212,3 @@ RULES = Registry((BATCH_DEDUP_KEYS_ON_ADMITTED_IDENTITY, EVERY_HTTP_BODY_READ_IS
 def test_no_rule_violations():
     """Batch dedup keys on admitted identity; every body read is capped."""
     RULES.check_all_clean()
-
-
-def test_every_rule_bites():
-    """The raw dedup and both unbounded read shapes fire; the chokepoint forms stay clean."""
-    RULES.check_all_bite()

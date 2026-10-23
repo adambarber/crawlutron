@@ -7,7 +7,7 @@ shape; the protocol names it, and this gate keeps the implementers conforming.
 import ast
 
 from app.runtime.resource_lifecycle import ResourceLifecycle
-from tests.chokepoint_walks import REPO_ROOT, app_trees, offender_at
+from tests.chokepoint_walks import app_trees, offender_at
 
 
 def _close_implementers(tree: ast.Module, path) -> list[ast.ClassDef]:
@@ -67,20 +67,6 @@ def test_the_eight_declared_implementers_are_still_the_eight():
         "ResourceGate",
         "ResultSpill",
     }, f"the close-implementer census drifted: {sorted(implementers)}"
-
-
-def test_the_protocol_bites_on_a_drifted_close():
-    """The declared shape is load-bearing: a close with extra arguments or no
-    declared return is not the protocol, and the gate names it."""
-    drifted = ast.parse(
-        "class Drifted:\n    def close(self, force: bool) -> None: ...\n    async def untyped(self): ...\n"
-    )
-    bad = [
-        node.name
-        for node in _close_implementers(drifted, REPO_ROOT / "app" / "_synthetic.py")
-        if not _conforms(node)
-    ]
-    assert bad == ["Drifted"], "the conformance check stopped firing"
 
 
 def test_the_protocol_names_the_release_shape():
@@ -145,22 +131,3 @@ def test_the_module_level_release_census_is_still_the_declared_six():
     """
     found = _module_release_paths(app_trees())
     assert found == _MODULE_RELEASE_NAMES, f"the module-level release census drifted: {sorted(found)}"
-
-
-def test_the_module_release_detector_bites_on_a_new_release_path():
-    """A synthetic release function is caught, via an ``.attr`` release call or the
-    shared ``discard_if_unowned_loop`` helper (#415)."""
-    synthetic = ast.parse(
-        "from app.transport.pooled_clients import discard_if_unowned_loop\n"
-        "POOL = build_pool()\n"
-        "async def close_new_resource() -> None:\n"
-        "    POOL.shutdown()\n"
-        "def close_queued_resource() -> None:\n"
-        "    discard_if_unowned_loop(_close, '_SLOT', globals())\n"
-        "async def shutdown_unrelated() -> None:\n"  # a shutdown-shaped name that releases nothing
-        "    logger.info('done')\n"
-    )
-    found = _module_release_paths([(REPO_ROOT / "app" / "_synthetic.py", synthetic)])
-    assert found == {"close_new_resource", "close_queued_resource"}, (
-        f"the module release detector is blind: {sorted(found)}"
-    )

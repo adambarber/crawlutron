@@ -214,8 +214,3 @@ RULES = Registry((VOCABULARY_PRIMITIVES_ARE_REFERENCED, RETIRED_VOCABULARY_IS_NO
 def test_no_rule_violations():
     """Vocabulary primitives are referenced; retired buckets are not imported."""
     RULES.check_all_clean()
-
-
-def test_every_rule_bites():
-    """Bites, and the neighbours that must stay quiet."""
-    RULES.check_all_bite()

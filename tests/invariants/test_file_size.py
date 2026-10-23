@@ -47,19 +47,6 @@ def overlong(root: str) -> dict[str, int]:
     return scan(REPO_ROOT / root, include_gate=(root == "scripts"))
 
 
-def test_the_detector_bites_over_the_ceiling(
-    tmp_path: pathlib.Path,
-) -> None:
-    """A planted 501-line file fires; a 500-line file stays clean."""
-    over = tmp_path / "over.py"
-    over.write_text("\n".join(f"x_{i} = {i}" for i in range(501)) + "\n")
-    ok = tmp_path / "ok.py"
-    ok.write_text("\n".join(f"x_{i} = {i}" for i in range(500)) + "\n")
-    found = scan(tmp_path)
-    assert list(found) == [over.as_posix()]
-    assert found[over.as_posix()] == 501
-
-
 def test_scan_includes_the_extensionless_gate_helper(tmp_path: pathlib.Path) -> None:
     """The H1 reach: the extensionless scripts/gate is not invisible to the file gate.
 

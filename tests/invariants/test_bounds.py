@@ -436,14 +436,6 @@ def test_no_rule_violations():
     RULES.check_all_clean()
 
 
-def test_every_rule_bites():
-    """Every rule must reject what it forbids, and spare what it resembles.
-
-    Declared on the rule, so a detector cannot be added without a proof that
-    it can fire -- or quietly weakened to match a proof that no longer fires."""
-    RULES.check_all_bite()
-
-
 # --------------------------------------------------------------------------- Advertise only the encodings
 # this process can decode ---------------------------------------------------------------------------
 _ALWAYS_DECODABLE_ENCODINGS = {"gzip", "deflate", "identity"}

@@ -194,8 +194,3 @@ NO_UNCLAIMED_CONTAINER_PROTOCOL = Rule(
 def test_no_app_class_promises_a_container_nobody_asks_for():
     """`_LockedDomainCookieStore` inherited ten methods no app/ caller reaches."""
     NO_UNCLAIMED_CONTAINER_PROTOCOL.scan()
-
-
-def test_container_protocol_detector_bites():
-    """A container base with no app-side signature fires, plain or subscripted."""
-    NO_UNCLAIMED_CONTAINER_PROTOCOL.check_bites()

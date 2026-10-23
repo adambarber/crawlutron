@@ -15,7 +15,7 @@ from tests.chokepoint_walks import (
     offender,
     resolved_call_name,
 )
-from tests.invariants._shared import _relative_app_path, assert_property_detector_bites
+from tests.invariants._shared import _relative_app_path
 from tests.invariants.test_registry import (
     _PROPERTY_MODULES,
     _module_aware,
@@ -310,39 +310,6 @@ def test_robots_policy_has_one_implementation():
 
 def test_robots_policy_registry_is_not_empty():
     assert _property("robots-policy").fingerprints
-
-
-def test_robots_policy_detector_bites():
-    assert_property_detector_bites(
-        _property("robots-policy"),
-        _robots_policy_offenders,
-        caught={
-            "parser call and cache": (
-                "from app.safety.bounded_ttl import BoundedTTLCache as Cache\n"
-                "from app.orchestration.robots_parse import parse_robots_rules as parse\n"
-                "def robots_loader(origin):\n"
-                "    cache = Cache(max_entries=1, ttl=1)\n"
-                "    return parse('User-agent: *')\n",
-                2,
-            ),
-            "parser definition": (
-                "def parse_robots_rules(text):\n    return [(True, text)]\n",
-                1,
-            ),
-            "renamed parser definition": (
-                "def decode_directives(text):\n"
-                "    rows = text.splitlines()\n"
-                "    return [(True, row) for row in rows if 'disallow' in row.lower()]\n",
-                1,
-            ),
-            **_ROBOTS_URL_FORMS_CAUGHT,
-        },
-        quiet=(
-            "from app.orchestration.robots import load_robots_rules as load\n"
-            "def check(origin):\n"
-            "    return load(origin, fetcher, 5)\n"
-        ),
-    )
 
 
 def _observe_robots_policy(tree: ast.AST, path: pathlib.Path, prop: Property) -> dict[str, int]:

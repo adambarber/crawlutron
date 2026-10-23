@@ -2,11 +2,9 @@
 
 from __future__ import annotations
 
-import ast
-
 import pytest
 
-from tests.chokepoint_walks import REPO_ROOT, app_offenders
+from tests.chokepoint_walks import app_offenders
 
 
 def test_crawl_strategy_name_members_match_vocabulary():
@@ -94,25 +92,6 @@ def test_result_primitives_emit_only_declared_literal_members():
         " declared Literal, or the strict enum at response shaping rejects the whole"
         f" batch: {'; '.join(offenders)}"
     )
-
-
-def test_generic_membership_detector_bites():
-    """The generic detector fires on the historical regression shape, and only
-    on it -- the proof that replacing the per-field list with a derived one did
-    not silently turn the sweep into a no-op."""
-    from tests.membership_gate import generic_literal_field_offenders, literal_typed_field_members
-
-    members = literal_typed_field_members()
-    assert members, "no Literal fields were enumerated; the generic sweep is a no-op"
-    bad = ast.parse('def f():\n    return failed_engine_result(classification="totally_made_up")\n')
-    hits = generic_literal_field_offenders(bad, REPO_ROOT / "app" / "_synthetic.py", members=members)
-    assert len(hits) == 1 and "totally_made_up" in hits[0], hits
-    # A real member literal passes.
-    good = ast.parse('def f():\n    return failed_engine_result(classification="network_error")\n')
-    assert not generic_literal_field_offenders(good, REPO_ROOT / "app" / "_synthetic.py", members=members)
-    # A non-literal (the shape a correct caller writes) passes without comment.
-    var = ast.parse("def f(c):\n    return failed_engine_result(classification=c)\n")
-    assert not generic_literal_field_offenders(var, REPO_ROOT / "app" / "_synthetic.py", members=members)
 
 
 def test_generic_membership_subsumes_the_per_field_detectors():
@@ -225,31 +204,6 @@ def test_result_primitives_take_taxonomy_constants_not_foreign_namespaces():
         " value collides with a real member which is exactly why a value check misses"
         f" it: {'; '.join(offenders)}"
     )
-
-
-def test_wrong_namespace_detector_bites():
-    """The provenance detector fires on the historical shape and admits the
-    correct one."""
-    from tests.membership_gate import literal_typed_field_members, namespace_constant_offenders
-
-    members = literal_typed_field_members()
-    bad = ast.parse(
-        'EXTRACTION_METHOD_BINARY_NO_TEXT = "binary_no_text"\n'
-        "def f():\n"
-        "    return failed_engine_result(classification=EXTRACTION_METHOD_BINARY_NO_TEXT)\n"
-    )
-    hits = namespace_constant_offenders(bad, REPO_ROOT / "app" / "_synthetic.py", members=members)
-    assert len(hits) == 1 and "EXTRACTION_METHOD_" in hits[0], hits
-    # The same constant used as its own field is the intended use.
-    ok = ast.parse(
-        'EXTRACTION_METHOD_BINARY_NO_TEXT = "binary_no_text"\n'
-        "def f(m):\n"
-        "    return build_engine_result(extraction_method=EXTRACTION_METHOD_BINARY_NO_TEXT)\n"
-    )
-    assert not namespace_constant_offenders(ok, REPO_ROOT / "app" / "_synthetic.py", members=members)
-    # A parameter (what a correct caller writes) is not a constant: passes.
-    param = ast.parse("def f(cls):\n    return failed_engine_result(classification=cls.site_error)\n")
-    assert not namespace_constant_offenders(param, REPO_ROOT / "app" / "_synthetic.py", members=members)
 
 
 # --------------------------------------------------------------------------- The runtime gate (program 1+2

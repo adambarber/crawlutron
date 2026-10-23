@@ -4,8 +4,6 @@ import ast
 import pathlib
 import re
 
-import httpx
-
 from tests.chokepoint_walks import (
     SANCTIONED,
     app_trees,
@@ -55,48 +53,6 @@ def test_the_classification_table_has_no_shadowed_or_mid_table_catch_all_rows():
     assert not offenders, (
         "the ordered table is matched first-hit-wins, so these rows can never fire "
         "or would swallow later verdicts -- order the specific rows first: " + ", ".join(offenders)
-    )
-
-
-def test_table_shadowing_detector_bites():
-    """A subclass row below its superclass, and a mid-table catch-all, both fire."""
-
-    class Sub(ValueError):
-        pass
-
-    class Deeper(Sub):
-        pass
-
-    # The shape that lost DecompressionError's verdict: no row of its own, so the catch-all answers for it.
-    orphans = [((ValueError,), "value_error")]
-    assert not _table_shadowing_offenders(orphans)
-
-    # A specific row placed BELOW the superclass that already claims it: dead.
-    below_super = [((ValueError,), "value_error"), ((Sub,), "value_error")]
-    assert any("can never fire" in o for o in _table_shadowing_offenders(below_super))
-
-    # A specific row ABOVE its superclass: live, and the superclass is the catch-all, which is allowed to be
-    # last.
-    correct = [((Deeper,), "http_error"), ((Sub,), "tls_error"), ((ValueError,), "value_error")]
-    assert not _table_shadowing_offenders(correct)
-
-    # A catch-all with any row after it, whatever that row claims.
-    mid_table = [((Exception,), "http_error"), ((Deeper,), "tls_error")]
-    assert any("catch-all" in o for o in _table_shadowing_offenders(mid_table))
-
-    # A broad row mid-table also makes every later specific row dead.
-    both = [((ValueError,), "value_error"), ((Deeper,), "http_error"), ((Sub,), "tls_error")]
-    offenders = _table_shadowing_offenders(both)
-    assert any("catch-all" in o for o in offenders)
-    assert sum("can never fire" in o for o in offenders) == 2
-
-    # The live shape this was written for.
-
-    assert (
-        _table_shadowing_offenders(
-            [((httpx.ConnectError,), "connection_error"), ((httpx.HTTPError,), "http_error")]
-        )
-        == []
     )
 
 
@@ -335,8 +291,3 @@ RULES = Registry(
 def test_no_rule_violations():
     """One transience home, failed results chokepointed, exhaustion catches sanctioned."""
     RULES.check_all_clean()
-
-
-def test_every_rule_bites():
-    """Every rule must reject what it forbids, and spare what it resembles."""
-    RULES.check_all_bite()

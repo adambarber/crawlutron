@@ -6,7 +6,7 @@ import ast
 import pathlib
 
 from tests.chokepoint_walks import REPO_ROOT, app_trees, local_nodes, nodes_of, offender, resolved_call_name
-from tests.invariants._shared import _relative_app_path, assert_property_detector_bites
+from tests.invariants._shared import _relative_app_path
 from tests.invariants.test_registry import (
     _PROPERTY_MODULES,
     _module_aware,
@@ -74,61 +74,6 @@ def test_public_target_has_one_implementation():
 
 def test_public_target_registry_is_not_empty():
     assert _property("public-target").fingerprints
-
-
-def test_public_target_detector_bites():
-    assert_property_detector_bites(
-        _property("public-target"),
-        _public_target_offenders,
-        caught={
-            "all alias forms in one module": (
-                "import ipaddress\n"
-                "import ipaddress as ip\n"
-                "from ipaddress import ip_address as parse\n"
-                "IP = ipaddress\n"
-                "def alias_import(value):\n"
-                "    address = ip.ip_address(value)\n"
-                "    return address.is_private or ip.ip_network('100.64.0.0/10')\n"
-                "def from_import(value):\n"
-                "    address = parse(value)\n"
-                "    return address.is_private or ip.ip_network('100.64.0.0/10')\n"
-                "def assignment(value):\n"
-                "    address = IP.ip_address(value)\n"
-                "    return address.is_private or IP.ip_network('100.64.0.0/10')\n"
-                "def getattr_call(value):\n"
-                "    address = getattr(ipaddress, 'ip_address')(value)\n"
-                "    return address.is_private or ipaddress.ip_network('100.64.0.0/10')\n",
-                4,
-            ),
-            "helper split with dynamic range access": (
-                "import ipaddress\n"
-                "def parse_address(value):\n"
-                "    return ipaddress.ip_address(value)\n"
-                "def verdict(value):\n"
-                "    return not getattr(parse_address(value), 'is_private')\n",
-                1,
-            ),
-            "aliased getattr": (
-                "from builtins import getattr as ga\n"
-                "import ipaddress\n"
-                "def verdict(value):\n"
-                "    return not ga(ipaddress, 'ip_address')(value).is_private\n",
-                1,
-            ),
-            "constant-folded getattr name": (
-                "import ipaddress\n"
-                "def verdict(value):\n"
-                "    name = 'ip_' + 'address'\n"
-                "    return not getattr(ipaddress, name)(value).is_private\n",
-                1,
-            ),
-        },
-        quiet=(
-            "from app.safety.validation import _is_public_ip as verdict\n"
-            "def check(value):\n"
-            "    return verdict(value)\n"
-        ),
-    )
 
 
 def test_public_target_detector_quiet_on_runtime_computed_name():

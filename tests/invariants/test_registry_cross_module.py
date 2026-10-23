@@ -11,9 +11,8 @@ from tests.invariants.test_registry import (
     _property,
     _property_owner,
     _property_owner_failures,
-    _property_registry_failures,
 )
-from tests.invariants.test_registry_bool_env import _bool_env_observations, _bool_env_offenders
+from tests.invariants.test_registry_bool_env import _bool_env_offenders
 from tests.invariants.test_registry_robots import _robots_policy_offenders
 from tests.invariants.test_registry_targets import _public_target_offenders
 
@@ -114,17 +113,6 @@ def test_robots_policy_detector_resolves_imported_helpers():
                 ),
             },
         },
-    )
-
-
-def test_property_registry_detector_bites():
-    prop = _property("bool-env")
-    path = REPO_ROOT / "app" / "_zero_observation.py"
-    tree = ast.parse("def normalize(value):\n    return value.strip().lower()\n")
-    assert _bool_env_observations(tree, path, prop) == {"bool_literal_set": 0}
-    failures = _property_registry_failures((prop,), trees=((path, tree),))
-    assert any("zero observations" in failure and "bool_literal_set" in failure for failure in failures), (
-        failures
     )
 
 

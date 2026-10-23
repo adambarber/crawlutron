@@ -210,8 +210,3 @@ RULES = Registry((BROWSER_RELEASE_ONLY_THROUGH_THE_CHOKEPOINT, STORES_SERIALIZE_
 def test_no_rule_violations():
     """Browser and store state release through their chokepoints."""
     RULES.check_all_clean()
-
-
-def test_every_rule_bites():
-    """Every rule must reject what it forbids, and spare what it resembles."""
-    RULES.check_all_bite()

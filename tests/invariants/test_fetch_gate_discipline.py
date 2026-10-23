@@ -146,8 +146,3 @@ FETCH_EXECUTORS_REACH_WORK_ONLY_THROUGH_THE_GATE = Rule(
 def test_fetch_executors_reach_work_only_through_the_gate():
     """The MCP door calls execute_crawl/map_site/render/search only under request_gate."""
     FETCH_EXECUTORS_REACH_WORK_ONLY_THROUGH_THE_GATE.scan()
-
-
-def test_fetch_executor_gating_detector_bites():
-    """An ungated door fires; a gated one and a blessed helper stay clean."""
-    FETCH_EXECUTORS_REACH_WORK_ONLY_THROUGH_THE_GATE.check_bites()

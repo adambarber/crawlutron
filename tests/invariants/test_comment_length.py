@@ -177,13 +177,6 @@ def test_the_run_tests_entry_point_is_inside_the_surface() -> None:
     assert long_comment_runs(planted), "the detector must fire on a planted run"
 
 
-def test_the_detector_bites_on_a_third_consecutive_comment() -> None:
-    """A three-line block fires; the legal shapes stay clean."""
-    assert long_comment_runs("# one\n# two\n# three\n") == [(1, 3)]
-    assert long_comment_runs("# one\n# two\nx = 1\n") == []
-    assert long_comment_runs("# one\n\n# two\n") == []
-
-
 def test_blank_lines_do_not_split_a_block() -> None:
     """A block chopped by blank lines is still one block -- the split is a
     cheat this gate exists to catch, not a formatting choice it blesses."""

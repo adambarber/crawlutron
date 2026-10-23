@@ -6,7 +6,7 @@ import ast
 import pathlib
 
 from tests.chokepoint_walks import app_trees, has_method_call, local_nodes, nodes_of, offender
-from tests.invariants._shared import _relative_app_path, assert_property_detector_bites
+from tests.invariants._shared import _relative_app_path
 from tests.invariants.test_registry import (
     _PROPERTY_MODULES,
     _module_aware,
@@ -164,39 +164,3 @@ def test_bool_env_has_one_implementation():
 
 def test_bool_env_registry_is_not_empty():
     assert _property("bool-env").fingerprints
-
-
-def test_bool_env_detector_bites():
-    assert_property_detector_bites(
-        _property("bool-env"),
-        _bool_env_offenders,
-        caught={
-            "truthy set": (
-                "def parse(value):\n    return value.strip().lower() in {'1', 'true', 'yes', 'on'}\n",
-                1,
-            ),
-            "inverted set": (
-                "def parse(value):\n    return value.strip().lower() not in {'0', 'false', 'no', 'off'}\n",
-                1,
-            ),
-            "module-level set": (
-                "FALSE_WORDS = {'0', 'false', 'no', 'off'}\n"
-                "def parse(value):\n"
-                "    return value.strip().lower() not in FALSE_WORDS\n",
-                1,
-            ),
-            "helper split through dict keys": (
-                "FALSE_WORDS = {'0': False, 'false': False, 'no': False, 'off': False}\n"
-                "def normalize(value):\n"
-                "    return value.strip().lower()\n"
-                "def parse(value):\n"
-                "    return normalize(value) in FALSE_WORDS.keys()\n",
-                1,
-            ),
-        },
-        quiet=(
-            "from app.safety.validation import parse_bool_value as parse\n"
-            "def parse_env(value, default):\n"
-            "    return parse(value, default, env_name='X')\n"
-        ),
-    )

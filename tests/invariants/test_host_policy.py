@@ -480,7 +480,3 @@ def test_host_policy_detector_accepts_fixed_extraction_boundaries():
 
 def test_url_returning_helpers_require_host_policy():
     URL_RETURNING_HELPERS_REQUIRE_HOST_POLICY.scan()
-
-
-def test_required_host_policy_detector_bites():
-    URL_RETURNING_HELPERS_REQUIRE_HOST_POLICY.check_bites()

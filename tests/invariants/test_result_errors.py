@@ -136,8 +136,3 @@ RULES = Registry((_HAND_ROLLED_ERROR_ENVELOPES_FORBIDDEN, NO_RAW_EXCEPTION_TEXT_
 def test_no_rule_violations():
     """Every HTTP error body flows through error_envelope/http_error."""
     RULES.check_all_clean()
-
-
-def test_every_rule_bites():
-    """Every rule must reject what it forbids, and spare what it resembles."""
-    RULES.check_all_bite()

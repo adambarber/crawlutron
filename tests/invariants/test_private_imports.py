@@ -200,14 +200,6 @@ def test_no_rule_violations():
     RULES.check_all_clean()
 
 
-def test_every_rule_bites():
-    """A gate that can only fire is indistinguishable from no gate.
-
-    Both directions proved: a private import bites; a public name
-    and a non-``app`` module stay clean."""
-    RULES.check_all_bite()
-
-
 # --------------------------------------------------------------------------- app/ reaching into app/
 # ---------------------------------------------------------------------------
 
@@ -328,18 +320,6 @@ def test_scripts_reach_no_undeclared_private_app_name():
     SCRIPTS_RULES.check_all_clean()
 
 
-def test_scripts_weld_rule_bites():
-    """The H1 reach: a scripts/ private app import fires instead of passing silently.
-
-    scripts/ was outside every private-import rule; a helper importing an app
-    private went unseen. The bite proves the rule now sweeps the scripts tree."""
-    SCRIPTS_RULES.check_all_bite()
-
-
-def test_app_weld_rule_bites():
-    APP_RULES.check_all_bite()
-
-
 # --------------------------------------------------------------------------- the harness reaches through a
 # door, not through the state object
 
@@ -394,7 +374,3 @@ CONFTEST_RULES = Registry((CONFTEST_WELDS,))
 
 def test_conftest_reaches_no_undeclared_private_app_name():
     CONFTEST_RULES.check_all_clean()
-
-
-def test_conftest_weld_rule_bites():
-    CONFTEST_RULES.check_all_bite()

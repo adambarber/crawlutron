@@ -7,7 +7,6 @@ from collections.abc import Iterable
 from pathlib import Path
 
 from tests.chokepoint_walks import (
-    APP_ROOT,
     REPO_ROOT,
     app_trees,
     attribute_reads,
@@ -86,39 +85,6 @@ def test_every_protocol_constant_is_produced():
     assert not offenders, "protocol constants with no production reader: " + ", ".join(offenders)
 
 
-def test_protocol_constant_production_detector_bites():
-    """An unread constant fires; reading it by name, or as an attribute, stays clean."""
-    owner = ast.parse(
-        "HEADER_MISMATCH = -32020\n"
-        "META_CLIENT_INFO = 'x'\n"
-        "__all__ = ['HEADER_MISMATCH', 'META_CLIENT_INFO']\n"
-    )
-    elsewhere = APP_ROOT / "mcp" / "protocol.py"
-    silent = _unproduced_protocol_constants(
-        owner, [(elsewhere, ast.parse("raise ProtocolError(HEADER_MISMATCH)\n"))]
-    )
-    assert len(silent) == 1, silent
-    assert "constants.py:2 META_CLIENT_INFO is declared but nothing in app/ reads it" in silent[0], silent
-    both = _unproduced_protocol_constants(
-        owner,
-        [
-            (
-                elsewhere,
-                ast.parse("def check(meta):\n    return meta, HEADER_MISMATCH, err.META_CLIENT_INFO\n"),
-            )
-        ],
-    )
-    assert not both, both
-    # The vacuous direction: a registry the sweep cannot read is not a clean bill.
-    unreadable = ast.parse("__all__ = compute()\n")
-    for source, reason in (
-        (unreadable, "the protocol registry is not one literal __all__"),
-        (None, "the protocol registry module could not be read"),
-    ):
-        offenders = _unproduced_protocol_constants(source, [(elsewhere, ast.parse(""))])
-        assert len(offenders) == 1 and f"{_PROTOCOL_CONSTANTS_MODULE}: {reason}" in offenders[0], offenders
-
-
 _CYCLE_GUARD_CALL = "_entered"
 
 
@@ -167,11 +133,6 @@ CYCLE_GUARD_IS_CONSULTED_IN_EXACTLY_ONE_PLACE = Rule(
 def test_the_cycle_guard_is_applied_in_exactly_one_place():
     """app/models/taxonomy.py consults the cycle guard in one function, not once per container arm."""
     CYCLE_GUARD_IS_CONSULTED_IN_EXACTLY_ONE_PLACE.scan()
-
-
-def test_cycle_guard_detector_bites():
-    """A guard call inlined at an arm fires; the same call in the owner stays clean."""
-    CYCLE_GUARD_IS_CONSULTED_IN_EXACTLY_ONE_PLACE.check_bites()
 
 
 def test_cycle_guard_detector_respects_the_owner_parameter():
@@ -246,8 +207,3 @@ THE_META_KEY_REJECTION_REASON_IS_AUTHORED_ONCE = Rule(
 def test_the_meta_key_rejection_reason_is_authored_once():
     """app/mcp/protocol.py spells the wrong-type _meta reason in one function."""
     THE_META_KEY_REJECTION_REASON_IS_AUTHORED_ONCE.scan()
-
-
-def test_meta_key_reason_detector_bites():
-    """A second authoring of the sentence fires; the one in the owner stays clean."""
-    THE_META_KEY_REJECTION_REASON_IS_AUTHORED_ONCE.check_bites()

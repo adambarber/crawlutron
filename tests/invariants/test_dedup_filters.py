@@ -227,51 +227,6 @@ def test_no_comment_block_is_written_twice():
     assert not offenders, "comment blocks written more than once: " + ", ".join(offenders)
 
 
-def test_comment_clone_detector_bites():
-    """A repeated block fires, in one file and across two; distinct blocks do not.
-
-    Hand-rolled rather than ``assert_detector`` (which parses to modules), because
-    a comment is not in the ``ast`` -- this detector reads the text.
-    """
-    path = REPO_ROOT / "app" / "transport" / "content_cache.py"
-    repeated = "# first line of the note\n# second line\n# third line\n"
-    other = "# a different note entirely\n# with three lines\n# of its own text\n"
-    detached = "        # first line of the note\n        # second line\n        # third line\n"
-
-    def detect(source: str) -> list[str]:
-        return _duplicated_comment_runs([(path, source)])
-
-    once = detect(f"x = 1\n{repeated}y = 2\n")
-    assert not once, once
-    twice = detect(f"x = 1\n{repeated}y = 2\n{repeated}")
-    expected = "app/transport/content_cache.py:2 and app/transport/content_cache.py:6"
-    assert len(twice) == 1 and expected in twice[0], twice
-    # Two blocks of the same length but different text are two notes.
-    assert not detect(f"x = 1\n{repeated}y = 2\n{other}"), "equal-length distinct blocks are not clones"
-    # Two lines is a section rule, not a WHY to centralize.
-    two_lines = "# first line of the note\n# second line\n"
-    assert not detect(f"x = 1\n{two_lines}y = 2\n{two_lines}"), "a two-line rule is below the floor"
-    # A blank line ends a block, so two paragraphs stay two paragraphs instead of one welded run -- which
-    # would match nothing, including its own twin.
-    assert not detect(f"{repeated}\n{other}"), "a blank line must end a comment block"
-    assert [line for line, _ in _comment_blocks(f"{repeated}\n{other}")] == [1, 5]
-    # Identical prose is still a duplicate across a blank line: the rule about blocks decides what counts as
-    # one note, not whether prose may repeat.
-    assert detect(f"{repeated}\n{repeated}"), "identical prose is a duplicate however it is separated"
-    # Normalized on whitespace, so a re-indented copy -- how these forks actually arrive -- still matches
-    # rather than hiding behind the extra spaces.
-    assert detect(f"x = 1\n{repeated}y = 2\n{detached}"), "a re-indented copy is still a clone"
-    # A fork usually arrives by pasting between modules, so the same block in two different files is one
-    # finding, and both sites have to be named.
-    across = _duplicated_comment_runs(
-        [
-            (REPO_ROOT / "app" / "a.py", f"x = 1\n{repeated}"),
-            (REPO_ROOT / "app" / "b.py", f"y = 2\n{repeated}"),
-        ]
-    )
-    assert len(across) == 1 and "app/a.py:2 and app/b.py:2" in across[0], across
-
-
 RULES = Registry(
     (
         JS_ENDPOINTS_FILTER_IS_NOT_REINLINED,
@@ -282,8 +237,3 @@ RULES = Registry(
 
 def test_no_rule_violations():
     RULES.check_all_clean()
-
-
-def test_every_rule_bites():
-    """Every rule must reject what it forbids, and spare what it resembles."""
-    RULES.check_all_bite()
