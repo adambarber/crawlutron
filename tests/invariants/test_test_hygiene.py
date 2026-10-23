@@ -18,6 +18,12 @@ from tests.chokepoint_walks import (
     trees_under,
 )
 from tests.invariants._shared import assert_trees_clean
+from tests.membership_gate import (
+    aliased_dynamic_pattern_re_offenders,
+    aliased_sanctioned_func_offenders,
+    error_field_taxonomy_offenders,
+    swallowing_test_double_offenders,
+)
 from tests.rules import Bites, Rule
 
 # --------------------------------------------------------------------------- Collectible tests: a test pytest
@@ -119,6 +125,111 @@ EVERY_TEST_FUNCTION_IS_ONE_PYTEST_CAN_COLLECT = Rule(
 )
 
 
+# --------------------------------------------------------------------------- Alias-blindness: a dynamic
+# pattern cannot rename itself past the chokepoint
+
+
+DYNAMIC_RE_PATTERNS_ROUTE_THROUGH_SAFE_REGEX = Rule(
+    name="dynamic-re-patterns-route-through-safe-regex",
+    find=aliased_dynamic_pattern_re_offenders,
+    summary=(
+        "re.<method>(<dynamic pattern>) must go through app.safety.safe_regex, under any"
+        " import alias -- the binding is resolved first, so an alias cannot rename a"
+        " dynamic pattern past the ReDoS sweep"
+    ),
+    bite=lambda: (
+        # The aliased spelling the name-anchored detector missed.
+        Bites(
+            "import re as _re\n\n\ndef f(p):\n    return _re.compile(p)\n",
+            "_re.compile(<dynamic pattern>)",
+        ),
+        # The plain name stays covered: subsumption of the old detector.
+        Bites("import re\n\n\ndef f(p):\n    return re.search(p, t)\n", "re.search(<dynamic pattern>)"),
+        # The plain name stays covered: subsumption of the old detector.
+        Bites("import re\n\n\ndef f(p):\n    return re.search(p, t)\n", "re.search(<dynamic pattern>)"),
+    ),
+    clean=lambda: (
+        # A literal pattern under the same alias is safe.
+        'import re as _re\n\n\ndef f():\n    return _re.compile(r"<loc>")\n',
+        # No re import at all: nothing to check.
+        "def f(p):\n    return compile(p)\n",
+    ),
+)
+
+
+SANCTIONED_FUNCS_ARE_NOT_ALIASED_PAST_THE_SPELLING_LISTS = Rule(
+    name="sanctioned-funcs-are-not-aliased-past-the-spelling-lists",
+    find=aliased_sanctioned_func_offenders,
+    summary=(
+        "a sanctioned chokepoint function is called through an alias the name-matching"
+        " detectors do not recognize; a missing cap or filter would be invisible to them"
+    ),
+    bite=lambda: Bites(
+        "from app.transport.decompression import decompress_body as dec\n\n"
+        "def f(raw, enc):\n    return dec(raw, enc)\n",
+        "alias of the sanctioned decompress_body",
+    ),
+    clean=lambda: (
+        # The spelling _DECOMPRESS_FUNCS already lists is known and silent.
+        "from app.transport.decompression import decompress_body as _decompress_body\n\n"
+        "def f(raw, enc):\n    return _decompress_body(raw, enc)\n",
+        # An import that is not a sanctioned function is not this sweep's business.
+        "from os import path as p\n\n\ndef f():\n    return p.join('a')\n",
+    ),
+)
+
+
+TEST_DOUBLES_ROUTE_THE_FAILED_RESULT = Rule(
+    name="test-doubles-route-the-failed-result",
+    find=swallowing_test_double_offenders,
+    summary=(
+        "bind the production kwarg by name or forward **kwargs to the real callable; a"
+        " double that drops it implements a contract that no longer exists. The"
+        " failed_result refactor broke 24 tests silently through exactly this shape."
+    ),
+    scope=lambda *, exclude: trees_under(TESTS_DIR),
+    proof_path=REPO_ROOT / "tests" / "_synthetic.py",
+    bite=lambda: Bites(
+        "class _S:\n"
+        "    async def run(self, jobs, worker, on_result=None, *, failed_result=None, **kwargs):\n"
+        "        return {}\n",
+        "run(**kwargs)",
+    ),
+    clean=lambda: (
+        # Forwarding is the sanctioned shape: the double passes the contract through.
+        "class _S:\n"
+        "    async def run(self, jobs, worker, on_result=None, *, failed_result=None, **kwargs):\n"
+        "        return real.run(jobs, worker, on_result=on_result, **kwargs)\n",
+        # Consulting kwargs by name (kwargs.get) also counts as routing it.
+        "class _S:\n"
+        "    async def run(self, jobs, worker, on_result=None, *, failed_result=None, **kwargs):\n"
+        "        return kwargs.get('x', 1)\n",
+        # A non-Protocol method is not a double and stays unflagged.
+        "def run(a, **kwargs):\n    return 1\n",
+    ),
+)
+
+
+ERROR_FIELD_VALUES_ARE_TAXONOMY_MEMBERS = Rule(
+    name="error-field-values-are-taxonomy-members",
+    find=error_field_taxonomy_offenders,
+    summary=(
+        "error= must be a member of the declared CrawlError taxonomy (the field is"
+        " documented as a stable code callers key on)"
+    ),
+    bite=lambda: Bites(
+        'def f():\n    return terminal_crawl_result(url="u", error="worker_failed")\n',
+        "not a Classification member",
+    ),
+    clean=lambda: (
+        # A member literal passes.
+        'def f():\n    return terminal_crawl_result(url="u", error="site_error")\n',
+        # A classified variable is the sanctioned shape.
+        "def f(c):\n    return terminal_crawl_result(url='u', error=c)\n",
+    ),
+)
+
+
 def test_every_test_function_is_one_pytest_can_collect():
     EVERY_TEST_FUNCTION_IS_ONE_PYTEST_CAN_COLLECT.scan()
 
@@ -136,8 +247,6 @@ def test_dynamic_pattern_re_calls_under_any_alias():
     """``import re as _re`` then ``_re.compile(<dynamic>)`` is invisible to a
     detector anchored on the name ``re``. The binding is resolved first, so an
     alias cannot rename a dynamic pattern past the chokepoint."""
-    from tests.membership_gate import aliased_dynamic_pattern_re_offenders
-
     offenders = app_offenders(aliased_dynamic_pattern_re_offenders)
     assert not offenders, (
         "re.<method> with a dynamic pattern must go through app.safety.safe_regex, under any"
@@ -146,7 +255,6 @@ def test_dynamic_pattern_re_calls_under_any_alias():
 
 
 def test_alias_detector_bites():
-    from tests.membership_gate import aliased_dynamic_pattern_re_offenders
 
     aliased = ast.parse("import re as _re\n\n\ndef f(p):\n    return _re.compile(p)\n")
     hits = aliased_dynamic_pattern_re_offenders(aliased, REPO_ROOT / "app" / "_synthetic.py")
@@ -167,7 +275,6 @@ def test_sanctioned_func_calls_under_any_alias():
 
     Resolving the import binding closes the one-alias-at-a-time gap: a new
     alias of ``decompress_body`` cannot name its way out of the cap requirement."""
-    from tests.membership_gate import aliased_sanctioned_func_offenders
 
     offenders = app_offenders(aliased_sanctioned_func_offenders)
     assert not offenders, (
@@ -180,7 +287,6 @@ def test_sanctioned_func_calls_under_any_alias():
 def test_sanctioned_func_alias_detector_bites():
     """The alias audit fires on a spelling the hand-kept list does not contain,
     and stays silent on the two spellings the existing list already covers."""
-    from tests.membership_gate import aliased_sanctioned_func_offenders
 
     unknown = ast.parse(
         "from app.transport.decompression import decompress_body as dec\n\n"
@@ -207,8 +313,6 @@ def test_doubles_do_not_accept_and_drop_kwargs():
     """A Protocol-shaped double that accepts ``**kwargs`` and never routes it is
     blind to a signature change on the production callable. The ``failed_result``
     refactor broke 24 tests silently through exactly this shape."""
-    from tests.membership_gate import swallowing_test_double_offenders
-
     assert_trees_clean(
         swallowing_test_double_offenders,
         "bind the production kwarg by name or forward **kwargs to the real callable; a"
@@ -223,35 +327,6 @@ def test_failed_result_binding_detector_bites():
     Offender: a ``run`` with the scheduler's positionals plus ``**kwargs``, so
     the envelope cannot land; a binding ``run`` is the property asserted."""
     SCHEDULER_DOUBLES_BIND_FAILED_RESULT.check_bites()
-
-
-def test_swallowing_double_detector_bites():
-    from tests.membership_gate import swallowing_test_double_offenders
-
-    drops = ast.parse(
-        "class _S:\n"
-        "    async def run(self, jobs, worker, on_result=None, *, failed_result=None, **kwargs):\n"
-        "        return {}\n"
-    )
-    hits = swallowing_test_double_offenders(drops, REPO_ROOT / "tests" / "_synthetic.py")
-    assert len(hits) == 1 and "run(**kwargs)" in hits[0], hits
-    # Forwarding is the sanctioned shape: the double passes the contract through.
-    forwards = ast.parse(
-        "class _S:\n"
-        "    async def run(self, jobs, worker, on_result=None, *, failed_result=None, **kwargs):\n"
-        "        return real.run(jobs, worker, on_result=on_result, **kwargs)\n"
-    )
-    assert not swallowing_test_double_offenders(forwards, REPO_ROOT / "tests" / "_synthetic.py")
-    # Consulting kwargs by name (kwargs.get) also counts as routing it.
-    consults = ast.parse(
-        "class _S:\n"
-        "    async def run(self, jobs, worker, on_result=None, *, failed_result=None, **kwargs):\n"
-        "        return kwargs.get('x', 1)\n"
-    )
-    assert not swallowing_test_double_offenders(consults, REPO_ROOT / "tests" / "_synthetic.py")
-    # A non-Protocol method is not a double and stays unflagged.
-    unrelated = ast.parse("def run(a, **kwargs):\n    return 1\n")
-    assert not swallowing_test_double_offenders(unrelated, REPO_ROOT / "tests" / "_synthetic.py")
 
 
 def _scheduler_run_positional_names() -> tuple[str, ...]:
@@ -332,36 +407,3 @@ def test_no_existing_double_swallows_failed_result():
     Every scheduler double in tests/ binds ``failed_result`` by name today;
     a ``**kwargs``-only regression is caught by this AND the sweep above."""
     SCHEDULER_DOUBLES_BIND_FAILED_RESULT.scan()
-
-
-# =========================================================================== Program 5 (hunt): the error=
-# field's undeclared taxonomy ===========================================================================
-
-
-def test_error_field_values_are_classification_members():
-    """A literal ``error=`` on a result primitive is in the declared taxonomy.
-
-    ``CrawlError`` Literal: page-outcome Classification members plus conditions
-    with no page analogue -- an outside literal is a contract leak, reported."""
-    from tests.membership_gate import error_field_taxonomy_offenders
-
-    offenders = app_offenders(error_field_taxonomy_offenders)
-    assert not offenders, (
-        "error= must be a member of the declared CrawlError taxonomy (the field is"
-        f" documented as a stable code callers key on): {'; '.join(offenders)}"
-    )
-
-
-def test_error_field_taxonomy_detector_bites():
-    """The hunt detector fires on the shipped shape and admits the classified one."""
-    from tests.membership_gate import error_field_taxonomy_offenders
-
-    bad = ast.parse('def f():\n    return terminal_crawl_result(url="u", error="worker_failed")\n')
-    hits = error_field_taxonomy_offenders(bad, REPO_ROOT / "app" / "_synthetic.py")
-    assert len(hits) == 1 and "worker_failed" in hits[0], hits
-    # A member literal passes.
-    good = ast.parse('def f():\n    return terminal_crawl_result(url="u", error="site_error")\n')
-    assert not error_field_taxonomy_offenders(good, REPO_ROOT / "app" / "_synthetic.py")
-    # A classified variable is the sanctioned shape and passes.
-    var = ast.parse("def f(c):\n    return terminal_crawl_result(url='u', error=c)\n")
-    assert not error_field_taxonomy_offenders(var, REPO_ROOT / "app" / "_synthetic.py")
