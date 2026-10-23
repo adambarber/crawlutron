@@ -16,7 +16,7 @@ from tests.chokepoint_walks import (
     writes,
 )
 from tests.invariants.test_ownership import _ELSEWHERE
-from tests.rules import Bites, Rule, Silent
+from tests.rules import Bites, Registry, Rule, Silent
 
 # --- browser instance release ------------------------------------------------- Both the per-attempt reset
 # and the service-shutdown close have to forget the same cached fields.
@@ -116,14 +116,6 @@ BROWSER_RELEASE_ONLY_THROUGH_THE_CHOKEPOINT = Rule(
 )
 
 
-def test_browser_instance_fields_are_cleared_only_by_the_release_chokepoint():
-    BROWSER_RELEASE_ONLY_THROUGH_THE_CHOKEPOINT.scan()
-
-
-def test_browser_release_detector_bites():
-    BROWSER_RELEASE_ONLY_THROUGH_THE_CHOKEPOINT.check_bites()
-
-
 #: The lock constructors a store must not hand itself.
 _PRIVATE_LOCK_NAMES = frozenset({"Lock", "RLock"})
 
@@ -212,9 +204,14 @@ STORES_SERIALIZE_ON_THE_FILES_PROCESS_LOCK = Rule(
 )
 
 
-def test_stores_serialize_on_the_files_process_lock():
-    STORES_SERIALIZE_ON_THE_FILES_PROCESS_LOCK.scan()
+RULES = Registry((BROWSER_RELEASE_ONLY_THROUGH_THE_CHOKEPOINT, STORES_SERIALIZE_ON_THE_FILES_PROCESS_LOCK))
 
 
-def test_private_store_lock_detector_bites():
-    STORES_SERIALIZE_ON_THE_FILES_PROCESS_LOCK.check_bites()
+def test_no_rule_violations():
+    """Browser and store state release through their chokepoints."""
+    RULES.check_all_clean()
+
+
+def test_every_rule_bites():
+    """Every rule must reject what it forbids, and spare what it resembles."""
+    RULES.check_all_bite()
