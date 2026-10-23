@@ -155,35 +155,9 @@ def _host_policy_expression_state(
     ):
         return True, False
     if isinstance(node, ast.Call):
-        if _host_policy_call_is_validated(tree, node, policy_names):
-            return True, True
-        if _is_policy_call(tree, node, _HOST_POLICY_VALIDATORS):
-            return True, False
-        if _is_policy_call(tree, node, _HOST_POLICY_URL_CALLS):
-            return True, False
-        if resolved_call_name(tree, node).rsplit(".", 1)[-1] == "get" and node.args:
-            key = node.args[0]
-            receiver = node.func.value if isinstance(node.func, ast.Attribute) else None
-            return (isinstance(key, ast.Constant) and _reads_url_field(receiver, key.value, url_names)), False
-        if resolved_call_name(tree, node).rsplit(".", 1)[-1] in {"str", "format", "join"}:
-            child_states = [
-                _host_policy_expression_state(tree, child, url_names, validated_names, policy_names)
-                for child in (*node.args, *(keyword.value for keyword in node.keywords))
-            ]
-            return any(is_url for is_url, _ in child_states), any(
-                is_validated for _, is_validated in child_states
-            )
-        return False, False
+        return _call_site_state(tree, node, (url_names, validated_names, policy_names))
     if isinstance(node, (ast.IfExp, ast.BoolOp)):
-        # A ternary is only as safe as its unsafe branch, and so is ``a or b``: URL-shaped if any branch is,
-        # validated only when EVERY URL-shaped branch is. A non-URL branch (``...
-        branches = (node.body, node.orelse) if isinstance(node, ast.IfExp) else tuple(node.values)
-        states = [
-            _host_policy_expression_state(tree, branch, url_names, validated_names, policy_names)
-            for branch in branches
-        ]
-        is_url = any(url for url, _ in states)
-        return is_url, all(valid or not url for url, valid in states)
+        return _branch_state(node, tree, (url_names, validated_names, policy_names))
     if isinstance(node, ast.Dict):
         dict_states = [
             _host_policy_expression_state(tree, value, url_names, validated_names, policy_names)
@@ -192,41 +166,106 @@ def _host_policy_expression_state(
         ]
         return any(is_url for is_url, _ in dict_states), any(is_validated for _, is_validated in dict_states)
     if isinstance(node, (ast.List, ast.Tuple, ast.Set)):
-        states = [
-            _host_policy_expression_state(tree, element, url_names, validated_names, policy_names)
-            for element in node.elts
-        ]
-        return any(is_url for is_url, _ in states), any(is_valid for _, is_valid in states)
+        return _merge(_children_states(node.elts, tree, url_names, validated_names, policy_names))
     if isinstance(node, (ast.ListComp, ast.SetComp, ast.GeneratorExp)):
-        state = _host_policy_expression_state(tree, node.elt, url_names, validated_names, policy_names)
-        generator_url = any(
-            _url_parameter_name(generator.iter.id)
-            for generator in node.generators
-            if isinstance(generator.iter, ast.Name)
-        )
-        condition_validated = any(
-            _host_policy_call_is_validated(tree, child, policy_names)
-            for generator in node.generators
-            for condition in generator.ifs
-            for child in local_nodes(condition)
-            if isinstance(child, ast.Call)
-        )
-        return state[0] or generator_url, state[1] or condition_validated
+        return _comprehension_state(node, tree, (url_names, validated_names, policy_names))
     if isinstance(node, ast.DictComp):
-        states = [
-            _host_policy_expression_state(tree, child, url_names, validated_names, policy_names)
-            for child in (node.key, node.value)
-        ]
-        return any(is_url for is_url, _ in states), any(is_valid for _, is_valid in states)
+        return _merge(
+            _children_states((node.key, node.value), tree, url_names, validated_names, policy_names)
+        )
     if isinstance(node, (ast.BinOp, ast.BoolOp, ast.JoinedStr, ast.IfExp, ast.Compare)):
-        states = [
-            _host_policy_expression_state(tree, child, url_names, validated_names, policy_names)
-            for child in ast.iter_child_nodes(node)
-        ]
-        return any(is_url for is_url, _ in states), any(is_valid for _, is_valid in states)
+        return _merge(
+            _children_states(
+                tuple(ast.iter_child_nodes(node)), tree, url_names, validated_names, policy_names
+            )
+        )
     if isinstance(node, ast.NamedExpr):
         return _host_policy_expression_state(tree, node.value, url_names, validated_names, policy_names)
     return False, False
+
+
+"""Shared shape for the sub-evaluators below: the walk context plus the verdict."""
+
+WalkContext = tuple[set[str], set[str], set[str]]
+"""(url_names, validated_names, policy_names) -- the walk's three name sets."""
+
+
+def _children_states(
+    children,
+    tree: ast.AST,
+    url_names: set[str],
+    validated_names: set[str],
+    policy_names: set[str],
+) -> list[tuple[bool, bool]]:
+    """Each child's (is_url, is_validated), in order."""
+    return [
+        _host_policy_expression_state(tree, child, url_names, validated_names, policy_names)
+        for child in children
+    ]
+
+
+def _merge(states: list[tuple[bool, bool]]) -> tuple[bool, bool]:
+    """URL-shaped if any child is; validated if any child is."""
+    return any(is_url for is_url, _ in states), any(is_validated for _, is_validated in states)
+
+
+def _call_site_state(tree: ast.AST, node: ast.Call, context: WalkContext) -> tuple[bool, bool]:
+    """A call is URL-shaped when it validates, builds from policy, or reads a
+    URL field; str/format/join inherit their arguments' states."""
+    url_names, validated_names, policy_names = context
+    if _host_policy_call_is_validated(tree, node, policy_names):
+        return True, True
+    if _is_policy_call(tree, node, _HOST_POLICY_VALIDATORS):
+        return True, False
+    if _is_policy_call(tree, node, _HOST_POLICY_URL_CALLS):
+        return True, False
+    if resolved_call_name(tree, node).rsplit(".", 1)[-1] == "get" and node.args:
+        key = node.args[0]
+        receiver = node.func.value if isinstance(node.func, ast.Attribute) else None
+        return (isinstance(key, ast.Constant) and _reads_url_field(receiver, key.value, url_names)), False
+    if resolved_call_name(tree, node).rsplit(".", 1)[-1] in {"str", "format", "join"}:
+        return _merge(
+            _children_states(
+                (*node.args, *(keyword.value for keyword in node.keywords)),
+                tree,
+                url_names,
+                validated_names,
+                policy_names,
+            )
+        )
+    return False, False
+
+
+def _branch_state(node: ast.IfExp | ast.BoolOp, tree: ast.AST, context: WalkContext) -> tuple[bool, bool]:
+    """A ternary is only as safe as its unsafe branch, and so is ``a or b``: URL-shaped if any branch is,
+    validated only when EVERY URL-shaped branch is. A non-URL branch (``...
+    """
+    url_names, validated_names, policy_names = context
+    branches = (node.body, node.orelse) if isinstance(node, ast.IfExp) else tuple(node.values)
+    states = _children_states(branches, tree, url_names, validated_names, policy_names)
+    is_url = any(url for url, _ in states)
+    return is_url, all(valid or not url for url, valid in states)
+
+
+def _comprehension_state(
+    node: ast.ListComp | ast.SetComp | ast.GeneratorExp, tree: ast.AST, context: WalkContext
+) -> tuple[bool, bool]:
+    """A comprehension carries its element's state, plus the generator's URL
+    names and any validator call in its conditions."""
+    state = _host_policy_expression_state(tree, node.elt, *context)
+    generator_url = any(
+        _url_parameter_name(generator.iter.id)
+        for generator in node.generators
+        if isinstance(generator.iter, ast.Name)
+    )
+    condition_validated = any(
+        _host_policy_call_is_validated(tree, child, context[2])
+        for generator in node.generators
+        for condition in generator.ifs
+        for child in local_nodes(condition)
+        if isinstance(child, ast.Call)
+    )
+    return state[0] or generator_url, state[1] or condition_validated
 
 
 def _url_return_shapes(function: ast.AST, tree: ast.AST) -> bool:
@@ -245,6 +284,16 @@ def _url_return_shapes(function: ast.AST, tree: ast.AST) -> bool:
     validated_names: set[str] = set(admitted)
     policy_names = _host_policy_scope_names(tree, function)
     nodes = local_subtree(function)
+    _propagate_loop_and_assign_states(tree, nodes, (url_names, validated_names, policy_names))
+    return _endpoint_leaks(tree, function, nodes, arguments, (url_names, validated_names, policy_names))
+
+
+def _propagate_loop_and_assign_states(
+    tree: ast.AST, nodes: tuple[ast.AST, ...], context: WalkContext
+) -> None:
+    """The fixed-point walk: loops over a URL iterable name their targets, and
+    assignments inherit their value's state, until nothing new is learned."""
+    url_names, validated_names, policy_names = context
     changed = True
     while changed:
         changed = False
@@ -266,17 +315,7 @@ def _url_return_shapes(function: ast.AST, tree: ast.AST) -> bool:
                 changed |= bool(validated - validated_names)
                 validated_names.update(validated)
         for statement in nodes:
-            targets: list[ast.expr] = []
-            value: ast.expr | None = None
-            if isinstance(statement, ast.Assign):
-                targets = statement.targets
-                value = statement.value
-            elif isinstance(statement, ast.AnnAssign):
-                targets = [statement.target]
-                value = statement.value
-            elif isinstance(statement, ast.NamedExpr):
-                targets = [statement.target]
-                value = statement.value
+            targets, value = _assign_parts(statement)
             if value is None:
                 continue
             names = {target.id for target in targets if isinstance(target, ast.Name)}
@@ -294,6 +333,29 @@ def _url_return_shapes(function: ast.AST, tree: ast.AST) -> bool:
             if _host_policy_value(value, policy_names):
                 changed |= bool(names - policy_names)
                 policy_names.update(names)
+
+
+def _assign_parts(statement: ast.AST) -> tuple[list[ast.expr], ast.expr | None]:
+    """The (targets, value) an assignment-shaped statement writes."""
+    if isinstance(statement, ast.Assign):
+        return statement.targets, statement.value
+    if isinstance(statement, ast.AnnAssign):
+        return [statement.target], statement.value
+    if isinstance(statement, ast.NamedExpr):
+        return [statement.target], statement.value
+    return [], None
+
+
+def _endpoint_leaks(
+    tree: ast.AST,
+    function: ast.FunctionDef | ast.AsyncFunctionDef,
+    nodes: tuple[ast.AST, ...],
+    arguments: tuple[ast.arg, ...],
+    context: WalkContext,
+) -> bool:
+    """Whether any returned expression is an unvalidated URL or a raw endpoint
+    parameter -- the two shapes the gate refuses."""
+    url_names, validated_names, policy_names = context
     endpoint_parameters = {
         argument.arg for argument in arguments if argument.arg.lower() in {"endpoint", "endpoints"}
     }

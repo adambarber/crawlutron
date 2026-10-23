@@ -29,12 +29,14 @@ _SCRIPTS_BUDGET_HISTORY: dict[str, list[int]] = {
 
 #: Oldest-first history per ``_TESTS_BUDGETS`` metric, declared at #375.
 _TESTS_BUDGET_HISTORY: dict[str, list[int]] = {
-    #: 11 first declared; lowered to 10 by #253 when the git-history ratchet that
-    #: occupied a 70-line function was reworked into a hermetic ledger.
-    "function length": [11, 10],
-    "abc size": [2],
+    #: 11 first declared; 10 by #253 (the git-history ratchet became a ledger);
+    #: 10 -> 9 -> 8 (#419, the host-policy state machine split by concept).
+    "function length": [11, 10, 9, 8],
+    #: 2 -> 0 (#419, same splits); the While went with the fixed-point walk.
+    "abc size": [2, 0],
     "largest class": [330],
-    "block length": [1],
+    #: 1 -> 0 (#419, the host-policy While moved into the fixed-point walk).
+    "block length": [1, 0],
 }
 
 __all__ = [
