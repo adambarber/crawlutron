@@ -29,9 +29,9 @@ _SCRIPTS_BUDGET_HISTORY: dict[str, list[int]] = {
 
 #: Oldest-first history per ``_TESTS_BUDGETS`` metric, declared at #375.
 _TESTS_BUDGET_HISTORY: dict[str, list[int]] = {
-    #: 11 -> ... -> 3 -> 2 -> 1 (#419: ... the detector-accounting plant, the
-    #: robots URL-form cases).
-    "function length": [11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1],
+    #: 11 -> ... -> 2 -> 1 -> 0 (#419: ... the robots URL-form cases, the
+    #: doc-pool recording lock).
+    "function length": [11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0],
     #: 2 -> 0 (#419, same splits); the While went with the fixed-point walk.
     "abc size": [2, 0],
     "largest class": [330],

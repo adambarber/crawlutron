@@ -29,6 +29,19 @@ from tests._process_doubles import (
 )
 
 
+def _recording_lock(lock, acquirer_thread: dict[str, int], acquirer_inside: threading.Event):
+    """A pool lock that flags when the acquiring thread gets in."""
+
+    class _RecordingLock(DelegatingLock):
+        def acquire(self, *args, **kwargs):
+            got = super().acquire(*args, **kwargs)
+            if threading.get_ident() == acquirer_thread.get("id"):
+                acquirer_inside.set()
+            return got
+
+    return _RecordingLock(lock)
+
+
 def _acquire_the_replacement(pool: DocExtractionPool, spawner: StubSpawner, pid: int, bound: float = 0.3):
     """Acquire from a pool whose only slots are unusable; report the spawn too.
 
@@ -346,14 +359,7 @@ def test_acquire_budget_starts_after_the_lock_not_before_it(fake_pool):
     acquirer_thread: dict[str, int] = {}
     acquirer_inside = threading.Event()
 
-    class _RecordingLock(DelegatingLock):
-        def acquire(self, *args, **kwargs):
-            got = super().acquire(*args, **kwargs)
-            if threading.get_ident() == acquirer_thread.get("id"):
-                acquirer_inside.set()
-            return got
-
-    recording_lock = _RecordingLock(pool_lock)
+    recording_lock = _recording_lock(pool_lock, acquirer_thread, acquirer_inside)
     pool, _spawner = _seeded(fake_pool, worker, lock=recording_lock)
     worker.busy = True
 
