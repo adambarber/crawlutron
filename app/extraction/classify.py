@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 import re
-from typing import Any, Final
+from typing import Final, NamedTuple
 
 from app.models.classification_evidence import ClassificationEvidenceRecord
-from app.models.taxonomy import Classification, as_classification
+from app.models.taxonomy import Classification
 from app.safety.bounded_io import truncate_html_input
 
 # Final[Classification], not bare literals: a literal in return position widens
@@ -188,13 +188,22 @@ def _structural_marker_match(
     return None
 
 
-def _prose_signature_matches(
-    visible_haystack: str, html_haystack: str
-) -> list[tuple[Classification, dict[str, Any]]]:
+class _ProseMatch(NamedTuple):
+    """One prose-signature hit, with its pass priority and match position."""
+
+    priority: int
+    classification: Classification
+    signature: str
+    source: str
+    haystack: str
+    offset: int
+
+
+def _prose_signature_matches(visible_haystack: str, html_haystack: str) -> list[_ProseMatch]:
     """Pass 1: every distinct prose-signature match; earliest source wins per
     signature, and each match carries its priority for the verdict pass.
     """
-    matches: list[tuple[Classification, dict[str, Any]]] = []
+    matches: list[_ProseMatch] = []
     for priority, (classification, signatures) in enumerate(CLASSIFICATION_SIGNATURES):
         for signature in signatures:
             for source, haystack in (
@@ -204,16 +213,13 @@ def _prose_signature_matches(
                 index = haystack.find(signature)
                 if index >= 0:
                     matches.append(
-                        (
-                            classification,
-                            {
-                                "priority": priority,
-                                "classification": classification,
-                                "signature": signature,
-                                "source": source,
-                                "haystack": haystack,
-                                "index": index,
-                            },
+                        _ProseMatch(
+                            priority=priority,
+                            classification=classification,
+                            signature=signature,
+                            source=source,
+                            haystack=haystack,
+                            offset=index,
                         )
                     )
                     break  # earliest source is enough for this signature
@@ -221,21 +227,21 @@ def _prose_signature_matches(
 
 
 def _verdict_from_matches(
-    matches: list[tuple[Classification, dict[str, Any]]],
+    matches: list[_ProseMatch],
 ) -> tuple[Classification, list[ClassificationEvidenceRecord]]:
     """Reduce the prose matches: none -> rendered; soft signals need corroboration."""
     if not matches:
         return _RENDERED, []
 
-    distinct_classifications = {name for name, _match in matches}
-    best_priority = min(match["priority"] for _name, match in matches)
+    distinct_classifications = {match.classification for match in matches}
+    best_priority = min(match.priority for match in matches)
     chosen = min(
-        (match for _name, match in matches if match["priority"] == best_priority),
-        key=lambda match: match["index"],
+        (match for match in matches if match.priority == best_priority),
+        key=lambda match: match.offset,
     )
-    # The classification travels with its match so it keeps its ``Classification``
+    # The classification rides its own record, so it keeps its ``Classification``
     # type instead of widening to ``str`` off an ``Any`` dict at the return.
-    classification = as_classification(next(name for name, match in matches if match is chosen))
+    classification = chosen.classification
 
     # Corroboration: >= 2 independent signals anywhere on the page (either two
     # different block classifications, or two distinct phrases of the same one).
@@ -246,10 +252,10 @@ def _verdict_from_matches(
     return classification, [
         _evidence(
             classification,
-            chosen["signature"],
-            chosen["source"],
-            chosen["haystack"],
-            chosen["index"],
+            chosen.signature,
+            chosen.source,
+            chosen.haystack,
+            chosen.offset,
         )
     ]
 
