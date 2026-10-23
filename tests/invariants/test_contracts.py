@@ -14,7 +14,7 @@ from tests.chokepoint_walks import (
     try_blocks,
     writes,
 )
-from tests.rules import Bites, Rule
+from tests.rules import Bites, Registry, Rule
 
 """Payloads are built once and strategy runners run guarded."""
 
@@ -90,14 +90,6 @@ JOB_ENGINE_PAYLOAD_USES_SINGLE_BUILDER = Rule(
         "    await _execute_crawl(payload)\n",
     ),
 )
-
-
-def test_job_engine_payload_uses_single_builder():
-    JOB_ENGINE_PAYLOAD_USES_SINGLE_BUILDER.scan()
-
-
-def test_job_engine_payload_chokepoint_detector_bites():
-    JOB_ENGINE_PAYLOAD_USES_SINGLE_BUILDER.check_bites()
 
 
 # The strategy chain's raise-chokepoint.
@@ -205,9 +197,13 @@ STRATEGY_RUNNERS_ARE_CALLED_UNDER_A_GUARD = Rule(
 )
 
 
-def test_every_strategy_runner_call_is_guarded():
-    STRATEGY_RUNNERS_ARE_CALLED_UNDER_A_GUARD.scan()
+RULES = Registry((JOB_ENGINE_PAYLOAD_USES_SINGLE_BUILDER, STRATEGY_RUNNERS_ARE_CALLED_UNDER_A_GUARD))
 
 
-def test_strategy_runner_guard_detector_bites():
-    STRATEGY_RUNNERS_ARE_CALLED_UNDER_A_GUARD.check_bites()
+def test_no_rule_violations():
+    RULES.check_all_clean()
+
+
+def test_every_rule_bites():
+    """Every rule must reject what it forbids, and spare what it resembles."""
+    RULES.check_all_bite()
