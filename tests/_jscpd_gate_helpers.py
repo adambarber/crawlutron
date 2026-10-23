@@ -55,14 +55,8 @@ def _stripped(location: dict, root: str) -> dict:
     return {**location, "name": _strip_root(str(location["name"]), root)}
 
 
-def _stub_report(
-    monkeypatch,
-    duplicates: list[dict],
-    percentage: float = 0,
-    sources: int | dict[str, int] = 200,
-) -> list[list[str]]:
-    commands: list[list[str]] = []
-
+def _intercept_declared_files(monkeypatch, duplicates: list[dict]) -> None:
+    """Pin res._IS_FILE to the declared files plus the real filesystem."""
     # Anything the test did not declare falls through to the real filesystem, which is what keeps an ambiguity
     # like `zz_tree_filler.py` a real one.
     declared = {
@@ -80,55 +74,74 @@ def _stub_report(
 
     monkeypatch.setattr(res, "_IS_FILE", _is_file)
 
+
+def _scoped_duplicates(duplicates: list[dict], roots: list[str]) -> list[dict]:
+    """The duplicates one invocation reports, named the way jscpd names them."""
+
+    def _inside(name: str) -> bool:
+        return any(name == root or name.startswith(root + "/") for root in roots)
+
+    def _straddles(duplicate: dict) -> bool:
+        sides = [duplicate[side]["name"] for side in ("firstFile", "secondFile")]
+        return len({_root_of(side) for side in sides}) > 1
+
+    def _root_of(name: str) -> str:
+        return next(root for root in roots if name == root or name.startswith(root + "/"))
+
+    if len(roots) == 1:
+        # One root per invocation: only pairs inside it are reported, named relative to it.
+        return [
+            {
+                **duplicate,
+                "firstFile": _stripped(duplicate["firstFile"], roots[0]),
+                "secondFile": _stripped(duplicate["secondFile"], roots[0]),
+            }
+            for duplicate in duplicates
+            if _inside(duplicate["firstFile"]["name"]) and _inside(duplicate["secondFile"]["name"])
+        ]
+    # The cross-tree pass: pairs that SPAN roots, named without their root so they are unattributable
+    # until the gate resolves them.
+    return [
+        {
+            **duplicate,
+            "firstFile": _stripped(duplicate["firstFile"], _root_of(duplicate["firstFile"]["name"])),
+            "secondFile": _stripped(duplicate["secondFile"], _root_of(duplicate["secondFile"]["name"])),
+        }
+        for duplicate in duplicates
+        if _straddles(duplicate)
+    ]
+
+
+def _sources_found(sources: int | dict[str, int], roots: list[str]) -> int:
+    """The sources count one invocation sees, per-root or global."""
+    if isinstance(sources, dict):
+        # One root per invocation is scored at that root's own count, which is what makes "this tree
+        # scanned nothing" detectable.
+        return sources[roots[0]] if len(roots) == 1 else sources.get(".", max(sources.values()))
+    return sources
+
+
+def _stub_report(
+    monkeypatch,
+    duplicates: list[dict],
+    percentage: float = 0,
+    sources: int | dict[str, int] = 200,
+) -> list[list[str]]:
+    commands: list[list[str]] = []
+    _intercept_declared_files(monkeypatch, duplicates)
+
     def run(command, **_kwargs):
         commands.append(command)
         positionals = command[command.index("--fail-on-empty") + 1 :]
         roots = [argument for argument in positionals if argument in _KNOWN_ROOTS]
-
-        def _inside(name: str) -> bool:
-            return any(name == root or name.startswith(root + "/") for root in roots)
-
-        def _straddles(duplicate: dict) -> bool:
-            sides = [duplicate[side]["name"] for side in ("firstFile", "secondFile")]
-            return len({_root_of(side) for side in sides}) > 1
-
-        def _root_of(name: str) -> str:
-            return next(root for root in roots if name == root or name.startswith(root + "/"))
-
-        if len(roots) == 1:
-            # One root per invocation: only pairs inside it are reported, named relative to it.
-            scoped = [
-                {
-                    **duplicate,
-                    "firstFile": _stripped(duplicate["firstFile"], roots[0]),
-                    "secondFile": _stripped(duplicate["secondFile"], roots[0]),
-                }
-                for duplicate in duplicates
-                if _inside(duplicate["firstFile"]["name"]) and _inside(duplicate["secondFile"]["name"])
-            ]
-        else:
-            # The cross-tree pass: pairs that SPAN roots, named without their root so they are unattributable
-            # until the gate resolves them.
-            scoped = [
-                {
-                    **duplicate,
-                    "firstFile": _stripped(duplicate["firstFile"], _root_of(duplicate["firstFile"]["name"])),
-                    "secondFile": _stripped(
-                        duplicate["secondFile"], _root_of(duplicate["secondFile"]["name"])
-                    ),
-                }
-                for duplicate in duplicates
-                if _straddles(duplicate)
-            ]
-        if isinstance(sources, dict):
-            # One root per invocation is scored at that root's own count, which is what makes "this tree
-            # scanned nothing" detectable.
-            found = sources[roots[0]] if len(roots) == 1 else sources.get(".", max(sources.values()))
-        else:
-            found = sources
+        scoped = _scoped_duplicates(duplicates, roots)
         report = {
             "statistics": {
-                "total": {"sources": found, "percentage": percentage, "duplicatedLines": 5 * len(scoped)}
+                "total": {
+                    "sources": _sources_found(sources, roots),
+                    "percentage": percentage,
+                    "duplicatedLines": 5 * len(scoped),
+                }
             },
             "duplicates": scoped,
         }
