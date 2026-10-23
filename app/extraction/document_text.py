@@ -197,7 +197,3 @@ def _document_item_range(start: str, end: str) -> list[str]:
     if start[:-1] != end[:-1]:
         return [start, end]
     return [f"{start[:-1]}{chr(code)}" for code in range(ord(start[-1]), ord(end[-1]) + 1)]
-
-
-def _mutation_probe_blocks() -> None:
-    """Mutation probe for the sealed block gate; deleted right after the check."""
