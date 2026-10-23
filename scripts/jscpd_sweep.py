@@ -31,28 +31,16 @@ def _scan(root: str, min_lines: int, min_tokens: int) -> tuple[str, list[dict]]:
     return root, duplicates
 
 
-# --- what counts as duplication worth removing ---------------------------------
-#
-# At 4 lines, Python's own preamble is a clone: three import lines beside three
-# import lines is 4 lines and ~25 tokens. Counting those as duplication is how
-# a floor gets set by arithmetic instead of by judgement, so every pair is
-# classified by what its fragment actually contains. A pair is LOGIC when
-# parsing its text yields at least one statement that does something; it is
-# PREAMBLE when the fragment is only imports, docstrings, comments, or bare
-# constants. Only LOGIC is worth a chokepoint, and only LOGIC should set the
-# floor.
+# --- what counts as duplication worth removing ---
+# At 4 lines, Python's preamble is a clone; counting as duplication sets the floor.
 _DOCSTRING_OPENERS = ('"""', "'''", 'r"""', "r'''")
 
-# The statements that open a nested scope, from the shared walk vocabulary
-# rather than restated: two lists that happen to agree on these seven are two
-# lists that can stop agreeing, and the walk module's body-owner set is built
-# from this one.
+# Compound nodes from the shared walk vocabulary rather than restated.
+# Two lists that agree can stop agreeing; the body-owner set is built from this.
 COMPOUND_NODES = SCOPE_OPENING_NODES
 
-# Every compound statement is also one that does something, so the logic
-# vocabulary is the nesting vocabulary plus the flat ones. Written as a sum
-# rather than as two coincidentally-agreeing tuples, "no statement that opens a
-# scope is mere preamble" is a fact here instead of an accident.
+# Every compound statement does something; the logic vocabulary is nesting
+# plus flat ones. "No scope-opening statement is mere preamble" is a fact here.
 LOGIC_NODES = COMPOUND_NODES + (
     ast.Assign,
     ast.AnnAssign,
@@ -260,10 +248,8 @@ def main() -> int:
             f"{len(logic):>6} {len(pairs) - len(logic):>9} {share:>6.0f}% {mass:>13}"
         )
         tipping.append((floor[1], len(logic), share, mass))
-    print("\n  the tipping point is the highest token floor at which logic still outnumbers preamble")
-    # ``logic_count``, not ``logic``: the loop above already bound ``logic`` to
-    # the list of duplicates, and rebinding it to a count meant the two facts
-    # shared a name -- and the comparison below read as list arithmetic.
+    # The tipping point is the highest token floor at which logic still
+    # outnumbers preamble.
     for tokens, logic_count, share, mass in tipping:
         mark = "  <-- tipping point" if logic_count and logic_count * 2 >= tipping[-1][1] else ""
         print(

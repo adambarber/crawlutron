@@ -22,59 +22,31 @@ LocationKey = tuple[str, int, int]
 LocationPair = tuple[LocationKey, LocationKey]
 
 
-#: How a scan root is decided a name belongs to. A module attribute rather than a
-#: default argument so the gate's own tests can put a name in a root without
-#: putting a file there -- the resolution is against the filesystem by design, and
-#: the tests that exercise it need synthetic paths.
+#: How a scan root name maps to a real root; a module attribute so tests can
+#: name a root without creating a file there.
 _IS_FILE: Callable[[Path], bool] = Path.is_file
 
 
-# The tree label for a pair whose two sides are in different trees. Its own label
-# rather than the first side's tree because the content of a cross-tree fragment
-# is the same content a within-tree pair would have, and keying a cross finding
-# under `production` would let a sanctioned within-tree entry absorb a cross-tree
-# clone of identical text.
+# Cross-tree label: keyed by its own label rather than the first side's tree, so
+# a sanctioned within-tree entry cannot absorb a cross-tree clone.
 CROSS_TREE = "cross"
 
 
-#: The scan root that sees every tree at once, so its reported names are the real
-#: service-relative paths. See ``_cross_tree_scan`` for why the per-root scans
-#: cannot substitute for this.
+# The scan root that sees every tree at once; per-root scans cannot substitute
+# for it (see ``_cross_tree_scan``).
 CROSS_TREE_ROOT = "."
 
 
-# One root per invocation, so that every pair jscpd reports can be attributed to
-# the tree it is in: jscpd names files relative to the root it was handed, and
-# `app/api/x.py` and `tests/api/x.py` both come back as `x.py`. A
-# single invocation over all roots would make that attribution impossible.
-#
-# This is a real cost and used to be accepted as the price of attribution: it
-# means a fragment shared BETWEEN two trees is reported by neither invocation,
-# because neither root contains both sides. That is not a consequence of the
-# attribution requirement, it is the cost of not noticing the case, and
-# ``_cross_tree_scan`` pays the attribution a different way -- one invocation,
-# service-relative names, and a tree comparison per path -- so the gap is closed
-# rather than documented.
+# One jscpd invocation per root: jscpd names files relative to its root, so
+# attribution requires one scan per root.
 TREE_ROOTS = {
     "production": ("app",),
     "test": ("tests", "scripts"),
 }
 
 
-# `.jscpd.json` decides which files this gate never sees, so it is enforcement
-# configuration, and a config nothing validates is a config that can be edited
-# into a no-op: one added glob is enough to hide a clone, and `ignore` was read
-# from disk by the subprocess below without ever being checked. These are the
-# whole sanctioned set -- caches, vendored trees, the scratch directory, and
-# schema migrations -- and the gate holds them rather than trusting the file, so
-# widening the scan surface is a deliberate edit to this list in a reviewed
-# commit instead of a silent edit to a JSON file.
-#
-# The migrations subtree is excluded because parallel CREATE TABLE scaffolding
-# across two migration files is the correct shape, not duplication: migrations
-# are replayed by name and each one is a standalone record of one schema step.
-# It is a subtree glob so a migration added tomorrow is covered without anyone
-# editing this list, which is the only way an exclusion stays true.
+# `.jscpd.json` decides which files this gate never sees; one added glob hides a
+# clone. The gate holds this set; widening it is a deliberate edit.
 PROFILE_PATHS = {"all": tuple(root for roots in TREE_ROOTS.values() for root in roots)}
 
 
@@ -208,9 +180,8 @@ def jscpd_report(
             "json",
             "--output",
             str(output),
-            # The root stays last: it is a positional, and every caller -- the
-            # gate, the sweep, and the test stubs that read ``command[-1]`` to
-            # tell which root was scanned -- reads it from the end.
+            # The root stays last: it is a positional, and every caller reads it
+            # from the end.
             *(["--fail-on-empty"] if fail_on_empty else []),
             *(paths or (root,)),
         ]

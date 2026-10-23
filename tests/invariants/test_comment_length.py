@@ -19,15 +19,6 @@ LIMIT = 2
 #: Compile-time, runtime and test docstrings may run no longer than three lines.
 DOC_LIMIT = 3
 
-#: The measured long-run count per root, at the last wave. Exact equality both ways: a run fails, a trimmed
-#: tree demands the lower number in this commit.
-_BUDGETS = {
-    "app": 0,
-    "tests": 0,
-    # LOWERED 21 -> 20 (#287): run-tests.sh joined the surface and its banner was trimmed.
-    # LOWERED 20 -> 19 (#32): the SyntaxError guard's comments were written inside the limit.
-    "scripts": 19,
-}
 
 #: A block's last line may not stop mid-clause: connectives, trailing commas and dangling dashes are a cut
 #: clause. A trailing run of 3+ dashes is a banner, kept.
@@ -167,9 +158,7 @@ def test_scripts_is_part_of_the_comment_budget_surface() -> None:
     The banner used to survive because scripts/ was outside the comment-budget
     surface and a bash script has no ``.py`` suffix to be picked up by the glob.
     """
-    assert "scripts" in _BUDGETS
-    runs = _root_runs("scripts")
-    assert sum(len(v) for v in runs.values()) == _BUDGETS["scripts"]
+    assert _root_runs("scripts") == {}
     # A three-line block in the helper surface fires; the banner shape is gone.
     assert long_comment_runs("#!/bin/sh\n# one\n# two\n# three\n") == [(1, 4)]
 
@@ -215,35 +204,33 @@ def test_a_block_cut_mid_clause_fires() -> None:
     assert dangling_comment_blocks("# --- Structured discovery ---\nx = 1\n") == []
 
 
-def test_every_root_is_at_its_declared_comment_budget() -> None:
-    """No new long comment run lands, and no trim is left unclaimed."""
-    failures: list[str] = []
-    for root, budget in _BUDGETS.items():
-        found = _root_runs(root)
-        total = sum(len(runs) for runs in found.values())
-        if total != budget:
-            worst = sorted(found.items(), key=lambda kv: -len(kv[1]))[:5]
-            detail = "; ".join(f"{name}: {len(runs)} runs" for name, runs in worst)
-            failures.append(
-                f"{root}: {total} long comment runs, budget declares {budget} ({detail}). "
-                "A new run must be cut to two lines or moved to a docstring; a trimmed "
-                "tree must lower the budget in the same commit."
-            )
-    assert not failures, "\n".join(failures)
+def _zero_everywhere(collect: Callable[[str], list]) -> list[str]:
+    """Every finding of ``collect`` across all three roots, with file and line."""
+    offenders: list[str] = []
+    for root in ("app", "tests", "scripts"):
+        for name, items in _root_findings(root, collect).items():
+            for item in items:
+                offenders.append(f"{name}:{item[0]}: {item[-1]}")
+    return offenders
+
+
+def test_zero_long_comment_runs_everywhere() -> None:
+    """Zero long comment runs in app/, tests/ and scripts/ -- no budget, no exemption."""
+    offenders = [
+        f"{name}:{start}-{end}: long comment run" for name, start, end in _zero_everywhere(long_comment_runs)
+    ]
+    assert not offenders, "\n".join(offenders)
 
 
 def test_no_overlong_docstring_anywhere() -> None:
-    """Zero over-limit docstrings in app/, tests/ and scripts/.
+    """Zero over-limit docstrings in app/, tests/ and scripts/ -- no budget, no exemption."""
 
-    Zero is the only number this gate accepts. Any docstring longer than
-    DOC_LIMIT content lines is a failure, full stop.
-    """
-    offenders: list[str] = []
-    for root in ("app", "tests", "scripts"):
-        found = _root_docstrings(root)
-        for name, items in found.items():
-            for lineno, _end, kind in items:
-                offenders.append(f"{name}:{lineno}: {kind} exceeds three lines")
+    def collect(source: str) -> list[tuple[int, int, str]]:
+        return over_line_docstrings(ast.parse(source), DOC_LIMIT)
+
+    offenders = [
+        f"{name}:{lineno}: {kind} exceeds three lines" for name, lineno, kind in _zero_everywhere(collect)
+    ]
     assert not offenders, "\n".join(offenders)
 
 
@@ -264,7 +251,7 @@ def test_no_docstring_sits_below_the_first_statement() -> None:
 def test_no_comment_block_ends_mid_clause() -> None:
     """Every block in the tree closes the thought it opens."""
     offenders: list[str] = []
-    for root in _BUDGETS:
+    for root in ("app", "tests", "scripts"):
         for name, found in _root_all_blocks(root).items():
             for start, _end, text in found:
                 offenders.append(f"{name}:{start}: {text}")

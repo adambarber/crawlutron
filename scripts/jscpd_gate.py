@@ -24,8 +24,7 @@ SANCTIONED_IGNORE_GLOBS = resolver.SANCTIONED_IGNORE_GLOBS
 SERVICE_ROOT = resolver.SERVICE_ROOT
 TREE_ROOTS = resolver.TREE_ROOTS
 # jscpd_report is the ONE invocation of jscpd; the sweep feeds it a root and a
-# floor and gets back the parsed report, so it is part of the contract surface
-# rather than a resolver detail.
+# floor and gets back the parsed report -- contract surface, not resolver detail.
 jscpd_report = resolver.jscpd_report
 
 
@@ -134,10 +133,8 @@ def _run(args: argparse.Namespace) -> int:
                     file=sys.stderr,
                 )
 
-    # The cross-tree pass runs after the per-root ones and deliberately does NOT
-    # fold its source count into `sources`: it reads the same files a second
-    # time, so counting them twice would let the MIN_SOURCES floor be met with
-    # half the sources it names.
+    # The cross-tree pass reads the same files a second time; counting them twice
+    # would let the MIN_SOURCES floor be met with half the sources it names.
     cross = resolver._cross_tree_scan(floor, args)
     cross_sources = int(cross["statistics"]["total"]["sources"])
     if cross_sources < 1:
@@ -149,9 +146,8 @@ def _run(args: argparse.Namespace) -> int:
         return 1
     cross_totals = {"lines": 0, "duplicatedLines": 0, "pairs": 0, "sources": cross_sources}
     for duplicate in cross["duplicates"]:
-        # Only pairs that SPAN two roots are this pass's business. A pair inside
-        # one tree was already scored above against the same floor, and reporting
-        # it twice would charge one clone against two passes.
+        # Only pairs that SPAN two roots count; reporting a pair twice charges one
+        # clone against two passes.
         if not resolver._spans_trees(duplicate, args.profile):
             continue
         cross_totals["pairs"] += 1
@@ -166,9 +162,8 @@ def _run(args: argparse.Namespace) -> int:
         print(f"jscpd {args.profile}: analyzed only {sources} sources", file=sys.stderr)
         return 1
 
-    # A duplicate at the floor fails the gate: with the hook at --threshold 0 every
-    # duplicate is a finding, and with a higher floor the per-tree percentage below
-    # carries the same decision.
+    # A duplicate at the floor fails the gate: the hook runs at --threshold 0,
+    # so every duplicate is a finding.
     if duplicated:
         return 1
 

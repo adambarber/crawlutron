@@ -9,14 +9,8 @@ from __future__ import annotations
 import ast
 from typing import TypeGuard
 
-#: The statements that open a nested scope. Beyond the classic compound
-#: statements, ``ast.ExceptHandler`` owns a real suite a walk can treat as a
-#: block (a definition inside ``except:`` is legal Python). ``ast.Match`` is
-#: deliberately NOT here: it owns ``.cases``, not ``.body``, so walks that read
-#: ``node.body`` would break on it, and the metrics budgets are measured without
-#: it. This is the vocabulary for "can contain a definition", and every consumer
-#: imports it rather than restating it: two lists that happen to agree are two
-#: lists that can stop agreeing (tests/test_ast_scopes.py holds that line).
+#: Statements that open a nested scope for walks: ``ast.ExceptHandler`` owns a
+#: real suite (a definition inside ``except:`` is legal Python).
 SCOPE_OPENING_NODES: tuple[type[ast.AST], ...] = (
     ast.If,
     ast.For,
@@ -28,13 +22,8 @@ SCOPE_OPENING_NODES: tuple[type[ast.AST], ...] = (
     ast.ExceptHandler,
 )
 
-#: A statement that owns a body -- a suite of statements. A walk asking "is this
-#: the first statement of a block" is asking for exactly this, and ``ast.stmt``
-#: -- the union every statement belongs to -- declares no ``body`` on any of
-#: them, so the question could not be asked against it.
-#:
-#: Built as the scope-opening set plus the definition-bearing statements rather
-#: than as a list that happens to agree with it.
+#: Statements that own a body -- what "the first statement of a block" asks for.
+#: ``ast.stmt`` declares no ``body``; this set is scope-openers plus definitions.
 BODY_OWNING_NODES: tuple[type[ast.AST], ...] = (
     ast.Module,
     ast.FunctionDef,
