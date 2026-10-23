@@ -111,50 +111,66 @@ async def render_request(
     """
     active_settings = settings or CrawlerSettings.from_mapping()
     host_policy = HostPolicy.from_settings(active_settings)
-    # One shared batch cap (a hand-rolled copy used to drift from it); submitted
-    # texts stay beside admitted values so the wire's original_url echoes text.
-    submitted = list(
+    submitted = _admitted_urls(payload, active_settings, host_policy)
+    urls = [NormalizedUrl(u, policy=host_policy) for u in submitted]
+    options = render_options_for(payload, active_settings)
+    started = time.monotonic()
+
+    robots_allowed = await _robots_allow_set(urls, options, active_settings, host_policy)
+    jobs = _admitted_jobs(urls, robots_allowed, options, host_policy)
+    by_index = _terminal_robot_refusals(urls, robots_allowed, started)
+    worker_errors: dict[int, BaseException] = {}
+
+    await _run_render_batch(
+        jobs,
+        worker=worker,
+        scheduler=_render_scheduler(active_settings),
+        urls=urls,
+        submitted=submitted,
+        by_index=by_index,
+        worker_errors=worker_errors,
+    )
+    _fill_missing_results(by_index, worker_errors, urls, started)
+
+    return _render_envelope(by_index, submitted, urls)
+
+
+def _admitted_urls(payload: RenderRequest, settings: CrawlerSettings, host_policy: HostPolicy) -> list[str]:
+    """The batch cap shared with the engine, and the admitted text values.
+
+    Submitted texts stay beside admitted values so the wire's ``original_url``
+    echoes text.
+    """
+    return list(
         checked_payload_urls(
             payload,
-            active_settings.max_batch_size,
+            settings.max_batch_size,
             host_policy=host_policy,
         )
     )
-    urls = [NormalizedUrl(u, policy=host_policy) for u in submitted]
 
-    options = render_options_for(payload, active_settings)
-    started = time.monotonic()
-    jobs: list[CrawlJob] = []
 
-    # #244: honor options.respect_robots before the browser reads the page.
-    # A disallowed target classifies as robots_disallowed, never reaching the worker.
-    robots_allowed = await _robots_allow_set(urls, options, active_settings, host_policy)
+def _admitted_jobs(
+    urls: list[NormalizedUrl],
+    robots_allowed: list[tuple[bool, RobotsRules]],
+    options: RenderOptions,
+    host_policy: HostPolicy,
+) -> list[CrawlJob]:
+    """Jobs for the robots-admitted slots; refusals never reach the worker (#244)."""
+    return [
+        CrawlJob(index=index, url=url, options=options, host_policy=host_policy)
+        for index, url in enumerate(urls)
+        if robots_allowed[index][0]
+    ]
 
-    for index, url in enumerate(urls):
-        if not robots_allowed[index][0]:
-            continue
-        jobs.append(
-            CrawlJob(
-                index=index,
-                url=url,
-                options=options,
-                host_policy=host_policy,
-            )
-        )
 
-    scheduler = DomainScheduler(
-        global_limit=active_settings.global_concurrency,
-        per_domain_limit=active_settings.per_domain_concurrency,
-        delay_seconds=active_settings.per_domain_delay_ms / 1000,
-    )
-    # Results carry the submitting job's index, so duplicates keep their own
-    # slots; per-index capture maps pool exhaustion to a 503, not a 500.
-    from app.transport.browser_pool import BrowserPoolExhaustedError
-
+def _terminal_robot_refusals(
+    urls: list[NormalizedUrl],
+    robots_allowed: list[tuple[bool, RobotsRules]],
+    started: float,
+) -> dict[int, CrawlResult]:
+    """Terminal robots_disallowed results for the slots admission skipped."""
     by_index: dict[int, CrawlResult] = {}
-    worker_errors: dict[int, BaseException] = {}
-
-    # Terminal robots_disallowed results fill the slots the admission skipped.
     for index, url in enumerate(urls):
         allowed, loaded = robots_allowed[index]
         if allowed:
@@ -169,6 +185,31 @@ async def render_request(
             error=loaded.source.error_code,
             metadata={"robots": {"allowed": False, "evaluation": loaded.source.value}},
         )
+    return by_index
+
+
+def _render_scheduler(settings: CrawlerSettings) -> DomainScheduler:
+    """The per-domain scheduler the render batch runs under."""
+    return DomainScheduler(
+        global_limit=settings.global_concurrency,
+        per_domain_limit=settings.per_domain_concurrency,
+        delay_seconds=settings.per_domain_delay_ms / 1000,
+    )
+
+
+async def _run_render_batch(
+    jobs: list[CrawlJob],
+    *,
+    worker: CrawlWorker,
+    scheduler: DomainScheduler,
+    urls: list[NormalizedUrl],
+    submitted: list[str],
+    by_index: dict[int, CrawlResult],
+    worker_errors: dict[int, BaseException],
+) -> None:
+    """Run the admitted jobs; results carry the submitting job's index so
+    duplicates keep their own slots, and per-index capture maps pool exhaustion
+    to a 503, not a 500."""
 
     async def _collect(index: int, result: EngineCrawlResult | CrawlResult) -> None:
         # The scheduler's worker-exception envelope is an EngineCrawlResult with no
@@ -196,40 +237,50 @@ async def render_request(
             ),
         )
 
-    # Pool exhaustion is a capacity condition, not a per-URL failure: the worker
-    # returns a classified terminal result and the endpoint maps it to the 503.
+
+def _fill_missing_results(
+    by_index: dict[int, CrawlResult],
+    worker_errors: dict[int, BaseException],
+    urls: list[NormalizedUrl],
+    started: float,
+) -> None:
+    """Terminal site_error results for the slots no worker answered.
+
+    Pool exhaustion is a capacity condition, not a per-URL failure: the 503 is
+    the endpoint's mapping. Never raw exception text: str(exc) would leak.
+    """
+    from app.transport.browser_pool import BrowserPoolExhaustedError
+
     if any(r.classification == "browser_pool_exhausted" for r in by_index.values()):
         raise BrowserPoolExhaustedError(
             # Static text only: the endpoint puts this message on the wire, so
             # it must carry no host/path/stack detail (the redaction contract).
             "browser pool exhausted: no renderer became available within the acquire bound"
         )
-
     missing = [index for index in range(len(urls)) if index not in by_index]
-    if missing:
-        if all(isinstance(worker_errors.get(index), BrowserPoolExhaustedError) for index in missing):
-            raise worker_errors[missing[0]]
-        for index in missing:
-            worker_error = worker_errors.get(index)
-            by_index[index] = terminal_crawl_result(
-                url=urls[index],
-                status="failed",
-                classification="site_error",
-                attempts=0,
-                elapsed_ms=int((time.monotonic() - started) * 1000),
-                domain="",
-                # Never raw exception text: str(exc) would leak DNS names, paths
-                # and secrets into the body.
-                error=classify_error_code(worker_error) if worker_error is not None else "unknown_error",
-            )
+    if missing and all(isinstance(worker_errors.get(index), BrowserPoolExhaustedError) for index in missing):
+        raise worker_errors[missing[0]]
+    for index in missing:
+        worker_error = worker_errors.get(index)
+        by_index[index] = terminal_crawl_result(
+            url=urls[index],
+            status="failed",
+            classification="site_error",
+            attempts=0,
+            elapsed_ms=int((time.monotonic() - started) * 1000),
+            domain="",
+            error=classify_error_code(worker_error) if worker_error is not None else "unknown_error",
+        )
 
-    ordered_results = [
-        # Every result is stamped with the caller's submitted text as
-        # ``original_url`` (the wire's "before normalization" field), right here.
-        replace(by_index[index], original_url=submitted[index])
-        for index in range(len(urls))
-    ]
-    response: RenderEnvelope = {
+
+def _render_envelope(
+    by_index: dict[int, CrawlResult],
+    submitted: list[str],
+    urls: list[NormalizedUrl],
+) -> RenderEnvelope:
+    """The wire envelope, every result stamped with its caller's submitted text."""
+    ordered_results = [replace(by_index[index], original_url=submitted[index]) for index in range(len(urls))]
+    return {
         "request_id": new_request_id(),
         "submitted_count": len(urls),
         # Same envelope key as the engine crawl envelope, so one adapter reads
@@ -239,7 +290,6 @@ async def render_request(
         # and the record's key set stays declared once, by the class it is.
         "results": list(ordered_results),
     }
-    return response
 
 
 __all__ = ["render_options_for", "render_request"]

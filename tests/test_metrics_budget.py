@@ -37,9 +37,9 @@ BLOCK_LENGTH = 40
 # What the tree is currently allowed to hold: offender counts for three metrics, and the size of the worst
 # class for the fourth.
 _BUDGETS = {
-    # LOWERED 22 -> 21 (#160); 21 -> 20 (#330); 20 -> 19 (#136);
-    # 19 -> 18 (#419): from_mapping split into seven field-family builders.
-    "function length": 18,
+    # 22 -> 21 (#160); 21 -> 20 (#330); 20 -> 19 (#136); 19 -> 18 (#419, from_mapping
+    # split into field-family builders); 18 -> 17 (#419, render_request split).
+    "function length": 17,
     "abc size": 0,
     # LOWERED 358 -> 357 (#383): BrowserRenderer's render loop lost a declaration line.
     # LOWERED 357 -> 355 (#136); 355 -> 348 (#419): the render phases left browser.py.

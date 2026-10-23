@@ -11,7 +11,7 @@ from __future__ import annotations
 _BUDGET_HISTORY: dict[str, list[int]] = {
     #: 22 -> 21 (#160); 21 -> 20 (#330); 20 -> 19 (#136);
     #: 19 -> 18 (#419, from_mapping split into seven field-family builders).
-    "function length": [22, 21, 20, 19, 18],
+    "function length": [22, 21, 20, 19, 18, 17],
     "abc size": [1, 0],
     #: 358 -> 357 (#383); 357 -> 355 (#136);
     #: 355 -> 348 (#419, the render phases left browser.py).
