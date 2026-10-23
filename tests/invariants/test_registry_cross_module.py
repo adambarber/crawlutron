@@ -18,7 +18,7 @@ from tests.invariants.test_registry_robots import _robots_policy_offenders
 from tests.invariants.test_registry_targets import _public_target_offenders
 
 
-def test_property_detectors_resolve_imported_helpers_across_modules():
+def test_public_target_detector_resolves_imported_helpers():
     assert_property_detector_bites(
         _property("public-target"),
         _public_target_offenders,
@@ -49,6 +49,9 @@ def test_property_detectors_resolve_imported_helpers_across_modules():
             },
         },
     )
+
+
+def test_bool_env_detector_resolves_imported_helpers():
     assert_property_detector_bites(
         _property("bool-env"),
         _bool_env_offenders,
@@ -75,6 +78,9 @@ def test_property_detectors_resolve_imported_helpers_across_modules():
             },
         },
     )
+
+
+def test_robots_policy_detector_resolves_imported_helpers():
     assert_property_detector_bites(
         _property("robots-policy"),
         _robots_policy_offenders,
