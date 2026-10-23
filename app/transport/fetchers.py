@@ -179,92 +179,138 @@ async def cffi_fetch(
         async for chain, pinned_url, hop_headers in pinned_transport.apinned_hops(
             url, headers, pin=pin, timeout_seconds=timeout_seconds
         ):
-            try:
-                response = await client.get(
-                    pinned_url,
-                    headers=hop_headers,
-                    allow_redirects=False,
-                    stream=True,
-                    timeout=float(timeout_seconds),
-                )
-            except Exception:
-                # Fall back to plain httpx for this request on transport errors.
-                return None
-            # Content-length check
-            content_length = response.headers.get("content-length")
-            if pinned_transport.declared_length_exceeds(content_length, max_content_length):
-                await response.aclose()  # release the curl handle
-                elapsed_ms = int((time.monotonic() - started) * 1000)
-                return _cffi_too_large_result(url, chain.url, response, elapsed_ms)
-            status_code = response.status_code
-            hop_url = chain.url
-            if await chain.advance(response):
-                await response.aclose()  # release the curl handle
-                await _store_hop_cookies(hop_url, response.headers)  # a hop's Set-Cookie persists
-                continue
-            # Never trust response.elapsed across curl_cffi versions: a timedelta
-            # there TypeErrors and silently downgrades every fetch to plain httpx.
-            elapsed_ms = int((time.monotonic() - started) * 1000)
-            # Stream RAW bytes with a running cap: a hostile origin can omit
-            # content-length and stream gigabytes; abort with a 413 past the cap.
-            raw = bytearray()
-            # Read the curl queue directly: aiter_content() awaits aclose() on the
-            # stalled-stream error and blocks forever; every exit releases the handle.
-            stream_completed = False
-            try:
-                while True:
-                    # A per-chunk wait, mirroring httpx read-timeout semantics: the
-                    # per-URL budget bounds the total, and queue.get() is pure asyncio.
-                    try:
-                        chunk = await asyncio.wait_for(
-                            response.queue.get(), timeout=max(timeout_seconds + 5.0, 10.0)
-                        )
-                    except TimeoutError as error:
-                        # Stall: release WITHOUT awaiting -- aclose() joins the very
-                        # producer task being escaped. A scheduled close reclaims.
-                        raise TimeoutError("cffi stream queue stalled") from error
-                    if isinstance(chunk, RequestException):
-                        raise chunk
-                    if chunk is STREAM_END:
-                        stream_completed = True
-                        break
-                    raw.extend(chunk)
-                    if len(raw) > max_content_length:
-                        # A 413 out of the loop is still an abandon, and the
-                        # producer may be a hostile drip -- never wait on it.
-                        return _cffi_too_large_result(url, chain.url, response, elapsed_ms)
-            finally:
-                if not stream_completed:
-                    if release_stream_noblock is not None:
-                        release_stream_noblock(response)
-                    else:
-                        _release_stream_noblock(response)
-            # STREAM_END means the producer is done, so awaiting close is safe -- and
-            # now required: an unreleased handle stalls the next streamed request.
-            await response.aclose()
-            # Decompress with a size cap (decompression-bomb guard), normalise
-            # headers and persist cookies via the shared tail.
-            return await _finish_fetch(
-                url=url,
-                final_url=chain.url,
-                status_code=status_code,
-                raw=bytes(raw),
-                response_headers=response.headers,
+            handled = await _handle_cffi_hop(
+                url,
+                chain,
+                client,
+                pinned_url,
+                hop_headers,
+                timeout_seconds=timeout_seconds,
                 max_content_length=max_content_length,
-                elapsed_ms=elapsed_ms,
-                too_large=functools.partial(
-                    _cffi_too_large_result,
-                    url,
-                    chain.url,
-                    response,
-                    elapsed_ms,
-                ),
+                started=started,
+                release_stream_noblock=release_stream_noblock,
             )
+            if handled is not None:
+                return handled
         raise AssertionError("apinned_hops raises on a body that neither returned nor advanced")
     except DecompressionError:
         raise
     except Exception:  # any cffi failure falls back to plain httpx
         return None
+
+
+async def _handle_cffi_hop(
+    url: NormalizedUrl,
+    chain,
+    client,
+    pinned_url: str,
+    hop_headers: dict[str, str],
+    *,
+    timeout_seconds: int,
+    max_content_length: int,
+    started: float,
+    release_stream_noblock: Callable[[Any], None] | None,
+) -> HttpFetchResult | None:
+    """One pinned hop: GET, too-large gate, redirect advance, or streamed body."""
+    try:
+        response = await client.get(
+            pinned_url,
+            headers=hop_headers,
+            allow_redirects=False,
+            stream=True,
+            timeout=float(timeout_seconds),
+        )
+    except Exception:
+        # Fall back to plain httpx for this request on transport errors.
+        return None
+    # Content-length check
+    content_length = response.headers.get("content-length")
+    if pinned_transport.declared_length_exceeds(content_length, max_content_length):
+        await response.aclose()  # release the curl handle
+        elapsed_ms = int((time.monotonic() - started) * 1000)
+        return _cffi_too_large_result(url, chain.url, response, elapsed_ms)
+    if await chain.advance(response):
+        await response.aclose()  # release the curl handle
+        await _store_hop_cookies(chain.url, response.headers)  # a hop's Set-Cookie persists
+        return None
+    # Never trust response.elapsed across curl_cffi versions: a timedelta
+    # there TypeErrors and silently downgrades every fetch to plain httpx.
+    elapsed_ms = int((time.monotonic() - started) * 1000)
+    return await _read_capped_stream(
+        url,
+        chain,
+        response,
+        timeout_seconds=timeout_seconds,
+        max_content_length=max_content_length,
+        elapsed_ms=elapsed_ms,
+        release_stream_noblock=release_stream_noblock,
+    )
+
+
+async def _read_capped_stream(
+    url: NormalizedUrl,
+    chain,
+    response,
+    *,
+    timeout_seconds: int,
+    max_content_length: int,
+    elapsed_ms: int,
+    release_stream_noblock: Callable[[Any], None] | None,
+) -> HttpFetchResult | None:
+    """Stream RAW bytes with a running cap and finish the fetch.
+
+    A hostile origin can omit content-length and stream gigabytes; abort with
+    a 413 past the cap. The curl queue is read directly; every exit releases it.
+    """
+    raw = bytearray()
+    stream_completed = False
+    try:
+        while True:
+            # A per-chunk wait, mirroring httpx read-timeout semantics: the
+            # per-URL budget bounds the total, and queue.get() is pure asyncio.
+            try:
+                chunk = await asyncio.wait_for(response.queue.get(), timeout=max(timeout_seconds + 5.0, 10.0))
+            except TimeoutError as error:
+                # Stall: release WITHOUT awaiting -- aclose() joins the very
+                # producer task being escaped. A scheduled close reclaims.
+                raise TimeoutError("cffi stream queue stalled") from error
+            if isinstance(chunk, RequestException):
+                raise chunk
+            if chunk is STREAM_END:
+                stream_completed = True
+                break
+            raw.extend(chunk)
+            if len(raw) > max_content_length:
+                # A 413 out of the loop is still an abandon, and the
+                # producer may be a hostile drip -- never wait on it.
+                return _cffi_too_large_result(url, chain.url, response, elapsed_ms)
+    finally:
+        if not stream_completed:
+            if release_stream_noblock is not None:
+                release_stream_noblock(response)
+            else:
+                _release_stream_noblock(response)
+    # STREAM_END means the producer is done, so awaiting close is safe -- and
+    # now required: an unreleased handle stalls the next streamed request.
+    await response.aclose()
+    # Decompress with a size cap (decompression-bomb guard), normalise
+    # headers and persist cookies via the shared tail.
+    return await _finish_fetch(
+        url=url,
+        final_url=chain.url,
+        status_code=response.status_code,
+        raw=bytes(raw),
+        response_headers=response.headers,
+        max_content_length=max_content_length,
+        elapsed_ms=elapsed_ms,
+        too_large=functools.partial(
+            _cffi_too_large_result,
+            url,
+            chain.url,
+            response,
+            elapsed_ms,
+        ),
+    )
 
 
 def impersonating_fetcher() -> HttpFetcher:

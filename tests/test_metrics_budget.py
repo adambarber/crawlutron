@@ -44,9 +44,9 @@ _BUDGETS = {
     # LOWERED 358 -> 357 (#383): BrowserRenderer's render loop lost a declaration line.
     # LOWERED 357 -> 355 (#136); 355 -> 348 (#419): the render phases left browser.py.
     "largest class": 348,
-    # 8 first declared; 7 (#136-ish pool split); 7 -> 6 (#419, run_async_crawl's
-    # guarded body split into claim/crawl/publish/failure phases).
-    "block length": 6,
+    # 8 first declared; 7 (#136-ish pool split); 7 -> 6 (#419, run_async_crawl split);
+    # 6 -> 5 (#419, cffi_fetch's per-hop handling and capped stream extracted).
+    "block length": 5,
 }
 
 #: The scripts/ tree, outside this gate before #293; its measured baseline,

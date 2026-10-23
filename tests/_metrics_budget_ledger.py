@@ -17,8 +17,8 @@ _BUDGET_HISTORY: dict[str, list[int]] = {
     #: 355 -> 348 (#419, the render phases left browser.py).
     "largest class": [358, 357, 355, 348],
     #: 8 first declared; 7 when the document pool's acquisition split its growth
-    #: logic out; 6 (#419, run_async_crawl's guarded body split into phases).
-    "block length": [8, 7, 6],
+    #: logic out; 6 (#419, run_async_crawl); 5 (#419, cffi_fetch stream extracted).
+    "block length": [8, 7, 6, 5],
 }
 
 #: Oldest-first history per ``_SCRIPTS_BUDGETS`` metric, declared at #293.
