@@ -21,8 +21,8 @@ _BUDGET_HISTORY: dict[str, list[int]] = {
 
 #: Oldest-first history per ``_SCRIPTS_BUDGETS`` metric, declared at #293.
 _SCRIPTS_BUDGET_HISTORY: dict[str, list[int]] = {
-    "function length": [2],
-    "abc size": [1],
+    #: fn-len 2 -> SEALED, abc 1 -> SEALED (#419: main and _run split; the rows
+    #: AND these records are gone -- the zero assertions are the whole gates).
     "largest class": [0],
     "block length": [0],
 }

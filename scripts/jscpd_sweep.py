@@ -181,6 +181,12 @@ def _first_appearance(results: dict, floors: list) -> list[tuple[tuple[int, int]
     ]
 
 
+AppearanceList = list[tuple[tuple[int, int], str, dict]]
+"""One record per file: (floor, file key, the duplicate that appeared)."""
+SweepResults = dict[tuple[int, int], dict[str, list[dict]]]
+"""The sweep: per floor, per root, the duplicate records found there."""
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--min-lines", type=int, default=2)
@@ -191,24 +197,35 @@ def main() -> int:
     parser.add_argument("--json", type=Path, help="write the raw sweep here")
     args = parser.parse_args()
 
-    current_lines, current_tokens, _ = gate.configured_floor()
-
     results = sweep(args.min_lines, args.max_lines, args.min_tokens, args.max_tokens)
+    _print_matrix(results, args)
+    _print_first_appearances(results, args)
+    _print_logic_vs_preamble(results, args)
+    _print_concentration(results)
+    _print_remaining(results, args)
+    if args.json:
+        _write_json(results, args.json)
+    return 0
+
+
+def _print_matrix(results: SweepResults, args: argparse.Namespace) -> None:
+    """The pairs-per-floor matrix and which limit is binding."""
     floors = sorted(results)
     roots = sorted(results[floors[0]])
-
     print(f"jscpd frontier sweep  roots={roots}")
     print(
         f"floors: {args.min_lines}/{args.min_tokens} .. "
         f"{args.max_lines}/{args.max_tokens}  ({len(floors)} runs per root)\n"
     )
-
     print("PAIRS PER FLOOR")
     print(_matrix(results))
-
     print("\nWHICH LIMIT IS BINDING")
     print(_binding(results))
 
+
+def _print_first_appearances(results: SweepResults, args: argparse.Namespace) -> None:
+    """Per-file first floor, bucketed, then the deepest-hiding fragment dump."""
+    floors = sorted(results)
     print("\nFIRST APPEARANCE PER FILE  (cheapest floor at which the file holds a pair)")
     appearances = _first_appearance(results, floors)
     buckets: dict[tuple[int, int], int] = {}
@@ -218,9 +235,13 @@ def main() -> int:
         if floor in buckets:
             print(f"  {floor[0]:>2}/{floor[1]:<2}  {buckets[floor]:>3} files first show a pair here")
     print(f"  total: {len(appearances)} files hold at least one pair at some floor in range")
+    _print_deepest(appearances, args.show)
 
-    print(f"\nDEEPEST HIDING (the {args.show} files whose first pair appears earliest)")
-    for floor, key, duplicate in appearances[: args.show]:
+
+def _print_deepest(appearances: AppearanceList, show: int) -> None:
+    """The files whose first pair appears earliest, with a fragment each."""
+    print(f"\nDEEPEST HIDING (the {show} files whose first pair appears earliest)")
+    for floor, key, duplicate in appearances[:show]:
         print(f"\n  {key}  --  first at {floor[0]}/{floor[1]}, span {_span(duplicate)} lines")
         for side in ("firstFile", "secondFile"):
             location = duplicate[side]
@@ -232,6 +253,11 @@ def main() -> int:
         body = "\n".join("      " + line for line in fragment.splitlines()[:12])
         print(f"    fragment:\n{body}")
 
+
+def _print_logic_vs_preamble(results: SweepResults, args: argparse.Namespace) -> None:
+    """Logic vs preamble at the current token line, and the tipping point."""
+    current_lines, current_tokens, _ = gate.configured_floor()
+    floors = sorted(results)
     print("\nLOGIC vs PREAMBLE  (a preamble pair is Python's own import/docstring shape)")
     print(f"  {'floor':>6} | {'total':>6} {'logic':>6} {'preamble':>9} {'logic%':>7} {'logic tokens':>13}")
     tipping = []
@@ -256,6 +282,10 @@ def main() -> int:
             f"    4/{tokens:<3} logic={logic_count:<4} {share:>3.0f}% of pairs  {mass:>5} logic tokens{mark}"
         )
 
+
+def _print_concentration(results: SweepResults) -> None:
+    """Pairs per production file, over the whole range, worst first."""
+    floors = sorted(results)
     print("\nCONCENTRATION  (pairs per production file, over the whole range)")
     per_file: dict[str, int] = {}
     for floor in floors:
@@ -268,6 +298,10 @@ def main() -> int:
             break
         print(f"  {count:>4} pairs  app/{name}")
 
+
+def _print_remaining(results: SweepResults, args: argparse.Namespace) -> None:
+    """What is left at the current floor, and at 2/20."""
+    current_lines, current_tokens, _ = gate.configured_floor()
     print(f"\nAT THE CURRENT FLOOR ({current_lines}/{current_tokens}), and at 2/20, what is left")
     for floor in ((current_lines, current_tokens), (2, 20)):
         if floor not in results:
@@ -281,18 +315,21 @@ def main() -> int:
                 f"  <->  {second['tree']}/{second['name']}:{second['start']}"
             )
 
-    if args.json:
-        payload = {
-            "roots": roots,
-            "floors": [{"min_lines": lines, "min_tokens": tokens} for lines, tokens in floors],
-            "results": {
-                f"{lines}/{tokens}": {root: results[(lines, tokens)][root] for root in roots}
-                for lines, tokens in floors
-            },
-        }
-        args.json.write_text(json.dumps(payload, indent=2), encoding="utf-8")
-        print(f"\nwrote {args.json}")
-    return 0
+
+def _write_json(results: SweepResults, path: Path) -> None:
+    """The raw sweep, in floors x roots form."""
+    floors = sorted(results)
+    roots = sorted(results[floors[0]])
+    payload = {
+        "roots": roots,
+        "floors": [{"min_lines": lines, "min_tokens": tokens} for lines, tokens in floors],
+        "results": {
+            f"{lines}/{tokens}": {root: results[(lines, tokens)][root] for root in roots}
+            for lines, tokens in floors
+        },
+    }
+    path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    print(f"\nwrote {path}")
 
 
 if __name__ == "__main__":

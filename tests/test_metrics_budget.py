@@ -43,11 +43,9 @@ _BUDGETS = {
     "largest class": 348,
 }
 
-#: The scripts/ tree, outside this gate before #293; its measured baseline,
-#: declared first (value-ratchet rule). ``largest class`` is zero: none declared.
+#: The scripts/ tree: SEALED at zero by #419 (main and _run split; the rows
+#: AND these records are gone -- the zero assertions are the whole gate).
 _SCRIPTS_BUDGETS = {
-    "function length": 2,
-    "abc size": 1,
     "largest class": 0,
     "block length": 0,
 }
@@ -327,12 +325,20 @@ test_tests_collection_is_deterministic = collection_is_deterministic(
 def test_the_scripts_budget_measurement_reaches_scripts() -> None:
     """The H1 reach: the complexity budget now sweeps scripts/, which had none.
     The real tree shows it, and the collector fires on a synthetic over-long fn."""
-    assert scripts_measurement("function length") == 2, (
-        "the scripts function-length budget stopped reaching the real tree"
-    )
-    assert scripts_measurement("abc size") == 1
-    assert scripts_measurement("largest class") == 0
     _assert_overlong_fn()
+    found = scripts_offenders("function length")
+    assert not found, (
+        "function length: scripts/ is sealed at the "
+        f"{_METRIC_LIMITS['function length']}-line ceiling -- split the "
+        "offending function(s) by concept: " + "; ".join(str(o) for o in found)
+    )
+    abc = scripts_offenders("abc size")
+    assert not abc, (
+        "abc size: scripts/ is sealed at the "
+        f"{_METRIC_LIMITS['abc size']} ceiling -- split the offending "
+        "function(s) by concept: " + "; ".join(str(o) for o in abc)
+    )
+    assert scripts_measurement("largest class") == 0
 
 
 test_collector_sees_the_whole_tree = collector_sees_the_whole_tree(
