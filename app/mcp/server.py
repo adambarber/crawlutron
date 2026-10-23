@@ -108,67 +108,69 @@ def _validate_transport(
     A missing/unsupported protocol-version header is reported before ``_meta``
     problems so legacy clients (no ``_meta``, no header) get an UnsupportedProtocolVersionError.
     """
-    if protocol_version_header is None:
-        raise ProtocolValidationError(
-            400,
-            error_response(request_id, HEADER_MISMATCH, "Missing required header: MCP-Protocol-Version"),
-        )
-    if protocol_version_header not in SUPPORTED_PROTOCOL_VERSIONS:
-        raise ProtocolValidationError(
-            400,
-            error_response(
-                request_id,
-                UNSUPPORTED_PROTOCOL_VERSION,
-                "Unsupported protocol version",
-                data={
-                    "supported": list(SUPPORTED_PROTOCOL_VERSIONS),
-                    "requested": protocol_version_header,
-                },
-            ),
-        )
+    _validate_protocol_version(request_id, protocol_version_header)
     validate_meta(params, request_id)
+    _validate_meta_matches_header(request_id, params, protocol_version_header)
+    _validate_method_header(request_id, method, method_header)
+    if method == "tools/call":
+        _validate_name_header(request_id, params, name_header)
+
+
+def _protocol_error(
+    request_id: int | str, code: int, message: str, data: JsonValue | None = None
+) -> ProtocolValidationError:
+    """One constructor for the 400 envelope every header check raises."""
+    return ProtocolValidationError(400, error_response(request_id, code, message, data=data))
+
+
+def _validate_protocol_version(request_id: int | str, header: str | None) -> None:
+    """The header must exist and name a supported protocol version."""
+    if header is None:
+        raise _protocol_error(request_id, HEADER_MISMATCH, "Missing required header: MCP-Protocol-Version")
+    if header not in SUPPORTED_PROTOCOL_VERSIONS:
+        raise _protocol_error(
+            request_id,
+            UNSUPPORTED_PROTOCOL_VERSION,
+            "Unsupported protocol version",
+            data={"supported": list(SUPPORTED_PROTOCOL_VERSIONS), "requested": header},
+        )
+
+
+def _validate_meta_matches_header(
+    request_id: int | str, params: dict[str, JsonValue], header: str | None
+) -> None:
+    """The body's _meta protocol version must agree with the header."""
     meta = params.get("_meta")
     meta_version = (meta if isinstance(meta, dict) else {}).get(META_PROTOCOL_VERSION)
-    if meta_version != protocol_version_header:
-        raise ProtocolValidationError(
-            400,
-            error_response(
-                request_id,
-                HEADER_MISMATCH,
-                f"MCP-Protocol-Version header '{protocol_version_header}' does not match "
-                f"_meta '{meta_version}'",
-            ),
+    if meta_version != header:
+        raise _protocol_error(
+            request_id,
+            HEADER_MISMATCH,
+            f"MCP-Protocol-Version header '{header}' does not match _meta '{meta_version}'",
         )
-    if method_header is None:
-        raise ProtocolValidationError(
-            400,
-            error_response(request_id, HEADER_MISMATCH, "Missing required header: Mcp-Method"),
+
+
+def _validate_method_header(request_id: int | str, method: Any, header: str | None) -> None:
+    """The Mcp-Method header must exist and name the body's method."""
+    if header is None:
+        raise _protocol_error(request_id, HEADER_MISMATCH, "Missing required header: Mcp-Method")
+    if header != method:
+        raise _protocol_error(
+            request_id, HEADER_MISMATCH, f"Mcp-Method header '{header}' does not match method '{method}'"
         )
-    if method_header != method:
-        raise ProtocolValidationError(
-            400,
-            error_response(
-                request_id,
-                HEADER_MISMATCH,
-                f"Mcp-Method header '{method_header}' does not match method '{method}'",
-            ),
+
+
+def _validate_name_header(request_id: int | str, params: dict[str, JsonValue], header: str | None) -> None:
+    """On tools/call the Mcp-Name header must decode to the body's tool name."""
+    tool_name = params.get("name")
+    if header is None:
+        raise _protocol_error(request_id, HEADER_MISMATCH, "Missing required header: Mcp-Name")
+    if decode_header_value(header) != tool_name:
+        raise _protocol_error(
+            request_id,
+            HEADER_MISMATCH,
+            f"Mcp-Name header '{header}' does not match tool name '{tool_name}'",
         )
-    if method == "tools/call":
-        tool_name = params.get("name")
-        if name_header is None:
-            raise ProtocolValidationError(
-                400,
-                error_response(request_id, HEADER_MISMATCH, "Missing required header: Mcp-Name"),
-            )
-        if decode_header_value(name_header) != tool_name:
-            raise ProtocolValidationError(
-                400,
-                error_response(
-                    request_id,
-                    HEADER_MISMATCH,
-                    f"Mcp-Name header '{name_header}' does not match tool name '{tool_name}'",
-                ),
-            )
 
 
 async def call_tool(
