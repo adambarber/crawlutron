@@ -134,117 +134,9 @@ if FastAPI is not None:
 
     @asynccontextmanager
     async def _lifespan(_app: FastAPI):
-        # Startup: initialize the browser pool, then load the cookie jar.
-        from .health.readiness import READINESS_STATE
-        from .orchestration.engine import resource_gate
-
-        # Readiness saturation comes from the live resource gate, not the
-        # metrics gauges (which only recursive crawls refresh).
-        READINESS_STATE.set_utilization_sampler(
-            lambda: (resource_gate().memory_ratio(), resource_gate().cpu_ratio())
-        )
-        # The module-level gate is built at import time with no running
-        # loop, so its lag probe must start here.
-        resource_gate().start_lag_probe()
-
-        # Before anything is listening: the exposure is a property of the bind,
-        # true from the first moment, so stated before the first request.
-        warn_if_bound_off_loopback(settings.host)
-
-        # One browser pool only: initialized here, reached via get_browser_pool(),
-        # with no second pool global.
-        await initialize_browser_pool(settings)
-        # Cookies first: recovered jobs can receive cookies in their first
-        # batch, and a clear-then-populate load would drop those.
-        if settings.cookie_persistence_enabled:
-            # The jar is backed by the shared coordination store, not a JSON file
-            # rewritten at shutdown (last-writer-wins); a legacy jar is imported once.
-            os.makedirs(settings.cache_dir, exist_ok=True)
-            from app.storage.coordination_cookies import SharedCookieStore
-            from app.transport import cookie_jar as cookie_jar_module
-            from app.transport.cookie_jar import CookieJar
-
-            jar = CookieJar(SharedCookieStore(DATABASE_PATH))
-            jar.import_file_into(settings.cookie_jar_path)
-            cookie_jar_module.set_global_cookie_jar(jar)
-            # Published like ``shutdown_event`` below: what the process is using
-            # is otherwise answerable only via the module global the lifespan assigned.
-            _app.state.cookie_jar = jar
-        # /metrics reports the service, not this worker: counters go to the shared
-        # store; gauges stay process-local (a shared cgroup summed reports nothing real).
-        from app.storage.coordination_counters import CoordinationCounters
-
-        from .runtime.metrics import get_metrics
-
-        get_metrics().bind_counters(CoordinationCounters(DATABASE_PATH))
-
-        # Jobs: rewind crash orphans and resume every PENDING whole-site job.
-        from .api.job_runner import recover_and_start_pending_jobs
-
-        # Minted in the lifespan, not at import: an import-time event is set by
-        # the first teardown and cancels every later run's crawls.
-        shutdown_event = asyncio.Event()
-        _app.state.shutdown_event = shutdown_event
-        await recover_and_start_pending_jobs(job_store, settings, shutdown_event)
-
-        # Watches: the due-registry sweep, owned by the store's process (like job
-        # recovery) and started before the first request so this deployment keeps them.
-        from .api.watch_sweep import sweep_watches_forever
-
-        watch_sweep_task = asyncio.create_task(
-            sweep_watches_forever(
-                watch_store,
-                host_policy=HostPolicy.from_settings(settings),
-                settings=settings,
-                shutdown_event=shutdown_event,
-                key_store=caller_key_store,
-                concurrency_tracker=_app.state.concurrency_tracker,
-                job_store=job_store,
-            )
-        )
-
+        await _startup_services(_app, settings)
         yield
-
-        # Shutdown stops the world FIRST: no webhooks against cleared dependencies,
-        # no cookies after the snapshot. The jar needs no step -- the store persists.
-        shutdown_event.set()
-        # The sweep is cancelled before the job runner drains, while the key store is
-        # still open: a pass that consults it for liveness must not race a closed handle.
-        watch_sweep_task.cancel()
-        try:
-            await watch_sweep_task
-        except asyncio.CancelledError:
-            pass
-        from .api.job_runner import shutdown_job_runner
-
-        await shutdown_job_runner()
-
-        from app.transport.http_client_pool import close_async_http_client, close_cffi_session
-
-        # Imported here, not at module scope: this pulls in the markitdown stack,
-        # which CLI/MCP callers that never render a PDF must not pay for.
-        from .extraction.content import shutdown_doc_extraction_executor
-        from .orchestration.engine import resource_gate
-
-        async def _close_gate() -> None:
-            resource_gate().close()
-
-        # Every step is attempted and failures surface only after the last: a
-        # close() that raises partway leaks every pool below it (and its subprocesses).
-        await _run_shutdown_steps(
-            (
-                ("close_async_http_client", close_async_http_client),
-                ("close_cffi_session", close_cffi_session),
-                ("close_browser_pool", close_browser_pool),
-                # The lazy document-extraction workers are the one pool nothing
-                # above touches; without this their subprocesses outlive shutdown.
-                ("shutdown_doc_extraction_executor", shutdown_doc_extraction_executor),
-                ("resource_gate.close", _close_gate),
-            )
-        )
-        # Symmetry with set_utilization_sampler(...): release the closed
-        # gate's ratio sampler so nothing dereferences it post-shutdown.
-        READINESS_STATE.set_utilization_sampler(None)
+        await _shutdown_services(_app)
 
     app = FastAPI(
         title="Crawlutron Execution Service",
@@ -346,3 +238,148 @@ else:
     # ``FastAPI`` is None here (the optional import failed): no app to build,
     # and the module-level ``app`` is None on this path -- readers must handle that.
     app = None
+
+
+async def _startup_services(_app: FastAPI, settings: CrawlerSettings) -> None:
+    """Start the readiness sampler, pools, cookies, metrics, jobs and watches.
+
+    Startup order is load-bearing: the pool initializes before cookies load,
+    cookies load before job recovery (a clear-then-populate load drops them).
+    """
+    from .health.readiness import READINESS_STATE
+    from .orchestration.engine import resource_gate
+
+    # Readiness saturation comes from the live resource gate, not the
+    # metrics gauges (which only recursive crawls refresh).
+    READINESS_STATE.set_utilization_sampler(
+        lambda: (resource_gate().memory_ratio(), resource_gate().cpu_ratio())
+    )
+    # The module-level gate is built at import time with no running
+    # loop, so its lag probe must start here.
+    resource_gate().start_lag_probe()
+
+    # Before anything is listening: the exposure is a property of the bind,
+    # true from the first moment, so stated before the first request.
+    warn_if_bound_off_loopback(settings.host)
+
+    # One browser pool only: initialized here, reached via get_browser_pool(),
+    # with no second pool global.
+    await initialize_browser_pool(settings)
+    _load_cookie_jar(settings, _app)
+    _bind_metrics()
+    await _recover_jobs_and_start_sweep(_app, settings)
+
+
+def _bind_metrics() -> None:
+    """Bind the shared-store counters; gauges stay process-local.
+
+    /metrics reports the service, not this worker: counters go to the shared
+    store (a shared cgroup summed reports nothing real).
+    """
+    from app.storage.coordination_counters import CoordinationCounters
+
+    from .runtime.metrics import get_metrics
+
+    get_metrics().bind_counters(CoordinationCounters(DATABASE_PATH))
+
+
+async def _recover_jobs_and_start_sweep(_app: FastAPI, settings: CrawlerSettings) -> None:
+    """Rewind crash orphans, resume PENDING jobs, start the watch sweep.
+
+    The shutdown event is minted in the lifespan, not at import: an import-time
+    event is set by the first teardown and cancels every later run's crawls.
+    """
+    from .api.job_runner import recover_and_start_pending_jobs
+    from .api.watch_sweep import sweep_watches_forever
+
+    shutdown_event = asyncio.Event()
+    _app.state.shutdown_event = shutdown_event
+    await recover_and_start_pending_jobs(job_store, settings, shutdown_event)
+    _app.state.watch_sweep_task = asyncio.create_task(
+        sweep_watches_forever(
+            watch_store,
+            host_policy=HostPolicy.from_settings(settings),
+            settings=settings,
+            shutdown_event=shutdown_event,
+            key_store=caller_key_store,
+            concurrency_tracker=_app.state.concurrency_tracker,
+            job_store=job_store,
+        )
+    )
+
+
+def _load_cookie_jar(settings: CrawlerSettings, _app: FastAPI) -> None:
+    """Load the shared cookie jar when cookie persistence is on.
+
+    Cookies load before job recovery (a clear-then-populate load drops them);
+    the jar is backed by the shared coordination store, not a JSON rewrite.
+    """
+    if not settings.cookie_persistence_enabled:
+        return
+    os.makedirs(settings.cache_dir, exist_ok=True)
+    from app.storage.coordination_cookies import SharedCookieStore
+    from app.transport import cookie_jar as cookie_jar_module
+    from app.transport.cookie_jar import CookieJar
+
+    jar = CookieJar(SharedCookieStore(DATABASE_PATH))
+    jar.import_file_into(settings.cookie_jar_path)
+    cookie_jar_module.set_global_cookie_jar(jar)
+    # Published like ``shutdown_event``: what the process is using
+    # is otherwise answerable only via the module global the lifespan assigned.
+    _app.state.cookie_jar = jar
+
+
+async def _shutdown_services(_app: FastAPI) -> None:
+    """Stop the world FIRST: no webhooks against cleared dependencies, no
+    cookies after the snapshot. The jar needs no step -- the store persists."""
+    from .health.readiness import READINESS_STATE
+    from .orchestration.engine import resource_gate
+
+    shutdown_event = _app.state.shutdown_event
+    shutdown_event.set()
+    await _drain_watch_sweep(_app)
+    from .api.job_runner import shutdown_job_runner
+
+    await shutdown_job_runner()
+
+    from app.transport.http_client_pool import close_async_http_client, close_cffi_session
+
+    # Imported here, not at module scope: this pulls in the markitdown stack,
+    # which CLI/MCP callers that never render a PDF must not pay for.
+    from .extraction.content import shutdown_doc_extraction_executor
+
+    async def _close_gate() -> None:
+        resource_gate().close()
+
+    # Every step is attempted and failures surface only after the last: a
+    # close() that raises partway leaks every pool below it (and its subprocesses).
+    await _run_shutdown_steps(
+        (
+            ("close_async_http_client", close_async_http_client),
+            ("close_cffi_session", close_cffi_session),
+            ("close_browser_pool", close_browser_pool),
+            # The lazy document-extraction workers are the one pool nothing
+            # above touches; without this their subprocesses outlive shutdown.
+            ("shutdown_doc_extraction_executor", shutdown_doc_extraction_executor),
+            ("resource_gate.close", _close_gate),
+        )
+    )
+    # Symmetry with set_utilization_sampler(...): release the closed
+    # gate's ratio sampler so nothing dereferences it post-shutdown.
+    READINESS_STATE.set_utilization_sampler(None)
+
+
+async def _drain_watch_sweep(_app: FastAPI) -> None:
+    """Cancel and await the watch sweep before the job runner drains.
+
+    The sweep is cancelled while the key store is still open: a pass that
+    consults it for liveness must not race a closed handle.
+    """
+    watch_sweep_task = getattr(_app.state, "watch_sweep_task", None)
+    if watch_sweep_task is None:
+        return
+    watch_sweep_task.cancel()
+    try:
+        await watch_sweep_task
+    except asyncio.CancelledError:
+        pass
