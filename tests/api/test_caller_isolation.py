@@ -2,14 +2,9 @@
 
 from __future__ import annotations
 
-import asyncio
-import contextlib
-from collections.abc import AsyncIterator
 from pathlib import Path
 
 import pytest
-from fastapi import FastAPI
-from httpx import AsyncClient
 
 from app.api.caller_auth import (
     check_page_quota,
@@ -17,80 +12,15 @@ from app.api.caller_auth import (
     identity_for_key,
 )
 from app.api.crawl_endpoint import get_crawl_result
-from app.api.dependencies import get_job_store, get_result_store, get_settings, get_shutdown_event
-from app.config.settings import CrawlerSettings
 from app.models.caller_identity import CallerIdentity
-from app.models.json_value import JsonValue
 from app.runtime.metrics import MetricsStore
 from app.storage.caller_key_store import CallerKeyStore
 from app.storage.job_store import JobStatus, JobStore
 from app.storage.result_store import CrawlResultStore
-from tests._async_harnesses import expect_quota_refused, serve
-from tests._policy_factories import job_store as make_store
-from tests._quota_harness import keyed_client, stores
-
-
-def _seed_owned_job(store: JobStore, job_id: str = "crawl_owned", owner: str = "key_a") -> None:
-    """One single-shot job owned by ``owner``; every scoped test seeds the same row."""
-    store.create_single_shot(job_id, "http://example.com/", {}, owner=owner)
-
-
-def _complete_job(store: JobStore, job_id: str, payload: JsonValue, owner: str = "") -> None:
-    """Seed one owned single-shot job and drive it to COMPLETED with ``payload``."""
-    _seed_owned_job(store, job_id=job_id, owner=owner)
-    done = store.load(job_id)
-    assert done is not None
-    done.results = [payload]
-    store.save(done)
-    store.set_status(job_id, JobStatus.COMPLETED, expected=JobStatus.PENDING)
-
-
-@contextlib.asynccontextmanager
-async def _isolation_client(
-    tmp_path: Path,
-) -> AsyncIterator[tuple[AsyncClient, JobStore, CrawlResultStore, CallerKeyStore]]:
-    """An HTTP client over isolated stores, yielding the client and the stores."""
-    store, results, keys = stores(tmp_path)
-    app = _isolation_app(store, results, keys)
-    async with serve(app) as client:
-        yield client, store, results, keys
-
-
-@contextlib.asynccontextmanager
-async def _quota_client(
-    tmp_path: Path,
-) -> AsyncIterator[tuple[AsyncClient, JobStore, CrawlResultStore, CallerKeyStore]]:
-    """An HTTP client whose app can run the crawl POST: settings and shutdown wired."""
-    store, results, keys = stores(tmp_path)
-    app = _isolation_app(store, results, keys)
-    async with keyed_client(
-        app,
-        keys=keys,
-        overrides={
-            get_settings: lambda: CrawlerSettings.from_mapping({}),
-            get_shutdown_event: asyncio.Event,
-        },
-    ) as client:
-        yield client, store, results, keys
-
-
-async def _post_crawl(client: AsyncClient, *, max_pages: int, key: str | None = None):
-    """POST one /v1/crawl for a caller; anonymous when no key is given."""
-    headers = {"X-API-Key": key} if key else None
-    return await client.post(
-        "/v1/crawl",
-        headers=headers,
-        json={
-            "url": "http://example.com/",
-            "async_mode": True,
-            "policy": {"limits": {"max_pages": max_pages}},
-        },
-    )
-
-
-def _expect_quota_refused(response) -> None:
-    """A 429 with the quota_exceeded code, as every quota test reads it."""
-    return expect_quota_refused(response)
+from tests._async_harnesses import expect_quota_refused
+from tests.factories.client import isolation_client, post_crawl, quota_client
+from tests.factories.store import complete_job, seed_owned_job
+from tests.factories.store import job_store as make_store
 
 
 def _stored_request(store: JobStore, response):
@@ -104,7 +34,7 @@ def _stored_request(store: JobStore, response):
 def test_single_shot_job_carries_its_owner(tmp_path):
     store = make_store(tmp_path / "jobs.db")
 
-    _seed_owned_job(store)
+    seed_owned_job(store)
 
     loaded = store.load("crawl_owned")
     assert loaded is not None
@@ -122,7 +52,7 @@ def test_job_created_without_owner_stays_anonymous(tmp_path):
 
 def test_load_for_caller_hides_foreign_jobs(tmp_path):
     store = make_store(tmp_path / "jobs.db")
-    _seed_owned_job(store)
+    seed_owned_job(store)
 
     assert store.load_for_caller("crawl_owned", "key_b") is None
     assert store.load_for_caller("crawl_owned", "") is None
@@ -141,7 +71,7 @@ def _deserialize_count(tmp_path: Path, owner: str = "key_a") -> tuple[JobStore, 
         return delegate(row, with_accumulators=with_accumulators)
 
     store = make_store(tmp_path / "jobs.db", row_to_job=_spy)
-    _seed_owned_job(store, owner=owner)
+    seed_owned_job(store, owner=owner)
     return store, calls
 
 
@@ -180,7 +110,7 @@ def test_status_list_exists_and_delete_all_scope_to_owner(tmp_path):
 
 def test_saving_a_job_never_transfers_ownership(tmp_path):
     store = make_store(tmp_path / "jobs.db")
-    _seed_owned_job(store)
+    seed_owned_job(store)
 
     loaded = store.load("crawl_owned")
     assert loaded is not None
@@ -194,7 +124,7 @@ def test_saving_a_job_never_transfers_ownership(tmp_path):
 
 def test_control_plane_moves_through_scoped_status(tmp_path):
     store = make_store(tmp_path / "jobs.db")
-    _seed_owned_job(store)
+    seed_owned_job(store)
 
     assert store.set_status("crawl_owned", JobStatus.RUNNING, expected=JobStatus.PENDING) is True
 
@@ -296,7 +226,7 @@ async def test_get_crawl_result_enforces_owner(tmp_path):
 
     store = make_store(tmp_path / "jobs.db")
     results = CrawlResultStore(tmp_path / "results.db")
-    _seed_owned_job(store)
+    seed_owned_job(store)
     payload = {"request_id": "crawl_owned", "results": []}
     done = store.load("crawl_owned")
     assert done is not None
@@ -314,23 +244,8 @@ async def test_get_crawl_result_enforces_owner(tmp_path):
     assert response.status_code == 200
 
 
-def _isolation_app(job_store: JobStore, result_store: CrawlResultStore, keys: CallerKeyStore):
-    """A test app with the crawl and key routers over isolated stores."""
-    from app.api.crawl_router import router as crawl_router
-    from app.api.keys_router import router as keys_router
-
-    app = FastAPI()
-    app.include_router(crawl_router)
-    app.include_router(keys_router)
-    app.state.caller_key_store = keys
-    app.state.key_admin_token = "test-admin-token"
-    app.dependency_overrides[get_job_store] = lambda: job_store
-    app.dependency_overrides[get_result_store] = lambda: result_store
-    return app
-
-
 async def test_http_scoped_reads_and_key_issuance(tmp_path):
-    async with _isolation_client(tmp_path) as (client, store, results, keys):
+    async with isolation_client(tmp_path) as (client, store, results, keys):
         admin = {"X-API-Key": "test-admin-token"}
         first = await client.post("/v1/keys", json={"label": "agent-a"}, headers=admin)
         assert first.status_code == 201, first.text
@@ -341,7 +256,7 @@ async def test_http_scoped_reads_and_key_issuance(tmp_path):
         assert {row["label"] for row in listed.json()} == {"agent-a", "agent-b"}
         assert "secret" not in listed.text
 
-        _complete_job(
+        complete_job(
             store,
             "crawl_owned",
             {
@@ -363,16 +278,16 @@ async def test_http_scoped_reads_and_key_issuance(tmp_path):
 
 
 async def test_http_legacy_anonymous_rows_stay_readable(tmp_path):
-    async with _isolation_client(tmp_path) as (client, store, results, keys):
-        _complete_job(store, "crawl_open", {"request_id": "crawl_open"})
+    async with isolation_client(tmp_path) as (client, store, results, keys):
+        complete_job(store, "crawl_open", {"request_id": "crawl_open"})
         assert (await client.get("/v1/crawl/crawl_open")).status_code == 200
 
 
 def test_active_count_for_caller_counts_only_live_owned_jobs(tmp_path):
     store = make_store(tmp_path / "jobs.db")
-    _seed_owned_job(store, job_id="crawl_running", owner="key_a")
-    _seed_owned_job(store, job_id="crawl_other", owner="key_b")
-    _seed_owned_job(store, job_id="crawl_done", owner="key_a")
+    seed_owned_job(store, job_id="crawl_running", owner="key_a")
+    seed_owned_job(store, job_id="crawl_other", owner="key_b")
+    seed_owned_job(store, job_id="crawl_done", owner="key_a")
     assert store.set_status("crawl_running", JobStatus.RUNNING, expected=JobStatus.PENDING) is True
     assert store.set_status("crawl_done", JobStatus.COMPLETED, expected=JobStatus.PENDING) is True
 
@@ -401,9 +316,9 @@ def test_concurrency_quota_rejects_a_full_caller():
 
 
 async def test_http_concurrency_quota_rejects_a_full_caller(tmp_path):
-    async with _quota_client(tmp_path) as (client, store, results, keys):
+    async with quota_client(tmp_path) as (client, store, results, keys):
         issued = keys.issue_key("agent-a", max_concurrency=1)
-        _seed_owned_job(store, job_id="crawl_busy", owner=issued.key_id)
+        seed_owned_job(store, job_id="crawl_busy", owner=issued.key_id)
         assert store.set_status("crawl_busy", JobStatus.RUNNING, expected=JobStatus.PENDING) is True
         refused = await client.post(
             "/v1/crawl",
@@ -453,9 +368,9 @@ def test_search_metrics_have_their_own_caller_family(tmp_path):
 
 
 async def test_http_page_quota_rejects_over_budget_crawls(tmp_path):
-    async with _quota_client(tmp_path) as (client, store, results, keys):
+    async with quota_client(tmp_path) as (client, store, results, keys):
         issued = keys.issue_key("agent-a", max_pages=1)
-        _expect_quota_refused(await _post_crawl(client, max_pages=50, key=issued.secret))
+        expect_quota_refused(await post_crawl(client, max_pages=50, key=issued.secret))
 
 
 async def test_scoped_store_twins_round_trip_off_the_loop(tmp_path):
@@ -476,22 +391,22 @@ async def test_scoped_store_twins_round_trip_off_the_loop(tmp_path):
 async def test_anonymous_crawl_stores_the_resolved_page_limit(tmp_path):
     """An anonymous /v1/crawl stores the resolved page bound, not the raw 0:
     the model keeps ``max_pages=0`` legal, so admission writes the bound back."""
-    async with _quota_client(tmp_path) as (client, store, results, keys):
-        response = await _post_crawl(client, max_pages=0)
+    async with quota_client(tmp_path) as (client, store, results, keys):
+        response = await post_crawl(client, max_pages=0)
         stored = _stored_request(store, response)
         assert stored.policy.limits.max_pages == 100
 
 
 async def test_anonymous_page_quota_refuses_over_budget_crawls(tmp_path):
     """The anonymous bucket's capability default is a real quota: 101 pages is a 429."""
-    async with _quota_client(tmp_path) as (client, store, results, keys):
-        _expect_quota_refused(await _post_crawl(client, max_pages=101))
+    async with quota_client(tmp_path) as (client, store, results, keys):
+        expect_quota_refused(await post_crawl(client, max_pages=101))
 
 
 async def test_keyed_crawl_keeps_an_explicit_zero_page_limit(tmp_path):
     """A keyed caller's explicit ``max_pages=0`` stays 0 in the stored row (#194)."""
-    async with _quota_client(tmp_path) as (client, store, results, keys):
+    async with quota_client(tmp_path) as (client, store, results, keys):
         issued = keys.issue_key("agent-a", max_pages=0)
-        response = await _post_crawl(client, max_pages=0, key=issued.secret)
+        response = await post_crawl(client, max_pages=0, key=issued.secret)
         stored = _stored_request(store, response)
         assert stored.policy.limits.max_pages == 0

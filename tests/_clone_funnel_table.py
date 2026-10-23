@@ -94,7 +94,7 @@ FUNNELS = [
     ),
     (
         "crawl-submit",
-        "_post_crawl",
+        "post_crawl",
         'async def f(client):\n resp = await client.post("/v1/crawl", json=payload)\n assert '
         "resp.status_code "
         ""
