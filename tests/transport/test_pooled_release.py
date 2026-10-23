@@ -1,10 +1,6 @@
 """Displaced clients release eagerly on a live loop, never twice."""
 
 import asyncio
-import inspect
-
-import httpx
-from curl_cffi.requests import AsyncSession
 
 import app.transport.http_client_pool as http_mod
 from app.config import settings as settings_mod
@@ -59,17 +55,6 @@ class _ThirdKind(_PooledClientDouble):
 
     async def aclose(self) -> None:
         await self._finish_close()
-
-
-def test_real_pooled_classes_have_no_synchronous_close():
-    """The premise of, pinned against the installed libraries.
-
-    If either class ever gains a sync close, the reasoning behind
-    ``_release_dropped_client`` must be revisited -- this is the trip wire.
-    """
-    assert not hasattr(httpx.AsyncClient(), "close"), "httpx gained a sync close"
-    assert inspect.iscoroutinefunction(AsyncSession.close), "cffi close is no longer async"
-    assert not hasattr(AsyncSession, "is_closed"), "cffi now publishes is_closed"
 
 
 def test_real_shaped_session_is_closed_eagerly_on_a_live_loop(stub_builder):

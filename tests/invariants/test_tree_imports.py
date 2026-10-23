@@ -75,13 +75,6 @@ def _bare_sibling_import_offenders(tree: ast.AST, path: pathlib.Path) -> list[st
     ]
 
 
-PLANTED_BARE_IMPORT = (
-    "from _chain_policies import chain_policy\n"
-    "import _job_harnesses as harnesses\n"
-    "from _policy_factories import _policy\n"
-)
-
-
 def _own_package(module: str) -> str:
     """The package a dotted module name belongs to.
 
@@ -174,7 +167,13 @@ TEST_HELPERS_IMPORTED_BY_PACKAGE_PATH = Rule(
         "both E402 and the type checker"
     ),
     scope=_tests_tree,
-    bite=lambda: Bites(PLANTED_BARE_IMPORT, marker="imports the test helper", count=3),
+    bite=lambda: Bites(
+        "from _chain_policies import chain_policy\n"
+        "import _job_harnesses as harnesses\n"
+        "from _policy_factories import _policy\n",
+        marker="imports the test helper",
+        count=3,
+    ),
     clean=lambda: (
         # Package, stdlib and third-party forms name a module that is not a test file, so the rule cannot
         # degenerate into "no unqualified imports".

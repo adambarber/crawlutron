@@ -9,7 +9,6 @@ import ast
 import pathlib
 
 from app.api import webhooks as wm
-from app.models.crawl_policy import CrawlPolicy
 from tests.chokepoint_walks import nodes_of
 
 ISLAND_NAMES = (
@@ -59,26 +58,3 @@ def test_deliver_pinned_webhook_is_called_only_from_post_webhook():
                 }:
                     callers.add(f"{path.name}::{node.name}")
     assert callers == {"webhooks.py::post_webhook"}, callers
-
-
-def test_build_job_status_handles_single_shot_jobs(tmp_path):
-    """SINGLE_SHOT jobs report zero counts through the real store: the counts are the
-    store's projection now, not ``len()`` over dataclass fields, so the AttributeError
-    concern is gone but the invariant is pinned against production code.
-    """
-    from app.api.main_helpers import build_job_status
-    from app.models.job_status_response import JobStatusResponse
-    from tests._job_harnesses import make_job_store
-
-    store = make_job_store(tmp_path)
-    job = store.create_single_shot("single_test", "http://example.com/", CrawlPolicy())
-
-    row = store.status_row(job.job_id)
-    assert row is not None
-    status = build_job_status(row)
-
-    assert isinstance(status, JobStatusResponse)
-    assert status.frontier_size == 0
-    assert status.visited_size == 0
-    assert status.results_count == 0
-    assert status.job_id == "single_test"

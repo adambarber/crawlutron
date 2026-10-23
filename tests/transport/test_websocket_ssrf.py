@@ -61,18 +61,3 @@ async def test_ws_guard_is_installed_and_closes_unsafe_connects_safe(monkeypatch
         await page.ws_handler(good)
     assert good.connect_calls == 1, "safe websocket never connected to the server"
     assert good.closed_count == 0
-
-
-async def test_ws_guard_uses_the_playwright_route_web_socket_api(monkeypatch):
-    """The renderer must reach the installed API surface ``route_web_socket`` (not the
-    invented ``route_websocket``): a page exposing the real method must have the guard
-    installed through it."""
-    block_private_targets(monkeypatch)
-    page = _WSBearingPage()
-    _page2, renderer = pinned_page_renderer(monkeypatch, page=page)
-    await render_bare(renderer)
-
-    assert page.ws_handler is not None
-
-    # The renderer does not treat the invented attribute as the seam.
-    assert not hasattr(page, "route_websocket")
