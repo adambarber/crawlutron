@@ -9,9 +9,8 @@ from __future__ import annotations
 #: Oldest-first history per ``_BUDGETS`` metric (app/). The first entry is the
 #: value at first declaration; a later entry is a lowering, never a raise.
 _BUDGET_HISTORY: dict[str, list[int]] = {
-    #: 22 -> 21 (#160); 21 -> 20 (#330); 20 -> 19 (#136);
-    #: 19 -> 18 -> ... -> 1 (#419, eighteen inline orchestration fns split).
-    "function length": [22, 21, 20, 19, 18, 17, 16, 15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1],
+    #: 22 -> 21 (#160); 21 -> 20 (#330); 20 -> 19 (#136); then 19 -> 1 -> SEALED:
+    #: the row AND this record are gone (#419's seal; the zero test is the gate).
     "abc size": [1, 0],
     #: 358 -> 357 (#383); 357 -> 355 (#136);
     #: 355 -> 348 (#419, the render phases left browser.py).

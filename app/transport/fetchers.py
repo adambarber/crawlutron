@@ -263,33 +263,25 @@ async def _read_capped_stream(
     a 413 past the cap. The curl queue is read directly; every exit releases it.
     """
     raw = bytearray()
-    stream_completed = False
+    completed = False
+    early_result: HttpFetchResult | None = None
     try:
-        while True:
-            # A per-chunk wait, mirroring httpx read-timeout semantics: the
-            # per-URL budget bounds the total, and queue.get() is pure asyncio.
-            try:
-                chunk = await asyncio.wait_for(response.queue.get(), timeout=max(timeout_seconds + 5.0, 10.0))
-            except TimeoutError as error:
-                # Stall: release WITHOUT awaiting -- aclose() joins the very
-                # producer task being escaped. A scheduled close reclaims.
-                raise TimeoutError("cffi stream queue stalled") from error
-            if isinstance(chunk, RequestException):
-                raise chunk
-            if chunk is STREAM_END:
-                stream_completed = True
-                break
-            raw.extend(chunk)
-            if len(raw) > max_content_length:
-                # A 413 out of the loop is still an abandon, and the
-                # producer may be a hostile drip -- never wait on it.
-                return _cffi_too_large_result(url, chain.url, response, elapsed_ms)
+        early_result = await _drain_capped_stream(
+            response,
+            raw,
+            timeout_seconds=timeout_seconds,
+            max_content_length=max_content_length,
+            too_large=lambda: _cffi_too_large_result(url, chain.url, response, elapsed_ms),
+        )
+        completed = early_result is None
     finally:
-        if not stream_completed:
+        if not completed:
             if release_stream_noblock is not None:
                 release_stream_noblock(response)
             else:
                 _release_stream_noblock(response)
+    if early_result is not None:
+        return early_result
     # STREAM_END means the producer is done, so awaiting close is safe -- and
     # now required: an unreleased handle stalls the next streamed request.
     await response.aclose()
@@ -311,6 +303,33 @@ async def _read_capped_stream(
             elapsed_ms,
         ),
     )
+
+
+async def _drain_capped_stream(
+    response,
+    raw: bytearray,
+    *,
+    timeout_seconds: int,
+    max_content_length: int,
+    too_large: Callable[[], HttpFetchResult | None],
+) -> HttpFetchResult | None:
+    """Fill ``raw`` from the curl queue under the cap; None only on STREAM_END.
+
+    Non-None is the early 413 result (the abandon path never awaits the
+    producer). A stall raises so the caller's finally releases WITHOUT awaiting.
+    """
+    while True:
+        try:
+            chunk = await asyncio.wait_for(response.queue.get(), timeout=max(timeout_seconds + 5.0, 10.0))
+        except TimeoutError as error:
+            raise TimeoutError("cffi stream queue stalled") from error
+        if isinstance(chunk, RequestException):
+            raise chunk
+        if chunk is STREAM_END:
+            return None
+        raw.extend(chunk)
+        if len(raw) > max_content_length:
+            return too_large()
 
 
 def impersonating_fetcher() -> HttpFetcher:
