@@ -7,6 +7,7 @@ import contextlib
 from collections.abc import AsyncIterator
 from pathlib import Path
 
+import pytest
 from fastapi import FastAPI
 from httpx import AsyncClient
 
@@ -159,13 +160,6 @@ def test_load_for_caller_never_deserializes_a_foreign_or_missing_row(tmp_path):
     assert calls == ["crawl_owned"]
 
 
-def test_load_for_caller_reads_legacy_anonymous_rows(tmp_path):
-    store = make_store(tmp_path / "jobs.db")
-    store.create_single_shot("crawl_legacy", "http://example.com/", {})
-
-    assert store.load_for_caller("crawl_legacy", "") is not None
-
-
 def test_status_list_exists_and_delete_all_scope_to_owner(tmp_path):
     store = make_store(tmp_path / "jobs.db")
     store.create_single_shot("crawl_a", "http://example.com/", {}, owner="key_a")
@@ -219,14 +213,33 @@ def test_result_store_scopes_payloads_by_owner(tmp_path):
     assert store.get_for_caller("crawl_owned", "key_a") == payload
 
 
-def test_result_store_keeps_legacy_anonymous_reads(tmp_path):
-    store = CrawlResultStore(tmp_path / "results.db")
-    payload = {"request_id": "crawl_open", "results": []}
-    store.put("crawl_open", payload)
+@pytest.mark.parametrize(
+    ("store_factory", "create_legacy", "read_legacy", "read_args"),
+    [
+        (
+            lambda p: make_store(p / "jobs.db"),
+            lambda s: s.create_single_shot("crawl_legacy", "http://example.com/", {}),
+            lambda s, jid: s.load_for_caller(jid, ""),
+            ("crawl_legacy",),
+        ),
+        (
+            lambda p: CrawlResultStore(p / "results.db"),
+            lambda s: s.put("crawl_open", {"request_id": "crawl_open", "results": []}),
+            lambda s, jid: s.get_for_caller(jid, ""),
+            ("crawl_open",),
+        ),
+    ],
+)
+def test_legacy_anonymous_rows_are_readable_by_anonymous(
+    tmp_path, store_factory, create_legacy, read_legacy, read_args
+):
+    """Legacy anonymous rows (created without an owner) are readable by anonymous callers.
 
-    assert store.get("crawl_open") == payload
-    assert store.get_for_caller("crawl_open", "") == payload
-    assert store.get_for_caller("crawl_open", "key_a") is None
+    Applies to both JobStore and CrawlResultStore: a row inserted before the
+    ownership model existed must still be accessible without credentials."""
+    store = store_factory(tmp_path)
+    create_legacy(store)
+    assert read_legacy(store, *read_args) is not None
 
 
 def test_identity_for_key_carries_quotas(tmp_path):
