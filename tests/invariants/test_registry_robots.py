@@ -30,6 +30,43 @@ from tests.invariants.test_registry import (
 )
 from tests.property_registry import Property
 
+#: The URL-shape bite cases: every spelling of a robots.txt URL that must
+#: count as a second parser, planted verbatim.
+_ROBOTS_URL_FORMS_CAUGHT = {
+    "split url literal": (
+        "def renamed_loader(origin):\n"
+        "    path = '/r' + 'obots.txt'\n"
+        "    return http_fetcher(urljoin(origin, path))\n",
+        1,
+    ),
+    "helper split with formatted url": (
+        "def endpoint(origin):\n"
+        "    return '{}/robots.txt'.format(origin)\n"
+        "def load(origin):\n"
+        "    return http_fetcher(endpoint(origin))\n",
+        1,
+    ),
+    "inline joined url": (
+        "def load(origin):\n    return http_fetcher(''.join((origin, '/robots.txt')))\n",
+        1,
+    ),
+    "inline f-string url": (
+        "def load(origin):\n    return http_fetcher(f'{origin}/robots.txt')\n",
+        1,
+    ),
+    "inline absolute formatted url": (
+        "def load(origin):\n    return http_fetcher('https://{}/robots.txt'.format(origin))\n",
+        1,
+    ),
+    "helper split with arbitrary dict parser": (
+        "def directives(text):\n"
+        "    return {line: True for line in text.splitlines()}\n"
+        "def load(text):\n"
+        "    return http_fetcher(directives(text))\n",
+        1,
+    ),
+}
+
 
 @cache
 def _source_and_literals(node: ast.AST) -> tuple[str, str]:
@@ -292,44 +329,13 @@ def test_robots_policy_detector_bites():
                 "def parse_robots_rules(text):\n    return [(True, text)]\n",
                 1,
             ),
-            "split url literal": (
-                "def renamed_loader(origin):\n"
-                "    path = '/r' + 'obots.txt'\n"
-                "    return http_fetcher(urljoin(origin, path))\n",
-                1,
-            ),
             "renamed parser definition": (
                 "def decode_directives(text):\n"
                 "    rows = text.splitlines()\n"
                 "    return [(True, row) for row in rows if 'disallow' in row.lower()]\n",
                 1,
             ),
-            "helper split with formatted url": (
-                "def endpoint(origin):\n"
-                "    return '{}/robots.txt'.format(origin)\n"
-                "def load(origin):\n"
-                "    return http_fetcher(endpoint(origin))\n",
-                1,
-            ),
-            "inline joined url": (
-                "def load(origin):\n    return http_fetcher(''.join((origin, '/robots.txt')))\n",
-                1,
-            ),
-            "inline f-string url": (
-                "def load(origin):\n    return http_fetcher(f'{origin}/robots.txt')\n",
-                1,
-            ),
-            "inline absolute formatted url": (
-                "def load(origin):\n    return http_fetcher('https://{}/robots.txt'.format(origin))\n",
-                1,
-            ),
-            "helper split with arbitrary dict parser": (
-                "def directives(text):\n"
-                "    return {line: True for line in text.splitlines()}\n"
-                "def load(text):\n"
-                "    return http_fetcher(directives(text))\n",
-                1,
-            ),
+            **_ROBOTS_URL_FORMS_CAUGHT,
         },
         quiet=(
             "from app.orchestration.robots import load_robots_rules as load\n"
