@@ -19,14 +19,6 @@ LIMIT = 2
 #: Compile-time, runtime and test docstrings may run no longer than three lines.
 DOC_LIMIT = 3
 
-#: The measured over-length docstring count per root, at the last wave.
-#: Exact equality both ways: new long docstrings fail; a trimmed tree lowers it.
-_DOC_BUDGETS = {
-    "app": 0,
-    "tests": 0,
-    "scripts": 0,
-}
-
 #: The measured long-run count per root, at the last wave. Exact equality both ways: a run fails, a trimmed
 #: tree demands the lower number in this commit.
 _BUDGETS = {
@@ -240,21 +232,19 @@ def test_every_root_is_at_its_declared_comment_budget() -> None:
     assert not failures, "\n".join(failures)
 
 
-def test_every_root_is_at_its_declared_docstring_budget() -> None:
-    """No over-limit docstring lands, and no rewrite is left unclaimed."""
-    failures: list[str] = []
-    for root, budget in _DOC_BUDGETS.items():
+def test_no_overlong_docstring_anywhere() -> None:
+    """Zero over-limit docstrings in app/, tests/ and scripts/.
+
+    Zero is the only number this gate accepts. Any docstring longer than
+    DOC_LIMIT content lines is a failure, full stop.
+    """
+    offenders: list[str] = []
+    for root in ("app", "tests", "scripts"):
         found = _root_docstrings(root)
-        total = sum(len(items) for items in found.values())
-        if total != budget:
-            worst = sorted(found.items(), key=lambda kv: -len(kv[1]))[:3]
-            detail = "; ".join(f"{name}: {len(items)}" for name, items in worst)
-            failures.append(
-                f"{root}: {total} docstrings over {DOC_LIMIT} lines, budget declares {budget} "
-                f"({detail}). A new over-limit docstring fails; a rewritten tree must "
-                "lower the budget in the same commit."
-            )
-    assert not failures, "\n".join(failures)
+        for name, items in found.items():
+            for lineno, _end, kind in items:
+                offenders.append(f"{name}:{lineno}: {kind} exceeds three lines")
+    assert not offenders, "\n".join(offenders)
 
 
 def test_no_docstring_sits_below_the_first_statement() -> None:
@@ -264,7 +254,7 @@ def test_no_docstring_sits_below_the_first_statement() -> None:
     a length, and the object it claimed to document carried no documentation.
     """
     failures: list[str] = []
-    for root in _DOC_BUDGETS:
+    for root in ("app", "tests", "scripts"):
         for name, items in _root_findings(root, demoted_docstrings).items():
             for lineno, _end, symbol in items:
                 failures.append(f"{name}:{lineno}: {symbol} has a docstring that documents nothing")
