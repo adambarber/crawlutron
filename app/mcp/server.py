@@ -97,7 +97,7 @@ def tools_list_result() -> dict[str, JsonValue]:
 
 def _validate_transport(
     request_id: int | str,
-    method: Any,
+    method: JsonValue,
     params: dict[str, JsonValue],
     protocol_version_header: str | None,
     method_header: str | None,
@@ -150,7 +150,7 @@ def _validate_meta_matches_header(
         )
 
 
-def _validate_method_header(request_id: int | str, method: Any, header: str | None) -> None:
+def _validate_method_header(request_id: int | str, method: JsonValue, header: str | None) -> None:
     """The Mcp-Method header must exist and name the body's method."""
     if header is None:
         raise _protocol_error(request_id, HEADER_MISMATCH, "Missing required header: Mcp-Method")

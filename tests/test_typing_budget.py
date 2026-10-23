@@ -25,9 +25,9 @@ from tests.chokepoint_walks import REPO_ROOT, nodes_of, trees_under
 _METRIC = "undeclared record"
 _ANY = "bare Any"
 
-# 143 -> 137 (#135/#136); 134 -> 131 -> 130 (#419: TypedDicts, fetch-phase record,
-# then the prose match). "bare Any" is #193's baseline: 161 -> 160 (#419, doors).
-_BUDGETS = {_METRIC: 130, _ANY: 160}
+# 143 -> 137 (#135/#136); 134 -> 130 (#419: TypedDicts, fetch-phase and prose
+# records). "bare Any" is #193's baseline: 161 -> 159 (#419, doors; JsonValue).
+_BUDGETS = {_METRIC: 130, _ANY: 159}
 
 #: The scripts/ tree, which #293 brings under this gate for the first time; its
 #: measured baseline is declared first (value-ratchet rule).
