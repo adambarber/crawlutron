@@ -368,46 +368,8 @@ class DomainScheduler:
                     # Cap the wait: a hostile Retry-After must not park this
                     # gather for years; beyond the cap the origin re-asserts.
                     await asyncio.sleep(min(cooldown_expiry - now, MAX_COOLDOWN_WAIT))
-
-            # Circuit breaker: if open, skip the network request entirely.
-            if self.is_circuit_open(job.domain):
-                # In on_result mode the failed envelope must take the same channel:
-                # a direct dict write once raised, was swallowed, and the job vanished.
-                await deliver(
-                    job.index,
-                    failed_result(job, CircuitBreakerOpen(self._domain_cooldowns.get(job.domain))),
-                )
+            if await self._run_one_gated(job, domain_gates, global_gate, deliver, worker, failed_result):
                 return
-
-            # Token bucket rate limiting.
-            if self._max_rps > 0:
-                bucket = self._token_buckets.get(job.domain)
-                if bucket is None:
-                    bucket = TokenBucket(rate=self._max_rps)
-                    self._token_buckets[job.domain] = bucket
-                wait_seconds = bucket.consume(1.0)
-                if wait_seconds > 0:
-                    await asyncio.sleep(wait_seconds)
-
-            async with domain_gates[job.domain]:
-                # Jitter sleeps while holding ONLY the per-domain gate: sleeping
-                # inside global_gate would burn a global slot on pure waiting.
-                base_delay = self.current_delay(job.domain)
-                delay_sleep = jittered_delay(base_delay)
-                await asyncio.sleep(delay_sleep)
-                async with global_gate:
-                    try:
-                        result = await worker(job)
-                        self._record_result_health(job.domain, result)
-                    except Exception as error:
-                        self.record_failure(job.domain)
-                        # Chokepoint for "a worker raised": the classified envelope
-                        # is built here; ``failed_result`` keeps each pipeline's shape.
-                        await deliver(job.index, failed_result(job, error))
-                        return
-                    # Delivery sits OUTSIDE the worker's try: a raising sink is
-                    # a delivery failure, not a charge against the domain's breaker.
-                    await deliver(job.index, result)
 
         # return_exceptions=True: one job's failure must not cancel the others;
         # the failing job is simply absent from the returned mapping.
@@ -415,6 +377,57 @@ class DomainScheduler:
         if on_result is not None:
             return None
         return results
+
+    async def _run_one_gated(
+        self,
+        job: _Job,
+        domain_gates: dict[str, asyncio.Semaphore],
+        global_gate: asyncio.Semaphore,
+        deliver: Callable[[int, _Result], Awaitable[None]],
+        worker: SchedulerWorker[_Job, _Result],
+        failed_result: Callable[[_Job, BaseException], _Result],
+    ) -> bool:
+        """Breaker skip (True = handled) or the gated worker run; False = done."""
+        # Circuit breaker: if open, skip the network request entirely.
+        if self.is_circuit_open(job.domain):
+            # In on_result mode the failed envelope must take the same channel:
+            # a direct dict write once raised, was swallowed, and the job vanished.
+            await deliver(
+                job.index,
+                failed_result(job, CircuitBreakerOpen(self._domain_cooldowns.get(job.domain))),
+            )
+            return True
+
+        # Token bucket rate limiting.
+        if self._max_rps > 0:
+            bucket = self._token_buckets.get(job.domain)
+            if bucket is None:
+                bucket = TokenBucket(rate=self._max_rps)
+                self._token_buckets[job.domain] = bucket
+            wait_seconds = bucket.consume(1.0)
+            if wait_seconds > 0:
+                await asyncio.sleep(wait_seconds)
+
+        async with domain_gates[job.domain]:
+            # Jitter sleeps while holding ONLY the per-domain gate: sleeping
+            # inside global_gate would burn a global slot on pure waiting.
+            base_delay = self.current_delay(job.domain)
+            delay_sleep = jittered_delay(base_delay)
+            await asyncio.sleep(delay_sleep)
+            async with global_gate:
+                try:
+                    result = await worker(job)
+                    self._record_result_health(job.domain, result)
+                except Exception as error:
+                    self.record_failure(job.domain)
+                    # Chokepoint for "a worker raised": the classified envelope
+                    # is built here; ``failed_result`` keeps each pipeline's shape.
+                    await deliver(job.index, failed_result(job, error))
+                    return False
+                # Delivery sits OUTSIDE the worker's try: a raising sink is
+                # a delivery failure, not a charge against the domain's breaker.
+                await deliver(job.index, result)
+        return False
 
     @property
     def domain_cooldowns(self) -> dict[str, float]:
