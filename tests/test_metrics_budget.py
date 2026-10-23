@@ -194,12 +194,9 @@ def _root_gate(
 scripts_offenders, scripts_measurement = _root_gate(REPO_ROOT / "scripts", _SCRIPTS_BUDGETS)
 
 
-#: The tests/ tree had a file-size and comment-length budget but no complexity
-#: ceiling; its measured baseline is declared first (value-ratchet rule).
+#: The tests/ tree: baseline first (value-ratchet rule); fn-len SEALED at zero
+#: by #419 -- its row and ledger record are gone, the zero test is the gate.
 _TESTS_BUDGETS = {
-    # 11 -> ... -> 1 -> 0 (#419: ... the robots URL-form cases, the doc-pool
-    # recording lock).
-    "function length": 0,
     "abc size": 0,
     "largest class": 330,
     "block length": 0,
@@ -218,15 +215,21 @@ def _assert_overlong_fn() -> None:
 
 def test_the_tests_budget_measurement_reaches_tests() -> None:
     """The H1 reach: the complexity ceiling now sweeps tests/, which had none.
-    The real tree shows it (11 over-long functions are counted, not invisible) and
-    the shared collector fires on a synthetic over-long fn in tests/."""
-    assert suite_measurement("function length") == 0, (
-        "the tests function-length budget stopped reaching the real tree"
-    )
+    The real tree shows it, and the shared collector fires on a synthetic
+    over-long fn in tests/."""
     assert suite_measurement("abc size") == 0
     assert suite_measurement("block length") == 0
     assert suite_measurement("largest class") == 330
     _assert_overlong_fn()
+
+
+def test_zero_long_functions_in_tests() -> None:
+    """Zero functions over the length limit in tests/ -- sealed, no budget row.
+
+    The 60-line ceiling is the metric definition (_METRIC_LIMITS); the ratchet
+    row and its ledger history are what seal removed, per the doctrine.
+    """
+    _assert_no_overlong_functions(suite_offenders("function length"), "tests")
 
 
 def report() -> None:
@@ -268,18 +271,22 @@ def test_zero_long_blocks_in_app() -> None:
     )
 
 
+def _assert_no_overlong_functions(found: list[Offender], tree: str) -> None:
+    """The whole sealed fn-len gate: zero, or name every offender (file+line)."""
+    assert not found, (
+        f"function length: the {tree} tree's functions are sealed at the "
+        f"{_METRIC_LIMITS['function length']}-line ceiling -- split the "
+        "offending function(s) by concept: " + "; ".join(str(o) for o in found)
+    )
+
+
 def test_zero_long_functions_in_app() -> None:
     """Zero functions over the length limit in app/ -- sealed, no budget row.
 
     _METRIC_LIMITS still states the metric definition (the per-function
     ceiling); what is deleted is the ratchet row, per the seal doctrine.
     """
-    found = offenders("function length")
-    assert not found, (
-        "function length: the app tree's functions are sealed at the "
-        f"{_METRIC_LIMITS['function length']}-line ceiling -- split the "
-        "offending function(s) by concept: " + "; ".join(str(o) for o in found)
-    )
+    _assert_no_overlong_functions(offenders("function length"), "app")
 
 
 _SCRIPTS_REMEDY = (
