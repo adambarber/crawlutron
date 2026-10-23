@@ -17,7 +17,7 @@ from tests.chokepoint_walks import (
 )
 from tests.invariants._shared import _relative_app_path
 from tests.property_registry import Property
-from tests.rules import Bites, Rule, Silent
+from tests.rules import Bites, Registry, Rule, Silent
 
 _MIGRATION_DDL_PROPERTY = Property(
     name="migration-ddl",
@@ -72,14 +72,6 @@ DDL_IS_CONFINED_TO_THE_MIGRATIONS_PACKAGE = Rule(
         ),
     ),
 )
-
-
-def test_ddl_is_confined_to_the_migrations_package():
-    DDL_IS_CONFINED_TO_THE_MIGRATIONS_PACKAGE.scan()
-
-
-def test_ddl_detector_bites():
-    DDL_IS_CONFINED_TO_THE_MIGRATIONS_PACKAGE.check_bites()
 
 
 # Two descriptions of one contract, neither derived from the other -- and the advertised one claimed
@@ -144,16 +136,14 @@ EVERY_MCP_TOOL_DECLARES_THE_MODEL_THAT_VALIDATES_ITS_ARGUMENTS = Rule(
 )
 
 
-def test_every_mcp_tool_declares_the_model_that_validates_its_arguments():
-    EVERY_MCP_TOOL_DECLARES_THE_MODEL_THAT_VALIDATES_ITS_ARGUMENTS.scan()
+def test_advertised_mcp_schemas_come_from_the_request_models():
+    """The live registry satisfies the invariant the guard asserts.
 
-
-def test_mcp_request_model_detector_bites():
+    The bite proves the detector; this proves the property on the real
+    TOOL_SPECS: no tool ships a schema its request model does not describe.
+    """
     from app.mcp.tools import TOOL_SPECS
 
-    EVERY_MCP_TOOL_DECLARES_THE_MODEL_THAT_VALIDATES_ITS_ARGUMENTS.check_bites()
-
-    # And the live registry must satisfy the invariant the guard asserts.
     for spec in TOOL_SPECS:
         assert spec.request_model is not None, spec.name
         assert spec.input_schema["properties"] == {
@@ -161,3 +151,21 @@ def test_mcp_request_model_detector_bites():
             for k, v in spec.request_model.model_json_schema().get("properties", {}).items()
             if k not in spec.unsupported_fields
         }, f"{spec.name} advertises a schema its request model does not describe"
+
+
+RULES = Registry(
+    (
+        DDL_IS_CONFINED_TO_THE_MIGRATIONS_PACKAGE,
+        EVERY_MCP_TOOL_DECLARES_THE_MODEL_THAT_VALIDATES_ITS_ARGUMENTS,
+    )
+)
+
+
+def test_no_rule_violations():
+    """DDL lives in migrations; every MCP tool declares its validating model."""
+    RULES.check_all_clean()
+
+
+def test_every_rule_bites():
+    """Every rule must reject what it forbids, and spare what it resembles."""
+    RULES.check_all_bite()
