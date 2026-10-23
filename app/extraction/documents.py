@@ -176,52 +176,69 @@ def extract_selected(
     # One evaluation deadline for every selector form. A pathological selector or
     # a hostile payload could otherwise run unbounded and tie up a request worker.
     selector_timeout = (settings or CrawlerSettings.from_mapping()).extraction_selector_timeout
-    fragment: str | None = None
-    css_selector = selectors.css
-    if css_selector:
-        try:
-            from bs4 import BeautifulSoup
-        except ImportError:
-            return ExtractedContent(None, None)
-        soup = BeautifulSoup(html, "html.parser")
-        selected = _eval_selector(lambda: soup.select(css_selector), selector_timeout)
-        if isinstance(selected, _SelectorTimedOut):
-            logger.warning(
-                "extraction_selector_timeout",
-                extra={"selector_type": "css", "selector": css_selector},
-            )
-            return ExtractedContent(None, None)
-        if not selected:
-            return ExtractedContent(None, None)
-        fragment = "\n".join(str(tag) for tag in selected)
+    if selectors.css:
+        fragment = _css_selected_fragment(html, selectors, selector_timeout)
     elif selectors.xpath:
-        xpath = selectors.xpath
-        tree = tree if tree is not None else parse_html_tree(html)
-        if tree is None:
-            return ExtractedContent(None, None)
-        try:
-            nodes = _eval_selector(lambda: tree.xpath(xpath), selector_timeout)
-        except Exception:  # invalid XPath is caller error, not extraction
-            return ExtractedContent(None, None)
-        if isinstance(nodes, _SelectorTimedOut):
-            logger.warning(
-                "extraction_selector_timeout",
-                extra={"selector_type": "xpath", "selector": xpath},
-            )
-            return ExtractedContent(None, None)
-        if not nodes:
-            return ExtractedContent(None, None)
-        parts: list[str] = []
-        for node in nodes:
-            if isinstance(node, str):
-                parts.append(node)
-            else:
-                parts.append(etree.tostring(node, encoding="unicode"))
-        fragment = "\n".join(parts)
+        fragment = _xpath_selected_fragment(html, selectors, selector_timeout, tree=tree)
+    else:
+        fragment = None
     if not fragment:
         return ExtractedContent(None, None)
     text, md = html_to_markdown(fragment)
     return ExtractedContent(md or text, md or text)
+
+
+def _css_selected_fragment(html: str, selectors: Selectors, selector_timeout: float) -> str | None:
+    """The CSS form: BeautifulSoup select under the shared deadline."""
+    css_selector = selectors.css or ""
+    if not css_selector:
+        return None
+    try:
+        from bs4 import BeautifulSoup
+    except ImportError:
+        return None
+    soup = BeautifulSoup(html, "html.parser")
+    selected = _eval_selector(lambda: soup.select(css_selector), selector_timeout)
+    if isinstance(selected, _SelectorTimedOut):
+        logger.warning(
+            "extraction_selector_timeout",
+            extra={"selector_type": "css", "selector": css_selector},
+        )
+        return None
+    if not selected:
+        return None
+    return "\n".join(str(tag) for tag in selected)
+
+
+def _xpath_selected_fragment(
+    html: str, selectors: Selectors, selector_timeout: float, *, tree: Any | None
+) -> str | None:
+    """The XPath form: lxml under the shared deadline; invalid XPath is caller error."""
+    xpath = selectors.xpath or ""
+    if not xpath:
+        return None
+    tree = tree if tree is not None else parse_html_tree(html)
+    if tree is None:
+        return None
+    try:
+        nodes = _eval_selector(lambda: tree.xpath(xpath), selector_timeout)
+    except Exception:  # invalid XPath is caller error, not extraction
+        return None
+    if isinstance(nodes, _SelectorTimedOut):
+        logger.warning(
+            "extraction_selector_timeout",
+            extra={"selector_type": "xpath", "selector": xpath},
+        )
+        return None
+    if not nodes:
+        return None
+    parts: list[str] = []
+    for node in nodes:
+        if isinstance(node, str):
+            parts.append(node)
+        else:
+            parts.append(etree.tostring(node, encoding="unicode"))
+    return "\n".join(parts)
 
 
 PDF_MAGIC = b"%PDF"
@@ -335,33 +352,7 @@ def extract_document(
         # other document failure instead of wedging the request.
         return ExtractedContent(None, None)
     try:
-        try:
-            worker.conn.send((body, doc_task_hooks()))
-        except (EOFError, OSError):
-            # Send raced a worker death: reap the slot and report empty.
-            logger.warning("extraction_document_child_died")
-            DOC_POOL.retire(worker)
-            return ExtractedContent(None, None)
-        try:
-            ready = worker.conn.poll(active.extraction_doc_timeout)
-        except (EOFError, OSError):
-            logger.warning("extraction_document_child_died")
-            DOC_POOL.retire(worker)
-            return ExtractedContent(None, None)
-        md = None
-        if ready:
-            try:
-                _, md = worker.conn.recv()
-            except (EOFError, OSError):
-                # Worker died pre-send (segfault on hostile input): EOF reads as
-                # readable, then recv() raises. Empty extraction; retire the slot.
-                logger.warning("extraction_document_child_died")
-                DOC_POOL.retire(worker)
-                return ExtractedContent(None, None)
-        else:
-            logger.warning("extraction_document_timeout")
-            DOC_POOL.retire(worker)
-            return ExtractedContent(None, None)
+        md = _document_pool_exchange(worker, body, active.extraction_doc_timeout)
     finally:
         DOC_POOL.release(worker)
 
@@ -375,6 +366,40 @@ def extract_document(
         md = md[:cap]
         logger.warning("extraction_document_truncated", extra={"max_chars": cap})
     return ExtractedContent(md, md)
+
+
+def _document_pool_exchange(worker, body: bytes, timeout_seconds: float) -> str | None:
+    """Send, wait, receive -- retiring the slot on every death or timeout path.
+
+    Worker death (EOF/OSError on send, poll or recv) and a poll timeout each
+    retire the slot and report empty: the pool respawns it, the caller degrades.
+    """
+    try:
+        worker.conn.send((body, doc_task_hooks()))
+    except (EOFError, OSError):
+        # Send raced a worker death: reap the slot and report empty.
+        logger.warning("extraction_document_child_died")
+        DOC_POOL.retire(worker)
+        return None
+    try:
+        ready = worker.conn.poll(timeout_seconds)
+    except (EOFError, OSError):
+        logger.warning("extraction_document_child_died")
+        DOC_POOL.retire(worker)
+        return None
+    if not ready:
+        logger.warning("extraction_document_timeout")
+        DOC_POOL.retire(worker)
+        return None
+    try:
+        _, md = worker.conn.recv()
+        return md
+    except (EOFError, OSError):
+        # Worker died pre-send (segfault on hostile input): EOF reads as
+        # readable, then recv() raises. Empty extraction; retire the slot.
+        logger.warning("extraction_document_child_died")
+        DOC_POOL.retire(worker)
+        return None
 
 
 async def adocument_extract(
