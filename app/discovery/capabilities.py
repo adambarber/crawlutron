@@ -42,84 +42,110 @@ OUTPUT_FIELDS = [
 
 
 def capabilities_payload(settings: CrawlerSettings) -> CapabilitiesPayload:
+    """The whole discovery payload, one named section per concern."""
     return {
         "service": SERVICE_IDENTITY["service"],
         "version": SERVICE_IDENTITY["version"],
         "policy_schema_version": SERVICE_IDENTITY["policy_schema_version"],
         "supported_strategies": [strategy.value for strategy in CrawlStrategy],
         "supported_extractions": [method.value for method in CrawlExtractionMethod],
-        "supported_classifications": [classification.value for classification in CrawlClassification],
+        "supported_classifications": [c.value for c in CrawlClassification],
         "output_fields": OUTPUT_FIELDS,
-        "default_limits": {
-            "batch_size": settings.max_batch_size,
-            "max_batch_size": settings.max_batch_size,
-            "timeout_seconds": settings.default_timeout_seconds,
-            "max_retries": settings.default_max_retries,
-            "challenge_wait_seconds": DEFAULT_CHALLENGE_WAIT_SECONDS,
-            "max_discovered_links": DEFAULT_MAX_DISCOVERED_LINKS,
-            "total_url_budget_seconds": DEFAULT_TOTAL_URL_BUDGET_SECONDS,
-            "global_concurrency": settings.global_concurrency,
-            "per_domain_concurrency": settings.per_domain_concurrency,
-            "per_domain_delay_ms": settings.per_domain_delay_ms,
-        },
-        "features": {
-            "headed_browser": True,
-            "pdf_extraction": True,
-            "direct_http": True,
-            "trafilatura": True,
-            "discovered_links": True,
-            "frame_discovery": True,
-            "form_discovery": True,
-            "conditional_fetch": True,
-            # The stored crawl record's diagnostic spine, read over existing
-            # data: attempts and classification evidence without page bodies.
-            "per_request_trace": True,
-            # Candidate host rules proposed from recorded evidence, for a person
-            # to review. Nothing here applies a rule.
-            "policy_suggestions": True,
-            # The surface that uses `conditional_fetch` on the caller's behalf:
-            # registered URLs the sweep rechecks, and announces when they change.
-            "watches": True,
-            "recursive_frontier": True,
-            "warmup": True,
-            "request_profiles": True,
-            "browser_profiles": True,
-            "web_search": True,
-            "mcp": True,
-            "async_mode": True,
-            "captcha_solving": False,
-            "proxy_rotation": False,
-            "identity_rotation": False,
-            "credential_injection": False,
-            # interstitial is a challenge, so captcha_solving: false states it already;
-            # naming the capability is the advertisement, not the warning.
-            "robots_diagnostics": True,
-            "sitemap_discovery": True,
-            "feed_discovery": True,
-            "adaptive_retry": True,
-            "runtime_diagnostics": True,
-            "domain_aware_concurrency": True,
-            "readiness_endpoint": True,
-            "event_loop_thread_offload": True,
-        },
-        "search": {
-            "active_provider": active_search_provider_name(settings),
-            "configured_providers": configured_search_providers(settings),
-            "endpoint": "/v1/search",
-            "provider_selection": "CRAWLUTRON_SEARCH_PROVIDER (auto "
-            "picks the first keyed provider; DuckDuckGo is the keyless fallback)",
-        },
-        "mcp": {
-            "endpoint": "/mcp",
-            "protocol_versions": ["2026-07-28"],
-        },
-        "crawl_timing": {
-            "per_url_budget_seconds": DEFAULT_TOTAL_URL_BUDGET_SECONDS,
-            "sync_has_server_time_ceiling": False,
-            "large_crawl_guidance": LARGE_CRAWL_GUIDANCE,
-        },
+        "default_limits": _default_limit_fields(settings),
+        "features": _feature_flag_fields(),
+        "search": _search_fields(settings),
+        "mcp": _mcp_fields(),
+        "crawl_timing": _crawl_timing_fields(),
         "openapi_url": "/openapi.json",
         "swagger_ui_url": "/docs",
+    }
+
+
+def _default_limit_fields(settings: CrawlerSettings) -> dict[str, object]:
+    """The limits a caller must plan around, from settings and the vocabulary."""
+    return {
+        "batch_size": settings.max_batch_size,
+        "max_batch_size": settings.max_batch_size,
+        "timeout_seconds": settings.default_timeout_seconds,
+        "max_retries": settings.default_max_retries,
+        "challenge_wait_seconds": DEFAULT_CHALLENGE_WAIT_SECONDS,
+        "max_discovered_links": DEFAULT_MAX_DISCOVERED_LINKS,
+        "total_url_budget_seconds": DEFAULT_TOTAL_URL_BUDGET_SECONDS,
+        "global_concurrency": settings.global_concurrency,
+        "per_domain_concurrency": settings.per_domain_concurrency,
+        "per_domain_delay_ms": settings.per_domain_delay_ms,
+    }
+
+
+def _feature_flag_fields() -> dict[str, bool]:
+    """Every capability the service advertises, refusals included, by name."""
+    return {
+        "headed_browser": True,
+        "pdf_extraction": True,
+        "direct_http": True,
+        "trafilatura": True,
+        "discovered_links": True,
+        "frame_discovery": True,
+        "form_discovery": True,
+        "conditional_fetch": True,
+        # The stored crawl record's diagnostic spine, read over existing
+        # data: attempts and classification evidence without page bodies.
+        "per_request_trace": True,
+        # Candidate host rules proposed from recorded evidence, for a person
+        # to review. Nothing here applies a rule.
+        "policy_suggestions": True,
+        # The surface that uses `conditional_fetch` on the caller's behalf:
+        # registered URLs the sweep rechecks, and announces when they change.
+        "watches": True,
+        "recursive_frontier": True,
+        "warmup": True,
+        "request_profiles": True,
+        "browser_profiles": True,
+        "web_search": True,
+        "mcp": True,
+        "async_mode": True,
+        "captcha_solving": False,
+        "proxy_rotation": False,
+        "identity_rotation": False,
+        "credential_injection": False,
+        # interstitial is a challenge, so captcha_solving: false states it already;
+        # naming the capability is the advertisement, not the warning.
+        "robots_diagnostics": True,
+        "sitemap_discovery": True,
+        "feed_discovery": True,
+        "adaptive_retry": True,
+        "runtime_diagnostics": True,
+        "domain_aware_concurrency": True,
+        "readiness_endpoint": True,
+        "event_loop_thread_offload": True,
+    }
+
+
+def _search_fields(settings: CrawlerSettings) -> dict[str, object]:
+    """The search front-end's provider picture and its selection rule."""
+    return {
+        "active_provider": active_search_provider_name(settings),
+        "configured_providers": configured_search_providers(settings),
+        "endpoint": "/v1/search",
+        "provider_selection": "CRAWLUTRON_SEARCH_PROVIDER (auto "
+        "picks the first keyed provider; DuckDuckGo is the keyless fallback)",
+    }
+
+
+def _mcp_fields() -> dict[str, object]:
+    """The MCP surface's endpoint and the protocol versions it speaks."""
+    return {
+        "endpoint": "/mcp",
+        "protocol_versions": ["2026-07-28"],
+    }
+
+
+def _crawl_timing_fields() -> dict[str, object]:
+    """Per-URL budget facts and the large-crawl guidance text."""
+    return {
+        "per_url_budget_seconds": DEFAULT_TOTAL_URL_BUDGET_SECONDS,
+        "sync_has_server_time_ceiling": False,
+        "large_crawl_guidance": LARGE_CRAWL_GUIDANCE,
     }
 
 
