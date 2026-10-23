@@ -204,19 +204,28 @@ def test_a_block_cut_mid_clause_fires() -> None:
     assert dangling_comment_blocks("# --- Structured discovery ---\nx = 1\n") == []
 
 
-def _zero_everywhere(collect: Callable[[str], list]) -> list[str]:
-    """Every finding of ``collect`` across all three roots, with file and line."""
-    offenders: list[str] = []
+def _zero_everywhere(collect: Callable[[str], list]):
+    """Every finding of ``collect`` across all three roots, with file and raw item."""
+    offenders = []
     for root in ("app", "tests", "scripts"):
         for name, items in _root_findings(root, collect).items():
             for item in items:
-                offenders.append(f"{name}:{item[0]}: {item[-1]}")
+                offenders.append((name, item))
     return offenders
+
+
+def _format_long_comment_run(name: str, item) -> str:
+    return f"{name}:{item[0]}: {item[-1]}"
+
+
+def _format_overlong_docstring(name: str, item) -> str:
+    lineno, _end, kind = item
+    return f"{name}:{lineno}: {kind} exceeds three lines"
 
 
 def test_zero_long_comment_runs_everywhere() -> None:
     """Zero long comment runs in app/, tests/ and scripts/ -- no budget, no exemption."""
-    offenders = _zero_everywhere(long_comment_runs)
+    offenders = [_format_long_comment_run(name, item) for name, item in _zero_everywhere(long_comment_runs)]
     assert not offenders, "\n".join(offenders)
 
 
@@ -226,9 +235,7 @@ def test_no_overlong_docstring_anywhere() -> None:
     def collect(source: str) -> list[tuple[int, int, str]]:
         return over_line_docstrings(ast.parse(source), DOC_LIMIT)
 
-    offenders = [
-        f"{name}:{lineno}: {kind} exceeds three lines" for name, lineno, kind in _zero_everywhere(collect)
-    ]
+    offenders = [_format_overlong_docstring(name, item) for name, item in _zero_everywhere(collect)]
     assert not offenders, "\n".join(offenders)
 
 

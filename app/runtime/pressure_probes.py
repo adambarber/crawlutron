@@ -7,7 +7,6 @@ import os
 import time
 from collections.abc import Awaitable, Callable
 
-from app.config.env import parse_bool_env
 from app.runtime.cgroup_sense import read_int, read_text
 
 # Self-managed, no operator knob (mirrors app/runtime/memory_pressure.py): the gate
@@ -20,11 +19,6 @@ DEFAULT_CPU_HARD = 0.95
 
 # Manual CPU budget override removed; the discovered quota is the ceiling.
 DEFAULT_CPU_BUDGET = None
-
-
-# Opt-in event-loop lag probe feeding admission; off by default
-# (CRAWLUTRON_LOOP_LAG_PROBE=1) so tests and minimal deployments pay no task cost.
-LOOP_LAG_PROBE_ENABLED = parse_bool_env("CRAWLUTRON_LOOP_LAG_PROBE", default=False)
 
 
 _LOOP_LAG_SAMPLE_INTERVAL = 0.05

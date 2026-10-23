@@ -11,14 +11,41 @@ import threading
 import time
 from collections.abc import Callable
 from contextlib import suppress
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, TypedDict
 
 from markitdown import MarkItDown
 
-from app.config.env import parse_bool_env
 from app.orchestration.pool import SyncPool
 
 logger = logging.getLogger(__name__)
+
+
+# The doc-pool death-simulation seam (#359): tests install a hooks payload here
+# (a per-process holder, never env) and the worker honors what the parent ships.
+class DocPoolHooks(TypedDict):
+    """The child-simulation hooks one task may carry: die/hang/output."""
+
+    die: bool
+    hang: bool
+    output: str | None
+
+
+class _HooksHolder:
+    __slots__ = ("active", "payload")
+
+    def __init__(self) -> None:
+        self.active = False
+        self.payload: DocPoolHooks | None = None
+
+
+doc_pool_hooks = _HooksHolder()
+
+
+def install_doc_pool_hooks(hooks: DocPoolHooks | None) -> None:
+    """Arm (or clear) the doc-pool death-simulation hooks for this process."""
+    doc_pool_hooks.active = hooks is not None
+    doc_pool_hooks.payload = hooks
+
 
 # Named start method, never inherited: a forked child inherits the parent's
 # loop, sockets and locks held for good, so one spawn context pairs every child.
@@ -66,25 +93,20 @@ def terminate_doc_process(proc) -> None:
 
 
 def test_hooks_enabled() -> bool:
-    """Whether the ``TEST_MARKITDOWN_*`` child hooks are in force: they let tests
-    simulate child death, hangs and output without real parsers, and fire only
-    with ``CRAWLUTRON_TEST_HOOKS=1`` plus the per-hook flag -- a stray env must never alter production.
+    """Whether the doc-pool death-simulation hooks are wired in this process.
+    Tests inject hooks directly; production carries no env gate at all.
     """
-    return parse_bool_env("CRAWLUTRON_TEST_HOOKS", default=False)
+    return bool(getattr(doc_pool_hooks, "active", False))
 
 
-def doc_task_hooks() -> dict | None:
-    """Snapshot the TEST_MARKITDOWN_* hooks for one task, parent-side.
-    Persistent workers would otherwise act on spawn-time env, not the caller's
+def doc_task_hooks() -> DocPoolHooks | None:
+    """The hooks for one task, parent-side: exactly what the seam injected.
+    Persistent workers would otherwise act on spawn-time state, not the caller's
     current flags; the parent ships the snapshot with the task and the worker honors the message.
     """
     if not test_hooks_enabled():
         return None
-    return {
-        "die": parse_bool_env("TEST_MARKITDOWN_DIE", default=False),
-        "hang": parse_bool_env("TEST_MARKITDOWN_HANG", default=False),
-        "output": os.environ.get("TEST_MARKITDOWN_OUTPUT"),
-    }
+    return doc_pool_hooks.payload
 
 
 def configure_doc_worker_logging() -> None:
@@ -97,8 +119,8 @@ def configure_doc_worker_logging() -> None:
 
 def _markitdown_extract(body: bytes) -> str | None:
     """Convert document bytes with markitdown (worker-side real path only). Test
-    hooks are NOT read here: the parent snapshots them per task, and the worker
-    honors the shipped message, so persistent workers never observe stale env.
+    hooks are NOT read here: the parent ships them per task, and the worker
+    honors the shipped message.
     """
     res = MarkItDown().convert_stream(io.BytesIO(body))
     return res.text_content if res is not None else None
@@ -106,8 +128,8 @@ def _markitdown_extract(body: bytes) -> str | None:
 
 def _doc_worker_main(conn) -> None:
     """Persistent worker entry: serve markitdown tasks until killed or orphaned.
-    Each task arrives as ``(body, hooks)`` from the parent's per-call snapshot
-    (never spawn-time env); a ``die`` hook exits without sending, like a segfault.
+    Each task arrives as ``(body, hooks)`` from the parent's per-call payload
+    (never process-global state); a ``die`` hook exits without sending, like a segfault.
     """
     try:
         configure_doc_worker_logging()

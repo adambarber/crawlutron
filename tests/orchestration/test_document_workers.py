@@ -14,7 +14,12 @@ from app.extraction.content import (
     extract_selected,
     parse_html_tree,
 )
-from app.orchestration.doc_pool import DocExtractionPool, spawn_doc_worker, terminate_doc_process
+from app.orchestration.doc_pool import (
+    DocExtractionPool,
+    install_doc_pool_hooks,
+    spawn_doc_worker,
+    terminate_doc_process,
+)
 from app.vocabulary.limits import DEFAULT_EXTRACTION_MAX_MARKDOWN
 from tests._assertions import set_optional_env
 from tests._extraction_helpers import doc_worker_acquisitions, extract_discovered_links, settings_with
@@ -140,18 +145,19 @@ def _reset_doc_extraction_pool(monkeypatch):
 async def test_extract_document_timeout_is_enforced(monkeypatch):
     """A document extraction exceeding the wall-clock timeout returns None.
 
-    The hang lives in the worker SUBPROCESS, injected via the environment, so
+    The hang lives in the worker SUBPROCESS, injected via the hooks seam, so
     the suite's in-process sleep patch is irrelevant -- no real sleeps needed."""
     # The worker subprocess hangs; a deadline short enough to notice is the whole point of the test, so it is
     # passed in rather than written onto the module the call lives in.
-    monkeypatch.setenv("TEST_MARKITDOWN_HANG", "1")
-    monkeypatch.setenv("CRAWLUTRON_TEST_HOOKS", "1")
-    settings = settings_with(extraction_doc_timeout=0.01)
+    install_doc_pool_hooks({"hang": True})
+    try:
+        settings = settings_with(extraction_doc_timeout=0.01)
 
-    assert_extraction_empty(extract_document(b"%PDF-1.4 fake", "http://example.com/x.pdf", settings=settings))
-
-    # Clean up
-    monkeypatch.delenv("TEST_MARKITDOWN_HANG", raising=False)
+        assert_extraction_empty(
+            extract_document(b"%PDF-1.4 fake", "http://example.com/x.pdf", settings=settings)
+        )
+    finally:
+        install_doc_pool_hooks(None)
 
 
 async def test_extract_document_child_death_returns_empty(monkeypatch):
@@ -159,10 +165,11 @@ async def test_extract_document_child_death_returns_empty(monkeypatch):
     not an unhandled EOFError, and leaves no zombie behind."""
     # Isolate the pool this call drives: the child-death contract is per worker,
     # so this test's pool must hold only this call's own worker.
-
-    monkeypatch.setenv("TEST_MARKITDOWN_DIE", "1")
-    monkeypatch.setenv("CRAWLUTRON_TEST_HOOKS", "1")
-    assert_extraction_empty(extract_document(b"%PDF-1.4 fake", "http://example.com/x.pdf"))
+    install_doc_pool_hooks({"die": True})
+    try:
+        assert_extraction_empty(extract_document(b"%PDF-1.4 fake", "http://example.com/x.pdf"))
+    finally:
+        install_doc_pool_hooks(None)
 
     # The only pooled worker is the one THIS call drove: after its child death it
     # must be reaped (not a zombie) and never left marked busy mid-task.
@@ -177,12 +184,13 @@ async def test_extract_document_output_is_truncated_at_the_configured_cap(monkey
     Same emission hook as the other scenarios; 10 KB against a 10 KB cap is a
     truncation, visible without materializing the 5 MB default."""
     cap = 10000
-    monkeypatch.setenv("TEST_MARKITDOWN_OUTPUT", "x" * (cap + 1000))
-    monkeypatch.setenv("CRAWLUTRON_TEST_HOOKS", "1")
-
-    result = extract_document(
-        b"%PDF-1.4 fake", "http://example.com/x.pdf", settings_with(extraction_max_markdown=cap)
-    )
+    install_doc_pool_hooks({"output": "x" * (cap + 1000)})
+    try:
+        result = extract_document(
+            b"%PDF-1.4 fake", "http://example.com/x.pdf", settings_with(extraction_max_markdown=cap)
+        )
+    finally:
+        install_doc_pool_hooks(None)
 
     assert result.markdown is not None
     assert len(result.markdown) == cap, "the document exceeded the configured cap"
@@ -215,29 +223,26 @@ async def test_extract_document_process_pool_isolation(monkeypatch):
     """Document extraction runs in a separate process so a hang can be killed.
 
     The kill and the hang are injected into the worker SUBPROCESS via the
-    environment, so the in-process sleep patch never needed to apply here."""
-    # The subprocess will check this env var and hang if set.
-    monkeypatch.setenv("TEST_MARKITDOWN_HANG", "1")
-    monkeypatch.setenv("CRAWLUTRON_TEST_HOOKS", "1")
-
-    result = extract_document(
-        b"%PDF-1.4 fake",
-        "http://example.com/x.pdf",
-        settings=settings_with(extraction_doc_timeout=0.01),
-    )
+    hooks seam, so the in-process sleep patch never needed to apply here."""
+    install_doc_pool_hooks({"hang": True})
+    try:
+        result = extract_document(
+            b"%PDF-1.4 fake",
+            "http://example.com/x.pdf",
+            settings=settings_with(extraction_doc_timeout=0.01),
+        )
+    finally:
+        install_doc_pool_hooks(None)
     # Should return None due to timeout (process killed).
     assert result.text is None
     assert result.markdown is None
-
-    # Clean up env var for other tests
-    monkeypatch.delenv("TEST_MARKITDOWN_HANG", raising=False)
 
 
 async def test_extract_document_process_pool_normal_works():
     """Normal document extraction still works with process isolation."""
     from app.extraction.content import extract_document
 
-    # Don't set TEST_MARKITDOWN_HANG - normal operation.
+    # No hooks installed - normal operation.
     result = extract_document(b"%PDF-1.4 fake", "http://example.com/x.pdf")
     # With fake bytes, markitdown returns something (or None for unparseable); the key is it doesn't crash.
     assert isinstance(result, ext_mod.ExtractedContent)
@@ -250,37 +255,41 @@ async def test_extract_document_recovers_after_timeout(monkeypatch):
     the (semaphore-bounded) extraction concurrency.
     """
     # First call hangs and is killed on timeout (short timeout, hang injected).
-    monkeypatch.setenv("TEST_MARKITDOWN_HANG", "1")
-    monkeypatch.setenv("CRAWLUTRON_TEST_HOOKS", "1")
-    hung = extract_document(
-        b"%PDF-1.4 fake",
-        "http://example.com/hang.pdf",
-        settings=settings_with(extraction_doc_timeout=0.01),
-    )
+    install_doc_pool_hooks({"hang": True})
+    try:
+        hung = extract_document(
+            b"%PDF-1.4 fake",
+            "http://example.com/hang.pdf",
+            settings=settings_with(extraction_doc_timeout=0.01),
+        )
+    finally:
+        install_doc_pool_hooks(None)
     assert hung.text is None
-    monkeypatch.delenv("TEST_MARKITDOWN_HANG", raising=False)
 
     # Second call (same process / shared semaphore) must succeed.
-    monkeypatch.setenv("TEST_MARKITDOWN_OUTPUT", "## Recovered")
-    monkeypatch.setenv("CRAWLUTRON_TEST_HOOKS", "1")
-    recovered = extract_document(
-        b"%PDF-1.4 fake",
-        "http://example.com/ok.pdf",
-        settings=settings_with(extraction_doc_timeout=10.0),
-    )
+    install_doc_pool_hooks({"output": "## Recovered"})
+    try:
+        recovered = extract_document(
+            b"%PDF-1.4 fake",
+            "http://example.com/ok.pdf",
+            settings=settings_with(extraction_doc_timeout=10.0),
+        )
+    finally:
+        install_doc_pool_hooks(None)
     assert recovered.markdown == "## Recovered"
-    monkeypatch.delenv("TEST_MARKITDOWN_OUTPUT", raising=False)
 
 
-async def test_test_hooks_inert_without_gate(monkeypatch):
-    """TEST_MARKITDOWN_* flags are inert unless CRAWLUTRON_TEST_HOOKS=1
-    is also set — production children must not honor stray test flags."""
+async def test_test_hooks_inert_without_seam(monkeypatch):
+    """Without the hooks seam armed, nothing answers -- a stray env value must
+    never reach a production child now the env gate is deleted."""
     monkeypatch.setenv("TEST_MARKITDOWN_OUTPUT", "## hijacked")
-    monkeypatch.delenv("CRAWLUTRON_TEST_HOOKS", raising=False)
 
     ungated = extract_document(b"%PDF-1.4 fake", "http://example.com/x.pdf")
     assert ungated.markdown != "## hijacked"
 
-    monkeypatch.setenv("CRAWLUTRON_TEST_HOOKS", "1")
-    gated = extract_document(b"%PDF-1.4 fake", "http://example.com/x.pdf")
+    install_doc_pool_hooks({"output": "## hijacked"})
+    try:
+        gated = extract_document(b"%PDF-1.4 fake", "http://example.com/x.pdf")
+    finally:
+        install_doc_pool_hooks(None)
     assert gated.markdown == "## hijacked"

@@ -9,7 +9,7 @@ from app.extraction.content import (
     looks_like_document,
     text_from_html,
 )
-from app.orchestration.doc_pool import doc_task_hooks
+from app.orchestration.doc_pool import doc_task_hooks, install_doc_pool_hooks
 from tests._extraction_helpers import (
     detect_pagination,
     doc_worker_acquisitions,
@@ -29,15 +29,11 @@ def assert_extraction_empty(result) -> None:
     assert result.markdown is None
 
 
-def test_document_test_hooks_accept_shared_bool_spellings(monkeypatch):
-    for value in (" true ", "yes", "1"):
-        monkeypatch.setenv("CRAWLUTRON_TEST_HOOKS", value)
-        monkeypatch.setenv("TEST_MARKITDOWN_DIE", value)
-        monkeypatch.setenv("TEST_MARKITDOWN_HANG", value)
-        hooks = doc_task_hooks()
-        assert hooks is not None
-        assert hooks["die"] is True
-        assert hooks["hang"] is True
+def test_document_test_hooks_follow_the_injected_seam():
+    for hooks in ({"die": True, "hang": True}, None):
+        install_doc_pool_hooks(hooks)
+        assert doc_task_hooks() is hooks
+    install_doc_pool_hooks(None)
 
 
 class TestExtractContent:

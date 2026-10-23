@@ -4,7 +4,7 @@ import time
 import app.extraction.content as ext_mod
 import app.extraction.documents as docex
 import app.orchestration.doc_pool as doc_pool_mod
-from app.orchestration.doc_pool import DocWorker
+from app.orchestration.doc_pool import DocWorker, install_doc_pool_hooks
 from tests._app_factory import service_app
 from tests._doc_pool_fixtures import _seeded, fresh_doc_pool
 from tests._extraction_helpers import settings_with
@@ -55,17 +55,14 @@ def _counting_spawn(monkeypatch):
 
 def _use_single_worker(monkeypatch, *, spawn=None):
     monkeypatch.setenv("CRAWLUTRON_EXTRACTION_DOC_WORKERS", "1")
-    monkeypatch.setenv("CRAWLUTRON_TEST_HOOKS", "1")
-    monkeypatch.setenv("TEST_MARKITDOWN_OUTPUT", "## Hello Markdown")
+    install_doc_pool_hooks({"output": "## Hello Markdown"})
     # teardown() is terminal since #246 -- it can no longer double as a reset, so
     # an isolated test gets a fresh pool instead of closing the shared one.
     fresh_doc_pool(monkeypatch, spawn=spawn)
 
 
 def _restore_pool():
-    for var in ("TEST_MARKITDOWN_OUTPUT", "TEST_MARKITDOWN_HANG", "TEST_MARKITDOWN_DIE"):
-        os.environ.pop(var, None)
-    os.environ.pop("CRAWLUTRON_TEST_HOOKS", None)
+    install_doc_pool_hooks(None)
     os.environ.pop("CRAWLUTRON_EXTRACTION_DOC_WORKERS", None)
 
 
@@ -102,7 +99,7 @@ def test_doc_timeout_kills_and_pool_recovers(monkeypatch):
     counting_spawn, constructions = _counting_spawn(monkeypatch)
     _use_single_worker(monkeypatch, spawn=counting_spawn)
     try:
-        monkeypatch.setenv("TEST_MARKITDOWN_HANG", "1")
+        install_doc_pool_hooks({"hang": True})
         started = time.monotonic()
         result = ext_mod.extract_document(
             b"%PDF-1.4 fake",
@@ -113,7 +110,7 @@ def test_doc_timeout_kills_and_pool_recovers(monkeypatch):
         assert result.text is None and result.markdown is None
         hung_pids = docex.DOC_POOL.pids()
 
-        monkeypatch.delenv("TEST_MARKITDOWN_HANG")
+        install_doc_pool_hooks({"output": "## Hello Markdown"})
         # A normal deadline for recovery: the respawned worker must boot (spawn platforms) before the task
         # timeout starts mattering again.
         recovered = ext_mod.extract_document(

@@ -12,7 +12,6 @@ from app.runtime.pressure_probes import (
     DEFAULT_CPU_BUDGET,
     DEFAULT_CPU_HARD,
     DEFAULT_CPU_TARGET,
-    LOOP_LAG_PROBE_ENABLED,
     LoopLagProbe,
     read_cpu_quota,
     read_cpu_usage_seconds,
@@ -129,7 +128,7 @@ class ResourceGate:
         clock: Callable[[], float] = time.monotonic,
         memory_ratio: Callable[[], float] | None = None,
         cpu_ratio: Callable[[], float] | None = None,
-        lag_probe_enabled: bool = LOOP_LAG_PROBE_ENABLED,
+        lag_probe_enabled: bool = False,
         lag_probe_clock: Callable[[], float] | None = None,
         lag_probe_sleep: Callable[[float], Awaitable[None]] | None = None,
     ):

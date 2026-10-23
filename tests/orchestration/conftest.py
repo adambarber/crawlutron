@@ -12,7 +12,6 @@ from tests._process_doubles import stub_worker
 def fake_pool(monkeypatch):
     """Stub the production pool's collaborators and restore it afterwards."""
     monkeypatch.setenv("CRAWLUTRON_EXTRACTION_DOC_WORKERS", "1")
-    monkeypatch.setenv("CRAWLUTRON_TEST_HOOKS", "1")
     saved_pool = docex.DOC_POOL
     try:
         yield monkeypatch

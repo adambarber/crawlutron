@@ -2,10 +2,8 @@
 
 from __future__ import annotations
 
-import os
 import secrets
 import sqlite3
-import sys
 import threading
 import time
 from dataclasses import dataclass
@@ -110,52 +108,8 @@ def _open_raw_store_connection(
     return sqlite3.connect(str(db_path), check_same_thread=False), None
 
 
-_PROCESS_LOCKS: dict[str, _TracedLock] = {}
+_PROCESS_LOCKS: dict[str, threading.RLock] = {}
 _PROCESS_LOCKS_GUARD = threading.Lock()
-
-#: A wait at least this long is worth a line: an in-process store write against
-#: a migration is sub-millisecond; more means the lock is held across real work.
-_LOCK_TRACE_ENV = "CRAWLUTRON_TRACE_STORE_LOCKS"
-_LOCK_TRACE_THRESHOLD = 0.05
-
-
-class _TracedLock:
-    """A re-entrant lock that can name the thread holding it.
-    The connection trace can't answer a locked database's real question (a thread
-    is blocked inside a migration), so it records the holder and reports a wait worth a line.
-    """
-
-    def __init__(self) -> None:
-        self._lock = threading.RLock()
-        self._holder: str | None = None
-
-    def acquire(self, blocking: bool = True, timeout: float = -1) -> bool:
-        if os.environ.get(_LOCK_TRACE_ENV) != "1":
-            return self._lock.acquire(blocking, timeout)
-        started = time.monotonic()
-        holder = self._holder
-        acquired = self._lock.acquire(blocking, timeout)
-        waited = time.monotonic() - started
-        if waited >= _LOCK_TRACE_THRESHOLD:
-            print(
-                f"store-lock-wait pid={os.getpid()} "
-                f"thread={threading.current_thread().name} waited={waited:.3f}s holder={holder}",
-                file=sys.stderr,
-                flush=True,
-            )
-        if acquired:
-            self._holder = threading.current_thread().name
-        return acquired
-
-    def release(self) -> None:
-        self._holder = None
-        self._lock.release()
-
-    def __enter__(self) -> bool:
-        return self.acquire()
-
-    def __exit__(self, *exc: object) -> None:
-        self.release()
 
 
 def store_lock_key(db_path: str | Path, memory_name: str | None = None) -> str:
@@ -168,7 +122,7 @@ def store_lock_key(db_path: str | Path, memory_name: str | None = None) -> str:
     return str(Path(db_path).resolve())
 
 
-def process_lock(key: str) -> _TracedLock:
+def process_lock(key: str) -> threading.RLock:
     """The one lock every writer and every migration on this database takes.
     A store's own lock only serializes that instance, and a migration runs on its
     own connection; one per-file lock shared by both makes the collision unrepresentable.
@@ -176,34 +130,8 @@ def process_lock(key: str) -> _TracedLock:
     with _PROCESS_LOCKS_GUARD:
         lock = _PROCESS_LOCKS.get(key)
         if lock is None:
-            lock = _PROCESS_LOCKS[key] = _TracedLock()
+            lock = _PROCESS_LOCKS[key] = threading.RLock()
         return lock
-
-
-_STORE_TRACE_ENV = "CRAWLUTRON_TRACE_STORE_CONNECTIONS"
-
-
-def _trace_store_connection(
-    db_path: str | Path,
-    schema: StoreSchema,
-    memory_name: str | None,
-) -> None:
-    """Write one line per opened connection to stderr, when asked.
-    "database is locked" reproduces rarely and never on demand, so which process,
-    thread, file and schema is answered from a record made at the moment of the call.
-    """
-    if os.environ.get(_STORE_TRACE_ENV) != "1":
-        return
-    target = f"memory:{memory_name}" if memory_name is not None else store_lock_key(db_path)
-    # ``schema`` is TYPE_CHECKING-only here because manifest.py imports this
-    # module; the member carries its own value, so this formatter stays neutral.
-    name = getattr(schema, "value", schema)
-    print(
-        f"store-connection pid={os.getpid()} thread={threading.current_thread().name} "
-        f"schema={name} db={target}",
-        file=sys.stderr,
-        flush=True,
-    )
 
 
 def connect_store(db_path: str | Path, *, schema: StoreSchema) -> tuple[sqlite3.Connection, str | None]:
@@ -216,7 +144,6 @@ def connect_store(db_path: str | Path, *, schema: StoreSchema) -> tuple[sqlite3.
     conn, memory_name = _open_raw_store_connection(db_path)
     try:
         configure_store_connection(conn)
-        _trace_store_connection(db_path, schema, memory_name)
         from app.storage.migrations import migrate_store
 
         migrate_store(db_path, schema, memory_name=memory_name)

@@ -7,7 +7,6 @@ import asyncio
 
 import pytest
 
-import app.runtime.pressure_probes as rp
 from app.runtime.resource_pressure import LoopLagProbe
 from tests._lag_scheduling import lag_clock, lagged_gate, scripted_sleep
 
@@ -18,17 +17,6 @@ def test_probe_does_not_start_without_running_loop():
     probe = LoopLagProbe(interval=0.05, smoothing=1.0, clock=lag_clock(0.30), sleep=scripted_sleep)
     probe.start()
     assert probe.get() == 0.0
-
-
-def test_loop_lag_probe_flag_accepts_shared_bool_spellings(monkeypatch):
-    import importlib
-
-    for value in (" true ", "yes", "1"):
-        monkeypatch.setenv("CRAWLUTRON_LOOP_LAG_PROBE", value)
-        module = importlib.reload(rp)
-        assert module.LOOP_LAG_PROBE_ENABLED is True
-    monkeypatch.delenv("CRAWLUTRON_LOOP_LAG_PROBE")
-    importlib.reload(rp)
 
 
 def test_gate_construction_never_starts_probe():
