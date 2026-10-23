@@ -78,34 +78,29 @@ class TestReadinessState:
 # --- sensing: quota ---
 
 
-def test_read_cpu_quota_v2(tmp_path):
+@pytest.mark.parametrize(
+    ("cpu_max", "expected"),
+    [("200000 100000", 2.0), ("max 100000", None)],
+    ids=["two-cpus", "max-is-unbounded"],
+)
+def test_read_cpu_quota_v2(tmp_path, cpu_max, expected):
     cg = tmp_path / "cgroup"
     cg.mkdir()
-    (cg / "cpu.max").write_text("200000 100000\n")  # 2 CPUs
-    assert read_cpu_quota(cgroup_root=str(cg)) == 2.0
+    (cg / "cpu.max").write_text(f"{cpu_max}\n")
+    assert read_cpu_quota(cgroup_root=str(cg)) == expected
 
 
-def test_read_cpu_quota_v2_max_is_unbounded(tmp_path):
-    cg = tmp_path / "cgroup"
-    cg.mkdir()
-    (cg / "cpu.max").write_text("max 100000\n")
-    assert read_cpu_quota(cgroup_root=str(cg)) is None
-
-
-def test_read_cpu_quota_v1(tmp_path):
+@pytest.mark.parametrize(
+    ("quota_us", "expected"),
+    [("150000", 1.5), ("-1", None)],
+    ids=["one-and-a-half-cpus", "unlimited"],
+)
+def test_read_cpu_quota_v1(tmp_path, quota_us, expected):
     cg = tmp_path / "cgroup" / "cpu"
     cg.mkdir(parents=True)
-    (cg / "cpu.cfs_quota_us").write_text("150000\n")
+    (cg / "cpu.cfs_quota_us").write_text(f"{quota_us}\n")
     (cg / "cpu.cfs_period_us").write_text("100000\n")
-    assert read_cpu_quota(cgroup_root=str(tmp_path / "cgroup")) == 1.5
-
-
-def test_read_cpu_quota_v1_unlimited(tmp_path):
-    cg = tmp_path / "cgroup" / "cpu"
-    cg.mkdir(parents=True)
-    (cg / "cpu.cfs_quota_us").write_text("-1\n")
-    (cg / "cpu.cfs_period_us").write_text("100000\n")
-    assert read_cpu_quota(cgroup_root=str(tmp_path / "cgroup")) is None
+    assert read_cpu_quota(cgroup_root=str(tmp_path / "cgroup")) == expected
 
 
 def test_read_cpu_quota_missing_is_unbounded(tmp_path):
@@ -149,12 +144,16 @@ def _cpu_gate(monkeypatch, *, target=0.90):
     return CpuGate(target=target), clock, usage
 
 
-def test_cpu_gate_full_speed_below_target(monkeypatch):
+@pytest.mark.parametrize(
+    ("cpu_seconds", "expected"),
+    [(1.0, 1.0), (2.0, 0.0)],
+    ids=["half-utilization-below-target", "at-the-hard-ceiling"],
+)
+def test_cpu_gate_at_the_utilization_edges(monkeypatch, cpu_seconds, expected):
     gate, clock, usage = _cpu_gate(monkeypatch)
     assert gate.batch_scale_factor() == 1.0  # first sight -> 0 utilization
-    # 1.0 CPU-second over 1.0 wall-second on a 2-CPU budget -> 0.50 util (< target)
-    clock[0], usage[0] = 1.0, 1.0
-    assert gate.batch_scale_factor() == 1.0
+    clock[0], usage[0] = 1.0, cpu_seconds
+    assert gate.batch_scale_factor() == expected
 
 
 def test_cpu_gate_scales_between_target_and_hard(monkeypatch):
@@ -165,14 +164,6 @@ def test_cpu_gate_scales_between_target_and_hard(monkeypatch):
     s = gate.batch_scale_factor()
     assert 0.0 < s < 1.0
     assert abs(s - 0.5) < 0.2
-
-
-def test_cpu_gate_zero_at_hard_ceiling(monkeypatch):
-    gate, clock, usage = _cpu_gate(monkeypatch)
-    gate.batch_scale_factor()
-    # 2.0 CPU-seconds over 1.0 wall-second on 2 CPUs -> 1.0 util (>= hard)
-    clock[0], usage[0] = 1.0, 2.0
-    assert gate.batch_scale_factor() == 0.0
 
 
 # The two sub-gates a throttle can be asked about, named once.

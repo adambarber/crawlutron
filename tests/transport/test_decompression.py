@@ -90,16 +90,13 @@ def test_decode_body_empty_body():
     assert decode_body(b"", "text/html") == ""
 
 
-def test_decompression_zlib():
+@pytest.mark.parametrize(
+    ("compress", "content_encoding"),
+    [(zlib.compress, "deflate"), (gzip.compress, "gzip")],
+)
+def test_decompression_round_trips(compress, content_encoding):
     original = b"hello world " * 10
-    compressed = zlib.compress(original)
-    assert decompress_body(compressed, "deflate", max_output_bytes=10_000_000) == original
-
-
-def test_decompression_gzip():
-    original = b"hello world " * 10
-    compressed = gzip.compress(original)
-    assert decompress_body(compressed, "gzip", max_output_bytes=10_000_000) == original
+    assert decompress_body(compress(original), content_encoding, max_output_bytes=10_000_000) == original
 
 
 def test_http_charset_decode_error():

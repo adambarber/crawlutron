@@ -33,30 +33,31 @@ def _teredo_hiding(client: str, server: str = "192.0.2.1") -> str:
     return str(ipaddress.IPv6Address(packed))
 
 
-def test_cgnat_is_blocked():
-    assert _blocked("100.64.0.1") is True
-
-
-def test_multicast_is_blocked():
-    assert _blocked("224.0.0.1") is True
-    assert _blocked("ff02::1") is True
-
-
-def test_unspecified_is_blocked():
-    assert _blocked("0.0.0.0") is True
-
-
-def test_reserved_is_blocked():
-    assert _blocked("240.0.0.1") is True
-
-
-def test_ipv6_unique_local_is_blocked():
-    assert _blocked("fc00::1") is True
-    assert _blocked("fd12:3456::1") is True
-
-
-def test_nat64_is_blocked():
-    assert _blocked("64:ff9b::1") is True
+@pytest.mark.parametrize(
+    "ip",
+    [
+        "100.64.0.1",
+        "224.0.0.1",
+        "ff02::1",
+        "0.0.0.0",
+        "240.0.0.1",
+        "fc00::1",
+        "fd12:3456::1",
+        "64:ff9b::1",
+    ],
+    ids=[
+        "cgnat",
+        "multicast-ipv4",
+        "multicast-ipv6",
+        "unspecified",
+        "reserved",
+        "unique-local-fc00",
+        "unique-local-fd12",
+        "nat64",
+    ],
+)
+def test_non_public_addresses_are_blocked(ip):
+    assert _blocked(ip) is True
 
 
 def test_public_ips_still_allowed():

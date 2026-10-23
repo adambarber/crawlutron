@@ -5,6 +5,8 @@ import os
 from dataclasses import dataclass
 from unittest.mock import patch
 
+import pytest
+
 import app.config.settings as settings_mod
 from app.config.settings import CrawlerSettings
 
@@ -128,10 +130,15 @@ class _FakeStats:
         self.total_bytes = total_bytes
 
 
-def test_small_limit_hits_floor():
-    with patch.object(settings_mod, "read_memory_stats", lambda: _FakeStats(256 * 1024 * 1024)):
-        assert settings_mod.default_http_max_connections() == 100
-        assert settings_mod.default_http_keepalive() == 50
+@pytest.mark.parametrize(
+    ("total_bytes", "max_connections", "keepalive"),
+    [(256 * 1024 * 1024, 100, 50), (64 * 1024 * 1024 * 1024, 512, 128)],
+    ids=["small-limit-hits-floor", "huge-limit-is-capped"],
+)
+def test_connection_defaults_floor_and_cap(total_bytes, max_connections, keepalive):
+    with patch.object(settings_mod, "read_memory_stats", lambda: _FakeStats(total_bytes)):
+        assert settings_mod.default_http_max_connections() == max_connections
+        assert settings_mod.default_http_keepalive() == keepalive
 
 
 def test_3gib_limit_scales_up():
@@ -145,12 +152,6 @@ def test_3gib_limit_scales_up():
         # With the honest per-task RAM estimate the 3 GiB derivation sits at the floor; the floor keeps the
         # minimal-deployment pool usable (a bigger box still scales above it -- see
         assert expected >= 100
-
-
-def test_huge_limit_is_capped():
-    with patch.object(settings_mod, "read_memory_stats", lambda: _FakeStats(64 * 1024 * 1024 * 1024)):
-        assert settings_mod.default_http_max_connections() == 512
-        assert settings_mod.default_http_keepalive() == 128
 
 
 def test_env_override_still_wins():

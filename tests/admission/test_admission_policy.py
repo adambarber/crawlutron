@@ -22,17 +22,16 @@ from tests._policy_factories import admit, canonical
 from tests.admission.test_admission_scaling import PinnedGate
 
 
-async def test_max_pages_default_is_bounded_not_unlimited():
-    policy = payload_policy({"url": "http://example.com/", "policy": {}}, PolicyTier.model_defaults())
-    # DEFAULT_MAX_PAGES, not 0/"unlimited".
-    assert policy.limits.max_pages == 100
-
-
-async def test_max_pages_zero_falls_back_to_default():
+@pytest.mark.parametrize(
+    ("limits", "expected"),
+    [({}, 100), ({"max_pages": 0}, 100), ({"max_pages": 7}, 7)],
+    ids=["default-is-bounded-not-unlimited", "zero-falls-back-to-default", "positive-preserved"],
+)
+async def test_payload_max_pages_resolves_to_a_bounded_positive_number(limits, expected):
     policy = payload_policy(
-        {"url": "http://example.com/", "policy": {"limits": {"max_pages": 0}}}, PolicyTier.model_defaults()
+        {"url": "http://example.com/", "policy": {"limits": limits}}, PolicyTier.model_defaults()
     )
-    assert policy.limits.max_pages == 100
+    assert policy.limits.max_pages == expected
 
 
 async def test_max_pages_above_upper_bound_is_rejected_not_clamped():
@@ -42,13 +41,6 @@ async def test_max_pages_above_upper_bound_is_rejected_not_clamped():
             {"url": "http://example.com/", "policy": {"limits": {"max_pages": 99999}}},
             PolicyTier.model_defaults(),
         )
-
-
-async def test_max_pages_positive_preserved():
-    policy = payload_policy(
-        {"url": "http://example.com/", "policy": {"limits": {"max_pages": 7}}}, PolicyTier.model_defaults()
-    )
-    assert policy.limits.max_pages == 7
 
 
 async def test_max_pages_zero_bounded_at_engine():

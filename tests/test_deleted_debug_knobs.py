@@ -4,6 +4,8 @@ CRAWLUTRON_LOOP_LAG_PROBE, CRAWLUTRON_TEST_HOOKS (TEST_MARKITDOWN_*)."""
 
 from __future__ import annotations
 
+import pytest
+
 import app.runtime.pressure_probes as pressure_probes
 import app.storage.sqlite_store as sqlite_store
 from app.orchestration.doc_pool import doc_task_hooks
@@ -16,12 +18,12 @@ def _assert_no_trace_env_readers(monkeypatch, env_var: str, module):
     assert module_envs == [], f"sqlite_store still carries trace-env readers: {module_envs}"
 
 
-def test_trace_store_locks_knob_is_not_read(monkeypatch):
-    _assert_no_trace_env_readers(monkeypatch, "CRAWLUTRON_TRACE_STORE_LOCKS", sqlite_store)
-
-
-def test_trace_store_connections_knob_is_not_read(monkeypatch):
-    _assert_no_trace_env_readers(monkeypatch, "CRAWLUTRON_TRACE_STORE_CONNECTIONS", sqlite_store)
+@pytest.mark.parametrize(
+    "env_var",
+    ["CRAWLUTRON_TRACE_STORE_LOCKS", "CRAWLUTRON_TRACE_STORE_CONNECTIONS"],
+)
+def test_trace_store_knobs_are_not_read(monkeypatch, env_var):
+    _assert_no_trace_env_readers(monkeypatch, env_var, sqlite_store)
 
 
 def test_loop_lag_probe_knob_is_not_read(monkeypatch):

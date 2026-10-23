@@ -17,8 +17,13 @@ from tests.admission.test_admission import _pinned_resource_gate
 # --- governance ---
 
 
-def test_batch_scale_full_below_target():
-    assert batch_scale(used=0.80, total=1.0, target=0.92) == 1.0
+@pytest.mark.parametrize(
+    ("used", "expected"),
+    [(0.80, 1.0), (0.99, 0.0)],
+    ids=["below-target-runs-full", "at-the-hard-ceiling-stops"],
+)
+def test_batch_scale_at_the_utilization_edges(used, expected):
+    assert batch_scale(used=used, total=1.0, target=0.92) == expected
 
 
 def test_batch_scale_scales_linearly_between_target_and_hard():
@@ -26,10 +31,6 @@ def test_batch_scale_scales_linearly_between_target_and_hard():
     s = batch_scale(used=0.945, total=1.0, target=0.92)
     assert 0.0 < s < 1.0
     assert abs(s - 0.5) < 0.2
-
-
-def test_batch_scale_zero_at_hard_ceiling():
-    assert batch_scale(used=0.99, total=1.0, target=0.92) == 0.0
 
 
 async def _crawl_under_pressure(monkeypatch, *, cpu_ratio, memory_ratio):

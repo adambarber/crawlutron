@@ -40,15 +40,15 @@ def test_an_incomplete_resource_gauge_fails_at_construction():
         ResourceGauge(target=0.90, poll_seconds=0.01, max_wait_seconds=1.0)
 
 
-def test_scale_full_below_target():
-    g = _stub([0.50])
-    assert g.batch_scale_factor() == 1.0
-
-
-def test_scale_zero_at_hard():
-    # hard = min(0.999, target + 0.05) ~= 0.95; use a value clearly above it.
-    g = _stub([0.99])
-    assert g.batch_scale_factor() == 0.0
+@pytest.mark.parametrize(
+    ("utilization", "expected"),
+    [(0.50, 1.0), (0.99, 0.0)],
+    ids=["below-target-runs-full", "at-the-hard-ceiling-stops"],
+)
+def test_scale_at_the_utilization_edges(utilization, expected):
+    # hard = min(0.999, target + 0.05); 0.99 sits clearly above it.
+    g = _stub([utilization])
+    assert g.batch_scale_factor() == expected
 
 
 def test_scale_linear_between_target_and_hard():

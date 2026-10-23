@@ -6,6 +6,8 @@ must not re-materialize the whole per-caller set per request; the page size is c
 
 from __future__ import annotations
 
+import pytest
+
 from app.vocabulary.limits import DEFAULT_JOB_LIST_LIMIT, MAX_JOB_LIST_LIMIT
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY
 
@@ -53,13 +55,9 @@ async def test_a_keyed_caller_never_sees_another_callers_jobs(client, job_store)
     assert [row["job_id"] for row in body["jobs"]] == list(reversed(job_ids))
 
 
-async def test_limit_above_the_cap_is_rejected(client, job_store):
-    resp = await client.get("/v1/jobs", params={"limit": MAX_JOB_LIST_LIMIT + 1})
-    assert resp.status_code == 422
-
-
-async def test_limit_below_one_is_rejected(client, job_store):
-    resp = await client.get("/v1/jobs", params={"limit": 0})
+@pytest.mark.parametrize("limit", [MAX_JOB_LIST_LIMIT + 1, 0], ids=["above-the-cap", "below-one"])
+async def test_out_of_range_limits_are_rejected(client, job_store, limit):
+    resp = await client.get("/v1/jobs", params={"limit": limit})
     assert resp.status_code == 422
 
 
