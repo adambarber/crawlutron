@@ -38,13 +38,15 @@ BLOCK_LENGTH = 40
 # class for the fourth.
 _BUDGETS = {
     # 22 -> 21 (#160); 21 -> 20 (#330); 20 -> 19 (#136); 19 -> 18 (#419, from_mapping
-    # split into field-family builders); 18 -> 17 (#419, render_request split).
-    "function length": 17,
+    # split); 18 -> 17 (render_request split); 17 -> 16 (run_async_crawl split).
+    "function length": 16,
     "abc size": 0,
     # LOWERED 358 -> 357 (#383): BrowserRenderer's render loop lost a declaration line.
     # LOWERED 357 -> 355 (#136); 355 -> 348 (#419): the render phases left browser.py.
     "largest class": 348,
-    "block length": 7,
+    # 8 first declared; 7 (#136-ish pool split); 7 -> 6 (#419, run_async_crawl's
+    # guarded body split into claim/crawl/publish/failure phases).
+    "block length": 6,
 }
 
 #: The scripts/ tree, outside this gate before #293; its measured baseline,
