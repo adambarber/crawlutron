@@ -37,9 +37,9 @@ BLOCK_LENGTH = 40
 # Offender counts for two metrics, plus the worst class's size. "block length"
 # is sealed at zero by #419: test_zero_long_blocks_in_app is the whole gate.
 _BUDGETS = {
-    # 22 -> 21 (#160); 21 -> 20 (#330); 20 -> 19 (#136); 19 -> 18 -> ... -> 10
-    # (#419: nine inline orchestration fns split by concept, run_one last).
-    "function length": 10,
+    # 22 -> 21 (#160); 21 -> 20 (#330); 20 -> 19 (#136); 19 -> 18 -> ... -> 9
+    # (#419: ten inline orchestration fns split by concept, the classify passes last).
+    "function length": 9,
     "abc size": 0,
     # LOWERED 358 -> 357 (#383): BrowserRenderer's render loop lost a declaration line.
     # LOWERED 357 -> 355 (#136); 355 -> 348 (#419): the render phases left browser.py.

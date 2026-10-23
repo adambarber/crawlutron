@@ -10,8 +10,8 @@ from __future__ import annotations
 #: value at first declaration; a later entry is a lowering, never a raise.
 _BUDGET_HISTORY: dict[str, list[int]] = {
     #: 22 -> 21 (#160); 21 -> 20 (#330); 20 -> 19 (#136);
-    #: 19 -> 18 -> ... -> 10 (#419, nine inline orchestration fns split).
-    "function length": [22, 21, 20, 19, 18, 17, 16, 15, 14, 13, 12, 11, 10],
+    #: 19 -> 18 -> ... -> 9 (#419, ten inline orchestration fns split).
+    "function length": [22, 21, 20, 19, 18, 17, 16, 15, 14, 13, 12, 11, 10, 9],
     "abc size": [1, 0],
     #: 358 -> 357 (#383); 357 -> 355 (#136);
     #: 355 -> 348 (#419, the render phases left browser.py).

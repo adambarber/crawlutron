@@ -164,6 +164,18 @@ def classify_page_with_evidence(
     # Pass 0: structural markers win immediately (one hit suffices). Scan the RAW
     # html too -- challenge plumbing (_cf_chl_opt) lives inside stripped <script>s.
     raw_haystack = (html or "").lower()
+    structural = _structural_marker_match(raw_haystack, html_haystack)
+    if structural is not None:
+        return structural
+
+    matches = _prose_signature_matches(visible_haystack, html_haystack)
+    return _verdict_from_matches(matches)
+
+
+def _structural_marker_match(
+    raw_haystack: str, html_haystack: str
+) -> tuple[Classification, list[ClassificationEvidenceRecord]] | None:
+    """Pass 0: the first structural marker hit wins, with its one evidence row."""
     for classification, markers in STRONG_CLASSIFICATION_MARKERS:
         for marker in markers:
             index = raw_haystack.find(marker)
@@ -173,9 +185,15 @@ def classify_page_with_evidence(
                 return classification, [
                     _evidence(classification, marker, "structural_marker", raw_haystack, index)
                 ]
+    return None
 
-    # Pass 1: prose signatures, every distinct match recorded; soft ones also
-    # need corroboration (>= 2 matches) so a stray phrase cannot escalate.
+
+def _prose_signature_matches(
+    visible_haystack: str, html_haystack: str
+) -> list[tuple[Classification, dict[str, Any]]]:
+    """Pass 1: every distinct prose-signature match; earliest source wins per
+    signature, and each match carries its priority for the verdict pass.
+    """
     matches: list[tuple[Classification, dict[str, Any]]] = []
     for priority, (classification, signatures) in enumerate(CLASSIFICATION_SIGNATURES):
         for signature in signatures:
@@ -199,6 +217,13 @@ def classify_page_with_evidence(
                         )
                     )
                     break  # earliest source is enough for this signature
+    return matches
+
+
+def _verdict_from_matches(
+    matches: list[tuple[Classification, dict[str, Any]]],
+) -> tuple[Classification, list[ClassificationEvidenceRecord]]:
+    """Reduce the prose matches: none -> rendered; soft signals need corroboration."""
     if not matches:
         return _RENDERED, []
 
