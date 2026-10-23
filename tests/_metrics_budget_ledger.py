@@ -29,9 +29,9 @@ _SCRIPTS_BUDGET_HISTORY: dict[str, list[int]] = {
 
 #: Oldest-first history per ``_TESTS_BUDGETS`` metric, declared at #375.
 _TESTS_BUDGET_HISTORY: dict[str, list[int]] = {
-    #: 11 -> 10 (#253) -> 9 -> 8 -> 7 (#419: host-policy split, then the server
-    #: route table).
-    "function length": [11, 10, 9, 8, 7],
+    #: 11 -> 10 (#253) -> 9 -> 8 -> 7 -> 6 (#419: host-policy, server route
+    #: table, cookie race).
+    "function length": [11, 10, 9, 8, 7, 6],
     #: 2 -> 0 (#419, same splits); the While went with the fixed-point walk.
     "abc size": [2, 0],
     "largest class": [330],

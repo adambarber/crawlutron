@@ -45,10 +45,8 @@ def test_concurrent_read_and_eviction_does_not_raise(clean_cookie_store):
     """
     for i in range(BROWSER_COOKIES_MAX):
         store_browser_cookies(f"d{i}.example", f"k{i}=v")
-    # The front-most key: the one popitem(last=False) drops first.
     victim = "d0.example"
 
-    # --- 1: the unsynchronized shape, with the read window held open --------
     old_shape = OrderedDict((f"d{i}.example", f"k{i}=v") for i in range(BROWSER_COOKIES_MAX))
     old_error: list[BaseException] = []
     reader_in_window = threading.Event()
@@ -57,26 +55,23 @@ def test_concurrent_read_and_eviction_does_not_raise(clean_cookie_store):
     def _racy_read() -> None:
         try:
             old_shape.get(victim)
-            # The seam: pre-fix, this is the gap the GIL may or may not fill. Scheduling the eviction here
-            # makes the race certain.
             reader_in_window.set()
             eviction_landed.wait(timeout=5)
             old_shape.move_to_end(victim)
-        except BaseException as exc:  # collected and asserted in the main thread
+        except BaseException as exc:
             old_error.append(exc)
 
     def _evict() -> None:
         reader_in_window.wait(timeout=5)
         old_shape["brand.new.example"] = "v"
         while len(old_shape) > BROWSER_COOKIES_MAX:
-            old_shape.popitem(last=False)  # drops the victim the reader is about to touch
+            old_shape.popitem(last=False)
         eviction_landed.set()
 
     race_threads = [threading.Thread(target=target) for target in (_racy_read, _evict)]
     for thread in race_threads:
         thread.start()
     for thread in race_threads:
-        # The liveness check below is the real one.
         thread.join(timeout=10)
     assert not any(thread.is_alive() for thread in race_threads), "the scheduled race wedged"
 
@@ -85,8 +80,14 @@ def test_concurrent_read_and_eviction_does_not_raise(clean_cookie_store):
         f"the unsynchronized read raised {old_error[0]!r}, not the expected KeyError"
     )
 
-    # --- 2: the guarded store serializes concurrent access. The discriminator is the observable
-    # outcome, not the lock: the public read must never raise the unsynchronized KeyError.
+
+def test_guarded_store_never_raises_under_concurrent_read_and_eviction(clean_cookie_store):
+    """The guarded store serializes concurrent access; the public read never raises.
+
+    The discriminator is the observable outcome, not the lock: stress writers
+    force eviction while readers hammer the oldest key.
+    """
+    victim = "d0.example"
     store = clean_cookie_store
     assert store is browser_cookies.BROWSER_COOKIES_BY_DOMAIN, "the fixture is the guarded global store"
 
@@ -95,14 +96,12 @@ def test_concurrent_read_and_eviction_does_not_raise(clean_cookie_store):
     stop = threading.Event()
     threads: list[threading.Thread] = []
 
-    # A writer keeps the store at the cap by storing fresh domains (forcing eviction of the front),
-    # while readers hammer the oldest key -- the pair the unsynchronized shape wedged.
     def _stress_write() -> None:
         i = 0
         while not stop.is_set():
             try:
                 store_browser_cookies(f"stress{i}.example", f"k{i}=v")
-            except BaseException as exc:  # collected in the main thread
+            except BaseException as exc:
                 errors.append(exc)
                 return
             i += 1
@@ -111,7 +110,7 @@ def test_concurrent_read_and_eviction_does_not_raise(clean_cookie_store):
         while not stop.is_set():
             try:
                 box["seen"] = get_browser_cookies_for(victim)
-            except BaseException as exc:  # collected in the main thread
+            except BaseException as exc:
                 errors.append(exc)
                 return
 
@@ -119,7 +118,6 @@ def test_concurrent_read_and_eviction_does_not_raise(clean_cookie_store):
     threads += [threading.Thread(target=_stress_read) for _ in range(4)]
     for thread in threads:
         thread.start()
-    # Run long enough that several store-append / evict / read interleavings must have occurred.
     stop.wait(timeout=0.05)
     stop.set()
     for thread in threads:
@@ -127,7 +125,6 @@ def test_concurrent_read_and_eviction_does_not_raise(clean_cookie_store):
 
     assert not any(thread.is_alive() for thread in threads), "the stress drive wedged"
     assert not errors, f"the guarded store raised {errors!r} under concurrent load"
-    # Every read resolved: the read path was never torn by an intervening eviction.
     assert "seen" in box
 
 
