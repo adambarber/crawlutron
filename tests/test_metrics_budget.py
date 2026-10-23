@@ -34,19 +34,16 @@ FUNCTION_LENGTH = 60
 ABC_SIZE = 30
 BLOCK_LENGTH = 40
 
-# What the tree is currently allowed to hold: offender counts for three metrics, and the size of the worst
-# class for the fourth.
+# Offender counts for two metrics, plus the worst class's size. "block length"
+# is sealed at zero by #419: test_zero_long_blocks_in_app is the whole gate.
 _BUDGETS = {
-    # 22 -> 21 (#160); 21 -> 20 (#330); 20 -> 19 (#136); 19 -> 18 -> 17 -> 16 -> 15
-    # (#419: from_mapping, render_request, run_async_crawl and _lifespan split).
-    "function length": 15,
+    # 22 -> 21 (#160); 21 -> 20 (#330); 20 -> 19 (#136); 19 -> 18 -> ... -> 11
+    # (#419: eight inline orchestration fns split by concept, consent list last).
+    "function length": 11,
     "abc size": 0,
     # LOWERED 358 -> 357 (#383): BrowserRenderer's render loop lost a declaration line.
     # LOWERED 357 -> 355 (#136); 355 -> 348 (#419): the render phases left browser.py.
     "largest class": 348,
-    # 8 first declared; 7 (#136-ish pool split); 7 -> 6 (#419, run_async_crawl split);
-    # 6 -> 5 (#419, cffi_fetch's per-hop handling and capped stream extracted).
-    "block length": 5,
 }
 
 #: The scripts/ tree, outside this gate before #293; its measured baseline,
@@ -150,7 +147,8 @@ def _build_gate(candidates, trees, budgets):
 
     def offenders(metric: str) -> list[Offender]:
         limit = _METRIC_LIMITS.get(metric)
-        budget = budgets[metric]
+        # A sealed metric has no budget row; it is measured against its limit only.
+        budget = budgets.get(metric)
         found: list[Offender] = []
         for candidate_metric, where, detail in candidates():
             if candidate_metric != metric:
@@ -257,6 +255,19 @@ test_budget_is_tight = budget_is_tight(_BUDGETS, (measurement, offenders), subje
 test_collection_is_deterministic = collection_is_deterministic(
     _BUDGETS, (measurement, offenders), subject="metrics"
 )
+
+
+def test_zero_long_blocks_in_app() -> None:
+    """Zero oversized blocks in app/ -- sealed at zero, no budget row survives.
+
+    The budget table is gone; this unconditional assertion is the whole gate.
+    A violation must name its file and line: offenders() carries both.
+    """
+    found = offenders("block length")
+    assert not found, (
+        "block length: the app tree's blocks are sealed at zero -- split the "
+        "offending block(s) by concept: " + "; ".join(str(o) for o in found)
+    )
 
 
 _SCRIPTS_REMEDY = (

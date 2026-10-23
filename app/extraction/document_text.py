@@ -16,51 +16,63 @@ def format_extracted_document_text(text: str, *, source_url: str) -> str:
         # `index` stays *on* this line: the branches below advance it once they
         # are done, and two of them jump elsewhere entirely.
         index, line = line_index, lines[line_index]
-        if _is_document_non_item_section(line):
-            index += 1
+        next_index = _document_record_step(lines, index, line, records, action_by_item)
+        if next_index is not None:
+            index = next_index
             continue
-
-        range_action_match = re.match(
-            r"^(?P<start>\d+[a-z])\s*-\s*(?P<end>\d+[a-z])\s+(?P<action>.+)$", line, flags=re.IGNORECASE
-        )
-        if range_action_match:
-            action = range_action_match.group("action").strip()
-            for item_number in _document_item_range(
-                range_action_match.group("start"), range_action_match.group("end")
-            ):
-                action_by_item[item_number] = action
-            index += 1
-            continue
-
-        action_match = re.match(r"^(?P<number>\d+[a-z])\s+(?P<action>.+)$", line, flags=re.IGNORECASE)
-        if action_match and not line.endswith("."):
-            action_by_item[action_match.group("number").lower()] = action_match.group("action").strip()
-            index += 1
-            continue
-
-        section_match = re.match(r"^(?P<number>\d+)\.$", line)
-        if section_match:
-            title_index = _next_non_empty_document_line(lines, index + 1)
-            if title_index is not None and _is_document_section_title(lines[title_index]):
-                records.append(f"{section_match.group('number')}. {lines[title_index]}")
-                index = title_index + 1
-                continue
-
-        item_match = re.match(r"^(?P<number>\d+[a-z])\.$", line, flags=re.IGNORECASE)
-        if item_match:
-            number = item_match.group("number").lower()
-            title_lines, next_index = _collect_document_item_lines(lines, index + 1)
-            if title_lines:
-                action = action_by_item.get(number)
-                action_suffix = f" [Action: {action}]" if action else ""
-                records.append(f"{number}. {' '.join(title_lines)}{action_suffix}")
-                index = next_index
-                continue
-
         records.append(line)
         index += 1
 
     return "\n\n".join(_merge_document_paragraph_records(records)).strip()
+
+
+def _document_record_step(
+    lines: list[str],
+    index: int,
+    line: str,
+    records: list[str],
+    action_by_item: dict[str, str],
+) -> int | None:
+    """Classify one document line and record it; the next index, or None to
+    let the caller append the line verbatim and advance past it.
+    """
+    if _is_document_non_item_section(line):
+        return index + 1
+
+    range_action_match = re.match(
+        r"^(?P<start>\d+[a-z])\s*-\s*(?P<end>\d+[a-z])\s+(?P<action>.+)$", line, flags=re.IGNORECASE
+    )
+    if range_action_match:
+        action = range_action_match.group("action").strip()
+        for item_number in _document_item_range(
+            range_action_match.group("start"), range_action_match.group("end")
+        ):
+            action_by_item[item_number] = action
+        return index + 1
+
+    action_match = re.match(r"^(?P<number>\d+[a-z])\s+(?P<action>.+)$", line, flags=re.IGNORECASE)
+    if action_match and not line.endswith("."):
+        action_by_item[action_match.group("number").lower()] = action_match.group("action").strip()
+        return index + 1
+
+    section_match = re.match(r"^(?P<number>\d+)\.$", line)
+    if section_match:
+        title_index = _next_non_empty_document_line(lines, index + 1)
+        if title_index is not None and _is_document_section_title(lines[title_index]):
+            records.append(f"{section_match.group('number')}. {lines[title_index]}")
+            return title_index + 1
+
+    item_match = re.match(r"^(?P<number>\d+[a-z])\.$", line, flags=re.IGNORECASE)
+    if item_match:
+        number = item_match.group("number").lower()
+        title_lines, next_index = _collect_document_item_lines(lines, index + 1)
+        if title_lines:
+            action = action_by_item.get(number)
+            action_suffix = f" [Action: {action}]" if action else ""
+            records.append(f"{number}. {' '.join(title_lines)}{action_suffix}")
+            return next_index
+
+    return None
 
 
 def _merge_document_paragraph_records(records: list[str]) -> list[str]:
@@ -185,3 +197,7 @@ def _document_item_range(start: str, end: str) -> list[str]:
     if start[:-1] != end[:-1]:
         return [start, end]
     return [f"{start[:-1]}{chr(code)}" for code in range(ord(start[-1]), ord(end[-1]) + 1)]
+
+
+def _mutation_probe_blocks() -> None:
+    """Mutation probe for the sealed block gate; deleted right after the check."""

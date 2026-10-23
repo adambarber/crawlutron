@@ -26,7 +26,9 @@ from app.models.caller_identity import CallerIdentity
 from app.models.crawl_request import CrawlRequest
 from app.models.host_policy import HostPolicy
 from app.models.json_value import JsonValue
+from app.models.result_record import ProducerEnvelope
 from app.models.trace_response import TraceResponse
+from app.models.unified_crawl_response import UnifiedCrawlResponse
 from app.runtime.metrics import get_metrics
 from app.storage.ids import new_request_id
 from app.storage.job_store import TERMINAL_STATUSES, JobKind, JobStore
@@ -81,103 +83,149 @@ async def crawl(
     request: Request | None = None,
     caller: CallerIdentity | None = None,
     concurrency_tracker: CallerConcurrencyTracker | None = None,
-) -> Any:
+) -> JSONResponse | Response | UnifiedCrawlResponse:
     """Execute a policy-driven crawl (sync or async webhook mode)."""
     active_caller = caller if caller is not None else anonymous_caller()
+    # One admission for both doors: sync holds a slot for the crawl's life; async
+    # persists a durable job row. The whole dispatch stays under the gate.
     with request_gate("crawl_request_rejected", logger=_logger, reject=_crawl_rejection):
         if payload.output_format:
-            # Validate the format before the branch commits to sync or async:
-            # the async path only fails inside a detached task, unseen by the caller.
+            # Format is validated pre-branch: the async path fails unseen.
             _serialize_or_reject([], payload.output_format)
-        # Gate the batch size at the boundary, before the 202: the async branch
-        # fails oversized batches inside a detached task the caller cannot see.
+        # Batch size is gated pre-202: an oversized async batch fails unseen.
         host_policy = HostPolicy.from_settings(settings)
-        checked = checked_payload_urls(
-            payload,
-            settings.max_batch_size,
-            host_policy=host_policy,
-        )
-        webhook_url = payload.webhook_url
-        async_mode = payload.async_mode
-        # One admission for both doors: sync holds a slot for the crawl's life and
-        # releases on every exit; async persists a durable job row instead of a slot.
+        checked = checked_payload_urls(payload, settings.max_batch_size, host_policy=host_policy)
         async with admit(
             active_caller,
             payload.policy.limits.max_pages,
             tracking=Tracking(job_store=job_store, concurrency_tracker=concurrency_tracker),
             payload=payload,
-            reserve_slot=not (async_mode or webhook_url),
+            reserve_slot=not (payload.async_mode or payload.webhook_url),
         ) as owner:
-            if async_mode or webhook_url:
-                if webhook_url and (
-                    not isinstance(webhook_url, str) or not webhook_url.startswith(("http://", "https://"))
-                ):
-                    raise http_error(422, "validation_error", "Invalid webhook_url")
-                if webhook_url:
-                    await validate_webhook_url_async(webhook_url, host_policy=host_policy)
-                request_id = new_request_id()
-                # The store's tier, not ``settings``: the row is read back with the
-                # store's tier, and two tier sources drift apart the moment they differ.
-                await job_store.acreate_single_shot(
-                    request_id,
-                    checked[0],
-                    payload.policy,
+            # Built after admission (a slot exists); calling runs nothing.
+            crawl_awaitable = (
+                None
+                if payload.async_mode or payload.webhook_url
+                else execute_crawl(payload, settings=settings, shutdown_event=shutdown_event, urls=checked)
+            )
+            if payload.async_mode or payload.webhook_url:
+                return await _accepted_async(
+                    payload,
+                    settings=settings,
+                    job_store=job_store,
+                    result_store=result_store,
+                    shutdown_event=shutdown_event,
+                    host_policy=host_policy,
+                    checked=checked,
                     owner=owner,
+                    webhook_url=payload.webhook_url,
                 )
-                from app.api.async_crawl_runner import run_async_crawl
+            return await _run_sync_crawl(
+                payload,
+                result_store=result_store,
+                checked=checked,
+                owner=owner,
+                request=request,
+                crawl_awaitable=crawl_awaitable if crawl_awaitable is not None else _missing_sync_awaitable(),
+            )
 
-                start_tracked_task(
-                    request_id,
-                    lambda: run_async_crawl(
-                        request_id,
-                        payload,
-                        webhook_url,
-                        settings,
-                        job_store,
-                        result_store,
-                        shutdown_event,
-                        urls=checked,
-                    ),
-                )
-                get_metrics().observe_crawl(accepted=True, caller_id=owner)
-                return JSONResponse(
-                    status_code=202,
-                    content={
-                        "status": "accepted",
-                        "request_id": request_id,
-                        "status_url": f"/v1/crawl/{request_id}",
-                        "webhook_url": webhook_url,
-                    },
-                )
-            _crawl_started = time.monotonic()
-            # Disconnect-aware sync crawl: if the caller has gone away, halt the
-            # engine call instead of crawling to completion for a dead client.
-            crawl_awaitable = execute_crawl(
-                payload, settings=settings, shutdown_event=shutdown_event, urls=checked
-            )
-            if request is None:
-                result = await crawl_awaitable
-            else:
-                result = await await_or_client_gone(crawl_awaitable, request)
-            record_crawl_completion(
-                result,
-                _crawl_started,
-                event="crawl_request_completed",
-                logger=_logger,
-                caller_id=owner,
-            )
-            response_model = await aunified_response_from_result(result)
-            try:
-                await result_store.aput(result["request_id"], response_model.model_dump(), owner=owner)
-            except Exception:
-                _logger.warning("crawl_result_store_failed", extra={"request_id": result["request_id"]})
-            output_format = payload.output_format
-            if output_format and output_format.lower() != "json":
-                body, media_type = _serialize_or_reject(
-                    [u.model_dump() for u in response_model.results], output_format
-                )
-                return Response(content=body, media_type=media_type)
-            return response_model
+
+def _missing_sync_awaitable() -> Awaitable[ProducerEnvelope]:
+    """Unreachable: the dispatch passes None only when the async door is taken."""
+    raise AssertionError("the sync door always receives a built awaitable")
+
+
+async def _accepted_async(
+    payload: CrawlRequest,
+    *,
+    settings: CrawlerSettings,
+    job_store: JobStore,
+    result_store: CrawlResultStore,
+    shutdown_event: asyncio.Event,
+    host_policy: HostPolicy,
+    checked: list[str],
+    owner: str,
+    webhook_url: str | None,
+) -> JSONResponse:
+    """The 202 door: validate the webhook, persist the job row, start the runner."""
+    if webhook_url and (
+        not isinstance(webhook_url, str) or not webhook_url.startswith(("http://", "https://"))
+    ):
+        raise http_error(422, "validation_error", "Invalid webhook_url")
+    if webhook_url:
+        await validate_webhook_url_async(webhook_url, host_policy=host_policy)
+    request_id = new_request_id()
+    # The store's tier, not ``settings``: the row is read back with the
+    # store's tier, and two tier sources drift apart the moment they differ.
+    await job_store.acreate_single_shot(
+        request_id,
+        checked[0],
+        payload.policy,
+        owner=owner,
+    )
+    from app.api.async_crawl_runner import run_async_crawl
+
+    start_tracked_task(
+        request_id,
+        lambda: run_async_crawl(
+            request_id,
+            payload,
+            webhook_url,
+            settings,
+            job_store,
+            result_store,
+            shutdown_event,
+            urls=checked,
+        ),
+    )
+    get_metrics().observe_crawl(accepted=True, caller_id=owner)
+    return JSONResponse(
+        status_code=202,
+        content={
+            "status": "accepted",
+            "request_id": request_id,
+            "status_url": f"/v1/crawl/{request_id}",
+            "webhook_url": webhook_url,
+        },
+    )
+
+
+async def _run_sync_crawl(
+    payload: CrawlRequest,
+    *,
+    result_store: CrawlResultStore,
+    checked: list[str],
+    owner: str,
+    request: Request | None,
+    crawl_awaitable: Awaitable[ProducerEnvelope],
+) -> Response | UnifiedCrawlResponse:
+    """The sync door: disconnect-aware crawl, metrics, store, then the body."""
+    _crawl_started = time.monotonic()
+    # Disconnect-aware sync crawl: if the caller has gone away, halt the
+    # engine call instead of crawling to completion for a dead client.
+    if request is None:
+        result = await crawl_awaitable
+    else:
+        result = await await_or_client_gone(crawl_awaitable, request)
+    record_crawl_completion(
+        result,
+        _crawl_started,
+        event="crawl_request_completed",
+        logger=_logger,
+        caller_id=owner,
+    )
+    response_model = await aunified_response_from_result(result)
+    try:
+        await result_store.aput(result["request_id"], response_model.model_dump(), owner=owner)
+    except Exception:
+        _logger.warning("crawl_result_store_failed", extra={"request_id": result["request_id"]})
+    output_format = payload.output_format
+    if output_format and output_format.lower() != "json":
+        body, media_type = _serialize_or_reject(
+            [u.model_dump() for u in response_model.results], output_format
+        )
+        return Response(content=body, media_type=media_type)
+    return response_model
 
 
 async def _stored_response_payload(

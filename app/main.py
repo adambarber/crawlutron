@@ -127,20 +127,19 @@ def warn_if_bound_off_loopback(host: str) -> None:
     )
 
 
-if FastAPI is not None:
-    # Declared once so both branches agree on the type: the module-level app is
-    # ``FastAPI | None`` by construction, not FastAPI that happens to be None.
-    app: FastAPI | None
-
-    @asynccontextmanager
-    async def _lifespan(_app: FastAPI):
-        await _startup_services(_app, settings)
-        yield
-        await _shutdown_services(_app)
-
+def _build_app(
+    settings: CrawlerSettings,
+    *,
+    job_store,
+    result_store,
+    watch_store,
+    caller_key_store,
+    lifespan,
+) -> FastAPI:
+    """Construct the FastAPI app: state, middleware, handlers, and routers."""
     app = FastAPI(
         title="Crawlutron Execution Service",
-        lifespan=_lifespan,
+        lifespan=lifespan,
         description=(
             "Localhost-only policy-driven crawler execution service for municipal script tools. "
             "GET /health is lightweight liveness for Docker healthchecks; GET /ready reports active crawl "
@@ -157,31 +156,42 @@ if FastAPI is not None:
         version=SERVICE_VERSION,
         contact={"name": SERVICE_ID},
         license_info={"name": "MIT License"},
-        openapi_tags=[
-            {
-                "name": "Health",
-                "description": "Lightweight liveness and crawl-capacity readiness endpoints for local orchestration.",  # noqa: E501
-            },
-            {
-                "name": "Discovery",
-                "description": "Machine-readable service capabilities and AI agent guidance.",
-            },
-            {
-                "name": "Crawler",
-                "description": "Browser render and universal policy-driven crawl execution endpoints.",
-            },
-            {
-                "name": "Search",
-                "description": "Web search front-end discovery via the configured provider.",
-            },
-            {
-                "name": "MCP",
-                "description": "Model Context Protocol 2026-07-28 endpoint exposing crawler tools.",
-            },
-        ],
+        openapi_tags=_openapi_tags(),
     )
-    # Stash shared dependencies on ``app.state`` so router handlers reach them
-    # via the :func:`get_settings` / :func:`get_shutdown_event` dependencies.
+    _stash_state(app, settings, job_store, result_store, watch_store, caller_key_store)
+    _install_error_surface(app)
+    _include_routers(app)
+    return app
+
+
+def _openapi_tags() -> list[dict[str, str]]:
+    """The service's OpenAPI tag groups, in the order the docs render them."""
+    return [
+        {
+            "name": "Health",
+            "description": "Lightweight liveness and crawl-capacity readiness endpoints for local orchestration.",  # noqa: E501
+        },
+        {
+            "name": "Discovery",
+            "description": "Machine-readable service capabilities and AI agent guidance.",
+        },
+        {
+            "name": "Crawler",
+            "description": "Browser render and universal policy-driven crawl execution endpoints.",
+        },
+        {
+            "name": "Search",
+            "description": "Web search front-end discovery via the configured provider.",
+        },
+        {
+            "name": "MCP",
+            "description": "Model Context Protocol 2026-07-28 endpoint exposing crawler tools.",
+        },
+    ]
+
+
+def _stash_state(app, settings, job_store, result_store, watch_store, caller_key_store) -> None:
+    """Stash shared dependencies on ``app.state`` for the router dependencies."""
     app.state.crawler_settings = settings
     app.state.job_store = job_store
     app.state.result_store = result_store
@@ -194,6 +204,9 @@ if FastAPI is not None:
 
     app.state.concurrency_tracker = CallerConcurrencyTracker()
 
+
+def _install_error_surface(app) -> None:
+    """Middleware and exception handlers every response path funnels through."""
     # Body-size guard: 16 MiB cap at the ASGI receive layer (see
     # app/api/middleware.py for how truncation and keep-alive are handled).
     from starlette.exceptions import HTTPException as StarletteHTTPException
@@ -209,7 +222,9 @@ if FastAPI is not None:
     app.add_exception_handler(StarletteHTTPException, http_exception_handler)
     app.add_exception_handler(Exception, http_exception_handler)
 
-    # Include modular routers
+
+def _include_routers(app) -> None:
+    """Mount every feature router, health first, MCP last."""
     health_router, _ = create_health_router()
     app.include_router(health_router)
 
@@ -233,6 +248,27 @@ if FastAPI is not None:
     app.include_router(crawl_router)
     app.include_router(policy_router)
     app.include_router(mcp_router)
+
+
+if FastAPI is not None:
+    # Declared once so both branches agree on the type: the module-level app is
+    # ``FastAPI | None`` by construction, not FastAPI that happens to be None.
+    app: FastAPI | None
+
+    @asynccontextmanager
+    async def _lifespan(_app: FastAPI):
+        await _startup_services(_app, settings)
+        yield
+        await _shutdown_services(_app)
+
+    app = _build_app(
+        settings,
+        job_store=job_store,
+        result_store=result_store,
+        watch_store=watch_store,
+        caller_key_store=caller_key_store,
+        lifespan=_lifespan,
+    )
 
 else:
     # ``FastAPI`` is None here (the optional import failed): no app to build,

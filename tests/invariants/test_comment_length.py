@@ -216,9 +216,7 @@ def _zero_everywhere(collect: Callable[[str], list]) -> list[str]:
 
 def test_zero_long_comment_runs_everywhere() -> None:
     """Zero long comment runs in app/, tests/ and scripts/ -- no budget, no exemption."""
-    offenders = [
-        f"{name}:{start}-{end}: long comment run" for name, start, end in _zero_everywhere(long_comment_runs)
-    ]
+    offenders = _zero_everywhere(long_comment_runs)
     assert not offenders, "\n".join(offenders)
 
 

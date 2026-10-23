@@ -4,13 +4,15 @@ from __future__ import annotations
 
 import time
 from dataclasses import replace
-from typing import Any
+from typing import Any, NamedTuple
 
 from app.admission.policy import discovery_flags
+from app.models.classification_evidence import ClassificationEvidenceRecord
 from app.models.crawl_diagnostics import CrawlDiagnostics
 from app.models.crawl_result import EngineCrawlResult
 from app.models.crawl_strategy_attempt import CrawlStrategyAttempt
 from app.models.fetch_envelope import RetryDiagnostics
+from app.models.http_fetch_result import HttpFetchResult
 from app.models.result_factory import binary_no_text_result, build_engine_result
 from app.models.taxonomy import Classification
 from app.orchestration.results import engine_result_from_exception
@@ -44,9 +46,16 @@ from app.vocabulary.extraction import EXTRACTION_DOCUMENT
 from app.vocabulary.taxonomy import status_for_classification
 
 
-async def _fetch_http_phase(ctx: HttpStrategyContext) -> tuple[Any, RetryDiagnostics]:
+class _FetchedWithRetries(NamedTuple):
+    """The fetch phase's response and its retry accounting, declared once."""
+
+    response: HttpFetchResult
+    retry_diagnostics: RetryDiagnostics
+
+
+async def _fetch_http_phase(ctx: HttpStrategyContext) -> _FetchedWithRetries:
     """Fetch a response with the strategy retry policy."""
-    return await fetch_policy.fetch_with_retries(
+    response, retry_diagnostics = await fetch_policy.fetch_with_retries(
         ctx.http_fetcher,
         ctx.normalized_url,
         ctx.request_headers,
@@ -54,6 +63,7 @@ async def _fetch_http_phase(ctx: HttpStrategyContext) -> tuple[Any, RetryDiagnos
         ctx.max_retries,
         ctx.max_content_length,
     )
+    return _FetchedWithRetries(response, retry_diagnostics)
 
 
 def _binary_result_if_needed(ctx: HttpStrategyContext, resp: FetchedResponse) -> EngineCrawlResult | None:
@@ -83,13 +93,7 @@ async def _construct_http_result(
     extracted: ExtractedHttpContent,
 ) -> EngineCrawlResult:
     """Run discovery shaping and construct the successful strategy result."""
-    classification, classification_evidence = classify_extracted_content(ctx, resp, extracted)
-    # A content-cache revalidation that earned a 304 re-serves the cached body; it is not a fresh
-    # render, so report not_modified (kept content lets WatchSweeper diff, not fire a webhook).
-    revalidated_304 = ctx.revalidated_304
-    if revalidated_304:
-        classification = "not_modified"
-        classification_evidence = []
+    classification, classification_evidence, revalidated_304 = _classify_http_content(ctx, resp, extracted)
     status = status_for_classification(classification)
     diagnostics: CrawlDiagnostics = {
         "decompression_failed": extracted.strategy_decompression_failed or resp.decompression_failed,
@@ -98,8 +102,6 @@ async def _construct_http_result(
         "runtime": {"elapsed_ms": resp.elapsed_ms, "final_url": resp.final_url},
         "content_metrics": extracted.content_metrics,
     }
-    # "Any channel on", not "the block exists": with channels off by default,
-    # an all-off block is the empty mapping that ``is not None`` now distinguishes.
     post_fetch = await discover_after_fetch(
         html=extracted.html,
         final_url=resp.final_url,
@@ -108,6 +110,71 @@ async def _construct_http_result(
         policy=ctx.policy,
         host_policy=ctx.host_policy,
     )
+    await _merge_discovery_diagnostics(ctx, resp, extracted, diagnostics, post_fetch)
+    next_page_url = post_fetch["next_page_url"]
+    diagnostics.update(post_fetch_diagnostics(post_fetch, resp.final_url, ctx.host_policy))
+
+    quality = _http_quality_score(status, classification, resp, extracted)
+    error_classification: Classification | None = None if status == "success" else classification
+    result_http_status = 304 if revalidated_304 else resp.status_code
+    attempt = CrawlStrategyAttempt(
+        strategy=ctx.strategy,
+        status=status,
+        classification=classification,
+        http_status=result_http_status,
+        content_type=resp.content_type,
+        elapsed_ms=resp.elapsed_ms,
+        error=error_classification,
+    )
+    html = extracted.html if ctx.include_html else None
+    return build_engine_result(
+        **response_result_fields(ctx, resp, attempt),
+        selected_strategy=ctx.strategy if status == "success" else None,
+        http_status=result_http_status,
+        content_type=resp.content_type,
+        html=html,
+        text=extracted.text,
+        markdown=extracted.markdown,
+        extraction_method=extracted.extraction_method,
+        quality_score=quality,
+        diagnostics=diagnostics,
+        **discovery_result_fields(
+            post_fetch,
+            classification_evidence=classification_evidence,
+        ),
+        next_page_url=next_page_url,
+        validators=resp.validators(),
+    )
+
+
+def _classify_http_content(
+    ctx: HttpStrategyContext,
+    resp: FetchedResponse,
+    extracted: ExtractedHttpContent,
+) -> tuple[Classification, list[ClassificationEvidenceRecord], bool]:
+    """Classify the extracted body; a revalidated 304 reports not_modified.
+
+    The 304 re-serves the cached body, so it is not a fresh render: kept
+    content lets WatchSweeper diff, not fire a webhook.
+    """
+    classification, classification_evidence = classify_extracted_content(ctx, resp, extracted)
+    if ctx.revalidated_304:
+        return "not_modified", [], True
+    return classification, classification_evidence, False
+
+
+async def _merge_discovery_diagnostics(
+    ctx: HttpStrategyContext,
+    resp: FetchedResponse,
+    extracted: ExtractedHttpContent,
+    diagnostics: CrawlDiagnostics,
+    post_fetch: dict[str, Any],
+) -> None:
+    """Fold the fetch-policy discovery block and retry-after into diagnostics.
+
+    "Any channel on", not "the block exists": with channels off by default, an
+    all-off block is the empty mapping that ``is not None`` now distinguishes.
+    """
     discovery_block = any(discovery_flags(ctx.policy))
     if discovery_block:
         diagnostics.update(post_fetch["diagnostics"])
@@ -132,9 +199,15 @@ async def _construct_http_result(
         if discovery_diag:
             discovery_diag.pop("sitemap_urls", None)
             discovery_diag.pop("feeds", None)
-    next_page_url = post_fetch["next_page_url"]
-    diagnostics.update(post_fetch_diagnostics(post_fetch, resp.final_url, ctx.host_policy))
 
+
+def _http_quality_score(
+    status: str,
+    classification: Classification,
+    resp: FetchedResponse,
+    extracted: ExtractedHttpContent,
+) -> float:
+    """Base quality score, floored for decompression failures, raised for rich text."""
     quality = body_decode.quality_score(
         status,
         classification,
@@ -151,38 +224,7 @@ async def _construct_http_result(
         and extracted.content_metrics["visible_text_length"] >= 40
     ):
         quality = max(quality, 0.95)
-
-    error_classification: Classification | None = None if status == "success" else classification
-    result_http_status = 304 if revalidated_304 else resp.status_code
-    attempt = CrawlStrategyAttempt(
-        strategy=ctx.strategy,
-        status=status,
-        classification=classification,
-        http_status=result_http_status,
-        content_type=resp.content_type,
-        elapsed_ms=resp.elapsed_ms,
-        error=error_classification,
-    )
-    html = extracted.html if ctx.include_html else None
-    result = build_engine_result(
-        **response_result_fields(ctx, resp, attempt),
-        selected_strategy=ctx.strategy if status == "success" else None,
-        http_status=result_http_status,
-        content_type=resp.content_type,
-        html=html,
-        text=extracted.text,
-        markdown=extracted.markdown,
-        extraction_method=extracted.extraction_method,
-        quality_score=quality,
-        diagnostics=diagnostics,
-        **discovery_result_fields(
-            post_fetch,
-            classification_evidence=classification_evidence,
-        ),
-        next_page_url=next_page_url,
-        validators=resp.validators(),
-    )
-    return result
+    return quality
 
 
 def _http_error_result(ctx: HttpStrategyContext, error: Exception) -> EngineCrawlResult:

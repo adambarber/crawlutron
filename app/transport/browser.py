@@ -17,7 +17,7 @@ from app.config.settings import CrawlerSettings
 from app.extraction.classify import classify_page
 from app.models.crawl_result import CrawlResult
 from app.models.normalized_url import NormalizedUrl
-from app.models.result_factory import terminal_attempt, terminal_crawl_result
+from app.models.result_factory import terminal_crawl_result
 from app.orchestration.classification import classify_error_code
 from app.transport.browser_cookies import (
     BROWSER_COOKIES_MAX,
@@ -29,15 +29,11 @@ from app.transport.browser_cookies import (
 from app.transport.browser_driver import BrowserDriver, async_sleep
 from app.transport.browser_render_phases import (
     ReleasePlan,
+    RenderCollaborators,
     RenderPage,
     WireGuard,
-    attach_screenshots,
-    extract_with_pdf_fallback,
-    navigate_with_host_override,
+    guarded_render,
     release_page,
-    run_pre_extraction_chain,
-    warmup_pages,
-    wire_ssrf_guards,
 )
 from app.transport.browser_targets import (
     make_response_handler,
@@ -256,76 +252,27 @@ class BrowserRenderer:
         # The guarded body starts here, not after route wiring: an early raise
         # still recycles via the finally's note_render (#223).
         try:
-            intercepted_xhr: list[dict[str, object]] = []
-            wire = WireGuard(pin_sync=self._pin_sync, policy=policy, timeout_seconds=options.timeout_seconds)
-            await wire_ssrf_guards(
-                page, wire=wire, profile=options.browser_profile, on_response=intercepted_xhr
-            )
-            await warmup_pages(
+            result = await guarded_render(
                 page,
-                wait_for_ready=self._driver.wait_for_ready_state,
-                warmup_urls=self._warmup_urls,
-                policy=policy,
-            )
-            await navigate_with_host_override(
-                page,
-                goto_and_settle=lambda pinned: self._navigate_and_settle(page, pinned),
+                url,
+                options,
                 pinned_url=pinned_url,
                 goto_headers=goto_headers,
-                timeout_seconds=options.timeout_seconds,
-            )
-            await run_pre_extraction_chain(
-                page,
-                run_actions=self._run_actions,
-                lazy_scroll=self._driver.lazy_load_scroll,
-                flatten_shadow_dom=self._driver.flatten_shadow_dom,
-                accept_cookies=self._driver.auto_accept_cookie_consent,
-                profile=options.browser_profile,
-                url=url.raw,
-                budget_seconds=max(1.0, float(options.timeout_seconds)),
-            )
-
-            html, text, classification, challenge_resolved = await self._extract(page, options)
-            outcome = await extract_with_pdf_fallback(
-                page,
-                html=html,
-                text=text,
-                classification=classification,
-                options=options,
-                looks_like=self._looks_like,
-                pdf_extractor=self._pdf_text_extractor,
-                policy=policy,
-            )
-            status = self._status_for(outcome.classification)
-            metadata: dict[str, object] = {
-                "title": await page.evaluate("() => document.title"),
-                "content_length": len(outcome.html or ""),
-                "browser_reused": self._driver.reused,
-                "challenge_resolved": challenge_resolved,
-                "extraction_method": outcome.method,
-                "intercepted_xhr": intercepted_xhr,
-            }
-            await attach_screenshots(
-                page,
-                metadata,
-                capture_element_shots=self._driver.capture_element_screenshots,
-                profile=options.browser_profile,
-            )
-            return CrawlResult(
-                url=url,
-                attempt=terminal_attempt(
-                    strategy=None,
-                    status=status,
-                    classification=outcome.classification,
-                    elapsed_ms=int((time.monotonic() - started) * 1000),
-                    error=None,
+                started=started,
+                collaborators=RenderCollaborators(
+                    policy=policy,
+                    wire=WireGuard(
+                        pin_sync=self._pin_sync, policy=policy, timeout_seconds=options.timeout_seconds
+                    ),
+                    warmup_urls=self._warmup_urls,
+                    driver=self._driver,
+                    navigate_and_settle=lambda pinned: self._navigate_and_settle(page, pinned),
+                    run_actions=self._run_actions,
+                    extract=self._extract,
+                    looks_like=self._looks_like,
+                    pdf_extractor=self._pdf_text_extractor,
+                    status_for=self._status_for,
                 ),
-                final_url=NormalizedUrl(page.url, policy=policy),
-                html=outcome.html,
-                text=outcome.text,
-                attempts=1,
-                domain=url.site,
-                metadata=metadata,
             )
         finally:
             # Always release the page between crawls (the Camoufox memory-growth
@@ -336,6 +283,7 @@ class BrowserRenderer:
                 close_page=self._driver.safe_close_page,
                 note_render=self._driver.note_render,
             )
+        return result
 
     def _run_actions(
         self, page: RenderPage, actions: list[BrowserAction], url: str, budget_seconds: float

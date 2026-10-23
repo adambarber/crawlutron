@@ -8,12 +8,18 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import time
 from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING, NamedTuple, Protocol
 
 from app.extraction.classify import classify_page
+from app.models.crawl_result import CrawlResult
+
+# Page identity: re-normalized against the policy at the result boundary.
 from app.models.normalized_url import NormalizedUrl
+from app.models.result_factory import terminal_attempt
 from app.transport.browser_cookies import harvest_session_cookies
+from app.transport.browser_driver import BrowserDriver
 from app.transport.browser_targets import (
     make_response_handler,
     make_ssrf_route_handler,
@@ -25,6 +31,7 @@ if TYPE_CHECKING:
     from app.models.host_policy import HostPolicy
     from app.models.render_options import RenderOptions
     from app.models.taxonomy import Classification
+    from app.vocabulary.taxonomy import ResultStatus
 
 import logging
 
@@ -247,3 +254,156 @@ async def release_page(
     # Increment render count for ALL attempts (success or failure) so
     # browser recycle logic bounds total attempts per browser instance.
     note_render()
+
+
+class RenderCollaborators(NamedTuple):
+    """The renderer's callables and rules the render phases share.
+
+    One bundle instead of nine mirrored keyword walls per phase (the clone
+    gate counts those); a named record reads better than a tenth line.
+    """
+
+    policy: HostPolicy
+    wire: WireGuard
+    warmup_urls: list[str]
+    driver: BrowserDriver
+    navigate_and_settle: Callable[[str], Awaitable[None]]
+    run_actions: Callable[..., Awaitable[None]]
+    extract: Callable[..., Awaitable[tuple[str | None, str | None, Classification, bool]]]
+    looks_like: Callable[[str], bool]
+    pdf_extractor: Callable[[NormalizedUrl], str]
+    status_for: Callable[[str], ResultStatus]
+
+
+async def guarded_render(
+    page: RenderPage,
+    url: NormalizedUrl,
+    options: RenderOptions,
+    *,
+    pinned_url: str,
+    goto_headers: dict[str, str],
+    started: float,
+    collaborators: RenderCollaborators,
+) -> CrawlResult:
+    """The guarded render setup: wire guards, warm up, navigate to the pin."""
+    intercepted_xhr: list[dict[str, object]] = []
+    await wire_ssrf_guards(
+        page, wire=collaborators.wire, profile=options.browser_profile, on_response=intercepted_xhr
+    )
+    await warmup_pages(
+        page,
+        wait_for_ready=collaborators.driver.wait_for_ready_state,
+        warmup_urls=collaborators.warmup_urls,
+        policy=collaborators.policy,
+    )
+    await navigate_with_host_override(
+        page,
+        goto_and_settle=lambda pinned: collaborators.navigate_and_settle(pinned),
+        pinned_url=pinned_url,
+        goto_headers=goto_headers,
+        timeout_seconds=options.timeout_seconds,
+    )
+    return await render_and_extract(
+        page,
+        url,
+        options,
+        started=started,
+        collaborators=collaborators,
+        intercepted_xhr=intercepted_xhr,
+    )
+
+
+async def render_and_extract(
+    page: RenderPage,
+    url: NormalizedUrl,
+    options: RenderOptions,
+    *,
+    started: float,
+    collaborators: RenderCollaborators,
+    intercepted_xhr: list[dict[str, object]],
+) -> CrawlResult:
+    """The interaction chain, extraction, PDF fallback, and result shaping."""
+    driver, policy = collaborators.driver, collaborators.policy
+    await run_pre_extraction_chain(
+        page,
+        run_actions=collaborators.run_actions,
+        lazy_scroll=driver.lazy_load_scroll,
+        flatten_shadow_dom=driver.flatten_shadow_dom,
+        accept_cookies=driver.auto_accept_cookie_consent,
+        profile=options.browser_profile,
+        url=url.raw,
+        budget_seconds=max(1.0, float(options.timeout_seconds)),
+    )
+
+    html, text, classification, challenge_resolved = await collaborators.extract(page, options)
+    outcome = await extract_with_pdf_fallback(
+        page,
+        html=html,
+        text=text,
+        classification=classification,
+        options=options,
+        looks_like=collaborators.looks_like,
+        pdf_extractor=collaborators.pdf_extractor,
+        policy=policy,
+    )
+    return await shape_render_result(
+        page,
+        url,
+        options=options,
+        policy=policy,
+        outcome=outcome,
+        challenge_resolved=challenge_resolved,
+        intercepted_xhr=intercepted_xhr,
+        started=started,
+        status_for=collaborators.status_for,
+        driver_reused=driver.reused,
+        capture_element_screenshots=driver.capture_element_screenshots,
+    )
+
+
+async def shape_render_result(
+    page: RenderPage,
+    url: NormalizedUrl,
+    *,
+    options: RenderOptions,
+    policy: HostPolicy,
+    outcome: PdfOutcome,
+    challenge_resolved: bool,
+    intercepted_xhr: list[dict[str, object]],
+    started: float,
+    status_for: Callable[[str], ResultStatus],
+    driver_reused: bool,
+    capture_element_screenshots: Callable[[RenderPage, list[str]], Awaitable[list[dict[str, object]]]],
+) -> CrawlResult:
+    """Terminal status, metadata, screenshots, and the CrawlResult envelope."""
+    status = status_for(outcome.classification)
+    metadata: dict[str, object] = {
+        "title": await page.evaluate("() => document.title"),
+        "content_length": len(outcome.html or ""),
+        "browser_reused": driver_reused,
+        "challenge_resolved": challenge_resolved,
+        "extraction_method": outcome.method,
+        "intercepted_xhr": intercepted_xhr,
+    }
+    await attach_screenshots(
+        page,
+        metadata,
+        capture_element_shots=capture_element_screenshots,
+        profile=options.browser_profile,
+    )
+    return CrawlResult(
+        url=url,
+        attempt=terminal_attempt(
+            strategy=None,
+            status=status,
+            classification=outcome.classification,
+            elapsed_ms=int((time.monotonic() - started) * 1000),
+            error=None,
+        ),
+        final_url=NormalizedUrl(page.url, policy=policy),
+        html=outcome.html,
+        text=outcome.text,
+        attempts=1,
+        domain=url.site,
+        metadata=metadata,
+    )

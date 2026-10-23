@@ -18,6 +18,7 @@ from app.models.crawl_diagnostics import CrawlDiagnostics
 from app.models.crawl_policy import CrawlPolicy
 from app.models.fetch_envelope import RetryDiagnostics
 from app.models.host_policy import HostPolicy
+from app.models.http_fetch_result import HttpFetchResult as _HttpFetchResult
 from app.models.http_fetcher import HttpFetcher
 from app.models.normalized_url import NormalizedUrl
 from app.models.robots_diagnostics import RobotsDiagnostics
@@ -58,7 +59,7 @@ async def fetch_with_retries(
     timeout_seconds: int,
     max_retries: int,
     max_content_length: int = DEFAULT_MAX_CONTENT_LENGTH_BYTES,
-) -> tuple[Any, RetryDiagnostics]:
+) -> tuple[_HttpFetchResult, RetryDiagnostics]:
     transient_errors: list[str] = []
     max_attempts = max(1, max_retries + 1)
     for attempt in range(1, max_attempts + 1):
@@ -66,7 +67,9 @@ async def fetch_with_retries(
             response = fetcher(url, headers, timeout_seconds, max_content_length)
             if inspect.iscoroutine(response):
                 response = await response
-            return response, {
+            # The fetcher Protocol returns HttpFetchResult; the local may have held
+            # the sync-call coroutine until the await above narrowed it.
+            return cast(_HttpFetchResult, response), {
                 "attempts": attempt,
                 "transient_errors": transient_errors,
                 "content_cache": "miss",

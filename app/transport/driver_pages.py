@@ -64,45 +64,67 @@ async def flatten_shadow_dom(page: Any) -> None:
         )
 
 
+_CONSENT_SELECTORS = [
+    # Common cookie consent button selectors and text patterns:
+    # generic button/anchor with common accept text, then ID/class patterns.
+    'button:has-text("Accept All")',
+    'button:has-text("Accept all")',
+    'button:has-text("Accept All Cookies")',
+    'button:has-text("Accept all cookies")',
+    'button:has-text("I Accept")',
+    'button:has-text("I Agree")',
+    'button:has-text("Allow All")',
+    'button:has-text("Allow all")',
+    'button:has-text("Continue")',
+    'button:has-text("Got it")',
+    'button:has-text("OK")',
+    'button:has-text("Ok")',
+    'a:has-text("Accept All")',
+    'a:has-text("Accept all")',
+    'a:has-text("I Accept")',
+    'a:has-text("I Agree")',
+    'button[id*="accept"]',
+    'button[class*="accept"]',
+    'button[id*="consent"]',
+    'button[class*="consent"]',
+    'button[id*="cookie"]',
+    'button[class*="cookie"]',
+    "#onetrust-accept-btn-handler",
+    ".cc-btn.cc-allow",
+    ".cookie-consent-accept",
+    '[data-testid="cookie-accept"]',
+    '[data-cy="accept-cookies"]',
+]
+
+_CONSENT_FALLBACK_JS = """() => {
+    const acceptTexts = [
+        'accept all', 'accept all cookies', 'i accept', 'i agree',
+        'allow all', 'allow all cookies', 'continue', 'got it', 'ok'
+    ];
+    const buttons = document.querySelectorAll('button, a, input[type="button"],
+    input[type="submit"]');
+    for (const btn of buttons) {
+        const text = (btn.innerText || btn.value || btn.textContent || '').toLowerCase().trim();
+        if (acceptTexts.some(t => text.includes(t))) {
+            // Check if visible
+            const style = window.getComputedStyle(btn);
+            if (style.display !== 'none' && style.visibility !== 'hidden' && style.opacity !==
+            '0') {
+                btn.click();
+                return true;
+            }
+        }
+    }
+    return false;
+}"""
+
+
 async def auto_accept_cookie_consent(page: Any, enabled: bool, sleep: Callable[[float], None]) -> bool:
     """Auto-click cookie consent buttons when the caller opts in."""
     if not enabled:
         return False
     try:
-        # Common cookie consent button selectors and text patterns
-        consent_selectors = [
-            # Generic button/anchor with common accept text
-            'button:has-text("Accept All")',
-            'button:has-text("Accept all")',
-            'button:has-text("Accept All Cookies")',
-            'button:has-text("Accept all cookies")',
-            'button:has-text("I Accept")',
-            'button:has-text("I Agree")',
-            'button:has-text("Allow All")',
-            'button:has-text("Allow all")',
-            'button:has-text("Continue")',
-            'button:has-text("Got it")',
-            'button:has-text("OK")',
-            'button:has-text("Ok")',
-            'a:has-text("Accept All")',
-            'a:has-text("Accept all")',
-            'a:has-text("I Accept")',
-            'a:has-text("I Agree")',
-            # Common ID/class patterns
-            'button[id*="accept"]',
-            'button[class*="accept"]',
-            'button[id*="consent"]',
-            'button[class*="consent"]',
-            'button[id*="cookie"]',
-            'button[class*="cookie"]',
-            "#onetrust-accept-btn-handler",
-            ".cc-btn.cc-allow",
-            ".cookie-consent-accept",
-            '[data-testid="cookie-accept"]',
-            '[data-cy="accept-cookies"]',
-        ]
-
-        for selector in consent_selectors:
+        for selector in _CONSENT_SELECTORS:
             with contextlib.suppress(Exception):
                 element = await page.query_selector(selector)
                 if element:
@@ -113,27 +135,7 @@ async def auto_accept_cookie_consent(page: Any, enabled: bool, sleep: Callable[[
                         await async_sleep(sleep, 0.5)  # Brief wait for consent to register
                         return True
         # Fallback: evaluate JS to find buttons by text content
-        clicked = await page.evaluate("""() => {
-            const acceptTexts = [
-                'accept all', 'accept all cookies', 'i accept', 'i agree',
-                'allow all', 'allow all cookies', 'continue', 'got it', 'ok'
-            ];
-            const buttons = document.querySelectorAll('button, a, input[type="button"],
-            input[type="submit"]');
-            for (const btn of buttons) {
-                const text = (btn.innerText || btn.value || btn.textContent || '').toLowerCase().trim();
-                if (acceptTexts.some(t => text.includes(t))) {
-                    // Check if visible
-                    const style = window.getComputedStyle(btn);
-                    if (style.display !== 'none' && style.visibility !== 'hidden' && style.opacity !==
-                    '0') {
-                        btn.click();
-                        return true;
-                    }
-                }
-            }
-            return false;
-        }""")
+        clicked = await page.evaluate(_CONSENT_FALLBACK_JS)
         return bool(clicked)
     except Exception:
         return False
