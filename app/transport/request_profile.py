@@ -167,30 +167,7 @@ def headers_for_strategy(
         headers["User-Agent"] = fp["user_agent"]
         is_browser_like = is_browser_like or "Mozilla" in fp["user_agent"]
     elif is_browser_like:
-        # Firefox identity: must match CFFI_IMPERSONATE_TARGET AND the Camoufox browser
-        # strategy, so cookie-bootstrap sessions carry a consistent User-Agent across both.
-        if strategy == HTTP_CFFI_IMPERSONATE:
-            headers["User-Agent"] = (
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:135.0) Gecko/20100101 Firefox/135.0"
-            )
-            headers["Accept"] = "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
-            headers["Referer"] = "https://www.google.com/"
-            headers["Upgrade-Insecure-Requests"] = "1"
-            headers["Sec-Fetch-Dest"] = "document"
-            headers["Sec-Fetch-Mode"] = "navigate"
-            headers["Sec-Fetch-Site"] = "cross-site"
-            headers["Sec-Fetch-User"] = "?1"
-        else:
-            headers["User-Agent"] = (
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-                "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
-            )
-            headers["Referer"] = "https://www.google.com/"
-            headers["Sec-Fetch-Site"] = "cross-site"
-            headers["Sec-CH-UA"] = '"Chromium";v="124", "Google Chrome";v="124", "Not-A.Brand";v="99"'
-            headers["Sec-CH-UA-Mobile"] = "?0"
-            headers["Sec-CH-UA-Platform"] = '"Windows"'
-            headers["Sec-Fetch-User"] = "?1"
+        headers.update(_browser_like_identity_headers(strategy))
     elif user_agent_family == "mobile_safari":
         headers["User-Agent"] = (
             "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 "
@@ -209,3 +186,34 @@ def headers_for_strategy(
     # and the redirect loop's scrub strips it on any cross-host hop (as with cookies).
     apply_credentials(headers, url, policy.credentials)
     return headers
+
+
+def _browser_like_identity_headers(strategy: str) -> dict[str, str]:
+    """The identity a browser-like strategy presents when no fingerprint supplies one.
+
+    Firefox must match CFFI_IMPERSONATE_TARGET and Camoufox (consistent UA on
+    cookie-bootstrap sessions); Chrome is the headless default with its hints.
+    """
+    if strategy == HTTP_CFFI_IMPERSONATE:
+        return {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:135.0) Gecko/20100101 Firefox/135.0",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "Referer": "https://www.google.com/",
+            "Upgrade-Insecure-Requests": "1",
+            "Sec-Fetch-Dest": "document",
+            "Sec-Fetch-Mode": "navigate",
+            "Sec-Fetch-Site": "cross-site",
+            "Sec-Fetch-User": "?1",
+        }
+    return {
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+            "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+        ),
+        "Referer": "https://www.google.com/",
+        "Sec-Fetch-Site": "cross-site",
+        "Sec-CH-UA": '"Chromium";v="124", "Google Chrome";v="124", "Not-A.Brand";v="99"',
+        "Sec-CH-UA-Mobile": "?0",
+        "Sec-CH-UA-Platform": '"Windows"',
+        "Sec-Fetch-User": "?1",
+    }
