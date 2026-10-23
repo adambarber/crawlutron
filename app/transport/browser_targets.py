@@ -72,37 +72,24 @@ def make_ssrf_route_handler(
         except ValueError:
             await route.abort()
             return
-        # Tracking/analytics requests carry no crawlable content; drop them
-        # unconditionally so they never consume bandwidth or trigger SSRF resolution.
-        if _is_analytics_url(admitted):
+        # Analytics and presentation subresources never consume crawl bandwidth:
+        # drop unconditionally, or when reduced-mode says so and no screenshot.
+        if _is_analytics_url(admitted) or (
+            getattr(request, "resource_type", "") in _REDUCED_BLOCK_RESOURCE_TYPES and not include_screenshot
+        ):
             await route.abort()
             return
-        # Abort presentation subresources: a text crawler never needs them (~70%
-        # of render bandwidth); permitted only when a screenshot is requested.
-        if getattr(request, "resource_type", "") in _REDUCED_BLOCK_RESOURCE_TYPES and not include_screenshot:
-            await route.abort()
-            return
-        try:
-            # Annotated once for both branches: mypy cannot widen the https
-            # branch's empty literal to the dict type the http pin rule returns.
-            host_headers: dict[str, str]
-            if request_scheme == "https":
-                # The browser dials its own connect (SNI/certs need the hostname), so we
-                # cannot pin it like the fetch family; validation must be fresh, never TTL-cached (#387).
-                await _BOUNDED(
-                    lambda: check_ssrf_protection(admitted, use_cache=False),
-                    timeout_seconds=timeout_seconds,
-                )
-                pinned_url, host_headers = request.url, {}
-            else:
-                pinned_url, host_headers = await _BOUNDED(
-                    lambda: pin(admitted, {}), timeout_seconds=timeout_seconds
-                )
-        except Exception:
-            # Fail closed: DNS timeout, resolver errors, anything unexpected ->
-            # abort rather than let an unchecked connection proceed.
-            await route.abort()
-            return
+        resolution = await _resolve_ssrf_pinned_url(
+            request,
+            request_scheme,
+            admitted,
+            pin=pin,
+            timeout_seconds=timeout_seconds,
+            abort=route.abort,
+        )
+        if resolution is None:
+            return  # the failure path already aborted (fail closed)
+        pinned_url, host_headers = resolution
         overrides = {}
         if host_headers.get("Host"):
             overrides["Host"] = host_headers["Host"]
@@ -114,6 +101,35 @@ def make_ssrf_route_handler(
             await route.continue_(url=pinned_url)
 
     return _handler
+
+
+async def _resolve_ssrf_pinned_url(
+    request,
+    request_scheme: str,
+    admitted: NormalizedUrl,
+    *,
+    pin: Callable[..., tuple[str, dict[str, str]]],
+    timeout_seconds: float | None,
+    abort: Callable[[], Awaitable[None]],
+) -> tuple[str, dict[str, str]] | None:
+    """Pin the request URL per scheme; None after aborting (fail closed).
+
+    HTTPS validates fresh (SNI/certs need the hostname; never TTL-cached, #387);
+    plain HTTP re-pins through the caller's rule.
+    """
+    try:
+        if request_scheme == "https":
+            await _BOUNDED(
+                lambda: check_ssrf_protection(admitted, use_cache=False),
+                timeout_seconds=timeout_seconds,
+            )
+            return request.url, {}
+        return await _BOUNDED(lambda: pin(admitted, {}), timeout_seconds=timeout_seconds)
+    except Exception:
+        # Fail closed: DNS timeout, resolver errors, anything unexpected ->
+        # abort rather than let an unchecked connection proceed.
+        await abort()
+        return None
 
 
 def make_ssrf_websocket_handler(*, policy: HostPolicy, timeout_seconds: float | None = None):
