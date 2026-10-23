@@ -8,7 +8,7 @@ import pathlib
 from tests.chokepoint_walks import REPO_ROOT, nodes_of, offender_at, relative_posix, unary_ops
 from tests.invariants._shared import _enclosing_calls
 from tests.invariants.test_ownership import _ELSEWHERE
-from tests.rules import Bites, Rule, Silent
+from tests.rules import Bites, Registry, Rule, Silent
 
 _DOC_POOL_CLASS = "DocExtractionPool"
 
@@ -107,14 +107,6 @@ DOC_POOL_ACQUIRER_REAPS_RETIRED_SLOTS = Rule(
 )
 
 
-def test_doc_pool_acquirer_reaps_retired_slots():
-    DOC_POOL_ACQUIRER_REAPS_RETIRED_SLOTS.scan()
-
-
-def test_doc_pool_reap_detector_bites():
-    DOC_POOL_ACQUIRER_REAPS_RETIRED_SLOTS.check_bites()
-
-
 # These two rules are the enforcement half: the jar has exactly one write door, and that door is the shared
 # tail.
 
@@ -205,11 +197,14 @@ RESPONSE_COOKIES_ENTER_VIA_THE_FETCH_TAIL = Rule(
 )
 
 
-def test_response_cookies_enter_the_jar_only_through_the_fetch_tail():
+RULES = Registry((DOC_POOL_ACQUIRER_REAPS_RETIRED_SLOTS, RESPONSE_COOKIES_ENTER_VIA_THE_FETCH_TAIL))
+
+
+def test_no_rule_violations():
     """Cookie persistence has one door, and that door is the shared fetch tail."""
-    RESPONSE_COOKIES_ENTER_VIA_THE_FETCH_TAIL.scan()
+    RULES.check_all_clean()
 
 
-def test_cookie_tail_detector_bites():
-    """Every bypass shape fires; the sanctioned two-hop chain stays clean."""
-    RESPONSE_COOKIES_ENTER_VIA_THE_FETCH_TAIL.check_bites()
+def test_every_rule_bites():
+    """Every rule must reject what it forbids, and spare what it resembles."""
+    RULES.check_all_bite()
