@@ -382,12 +382,7 @@ async def crawl_request(
     host_policy = HostPolicy.from_settings(active_settings)
     # One batch cap -- the same gate the async endpoint uses before accepting, so
     # sync and async cannot drift; a forwarded batch skips re-derivation, not the cap.
-    urls = checked_payload_urls(
-        payload,
-        active_settings.max_batch_size,
-        urls=urls,
-        host_policy=host_policy,
-    )
+    urls = checked_payload_urls(payload, active_settings.max_batch_size, urls=urls, host_policy=host_policy)
     policy = payload_policy(payload, PolicyTier.from_settings(active_settings))
     fetcher = http_fetcher or default_http_fetcher
     # A binding of the one fetcher, not a second entry point: the impersonating
@@ -412,19 +407,27 @@ async def crawl_request(
             content_cache=content_cache,
             webhook_url=webhook_url,
             spill_path=spill_path,
-            dependencies=PipelineDependencies(
-                get_content_cache=get_shared_content_cache,
-                make_spill=ResultSpill,
-                compile_scope_regex_safe=compile_scope_pattern,
-                stale_seeds=stale_seeds,
-                fetch_and_decode=fetch_and_decode,
-                shared_http_cache=_SHARED_HTTP_CACHE,
-                resource_gate=resource_gate if resource_gate is not None else _resource_gate,
-            ),
+            dependencies=_pipeline_dependencies(fetch_and_decode, resource_gate),
         )
         return await run_crawl_request(state)
     finally:
         _reset_cookie_namespace(_cookie_token)
+
+
+def _pipeline_dependencies(
+    fetch_and_decode: FetchAndDecode | None,
+    resource_gate: ResourceGate | None,
+) -> PipelineDependencies:
+    """The process-wide dependencies a crawl binds: shared caches, spill, gate."""
+    return PipelineDependencies(
+        get_content_cache=get_shared_content_cache,
+        make_spill=ResultSpill,
+        compile_scope_regex_safe=compile_scope_pattern,
+        stale_seeds=stale_seeds,
+        fetch_and_decode=fetch_and_decode,
+        shared_http_cache=_SHARED_HTTP_CACHE,
+        resource_gate=resource_gate if resource_gate is not None else _resource_gate,
+    )
 
 
 def reset_process_state() -> None:
