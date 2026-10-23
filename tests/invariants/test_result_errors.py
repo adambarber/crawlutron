@@ -12,7 +12,7 @@ from tests.chokepoint_walks import (
     named_calls_to_any,
     offender_at,
 )
-from tests.rules import Bites, Rule, Trips
+from tests.rules import Bites, Registry, Rule, Trips
 
 # --------------------------------------------------------------------------- Error-envelope shape
 ENVELOPE_SANCTIONED = SANCTIONED | {"exceptions.py"}
@@ -74,16 +74,6 @@ _HAND_ROLLED_ERROR_ENVELOPES_FORBIDDEN = Rule(
 )
 
 
-def test_no_hand_rolled_error_envelopes():
-    """Every HTTP error body flows through error_envelope/http_error."""
-    _HAND_ROLLED_ERROR_ENVELOPES_FORBIDDEN.scan()
-
-
-def test_envelope_detector_bites():
-    """All three drift shapes fire; factory-shaped code stays clean."""
-    _HAND_ROLLED_ERROR_ENVELOPES_FORBIDDEN.check_bites()
-
-
 # --------------------------------------------------------------------------- Raw exception text never
 
 _TERMINAL_RESULT_SANCTIONED = frozenset({"results.py", "classification.py"})
@@ -140,11 +130,14 @@ NO_RAW_EXCEPTION_TEXT_IN_RESULT_ERROR_FIELD = Rule(
 )
 
 
-def test_no_raw_exception_text_in_result_error_field():
-    """The ``error`` field is a stable classification, never ``str(exc)``."""
-    NO_RAW_EXCEPTION_TEXT_IN_RESULT_ERROR_FIELD.scan()
+RULES = Registry((_HAND_ROLLED_ERROR_ENVELOPES_FORBIDDEN, NO_RAW_EXCEPTION_TEXT_IN_RESULT_ERROR_FIELD))
 
 
-def test_raw_exception_error_detector_bites():
-    """The leak shape fires on both sinks; the classified shape stays clean."""
-    NO_RAW_EXCEPTION_TEXT_IN_RESULT_ERROR_FIELD.check_bites()
+def test_no_rule_violations():
+    """Every HTTP error body flows through error_envelope/http_error."""
+    RULES.check_all_clean()
+
+
+def test_every_rule_bites():
+    """Every rule must reject what it forbids, and spare what it resembles."""
+    RULES.check_all_bite()
