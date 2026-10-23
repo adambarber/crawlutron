@@ -15,7 +15,7 @@ from tests.chokepoint_walks import (
     trees_under,
 )
 from tests.invariants.test_tree_immutability import _tests_tree
-from tests.rules import Bites, Rule, Silent
+from tests.rules import Bites, Registry, Rule, Silent
 
 # Measured on tests/invariants/ alone: 37.7s of a 49.4s file, led by
 # test_property_registry_fingerprints_are_observed 8.06s, test_documented_browser_knobs_have_consumers
@@ -161,20 +161,8 @@ PRIVATE_NAME_LEAKS_PACKAGE = Rule(
 )
 
 
-def test_a_private_name_does_not_leave_its_package():
-    """No app module reaches a private name in another package.
-
-    The load-bearing half of a genuinely private name -- the thing a reviewer
-    cannot check at a glance when reading an import."""
-    PRIVATE_NAME_LEAKS_PACKAGE.scan()
-
-
-def test_private_leak_detector_bites():
-    """Bites across the boundary; silent inside it, and silent on the rest.
-
-    The clean case pins all four ways the rule must not degenerate: sibling,
-    public cross-package name, dunder spelling, non-app imports."""
-    PRIVATE_NAME_LEAKS_PACKAGE.check_bites()
+# The one shared gate: each rule carries its own scope (app/ for the leak rule, tests/ for the
+# package-path rule), and Registry applies each rule's own trees.
 
 
 TEST_HELPERS_IMPORTED_BY_PACKAGE_PATH = Rule(
@@ -201,18 +189,20 @@ TEST_HELPERS_IMPORTED_BY_PACKAGE_PATH = Rule(
 )
 
 
-def test_tests_import_their_helpers_by_package_path():
-    """No test module reaches a sibling helper by bare name.
-
-    Tree-wide over ``tests/``, so a helper added tomorrow is covered by existing
-    the same way, and read from the tree rather than a file list.
-    """
-    TEST_HELPERS_IMPORTED_BY_PACKAGE_PATH.scan()
+RULES = Registry((PRIVATE_NAME_LEAKS_PACKAGE, TEST_HELPERS_IMPORTED_BY_PACKAGE_PATH))
 
 
-def test_bare_sibling_import_detector_bites():
-    """Bites: the shipped spellings, and the neighbors that must stay quiet -- the
-    clean case pins both directions so package, stdlib and third-party imports are
-    left alone and the rule cannot degenerate into banning all unqualified imports.
-    """
-    TEST_HELPERS_IMPORTED_BY_PACKAGE_PATH.check_bites()
+def test_no_rule_violations():
+    """No module reaches a private name across its package, or a sibling by bare name.
+
+    The load-bearing half of a genuinely private name -- the thing a reviewer
+    cannot check at a glance when reading an import."""
+    RULES.check_all_clean()
+
+
+def test_every_rule_bites():
+    """Bites across each boundary; silent inside it, and silent on the rest.
+
+    Each rule's clean case pins the ways it must not degenerate: sibling,
+    public and dunder spellings, and non-app, stdlib, third-party imports."""
+    RULES.check_all_bite()
