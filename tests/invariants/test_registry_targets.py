@@ -129,6 +129,9 @@ def test_public_target_detector_bites():
             "    return verdict(value)\n"
         ),
     )
+
+
+def test_public_target_detector_quiet_on_runtime_computed_name():
     runtime_name = ast.parse(
         "import ipaddress\n"
         "def attribute_name():\n"
