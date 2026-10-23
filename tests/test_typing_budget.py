@@ -25,9 +25,9 @@ from tests.chokepoint_walks import REPO_ROOT, nodes_of, trees_under
 _METRIC = "undeclared record"
 _ANY = "bare Any"
 
-# 143 -> 137 -> 134: #135/#136 declared the open-JSON, job-row and spill reads.
-# "bare Any" is #193's second accounting, a measured baseline, not sanctioned.
-_BUDGETS = {_METRIC: 134, _ANY: 161}
+# 143 -> 137 (#135/#136 open-JSON, job-row, spill reads); 134 -> 132 (#419):
+# field families and render outcomes are TypedDicts. "bare Any" is #193's baseline.
+_BUDGETS = {_METRIC: 132, _ANY: 161}
 
 #: The scripts/ tree, which #293 brings under this gate for the first time; its
 #: measured baseline is declared first (value-ratchet rule).

@@ -40,10 +40,10 @@ _BUDGETS = {
     # LOWERED 22 -> 21 (#160); 21 -> 20 (#330); 20 -> 19 (#136);
     # 19 -> 18 (#419): from_mapping split into seven field-family builders.
     "function length": 18,
-    "abc size": 1,
+    "abc size": 0,
     # LOWERED 358 -> 357 (#383): BrowserRenderer's render loop lost a declaration line.
-    # LOWERED 357 -> 355 (#136): the row walk moved to job_store_state's row_to_state.
-    "largest class": 355,
+    # LOWERED 357 -> 355 (#136); 355 -> 348 (#419): the render phases left browser.py.
+    "largest class": 348,
     "block length": 7,
 }
 

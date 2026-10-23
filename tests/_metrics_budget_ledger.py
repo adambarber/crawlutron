@@ -12,10 +12,10 @@ _BUDGET_HISTORY: dict[str, list[int]] = {
     #: 22 -> 21 (#160); 21 -> 20 (#330); 20 -> 19 (#136);
     #: 19 -> 18 (#419, from_mapping split into seven field-family builders).
     "function length": [22, 21, 20, 19, 18],
-    "abc size": [1],
-    #: 358 -> 357 (#383, BrowserRenderer's retry loop lost a declaration line);
-    #: 357 -> 355 (#136, the row-to-record walk moved to row_to_state).
-    "largest class": [358, 357, 355],
+    "abc size": [1, 0],
+    #: 358 -> 357 (#383); 357 -> 355 (#136);
+    #: 355 -> 348 (#419, the render phases left browser.py).
+    "largest class": [358, 357, 355, 348],
     #: 8 first declared; lowered to 7 when the document pool's acquisition split
     #: its growth logic out, and one oversized block left the tree.
     "block length": [8, 7],

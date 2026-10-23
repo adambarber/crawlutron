@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import base64
 import logging
 import os
 import time
@@ -23,12 +22,23 @@ from app.orchestration.classification import classify_error_code
 from app.transport.browser_cookies import (
     BROWSER_COOKIES_MAX,
     get_browser_cookies_for,
-    harvest_session_cookies,
     has_process_state,
     reset_process_state,
     store_browser_cookies,
 )
 from app.transport.browser_driver import BrowserDriver, async_sleep
+from app.transport.browser_render_phases import (
+    ReleasePlan,
+    RenderPage,
+    WireGuard,
+    attach_screenshots,
+    extract_with_pdf_fallback,
+    navigate_with_host_override,
+    release_page,
+    run_pre_extraction_chain,
+    warmup_pages,
+    wire_ssrf_guards,
+)
 from app.transport.browser_targets import (
     make_response_handler,
     make_ssrf_route_handler,
@@ -57,6 +67,7 @@ __all__ = [
 ]
 from app.transport.document import default_document_text_extractor
 from app.transport.pinned_transport import build_pinned_request, build_pinned_request_async
+from app.vocabulary.browser import BrowserAction
 from app.vocabulary.limits import DEFAULT_CHALLENGE_WAIT_SECONDS, DEFAULT_MAX_CONCURRENT_PAGES
 from app.vocabulary.taxonomy import ResultStatus, status_for_classification
 
@@ -245,121 +256,73 @@ class BrowserRenderer:
         # The guarded body starts here, not after route wiring: an early raise
         # still recycles via the finally's note_render (#223).
         try:
-            # Abort any request (navigation, redirect, or subresource) that
-            # resolves to an SSRF-unsafe host before the browser connects.
-            await page.route(
-                "**/*",
-                make_ssrf_route_handler(
-                    (options.browser_profile or {}).get("resource_mode"),
-                    include_screenshot=bool((options.browser_profile or {}).get("include_screenshot")),
-                    policy=policy,
-                    pin=self._pin_sync,
-                    timeout_seconds=options.timeout_seconds,
-                ),
+            intercepted_xhr: list[dict[str, object]] = []
+            wire = WireGuard(pin_sync=self._pin_sync, policy=policy, timeout_seconds=options.timeout_seconds)
+            await wire_ssrf_guards(
+                page, wire=wire, profile=options.browser_profile, on_response=intercepted_xhr
             )
-            ws_guard = make_ssrf_websocket_handler(policy=policy, timeout_seconds=options.timeout_seconds)
-            ws_router = getattr(page, "route_web_socket", None)
-            if ws_router is None:
-                logger.warning("websocket_interception_unsupported")
-            else:
-                # route_web_socket is async in Playwright 1.62+ (verified from the
-                # installed source); accept both sync and async for doubles.
-                outcome = ws_router("**/*", ws_guard)
-                if asyncio.iscoroutine(outcome):
-                    await outcome
-            # Katana-style XHR/fetch interception.
-            intercepted_xhr: list[dict[str, Any]] = []
-            page.on("response", make_response_handler(intercepted_xhr))
-
-            # Warmup URLs (no Host header needed). The driver's goto takes
-            # text -- .raw projects at that external-API edge.
-            for warmup_url in self._warmup_urls:
-                normalized_warmup = NormalizedUrl(warmup_url, policy=policy)
-                await page.goto(normalized_warmup.raw, wait_until="domcontentloaded")
-                await self._driver.wait_for_ready_state(page)
-
-            # Navigate with the Host override via set_extra_http_headers (goto takes no
-            # headers); wait_for honors the timeout, floored at 1s, mapping to navigation_timeout.
-            navigation_timeout = max(1.0, float(options.timeout_seconds))
-            if goto_headers:
-                await page.set_extra_http_headers(goto_headers)
-            await asyncio.wait_for(
-                self._navigate_and_settle(page, pinned_url),
-                timeout=navigation_timeout,
+            await warmup_pages(
+                page,
+                wait_for_ready=self._driver.wait_for_ready_state,
+                warmup_urls=self._warmup_urls,
+                policy=policy,
             )
-            if goto_headers:
-                # Clear the page-scoped Host override: leaving it would spoof Host
-                # on every later request from this page (XHR, later navigations).
-                await page.set_extra_http_headers({})
-
-            # Browser action chains: run policy-specified interactions before extraction.
-            actions = (options.browser_profile or {}).get("actions") or []
-            if actions:
-                await self._driver.run_action_chain(
-                    page, actions, url=url.raw, budget_seconds=navigation_timeout
-                )
-
-            # Lazy-load scroll: trigger deferred/infinite-scroll content.
-            await self._driver.lazy_load_scroll(page, options.browser_profile)
-
-            # Shadow-DOM flattening: inline open shadow roots so their links
-            # and visible text are reachable by the standard HTML/text extractors.
-            await self._driver.flatten_shadow_dom(page)
-
-            # Auto-accept cookie consent (opt-in only) before extraction
-            await self._driver.auto_accept_cookie_consent(
-                page, bool((options.browser_profile or {}).get("auto_accept_cookie_consent"))
+            await navigate_with_host_override(
+                page,
+                goto_and_settle=lambda pinned: self._navigate_and_settle(page, pinned),
+                pinned_url=pinned_url,
+                goto_headers=goto_headers,
+                timeout_seconds=options.timeout_seconds,
+            )
+            await run_pre_extraction_chain(
+                page,
+                run_actions=self._run_actions,
+                lazy_scroll=self._driver.lazy_load_scroll,
+                flatten_shadow_dom=self._driver.flatten_shadow_dom,
+                accept_cookies=self._driver.auto_accept_cookie_consent,
+                profile=options.browser_profile,
+                url=url.raw,
+                budget_seconds=max(1.0, float(options.timeout_seconds)),
             )
 
-            # Extract with challenge waiting
             html, text, classification, challenge_resolved = await self._extract(page, options)
-
-            extraction_method = "dom_text"
-            final_url = NormalizedUrl(page.url, policy=policy)
-            # Re-validate the post-navigation URL: the site may have redirected to an internal
-            # host. Fail closed (already admitted as a NormalizedUrl above).
-            if self._looks_like(final_url.raw) and not (text or "").strip():
-                # Blocking file read + parse: keep it off the event loop like every
-                # other document-extraction path.
-                text = await asyncio.to_thread(self._pdf_text_extractor, final_url)
-                html = html if options.include_html else None
-                title = await page.evaluate("() => document.title")
-                classification = classify_page(html, text, title=title)
-                extraction_method = "pdf_text"
-
-            status = self._status_for(classification)
-
-            metadata: dict[str, Any] = {
+            outcome = await extract_with_pdf_fallback(
+                page,
+                html=html,
+                text=text,
+                classification=classification,
+                options=options,
+                looks_like=self._looks_like,
+                pdf_extractor=self._pdf_text_extractor,
+                policy=policy,
+            )
+            status = self._status_for(outcome.classification)
+            metadata: dict[str, object] = {
                 "title": await page.evaluate("() => document.title"),
-                "content_length": len(html or ""),
+                "content_length": len(outcome.html or ""),
                 "browser_reused": self._driver.reused,
                 "challenge_resolved": challenge_resolved,
-                "extraction_method": extraction_method,
+                "extraction_method": outcome.method,
                 "intercepted_xhr": intercepted_xhr,
             }
-
-            # Screenshots: optional full-page, plus targeted element screenshots by CSS selector.
-            if options.browser_profile.get("include_screenshot"):
-                screenshot_bytes = await page.screenshot(full_page=True)
-                metadata["screenshot"] = base64.b64encode(screenshot_bytes).decode("ascii")
-            element_shots = (options.browser_profile or {}).get("screenshot_selectors") or []
-            if element_shots:
-                metadata["element_screenshots"] = await self._driver.capture_element_screenshots(
-                    page, element_shots
-                )
-
+            await attach_screenshots(
+                page,
+                metadata,
+                capture_element_shots=self._driver.capture_element_screenshots,
+                profile=options.browser_profile,
+            )
             return CrawlResult(
                 url=url,
                 attempt=terminal_attempt(
                     strategy=None,
                     status=status,
-                    classification=classification,
+                    classification=outcome.classification,
                     elapsed_ms=int((time.monotonic() - started) * 1000),
                     error=None,
                 ),
-                final_url=final_url,
-                html=html,
-                text=text,
+                final_url=NormalizedUrl(page.url, policy=policy),
+                html=outcome.html,
+                text=outcome.text,
                 attempts=1,
                 domain=url.site,
                 metadata=metadata,
@@ -367,17 +330,18 @@ class BrowserRenderer:
         finally:
             # Always release the page between crawls (the Camoufox memory-growth
             # root); a wedged context.cookies() falls back cookieless after a bounded wait.
-            try:
-                await asyncio.wait_for(
-                    harvest_session_cookies(page, url),
-                    timeout=self._driver.harvest_timeout_for(options.browser_profile or {}),
-                )
-            except TimeoutError:
-                pass
-            await self._driver.safe_close_page(page)
-            # Increment render count for ALL attempts (success or failure) so
-            # browser recycle logic bounds total attempts per browser instance.
-            self._driver.note_render()
+            await release_page(
+                ReleasePlan(page=page, url=url, profile=options.browser_profile or {}),
+                harvest_timeout=self._driver.harvest_timeout_for(options.browser_profile or {}),
+                close_page=self._driver.safe_close_page,
+                note_render=self._driver.note_render,
+            )
+
+    def _run_actions(
+        self, page: RenderPage, actions: list[BrowserAction], url: str, budget_seconds: float
+    ) -> Awaitable[None]:
+        """The policy-specified interaction chain, under its time budget."""
+        return self._driver.run_action_chain(page, actions, url=url, budget_seconds=budget_seconds)
 
     async def extract_with_challenge_wait(
         self, page: Any, options: RenderOptions
