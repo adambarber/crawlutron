@@ -9,8 +9,9 @@ from __future__ import annotations
 from typing import Any
 
 from app.api.response_shaping import frontier_link_url
+from app.models.crawl_result import EngineCrawlResult
 from app.models.host_policy import HostPolicy
-from app.models.normalized_url import admit_or_none
+from app.models.normalized_url import NormalizedUrl, admit_or_none
 from app.models.result_record import ProducerEnvelope
 from app.models.site_map_response import SiteMapPayload
 
@@ -40,31 +41,10 @@ def build_site_map(crawl_response: ProducerEnvelope, *, host_policy: HostPolicy)
         normalized = root.resolve(u) if root is not None else admit_or_none(u, policy=host_policy)
         return normalized.raw if normalized is not None else None
 
-    links: list[str] = []
-    for link in result.discovered_links if result is not None else ():
-        link_url = frontier_link_url(
-            link,
-            policy=host_policy,
-            resolve_against=root,
-        )
-        if link_url is not None:
-            links.append(link_url.raw)
-
-    sitemaps: list[str] = []
-    sitemap_urls: list[str] = []
-    feeds: list[str] = []
-    for u in robots.get("sitemaps", []) or []:
-        n = _normalize(u)
-        if n:
-            sitemaps.append(n)
-    for u in discovery.get("sitemap_urls", []) or []:
-        n = _normalize(u)
-        if n:
-            sitemap_urls.append(n)
-    for u in discovery.get("feeds", []) or []:
-        n = _normalize(u)
-        if n:
-            feeds.append(n)
+    links = _discovered_link_roots(result, root=root, host_policy=host_policy)
+    sitemaps = [n for u in robots.get("sitemaps", []) or [] if (n := _normalize(u))]
+    sitemap_urls = [n for u in discovery.get("sitemap_urls", []) or [] if (n := _normalize(u))]
+    feeds = [n for u in discovery.get("feeds", []) or [] if (n := _normalize(u))]
 
     all_urls: list[str] = []
     seen: set[str] = set()
@@ -80,3 +60,19 @@ def build_site_map(crawl_response: ProducerEnvelope, *, host_policy: HostPolicy)
         "feeds": sorted(set(feeds)),
         "all_urls": all_urls,
     }
+
+
+def _discovered_link_roots(
+    result: EngineCrawlResult | None, *, root: NormalizedUrl | None, host_policy: HostPolicy
+) -> list[str]:
+    """The discovered links, resolved against the crawl's own root."""
+    links: list[str] = []
+    for link in result.discovered_links if result is not None else ():
+        link_url = frontier_link_url(
+            link,
+            policy=host_policy,
+            resolve_against=root,
+        )
+        if link_url is not None:
+            links.append(link_url.raw)
+    return links
