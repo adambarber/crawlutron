@@ -15,6 +15,40 @@ INVARIANTS_ROOT = REPO_ROOT / "tests" / "invariants"
 
 DETECTOR_SUFFIX = "_offenders"
 
+#: One Rule-backed detector wired directly, one through a lambda, one
+#: hand-rolled detector, and one non-detector -- planted verbatim.
+_RULE_BACKED_PLANT = (
+    "from tests.rules import Rule\n"
+    "\n"
+    "\n"
+    "def _direct_wired_offenders(tree, path):\n"
+    "    return []\n"
+    "\n"
+    "\n"
+    'DIRECT = Rule(name="direct", find=_direct_wired_offenders)\n'
+    "\n"
+    "\n"
+    "def _lambda_wired_offenders(tree, path, extra=None):\n"
+    "    return []\n"
+    "\n"
+    "\n"
+    "LAMBDA = Rule(\n"
+    '    name="lambda", find=lambda tree, path: _lambda_wired_offenders(tree, path, extra=1)\n'
+    ")\n"
+    "\n"
+    "\n"
+    "def _hand_rolled_offenders(tree, path):\n"
+    "    return []\n"
+    "\n"
+    "\n"
+    "def _documented_knob_offenders(documented, references):\n"
+    "    return [name for name in sorted(documented - references)]\n"
+    "\n"
+    "\n"
+    "def test_something():\n"
+    "    pass\n"
+)
+
 
 @dataclass(frozen=True)
 class DetectorEntry:
@@ -229,38 +263,7 @@ def test_a_rule_backed_detector_counts_as_declared_and_a_hand_rolled_one_does_no
     aliased, lambda -- so the count measures the migration, not its spelling."""
     root = tmp_path / "invariants"
     root.mkdir()
-    (root / "test_planted.py").write_text(
-        "from tests.rules import Rule\n"
-        "\n"
-        "\n"
-        "def _direct_wired_offenders(tree, path):\n"
-        "    return []\n"
-        "\n"
-        "\n"
-        'DIRECT = Rule(name="direct", find=_direct_wired_offenders)\n'
-        "\n"
-        "\n"
-        "def _lambda_wired_offenders(tree, path, extra=None):\n"
-        "    return []\n"
-        "\n"
-        "\n"
-        "LAMBDA = Rule(\n"
-        '    name="lambda", find=lambda tree, path: _lambda_wired_offenders(tree, path, extra=1)\n'
-        ")\n"
-        "\n"
-        "\n"
-        "def _hand_rolled_offenders(tree, path):\n"
-        "    return []\n"
-        "\n"
-        "\n"
-        "def _documented_knob_offenders(documented, references):\n"
-        "    return [name for name in sorted(documented - references)]\n"
-        "\n"
-        "\n"
-        "def test_something():\n"
-        "    pass\n",
-        encoding="utf-8",
-    )
+    (root / "test_planted.py").write_text(_RULE_BACKED_PLANT, encoding="utf-8")
     result = audit(root)
     assert len(result.detectors) == 3, f"expected all three planted detectors, got {result.detectors}"
     assert len(result.declared) == 2, (
