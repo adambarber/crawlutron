@@ -9,9 +9,9 @@ from __future__ import annotations
 #: Oldest-first history per ``_BUDGETS`` metric (app/). The first entry is the
 #: value at first declaration; a later entry is a lowering, never a raise.
 _BUDGET_HISTORY: dict[str, list[int]] = {
-    #: 22 -> 21 (#160, result constructors left results.py); 21 -> 20 (#330, the
-    #: five-branch chain became one table); 20 -> 19 (#136, declared row record).
-    "function length": [22, 21, 20, 19],
+    #: 22 -> 21 (#160); 21 -> 20 (#330); 20 -> 19 (#136);
+    #: 19 -> 18 (#419, from_mapping split into seven field-family builders).
+    "function length": [22, 21, 20, 19, 18],
     "abc size": [1],
     #: 358 -> 357 (#383, BrowserRenderer's retry loop lost a declaration line);
     #: 357 -> 355 (#136, the row-to-record walk moved to row_to_state).

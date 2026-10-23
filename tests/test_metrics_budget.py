@@ -37,9 +37,9 @@ BLOCK_LENGTH = 40
 # What the tree is currently allowed to hold: offender counts for three metrics, and the size of the worst
 # class for the fourth.
 _BUDGETS = {
-    # LOWERED 22 -> 21 (#160): result constructors left app/orchestration/results.py.
-    # LOWERED 21 -> 20 (#330); 20 -> 19 (#136): from_json reads the declared row record.
-    "function length": 19,
+    # LOWERED 22 -> 21 (#160); 21 -> 20 (#330); 20 -> 19 (#136);
+    # 19 -> 18 (#419): from_mapping split into seven field-family builders.
+    "function length": 18,
     "abc size": 1,
     # LOWERED 358 -> 357 (#383): BrowserRenderer's render loop lost a declaration line.
     # LOWERED 357 -> 355 (#136): the row walk moved to job_store_state's row_to_state.

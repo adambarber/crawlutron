@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 from collections.abc import Mapping
 from dataclasses import dataclass, field
+from typing import TypedDict
 
 from app.config.env import get_mapping_float, get_mapping_int, in_range, parse_bool_value
 from app.runtime.memory_pressure import read_memory_stats
@@ -129,155 +130,283 @@ class CrawlerSettings:
         """
         source = os.environ if values is None else values
         return cls(
-            host=source.get("CRAWLUTRON_HOST", cls.host),
-            global_concurrency=get_mapping_int(
-                source, "CRAWLUTRON_GLOBAL_CONCURRENCY", cls.global_concurrency
-            ),
-            per_domain_concurrency=get_mapping_int(
-                source, "CRAWLUTRON_PER_DOMAIN_CONCURRENCY", cls.per_domain_concurrency
-            ),
-            per_domain_delay_ms=get_mapping_int(
-                source, "CRAWLUTRON_PER_DOMAIN_DELAY_MS", cls.per_domain_delay_ms
-            ),
-            max_batch_size=get_mapping_int(source, "CRAWLUTRON_MAX_BATCH_SIZE", cls.max_batch_size),
-            default_timeout_seconds=get_mapping_int(
-                source,
-                "CRAWLUTRON_DEFAULT_TIMEOUT_SECONDS",
-                cls.default_timeout_seconds,
-                # Bounded by the same declaration the policy is validated against,
-                # so out-of-range is rejected loudly, never silently clamped.
-                lo=1,
-                hi=MAX_HTTP_TIMEOUT_SECONDS,
-                validate=in_range(1, MAX_HTTP_TIMEOUT_SECONDS),
-                validate_event="operator_timeout_out_of_range",
-            ),
-            default_max_retries=get_mapping_int(
-                source,
-                "CRAWLUTRON_DEFAULT_MAX_RETRIES",
-                cls.default_max_retries,
-                # The deployment ceiling, not the per-job one: capped at
-                # MAX_RETRIES, so an operator asking for more is told so.
-                lo=0,
-                hi=MAX_RETRIES,
-                validate=in_range(0, MAX_RETRIES),
-                validate_event="operator_max_retries_out_of_range",
-            ),
-            respect_robots=parse_bool_value(
-                source.get("CRAWLUTRON_RESPECT_ROBOTS"),
-                cls.respect_robots,
-                env_name="CRAWLUTRON_RESPECT_ROBOTS",
-            ),
-            allowed_hosts=source.get("CRAWLUTRON_ALLOWED_HOSTS", cls.allowed_hosts),
-            denied_hosts=source.get("CRAWLUTRON_DENIED_HOSTS", cls.denied_hosts),
-            log_level=source.get("CRAWLUTRON_LOG_LEVEL", cls.log_level),
-            log_file_path=source.get(ENVIRONMENT_FIELD_ALIASES["log_file_path"], cls.log_file_path),
-            log_file_max_bytes=get_mapping_int(
-                source,
-                ENVIRONMENT_FIELD_ALIASES["log_file_max_bytes"],
-                cls.log_file_max_bytes,
-            ),
-            log_file_backup_count=get_mapping_int(
-                source,
-                ENVIRONMENT_FIELD_ALIASES["log_file_backup_count"],
-                cls.log_file_backup_count,
-            ),
-            cache_dir=source.get("CRAWLUTRON_CACHE_DIR", cls.cache_dir),
-            cache_ttl_seconds=get_mapping_int(
-                source,
-                "CRAWLUTRON_CACHE_TTL_SECONDS",
-                cls.cache_ttl_seconds,
-                lo=0,
-                hi=86_400,
-            ),
-            content_cache_enabled=parse_bool_value(
-                source.get("CRAWLUTRON_CONTENT_CACHE_ENABLED"),
-                cls.content_cache_enabled,
-                env_name="CRAWLUTRON_CONTENT_CACHE_ENABLED",
-            ),
-            adaptive_throttling=parse_bool_value(
-                source.get("CRAWLUTRON_ADAPTIVE_THROTTLING"),
-                cls.adaptive_throttling,
-                env_name="CRAWLUTRON_ADAPTIVE_THROTTLING",
-            ),
-            adaptive_min_delay=get_mapping_float(
-                source, "CRAWLUTRON_ADAPTIVE_MIN_DELAY", cls.adaptive_min_delay
-            ),
-            adaptive_max_delay=get_mapping_float(
-                source, "CRAWLUTRON_ADAPTIVE_MAX_DELAY", cls.adaptive_max_delay
-            ),
-            adaptive_latency_factor=get_mapping_float(
-                source, "CRAWLUTRON_ADAPTIVE_LATENCY_FACTOR", cls.adaptive_latency_factor
-            ),
-            cookie_persistence_enabled=parse_bool_value(
-                source.get("CRAWLUTRON_COOKIE_PERSISTENCE_ENABLED"),
-                cls.cookie_persistence_enabled,
-                env_name="CRAWLUTRON_COOKIE_PERSISTENCE_ENABLED",
-            ),
-            cookie_jar_path=source.get("CRAWLUTRON_COOKIE_JAR_PATH", cls.cookie_jar_path),
-            http_max_connections=get_mapping_int(
-                source, "CRAWLUTRON_HTTP_MAX_CONNECTIONS", default_http_max_connections()
-            ),
-            http_max_keepalive=get_mapping_int(
-                source, "CRAWLUTRON_HTTP_MAX_KEEPALIVE", default_http_keepalive()
-            ),
-            http_keepalive_expiry=get_mapping_float(
-                source, "CRAWLUTRON_HTTP_KEEPALIVE_EXPIRY", cls.http_keepalive_expiry
-            ),
-            max_browser_renders=get_mapping_int(
-                source, "CRAWLUTRON_MAX_BROWSER_RENDERS", cls.max_browser_renders
-            ),
-            max_concurrent_pages=get_mapping_int(
-                source, "CRAWLUTRON_MAX_CONCURRENT_PAGES", cls.max_concurrent_pages
-            ),
-            challenge_wait_seconds=get_mapping_int(
-                source, "CRAWLUTRON_CHALLENGE_WAIT_SECONDS", cls.challenge_wait_seconds
-            ),
-            browser_lazy_scroll_steps=get_mapping_int(
-                source,
-                ENVIRONMENT_FIELD_ALIASES["browser_lazy_scroll_steps"],
-                cls.browser_lazy_scroll_steps,
-                lo=0,
-            ),
-            browser_lazy_scroll_delay_seconds=get_mapping_float(
-                source,
-                ENVIRONMENT_FIELD_ALIASES["browser_lazy_scroll_delay_seconds"],
-                cls.browser_lazy_scroll_delay_seconds,
-                lo=0.0,
-            ),
-            browser_cookie_harvest_timeout_seconds=get_mapping_float(
-                source,
-                ENVIRONMENT_FIELD_ALIASES["browser_cookie_harvest_timeout_seconds"],
-                cls.browser_cookie_harvest_timeout_seconds,
-                lo=0.0,
-            ),
-            extraction_doc_timeout=get_mapping_float(
-                source, "CRAWLUTRON_EXTRACTION_DOC_TIMEOUT", cls.extraction_doc_timeout, lo=0.0
-            ),
-            extraction_selector_timeout=get_mapping_float(
-                source, "CRAWLUTRON_EXTRACTION_SELECTOR_TIMEOUT", cls.extraction_selector_timeout, lo=0.0
-            ),
-            extraction_doc_acquire_timeout=get_mapping_float(
-                source,
-                "CRAWLUTRON_EXTRACTION_DOC_ACQUIRE_TIMEOUT",
-                cls.extraction_doc_acquire_timeout,
-                lo=0.0,
-            ),
-            extraction_max_markdown=get_mapping_int(
-                source, "CRAWLUTRON_EXTRACTION_MAX_MARKDOWN", cls.extraction_max_markdown, lo=1
-            ),
-            search_provider=source.get("CRAWLUTRON_SEARCH_PROVIDER", cls.search_provider),
-            tavily_api_key=source.get("CRAWLUTRON_TAVILY_API_KEY", cls.tavily_api_key),
-            brave_api_key=source.get("CRAWLUTRON_BRAVE_API_KEY", cls.brave_api_key),
-            serper_api_key=source.get("CRAWLUTRON_SERPER_API_KEY", cls.serper_api_key),
-            search_limit_default=get_mapping_int(
-                source, "CRAWLUTRON_SEARCH_LIMIT_DEFAULT", cls.search_limit_default
-            ),
-            search_limit_max=get_mapping_int(source, "CRAWLUTRON_SEARCH_LIMIT_MAX", cls.search_limit_max),
-            search_timeout_seconds=get_mapping_int(
-                source, "CRAWLUTRON_SEARCH_TIMEOUT_SECONDS", cls.search_timeout_seconds
-            ),
-            key_admin_token=source.get("CRAWLUTRON_KEY_ADMIN_TOKEN", cls.key_admin_token),
-            max_watches_per_caller=get_mapping_int(
-                source, "CRAWLUTRON_MAX_WATCHES_PER_CALLER", cls.max_watches_per_caller, lo=1
-            ),
+            **_core_fields(cls, source),
+            **_policy_fields(cls, source),
+            **_persistence_fields(cls, source),
+            **_transport_fields(cls, source),
+            **_browser_fields(cls, source),
+            **_extraction_fields(cls, source),
+            **_search_fields(cls, source),
         )
+
+
+class _CoreFields(TypedDict):
+    """The keys `_core_fields` reads; the constructor consumes them by name."""
+
+    host: str
+    global_concurrency: int
+    per_domain_concurrency: int
+    per_domain_delay_ms: int
+    max_batch_size: int
+    default_timeout_seconds: int
+    default_max_retries: int
+
+
+class _PolicyFields(TypedDict):
+    """The keys `_policy_fields` reads: robots, hosts, and the log sink."""
+
+    respect_robots: bool
+    allowed_hosts: str
+    denied_hosts: str
+    log_level: str
+    log_file_path: str
+    log_file_max_bytes: int
+    log_file_backup_count: int
+
+
+class _PersistenceFields(TypedDict):
+    """The keys `_persistence_fields` reads: caches and adaptive throttling."""
+
+    cache_dir: str
+    cache_ttl_seconds: int
+    content_cache_enabled: bool
+    adaptive_throttling: bool
+    adaptive_min_delay: float
+    adaptive_max_delay: float
+    adaptive_latency_factor: float
+    cookie_persistence_enabled: bool
+    cookie_jar_path: str
+
+
+class _TransportFields(TypedDict):
+    """The keys `_transport_fields` reads: the HTTP connection pool."""
+
+    http_max_connections: int
+    http_max_keepalive: int
+    http_keepalive_expiry: float
+
+
+class _BrowserFields(TypedDict):
+    """The keys `_browser_fields` reads: render caps and fixed overheads."""
+
+    max_browser_renders: int
+    max_concurrent_pages: int
+    challenge_wait_seconds: int
+    browser_lazy_scroll_steps: int
+    browser_lazy_scroll_delay_seconds: float
+    browser_cookie_harvest_timeout_seconds: float
+
+
+class _ExtractionFields(TypedDict):
+    """The keys `_extraction_fields` reads: extraction deadlines and caps."""
+
+    extraction_doc_timeout: float
+    extraction_selector_timeout: float
+    extraction_doc_acquire_timeout: float
+    extraction_max_markdown: int
+
+
+class _SearchFields(TypedDict):
+    """The keys `_search_fields` reads: search providers and key admin."""
+
+    search_provider: str
+    tavily_api_key: str
+    brave_api_key: str
+    serper_api_key: str
+    search_limit_default: int
+    search_limit_max: int
+    search_timeout_seconds: int
+    key_admin_token: str
+    max_watches_per_caller: int
+
+
+def _core_fields(cls: type[CrawlerSettings], source: Mapping[str, str]) -> _CoreFields:
+    """Host, global/per-domain concurrency, batch size, timeout and retry ceilings."""
+    return {
+        "host": source.get("CRAWLUTRON_HOST", cls.host),
+        "global_concurrency": get_mapping_int(
+            source, "CRAWLUTRON_GLOBAL_CONCURRENCY", cls.global_concurrency
+        ),
+        "per_domain_concurrency": get_mapping_int(
+            source, "CRAWLUTRON_PER_DOMAIN_CONCURRENCY", cls.per_domain_concurrency
+        ),
+        "per_domain_delay_ms": get_mapping_int(
+            source, "CRAWLUTRON_PER_DOMAIN_DELAY_MS", cls.per_domain_delay_ms
+        ),
+        "max_batch_size": get_mapping_int(source, "CRAWLUTRON_MAX_BATCH_SIZE", cls.max_batch_size),
+        "default_timeout_seconds": get_mapping_int(
+            source,
+            "CRAWLUTRON_DEFAULT_TIMEOUT_SECONDS",
+            cls.default_timeout_seconds,
+            # Bounded by the same declaration the policy is validated against,
+            # so out-of-range is rejected loudly, never silently clamped.
+            lo=1,
+            hi=MAX_HTTP_TIMEOUT_SECONDS,
+            validate=in_range(1, MAX_HTTP_TIMEOUT_SECONDS),
+            validate_event="operator_timeout_out_of_range",
+        ),
+        "default_max_retries": get_mapping_int(
+            source,
+            "CRAWLUTRON_DEFAULT_MAX_RETRIES",
+            cls.default_max_retries,
+            # The deployment ceiling, not the per-job one: capped at
+            # MAX_RETRIES, so an operator asking for more is told so.
+            lo=0,
+            hi=MAX_RETRIES,
+            validate=in_range(0, MAX_RETRIES),
+            validate_event="operator_max_retries_out_of_range",
+        ),
+    }
+
+
+def _policy_fields(cls: type[CrawlerSettings], source: Mapping[str, str]) -> _PolicyFields:
+    """Robots, host allow/deny lists, and the log sink's level and rotation."""
+    return {
+        "respect_robots": parse_bool_value(
+            source.get("CRAWLUTRON_RESPECT_ROBOTS"),
+            cls.respect_robots,
+            env_name="CRAWLUTRON_RESPECT_ROBOTS",
+        ),
+        "allowed_hosts": source.get("CRAWLUTRON_ALLOWED_HOSTS", cls.allowed_hosts),
+        "denied_hosts": source.get("CRAWLUTRON_DENIED_HOSTS", cls.denied_hosts),
+        "log_level": source.get("CRAWLUTRON_LOG_LEVEL", cls.log_level),
+        "log_file_path": source.get(ENVIRONMENT_FIELD_ALIASES["log_file_path"], cls.log_file_path),
+        "log_file_max_bytes": get_mapping_int(
+            source, ENVIRONMENT_FIELD_ALIASES["log_file_max_bytes"], cls.log_file_max_bytes
+        ),
+        "log_file_backup_count": get_mapping_int(
+            source, ENVIRONMENT_FIELD_ALIASES["log_file_backup_count"], cls.log_file_backup_count
+        ),
+    }
+
+
+def _persistence_fields(cls: type[CrawlerSettings], source: Mapping[str, str]) -> _PersistenceFields:
+    """Disk caches, cookie persistence, and the adaptive-throttling triple."""
+    return {
+        "cache_dir": source.get("CRAWLUTRON_CACHE_DIR", cls.cache_dir),
+        "cache_ttl_seconds": get_mapping_int(
+            source,
+            "CRAWLUTRON_CACHE_TTL_SECONDS",
+            cls.cache_ttl_seconds,
+            lo=0,
+            hi=86_400,
+        ),
+        "content_cache_enabled": parse_bool_value(
+            source.get("CRAWLUTRON_CONTENT_CACHE_ENABLED"),
+            cls.content_cache_enabled,
+            env_name="CRAWLUTRON_CONTENT_CACHE_ENABLED",
+        ),
+        "adaptive_throttling": parse_bool_value(
+            source.get("CRAWLUTRON_ADAPTIVE_THROTTLING"),
+            cls.adaptive_throttling,
+            env_name="CRAWLUTRON_ADAPTIVE_THROTTLING",
+        ),
+        "adaptive_min_delay": get_mapping_float(
+            source, "CRAWLUTRON_ADAPTIVE_MIN_DELAY", cls.adaptive_min_delay
+        ),
+        "adaptive_max_delay": get_mapping_float(
+            source, "CRAWLUTRON_ADAPTIVE_MAX_DELAY", cls.adaptive_max_delay
+        ),
+        "adaptive_latency_factor": get_mapping_float(
+            source, "CRAWLUTRON_ADAPTIVE_LATENCY_FACTOR", cls.adaptive_latency_factor
+        ),
+        "cookie_persistence_enabled": parse_bool_value(
+            source.get("CRAWLUTRON_COOKIE_PERSISTENCE_ENABLED"),
+            cls.cookie_persistence_enabled,
+            env_name="CRAWLUTRON_COOKIE_PERSISTENCE_ENABLED",
+        ),
+        "cookie_jar_path": source.get("CRAWLUTRON_COOKIE_JAR_PATH", cls.cookie_jar_path),
+    }
+
+
+def _transport_fields(cls: type[CrawlerSettings], source: Mapping[str, str]) -> _TransportFields:
+    """HTTP connection-pool sizing and keepalive expiry."""
+    return {
+        "http_max_connections": get_mapping_int(
+            source, "CRAWLUTRON_HTTP_MAX_CONNECTIONS", default_http_max_connections()
+        ),
+        "http_max_keepalive": get_mapping_int(
+            source, "CRAWLUTRON_HTTP_MAX_KEEPALIVE", default_http_keepalive()
+        ),
+        "http_keepalive_expiry": get_mapping_float(
+            source, "CRAWLUTRON_HTTP_KEEPALIVE_EXPIRY", cls.http_keepalive_expiry
+        ),
+    }
+
+
+def _browser_fields(cls: type[CrawlerSettings], source: Mapping[str, str]) -> _BrowserFields:
+    """Browser render caps, challenge wait, and the fixed-overhead render knobs."""
+    return {
+        "max_browser_renders": get_mapping_int(
+            source, "CRAWLUTRON_MAX_BROWSER_RENDERS", cls.max_browser_renders
+        ),
+        "max_concurrent_pages": get_mapping_int(
+            source, "CRAWLUTRON_MAX_CONCURRENT_PAGES", cls.max_concurrent_pages
+        ),
+        "challenge_wait_seconds": get_mapping_int(
+            source, "CRAWLUTRON_CHALLENGE_WAIT_SECONDS", cls.challenge_wait_seconds
+        ),
+        "browser_lazy_scroll_steps": get_mapping_int(
+            source,
+            ENVIRONMENT_FIELD_ALIASES["browser_lazy_scroll_steps"],
+            cls.browser_lazy_scroll_steps,
+            lo=0,
+        ),
+        "browser_lazy_scroll_delay_seconds": get_mapping_float(
+            source,
+            ENVIRONMENT_FIELD_ALIASES["browser_lazy_scroll_delay_seconds"],
+            cls.browser_lazy_scroll_delay_seconds,
+            lo=0.0,
+        ),
+        "browser_cookie_harvest_timeout_seconds": get_mapping_float(
+            source,
+            ENVIRONMENT_FIELD_ALIASES["browser_cookie_harvest_timeout_seconds"],
+            cls.browser_cookie_harvest_timeout_seconds,
+            lo=0.0,
+        ),
+    }
+
+
+def _extraction_fields(cls: type[CrawlerSettings], source: Mapping[str, str]) -> _ExtractionFields:
+    """Extraction deadlines and the markdown size cap."""
+    return {
+        "extraction_doc_timeout": get_mapping_float(
+            source, "CRAWLUTRON_EXTRACTION_DOC_TIMEOUT", cls.extraction_doc_timeout, lo=0.0
+        ),
+        "extraction_selector_timeout": get_mapping_float(
+            source,
+            "CRAWLUTRON_EXTRACTION_SELECTOR_TIMEOUT",
+            cls.extraction_selector_timeout,
+            lo=0.0,
+        ),
+        "extraction_doc_acquire_timeout": get_mapping_float(
+            source,
+            "CRAWLUTRON_EXTRACTION_DOC_ACQUIRE_TIMEOUT",
+            cls.extraction_doc_acquire_timeout,
+            lo=0.0,
+        ),
+        "extraction_max_markdown": get_mapping_int(
+            source, "CRAWLUTRON_EXTRACTION_MAX_MARKDOWN", cls.extraction_max_markdown, lo=1
+        ),
+    }
+
+
+def _search_fields(cls: type[CrawlerSettings], source: Mapping[str, str]) -> _SearchFields:
+    """Search provider selection, API keys, result limits, and key admin."""
+    return {
+        "search_provider": source.get("CRAWLUTRON_SEARCH_PROVIDER", cls.search_provider),
+        "tavily_api_key": source.get("CRAWLUTRON_TAVILY_API_KEY", cls.tavily_api_key),
+        "brave_api_key": source.get("CRAWLUTRON_BRAVE_API_KEY", cls.brave_api_key),
+        "serper_api_key": source.get("CRAWLUTRON_SERPER_API_KEY", cls.serper_api_key),
+        "search_limit_default": get_mapping_int(
+            source, "CRAWLUTRON_SEARCH_LIMIT_DEFAULT", cls.search_limit_default
+        ),
+        "search_limit_max": get_mapping_int(source, "CRAWLUTRON_SEARCH_LIMIT_MAX", cls.search_limit_max),
+        "search_timeout_seconds": get_mapping_int(
+            source, "CRAWLUTRON_SEARCH_TIMEOUT_SECONDS", cls.search_timeout_seconds
+        ),
+        "key_admin_token": source.get("CRAWLUTRON_KEY_ADMIN_TOKEN", cls.key_admin_token),
+        "max_watches_per_caller": get_mapping_int(
+            source, "CRAWLUTRON_MAX_WATCHES_PER_CALLER", cls.max_watches_per_caller, lo=1
+        ),
+    }
