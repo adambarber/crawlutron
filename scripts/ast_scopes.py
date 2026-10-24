@@ -32,7 +32,11 @@ BODY_OWNING_NODES: tuple[type[ast.AST], ...] = (
 ) + SCOPE_OPENING_NODES
 
 
-def is_scope_opener(node: ast.AST) -> TypeGuard[ast.stmt | ast.ExceptHandler]:
+def is_scope_opener(
+    node: ast.AST,
+) -> TypeGuard[
+    ast.If | ast.For | ast.AsyncFor | ast.While | ast.With | ast.AsyncWith | ast.Try | ast.ExceptHandler
+]:
     """Whether ``node`` is a scope-opening node, narrowed to the kinds that are.
 
     The narrowed companion to :data:`SCOPE_OPENING_NODES`, for walks that read
@@ -41,10 +45,25 @@ def is_scope_opener(node: ast.AST) -> TypeGuard[ast.stmt | ast.ExceptHandler]:
     return isinstance(node, SCOPE_OPENING_NODES)
 
 
-def is_body_owner(node: ast.AST) -> TypeGuard[ast.Module | ast.stmt | ast.ExceptHandler]:
+def is_body_owner(
+    node: ast.AST,
+) -> TypeGuard[
+    ast.Module
+    | ast.FunctionDef
+    | ast.AsyncFunctionDef
+    | ast.ClassDef
+    | ast.If
+    | ast.For
+    | ast.AsyncFor
+    | ast.While
+    | ast.With
+    | ast.AsyncWith
+    | ast.Try
+    | ast.ExceptHandler
+]:
     """Whether ``node`` is a node that owns a body, narrowed to the kinds that do.
 
-    The predicate a walk needs rather than a bare ``isinstance`` -- membership test and
-    narrowed type are the same fact, and separating them lets a check miss the type.
+    The predicate a walk needs rather than a bare ``isinstance``; each kind is named
+    because ``ast.stmt`` declares no ``body``.
     """
     return isinstance(node, BODY_OWNING_NODES)

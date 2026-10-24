@@ -98,12 +98,14 @@ def writes(root: ast.AST) -> tuple[ast.Assign | ast.AnnAssign | ast.AugAssign, .
     )
 
 
-def assignment_targets(node: ast.Assign | ast.AnnAssign) -> list[ast.expr]:
+def assignment_targets(node: ast.Assign | ast.AnnAssign | ast.AugAssign) -> list[ast.expr]:
     """The target expressions of a write, whatever form the write took.
 
-    ``Assign`` carries a list, ``AnnAssign`` a single node; the four-line
-    branch was copied into six detectors, one of which read a tuple silently."""
-    return list(node.targets) if isinstance(node, ast.Assign) else [node.target]
+    ``Assign`` carries a list; ``AnnAssign`` and the in-place ``AugAssign``
+    bind one target each."""
+    if isinstance(node, ast.Assign):
+        return list(node.targets)
+    return [node.target]
 
 
 def plain_imports(root: ast.AST) -> tuple[ast.Import, ...]:

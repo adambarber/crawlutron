@@ -63,7 +63,7 @@ def _reference_index() -> dict[pathlib.Path, frozenset[str]]:
 
 
 def _public_definitions(
-    tree: ast.AST,
+    tree: ast.Module,
 ) -> Iterator[ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef]:
     """The top-level definitions a module advertises by not hiding them.
 
@@ -72,12 +72,12 @@ def _public_definitions(
     return (
         node
         for node in tree.body
-        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef)
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
         and not node.name.startswith("_")
     )
 
 
-def _unreferenced_primitive_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
+def _unreferenced_primitive_offenders(tree: ast.Module, path: pathlib.Path) -> list[str]:
     """A public vocabulary primitive that no module outside its own names.
 
     Restricted to the vocabulary layer by name; sweeping other modules'
@@ -165,15 +165,17 @@ _RETIRED_VOCABULARY_IMPORTED = (
 )
 
 
-def _retired_vocabulary_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
+def _retired_vocabulary_offenders(tree: ast.Module, path: pathlib.Path) -> list[str]:
     """This module's sites still importing the retired bucket, by line."""
     offenders: list[str] = []
-    for node in from_imports(tree):
+    from_nodes: tuple[ast.ImportFrom, ...] = from_imports(tree)
+    plain_nodes: tuple[ast.Import, ...] = plain_imports(tree)
+    for node in from_nodes:
         if node.module == _RETIRED_VOCABULARY:
             offenders.append(offender_at(path, node, _RETIRED_VOCABULARY_IMPORTED))
-    for node in plain_imports(tree):
-        if any(alias.name == _RETIRED_VOCABULARY for alias in node.names):
-            offenders.append(offender_at(path, node, _RETIRED_VOCABULARY_IMPORTED))
+    for plain_node in plain_nodes:
+        if any(alias.name == _RETIRED_VOCABULARY for alias in plain_node.names):
+            offenders.append(offender_at(path, plain_node, _RETIRED_VOCABULARY_IMPORTED))
     return offenders
 
 
@@ -204,9 +206,6 @@ RETIRED_VOCABULARY_IS_NOT_IMPORTABLE = Rule(
         "import constants\nfrom constants import value\n",
     ),
 )
-
-RULES = Registry((VOCABULARY_PRIMITIVES_ARE_REFERENCED, RETIRED_VOCABULARY_IS_NOT_IMPORTABLE))
-
 
 RULES = Registry((VOCABULARY_PRIMITIVES_ARE_REFERENCED, RETIRED_VOCABULARY_IS_NOT_IMPORTABLE))
 

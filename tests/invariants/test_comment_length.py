@@ -197,9 +197,9 @@ def test_a_block_cut_mid_clause_fires() -> None:
     assert dangling_comment_blocks("# --- Structured discovery ---\nx = 1\n") == []
 
 
-def _zero_everywhere(collect: Callable[[str], list]):
+def _zero_everywhere[T](collect: Callable[[str], list[T]]) -> list[tuple[str, T]]:
     """Every finding of ``collect`` across all three roots, with file and raw item."""
-    offenders = []
+    offenders: list[tuple[str, T]] = []
     for root in ("app", "tests", "scripts"):
         for name, items in _root_findings(root, collect).items():
             for item in items:
@@ -207,11 +207,11 @@ def _zero_everywhere(collect: Callable[[str], list]):
     return offenders
 
 
-def _format_long_comment_run(name: str, item) -> str:
+def _format_long_comment_run(name: str, item: tuple[int, int]) -> str:
     return f"{name}:{item[0]}: {item[-1]}"
 
 
-def _format_overlong_docstring(name: str, item) -> str:
+def _format_overlong_docstring(name: str, item: tuple[int, int, str]) -> str:
     lineno, _end, kind = item
     return f"{name}:{lineno}: {kind} exceeds three lines"
 

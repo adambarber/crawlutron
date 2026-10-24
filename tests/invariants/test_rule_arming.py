@@ -24,12 +24,12 @@ def _is_rule_call(node: ast.AST) -> bool:
     return isinstance(node, ast.Call) and getattr(node.func, "id", "") == "Rule"
 
 
-def _function_index(module: ast.AST) -> dict[str, ast.AST]:
+def _function_index(module: ast.Module) -> dict[str, ast.FunctionDef | ast.AsyncFunctionDef | ast.Lambda]:
     """Every local def by name, for resolving a ``find``/registered detector to its body."""
     return {
         node.name: node
         for node in module.body
-        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.Lambda)
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda))
     }
 
 
@@ -48,7 +48,10 @@ def _string_constants(module: ast.Module) -> dict[str, str]:
     return constants
 
 
-def _detector_body(find: ast.expr, functions: dict[str, ast.AST]) -> ast.AST:
+def _detector_body(
+    find: ast.expr,
+    functions: dict[str, ast.FunctionDef | ast.AsyncFunctionDef | ast.Lambda],
+) -> ast.AST:
     """The node whose literals are this rule's spelling.
 
     A bare name resolves to the function it names (``find=_foo`` alone says
@@ -66,7 +69,7 @@ def declared_rules() -> Iterator[ArmedRule]:
         functions = _function_index(module)
         constants = _string_constants(module)
         for node in ast.walk(module):
-            if not _is_rule_call(node):
+            if not _is_rule_call(node) or not isinstance(node, ast.Call):
                 continue
             keywords = {keyword.arg: keyword.value for keyword in node.keywords}
             find = keywords.get("find")
@@ -158,7 +161,7 @@ def test_a_detector_keyed_on_a_name_the_tree_lost_is_reported() -> None:
 def test_a_hand_rolled_detector_keyed_on_a_name_the_tree_lost_is_reported() -> None:
     """The H2 bite: the audit walks hand-rolled detectors, not only ``Rule`` finds.
     A detector outside every ``Rule(...)`` was invisible to this audit."""
-    planted = [
+    planted: list[ArmedRule] = [
         (
             "hand-rolled-gone",
             _detector(
@@ -197,7 +200,9 @@ def test_a_detector_that_spares_private_names_is_not_reported() -> None:
 
 def test_a_hand_rolled_detector_that_spares_private_names_is_not_reported() -> None:
     """The clean half for hand-rolled detectors: ordinary vocabulary stays quiet."""
-    planted = [("hand-rolled-vocabulary", _detector("def f(tree, path):\n    return []\n"), {})]
+    planted: list[ArmedRule] = [
+        ("hand-rolled-vocabulary", _detector("def f(tree, path):\n    return []\n"), {})
+    ]
     assert not missing_armings(hand_rolled=planted)
 
 

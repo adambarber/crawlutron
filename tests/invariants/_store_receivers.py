@@ -64,7 +64,7 @@ def _self_attr_receivers(tree: ast.AST | None) -> dict[str, str]:
     return receivers
 
 
-def _store_receivers(function: ast.AST, tree: ast.AST | None = None) -> dict[str, str]:
+def _store_receivers(function: ast.AST, tree: ast.Module | None = None) -> dict[str, str]:
     """Name -> store class, for the store-typed bindings of one function."""
     receivers: dict[str, str] = {}
     for node in nodes_of(function):
@@ -92,7 +92,7 @@ def _store_receivers(function: ast.AST, tree: ast.AST | None = None) -> dict[str
     return receivers
 
 
-def _module_store_globals(tree: ast.AST | None) -> dict[str, str]:
+def _module_store_globals(tree: ast.Module | None) -> dict[str, str]:
     """Module-level names bound to a store instance: every function sees them."""
     if tree is None:
         return {}

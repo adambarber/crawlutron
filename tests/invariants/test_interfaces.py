@@ -127,7 +127,9 @@ def _container_protocol_offenders(tree: ast.Module, path: Path) -> list[str]:
     for node in ast.walk(tree):
         if not isinstance(node, ast.ClassDef):
             continue
-        container = sorted({_base_class_name(base) for base in node.bases} & container_names)
+        container = sorted(
+            {name for base in node.bases if (name := _base_class_name(base)) is not None} & container_names
+        )
         if not container or node.name in announced:
             continue
         offenders.append(

@@ -206,7 +206,7 @@ def _app_symbol_definitions(root: pathlib.Path = REPO_ROOT) -> dict[str, frozens
     return {name: frozenset(modules) for name, modules in definitions.items()}
 
 
-def _symbol_defined_in(tree: ast.AST, symbol: str) -> bool:
+def _symbol_defined_in(tree: ast.Module, symbol: str) -> bool:
     """Whether ``symbol`` is defined at top level of the given module tree."""
     for node in tree.body:
         if isinstance(node, ast.ClassDef | ast.FunctionDef | ast.AsyncFunctionDef) and node.name == symbol:

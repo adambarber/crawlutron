@@ -110,14 +110,16 @@ def _private_app_names(tree: ast.Module) -> dict[str, int]:
         if module.startswith("app") and name.startswith("_") and not name.startswith("__"):
             found.setdefault(key, lineno)
 
-    for node in from_imports(tree):
-        if not node.module or not node.module.startswith("app") or node.level:
+    from_nodes: tuple[ast.ImportFrom, ...] = from_imports(tree)
+    for import_node in from_nodes:
+        if not import_node.module or not import_node.module.startswith("app") or import_node.level:
             continue
-        for alias in node.names:
-            record(f"{node.module}.{alias.name}", node.lineno)
+        for alias in import_node.names:
+            record(f"{import_node.module}.{alias.name}", import_node.lineno)
     for key, lineno in _attribute_reach_keys(tree, instances):
         record(key, lineno)
-    for node in nodes_of(tree):
+    reached: tuple[ast.AST, ...] = nodes_of(tree)
+    for node in reached:
         if not isinstance(node, ast.Call) or len(node.args) < 2:
             continue
         callee = node.func

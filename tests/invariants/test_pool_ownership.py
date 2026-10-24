@@ -170,6 +170,15 @@ RESPONSE_COOKIES_ENTER_VIA_THE_FETCH_TAIL = Rule(
             "add_cookie_header() outside store_set_cookies()",
         ),
         Bites("def nested():\n    jar.add_cookie_header(url, cookie)\n", "add_cookie_header() outside"),
+        # The half that makes it a PATH-keyed rule: that very same fetch-tail source still fires anywhere
+        # else.
+        Bites(
+            "from app.transport.request_profile import store_set_cookies\n"
+            "def _finish_fetch(**kwargs):\n"
+            "    return store_set_cookies(kwargs)\n",
+            "store_set_cookies() outside _finish_fetch()",
+            at=_ELSEWHERE,
+        ),
     ),
     clean=lambda: (
         # The sanctioned two-hop chain, spared at the paths that own it.
@@ -182,15 +191,6 @@ RESPONSE_COOKIES_ENTER_VIA_THE_FETCH_TAIL = Rule(
         Silent(
             "def store_set_cookies(url, headers):\n    jar.add_cookie_header(url, c)\n",
             at=REPO_ROOT / _COOKIE_HELPER,
-        ),
-        # The half that makes it a PATH-keyed rule: that very same fetch-tail source still fires anywhere
-        # else.
-        Bites(
-            "from app.transport.request_profile import store_set_cookies\n"
-            "def _finish_fetch(**kwargs):\n"
-            "    return store_set_cookies(kwargs)\n",
-            "store_set_cookies() outside _finish_fetch()",
-            at=_ELSEWHERE,
         ),
     ),
     proof_path=REPO_ROOT / _COOKIE_TAIL,

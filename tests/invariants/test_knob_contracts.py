@@ -71,6 +71,14 @@ _ENV_READER_NAMES = frozenset(
 )
 
 
+def _first_statement_of_block(scope: ast.AST) -> ast.stmt | None:
+    """The first statement of a block-owning node, or None when it owns none."""
+    if not is_body_owner(scope):
+        return None
+    body = scope.body
+    return body[0] if body else None
+
+
 def _environment_reader_reference(
     tree: ast.AST,
     node: ast.Constant,
@@ -79,16 +87,14 @@ def _environment_reader_reference(
     parents = parent_map(tree)
     expression = parents.get(id(node))
     scope = parents.get(id(expression)) if expression is not None else None
+    # The block-owning statement kinds, named rather than ``ast.stmt``: "is this the first statement of a
+    # block" asks for a body, and only some statements have one.
     if (
         isinstance(node, ast.Constant)
         and isinstance(expression, ast.Expr)
         and expression.value is node
-        # The block-owning statement kinds, named rather than ``ast.stmt``: "is this the first statement of a
-        # block" asks for a body, and only some statements have one.
         and scope is not None
-        and is_body_owner(scope)
-        and scope.body
-        and scope.body[0] is expression
+        and _first_statement_of_block(scope) is expression
     ):
         return None
     current: ast.AST = node

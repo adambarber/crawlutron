@@ -49,9 +49,9 @@ class LoopGuardJobStore(JobStore):
         _refuse_on_loop("JobStore.delete_for_caller")
         return super().delete_for_caller(job_id, caller_id)
 
-    def list_jobs(self):
+    def list_jobs(self, *, limit=None, offset=0):
         _refuse_on_loop("JobStore.list_jobs")
-        return super().list_jobs()
+        return super().list_jobs(limit=limit, offset=offset)
 
     def list_for_caller(self, caller_id, *, limit=None, offset=0):
         _refuse_on_loop("JobStore.list_for_caller")

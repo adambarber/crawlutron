@@ -332,7 +332,7 @@ SCHEDULER_DOUBLES_BIND_FAILED_RESULT = Rule(
         "the DomainScheduler.run contract requires failed_result; a double that omits it"
         " silently drops the envelope the pipeline supplies"
     ),
-    premise=lambda: _scheduler_run_positional_names(),
+    premise=lambda: None if _scheduler_run_positional_names() is None else None,
     bite=lambda: Bites(_failed_result_binding_source(), "failed_result"),
     clean=lambda: (
         # The method that does bind the name is the property being asserted.

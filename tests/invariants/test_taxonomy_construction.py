@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pytest
 
+from tests._policy_factories import canonical
 from tests.chokepoint_walks import app_offenders
 
 
@@ -146,7 +147,7 @@ def test_result_construction_enforces_membership_at_the_dataclass():
     # Built, not spelled. Constructing the result directly hands each value to the field's own type, so the
     # all-member build is checked against the taxonomy it is a sample of.
     member_crawl_result = CrawlResult(
-        url="http://a/",
+        url=canonical("http://a/"),
         attempt=CrawlStrategyAttempt(
             strategy="BROWSER_HEADLESS",
             status="success",
