@@ -1,7 +1,7 @@
 """The harness imports production declarations; it never re-declares them (#112).
 
-A double is a second copy of a shape ``app/`` declares: two detectors govern, name
-equality over every declaration form plus full-field-set shape for records.
+A double is a second copy of a shape ``app/`` declares, compared SUPERSET-OR-EQUAL (#412).
+An INTERSECTING record (shares fields, holds no full set) stays silent.
 """
 
 from __future__ import annotations
@@ -9,6 +9,7 @@ from __future__ import annotations
 import ast
 import inspect
 import pathlib
+from collections.abc import Iterator
 
 from tests.chokepoint_walks import trees_under
 
@@ -51,25 +52,7 @@ def _decorator_name(decorator: ast.expr) -> str:
     return ""
 
 
-def _record_shape(node: ast.ClassDef) -> frozenset[str] | None:
-    """Field names of a dataclass, TypedDict or pydantic BaseModel class, or None.
-
-    Inherited fields are excluded on purpose: a subclass REUSES the production
-    declaration, which is the desired direction, not a second copy of it.
-    """
-    is_dataclass = any(_decorator_name(d) == "dataclass" for d in node.decorator_list)
-    is_typed_dict = any(_base_name(b) == "TypedDict" for b in node.bases)
-    is_pydantic = any(_base_name(b) == "BaseModel" for b in node.bases)
-    if not is_dataclass and not is_typed_dict and not is_pydantic:
-        return None
-    fields: set[str] = set()
-    for stmt in node.body:
-        if isinstance(stmt, ast.AnnAssign) and isinstance(stmt.target, ast.Name):
-            fields.add(stmt.target.id)
-        elif isinstance(stmt, ast.Assign):
-            fields.update(t.id for t in stmt.targets if isinstance(t, ast.Name))
-    fields -= {name for name in fields if name.startswith("model_")}
-    return frozenset(fields) if len(fields) >= 2 else None
+_RECORD_BASE_TAILS = ("BaseModel", "TypedDict")
 
 
 def _base_name(base: ast.expr) -> str:
@@ -81,18 +64,155 @@ def _base_name(base: ast.expr) -> str:
     return ""
 
 
+def _own_fields(node: ast.ClassDef) -> frozenset[str]:
+    """The field names one class body declares, pydantic's ``model_`` namespace dropped.
+
+    A ``ClassVar`` annotation is a class attribute, not a field: pydantic excludes it
+    and so does this census.
+    """
+    fields: set[str] = set()
+    for stmt in node.body:
+        if isinstance(stmt, ast.AnnAssign) and isinstance(stmt.target, ast.Name):
+            if _annotation_is_classvar(stmt.annotation):
+                continue
+            fields.add(stmt.target.id)
+        elif isinstance(stmt, ast.Assign):
+            fields.update(t.id for t in stmt.targets if isinstance(t, ast.Name))
+    return frozenset(fields) - {name for name in fields if name.startswith("model_")}
+
+
+def _annotation_is_classvar(annotation: ast.expr) -> bool:
+    """Whether an annotation is (or wraps, under Annotated[...]) a ClassVar."""
+    if isinstance(annotation, ast.Subscript):
+        value = annotation.value
+        tail = ""
+        if isinstance(value, ast.Attribute):
+            tail = value.attr
+        elif isinstance(value, ast.Name):
+            tail = value.id
+        if tail == "ClassVar":
+            return True
+        if tail == "Annotated":
+            return _annotation_is_classvar(annotation.slice)
+    return False
+
+
+def _module_census(tree: ast.Module) -> tuple[dict[str, ast.ClassDef], dict[str, str]]:
+    """(class name -> node, local binding -> dotted origin) for one module.
+
+    The binding table is what makes an ALIASED record base readable: after
+    ``from pydantic import BaseModel as BM``, ``BM`` binds ``pydantic.BaseModel``.
+    """
+    classes = {node.name: node for node in tree.body if isinstance(node, ast.ClassDef)}
+    bindings: dict[str, str] = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and node.module and not node.level:
+            for alias in node.names:
+                bindings[alias.asname or alias.name] = f"{node.module}.{alias.name}"
+    return classes, bindings
+
+
+class _RecordCensus:
+    """Record resolution over one root's parsed modules.
+
+    A class is a record when it wears ``@dataclass`` or some base binds a record base
+    -- directly, aliased via the import table, or through a class that itself does.
+    """
+
+    def __init__(self, trees: list[tuple[pathlib.Path, ast.Module]]) -> None:
+        self.modules: dict[str, tuple[dict[str, ast.ClassDef], dict[str, str]]] = {}
+        for path, tree in trees:
+            self.modules[path.relative_to(REPO_ROOT).as_posix()] = _module_census(tree)
+        self._record_memo: dict[tuple[str, str], bool] = {}
+        self._fields_memo: dict[tuple[str, str], frozenset[str]] = {}
+
+    def _origin_target(self, module: str, display: str) -> tuple[str, str] | None:
+        """(defining module, class name) an imported base display resolves to."""
+        origin = self.modules[module][1].get(display, "")
+        if not origin or "." not in origin:
+            return None
+        defining, name = origin.rsplit(".", 1)
+        target = defining.replace(".", "/") + ".py"
+        if target in self.modules and name in self.modules[target][0]:
+            return (target, name)
+        return None
+
+    def _base_binds_record(self, module: str, display: str, seen: frozenset[str]) -> bool:
+        """Whether a written base name binds a record base, however it was imported."""
+        if display in _RECORD_BASE_TAILS:
+            return True
+        origin = self.modules[module][1].get(display, "")
+        if any(origin == f"pydantic.{tail}" or origin.endswith(f".{tail}") for tail in _RECORD_BASE_TAILS):
+            return True
+        classes = self.modules[module][0]
+        if display in classes and self.is_record(module, display, seen):
+            return True
+        target = self._origin_target(module, display)
+        return target is not None and self.is_record(target[0], target[1], seen)
+
+    def is_record(self, module: str, name: str, seen: frozenset[str] = frozenset()) -> bool:
+        """Whether the named class governs a field shape, transitively."""
+        key = (module, name)
+        if key in self._record_memo:
+            return self._record_memo[key]
+        if name in seen or name not in self.modules[module][0]:
+            return False
+        node = self.modules[module][0][name]
+        result = any(_decorator_name(d) == "dataclass" for d in node.decorator_list) or any(
+            self._base_binds_record(module, _base_name(base), seen | {name}) for base in node.bases
+        )
+        self._record_memo[key] = result
+        return result
+
+    def fields(self, module: str, name: str, seen: frozenset[str] = frozenset()) -> frozenset[str]:
+        """Accumulated fields of a record: own body plus record-kind bases' fields.
+
+        No size cutoff here -- the two-field floor is a shape-report decision, and a
+        one-field base still contributes its field to the records that derive from it.
+        """
+        key = (module, name)
+        if key in self._fields_memo:
+            return self._fields_memo[key]
+        if name in seen:
+            return frozenset()
+        classes = self.modules[module][0]
+        fields: set[str] = set(_own_fields(classes[name]))
+        for base in classes[name].bases:
+            display = _base_name(base)
+            base_module, base_name = module, display
+            if base_name not in classes:
+                target = self._origin_target(module, display)
+                if target is None:
+                    continue
+                base_module, base_name = target
+            if self.is_record(base_module, base_name):
+                fields |= self.fields(base_module, base_name, seen | {name})
+        result = frozenset(fields)
+        self._fields_memo[key] = result
+        return result
+
+    def records(self) -> Iterator[tuple[str, str, frozenset[str]]]:
+        """Every governed record with a shape (>=2 fields), as (module, name, fields)."""
+        for module, (classes, _bindings) in self.modules.items():
+            for name in classes:
+                if not self.is_record(module, name):
+                    continue
+                shape = self.fields(module, name)
+                if len(shape) >= 2:
+                    yield (module, name, shape)
+
+
+def _shapes_from_trees(trees: list[tuple[pathlib.Path, ast.Module]]) -> dict[frozenset[str], list[str]]:
+    """Field shapes of record-like classes in already-parsed modules, mapped to modules."""
+    shapes: dict[frozenset[str], list[str]] = {}
+    for module, _name, shape in _RecordCensus(trees).records():
+        shapes.setdefault(shape, []).append(module)
+    return shapes
+
+
 def _declared_shapes(root: pathlib.Path) -> dict[frozenset[str], list[str]]:
     """Field shapes of record-like classes under ``root``, mapped to declaring modules."""
-    shapes: dict[frozenset[str], list[str]] = {}
-    for path, tree in trees_under(root):
-        module = path.relative_to(REPO_ROOT).as_posix()
-        for node in tree.body:
-            if not isinstance(node, ast.ClassDef):
-                continue
-            shape = _record_shape(node)
-            if shape is not None:
-                shapes.setdefault(shape, []).append(module)
-    return shapes
+    return _shapes_from_trees(list(trees_under(root)))
 
 
 def _tests_declared_names() -> dict[str, list[str]]:
@@ -125,8 +245,8 @@ def test_a_tests_module_never_declares_a_name_app_models_declares() -> None:
 def test_a_tests_module_never_mirrors_a_production_field_shape() -> None:
     """A tests/ record CONTAINING a production field set is a re-declaration.
 
-    Superset-or-equal fires (a grown double is still the copy); a subset stays
-    silent. Governed: dataclass, TypedDict, pydantic BaseModel.
+    Superset-or-equal fires (a grown double is still the copy); a subset and a
+    single-field record (<2 fields) stay silent. Governed transitively (#412).
     """
     model_shapes = _declared_shapes(REPO_ROOT / "app" / "models")
     assert model_shapes, "the shape census came back empty; the detector would govern nothing"
@@ -136,6 +256,78 @@ def test_a_tests_module_never_mirrors_a_production_field_shape() -> None:
             if shape >= model_shape:
                 findings[tuple(sorted(shape))] = (modules, model_modules)
     assert not findings, f"harness records containing app/models/ field sets: {findings}"
+
+
+def _smallest_production_entry() -> tuple[frozenset[str], str, str]:
+    """The alphabetically-first three-field production record: (shape, module, class),
+    derived from the live census so the planted doubles aim at a record that exists."""
+    entries: list[tuple[frozenset[str], str, str]] = []
+    census = _RecordCensus(list(trees_under(REPO_ROOT / "app" / "models")))
+    for module, name, shape in census.records():
+        entries.append((shape, module, name))
+    assert entries, "no multi-field production record exists; re-derive the planted doubles"
+    return min(entries, key=lambda item: (sorted(item[0]), item[1], item[2]))
+
+
+def _planted_finding(source: str, label: str) -> tuple[list[str], list[str]] | None:
+    """The finding one planted tests-side tree produces against the real census."""
+    model_shapes = _declared_shapes(REPO_ROOT / "app" / "models")
+    planted = _shapes_from_trees([(REPO_ROOT / label, ast.parse(source))])
+    for shape, modules in planted.items():
+        for model_shape, model_modules in model_shapes.items():
+            if shape >= model_shape:
+                return (modules, model_modules)
+    return None
+
+
+def test_a_double_whose_base_is_an_aliased_import_fires() -> None:
+    """The aliased-import hole (#412): ``from pydantic import BaseModel as BM`` put
+    the record outside the detector's vocabulary, so a renamed double inherited
+    through the alias passed. The planted double must fire naming both modules."""
+    fields, production, _classname = _smallest_production_entry()
+    body = "\n".join(f"    {field}: int" for field in sorted(fields))
+    source = f"from pydantic import BaseModel as BM\n\nclass RenamedAliasedDouble(BM):\n{body}\n"
+    finding = _planted_finding(source, "tests/_planted_double.py")
+    assert finding is not None, "the aliased-import double did NOT fire; the hole is live"
+    planted_modules, production_modules = finding
+    assert planted_modules == ["tests/_planted_double.py"]
+    assert production_modules == [production]
+
+
+def test_a_double_split_across_a_local_record_base_fires() -> None:
+    """The transitive hole (#412): a double split as ``_Base(BaseModel)`` plus a
+    child carrying the rest of the fields re-declares production in two pieces;
+    the direct-base check saw neither. The planted pair must fire naming both."""
+    fields, production, _classname = _smallest_production_entry()
+    head, *rest = sorted(fields)
+    tail_fields = "\n".join(f"    {field}: int" for field in rest)
+    source = (
+        "from pydantic import BaseModel\n\n"
+        f"class _SplitBase(BaseModel):\n"
+        f"    {head}: int\n\n"
+        f"class RenamedSplitDouble(_SplitBase):\n"
+        f"{tail_fields}\n"
+    )
+    finding = _planted_finding(source, "tests/_planted_double.py")
+    assert finding is not None, "the split transitive double did NOT fire; the hole is live"
+    planted_modules, production_modules = finding
+    assert planted_modules == ["tests/_planted_double.py"]
+    assert production_modules == [production]
+
+
+def test_a_tests_side_reuse_of_a_production_record_stays_silent() -> None:
+    """The clean half of the transitive fix: subclassing a PRODUCTION record is
+    reuse (the declared direction), so its imported fields must not accumulate
+    into a planted finding."""
+    _fields, production, classname = _smallest_production_entry()
+    source = (
+        f"from {production[:-3].replace('/', '.')} import {classname}\n"
+        "\n"
+        f"class ReuseDouble({classname}):\n"
+        f"    extra_field: int\n"
+    )
+    finding = _planted_finding(source, "tests/_planted_double.py")
+    assert finding is None, f"reuse of the production record fired: {finding}"
 
 
 def test_the_admission_helper_declares_the_production_known_set() -> None:
