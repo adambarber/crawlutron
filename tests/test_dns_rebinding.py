@@ -19,6 +19,30 @@ from tests._transport_doubles import MockResponse, scripted_transport_client
 
 
 class TestDNSRebindingProtection:
+    def test_a_mixed_public_private_answer_pins_the_public_ip(self, monkeypatch):
+        """#404: a mixed public/private DNS answer is not refused at the pin; the
+        public IP is selected and the private one never dialled. A pin that took
+        the first answer would dial the private IP and fail this."""
+        import socket
+        from unittest.mock import patch
+
+        from app.transport.pinned_transport import resolve_and_pin_host
+
+        block_private_targets(monkeypatch)
+        public_ip, private_ip = "93.184.216.34", "169.254.169.254"
+
+        def mixed_getaddrinfo(host, *args, **kwargs):
+            return [
+                (socket.AF_INET, socket.SOCK_STREAM, 6, "", (private_ip, 80)),
+                (socket.AF_INET, socket.SOCK_STREAM, 6, "", (public_ip, 80)),
+            ]
+
+        with patch("socket.getaddrinfo", side_effect=mixed_getaddrinfo):
+            hostname, ip = resolve_and_pin_host(canonical("http://example.com/"))
+        assert hostname == "example.com"
+        assert ip == public_ip, f"the pin dialled a non-public answer: {ip}"
+        assert ip != private_ip
+
     def test_resolve_and_pin_host_uses_first_resolution(self, monkeypatch):
         """Even if a second resolution would rebound to a private IP, the pinned
         IP (first resolution) is what the connection uses."""

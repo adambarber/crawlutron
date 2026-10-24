@@ -12,7 +12,7 @@ import pytest
 
 from app.storage.coordination_cookies import SharedCookieStore
 from app.transport import cookie_jar
-from app.transport.cookie_jar import CookieJar
+from app.transport.cookie_jar import MAX_COOKIE_LIFETIME_SECONDS, CookieJar
 from tests._fetcher_factories import run_default_http_fetcher
 from tests._policy_factories import canonical
 from tests._transport_doubles import MockResponse, patch_http_fetcher_transport
@@ -254,6 +254,24 @@ def _zero_window_jar(tmp_path, monkeypatch) -> tuple[object, object]:
     monkeypatch.setattr(cookie_jar, "TOMBSTONE_WINDOW_SECONDS", 0.0)
     store = SharedCookieStore(tmp_path / "coordination.db")
     return store, CookieJar(store=store)
+
+
+def test_the_expiry_cap_boundary_instant_is_expired_not_live(monkeypatch):
+    """#406: a cookie AT exactly the cap instant is dead, one a second short is
+    alive. Pins the comparison the expiry check uses -- a '<' instead of '<='
+    would make the exact-cap cookie live and no other test would notice."""
+    monkeypatch.setattr(cookie_jar.time, "time", lambda: 1_000_000.0)
+    jar = CookieJar()
+    # Max-Age exactly the cap: the expiry is now + cap, the boundary instant.
+    jar.add_cookie_header(
+        canonical("http://a.example/"), f"sid=abc; Path=/; Max-Age={MAX_COOKIE_LIFETIME_SECONDS}"
+    )
+    # A read AT the boundary instant (cap seconds later) finds it expired.
+    monkeypatch.setattr(cookie_jar.time, "time", lambda: 1_000_000.0 + MAX_COOKIE_LIFETIME_SECONDS)
+    assert jar.cookie_header_for(canonical("http://a.example/")) == ""
+    # A read a second short of the boundary finds it alive.
+    monkeypatch.setattr(cookie_jar.time, "time", lambda: 1_000_000.0 + MAX_COOKIE_LIFETIME_SECONDS - 1)
+    assert jar.cookie_header_for(canonical("http://a.example/")) == "sid=abc"
 
 
 def test_prune_never_crosses_the_namespace_boundary(tmp_path, monkeypatch):
