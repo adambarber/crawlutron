@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+__all__ = ["format_extracted_document_text"]
+
 from dataclasses import replace
 from typing import TypedDict, Unpack
 
@@ -22,6 +24,7 @@ from app.extraction.content import (
 from app.extraction.content import (
     html_diagnostics as _production_html_diagnostics,
 )
+from app.extraction.document_text import format_extracted_document_text
 from app.transport.fetchers import default_http_fetcher as _production_default_http_fetcher
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY
 

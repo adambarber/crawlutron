@@ -23,7 +23,9 @@ _DOC_REFERENCE_EXCLUSIONS = {
 }
 
 
-_SKIP_DIRECTORIES = frozenset({".git", ".venv", "work", "node_modules", ".pytest_cache", "__pycache__"})
+_SKIP_DIRECTORIES = frozenset(
+    {".git", ".venv", "work", ".hardstand", "node_modules", ".pytest_cache", "__pycache__"}
+)
 
 
 _BACKTICKED_PATH = re.compile(

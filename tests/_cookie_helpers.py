@@ -11,11 +11,12 @@ import os
 import tempfile
 from collections.abc import Iterator
 from contextlib import contextmanager
-from http.cookiejar import FileCookieJar
+
+from app.transport.cookie_jar import CookieJar
 
 
 @contextmanager
-def cookie_file(jar: FileCookieJar, name: str) -> Iterator[str]:
+def cookie_file(jar: CookieJar, name: str) -> Iterator[str]:
     """Export ``jar`` to ``name``; yield the path, removed on exit, and removed
     *first* if a previous run left one behind so an atomicity test never reads a
     file it did not write.
@@ -24,7 +25,7 @@ def cookie_file(jar: FileCookieJar, name: str) -> Iterator[str]:
     if os.path.exists(target):
         os.unlink(target)
     try:
-        jar.save(target)
+        jar.export_to_file(target)
         yield target
     finally:
         if os.path.exists(target):
