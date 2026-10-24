@@ -22,6 +22,7 @@ from app.extraction.content import (
 from app.extraction.content import (
     html_diagnostics as _production_html_diagnostics,
 )
+from app.extraction.document_text import format_extracted_document_text
 from app.transport.fetchers import default_http_fetcher as _production_default_http_fetcher
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY
 
@@ -91,3 +92,17 @@ def settings_with(**overrides: Unpack[_SettingsOverrides]) -> CrawlerSettings:
     whatever the environment says about every other knob -- as production does.
     """
     return replace(CrawlerSettings.from_mapping(), **overrides)
+
+
+# The surface test modules import; a name dropped here fails their collection.
+__all__ = [
+    "default_http_fetcher",
+    "detect_pagination",
+    "doc_worker_acquisitions",
+    "extract_content",
+    "extract_discovered_links",
+    "extract_js_endpoints",
+    "format_extracted_document_text",
+    "html_diagnostics",
+    "settings_with",
+]
