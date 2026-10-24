@@ -5,7 +5,6 @@ change lands in only one test. Factories return the MODEL, not the wire mapping.
 
 import pathlib
 from collections.abc import Callable
-from typing import Any
 
 from app.admission.admission_links import admit_discovered_links
 from app.admission.payload_helpers import payload_policy
@@ -73,7 +72,7 @@ def _policy(extra=None) -> CrawlPolicy:
 
     Carries no ``strategies`` on purpose: strategy tests want the default
     ladder to climb, not a pinned step."""
-    policy: dict[str, Any] = {
+    policy: dict[str, object] = {
         "request_profile": {},
         "headers": {},
         "limits": dict(_STRATEGY_LIMITS),
@@ -153,12 +152,12 @@ __all__ = [
 ]
 
 
-def crawl_limits(*, respect_robots: bool | None = None, **over: Any) -> dict[str, Any]:
+def crawl_limits(*, respect_robots: bool | None = None, **over: object) -> dict[str, object]:
     """The limits block a crawl fixture needs, with overrides merged over it.
 
     ``timeout_seconds: 10`` is the live-server profile -- a too-tight fixture
     reports a transport problem. ``respect_robots`` is a keyword tests flip."""
-    limits: dict[str, Any] = {"timeout_seconds": 10, "max_retries": 0, "max_discovered_links": 10}
+    limits: dict[str, object] = {"timeout_seconds": 10, "max_retries": 0, "max_discovered_links": 10}
     if respect_robots is not None:
         limits["respect_robots"] = respect_robots
     limits.update(over)
@@ -168,18 +167,21 @@ def crawl_limits(*, respect_robots: bool | None = None, **over: Any) -> dict[str
 def crawl_policy(
     strategies=None,
     *,
-    limits: dict[str, Any] | None = None,
-    discovery: dict[str, Any] | None = None,
+    limits: dict[str, object] | None = None,
+    discovery: dict[str, object] | None = None,
     scope_regex: str | None = None,
     extraction: str | None = None,
-) -> dict[str, Any]:
+) -> dict[str, object]:
     """A crawl policy carrying strategies, limits, and the named extra blocks.
 
     Each extra block is a named keyword, so a typo'd name is a ``TypeError``;
     the dict is the WIRE shape production's ``payload_policy`` declares."""
-    policy: dict[str, Any] = {
+    limits_block = crawl_limits()
+    if limits is not None:
+        limits_block.update(limits)
+    policy: dict[str, object] = {
         "strategies": list(strategies) if strategies is not None else [HTTP_DECLARED_CRAWLER],
-        "limits": crawl_limits(**(limits or {})),
+        "limits": limits_block,
     }
     if discovery is not None:
         policy["discovery"] = discovery

@@ -1,6 +1,6 @@
 from collections.abc import Iterator
 from contextlib import contextmanager
-from typing import Any
+from typing import NoReturn
 
 from app.transport.browser import BrowserRenderer
 from app.transport.browser_driver import BrowserDriver
@@ -10,6 +10,7 @@ from app.transport.browser_pool import (
     BrowserPoolExhaustedError,
     set_browser_pool,
 )
+from app.vocabulary.browser import BrowserAction
 
 
 @contextmanager
@@ -50,7 +51,7 @@ class _MockDriver(BrowserDriver):
         # Skip the real BrowserDriver init which launches a browser
         self._browser = None
         self._context = None
-        self._pages: list[Any] = []
+        self._pages: list[object] = []
 
     async def close(self) -> None:
         pass
@@ -58,26 +59,26 @@ class _MockDriver(BrowserDriver):
     def note_render(self) -> None:
         pass
 
-    def harvest_timeout_for(self, browser_profile: dict[str, Any] | None) -> float:
+    def harvest_timeout_for(self, browser_profile: dict[str, object] | None) -> float:
         return 1.0
 
-    async def safe_close_page(self, page: Any) -> None:
+    async def safe_close_page(self, page: object) -> None:
         pass
 
     async def run_action_chain(
         self,
-        page: Any,
-        actions: list[Any],
+        page: object,
+        actions: list[BrowserAction],
         *,
         url: str = "",
         budget_seconds: float | None = None,
     ) -> None:
         pass
 
-    async def wait_for_ready_state(self, page: Any) -> None:
+    async def wait_for_ready_state(self, page: object) -> None:
         pass
 
-    async def open_page(self, browser_profile: dict[str, Any] | None) -> Any:
+    async def open_page(self, browser_profile: dict[str, object] | None) -> NoReturn:
         raise AssertionError("RaisingRenderer should never open a page")
 
 

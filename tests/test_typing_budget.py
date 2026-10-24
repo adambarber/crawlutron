@@ -199,16 +199,17 @@ def test_the_scripts_typing_budget_reaches_scripts() -> None:
     _assert_undeclared_record_fires()
 
 
-#: The tests/ tree baseline. Re-baselined 146/60 -> 157/65 in #397:
-#: the scope widened to tests/_*.py, counting unseen annotations.
-_TESTS_BUDGETS = {_METRIC: 157, _ANY: 65}
+#: The tests/ tree baseline; 146/60 -> 157/65 in #397 (scope widened to
+#: tests/_*.py), LOWERED 157/65 -> 99/39 (#389: harness helpers declared).
+_TESTS_BUDGETS = {_METRIC: 99, _ANY: 39}
 
 suite_offenders, suite_measurement = _gate(REPO_ROOT / "tests")
 
 
 _TESTS_REMEDY = (
-    "tests/ had no typing budget before this cohort; its baseline is the 152 "
-    "undeclared records it shipped with. Declare, or name the system type, and lower it."
+    "tests/ records: declare the key set (a test-local TypedDict or the production "
+    "model it mirrors), or name the system type it honestly is. Each declaration "
+    "lowers the budget in `_TESTS_BUDGETS` in the same commit."
 )
 
 
@@ -228,10 +229,10 @@ test_tests_collection_is_deterministic = collection_is_deterministic(
 
 def test_the_tests_typing_budget_reaches_tests() -> None:
     """The H1 reach: the typing budget now sweeps tests/, which had none. The real
-    tree shows it (147 records are counted, not invisible) and the shared classifier
-    fires on a synthetic undeclared record, so one in tests/ fires."""
-    assert suite_measurement(_METRIC) == 157, "the tests typing budget stopped reaching the real tree"
-    assert suite_measurement(_ANY) == 65, "the bare-Any budget stopped reaching the real tree"
+    tree shows it, and the shared classifier fires on a synthetic undeclared
+    record, so one in tests/ fires."""
+    assert suite_measurement(_METRIC) == 99, "the tests typing budget stopped reaching the real tree"
+    assert suite_measurement(_ANY) == 39, "the bare-Any budget stopped reaching the real tree"
     _assert_undeclared_record_fires()
 
 

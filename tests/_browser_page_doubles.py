@@ -1,4 +1,4 @@
-from typing import Any, Protocol
+from typing import Protocol
 
 #: What the renderer reads out of a page, in the order it asks.
 DEFAULT_PAGE_ANSWERS = {
@@ -53,8 +53,8 @@ class BrowserFakePage:
         context: PageCookieContext | None = None,
         on_wait_for_selector=None,
     ):
-        self.goto_calls: list[tuple[str, dict[str, Any]]] = []
-        self.route_calls: list[tuple[Any, Any]] = []
+        self.goto_calls: list[tuple[str, dict[str, object]]] = []
+        self.route_calls: list[tuple[str, object]] = []
         self.set_extra_http_headers_calls: list[dict[str, str]] = []
         self.url = url
         self.context = context if context is not None else FakePageContext()

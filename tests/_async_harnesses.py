@@ -7,7 +7,6 @@ import asyncio
 import contextlib
 from collections.abc import AsyncGenerator, AsyncIterator, Sequence
 from dataclasses import dataclass
-from typing import Any
 
 import pytest
 from fastapi import FastAPI
@@ -20,24 +19,27 @@ from tests._timing_harnesses import await_until
 class CrawlApi:
     """The client, the origin, and the request payloads rooted at that origin."""
 
-    client: Any
+    client: AsyncClient
     base: str
 
-    def payload(self, **overrides: Any) -> dict[str, Any]:
-        """A crawl request for the helper server's root, with ``overrides`` applied.
+    def payload(self, *, async_mode: bool = False, webhook_url: str | None = None) -> dict[str, object]:
+        """A crawl request for the helper server's root, with the async keys applied.
 
         ``make_crawl_payload`` owns the payload's shape, so this adds only the
-        origin; a test varies the one key it is about."""
+        origin and the two async keys; a test varies the one key it is about."""
         from tests._fetcher_factories import make_crawl_payload
 
-        return make_crawl_payload(f"{self.base}/", **overrides)
+        return make_crawl_payload(f"{self.base}/", async_mode=async_mode, webhook_url=webhook_url)
 
-    def batch_payload(self, paths: Sequence[str], **overrides: Any) -> dict[str, Any]:
+    def batch_payload(
+        self, paths: Sequence[str], *, async_mode: bool = False, webhook_url: str | None = None
+    ) -> dict[str, object]:
         """A batch crawl request: ``urls``, and no ``url`` beside it.
 
         The request model takes exactly one of the two, so a batch payload is a
         different shape, stated once instead of rediscovered via a 422."""
-        payload = self.payload(urls=[f"{self.base}{path}" for path in paths], **overrides)
+        payload = self.payload(async_mode=async_mode, webhook_url=webhook_url)
+        payload["urls"] = [f"{self.base}{path}" for path in paths]
         payload.pop("url")
         return payload
 
@@ -118,7 +120,7 @@ async def serve(app: FastAPI) -> AsyncIterator[AsyncClient]:
 
 async def issue_key(client: AsyncClient, *, max_pages: int = 0, max_concurrency: int = 0) -> str:
     """Issue one keyed caller through the public keys door; returns its secret."""
-    body: dict[str, Any] = {"label": "agent-a"}
+    body: dict[str, object] = {"label": "agent-a"}
     if max_pages:
         body["max_pages"] = max_pages
     if max_concurrency:

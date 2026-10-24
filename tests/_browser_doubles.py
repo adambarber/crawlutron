@@ -1,5 +1,4 @@
 from dataclasses import dataclass
-from typing import Any
 
 from app.transport.browser import BrowserRenderer
 from app.transport.browser_driver import BrowserDriver
@@ -35,7 +34,7 @@ class FakeBrowserDriver(BrowserDriver):
         # Skip the real BrowserDriver init which launches a browser
         self._browser = None
         self._context = None
-        self._pages: list[Any] = []
+        self._pages: list[object] = []
         self.page = page
         self.harvest_timeout = harvest_timeout
         self.on_close = on_close
@@ -358,7 +357,7 @@ def blocking_pinned_request(thread_ids: list[int], delay: float = 0.05):
 
 def response_handler_double(url: str, payload=None, error=None):
 
-    collected: list[dict[str, Any]] = []
+    collected: list[dict[str, object]] = []
     handler = make_response_handler(collected)
     response_url = url
 

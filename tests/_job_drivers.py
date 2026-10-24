@@ -2,12 +2,12 @@ import asyncio
 import sqlite3
 from collections.abc import Callable, Collection
 from contextlib import contextmanager
-from typing import Any
+from typing import TypedDict, Unpack
 
 from app.admission.policy import PolicyLike
 from app.models.crawl_result import EngineCrawlResult
 from app.models.result_record import ProducerEnvelope
-from app.storage.job_store import FrontierEntry, JobStatus
+from app.storage.job_store import CrawlJobState, FrontierEntry, JobStatus
 from tests._policy_factories import canonical
 
 
@@ -20,30 +20,36 @@ async def _create_api_job(client, root_url: str, execute, policy: PolicyLike | N
     return response.json()["job_id"]
 
 
+class _SeedJobKwargs(TypedDict, total=False):
+    """The seed keywords a recovery test varies."""
+
+    frontier: list[str]
+    in_flight: list[str]
+    running: bool
+
+
 def _seed_job(
     job_store,
     root_url: str,
     policy: PolicyLike | None = None,
     *,
-    frontier: list[str] | None = None,
-    in_flight: list[str] | None = None,
-    running: bool = False,
-    on_seeded: Callable[[Any, Any], None] | None = None,
+    on_seeded: Callable[[object, object], None] | None = None,
+    **kw: Unpack[_SeedJobKwargs],
 ):
     job = job_store.create(root_url, policy if policy is not None else {})
-    if frontier is not None:
-        job.frontier = [FrontierEntry(url=canonical(url), depth=0) for url in frontier]
-    if in_flight is not None:
-        job.in_flight = [FrontierEntry(url=canonical(url), depth=0) for url in in_flight]
+    if kw.get("frontier") is not None:
+        job.frontier = [FrontierEntry(url=canonical(url), depth=0) for url in kw["frontier"]]
+    if kw.get("in_flight") is not None:
+        job.in_flight = [FrontierEntry(url=canonical(url), depth=0) for url in kw["in_flight"]]
     job_store.save(job)
-    if running:
+    if kw.get("running"):
         job_store.set_status(job.job_id, JobStatus.RUNNING, expected=JobStatus.PENDING)
     if on_seeded is not None:
         on_seeded(job, job_store)
     return job
 
 
-async def run_to_terminal(job_store, job_id: str) -> Any:
+async def run_to_terminal(job_store, job_id: str) -> CrawlJobState:
     """Block until ``job_id`` settles; return the finished row.
 
     The row is re-read after the wait: a status CAS and the batch body are
@@ -117,15 +123,15 @@ async def run_seeded_scripted_job(
     root_url: str,
     policy: PolicyLike,
     execute,
-    on_seeded: Callable[[Any, Any], None] | None = None,
-    **seed: Any,
+    on_seeded: Callable[[object, object], None] | None = None,
+    **kw: Unpack[_SeedJobKwargs],
 ):
     """Seed a row the way a crash left it, then drive it to terminal.
 
     Recovery tests vary engine answer, row shape and ending -- one of the
     widest repeated lines; ``on_seeded`` mutates the row write-path refuses."""
     return await run_seeded_job(
-        _seed_job(job_store, root_url, policy, on_seeded=on_seeded, **seed), job_store, execute
+        _seed_job(job_store, root_url, policy, on_seeded=on_seeded, **kw), job_store, execute
     )
 
 
@@ -147,7 +153,7 @@ def job_limits(max_depth: int = 2, max_pages: int = 0, **extra) -> PolicyLike:
 
     Restated inline, two runner tests capped pages at different depths while
     reading identically; unset limits are filled in by ``_execution_policy``."""
-    limits: dict[str, Any] = {"max_depth": max_depth, "max_pages": max_pages}
+    limits: dict[str, object] = {"max_depth": max_depth, "max_pages": max_pages}
     limits.update(extra)
     return {"limits": limits}
 

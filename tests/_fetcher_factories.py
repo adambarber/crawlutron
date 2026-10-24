@@ -1,13 +1,23 @@
 """Sanctioned fetch fakes; definitions live in the sibling helper modules."""
 
-from typing import Any, cast
+from __future__ import annotations
+
+from collections.abc import Callable
+from typing import TYPE_CHECKING, cast
+
+import pytest
 
 from app.admission.policy import CrawlPolicy
+from app.models.http_fetch_result import HttpFetchResult
 from app.models.http_fetcher import HttpFetcher
 from tests._browser_doubles import _fake_browser
+
+if TYPE_CHECKING:
+    from app.models.crawl_result import EngineCrawlResult
 from tests._crawl_runners import (
     LINKED_PAIR_LIMITS,
     LLM_FORMAT_TEST_HTML,
+    _CrawlHttpKwargs,
     _spawn_fetch,
     build_payload,
     cache_with_etag,
@@ -50,14 +60,14 @@ from tests._policy_factories import canonical
 
 
 async def invoke_http_strategy(
-    monkeypatch: Any,
+    monkeypatch: pytest.MonkeyPatch,
     *,
-    policy: CrawlPolicy | dict[str, Any],
-    resp: Any,
+    policy: CrawlPolicy | dict[str, object],
+    resp: Callable[[object], HttpFetchResult],
     dedupe_patch: bool = False,
     global_concurrency: int | None = None,
     cap_capture: list[int] | None = None,
-) -> Any:
+) -> EngineCrawlResult:
     if dedupe_patch:
         # Lazy on purpose, and the reason is measured: `import trafilatura` costs roughly 400ms because it
         # transitively pulls dateparser, ua_parser, browserforge, onnxruntime, mammoth, lxml and PIL.
@@ -68,10 +78,10 @@ async def invoke_http_strategy(
     def answer(url, _sent_headers, *_):
         return resp(url)
 
-    kwargs: dict[str, Any] = {}
+    fetcher_double = FetcherDouble(answer, record_cap=cap_capture, answer_is_response=True)
+    kwargs: _CrawlHttpKwargs = {}
     if global_concurrency is not None:
         kwargs["global_concurrency"] = global_concurrency
-    fetcher_double = FetcherDouble(answer, record_cap=cap_capture, answer_is_response=True)
     return await run_http_strategy(
         url="http://example.com/",
         policy=policy,
@@ -81,8 +91,12 @@ async def invoke_http_strategy(
 
 
 async def invoke_browser_strategy(
-    monkeypatch: Any, *, policy: CrawlPolicy | dict[str, Any], html: str, text: str = "Hello world"
-) -> Any:
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    policy: CrawlPolicy | dict[str, object],
+    html: str,
+    text: str = "Hello world",
+) -> EngineCrawlResult:
     from app.transport.browser_result import browser_strategy_result
 
     return await browser_strategy_result(

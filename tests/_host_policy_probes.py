@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from collections import defaultdict
 from collections.abc import Mapping, MutableMapping
-from typing import Any
 
 _BLOCKED_URL = "https://blocked.test/secret"
 
@@ -35,7 +34,7 @@ def _refused_result(result) -> bool:
     return result is None
 
 
-def _effects() -> defaultdict[str, list[Any]]:
+def _effects() -> defaultdict[str, list[str]]:
     """An empty recorder for the "this must never be reached" lists: refusal is proven
     by the list staying empty, and a key exists only once something was recorded, so
     the recorder and the consuming assertion cannot drift apart.
@@ -43,12 +42,15 @@ def _effects() -> defaultdict[str, list[Any]]:
     return defaultdict(list)
 
 
-def _record_probe_fetch(effects: MutableMapping[str, list[str]], payload: Mapping[str, Any]) -> None:
+def _record_probe_fetch(effects: MutableMapping[str, list[str]], payload: Mapping[str, object]) -> None:
     """Note a fetch the guard was supposed to prevent, except the blocked URL itself;
     spelled inline, a probe comparing a different value would record every URL and
     the assertion would still pass, since it only ever checked the blocked one.
     """
-    url = getattr(payload, "url", None) or payload.get("url")
+    url = getattr(payload, "url", None)
+    if url is None:
+        raw = payload.get("url")
+        url = raw if isinstance(raw, str) else None
     if url is not None and url != _BLOCKED_URL:
         effects["fetched"].append(url)
 
@@ -66,7 +68,7 @@ async def _assert_refused(awaitable, effects: Mapping[str, list[str]]) -> None:
     assert all(not values for values in effects.values())
 
 
-def _blocked_records() -> list[dict[str, Any]]:
+def _blocked_records() -> list[dict[str, object]]:
     """One retained crawl record whose only page was blocked."""
     return [
         {

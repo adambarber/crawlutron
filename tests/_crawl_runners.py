@@ -3,18 +3,19 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, TypedDict, Unpack
 from urllib.parse import urlparse
 
 from app.admission.policy import read_policy
 from app.models.host_policy import HostPolicy
+from app.models.http_fetch_result import HttpFetchResult
 from app.orchestration.engine import crawl_request
 from app.transport.cache import HttpCache
-from app.transport.content_cache import ContentCache
+from app.transport.content_cache import CONTENT_CACHE_MAX_TOTAL_BYTES, ContentCache
 from app.transport.fetchers import default_http_fetcher
 from app.transport.strategy_request import StrategyRequest
 from app.vocabulary.strategies import HTTP_DECLARED_CRAWLER
-from tests._fetch_doubles import site_fetcher
+from tests._fetch_doubles import PageData, PageMap, site_fetcher
 from tests._fetch_scripted import tap_fetcher
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY, canonical
 
@@ -28,13 +29,28 @@ if TYPE_CHECKING:
     from app.orchestration.scheduler import DomainScheduler
     from app.runtime.pressure_gates import ResourceGate
 
-#: One scripted page: (status, raw body, content type). The fetcher estimates
-#: the type when a page does not declare one; declaring it makes a sitemap.
-PageData = tuple[int, str, str]
-PageMap = dict[str, PageData]
-
 #: The policy limits a scripted crawl is run under, in wire shape.
-Limits = dict[str, Any]
+Limits = dict[str, object]
+
+
+class _CrawlPayloadKwargs(TypedDict, total=False):
+    """The limit knobs :func:`crawled_result` forwards to ``make_crawl_payload``;
+    mypy checks the keys against that function's own signature, so a rename
+    fails here and not as a silent default at one caller."""
+
+    strategies: Sequence[str]
+    timeout_seconds: int
+    max_retries: int
+    max_discovered_links: int
+
+
+class _CrawledRunKwargs(TypedDict, total=False):
+    """The run keywords :func:`crawled_urls` forwards: the two knobs a recursive
+    test varies. ``url`` is an explicit parameter, not a bag key -- a url/limits/
+    policy record would restate the request models' field set (#412)."""
+
+    limits: Limits
+    policy: dict[str, object]
 
 
 def make_crawl_payload(
@@ -44,9 +60,9 @@ def make_crawl_payload(
     timeout_seconds: int = 10,
     max_retries: int = 0,
     max_discovered_links: int = 50,
-    **extra: Any,
-) -> dict[str, Any]:
-    payload: dict[str, Any] = {
+    **extra: object,
+) -> dict[str, object]:
+    payload: dict[str, object] = {
         "url": url,
         "policy": {
             "strategies": strategies if strategies is not None else [HTTP_DECLARED_CRAWLER],
@@ -67,17 +83,20 @@ def build_payload(
     urls: Sequence[str] | None = None,
     strategies: Sequence[str] | None = None,
     limits: Limits | None = None,
-    **extra: Any,
-) -> dict[str, Any]:
-    payload: dict[str, Any] = {}
+    **extra: object,
+) -> dict[str, object]:
+    payload: dict[str, object] = {}
     if url:
         payload["url"] = url
     if urls:
         payload["urls"] = urls
+    policy_block: dict[str, object] = {}
     if strategies is not None:
-        payload["policy"] = {"strategies": strategies}
+        policy_block["strategies"] = strategies
     if limits is not None:
-        payload.setdefault("policy", {})["limits"] = limits
+        policy_block["limits"] = limits
+    if policy_block:
+        payload["policy"] = policy_block
     payload.update(extra)
     return payload
 
@@ -109,7 +128,7 @@ async def crawled_results(
     *,
     url: str = "http://example.com/",
     limits: Limits | None = None,
-    policy: dict[str, Any] | None = None,
+    policy: dict[str, object] | None = None,
     spill_path: str | None = None,
     content_cache: ContentCache | None = None,
     calls: list[str] | None = None,
@@ -119,7 +138,7 @@ async def crawled_results(
 
     Payload, fetcher and cache wiring are stated once so a hand-rolled call
     cannot differ from a routed one; ``limits`` is the limits sub-mapping."""
-    body: dict[str, Any] = {"limits": dict(limits or {}), **(policy or {})}
+    body: dict[str, object] = {"limits": dict(limits or {}), **(policy or {})}
     fetcher = tap_fetcher(site_fetcher(pages), calls) if calls is not None else site_fetcher(pages)
     return await crawl_request(
         {"url": url, "policy": body},
@@ -131,19 +150,21 @@ async def crawled_results(
     )
 
 
-async def crawled_urls(pages: PageMap, **kwargs: Any) -> list[str]:
+async def crawled_urls(
+    pages: PageMap, *, url: str = "http://example.com/", **kw: Unpack[_CrawledRunKwargs]
+) -> list[str]:
     """:func:`crawled_results` projected to the crawled URLs, in crawl order.
 
     Order is crawl order (BFS), which a caller may depend on; a caller that
     only asserts membership wraps this in ``set()``.
     """
-    out = await crawled_results(pages, **kwargs)
+    out = await crawled_results(pages, url=url, **kw)
     # Projecting it as `str | None` would push that possibility onto every caller, and a caller comparing a
     # `str | None` to a canonical URL is the comparison that quietly stops meaning anything.
     return [r.normalized_url.raw for r in out["results"] if r.normalized_url is not None]
 
 
-def site_linking_to(*paths: str, bodies: dict[str, str] | None = None) -> dict[str, Any]:
+def site_linking_to(*paths: str, bodies: dict[str, str] | None = None) -> PageMap:
     """A fake site: an index linking to each of ``paths``, plus a page per path.
 
     A test names the children it wants; depth, cap and scope stay with the
@@ -171,35 +192,31 @@ def cache_with_etag(url: str, etag: str = "v1") -> HttpCache:
 async def crawled_result(
     url: str,
     *,
-    policy: CrawlPolicy | dict[str, Any] | None = None,
-    strategies: Sequence[str] | None = None,
+    policy: CrawlPolicy | dict[str, object] | None = None,
     http_fetcher: HttpFetcher | None = None,
     browser_worker: CrawlWorker | None = None,
     cache: HttpCache | None = None,
     content_cache: ContentCache | None = None,
-    **payload_kwargs: Any,
+    **payload: Unpack[_CrawlPayloadKwargs],
 ) -> EngineCrawlResult:
     """The one result a real ``crawl_request`` returns for ``url``.
 
     The single-URL sibling of :func:`crawled_results`: wiring plus the
     ``results[0]`` projection stated once."""
-    payload = (
-        {"url": url, "policy": policy}
-        if policy is not None
-        else make_crawl_payload(url, strategies=strategies, **payload_kwargs)
-    )
-    kwargs: dict[str, Any] = {"cache": HttpCache() if cache is None else cache}
-    if http_fetcher is not None:
-        kwargs["http_fetcher"] = http_fetcher
-    if browser_worker is not None:
-        kwargs["browser_worker"] = browser_worker
-    if content_cache is not None:
-        kwargs["content_cache"] = content_cache
-    return (await crawl_request(payload, **kwargs))["results"][0]
+    wire = {"url": url, "policy": policy} if policy is not None else make_crawl_payload(url, **payload)
+    return (
+        await crawl_request(
+            wire,
+            cache=HttpCache() if cache is None else cache,
+            http_fetcher=http_fetcher,
+            browser_worker=browser_worker,
+            content_cache=content_cache,
+        )
+    )["results"][0]
 
 
 async def run_crawl_async(
-    payload: dict[str, Any], *, cache: HttpCache | None = None, browser_worker: CrawlWorker | None = None
+    payload: dict[str, object], *, cache: HttpCache | None = None, browser_worker: CrawlWorker | None = None
 ) -> ProducerEnvelope:
     if cache is None:
         cache = HttpCache()
@@ -233,7 +250,7 @@ async def run_chain(
     fetcher: HttpFetcher | None = None,
     *,
     cffi_fetcher: HttpFetcher | None = None,
-    policy: CrawlPolicy | dict[str, Any],
+    policy: CrawlPolicy | dict[str, object],
     scheduler: DomainScheduler | None = None,
     browser_worker: CrawlWorker | None = None,
 ) -> EngineCrawlResult:
@@ -262,7 +279,7 @@ async def run_chain(
 
 async def run_cached_twice(
     url: str,
-    policy: CrawlPolicy | dict[str, Any],
+    policy: CrawlPolicy | dict[str, object],
     fetcher: HttpFetcher,
     cache: HttpCache,
     content_cache: ContentCache,
@@ -283,30 +300,47 @@ def clocked_cache(
     *,
     default_ttl: float = 1,
     clock_start: float = 1000.0,
-    **settings: Any,
+    max_entries: int = 10000,
+    max_total_bytes: int | None = CONTENT_CACHE_MAX_TOTAL_BYTES,
 ) -> tuple[ContentCache, list[float]]:
     """A cache over ``directory`` reading time from a handle the caller advances.
 
     Expiry is the subject of most of these tests, so a movable clock handle is
     returned beside the cache -- no site declares a list and a lambda over it."""
     clock = [clock_start]
-    return ContentCache(directory, default_ttl=default_ttl, clock=lambda: clock[0], **settings), clock
+    return (
+        ContentCache(
+            directory,
+            default_ttl=default_ttl,
+            clock=lambda: clock[0],
+            max_entries=max_entries,
+            max_total_bytes=max_total_bytes,
+        ),
+        clock,
+    )
 
 
 def make_seeded_cache(
-    directory: str, *keys: str, value: Any = None, **settings: Any
+    directory: str,
+    *keys: str,
+    value: object = None,
+    default_ttl: float = 1,
+    max_entries: int = 10000,
+    max_total_bytes: int | None = CONTENT_CACHE_MAX_TOTAL_BYTES,
 ) -> tuple[ContentCache, list[float]]:
     """:func:`clocked_cache` holding one entry per key.
 
     Seeding + a clock are the two halves of "an entry that expires"; a test
     needing both used to write down directory, TTL, clock list and entry."""
-    cache, clock = clocked_cache(directory, **settings)
+    cache, clock = clocked_cache(
+        directory, default_ttl=default_ttl, max_entries=max_entries, max_total_bytes=max_total_bytes
+    )
     for key in keys:
         cache.set(key, {"data": "1"} if value is None else value)
     return cache, clock
 
 
-def _spawn_fetch(fn: Callable[[object], Any]) -> Any:
+def _spawn_fetch(fn: Callable[[object], HttpFetchResult]) -> HttpFetchResult:
     from tests.helpers.server import spawn_server
 
     server = spawn_server()
@@ -317,7 +351,7 @@ def _spawn_fetch(fn: Callable[[object], Any]) -> Any:
 
 
 def strategy_request(
-    url: str, policy: CrawlPolicy | dict[str, Any], strategy: CrawlStrategyName
+    url: str, policy: CrawlPolicy | dict[str, object], strategy: CrawlStrategyName
 ) -> StrategyRequest:
     """The page identity these factories hand the real strategy entry points.
 
@@ -332,24 +366,24 @@ def strategy_request(
     )
 
 
+class _CrawlHttpKwargs(TypedDict, total=False):
+    """The ``http_strategy_result`` keywords a scripted run varies."""
+
+    cache: HttpCache
+    content_cache: ContentCache
+    caller_validators: dict[str, str]
+    robots_sitemaps: list[str]
+    global_concurrency: int
+
+
 async def run_http_strategy(
     url: str,
-    policy: CrawlPolicy | dict[str, Any],
+    policy: CrawlPolicy | dict[str, object],
     http_fetcher: HttpFetcher,
-    cache: HttpCache | None = None,
-    content_cache: ContentCache | None = None,
-    **extra: Any,
+    **kwargs: Unpack[_CrawlHttpKwargs],
 ) -> EngineCrawlResult:
     from app.transport.http import http_strategy_result
 
-    kwargs: dict[str, Any] = {}
-    if cache is not None:
-        kwargs["cache"] = cache
-    if content_cache is not None:
-        kwargs["content_cache"] = content_cache
     return await http_strategy_result(
-        request=strategy_request(url, policy, HTTP_DECLARED_CRAWLER),
-        http_fetcher=http_fetcher,
-        **kwargs,
-        **extra,
+        request=strategy_request(url, policy, HTTP_DECLARED_CRAWLER), http_fetcher=http_fetcher, **kwargs
     )

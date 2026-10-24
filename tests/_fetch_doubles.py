@@ -21,6 +21,11 @@ SCOPE_KEEP_DROP_PAGES = {
     "/drop/y": (200, "<html>d</html>", "text/html"),
 }
 
+#: One scripted page: (status, raw body, content type). The fetcher estimates
+#: the type when a page does not declare one; declaring it makes a sitemap.
+PageData = tuple[int, str, str]
+PageMap = dict[str, PageData]
+
 
 def make_fetch(
     status=200,

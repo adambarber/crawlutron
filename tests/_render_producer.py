@@ -5,7 +5,7 @@ arguments (default settings, a worker) next to the per-test payload.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from tests._browser_doubles import _fake_browser
 
@@ -13,7 +13,7 @@ if TYPE_CHECKING:
     from app.models.result_record import RenderEnvelope
 
 
-async def render_stub_request(payload: dict[str, Any], *, worker=None) -> RenderEnvelope:
+async def render_stub_request(payload: dict[str, object], *, worker=None) -> RenderEnvelope:
     """The envelope ``/v1/render`` produces for `payload`, with a worker defaulting
     to success on a fixed body -- the shape an endpoint test asserts on; pass
     ``worker`` for scenarios that are about the worker itself.

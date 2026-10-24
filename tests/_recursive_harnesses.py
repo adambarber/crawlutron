@@ -8,7 +8,7 @@ from __future__ import annotations
 import asyncio
 import inspect
 from collections.abc import Awaitable, Callable
-from typing import TYPE_CHECKING, Any, NamedTuple
+from typing import TYPE_CHECKING, NamedTuple
 
 from app.models.crawl_task import CrawlTask
 from app.orchestration.recursive import run_recursive_crawl
@@ -80,7 +80,7 @@ async def drive_recursive_crawl(
     gate_scale: float = 1.0,
     admission: WeightedAdmission | None = None,
     host_policy: HostPolicy | None = None,
-    **overrides: Any,
+    **overrides: object,
 ) -> RecursiveRun:
     """Run one recursive crawl with the uncontested defaults filled in; every keyword
     is bound against ``run_recursive_crawl``'s own signature first, so this is derived
@@ -117,7 +117,7 @@ def _crawl_defaults(
     *,
     robots_disallowed: Callable[[CrawlTask], Awaitable[EngineCrawlResult]] | None,
     sitemap_seeds: Callable[[], Awaitable[list[NormalizedUrl]]] | None,
-) -> dict[str, Any]:
+) -> dict[str, object]:
     """The values for the keywords a crawl test is not about: factories, not values,
     so ``shutdown_event`` is a fresh ``Event`` per call -- a shared one carries
     ``is_set()`` state between tests and would stop a crawl that should have run.

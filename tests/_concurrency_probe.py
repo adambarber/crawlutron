@@ -7,12 +7,20 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Callable, Iterable
-from typing import Any
+from typing import NamedTuple
 
 _SYNC_RESULT = {"request_id": "sync", "results": [], "submitted_count": 0, "policy_schema_version": ""}
 
 
-def make_blocking_callable(*, result: Any):
+class BlockHandle(NamedTuple):
+    """The parked call and the two events that steer it."""
+
+    blocker: Callable[..., object]
+    entered: asyncio.Event
+    released: asyncio.Event
+
+
+def make_blocking_callable(*, result: object) -> BlockHandle:
     """Return ``(callable, entered, released)``: the callable signals ``entered``
     then parks until ``released``, both of which the caller uses to steer it."""
     entered = asyncio.Event()
@@ -23,14 +31,14 @@ def make_blocking_callable(*, result: Any):
         await released.wait()
         return result
 
-    return _block, entered, released
+    return BlockHandle(_block, entered, released)
 
 
-def block_execute_crawl(monkeypatch, module) -> tuple[Callable[..., Any], asyncio.Event, asyncio.Event]:
+def block_execute_crawl(monkeypatch, module) -> BlockHandle:
     """Stub a module's ``execute_crawl`` with a parked call; drives a sync-crawl probe."""
     blocker, entered, released = make_blocking_callable(result=_SYNC_RESULT)
     monkeypatch.setattr(module, "execute_crawl", blocker)
-    return blocker, entered, released
+    return BlockHandle(blocker, entered, released)
 
 
 async def assert_second_concurrent_refused(
@@ -38,7 +46,7 @@ async def assert_second_concurrent_refused(
     *,
     url: str,
     headers: dict[str, str] | None,
-    body: dict[str, Any],
+    body: dict[str, object],
     entered: asyncio.Event,
     released: asyncio.Event,
     first_ok: Iterable[int],
