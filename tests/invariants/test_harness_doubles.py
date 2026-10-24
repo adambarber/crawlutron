@@ -52,14 +52,15 @@ def _decorator_name(decorator: ast.expr) -> str:
 
 
 def _record_shape(node: ast.ClassDef) -> frozenset[str] | None:
-    """The field names of a class-statement dataclass or TypedDict, or None.
+    """Field names of a dataclass, TypedDict or pydantic BaseModel class, or None.
 
     Inherited fields are excluded on purpose: a subclass REUSES the production
     declaration, which is the desired direction, not a second copy of it.
     """
     is_dataclass = any(_decorator_name(d) == "dataclass" for d in node.decorator_list)
-    is_typed_dict = any(getattr(base, "id", getattr(base, "attr", "")) == "TypedDict" for base in node.bases)
-    if not is_dataclass and not is_typed_dict:
+    is_typed_dict = any(_base_name(b) == "TypedDict" for b in node.bases)
+    is_pydantic = any(_base_name(b) == "BaseModel" for b in node.bases)
+    if not is_dataclass and not is_typed_dict and not is_pydantic:
         return None
     fields: set[str] = set()
     for stmt in node.body:
@@ -67,7 +68,17 @@ def _record_shape(node: ast.ClassDef) -> frozenset[str] | None:
             fields.add(stmt.target.id)
         elif isinstance(stmt, ast.Assign):
             fields.update(t.id for t in stmt.targets if isinstance(t, ast.Name))
+    fields -= {name for name in fields if name.startswith("model_")}
     return frozenset(fields) if len(fields) >= 2 else None
+
+
+def _base_name(base: ast.expr) -> str:
+    """The bare name a class base resolves to (``pydantic.BaseModel`` too)."""
+    if isinstance(base, ast.Name):
+        return base.id
+    if isinstance(base, ast.Attribute):
+        return base.attr
+    return ""
 
 
 def _declared_shapes(root: pathlib.Path) -> dict[frozenset[str], list[str]]:
@@ -112,18 +123,19 @@ def test_a_tests_module_never_declares_a_name_app_models_declares() -> None:
 
 
 def test_a_tests_module_never_mirrors_a_production_field_shape() -> None:
-    """The #112 shape gate: a tests/ record whose full field set equals a
-    production record's is a double under another name. Equality of the whole
-    set is the trigger, so classes sharing a field or two stay silent.
+    """A tests/ record CONTAINING a production field set is a re-declaration.
+
+    Superset-or-equal fires (a grown double is still the copy); a subset stays
+    silent. Governed: dataclass, TypedDict, pydantic BaseModel.
     """
     model_shapes = _declared_shapes(REPO_ROOT / "app" / "models")
     assert model_shapes, "the shape census came back empty; the detector would govern nothing"
-    findings = {
-        tuple(sorted(shape)): (modules, model_shapes[shape])
-        for shape, modules in _declared_shapes(REPO_ROOT / "tests").items()
-        if shape in model_shapes
-    }
-    assert not findings, f"harness records mirroring app/models/ shapes under other names: {findings}"
+    findings: dict[tuple[str, ...], tuple[list[str], list[str]]] = {}
+    for shape, modules in _declared_shapes(REPO_ROOT / "tests").items():
+        for model_shape, model_modules in model_shapes.items():
+            if shape >= model_shape:
+                findings[tuple(sorted(shape))] = (modules, model_modules)
+    assert not findings, f"harness records containing app/models/ field sets: {findings}"
 
 
 def test_the_admission_helper_declares_the_production_known_set() -> None:
