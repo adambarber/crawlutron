@@ -19,6 +19,7 @@ SCOPE_OPENING_NODES: tuple[type[ast.AST], ...] = (
     ast.With,
     ast.AsyncWith,
     ast.Try,
+    ast.TryStar,
     ast.ExceptHandler,
 )
 
@@ -31,12 +32,23 @@ BODY_OWNING_NODES: tuple[type[ast.AST], ...] = (
     ast.ClassDef,
 ) + SCOPE_OPENING_NODES
 
+# The TypeGuard unions spell the same kinds once, as aliases: a second
+# hand-written union at each guard would be two lists that can stop agreeing.
+ScopeOpeningNode = (
+    ast.If
+    | ast.For
+    | ast.AsyncFor
+    | ast.While
+    | ast.With
+    | ast.AsyncWith
+    | ast.Try
+    | ast.TryStar
+    | ast.ExceptHandler
+)
+BodyOwningNode = ast.Module | ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef | ScopeOpeningNode
 
-def is_scope_opener(
-    node: ast.AST,
-) -> TypeGuard[
-    ast.If | ast.For | ast.AsyncFor | ast.While | ast.With | ast.AsyncWith | ast.Try | ast.ExceptHandler
-]:
+
+def is_scope_opener(node: ast.AST) -> TypeGuard[ScopeOpeningNode]:
     """Whether ``node`` is a scope-opening node, narrowed to the kinds that are.
 
     The narrowed companion to :data:`SCOPE_OPENING_NODES`, for walks that read
@@ -45,22 +57,7 @@ def is_scope_opener(
     return isinstance(node, SCOPE_OPENING_NODES)
 
 
-def is_body_owner(
-    node: ast.AST,
-) -> TypeGuard[
-    ast.Module
-    | ast.FunctionDef
-    | ast.AsyncFunctionDef
-    | ast.ClassDef
-    | ast.If
-    | ast.For
-    | ast.AsyncFor
-    | ast.While
-    | ast.With
-    | ast.AsyncWith
-    | ast.Try
-    | ast.ExceptHandler
-]:
+def is_body_owner(node: ast.AST) -> TypeGuard[BodyOwningNode]:
     """Whether ``node`` is a node that owns a body, narrowed to the kinds that do.
 
     The predicate a walk needs rather than a bare ``isinstance``; each kind is named

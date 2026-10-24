@@ -367,6 +367,14 @@ def test_doc_symbol_detector_bites(tmp_path):
     offenders = _doc_symbol_offenders(root=tmp_path, documents=["CONTRIBUTING.md"], symbols=symbols)
     assert any("module does not exist" in hit for hit in offenders), offenders
     assert any("names no app symbol" in hit for hit in offenders), offenders
+    (tmp_path / "app_orchestration_ghost.md").write_text(
+        "See ``app/orchestration.robots_parse.no_such_symbol_xyz``.\n",
+        encoding="utf-8",
+    )
+    offenders = _doc_symbol_offenders(
+        root=tmp_path, documents=["app_orchestration_ghost.md"], symbols=symbols
+    )
+    assert any("symbol not defined in" in hit for hit in offenders), offenders
 
 
 def test_doc_symbol_detector_spared_clean_references(tmp_path):

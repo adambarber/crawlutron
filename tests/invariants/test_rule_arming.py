@@ -222,6 +222,19 @@ def _rules() -> list[tuple[str, Rule]]:
     return sorted(found.items())
 
 
+def test_ast_derivation_and_import_derivation_agree() -> None:
+    """The two rule inventories are the same set of rules.
+
+    If they diverge, one derivation misses rules the other sees.
+    """
+    ast_names = {name for name, _body, _constants in declared_rules()}
+    import_names = {label.rsplit(".", 1)[1] for label, _rule in _rules()}
+    assert ast_names == import_names, (
+        f"AST-only rules: {sorted(ast_names - import_names)}; "
+        f"import-only rules: {sorted(import_names - ast_names)}"
+    )
+
+
 def test_every_rule_bites() -> None:
     """Every rule's proof thunk executes and fires, naming its marker.
 

@@ -58,3 +58,4 @@ def test_except_handler_opens_a_scope_and_match_does_not() -> None:
     break on it, and the metrics budgets are measured without it."""
     assert ast.ExceptHandler in SCOPE_OPENING_NODES
     assert ast.Match not in SCOPE_OPENING_NODES
+    assert ast.TryStar in SCOPE_OPENING_NODES
