@@ -10,10 +10,10 @@ import argparse
 import json
 import re
 import sys
-from typing import Any
 
 import yaml
 
+from app.models.jscpd_report import JscpdDuplicate
 from scripts import _jscpd_pair_resolution as resolver
 
 # Re-exports: the contract surface the gate's own suite reads off this module.
@@ -100,7 +100,7 @@ def _parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def _footprint(duplicate: dict[str, Any]) -> int:
+def _footprint(duplicate: JscpdDuplicate) -> int:
     return min(
         int(duplicate["firstFile"]["end"]) - int(duplicate["firstFile"]["start"]) + 1,
         int(duplicate["secondFile"]["end"]) - int(duplicate["secondFile"]["start"]) + 1,

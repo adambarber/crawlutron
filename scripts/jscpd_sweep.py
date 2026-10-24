@@ -13,22 +13,28 @@ import json
 import textwrap
 from pathlib import Path
 
+from app.models.jscpd_report import JscpdDuplicate
 from scripts import jscpd_gate as gate
 from scripts.ast_scopes import SCOPE_OPENING_NODES
 
 
-def _scan(root: str, min_lines: int, min_tokens: int) -> tuple[str, list[dict]]:
+def _scan(root: str, min_lines: int, min_tokens: int) -> tuple[str, list[JscpdDuplicate]]:
     """One jscpd invocation at one floor, tagged with the root it scanned.
 
     The invocation IS the gate's ``jscpd_report`` (no second copy of the command
     line); the sweep adds the root tag, since jscpd reports paths root-relative.
     """
     report = gate.jscpd_report(root, (min_lines, min_tokens))
-    duplicates = (report or {}).get("duplicates") or []
-    for duplicate in duplicates:
-        for side in ("firstFile", "secondFile"):
-            duplicate[side]["tree"] = root
-    return root, duplicates
+    duplicates: list[JscpdDuplicate] = report["duplicates"] if report else []
+    swept: list[JscpdDuplicate] = [
+        {
+            **duplicate,
+            "firstFile": {**duplicate["firstFile"], "tree": root},
+            "secondFile": {**duplicate["secondFile"], "tree": root},
+        }
+        for duplicate in duplicates
+    ]
+    return root, swept
 
 
 # --- what counts as duplication worth removing ---
@@ -92,14 +98,14 @@ def classify(fragment: str) -> str:
 _span = gate._footprint
 
 
-def sweep(min_lines: int, max_lines: int, min_tokens: int, max_tokens: int) -> dict:
+def sweep(min_lines: int, max_lines: int, min_tokens: int, max_tokens: int) -> SweepResults:
     floors = [
         (lines, tokens)
         for lines in range(min_lines, max_lines + 1)
         for tokens in range(min_tokens, max_tokens + 1)
     ]
     roots = list(gate.PROFILE_PATHS["all"])
-    results: dict[tuple[int, int], dict[str, list[dict]]] = {}
+    results: SweepResults = {}
     with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
         futures = {
             pool.submit(_scan, root, lines, tokens): (root, lines, tokens)
@@ -113,7 +119,7 @@ def sweep(min_lines: int, max_lines: int, min_tokens: int, max_tokens: int) -> d
     return results
 
 
-def _matrix(results: dict) -> str:
+def _matrix(results: SweepResults) -> str:
     """Pairs per floor, plus duplicated lines -- the staircase in full."""
     roots = sorted(results[sorted(results)[0]])
     header = " ".join(f"{root:>{max(len(root), 6)}}" for root in roots)
@@ -127,7 +133,7 @@ def _matrix(results: dict) -> str:
     return "\n".join(out)
 
 
-def _binding(results: dict) -> str:
+def _binding(results: SweepResults) -> str:
     """Which limit is binding the frontier down per step.
 
     Raising tokens removes long/token-poor pairs; raising lines removes dense/short pairs --
@@ -158,17 +164,17 @@ def _binding(results: dict) -> str:
     return "\n".join(out)
 
 
-def _all(by_root: dict) -> list[dict]:
+def _all(by_root: dict[str, list[JscpdDuplicate]]) -> list[JscpdDuplicate]:
     return [duplicate for duplicates in by_root.values() for duplicate in duplicates]
 
 
-def _first_appearance(results: dict, floors: list) -> list[tuple[tuple[int, int], str, dict]]:
+def _first_appearance(results: SweepResults, floors: list[tuple[int, int]]) -> AppearanceList:
     """The cheapest floor at which each file first holds a pair.
 
     The answer to "where is the real duplication hiding": a file whose first
     appearance is at 2/20 holds a repetition the shipped 4/39 floor cannot see.
     """
-    seen: dict[str, tuple[tuple[int, int], dict]] = {}
+    seen: dict[str, tuple[tuple[int, int], JscpdDuplicate]] = {}
     for floor in floors:
         for duplicate in _all(results[floor]):
             for side in ("firstFile", "secondFile"):
@@ -181,9 +187,9 @@ def _first_appearance(results: dict, floors: list) -> list[tuple[tuple[int, int]
     ]
 
 
-AppearanceList = list[tuple[tuple[int, int], str, dict]]
+AppearanceList = list[tuple[tuple[int, int], str, JscpdDuplicate]]
 """One record per file: (floor, file key, the duplicate that appeared)."""
-SweepResults = dict[tuple[int, int], dict[str, list[dict]]]
+SweepResults = dict[tuple[int, int], dict[str, list[JscpdDuplicate]]]
 """The sweep: per floor, per root, the duplicate records found there."""
 
 

@@ -29,10 +29,6 @@ _ANY = "bare Any"
 # "bare Any" is #193's baseline: 161 -> 159 (#419, doors; JsonValue).
 _BUDGETS = {_METRIC: 129, _ANY: 159}
 
-#: The scripts/ tree, which #293 brings under this gate for the first time; its
-#: measured baseline is declared first (value-ratchet rule).
-_SCRIPTS_BUDGETS = {_METRIC: 16, _ANY: 0}
-
 # A record is anything whose key set a caller might depend on.
 _RECORD_ROOTS = frozenset(
     {"dict", "Dict", "list", "List", "tuple", "Tuple", "Mapping", "MutableMapping", "Sequence"}
@@ -137,7 +133,7 @@ def _gate(root: Path) -> tuple[Callable[[str], list[Offender]], Callable[[str], 
     return work, measure
 
 
-scripts_offenders, scripts_measurement = _gate(REPO_ROOT / "scripts")
+scripts_offenders, _scripts_measurement = _gate(REPO_ROOT / "scripts")
 
 
 def report() -> None:
@@ -170,24 +166,22 @@ test_collection_is_deterministic = collection_is_deterministic(
 )
 
 
-_SCRIPTS_REMEDY = (
-    "scripts/ was outside the typing budget before #293; its baseline is the 16 "
-    "undeclared records it shipped with. Declare, or name the system type, and lower it."
+_SCRIPTS_SEALED = (
+    "undeclared record: the scripts tree is sealed at zero (#389) -- declare the "
+    "record (TypedDict/model, see scripts/jscpd_report_types.py) or name the "
+    "system type it honestly is: "
 )
 
 
-test_scripts_budget_is_not_exceeded = budget_not_exceeded(
-    _SCRIPTS_BUDGETS,
-    (scripts_measurement, scripts_offenders),
-    subject="scripts typing",
-    remedy=_SCRIPTS_REMEDY,
-)
-test_scripts_budget_is_tight = budget_is_tight(
-    _SCRIPTS_BUDGETS, (scripts_measurement, scripts_offenders), subject="scripts typing"
-)
-test_scripts_collection_is_deterministic = collection_is_deterministic(
-    _SCRIPTS_BUDGETS, (scripts_measurement, scripts_offenders), subject="scripts typing"
-)
+def test_zero_undeclared_records_in_scripts() -> None:
+    """scripts/ is sealed at zero: no budget row survives (#389).
+
+    The classifier is the chokepoint -- an undeclared record or a bare Any is a
+    hard failure that names its file and line; no sanction surface survives.
+    """
+    found = scripts_offenders(_METRIC) + scripts_offenders(_ANY)
+    assert not found, _SCRIPTS_SEALED + "; ".join(str(o) for o in found)
+    _assert_undeclared_record_fires()
 
 
 def _assert_undeclared_record_fires() -> None:
@@ -199,10 +193,9 @@ def _assert_undeclared_record_fires() -> None:
 
 
 def test_the_scripts_typing_budget_reaches_scripts() -> None:
-    """The H1 reach: the typing budget now sweeps scripts/, which had none.
-    The real tree shows it (16 records are counted, not invisible) and the shared
-    classifier fires on a synthetic undeclared record, so one in scripts/ fires."""
-    assert scripts_measurement(_METRIC) == 16, "the scripts typing budget stopped reaching the real tree"
+    """The H1 reach, kept as the sealed gate's bite proof: the shared classifier
+    fires on a synthetic undeclared record, so one introduced into scripts/ fails
+    the sealed zero assertion above with its file and line named."""
     _assert_undeclared_record_fires()
 
 

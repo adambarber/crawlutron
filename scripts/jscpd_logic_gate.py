@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 import sys
 
+from app.models.jscpd_report import JscpdDuplicate, JscpdReport
 from scripts import _jscpd_pair_resolution as resolver
 from scripts.jscpd_sweep import classify
 
@@ -30,11 +31,11 @@ def helper_surface() -> tuple[str, ...]:
     return ("app", "scripts") + _helper_files()
 
 
-def _is_cross_file(duplicate: dict) -> bool:
+def _is_cross_file(duplicate: JscpdDuplicate) -> bool:
     return duplicate["firstFile"]["name"] != duplicate["secondFile"]["name"]
 
 
-def _logic_clones(report: dict) -> list[dict]:
+def _logic_clones(report: JscpdReport) -> list[JscpdDuplicate]:
     return [
         duplicate
         for duplicate in report.get("duplicates") or []

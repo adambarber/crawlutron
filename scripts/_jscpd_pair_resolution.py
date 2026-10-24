@@ -6,8 +6,9 @@ import subprocess
 import tempfile
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from typing import cast
 
+from app.models.jscpd_report import JscpdDuplicate, JscpdLocation, JscpdReport
 from scripts.executables import require_repo_tool
 
 SERVICE_ROOT = Path(__file__).resolve().parents[1]
@@ -118,8 +119,11 @@ def _location_pair(entries: list[LocationKey]) -> LocationPair:
     return (first, second)
 
 
-def _location(container: dict[str, Any], side: str, path_key: str) -> LocationKey:
-    return (str(container[side][path_key]), int(container[side]["start"]), int(container[side]["end"]))
+def _location_key(location: JscpdLocation) -> LocationKey:
+    """A report side as a key; the coercions harden the boundary against a producer
+    that strayed from the declared ints.
+    """
+    return (str(location["name"]), int(location["start"]), int(location["end"]))
 
 
 def _scanned_roots(profile: str) -> tuple[str, ...]:
@@ -134,13 +138,13 @@ def _resolve_roots(name: str, profile: str) -> tuple[str, ...]:
     return tuple(root for root in _scanned_roots(profile) if _IS_FILE(SERVICE_ROOT / root / name))
 
 
-def _pair_id(duplicate: dict[str, Any], root: str) -> LocationPair:
+def _pair_id(duplicate: JscpdDuplicate, root: str) -> LocationPair:
     """Where jscpd says a clone is, in repository-relative terms: jscpd's ``name`` is
     root-relative, so the root is put back on -- otherwise ``models.py`` from ``app/``
     and ``tests/`` collapse into the same string.
     """
     return _location_pair(
-        [_scoped(root, _location(duplicate, side, "name")) for side in ("firstFile", "secondFile")]
+        [_scoped(root, _location_key(duplicate[side])) for side in ("firstFile", "secondFile")]
     )
 
 
@@ -157,7 +161,7 @@ def jscpd_report(
     threshold: int = 0,
     fail_on_empty: bool = False,
     paths: tuple[str, ...] = (),
-) -> dict[str, Any] | None:
+) -> JscpdReport | None:
     """Run jscpd over one root at one (lines, tokens) floor and parse the report -- the
     ONE place that knows how to invoke jscpd. ``paths`` scans several roots in one
     invocation (the only way to see a spanning clone); ``fail_on_empty`` refuses an empty result.
@@ -188,13 +192,15 @@ def jscpd_report(
         completed = subprocess.run(command, cwd=SERVICE_ROOT, capture_output=True, text=True, check=False)
         report_path = output / "jscpd-report.json"
         if report_path.is_file():
-            return json.loads(report_path.read_text(encoding="utf-8"))
+            # The parse boundary: json.loads returns Any, and the report's shape
+            # is the contract jscpd_report_types declares.
+            return cast(JscpdReport, json.loads(report_path.read_text(encoding="utf-8")))
         if completed.returncode not in (0, 1):
             raise OSError(f"jscpd failed on {root}: {completed.stdout}{completed.stderr}".strip())
         return None
 
 
-def _scan(root: str, floor: tuple[int, int], args: argparse.Namespace) -> dict[str, Any]:
+def _scan(root: str, floor: tuple[int, int], args: argparse.Namespace) -> JscpdReport:
     """One jscpd invocation over one root at one floor, scored as a gate."""
     report = jscpd_report(root, floor, threshold=args.threshold, fail_on_empty=True)
     if report is None:
@@ -202,7 +208,7 @@ def _scan(root: str, floor: tuple[int, int], args: argparse.Namespace) -> dict[s
     return report
 
 
-def _cross_tree_scan(floor: tuple[int, int], args: argparse.Namespace) -> dict[str, Any]:
+def _cross_tree_scan(floor: tuple[int, int], args: argparse.Namespace) -> JscpdReport:
     """Every root in ONE invocation so a pair spanning two of them is visible -- a
     per-root scan names the other root's files relative to the one it was given, so a
     cross-tree fragment is reported by neither. Attributed via ``_resolve_root``.
@@ -219,7 +225,7 @@ def _cross_tree_scan(floor: tuple[int, int], args: argparse.Namespace) -> dict[s
     return report
 
 
-def _spans_trees(duplicate: dict[str, Any], profile: str) -> bool:
+def _spans_trees(duplicate: JscpdDuplicate, profile: str) -> bool:
     """True when the two sides of a pair could resolve to different roots ("could",
     not "must"): a single-root pair was scored per-root already; an unattributable
     multi-root name is kept rather than guessed -- bias toward reporting this blind class.
@@ -235,7 +241,7 @@ def _spans_trees(duplicate: dict[str, Any], profile: str) -> bool:
     return len(first) > 1 or len(second) > 1 or first != second
 
 
-def _cross_pair_id(duplicate: dict[str, Any], profile: str) -> LocationPair:
+def _cross_pair_id(duplicate: JscpdDuplicate, profile: str) -> LocationPair:
     """A cross-tree pair's location, re-prefixed so both sides name their root; ``_scoped``
     cannot do it because a multi-path invocation's name has had its root stripped. A name in
     several roots is reported under each -- and declared locations use the same rule.
