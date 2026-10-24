@@ -6,6 +6,7 @@ from app.models.crawl_job import CrawlJob
 from app.models.crawl_result import CrawlResult, EngineCrawlResult
 from app.models.crawl_strategy_attempt import CrawlStrategyAttempt
 from app.models.discovered_link import DiscoveredLink
+from app.models.host_policy import HostPolicy
 from app.models.normalized_url import NormalizedUrl, admit_or_none
 from app.models.registrable_domain import registrable_domain
 from app.models.render_options import RenderOptions
@@ -197,6 +198,11 @@ class Spill:
 
     def write(self, index: int, result: EngineCrawlResult) -> None:
         self.writes[index] = result
+
+    def load_ordered(self, *, policy: HostPolicy) -> list[EngineCrawlResult]:
+        """Reassembly in write order, as the real sink reads it back out."""
+        del policy
+        return [self.writes[index] for index in sorted(self.writes)]
 
     def close(self) -> None:
         """A spill is closable; a no-op here, the writes are already held in RAM."""

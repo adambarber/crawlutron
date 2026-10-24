@@ -1,12 +1,14 @@
 """ResultSpill.load_ordered single-pass reassembly contract."""
 
 import fcntl
+import inspect
 import os
 import time
 
 from app.orchestration.engine import ResultSpill
+from app.orchestration.spill_sink import SpillSink
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY
-from tests._result_builders import engine_result
+from tests._result_builders import Spill, engine_result
 
 
 class TestLoadOrderedContract:
@@ -43,6 +45,24 @@ class TestLoadOrderedContract:
             assert spill.load_ordered(policy=UNRESTRICTED_HOST_POLICY) == []
         finally:
             spill.close()
+
+
+class TestTheFakeSpillConformsToTheProtocol:
+    """The ``Spill`` double is bound where production binds a ``SpillSink``, so its
+    surface must be the protocol's surface (#369): a member the protocol declares and
+    the double omits is a silent contract drop, invisible until reassembly routes it."""
+
+    def test_every_protocol_member_exists_with_the_protocol_signature(self):
+        for member in ("write", "load_ordered", "close"):
+            proto = inspect.signature(getattr(SpillSink, member))
+            fake = inspect.signature(getattr(Spill, member))
+            assert set(proto.parameters) <= set(fake.parameters), (
+                f"Spill.{member}{fake} drops the protocol's parameters {proto}: the double"
+                " no longer implements the contract it stands in for"
+            )
+
+    def test_the_double_answers_the_call_production_makes(self):
+        assert Spill().load_ordered(policy=UNRESTRICTED_HOST_POLICY) == []
 
 
 class TestSpillGcCadence:
