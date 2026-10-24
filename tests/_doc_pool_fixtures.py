@@ -39,6 +39,7 @@ def _seeded(monkeypatch, *workers: DocWorker, lock=None) -> tuple[DocExtractionP
     held = [pool.acquire(0.1) for _ in workers]
     assert held == list(workers), "the pool grew slots in an order no test asked for"
     for worker in held:
+        assert worker is not None
         pool.release(worker)
     spawner.asked.clear()
     monkeypatch.setattr(docex, "DOC_POOL", pool)

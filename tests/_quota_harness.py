@@ -9,16 +9,24 @@ import asyncio
 import contextlib
 from collections.abc import AsyncIterator, Mapping
 from pathlib import Path
+from typing import TYPE_CHECKING
 
-from fastapi import FastAPI
+from fastapi import APIRouter, FastAPI
 from httpx import AsyncClient
 
 from app.api.caller_concurrency import CallerConcurrencyTracker
+from app.api.dependencies import get_job_store, get_result_store, get_settings, get_shutdown_event
+from app.config.settings import CrawlerSettings
 from app.storage.caller_key_store import CallerKeyStore
 from app.storage.job_store import JobStore
 from app.storage.result_store import CrawlResultStore
 from tests._async_harnesses import serve
 from tests._policy_factories import job_store as make_store
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from fastapi import Request
 
 
 def stores(tmp_path: Path) -> tuple[JobStore, CrawlResultStore, CallerKeyStore]:
@@ -35,7 +43,7 @@ async def keyed_client(
     app: FastAPI,
     *,
     keys: CallerKeyStore,
-    overrides: Mapping[object, object] | None = None,
+    overrides: Mapping[Callable[[Request], object], Callable[[], object]] | None = None,
 ) -> AsyncIterator[AsyncClient]:
     """Configure ``app`` as a keyed service and serve it with an in-process client."""
     app.state.concurrency_tracker = CallerConcurrencyTracker()
@@ -51,29 +59,24 @@ async def keyed_client(
 async def service_client(
     tmp_path: Path,
     *,
-    routers: Mapping[str, object],
+    routers: Mapping[str, APIRouter],
     with_results: bool = False,
 ) -> AsyncIterator[tuple[AsyncClient, JobStore, CallerKeyStore]]:
     """Serve a keyed HTTP client over one register and one key admin and ``routers``.
 
     ``with_results`` also wires a result store and propagates the job store to
     ``app.state`` for the MCP door. Yields the client, job store, and key store."""
-    from app.api.dependencies import get_job_store, get_settings, get_shutdown_event
-    from app.config.settings import CrawlerSettings
-
     job_store, results, keys = stores(tmp_path)
     app = FastAPI()
     for router in routers.values():
         app.include_router(router)
     app.state.job_store = job_store
-    overrides = {
+    overrides: dict[Callable[[Request], object], Callable[[], object]] = {
         get_job_store: lambda: job_store,
         get_settings: lambda: CrawlerSettings.from_mapping({}),
         get_shutdown_event: asyncio.Event,
     }
     if with_results:
-        from app.api.dependencies import get_result_store
-
         app.state.result_store = results
         overrides[get_result_store] = lambda: results
     async with keyed_client(app, keys=keys, overrides=overrides) as client:

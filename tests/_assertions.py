@@ -5,6 +5,7 @@ import inspect
 import json
 import os
 from contextlib import contextmanager
+from typing import Any
 
 import pytest
 
@@ -217,7 +218,7 @@ async def poll_crawl_completion(
     return response
 
 
-async def accepted_crawl(client, payload: dict) -> dict:
+async def accepted_crawl(client, payload: dict[str, Any]) -> dict[str, Any]:
     """POST a crawl that must be accepted for background execution.
 
     Asserts the 202/``accepted`` contract once, so a webhook or status-URL test
@@ -229,7 +230,7 @@ async def accepted_crawl(client, payload: dict) -> dict:
     return body
 
 
-async def completed_crawl(client, payload: dict) -> dict:
+async def completed_crawl(client, payload: dict[str, Any]) -> dict[str, Any]:
     """POST a crawl that must run synchronously and return its response body.
 
     The mirror of :func:`accepted_crawl`: 200 with results inline, so a
@@ -241,7 +242,7 @@ async def completed_crawl(client, payload: dict) -> dict:
 
 async def submit_async_crawl(
     client,
-    payload: dict,
+    payload: dict[str, Any],
     *,
     message: str = "Async crawl did not complete in time",
     on_pending=None,

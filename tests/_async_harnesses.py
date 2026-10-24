@@ -5,7 +5,7 @@ webhook sink); the sink is process-global, so clearing and draining are its."""
 
 import asyncio
 import contextlib
-from collections.abc import AsyncIterator, Sequence
+from collections.abc import AsyncGenerator, AsyncIterator, Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -23,7 +23,7 @@ class CrawlApi:
     client: Any
     base: str
 
-    def payload(self, **overrides: Any) -> dict:
+    def payload(self, **overrides: Any) -> dict[str, Any]:
         """A crawl request for the helper server's root, with ``overrides`` applied.
 
         ``make_crawl_payload`` owns the payload's shape, so this adds only the
@@ -32,7 +32,7 @@ class CrawlApi:
 
         return make_crawl_payload(f"{self.base}/", **overrides)
 
-    def batch_payload(self, paths: Sequence[str], **overrides: Any) -> dict:
+    def batch_payload(self, paths: Sequence[str], **overrides: Any) -> dict[str, Any]:
         """A batch crawl request: ``urls``, and no ``url`` beside it.
 
         The request model takes exactly one of the two, so a batch payload is a
@@ -43,7 +43,7 @@ class CrawlApi:
 
 
 @pytest.fixture
-async def crawl_api(async_client, base_url) -> CrawlApi:
+async def crawl_api(async_client, base_url) -> AsyncGenerator[CrawlApi, None]:
     """An ASGI client, the helper server's origin, and a cleared webhook sink.
 
     Teardown drains the crawls this test started -- a straggler losing its
@@ -84,7 +84,8 @@ async def _drain_running_crawls(*, guard: float = 10.0) -> None:
     # A stale PENDING/RUNNING anonymous row would bleed into the next test's quota; a
     # bounded wait that cannot retire it force-cancels it so none leaks.
     for job_id in acting():
-        job_store.set_status(job_id, JobStatus.CANCELLED, expected={JobStatus.PENDING, JobStatus.RUNNING})
+        pending = frozenset({JobStatus.PENDING, JobStatus.RUNNING})
+        job_store.set_status(job_id, JobStatus.CANCELLED, expected=pending)
 
 
 async def run_loop_rebind_scenario(get_client, *, guard: float | None = None):

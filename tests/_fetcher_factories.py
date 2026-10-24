@@ -1,8 +1,9 @@
 """Sanctioned fetch fakes; definitions live in the sibling helper modules."""
 
-from typing import Any
+from typing import Any, cast
 
 from app.admission.policy import CrawlPolicy
+from app.models.http_fetcher import HttpFetcher
 from tests._browser_doubles import _fake_browser
 from tests._crawl_runners import (
     LINKED_PAIR_LIMITS,
@@ -70,10 +71,11 @@ async def invoke_http_strategy(
     kwargs: dict[str, Any] = {}
     if global_concurrency is not None:
         kwargs["global_concurrency"] = global_concurrency
+    fetcher_double = FetcherDouble(answer, record_cap=cap_capture, answer_is_response=True)
     return await run_http_strategy(
         url="http://example.com/",
         policy=policy,
-        http_fetcher=FetcherDouble(answer, record_cap=cap_capture, answer_is_response=True),
+        http_fetcher=cast("HttpFetcher", fetcher_double),
         **kwargs,
     )
 

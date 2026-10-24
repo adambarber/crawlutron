@@ -1,4 +1,5 @@
 from dataclasses import replace
+from typing import Any
 
 import app.extraction.content as _extraction_module
 from app.config.settings import CrawlerSettings
@@ -72,7 +73,7 @@ __all__ = [
 ]
 
 
-def settings_with(**overrides: object) -> CrawlerSettings:
+def settings_with(**overrides: Any) -> CrawlerSettings:
     """Settings carrying the extraction deadlines a test wants, built from mapping
     and overridden, so a test that only cares about one deadline still runs against
     whatever the environment says about every other knob -- as production does.

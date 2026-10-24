@@ -146,7 +146,7 @@ async def run_scoped_crawl(scope_regex=None, *, max_depth=1, max_pages=10, pages
         "policy": {"limits": {"max_depth": max_depth, "max_pages": max_pages}, "scope_regex": scope_regex},
     }
     out = await crawl_request(payload, http_fetcher=site_fetcher(pages), cache=HttpCache())
-    return {r.normalized_url.raw for r in out["results"]}
+    return {r.normalized_url.raw for r in out["results"] if r.normalized_url is not None}
 
 
 def ok_fetcher(url, sent_headers, timeout, max_content_length=DEFAULT_MAX_CONTENT_LENGTH_BYTES):

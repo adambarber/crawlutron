@@ -43,17 +43,17 @@ def _effects() -> defaultdict[str, list[Any]]:
     return defaultdict(list)
 
 
-def _record_probe_fetch(effects: MutableMapping[str, list], payload: Mapping[str, Any]) -> None:
+def _record_probe_fetch(effects: MutableMapping[str, list[str]], payload: Mapping[str, Any]) -> None:
     """Note a fetch the guard was supposed to prevent, except the blocked URL itself;
     spelled inline, a probe comparing a different value would record every URL and
     the assertion would still pass, since it only ever checked the blocked one.
     """
     url = getattr(payload, "url", None) or payload.get("url")
-    if url != _BLOCKED_URL:
+    if url is not None and url != _BLOCKED_URL:
         effects["fetched"].append(url)
 
 
-async def _assert_refused(awaitable, effects: Mapping[str, list]) -> None:
+async def _assert_refused(awaitable, effects: Mapping[str, list[str]]) -> None:
     try:
         result = await awaitable
     except (ValueError, RuntimeError):
@@ -66,7 +66,7 @@ async def _assert_refused(awaitable, effects: Mapping[str, list]) -> None:
     assert all(not values for values in effects.values())
 
 
-def _blocked_records() -> list[dict]:
+def _blocked_records() -> list[dict[str, Any]]:
     """One retained crawl record whose only page was blocked."""
     return [
         {

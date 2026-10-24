@@ -1,6 +1,8 @@
 from dataclasses import dataclass
+from typing import Any
 
 from app.transport.browser import BrowserRenderer
+from app.transport.browser_driver import BrowserDriver
 from app.transport.browser_targets import make_response_handler
 from app.vocabulary.taxonomy import ResultStatus
 from tests._browser_page_doubles import (
@@ -23,13 +25,17 @@ from tests._browser_pool_doubles import (
 ROUTE_ARG_UNSET = object()
 
 
-class FakeBrowserDriver:
-    """A stand-in for :class:`BrowserDriver` -- a duck type, NOT a subclass.
+class FakeBrowserDriver(BrowserDriver):
+    """A stand-in for :class:`BrowserDriver` -- a minimal subclass.
 
     One object instead of the ten private methods once rebound; a missing
     method fails loudly with ``AttributeError``."""
 
     def __init__(self, page, *, harvest_timeout=0.0, on_close=None):
+        # Skip the real BrowserDriver init which launches a browser
+        self._browser = None
+        self._context = None
+        self._pages: list[Any] = []
         self.page = page
         self.harvest_timeout = harvest_timeout
         self.on_close = on_close
@@ -352,7 +358,7 @@ def blocking_pinned_request(thread_ids: list[int], delay: float = 0.05):
 
 def response_handler_double(url: str, payload=None, error=None):
 
-    collected: list[dict] = []
+    collected: list[dict[str, Any]] = []
     handler = make_response_handler(collected)
     response_url = url
 

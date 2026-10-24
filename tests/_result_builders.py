@@ -161,7 +161,7 @@ def make_result(url: str, domain: str):
     )
 
 
-def crawl_result(url: str, domain: str | None = None) -> CrawlResult:
+def crawl_result(url: str | NormalizedUrl, domain: str | None = None) -> CrawlResult:
     """A ``CrawlResult`` -- what the worker hands back.
 
     Worker-dispatch tests claim identity: the worker's own object comes back,
@@ -179,7 +179,9 @@ def crawl_result(url: str, domain: str | None = None) -> CrawlResult:
         html="ok",
         text="ok",
         attempts=1,
-        domain=domain if domain is not None else registrable_domain(url),
+        domain=domain
+        if domain is not None
+        else registrable_domain(url.raw if isinstance(url, NormalizedUrl) else url),
     )
 
 

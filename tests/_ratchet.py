@@ -87,7 +87,7 @@ def budget_not_exceeded(
     *,
     subject: str,
     remedy: str,
-) -> Callable:
+) -> Callable[[str], None]:
     """The gate: no metric may hold more than its budget allows."""
     measurement, offenders = read
 
@@ -104,7 +104,7 @@ def budget_not_exceeded(
     return assertion_not_exceeded
 
 
-def budget_is_tight(budgets: dict[str, int], read: Metrics, *, subject: str) -> Callable:
+def budget_is_tight(budgets: dict[str, int], read: Metrics, *, subject: str) -> Callable[[str], None]:
     """A budget may not sit above the measurement, or it is a standing allowance.
 
     Without this the gate is satisfied by a number nobody ever lowers, and the
@@ -125,7 +125,9 @@ def budget_is_tight(budgets: dict[str, int], read: Metrics, *, subject: str) -> 
     return assertion_is_tight
 
 
-def collection_is_deterministic(budgets: dict[str, int], read: Metrics, *, subject: str) -> Callable:
+def collection_is_deterministic(
+    budgets: dict[str, int], read: Metrics, *, subject: str
+) -> Callable[[], None]:
     """The numbers in the budgets came from somewhere; make that somewhere checkable."""
     measurement, offenders = read
 
@@ -144,7 +146,7 @@ def collector_sees_the_whole_tree(
     minimums: dict[str, int],
     *,
     subject: str,
-) -> Callable:
+) -> Callable[[], None]:
     """The gate is only worth what it scans: an empty and a whole-tree scan both
     report zero, so reach is proved against real code, never by counting offenders;
     a gate may walk for several things, so counts are a mapping with per-key minimums.

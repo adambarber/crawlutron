@@ -1,7 +1,9 @@
 from collections.abc import Iterator
 from contextlib import contextmanager
+from typing import Any
 
 from app.transport.browser import BrowserRenderer
+from app.transport.browser_driver import BrowserDriver
 from app.transport.browser_pool import (
     BROWSER_POOL_ACQUIRE_TIMEOUT_SECONDS,
     BrowserPool,
@@ -41,8 +43,50 @@ class FakeBrowserPool(BrowserPool):
         await super().close()
 
 
-class RaisingRenderer:
+class _MockDriver(BrowserDriver):
+    """A minimal driver that does nothing -- used only to satisfy the type checker."""
+
+    def __init__(self) -> None:
+        # Skip the real BrowserDriver init which launches a browser
+        self._browser = None
+        self._context = None
+        self._pages: list[Any] = []
+
+    async def close(self) -> None:
+        pass
+
+    def note_render(self) -> None:
+        pass
+
+    def harvest_timeout_for(self, browser_profile: dict[str, Any] | None) -> float:
+        return 1.0
+
+    async def safe_close_page(self, page: Any) -> None:
+        pass
+
+    async def run_action_chain(
+        self,
+        page: Any,
+        actions: list[Any],
+        *,
+        url: str = "",
+        budget_seconds: float | None = None,
+    ) -> None:
+        pass
+
+    async def wait_for_ready_state(self, page: Any) -> None:
+        pass
+
+    async def open_page(self, browser_profile: dict[str, Any] | None) -> Any:
+        raise AssertionError("RaisingRenderer should never open a page")
+
+
+class RaisingRenderer(BrowserRenderer):
     """A renderer whose ``render`` raises: the worker's failure path under test."""
+
+    def __init__(self) -> None:
+        # Initialize with a mock driver to satisfy the type checker
+        super().__init__(driver=_MockDriver())
 
     async def render(self, url, options, *, policy=None):
         raise RuntimeError("renderer died")

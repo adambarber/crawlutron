@@ -26,7 +26,7 @@ def make_blocking_callable(*, result: Any):
     return _block, entered, released
 
 
-def block_execute_crawl(monkeypatch, module) -> tuple[Callable, asyncio.Event, asyncio.Event]:
+def block_execute_crawl(monkeypatch, module) -> tuple[Callable[..., Any], asyncio.Event, asyncio.Event]:
     """Stub a module's ``execute_crawl`` with a parked call; drives a sync-crawl probe."""
     blocker, entered, released = make_blocking_callable(result=_SYNC_RESULT)
     monkeypatch.setattr(module, "execute_crawl", blocker)

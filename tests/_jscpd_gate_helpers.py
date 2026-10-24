@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
+from typing import Any
 
 from scripts import _jscpd_pair_resolution as res
 from scripts import jscpd_gate as gate
@@ -51,11 +52,11 @@ def _strip_root(name: str, root: str) -> str:
     return name[len(root) + 1 :] if name.startswith(root + "/") else name
 
 
-def _stripped(location: dict, root: str) -> dict:
+def _stripped(location: dict[str, Any], root: str) -> dict[str, Any]:
     return {**location, "name": _strip_root(str(location["name"]), root)}
 
 
-def _intercept_declared_files(monkeypatch, duplicates: list[dict]) -> None:
+def _intercept_declared_files(monkeypatch, duplicates: list[dict[str, Any]]) -> None:
     """Pin res._IS_FILE to the declared files plus the real filesystem."""
     # Anything the test did not declare falls through to the real filesystem, which is what keeps an ambiguity
     # like `zz_tree_filler.py` a real one.
@@ -75,13 +76,13 @@ def _intercept_declared_files(monkeypatch, duplicates: list[dict]) -> None:
     monkeypatch.setattr(res, "_IS_FILE", _is_file)
 
 
-def _scoped_duplicates(duplicates: list[dict], roots: list[str]) -> list[dict]:
+def _scoped_duplicates(duplicates: list[dict[str, Any]], roots: list[str]) -> list[dict[str, Any]]:
     """The duplicates one invocation reports, named the way jscpd names them."""
 
     def _inside(name: str) -> bool:
         return any(name == root or name.startswith(root + "/") for root in roots)
 
-    def _straddles(duplicate: dict) -> bool:
+    def _straddles(duplicate: dict[str, Any]) -> bool:
         sides = [duplicate[side]["name"] for side in ("firstFile", "secondFile")]
         return len({_root_of(side) for side in sides}) > 1
 
@@ -123,7 +124,7 @@ def _sources_found(sources: int | dict[str, int], roots: list[str]) -> int:
 
 def _stub_report(
     monkeypatch,
-    duplicates: list[dict],
+    duplicates: list[dict[str, Any]],
     percentage: float = 0,
     sources: int | dict[str, int] = 200,
 ) -> list[list[str]]:
@@ -182,7 +183,7 @@ def _duplicate(
     first_path: str = "app/new.py",
     second_path: str = "app/other.py",
     fragment: str = "duplicate",
-) -> dict:
+) -> dict[str, Any]:
     return {
         "firstFile": {"name": first_path, "start": 10, "end": 20},
         "secondFile": {"name": second_path, "start": 30, "end": 40},

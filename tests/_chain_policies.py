@@ -4,10 +4,12 @@
 three things -- a ladder, no-robots limits, no profile -- so it is written once.
 """
 
+from typing import Any
+
 from tests._policy_factories import crawl_limits
 
 
-def chain_policy(*strategies: str, discovery: dict | None = None) -> dict:
+def chain_policy(*strategies: str, discovery: dict[str, Any] | None = None) -> dict[str, Any]:
     """A chain policy over `strategies`.
 
     The limits are ``crawl_limits`` with robots off (no second copy to drift),

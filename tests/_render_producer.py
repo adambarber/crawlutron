@@ -3,10 +3,17 @@ plain coroutine, not a route, and every direct call spelled the same two
 arguments (default settings, a worker) next to the per-test payload.
 """
 
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Any
+
 from tests._browser_doubles import _fake_browser
 
+if TYPE_CHECKING:
+    from app.models.result_record import RenderEnvelope
 
-async def render_stub_request(payload: dict, *, worker=None) -> dict:
+
+async def render_stub_request(payload: dict[str, Any], *, worker=None) -> RenderEnvelope:
     """The envelope ``/v1/render`` produces for `payload`, with a worker defaulting
     to success on a fixed body -- the shape an endpoint test asserts on; pass
     ``worker`` for scenarios that are about the worker itself.
