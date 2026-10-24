@@ -1,0 +1,61 @@
+# hardstand workspace configuration for crawlutron
+#
+# Workspaces are created inside .hardstand/ (gitignored), on branches prefixed
+# with "work/". The base branch is main.
+
+[workspace]
+base_branch = "main"
+
+[[resource]]
+kind          = "worktree"
+provider      = "git.worktree"
+branch_prefix = "work"
+
+# Setup: reuse the main checkout's existing venv via symlink — no downloads.
+# The main checkout already has a working .venv with all dev deps installed.
+
+[[setup]]
+name = "link-venv"
+run = "ln -sfn ../../.venv .venv"
+
+# Actions that agents can run inside the workspace
+
+[[actions]]
+name = "pytest"
+kind = "exec"
+run = ".venv/bin/python -m pytest"
+
+[[actions]]
+name = "pytest-fast"
+kind = "exec"
+run = ".venv/bin/python -m pytest -q"
+
+[[actions]]
+name = "ruff"
+kind = "exec"
+run = ".venv/bin/ruff check"
+
+[[actions]]
+name = "mypy"
+kind = "exec"
+run = ".venv/bin/mypy"
+
+[[actions]]
+name = "pre-commit"
+kind = "exec"
+run = ".venv/bin/pre-commit run --all-files"
+
+[[actions]]
+name = "lint"
+kind = "exec"
+run = ".venv/bin/make lint"
+
+[[actions]]
+name = "typecheck"
+kind = "exec"
+run = ".venv/bin/make typecheck"
+
+[[actions]]
+name = "shell"
+kind = "exec"
+run = "bash"
