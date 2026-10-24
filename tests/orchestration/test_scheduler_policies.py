@@ -3,27 +3,34 @@
 import asyncio
 import time
 
+import pytest
+
 from app.models.crawl_job import CrawlJob
 from app.models.crawl_result import EngineCrawlResult
-from app.orchestration.scheduler import COOLDOWN_PURGE_INTERVAL, DomainScheduler
+from app.orchestration.scheduler import COOLDOWN_PURGE_INTERVAL, DomainScheduler, TokenBucket
 from tests._policy_factories import canonical
 from tests._result_builders import make_job, make_result
-from tests._scheduler_doubles import engine_envelope, make_scheduler, trip_circuit
+from tests._scheduler_doubles import engine_envelope, make_scheduler, ok_worker, trip_circuit
+
+# Breaker, EMA and bucket policy tests record their clock through these two:
+from tests._timing_harnesses import recorder
 
 
 class TestSchedulerCircuitBreaker:
-    def test_scheduler_circuit_breaker_reset(self):
-        scheduler = make_scheduler(circuit_cooldown=0.0)
-        trip_circuit(scheduler, "example.com")
+    def test_record_success_resets_the_escalation_ladder(self, monkeypatch):
+        now = [0.0]
+        monkeypatch.setattr("app.orchestration.scheduler.time.monotonic", lambda: now[0])
+        scheduler = make_scheduler(circuit_threshold=1, circuit_cooldown_base=30.0, circuit_cooldown=600.0)
+        scheduler.record_failure("example.com")  # t=0: first window, base cooldown
         assert scheduler.is_circuit_open("example.com")
-        # Record_success resets failure counter; with cooldown=0, circuit is not open
+        now[0] = 5.0  # still inside that window
         scheduler.record_success("example.com")
-        assert scheduler._domain_failures.get("example.com", 0) == 0
-
-    def test_scheduler_record_success(self):
-        scheduler = make_scheduler()
-        scheduler.record_success("example.com")
-        assert scheduler._domain_failures.get("example.com", 0) == 0
+        scheduler.record_failure("example.com")  # a fresh charge: base window from NOW, not doubled
+        now[0] = 35.0
+        assert not scheduler.is_circuit_open("example.com"), (
+            "the success did not clear the domain's escalation: the second fault opened a "
+            "doubled window still running at t=35 instead of a base window ending there"
+        )
 
     def test_scheduler_is_circuit_open_false(self):
         scheduler = make_scheduler()
@@ -31,33 +38,46 @@ class TestSchedulerCircuitBreaker:
 
 
 class TestSchedulerLatencyEma:
+    """The EMA is invisible by design; what it CAUSES is the adaptive delay."""
+
     def test_scheduler_record_latency_invalid(self):
         scheduler = make_scheduler()
-        # A negative latency is a broken measurement, not a fast one: recording it would pull the EMA under
-        # every delay actually observed and let the domain through faster than anything it has been timed at.
+        # A negative latency is a broken measurement, not a fast one: recording it would pull the
+        # adaptive delay under every delay actually observed.
         scheduler.record_latency("example.com", -1.0)
-        assert "example.com" not in scheduler._domain_latency_ema
+        assert scheduler.current_delay("example.com") == 0.0, (
+            "a rejected measurement moved the adaptive delay off the base: the EMA accepted it"
+        )
 
     def test_scheduler_record_latency_valid(self):
-        scheduler = make_scheduler()
-        scheduler.record_latency("example.com", 100.0)
-        assert "example.com" in scheduler._domain_latency_ema
-        assert abs(scheduler._domain_latency_ema["example.com"] - (100.0)) < 1e-07
+        scheduler = make_scheduler(adaptive_latency_factor=1.0, adaptive_min_delay=0.5)
+        scheduler.record_latency("example.com", 1000.0)
+        assert scheduler.current_delay("example.com") == pytest.approx(1.0), (
+            "a recorded 1s latency left the adaptive delay at the base: the EMA never fed it"
+        )
 
     def test_scheduler_record_latency_ema(self):
-        scheduler = make_scheduler(adaptive_smoothing=0.5)
-        scheduler.record_latency("example.com", 100.0)
-        scheduler.record_latency("example.com", 200.0)
-        assert abs(scheduler._domain_latency_ema["example.com"] - (150.0)) < 0.1
+        scheduler = make_scheduler(adaptive_smoothing=0.5, adaptive_latency_factor=1.0)
+        scheduler.record_latency("example.com", 1000.0)
+        scheduler.record_latency("example.com", 3000.0)
+        assert scheduler.current_delay("example.com") == pytest.approx(2.0), (
+            "the adaptive delay is not the smoothed mean of the two observations: the EMA "
+            "is either not averaging or weighting the latest sample alone"
+        )
 
 
 class TestSchedulerPolicies:
     """Cover remaining branches in scheduler.py"""
 
-    def test_token_bucket_basic(self):
-        from app.orchestration.scheduler import TokenBucket
+    @staticmethod
+    def _bucket_at_full(rate: float, capacity: int) -> TokenBucket:
+        """A full bucket, since the constructor already starts one there."""
+        return TokenBucket(rate=rate, capacity=capacity)
 
-        bucket = TokenBucket(rate=10.0, capacity=5)
+    def test_token_bucket_basic(self):
+        from app.orchestration.scheduler import TokenBucket as _Bucket
+
+        bucket = _Bucket(rate=10.0, capacity=5)
         wait = bucket.consume(1.0)
         assert wait == 0.0
         wait = bucket.consume(4.0)
@@ -66,9 +86,7 @@ class TestSchedulerPolicies:
         assert wait > 0.0
 
     def test_token_bucket_refill(self):
-        from app.orchestration.scheduler import TokenBucket
-
-        bucket = TokenBucket(rate=100.0, capacity=10)
+        bucket = self._bucket_at_full(rate=100.0, capacity=10)
         bucket.consume(10.0)
         # Manually refill tokens as if 0.1s passed (at 100 tokens/s, that's 10 more)
         bucket.tokens = 10.0
@@ -80,43 +98,64 @@ class TestSchedulerPolicies:
         trip_circuit(scheduler, "example.com")
         assert scheduler.is_circuit_open("example.com")
 
-    def test_circuit_breaker_cooldown_expired(self):
+    def test_circuit_breaker_cooldown_expired(self, monkeypatch):
         scheduler = make_scheduler(global_limit=10, per_domain_limit=10)
-        scheduler._circuit_open_until["example.com"] = time.monotonic() - 1
+        trip_circuit(scheduler, "example.com")
+        # Half-open: after the window elapses the breaker re-admits the domain.
+        real = time.monotonic
+        monkeypatch.setattr("app.orchestration.scheduler.time.monotonic", lambda: real() + 10_000.0)
         assert not (scheduler.is_circuit_open("example.com"))
 
     def test_scheduler_record_latency(self):
         scheduler = make_scheduler(global_limit=10, per_domain_limit=10, adaptive=True)
-        scheduler.record_latency("example.com", 1.0)
-        scheduler.record_latency("example.com", 2.0)
-        assert "example.com" in scheduler._domain_latency_ema
+        scheduler.record_latency("example.com", 5000.0)
+        assert scheduler.current_delay("example.com") > 0.0, (
+            "a recorded 5s latency left the adaptive delay at the base: the EMA never fed it"
+        )
 
-    def test_scheduler_max_rps_token_bucket(self):
+    async def test_scheduler_max_rps_token_bucket(self, monkeypatch):
+        """The cap is observable as a requested wait, not a stored number.
+
+        The bucket starts full at ``capacity=5``, so the first five admissions
+        are free and the sixth must request the refill wait (1/5s at 5 rps)."""
+        sleeps = recorder(monkeypatch)
         scheduler = make_scheduler(global_limit=10, per_domain_limit=10, max_rps=5.0)
-        assert scheduler._max_rps > 0
+        jobs = [make_job(i, "https://example.com/p") for i in range(6)]
+        ret = await scheduler.run(jobs, ok_worker, failed_result=engine_envelope)
+        assert ret is not None
+        assert any(d > 0.05 for d in sleeps.delays), (
+            f"the 6th request inside one second at 5 rps requested no refill wait: {sleeps.delays}"
+        )
 
-    def test_circuit_breaker_exponential_backoff(self):
+    def test_circuit_breaker_exponential_backoff(self, monkeypatch):
         """Consecutive trips escalate the cooldown
         exponentially (base -> doubled -> ... -> cap)."""
+        now = [0.0]
+        monkeypatch.setattr("app.orchestration.scheduler.time.monotonic", lambda: now[0])
         s = make_scheduler(
             circuit_threshold=5,
             circuit_cooldown_base=30.0,
             circuit_cooldown=600.0,
         )
 
-        def open_after(failures: int) -> float:
-            s._domain_failures.clear()
-            s._circuit_trip_count.clear()
-            s._circuit_open_until.clear()
+        def still_open_after(failures: int, elapsed: float) -> bool:
+            # A fresh scheduler state per probe: failure ladder re-wound by hand through
+            # record_success, which is the public way to clear the charge.
+            s.record_success("x")
+            now[0] = 0.0
             trip_circuit(s, "x", failures=failures)
-            return s._circuit_open_until["x"] - time.monotonic()
+            now[0] = elapsed
+            return s.is_circuit_open("x")
 
-        assert 29 <= open_after(5) <= 31
-        assert 59 <= open_after(10) <= 61
-        assert 119 <= open_after(15) <= 121
-        assert 599 <= open_after(40) <= 601
-        s.record_success("x")
-        assert s._circuit_trip_count["x"] == 0
+        # First trip: base 30s. Escalations: 60, 120; 40 failures -> cap 600.
+        assert still_open_after(5, 29.0)
+        assert not still_open_after(5, 31.0)
+        assert still_open_after(10, 59.0)
+        assert not still_open_after(10, 61.0)
+        assert still_open_after(15, 119.0)
+        assert not still_open_after(15, 121.0)
+        assert still_open_after(40, 599.0)
+        assert not still_open_after(40, 601.0)
 
     def test_scheduler_set_domain_min_delay(self):
         """A robots Crawl-delay is enforced as a floor
@@ -159,7 +198,10 @@ class TestSchedulerPolicies:
         """Inf/nan must never become a stored politeness floor."""
         scheduler = make_scheduler(global_limit=10, per_domain_limit=10)
         scheduler.set_domain_min_delay("example.com", float("inf"))
-        assert "example.com" not in scheduler._domain_min_delay
+        assert scheduler.current_delay("example.com") == 0.0, (
+            "an infinite Crawl-delay installed an unbounded politeness floor: the domain "
+            "would wait forever on its next request"
+        )
 
     async def test_run_streams_results_via_on_result(self):
         """With ``on_result`` set, each completed result is delivered immediately.

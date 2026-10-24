@@ -202,10 +202,13 @@ class TestSchedulerFailureAccountingIsAboutStatuses:
         )
 
     async def test_a_network_fault_records_a_domain_failure(self):
-        """The reported case, through the real failure envelope, not a copy."""
+        """The reported case, through the real failure envelope, not a copy.
+
+        The charge is observed through the breaker: one dns_error leaves it
+        closed at threshold 2, and the second real fault opens it."""
         import socket
 
-        scheduler = make_scheduler(circuit_cooldown=0.0)
+        scheduler = make_scheduler(circuit_threshold=2)
         job = make_job(0, "https://example.com/p")
 
         async def failing_worker(job):
@@ -218,7 +221,14 @@ class TestSchedulerFailureAccountingIsAboutStatuses:
         # other is why the old tuple could not work.
         assert result.status == "failed"
         assert result.classification == "dns_error"
-        assert scheduler._domain_failures.get("example.com", 0) == 1
+        assert not scheduler.is_circuit_open("example.com"), (
+            "one dns_error opened the breaker at threshold 2: the fault was double-charged"
+        )
+        scheduler.record_failure("example.com")  # the second real fault
+        assert scheduler.is_circuit_open("example.com"), (
+            "two dns_errors left the breaker closed: the network fault was never charged "
+            "to the domain's failure count"
+        )
 
     @pytest.mark.parametrize(
         ("classification", "expected_failures", "why"),
@@ -232,14 +242,19 @@ class TestSchedulerFailureAccountingIsAboutStatuses:
     async def test_each_status_reaches_the_verdict_its_meaning_implies(
         self, classification, expected_failures, why
     ):
-        scheduler = make_scheduler(circuit_cooldown=0.0)
+        """The charge is observed through the breaker at threshold = 2: one more
+        fault crosses it only when the run's verdict charged the book."""
+        scheduler = make_scheduler(circuit_threshold=2)
         job = make_job(0, "https://example.com/p")
 
         async def worker(job):
             return self._terminal(job, classification)
 
         await scheduler.run([job], worker, failed_result=engine_envelope)
-        assert scheduler._domain_failures.get("example.com", 0) == expected_failures, why
+        # One more real fault: a charged book (run's verdict + this one) crosses
+        # threshold 2 and opens the breaker; an uncharged book stays closed.
+        scheduler.record_failure("example.com")
+        assert scheduler.is_circuit_open("example.com") == bool(expected_failures), why
 
     def test_status_accounting_is_total(self):
         """Every ResultStatus member has a verdict, so none can arrive unhandled.
