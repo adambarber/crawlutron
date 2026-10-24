@@ -10,6 +10,7 @@ import ast
 import pathlib
 
 from tests.chokepoint_walks import (
+    REPO_ROOT,
     call_nodes,
     enclosing_function,
     functions,
@@ -31,10 +32,10 @@ _GATED_FETCH_EXECUTORS = frozenset(
     }
 )
 
-# Executor-calling helpers that run under a gate: ``map_site`` is gated by its HTTP
-# doors always, ``_crawled`` only so long as the MCP chokepoint stays gated.
-_GATED_MAP_HELPER = "map_site"
-_GATED_MCP_CRAWL_HELPER = "_crawled"
+# The one executor-calling executor (map_site -> execute_crawl); resolved
+# structurally from map_endpoint.py's own tree, not by exempting a name.
+_INNER_EXECUTOR_EDGE = ("app.api.map_endpoint.map_site", "app.api.crawl_executor.execute_crawl")
+_MAP_ENDPOINT = REPO_ROOT / "app" / "api" / "map_endpoint.py"
 
 # Background workers run the same executor off the readiness path, holding a durable
 # job row rather than a slot; they are not doors and need no request_gate.
@@ -73,6 +74,36 @@ def _gated(
     return False
 
 
+def _entered_only_through_admit_tool(fn: ast.FunctionDef | ast.AsyncFunctionDef, tree: ast.AST) -> bool:
+    """Whether every call of ``fn`` sits inside a ``work=`` lambda of ``_admit_tool``.
+
+    The structural replacement for the old name-check: a helper's executor call
+    sits behind a lambda indirection, so the lexical gate walk finds nothing.
+    """
+    entry_nodes = {id(node) for entry in _work_lambda_entries(tree) for node in local_nodes(entry)}
+    if not entry_nodes:
+        return False
+    for call in call_nodes(tree):
+        callee = resolved_call_name(tree, call)
+        if callee.rsplit(".", 1)[-1] != fn.name:
+            continue
+        if id(call) not in entry_nodes:
+            return False
+    return True
+
+
+def _work_lambda_entries(tree: ast.AST) -> list[ast.AST]:
+    """Every expression passed as ``work=`` to the MCP admit chokepoint."""
+    entries: list[ast.AST] = []
+    for call in call_nodes(tree):
+        if not resolved_call_name(tree, call).endswith(_MCP_ADMIT_TOOL):
+            continue
+        for keyword in call.keywords:
+            if keyword.arg == "work":
+                entries.append(keyword.value)
+    return entries
+
+
 def _function_is_gated(fn: ast.AST, tree: ast.AST) -> bool:
     """Whether a function body carries a request_gate (nested defs excluded)."""
     return any(
@@ -89,8 +120,31 @@ def _admit_tool_gated(tree: ast.AST) -> bool:
     return False
 
 
+def _inner_edge_callers() -> frozenset[str]:
+    """The fully-qualified names of functions whose body calls the inner executor.
+
+    Derived from map_endpoint.py's own tree, not hand-listed: when map_site stops
+    calling execute_crawl the edge disappears and the exemption seals shut."""
+    if not _MAP_ENDPOINT.exists():
+        return frozenset()
+    inner_tree = ast.parse(_MAP_ENDPOINT.read_text(encoding="utf-8"))
+    inner_name = _INNER_EXECUTOR_EDGE[1].rsplit(".", 1)[-1]
+    callers = frozenset(
+        f"{_INNER_EXECUTOR_EDGE[0].rsplit('.', 1)[0]}.{fn.name}"
+        for fn in functions(inner_tree)
+        if any(resolved_call_name(inner_tree, call).endswith(inner_name) for call in call_nodes(fn))
+    )
+    return callers
+
+
+def _module_of(path: pathlib.Path) -> str:
+    """``app/api/map_endpoint.py`` -> ``app.api.map_endpoint``: the scanned file's own module."""
+    return path.relative_to(REPO_ROOT).with_suffix("").as_posix().replace("/", ".")
+
+
 def _ungated_fetch_executor_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
     parents = parent_map(tree)
+    module = _module_of(path)
     admit_tool = frozenset(
         id(call) for call in call_nodes(tree) if resolved_call_name(tree, call) == _MCP_ADMIT_TOOL
     )
@@ -101,11 +155,16 @@ def _ungated_fetch_executor_offenders(tree: ast.AST, path: pathlib.Path) -> list
         if name not in _GATED_FETCH_EXECUTORS:
             continue
         owner = enclosing_function(call, parents)
-        if owner is not None and owner.name == _GATED_MAP_HELPER:
-            continue
-        if admit_tool_gated and owner is not None and owner.name == _GATED_MCP_CRAWL_HELPER:
+        owner_qualified = f"{module}.{owner.name}" if owner is not None else None
+        # Gated transitively: this owner IS the inner executor edge (map_site),
+        # so its callers' gating is what counts.
+        if owner_qualified is not None and owner_qualified in _inner_edge_callers():
             continue
         if _gated(call, tree, parents, admit_tool, admit_tool_gated):
+            continue
+        # A helper behind a work= lambda is gated only when every call of it
+        # funnels through the MCP chokepoint; a derived fact, not a name skip.
+        if admit_tool_gated and owner is not None and _entered_only_through_admit_tool(owner, tree):
             continue
         offenders.append(
             offender_at(
