@@ -16,6 +16,7 @@ from tests.chokepoint_walks import (
     parent_map,
     resolved_call_name,
     string_literals,
+    trees_under,
 )
 from tests.invariants._shared import _relative_app_path
 from tests.property_registry import Property
@@ -181,6 +182,12 @@ def _production_browser_knob_references() -> set[str]:
                 conventional = f"CRAWLUTRON_{node.attr.upper()}"
                 if conventional in field_knobs:
                     references.add(conventional)
+    # Scripts are consumption too (probe_session.py reads the probe knobs);
+    # a knob a script reads is live for operators the same way.
+    for _path, tree in trees_under(REPO_ROOT / "scripts"):
+        for node in string_literals(tree):
+            if isinstance(node.value, str) and node.value.startswith("CRAWLUTRON_"):
+                references.add(node.value)
     dockerfile = REPO_ROOT / "Dockerfile"
     if dockerfile.exists():
         for line in dockerfile.read_text(encoding="utf-8").splitlines():
