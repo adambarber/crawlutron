@@ -94,3 +94,17 @@ def settings_with(**overrides: Unpack[_SettingsOverrides]) -> CrawlerSettings:
     whatever the environment says about every other knob -- as production does.
     """
     return replace(CrawlerSettings.from_mapping(), **overrides)
+
+
+# The surface test modules import; a name dropped here fails their collection.
+__all__ = [
+    "default_http_fetcher",
+    "detect_pagination",
+    "doc_worker_acquisitions",
+    "extract_content",
+    "extract_discovered_links",
+    "extract_js_endpoints",
+    "format_extracted_document_text",
+    "html_diagnostics",
+    "settings_with",
+]

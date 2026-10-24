@@ -353,3 +353,24 @@ def test_the_canned_result_builder_declares_the_record_s_url_union() -> None:
     assert "NormalizedUrl" in annotation and "str" in annotation, (
         f"_canned_result(url) drifted from the record's own union: {annotation}"
     )
+
+
+def test_make_engine_result_carries_the_caller_s_link_records_once_each() -> None:
+    """Every ``make_engine_result`` caller hands it real ``DiscoveredLink``
+    records; the result carries those records once each, never re-derived
+    from strings (a re-wrap crashes and the engine swallows it)."""
+    from tests._result_builders import GRAPH_ROOT, _link, make_engine_result
+
+    links = [
+        _link("http://example.test/b", GRAPH_ROOT),
+        _link("http://example.test/c", GRAPH_ROOT),
+    ]
+    result = make_engine_result(GRAPH_ROOT, links)
+
+    assert result.discovered_links == links, (
+        "the builder must carry the caller's own link records, not re-derive them"
+    )
+    assert result.discovered_link_count == len(links), (
+        f"each link appears exactly once, got {result.discovered_link_count}"
+    )
+    assert result.status == "success", result.status

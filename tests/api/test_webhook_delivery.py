@@ -70,25 +70,27 @@ def _spy_resolver_threads(monkeypatch: pytest.MonkeyPatch) -> list[threading.Thr
     return resolver_threads
 
 
+async def _run_with_webhook(request_id, execute_fn, webhook_url, job_store, result_store):
+    """One async crawl with a scripted executor and a captured webhook post."""
+    with patch("app.api.async_crawl_runner.execute_crawl", new=execute_fn):
+        with patch("app.api.webhooks.post_webhook", new_callable=AsyncMock) as post_webhook:
+            await run_async_crawl(
+                request_id,
+                CrawlRequest.model_validate({"url": "http://example.com/"}),
+                webhook_url,
+                MagicMock(),
+                job_store,
+                result_store,
+                asyncio.Event(),
+            )
+    return post_webhook
+
+
 class TestAsyncCrawlFailureWebhookDelivery:
     """The async-crawl FAILURE webhook must actually be delivered.
 
     ``await coro().model_dump()`` parses as ``await (coro().model_dump())``: the
     dump runs on the coroutine (TypeError) and ``except Exception`` swallows it."""
-
-    async def _run_with_webhook(self, request_id, execute_fn, webhook_url, job_store, result_store):
-        with patch("app.api.async_crawl_runner.execute_crawl", new=execute_fn):
-            with patch("app.api.webhooks.post_webhook", new_callable=AsyncMock) as post_webhook:
-                await run_async_crawl(
-                    request_id,
-                    CrawlRequest.model_validate({"url": "http://example.com/"}),
-                    webhook_url,
-                    MagicMock(),
-                    job_store,
-                    result_store,
-                    asyncio.Event(),
-                )
-        return post_webhook
 
     async def test_failed_async_crawl_delivers_failure_webhook(self, job_store, tmp_path):
         request_id = "crawl_c3_failure"
@@ -100,7 +102,7 @@ class TestAsyncCrawlFailureWebhookDelivery:
         async def _boom(*args, **kwargs):
             raise RuntimeError("crawl blew up")
 
-        post_webhook = await self._run_with_webhook(request_id, _boom, webhook_url, job_store, result_store)
+        post_webhook = await _run_with_webhook(request_id, _boom, webhook_url, job_store, result_store)
 
         # The failure webhook must be delivered exactly once.
         assert post_webhook.await_count == 1, (
@@ -112,6 +114,9 @@ class TestAsyncCrawlFailureWebhookDelivery:
         assert delivered_url == webhook_url, delivered_url
         # Payload must be a real UnifiedCrawlResponse shape, not a coroutine.
         assert isinstance(payload, dict), f"payload must be a dict, got {type(payload)}"
+        assert payload["request_id"] == request_id, payload
+        assert payload["success"] is False, payload
+        assert isinstance(payload["results"], list), payload
 
 
 class TestAsyncCrawlTerminalCasControlsWhatIsPublished:
@@ -143,7 +148,7 @@ class TestAsyncCrawlTerminalCasControlsWhatIsPublished:
                 "policy_schema_version": "",
             }
 
-        post_webhook = await self._run_with_webhook(
+        post_webhook = await _run_with_webhook(
             request_id,
             execute,
             "http://webhook.example.com/cb",

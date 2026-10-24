@@ -1,3 +1,4 @@
+from collections.abc import Sequence
 from dataclasses import replace
 from typing import TypedDict, Unpack
 from urllib.parse import urljoin
@@ -81,7 +82,7 @@ def _text(url: str | NormalizedUrl) -> str:
 
 
 def engine_result(
-    url: str,
+    url: str | NormalizedUrl,
     classification: Classification,
     *,
     status: ResultStatus | None = None,
@@ -161,12 +162,12 @@ def skipped_result(
 
 
 def _successful_engine_result(
-    url: str,
+    url: str | NormalizedUrl,
     *,
     attempted_strategies: list[CrawlStrategyAttempt],
     text: str,
     markdown: str | None = None,
-    links: list[str] | None = None,
+    links: Sequence[DiscoveredLink] | None = None,
 ):
     return engine_result(
         url,
@@ -181,19 +182,7 @@ def _successful_engine_result(
         markdown=markdown,
         extraction_method="http_html",
         quality_score=1.0,
-        discovered_links=[
-            DiscoveredLink(
-                url=link,
-                normalized_url=canonical(link),
-                text="",
-                rel=[],
-                source_url=canonical(url),
-                host=registrable_domain(link),
-                is_same_host=registrable_domain(link) == registrable_domain(url),
-            )
-            for link in (links or [])
-            for link in (links or [])
-        ],
+        discovered_links=list(links or []),
     )
 
 
@@ -240,7 +229,7 @@ def crawl_result(url: str | NormalizedUrl, domain: str | None = None) -> CrawlRe
     )
 
 
-def make_engine_result(url: str, links=()):
+def make_engine_result(url: str | NormalizedUrl, links: Sequence[DiscoveredLink] = ()):
     return _successful_engine_result(url, attempted_strategies=[], text="t", links=list(links))
 
 
