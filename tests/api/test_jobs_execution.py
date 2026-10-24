@@ -423,3 +423,29 @@ class TestWholeSiteJobExecution:
         )
         assert_settled(job, visited=[GRAPH_ROOT, GRAPH_CHILD, "http://example.test/c"], crawled=3)
         assert len(calls) == 2  # one per batch (root, then the two-entry batch), not per entry
+
+    async def test_an_intra_batch_duplicate_is_deduped_against_the_first_admission(self, client, job_store):
+        """#402: each entry's admission folds back (``known |= known_after``), so the
+        next entry dedupes against what the previous one admitted. Two entries in
+        one batch discovering the same URL must admit it once."""
+        shared = "http://example.test/shared"
+        job = await run_scripted_api_job(
+            client,
+            job_store,
+            GRAPH_ROOT,
+            results=[
+                _canned_result(GRAPH_ROOT, links=[GRAPH_CHILD, "http://example.test/c"]),
+                _canned_result(GRAPH_CHILD, links=[shared]),
+                _canned_result("http://example.test/c", links=[shared]),
+                _canned_result(shared),
+            ],
+            policy=job_limits(max_depth=2),
+        )
+        assert_settled(
+            job,
+            visited=[GRAPH_ROOT, GRAPH_CHILD, "http://example.test/c", shared],
+            # child + c admitted from root; shared admitted ONCE -- the second
+            # discovery deduped against the first's folded-back set (4 unfolded).
+            discovered=3,
+            crawled=4,
+        )

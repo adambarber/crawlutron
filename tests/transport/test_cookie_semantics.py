@@ -249,12 +249,17 @@ def test_tombstone_within_the_window_is_retained_and_propagates(tmp_path, monkey
     assert _header_for(sibling, "http://a.example/") == ""
 
 
+def _zero_window_jar(tmp_path, monkeypatch) -> tuple[object, object]:
+    """A store + jar with the tombstone window closed, so reads reap immediately."""
+    monkeypatch.setattr(cookie_jar, "TOMBSTONE_WINDOW_SECONDS", 0.0)
+    store = SharedCookieStore(tmp_path / "coordination.db")
+    return store, CookieJar(store=store)
+
+
 def test_prune_never_crosses_the_namespace_boundary(tmp_path, monkeypatch):
     """#393 walk-past: reaping one namespace's tombstones must not touch another
     namespace's slot, and a deletion in one namespace never deletes another's."""
-    monkeypatch.setattr(cookie_jar, "TOMBSTONE_WINDOW_SECONDS", 0.0)
-    store = SharedCookieStore(tmp_path / "coordination.db")
-    jar = CookieJar(store=store)
+    store, jar = _zero_window_jar(tmp_path, monkeypatch)
     jar.add_cookie_header(canonical("http://a.example/"), "k=v; Path=/", namespace="t1")
     jar.add_cookie_header(canonical("http://a.example/"), "k=v; Path=/", namespace="t2")
     jar.add_cookie_header(canonical("http://a.example/"), "k=; Max-Age=0; Path=/", namespace="t1")
@@ -262,3 +267,20 @@ def test_prune_never_crosses_the_namespace_boundary(tmp_path, monkeypatch):
     assert jar.cookie_header_for(canonical("http://a.example/"), namespace="t1") == ""
     assert jar.cookie_header_for(canonical("http://a.example/"), namespace="t2") == "k=v; other=w"
     assert set(store.load("t2", "a.example")) == {"k", "other"}
+
+
+def test_the_reap_scopes_its_slot_writes_to_the_tombstones_own_namespace(tmp_path, monkeypatch):
+    """#401: the reap of namespace t1's tombstones runs while t2 holds live cookies
+    for the same host; t2's slot must be untouched and its cookies still sent.
+    A prune whose slot write ignores the namespace would erase t2 here."""
+    store, jar = _zero_window_jar(tmp_path, monkeypatch)
+    jar.add_cookie_header(canonical("http://a.example/"), "dead=x; Path=/", namespace="t1")
+    jar.add_cookie_header(canonical("http://a.example/"), "dead=; Max-Age=0; Path=/", namespace="t1")
+    jar.add_cookie_header(canonical("http://a.example/"), "live=y; Path=/", namespace="t2")
+    # The read that reaps t1's expired tombstone.
+    assert jar.cookie_header_for(canonical("http://a.example/"), namespace="t1") == ""
+    # t2's slot survived the reap and its cookie is still sent.
+    assert set(store.load("t2", "a.example")) == {"live"}
+    assert jar.cookie_header_for(canonical("http://a.example/"), namespace="t2") == "live=y"
+    # The reap emptied t1's slot; a re-read does not resurrect the deletion.
+    assert set(store.load("t1", "a.example")) == set()
