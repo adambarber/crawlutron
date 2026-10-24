@@ -5,8 +5,10 @@ it must run on its own pool, never crowding the store control plane's threads.
 """
 
 import threading
+from typing import cast
 
 from app.extraction import documents as docex
+from app.models.crawl_extraction_method import CrawlExtractionMethod
 from app.transport import content_pipeline as pipeline
 from app.vocabulary.extraction import EXTRACTION_DOCUMENT
 from tests._policy_factories import http_strategy_policy
@@ -14,23 +16,23 @@ from tests._policy_factories import http_strategy_policy
 _DOC_EXECUTOR_PREFIX = "doc-extract"
 
 
-def _thread_recording_document(seen: dict):
+def _thread_recording_document(seen: dict[str, threading.Thread]):
     """A stand-in for the real document extractor that records the thread it ran on."""
 
     def spy(payload, url, settings=None):
         seen["thread"] = threading.current_thread()
-        return pipeline.ExtractedContent(text=None, markdown=None, extraction_method="")
+        return pipeline.ExtractedContent(text="", markdown=None, extraction_method="")
 
     return spy
 
 
 async def test_document_extraction_runs_on_dedicated_executor_not_default(monkeypatch):
     """The document branch runs on the dedicated doc pool, not the default executor."""
-    seen: dict = {}
+    seen: dict[str, threading.Thread] = {}
     monkeypatch.setattr(docex, "extract_document", _thread_recording_document(seen))
 
     result = await pipeline.run_extraction(
-        extraction=EXTRACTION_DOCUMENT,
+        extraction=cast("CrawlExtractionMethod", EXTRACTION_DOCUMENT),
         content=b"some bytes",
         decoded="some bytes",
         content_type=None,

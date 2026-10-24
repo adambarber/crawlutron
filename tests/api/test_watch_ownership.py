@@ -47,7 +47,7 @@ async def _keyed_watch_client(
         yield client
 
 
-async def _register(client, headers: dict[str, str], url: str) -> dict:
+async def _register(client, headers: dict[str, str], url: str) -> dict[str, object]:
     """Create one watch for a caller and return its parsed body."""
     resp = await client.post("/v1/watches", headers=headers, json={"url": url, "interval_seconds": INTERVAL})
     assert resp.status_code == 201, resp.text

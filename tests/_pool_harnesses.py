@@ -7,15 +7,14 @@ so this adapter states once instead of a ``lambda *a, **k`` how a no-arg double 
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Any
 
 __all__ = ["builder_for"]
 
 
-def builder_for(fake: Callable[[], Any]) -> Callable[..., Any]:
+def builder_for(fake: Callable[[], object]) -> Callable[..., object]:
     """Adapt a zero-argument fake factory to the ``build(settings)`` contract."""
 
-    def _build(settings: Any = None) -> Any:
+    def _build(settings: object = None) -> object:
         return fake()
 
     return _build

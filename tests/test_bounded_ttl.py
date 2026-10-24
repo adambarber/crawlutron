@@ -6,13 +6,13 @@ from app.safety.bounded_ttl import BoundedTTLCache
 from tests._thread_fanout import run_thread_fanout
 
 
-def _clocked_cache(ttl: float = 10.0) -> tuple[dict[str, float], BoundedTTLCache[str, Any]]:
+def _clocked_cache(ttl: float = 10.0) -> tuple[dict[str, float], BoundedTTLCache[str, str]]:
     """A cache whose clock the test owns, plus the handle to move it: none of these
     tests can use a real clock, so each was building the same clock-plus-cache pair;
     moving ``now`` is the only verb the caller has.
     """
     clock: dict[str, float] = {"now": 1000.0}
-    cache = BoundedTTLCache[str, Any](max_entries=4, ttl=ttl, clock=lambda: clock["now"])
+    cache = BoundedTTLCache[str, str](max_entries=4, ttl=ttl, clock=lambda: clock["now"])
     return clock, cache
 
 

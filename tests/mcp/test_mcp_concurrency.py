@@ -32,7 +32,7 @@ async def _mcp_client(tmp_path: Path):
         yield client, job_store, keys
 
 
-def _mcp_headers(*, key: str) -> dict:
+def _mcp_headers(*, key: str) -> dict[str, str]:
     return {
         "MCP-Protocol-Version": PROTOCOL,
         "Mcp-Method": "tools/call",
@@ -42,7 +42,7 @@ def _mcp_headers(*, key: str) -> dict:
     }
 
 
-def _mcp_crawl_body(url: str) -> dict:
+def _mcp_crawl_body(url: str) -> dict[str, object]:
     return {
         "jsonrpc": "2.0",
         "id": 1,

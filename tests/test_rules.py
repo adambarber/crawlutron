@@ -7,11 +7,13 @@ from __future__ import annotations
 
 import ast
 import pathlib
+from collections.abc import Callable, Iterable, Sequence
+from typing import TypedDict, Unpack
 
 import pytest
 
 from tests.chokepoint_walks import trees_under
-from tests.rules import Bites, Registry, Rule, Silent, Trips
+from tests.rules import Bites, Detector, Proof, Registry, Rule, Silent, Trips
 
 
 def _calls_urljoin(tree: ast.Module, path: pathlib.Path) -> list[str]:
@@ -31,8 +33,21 @@ def _every_or(tree: ast.Module, path: pathlib.Path) -> list[str]:
     ]
 
 
-def _urljoin_rule(**overrides) -> Rule:
-    kwargs: dict = {
+class _UrljoinRuleKwargs(TypedDict, total=False):
+    """The Rule fields a test overrides, spelled against the framework's own
+    aliases so the overrides are checked, not splatted as ``object`` values."""
+
+    name: str
+    find: Detector
+    bite: Callable[[], Proof | Sequence[Proof]]
+    summary: str
+    excludes: frozenset[str]
+    clean: Callable[[], Sequence[str | Silent]]
+    scope: Callable[..., Iterable[tuple[pathlib.Path, ast.Module]]]
+
+
+def _urljoin_rule(**overrides: Unpack[_UrljoinRuleKwargs]) -> Rule:
+    kwargs: _UrljoinRuleKwargs = {
         "name": "no_raw_urljoin",
         "find": _calls_urljoin,
         "bite": lambda: "def f(a, b):\n    return urljoin(a, b)\n",
@@ -56,7 +71,7 @@ class TestBiteIsRequiredByConstruction:
             Rule(name="no_bite", find=_calls_urljoin)  # type: ignore[call-arg]
 
     def test_passing_bite_positionally_is_enough(self):
-        rule = Rule("no_raw_urljoin", _calls_urljoin, lambda: "urljoin(a, b)\n")  # type: ignore[misc]
+        rule = Rule("no_raw_urljoin", _calls_urljoin, lambda: "urljoin(a, b)\n")
         assert rule.name == "no_raw_urljoin"
 
 

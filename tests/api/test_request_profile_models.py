@@ -55,11 +55,14 @@ class TestRequestProfileVocabularyIsClosed:
         field = CrawlPolicy.model_fields["request_profile"]
         # ``.get`` rather than ``getattr(..., "keys")``: a dict's own ``keys`` attribute would satisfy the
         # getattr and hand back the bound method.
-        declared = (field.json_schema_extra or {}).get("keys")
+        extra = field.json_schema_extra
+        assert callable(extra) is False and extra is not None and isinstance(extra, dict)
+        declared = extra.get("keys")
         assert declared, "request_profile does not declare its key set"
+        assert isinstance(declared, (list, tuple, set))
 
         app = "\n".join(path.read_text() for path in sorted(APP_ROOT.rglob("*.py")))
-        inert = sorted(key for key in declared if f'"{key}"' not in app and f"'{key}'" not in app)
+        inert = sorted(str(key) for key in declared if f'"{key}"' not in app and f"'{key}'" not in app)
         assert not inert, f"request_profile allows keys nothing reads: {inert}"
 
     def test_the_description_names_exactly_the_allowed_keys(self):
@@ -99,7 +102,7 @@ class TestRequestProfileCookiesCannotBypassTheNamespaceChokepoint:
     #: Most cookies in one host's map.
     MAX_COOKIE_PAIRS = 32
 
-    def _profile(self, cookies: dict):
+    def _profile(self, cookies: dict[str, dict[str, str]]):
         from app.models.crawl_policy import CrawlPolicy
 
         return CrawlPolicy(

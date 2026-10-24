@@ -371,7 +371,7 @@ class _CrawlHttpKwargs(TypedDict, total=False):
 
     cache: HttpCache
     content_cache: ContentCache
-    caller_validators: dict[str, str]
+    caller_validators: dict[str, str] | None
     robots_sitemaps: list[str]
     global_concurrency: int
 

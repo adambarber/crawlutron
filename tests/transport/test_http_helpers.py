@@ -1,7 +1,6 @@
 """Validation, headers, retries and parsing stay pure and total."""
 
 import asyncio
-from typing import Any
 
 import pytest
 
@@ -94,7 +93,7 @@ class TestValidationHelpers:
 
     def test_payload_policy_errors(self) -> None:
         tier = PolicyTier.model_defaults()
-        cases: list[tuple[dict[str, Any], str]] = [
+        cases: list[tuple[dict[str, object], str]] = [
             ({"policy": "x"}, "invalid_policy"),
             ({"policy": {"limits": "x"}}, "invalid_policy_limits"),
             ({"policy": {"headers": "x"}}, "invalid_policy_headers"),

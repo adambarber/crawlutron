@@ -4,12 +4,12 @@ result store (the rollup reads every record), and nothing here applies one
 """
 
 import logging
-from typing import Any
 
 import pytest
 
 from app.api.policy_suggestions import policy_suggestions
 from app.config.settings import CrawlerSettings
+from app.models.json_value import JsonValue
 from app.storage.result_store import CrawlResultStore
 from tests._assertions import completed_crawl
 from tests._fetcher_factories import make_crawl_payload
@@ -33,7 +33,7 @@ async def _crawl_twice(client, url: str) -> None:
         await completed_crawl(client, make_crawl_payload(url))
 
 
-async def _suggestion_for(client, base_url) -> dict[str, Any]:
+async def _suggestion_for(client, base_url) -> dict[str, object]:
     """The endpoint's suggestion for this test's host."""
     body = (await client.get("/v1/policy-suggestions")).json()
     return next(s for s in body["suggestions"] if s["host"] == canonical(base_url).site)
@@ -53,10 +53,19 @@ async def test_a_repeatedly_blocked_host_is_suggested_with_its_evidence(client, 
     assert suggestion["observed_attempts"] == 2
     # The evidence a reviewer is being asked to trust is the crawler's own: the classification that fired and
     # the signature that matched it.
-    assert "access_denied" in suggestion["classifications"]
+    classifications = suggestion["classifications"]
+    assert isinstance(classifications, list)
+    assert "access_denied" in classifications
     assert suggestion["signatures"]
-    assert suggestion["evidence"][0]["context"]
-    assert suggestion["host"] in suggestion["rationale"]
+    evidence = suggestion["evidence"]
+    assert isinstance(evidence, list) and evidence
+    first_evidence = evidence[0]
+    assert isinstance(first_evidence, dict) and first_evidence["context"]
+    rationale = suggestion["rationale"]
+    assert isinstance(rationale, str)
+    host = suggestion["host"]
+    assert isinstance(host, str)
+    assert host in rationale
 
 
 async def test_a_host_that_was_never_blocked_is_not_suggested(client, base_url):
@@ -103,7 +112,7 @@ async def test_one_malformed_retained_row_does_not_kill_the_rollup(tmp_path, cap
     The window's size is reported honestly, and the skip names the row.
     """
     store = CrawlResultStore(tmp_path / "results.db")
-    good_page = {
+    good_page: dict[str, JsonValue] = {
         "normalized_url": "https://good.test/x",
         "status": "blocked",
         "classification": "access_denied",

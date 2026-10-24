@@ -5,12 +5,13 @@ caught only by curling live. Adaptation is now one function over one shape.
 
 from app.api.response_shaping import arender_response_from_result, aunified_response_from_result
 from app.models.crawl_policy import POLICY_SCHEMA_VERSION
+from app.models.result_record import ProducerEnvelope, RenderEnvelope
 from tests._browser_doubles import _fake_browser
 from tests._render_producer import render_stub_request
 from tests._result_builders import engine_result
 
 #: The engine's envelope, which is the shape the crawl producer emits.
-CRAWL_ENVELOPE = {
+CRAWL_ENVELOPE: ProducerEnvelope = {
     "request_id": "req-crawl",
     "submitted_count": 2,
     "policy_schema_version": "v-engine",
@@ -21,7 +22,7 @@ CRAWL_ENVELOPE = {
 }
 
 
-async def _render_envelope() -> dict:
+async def _render_envelope() -> RenderEnvelope:
     return await render_stub_request({"url": "http://127.0.0.1:1/x"})
 
 

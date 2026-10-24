@@ -1,7 +1,5 @@
 """Payload helpers: policy construction, advertised limits and invalid-limit handling."""
 
-from typing import Any
-
 import pytest
 from pydantic import ValidationError
 
@@ -11,7 +9,7 @@ from app.config.settings import CrawlerSettings
 from app.models.crawl_policy import CrawlPolicy
 
 
-def _normalized_policy(**policy: Any) -> CrawlPolicy:
+def _normalized_policy(**policy: object) -> CrawlPolicy:
     """``payload_policy`` over a bare crawl payload, with default settings.
 
     Every test here is about one policy field, so the envelope and empty

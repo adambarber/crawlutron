@@ -43,7 +43,7 @@ async def _run(
     *,
     url,
     strategy=HTTP_DECLARED_CRAWLER,
-    policy: dict | None = None,
+    policy: dict[str, object] | None = None,
     http_fetcher=default_http_fetcher,
     **kwargs,
 ):

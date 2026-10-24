@@ -19,7 +19,7 @@ from tests._fetcher_factories import make_html_fetcher
 from tests._policy_factories import canonical, crawl_policy
 
 
-def _policy(*, respect_robots: bool = True) -> dict:
+def _policy(*, respect_robots: bool = True) -> dict[str, object]:
     return crawl_policy(limits={"respect_robots": respect_robots})
 
 

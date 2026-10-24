@@ -199,9 +199,9 @@ def test_the_scripts_typing_budget_reaches_scripts() -> None:
     _assert_undeclared_record_fires()
 
 
-#: The tests/ tree baseline; 146/60 -> 157/65 in #397 (scope widened to
-#: tests/_*.py), LOWERED 157/65 -> 99/39 (#389: harness helpers declared).
-_TESTS_BUDGETS = {_METRIC: 99, _ANY: 39}
+#: Tests/ baseline: 157/65 -> 99/39 -> 3/0 (#389). The 3 are
+#: browser_blocking handler's list[dict[str, Any]] matching production.
+_TESTS_BUDGETS = {_METRIC: 3, _ANY: 0}
 
 suite_offenders, suite_measurement = _gate(REPO_ROOT / "tests")
 
@@ -231,8 +231,8 @@ def test_the_tests_typing_budget_reaches_tests() -> None:
     """The H1 reach: the typing budget now sweeps tests/, which had none. The real
     tree shows it, and the shared classifier fires on a synthetic undeclared
     record, so one in tests/ fires."""
-    assert suite_measurement(_METRIC) == 99, "the tests typing budget stopped reaching the real tree"
-    assert suite_measurement(_ANY) == 39, "the bare-Any budget stopped reaching the real tree"
+    assert suite_measurement(_METRIC) == 3, "the tests typing budget stopped reaching the real tree"
+    assert suite_measurement(_ANY) == 0, "the bare-Any budget stopped reaching the real tree"
     _assert_undeclared_record_fires()
 
 

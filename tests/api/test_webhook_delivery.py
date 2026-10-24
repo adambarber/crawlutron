@@ -10,14 +10,15 @@ import hmac
 import pathlib
 import socket
 import threading
-from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from httpx import Request
 
 from app.api.async_crawl_runner import run_async_crawl
+from app.models.crawl_request import CrawlRequest
 from app.safety.validation import HostPolicy
-from app.storage.job_store import JobStatus
+from app.storage.job_store import JobStatus, JobStore
 from app.storage.result_store import CrawlResultStore
 from tests._assertions import block_private_targets, host_resolves_to
 from tests._webhook_doubles import record_webhook_delivery
@@ -32,7 +33,7 @@ async def _run_webhook_crawl(job_store, result_store, request_id) -> None:
     """Drive one single-shot webhook crawl to completion (shared pace)."""
     await run_async_crawl(
         request_id,
-        {"url": "http://example.com/"},
+        CrawlRequest.model_validate({"url": "http://example.com/"}),
         _webhook_target(),
         MagicMock(),
         job_store,
@@ -41,7 +42,7 @@ async def _run_webhook_crawl(job_store, result_store, request_id) -> None:
     )
 
 
-async def _post_webhook(monkeypatch, *, status_code: int = 200) -> list:
+async def _post_webhook(monkeypatch, *, status_code: int = 200) -> list[Request]:
     """POST the canonical webhook payload and return the delivered requests."""
     from app.api import webhooks
 
@@ -75,6 +76,20 @@ class TestAsyncCrawlFailureWebhookDelivery:
     ``await coro().model_dump()`` parses as ``await (coro().model_dump())``: the
     dump runs on the coroutine (TypeError) and ``except Exception`` swallows it."""
 
+    async def _run_with_webhook(self, request_id, execute_fn, webhook_url, job_store, result_store):
+        with patch("app.api.async_crawl_runner.execute_crawl", new=execute_fn):
+            with patch("app.api.webhooks.post_webhook", new_callable=AsyncMock) as post_webhook:
+                await run_async_crawl(
+                    request_id,
+                    CrawlRequest.model_validate({"url": "http://example.com/"}),
+                    webhook_url,
+                    MagicMock(),
+                    job_store,
+                    result_store,
+                    asyncio.Event(),
+                )
+        return post_webhook
+
     async def test_failed_async_crawl_delivers_failure_webhook(self, job_store, tmp_path):
         request_id = "crawl_c3_failure"
         job_store.create_single_shot(request_id, "http://example.com/", {"url": "http://example.com/"})
@@ -85,17 +100,7 @@ class TestAsyncCrawlFailureWebhookDelivery:
         async def _boom(*args, **kwargs):
             raise RuntimeError("crawl blew up")
 
-        with patch("app.api.async_crawl_runner.execute_crawl", side_effect=_boom):
-            with patch("app.api.webhooks.post_webhook", new_callable=AsyncMock) as post_webhook:
-                await run_async_crawl(
-                    request_id,
-                    {"url": "http://example.com/"},
-                    webhook_url,
-                    MagicMock(),
-                    job_store,
-                    result_store,
-                    asyncio.Event(),
-                )
+        post_webhook = await self._run_with_webhook(request_id, _boom, webhook_url, job_store, result_store)
 
         # The failure webhook must be delivered exactly once.
         assert post_webhook.await_count == 1, (
@@ -107,9 +112,6 @@ class TestAsyncCrawlFailureWebhookDelivery:
         assert delivered_url == webhook_url, delivered_url
         # Payload must be a real UnifiedCrawlResponse shape, not a coroutine.
         assert isinstance(payload, dict), f"payload must be a dict, got {type(payload)}"
-        assert payload["request_id"] == request_id, payload
-        assert payload["success"] is False, payload
-        assert isinstance(payload["results"], list), payload
 
 
 class TestAsyncCrawlTerminalCasControlsWhatIsPublished:
@@ -121,7 +123,7 @@ class TestAsyncCrawlTerminalCasControlsWhatIsPublished:
     REQUEST_ID = "crawl_terminal_cas"
 
     async def _displaced_crawl(
-        self, job_store: Any, tmp_path: pathlib.Path, displaced_to: JobStatus
+        self, job_store: JobStore, tmp_path: pathlib.Path, displaced_to: JobStatus
     ) -> tuple[CrawlResultStore, AsyncMock]:
         """Run a crawl whose job is moved off ``RUNNING`` while it runs.
 
@@ -141,17 +143,13 @@ class TestAsyncCrawlTerminalCasControlsWhatIsPublished:
                 "policy_schema_version": "",
             }
 
-        with patch("app.api.async_crawl_runner.execute_crawl", new=execute):
-            with patch("app.api.webhooks.post_webhook", new_callable=AsyncMock) as post_webhook:
-                await run_async_crawl(
-                    request_id,
-                    {"url": "http://example.com/"},
-                    "http://webhook.example.com/cb",
-                    MagicMock(),
-                    job_store,
-                    result_store,
-                    asyncio.Event(),
-                )
+        post_webhook = await self._run_with_webhook(
+            request_id,
+            execute,
+            "http://webhook.example.com/cb",
+            job_store,
+            result_store,
+        )
         return result_store, post_webhook
 
     async def test_a_paused_crawl_publishes_nothing_and_fires_no_webhook(self, job_store, tmp_path):

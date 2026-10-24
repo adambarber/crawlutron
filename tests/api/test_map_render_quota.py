@@ -24,11 +24,11 @@ async def _map_render_client(tmp_path: Path):
         yield client
 
 
-def _map_body(*, max_pages: int) -> dict:
+def _map_body(*, max_pages: int) -> dict[str, object]:
     return {"url": "http://example.com/", "policy": {"limits": {"max_pages": max_pages}}}
 
 
-def _render_body() -> dict:
+def _render_body() -> dict[str, object]:
     return {"urls": ["http://example.com/1", "http://example.com/2", "http://example.com/3"]}
 
 

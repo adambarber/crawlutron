@@ -4,14 +4,25 @@
 ``discovered_links`` but are never fetched.
 """
 
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, cast
+
 import pytest
 
+from app.models.result_record import ProducerEnvelope
 from app.orchestration.engine import crawl_request
 from app.transport.cache import HttpCache
+from tests._fetch_doubles import FetcherDouble, PageMap
 from tests._fetcher_factories import site_fetcher, tap_fetcher
 
+if TYPE_CHECKING:
+    from app.models.host_policy import HostPolicy
+    from app.models.http_fetcher import HttpFetcher
+    from app.models.normalized_url import NormalizedUrl
 
-def _recording_fetcher(pages):
+
+def _recording_fetcher(pages: PageMap) -> FetcherDouble:
     # The real site fetcher answers; the tap only records. The subject of every test in this file is which
     # URLs get enqueued, so the fetcher must not be a second implementation of the site.
     return tap_fetcher(site_fetcher(pages))
@@ -29,9 +40,9 @@ def _doc_pages():
     }
 
 
-def _crawled_urls(out) -> set[str]:
+def _crawled_urls(out: ProducerEnvelope) -> set[str]:
     """The URLs the crawl actually fetched a page for."""
-    return {r.normalized_url.raw for r in out["results"]}
+    return {r.normalized_url.raw for r in out["results"] if r.normalized_url is not None}
 
 
 async def _crawl_example_site(pages, **policy):
@@ -45,17 +56,19 @@ async def _crawl_example_site(pages, **policy):
         "url": "http://example.com/",
         "policy": {"limits": {"max_depth": 2, "max_pages": 10}, **policy},
     }
-    out = await crawl_request(payload, http_fetcher=fetcher, cache=HttpCache())
+    out = await crawl_request(payload, http_fetcher=cast("HttpFetcher", fetcher), cache=HttpCache())
     return out, fetcher.calls
 
 
-def _recorded_discovered(out: dict, root_url: str = "http://example.com") -> set[str]:
+def _recorded_discovered(out: ProducerEnvelope, root_url: str = "http://example.com") -> set[str]:
     """URLs recorded on the seed result's ``discovered_links``, as a set.
 
     The property is that a recorded-but-not-fetched link still reaches the seed
     result; stated once so neither the root nor the shape can drift per copy.
     """
-    root = next(r for r in out["results"] if r.normalized_url.raw == root_url)
+    root = next(
+        r for r in out["results"] if r.normalized_url is not None and r.normalized_url.raw == root_url
+    )
     return {d.normalized_url.raw for d in root.discovered_links}
 
 
@@ -136,7 +149,17 @@ class TestSitemapCandidateBuilderUsesTheCanonicalOrigin:
 
         seen: list[str] = []
 
-        async def _capture(_fetcher, sitemap_url, _timeout, **_kwargs):
+        async def _capture(
+            fetcher: HttpFetcher,
+            sitemap_url: NormalizedUrl,
+            timeout_seconds: int,
+            *,
+            max_depth: int = 2,
+            max_urls: int = 100,
+            conditional: dict[str, str] | None = None,
+            host_policy: HostPolicy,
+            _test_stub: bool = True,  # marks this as a test double
+        ) -> set[tuple[NormalizedUrl, str | None]]:
             seen.append(sitemap_url.raw)
             return set()
 

@@ -123,7 +123,7 @@ class FetcherDouble:
         return _answer(result, url)
 
 
-def site_fetcher(pages: dict[str, Any]):
+def site_fetcher(pages: PageMap):
     """A fetcher serving a scripted page table by path, 404 for anything else.
 
     A crawler test that reads a body it did not arrange passes for the wrong

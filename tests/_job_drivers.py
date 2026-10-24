@@ -5,8 +5,8 @@ from contextlib import contextmanager
 from typing import TypedDict, Unpack
 
 from app.admission.policy import PolicyLike
+from app.models.crawl_request import CrawlRequest
 from app.models.crawl_result import EngineCrawlResult
-from app.models.result_record import ProducerEnvelope
 from app.storage.job_store import CrawlJobState, FrontierEntry, JobStatus
 from tests._policy_factories import canonical
 
@@ -135,15 +135,15 @@ async def run_seeded_scripted_job(
     )
 
 
-def recording_execute(execute, captured: list[ProducerEnvelope]):
-    """Wrap a scripted engine, recording every payload dict it was handed.
+def recording_execute(execute, captured: list[CrawlRequest]):
+    """Wrap a scripted engine, recording every request model it was handed.
 
     The engine call is where the runner's assembled batch is visible, so the
-    profile and admitted URLs are read off the payloads, not the sent request."""
+    profile and admitted URLs are read off the requests, not the sent API body."""
 
-    async def _execute(payload_dict, *, settings, shutdown_event):
-        captured.append(payload_dict)
-        return await execute(payload_dict, settings=settings, shutdown_event=shutdown_event)
+    async def _execute(payload: CrawlRequest, *, settings, shutdown_event):
+        captured.append(payload)
+        return await execute(payload, settings=settings, shutdown_event=shutdown_event)
 
     return _execute
 

@@ -12,7 +12,7 @@ from tests._browser_doubles import FakeBrowserPool, owned_browser_pool
 
 _PROTOCOL_VERSION = "2026-07-28"
 
-_META = {
+_META: dict[str, object] = {
     "io.modelcontextprotocol/protocolVersion": _PROTOCOL_VERSION,
     "io.modelcontextprotocol/clientInfo": {"name": "test-client", "version": "1.0"},
     "io.modelcontextprotocol/clientCapabilities": {},
@@ -26,7 +26,7 @@ def browser_pool_stub():
         yield
 
 
-async def _crawl_call(client, arguments: dict) -> dict:
+async def _crawl_call(client, arguments: dict[str, object]) -> dict[str, object]:
     body = {
         "jsonrpc": "2.0",
         "id": 1,
@@ -40,7 +40,9 @@ async def _crawl_call(client, arguments: dict) -> dict:
         "Accept": "application/json, text/event-stream",
     }
     resp = await client.post("/mcp", json=body, headers=headers)
-    return resp.json()["result"]
+    result = resp.json()["result"]
+    assert isinstance(result, dict)
+    return result
 
 
 class TestCrawlDeliveryRefusal:
@@ -62,12 +64,20 @@ class TestCrawlDeliveryRefusal:
         """output_format is a silent no-op over MCP (REST-only); an explicit non-null
         value must be refused like async_mode/webhook_url, never silently dropped."""
         result = await _crawl_call(async_client, {"url": f"{base_url}/", "output_format": "csv"})
-        assert result["isError"] is True
-        assert "output_format" in result["content"][0]["text"]
+        _assert_refused_error(result, "output_format")
 
     async def test_refused_async_mode_true(self, async_client, base_url):
         """A meaningful async_mode=true is still refused; the value-keyed check must
         not admit the value that actually requests unsupported delivery."""
         result = await _crawl_call(async_client, {"url": f"{base_url}/", "async_mode": True})
-        assert result["isError"] is True
-        assert "async_mode" in result["content"][0]["text"]
+        _assert_refused_error(result, "async_mode")
+
+
+def _assert_refused_error(result, key):
+    """Assert the result is an error mentioning the refused key."""
+    assert result["isError"] is True
+    content = result["content"]
+    assert isinstance(content, list)
+    first = content[0]
+    assert isinstance(first, dict)
+    assert key in first["text"]

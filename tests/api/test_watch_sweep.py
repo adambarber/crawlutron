@@ -4,7 +4,6 @@ decision), while the funnel it rides is ``app.api.webhooks``' contract.
 """
 
 import asyncio
-from typing import Any
 
 import pytest
 
@@ -40,9 +39,9 @@ def sweeper(watch_store):
 @pytest.fixture
 def announced(monkeypatch):
     """The announcements a pass handed the delivery funnel, in order."""
-    calls: list[tuple[str, dict[str, Any]]] = []
+    calls: list[tuple[str, dict[str, object]]] = []
 
-    async def _capture(webhook_url: str, payload: dict[str, Any], *, host_policy) -> None:
+    async def _capture(webhook_url: str, payload: dict[str, object], *, host_policy) -> None:
         calls.append((webhook_url, payload))
 
     monkeypatch.setattr(watch_sweep, "post_webhook_guarded", _capture)

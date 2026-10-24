@@ -6,11 +6,12 @@ gate fails on cross-file clones whose fragment is LOGIC.
 
 from __future__ import annotations
 
+from app.models.jscpd_report import JscpdDuplicate
 from scripts import _jscpd_pair_resolution as resolver
 from scripts import jscpd_logic_gate as gate
 
 
-def _duplicate(first: str, second: str, fragment: str) -> dict:
+def _duplicate(first: str, second: str, fragment: str) -> JscpdDuplicate:
     return {
         "firstFile": {"name": first, "start": 1, "end": 3},
         "secondFile": {"name": second, "start": 1, "end": 3},

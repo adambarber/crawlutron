@@ -12,7 +12,7 @@ from app.api.middleware import MAX_REQUEST_BODY_BYTES, limit_request_body
 CAP = 10
 
 
-def _make_request(messages: list, headers: list | None = None):
+def _make_request(messages: list[dict[str, object]], headers: list[tuple[bytes, bytes]] | None = None):
     """A Request whose receive() pops the scripted ASGI message list."""
 
     async def receive():
@@ -28,7 +28,7 @@ def _make_request(messages: list, headers: list | None = None):
     return Request(scope, receive=receive)
 
 
-def _one_chunk(body: bytes = b"", headers: list | None = None) -> Request:
+def _one_chunk(body: bytes = b"", headers: list[tuple[bytes, bytes]] | None = None) -> Request:
     return _make_request(
         [{"type": "http.request", "body": body, "more_body": False}],
         headers=headers,

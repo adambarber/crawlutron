@@ -11,7 +11,7 @@ from app.transport.fetchers import default_http_fetcher
 from tests._policy_factories import canonical
 
 
-def _thread_recording_spy(seen: dict, *, dead_port: bool = True):
+def _thread_recording_spy(seen: dict[str, threading.Thread], *, dead_port: bool = True):
     """A pin rule that records the thread it ran on.
 
     Both tests assert the same property -- the rule ran off the loop thread --
@@ -29,7 +29,7 @@ async def test_http_fetcher_offloads_the_pin_rule_to_thread():
     """The pin rule (which performs a blocking socket.getaddrinfo) must run in a
     worker thread, not the event loop thread -- and the fetcher must actually
     pass one through, rather than building its own and ignoring the argument."""
-    seen: dict = {}
+    seen: dict[str, threading.Thread] = {}
 
     # The spy redirects the connection at a closed loopback port, so the fetch reaches the transport and fails
     # to connect.
@@ -55,7 +55,7 @@ async def test_pinned_hop_offloads_the_pin_rule_to_thread():
     Same property as the fetcher test, at the walk; this also pins that the
     hop yields the rule's connect-ready URL/headers, not the rule's input.
     """
-    seen: dict = {}
+    seen: dict[str, threading.Thread] = {}
 
     walk = pinned_transport.apinned_hops(
         canonical("http://example.com/"),

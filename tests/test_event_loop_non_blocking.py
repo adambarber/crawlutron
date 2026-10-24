@@ -16,6 +16,7 @@ import pytest
 import app.transport.content_cache as cc
 from app.api.job_runner import run_job
 from app.models.crawl_policy import CrawlPolicy
+from app.models.result_record import ProducerEnvelope
 from app.orchestration.engine import ResultSpill
 from app.storage.job_store import JobStatus
 from app.transport.content_cache import ContentCache
@@ -359,7 +360,7 @@ class TestSpillAssemblyOffTheEventLoop:
 
         pages = {"/": (200, "<html><body>hello</body></html>", "text/html")}
 
-        async def scenario() -> dict:
+        async def scenario() -> ProducerEnvelope:
             # The crawl is scheduled, not awaited inline: the point is what the event loop does while the
             # spilled results are read back.
             crawl = asyncio.ensure_future(crawled_results(pages, limits={"max_depth": 1, "max_pages": 5}))

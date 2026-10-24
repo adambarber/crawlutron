@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
+from typing import cast
 
 import pytest
 
@@ -13,6 +15,7 @@ from app.api.caller_auth import (
 )
 from app.api.crawl_endpoint import get_crawl_result
 from app.models.caller_identity import CallerIdentity
+from app.models.json_value import JsonValue
 from app.runtime.metrics import MetricsStore
 from app.storage.caller_key_store import CallerKeyStore
 from app.storage.job_store import JobStatus, JobStore
@@ -47,7 +50,8 @@ def test_job_created_without_owner_stays_anonymous(tmp_path):
     job = store.create("http://example.com/", {})
 
     assert job.owner == ""
-    assert store.load(job.job_id) is not None and store.load(job.job_id).owner == ""
+    anonymous = store.load(job.job_id)
+    assert anonymous is not None and anonymous.owner == ""
 
 
 def test_load_for_caller_hides_foreign_jobs(tmp_path):
@@ -61,13 +65,15 @@ def test_load_for_caller_hides_foreign_jobs(tmp_path):
     assert owned is not None and owned.job_id == "crawl_owned"
 
 
-def _deserialize_count(tmp_path: Path, owner: str = "key_a") -> tuple[JobStore, list]:
+def _deserialize_count(tmp_path: Path, owner: str = "key_a") -> tuple[JobStore, list[str]]:
     """A store that counts every full-row deserialization, via the public
     ``row_to_job`` constructor knob rather than an instance poke."""
-    calls: list = []
+    calls: list[str] = []
 
-    def _spy(row, delegate, *, with_accumulators):
-        calls.append(row["job_id"])
+    def _spy(row: dict[str, object], delegate: Callable[..., object], *, with_accumulators: bool):
+        job_id = row["job_id"]
+        assert isinstance(job_id, str)
+        calls.append(job_id)
         return delegate(row, with_accumulators=with_accumulators)
 
     store = make_store(tmp_path / "jobs.db", row_to_job=_spy)
@@ -118,7 +124,8 @@ def test_saving_a_job_never_transfers_ownership(tmp_path):
     store.save(loaded)
 
     assert store.load("crawl_owned") is not None
-    assert store.load("crawl_owned").owner == "key_a"
+    after_save = store.load("crawl_owned")
+    assert after_save is not None and after_save.owner == "key_a"
     assert store.load_for_caller("crawl_owned", "key_b") is None
 
 
@@ -136,7 +143,7 @@ def test_result_store_scopes_payloads_by_owner(tmp_path):
     store = CrawlResultStore(tmp_path / "results.db")
     payload = {"request_id": "crawl_owned", "results": []}
 
-    store.put("crawl_owned", payload, owner="key_a")
+    store.put("crawl_owned", cast("JsonValue", payload), owner="key_a")
 
     assert store.get_for_caller("crawl_owned", "key_b") is None
     assert store.get_for_caller("crawl_owned", "") is None
@@ -230,7 +237,7 @@ async def test_get_crawl_result_enforces_owner(tmp_path):
     payload = {"request_id": "crawl_owned", "results": []}
     done = store.load("crawl_owned")
     assert done is not None
-    done.results = [payload]
+    done.results = [cast("dict[str, JsonValue]", payload)]
     store.save(done)
     store.set_status("crawl_owned", JobStatus.COMPLETED, expected=JobStatus.PENDING)
     owner = CallerIdentity(caller_id="key_a", authenticated=True)

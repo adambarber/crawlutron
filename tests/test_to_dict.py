@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
+from typing import cast
 
 import pytest
 
@@ -26,16 +27,16 @@ class _Link:
 class _Res:
     html: str
     links: list[_Link] = field(default_factory=list)
-    meta: dict = field(default_factory=dict)
+    meta: dict[str, object] = field(default_factory=dict)
 
 
 def test_to_dict_json_safe_and_no_deepcopy():
     html = "x" * 1000
     links = [_Link("http://a", "a"), _Link("http://b", "b")]
-    meta = {"k": "v"}
-    res = _Res(html=html, links=links, meta=meta)
+    meta: dict[str, str] = {"k": "v"}
+    res = _Res(html=html, links=links, meta=cast("dict[str, object]", meta))
 
-    d = to_dict(res)
+    d = to_dict(cast("EngineCrawlResult", res))
     # Must serialize to JSON (nested dataclasses -> dicts).
     json.dumps(d)
     # Heavy string is shared by reference, not copied.
@@ -50,8 +51,8 @@ def test_to_dict_json_safe_and_no_deepcopy():
 
 
 def test_to_dict_non_dataclass_passthrough():
-    assert to_dict({"a": 1}) == {"a": 1}
-    assert to_dict(5) == 5
+    assert to_dict(cast("EngineCrawlResult", {"a": 1})) == {"a": 1}
+    assert to_dict(cast("EngineCrawlResult", 5)) == 5
 
 
 def test_to_dict_handles_cyclic_link_graph():
@@ -63,14 +64,14 @@ def test_to_dict_handles_cyclic_link_graph():
     class _Node:
         name: str
         parent: _Node | None = None
-        children: list = field(default_factory=list)
+        children: list[object] = field(default_factory=list)
 
     a = _Node("a")
     b = _Node("b", parent=a)
     a.children.append(b)
     b.children.append(a)  # cycle: a -> b -> a
 
-    d = to_dict(a)
+    d = to_dict(cast("EngineCrawlResult", a))
     assert isinstance(d, dict)
     # Must terminate and be JSON-serializable.
     json.dumps(d)
@@ -81,19 +82,19 @@ def test_to_dict_handles_cyclic_link_graph():
 def test_to_dict_breaks_a_cyclic_dict_graph():
     # The dataclass test above breaks its cycle on re-entering a *dataclass*, so the dict and sequence
     # branches each carried their own copy of the cycle guard with nothing pinning them.
-    node: dict = {"name": "a"}
+    node: dict[str, object] = {"name": "a"}
     node["self"] = node
 
-    d = to_dict(node)
+    d = to_dict(cast("EngineCrawlResult", node))
     assert d["name"] == "a"
     assert d["self"] is None
 
 
 def test_to_dict_breaks_a_cyclic_sequence_graph():
-    items: list = []
+    items: list[object] = []
     items.append(items)
 
-    d = to_dict({"items": items})
+    d = to_dict(cast("EngineCrawlResult", {"items": items}))
     assert d == {"items": [None]}
 
 

@@ -3,7 +3,7 @@
 One double models the whole signal contract (SIGTERM absorbed, SIGKILL fatal,
 join after death); three copies previously froze three ideas of ``exitcode``."""
 
-from typing import Any
+from __future__ import annotations
 
 from app.orchestration.doc_pool import DocExtractionPool, DocWorker
 
@@ -85,7 +85,7 @@ def stub_worker(pid: int, responds_to_sigterm: bool = True) -> DocWorker:
     return worker
 
 
-def unkillable_doc_worker(pid: int = 1111) -> Any:
+def unkillable_doc_worker(pid: int = 1111) -> DocWorker:
     """A retired-but-``is_alive()`` pool slot nothing can reclaim.
 
     ``responds_to_sigterm=False`` keeps ``is_alive()`` True for the process's

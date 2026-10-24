@@ -1,5 +1,5 @@
 from dataclasses import replace
-from typing import Any
+from typing import TypedDict, Unpack
 from urllib.parse import urljoin
 
 from app.models.crawl_job import CrawlJob
@@ -15,6 +15,48 @@ from app.models.taxonomy import Classification, CrawlError, CrawlStrategyName
 from app.vocabulary.strategies import HTTP_DECLARED_CRAWLER
 from app.vocabulary.taxonomy import ResultStatus
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY, canonical
+
+
+class _EngineResultOverrides(TypedDict, total=False):
+    """The subset of EngineCrawlResult fields tests may override."""
+
+    # Submission identity
+    original_url: str
+    normalized_url: NormalizedUrl | None
+    final_url: NormalizedUrl | None
+    # Strategy selection
+    selected_strategy: CrawlStrategyName | None
+    attempted_strategies: list[CrawlStrategyAttempt]
+    # Response metadata
+    http_status: int | None
+    headers: dict[str, str]
+    content_type: str | None
+    # Content
+    html: str | None
+    text: str | None
+    extraction_method: str | None
+    # Quality
+    quality_score: float
+    # Discovery
+    discovered_links: list[DiscoveredLink]
+    discovered_link_count: int
+    # Error
+    error: CrawlError | None
+    # Optional
+    markdown: str | None
+
+
+class _CrawlResultOverrides(TypedDict, total=False):
+    """The subset of CrawlResult fields tests may override."""
+
+    url: NormalizedUrl
+    attempt: CrawlStrategyAttempt
+    final_url: NormalizedUrl
+    html: str
+    text: str
+    attempts: int
+    domain: str
+    metadata: dict[str, str]
 
 
 def make_job(index: int, url: str, *, options: RenderOptions | None = None):
@@ -43,7 +85,7 @@ def engine_result(
     classification: Classification,
     *,
     status: ResultStatus | None = None,
-    **overrides: Any,
+    **overrides: Unpack[_EngineResultOverrides],
 ):
     """An ``EngineCrawlResult`` for `url`: every optional field absent, plus `overrides``.
 
@@ -129,7 +171,7 @@ def _successful_engine_result(
     return engine_result(
         url,
         "rendered",
-        final_url=url,
+        final_url=canonical(url),
         selected_strategy=HTTP_DECLARED_CRAWLER,
         attempted_strategies=attempted_strategies,
         http_status=200,
@@ -139,7 +181,19 @@ def _successful_engine_result(
         markdown=markdown,
         extraction_method="http_html",
         quality_score=1.0,
-        discovered_links=list(links or []),
+        discovered_links=[
+            DiscoveredLink(
+                url=link,
+                normalized_url=canonical(link),
+                text="",
+                rel=[],
+                source_url=canonical(url),
+                host=registrable_domain(link),
+                is_same_host=registrable_domain(link) == registrable_domain(url),
+            )
+            for link in (links or [])
+            for link in (links or [])
+        ],
     )
 
 
@@ -250,7 +304,7 @@ def _canned_result(
         text,
         classification,
         status=status,
-        final_url=text,
+        final_url=canonical(text),
         discovered_links=[_link(link, text) for link in links or []] + (raw_links or []),
     )
 

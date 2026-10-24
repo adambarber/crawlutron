@@ -5,19 +5,19 @@ from __future__ import annotations
 import asyncio
 import inspect
 from collections.abc import Callable
-from typing import Any
 
 import pytest
 from fastapi.params import Depends as DependsParam
 from fastapi.routing import APIRoute
 from httpx import ASGITransport, AsyncClient
 
-from app.admission.policy import read_policy
+from app.admission.policy import PolicyLike, read_policy
 from app.api import dependencies, job_runner, jobs_router
 from app.api.caller_auth import get_caller_identity
 from app.api.dependencies import get_job_store, get_settings, get_shutdown_event
 from app.config.settings import CrawlerSettings
 from app.models.crawl_policy import CrawlPolicy
+from app.models.crawl_request import CrawlRequest
 from app.storage.job_store import FrontierEntry, JobStatus
 from tests._job_harnesses import (
     ScriptedExecute,
@@ -64,6 +64,8 @@ def test_every_job_endpoint_declares_its_providers_through_an_alias():
         assert isinstance(route, APIRoute), f"the jobs router registered a {type(route).__name__}"
         for name, param in inspect.signature(route.endpoint, eval_str=True).parameters.items():
             where = f"{route.endpoint.__name__}.{name}"
+            endpoint = route.endpoint
+            assert endpoint is not None, f"{where}: a route with no endpoint"
             provider = next(
                 (
                     meta
@@ -76,7 +78,7 @@ def test_every_job_endpoint_declares_its_providers_through_an_alias():
                 # The invisible-default ban is a provider rule: only a ``= Depends()``
                 # default hides a provider, while a query default is a declared param.
                 assert any(param.annotation is alias for alias in aliases), (
-                    f"{where} wires {provider.dependency.__name__} outside a declared alias"
+                    f"{where} wires {getattr(provider.dependency, '__name__', '?')} outside a declared alias"
                 )
                 assert param.default is inspect.Parameter.empty, (
                     f"{where} uses an invisible default; a provider belongs in the annotation"
@@ -89,8 +91,8 @@ def test_creating_and_controlling_a_job_need_the_same_providers():
     fifth needed by one and not the other is what this says.
     """
 
-    def _providers(handler) -> dict[str, Callable[..., Any]]:
-        declared: dict[str, Callable[..., Any]] = {}
+    def _providers(handler) -> dict[str, Callable[..., object]]:
+        declared: dict[str, Callable[..., object]] = {}
         # Eval_str: the router module defers its annotations (PEP 563), so the alias objects are only
         # reachable after the string is resolved.
         for name, param in inspect.signature(handler, eval_str=True).parameters.items():
@@ -229,7 +231,7 @@ class TestWholeSiteJobExecution:
         root = GRAPH_ROOT
         # The limit block is stated once and the one field this test is about is the only thing that varies.
 
-        def limits(*, max_depth: int = 2) -> dict:
+        def limits(*, max_depth: int = 2) -> PolicyLike:
             return job_limits(
                 max_depth=max_depth,
                 max_pages=50,
@@ -253,7 +255,7 @@ class TestWholeSiteJobExecution:
 
     async def test_run_job_uses_engine_payload_builder(self, client, job_store):
         root = GRAPH_ROOT
-        captured: list[Any] = []
+        captured: list[CrawlRequest] = []
         engine = recording_execute(ScriptedExecute(results=[_canned_result(root)]), captured)
 
         await run_api_job(
@@ -291,7 +293,7 @@ class TestWholeSiteJobExecution:
         assert_settled(job, visited={GRAPH_ROOT, GRAPH_CHILD}, discovered=1, crawled=2)
 
     async def test_max_pages_absent_keeps_the_whole_site_unbounded(self, client, job_store):
-        captured: list[dict[str, Any]] = []
+        captured: list[CrawlRequest] = []
         engine = recording_execute(ScriptedExecute(results=_small_link_graph_results()), captured)
 
         job = await run_api_job(

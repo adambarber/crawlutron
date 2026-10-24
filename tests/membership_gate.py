@@ -8,8 +8,7 @@ from __future__ import annotations
 import ast
 import pathlib
 import typing
-from collections.abc import Iterator
-from typing import Any
+from collections.abc import Iterator, Mapping
 
 from tests.chokepoint_walks import (
     attribute_calls,
@@ -57,9 +56,11 @@ def literal_typed_field_members() -> FieldMembers:
 
     out: dict[str, set[str]] = {}
     for class_name in RESULT_DATACLASS_NAMES:
-        cls = resolve_declared_type(class_name)
+        cls: type = resolve_declared_type(class_name)
+        fields = getattr(cls, "__dataclass_fields__", None)
+        assert fields is not None, f"{class_name} is not a dataclass"
         hints = typing.get_type_hints(cls)
-        for field_name in cls.__dataclass_fields__:
+        for field_name in fields:
             members = taxonomy.literal_members(hints.get(field_name))
             if not members:
                 continue
@@ -90,7 +91,7 @@ def _module_constants(tree: ast.AST) -> dict[str, str]:
 
 
 def _primitive_keyword_calls(
-    tree: ast.AST, *, arg_names: str | frozenset[str] | set[str] | dict[str, Any] | None = None
+    tree: ast.AST, *, arg_names: str | frozenset[str] | set[str] | Mapping[str, object] | None = None
 ) -> list[tuple[ast.Call, ast.keyword]]:
     """Yield ``(call, keyword)`` for every keyword of a result-primitive call.
 
@@ -107,7 +108,7 @@ type FieldMembers = dict[str, set[str]]
 
 
 def _named_primitive_keyword_calls(
-    tree: ast.AST, *, arg_names: str | frozenset[str] | set[str] | dict[str, Any] | None = None
+    tree: ast.AST, *, arg_names: str | frozenset[str] | set[str] | Mapping[str, object] | None = None
 ) -> Iterator[tuple[ast.Call, str, ast.expr]]:
     """``_primitive_keyword_calls``, each keyword paired with its name and value.
 

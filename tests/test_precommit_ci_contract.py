@@ -164,12 +164,12 @@ def _assert_no_config_exclude(config: str) -> None:
         )
 
 
-def _field(block: dict, name: str) -> str:
+def _field(block: dict[str, object], name: str) -> str:
     assert name in block, f"hook is missing {name}"
     return str(block[name])
 
 
-def _entry(block: dict) -> str:
+def _entry(block: dict[str, object]) -> str:
     """The command pre-commit executes, with folded scalars joined. The old `>-`
     assertion was a proxy for the real rule: pre-commit runs the entry as ONE
     command, so a literal block would smuggle newlines in.

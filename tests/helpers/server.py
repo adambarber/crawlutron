@@ -227,7 +227,7 @@ class _Handler(BaseHTTPRequestHandler):
         WEBHOOK_RECEIVED.append(body)
         self._respond(200, {"content-type": "application/json"}, b"{}")
 
-    def log_message(self, *args: Any) -> None:  # silence test noise
+    def log_message(self, *args: object) -> None:  # silence test noise
         return
 
 
@@ -275,7 +275,7 @@ class SilentHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def log_message(self, *args: Any) -> None:  # silence
+    def log_message(self, *args: object) -> None:  # silence
         return
 
     @property

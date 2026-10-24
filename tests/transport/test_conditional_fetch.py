@@ -4,8 +4,6 @@ Callers supply ETag / Last-Modified validators; matching URLs are revalidated
 with If-None-Match / If-Modified-Since and an unchanged page is not_modified.
 """
 
-from typing import Any
-
 import pytest
 from pydantic import ValidationError
 
@@ -47,7 +45,7 @@ def _ok_fetcher(headers_out, body=b"hello", extra_headers=None):
 
 
 async def test_caller_validators_sent_as_conditional_headers():
-    captured: dict[str, Any] = {}
+    captured: dict[str, str] = {}
     fetcher = _ok_fetcher(captured, extra_headers={"etag": '"v1"'})
     await _run_http(
         fetcher,
@@ -61,7 +59,7 @@ async def test_caller_validators_sent_as_conditional_headers():
 
 
 async def test_no_validators_means_no_conditional_headers():
-    captured: dict[str, Any] = {}
+    captured: dict[str, str] = {}
     await _run_http(_ok_fetcher(captured))
     assert "If-None-Match" not in captured
     assert "If-Modified-Since" not in captured

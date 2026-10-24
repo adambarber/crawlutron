@@ -6,7 +6,6 @@ omitting ``write``, a live bug), so every new I/O site picks a named constructor
 from __future__ import annotations
 
 import dataclasses
-from typing import Any
 
 import httpx
 import pytest
@@ -34,8 +33,8 @@ class TestTimeoutsChokepoint:
         assert Timeouts.defaults().read == 30.0
 
     def test_frozen(self):
-        # Bound through Any on purpose: the static checker already forbids this write, and the whole point of
-        # the test is that the runtime guard fires where the static one does
-        timeout: Any = Timeouts.for_request(5.0)
+        # Bound through object: static checker forbids the write; the test asserts
+        # the runtime guard fires where the static one does.
+        timeout: object = Timeouts.for_request(5.0)
         with pytest.raises(dataclasses.FrozenInstanceError):
             timeout.read = 99.0

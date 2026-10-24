@@ -9,7 +9,7 @@ from tests._assertions import assert_result_success
 from tests._fetcher_factories import run_chain, scripted_fetcher, sequenced_fetcher
 
 
-def escalate(base_policy: dict) -> dict:
+def escalate(base_policy: dict[str, object]) -> dict[str, object]:
     """``base_policy`` with the two-step ladder that can answer a block."""
     return dict(base_policy, strategies=[HTTP_DECLARED_CRAWLER, HTTP_CFFI_IMPERSONATE])
 

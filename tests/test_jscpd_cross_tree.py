@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pytest
 
+from app.models.jscpd_report import JscpdDuplicate
 from scripts import _jscpd_pair_resolution as res
 from scripts import jscpd_gate as gate
 from scripts.executables import require_repo_tool
@@ -20,7 +21,7 @@ def test_uniform_profile_shape() -> None:
     assert gate.MIN_SOURCES == {"all": 200}
 
 
-def _cross_tree_duplicate() -> dict:
+def _cross_tree_duplicate() -> JscpdDuplicate:
     """A fragment shared between production and a test, at the same floor.
 
     A harness re-spelling production's truth looks like one legitimate copy on
@@ -28,7 +29,7 @@ def _cross_tree_duplicate() -> dict:
     return _duplicate("app/orchestration/recursive.py", "tests/_recursive_harnesses.py")
 
 
-def _stubbed_scan(duplicates: list[dict], sources: int = 400) -> dict[str, object]:
+def _stubbed_scan(duplicates: list[JscpdDuplicate], sources: int = 400) -> dict[str, object]:
     """A cross-tree scan result, for the cases that replace the real one."""
     return {"statistics": {"total": {"sources": sources}}, "duplicates": duplicates}
 

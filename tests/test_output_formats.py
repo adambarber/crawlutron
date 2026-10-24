@@ -1,7 +1,6 @@
 """Output formats: field projection, CSV injection neutralization and envelope edges."""
 
 import json
-from typing import Any
 
 import pytest
 
@@ -13,10 +12,10 @@ from app.extraction.output_formats import (
 
 # The two result shapes the serialization table is built from. Module level so the table reads as
 # formats-over-bodies rather than as four bodies spelling the same result four times.
-_TEXT_RESULT: list[dict[str, Any]] = [{"url": "http://x/", "text": "content"}]
-_MARKDOWN_RESULT: list[dict[str, Any]] = [{"url": "http://x/", "markdown": "# Title\n\nContent"}]
+_TEXT_RESULT: list[dict[str, object]] = [{"url": "http://x/", "text": "content"}]
+_MARKDOWN_RESULT: list[dict[str, object]] = [{"url": "http://x/", "markdown": "# Title\n\nContent"}]
 
-SAMPLE: list[dict[str, Any]] = [
+SAMPLE: list[dict[str, object]] = [
     {
         "original_url": "http://a.example/",
         "final_url": "http://a.example/",

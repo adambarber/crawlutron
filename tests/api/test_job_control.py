@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import threading
 from dataclasses import replace
-from typing import Any
 
 import pytest
 
@@ -335,7 +334,7 @@ class _RunnerReadRunsBeforeTheStore:
     def __init__(self, inner: JobStore) -> None:
         self._inner = inner
 
-    def __getattr__(self, name: str) -> Any:
+    def __getattr__(self, name: str) -> object:
         return getattr(self._inner, name)
 
     async def aload(self, job_id: str):

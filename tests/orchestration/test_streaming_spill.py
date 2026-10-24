@@ -28,7 +28,7 @@ def _policy(scope=True):
     Split so the spill-path variants below are a chokepoint call with one more
     argument rather than a second hand-built payload.
     """
-    policy: dict = {}
+    policy: dict[str, object] = {}
     if scope:
         # keep the crawl on the seed host so instagram stays recorded-but-unfetched
         policy["scope_regex"] = r"^https?://example\.com(/|$)"

@@ -2,7 +2,6 @@
 
 import gzip
 import zlib
-from typing import Any
 
 import brotli
 import pytest
@@ -22,7 +21,7 @@ _CAP = 10_000_000
 def test_cap_is_required_keyword():
     # The uncapped branch existed only as a default; making the cap mandatory turns "forgot to bound a bomb"
     # into a TypeError. The call is made through a mapping of arguments on purpose.
-    uncapped: dict[str, Any] = {"body": gzip.compress(b"hello"), "content_encoding": "gzip"}
+    uncapped: dict[str, object] = {"body": gzip.compress(b"hello"), "content_encoding": "gzip"}
     with pytest.raises(TypeError):
         decompress_body(**uncapped)
 
@@ -64,7 +63,7 @@ def test_concatenated_gzip_members_are_decoded():
 def test_decode_body_no_longer_decompresses():
     # Decompression lives at the chokepoint, not inside the text decoder; the headers parameter existed only
     # to double-decompress uncapped.
-    with_headers: dict[str, Any] = {
+    with_headers: dict[str, object] = {
         "body": gzip.compress(b"hello world"),
         "content_type": "text/html",
         "headers": {"content-encoding": "gzip"},
@@ -269,7 +268,7 @@ def test_decompression_without_limit_is_rejected():
     payload = b"hello world"
     bomb = gzip.compress(payload)
     # No cap is no longer a legal call — the bound is required.
-    uncapped: dict[str, Any] = {"body": bomb, "content_encoding": "gzip"}
+    uncapped: dict[str, object] = {"body": bomb, "content_encoding": "gzip"}
     with pytest.raises(TypeError):
         decompress_body(**uncapped)
 

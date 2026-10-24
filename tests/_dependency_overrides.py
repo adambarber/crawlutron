@@ -6,13 +6,18 @@ every harness that builds an app over a router.
 
 from __future__ import annotations
 
-from typing import Any
+import asyncio
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from fastapi import FastAPI
 
 from app.api.dependencies import get_job_store, get_settings, get_shutdown_event
 from app.config.settings import CrawlerSettings
+from app.storage.job_store import JobStore
 
 
-def bind_base_overrides(app: Any, *, job_store: Any, shutdown_event: Any) -> None:
+def bind_base_overrides(app: FastAPI, *, job_store: JobStore, shutdown_event: asyncio.Event) -> None:
     """Install the job-store / settings / shutdown overrides onto ``app``."""
     app.dependency_overrides[get_job_store] = lambda: job_store
     app.dependency_overrides[get_settings] = lambda: CrawlerSettings.from_mapping({})

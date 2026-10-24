@@ -239,7 +239,7 @@ def fake_provider_http(monkeypatch):
     the kwargs of every provider HTTP call into ``capture``.
     """
 
-    def _patch(status: int = 200, body: str = "{}", capture: list | None = None):
+    def _patch(status: int = 200, body: str = "{}", capture: list[dict[str, object]] | None = None):
         async def _fake(method, url, **kwargs):
             if capture is not None:
                 capture.append({"method": method, "url": url, **kwargs})

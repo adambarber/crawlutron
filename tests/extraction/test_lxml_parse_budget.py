@@ -36,7 +36,7 @@ def parse_budget() -> ParseBudget:
     return ParseBudget()
 
 
-async def _run(policy_extra: dict, *, html: str = HTML):
+async def _run(policy_extra: dict[str, object], *, html: str = HTML):
     fetcher = scripted_fetcher(status=200, headers={"content-type": "text/html"}, body=html.encode())
 
     return await run_http_strategy(

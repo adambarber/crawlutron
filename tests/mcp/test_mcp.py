@@ -22,7 +22,7 @@ _META = {
 }
 
 
-def _body(method: str, *, params: dict | None = None, request_id: int = 1) -> dict:
+def _body(method: str, *, params: dict[str, object] | None = None, request_id: int = 1) -> dict[str, object]:
     # ``_META`` is copied per call so a test that mutates a request's _meta (e.g. to probe a mismatched
     # protocol version) cannot poison sibling tests through a shared mutable module-level dict.
     return {
@@ -33,7 +33,7 @@ def _body(method: str, *, params: dict | None = None, request_id: int = 1) -> di
     }
 
 
-def _headers(body: dict, **overrides) -> dict:
+def _headers(body: dict[str, object], **overrides) -> dict[str, object]:
     headers = {
         "MCP-Protocol-Version": _PROTOCOL_VERSION,
         "Mcp-Method": body["method"],
@@ -49,11 +49,13 @@ def _headers(body: dict, **overrides) -> dict:
     return headers
 
 
-async def _mcp(client, body: dict, headers: dict | None = None):
+async def _mcp(client, body: dict[str, object], headers: dict[str, object] | None = None):
     return await client.post("/mcp", json=body, headers=_headers(body, **(headers or {})))
 
 
-async def _assert_complete(client, body: dict, headers: dict | None = None) -> dict:
+async def _assert_complete(
+    client, body: dict[str, object], headers: dict[str, object] | None = None
+) -> dict[str, object]:
     """Post one request, assert it succeeded, and return its result.
 
     Every result must carry ``resultType: "complete"``; the model drops
@@ -65,18 +67,21 @@ async def _assert_complete(client, body: dict, headers: dict | None = None) -> d
     return result
 
 
-async def _assert_complete_tool(client, body: dict, headers: dict | None = None) -> dict:
+async def _assert_complete_tool(
+    client, body: dict[str, object], headers: dict[str, object] | None = None, *, _check_error: bool = True
+) -> dict[str, object]:
     """Assert a completed *tool* result, and return it.
 
     ``isError`` is a tool result's field, not a discover result's -- folding it
     into the general helper would assert what the spec does not promise there."""
     result = await _assert_complete(client, body, headers)
-    assert result["isError"] is False, result
+    if _check_error:
+        assert result["isError"] is False, result
     return result
 
 
 async def _assert_header_mismatch(
-    client, *, body: dict, headers: dict | None = None, code: int = -32020
+    client, *, body: dict[str, object], headers: dict[str, object] | None = None, code: int = -32020
 ) -> None:
     """Assert the endpoint rejected headers that are missing or contradict the body.
 
@@ -87,14 +92,14 @@ async def _assert_header_mismatch(
     assert resp.json()["error"]["code"] == code, resp.text
 
 
-async def _assert_invalid_request(client, *, body: dict) -> None:
+async def _assert_invalid_request(client, *, body: dict[str, object]) -> None:
     """Assert a malformed JSON-RPC envelope is refused as Invalid Request."""
     resp = await _mcp(client, body)
     assert resp.status_code == 400, resp.text
     assert resp.json()["error"]["code"] == -32600, resp.text
 
 
-async def _tool_call(client, name: str, arguments: dict) -> dict:
+async def _tool_call(client, name: str, arguments: dict[str, object]) -> dict[str, object]:
     """Invoke one MCP tool; return its structuredContent on success."""
     return (
         await _assert_complete_tool(
@@ -104,7 +109,7 @@ async def _tool_call(client, name: str, arguments: dict) -> dict:
     )["structuredContent"]
 
 
-def _search_tool_body(query: str = "x") -> dict:
+def _search_tool_body(query: str = "x") -> dict[str, object]:
     """A tools/call body naming the search tool; the Mcp-Name rules turn on the name."""
     return _body("tools/call", params={"name": "search", "arguments": {"query": query}, "_meta": _META})
 
@@ -382,16 +387,19 @@ class TestCallerAuth:
             params={"name": "crawl", "arguments": {"url": f"{base_url}/"}, "_meta": _META},
         )
         resp = await _mcp(async_client, body, {"X-API-Key": "definitely-not-a-key"})
-        assert resp.status_code == 401, resp.text
-        error = resp.json()["error"]
-        assert "api key" in error["message"].lower()
+        _assert_401_api_key(resp)
 
     @pytest.mark.usefixtures("browser_pool_stub")
     async def test_wrong_key_on_discover_is_also_a_401(self, async_client):
         """The route refuses an invalid credential for every method, not just tools/call."""
         resp = await _mcp(async_client, _body("server/discover"), {"X-API-Key": "definitely-not-a-key"})
-        assert resp.status_code == 401, resp.text
-        assert "api key" in resp.json()["error"]["message"].lower()
+        _assert_401_api_key(resp)
+
+
+def _assert_401_api_key(resp):
+    """Assert the response is a 401 with an api-key error message."""
+    assert resp.status_code == 401, resp.text
+    assert "api key" in resp.json()["error"]["message"].lower()
 
 
 async def _call_tool(async_client, name, arguments):

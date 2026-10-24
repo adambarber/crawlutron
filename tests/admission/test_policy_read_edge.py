@@ -5,8 +5,6 @@ repair is field-scoped, not a whole-policy default."""
 
 from __future__ import annotations
 
-from typing import Any
-
 import pytest
 from pydantic import ValidationError
 
@@ -156,7 +154,7 @@ class TestValidateWirePolicyRejects:
         assert validated.limits.max_depth == 2
 
     def test_validate_wire_policy_leaves_the_callers_mapping_alone(self):
-        raw: dict[str, Any] = {"limits": {}}
+        raw: dict[str, object] = {"limits": {}}
 
         validate_wire_policy(raw)
 

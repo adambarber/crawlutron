@@ -1,21 +1,46 @@
+"""Test helpers for the extraction pipeline."""
+
+from __future__ import annotations
+
 from dataclasses import replace
-from typing import Any
+from typing import TypedDict, Unpack
 
 import app.extraction.content as _extraction_module
 from app.config.settings import CrawlerSettings
-from app.extraction.content import detect_pagination as _production_detect_pagination
-from app.extraction.content import extract_content
-from app.extraction.content import extract_discovered_links as _production_extract_discovered_links
-from app.extraction.content import extract_js_endpoints as _extract_js_endpoints_with_policy
-from app.extraction.content import html_diagnostics as _production_html_diagnostics
-from app.extraction.document_text import format_extracted_document_text
-from app.transport.document import format_table
+from app.extraction.content import (
+    detect_pagination as _production_detect_pagination,
+)
+from app.extraction.content import (
+    extract_content as _production_extract_content,
+)
+from app.extraction.content import (
+    extract_discovered_links as _production_extract_discovered_links,
+)
+from app.extraction.content import (
+    extract_js_endpoints as _extract_js_endpoints_with_policy,
+)
+from app.extraction.content import (
+    html_diagnostics as _production_html_diagnostics,
+)
 from app.transport.fetchers import default_http_fetcher as _production_default_http_fetcher
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY
 
 
+class _SettingsOverrides(TypedDict, total=False):
+    """The subset of CrawlerSettings fields tests may override."""
+
+    extraction_doc_timeout: float
+    extraction_selector_timeout: float
+    extraction_doc_acquire_timeout: float
+    extraction_max_markdown: int
+
+
 def html_diagnostics(html, source_url):
     return _production_html_diagnostics(html, source_url)
+
+
+def extract_content(content, content_type, url, selectors=None):
+    return _production_extract_content(content, content_type, url, selectors)
 
 
 def extract_js_endpoints(endpoints, source_url=None, *, policy=UNRESTRICTED_HOST_POLICY):
@@ -60,20 +85,7 @@ async def default_http_fetcher(*args, **kwargs):
     return await _production_default_http_fetcher(*args, **kwargs)
 
 
-__all__ = [
-    "default_http_fetcher",
-    "detect_pagination",
-    "extract_discovered_links",
-    "format_extracted_document_text",
-    "format_table",
-    "html_diagnostics",
-    "doc_worker_acquisitions",
-    "extract_content",
-    "extract_js_endpoints",
-]
-
-
-def settings_with(**overrides: Any) -> CrawlerSettings:
+def settings_with(**overrides: Unpack[_SettingsOverrides]) -> CrawlerSettings:
     """Settings carrying the extraction deadlines a test wants, built from mapping
     and overridden, so a test that only cares about one deadline still runs against
     whatever the environment says about every other knob -- as production does.

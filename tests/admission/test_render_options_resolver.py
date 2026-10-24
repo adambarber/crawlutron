@@ -10,6 +10,7 @@ from app.admission.policy import read_policy
 from app.admission.render_options import policy_wants_html, resolve_render_options
 from app.api.render import render_options_for
 from app.config.settings import CrawlerSettings
+from app.models.render_options import RenderOptions
 from app.transport.browser_result import browser_strategy_result
 from tests._browser_doubles import _fake_browser
 from tests._fetcher_factories import strategy_request
@@ -102,7 +103,7 @@ class TestRenderEndpointConsumesResolver:
             render_options_for({"options": "nope"}, _settings())
 
 
-def _browser_policy() -> dict:
+def _browser_policy() -> dict[str, object]:
     return {
         "strategies": ["BROWSER_HEADLESS"],
         "limits": {"timeout_seconds": 11, "max_retries": 7, "max_discovered_links": 10},
@@ -114,7 +115,7 @@ class TestEngineConsumesResolver:
     """The crawl path's capture knob is pipeline-owned; the payload knob is the caller's."""
 
     async def test_capture_pinned_and_profile_reaches_worker(self):
-        captured: dict = {}
+        captured: dict[str, object] = {}
         rendered = _fake_browser(
             html="<html><head><title>T</title></head><body>some page content</body></html>",
             text="some page content",
@@ -130,12 +131,15 @@ class TestEngineConsumesResolver:
             browser_worker=worker,
         )
         options = captured["options"]
+        assert isinstance(options, RenderOptions)
         # The caller asked for no HTML in the payload...
         assert policy_wants_html(read_policy(policy)) is False
         assert options.include_html is True
         assert options.include_text is True
-        assert options.timeout_seconds == policy["limits"]["timeout_seconds"]
-        assert options.max_retries == policy["limits"]["max_retries"]
+        limits = policy["limits"]
+        assert isinstance(limits, dict)
+        assert options.timeout_seconds == limits["timeout_seconds"]
+        assert options.max_retries == limits["max_retries"]
         assert options.browser_profile == {"include_html": False, "viewport": "mobile"}
         # The captured HTML demonstrably fed the pipeline even though the caller's payload knob is False.
         assert result.diagnostics["content_metrics"]["html_length"] > 0

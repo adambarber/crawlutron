@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 import subprocess
+from typing import cast
 
 import pytest
 import yaml
@@ -27,30 +28,43 @@ from tests.test_precommit_ci_contract import (
 
 
 def _required_needs(workflow: str) -> set[str]:
-    required = _jobs(workflow).get("required")
-    assert isinstance(required, dict), "CI must declare the required aggregate job"
+    required = _required_job(workflow)
     needs = required.get("needs")
     assert isinstance(needs, list) and needs, "the required aggregate must declare needs"
     return {str(job) for job in needs}
 
 
-def _jobs(workflow: str) -> dict:
+def _required_job(workflow: str) -> dict[str, object]:
+    """The required aggregate job block, as the record its checks read."""
+    required = _jobs(workflow).get("required")
+    assert isinstance(required, dict), "CI must declare the required aggregate job"
+    return required
+
+
+def _jobs(workflow: str) -> dict[str, dict[str, object]]:
     document = yaml.safe_load(workflow)
     assert isinstance(document, dict), "the workflow must be a mapping"
     jobs = document.get("jobs")
     assert isinstance(jobs, dict) and jobs, "the workflow must declare jobs"
-    return jobs
+    return cast("dict[str, dict[str, object]]", jobs)
 
 
 def _result_assertion(job: str) -> str:
     return 'test "${{ needs.' + job + '.result }}" = "success"'
 
 
-def _required_gate_step(workflow: str) -> dict:
-    for step in _jobs(workflow)["required"].get("steps") or []:
+def _required_gate_step(workflow: str) -> dict[str, object]:
+    for step in _required_steps(workflow):
         if str(step.get("run", "")).strip():
             return step
     raise AssertionError("the required aggregate must run a script")
+
+
+def _required_steps(workflow: str) -> list[dict[str, object]]:
+    """The required aggregate's steps, as the records their checks read."""
+    steps = _required_job(workflow).get("steps")
+    assert isinstance(steps, list) and steps, "the required aggregate must declare steps"
+    return steps
 
 
 def _required_gate_script(workflow: str) -> str:
@@ -85,7 +99,7 @@ def _run_script(script: str) -> subprocess.CompletedProcess[str]:
     )
 
 
-def _assert_no_continue_on_error(block: dict, label: str) -> None:
+def _assert_no_continue_on_error(block: dict[str, object], label: str) -> None:
     """Reject any `continue-on-error` GitHub could evaluate true: `${{ true }}` loads
     as a STRING, so an `is not True` check passes the value GitHub runs as true --
     the only safe value is absent or the literal scalar `false`.
@@ -103,12 +117,14 @@ def _assert_failure_propagation(workflow: str) -> None:
     the old contract -- the refusal is checked by running the aggregate's script.
     """
     jobs = _jobs(workflow)
-    required = jobs["required"]
+    required = _required_job(workflow)
     _assert_no_continue_on_error(required, "the required aggregate")
     assert required.get("if") == "${{ always() }}", "the required aggregate must run even when a need fails"
     for name, job in jobs.items():
         _assert_no_continue_on_error(job, name)
-        for step in job.get("steps") or []:
+        steps = job.get("steps")
+        assert isinstance(steps, list)
+        for step in steps:
             _assert_no_continue_on_error(step, f"a step in {name}")
 
     needs = _required_needs(workflow)
@@ -118,16 +134,16 @@ def _assert_failure_propagation(workflow: str) -> None:
     )
     _required_gate_shell(workflow)
     script = _required_gate_script(workflow)
-    for job in sorted(needs):
-        assert _result_assertion(job) in script, (
-            f"the required aggregate never asserts needs.{job}.result succeeded"
+    for job_name in sorted(needs):
+        assert _result_assertion(job_name) in script, (
+            f"the required aggregate never asserts needs.{job_name}.result succeeded"
         )
 
     results = {job: "success" for job in needs}
     assert _run_script(_render_results(script, results)).returncode == 0, "all-green must pass"
-    for job in sorted(needs):
+    for job_name in sorted(needs):
         for outcome in ("failure", "cancelled", "skipped"):
-            broken = dict(results, **{job: outcome})
+            broken = dict(results, **{job_name: outcome})
             completed = _run_script(_render_results(script, broken))
             assert completed.returncode != 0, (
                 f"needs.{job}.result = {outcome} still passed the required aggregate:\n{completed.stdout}"
@@ -207,7 +223,11 @@ def assert_no_hook_command_rerun(workflow: str, hook_tools) -> None:
     the job so the step is findable from the failure alone.
     """
     for name, job in _jobs(workflow).items():
-        for step in job.get("steps") or []:
+        steps = job.get("steps")
+        assert isinstance(steps, list)
+        for step in steps:
+            if not isinstance(step, dict):
+                continue
             run = step.get("run")
             if not isinstance(run, str):
                 continue

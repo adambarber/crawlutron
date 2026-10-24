@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import random
 from dataclasses import replace
-from typing import Any
+from typing import cast
 
 from app.api.response_shaping import (
     EnvelopeOptions,
@@ -19,6 +19,8 @@ from app.api.response_shaping import (
 from app.models.crawl_result import CrawlResult, EngineCrawlResult
 from app.models.crawl_status import CrawlStatus
 from app.models.result_factory import terminal_attempt
+from app.models.taxonomy import Classification
+from app.models.unified_crawl_result import UnifiedCrawlResult
 from app.vocabulary.strategies import HTTP_DECLARED_CRAWLER
 from app.vocabulary.taxonomy import CrawlClassification, status_for_classification
 from tests._policy_factories import canonical
@@ -28,9 +30,9 @@ SEEDS = range(12)
 BATCH_MIN, BATCH_MAX = 1, 12
 HEALTHY_PROBABILITY = 0.5
 
-# Real classifications the engine legitimately emits at these status tiers, deliberately excluding site_error
-# so "healthy items keep their real classification" also pins "healthy items are never
-HEALTHY_CLASSIFICATIONS = (
+#: Real classifications the engine legitimately emits at these status tiers, deliberately excluding site_error
+#: so "healthy items keep their real classification" also pins "healthy items are never reclassified".
+HEALTHY_CLASSIFICATIONS: tuple[Classification, ...] = (
     "rendered",
     "not_modified",
     "captcha_detected",
@@ -41,15 +43,19 @@ HEALTHY_CLASSIFICATIONS = (
 
 POISON_KINDS = ("not_a_result", "boom_mapping", "bad_evidence", "bad_validators", "none", "scalar")
 
+#: Poison items enter via an explicit cast per loop; the lie is localized there.
+#: Poison is NOT a result -- the guard's subject.
+POISON_EVIDENCE: list[dict[str, object]] = [{"detail": 42}]
 
-class _BoomMapping(dict):
+
+class _BoomMapping(dict[str, object]):
     """An item whose own read path explodes (the model_dump-raises shape)."""
 
-    def get(self, *args: Any, **kwargs: Any) -> Any:
+    def get(self, *args: object, **kwargs: object) -> object:
         raise RuntimeError("model_dump exploded")
 
 
-def _healthy(index: int, classification: str) -> EngineCrawlResult:
+def _healthy(index: int, classification: Classification) -> EngineCrawlResult:
     """A real engine result, built through the record not a dict: the dict form
     was only admissible while the shaper read untyped keys, so the property is
     about what goes wrong AT the boundary, not a shape no producer emits.
@@ -92,32 +98,44 @@ def _healthy_render(index: int) -> CrawlResult:
     )
 
 
-def _poison(kind: str, index: int) -> Any:
+#: Poison is NOT a result -- the guard's subject. Sweep loops cast it into
+#: the element type; the point is that garbage AT the boundary is absorbed.
+def _poison(kind: str, index: int) -> object:
     """The survivors of records closing most shapes: a non-result, one that
     explodes on first read, and the OPEN payloads (``classification_evidence``,
     ``validators``) still ``dict[str, Any]`` by declaration -- so reachable.
     """
+    # `error=` is a declared CrawlError Literal; a healthy classification's error is None, so the
+    # non-Literal poison classifications flow through `classification_evidence`/`validators` instead.
+    healthy = _healthy(index, "rendered")
     if kind == "not_a_result":
         return {}
     if kind == "boom_mapping":
         return _BoomMapping()
     if kind == "bad_evidence":
-        return replace(_healthy(index, "rendered"), classification_evidence=[{"detail": 42}])
+        # A poison classification feeds the OPEN payload field, never `error=` (a declared Literal).
+        return replace(healthy, classification_evidence=POISON_EVIDENCE)
     if kind == "bad_validators":
-        return replace(_healthy(index, "rendered"), validators={"etag": {"not": "a string"}})
+        bad = cast("dict[str, str]", {"etag": {"not": "a string"}})
+        return replace(healthy, validators=bad)
     if kind == "none":
         return None
     return 42
 
 
+#: The shapers' batch contract. Poison enters through one explicit
+#: cast per loop: garbage AT that boundary is absorbed.
+BatchItem = EngineCrawlResult | CrawlResult
+
+
 def _random_batch(
     rng: random.Random,
-) -> tuple[list[Any], list[tuple[str, str] | None], list[str | None]]:
+) -> tuple[list[EngineCrawlResult], list[tuple[str, str] | None], list[str | None]]:
     """Per position, either ``(status, classification)`` for a healthy item whose
     real type must survive, or None for a poison slot (survival is its only
     contract); ``kinds`` lets the sweep prove every strategy ran.
     """
-    batch: list[Any] = []
+    batch: list[EngineCrawlResult] = []
     expected: list[tuple[str, str] | None] = []
     kinds: list[str | None] = []
     for index in range(rng.randint(BATCH_MIN, BATCH_MAX)):
@@ -128,17 +146,18 @@ def _random_batch(
             kinds.append(None)
         else:
             kind = rng.choice(POISON_KINDS)
-            batch.append(_poison(kind, index))
+            # The cast IS the property: poison is not a result, and the guard must hold anyway.
+            batch.append(cast(EngineCrawlResult, _poison(kind, index)))
             expected.append(None)
             kinds.append(kind)
     return batch, expected, kinds
 
 
-def _assert_taxonomy_member(value: Any, enum: Any, what: str) -> None:
+def _assert_taxonomy_member(value: object, enum: type, what: str) -> None:
     assert isinstance(value, enum), f"{what}={value!r} is not a declared {enum.__name__} member"
 
 
-def _check_shaped(shaped: list[Any], expected: list[tuple[str, str] | None]) -> None:
+def _check_shaped(shaped: list[UnifiedCrawlResult], expected: list[tuple[str, str] | None]) -> None:
     assert len(shaped) == len(expected), "one position per item: no drops, no 500"
     for result, expectation in zip(shaped, expected, strict=True):
         _assert_taxonomy_member(result.status, CrawlStatus, "status")
@@ -187,17 +206,18 @@ class TestBatchShapeProperty:
             _check_shaped(response.results, expected)
 
     async def test_adapter_batch_survives_and_keeps_render_classifications(self):
-        """/v1/render adapts inside the same guard (the once-unguarded comprehension)."""
+        """The /v1/render door adapts inside the same guard (the once-unguarded
+        comprehension); its batch is the render record, so the poison cast targets it."""
         for seed in SEEDS:
             rng = random.Random(3000 + seed)
-            batch: list[Any] = []
+            batch: list[CrawlResult] = []
             expected: list[tuple[str, str] | None] = []
             for index in range(rng.randint(BATCH_MIN, BATCH_MAX)):
                 if rng.random() < HEALTHY_PROBABILITY:
                     batch.append(_healthy_render(index))
                     expected.append(("success", "rendered"))
                 else:
-                    batch.append(_poison(rng.choice(POISON_KINDS), index))
+                    batch.append(cast(CrawlResult, _poison(rng.choice(POISON_KINDS), index)))
                     expected.append(None)
             shaped = await abuild_unified_crawl_response(batch, adapt=render_result_to_unified)
             _check_shaped(shaped.results, expected)
@@ -211,13 +231,11 @@ class TestPoisonDegradesLoudly:
     """The original bug swallowed the exception silently; degradation is now logged."""
 
     def test_each_poison_item_logs_one_warning(self, caplog):
-        batch = [
-            _healthy(0, "rendered"),
-            {},
-            _poison("wrong_types", 1),
-            None,
-            _BoomMapping(),
-        ]
+        # Same boundary lie as the sweep loops: poison enters via one cast, the guard absorbs it.
+        batch = cast(
+            list[EngineCrawlResult],
+            [_healthy(0, "rendered"), {}, _poison("wrong_types", 1), None, _BoomMapping()],
+        )
         with caplog.at_level("WARNING", logger="app.api.response_shaping"):
             build_unified_crawl_response(batch)
         warnings = [r for r in caplog.records if r.name == "app.api.response_shaping"]
@@ -232,7 +250,7 @@ class TestPoisonDegradesLoudly:
         """Callers can tell 'we could not shape this' from a real site failure."""
         # A dict missing every required key is the per-item guard's subject: the declared item type is a
         # result dict, and a dict the shaper cannot read is what "malformed" means here.
-        shaped = build_unified_crawl_response([{}]).results
+        shaped = build_unified_crawl_response(cast("list[EngineCrawlResult]", [{}])).results
         assert shaped[0].error == "result_shaping_failed"
         # The fallback is best-effort by attribute, so a real result still reports which URL failed rather
         # than degrading to an empty one.

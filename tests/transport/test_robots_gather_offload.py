@@ -17,7 +17,7 @@ from tests._result_builders import make_engine_result
 
 
 @asynccontextmanager
-async def _overlap_window(state: dict):
+async def _overlap_window(state: dict[str, object]):
     """Hold ``state``'s in-flight window across one scheduling point.
 
     The guarded call yields once, so every concurrent caller is inside the

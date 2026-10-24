@@ -30,7 +30,7 @@ def _settings(*, allowed: str = "", denied: str = "") -> CrawlerSettings:
 ONE_HOP_LIMITS = {"max_depth": 1, "max_pages": 10, "respect_robots": False}
 
 
-def _one_hop_policy(**extra) -> dict:
+def _one_hop_policy(**extra: object) -> dict[str, object]:
     """A one-hop crawl policy, fresh per call because callers may mutate it."""
     return {"limits": dict(ONE_HOP_LIMITS), **extra}
 

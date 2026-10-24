@@ -4,7 +4,6 @@ import ast
 import pathlib
 from collections.abc import Mapping, Sequence
 from contextvars import ContextVar
-from typing import Any
 
 from tests.chokepoint_walks import app_trees, local_nodes, nodes_of, resolved_call_name
 from tests.invariants._shared import DefinitionNode, _module_definition_index, _relative_app_path
@@ -162,7 +161,7 @@ class _PropertyObservations:
 
 
 def _property_sites(
-    tree: ast.AST, path: pathlib.Path, prop: Property, *, modules: Any
+    tree: ast.AST, path: pathlib.Path, prop: Property, *, modules: object
 ) -> list[tuple[str, DefinitionNode, list[tuple[ast.AST, ast.AST]]]]:
     """``(name, site node, resolved nodes)`` per site, the owner's own code excluded: a
     registered property is a claim about the whole codebase, so the code that implements

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import shutil
 import threading
-from typing import Any
 
 import pytest
 
@@ -31,7 +30,7 @@ def _assert_concurrent_op_proceeds(monkeypatch, cache, worker, probe_key):
         thread = threading.Thread(target=worker)
         thread.start()
         assert started.wait(10), "the worker never reached an unlink"
-        result: list[Any] = []
+        result: list[object] = []
         probe = threading.Thread(target=lambda: result.append(cache.get(probe_key)))
         probe.start()
         probe.join(timeout=5)
@@ -123,11 +122,12 @@ class TestContentCacheEntryLifecycle:
     async def test_aset_writes_off_event_loop(self):
         """The disk write (json.dumps of a large value) runs in a worker thread."""
         with scoped_cache(default_ttl=60) as cache:
-            seen: dict[str, Any] = {}
+            seen: dict[str, threading.Thread] = {}
             watch_writes(cache, on_write=lambda path, data: seen.update(thread=threading.current_thread()))
             await cache.aset("k2", "y" * 2_000_000)
         assert seen, "write never happened"
-        assert seen["thread"] is not threading.current_thread()
+        written_on = seen["thread"]
+        assert written_on is not threading.current_thread()
 
 
 class TestCachedAtReadsMetadataWithoutDeserializingTheValue:

@@ -6,11 +6,12 @@ sweep runs, surfaces a clone, and reads the enforced floor, not a stale number.
 
 from __future__ import annotations
 
+from app.models.jscpd_report import JscpdDuplicate
 from scripts import jscpd_gate as gate
 from scripts import jscpd_sweep as sweep
 
 
-def _clone() -> dict:
+def _clone() -> JscpdDuplicate:
     return {
         "firstFile": {"name": "one.py", "start": 1, "end": 2, "tree": "app"},
         "secondFile": {"name": "two.py", "start": 1, "end": 2, "tree": "app"},

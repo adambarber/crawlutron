@@ -9,12 +9,13 @@ from collections.abc import Awaitable, Callable, Sequence
 from typing import Any, NamedTuple
 
 import pytest
+from httpx import AsyncClient
 
 from app.admission.policy import PolicyLike
 from app.api import job_runner
 from app.orchestration.robots import RobotsRules
 from app.orchestration.robots_parse import parse_robots_rules
-from app.storage.job_store import CrawlJobState, JobStatus
+from app.storage.job_store import CrawlJobState, JobStatus, JobStore
 from app.vocabulary.robots import RobotsSource
 from tests._job_harnesses import (
     ScriptedExecute,
@@ -98,8 +99,8 @@ class TestWholeSiteAdmissionContract:
 
     async def _admitted(
         self,
-        client: Any,
-        job_store: Any,
+        client: AsyncClient,
+        job_store: JobStore,
         root: str,
         links: Sequence[str],
         policy: PolicyLike,
@@ -113,8 +114,8 @@ class TestWholeSiteAdmissionContract:
 
     async def _admission_scenario(
         self,
-        client: Any,
-        job_store: Any,
+        client: AsyncClient,
+        job_store: JobStore,
         root: str,
         links: Sequence[str],
         policy: PolicyLike,

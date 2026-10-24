@@ -5,7 +5,16 @@ watches instead of copying the surface and risking a gap that hides a real-bug r
 
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import Literal, Protocol
+
+
+class _LockLike(Protocol):
+    def acquire(self, *args: object, **kwargs: object) -> object: ...
+    def release(self) -> object: ...
+    def locked(self) -> object: ...
+    def wait(self, *args: object, **kwargs: object) -> object: ...
+    def notify(self, *args: object) -> object: ...
+    def notify_all(self) -> object: ...
 
 
 class DelegatingLock:
@@ -14,25 +23,25 @@ class DelegatingLock:
     property under test is usually *which* lock was taken.
     """
 
-    def __init__(self, inner: Any) -> None:
+    def __init__(self, inner: _LockLike) -> None:
         self._inner = inner
 
-    def acquire(self, *args: Any, **kwargs: Any) -> Any:
+    def acquire(self, *args: object, **kwargs: object) -> object:
         return self._inner.acquire(*args, **kwargs)
 
-    def release(self) -> Any:
+    def release(self) -> object:
         return self._inner.release()
 
-    def locked(self) -> Any:
+    def locked(self) -> object:
         return self._inner.locked()
 
-    def wait(self, *args: Any, **kwargs: Any) -> Any:
+    def wait(self, *args: object, **kwargs: object) -> object:
         return self._inner.wait(*args, **kwargs)
 
-    def notify(self, *args: Any) -> Any:
+    def notify(self, *args: object) -> object:
         return self._inner.notify(*args)
 
-    def notify_all(self) -> Any:
+    def notify_all(self) -> object:
         return self._inner.notify_all()
 
     def __enter__(self) -> DelegatingLock:
