@@ -125,6 +125,71 @@ EVERY_TEST_FUNCTION_IS_ONE_PYTEST_CAN_COLLECT = Rule(
 )
 
 
+# Markers pytest itself registers, or the plugins this project pins
+# (pytest-asyncio); --strict-markers exempts them, so the gate must too.
+_BUILTIN_AND_PLUGIN_MARKERS = frozenset(
+    {"parametrize", "skip", "skipif", "xfail", "usefixtures", "filterwarnings", "asyncio"}
+)
+
+
+def _configured_markers() -> frozenset[str]:
+    """Marker names pytest.ini declares under ``markers =``."""
+    parser = configparser.ConfigParser()
+    parser.read(REPO_ROOT / "pytest.ini")
+    raw = parser["pytest"]["markers"].strip()
+    return frozenset(line.split(":", 1)[0].strip() for line in raw.splitlines() if line.strip())
+
+
+def _is_pytest_mark(node: ast.AST) -> bool:
+    """Whether ``node`` is the ``pytest.mark.<name>`` attribute spelling."""
+    return (
+        isinstance(node, ast.Attribute)
+        and isinstance(node.value, ast.Attribute)
+        and node.value.attr == "mark"
+        and isinstance(node.value.value, ast.Name)
+        and node.value.value.id == "pytest"
+    )
+
+
+def _unregistered_marker_uses(tree: ast.Module, path: pathlib.Path) -> list[str]:
+    """Every ``pytest.mark.<name>`` use pytest.ini does not declare.
+
+    A marker --strict-markers does not know errors whole files out of collection."""
+    declared = _configured_markers()
+    return [
+        offender_at(path, node, f"pytest.mark.{node.attr} is not registered in pytest.ini")
+        for node in ast.walk(tree)
+        if _is_pytest_mark(node)
+        and node.attr not in declared
+        and node.attr not in _BUILTIN_AND_PLUGIN_MARKERS
+    ]
+
+
+EVERY_PYTEST_MARKER_IS_REGISTERED = Rule(
+    name="every-pytest-marker-is-registered",
+    find=_unregistered_marker_uses,
+    summary=(
+        "a pytest.mark.<name> that pytest.ini does not declare is a --strict-markers"
+        " collection error; #304's real_sleeps shipped exactly this shape"
+    ),
+    bite=lambda: Bites(
+        "import pytest\n\n@pytest.mark.zz_never_registered\ndef test_one():\n    pass\n",
+        "not registered in pytest.ini",
+    ),
+    clean=lambda: (
+        # A marker the ini declares and a pytest builtin both stay silent.
+        "import pytest\n\n@pytest.mark.real_sleeps\ndef test_one():\n    pass\n",
+        "import pytest\n\n@pytest.mark.parametrize('v', [1])\ndef test_two(v):\n    assert v\n",
+    ),
+    scope=lambda *, exclude: trees_under(TESTS_DIR),
+    proof_path=TESTS_DIR / "_synthetic.py",
+)
+
+
+def test_every_pytest_marker_is_registered():
+    EVERY_PYTEST_MARKER_IS_REGISTERED.scan()
+
+
 # --------------------------------------------------------------------------- Alias-blindness: a dynamic
 # pattern cannot rename itself past the chokepoint
 
