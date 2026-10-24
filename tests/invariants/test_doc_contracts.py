@@ -13,7 +13,7 @@ from tests.invariants.test_knob_contracts import (
     _KNOB_PATTERN,
     _consumed_knobs,
 )
-from tests.rules import Bites, Rule
+from tests.rules import Rule
 
 _DOC_REFERENCE_EXCLUSIONS = {
     "CHANGELOG.md": "a record of what shipped; its citations name modules that were refactored away",
@@ -281,18 +281,11 @@ DOC_SYMBOLS_RESOLVE_TO_DEFINITIONS = Rule(
         "A backticked app symbol in a live doc must name something app/ actually defines, "
         "so a rename or deletion can't leave docs citing ghosts."
     ),
+    # The detector reads doc FILES (root/documents/symbols), not a parsed tree, so no snippet can go
+    # through check_bites' ast.parse -- its bite and clean halves are the tmp-copy tests below.
     proof_path=REPO_ROOT / "CONTRIBUTING.md",
-    bite=lambda: (
-        Bites(
-            "Logging is configured by ``app/logging_config.configure_service_logging``",
-            "symbol not defined in app/logging_config.py",
-        ),
-        Bites(
-            "CSV injection (``_csv_neutralize``)",
-            "names no app symbol",
-        ),
-    ),
-    clean=lambda: ("Logging is configured by ``app/runtime.logging_config.configure_service_logging``",),
+    bite=lambda: (),
+    clean=None,
 )
 
 
@@ -358,6 +351,22 @@ def test_live_docs_point_at_paths_that_exist():
 def test_doc_symbols_resolve_to_definitions():
     """Live docs cite no app symbols that don't exist."""
     assert not (failures := _doc_symbol_offenders()), "; ".join(failures)
+
+
+def test_doc_symbol_detector_bites(tmp_path):
+    """The gate must catch a stale dotted path and a stale bare symbol.
+
+    The rule's detector reads doc FILES, not a parsed tree, so its bite is a
+    synthetic ghost citation in a copy, not a parseable snippet."""
+    symbols = _app_symbol_definitions()
+    assert _doc_symbol_offenders(symbols=symbols) == []
+    (tmp_path / "CONTRIBUTING.md").write_text(
+        "See ``app/ghost_module.configure_service_logging``.\nAnd ``_ghost_symbol`` is also gone.\n",
+        encoding="utf-8",
+    )
+    offenders = _doc_symbol_offenders(root=tmp_path, documents=["CONTRIBUTING.md"], symbols=symbols)
+    assert any("module does not exist" in hit for hit in offenders), offenders
+    assert any("names no app symbol" in hit for hit in offenders), offenders
 
 
 def test_doc_symbol_detector_spared_clean_references(tmp_path):

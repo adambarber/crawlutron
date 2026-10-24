@@ -6,12 +6,14 @@ forever; bite proofs are synthetic, so the ``find=`` underscore keys are audited
 from __future__ import annotations
 
 import ast
+import importlib
 import re
 from collections.abc import Iterator, Sequence
 
 from tests.chokepoint_walks import REPO_ROOT
 from tests.invariants._armed_detectors import ArmedHandRolled, hand_rolled_detectors
 from tests.invariants._shared import app_names
+from tests.rules import Registry, Rule
 
 #: One declared rule, as the three things this audit needs: what it is called, the node holding its detector's
 #: body, and its module's string constants so a factored key can be resolved to its value.
@@ -197,6 +199,36 @@ def test_a_hand_rolled_detector_that_spares_private_names_is_not_reported() -> N
     """The clean half for hand-rolled detectors: ordinary vocabulary stays quiet."""
     planted = [("hand-rolled-vocabulary", _detector("def f(tree, path):\n    return []\n"), {})]
     assert not missing_armings(hand_rolled=planted)
+
+
+def _rules() -> list[tuple[str, Rule]]:
+    """Every rule the invariants suite declares, derived by import.
+
+    Registries and standalone ``Rule`` constants both; enumeration mirrors ``declared_rules``."""
+    found: dict[str, Rule] = {}
+    for path in sorted((REPO_ROOT / "tests" / "invariants").glob("test_*.py")):
+        module = importlib.import_module(f"tests.invariants.{path.stem}")
+        for attr in sorted(vars(module)):
+            value = getattr(module, attr)
+            if isinstance(value, Registry):
+                found.update((f"{path.stem}.{rule.name}", rule) for rule in value)
+            elif isinstance(value, Rule):
+                found[f"{path.stem}.{value.name}"] = value
+    return sorted(found.items())
+
+
+def test_every_rule_bites() -> None:
+    """Every rule's proof thunk executes and fires, naming its marker.
+
+    The arming audit is a static spelling check; only running the proofs
+    executes them -- this test is what a silent ``return []`` must get past."""
+    rules = _rules()
+    assert len(rules) >= 80, "the rule sweep found almost nothing"
+    for label, rule in rules:
+        try:
+            rule.check_bites()
+        except AssertionError as exc:
+            raise AssertionError(f"[{label}] {exc}") from exc
 
 
 def test_every_rule_is_still_armed_on_a_name_the_app_tree_has() -> None:
