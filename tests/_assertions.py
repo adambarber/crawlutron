@@ -22,11 +22,11 @@ def block_private_targets(monkeypatch) -> None:
 
 
 @contextmanager
-def host_resolves_to(monkeypatch, ip: str):
+def host_resolves_to(monkeypatch, ip: str, *, resolver=None):
     """The precondition for a resolution-dependent SSRF verdict: ``name`` resolves to ``ip``.
 
-    Opts out of the allow-private escape hatch AND pins the resolver; yields
-    the hostnames resolved, so an exactly-once DNS contract is assertable."""
+    ``resolver`` replaces the whole ``getaddrinfo`` (a mixed-answer pin); a plain
+    ``ip`` pins every answer to that single address."""
     import socket
     from unittest.mock import patch
 
@@ -35,6 +35,8 @@ def host_resolves_to(monkeypatch, ip: str):
 
     def _getaddrinfo(host, *args, **kwargs):
         resolved.append(host)
+        if resolver is not None:
+            return resolver(host, *args, **kwargs)
         return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", (ip, 80))]
 
     with patch("socket.getaddrinfo", side_effect=_getaddrinfo):
