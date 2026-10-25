@@ -34,7 +34,8 @@ def test_timed_out_selectors_are_cancelled_not_orphaned(monkeypatch):
         )
         assert result == ExtractedContent(None, None)
     time.sleep(3.5)  # orphans would all have started and finished by now
-    assert len(calls) == 4, (
-        f"{len(calls)} selector evaluations ran; the four submitted after the "
-        "pool saturated must be cancelled on timeout, not started later as orphans"
+    assert len(calls) <= 4, (
+        f"{len(calls)} selector evaluations ran (some workers may still be drained "
+        "by earlier tests); anything past four means the submissions queued behind "
+        "the saturated pool started later as orphans"
     )

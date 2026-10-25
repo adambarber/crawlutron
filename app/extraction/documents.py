@@ -197,6 +197,14 @@ def _css_selected_fragment(html: str, selectors: Selectors, selector_timeout: fl
     css_selector = selectors.css or ""
     if not css_selector:
         return None
+    if len(html) > EXTRACTION_DOC_MAX_INPUT_BYTES:
+        # The parse itself is untimed on the caller thread: refuse a hostile-size
+        # payload instead of parsing it.
+        logger.warning(
+            "extraction_css_payload_too_large",
+            extra={"size_bytes": len(html), "max_bytes": EXTRACTION_DOC_MAX_INPUT_BYTES},
+        )
+        return None
     try:
         from bs4 import BeautifulSoup
     except ImportError:
