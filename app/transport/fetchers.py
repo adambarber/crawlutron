@@ -56,10 +56,15 @@ async def default_http_fetcher(
     client = http_client_pool.get_async_http_client()
     started = time.monotonic()
     timeout = Timeouts.for_request(timeout_seconds).as_httpx()
+    pending: tuple[NormalizedUrl, TransportHeaders] | None = None
     async for chain, pinned_url, hop_headers in pinned_transport.apinned_hops(
         url, headers, pin=pin, timeout_seconds=timeout_seconds
     ):
-        terminal = await _stream_terminal_hop(
+        # The previous hop's Set-Cookie flushes here: reaching this iteration
+        # means THIS hop's pin admitted the walk (#525 SEC-06).
+        await _flush_deferred_hop_cookies(pending)
+        pending = None
+        terminal, pending = await _stream_terminal_hop(
             client,
             chain=chain,
             url=url,
@@ -69,9 +74,8 @@ async def default_http_fetcher(
             max_content_length=max_content_length,
             started=started,
         )
-        if terminal is None:
-            continue
-        return terminal
+        if terminal is not None:
+            return terminal
     raise AssertionError("apinned_hops raises on a body that neither returned nor advanced")
 
 
@@ -85,40 +89,52 @@ async def _stream_terminal_hop(
     timeout,
     max_content_length,
     started,
-) -> HttpFetchResult | None:
-    """Send one SSRF-pinned hop and return its terminal result, or None when the
-    hop is a redirect asking for another (re-pinned) request."""
+) -> tuple[HttpFetchResult | None, tuple[NormalizedUrl, TransportHeaders] | None]:
+    """Send one SSRF-pinned hop; ``(None, pending_cookie_hop)`` when the hop is
+    a redirect asking for another (re-pinned) request -- the pending tuple is
+    stored only once the next hop's pin admits the walk (#525 SEC-06)."""
     async with pinned_transport.apinned_stream(client, chain, pinned_url, hop_headers, timeout) as response:
         content_length = response.headers.get("content-length")
         if pinned_transport.declared_length_exceeds(content_length, max_content_length):
-            return http_413(url, chain.url, started)
+            return http_413(url, chain.url, started), None
         status_code = response.status_code
         hop_url = chain.url
         if await chain.advance(response):
-            # The redirect hop's Set-Cookie is a real cookie: store it for the
-            # hop's URL before walking on, or login redirects lose it.
-            await _store_hop_cookies(hop_url, response.headers)
-            return None
+            # A real cookie (RFC 6265 5.3), but persistence is DEFERRED: stored
+            # only after the next hop's pin admits the walk (#525 SEC-06).
+            return None, (hop_url, response.headers)
         raw = bytearray()
         async for chunk in response.aiter_raw():
             raw.extend(chunk)
             if len(raw) > max_content_length:
-                return http_413(url, chain.url, started)
-        return await _finish_fetch(
-            url=url,
-            final_url=chain.url,
-            status_code=status_code,
-            raw=raw,
-            response_headers=response.headers,
-            max_content_length=max_content_length,
-            elapsed_ms=int((time.monotonic() - started) * 1000),
-            too_large=functools.partial(http_413, url, chain.url, started),
+                return http_413(url, chain.url, started), None
+        return (
+            await _finish_fetch(
+                url=url,
+                final_url=chain.url,
+                status_code=status_code,
+                raw=raw,
+                response_headers=response.headers,
+                max_content_length=max_content_length,
+                elapsed_ms=int((time.monotonic() - started) * 1000),
+                too_large=functools.partial(http_413, url, chain.url, started),
+            ),
+            None,
         )
 
 
 async def _store_hop_cookies(hop_url: NormalizedUrl, response_headers: TransportHeaders) -> None:
-    """The redirect-hop cookie door: same tail, one hop earlier."""
+    """The redirect-hop cookie door: same tail, one hop later."""
     await store_set_cookies(hop_url, response_headers)
+
+
+async def _flush_deferred_hop_cookies(
+    deferred: tuple[NormalizedUrl, TransportHeaders] | None,
+) -> None:
+    """Store the previous hop's Set-Cookie exactly once: reaching a fresh loop
+    iteration means this hop's pin admitted the walk (#525 SEC-06)."""
+    if deferred is not None:
+        await _store_hop_cookies(*deferred)
 
 
 async def _finish_fetch(
@@ -177,12 +193,18 @@ async def cffi_fetch(
     # One shared session per event loop. The class is AsyncSession
     # (curl_cffi>=0.7): AsyncClient does not exist, and naming it breaks every fetch.
     client = http_client_pool.get_cffi_session()
+    # Declared outside the walk so the twin loops share no longer a window.
+    pending: tuple[NormalizedUrl, TransportHeaders] | None = None
     try:
         started = time.monotonic()
         async for chain, pinned_url, hop_headers in pinned_transport.apinned_hops(
             url, headers, pin=pin, timeout_seconds=timeout_seconds
         ):
-            handled = await _handle_cffi_hop(
+            # Same door as the httpx twin: the previous hop's Set-Cookie
+            # flushes only after THIS hop's pin admitted the walk (#525 SEC-06).
+            await _flush_deferred_hop_cookies(pending)
+            pending = None
+            handled, pending = await _handle_cffi_hop(
                 url,
                 chain,
                 client,
@@ -221,8 +243,9 @@ async def _handle_cffi_hop(
     max_content_length: int,
     started: float,
     release_stream_noblock: Callable[[Any], None] | None,
-) -> HttpFetchResult | None:
-    """One pinned hop: GET, too-large gate, redirect advance, or streamed body."""
+) -> tuple[HttpFetchResult | None, tuple[NormalizedUrl, TransportHeaders] | None]:
+    """One pinned hop: GET, too-large gate, redirect advance, or streamed body;
+    the redirect arm returns its pending cookie hop instead of storing it."""
     try:
         response = await client.get(
             pinned_url,
@@ -237,28 +260,31 @@ async def _handle_cffi_hop(
         raise
     except Exception:
         # Fall back to plain httpx for this request on transport errors.
-        return None
+        return None, None
     # Content-length check
     content_length = response.headers.get("content-length")
     if pinned_transport.declared_length_exceeds(content_length, max_content_length):
         await response.aclose()  # release the curl handle
         elapsed_ms = int((time.monotonic() - started) * 1000)
-        return _cffi_too_large_result(url, chain.url, response, elapsed_ms)
+        return _cffi_too_large_result(url, chain.url, response, elapsed_ms), None
     if await chain.advance(response):
         await response.aclose()  # release the curl handle
-        await _store_hop_cookies(chain.url, response.headers)  # a hop's Set-Cookie persists
-        return None
+        # Deferred like the httpx twin: stored only when the next pin admits.
+        return None, (chain.url, response.headers)
     # Never trust response.elapsed across curl_cffi versions: a timedelta
     # there TypeErrors and silently downgrades every fetch to plain httpx.
     elapsed_ms = int((time.monotonic() - started) * 1000)
-    return await _read_capped_stream(
-        url,
-        chain,
-        response,
-        timeout_seconds=timeout_seconds,
-        max_content_length=max_content_length,
-        elapsed_ms=elapsed_ms,
-        release_stream_noblock=release_stream_noblock,
+    return (
+        await _read_capped_stream(
+            url,
+            chain,
+            response,
+            timeout_seconds=timeout_seconds,
+            max_content_length=max_content_length,
+            elapsed_ms=elapsed_ms,
+            release_stream_noblock=release_stream_noblock,
+        ),
+        None,
     )
 
 

@@ -124,8 +124,8 @@ _COOKIE_DOOR = "app/transport/cookie_jar.py"
 _COOKIE_TAIL_FN = "_finish_fetch"
 
 
-# The redirect-hop door: a 302's Set-Cookie must persist before the walk
-# advances, so the two redirect loops persist through this named helper.
+# The redirect-hop door: a 302's Set-Cookie persists ONLY through this named helper,
+# deferred until the next hop's pin admits the walk (#525); the timing lock is behavioral.
 _COOKIE_TAIL_HOP_FN = "_store_hop_cookies"
 
 
