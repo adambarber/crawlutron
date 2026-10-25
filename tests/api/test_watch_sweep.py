@@ -38,13 +38,19 @@ def sweeper(watch_store):
 
 @pytest.fixture
 def announced(monkeypatch):
-    """The announcements a pass handed the delivery funnel, in order."""
+    """The announcements a pass handed the delivery funnel, in order.
+
+    The sweep backgrounded its deliveries (#528), so the stub is the spawn
+    seam; each call is awaited here so tests observe the completed delivery."""
     calls: list[tuple[str, dict[str, object]]] = []
 
-    async def _capture(webhook_url: str, payload: dict[str, object], *, host_policy) -> None:
-        calls.append((webhook_url, payload))
+    async def _capture(url: str, payload: dict[str, object], *, host_policy) -> None:
+        calls.append((url, payload))
 
-    monkeypatch.setattr(watch_sweep, "post_webhook_guarded", _capture)
+    def _spawn(url: str, payload: dict[str, object], *, host_policy):
+        return asyncio.create_task(_capture(url, payload, host_policy=host_policy))
+
+    monkeypatch.setattr(watch_sweep, "start_webhook_delivery", _spawn)
     return calls
 
 
@@ -78,6 +84,9 @@ async def _prime(sweeper, watch_store, server, announced) -> WatchState:
     """
     watch = register(watch_store, canonical(origin_url(server)))
     await sweeper.sweep_once(now=NOW)
+    # The first pass's spawned delivery runs on the next loop turn; let it land
+    # before the buffer is cleared, or a late announcement leaks into the follow-up.
+    await asyncio.sleep(0)
     announced.clear()
     return watch
 
@@ -93,6 +102,9 @@ async def test_a_first_check_records_what_the_origin_returned_and_announces_it(
     watch = register(watch_store, canonical(origin_url(etag_server)))
 
     outcomes = await sweeper.sweep_once(now=NOW)
+    # The delivery is a spawned task now (#528): yield once so it runs before
+    # the assertions read the buffer.
+    await asyncio.sleep(0)
 
     assert outcomes == [CrawlClassification.rendered]
     reloaded = watch_store.get(watch.watch_id)
@@ -130,6 +142,8 @@ async def test_a_changed_origin_is_announced_again_with_the_new_validators(
     origin_content("v2", b"<html><body>changed</body></html>")
 
     outcomes = await sweeper.sweep_once(now=NOW + INTERVAL)
+    # A spawned delivery lands on the next loop turn (#528).
+    await asyncio.sleep(0)
 
     assert outcomes == [CrawlClassification.rendered]
     assert watch_store.get(watch.watch_id).validators.etag == "v2"

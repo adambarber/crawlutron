@@ -146,6 +146,31 @@ class WatchStore(CoordinationStore):
             ).fetchall()
         return [_row_to_state(row) for row in rows]
 
+    def claim_due(self, now: float, token: str, *, claim_seconds: float) -> list[WatchState]:
+        """Atomically claim the due watches for one sweep pass: an UPDATE stamps
+        ``token``/``claimed_at`` on every due, unclaimed (or stale-claimed) row and
+        the claimed rows are returned; a second sweeper's CAS loses and skips (#528).
+        """
+        with self._lock:
+            self._conn.execute(
+                """
+                UPDATE watches SET claimed_by = ?, claimed_at = ?
+                WHERE status = ? AND next_check_at <= ?
+                  AND (claimed_at IS NULL OR claimed_at < ?)
+                """,
+                (token, now, WatchStatus.ACTIVE, now, now - claim_seconds),
+            )
+            self._conn.commit()
+            rows = self._conn.execute(
+                """
+                SELECT * FROM watches
+                WHERE status = ? AND next_check_at <= ? AND claimed_by = ?
+                ORDER BY next_check_at
+                """,
+                (WatchStatus.ACTIVE, now, token),
+            ).fetchall()
+        return [_row_to_state(row) for row in rows]
+
     def record_check(
         self,
         watch_id: str,
@@ -176,6 +201,8 @@ class WatchStore(CoordinationStore):
                     -- a delivered body replaces the set outright; other verdicts keep it
                     validators = CASE WHEN ? THEN ? ELSE validators END,
                     next_check_at = ?,
+                    -- the claim ends with the check: a completed row is unclaimed
+                    claimed_at = NULL,
                     updated_at = ?
                 WHERE watch_id = ?
                 """,
@@ -209,6 +236,9 @@ class WatchStore(CoordinationStore):
                     status = ?,
                     last_outcome = ?,
                     next_check_at = ?,
+                    -- the claim ends with the check: a completed row is unclaimed
+                    claimed_at = NULL,
+                    claimed_by = NULL,
                     updated_at = ?
                 WHERE watch_id = ?
                 """,
@@ -221,6 +251,7 @@ class WatchStore(CoordinationStore):
 
     acreate = atwin(create)
     arecord_check = atwin(record_check)
+    aclaim_due = atwin(claim_due)
     adeactivate = atwin(deactivate)
     aget = atwin(get)
     aget_for_caller = atwin(get_for_caller)
