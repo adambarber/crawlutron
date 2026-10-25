@@ -168,9 +168,11 @@ def page_kwargs(browser_profile: dict[str, Any] | None) -> dict[str, Any]:
     """Page/context kwargs, applied at ``browser.new_page`` time."""
     profile = browser_profile or {}
     viewport = profile.get("viewport")
+    # Playwright's page.route never intercepts a service worker's fetch(); only
+    # the context-level service_workers="block" keeps a hostile SW from starting.
     if viewport == "mobile":
-        return {"viewport": {"width": 390, "height": 844}}
-    return {"viewport": {"width": 1365, "height": 768}}
+        return {"service_workers": "block", "viewport": {"width": 390, "height": 844}}
+    return {"service_workers": "block", "viewport": {"width": 1365, "height": 768}}
 
 
 def harvest_timeout_for(browser_profile: dict[str, Any] | None, default_seconds: float) -> float:

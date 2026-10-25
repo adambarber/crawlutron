@@ -4,6 +4,7 @@ from app.models.normalized_url import NormalizedUrl
 from app.models.render_options import RenderOptions
 from app.transport.browser import BrowserRenderer
 from app.transport.browser_driver import BrowserDriver
+from tests._browser_page_doubles import BrowserFakeContextManager, BrowserFakePage
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY
 
 
@@ -43,6 +44,43 @@ class TestBrowserRenderRetry:
     async def test_render_exhausts_retries_on_generic_error(self):
         result = await _retry_exhausted(_raise_generic)
         assert result.classification == "unknown_error"
+
+
+class TestServiceWorkersBlocked:
+    def test_service_workers_blocked_at_page_open(self):
+        """A hostile service worker's fetch() never crosses page.route, so SWs
+        must be blocked at context creation -- new_page() owns that option.
+        """
+        driver = BrowserDriver()
+        kwargs = driver.page_kwargs({})
+        assert kwargs.get("service_workers") == "block", kwargs
+
+    def test_service_workers_block_survives_profile_kwargs(self):
+        driver = BrowserDriver()
+        kwargs = driver.page_kwargs({"viewport": "mobile"})
+        assert kwargs.get("service_workers") == "block", kwargs
+
+    async def test_new_page_receives_service_workers_block(self):
+        """The option must ride new_page's context options, not just sit in the
+        kwargs dict -- the browser double records what actually arrived."""
+
+        class _RecordingBrowser:
+            def __init__(self):
+                self.page_kwargs_seen: list[dict] = []
+
+            async def new_page(self, **kwargs):
+                self.page_kwargs_seen.append(kwargs)
+                return BrowserFakePage()
+
+            @property
+            def is_closed(self):
+                return False
+
+        browser = _RecordingBrowser()
+        driver = BrowserDriver(browser_factory=lambda **_kw: BrowserFakeContextManager(browser))
+        await driver.open_page({})
+        assert browser.page_kwargs_seen, "open_page never reached new_page"
+        assert browser.page_kwargs_seen[0].get("service_workers") == "block"
 
 
 class TestBrowserKwargs:

@@ -10,15 +10,21 @@ import pytest
 
 from app.models.render_options import RenderOptions
 from tests._browser_doubles import FakeBrowserDriver, build_pinned_renderer, stub_pinned_request
-from tests._browser_page_doubles import BrowserFakePage
+from tests._browser_page_doubles import BrowserFakePage, FakePageContext
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY, canonical
 
 
 class _RouteRaisesPage(BrowserFakePage):
-    """A page whose route setup fails the moment the renderer wires the SSRF guard."""
+    """A page whose CONTEXT route setup fails the moment the renderer wires the guard."""
 
-    async def route(self, pattern, handler):
-        raise RuntimeError("route setup failed")
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+        class _Raising(FakePageContext):
+            async def route(self, pattern, handler):
+                raise RuntimeError("route setup failed")
+
+        self.context = _Raising()
 
 
 class _CountingDriver(FakeBrowserDriver):

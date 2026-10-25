@@ -38,14 +38,19 @@ import logging
 logger = logging.getLogger(__name__)
 
 
-class RenderPage(Protocol):
-    """The page surface the render phases call; a double needs exactly this."""
-
-    url: str
+class GuardContext(Protocol):
+    """The context surface the SSRF guards install on (route + websocket)."""
 
     async def route(self, pattern: str, handler: Callable[..., object]) -> object: ...
 
     def route_web_socket(self, pattern: str, handler: Callable[..., object]) -> object: ...
+
+
+class RenderPage(Protocol):
+    """The page surface the render phases call; a double needs exactly this."""
+
+    url: str
+    context: GuardContext
 
     def on(self, event: str, handler: Callable[..., object]) -> object: ...
 
@@ -114,7 +119,10 @@ async def wire_ssrf_guards(
     on_response: list[dict[str, object]],
 ) -> None:
     """Route-level SSRF guards plus XHR interception, before navigation."""
-    await page.route(
+    # Install at the page's context: every page/worker the context spawns is
+    # covered, including ones created after the install (CRLN-SEC-02 gap 2).
+    context = page.context
+    await context.route(
         "**/*",
         make_ssrf_route_handler(
             _profile_str(profile, "resource_mode"),
@@ -125,7 +133,7 @@ async def wire_ssrf_guards(
         ),
     )
     ws_guard = make_ssrf_websocket_handler(policy=wire.policy, timeout_seconds=wire.timeout_seconds)
-    ws_router = getattr(page, "route_web_socket", None)
+    ws_router = getattr(context, "route_web_socket", None)
     if ws_router is None:
         logger.warning("websocket_interception_unsupported")
     else:

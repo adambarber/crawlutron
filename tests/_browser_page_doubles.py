@@ -23,13 +23,21 @@ class PageCookieContext(Protocol):
 
 
 class FakePageContext:
-    """A page context that holds no cookies; ``harvest_session_cookies`` reads
-    ``page.context.cookies``, so a page with none would be one the renderer cannot
-    ask -- the context is part of the surface, so part of the double.
-    """
+    """A page context that holds no cookies and records route installs: the
+    render phases install their SSRF guards on ``page.context.route``."""
+
+    def __init__(self) -> None:
+        self.route_calls: list[tuple[str, object]] = []
+        self.ws_calls: list[tuple[str, object]] = []
 
     async def cookies(self, url: str | None = None) -> list[dict[str, str]]:
         return []
+
+    async def route(self, pattern, handler):
+        self.route_calls.append((pattern, handler))
+
+    def route_web_socket(self, pattern, handler):
+        self.ws_calls.append((pattern, handler))
 
 
 async def _selector_is_present(selector, timeout=None, **kwargs):
@@ -54,14 +62,10 @@ class BrowserFakePage:
         on_wait_for_selector=None,
     ):
         self.goto_calls: list[tuple[str, dict[str, object]]] = []
-        self.route_calls: list[tuple[str, object]] = []
         self.set_extra_http_headers_calls: list[dict[str, str]] = []
         self.url = url
         self.context = context if context is not None else FakePageContext()
         self.on_wait_for_selector = on_wait_for_selector or _selector_is_present
-
-    async def route(self, pattern, handler):
-        self.route_calls.append((pattern, handler))
 
     def on(self, event, handler):
         pass
