@@ -13,12 +13,8 @@ from dataclasses import dataclass, field, replace
 from itertools import islice
 from typing import NamedTuple, Protocol, cast
 
-from app.admission.admission_links import (
-    AdmittedLink,
-    admit_discovered_links,
-    gather_robots_decisions,
-    remaining_page_capacity,
-)
+from app.admission.admission_links import AdmittedLink, admit_discovered_links, gather_robots_decisions
+from app.admission.admission_links import remaining_page_capacity
 from app.models.crawl_result import EngineCrawlResult
 from app.models.crawl_task import CrawlTask
 from app.models.host_policy import HostPolicy
