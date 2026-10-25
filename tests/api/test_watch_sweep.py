@@ -137,6 +137,39 @@ async def test_a_changed_origin_is_announced_again_with_the_new_validators(
     assert announced[0][1]["url"] == watch.url
 
 
+async def test_a_delivery_time_validation_failure_leaves_the_recorded_outcome_intact(
+    sweeper, watch_store, etag_server, monkeypatch
+):
+    """One DNS blip at webhook-delivery time must not turn a good check into a
+    failed one (#450): the outcome ``arecord_check`` already wrote stands, and a
+    delivery-time raise never reaches the sweep's failure recorder."""
+    from app.api import webhooks
+
+    watch = register(watch_store, canonical(origin_url(etag_server)))
+
+    async def resolver_blip(url, *, host_policy):
+        raise OSError("resolver timeout")
+
+    async def _no_delivery(url, payload, *, host_policy):
+        return None
+
+    monkeypatch.setattr(webhooks, "validate_webhook_url_async", resolver_blip)
+    monkeypatch.setattr(webhooks, "deliver_pinned_webhook", _no_delivery)
+
+    outcomes = await sweeper.sweep_once(now=NOW)
+
+    assert outcomes == [CrawlClassification.rendered], outcomes
+    # The row the pass already recorded is exactly what stands: same validators,
+    # no failure streak, still active, rescheduled -- delivery never touched it.
+    reloaded = watch_store.get(watch.watch_id)
+    assert (
+        reloaded.validators.etag,
+        reloaded.consecutive_failures,
+        reloaded.next_check_at,
+        reloaded.status,
+    ) == (EtagHandler.etag, 0, NOW + INTERVAL, WatchStatus.ACTIVE)
+
+
 async def test_a_poll_only_watch_is_checked_and_announces_to_nobody(
     sweeper, watch_store, etag_server, announced
 ):

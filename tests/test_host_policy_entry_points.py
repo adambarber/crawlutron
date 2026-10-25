@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 
-import httpx
 import pytest
 
 from app.storage.result_store import CrawlResultStore
@@ -14,6 +13,7 @@ from tests._host_policy_probes import (
     _denied_settings,
     _effects,
     _record_probe_fetch,
+    monkeypatch_wire_guard,
 )
 from tests._http_test_helpers import minimal_request
 from tests._policy_factories import canonical
@@ -243,13 +243,9 @@ async def _probe_webhook(monkeypatch, tmp_path):
     from app.api import webhooks
 
     effects = _effects()
-
-    async def forbidden_delivery(*args, **kwargs):
-        effects["wire"].append(args)
-
-    monkeypatch.setattr(webhooks, "deliver_pinned_webhook", forbidden_delivery)
-    # Both webhook entry points refuse the same refused host without touching the wire:
-    # the plain funnel and its shielded drain-worthy twin share one admission seam.
+    monkeypatch_wire_guard(monkeypatch, effects)
+    # Both webhook entry points share one admission seam: the per-attempt pin (#450),
+    # which fails closed before any client is built. Refusal is proven by the empty wire.
     for entry in (webhooks.post_webhook, webhooks.post_webhook_guarded):
         await _assert_refused(
             entry(_BLOCKED_URL, {"status": "accepted"}, host_policy=_denied_policy()),
@@ -261,12 +257,7 @@ async def _probe_webhook_delivery(monkeypatch, tmp_path):
     from app.api import webhooks
 
     effects = _effects()
-
-    def forbidden_client(*args, **kwargs):
-        effects["wire"].append(args)
-        raise AssertionError("blocked webhook reached the wire")
-
-    monkeypatch.setattr(httpx, "AsyncClient", forbidden_client)
+    monkeypatch_wire_guard(monkeypatch, effects)
     await _assert_refused(
         webhooks.deliver_pinned_webhook(
             _BLOCKED_URL,
