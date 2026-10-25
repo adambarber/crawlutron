@@ -53,6 +53,7 @@ def capabilities_payload(settings: CrawlerSettings) -> CapabilitiesPayload:
         "output_fields": OUTPUT_FIELDS,
         "default_limits": _default_limit_fields(settings),
         "features": _feature_flag_fields(),
+        "auth": _auth_fields(),
         "search": _search_fields(settings),
         "mcp": _mcp_fields(),
         "crawl_timing": _crawl_timing_fields(),
@@ -118,6 +119,15 @@ def _feature_flag_fields() -> dict[str, bool]:
         "domain_aware_concurrency": True,
         "readiness_endpoint": True,
         "event_loop_thread_offload": True,
+    }
+
+
+def _auth_fields() -> dict[str, object]:
+    """How a caller identifies, and who can mint keys."""
+    return {
+        "caller_credential": "X-API-Key or Authorization: Bearer",
+        "anonymous_caller": "shared bounded identity (default quotas)",
+        "key_management": "POST /v1/keys, operator-gated (X-API-Key: CRAWLUTRON_KEY_ADMIN_TOKEN)",
     }
 
 

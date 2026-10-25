@@ -22,6 +22,7 @@ def discovery_payload() -> DiscoveryPayload:
             "map": "/v1/map",
             "jobs": "/v1/jobs",
             "watches": "/v1/watches",
+            "keys": "/v1/keys",
             "result_retrieval": "/v1/crawl/{request_id}",
             "trace": "/v1/crawl/{request_id}/trace",
             "policy_suggestions": "/v1/policy-suggestions",
@@ -41,6 +42,9 @@ def discovery_payload() -> DiscoveryPayload:
             "GET /v1/jobs/{job_id}",
             "POST /v1/jobs/{job_id}/control",
             "DELETE /v1/jobs/{job_id}",
+            "POST /v1/keys",
+            "GET /v1/keys",
+            "DELETE /v1/keys/{key_id}",
             "POST /v1/watches",
             "GET /v1/watches",
             "GET /v1/watches/{watch_id}",
@@ -51,6 +55,14 @@ def discovery_payload() -> DiscoveryPayload:
             "POST /mcp",
         ],
         "description": "Policy-driven universal crawler execution service for script-tool municipal crawling.",  # noqa: E501
+        "auth": {
+            "caller_keys": "Present X-API-Key (or Authorization: Bearer) on crawl/job/result requests; "
+            "jobs and results created under a key are readable only under it. Anonymous requests crawl as a "
+            "shared bounded identity.",
+            "key_issuance": "POST /v1/keys mints and revokes caller keys but accepts only the operator token "
+            "(X-API-Key: CRAWLUTRON_KEY_ADMIN_TOKEN); with no token configured the keys surface is sealed.",
+        },
+        "is_operator_sealed": False,
     }
 
 

@@ -3,11 +3,16 @@
 from __future__ import annotations
 
 import ast
+import json
 import pathlib
 import re
 
 import pytest
 
+from app.models.crawl_policy import CrawlPolicy
+from app.models.crawl_request import CrawlRequest
+from app.models.json_value import JsonValue
+from app.models.render_request import RenderRequest
 from tests.chokepoint_walks import REPO_ROOT
 from tests.invariants.test_knob_contracts import (
     _KNOB_PATTERN,
@@ -289,6 +294,73 @@ DOC_SYMBOLS_RESOLVE_TO_DEFINITIONS = Rule(
     bite=lambda: (),
     clean=None,
 )
+
+
+_FENCED_JSON = re.compile(r"```json\n(.*?)```", re.DOTALL)
+
+
+def _classify_request_shape(payload: dict[str, JsonValue]) -> type | None:
+    """The live model a JSON object claims to be, or None when it is not a request."""
+    if not isinstance(payload, dict):
+        return None
+    if "strategies" in payload:
+        return CrawlPolicy
+    if "options" in payload and ("url" in payload or "urls" in payload):
+        return RenderRequest
+    if "url" in payload or "urls" in payload:
+        return CrawlRequest
+    return None
+
+
+def _doc_example_offenders(root: pathlib.Path = REPO_ROOT, documents: list[str] | None = None) -> list[str]:
+    """Every fenced request-payload example in a live doc must validate against its model.
+
+    Blocks that do not parse or do not name a request shape are skipped.
+    """
+    offenders: list[str] = []
+    for name in _live_documents() if documents is None else documents:
+        document = root / name
+        for index, block in enumerate(_FENCED_JSON.findall(document.read_text(encoding="utf-8")), start=1):
+            try:
+                payload = json.loads(block)
+            except json.JSONDecodeError:
+                continue
+            model = _classify_request_shape(payload)
+            if model is None:
+                continue
+            try:
+                model.model_validate(payload)
+            except Exception as error:
+                first = str(error).split("\n")[0]
+                offenders.append(f"{name} json example #{index} is rejected by {model.__name__}: {first}")
+    return offenders
+
+
+def test_live_doc_json_request_examples_validate():
+    assert not (failures := _doc_example_offenders()), "; ".join(failures)
+
+
+def test_doc_example_gate_bites(tmp_path):
+    """The gate must reject a request example the live model refuses."""
+    assert _doc_example_offenders() == []
+    (tmp_path / "doc_ghost.md").write_text(
+        '```json\n{"url": "https://example.com/a", "request_profile": {}}\n```\n',
+        encoding="utf-8",
+    )
+    offenders = _doc_example_offenders(root=tmp_path, documents=["doc_ghost.md"])
+    assert len(offenders) == 1, offenders
+    assert "rejected by CrawlRequest" in offenders[0], offenders
+
+
+def test_doc_example_gate_spares_non_request_fences(tmp_path):
+    """Response shapes and non-JSON fences are not requests and must not fire."""
+    (tmp_path / "doc_ghost.md").write_text(
+        '```json\n{"request_id": "a", "results": [{"url": "https://example.com/a"}]}\n```\n'
+        "```\nnot json at all\n```\n"
+        '```json\n{"url": "https://example.com/a"}\n```\n',
+        encoding="utf-8",
+    )
+    assert _doc_example_offenders(root=tmp_path, documents=["doc_ghost.md"]) == []
 
 
 def _compose_file() -> pathlib.Path:

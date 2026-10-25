@@ -28,9 +28,13 @@ production deployments typically front it with an authenticated reverse proxy.
 
 ## Security Posture
 
-crawlutron is a **localhost-only** service. By design it does not
-authenticate callers and binds to `127.0.0.1`; expose it beyond localhost
-only behind an authenticated reverse proxy.
+crawlutron is a **localhost-only** service. It binds to `127.0.0.1` by
+default. Callers authenticate with an API key presented as `X-API-Key` or
+`Authorization: Bearer` — jobs and results created under a key are readable
+only under it, and key issuance/revocation is operator-gated
+(`CRAWLUTRON_KEY_ADMIN_TOKEN` via `/v1/keys`). Keyless requests crawl as a
+shared anonymous identity with bounded default quotas. Expose it beyond
+localhost only behind an authenticated reverse proxy.
 
 What the SSRF defenses cover:
 
@@ -168,6 +172,7 @@ $EDITOR app/storage/migrations/0002_crawl_jobs_descriptive_name.py
 | `GET`  | `/v1/capabilities` | Declares supported strategies, classifications, extraction methods, profiles. |
 | `GET`  | `/v1/agent-hints` | Machine-readable guidance for agents/bots (request shapes, caveats). |
 | `GET`  | `/.well-known/crawler-service` | Service discovery descriptor (links to OpenAPI, agent hints, capabilities). |
+| `POST`/`GET`/`DELETE` | `/v1/keys` | Caller API keys: issue, list, revoke (operator token required). Callers present the key as `X-API-Key`. |
 | `GET`  | `/metrics` | Prometheus-format metrics. |
 
 ---
@@ -213,9 +218,10 @@ rebinding defense).
 
 ## Crawl request shape
 
-`POST /v1/crawl` accepts either a single `url` or a list of `urls`, plus an optional
-`policy`, `request_profile`, `browser_profile`, `discovery`, `scope_regex`,
-`css_selector`, `xpath`, and `webhook_url`.
+`POST /v1/crawl` accepts either a single `url` or a list of `urls`, plus optional top-level
+fields: `policy`, `validators` (cached conditional-GET validators), `async_mode`, `webhook_url`,
+and `output_format`. The request/browsing profile knobs — `request_profile`, `browser_profile`,
+`discovery`, `scope_regex`, `css_selector`, `xpath` — live **inside** `policy`.
 
 ```json
 {
@@ -229,11 +235,11 @@ rebinding defense).
       "challenge_wait_seconds": 4,
       "max_discovered_links": 10,
       "respect_robots": true
-    }
-  },
-  "request_profile": { "user_agent_family": "declared_crawler" },
-  "browser_profile": { "state": "ephemeral", "resource_mode": "document" },
-  "discovery": { "robots": true, "sitemaps": true, "feeds": true }
+    },
+    "request_profile": { "user_agent_family": "declared_crawler" },
+    "browser_profile": { "resource_mode": "document" },
+    "discovery": { "robots": true, "sitemaps": true, "feeds": true }
+  }
 }
 ```
 
@@ -383,7 +389,7 @@ Host policy is applied at the shared public-URL chokepoint before the SSRF/priva
 - Service descriptor: `/.well-known/crawler-service`
 
 The `/v1/render` request body is a typed `RenderRequest` (`url`/`urls` plus an
-`options` object with `timeout_seconds`, `wait_until`, `max_retries`,
+`options` object with `timeout_seconds`, `max_retries`,
 `respect_robots`, `include_html`, `include_text`). Malformed bodies are rejected
 with `422`.
 
