@@ -42,6 +42,17 @@ def _effects() -> defaultdict[str, list[str]]:
     return defaultdict(list)
 
 
+def monkeypatch_wire_guard(monkeypatch, effects) -> None:
+    """Point ``httpx.AsyncClient`` at a recorder that never lets a blocked host reach the wire."""
+    import httpx
+
+    def forbidden_client(*args, **kwargs):
+        effects["wire"].append(args)
+        raise AssertionError("blocked webhook reached the wire")
+
+    monkeypatch.setattr(httpx, "AsyncClient", forbidden_client)
+
+
 def _record_probe_fetch(effects: MutableMapping[str, list[str]], payload: Mapping[str, object]) -> None:
     """Note a fetch the guard was supposed to prevent, except the blocked URL itself;
     spelled inline, a probe comparing a different value would record every URL and
