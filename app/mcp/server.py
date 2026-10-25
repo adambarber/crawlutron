@@ -42,8 +42,8 @@ _LOOPBACK_HOSTS = {"localhost", "127.0.0.1", "::1"}
 def origin_allowed(origin: str | None) -> bool:
     """Reject cross-origin browser requests (DNS-rebinding defense).
 
-    The service binds to loopback only and carries no caller authentication, so
-    any browser origin that is not loopback is rejected with 403.
+    Callers authenticate by API key (X-API-Key / Bearer; anonymous callers share
+    a bounded identity), so any non-loopback browser origin is rejected with 403.
     """
     if not origin:
         return True

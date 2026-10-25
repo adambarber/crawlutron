@@ -28,9 +28,13 @@ production deployments typically front it with an authenticated reverse proxy.
 
 ## Security Posture
 
-crawlutron is a **localhost-only** service. By design it does not
-authenticate callers and binds to `127.0.0.1`; expose it beyond localhost
-only behind an authenticated reverse proxy.
+crawlutron is a **localhost-only** service. It binds to `127.0.0.1` by
+default. Callers authenticate with an API key presented as `X-API-Key` or
+`Authorization: Bearer` — jobs and results created under a key are readable
+only under it, and key issuance/revocation is operator-gated
+(`CRAWLUTRON_KEY_ADMIN_TOKEN` via `/v1/keys`). Keyless requests crawl as a
+shared anonymous identity with bounded default quotas. Expose it beyond
+localhost only behind an authenticated reverse proxy.
 
 What the SSRF defenses cover:
 

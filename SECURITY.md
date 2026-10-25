@@ -35,8 +35,11 @@ It is a powerful SSRF-enabled service that:
 - Caps request bodies (16 MiB), decompressed responses (50 MiB), CSS/XPath
   selector runtime (1 s), and HTML-size-to-lxml input (4 MiB) so a malicious
   input cannot exhaust memory or pin a worker.
-- Default-binds to `127.0.0.1` and ships with **no authentication**; any
-  exposure beyond localhost must add an authentication layer
+- Default-binds to `127.0.0.1`; callers authenticate with an API key
+  (`X-API-Key` / `Authorization: Bearer`), keyless requests crawl as a shared
+  bounded anonymous identity, and key issuance is operator-gated via `/v1/keys`
+  (`CRAWLUTRON_KEY_ADMIN_TOKEN`). Any exposure beyond localhost must still add
+  a transport authentication layer
   (recommendation: Caddy basic-auth or an upstream reverse proxy).
 
 ### What it deliberately does **not** do
