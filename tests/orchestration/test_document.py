@@ -1,5 +1,7 @@
 """Document model: text parsing, bytearray paths and document-level extraction edges."""
 
+import asyncio
+import contextlib
 import logging
 import socket
 from pathlib import Path
@@ -8,6 +10,7 @@ from urllib.parse import urlparse
 
 import httpx
 
+import app.transport.http_client_pool as _http_pool_mod
 from app.transport.document import (
     default_document_text_extractor,
     extract_pdf_bytes_to_markdown,
@@ -398,3 +401,43 @@ class TestDocumentTextParserEdges:
     def test_blank_line_inside_an_item_title_is_skipped(self):
         out = format_extracted_document_text("1a.\nBuild\n\nMore detail", source_url="http://x/")
         assert out == "1a. Build More detail"
+
+
+class TestDocumentFetchHonorsRequestBudget:
+    """The document fetcher reads its budget from the vocabulary (#482): the
+    caller's request budget flows through ``Timeouts.for_request``; only a
+    caller with no budget falls back to the service posture."""
+
+    async def test_document_bytes_use_caller_budget_not_fixed_30s(self, monkeypatch):
+
+        import app.transport.document as doc_mod
+        import app.transport.pinned_transport as pinned_mod
+        from tests._transport_doubles import MockResponse, dispatching_transport_client
+
+        seen_timeouts: list[httpx.Timeout] = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            return MockResponse(200, content=FIXTURE.read_bytes())
+
+        client = dispatching_transport_client(handler)
+        monkeypatch.setattr(_http_pool_mod, "get_async_http_client", lambda: client)
+
+        real_stream = pinned_mod.apinned_stream
+
+        @contextlib.asynccontextmanager
+        async def capture_stream(*args, **kwargs):
+            seen_timeouts.append(args[4] if len(args) > 4 else kwargs.get("timeout"))
+            async with real_stream(*args, **kwargs) as response:
+                yield response
+
+        monkeypatch.setattr(pinned_mod, "apinned_stream", capture_stream)
+        # The production caller's door is the public extractor; drive the budget
+        # through it so the fetch seam sees the request budget, not 30s.
+        md = await asyncio.to_thread(
+            doc_mod.default_document_text_extractor,
+            canonical("http://initial.test/doc.pdf"),
+            timeout_seconds=12,
+        )
+        assert "Alice" in md
+        # The budget flows through the vocabulary, not a fixed 30s posture.
+        assert seen_timeouts and seen_timeouts[0].read == 12.0

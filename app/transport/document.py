@@ -72,20 +72,27 @@ def extract_pdf_bytes_to_markdown(pdf_bytes: bytes) -> str:
         return _pdf_to_markdown(pdf)
 
 
-async def _afetch_document_bytes(url: NormalizedUrl, pin: pinned_transport.PinRule | None = None) -> bytes:
-    """Fetch a document's bytes over the shared pinned transport -- every hop
-    re-validated and re-pinned by the same chain the HTML fetcher uses (a
-    hand-rolled urllib copy had drifted out of step), with ``follow_redirects=False``.
-    """
+async def _afetch_document_bytes(
+    url: NormalizedUrl,
+    pin: pinned_transport.PinRule | None = None,
+    *,
+    timeout_seconds: float | None = None,
+) -> bytes:
+    """Fetch document bytes over the shared pinned transport, redirect hops
+    re-pinned, with ``follow_redirects=False``. The budget is the caller's
+    request budget via ``Timeouts.for_request``; none falls to the posture (#482)."""
     from app.extraction.content import EXTRACTION_DOC_MAX_INPUT_BYTES
     from app.safety.bounded_io import read_capped_async
     from app.transport import http_client_pool, pinned_transport, pooled_clients
 
     await pooled_clients.drain_pending_client_closes()
     client = http_client_pool.get_async_http_client()
-    timeout = Timeouts.defaults().as_httpx()
+    # The request budget when one exists, the service posture otherwise --
+    # both read FROM the vocabulary, never a local scalar (#482).
+    budget = Timeouts.for_request(timeout_seconds) if timeout_seconds is not None else Timeouts.defaults()
+    timeout = budget.as_httpx()
     async for chain, pinned_url, hop_headers in pinned_transport.apinned_hops(
-        url, {}, pin=pin, timeout_seconds=Timeouts.defaults().read
+        url, {}, pin=pin, timeout_seconds=budget.read
     ):
         # Follow_redirects=False: the chain below is the redirect loop, so httpx
         # following one too would connect to a target nobody re-validated.
@@ -98,16 +105,17 @@ async def _afetch_document_bytes(url: NormalizedUrl, pin: pinned_transport.PinRu
     raise AssertionError("apinned_hops raises on a body that neither returned nor advanced")
 
 
-def default_document_text_extractor(url: NormalizedUrl) -> str:
-    """Default document text extractor: fetch the URL and extract Markdown (used
-    by the browser strategy for ``.pdf`` URLs, injectable for tests). SSRF is
-    inherited -- the URL arrives admitted, and the fetch walks the shared chain.
-    """
+def default_document_text_extractor(url: NormalizedUrl, timeout_seconds: float | None = None) -> str:
+    """Default document text extractor: fetch the URL, extract Markdown. Used by
+    the browser strategy for ``.pdf`` URLs, injectable for tests. SSRF inherited:
+    the URL arrives admitted, the fetch walks the shared chain; budget per #482."""
     try:
         # the one production caller runs this through asyncio.to_thread, so a
         # running loop is not the only way in, and a nested loop raises.
         with ThreadPoolExecutor(max_workers=1) as pool:
-            pdf_bytes = pool.submit(asyncio.run, _afetch_document_bytes(url)).result()
+            pdf_bytes = pool.submit(
+                asyncio.run, _afetch_document_bytes(url, timeout_seconds=timeout_seconds)
+            ).result()
     except Exception:  # fetch failure yields empty text
         return ""
     try:

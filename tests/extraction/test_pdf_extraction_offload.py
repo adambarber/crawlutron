@@ -52,7 +52,7 @@ async def _render_pdf():
     page = _PdfPage()
     renderer = _build_pdf_renderer(page)
 
-    def blocking_pdf_extractor(url) -> str:
+    def blocking_pdf_extractor(url, _timeout_seconds=None) -> str:
         # The extractor seam takes the admitted value: the value object carries the policy, and a downloader
         # projects .raw itself.
         assert url == _PDF_VALUE
@@ -75,7 +75,7 @@ class TestPdfExtractorIsOffloaded:
         assert (result.metadata or {}).get("extraction_method") == "pdf_text", (
             "the PDF fallback branch never ran -- the test would pass vacuously"
         )
-        assert "blocking_pdf_extractor" in seen, (
+        assert any("blocking_pdf_extractor" in name for name in seen), (
             "pdf extractor ran on the event loop: expected an asyncio.to_thread offload"
         )
 

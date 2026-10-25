@@ -141,6 +141,11 @@ def install_to_thread_spy(monkeypatch):
     async def spy(fn, *args, **kwargs):
         if isinstance(fn, functools.partial):
             seen.append(getattr(fn.func, "__name__", repr(fn.func)))
+        elif getattr(fn, "__name__", "") == "<lambda>" and fn.__closure__:
+            # A lambda offload wraps the real callee; its name rides the closure.
+            seen.extend(
+                getattr(cell.cell_contents, "__name__", str(cell.cell_contents)) for cell in fn.__closure__
+            )
         else:
             seen.append(getattr(fn, "__name__", repr(fn)))
         return await orig(fn, *args, **kwargs)

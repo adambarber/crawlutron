@@ -38,3 +38,14 @@ class TestTimeoutsChokepoint:
         timeout: object = Timeouts.for_request(5.0)
         with pytest.raises(dataclasses.FrozenInstanceError):
             timeout.read = 99.0
+
+
+class TestRenderPhaseBudgetPin:
+    """The render budget applies per phase, deliberately: navigation has
+    returned before the action chain starts, so the bound is sequential."""
+
+    def test_render_phase_seconds_floors_and_preserves(self):
+        from app.transport.timeouts import render_phase_seconds
+
+        assert render_phase_seconds(30) == 30.0
+        assert render_phase_seconds(0.2) == 1.0
