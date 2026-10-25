@@ -120,14 +120,16 @@ def _column_info(conn: sqlite3.Connection, table: str, column: str) -> sqlite3.R
 
 
 def _assert_column_ddl(conn: sqlite3.Connection, table: str, column: str, column_ddl: str) -> None:
-    """Pin the spelling: name, nullability, and default must match the DDL."""
+    """Pin the spelling: type, nullability, and default must match the DDL."""
     info = _column_info(conn, table, column)
-    assert column_ddl.startswith(f"{column} "), f"{column_ddl} does not name {column}"
+    tokens = column_ddl.split()
+    assert tokens[0] == column, f"{column_ddl} does not name {column}"
+    assert tokens[1].upper() == info[2].upper(), f"{column_ddl} declares {info[2]!r} per PRAGMA table_info"
     expect_notnull = "NOT NULL" in column_ddl
     assert (info[3] == 1) == expect_notnull, (
         f"{column_ddl} notnull={info[3]} disagrees with PRAGMA table_info"
     )
-    default = next((tok for tok in column_ddl.split() if tok.startswith("DEFAULT")), None)
+    default = next((tok for tok in tokens if tok.startswith("DEFAULT")), None)
     assert (default is not None) == (info[4] is not None), (
         f"{column_ddl} default disagrees with PRAGMA table_info"
     )
