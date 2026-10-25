@@ -94,15 +94,17 @@ async def run_async_crawl(
             response_payload = await _crawl_and_build_response(
                 request_id, payload, crawl_settings, shutdown_event, urls, job, job_store
             )
-            await _publish_success(
-                request_id,
-                job_store=job_store,
-                result_store=result_store,
-                response_payload=response_payload,
-                owner=job.owner,
-                webhook_url=webhook_url,
-                webhook_policy=webhook_policy,
-            )
+        # #463: deliver outside the semaphore -- a retrying webhook (up to 60s
+        # of backoff) must not gate another caller's crawl capacity.
+        await _publish_success(
+            request_id,
+            job_store=job_store,
+            result_store=result_store,
+            response_payload=response_payload,
+            owner=job.owner,
+            webhook_url=webhook_url,
+            webhook_policy=webhook_policy,
+        )
     except Exception as exc:
         await _record_failure(request_id, job_store, str(exc), webhook_url, webhook_policy)
 
