@@ -40,6 +40,19 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   boundary+reader pair the profile knob ceilings already use. The
   `request_profile` pool entries (`user_agents`, `accept_languages`) keep
   their entry-count ceiling and remain #454's surface.
+- **Result-store payloads are bounded and the policy rollup leaves the event
+  loop (#443, #449).** `CrawlResultStore.put` accepted payloads of any size,
+  so one oversized crawl result was retained forever and re-read in full on
+  every listing; `put` now refuses past the byte cap *before* the INSERT
+  (the row is never stored -- `get` returns None, both `aput` callers catch
+  and log `crawl_result_store_failed`, the crawl response still reaches the
+  caller). The unbounded `payloads()` fetchall is deleted; `/v1/policy-
+  suggestions` read every retained row on the event loop -- validating each
+  trace inline -- so a large store stalled the whole service. The rollup now
+  pages by keyset cursor (`payloads_page`, tie-safe on `(stored_at,
+  request_id)`), validates and rolls up via `asyncio.to_thread`, and reports
+  an honest window (`records_examined` = valid + malformed + unread; the
+  O(n^2) signature dedupe is a capped first-seen set).
 
 ### Changed
 - **An app class may no longer promise a container interface nobody asked for.**
