@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import StrEnum
+from functools import lru_cache
 from typing import Any, TypedDict
 
 from app.admission.policy import PolicyTier, read_policy
@@ -68,6 +69,16 @@ def job_max_pages(policy: Any, tier: PolicyTier | None = None) -> int:
     return read_policy(policy, tier).limits.max_pages
 
 
+@lru_cache(maxsize=4096)
+def _admit_cached(raw: str, policy: HostPolicy) -> NormalizedUrl | None:
+    """Admit ``raw`` once per (raw, policy) pair; repeats read the cache (#519).
+
+    Stored values were admitted at write, so re-admitting on every load is pure
+    re-work; refusals are cached too, so a hostile raw stays refused on each read.
+    """
+    return admit_or_none(raw, policy=policy)
+
+
 def read_transient_retries(retries: dict[str, int], *, host_policy: HostPolicy) -> dict[NormalizedUrl, int]:
     """The retry column's text keys re-admitted against the live policy."""
     admitted_retries: dict[NormalizedUrl, int] = {}
@@ -75,7 +86,7 @@ def read_transient_retries(retries: dict[str, int], *, host_policy: HostPolicy) 
         if not isinstance(url, str):
             continue
         try:
-            key = admit_or_none(url, policy=host_policy)
+            key = _admit_cached(url, host_policy)
             if key is not None:
                 admitted_retries[key] = max(0, int(attempts))
         except (TypeError, ValueError):
@@ -138,7 +149,7 @@ def normalize_frontier(
         depth = value.get("depth", legacy_depth)
         if not isinstance(raw_url, str) or not raw_url:
             continue
-        url = admit_or_none(raw_url, policy=host_policy)
+        url = _admit_cached(raw_url, host_policy)
         if url is None:
             continue
         entry_depth = 0 if url == canonical_root else _entry_depth(depth, legacy_depth)
@@ -153,7 +164,7 @@ def normalize_visited(visited: list[str], *, host_policy: HostPolicy) -> set[Nor
     normalized: set[NormalizedUrl] = set()
     for url in visited:
         if isinstance(url, str) and url:
-            admitted = admit_or_none(url, policy=host_policy)
+            admitted = _admit_cached(url, host_policy)
             if admitted is not None:
                 normalized.add(admitted)
     return normalized
