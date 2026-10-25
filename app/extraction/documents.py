@@ -62,9 +62,8 @@ def _doc_executor() -> concurrent.futures.ThreadPoolExecutor:
 
 
 def _extraction_executor() -> concurrent.futures.ThreadPoolExecutor:
-    """The shared pool, created on first use; every worker is idle when it returns,
-    so a ``submit`` can never land after the pool was closed by an in-flight
-    shutdown -- the same failure the layer below avoids.
+    """The shared pool, created on demand; recreate-on-demand is the documented
+    lifespan-restart contract (#87), so shutdown ends threads, not extraction.
     """
     global _EXTRACTION_EXECUTOR
     if _EXTRACTION_EXECUTOR is None:
@@ -104,10 +103,12 @@ async def shutdown_doc_extraction_executor() -> None:
     global _EXTRACTION_EXECUTOR, _DOC_EXECUTOR
     executor, _EXTRACTION_EXECUTOR = _EXTRACTION_EXECUTOR, None
     if executor is not None:
-        executor.shutdown(wait=False)
+        # cancel_futures drains queued-but-unstarted work so no orphaned future
+        # spawns a thread after this returns; threads never outlive the shutdown.
+        executor.shutdown(wait=False, cancel_futures=True)
     doc_executor, _DOC_EXECUTOR = _DOC_EXECUTOR, None
     if doc_executor is not None:
-        doc_executor.shutdown(wait=False)
+        doc_executor.shutdown(wait=False, cancel_futures=True)
 
 
 # Extraction deadlines live in CrawlerSettings (env-mapped, operator-tunable).
@@ -155,9 +156,9 @@ def _eval_selector[SelectorResult](
     fut = _extraction_executor().submit(fn)
     try:
         return fut.result(timeout=timeout)
-    except concurrent.futures.TimeoutError:
-        # Cancel once the runaway finishes and wait it out: without this the
-        # future stays queued and four pathological selectors pin the whole pool.
+    except (concurrent.futures.TimeoutError, concurrent.futures.CancelledError):
+        # Cancel once the runaway finishes; without this four pathological
+        # selectors pin the pool. CancelledError: shutdown refused the work.
         fut.cancel()
         concurrent.futures.wait([fut], timeout=timeout)
         return _EXTRACTION_SELECTOR_SENTINEL
