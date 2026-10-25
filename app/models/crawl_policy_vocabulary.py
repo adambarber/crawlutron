@@ -4,6 +4,7 @@ from typing import Any
 from urllib.parse import urlsplit
 
 from app.models.json_value import JsonValue
+from app.vocabulary.limits import MAX_HEADER_VALUE_BYTES
 from app.vocabulary.request_profiles import REQUEST_PROFILE_KEYS
 
 __all__ = [
@@ -11,6 +12,7 @@ __all__ = [
     "close_browser_profile_vocabulary",
     "close_request_profile_vocabulary",
     "narrows_credential_scope",
+    "refuse_oversized_profile_strings",
 ]
 
 
@@ -33,6 +35,7 @@ def close_browser_profile_vocabulary(profile: dict[str, JsonValue]) -> dict[str,
         )
 
     _refuse_over_ceiling_knobs(profile)
+    refuse_oversized_profile_strings(profile)
 
     actions = profile.get("actions")
     if actions is None:
@@ -78,6 +81,30 @@ def _refuse_over_ceiling_knobs(profile: dict[str, JsonValue]) -> None:
             f"browser_profile screenshot_selectors may carry at most {MAX_SCREENSHOT_SELECTORS} "
             f"entries, got {len(selectors)}"
         )
+
+
+def refuse_oversized_profile_strings(
+    profile: dict[str, JsonValue], ceiling: int = MAX_HEADER_VALUE_BYTES
+) -> None:
+    """Refuse any string in a ``browser_profile`` over ``ceiling`` (#444).
+
+    An unsized selector or header-like value is per-request memory a pooled
+    renderer holds; the ceiling is #441's header-value interop number.
+    """
+    for key, value in profile.items():
+        _refuse_oversized_value(key, value, ceiling)
+
+
+def _refuse_oversized_value(key: str, value: JsonValue, ceiling: int) -> None:
+    """One profile value against the string ceiling, nested shapes included."""
+    if isinstance(value, dict):
+        for nested in value.values():
+            _refuse_oversized_value(key, nested, ceiling)
+    elif isinstance(value, (list, tuple)):
+        for item in value:
+            _refuse_oversized_value(key, item, ceiling)
+    elif isinstance(value, str) and len(value) > ceiling:
+        raise ValueError(f"browser_profile {key} may carry at most {ceiling} characters, got {len(value)}")
 
 
 def _refuse_unusable_action(action: Any, index: int, allowed: str) -> None:

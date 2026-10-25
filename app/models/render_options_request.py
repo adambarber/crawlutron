@@ -6,6 +6,8 @@ from typing import Annotated
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.vocabulary.limits import MAX_HTTP_TIMEOUT_SECONDS, MAX_RETRIES
+
 
 class RenderOptionsRequest(BaseModel):
     """Browser render options for ``/v1/render`` (all optional; server applies defaults)."""
@@ -15,13 +17,19 @@ class RenderOptionsRequest(BaseModel):
     timeout_seconds: Annotated[
         int | None,
         Field(
-            description="Per-render navigation timeout in seconds.",
+            description=(
+                "Per-render navigation timeout in seconds; values above "
+                f"{MAX_HTTP_TIMEOUT_SECONDS} are clamped to it (#444)."
+            ),
         ),
     ] = None
     max_retries: Annotated[
         int | None,
         Field(
-            description="Maximum retries for a transient render failure.",
+            description=(
+                "Maximum retries for a transient render failure; values above "
+                f"{MAX_RETRIES} are clamped to it (#444)."
+            ),
         ),
     ] = None
     respect_robots: Annotated[

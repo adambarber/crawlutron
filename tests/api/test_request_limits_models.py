@@ -158,6 +158,52 @@ class TestCallerKnobsBehindClosedKeysAreCeilinged:
         assert driver.scroll_config_for({"lazy_scroll_steps": -5}) == (0, 0.5)
 
 
+class TestProfileStringsAreCeilinged:
+    """#444: closed keys answered WHICH keys; string VALUES were unsized.
+
+    An 8 KiB ceiling (#441's header-value number) bounds a caller's per-request
+    memory at the boundary, with the resolver as the reader-side refusal.
+    """
+
+    #: Longest string anywhere in a browser_profile, in characters. The #441
+    #: header-value ceiling: the common 8 KB interop limit origins accept.
+    MAX_PROFILE_STRING = 8192
+
+    def test_an_oversized_action_selector_is_refused(self):
+        from app.models.crawl_policy import CrawlPolicy
+
+        with pytest.raises(ValidationError, match="browser_profile actions"):
+            CrawlPolicy(
+                browser_profile={
+                    "actions": [{"type": "click", "selector": "#" + "a" * (self.MAX_PROFILE_STRING + 1)}]
+                }
+            )
+
+    def test_an_oversized_top_level_string_is_refused(self):
+        from app.models.crawl_policy import CrawlPolicy
+
+        with pytest.raises(ValidationError, match="browser_profile storage_state"):
+            CrawlPolicy(browser_profile={"storage_state": "s" * (self.MAX_PROFILE_STRING + 1)})
+
+    def test_an_oversized_screenshot_selector_is_refused(self):
+        from app.models.crawl_policy import CrawlPolicy
+
+        with pytest.raises(ValidationError, match="browser_profile screenshot_selectors"):
+            CrawlPolicy(browser_profile={"screenshot_selectors": ["#" + "s" * (self.MAX_PROFILE_STRING + 1)]})
+
+    def test_a_string_at_the_ceiling_is_accepted(self):
+        """The ceiling is the boundary, not a lower bound the caller cannot reach."""
+        from app.models.crawl_policy import CrawlPolicy
+
+        policy = CrawlPolicy(
+            browser_profile={
+                "storage_state": "s" * self.MAX_PROFILE_STRING,
+                "actions": [{"type": "click", "selector": "c" * self.MAX_PROFILE_STRING}],
+            }
+        )
+        assert len(policy.browser_profile["storage_state"]) == self.MAX_PROFILE_STRING
+
+
 class TestStrategyLadderIsBounded:
     """The one collection left uncapped: the ladder runs one outbound attempt
     per entry, and the ceiling beats a dedupe because a browser render mints a

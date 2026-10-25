@@ -12,6 +12,7 @@ from app.api.render import render_options_for
 from app.config.settings import CrawlerSettings
 from app.models.render_options import RenderOptions
 from app.transport.browser_result import browser_strategy_result
+from app.vocabulary.limits import MAX_HEADER_VALUE_BYTES, MAX_HTTP_TIMEOUT_SECONDS, MAX_RETRIES
 from tests._browser_doubles import _fake_browser
 from tests._fetcher_factories import strategy_request
 
@@ -73,6 +74,67 @@ class TestResolveRenderOptions:
         profile["viewport"] = "desktop"
         assert options.browser_profile == {"viewport": "mobile"}
 
+    def test_an_absurd_timeout_and_retry_count_are_clamped(self):
+        """#444: the caller's render knobs are ceilinged at the shared constants.
+
+        A stalling target under a 1e9-second timeout holds a pooled renderer
+        (~700 MiB) for as long as it stalls, retried without bound.
+        """
+        options = resolve_render_options({"timeout_seconds": 1_000_000_000, "max_retries": 1_000_000_000}, {})
+
+        assert options.timeout_seconds == MAX_HTTP_TIMEOUT_SECONDS
+        assert options.max_retries == MAX_RETRIES
+
+    def test_caller_values_under_the_ceilings_stand(self):
+        """The clamp only bites above the ceiling; a clamp that pinned every
+        value to the ceiling would pass the same assertions.
+        """
+        options = resolve_render_options({"timeout_seconds": 45, "max_retries": 2}, {})
+
+        assert options.timeout_seconds == 45
+        assert options.max_retries == 2
+
+    def test_policy_defaults_pass_through_uncapped(self):
+        """#444 scopes the clamp to the caller's side: the defaults side is
+        operator/policy-owned and already ceilinged by its own validators
+        (CrawlPolicyLimits allows up to MAX_JOB_MAX_RETRIES per job).
+        """
+        options = resolve_render_options(None, {"timeout_seconds": 30, "max_retries": 7})
+
+        assert options.timeout_seconds == 30
+        assert options.max_retries == 7
+
+    def test_an_oversized_profile_string_is_refused(self):
+        """#444: an unsized profile string is per-request memory a caller sets
+        and a pooled renderer holds -- an absurd user_agent is not accepted.
+        """
+        with pytest.raises(ValueError, match="browser_profile user_agent"):
+            resolve_render_options(
+                {"browser_profile": {"user_agent": "A" * (MAX_HEADER_VALUE_BYTES + 1)}}, {}
+            )
+
+    def test_a_nested_oversized_action_string_is_refused(self):
+        """#444: the cap walks nested shapes -- an action's selector rides the
+        same profile and the same pooled renderer.
+        """
+        with pytest.raises(ValueError, match="browser_profile actions"):
+            resolve_render_options(
+                {
+                    "browser_profile": {
+                        "actions": [{"type": "click", "selector": "#" + "a" * (MAX_HEADER_VALUE_BYTES + 1)}]
+                    }
+                },
+                {},
+            )
+
+    def test_a_profile_string_at_the_cap_is_accepted(self):
+        """The cap is a ceiling, not a lower bound a caller cannot reach."""
+        options = resolve_render_options(
+            {"browser_profile": {"user_agent": "A" * MAX_HEADER_VALUE_BYTES}}, {}
+        )
+
+        assert options.browser_profile["user_agent"] == "A" * MAX_HEADER_VALUE_BYTES
+
 
 class TestRenderEndpointConsumesResolver:
     """``/v1/render`` is a resolver consumer, keeping its caller-controlled capture."""
@@ -101,6 +163,23 @@ class TestRenderEndpointConsumesResolver:
     def test_invalid_options_shape_still_rejected(self):
         with pytest.raises(ValueError, match="invalid_options"):
             render_options_for({"options": "nope"}, _settings())
+
+    def test_the_endpoint_clamps_absurd_caller_knobs(self):
+        """#444: the /v1/render funnel ceilinged its caller's knobs -- the door
+        a raw-dict caller reaches, so the clamp must sit on this path too.
+        """
+        options = render_options_for({"options": {"timeout_seconds": 10**9, "max_retries": 999}}, _settings())
+
+        assert options.timeout_seconds == MAX_HTTP_TIMEOUT_SECONDS
+        assert options.max_retries == MAX_RETRIES
+
+    def test_the_endpoint_refuses_an_oversized_profile_string(self):
+        """#444: the oversized-string refusal reaches the endpoint funnel."""
+        with pytest.raises(ValueError, match="browser_profile user_agent"):
+            render_options_for(
+                {"options": {"browser_profile": {"user_agent": "B" * (MAX_HEADER_VALUE_BYTES + 1)}}},
+                _settings(),
+            )
 
 
 def _browser_policy() -> dict[str, object]:
