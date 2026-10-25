@@ -154,6 +154,40 @@ async def test_crawl_delay_commits_the_canonical_scheduler_key_not_the_bare_host
     )
 
 
+async def test_candidate_duplicated_during_the_crawl_delay_await_is_counted():
+    """#522: the re-check after the crawl-delay await must COUNT its drop.
+
+    A twin whose identity lands in ``known`` while the check is in flight was
+    dropped silently -- ``duplicates_skipped`` lied by one."""
+    known: set[NormalizedUrl] = set()
+    checked: list[int] = []
+
+    async def allows(url: NormalizedUrl) -> bool:
+        return True
+
+    async def crawl_delay(url: NormalizedUrl) -> float | None:
+        checked.append(1)
+        # Another writer lands the identity while this check is in flight.
+        if len(checked) == 1:
+            known.add(canonical("https://example.test/twin"))
+        return None
+
+    frontier: list[NormalizedUrl] = []
+    outcome = await admit(
+        ["https://example.test/twin", "https://example.test/twin"],
+        frontier=frontier,
+        known=known,
+        robots_allows=allows,
+        robots_crawl_delay=crawl_delay,
+        respect_robots=True,
+    )
+
+    assert outcome.accepted == 0
+    assert outcome.duplicates_skipped == 2, (
+        "the post-await re-check dropped its duplicate without counting it"
+    )
+
+
 class TestAPersistedScopeRestrictionFailsClosed:
     """A stored scope restriction that cannot compile must not widen the crawl.
 
