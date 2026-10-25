@@ -124,6 +124,34 @@ async def test_known_is_read_only_and_known_after_threads_the_occupied_set():
     }
 
 
+async def _robots_all_admit(_url: NormalizedUrl) -> bool:
+    return True
+
+
+async def _delay_15(_url: NormalizedUrl) -> float | None:
+    return 1.5
+
+
+async def test_crawl_delay_commits_the_canonical_scheduler_key_not_the_bare_host():
+    """#456: the delay commit keys the scheduler's registrable-site map, so a
+    ``www``-hosted link's floor is the one ``current_delay`` actually reads."""
+    committed: list[tuple[str, float]] = []
+    frontier: list[NormalizedUrl] = []
+    outcome = await admit(
+        ["https://www.example.test/child"],
+        frontier=frontier,
+        robots_crawl_delay=_delay_15,
+        robots_allows=_robots_all_admit,
+        commit_crawl_delay=lambda domain, delay: committed.append((domain, delay)),
+    )
+
+    assert outcome.accepted == 1
+    assert committed == [("example.test", 1.5)], (
+        f"the delay committed under {committed!r}, not the canonical scheduler "
+        f"key the scheduler's readers use (#456)"
+    )
+
+
 class TestAPersistedScopeRestrictionFailsClosed:
     """A stored scope restriction that cannot compile must not widen the crawl.
 
