@@ -25,6 +25,16 @@ from tests._policy_factories import canonical
 from tests._result_builders import GRAPH_CHILD, GRAPH_ROOT, _canned_result, _flaky, _link, engine_result
 
 
+def _started_hung_job(job_store, root=GRAPH_ROOT):
+    """Create and start a job whose runner blocks inside the scripted engine hang."""
+    hang = asyncio.Event()
+    job_runner.install_execute_crawl(ScriptedExecute(results=[_canned_result(root)], hang=hang))
+    settings = CrawlerSettings.from_mapping({})
+    job = job_store.create(root, CrawlPolicy())
+    job_runner.start_job(job.job_id, job_store, settings, asyncio.Event())
+    return job, hang, settings
+
+
 class TestTransientFailureRequeue:
     """A TRANSIENT failure (network/dns/tls/timeout/browser crash) re-queues
     for bounded retries; a PERMANENT one (not_found/site_error/gone) is
@@ -142,10 +152,7 @@ class TestTransientFailureRequeue:
 
 class TestRunnerLifecycle:
     async def test_shutdown_cancels_running_tasks(self, job_store):
-        hang = asyncio.Event()
-        job_runner.install_execute_crawl(ScriptedExecute(results=[_canned_result(GRAPH_ROOT)], hang=hang))
-        job = job_store.create(GRAPH_ROOT, CrawlPolicy())
-        job_runner.start_job(job.job_id, job_store, CrawlerSettings.from_mapping({}), asyncio.Event())
+        job, hang, settings = _started_hung_job(job_store)
         await _wait_status(job_store, job.job_id, {"running"})
         await job_runner.shutdown_job_runner()
         assert not job_runner.is_running(job.job_id)
@@ -204,6 +211,46 @@ class TestRunnerLifecycle:
 
             assert started == 0
             assert store.load(job.job_id).status == JobStatus.FAILED
+
+    async def test_resume_waits_out_a_stale_predecessor_before_respawning(self, job_store):
+        """#523 COR-08: resume with a live (wedged) predecessor task must not spawn
+        a RUNNING row with no runner; the old task is joined or cancelled first."""
+        from app.api.job_lifecycle import tracked_task
+
+        job, hang, settings = _started_hung_job(job_store)
+        await _wait_status(job_store, job.job_id, {"running"})
+        await job_runner.pause_job(job.job_id, job_store)
+        await _wait_status(job_store, job.job_id, {"paused"})
+        wedged = tracked_task(job.job_id)
+        assert wedged is not None
+
+        await job_runner.resume_job(job.job_id, job_store, settings, asyncio.Event())
+        assert job_store.load(job.job_id).status is JobStatus.RUNNING
+        live = tracked_task(job.job_id)
+        assert live is not None, "resume left a RUNNING row with no runner task"
+        # A wedged predecessor holds the engine hang: the respawn must have
+        # replaced it, not returned the same task (#523 COR-08).
+        assert live is not wedged, "resume returned the wedged predecessor task"
+
+        hang.set()
+        await job_runner.shutdown_job_runner()
+
+    async def test_boot_backlog_starts_at_most_global_concurrency_runners(self, job_store):
+        """#523 COR-09: a 10-job crash backlog must not spawn 10 concurrent
+        runners at startup; starts are bounded by the global concurrency."""
+        from app.api import job_lifecycle
+
+        hang = asyncio.Event()
+        job_runner.install_execute_crawl(ScriptedExecute(results=[_canned_result(GRAPH_ROOT)], hang=hang))
+        settings = CrawlerSettings.from_mapping({"CRAWLUTRON_GLOBAL_CONCURRENCY": "2"})
+        job_ids = [job_store.create(GRAPH_ROOT, CrawlPolicy()).job_id for _ in range(10)]
+
+        await job_runner.recover_and_start_pending_jobs(job_store, settings, asyncio.Event())
+        # Give spawned runners their registration turn.
+        await asyncio.sleep(0.05)
+        spawned = sum(1 for job_id in job_ids if job_lifecycle.is_running(job_id))
+        assert spawned <= 2, f"{spawned} runners spawned at boot for a bounded slot count"
+        await job_runner.shutdown_job_runner()
 
     async def test_recover_and_start_resumes_pending_jobs(self, job_store):
         import asyncio as _asyncio
