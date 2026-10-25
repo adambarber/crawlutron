@@ -99,9 +99,8 @@ def check_ssrf_protection(url: NormalizedUrl, *, use_cache: bool = True) -> None
 
 def resolve_and_pin_host(url: NormalizedUrl) -> tuple[str, str]:
     """Resolve the host once and pin the resulting IP, connecting to that exact IP
-    to defeat DNS-rebinding TOCTOU SSRF. Fails closed: an unresolvable host
-    raises instead of falling back to "(hostname, hostname)"; the caller keeps the Host header.
-    """
+    to defeat DNS-rebinding TOCTOU SSRF. Fails closed; ONE verdict per hostname --
+    a mixed public/private answer set is refused, matching the browser ruling (#387)."""
 
     hostname = url.host
     if allow_private_targets():
@@ -115,11 +114,14 @@ def resolve_and_pin_host(url: NormalizedUrl) -> tuple[str, str]:
         # Fail closed: returning the hostname lets the client re-resolve at connect
         # time with no validation applied.
         raise ValueError(f"SSRF protection: cannot resolve hostname {hostname}") from None
+    if not ips:
+        raise ValueError(f"SSRF protection: hostname {hostname} has no public IP")
     for ip in ips:
-        if is_public_ip_value(ip):
-            return hostname, ip
-    # No public IP found (should have been caught above) -> fail safe
-    raise ValueError(f"SSRF protection: hostname {hostname} has no public IP")
+        if not is_public_ip_value(ip):
+            raise ValueError(
+                f"SSRF protection: hostname {hostname} resolves to private/loopback IP {ip}"
+            ) from None
+    return hostname, ips[0]
 
 
 def declared_length_exceeds(header_value: str | None, limit: int) -> bool:

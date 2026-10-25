@@ -40,6 +40,20 @@ async def reject_hostile_origin(request: Request, call_next):
     return await call_next(request)
 
 
+async def _drain_declared_body(original_receive, *, max_bytes: int) -> None:
+    """Discard a refused declared body up to ``max_bytes`` -- never unbounded.
+
+    Past the cap the client is streaming forever or lying; the 413's
+    Connection: close aborts the remainder (#525, SEC-04).
+    """
+    drained = 0
+    while drained <= max_bytes:
+        message = await original_receive()
+        if not message.get("more_body", False):
+            break
+        drained += len(message.get("body", b"") or b"")
+
+
 async def limit_request_body(request: Request, call_next, *, max_bytes: int = MAX_REQUEST_BODY_BYTES):
     """ASGI middleware: cap request bodies at ``max_bytes``."""
     original_receive = request.receive
@@ -47,15 +61,9 @@ async def limit_request_body(request: Request, call_next, *, max_bytes: int = MA
     if content_length:
         try:
             if int(content_length) > max_bytes:
-                # Mirror the truncation path: mark the connection closing and
-                # drain (discard) the declared body before the 413.
-                async def _drain() -> None:
-                    while True:
-                        message = await original_receive()
-                        if not message.get("more_body", False):
-                            break
-
-                await _drain()
+                # Mirror the truncation path: drain the refused body before the
+                # 413, capped so a slow-post client cannot pin the task (#525).
+                await _drain_declared_body(original_receive, max_bytes=max_bytes)
                 return JSONResponse(
                     status_code=413,
                     content=error_envelope(

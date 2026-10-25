@@ -129,24 +129,42 @@ async def test_declared_body_over_the_cap_is_refused_before_the_app_sees_it():
     assert not called, "the app was invoked for a body already refused"
 
 
-async def test_declared_body_over_cap_marks_connection_close_and_drains():
-    """The early Content-Length 413 must mirror the truncation path: mark the
-    connection closing AND drain (discard) the declared body, so a keep-alive
-    re-use of the socket cannot read the abandoned body as the next request."""
-    messages = [
-        {"type": "http.request", "body": b"X" * 512, "more_body": True},
-        {"type": "http.request", "body": b"", "more_body": False},
-    ]
-    request = _make_request(messages, headers=[(b"content-length", b"4096")])
+async def _refused_response(messages: list[dict[str, object]], *, declared: int) -> Response:
+    """Drive the middleware with a declared-oversized body; the app must not run."""
+    request = _make_request(messages, headers=[(b"content-length", str(declared).encode())])
 
     async def call_next(req):
         raise AssertionError("the app must not run for a body already refused")
 
-    response = await limit_request_body(request, call_next, max_bytes=CAP)
+    return await limit_request_body(request, call_next, max_bytes=CAP)
+
+
+async def test_declared_body_over_cap_drains_only_up_to_the_cap():
+    """The early Content-Length 413 drains the abandoned body so a keep-alive
+    re-use cannot read it as the next request -- but no further than the cap:
+    past it the client is pinned or lying, and Connection: close aborts it (#525)."""
+    messages = [
+        {"type": "http.request", "body": b"X" * 4, "more_body": True},
+        {"type": "http.request", "body": b"X" * 4, "more_body": True},
+        {"type": "http.request", "body": b"X" * 4, "more_body": True},
+        {"type": "http.request", "body": b"", "more_body": False},
+    ]
+    response = await _refused_response(messages, declared=4096)
 
     assert response.status_code == 413
     assert response.headers["Connection"] == "close"
-    assert messages == [], "the declared body must be drained before the 413"
+    assert len(messages) == 1, "the drain stopped at the cap, not at the declared 4096"
+
+
+async def test_oversized_drain_is_capped_and_aborts_past_it():
+    """The 413 drain must not read forever: past the cap it stops reading, and
+    the Connection: close 413 aborts whatever the client still trickles."""
+    messages = [{"type": "http.request", "body": b"X" * 64, "more_body": True} for _ in range(50)]
+    response = await _refused_response(messages, declared=999999)
+
+    assert response.status_code == 413
+    assert response.headers["Connection"] == "close"
+    assert len(messages) > 0, "the drain read past the cap instead of aborting"
 
 
 @pytest.mark.parametrize("declared", [CAP, CAP - 1], ids=["at", "under"])

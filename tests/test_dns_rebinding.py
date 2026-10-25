@@ -7,6 +7,7 @@ from unittest.mock import patch
 from urllib.parse import urlparse
 
 import httpx
+import pytest
 
 from app.transport.fetchers import default_http_fetcher
 from tests._assertions import (
@@ -19,10 +20,10 @@ from tests._transport_doubles import MockResponse, scripted_transport_client
 
 
 class TestDNSRebindingProtection:
-    def test_a_mixed_public_private_answer_pins_the_public_ip(self, monkeypatch):
-        """#404: a mixed public/private DNS answer is not refused at the pin; the
-        public IP is selected and the private one never dialled. A pin that took
-        the first answer would dial the private IP and fail this."""
+    def test_a_mixed_public_private_answer_is_refused(self, monkeypatch):
+        """Re-ruled #525 SEC-07: #404's first-public-wins drifted from
+        check_ssrf_protection (fail-closed on any private) and from the browser
+        path (#387, mixed refused). One verdict per hostname: refuse."""
         import socket
 
         from app.transport.pinned_transport import resolve_and_pin_host
@@ -33,11 +34,11 @@ class TestDNSRebindingProtection:
                 (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 80)),
             ]
 
-        with host_resolves_to(monkeypatch, "unused", resolver=mixed_getaddrinfo):
-            hostname, ip = resolve_and_pin_host(canonical("http://example.com/"))
-        assert hostname == "example.com"
-        assert ip == "93.184.216.34", f"the pin dialled a non-public answer: {ip}"
-        assert ip != "169.254.169.254"
+        with (
+            host_resolves_to(monkeypatch, "unused", resolver=mixed_getaddrinfo),
+            pytest.raises(ValueError, match="private"),
+        ):
+            resolve_and_pin_host(canonical("http://example.com/"))
 
     def test_resolve_and_pin_host_uses_first_resolution(self, monkeypatch):
         """Even if a second resolution would rebound to a private IP, the pinned

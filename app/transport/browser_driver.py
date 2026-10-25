@@ -373,4 +373,6 @@ def _browser_closed(browser: object) -> bool:
     or reading a bool attribute/property, and defaulting to open when it publishes none.
     """
     probe = getattr(browser, "is_closed", False)
-    return probe() if callable(probe) else bool(probe)
+    if callable(probe):
+        return bool(probe())
+    return bool(probe)
