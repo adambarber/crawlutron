@@ -17,7 +17,7 @@ BY_CLASS = [
     (AddressClass.LINK_LOCAL, ["169.254.1.1", "fe80::1"]),
     (AddressClass.CGNAT, ["100.64.0.1"]),
     (AddressClass.UNIQUE_LOCAL, ["fc00::1", "fd12:3456::1"]),
-    (AddressClass.NAT64, ["64:ff9b::1"]),
+    (AddressClass.NAT64, ["64:ff9b::1", "64:ff9b:1::1"]),
     (AddressClass.MULTICAST, ["224.0.0.1", "ff02::1"]),
     (AddressClass.UNSPECIFIED, ["0.0.0.0"]),
     (AddressClass.RESERVED, ["240.0.0.1"]),

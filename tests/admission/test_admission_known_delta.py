@@ -12,8 +12,7 @@ from tests._policy_factories import admit, canonical
 async def test_admission_returns_the_newly_reserved_delta():
     """The delta is exactly the identities this pass reserved.
 
-    ``known_after`` stays for its full-set consumers; the hot caller threads
-    ``known_delta`` so no pass copies the occupied set whole."""
+    The hot caller threads ``known_delta`` so no pass copies the occupied set whole."""
     owned = {canonical("https://example.test/root")}
     frontier: list[NormalizedUrl] = []
     outcome = await admit(

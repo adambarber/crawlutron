@@ -7,6 +7,8 @@ from contextlib import suppress
 from importlib import import_module
 from typing import Protocol, cast
 
+from app.models.address_class import AddressClass, classify
+
 TWO_PART_PUBLIC_SUFFIXES = {"co.uk", "org.uk", "ac.uk", "gov.uk", "com.au", "net.au", "org.au"}
 
 
@@ -57,6 +59,10 @@ def registrable_domain(host: str, *, psl: _PublicSuffixDataset | None = None) ->
         ascii_host = host
     if psl is None:
         psl = _public_suffix_list()
+    # An IP literal has no registrable site: the PSL '*' default would map it to
+    # its last two octets, colliding unrelated hosts on one site key (#527).
+    if classify(ascii_host) is not AddressClass.NOT_AN_ADDRESS:
+        return host
     if psl is not None:
         with suppress(Exception):
             registrable = psl.privatesuffix(ascii_host)

@@ -73,6 +73,13 @@ class TestPolicyValidation:
         assert registrable_domain("a.b.c.example.com") == "example.com"
         assert registrable_domain("example.com") == "example.com"
 
+    def test_registrable_domain_ip_literals_keep_their_own_site_key(self):
+        # #527: the PSL '*' default rule maps any IP to its last two octets,
+        # so unrelated public IPs would collide on one scheduler site key.
+        assert registrable_domain("1.2.3.4") == "1.2.3.4"
+        assert registrable_domain("5.6.7.8") == "5.6.7.8"
+        assert registrable_domain("1.2.3.4") != registrable_domain("5.6.7.8")
+
     def test_invalid_url_no_host(self):
         with pytest.raises(ValueError):
             NormalizedUrl("http:///path", policy=UNRESTRICTED_HOST_POLICY)
