@@ -7,20 +7,30 @@ from __future__ import annotations
 
 from tests._assertions import block_private_targets, host_resolves_to
 from tests._browser_doubles import BrowserFakePage, pinned_page_renderer, render_bare
+from tests._browser_page_doubles import FakePageContext
 
 _PUBLIC = "1.2.3.4"
 
 
-class _WSBearingPage(BrowserFakePage):
-    """A page whose WebSocket-route surface matches the installed Playwright 1.62.0 API:
+class _WSGuardContext(FakePageContext):
+    """A context whose websocket-route surface matches installed Playwright 1.62.0:
     ``route_web_socket(url, handler)`` records the handler the renderer installs."""
+
+    def route_web_socket(self, url, handler):
+        self.ws_handler = handler
+        super().route_web_socket(url, handler)
+
+
+class _WSBearingPage(BrowserFakePage):
+    """A page whose CONTEXT records the websocket guard the renderer installs."""
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.ws_handler = None
+        self.context = _WSGuardContext()
 
-    async def route_web_socket(self, url, handler):
-        self.ws_handler = handler
+    @property
+    def ws_handler(self):
+        return self.context.ws_handler
 
 
 class _FakeWS:
@@ -45,8 +55,8 @@ async def test_ws_guard_is_installed_and_closes_unsafe_connects_safe(monkeypatch
     _page2, renderer = pinned_page_renderer(monkeypatch, page=page)
     await render_bare(renderer)
 
-    # The guard must actually be installed on the render path (the old wrong
-    # attribute name skipped it entirely).
+    # The guard must actually be installed at context scope (the old per-page
+    # install never covered pages the context spawned later).
     assert page.ws_handler is not None, "websocket SSRF guard was never installed"
 
     # (a) an unsafe (private/loopback) websocket target is closed, not connected.

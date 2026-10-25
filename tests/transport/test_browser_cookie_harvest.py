@@ -22,6 +22,15 @@ def _page_with_context():
 
 
 class _FakeContext:
+    """A cookie-only context double: the render phases' route install and the
+    harvest's cookies read are the only surface this test needs."""
+
+    async def route(self, pattern, handler):
+        pass
+
+    def route_web_socket(self, pattern, handler):
+        pass
+
     async def cookies(self, url):
         # A scheduling point, not a duration: the point of the test is that the harvest is AWAITED, so the
         # assertion is on what the synchronous store read sees after the await returns.
@@ -86,12 +95,19 @@ class TestHarvestIsPartitionedByCookieNamespace:
 
 
 class _WedgedContext:
-    """Cookies() that never resolves (simulates a wedged transport)."""
+    """Cookies() that never resolves (simulates a wedged transport); the
+    route-install surface is present so the guard wiring succeeds first."""
 
     # The declared return is what this WOULD answer if it ever did.
     async def cookies(self, url: str | None = None) -> list[dict[str, str]]:
         await asyncio.Event().wait()
         raise AssertionError("unreachable: this coroutine never resolves")
+
+    async def route(self, pattern, handler):
+        pass
+
+    def route_web_socket(self, pattern, handler):
+        pass
 
 
 class TestHarvestWaitBounded:
