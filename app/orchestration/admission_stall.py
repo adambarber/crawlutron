@@ -103,6 +103,10 @@ async def crawl_batches(
         if not allowed_jobs and stall_guard.stalled():
             await fail_remaining_frontier(run.spill, run.spill_write, state.frontier)
             return
+        if not allowed_jobs:
+            # Zero-admission pass: yield the turn -- never hot-spin the gates.
+            await asyncio.sleep(0)
+            continue
         scheduled_results = await crawl_recursive_batch(run, allowed_jobs)
         await commit_recursive_results(run, state, allowed_jobs, scheduled_results)
         if allowed_jobs or state.page_count > page_count_before:

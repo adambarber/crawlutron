@@ -210,7 +210,8 @@ class TestCircuitBreakerSpillsOnResult:
     by ``return_exceptions=True`` -> the URL silently vanishes.
     """
 
-    async def test_open_circuit_spills_via_on_result(self):
+    async def test_open_circuit_spills_via_on_result(self, monkeypatch):
+        recorder(monkeypatch)  # the park a 429 takes; zero wall clock
         scheduler = make_scheduler(
             global_limit=2,
             circuit_threshold=3,
