@@ -2,8 +2,36 @@
 stale callback evict a replacement task's registration."""
 
 import asyncio
+from collections.abc import Callable
 
-import pytest
+
+def _finishable_and_blocked_factories() -> tuple[Callable, Callable, asyncio.Event]:
+    """A factory that finishes in one turn, and one held open by an event."""
+    b_release = asyncio.Event()
+
+    async def fast():
+        return "a"
+
+    async def slow():
+        await b_release.wait()
+        return "b"
+
+    return fast, slow, b_release
+
+
+async def _drain(job_lifecycle, task) -> None:
+    """Let a queued done-callback fire without awaiting the task itself."""
+    while not task.done():
+        await asyncio.sleep(0)
+
+
+async def _reap(job_lifecycle, job_id: str, b_release: asyncio.Event) -> None:
+    """Release the held factory, await whatever the registry still owns, reset."""
+    b_release.set()
+    live = job_lifecycle.tracked_task(job_id)
+    if live is not None:
+        await asyncio.gather(live, return_exceptions=True)
+    job_lifecycle.reset_job_runner()
 
 
 async def test_a_task_that_never_gets_registered_is_still_awaitable_by_the_caller():
@@ -47,29 +75,22 @@ async def test_a_failed_task_is_never_reported_as_running():
 
 
 async def test_replacement_task_registration_survives_the_predecessors_callback():
-    """#448: A finished, B in flight; A's done-callback pops the slot
-    unconditionally and evicts B -- ownership misreports, cancel cannot find B."""
+    """#448: A's queued done-callback pops the slot and evicts the live B."""
     from app.api import job_lifecycle
 
     job_lifecycle.reset_job_runner()
     job_id = "evict-job"
-    b_release = asyncio.Event()
-
-    async def fast():
-        return "a"
-
-    async def slow():
-        await b_release.wait()
-        return "b"
+    fast, slow, b_release = _finishable_and_blocked_factories()
 
     try:
-        job_lifecycle.start_tracked_task(job_id, fast)
-        # One turn: A runs to completion; its done-callback is QUEUED but has
-        # not run -- the coroutine resumes before the callback.
-        await asyncio.sleep(0)
+        a = job_lifecycle.start_tracked_task(job_id, fast)
+        # Drive A to completion WITHOUT awaiting it: completion queues the
+        # release callback for the next turn, while this coroutine resumes now.
+        while not a.done():
+            await asyncio.sleep(0)
+        # Same turn as A's completion: B is created and registered.
         b = job_lifecycle.start_tracked_task(job_id, slow)
-        # Next turn: A's queued callback fires and pops the slot -- evicting B
-        # under the old unconditional pop.
+        # Next turn: A's queued release fires -- old code pops B's slot.
         await asyncio.sleep(0)
         await asyncio.sleep(0)
 
@@ -77,35 +98,25 @@ async def test_replacement_task_registration_survives_the_predecessors_callback(
         assert live is not None and live is b, "A's stale done-callback evicted B's registration (#448)"
         assert job_lifecycle.is_running(job_id)
     finally:
-        b_release.set()
-        live = job_lifecycle.tracked_task(job_id)
-        if live is not None:
-            await asyncio.gather(live, return_exceptions=True)
-        job_lifecycle.reset_job_runner()
+        await _reap(job_lifecycle, job_id, b_release)
 
 
-@pytest.mark.parametrize("which", ["callback-eviction"])
-async def test_the_registry_slot_is_only_reclaimed_by_its_own_task(which):
-    """Parametrized companion: the eviction above, stated as the invariant."""
-    del which
+async def test_the_registry_slot_is_only_reclaimed_by_its_own_task():
+    """Companion invariant: only the registered task's own completion reclaims."""
     from app.api import job_lifecycle
 
     job_lifecycle.reset_job_runner()
     job_id = "slot-owner-job"
-
-    async def leaf():
-        return "leaf"
+    fast, slow, b_release = _finishable_and_blocked_factories()
 
     try:
-        first = job_lifecycle.start_tracked_task(job_id, leaf)
-        await asyncio.sleep(0)
-        second = job_lifecycle.start_tracked_task(job_id, leaf)
+        a = job_lifecycle.start_tracked_task(job_id, fast)
+        while not a.done():
+            await asyncio.sleep(0)
+        second = job_lifecycle.start_tracked_task(job_id, slow)
         await asyncio.sleep(0)
         await asyncio.sleep(0)
         live = job_lifecycle.tracked_task(job_id)
-        assert live is None or live is second, (
-            "a finished task's callback must not reclaim a successor's slot"
-        )
-        del first
+        assert live is second, "a finished task's callback must not reclaim a successor's slot"
     finally:
-        job_lifecycle.reset_job_runner()
+        await _reap(job_lifecycle, job_id, b_release)

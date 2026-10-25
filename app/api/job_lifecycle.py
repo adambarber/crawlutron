@@ -68,10 +68,31 @@ def start_tracked_task(
     existing = _tasks.get(job_id)
     if existing is not None and not existing.done():
         return existing
-    task = asyncio.create_task(factory())
+    holder: list[asyncio.Task] = []
+
+    def release(t: asyncio.Task) -> None:
+        # Only this task's completion may reclaim the slot (#448): a stale
+        # callback from a predecessor must not evict the live replacement.
+        if holder and _tasks.get(job_id) is t:
+            _tasks.pop(job_id, None)
+
+    task = asyncio.create_task(_track_then_run(holder, factory))
+    holder.append(task)
     _tasks[job_id] = task
-    task.add_done_callback(lambda t: _tasks.pop(job_id, None))
+    task.add_done_callback(release)
     return task
+
+
+async def _track_then_run(
+    holder: list[asyncio.Task],
+    factory: Callable[[], Coroutine[Any, Any, Any]],
+) -> object:
+    """Yield once so the spawn site registers the task before any user code.
+
+    Registration precedes the first ``await`` of ``factory``, so an early
+    failure can never land in a task the registry never saw (#448)."""
+    await asyncio.sleep(0)
+    return await factory()
 
 
 def start_job(
