@@ -28,8 +28,8 @@ from app.orchestration.results import failed_result_for
 from app.orchestration.scheduler import DomainScheduler
 from app.orchestration.spill_sink import SpillSink, write_spill
 from app.runtime.metrics import MetricsStore, get_metrics
+from app.runtime.pressure_gates import ResourceGate
 from app.runtime.resource_pressure import (
-    ResourceGate,
     WeightedAdmission,
     default_admission_policy,
 )

@@ -10,7 +10,7 @@ from urllib.parse import parse_qs, unquote, urlsplit
 
 from lxml import html as lxml_html
 
-from app.safety.validation import HostPolicy
+from app.models.host_policy import HostPolicy
 from app.search import providers as _providers
 from app.search.providers import (
     BaseProvider,

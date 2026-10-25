@@ -9,14 +9,13 @@ import abc
 import json
 import logging
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import httpx
 
-from app.models.json_value import JsonValue
+from app.models.host_policy import HostPolicy
 from app.models.normalized_url import NormalizedUrl, admit_or_none
 from app.safety.bounded_io import BodyTooLarge, read_capped_async
-from app.safety.validation import HostPolicy
 from app.transport.http_client_pool import get_async_http_client
 from app.transport.pinned_transport import (
     ResolverBudgetExceeded,
@@ -25,6 +24,9 @@ from app.transport.pinned_transport import (
     sni_extension,
 )
 from app.transport.timeouts import Timeouts
+
+if TYPE_CHECKING:
+    from app.models.json_value import JsonValue
 
 logger = logging.getLogger(__name__)
 

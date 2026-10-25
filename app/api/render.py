@@ -249,7 +249,7 @@ def _fill_missing_results(
     Pool exhaustion is a capacity condition, not a per-URL failure: the 503 is
     the endpoint's mapping. Never raw exception text: str(exc) would leak.
     """
-    from app.transport.browser_pool import BrowserPoolExhaustedError
+    from app.models.browser_pool_exhausted import BrowserPoolExhaustedError
 
     if any(r.classification == "browser_pool_exhausted" for r in by_index.values()):
         raise BrowserPoolExhaustedError(

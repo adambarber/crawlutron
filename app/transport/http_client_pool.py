@@ -14,7 +14,6 @@ from typing import TYPE_CHECKING, Any
 from app.transport import pooled_cffi as _leaf
 from app.transport import pooled_clients as _core
 from app.transport.pooled_cffi import (
-    CFFI_IMPERSONATE_TARGET,
     close_cffi_session,
     close_queued_session,
     get_cffi_session,
@@ -27,6 +26,7 @@ from app.transport.pooled_clients import (
 from app.transport.pooled_clients import (
     reset_process_state as _reset_http_pool_state,
 )
+from app.vocabulary.strategies import CFFI_IMPERSONATE_TARGET
 
 if TYPE_CHECKING:
     from app.config.settings import CrawlerSettings

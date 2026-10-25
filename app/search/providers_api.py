@@ -7,8 +7,8 @@ from __future__ import annotations
 
 import abc
 
+from app.models.host_policy import HostPolicy
 from app.models.json_value import JsonValue
-from app.safety.validation import HostPolicy
 from app.search import providers as _providers
 from app.search.providers import (
     BaseProvider,
