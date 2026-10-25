@@ -94,10 +94,10 @@ Supported strategy names (fetch strategies):
 
 Supported extraction methods (parsing pipelines, orthogonal to fetch strategy):
 
-- `FULL` — Unified pipeline (trafilatura for HTML, markitdown for documents, plain-text passthrough)
-- `TRAFILATURA` — Forces HTML main-text extraction only
-- `DOCUMENT` — Forces markitdown document extraction for PDFs and non-HTML bodies
-- `DOM` — DOM text extraction (browser-rendered pages)
+- `full` — Unified pipeline (trafilatura for HTML, markitdown for documents, plain-text passthrough)
+- `trafilatura` — Forces HTML main-text extraction only
+- `document` — Forces markitdown document extraction for PDFs and non-HTML bodies
+- `dom` — DOM text extraction (browser-rendered pages)
 
 Policy fields agents may send:
 
@@ -121,7 +121,7 @@ Policy fields agents may send:
 {
   "schema_version": "2026-06-23",
   "strategies": ["HTTP_DECLARED_CRAWLER", "HTTP_CFFI_IMPERSONATE", "BROWSER_HEADLESS"],
-  "extraction": "FULL",
+  "extraction": "full",
   "limits": {
     "timeout_seconds": 30,
     "max_retries": 2,
@@ -130,7 +130,7 @@ Policy fields agents may send:
   },
   "request_profile": {
     "user_agent_family": "desktop_chrome",
-    "accept_language": "en-US,en;q=0.9"
+    "accept_languages": ["en-US", "en;q=0.9"]
   },
   "browser_profile": {
     "viewport": "desktop",

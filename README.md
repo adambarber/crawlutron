@@ -213,9 +213,10 @@ rebinding defense).
 
 ## Crawl request shape
 
-`POST /v1/crawl` accepts either a single `url` or a list of `urls`, plus an optional
-`policy`, `request_profile`, `browser_profile`, `discovery`, `scope_regex`,
-`css_selector`, `xpath`, and `webhook_url`.
+`POST /v1/crawl` accepts either a single `url` or a list of `urls`, plus optional top-level
+fields: `policy`, `validators` (cached conditional-GET validators), `async_mode`, `webhook_url`,
+and `output_format`. The request/browsing profile knobs — `request_profile`, `browser_profile`,
+`discovery`, `scope_regex`, `css_selector`, `xpath` — live **inside** `policy`.
 
 ```json
 {
@@ -229,11 +230,11 @@ rebinding defense).
       "challenge_wait_seconds": 4,
       "max_discovered_links": 10,
       "respect_robots": true
-    }
-  },
-  "request_profile": { "user_agent_family": "declared_crawler" },
-  "browser_profile": { "state": "ephemeral", "resource_mode": "document" },
-  "discovery": { "robots": true, "sitemaps": true, "feeds": true }
+    },
+    "request_profile": { "user_agent_family": "declared_crawler" },
+    "browser_profile": { "resource_mode": "document" },
+    "discovery": { "robots": true, "sitemaps": true, "feeds": true }
+  }
 }
 ```
 
@@ -383,7 +384,7 @@ Host policy is applied at the shared public-URL chokepoint before the SSRF/priva
 - Service descriptor: `/.well-known/crawler-service`
 
 The `/v1/render` request body is a typed `RenderRequest` (`url`/`urls` plus an
-`options` object with `timeout_seconds`, `wait_until`, `max_retries`,
+`options` object with `timeout_seconds`, `max_retries`,
 `respect_robots`, `include_html`, `include_text`). Malformed bodies are rejected
 with `422`.
 
