@@ -185,13 +185,15 @@ class TestWebhookValidationRunsOffLoop:
     would otherwise stall the FastAPI loop. Pin as crawl targets do; delivery
     re-pins through the same builder, closing the validation->delivery TOCTOU."""
 
-    async def test_post_webhook_validates_off_the_event_loop(self, monkeypatch):
+    async def test_post_webhook_resolves_off_the_event_loop(self, monkeypatch):
+        """Every DNS work ``post_webhook`` does (the per-attempt delivery pin, #450)
+        must leave the event loop; a blackholed resolver would otherwise stall the
+        FastAPI loop. Pin as crawl targets do; delivery re-pins each attempt."""
         from app.api.webhooks import post_webhook
 
         block_private_targets(monkeypatch)
         resolver_threads = _spy_resolver_threads(monkeypatch)
-        # Neutralize delivery so the ONLY resolution is the validation parse.
-        monkeypatch.setattr("app.api.webhooks.deliver_pinned_webhook", AsyncMock())
+        delivered = record_webhook_delivery(monkeypatch)
 
         await post_webhook(
             "http://public.example.com/cb",
@@ -199,15 +201,16 @@ class TestWebhookValidationRunsOffLoop:
             host_policy=HostPolicy.unrestricted(),
         )
 
-        assert resolver_threads, "socket.getaddrinfo was never called during validation"
+        assert delivered, "delivery never ran; the test is not exercising the pin path"
+        assert resolver_threads, "socket.getaddrinfo was never called during delivery"
         loop_thread = threading.current_thread()
         for thread in resolver_threads:
             assert thread is not loop_thread, (
-                f"validation resolved DNS on the event-loop thread {thread.name!r}; "
+                f"the delivery pin resolved DNS on the event-loop thread {thread.name!r}; "
                 "it must run on a dns-resolve worker thread"
             )
             assert thread.name.startswith("dns-resolve"), (
-                f"validation did not reuse the dns-resolve pool (ran on {thread.name!r})"
+                f"the delivery pin did not reuse the dns-resolve pool (ran on {thread.name!r})"
             )
 
     async def test_deliver_pinned_webhook_parses_off_the_event_loop(self, monkeypatch):
@@ -248,6 +251,28 @@ class TestWebhookValidationRunsOffLoop:
         with host_resolves_to(monkeypatch, "127.0.0.1"), pytest.raises(ValueError):
             await validate_webhook_url_async(
                 "http://evil.example.com/callback",
+                host_policy=HostPolicy.unrestricted(),
+            )
+
+
+class TestDeliveryTimeValidationFailureStaysBestEffort:
+    """A transient validation raise at delivery time must not escape ``post_webhook``
+    (#450): the pin path fails closed per attempt, and the caller's outcome stands."""
+
+    async def test_a_resolver_failure_at_delivery_time_does_not_raise_out_of_post_webhook(self, monkeypatch):
+        """A DNS blip during delivery is a lost callback, never a raised error: the
+        best-effort contract belongs to the whole delivery, pre-loop check included."""
+        from app.api import webhooks
+
+        async def resolver_blip(url, *, host_policy):
+            raise OSError("resolver timeout")
+
+        monkeypatch.setattr(webhooks, "validate_webhook_url_async", resolver_blip)
+        record_webhook_delivery(monkeypatch)
+        with host_resolves_to(monkeypatch, "8.8.8.8"):
+            await webhooks.post_webhook(
+                _webhook_target(),
+                {"results": []},
                 host_policy=HostPolicy.unrestricted(),
             )
 

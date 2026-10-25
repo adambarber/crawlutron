@@ -172,8 +172,8 @@ async def post_webhook(
     host_policy: HostPolicy,
 ) -> None:
     """POST a webhook (SSRF/IP pinned, HMAC-signed, size-capped) with backoff retries.
-    Best-effort: a lost callback is logged, never raised, so a dead receiver cannot
-    crash the crawl worker. The size-cap/validation story lives only here.
+    Best-effort: nothing raises -- a lost callback is logged, so it cannot corrupt
+    an already-recorded outcome (#450); validation lives in the pin per attempt.
     """
     payload_bytes = json.dumps(dict(payload)).encode("utf-8")
     if len(payload_bytes) > max_webhook_size():
@@ -182,7 +182,6 @@ async def post_webhook(
             extra={"url": webhook_url, "size": len(payload_bytes)},
         )
         return
-    await validate_webhook_url_async(webhook_url, host_policy=host_policy)
     attempts = webhook_max_attempts()
     for attempt in range(attempts):
         try:
