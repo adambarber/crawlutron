@@ -406,7 +406,7 @@ class TestWholeSiteJobExecution:
         self, client, job_store, monkeypatch
     ):
         """#381: the occupied set is derived once per batch and threaded by value
-        (``known_after``), not re-derived from job state for every entry."""
+        (the reserved delta), not re-derived from job state for every entry."""
         import app.api.job_runner as job_runner_module
 
         calls: list[int] = []
@@ -427,7 +427,7 @@ class TestWholeSiteJobExecution:
         assert len(calls) == 2  # one per batch (root, then the two-entry batch), not per entry
 
     async def test_an_intra_batch_duplicate_is_deduped_against_the_first_admission(self, client, job_store):
-        """#402: each entry's admission folds back (``known |= known_after``), so the
+        """#402: each entry's admission folds back (``known |= known_delta``), so the
         next entry dedupes against what the previous one admitted. Two entries in
         one batch discovering the same URL must admit it once."""
         shared = "http://example.test/shared"
