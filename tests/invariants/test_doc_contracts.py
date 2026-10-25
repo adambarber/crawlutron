@@ -11,6 +11,7 @@ import pytest
 
 from app.models.crawl_policy import CrawlPolicy
 from app.models.crawl_request import CrawlRequest
+from app.models.json_value import JsonValue
 from app.models.render_request import RenderRequest
 from tests.chokepoint_walks import REPO_ROOT
 from tests.invariants.test_knob_contracts import (
@@ -298,7 +299,7 @@ DOC_SYMBOLS_RESOLVE_TO_DEFINITIONS = Rule(
 _FENCED_JSON = re.compile(r"```json\n(.*?)```", re.DOTALL)
 
 
-def _classify_request_shape(payload: dict) -> type | None:
+def _classify_request_shape(payload: dict[str, JsonValue]) -> type | None:
     """The live model a JSON object claims to be, or None when it is not a request."""
     if not isinstance(payload, dict):
         return None
