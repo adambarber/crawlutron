@@ -193,6 +193,8 @@ async def _admit_chunk[T](
             if delay is not None and delay > 0:
                 pass_.commit_crawl_delay(candidate.normalized_url.site, delay)
         if candidate.normalized_url in known or candidate.normalized_url in added:
+            # The await above let another writer claim it: count, then drop (#522).
+            duplicates_skipped += 1
             continue
         capacity = remaining_page_capacity(current_occupied + occupied_delta, pass_.max_pages)
         if capacity is not None and capacity <= 0:

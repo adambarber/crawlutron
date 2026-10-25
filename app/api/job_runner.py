@@ -31,6 +31,7 @@ from app.api.job_lifecycle import (
     shutdown_job_runner,
     start_job,
     start_tracked_task,
+    tracked_task,
 )
 from app.api.job_recovery import (
     recover_and_start_pending_jobs,
@@ -383,10 +384,26 @@ async def pause_job(job_id: str, job_store: JobStore) -> str:
 
 async def resume_job(job_id: str, job_store: JobStore, settings: Any, shutdown_event: asyncio.Event) -> str:
     """Resume a paused job by respawning its runner task."""
+    # A stale predecessor task still owning the slot must not leave a RUNNING
+    # row with no runner (#523 COR-08): take the registry's slot-lock path.
     outcome = await _transition(job_store, job_id, JobStatus.RUNNING, expected=JobStatus.PAUSED)
     if outcome == "ok":
         # The flip above is this process's claim, so the runner is told not to
         # take a second one -- the only way it can run without the CAS failing.
+        old = tracked_task(job_id)
+        if old is not None:
+            try:
+                await asyncio.wait_for(asyncio.shield(old), timeout=5.0)
+            except TimeoutError:
+                # Still wedged past the grace period: cancel and join it so the
+                # spawn below actually claims the freed slot.
+                old.cancel()
+                try:
+                    await old
+                except asyncio.CancelledError:
+                    pass
+            except asyncio.CancelledError:
+                raise
         start_job(job_id, job_store, settings, shutdown_event, preclaimed=True)
     return outcome
 

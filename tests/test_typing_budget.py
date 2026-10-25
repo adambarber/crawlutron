@@ -26,8 +26,8 @@ _METRIC = "undeclared record"
 _ANY = "bare Any"
 
 # 143 -> 137 (#135/#136); 134 -> 130 -> 129 (#419: TypedDicts; #359: DocPoolHooks).
-# "bare Any" is #193's baseline: 161 -> 159 (#419, doors; JsonValue).
-_BUDGETS = {_METRIC: 129, _ANY: 159}
+# "bare Any" is #193's baseline: 161 -> 159 (#419); 159 -> 158 (#523, typed recovery settings).
+_BUDGETS = {_METRIC: 129, _ANY: 158}
 
 # A record is anything whose key set a caller might depend on.
 _RECORD_ROOTS = frozenset(
