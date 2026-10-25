@@ -93,7 +93,7 @@ class TokenBucket:
         """Reserve ``tokens``, returning seconds to wait before firing (0 if available).
 
         A short caller drives the balance negative, so overlapping callers queue
-        behind what was taken (the max_rps herd).
+        behind what was taken (the max_rps herd); rate >= 1/MAX_RATE_LIMIT_RPS.
         """
         now = time.monotonic()
         elapsed = now - self.last_refill
