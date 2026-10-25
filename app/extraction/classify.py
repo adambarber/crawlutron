@@ -30,7 +30,6 @@ CLASSIFICATION_SIGNATURES: tuple[tuple[Classification, tuple[str, ...]], ...] = 
             "complete the captcha",
             "captcha challenge",
             "prove you are human",
-            "security check",
             "i'm not a robot",
         ),
     ),
@@ -88,11 +87,11 @@ CLASSIFICATION_SIGNATURES: tuple[tuple[Classification, tuple[str, ...]], ...] = 
     ),
     (
         "access_denied",
-        ("access denied", "request has been blocked", "forbidden", "security rules", "403 forbidden"),
+        ("access denied", "request has been blocked", "security rules", "403 forbidden"),
     ),
     (
         "not_found",
-        ("custom404", "404. the page/url requested", "404 not found", "page not found", "not found"),
+        ("custom404", "404. the page/url requested", "404 not found", "page not found"),
     ),
     ("site_error", ("runtime error", "server error in '/' application", "application error")),
     ("gone", ("410 gone",)),
