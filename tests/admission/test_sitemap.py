@@ -159,8 +159,11 @@ class TestSitemapFanoutBound:
         real_create_task = asyncio.create_task
 
         def counting_create_task(coro, **kwargs):
+            # Only child walks count: the #498 single-flight wrapper is one
+            # bookkeeping task per flight, not part of the fan-out cap.
             nonlocal tasks_created
-            tasks_created += 1
+            if getattr(coro, "__qualname__", "").startswith("_recurse_sitemap"):
+                tasks_created += 1
             return real_create_task(coro, **kwargs)
 
         monkeypatch.setattr(asyncio, "create_task", counting_create_task)

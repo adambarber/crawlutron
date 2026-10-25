@@ -272,6 +272,24 @@ async def _recurse_sitemap(
     return etag, last_modified
 
 
+# In-flight cold walks, keyed like the cache (#498): parallel callers of one
+# cold sitemap share one upstream walk instead of each walking it.
+_INFLIGHT_SITEMAP: dict[tuple[str, HostPolicy], asyncio.Task[set]] = {}
+
+
+def _cache_walk_result(
+    cache_key: tuple[str, HostPolicy],
+    page_urls: set[tuple[NormalizedUrl, str | None]],
+    root_etag: str | None,
+    root_lm: str | None,
+) -> None:
+    """Store one walk's outcome: failure (nothing, no validators) expires short."""
+    if not page_urls and root_etag is None and root_lm is None:
+        SITEMAP_CACHE.put(cache_key, (list(page_urls), root_etag, root_lm), ttl=SITEMAP_FAILURE_TTL_SECONDS)
+    else:
+        SITEMAP_CACHE.put(cache_key, (list(page_urls), root_etag, root_lm))
+
+
 async def fetch_sitemap_urls(
     fetcher: HttpFetcher,
     sitemap_url: NormalizedUrl,
@@ -308,15 +326,16 @@ async def fetch_sitemap_urls(
         elif stale[2]:
             conditional = {"If-Modified-Since": stale[2]}
     try:
-        root_etag, root_lm = await _recurse_sitemap(walk, sitemap_url, 0, conditional)
+
+        async def walk_and_cache() -> set[tuple[NormalizedUrl, str | None]]:
+            root_etag, root_lm = await _recurse_sitemap(walk, sitemap_url, 0, conditional)
+            _cache_walk_result(cache_key, page_urls, root_etag, root_lm)
+            return page_urls
+
+        page_urls = await single_flight(_INFLIGHT_SITEMAP, cache_key, walk_and_cache)
     except Exception:
         root_etag, root_lm = (stale[1] if stale else None), (stale[2] if stale else None)
-    # A failure (walk raised, or nothing resolved with no validators) must not
-    # stand for the full TTL: transient outages expire on the short clock.
-    if not page_urls and root_etag is None and root_lm is None:
-        SITEMAP_CACHE.put(cache_key, (list(page_urls), root_etag, root_lm), ttl=SITEMAP_FAILURE_TTL_SECONDS)
-    else:
-        SITEMAP_CACHE.put(cache_key, (list(page_urls), root_etag, root_lm))
+        _cache_walk_result(cache_key, page_urls, root_etag, root_lm)
     return page_urls
 
 
