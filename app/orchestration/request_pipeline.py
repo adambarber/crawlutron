@@ -98,7 +98,6 @@ def _build_jobs(state: PipelineState) -> list[CrawlTask]:
     for index, original_url in enumerate(state.urls):
         try:
             normalized_url = NormalizedUrl(original_url, policy=state.host_policy)
-            domain = normalized_url.site
         except ValueError as error:
             raise ValueError(f"invalid_url: {error}") from error
         jobs.append(
@@ -106,7 +105,6 @@ def _build_jobs(state: PipelineState) -> list[CrawlTask]:
                 index=index,
                 original_url=original_url,
                 normalized_url=normalized_url,
-                domain=domain,
             )
         )
     return jobs

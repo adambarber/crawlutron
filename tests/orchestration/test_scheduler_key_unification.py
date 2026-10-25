@@ -65,7 +65,7 @@ def test_recursive_admitted_and_seed_tasks_share_one_key_scheme():
     from app.models.crawl_task import CrawlTask
 
     seed_url = canonical("http://www.example.com/seed")
-    seed_task = CrawlTask(index=0, original_url=seed_url.raw, normalized_url=seed_url, domain=seed_url.site)
+    seed_task = CrawlTask(index=0, original_url=seed_url.raw, normalized_url=seed_url)
     link = _link("http://www.example.com/page", seed_url)
     _depth, admitted = _empty_state(next_index=1, known={seed_url}).make_admitted_task(_admit(link))
 
@@ -75,9 +75,12 @@ def test_recursive_admitted_and_seed_tasks_share_one_key_scheme():
 
 
 def test_the_task_domain_can_no_longer_disagree_with_its_url():
-    """#445 root cause: a caller-supplied domain field can mis-key the scheduler."""
+    """#445 root cause: a caller-supplied domain field could mis-key the scheduler."""
+    from dataclasses import fields
+
     from app.models.crawl_task import CrawlTask
 
     url = canonical("http://www.example.com/page")
-    task = CrawlTask(index=0, original_url=url.raw, normalized_url=url, domain="whatever")
+    task = CrawlTask(index=0, original_url=url.raw, normalized_url=url)
     assert task.domain == url.site
+    assert "domain" not in {f.name for f in fields(CrawlTask)}

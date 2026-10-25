@@ -77,7 +77,6 @@ class TestTransientRequeue:
             index=0,
             original_url="http://a.example/x",
             normalized_url=canonical("http://a.example/x"),
-            domain="a.example",
         )
         frontier: deque[tuple[int, CrawlTask]] = deque()
 

@@ -144,7 +144,6 @@ async def _pace_delayed_batch(
                     index=index,
                     original_url=entry.url.raw,
                     normalized_url=entry.url,
-                    domain=host,
                 )
             )
     if not tasks:

@@ -318,7 +318,6 @@ class TestNormalizedUrlIsAValueNotAString:
             index=0,
             original_url="http://a.test/x",
             normalized_url=canonical("http://a.test/x"),
-            domain="a.test",
         )
         link = _link("http://a.test/x", "http://a.test/")
         assert isinstance(to_dict(task)["normalized_url"], str)

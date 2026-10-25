@@ -5,7 +5,6 @@ batch-sizing and admission-gate logic are covered without the full engine."""
 
 import asyncio
 from collections import deque
-from urllib.parse import urlsplit
 
 import pytest
 
@@ -28,15 +27,11 @@ _ROOT_CANONICAL = canonical(_ROOT)
 
 
 def _task(url: str, *, index: int = 0) -> CrawlTask:
-    """A crawl task whose ``normalized_url`` is the production canonical form.
-
-    ``original_url`` keeps the raw spelling; the four-field seed was written
-    six times here, each copy free to drift -- this is the one that cannot."""
+    """A crawl task whose ``normalized_url`` is the production canonical form."""
     return CrawlTask(
         index=index,
         original_url=url,
         normalized_url=canonical(url),
-        domain=urlsplit(url).hostname or "",
     )
 
 
@@ -251,7 +246,6 @@ def _tiered_job(index: int, host: str) -> CrawlTask:
         index=index,
         original_url=f"http://{host}/",
         normalized_url=canonical(f"http://{host}/"),
-        domain=host,
     )
 
 
