@@ -93,6 +93,8 @@ CONTENT_CACHE_MAX_TOTAL_BYTES: int = 512 * 1024 * 1024
 SITEMAP_MAX_DEPTH: int = 3
 SITEMAP_MAX_URLS: int = 10_000
 SITEMAP_CACHE_TTL_SECONDS: float = DEFAULT_CACHE_TTL_SECONDS
+# A failure must not stand for the full hour (mirror ROBOTS_FAILURE_TTL_SECONDS).
+SITEMAP_FAILURE_TTL_SECONDS: float = 60.0
 SITEMAP_CACHE_MAX_ENTRIES: int = 1000
 SITEMAP_FANOUT_TIMEOUT_SECONDS: int = 45
 # Max child-sitemap fetches in flight per index level: without chunking, one

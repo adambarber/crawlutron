@@ -25,6 +25,7 @@ from app.vocabulary.limits import (
     DISCOVERY_BODY_MAX_BYTES,
     SITEMAP_CACHE_MAX_ENTRIES,
     SITEMAP_CACHE_TTL_SECONDS,
+    SITEMAP_FAILURE_TTL_SECONDS,
     SITEMAP_FANOUT_TIMEOUT_SECONDS,
     SITEMAP_INDEX_FANOUT,
     SITEMAP_MAX_DEPTH,
@@ -310,7 +311,12 @@ async def fetch_sitemap_urls(
         root_etag, root_lm = await _recurse_sitemap(walk, sitemap_url, 0, conditional)
     except Exception:
         root_etag, root_lm = (stale[1] if stale else None), (stale[2] if stale else None)
-    SITEMAP_CACHE.put(cache_key, (list(page_urls), root_etag, root_lm))
+    # A failure (walk raised, or nothing resolved with no validators) must not
+    # stand for the full TTL: transient outages expire on the short clock.
+    if not page_urls and root_etag is None and root_lm is None:
+        SITEMAP_CACHE.put(cache_key, (list(page_urls), root_etag, root_lm), ttl=SITEMAP_FAILURE_TTL_SECONDS)
+    else:
+        SITEMAP_CACHE.put(cache_key, (list(page_urls), root_etag, root_lm))
     return page_urls
 
 

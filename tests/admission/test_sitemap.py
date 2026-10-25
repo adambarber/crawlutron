@@ -10,6 +10,7 @@ from app.orchestration.fetch_helpers import SITEMAP_CACHE, fetch_sitemap_urls
 from app.transport.content_cache import ContentCache
 from app.transport.content_cache_key import build_content_cache_key
 from app.transport.request_profile import headers_for_strategy
+from app.vocabulary.limits import SITEMAP_CACHE_TTL_SECONDS, SITEMAP_FAILURE_TTL_SECONDS
 from tests._assertions import install_to_thread_spy
 from tests._fetcher_factories import (
     concurrent_fetcher,
@@ -238,6 +239,43 @@ async def test_index_children_recurse_without_lastmod():
         host_policy=UNRESTRICTED_HOST_POLICY,
     )
     assert (canonical("http://x.test/p"), "2024-03-03") in urls
+
+
+async def test_failed_sitemap_fetch_is_cached_on_the_short_clock():
+    """A transient failure must not poison discovery for the full hour:
+    the failure entry lapses on the short clock like robots' does."""
+    url = canonical("http://x.test/sitemap.xml")
+    SITEMAP_CACHE.discard((url.raw, UNRESTRICTED_HOST_POLICY))
+    try:
+        fetcher = scripted_fetcher(status=500, ctype="application/xml", body=b"")
+        out = await fetch_sitemap_urls(fetcher, url, 10, host_policy=UNRESTRICTED_HOST_POLICY)
+        assert out == set()
+        delta = SITEMAP_CACHE.time_until_expiry((url.raw, UNRESTRICTED_HOST_POLICY))
+        assert delta is not None and delta <= SITEMAP_FAILURE_TTL_SECONDS
+    finally:
+        SITEMAP_CACHE.discard((url.raw, UNRESTRICTED_HOST_POLICY))
+
+
+async def test_successful_sitemap_fetch_keeps_the_long_ttl():
+    """A resolved sitemap is a real result -- the full TTL, not the failure clock."""
+    url = canonical("http://x.test/sitemap.xml")
+    SITEMAP_CACHE.discard((url.raw, UNRESTRICTED_HOST_POLICY))
+    try:
+        out = await fetch_sitemap_urls(
+            _sitemap_fetcher(
+                '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'
+                "<url><loc>http://x.test/p</loc></url></urlset>"
+            ),
+            url,
+            10,
+            host_policy=UNRESTRICTED_HOST_POLICY,
+        )
+        assert out
+        delta = SITEMAP_CACHE.time_until_expiry((url.raw, UNRESTRICTED_HOST_POLICY))
+        assert delta is not None and delta > SITEMAP_FAILURE_TTL_SECONDS
+        assert delta <= SITEMAP_CACHE_TTL_SECONDS
+    finally:
+        SITEMAP_CACHE.discard((url.raw, UNRESTRICTED_HOST_POLICY))
 
 
 def _policy(extra=None, *, extraction=None):
