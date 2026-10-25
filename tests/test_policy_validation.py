@@ -1,5 +1,7 @@
 """URL and network policy validation: schemes, private networks, registrable domains."""
 
+from urllib.parse import urlparse
+
 import pytest
 
 from app.models.host_policy import HostPolicy
@@ -97,6 +99,29 @@ class TestPolicyValidation:
             NormalizedUrl("http://0x7f000001/", policy=UNRESTRICTED_HOST_POLICY)  # 127.0.0.1
         with pytest.raises(ValueError):
             NormalizedUrl("http://127.1/", policy=UNRESTRICTED_HOST_POLICY)  # 127.0.0.1
+
+    def test_ipv6_literal_canonicalizes_bracketed(self, monkeypatch):
+        # #442: a bracketed IPv6 literal must survive canonicalization as a parseable URL;
+        # the bracket-stripped host colon-collapses, then urlparse/httpx refuse the result.
+        monkeypatch.setenv("CRAWLUTRON_ALLOW_PRIVATE_TARGETS", "0")
+        url = NormalizedUrl("http://[2606:4700::1111]/x", policy=UNRESTRICTED_HOST_POLICY)
+        assert url.raw == "http://[2606:4700::1111]/x"
+        assert url.host == "2606:4700::1111"
+        assert url.origin == "http://[2606:4700::1111]"
+        assert urlparse(url.raw).hostname == "2606:4700::1111"
+
+    def test_ipv6_literal_with_port_canonicalizes_bracketed(self, monkeypatch):
+        monkeypatch.setenv("CRAWLUTRON_ALLOW_PRIVATE_TARGETS", "0")
+        url = NormalizedUrl("http://[2606:4700::1111]:8080/x", policy=UNRESTRICTED_HOST_POLICY)
+        assert url.raw == "http://[2606:4700::1111]:8080/x"
+        assert url.origin == "http://[2606:4700::1111]:8080"
+        assert urlparse(url.raw).port == 8080
+
+    def test_ipv6_zone_id_refused(self, monkeypatch):
+        # A zone id is not a public name nor address: fail closed at admission.
+        monkeypatch.setenv("CRAWLUTRON_ALLOW_PRIVATE_TARGETS", "0")
+        with pytest.raises(ValueError):
+            NormalizedUrl("http://[fe80::1%25eth0]/", policy=UNRESTRICTED_HOST_POLICY)
 
     def test_public_integer_literal_allowed(self, monkeypatch):
         # Numeric but public (1.1.1.1) stays reachable.

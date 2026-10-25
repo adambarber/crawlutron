@@ -161,6 +161,10 @@ def _host_is_public(host: str) -> bool:
     """
     if host in _PRIVATE_HOSTS:
         return False
+    if "%" in host and classify(host) is AddressClass.NOT_AN_ADDRESS:
+        # A zone-scoped literal (``fe80::1%25eth0``) defeats ip_address() and would be
+        # admitted as a name; no public URL carries a zone id, so refuse it (#442).
+        return False
     # A host that is not an address is a name, judged against ``is_public_ip_value``
     # once the resolver answers; only a literal IP in a rejected range is refused.
     return classify(host) in (AddressClass.NOT_AN_ADDRESS, AddressClass.PUBLIC)

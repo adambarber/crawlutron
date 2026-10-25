@@ -39,6 +39,12 @@ def _strip_trailing_colon(value: str) -> str:
     return value[:-1] if value.endswith(":") else value
 
 
+def _bracketed_netloc(host: str, port: int | None) -> str:
+    """Netloc with IPv6 literals re-bracketed; bare colons parse as host:port pairs."""
+    host_part = f"[{host}]" if ":" in host else host
+    return host_part if port is None else f"{host_part}:{port}"
+
+
 def _canonical_parts(url: str, *, policy: HostPolicy) -> tuple[str, str, str, str, int | None, str, str]:
     """(canonical, scheme, host, site, port, path, query), or raise with the refusal reason."""
     parsed = urlparse(url)
@@ -57,7 +63,7 @@ def _canonical_parts(url: str, *, policy: HostPolicy) -> tuple[str, str, str, st
     port = parsed.port
     if port == default_port:
         port = None
-    netloc = host if port is None else f"{host}:{port}"
+    netloc = _bracketed_netloc(host, port)
     path = _strip_trailing_colon(parsed.path or "").rstrip("/")
     query = _strip_trailing_colon(parsed.query)
     if query:
@@ -107,9 +113,10 @@ class NormalizedUrl:
     def origin(self) -> str:
         """``scheme://host[:port]`` -- the fetch origin for robots/sitemaps."""
         default_port = 80 if self._scheme == "http" else 443
+        host_part = f"[{self._host}]" if ":" in self._host else self._host
         if self._port is None or self._port == default_port:
-            return f"{self._scheme}://{self._host}"
-        return f"{self._scheme}://{self._host}:{self._port}"
+            return f"{self._scheme}://{host_part}"
+        return f"{self._scheme}://{host_part}:{self._port}"
 
     @property
     def host(self) -> str:
