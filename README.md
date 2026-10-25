@@ -172,6 +172,7 @@ $EDITOR app/storage/migrations/0002_crawl_jobs_descriptive_name.py
 | `GET`  | `/v1/capabilities` | Declares supported strategies, classifications, extraction methods, profiles. |
 | `GET`  | `/v1/agent-hints` | Machine-readable guidance for agents/bots (request shapes, caveats). |
 | `GET`  | `/.well-known/crawler-service` | Service discovery descriptor (links to OpenAPI, agent hints, capabilities). |
+| `POST`/`GET`/`DELETE` | `/v1/keys` | Caller API keys: issue, list, revoke (operator token required). Callers present the key as `X-API-Key`. |
 | `GET`  | `/metrics` | Prometheus-format metrics. |
 
 ---

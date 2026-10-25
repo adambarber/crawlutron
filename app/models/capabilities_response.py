@@ -28,6 +28,7 @@ class CapabilitiesPayload(TypedDict):
     output_fields: list[str]
     default_limits: dict[str, object]
     features: dict[str, bool]
+    auth: dict[str, object]
     search: dict[str, object]
     mcp: dict[str, object]
     crawl_timing: dict[str, object]
@@ -45,6 +46,7 @@ class CapabilitiesResponse(BaseModel):
     output_fields: list[str]
     default_limits: dict[str, int]
     features: dict[str, bool]
+    auth: dict[str, str]
     crawl_timing: CrawlTiming
     search: SearchCapabilities
     mcp: McpCapabilities

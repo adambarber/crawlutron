@@ -58,6 +58,9 @@ GUIDANCE = [
     "URL itself is crawled.",
     "The active search provider is operator-configured (CRAWLUTRON_SEARCH_PROVIDER + the matching "
     "*_API_KEY); GET /v1/capabilities reports which provider is active.",
+    "Callers authenticate with an API key: present X-API-Key (or Authorization: Bearer); jobs and results "
+    "created under a key are readable only under it. Anonymous requests crawl as a shared bounded identity. "
+    "Key issuance/revocation (POST /v1/keys) is operator-gated and not available to callers.",
     "Use POST /mcp for MCP (2026-07-28, stateless streamable HTTP): server/discover lists supported protocol "
     "versions and capabilities, and tools/list exposes search, crawl, crawl_and_extract, map, and render. "
     "crawl_and_extract is the crawl response projected to per-page content. The MCP tools mirror "
