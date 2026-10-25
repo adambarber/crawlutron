@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Any
 
 from app.api.job_lifecycle import is_running, start_job, start_tracked_task
+from app.config.settings import CrawlerSettings
 from app.storage.job_store import JobKind, JobStatus, JobStore
 
 _DRAIN_TASK_ID = "_recovery_backlog_drain"
@@ -42,7 +42,7 @@ async def recover_orphaned_running_jobs(job_store: JobStore) -> int:
     return recovered
 
 
-def recovery_start_limit(settings: Any) -> int:
+def recovery_start_limit(settings: CrawlerSettings) -> int:
     """How many runners boot recovery may hold at once.
 
     Sized like the create path's global concurrency: one runner per global
@@ -55,7 +55,7 @@ async def _drain_backlog(
     live: set[asyncio.Task],
     limit: int,
     job_store: JobStore,
-    settings: Any,
+    settings: CrawlerSettings,
     shutdown_event: asyncio.Event,
 ) -> None:
     """Start queued backlog rows as recovery slots free, never above ``limit``."""
@@ -72,7 +72,7 @@ async def _drain_backlog(
 
 async def recover_and_start_pending_jobs(
     job_store: JobStore,
-    settings: Any,
+    settings: CrawlerSettings,
     shutdown_event: asyncio.Event,
 ) -> int:
     """Lifespan startup: retire crash orphans, then run every PENDING job.
