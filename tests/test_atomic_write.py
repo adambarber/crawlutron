@@ -5,11 +5,18 @@ hand-rolled copy and ContentCache's bare ``path.write_text``.
 
 from __future__ import annotations
 
+import os
 from unittest import mock
 
 import pytest
 
 from app.safety.atomic_write import atomic_write_text
+
+
+def _watch_fsync(monkeypatch, calls: list[int]) -> None:
+    """Count ``os.fsync`` calls without dropping them, so durability is observable."""
+    real_fsync = os.fsync
+    monkeypatch.setattr(os, "fsync", lambda fd: calls.append(fd) or real_fsync(fd))
 
 
 class TestAtomicWrite:
@@ -45,3 +52,19 @@ class TestAtomicWrite:
                 atomic_write_text(target, "x")
         assert not target.exists()
         assert not list(tmp_path.glob(".*.tmp"))
+
+    def test_default_write_fsyncs_file_and_parent(self, tmp_path, monkeypatch):
+        """The default is durable: the temp file and the parent rename both fsync."""
+        calls: list[int] = []
+        _watch_fsync(monkeypatch, calls)
+        atomic_write_text(tmp_path / "a.json", "x")
+        assert len(calls) == 2, f"file + parent must fsync, got {len(calls)}"
+
+    def test_best_effort_write_skips_fsync(self, tmp_path, monkeypatch):
+        """``durable=False`` writes the replace but pays no fsync: a best-effort
+        store loses the entry whole to power loss, never half-written (#357)."""
+        calls: list[int] = []
+        _watch_fsync(monkeypatch, calls)
+        atomic_write_text(tmp_path / "a.json", "x", durable=False)
+        assert (tmp_path / "a.json").read_text() == "x"
+        assert calls == [], f"a best-effort write must not fsync, got {len(calls)}"

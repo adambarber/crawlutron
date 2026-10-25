@@ -12,11 +12,10 @@ import tempfile
 from pathlib import Path
 
 
-def atomic_write_text(path: str | Path, data: str, *, encoding: str = "utf-8") -> None:
-    """Write ``data`` to ``path`` atomically (temp file + fsync + replace).
-
-    A crash or error mid-write leaves the previous file intact and never
-    leaves temp files behind. Parent directories are created as needed.
+def atomic_write_text(path: str | Path, data: str, *, encoding: str = "utf-8", durable: bool = True) -> None:
+    """Write ``data`` to ``path`` atomically (temp + fsync + replace); ``durable=False``
+    skips the fsyncs for best-effort stores (caches, exports): the replace can be lost
+    whole to power loss, never half-written (#357).
     """
     target = Path(path)
     parent = target.parent
@@ -31,9 +30,11 @@ def atomic_write_text(path: str | Path, data: str, *, encoding: str = "utf-8") -
         with os.fdopen(fd, "w", encoding=encoding) as fh:
             fh.write(data)
             fh.flush()
-            os.fsync(fh.fileno())
+            if durable:
+                os.fsync(fh.fileno())
         os.replace(tmp_path, target)
-        _fsync_parent(parent)
+        if durable:
+            _fsync_parent(parent)
     except BaseException:
         try:
             os.unlink(tmp_path)
