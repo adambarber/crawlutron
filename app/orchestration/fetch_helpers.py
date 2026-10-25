@@ -10,6 +10,7 @@ import asyncio
 import contextlib
 import inspect
 import re as _re
+from bisect import bisect_right as _bisect_right
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
 from typing import Any, NamedTuple
@@ -196,6 +197,9 @@ SITEMAP_CACHE: BoundedTTLCache[tuple[str, HostPolicy], tuple[list, str | None, s
 _LOC_PATTERN = _re.compile(r"<loc>\s*([^<\s]+)\s*</loc>", _re.IGNORECASE)
 _LASTMOD_PATTERN = _re.compile(r"<lastmod>\s*([^<]+)\s*</lastmod>", _re.IGNORECASE)
 
+# Body size past which the lastmod association runs in a worker thread (#526).
+_COLLECT_OFFLOAD_MIN_BYTES = 262_144
+
 
 def _collect_page_entries(
     text: str,
@@ -204,12 +208,21 @@ def _collect_page_entries(
 ) -> None:
     """Associate each page ``<loc>`` with its neighboring ``<lastmod>``.
 
-    Matched by byte offsets so wrapped and bare entry shapes both parse."""
+    Matched by byte offsets so wrapped and bare entry shapes both parse; the
+    ascending lastmod offsets bisect in, keeping large sitemaps linear (#526)."""
     loc_items = [(m.start(), m.group(1)) for m in _LOC_PATTERN.finditer(text)]
     lastmod_items = [(m.start(), m.group(1).strip()) for m in _LASTMOD_PATTERN.finditer(text)]
+    # finditer yields ascending offsets, so these positions are already sorted.
+    lastmod_positions = [pos for pos, _ in lastmod_items]
+    text_end = len(text)
     for idx, (pos, loc) in enumerate(loc_items):
-        next_pos = loc_items[idx + 1][0] if idx + 1 < len(loc_items) else len(text)
-        lastmod = next((val for lpos, val in lastmod_items if pos < lpos < next_pos), None)
+        next_pos = loc_items[idx + 1][0] if idx + 1 < len(loc_items) else text_end
+        first = _bisect_right(lastmod_positions, pos)
+        lastmod = (
+            lastmod_items[first][1]
+            if first < len(lastmod_positions) and lastmod_positions[first] < next_pos
+            else None
+        )
         admitted = current_url.resolve(loc)
         if admitted is not None:
             page_urls.add((admitted, lastmod))
@@ -268,7 +281,12 @@ async def _recurse_sitemap(
         children = locs[: max(0, walk.max_urls - len(walk.page_urls))]
         await _fanout_sitemap_children(walk, current_url, children, depth)
         return etag, last_modified
-    _collect_page_entries(text, current_url, walk.page_urls)
+    # Past the threshold the association runs in a worker thread: a 50k-entry
+    # sitemap must not hold the event loop for its scan (#526).
+    if len(text) >= _COLLECT_OFFLOAD_MIN_BYTES:
+        await asyncio.to_thread(_collect_page_entries, text, current_url, walk.page_urls)
+    else:
+        _collect_page_entries(text, current_url, walk.page_urls)
     return etag, last_modified
 
 
