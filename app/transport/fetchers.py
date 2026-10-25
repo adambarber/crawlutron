@@ -252,7 +252,7 @@ async def _handle_cffi_hop(
             headers=hop_headers,
             allow_redirects=False,
             stream=True,
-            timeout=float(timeout_seconds),
+            timeout=Timeouts.for_request(timeout_seconds).read,
         )
     except SSLError:
         # A TLS-handshake failure means impersonation never completed: serving
@@ -361,7 +361,10 @@ async def _drain_capped_stream(
     """
     while True:
         try:
-            chunk = await asyncio.wait_for(response.queue.get(), timeout=max(timeout_seconds + 5.0, 10.0))
+            chunk = await asyncio.wait_for(
+                response.queue.get(),
+                timeout=max(Timeouts.for_request(timeout_seconds).read + 5.0, 10.0),
+            )
         except TimeoutError as error:
             raise TimeoutError("cffi stream queue stalled") from error
         if isinstance(chunk, RequestException):

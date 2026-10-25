@@ -25,6 +25,7 @@ from app.transport.browser_targets import (
     make_ssrf_route_handler,
     make_ssrf_websocket_handler,
 )
+from app.transport.timeouts import render_phase_seconds
 from app.vocabulary.browser import BrowserAction
 
 if TYPE_CHECKING:
@@ -174,7 +175,7 @@ async def navigate_with_host_override(
     The override travels via ``set_extra_http_headers`` (goto takes no
     headers); the wait honors the timeout floored at 1s.
     """
-    navigation_timeout = max(1.0, float(timeout_seconds))
+    navigation_timeout = render_phase_seconds(timeout_seconds)
     if goto_headers:
         await page.set_extra_http_headers(goto_headers)
     await asyncio.wait_for(goto_and_settle(pinned_url), timeout=navigation_timeout)
@@ -210,7 +211,7 @@ async def extract_with_pdf_fallback(
     classification: Classification,
     options: RenderOptions,
     looks_like: Callable[[str], bool],
-    pdf_extractor: Callable[[NormalizedUrl], str],
+    pdf_extractor: Callable[..., str],
     policy: HostPolicy,
 ) -> PdfOutcome:
     """DOM extraction, or PDF text when the page turned out to be a PDF.
@@ -221,7 +222,11 @@ async def extract_with_pdf_fallback(
     method = "dom_text"
     final_url = NormalizedUrl(page.url, policy=policy)
     if looks_like(final_url.raw) and not (text or "").strip():
-        pdf_text = await asyncio.to_thread(pdf_extractor, final_url)
+        # A lambda because asyncio.to_thread rejects the extra argument under
+        # mypy; the spy records the closure's callee via its code name.
+        pdf_text = await asyncio.to_thread(
+            lambda: pdf_extractor(final_url, render_phase_seconds(options.timeout_seconds))
+        )
         html = html if options.include_html else None
         title = await page.evaluate("() => document.title")
         classification = classify_page(html, pdf_text, title=str(title))
@@ -279,7 +284,7 @@ class RenderCollaborators(NamedTuple):
     run_actions: Callable[..., Awaitable[None]]
     extract: Callable[..., Awaitable[tuple[str | None, str | None, Classification, bool]]]
     looks_like: Callable[[str], bool]
-    pdf_extractor: Callable[[NormalizedUrl], str]
+    pdf_extractor: Callable[..., str]
     status_for: Callable[[str], ResultStatus]
 
 
@@ -340,7 +345,7 @@ async def render_and_extract(
         accept_cookies=driver.auto_accept_cookie_consent,
         profile=options.browser_profile,
         url=url.raw,
-        budget_seconds=max(1.0, float(options.timeout_seconds)),
+        budget_seconds=render_phase_seconds(options.timeout_seconds),
     )
 
     html, text, classification, challenge_resolved = await collaborators.extract(page, options)
