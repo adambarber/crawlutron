@@ -76,6 +76,23 @@ def test_reset_is_idempotent(module_path: str) -> None:
     )
 
 
+def test_engine_reset_empties_the_shared_content_cache() -> None:
+    """The fourth process-global sits inside the reset/probe pair, not beside it.
+
+    #147: the shared content cache was emptied by nothing and seen by nothing.
+    A seeded entry survived both halves.
+    """
+    import app.orchestration.engine as engine
+
+    cache = engine.get_shared_content_cache()
+    cache.set("engine-reset-probe", {"data": "value"})
+    assert engine.has_process_state(), "a seeded content cache is live process state"
+    engine.reset_process_state()
+    assert not engine.has_process_state(), (
+        "the shared content cache outlived the reset that empties every shared cache"
+    )
+
+
 def test_every_owner_is_listed() -> None:
     """The table is the declaration; a new module must be added to it, asserted against
     the tree rather than trusted -- an unnamed state holder conforms to nothing and is
