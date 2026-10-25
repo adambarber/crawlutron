@@ -62,8 +62,8 @@ async def test_redirect_to_unsafe_loopback_is_not_followed(monkeypatch):
     with pytest.raises(ValueError):
         await run_default_http_fetcher("http://public.example/", pin=_reject_loopback)
 
-    # The pin target is the value's canonical raw (root slash stripped by the normalizer's standing law).
-    assert [str(request.url) for request in requested] == ["http://public.example"]
+    # The pin target is the value's canonical raw; #520 keeps the root slash on it.
+    assert [str(request.url) for request in requested] == ["http://public.example/"]
 
 
 async def test_redirect_to_safe_target_is_followed(monkeypatch):
@@ -83,8 +83,8 @@ async def test_redirect_to_safe_target_is_followed(monkeypatch):
     # Initial request + one followed redirect, the second one by the loop and not by httpx: automatic
     # following would have left the hop in history.
     assert [str(request.url) for request in requested] == [
-        "http://public.example",
-        "http://other.example",
+        "http://public.example/",
+        "http://other.example/",
     ]
     assert not _follows_itself(seen)
 

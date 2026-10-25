@@ -132,4 +132,4 @@ async def test_carried_metadata_never_reaches_the_wire():
     assert "llm_metadata" not in dumped
     # ...and its metadata is the SAME wire surface the old reparse produced.
     assert dumped["metadata"]["title"] == "Meta T"
-    assert dumped["metadata"]["source_url"] == "http://example.com"
+    assert dumped["metadata"]["source_url"] == "http://example.com/"

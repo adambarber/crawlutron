@@ -341,7 +341,7 @@ class TestNormalizedUrlIsAValueNotAString:
         from app.models.normalized_url import NormalizedUrl
 
         value = NormalizedUrl("https://Deep.Sub.Example.co.uk:443/p/", policy=HostPolicy.unrestricted())
-        assert value.raw == "https://deep.sub.example.co.uk/p"
+        assert value.raw == "https://deep.sub.example.co.uk/p/"  # #520: path text survives verbatim
         assert value.host == "deep.sub.example.co.uk"
         assert value.site == "example.co.uk"
 
@@ -350,7 +350,9 @@ class TestNormalizedUrlIsAValueNotAString:
         from app.models.normalized_url import NormalizedUrl
 
         policy = HostPolicy.unrestricted()
-        one = NormalizedUrl("https://example.com:443/a/?utm_source=x", policy=policy)
+        # #520: path text is identity, so slash-equivalence is no longer normalized away;
+        # tracking-param dropping still canonicalizes to one value.
+        one = NormalizedUrl("https://example.com/a?utm_source=x", policy=policy)
         two = NormalizedUrl("https://example.com/a", policy=policy)
         assert one == two
         assert len({one, two}) == 1

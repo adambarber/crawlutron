@@ -190,7 +190,7 @@ async def test_gather_preserves_order_and_skips_delay_when_disallowed():
     delay_calls: list[str] = []
 
     async def allows(url):
-        return url.raw != "http://b.example"
+        return url.raw != "http://b.example/"
 
     async def crawl_delay(url):
         delay_calls.append(url.raw)
@@ -202,7 +202,7 @@ async def test_gather_preserves_order_and_skips_delay_when_disallowed():
         crawl_delay,
     )
     assert out == [(True, 1.5), (False, None), (True, 1.5)]
-    assert delay_calls == ["http://a.example", "http://c.example"]
+    assert delay_calls == ["http://a.example/", "http://c.example/"]
 
 
 async def test_recursive_screen_no_robots_calls_when_disrespected():

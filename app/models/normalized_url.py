@@ -64,8 +64,10 @@ def _canonical_parts(url: str, *, policy: HostPolicy) -> tuple[str, str, str, st
     if port == default_port:
         port = None
     netloc = _bracketed_netloc(host, port)
-    path = _strip_trailing_colon(parsed.path or "").rstrip("/")
-    query = _strip_trailing_colon(parsed.query)
+    # Path and query are identity: a trailing colon or slash in them can name a
+    # distinct resource (#520), so only the authority segment is normalized here.
+    path = parsed.path or ""
+    query = parsed.query
     if query:
         # Drop known tracking parameters so UTM-variants canonicalize to one key;
         # the rest are sorted, so parameter order alone canonicalizes identically.
@@ -204,9 +206,13 @@ __all__ = ["NormalizedUrl", "admit_or_none"]
 def admit_or_none(candidate: str | NormalizedUrl | None, *, policy: HostPolicy) -> NormalizedUrl | None:
     """Admit ``candidate`` as a public page URL, or drop it.
     The constructor is the enforcement chokepoint; this is the one None-returning
-    wrapper every egress door shares. An already-admitted value returns unchanged.
+    wrapper every egress door shares. An admitted value is re-checked per door.
     """
     if isinstance(candidate, NormalizedUrl):
+        # Re-run the policy predicate: a value admitted under one posture can
+        # cross a stricter door, and deny-list accounting must not be bypassed.
+        if host_policy_reason(candidate.host, policy=policy) or host_egress_reason(candidate.host):
+            return None
         return candidate
     if not candidate or not candidate.strip():
         return None

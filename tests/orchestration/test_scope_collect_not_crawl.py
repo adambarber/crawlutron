@@ -60,7 +60,7 @@ async def _crawl_example_site(pages, **policy):
     return out, fetcher.calls
 
 
-def _recorded_discovered(out: ProducerEnvelope, root_url: str = "http://example.com") -> set[str]:
+def _recorded_discovered(out: ProducerEnvelope, root_url: str = "http://example.com/") -> set[str]:
     """URLs recorded on the seed result's ``discovered_links``, as a set.
 
     The property is that a recorded-but-not-fetched link still reaches the seed
@@ -89,7 +89,7 @@ async def test_scope_records_out_of_scope_links_but_never_fetches_them():
     )
     crawled = _crawled_urls(out)
     # expansion stayed in scope...
-    assert crawled == {"http://example.com", "http://example.com/keep/x"}
+    assert crawled == {"http://example.com/", "http://example.com/keep/x"}
     # ...and instagram was never fetched
     assert not any("instagram.com" in u for u in fetched)
     # ...but the advertised profile is still recorded on the seed result
@@ -109,7 +109,7 @@ async def test_skip_list_hosts_recorded_but_never_enqueued():
     }
     out, fetched = await _crawl_example_site(pages)
     crawled = _crawled_urls(out)
-    assert crawled == {"http://example.com", "http://example.com/local"}
+    assert crawled == {"http://example.com/", "http://example.com/local"}
     assert not any("pinterest.com" in u or "x.com/" in u for u in fetched), fetched
     recorded = _recorded_discovered(out)
     assert "https://www.pinterest.com/pin/1" in recorded
@@ -121,7 +121,7 @@ async def test_document_urls_recorded_but_not_fetched_by_default():
     # downloading them during URL discovery.
     out, fetched = await _crawl_example_site(_doc_pages())
     crawled = _crawled_urls(out)
-    assert crawled == {"http://example.com", "http://example.com/local"}
+    assert crawled == {"http://example.com/", "http://example.com/local"}
     assert not any(u.endswith(".pdf") for u in fetched)
     assert "http://example.com/reports/2024-minutes.pdf" in _recorded_discovered(out)
 

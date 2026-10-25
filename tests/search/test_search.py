@@ -40,15 +40,19 @@ def _collect(items):
 
 class TestCollectResults:
     def test_dedupes_by_normalized_url_and_preserves_order(self):
+        # #520: path text is identity, so /a and /a/ are distinct values; exact
+        # canonical duplicates (the two /b spellings) still dedupe to one.
         items = [
             {"url": "https://example.gov/a", "title": "A", "content": "first"},
-            {"url": "https://example.gov/a/", "title": "A dup", "content": "dup"},
-            {"url": "https://example.gov/b", "title": "B", "content": "second"},
+            {"url": "https://example.gov/a/", "title": "A", "content": "dup"},
+            {"url": "https://example.gov/b?utm_source=x", "title": "B", "content": "first"},
+            {"url": "https://example.gov/b", "title": "B", "content": "dup"},
         ]
         results = _collect(items)
         assert [(r.url, r.title, r.description) for r in results] == [
             ("https://example.gov/a", "A", "first"),
-            ("https://example.gov/b", "B", "second"),
+            ("https://example.gov/a/", "A", "dup"),
+            ("https://example.gov/b", "B", "first"),
         ]
 
     def test_skips_non_dicts_blank_and_private_urls(self, monkeypatch):

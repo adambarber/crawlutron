@@ -63,7 +63,7 @@ class TestStatusPlane:
         store.save(snapshot)
         row = loaded_job(store, "j1")
         assert row.status is JobStatus.PAUSED, "data save resurrected the runner's stale status"
-        assert row.visited == {canonical("https://a.example")}  # data plane still flows
+        assert row.visited == {canonical("https://a.example/")}  # data plane still flows
 
     async def test_terminal_claim_respects_a_concurrent_cancel(self, tmp_path):
         """A cancelled job is settled, and nothing may claim otherwise.
