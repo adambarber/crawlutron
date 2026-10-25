@@ -16,6 +16,8 @@ from app.models.crawl_policy_vocabulary import (
 from app.models.crawl_strategy import CrawlStrategy
 from app.models.credential import Credential
 from app.models.discovery_config import DiscoveryConfig
+from app.safety.header_values import reject_injectable_header_values
+from app.vocabulary.limits import MAX_HEADER_VALUE_BYTES
 
 POLICY_SCHEMA_VERSION = "2026-06-23"
 
@@ -240,4 +242,20 @@ class CrawlPolicy(BaseModel):
             reason = cls._BANNED_HEADERS.get(lowered)
             if reason is not None:
                 raise ValueError(f"header '{key}' is not permitted in policy.headers: {reason}")
+        return value
+
+    @field_validator("headers")
+    @classmethod
+    def _reject_injectable_header_values(cls, value: dict[str, str]) -> dict[str, str]:
+        """Refuse header VALUES that could smuggle bytes onto the wire, and bound
+        their length: the name ban keeps a caller from setting a banned header;
+        this keeps a value from INVENTING one (#441).
+        """
+        reject_injectable_header_values(value)
+        for name, header_value in value.items():
+            if len(header_value) > MAX_HEADER_VALUE_BYTES:
+                raise ValueError(
+                    f"header '{name}' value is not permitted: values may carry at most "
+                    f"{MAX_HEADER_VALUE_BYTES} bytes"
+                )
         return value

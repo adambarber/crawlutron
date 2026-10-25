@@ -11,6 +11,7 @@ from urllib.parse import urlsplit
 
 from app.models.credential import Credential
 from app.models.normalized_url import NormalizedUrl
+from app.safety.header_values import reject_injectable_header_value
 
 __all__ = ["apply_credentials", "authorization_value", "origin_of"]
 
@@ -52,13 +53,15 @@ def apply_credentials(
     credentials: Mapping[str, Credential],
 ) -> dict[str, str]:
     """Attach the Authorization header iff ``url``'s origin holds one, by exact
-    canonical-origin equality: a credential for origin A can never attach to a
-    request for origin B (cross-host redirects strip it).
+    canonical-origin equality: a credential for origin A can never attach to origin B.
+    The built value is wire-law-checked too (#441), even past model validation.
     """
     if not credentials:
         return headers
     origin = url.origin
     credential = credentials.get(origin)
     if credential is not None:
-        headers["Authorization"] = authorization_value(credential)
+        value = authorization_value(credential)
+        reject_injectable_header_value("Authorization", value)
+        headers["Authorization"] = value
     return headers

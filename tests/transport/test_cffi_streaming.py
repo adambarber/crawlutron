@@ -437,3 +437,45 @@ async def test_cffi_missing_falls_back_to_httpx(monkeypatch, counting_server):
         await http_mod.close_cffi_session()
     assert resp.status_code == 200
     assert counting_server.hits == 1, "the fallback did not serve the page"
+
+
+class _WireProbeSession:
+    """Records whether the curl_cffi session was reached; raises to stop the hop.
+
+    A raise is the loudest stop available: cffi_fetch's blanket fallback would
+    otherwise continue the walk and muddy what "reached the wire" means.
+    """
+
+    def __init__(self):
+        self.reached_wire = False
+
+    async def get(self, *args, **kwargs):
+        self.reached_wire = True
+        raise RuntimeError("stop the hop")
+
+
+class TestCffiHeaderInjectionRefused:
+    async def test_crlf_value_never_reaches_the_curl_handle(self, monkeypatch):
+        """#441: libcurl transmits embedded CRLF verbatim, so this is the path the
+        smuggling rode. The wire edge must refuse the value and fall back (None),
+        with the session's GET never called.
+        """
+        import socket
+
+        from app.transport.fetchers import cffi_fetch
+
+        probe = _WireProbeSession()
+        monkeypatch.setattr(http_mod, "get_cffi_session", lambda: probe)
+        monkeypatch.setattr(
+            socket,
+            "getaddrinfo",
+            lambda *a, **k: [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 80))],
+        )
+        result = await cffi_fetch(
+            canonical("http://example.com/"),
+            {"X-Tenant": "a\r\nCookie: admin=1"},
+            10,
+            64 * 1024,
+        )
+        assert probe.reached_wire is False, "injectable header values reached the curl handle"
+        assert result is None

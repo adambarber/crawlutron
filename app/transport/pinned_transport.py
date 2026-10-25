@@ -17,6 +17,7 @@ import httpx
 from app.models.host_policy import allow_private_targets
 from app.models.normalized_url import NormalizedUrl
 from app.safety.bounded_ttl import BoundedTTLCache
+from app.safety.header_values import reject_injectable_header_values
 from app.safety.validation import is_public_ip_value
 from app.transport.cookie_jar import COOKIE_NAMESPACE, global_cookie_jar
 
@@ -347,9 +348,13 @@ async def apinned_hops(
     ``continue`` after ``chain.advance(response)`` asks for the next hop.
     """
     # timeout_seconds is the request budget; it bounds the resolver wait (#383).
+    # The shared wire edge (#441): a value that can start another header is refused here.
+    reject_injectable_header_values(headers)
     chain = _RedirectChain(url, headers, pin=pin or build_pinned_request, timeout_seconds=timeout_seconds)
     while True:
         pinned_url, hop_headers = await chain.pin()
+        # Service-built additions (Host, hop cookies) ride the same law.
+        reject_injectable_header_values(hop_headers)
         served_hops = chain.hops
         yield chain, pinned_url, hop_headers
         if chain.hops == served_hops:

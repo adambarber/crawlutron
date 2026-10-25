@@ -48,6 +48,10 @@ DEFAULT_HTTP_TIMEOUT_SECONDS: int = 30
 # deployment default's bound are one number (the pair that used to drift).
 MAX_HTTP_TIMEOUT_SECONDS: int = 120
 
+# Longest header VALUE a caller may set (#441): at the common 8 KB interop
+# ceiling origins accept, it also bounds one policy's total header size.
+MAX_HEADER_VALUE_BYTES: Final[int] = 8 * 1024
+
 # Three retry numbers, three authorities: DEFAULT (no operator stated one),
 # MAX_RETRIES (deployment ceiling), MAX_JOB_MAX_RETRIES (one flaky job may exceed it).
 DEFAULT_MAX_RETRIES: int = 5

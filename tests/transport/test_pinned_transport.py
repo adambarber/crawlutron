@@ -171,3 +171,45 @@ class TestWrapperBudget:
         _stalling_resolver(monkeypatch, 1.2)
         connect_url, _headers = await build_pinned_request_async(canonical("http://ok.example/"), {})
         assert urlparse(connect_url).hostname == "93.184.216.34"
+
+
+class TestHeaderValueWireGuard:
+    """#441: apinned_hops is the one edge both transports send through, so it is
+    where a header VALUE that could end one header and start another (CR/LF/NUL)
+    is refused -- whatever door it came through.
+    """
+
+    async def test_caller_crlf_value_is_refused_before_the_first_hop(self):
+        # The resolver is scripted for the RED state: today the walk proceeds
+        # toward the wire; once the guard lands the refusal precedes any resolve.
+        with _resolve_as(_PUBLIC):
+            with pytest.raises(ValueError):
+                await anext(
+                    apinned_hops(
+                        canonical("http://example.com/"),
+                        {"X-Tenant": "a\r\nCookie: admin=1"},
+                        pin=build_pinned_request,
+                    )
+                )
+
+    async def test_a_value_injected_by_a_pin_rule_is_refused_before_the_wire(self):
+        """The pin rule is injectable by design; its output is re-checked, so a
+        rule that hand-builds headers cannot smuggle past the edge either.
+        """
+
+        def injecting_rule(url, headers):
+            out = dict(headers)
+            out["X-Inject"] = "clean\r\nX-Smuggled: 1"
+            return build_pinned_request(url, out)
+
+        with _resolve_as(_PUBLIC):
+            with pytest.raises(ValueError):
+                await anext(apinned_hops(canonical("http://example.com/"), {}, pin=injecting_rule))
+
+    async def test_clean_headers_still_reach_the_pin(self):
+        # No false positives: ordinary values (multibyte included) pass untouched.
+        with _resolve_as(_PUBLIC):
+            _chain, _pinned_url, hop_headers = await anext(
+                apinned_hops(canonical("http://example.com/"), {"X-Tenant": "Café"}, pin=build_pinned_request)
+            )
+        assert hop_headers["X-Tenant"] == "Café"

@@ -162,3 +162,52 @@ def test_hop_by_hop_headers_are_refused_through_every_model_embedding_the_policy
     ):
         with pytest.raises(ValidationError):
             model(**payload, policy={"headers": {"transfer-encoding": "chunked"}})
+
+
+#: The wire delimiters and the parser-poisoning byte, alone and in the smuggling
+#: shape the issue names: each can end one header and start another on the wire.
+INJECTABLE_VALUES = (
+    "a\r\nCookie: admin=1",
+    "a\rb",
+    "a\nb",
+    "a\x00b",
+)
+
+
+class TestHeaderValueInjection:
+    """#441: the ban list governs header NAMES; a value carrying CR/LF/NUL can
+    still INVENT headers (curl_cffi transmits embedded CRLF verbatim), so the
+    policy edge refuses injectable values too.
+    """
+
+    @pytest.mark.parametrize("value", INJECTABLE_VALUES)
+    def test_injectable_values_are_refused_at_the_policy_edge(self, value):
+        from app.models.crawl_policy import CrawlPolicy
+
+        with pytest.raises(ValidationError) as exc:
+            CrawlPolicy(headers={"X-Tenant": value})
+        # The refusal names the header so a caller with many headers can bisect.
+        assert "X-Tenant" in str(exc.value)
+
+    def test_the_value_refusal_travels_to_the_wire_models(self):
+        from app.models.job_create_request import JobCreateRequest
+
+        with pytest.raises(ValidationError):
+            JobCreateRequest(
+                root_url="http://example.com/",
+                policy={"headers": {"X-Tenant": "a\r\nCookie: admin=1"}},
+            )
+
+    def test_oversize_values_are_refused(self):
+        from app.models.crawl_policy import CrawlPolicy
+        from app.vocabulary.limits import MAX_HEADER_VALUE_BYTES
+
+        with pytest.raises(ValidationError) as exc:
+            CrawlPolicy(headers={"X-Big": "a" * (MAX_HEADER_VALUE_BYTES + 1)})
+        assert "X-Big" in str(exc.value)
+
+    def test_plain_multibyte_values_are_unaffected(self):
+        from app.models.crawl_policy import CrawlPolicy
+
+        # Non-ASCII text is a legal header value; only wire delimiters are refused.
+        assert CrawlPolicy(headers={"X-Tenant": "Café"}).headers == {"X-Tenant": "Café"}
