@@ -188,7 +188,7 @@ async def _admit_chunk[T](
         if pass_.respect_robots and pass_.robots_crawl_delay is not None:
             delay = await pass_.robots_crawl_delay(candidate.normalized_url)
             if delay is not None and delay > 0:
-                pass_.commit_crawl_delay(candidate.normalized_url.host, delay)
+                pass_.commit_crawl_delay(candidate.normalized_url.site, delay)
         if candidate.normalized_url in reserved:
             continue
         capacity = remaining_page_capacity(current_occupied + occupied_delta, pass_.max_pages)
