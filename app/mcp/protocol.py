@@ -27,6 +27,7 @@ class ProtocolValidationError(Exception):
     """
 
     def __init__(self, status_code: int, payload: JsonValue) -> None:
+        message: JsonValue = "validation error"
         if isinstance(payload, dict):
             error = payload.get("error")
             if isinstance(error, dict):
