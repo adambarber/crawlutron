@@ -5,6 +5,7 @@ without one the counters are a plain process-local dict.
 
 from __future__ import annotations
 
+import threading
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
@@ -63,6 +64,9 @@ class MetricsStore:
         # The no-store path. One dict for every counter and label, so a counter
         # is added in one place whether or not a store is attached.
         self._local: dict[str, float] = {}
+        # One write lock: the local RMW and the caller-series check-then-insert
+        # are read-modify-writes two threads can interleave (#524).
+        self._write_lock = threading.RLock()
         # Gauges: instantaneous readings of shared state, never summed.
         self.resource_memory_utilization: float = 0.0
         self.resource_cpu_utilization: float = 0.0
@@ -74,7 +78,8 @@ class MetricsStore:
         if self._counters is not None:
             self._counters.add(key, delta)
             return
-        self._local[key] = self._local.get(key, 0.0) + delta
+        with self._write_lock:
+            self._local[key] = self._local.get(key, 0.0) + delta
 
     def _source(self) -> dict[str, float]:
         return self._counters.snapshot() if self._counters is not None else self._local
@@ -130,7 +135,11 @@ class MetricsStore:
     ) -> None:
         self._add("crawl_requests_total", 1)
         if caller_id:
-            self._add(_CALLER_PREFIX + self._caller_series(self._source(), _CALLER_PREFIX, caller_id), 1)
+            # Decision and insert under one lock: a check-then-insert split
+            # across them races past the series cap (#524).
+            with self._write_lock:
+                series = self._caller_series(self._source(), _CALLER_PREFIX, caller_id)
+                self._add(_CALLER_PREFIX + series, 1)
         if accepted:
             self._add("crawl_requests_accepted_total", 1)
         if results:
@@ -164,10 +173,9 @@ class MetricsStore:
         if provider:
             self._add(_PROVIDER_PREFIX + provider, results)
         if caller_id:
-            self._add(
-                _SEARCH_CALLER_PREFIX + self._caller_series(self._source(), _SEARCH_CALLER_PREFIX, caller_id),
-                1,
-            )
+            with self._write_lock:
+                series = self._caller_series(self._source(), _SEARCH_CALLER_PREFIX, caller_id)
+                self._add(_SEARCH_CALLER_PREFIX + series, 1)
         self._add("search_total_elapsed_ms", elapsed_ms)
 
     def record_throttle(self) -> None:

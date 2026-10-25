@@ -155,6 +155,10 @@ WATCHES_SCHEMA = TableSchema(
         # Owner of the watch row: the anonymous bucket ("") or a keyed caller's id.
         # Registration, list, read, delete are owner-scoped; the due read stays global.
         ColumnSchema("owner", "TEXT", True, "''"),
+        # The sweep-pass claim pair: one sweeper's CAS marks them; another skips
+        # the row until the stamp goes stale, so two sweeps never double-fire (#528).
+        ColumnSchema("claimed_at", "REAL", False, None),
+        ColumnSchema("claimed_by", "TEXT", False, None),
     ),
     indexes=(
         # The due-claim sweep reads (status, next_check_at) and nothing else;
@@ -211,7 +215,7 @@ MIGRATION_SEQUENCES = {
     StoreSchema.RESULTS: ("0001_results_initial", "0002_results_add_owner"),
     StoreSchema.COORDINATION_COUNTERS: ("0001_coordination_counters_initial",),
     StoreSchema.COORDINATION_COOKIES: ("0001_coordination_cookies_initial",),
-    StoreSchema.WATCHES: ("0001_watches_initial", "0002_watches_add_owner"),
+    StoreSchema.WATCHES: ("0001_watches_initial", "0002_watches_add_owner", "0003_watches_add_claimed_at"),
     StoreSchema.CALLER_KEYS: ("0001_caller_keys_initial",),
 }
 

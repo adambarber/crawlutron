@@ -243,6 +243,19 @@ async def post_webhook(
             await _backoff_sleep(attempt, webhook_backoff_base_ms())
 
 
+def _tracked_delivery(
+    webhook_url: str,
+    payload: Mapping[str, object],
+    *,
+    host_policy: HostPolicy,
+) -> asyncio.Task:
+    """Spawn one delivery joined to the shutdown drain set, spawn site agnostic."""
+    task = asyncio.create_task(post_webhook(webhook_url, payload, host_policy=host_policy))
+    _DELIVERIES.add(task)
+    task.add_done_callback(_DELIVERIES.discard)
+    return task
+
+
 async def post_webhook_guarded(
     webhook_url: str,
     payload: Mapping[str, object],
@@ -251,14 +264,25 @@ async def post_webhook_guarded(
 ) -> None:
     """Await ``post_webhook`` as a shielded, drained task: a runner cancelled at
     shutdown does not drop the callback whose terminal write already landed."""
-    task = asyncio.create_task(post_webhook(webhook_url, payload, host_policy=host_policy))
-    _DELIVERIES.add(task)
-    task.add_done_callback(_DELIVERIES.discard)
+    task = _tracked_delivery(webhook_url, payload, host_policy=host_policy)
     try:
         await asyncio.shield(task)
     except asyncio.CancelledError:
         # The runner was cancelled; the tracked delivery continues for drain.
         raise
+
+
+def start_webhook_delivery(
+    webhook_url: str,
+    payload: Mapping[str, object],
+    *,
+    host_policy: HostPolicy,
+) -> asyncio.Task:
+    """Spawn the delivery as a tracked background task and return at once.
+
+    The sweep pass must not stall on a slow receiver (#528); the task joins the
+    same ``_DELIVERIES`` set, so shutdown drains it like any other callback."""
+    return _tracked_delivery(webhook_url, payload, host_policy=host_policy)
 
 
 def validate_webhook_url(webhook_url: str, *, host_policy: HostPolicy) -> None:

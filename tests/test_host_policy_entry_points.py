@@ -244,9 +244,10 @@ async def _probe_webhook(monkeypatch, tmp_path):
 
     effects = _effects()
     monkeypatch_wire_guard(monkeypatch, effects)
-    # Both webhook entry points share one admission seam: the per-attempt pin (#450),
-    # which fails closed before any client is built. Refusal is proven by the empty wire.
-    for entry in (webhooks.post_webhook, webhooks.post_webhook_guarded):
+    # All three webhook entry points share one admission seam: the per-attempt pin
+    # (#450), failing closed before any client is built. Refusal is proven by the wire.
+    entries = (webhooks.post_webhook, webhooks.post_webhook_guarded, webhooks.start_webhook_delivery)
+    for entry in entries:
         await _assert_refused(
             entry(_BLOCKED_URL, {"status": "accepted"}, host_policy=_denied_policy()),
             effects,
@@ -343,6 +344,7 @@ _PROBES = {
     "app/api/policy_suggestions.py:build_policy_suggestions": _probe_policy_suggestions,
     "app/api/webhooks.py:post_webhook": _probe_webhook,
     "app/api/webhooks.py:post_webhook_guarded": _probe_webhook,
+    "app/api/webhooks.py:start_webhook_delivery": _probe_webhook,
     "app/api/webhooks.py:deliver_pinned_webhook": _probe_webhook_delivery,
 }
 

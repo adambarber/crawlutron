@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING, Any
 
 from app.api.caller_auth import Tracking, admit, anonymous_caller, identity_for_key
 from app.api.crawl_executor import execute_crawl
-from app.api.webhooks import post_webhook_guarded
+from app.api.webhooks import start_webhook_delivery
 from app.config.settings import CrawlerSettings
 from app.models.caller_identity import CallerIdentity
 from app.models.crawl_policy import CrawlPolicy
@@ -34,6 +34,10 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 WATCH_SWEEP_INTERVAL_SECONDS = 60.0
+
+# How long a sweep's claim on a due watch stays fresh: a sweeper that died
+# mid-check releases the row to the next pass after this (#528).
+_CLAIM_SECONDS = 300.0
 """How often the process sweeps the registry.
 
 A bound on how late a check runs, nothing more: each watch's own
@@ -91,6 +95,7 @@ class WatchSweeper:
         self._key_store = key_store
         self._concurrency_tracker = concurrency_tracker
         self._job_store = job_store
+        self._claim_token = f"{id(self)}-{time.monotonic_ns()}"
 
     async def sweep_once(self, now: float) -> list[CrawlClassification]:
         """Recheck every watch due at ``now``; one conclusion per due watch, in
@@ -98,7 +103,10 @@ class WatchSweeper:
         the watches sorted after it in the due list (#228).
         """
         outcomes: list[CrawlClassification] = []
-        for watch in await self._store.adue(now):
+        # One claim per pass: a second sweeper's CAS on these rows loses and
+        # skips them, so two sweeps never double-fire a webhook (#528).
+        due = await self._store.aclaim_due(now, self._claim_token, claim_seconds=_CLAIM_SECONDS)
+        for watch in due:
             revoked = (
                 self._key_store is not None
                 and watch.owner
@@ -176,13 +184,16 @@ class WatchSweeper:
             return classification
         # A delivered change is what a webhook exists to say: any success-status
         # classification except "not_modified" (a 304 that proved freshness).
+        webhook_url = watch.webhook_url
         if (
             status_for_classification(classification) == "success"
             and classification != CrawlClassification.not_modified
-            and watch.webhook_url
+            and webhook_url is not None
         ):
-            await post_webhook_guarded(
-                watch.webhook_url,
+            # Backgrounded, not awaited: a slow receiver must not stall the pass
+            # (#528). The delivery rides the tracked set; shutdown drains it.
+            start_webhook_delivery(
+                webhook_url,
                 _announcement(watch, outcome=classification, checked_at=now),
                 host_policy=self._host_policy,
             )

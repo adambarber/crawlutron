@@ -62,6 +62,7 @@ _EXPECTED_SQL: dict[str, list[tuple[str, str]]] = {
 _ADD_COLUMN_SQL: dict[str, tuple[str, str, str]] = {
     "0002_results_add_owner": ("results", "owner", "owner TEXT NOT NULL DEFAULT ''"),
     "0002_watches_add_owner": ("watches", "owner", "owner TEXT NOT NULL DEFAULT ''"),
+    "0003_watches_add_claimed_at": ("watches", "claimed_at", "claimed_at REAL"),
     "0004_crawl_jobs_add_owner": ("crawl_jobs", "owner", "owner TEXT NOT NULL DEFAULT ''"),
     "0005_crawl_jobs_add_deleted_at": ("crawl_jobs", "deleted_at", "deleted_at REAL"),
 }
