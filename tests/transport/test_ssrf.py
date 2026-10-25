@@ -161,6 +161,23 @@ def test_pinned_builder_surfaces_unresolvable_host_as_an_ssrf_refusal(monkeypatc
 
 
 class TestSSRFProtection:
+    def test_resolve_and_pin_host_refuses_a_mixed_public_private_answer(self, monkeypatch):
+        """One verdict per hostname (#525 SEC-07): check_ssrf_protection fails
+        closed on any-private and the browser path refused mixed answers (#387);
+        first-public-wins would dial a host whose other answers are internal."""
+
+        def mixed(host, *args, **kwargs):
+            return [
+                (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 80)),
+                (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("10.0.0.5", 80)),
+            ]
+
+        with (
+            host_resolves_to(monkeypatch, "unused", resolver=mixed),
+            pytest.raises(ValueError, match="private"),
+        ):
+            resolve_and_pin_host(canonical("http://example.com/"))
+
     @pytest.mark.parametrize("private_ip", ["127.0.0.1", "192.168.1.1"])
     def test_check_ssrf_protection_blocks_private_targets(self, monkeypatch, private_ip):
         # The live hazard shape: an admitted public NAME whose DNS answer is private
