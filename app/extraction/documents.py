@@ -362,15 +362,17 @@ def extract_document(
         # other document failure instead of wedging the request.
         return ExtractedContent(None, None)
     try:
-        md = _document_pool_exchange(worker, body, active.extraction_doc_timeout)
+        md = _document_pool_exchange(
+            worker, body, active.extraction_doc_timeout, cap=active.extraction_max_markdown
+        )
     finally:
         DOC_POOL.release(worker)
 
     if not md or not md.strip():
         return ExtractedContent(None, None)
 
-    # Cap output size. Settings carry the cap so a caller bounding one document
-    # states the bound instead of rewriting this module's constant.
+    # Defense in depth only: the worker already capped before send, so a reply
+    # over cap here means an old worker or a foreign pipe -- name it, cut it.
     cap = active.extraction_max_markdown
     if len(md) > cap:
         md = md[:cap]
@@ -378,14 +380,14 @@ def extract_document(
     return ExtractedContent(md, md)
 
 
-def _document_pool_exchange(worker, body: bytes, timeout_seconds: float) -> str | None:
+def _document_pool_exchange(worker, body: bytes, timeout_seconds: float, cap: int) -> str | None:
     """Send, wait, receive -- retiring the slot on every death or timeout path.
 
-    Worker death (EOF/OSError on send, poll or recv) and a poll timeout each
-    retire the slot and report empty: the pool respawns it, the caller degrades.
+    The cap rides the task so the worker truncates before send (#508). Death
+    and timeout paths each retire the slot and report empty.
     """
     try:
-        worker.conn.send((body, doc_task_hooks()))
+        worker.conn.send((body, doc_task_hooks(), cap))
     except (EOFError, OSError):
         # Send raced a worker death: reap the slot and report empty.
         logger.warning("extraction_document_child_died")

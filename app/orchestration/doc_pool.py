@@ -128,7 +128,7 @@ def _markitdown_extract(body: bytes) -> str | None:
 
 def _doc_worker_main(conn) -> None:
     """Persistent worker entry: serve markitdown tasks until killed or orphaned.
-    Each task arrives as ``(body, hooks)`` from the parent's per-call payload
+    Each task arrives as ``(body, hooks, cap)`` from the parent's per-call payload
     (never process-global state); a ``die`` hook exits without sending, like a segfault.
     """
     try:
@@ -138,7 +138,7 @@ def _doc_worker_main(conn) -> None:
         conn.send(("ready", None))
         while True:
             try:
-                body, hooks = conn.recv()
+                body, hooks, cap = conn.recv()
             except (EOFError, OSError):
                 return
             if hooks is not None:
@@ -150,11 +150,11 @@ def _doc_worker_main(conn) -> None:
                     time.sleep(10)  # Longer than any test timeout
                 if hooks.get("output") is not None:
                     with suppress(Exception):
-                        conn.send(("ok", hooks["output"]))
+                        conn.send(("ok", hooks["output"][:cap]))
                     continue
             try:
                 md = _markitdown_extract(body)
-                conn.send(("ok", md))
+                conn.send(("ok", md[:cap] if md else md))
             except Exception:
                 with suppress(Exception):
                     conn.send(("err", None))
