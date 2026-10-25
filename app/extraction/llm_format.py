@@ -8,6 +8,7 @@ import re
 from html import unescape
 from typing import Any, cast, get_args, get_type_hints
 
+from app.extraction.classify import strip_html_noise
 from app.models.json_value import JsonValue
 from app.models.normalized_url import NormalizedUrl
 from app.models.page_metadata import PageMetadata
@@ -16,6 +17,7 @@ from app.safety.bounded_io import truncate_html_input
 #: a field added there is admitted here without a second edit; only None is stripped
 #: from a union, and the system-type field resolves to the JSON union's membership.
 _JSON_MEMBERSHIP = (type(None), bool, int, float, str, list, dict)
+_WHITESPACE_RE = re.compile(r"\s+")
 _FIELD_TYPES: dict[str, type | tuple[type, ...]] = {}
 for _field, _hint in get_type_hints(PageMetadata).items():
     if _hint is JsonValue:
@@ -158,12 +160,9 @@ def _carry_meta_tags(metadata: PageMetadata, tree: Any) -> None:
 
 
 def text_from_html(html: str) -> str:
-    without_scripts = re.sub(r"<script\b[^>]*>.*?</script>", " ", html, flags=re.IGNORECASE | re.DOTALL)
-    without_styles = re.sub(
-        r"<style\b[^>]*>.*?</style>", " ", without_scripts, flags=re.IGNORECASE | re.DOTALL
-    )
-    text = re.sub(r"<[^>]+>", " ", without_styles)
-    return re.sub(r"\s+", " ", unescape(text)).strip()
+    # The linear, input-capped noise scanner classify owns (#440): the lazy-quantifier
+    # regexes this replaced went quadratic on unterminated <script floods.
+    return _WHITESPACE_RE.sub(" ", unescape(strip_html_noise(html))).strip()
 
 
 __all__ = [

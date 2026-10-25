@@ -1,5 +1,8 @@
 """LLM output formatting: metadata extraction and markdown edges."""
 
+import html
+import time
+
 from app.extraction.llm_format import extract_llm_metadata, text_from_html
 from app.models.json_value import JsonValue
 from app.models.page_metadata import PageMetadata
@@ -107,6 +110,55 @@ class TestLlmFormat:
         assert "Hello" in text
         assert "var x" not in text
         assert "body{}" not in text
+
+
+class TestTextFromHtmlAdversarial:
+    """#440: attacker-built HTML must buy linear work only in the text projection.
+
+    The old implementation re-substituted a lazy ``.*?</script>`` regex per literal
+    ``<script`` occurrence; k unterminated openers scanned k times to end-of-string.
+    """
+
+    def test_unclosed_script_swallows_the_rest_like_a_browser(self):
+        # A page cut off mid-script has no text after the cut: script CODE is
+        # never page text, which is the same contract classify.strip_html_noise owns.
+        assert text_from_html("<script>alert(1)<p>never page text</p>") == ""
+
+    def test_unclosed_style_swallows_the_rest_like_a_browser(self):
+        assert text_from_html("<style>p{color:red}<p>never page text</p>") == ""
+
+    def test_entity_encoded_tags_stay_text(self):
+        # Parity guard: unescape runs AFTER stripping, so an entity-encoded tag
+        # stays text instead of being reborn as a live tag.
+        encoded = html.escape("<p>hi</p>")
+        assert text_from_html(encoded) == "<p>hi</p>"
+
+    def test_unterminated_script_flood_meets_a_linear_budget(self):
+        # 1.2 MB of repeated openers, under the 4 MB input cap: the quadratic
+        # shape burns ~100s here; any linear scan finishes in milliseconds.
+        hostile = "<script" * 200_000
+        started = time.perf_counter()
+        text_from_html(hostile)
+        elapsed = time.perf_counter() - started
+        assert elapsed < 10.0, f"strip is not linear: {elapsed:.2f}s for {len(hostile)} bytes"
+
+    def test_closed_script_flood_meets_a_linear_budget(self):
+        # The shared scanner's other adversarial shape (#440): many CLOSED
+        # regions, each once re-scanning the remainder for absent openers.
+        flood = "<script>a</script>" * 50_000
+        began = time.perf_counter()
+        text_from_html(flood)
+        took = time.perf_counter() - began
+        assert took < 2.0, f"closed-region strip is not linear: {took:.2f}s for {len(flood)} bytes"
+
+    def test_tag_delimiter_flood_meets_a_linear_budget(self):
+        # The tag-strip tail: many bare '<' and no '>' anywhere -- the regex
+        # form backtracked to end-of-string per '<' (#440).
+        swamp = "<b" * 100_000
+        t0 = time.perf_counter()
+        text_from_html(swamp)
+        burned = time.perf_counter() - t0
+        assert burned < 2.0, f"tag strip is not linear: {burned:.2f}s for {len(swamp)} bytes"
 
 
 class TestLlmFormatEdges:
