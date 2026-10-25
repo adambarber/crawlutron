@@ -7,7 +7,7 @@ This project is distributed under the MIT License; see LICENSE.
 ADAPTED WORK
 ------------
 
-`app/classify.py` notes that its classification-marker tuple approach is adapted
+`app/extraction/classify.py` notes that its classification-marker tuple approach is adapted
 from two MIT-licensed projects. Their copyright notices are reproduced here in
 compliance with those licenses.
 

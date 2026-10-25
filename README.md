@@ -142,7 +142,7 @@ Migrations live in `app/storage/migrations/`. Every store schema — jobs, resul
 # Add a migration: add a versioned schema to manifest.py, point CURRENT_SCHEMAS at it,
 # then add a yoyo step with apply and rollback SQL under the migration directory.
 $EDITOR app/storage/migrations/manifest.py
-$EDITOR app/storage/migrations/0002_crawl_jobs_descriptive_name.py
+$EDITOR app/storage/migrations/0001_crawl_jobs_initial.py
 
 # Stamp an existing database after checking it against the declared schema.
 .venv/bin/python -m app.storage.migrations stamp cache/crawler.db crawl_jobs
