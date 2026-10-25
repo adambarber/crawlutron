@@ -52,6 +52,9 @@ class HttpStrategyContext:
     response: Any = None
     limits: CrawlPolicyLimits = field(default_factory=CrawlPolicyLimits)
     retry_diagnostics: RetryDiagnostics = field(default_factory=lambda: _DEFAULT_RETRY)
+    # The crawl's own resolved settings, carried so extraction never re-reads
+    # the env or the cgroup per document (#509); None keeps direct callers whole.
+    settings: Any = None
 
 
 @dataclass

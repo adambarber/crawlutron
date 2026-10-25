@@ -58,6 +58,7 @@ async def _extract_browser_content(
     content: str | None,
     result: Any,
     policy: CrawlPolicy,
+    settings: Any = None,
 ) -> ExtractedContent:
     if not content:
         return ExtractedContent(
@@ -76,6 +77,7 @@ async def _extract_browser_content(
         # label that branch for us.
         default_method=result.metadata.get("extraction_method") or EXTRACTION_METHOD_DOM_TEXT,
         html=True,
+        settings=settings,
     )
 
 
@@ -165,13 +167,14 @@ async def browser_strategy_result(
     *,
     request: StrategyRequest,
     browser_worker: CrawlWorker,
+    settings: Any = None,
 ) -> EngineCrawlResult:
     result = await call_worker(
         browser_worker,
         _browser_job(request.normalized_url, _browser_options(request.policy), request.host_policy),
     )
     content = result.html if result.html else result.text
-    extracted = await _extract_browser_content(content, result, request.policy)
+    extracted = await _extract_browser_content(content, result, request.policy, settings)
     post_fetch = await _discover_browser_content(result, request.policy, request.host_policy)
     diagnostics = _browser_diagnostics(result, extracted, request.policy, request.host_policy, post_fetch)
     return _build_browser_result(

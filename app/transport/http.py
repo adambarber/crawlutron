@@ -253,6 +253,7 @@ async def http_strategy_result(
     caller_validators: dict[str, str] | None = None,
     robots_sitemaps: list[str] | None = None,
     global_concurrency: int | None = None,
+    settings: Any = None,
 ) -> EngineCrawlResult:
     """Coordinate the named HTTP fetch phases and return one crawl result."""
     ctx = HttpStrategyContext(
@@ -268,6 +269,7 @@ async def http_strategy_result(
         robots_sitemaps=robots_sitemaps,
         global_concurrency=global_concurrency,
         started=time.monotonic(),
+        settings=settings,
     )
     # The resolver's jar read is SQLite when persistence is on: awaited, off-loop.
     await resolve_http_limits(ctx)

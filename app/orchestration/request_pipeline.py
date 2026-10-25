@@ -182,6 +182,7 @@ async def _run_job(state: PipelineState, job: CrawlTask) -> tuple[int, EngineCra
                 robots_sitemaps=robots_sitemaps,
                 host_policy=state.host_policy,
                 caller_validators=_validators_for(state, job),
+                settings=state.settings,
             ),
             timeout=budget,
         )
