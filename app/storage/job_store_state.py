@@ -295,22 +295,12 @@ class JobAccumulators:
         )
 
     def _append_visited(self, job: CrawlJobState) -> None:
-        """Insert newly visited pages, the ones the stored rows do not hold.
-
-        The difference is by RAW URL (a NormalizedUrl never equals a string), and
-        the stored COUNT is not a growth test: a sibling's pages can drop ours.
-        """
+        """Insert newly visited pages; ``INSERT OR IGNORE`` over the (job_id, url)
+        key makes an already-stored URL a no-op, so no pre-read is needed."""
         job_id = job.job_id
-        stored = {
-            row["url"]
-            for row in self._conn.execute('SELECT url FROM "crawl_job_visited" WHERE job_id = ?', (job_id,))
-        }
-        fresh = {url.raw for url in job.visited} - stored
-        if not fresh:
-            return
         self._conn.executemany(
             'INSERT OR IGNORE INTO "crawl_job_visited" (job_id, url) VALUES (?, ?)',
-            ((job_id, url) for url in fresh),
+            ((job_id, url.raw) for url in job.visited),
         )
 
 
