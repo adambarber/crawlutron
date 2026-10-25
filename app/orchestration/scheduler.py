@@ -10,7 +10,7 @@ from secrets import SystemRandom
 from typing import Protocol, TypeVar
 
 from app.orchestration.scheduler_exceptions import CircuitBreakerOpen
-from app.vocabulary.taxonomy import ResultStatus
+from app.vocabulary.taxonomy import DOMAIN_HEALTH_BY_STATUS, ResultStatus
 
 logger = logging.getLogger(__name__)
 
@@ -110,17 +110,6 @@ MAX_COOLDOWN_WAIT = 300.0
 # 429-heavy crawl does not rebuild both dicts per result. ``run`` purges up front.
 COOLDOWN_PURGE_INTERVAL = 100
 
-# What each ResultStatus means for DOMAIN health: success/blocked keep the
-# host healthy, failed/retry_exhausted fault it, skipped/disallowed say nothing.
-STATUS_ACCOUNTING: dict[str, str] = {
-    "success": "success",
-    "blocked": "success",
-    "failed": "failure",
-    "retry_exhausted": "failure",
-    "skipped": "none",
-    "disallowed": "none",
-}
-
 
 class DomainScheduler:
     def __init__(
@@ -197,11 +186,11 @@ class DomainScheduler:
             self.purge_expired()
 
     def _record_result_health(self, domain: str, result: SchedulerResult) -> None:
-        """Apply a result's domain-health verdict. See STATUS_ACCOUNTING.
+        """Apply a result's domain-health verdict. See DOMAIN_HEALTH_BY_STATUS.
         One decision, kept out of ``run_one``'s ``async with`` so the loop stays
         readable; the verdict mapping is the whole question of a status's health.
         """
-        accounting = STATUS_ACCOUNTING.get(result.status, "none")
+        accounting = DOMAIN_HEALTH_BY_STATUS.get(result.status, "none")
         if accounting == "failure":
             self.record_failure(domain)
             return

@@ -264,16 +264,16 @@ class TestSchedulerFailureAccountingIsAboutStatuses:
         """
         import typing
 
-        from app.orchestration.scheduler import STATUS_ACCOUNTING
-        from app.vocabulary.taxonomy import ResultStatus
+        from app.vocabulary.taxonomy import DOMAIN_HEALTH_BY_STATUS, ResultStatus
 
         members = set(typing.get_args(ResultStatus))
         assert members, "ResultStatus must be a Literal to be checkable"
-        assert not members - set(STATUS_ACCOUNTING), (
-            f"a ResultStatus member has no domain-health verdict: {sorted(members - set(STATUS_ACCOUNTING))}"
+        assert not members - set(DOMAIN_HEALTH_BY_STATUS), (
+            f"a ResultStatus member has no domain-health verdict: "
+            f"{sorted(members - set(DOMAIN_HEALTH_BY_STATUS))}"
         )
-        assert not set(STATUS_ACCOUNTING) - members, (
+        assert not set(DOMAIN_HEALTH_BY_STATUS) - members, (
             "the accounting table names a status the taxonomy does not define: "
-            f"{sorted(set(STATUS_ACCOUNTING) - members)}"
+            f"{sorted(set(DOMAIN_HEALTH_BY_STATUS) - members)}"
         )
-        assert set(STATUS_ACCOUNTING.values()) <= {"success", "failure", "none"}
+        assert set(DOMAIN_HEALTH_BY_STATUS.values()) <= {"success", "failure", "none"}

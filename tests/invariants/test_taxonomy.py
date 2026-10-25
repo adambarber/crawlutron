@@ -291,3 +291,32 @@ RULES = Registry(
 def test_no_rule_violations():
     """One transience home, failed results chokepointed, exhaustion catches sanctioned."""
     RULES.check_all_clean()
+
+
+# --------------------------------------------------------------------------- Domain-health accounting: the
+# scheduler reads the taxonomy's one table, never a second declaration
+
+
+def test_scheduler_reads_the_taxonomy_domain_health_table():
+    """What a status charges the domain's health book is declared once.
+
+    #167: the scheduler hand-wrote the table, so a taxonomy change never reached it.
+    Identity pins the scheduler to the taxonomy's single object.
+    """
+    import typing
+
+    import app.orchestration.scheduler as scheduler
+    from app.vocabulary import taxonomy
+
+    members = set(typing.get_args(taxonomy.ResultStatus))
+    assert scheduler.DOMAIN_HEALTH_BY_STATUS is taxonomy.DOMAIN_HEALTH_BY_STATUS, (
+        "the scheduler declares its own domain-health accounting; read the taxonomy's table"
+    )
+    assert not members - set(taxonomy.DOMAIN_HEALTH_BY_STATUS), (
+        f"a ResultStatus member has no domain-health verdict: "
+        f"{sorted(members - set(taxonomy.DOMAIN_HEALTH_BY_STATUS))}"
+    )
+    assert not set(taxonomy.DOMAIN_HEALTH_BY_STATUS) - members, (
+        "the accounting table names a status the taxonomy does not define: "
+        f"{sorted(set(taxonomy.DOMAIN_HEALTH_BY_STATUS) - members)}"
+    )

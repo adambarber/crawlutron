@@ -106,6 +106,19 @@ FAILED_CLASSIFICATIONS = _classification_values(
 # maps every classification onto one of these; ``app.models`` re-exports the alias.
 ResultStatus = Literal["success", "blocked", "disallowed", "retry_exhausted", "failed", "skipped"]
 
+# What each status means for DOMAIN health: success/blocked keep the host
+# healthy, failed/retry_exhausted fault it, skipped/disallowed say nothing.
+DomainHealth = Literal["success", "failure", "none"]
+
+DOMAIN_HEALTH_BY_STATUS: dict[ResultStatus, DomainHealth] = {
+    "success": "success",
+    "blocked": "success",
+    "failed": "failure",
+    "retry_exhausted": "failure",
+    "skipped": "none",
+    "disallowed": "none",
+}
+
 # Classification -> result status: THE table -- it replaced two if-chains that
 # disagreed on unrecognized labels, and seeds future per-classification metadata.
 CLASSIFICATION_STATUS_BY_LABEL: dict[str, ResultStatus] = {
