@@ -2,6 +2,7 @@
 
 import asyncio
 import dataclasses
+import logging
 from pathlib import Path
 
 import pytest
@@ -129,15 +130,33 @@ class TestAppLifecycleEdges:
         assert body["code"] == "validation_error"
         assert isinstance(body["details"]["errors"], list)
 
-    async def test_crawl_endpoint_webhook_error(self, async_client):
-        # Crawl a valid URL; webhook delivery is best-effort and won't crash the request
-        resp = await async_client.post(
-            "/v1/crawl", json={"url": "http://example.com/", "webhook_url": "http://unreachable.invalid/"}
-        )
-        # The endpoint should accept the request (202 = accepted, background processing)
-        assert resp.status_code in (200, 201, 202)
-        # Give background task a brief moment, then ensure no exception propagated
-        await asyncio.sleep(0.5)
+    async def test_crawl_endpoint_webhook_error(self, async_client, caplog):
+        # Crawl a valid URL whose webhook is undeliverable: best-effort delivery
+        # must not crash the request, and the loss must be recorded.
+        with caplog.at_level(logging.WARNING, logger="app.api.webhooks"):
+            resp = await async_client.post(
+                "/v1/crawl", json={"url": "http://example.com/", "webhook_url": "http://unreachable.invalid/"}
+            )
+        assert resp.status_code == 202, f"webhook_url accepts for background delivery, got {resp.status_code}"
+        body = resp.json()
+        assert body["status"] == "accepted", body
+        assert body["webhook_url"] == "http://unreachable.invalid/", body
+
+        # The background runner POSTs the (failing) webhook; under fast_sleeps the
+        # retries spin on the loop, so the logged loss surfaces without a real wait.
+        def _delivery_failed() -> bool:
+            return any(
+                record.getMessage() == "webhook_delivery_failed"
+                and "unreachable.invalid" in str(getattr(record, "url", ""))
+                for record in caplog.records
+            )
+
+        import time as _time
+
+        deadline = _time.monotonic() + 5.0
+        while not _delivery_failed() and _time.monotonic() < deadline:
+            await asyncio.sleep(0)
+        assert _delivery_failed(), "the failed webhook delivery was never recorded"
 
     async def test_map_endpoint_value_error(self, async_client):
         resp = await async_client.post("/v1/map", json={"url": "invalid"})

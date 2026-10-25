@@ -163,10 +163,21 @@ def test_parked_acquire_wakes_to_none_after_teardown(fake_pool):
     """A thread parked in acquire when teardown runs must wake to ``None``, not a
     TypeError iterating the now-``None`` slot list (pins #254)."""
     busy = stub_worker(5555)
-    pool, _spawner = _seeded(fake_pool, busy)
-    busy.busy = True  # the only slot is busy, so the acquirer parks in the wait.
     box: dict[str, object] = {"error": None, "worker": object()}
     parked = threading.Event()
+
+    class _ParkedCondition(threading.Condition):
+        """The pool's lock, signaling when an acquirer reaches the park point.
+
+        The seeding acquires never park (their spawn succeeds), so the event
+        fires exactly when the test's acquirer enters the condition wait."""
+
+        def wait(self, timeout=None):
+            parked.set()
+            return super().wait(timeout=timeout)
+
+    pool, _spawner = _seeded(fake_pool, busy, lock=_ParkedCondition(threading.Lock()))
+    busy.busy = True  # the only slot is busy, so the acquirer parks in the wait.
 
     def _call() -> None:
         try:
@@ -178,9 +189,10 @@ def test_parked_acquire_wakes_to_none_after_teardown(fake_pool):
 
     thread = threading.Thread(target=_call, daemon=True)
     thread.start()
-    time.sleep(0.2)  # let the acquirer reach the condition wait.
+    # The event, not a sleep guess: teardown may run once the acquirer is parked.
+    assert parked.wait(timeout=10), "the acquirer never reached the condition wait"
     pool.teardown()
-    parked.wait(timeout=10)
+    thread.join(timeout=10)
 
     assert box["error"] is None, f"parked acquirer escaped as {box['error']!r}"
     assert box["worker"] is None
