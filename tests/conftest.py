@@ -4,7 +4,6 @@ no longer referenced -- the logging helper lives at :mod:`app.runtime.logging_co
 """
 
 import asyncio
-import contextlib
 import os
 import shutil
 import sys
@@ -398,46 +397,35 @@ def _clear_global_http_state() -> None:
     tests; the close is loop-aware (drop for GC) to avoid running a second loop."""
     import asyncio
 
+    from app.orchestration import engine as _engine_mod
+    from app.runtime.cgroup_sense import reset_process_state as _reset_cgroup
     from app.transport import cookie_jar as cookie_mod
     from app.transport import http_client_pool as pool_mod
-
-    with contextlib.suppress(Exception):
-        cookie_mod.reset_process_state()
-    with contextlib.suppress(Exception):
-        # The renderer's per-domain cookie store is module-global and bounded, not cleared, so a test that
-        # harvests once leaves its domain's cookies for the next test to assert against.
-        from app.transport import browser as browser_mod
-
-        browser_mod.reset_process_state()
-    with contextlib.suppress(Exception):
-        # The pool decides per client whether it may be closed or must simply be dropped: a client owned by an
-        # already-finished loop cannot be awaited from the next one, and only the pool knows which loop owns
-        pool_mod.reset_process_state()
-    # The real app's shutdown event is module-global and shared by every ASGI test.
-    with contextlib.suppress(Exception):
-        service_app().state.shutdown_event = asyncio.Event()
-    # Tests reuse origins with different robots.txt bodies, so clear it between tests for isolation.
-    # Production keeps it shared (a given origin always serves the same robots.txt).
-    with contextlib.suppress(Exception):
-        from app.orchestration import engine as _engine_mod
-
-        # The robots cache, the shared HTTP cache and the admission gate are one crawl-lifetime unit, so the
-        # engine empties all three itself.
-        _engine_mod.reset_process_state()
-        # Drop any memoized cgroup reads so a test that asserts fresh sensing (e.g. writes a new fake cgroup
-        # file) is not served a stale value.
-        from app.runtime.cgroup_sense import reset_process_state
-
-        reset_process_state()
-    # DNS cache + pending client close queue + cookie namespace contextvar isolation between tests
     from app.transport import pinned_transport as pinned_mod
 
-    with contextlib.suppress(Exception):
-        pinned_mod.reset_process_state()
-        pool_mod.reset_process_state()
-        # Reset the per-request cookie namespace so a test that sets one does not leak into a subsequent
-        # test's request context.
-        cookie_mod.reset_process_state()
+    cookie_mod.reset_process_state()
+    # The renderer's per-domain cookie store is module-global and bounded, not cleared, so a test that
+    # harvests once leaves its domain's cookies for the next test to assert against.
+    from app.transport import browser as browser_mod
+
+    browser_mod.reset_process_state()
+    # The pool decides per client whether it may be closed or must simply be dropped: a client owned by an
+    # already-finished loop cannot be awaited from the next one, and only the pool knows which loop owns it.
+    pool_mod.reset_process_state()
+    # The real app's shutdown event is module-global and shared by every ASGI test.
+    service_app().state.shutdown_event = asyncio.Event()
+    # Tests reuse origins with different robots.txt bodies, so clear it between tests for isolation.
+    # Production keeps it shared (a given origin always serves the same robots.txt).
+    _engine_mod.reset_process_state()
+    # Drop any memoized cgroup reads so a test that asserts fresh sensing (e.g. writes a new fake cgroup
+    # file) is not served a stale value.
+    _reset_cgroup()
+    # DNS cache + pending client close queue + cookie namespace contextvar isolation between tests
+    pinned_mod.reset_process_state()
+    pool_mod.reset_process_state()
+    # Reset the per-request cookie namespace so a test that sets one does not leak into a subsequent
+    # test's request context.
+    cookie_mod.reset_process_state()
 
 
 _MODULE_GLOBAL_RESETS = (_clear_sitemap_cache, _clear_metrics, _clear_global_http_state)
