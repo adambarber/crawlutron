@@ -41,7 +41,7 @@ def _build_async_crawl_semaphore() -> asyncio.Semaphore:
     return asyncio.Semaphore(get_env_int("CRAWLUTRON_MAX_WEBHOOK_CONCURRENCY", 4, lo=1))
 
 
-def _get_async_crawl_semaphore() -> asyncio.Semaphore:
+def async_crawl_semaphore() -> asyncio.Semaphore:
     """Return the webhook-crawl semaphore bound to the running event loop.
 
     Lazily constructed (no event-loop dependency at import) and rebuilt when the
@@ -84,11 +84,13 @@ async def run_async_crawl(
     is set. ``payload`` is the declared request model; ``urls`` carries the batch.
     """
     webhook_policy = HostPolicy.from_settings(crawl_settings)
-    job = await _claim_running(request_id, job_store)
-    if job is None:
-        return
     try:
-        async with _get_async_crawl_semaphore():
+        # #462: claim RUNNING only after the semaphore is ours; a queued job must
+        # not read RUNNING nor count in aactive_count_for_caller while it waits.
+        async with async_crawl_semaphore():
+            job = await _claim_running(request_id, job_store)
+            if job is None:
+                return
             response_payload = await _crawl_and_build_response(
                 request_id, payload, crawl_settings, shutdown_event, urls, job, job_store
             )
@@ -107,7 +109,7 @@ async def run_async_crawl(
 
 async def _claim_running(request_id: str, job_store) -> CrawlJobState | None:
     """Load the job and claim RUNNING via CAS; a lost claim means the row was
-    deleted or already transitioned."""
+    deleted or already transitioned (post-semaphore-acquire, per #462)."""
     job = await job_store.aload(request_id)
     if job is None:
         logger.error("async_crawl_job_missing", extra={"request_id": request_id})
@@ -121,7 +123,7 @@ async def _claim_running(request_id: str, job_store) -> CrawlJobState | None:
     return job
 
 
-__all__ = ["run_async_crawl"]
+__all__ = ["run_async_crawl", "async_crawl_semaphore"]
 
 
 async def _crawl_and_build_response(
