@@ -88,7 +88,7 @@ async def test_breaker_still_open_after_the_park_cap_fails_the_job(monkeypatch):
 
     assert results is not None
     assert results[0].classification == "circuit_breaker_open", results
-    assert results[0].diagnostics.get("circuit_breaker") is True, results.diagnostics
+    assert results[0].diagnostics.get("circuit_breaker") is True, results[0].diagnostics
 
 
 async def test_recursive_batch_over_an_open_breaker_runs_not_requeues(monkeypatch):
