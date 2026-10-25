@@ -18,7 +18,11 @@ __all__ = [
 # be reached by a public egress, nor bound by a service expecting to be local.
 _CGNAT_NETWORK = ipaddress.ip_network("100.64.0.0/10")
 _IPV6_UNIQUE_LOCAL_NETWORK = ipaddress.ip_network("fc00::/7")
-_NAT64_NETWORK = ipaddress.ip_network("64:ff9b::/96")
+_NAT64_NETWORKS = [
+    ipaddress.ip_network("64:ff9b::/96"),
+    # RFC 8215 local-use prefix; same fall-through hazard as the /96.
+    ipaddress.ip_network("64:ff9b:1::/48"),
+]
 
 
 class AddressClass(StrEnum):
@@ -149,7 +153,9 @@ def classify(host: str | ipaddress.IPv4Address | ipaddress.IPv6Address) -> Addre
         return AddressClass.CGNAT
     if isinstance(classified, ipaddress.IPv6Address) and classified in _IPV6_UNIQUE_LOCAL_NETWORK:
         return AddressClass.UNIQUE_LOCAL
-    if isinstance(classified, ipaddress.IPv6Address) and classified in _NAT64_NETWORK:
+    if isinstance(classified, ipaddress.IPv6Address) and any(
+        classified in network for network in _NAT64_NETWORKS
+    ):
         return AddressClass.NAT64
     if classified.is_reserved:
         return AddressClass.RESERVED
