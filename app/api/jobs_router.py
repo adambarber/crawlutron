@@ -92,8 +92,8 @@ async def create_job(
             profile = dict(resolved_policy.request_profile)
             profile["cookie_namespace"] = namespace
             resolved_policy = resolved_policy.model_copy(update={"request_profile": profile})
-        # A whole-site job persists a durable row; admit counts the caller's rows and
-        # sync in-flight against one ceiling without reserving a slot of its own.
+        # A whole-site job persists a durable row; admit reserves a slot across the
+        # check->insert window and hands it to the durable row at block exit.
         tracking = Tracking(
             job_store=job_store, concurrency_tracker=getattr(request.app.state, "concurrency_tracker", None)
         )

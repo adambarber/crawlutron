@@ -160,18 +160,23 @@ class TestRunnerLifecycle:
         assert recovered == 1
         assert job_store.load(job.job_id).status == JobStatus.PENDING
 
-    async def test_paused_single_shot_job_is_not_resumed_as_a_whole_site_job(self):
-        """The startup scan's kind filter was reading a key nothing populated.
+    async def test_pending_single_shot_row_reaches_a_terminal_state_after_recovery(self):
+        """A PENDING single-shot row is unresumable: startup must retire it (#461).
 
-        ``alist_jobs`` did not select ``kind``, so the filter excluded nothing
-        and a PENDING single-shot job was handed to the whole-site runner."""
-        with single_shot_job(job_id="seeded-shot") as (store, job):
-            started = await job_runner.recover_and_start_pending_jobs(
-                store, CrawlerSettings.from_mapping({}), asyncio.Event()
+        Nothing ever picks up a non-whole_site PENDING row, so it read 'pending' forever
+        and was never handed to the whole-site runner; now it retires FAILED.
+        """
+        with single_shot_job(job_id="pending-shot") as (store, job):
+            assert (
+                await job_runner.recover_and_start_pending_jobs(
+                    store, CrawlerSettings.from_mapping({}), asyncio.Event()
+                )
+                == 0
             )
-
-            assert started == 0, "a SINGLE_SHOT job was handed to the whole-site runner"
-            assert store.load(job.job_id).status == JobStatus.PENDING
+            assert store.load(job.job_id).status == JobStatus.FAILED, (
+                "a PENDING single-shot row can never resume; leaving it PENDING "
+                "reports 'pending' to its client forever"
+            )
 
     async def test_single_shot_orphan_is_failed_not_left_pending_forever(self):
         """A single-shot orphan is unrecoverable, and must be marked so.

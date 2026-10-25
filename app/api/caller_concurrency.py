@@ -4,14 +4,23 @@ with the async job-row count so one limit binds both doors."""
 
 from __future__ import annotations
 
+import asyncio
 from collections import defaultdict
 
 
 class CallerConcurrencyTracker:
-    """Per-caller count of in-flight sync crawls, released to zero on completion."""
+    """Per-caller count of in-flight sync crawls, released to zero on completion.
+
+    Also owns the per-caller admit lock that serializes the count->insert window (#464).
+    """
 
     def __init__(self) -> None:
         self._in_flight: dict[str, int] = defaultdict(int)
+        self._slot_locks: dict[str, asyncio.Lock] = {}
+
+    def slot_lock(self, caller_id: str) -> asyncio.Lock:
+        """The admit mutex for ``caller_id``; one per caller, lazily created."""
+        return self._slot_locks.setdefault(caller_id, asyncio.Lock())
 
     def reserve(self, caller_id: str) -> None:
         """Mark one more sync crawl in flight for ``caller_id``."""

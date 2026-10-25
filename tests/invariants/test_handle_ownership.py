@@ -186,7 +186,7 @@ _SEMAPHORE_GLOBALS = frozenset({"_async_crawl_semaphore", "_async_crawl_semaphor
 
 # The accessor binds the cached instance to the running loop; the public reset
 # clears it so a test swapping the builder observes its patch immediately.
-_SEMAPHORE_WRITERS = frozenset({"_get_async_crawl_semaphore", "reset_process_state"})
+_SEMAPHORE_WRITERS = frozenset({"async_crawl_semaphore", "reset_process_state"})
 
 
 def _semaphore_global_touch_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
@@ -232,7 +232,7 @@ SEMAPHORE_GLOBALS_ARE_LOOP_BOUND = Rule(
         # The module-level declaration is the definition, not a touch.
         "_async_crawl_semaphore: asyncio.Semaphore | None = None\n",
         # The accessor itself is exempt, including the companion loop global.
-        "def _get_async_crawl_semaphore():\n"
+        "def async_crawl_semaphore():\n"
         "    global _async_crawl_semaphore, _async_crawl_semaphore_loop\n"
         "    if _async_crawl_semaphore is None:\n"
         "        _async_crawl_semaphore = _build_async_crawl_semaphore()\n"

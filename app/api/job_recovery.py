@@ -53,7 +53,11 @@ async def recover_and_start_pending_jobs(
     for summary in await job_store.alist_jobs():
         if summary.get("status") != JobStatus.PENDING.value:
             continue
+        # #461: a PENDING row of an unresumable kind can never be picked up by
+        # anything else -- retire it terminal instead of leaving it pending forever.
         if not _is_resumable_kind(summary["kind"]):
+            # #461: retire terminal via CAS; a lost CAS means it moved meanwhile.
+            await job_store.aset_status(summary["job_id"], JobStatus.FAILED, expected=JobStatus.PENDING)
             continue
         job = await job_store.aload(summary["job_id"])
         if job is None:

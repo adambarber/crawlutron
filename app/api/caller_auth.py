@@ -235,7 +235,8 @@ async def admit(
 ) -> AsyncIterator[str]:
     """Admit one request: resolve the page bound, the quotas, the cookie namespace.
 
-    ``reserve_slot=False`` when a durable job row counts instead of a sync slot.
+    #464: the caller's admit lock spans count->check->insert for async doors
+    (``reserve_slot=False``) and count->check->reserve for sync doors.
     """
     active = caller if caller is not None else anonymous_caller()
     resolved = resolve_page_limit(active, requested_pages)
@@ -252,17 +253,31 @@ async def admit(
     check_page_quota(active, resolved)
     job_store = tracking.job_store
     concurrency_tracker = tracking.concurrency_tracker
-    active_count = await job_store.aactive_count_for_caller(active.caller_id) if job_store is not None else 0
-    if concurrency_tracker is not None:
+    if concurrency_tracker is None:
+        active_count = (
+            await job_store.aactive_count_for_caller(active.caller_id) if job_store is not None else 0
+        )
+        check_concurrency_quota(active, active_count)
+        yield active.caller_id
+        return
+    # #464: one admit at a time per caller, so no two requests read the same
+    # count before either has inserted its row or reserved its slot.
+    async with concurrency_tracker.slot_lock(active.caller_id):
+        active_count = (
+            await job_store.aactive_count_for_caller(active.caller_id) if job_store is not None else 0
+        )
         active_count += concurrency_tracker.sync_in_flight(active.caller_id)
-    check_concurrency_quota(active, active_count)
-    if reserve_slot and concurrency_tracker is not None:
+        check_concurrency_quota(active, active_count)
+        if not reserve_slot:
+            # The row insert runs inside the lock; once it lands, the durable
+            # row is the reservation the next admit counts.
+            yield active.caller_id
+            return
         concurrency_tracker.reserve(active.caller_id)
     try:
         yield active.caller_id
     finally:
-        if reserve_slot and concurrency_tracker is not None:
-            concurrency_tracker.release(active.caller_id)
+        concurrency_tracker.release(active.caller_id)
 
 
 __all__ = [
