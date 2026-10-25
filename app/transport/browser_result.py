@@ -23,6 +23,7 @@ from app.transport.strategy_request import StrategyRequest
 from app.vocabulary.extraction import EXTRACTION_METHOD_DOM_TEXT
 
 if TYPE_CHECKING:
+    from app.config.settings import CrawlerSettings
     from app.models.crawl_diagnostics import CrawlDiagnostics
     from app.models.crawl_result import EngineCrawlResult
     from app.models.crawl_worker import CrawlWorker
@@ -58,7 +59,7 @@ async def _extract_browser_content(
     content: str | None,
     result: Any,
     policy: CrawlPolicy,
-    settings: Any = None,
+    settings: CrawlerSettings | None = None,
 ) -> ExtractedContent:
     if not content:
         return ExtractedContent(
@@ -167,7 +168,7 @@ async def browser_strategy_result(
     *,
     request: StrategyRequest,
     browser_worker: CrawlWorker,
-    settings: Any = None,
+    settings: CrawlerSettings | None = None,
 ) -> EngineCrawlResult:
     result = await call_worker(
         browser_worker,

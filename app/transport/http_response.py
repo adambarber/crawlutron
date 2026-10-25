@@ -6,6 +6,7 @@ import base64
 from dataclasses import dataclass, field
 from typing import Any
 
+from app.config.settings import CrawlerSettings
 from app.models.crawl_extraction_method import CrawlExtractionMethod
 from app.models.crawl_policy import CrawlPolicy
 from app.models.crawl_policy_limits import CrawlPolicyLimits
@@ -52,9 +53,9 @@ class HttpStrategyContext:
     response: Any = None
     limits: CrawlPolicyLimits = field(default_factory=CrawlPolicyLimits)
     retry_diagnostics: RetryDiagnostics = field(default_factory=lambda: _DEFAULT_RETRY)
-    # The crawl's own resolved settings, carried so extraction never re-reads
-    # the env or the cgroup per document (#509); None keeps direct callers whole.
-    settings: Any = None
+    # The crawl's resolved settings, carried so extraction never re-reads the
+    # env or the cgroup per document (#509); None keeps direct callers whole.
+    settings: CrawlerSettings | None = None
 
 
 @dataclass

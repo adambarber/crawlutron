@@ -19,6 +19,7 @@ from app.transport.strategy_request import StrategyRequest
 from app.vocabulary.strategies import BROWSER_STRATEGIES, HTTP_CFFI_IMPERSONATE, HTTP_STRATEGIES
 
 if TYPE_CHECKING:
+    from app.config.settings import CrawlerSettings
     from app.models.crawl_diagnostics import CrawlDiagnostics
     from app.models.crawl_policy import CrawlPolicy
     from app.models.crawl_result import EngineCrawlResult
@@ -64,7 +65,7 @@ class _ChainContext:
     robots_sitemaps: list[str] | None
     host_policy: HostPolicy
     global_concurrency: int | None
-    settings: Any = None
+    settings: CrawlerSettings | None = None
 
     def request_for(self, strategy: CrawlStrategyName) -> StrategyRequest:
         """The page's identity for one ladder step.
@@ -298,7 +299,7 @@ async def execute_crawl_chain(
     robots_sitemaps: list[str] | None = None,
     host_policy: HostPolicy,
     global_concurrency: int | None = None,
-    settings: Any = None,
+    settings: CrawlerSettings | None = None,
 ) -> EngineCrawlResult:
     context = _ChainContext(
         original_url=original_url,

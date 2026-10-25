@@ -7,6 +7,7 @@ from dataclasses import replace
 from typing import Any, NamedTuple
 
 from app.admission.policy import discovery_flags
+from app.config.settings import CrawlerSettings
 from app.models.classification_evidence import ClassificationEvidenceRecord
 from app.models.crawl_diagnostics import CrawlDiagnostics
 from app.models.crawl_result import EngineCrawlResult
@@ -253,7 +254,7 @@ async def http_strategy_result(
     caller_validators: dict[str, str] | None = None,
     robots_sitemaps: list[str] | None = None,
     global_concurrency: int | None = None,
-    settings: Any = None,
+    settings: CrawlerSettings | None = None,
 ) -> EngineCrawlResult:
     """Coordinate the named HTTP fetch phases and return one crawl result."""
     ctx = HttpStrategyContext(
