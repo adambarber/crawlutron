@@ -4,9 +4,8 @@
 
 | Version | Supported          |
 |---------|--------------------|
-| 0.2.x   | Yes                |
-| 0.1.x   | Critical fixes only|
-| < 0.1   | No                 |
+| 0.3.x   | Yes                |
+| < 0.3   | Critical fixes only|
 
 ## Reporting a Vulnerability
 
@@ -32,8 +31,10 @@ It is a powerful SSRF-enabled service that:
 - Validates every redirect hop manually so a `302 -> 169.254.169.254/`
   cannot be followed.
 - Pins the browser navigation IP and re-validates post-redirect URLs.
-- Caps request bodies (16 MiB), decompressed responses (50 MiB), CSS/XPath
-  selector runtime (1 s), and HTML-size-to-lxml input (4 MiB) so a malicious
+- Caps request bodies (16 MiB), decompressed responses (10 MiB default
+  content cap, caller-tunable up to the 1 GiB hard ceiling), CSS/XPath
+  selector runtime (2 s default, `CRAWLUTRON_EXTRACTION_SELECTOR_TIMEOUT`),
+  and HTML-size-to-lxml input (4 MiB) so a malicious
   input cannot exhaust memory or pin a worker.
 - Default-binds to `127.0.0.1`; callers authenticate with an API key
   (`X-API-Key` / `Authorization: Bearer`), keyless requests crawl as a shared

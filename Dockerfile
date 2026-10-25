@@ -147,8 +147,8 @@ EXPOSE 8765
 HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
     CMD curl -f http://localhost:8765/health || exit 1
 
-# Production command. The bind interface defaults to loopback (M15: the service
-# has no caller authentication); CRAWLUTRON_HOST must be set explicitly to
+# Production command. The bind interface defaults to loopback (callers
+# authenticate with an API key; see SECURITY.md); CRAWLUTRON_HOST must be set explicitly to
 # expose the port (the compose file sets 0.0.0.0, gated by its loopback mapping).
 CMD ["sh", "-c", "exec uvicorn app.main:app --host ${CRAWLUTRON_HOST:-127.0.0.1} --port 8765 --workers ${CRAWLUTRON_WORKERS} --log-config /app/uvicorn-log-config.json --log-level ${CRAWLUTRON_LOG_LEVEL}"]
 

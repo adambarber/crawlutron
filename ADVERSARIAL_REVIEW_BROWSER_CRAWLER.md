@@ -1,5 +1,10 @@
 # Adversarial Review: Browser Crawler Python Codebase
 
+> **Historical document.** This review is dated 2025 and describes the tree as
+> it stood then — including paths (e.g. `docker/browser-crawler/`) that no
+> longer exist after the repository extraction. It is retained as a record of
+> what was reviewed, not as a description of the current layout.
+
 **Repository**: `docker/browser-crawler/`  
 **Review Date**: 2025 (current session)  
 **Scope**: Complete codebase — app logic, strategies, API, tests, Docker, docs

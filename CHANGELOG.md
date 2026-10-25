@@ -86,6 +86,16 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   cache already were.
 
 ### Added
+- **Caller identity is enforced at the read edge: keys API, scoped reads,
+  labelled metrics, quotas (#25).** Callers authenticate with an API key
+  presented as `X-API-Key` (or `Authorization: Bearer`), and every read edge —
+  `GET /v1/crawl/{request_id}`, the jobs surface, labelled metrics — scopes what
+  it returns to the caller's identity, so one caller cannot read another's jobs
+  or results. `/v1/keys` issues, lists and revokes caller keys; issuance is
+  operator-gated via `CRAWLUTRON_KEY_ADMIN_TOKEN`. Keyless requests crawl as a
+  shared anonymous identity with bounded default quotas. Isolation is pinned in
+  `tests/api/test_caller_isolation.py` and the refusal matrix in
+  `tests/api/test_caller_auth.py`.
 - **A page's durable identity is one function, and a gate holds it there.**
   `visited`, `in_flight` and `frontier` all key on page identity, so they have
   to agree — but "canonical form, else the raw URL" was written out at twelve

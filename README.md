@@ -9,7 +9,7 @@ FastAPI. It exposes a single, machine-readable crawl contract that supports:
   for JavaScript-dependent pages.
 - **Document extraction** — PDF/DOCX/PPTX/XLSX/TXT via markitdown, plus main-text
   extraction via trafilatura.
-- **Content classification** — 30 crawl classifications (success, blocked,
+- **Content classification** — 36 crawl classifications (success, blocked,
   network_error, robots_disallowed, challenge_detected, etc.) so callers can branch
   on outcome rather than guessing.
 - **Discovery endpoints** — capabilities, agent hints, and a `.well-known` service
@@ -142,7 +142,7 @@ Migrations live in `app/storage/migrations/`. Every store schema — jobs, resul
 # Add a migration: add a versioned schema to manifest.py, point CURRENT_SCHEMAS at it,
 # then add a yoyo step with apply and rollback SQL under the migration directory.
 $EDITOR app/storage/migrations/manifest.py
-$EDITOR app/storage/migrations/0002_crawl_jobs_descriptive_name.py
+$EDITOR app/storage/migrations/0001_crawl_jobs_initial.py
 
 # Stamp an existing database after checking it against the declared schema.
 .venv/bin/python -m app.storage.migrations stamp cache/crawler.db crawl_jobs
@@ -267,7 +267,7 @@ exhausted.
 
 ## Classifications
 
-Every crawl result carries a `classification` from a fixed enum of **30 values**
+Every crawl result carries a `classification` from a fixed enum of **36 values**
 (returned by `GET /v1/capabilities` under `supported_classifications`). Examples:
 `success`, `rendered`, `not_modified`, `network_error`, `http_error`,
 `robots_disallowed`, `challenge_detected`, `ssrf_blocked`, `hard_error`,
