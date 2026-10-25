@@ -184,6 +184,20 @@ class TestRequestProfileValueTypesMatchTheHeaderMapTheyCorrupt:
         with pytest.raises(ValidationError, match="at most"):
             CrawlPolicy(request_profile={"user_agents": [f"agent-{i}" for i in range(65)]})
 
+    def test_pool_entries_honor_the_header_value_law(self):
+        """Each pool entry lands in User-Agent/Accept-Language verbatim, so it is a
+        header value: a CR/LF smuggle is refused, the #441 8 KiB ceiling holds, and
+        a value exactly at the ceiling is still accepted -- over both keys (#454)."""
+        from app.models.crawl_policy import CrawlPolicy
+
+        for key in ("user_agents", "accept_languages"):
+            with pytest.raises(ValidationError, match=key):
+                CrawlPolicy(request_profile={key: ["a\r\nCookie: admin=1"]})
+            at_ceiling = CrawlPolicy(request_profile={key: ["x" * 8192]})
+            assert at_ceiling.request_profile[key] == ["x" * 8192]
+            with pytest.raises(ValidationError, match=key):
+                CrawlPolicy(request_profile={key: ["x" * 8193]})
+
     def test_the_seed_and_family_must_be_strings(self):
         """``fingerprint_seed`` is interpolated into a hash and ``user_agent_family``
         is read with ``str()``, so a dict reaches the hash instead of a string."""

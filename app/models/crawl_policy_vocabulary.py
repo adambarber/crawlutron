@@ -4,6 +4,7 @@ from typing import Any
 from urllib.parse import urlsplit
 
 from app.models.json_value import JsonValue
+from app.safety.header_values import reject_injectable_header_value
 from app.vocabulary.limits import MAX_HEADER_VALUE_BYTES
 from app.vocabulary.request_profiles import REQUEST_PROFILE_KEYS
 
@@ -210,7 +211,7 @@ def _refuse_malformed_profile_values(profile: dict[str, JsonValue]) -> None:
 
 
 def _refuse_malformed_pool(profile: dict[str, JsonValue], key: str, ceiling: int) -> None:
-    """Refuse a header pool that is not a bounded list of strings.
+    """Refuse a header pool that is not a bounded list of bounded strings.
     Split so the wrong-container and wrong-contents failures read separately; a
     ``[None]`` used to reach the header builder and raise from inside it.
     """
@@ -222,6 +223,14 @@ def _refuse_malformed_pool(profile: dict[str, JsonValue], key: str, ceiling: int
     for entry in pool:
         if not isinstance(entry, str):
             raise ValueError(f"request_profile {key} entries must be strings, got {type(entry).__name__}")
+        # The pool entry lands in User-Agent/Accept-Language verbatim, so it is a
+        # header value here too: the #441 law and ceiling apply at this edge (#454).
+        reject_injectable_header_value(key, entry)
+        if len(entry) > MAX_HEADER_VALUE_BYTES:
+            raise ValueError(
+                f"request_profile {key} entries may carry at most {MAX_HEADER_VALUE_BYTES} "
+                f"characters, got {len(entry)}"
+            )
 
 
 def _refuse_malformed_cookie_map(profile: dict[str, JsonValue], host_ceiling: int, pair_ceiling: int) -> None:
