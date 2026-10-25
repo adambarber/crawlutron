@@ -25,7 +25,9 @@ def origin_of(url: str) -> str:
     scheme = parsed.scheme.lower()
     if scheme not in {"http", "https"}:
         raise ValueError("credential origin requires http/https")
-    host = parsed.hostname
+    # The same host canonicalization NormalizedUrl.origin runs: trailing FQDN
+    # dot stripped, IPv6 literals re-bracketed so the one origin spelling matches.
+    host = (parsed.hostname or "").rstrip(".")
     if not host:
         raise ValueError("credential origin requires a host")
     if parsed.username is not None or parsed.password is not None:
@@ -33,7 +35,8 @@ def origin_of(url: str) -> str:
     port = parsed.port  # raises ValueError for a malformed port
     if port is not None and not ((scheme == "http" and port != 80) or (scheme == "https" and port != 443)):
         port = None
-    return f"{scheme}://{host}" if port is None else f"{scheme}://{host}:{port}"
+    host_part = f"[{host}]" if ":" in host else host
+    return f"{scheme}://{host_part}" if port is None else f"{scheme}://{host_part}:{port}"
 
 
 def authorization_value(credential: Credential) -> str:
