@@ -17,6 +17,7 @@ from http.cookiejar import CookieJar as StdCookieJar
 from typing import TYPE_CHECKING, TypedDict, cast
 
 from app.models.normalized_url import NormalizedUrl
+from app.models.registrable_domain import is_public_suffix
 from app.storage.coordination_cookies import DEFAULT_MAX_HOSTS_PER_NAMESPACE
 from app.storage.coordination_store import atwin
 from app.transport.cookie_store import InMemoryCookieStore
@@ -279,19 +280,17 @@ def _parse_set_cookie(header: str, url: NormalizedUrl) -> tuple[str, CookieRecor
     if not name or value is None:
         return None
     attrs = dict(raw_attrs)
-    domain = _cookie_domain(attrs, url)
-    if domain is None:
+    if (resolved := _cookie_domain(attrs, url)) is None:
         return None
+    domain, host_only = resolved
     secure = "secure" in attrs
     if secure and url.scheme != "https":
         # RFC 6265bis 5.5: Secure cookies are refused over plain HTTP.
         return None
     path = str(attrs["path"]) if attrs.get("path") else _default_path(url)
-    record = CookieRecord(
-        value=value, domain=domain, path=path, secure=secure, expires=_expiry(attrs), host_only=True
+    return name, CookieRecord(
+        value=value, domain=domain, path=path, secure=secure, expires=_expiry(attrs), host_only=host_only
     )
-    record["host_only"] = not bool(attrs.get("domain"))
-    return name, record
 
 
 def _ns_pairs(header: str) -> list[tuple[str, str | None]] | None:
@@ -306,13 +305,15 @@ def _ns_pairs(header: str) -> list[tuple[str, str | None]] | None:
     return pairs if pairs else None
 
 
-def _cookie_domain(attrs: dict[str, str | None], url: NormalizedUrl) -> str | None:
-    """The storage domain, or None when the attribute cannot apply (5.3 step 6)."""
+def _cookie_domain(attrs: dict[str, str | None], url: NormalizedUrl) -> tuple[str, bool] | None:
+    """The storage domain with its host-only pin (5.3 steps 4-6), or None to refuse."""
     domain_attr = attrs.get("domain")
     if not domain_attr:
-        return url.host.lower()
+        return url.host.lower(), True
     domain = domain_attr.lstrip(".").lower()
-    return domain if _domain_matches(url.host, domain) else None
+    if is_public_suffix(domain):  # 6265bis 5.3: only the request host stays, host-only (#438)
+        return (domain, True) if domain == url.host.lower() else None
+    return (domain, False) if _domain_matches(url.host, domain) else None
 
 
 def _domain_matches(host: str, domain: str) -> bool:

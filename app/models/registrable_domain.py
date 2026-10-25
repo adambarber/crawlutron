@@ -65,4 +65,24 @@ def registrable_domain(host: str, *, psl: _PublicSuffixDataset | None = None) ->
     return _heuristic_registrable_domain(host)
 
 
-__all__ = ["TWO_PART_PUBLIC_SUFFIXES", "registrable_domain"]
+def is_public_suffix(host: str, *, psl: _PublicSuffixDataset | None = None) -> bool:
+    """Whether ``host`` is itself a public suffix, with no registrable site under it.
+
+    The cookie admission edge refuses a ``Domain=`` naming one of these (#438):
+    ``com`` or ``co.uk`` would otherwise domain-match every host under the suffix.
+    """
+    host = host.lower().rstrip(".")
+    if not host:
+        return False
+    if "." not in host:
+        # Every single label is a TLD under the PSL's wildcard rule.
+        return True
+    if psl is None:
+        psl = _public_suffix_list()
+    if psl is not None:
+        with suppress(Exception):
+            return psl.privatesuffix(host) is None
+    return host in TWO_PART_PUBLIC_SUFFIXES
+
+
+__all__ = ["TWO_PART_PUBLIC_SUFFIXES", "is_public_suffix", "registrable_domain"]

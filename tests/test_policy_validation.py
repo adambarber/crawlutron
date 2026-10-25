@@ -124,6 +124,25 @@ class TestPolicyValidation:
         assert registrable_domain("a.b.example.co.uk", psl=None) == "example.co.uk"
         assert registrable_domain("a.b.c.example.com", psl=None) == "example.com"
 
+    def test_public_suffix_detection(self):
+        from app.models.registrable_domain import is_public_suffix
+
+        # The cookie admission edge refuses a Domain= naming one of these
+        # (#438): every TLD, and every listed multi-label suffix.
+        assert is_public_suffix("com")
+        assert is_public_suffix("co.uk")
+        assert not is_public_suffix("example.com")
+        assert not is_public_suffix("example.co.uk")
+
+    def test_public_suffix_detection_falls_back_without_dataset(self):
+        from app.models.registrable_domain import is_public_suffix
+
+        # Without the dataset every single label is still a TLD, and the known
+        # two-part suffixes stay suffixes (the heuristic's whole fidelity).
+        assert is_public_suffix("com", psl=None)
+        assert is_public_suffix("co.uk", psl=None)
+        assert not is_public_suffix("example.com", psl=None)
+
 
 class TestResolveEgress:
     """Egress filter: resolve-then-strict-accept (js_endpoints/next-page)."""

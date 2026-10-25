@@ -161,6 +161,42 @@ def test_domain_attribute_outside_the_request_host_is_refused():
     assert _header_for(jar, "http://other.example/") == ""
 
 
+# RFC 6265bis 5.3 step 6.3 (#438): a public-suffix ``Domain=`` injects into
+# every host under the suffix; only the request host itself stays.
+
+
+@pytest.mark.parametrize(
+    ("origin", "header", "victim"),
+    [
+        ("https://evil.com/", "sid=secret; Domain=com", "https://victim.com/"),
+        ("https://evil.co.uk/", "sid=secret; Domain=co.uk", "https://victim.co.uk/"),
+    ],
+)
+def test_public_suffix_domain_attribute_is_refused_outright(origin, header, victim):
+    """A ``Domain=`` naming a public suffix is refused, never stored (#438).
+
+    A bare suffix match accepts it, and the send side then matches every
+    host under the suffix in the namespace.
+    """
+    jar = CookieJar()
+    jar.add_cookie_header(canonical(origin), header)
+    assert _header_for(jar, victim) == ""
+    # Refused outright, not degraded: not even the setting host replays it.
+    assert _header_for(jar, origin) == ""
+
+
+def test_public_suffix_domain_equal_to_request_host_degrades_to_host_only():
+    """6265bis: Domain= naming the request host itself stays, host-only.
+
+    A bare refusal would drop a legitimate same-site declaration; the RFC
+    pins it to exactly the host that set it, never the sibling sites.
+    """
+    jar = CookieJar()
+    jar.add_cookie_header(canonical("http://co.uk/"), "sid=abc; Domain=co.uk")
+    assert _header_for(jar, "http://co.uk/") == "sid=abc"
+    assert _header_for(jar, "http://x.co.uk/") == ""
+
+
 # RFC 6265 5.4: cookies with longer paths are listed first.
 
 
