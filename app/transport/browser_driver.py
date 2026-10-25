@@ -368,7 +368,7 @@ class BrowserDriver:
         await async_sleep(self._sleep, seconds)
 
 
-def _browser_closed(browser: Any) -> bool:
+def _browser_closed(browser: object) -> bool:
     """Whether ``browser`` is closed, calling an ``is_closed`` method (Playwright)
     or reading a bool attribute/property, and defaulting to open when it publishes none.
     """
