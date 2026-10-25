@@ -6,6 +6,20 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Security
+- **Webhook doors refuse plaintext `http://` (#499).** `webhook_url` was accepted
+  at both doors -- the crawl 202 path and watch registration -- with any
+  `http://` scheme: the HMAC signature scheme protects integrity, not
+  confidentiality, so the signature AND the full crawl payload (possibly
+  including extracted page text) rode to a plaintext callback unencrypted. One
+  law now governs both doors (`ensure_https_webhook_url` in `webhooks.py`):
+  `https://` is required unless the operator opts out with
+  `CRAWLUTRON_ALLOW_PLAINTEXT_WEBHOOK=1`, mirroring the
+  `CRAWLUTRON_ALLOW_PRIVATE_TARGETS` escape-hatch shape (value-keyed memo,
+  default fail-closed, one warning per distinct env value). Refused at
+  admission with the existing 422 `validation_error` envelope in
+  `tests/test_webhook_ssrf.py` (unit) and both door suites. `webhook_url` never
+  fired at a target the caller chose less than crawl targets do, so the trust
+  position is identical and both fail closed.
 - **`/v1/keys` is operator-only; a caller key no longer mints or revokes keys
   (#436).** `get_keys_caller` fell through to ordinary verification whenever
   the presented secret was not the operator token, so ANY live caller key

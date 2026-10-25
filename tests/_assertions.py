@@ -21,6 +21,19 @@ def block_private_targets(monkeypatch) -> None:
 
 
 @contextmanager
+def plaintext_webhook_refusal(monkeypatch):
+    """The closed #499 door for one call: drop the plaintext opt-in and its memo."""
+    monkeypatch.delenv("CRAWLUTRON_ALLOW_PLAINTEXT_WEBHOOK", raising=False)
+    from app.api.webhooks import reset_plaintext_webhook_memo
+
+    reset_plaintext_webhook_memo()
+    try:
+        yield
+    finally:
+        reset_plaintext_webhook_memo()
+
+
+@contextmanager
 def host_resolves_to(monkeypatch, ip: str, *, resolver=None):
     """The precondition for a resolution-dependent SSRF verdict: ``name`` resolves to ``ip``.
 

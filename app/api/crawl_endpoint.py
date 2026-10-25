@@ -19,7 +19,7 @@ from app.api.exceptions import http_error, validation_http_error
 from app.api.job_runner import start_tracked_task
 from app.api.main_helpers import record_crawl_completion, request_gate
 from app.api.response_shaping import aunified_response_from_result
-from app.api.webhooks import validate_webhook_url_async
+from app.api.webhooks import ensure_https_webhook_url, validate_webhook_url_async
 from app.config.settings import CrawlerSettings
 from app.extraction.output_formats import serialize_results
 from app.models.caller_identity import CallerIdentity
@@ -153,6 +153,10 @@ async def _accepted_async(
     ):
         raise http_error(422, "validation_error", "Invalid webhook_url")
     if webhook_url:
+        try:
+            ensure_https_webhook_url(webhook_url)
+        except ValueError as error:
+            raise http_error(422, "validation_error", str(error)) from error
         await validate_webhook_url_async(webhook_url, host_policy=host_policy)
     request_id = new_request_id()
     # The store's tier, not ``settings``: the row is read back with the

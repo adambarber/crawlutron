@@ -26,6 +26,7 @@ class WatchCreateRequest(BaseModel):
     webhook_url: Annotated[
         str | None,
         Field(
-            description="Where to POST a change notification. Omit for a poll-only watch.",
+            description="Where to POST a change notification (https:// required unless the "
+            "operator sets CRAWLUTRON_ALLOW_PLAINTEXT_WEBHOOK=1). Omit for a poll-only watch.",
         ),
     ] = None

@@ -15,7 +15,7 @@ from app.api.caller_auth import auth_denials
 from app.api.dependencies import CallerDep, SettingsDep, WatchStoreDep
 from app.api.exceptions import http_error, validation_http_error
 from app.api.watch_sweep import WATCH_SWEEP_INTERVAL_SECONDS
-from app.api.webhooks import validate_webhook_url_async
+from app.api.webhooks import ensure_https_webhook_url, validate_webhook_url_async
 from app.models.error_response import ErrorResponse
 from app.models.host_policy import HostPolicy
 from app.models.normalized_url import NormalizedUrl
@@ -69,7 +69,8 @@ async def create_watch(
         url = NormalizedUrl(payload.url, policy=host_policy)
         if payload.webhook_url is not None:
             # An undeliverable URL is a configuration error the caller fixes now; delivery
-            # validates again regardless, against a name resolving elsewhere later.
+            # validates again regardless. ensure_https_webhook_url is the #499 scheme law.
+            ensure_https_webhook_url(payload.webhook_url)
             await validate_webhook_url_async(payload.webhook_url, host_policy=host_policy)
     except ValueError as error:
         raise validation_http_error(error) from error
