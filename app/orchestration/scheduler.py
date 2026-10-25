@@ -389,15 +389,18 @@ class DomainScheduler:
         failed_result: Callable[[_Job, BaseException], _Result],
     ) -> bool:
         """Breaker skip (True = handled) or the gated worker run; False = done."""
-        # Circuit breaker: if open, skip the network request entirely.
+        # Circuit breaker: if open, PARK the batch (cooldown path) instead of
+        # re-dispatching into the breaker; past the cap the envelope is terminal.
         if self.is_circuit_open(job.domain):
-            # In on_result mode the failed envelope must take the same channel:
-            # a direct dict write once raised, was swallowed, and the job vanished.
-            await deliver(
-                job.index,
-                failed_result(job, CircuitBreakerOpen(self._domain_cooldowns.get(job.domain))),
-            )
-            return True
+            await self._park_open_breaker(job.domain)
+            if self.is_circuit_open(job.domain):
+                # In on_result mode the failed envelope must take the same channel:
+                # a direct dict write once raised, was swallowed, and the job vanished.
+                await deliver(
+                    job.index,
+                    failed_result(job, CircuitBreakerOpen(self._domain_cooldowns.get(job.domain))),
+                )
+                return True
 
         # Token bucket rate limiting.
         if self._max_rps > 0:
@@ -431,6 +434,15 @@ class DomainScheduler:
                 # a delivery failure, not a charge against the domain's breaker.
                 await deliver(job.index, result)
         return False
+
+    async def _park_open_breaker(self, domain: str) -> None:
+        """Record the open window as a domain cooldown and sleep it out, capped.
+        The same park a 429 takes; the caller re-checks the breaker after it."""
+        expiry = self._circuit_open_until.get(domain)
+        remaining = 0.0 if expiry is None else max(0.0, expiry - time.monotonic())
+        if remaining > 0:
+            self.set_domain_cooldown(domain, remaining)
+            await asyncio.sleep(min(remaining, MAX_COOLDOWN_WAIT))
 
     @property
     def domain_cooldowns(self) -> dict[str, float]:
