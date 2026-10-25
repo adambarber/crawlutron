@@ -9,7 +9,7 @@ FastAPI. It exposes a single, machine-readable crawl contract that supports:
   for JavaScript-dependent pages.
 - **Document extraction** — PDF/DOCX/PPTX/XLSX/TXT via markitdown, plus main-text
   extraction via trafilatura.
-- **Content classification** — 30 crawl classifications (success, blocked,
+- **Content classification** — 36 crawl classifications (success, blocked,
   network_error, robots_disallowed, challenge_detected, etc.) so callers can branch
   on outcome rather than guessing.
 - **Discovery endpoints** — capabilities, agent hints, and a `.well-known` service
@@ -267,7 +267,7 @@ exhausted.
 
 ## Classifications
 
-Every crawl result carries a `classification` from a fixed enum of **30 values**
+Every crawl result carries a `classification` from a fixed enum of **36 values**
 (returned by `GET /v1/capabilities` under `supported_classifications`). Examples:
 `success`, `rendered`, `not_modified`, `network_error`, `http_error`,
 `robots_disallowed`, `challenge_detected`, `ssrf_blocked`, `hard_error`,
