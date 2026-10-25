@@ -136,19 +136,21 @@ def _constant_time_eq(secret: str, token: str) -> bool:
 
 
 async def get_keys_caller(request: Request) -> CallerIdentity:
-    """FastAPI dependency: a verified caller or the operator for /v1/keys."""
+    """FastAPI dependency: the operator token is the only /v1/keys caller (#436).
+
+    A caller key never enters, valid or not; no store lookup, so the door is
+    not a key-validity oracle, and an unconfigured token seals it (fail closed).
+    """
     secret = _presented_key(request)
-    if not secret:
-        raise http_error(401, "invalid_api_key", "Unknown or revoked API key")
     admin_token = _key_admin_token(request)
-    if admin_token and _constant_time_eq(secret, admin_token):
-        return CallerIdentity(
-            caller_id="admin",
-            authenticated=True,
-            max_pages=0,
-            max_concurrency=0,
-        )
-    return await _caller_from_secret(request, secret)
+    if not secret or not admin_token or not _constant_time_eq(secret, admin_token):
+        _raise_invalid_api_key()
+    return CallerIdentity(
+        caller_id="admin",
+        authenticated=True,
+        max_pages=0,
+        max_concurrency=0,
+    )
 
 
 async def _caller_from_secret(request: Request, secret: str) -> CallerIdentity:

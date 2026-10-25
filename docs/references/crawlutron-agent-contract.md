@@ -43,8 +43,11 @@ or retrying after a timeout.
 
 ## Caller Authentication (API Keys)
 
-Callers may mint a key with `POST /v1/keys` (`{"label": ...}`, optional
-`max_pages` / `max_concurrency` quotas) and present it as `X-API-Key` (or an
+Keys are minted by the operator: `POST /v1/keys` (`{"label": ...}`, optional
+`max_pages` / `max_concurrency` quotas) accepts only the operator token
+(`CRAWLUTRON_KEY_ADMIN_TOKEN`) presented as `X-API-Key` -- a caller key at
+the keys routes is a 401, and an unconfigured token seals key management
+(#436). Callers present the issued key as `X-API-Key` (or an
 `Authorization: Bearer` token). Jobs and results created under a key are
 readable only under that key: `GET /v1/crawl/{request_id}`, its `/trace`, and
 the `/v1/jobs` reads answer 404 to any other caller. Requests with no key are

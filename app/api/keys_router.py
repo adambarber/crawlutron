@@ -1,7 +1,7 @@
 """``/v1/keys`` inbound caller-key issuance and inventory.
 
 Keys authenticate callers; ownership of jobs and results is what isolates
-them. The secret is shown once at issuance and never stored or listed.
+them. The operator token is the only credential these routes accept (#436).
 """
 
 from __future__ import annotations
@@ -27,7 +27,8 @@ router = APIRouter(prefix="/v1/keys", tags=["Crawler"], responses=auth_denials()
     summary="Issue an inbound caller API key",
     description=(
         "Mint a key a caller presents as X-API-Key. Jobs and results created "
-        "under it are readable only under it; the secret is shown once here."
+        "under it are readable only under it; the secret is shown once here. "
+        "Requires the operator token (X-API-Key: CRAWLUTRON_KEY_ADMIN_TOKEN)."
     ),
     responses={
         422: {"model": ErrorResponse, "description": "Invalid key request."},
@@ -47,7 +48,10 @@ async def issue_key(
     "",
     response_model=list[KeySummary],
     summary="List live caller keys",
-    description="Every live key's public row; hashes and secrets are never listed.",
+    description=(
+        "Every live key's public row; hashes and secrets are never listed. "
+        "Requires the operator token (X-API-Key: CRAWLUTRON_KEY_ADMIN_TOKEN)."
+    ),
     responses={},
 )
 async def list_keys(
@@ -61,7 +65,10 @@ async def list_keys(
     "/{key_id}",
     response_model=RevokedKey,
     summary="Revoke a caller API key",
-    description="Revoke a key; its rows stay but no new request can crawl as it.",
+    description=(
+        "Revoke a key; its rows stay but no new request can crawl as it. "
+        "Requires the operator token (X-API-Key: CRAWLUTRON_KEY_ADMIN_TOKEN)."
+    ),
     responses={
         404: {"model": ErrorResponse, "description": "Key not found."},
     },

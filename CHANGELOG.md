@@ -5,6 +5,42 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Security
+- **`/v1/keys` is operator-only; a caller key no longer mints or revokes keys
+  (#436).** `get_keys_caller` fell through to ordinary verification whenever
+  the presented secret was not the operator token, so ANY live caller key
+  could mint fresh unbounded identities (`max_pages=0, max_concurrency=0`
+  default to unbounded), revoke any other tenant's key by id, and read every
+  tenant's labels and quotas -- a cross-tenant authz break one POST away.
+  The door now accepts only the configured operator token
+  (`CRAWLUTRON_KEY_ADMIN_TOKEN`) and fails closed when none is configured,
+  which is the contract `.env.example` and `CrawlerSettings` already
+  documented ("empty disables issuance/listing/revocation over HTTP") and
+  `scripts/e2e_verify.py` already assumed. The refusal is the door's existing
+  401 `invalid_api_key` envelope -- no store lookup, so the keys door is not
+  a key-validity oracle, and callers learn nothing about which keys are live.
+  Refusals are pinned in `tests/api/test_caller_auth.py`: a tenant key cannot
+  mint, list, or revoke, and the sealed door stays sealed without a token.
+- **Render options are ceilinged: an anonymous caller can no longer park a
+  pooled renderer (#444).** `resolve_render_options` accepted
+  `options.timeout_seconds=1000000000` and any `max_retries`, so one
+  `/v1/render` request held one of a handful of pooled renderers (~700 MiB
+  apiece) for as long as the target stalled, retried indefinitely -- while
+  the crawl path bounded the identical knobs through `CrawlPolicyLimits` all
+  along. The caller-supplied knobs now clamp at the tree's own constants
+  (`MAX_HTTP_TIMEOUT_SECONDS`=120, `MAX_RETRIES`=5), silently, so sane
+  requests behave identically; the clamp binds the caller's side only,
+  because the resolver is the shared chokepoint and `_browser_options` feeds
+  it policy limits whose per-job retry ceiling (`MAX_JOB_MAX_RETRIES`=10) is
+  a documented contract. Profile strings -- an action `selector`, a
+  `storage_state`, a header-like `user_agent`/`accept` value riding the
+  raw-dict arm -- were equally unsized and are now refused at #441's
+  `MAX_HEADER_VALUE_BYTES` (8 KiB) at both the boundary (a 422 naming the
+  key) and the resolver (the render edge's own refusal), the same
+  boundary+reader pair the profile knob ceilings already use. The
+  `request_profile` pool entries (`user_agents`, `accept_languages`) keep
+  their entry-count ceiling and remain #454's surface.
+
 ### Changed
 - **An app class may no longer promise a container interface nobody asked for.**
   `_LockedDomainCookieStore` subclassed `MutableMapping[str, str]`, and ten of

@@ -9,7 +9,9 @@ from collections.abc import Mapping
 from typing import Any
 
 from app.models.crawl_policy import CrawlPolicy
+from app.models.crawl_policy_vocabulary import refuse_oversized_profile_strings
 from app.models.render_options import RenderOptions
+from app.vocabulary.limits import MAX_HTTP_TIMEOUT_SECONDS, MAX_RETRIES
 
 
 def _pick(request: Mapping[str, Any] | None, defaults: Mapping[str, Any], key: str) -> Any:
@@ -33,17 +35,27 @@ def resolve_render_options(
     request = request_options or {}
     base = defaults or {}
     kwargs: dict[str, Any] = {}
-    timeout = _pick(request, base, "timeout_seconds")
+    # #444: the clamp binds the CALLER's side only -- the defaults side is
+    # operator/policy-owned and ceilinged by its own validators already.
+    timeout = request.get("timeout_seconds")
     if timeout is not None:
-        kwargs["timeout_seconds"] = int(timeout)
-    retries = _pick(request, base, "max_retries")
+        kwargs["timeout_seconds"] = min(int(timeout), MAX_HTTP_TIMEOUT_SECONDS)
+    elif (base_timeout := base.get("timeout_seconds")) is not None:
+        kwargs["timeout_seconds"] = int(base_timeout)
+    retries = request.get("max_retries")
     if retries is not None:
-        kwargs["max_retries"] = int(retries)
+        kwargs["max_retries"] = min(int(retries), MAX_RETRIES)
+    elif (base_retries := base.get("max_retries")) is not None:
+        kwargs["max_retries"] = int(base_retries)
     for key in ("respect_robots", "include_html", "include_text"):
         value = _pick(request, base, key)
         if value is not None:
             kwargs[key] = bool(value)
-    kwargs["browser_profile"] = dict(_pick(request, base, "browser_profile") or {})
+    # #444: an unsized profile string is per-request memory a pooled renderer
+    # holds; the crawl boundary already refused it, so this is the render edge.
+    profile = dict(_pick(request, base, "browser_profile") or {})
+    refuse_oversized_profile_strings(profile)
+    kwargs["browser_profile"] = profile
     return RenderOptions(**kwargs)
 
 

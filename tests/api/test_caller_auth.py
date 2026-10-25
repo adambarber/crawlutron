@@ -6,6 +6,7 @@ Regression pins for the auth paths that had zero coverage (#199).
 from __future__ import annotations
 
 from app.storage.caller_key_store import CallerKeyStore
+from tests._async_harnesses import issue_key
 from tests.factories.client import isolation_client, post_crawl, quota_client
 from tests.factories.store import complete_job
 
@@ -106,3 +107,65 @@ async def test_keyless_crawl_stays_anonymous(tmp_path):
     async with quota_client(tmp_path) as (client, _store, _results, _keys):
         response = await post_crawl(client, max_pages=1)
         assert response.status_code == 202, response.text
+
+
+async def test_a_valid_caller_key_cannot_mint_keys(tmp_path):
+    """#436: a tenant key is not the operator; the keys door refuses to mint.
+
+    Today the door falls through to ordinary verification, so any live key
+    mints a fresh unbounded identity -- the escalation this refuses.
+    """
+    async with isolation_client(tmp_path) as (client, _store, _results, _keys):
+        secret = await issue_key(client)
+
+        minted = await client.post("/v1/keys", json={"label": "escalated"}, headers={"X-API-Key": secret})
+
+        _assert_401(minted)
+
+
+async def test_a_valid_caller_key_cannot_revoke_another_callers_key(tmp_path):
+    """#436: revocation is operator-only; a tenant key leaves a tenant's key live."""
+    async with isolation_client(tmp_path) as (client, _store, _results, keys):
+        victim_secret = await issue_key(client)
+        attacker_secret = await issue_key(client)
+        victim_key = keys.verify_key(victim_secret)
+        assert victim_key is not None
+
+        refused = await client.delete(f"/v1/keys/{victim_key.key_id}", headers={"X-API-Key": attacker_secret})
+
+        _assert_401(refused)
+        assert keys.verify_key(victim_secret) is not None
+
+
+async def test_a_valid_caller_key_cannot_list_keys(tmp_path):
+    """#436: the inventory is operator-only; a tenant key reads no other tenant's rows."""
+    async with isolation_client(tmp_path) as (client, _store, _results, _keys):
+        secret = await issue_key(client)
+
+        listed = await client.get("/v1/keys", headers={"X-API-Key": secret})
+
+        _assert_401(listed)
+
+
+async def test_keys_door_is_sealed_when_no_operator_token_is_configured(tmp_path, monkeypatch):
+    """#436: fail closed -- with no token configured, even a live key cannot mint.
+
+    The documented contract (settings, .env.example) says an empty token
+    disables the HTTP key surface; the door must not fall through.
+    """
+    from tests._async_harnesses import serve
+    from tests._quota_harness import stores
+    from tests.factories.client import isolation_app
+
+    monkeypatch.delenv("CRAWLUTRON_KEY_ADMIN_TOKEN", raising=False)
+    store, results, keys = stores(tmp_path)
+    app = isolation_app(store, results, keys)
+    app.state.key_admin_token = ""
+    async with serve(app) as client:
+        issued = keys.issue_key("tenant-a")
+
+        minted = await client.post(
+            "/v1/keys", json={"label": "escalated"}, headers={"X-API-Key": issued.secret}
+        )
+
+        _assert_401(minted)
