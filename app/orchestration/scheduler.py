@@ -90,16 +90,17 @@ class TokenBucket:
         self.last_refill = time.monotonic()
 
     def consume(self, tokens: float = 1.0) -> float:
-        """Return seconds to wait before consuming ``tokens`` (0 if available)."""
+        """Reserve ``tokens``, returning seconds to wait before firing (0 if available).
+
+        A short caller drives the balance negative, so overlapping callers queue
+        behind what was taken (the max_rps herd); rate >= 1/MAX_RATE_LIMIT_RPS.
+        """
         now = time.monotonic()
         elapsed = now - self.last_refill
         self.tokens = min(self.capacity, self.tokens + elapsed * self.rate)
         self.last_refill = now
-        if self.tokens >= tokens:
-            self.tokens -= tokens
-            return 0.0
-        deficit = tokens - self.tokens
-        return deficit / self.rate
+        self.tokens -= tokens
+        return max(0.0, -self.tokens / self.rate)
 
 
 # Upper bound on how long any single job will sleep on a domain cooldown.
@@ -406,6 +407,8 @@ class DomainScheduler:
                 self._token_buckets[job.domain] = bucket
             wait_seconds = bucket.consume(1.0)
             if wait_seconds > 0:
+                # The reserve is taken; this sleep only spaces this job's firing,
+                # and the next caller's consume sees the negative balance.
                 await asyncio.sleep(wait_seconds)
 
         async with domain_gates[job.domain]:

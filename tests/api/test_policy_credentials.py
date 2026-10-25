@@ -5,6 +5,7 @@ secrets into URLs; origin-keyed fields ride the existing cross-host scrub.
 
 import pytest
 
+from app.admission.credentials import origin_of
 from app.models.credential import Credential
 from app.transport.request_profile import apply_credentials
 from tests._policy_factories import CrawlPolicy, PolicyTier, canonical, payload_policy, read_policy
@@ -192,3 +193,61 @@ class TestCredentialValueInjection:
                 canonical("https://private.example/page"),
                 {"https://private.example": smuggled},
             )
+
+
+class TestIpv6AndTrailingDotOrigins:
+    """#518: an IPv6-literal credential origin must survive its own canonicalization.
+
+    An unbracketed rebuild re-parses with ValueError, so every reload of a row
+    carrying one fails ``read_policy`` and the row is unloadable.
+    """
+
+    def test_origin_of_brackets_ipv6_literals(self):
+        origin = origin_of("https://[2001:0DB8::1]:8080/page")
+        assert origin == "https://[2001:0db8::1]:8080"
+        # Idempotent: the canonical form re-parses to itself.
+        assert origin_of(origin) == origin
+
+    def test_origin_of_matches_the_normalized_url_spelling(self):
+        url = canonical("https://[2001:0db8::1]:8080/page")
+        assert origin_of(url.raw) == url.origin
+
+    def test_origin_of_strips_the_trailing_fqdn_dot(self):
+        assert origin_of("https://example.com./page") == "https://example.com"
+
+    def test_an_ipv6_credential_policy_revalidates(self):
+        """The wire path writes origin_of's spelling into the policy; the read
+        edge re-runs the canonicalizer on every load, so one spelling must
+        survive its own round trip."""
+        policy = payload_policy(
+            {"policy": {"credentials": {"https://[2001:0db8::1]:8080": {"kind": "bearer", "token": "t"}}}},
+            MODEL_DEFAULTS_TIER,
+        )
+        assert list(policy.credentials) == ["https://[2001:0db8::1]:8080"]
+        again = payload_policy({"policy": {"credentials": dict(policy.credentials)}}, MODEL_DEFAULTS_TIER)
+        assert dict(again.credentials) == dict(policy.credentials)
+
+    def test_an_ipv6_credential_row_loads_from_the_job_store(self, tmp_path):
+        """The #518 corruption: a whole-site job whose policy carries an
+        IPv6-port credential failed read_policy on EVERY load and the row
+        returned None (job_store_load_corrupt)."""
+        from tests._policy_factories import UNRESTRICTED_HOST_POLICY as unrestricted
+        from tests._policy_factories import job_store
+
+        store = job_store(tmp_path / "jobs.db", policy=unrestricted)
+        policy = payload_policy(
+            {"policy": {"credentials": {"https://[2001:0db8::1]:8080": {"kind": "bearer", "token": "t"}}}},
+            MODEL_DEFAULTS_TIER,
+        )
+        job = store.create("https://[2001:0db8::1]:8080/", policy)
+        loaded = store.load(job.job_id)
+        assert loaded is not None, "an IPv6-credential row must load back"
+        assert "https://[2001:0db8::1]:8080" in read_policy(loaded.policy).credentials
+
+    def test_an_ipv6_origin_credential_attaches(self):
+        headers = apply_credentials(
+            {},
+            canonical("https://[2001:0db8::1]:8080/page"),
+            {"https://[2001:0db8::1]:8080": Credential(kind="bearer", token="t")},
+        )
+        assert headers["Authorization"] == "Bearer t"

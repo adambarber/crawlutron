@@ -294,3 +294,61 @@ class TestCooldownPurgeCadence:
         scheduler.set_domain_cooldown("rate-limited.test", 30.0)
         assert "rate-limited.test" in scheduler.domain_cooldowns
         assert scheduler.domain_cooldowns["rate-limited.test"] > 1000.0
+
+
+class TestTokenBucketConcurrency:
+    """#517: under concurrency the bucket must RESERVE, not just observe.
+
+    Calls that overlap must each be held back by what the others took, or every
+    job in a burst reads the same token count and fires together.
+    """
+
+    async def test_an_overlapping_burst_reserves_in_arrival_order(self, monkeypatch):
+        """The scheduler-level herd: seven jobs on one domain, gathered like
+        ``run``'s fan-out, must request SERIALLY increasing waits (1s, 2s at
+        rate 1), never the same deficit twice."""
+        sleeps = recorder(monkeypatch)
+        scheduler = make_scheduler(global_limit=10, per_domain_limit=10, max_rps=1.0, adaptive=False)
+        # capacity=5: the first five are free, the 6th and 7th queue behind the
+        # refill at rate 1 -- 1s, then 2s, never the same deficit twice.
+        jobs = [make_job(i, "https://example.com/p") for i in range(7)]
+        ret = await scheduler.run(jobs, ok_worker, failed_result=engine_envelope)
+        assert ret is not None
+        waits = sorted(sleeps.in_range(0.9, 3.0))
+        assert waits == [pytest.approx(1.0, abs=1e-3), pytest.approx(2.0, abs=1e-3)], (
+            f"the burst did not serialize its reserves behind the free tokens: {waits}"
+        )
+        # Seven zero-delays (five free tokens + the zero base delay sleep each
+        # job takes), then the two reserves in refill order.
+        assert sorted(sleeps.delays) == [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            pytest.approx(1.0, abs=1e-3),
+            pytest.approx(2.0, abs=1e-3),
+        ], sleeps.delays
+
+    async def test_drained_bucket_serializes_two_gathered_consumes(self, monkeypatch):
+        """Two gathered consumers on a drained bucket must wait SERIALLY: the
+        second observes what the first reserved and waits ~1/rate longer."""
+        sleeps = recorder(monkeypatch)
+        bucket = TokenBucket(rate=2.0, capacity=0)
+        taken: list[float] = []
+
+        async def one() -> None:
+            wait = bucket.consume(1.0)
+            taken.append(wait)
+            await asyncio.sleep(wait)  # the real caller's shape: fire after the wait
+
+        await asyncio.gather(one(), one())
+        # A real monotonic clock refills microseconds between the two takes, so
+        # the equality is to a millisecond, not an exact float.
+        assert taken == [pytest.approx(0.5, abs=1e-3), pytest.approx(1.0, abs=1e-3)], taken
+        assert sorted(sleeps.delays) == [
+            pytest.approx(0.5, abs=1e-3),
+            pytest.approx(1.0, abs=1e-3),
+        ], sleeps.delays
