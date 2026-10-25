@@ -131,14 +131,15 @@ def job_engine_payload(job: Any, batch: Sequence[FrontierEntry]) -> CrawlRequest
     return CrawlRequest(urls=urls, policy=policy)
 
 
-async def _pace_delayed_batch(
+async def pace_delayed_batch(
     context: JobAdmissionContext,
     batch: Sequence[FrontierEntry],
 ) -> None:
     tasks: list[CrawlTask] = []
     for index, entry in enumerate(batch):
-        host = entry.url.host.lower()
-        if host in context.delayed_hosts:
+        # The membership test uses the same canonical key commit_crawl_delay
+        # recorded (#445/#497): a host must never miss its own site's delay.
+        if entry.url.site in context.delayed_hosts:
             tasks.append(
                 CrawlTask(
                     index=index,
@@ -327,7 +328,7 @@ async def run_job(
             if not job.in_flight:
                 job.in_flight = list(batch)
             await job_store.asave(job)
-            await _pace_delayed_batch(context, batch)
+            await pace_delayed_batch(context, batch)
             result = await _execute_crawl(
                 job_engine_payload(job, batch), settings=settings, shutdown_event=shutdown_event
             )
@@ -407,6 +408,7 @@ __all__ = [
     "cancel_job_task",
     "install_execute_crawl",
     "is_running",
+    "pace_delayed_batch",
     "pause_job",
     "recover_orphaned_running_jobs",
     "run_job",
