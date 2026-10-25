@@ -126,6 +126,33 @@ def test_strip_is_linear_under_pathological_unclosed_script_flood():
     assert t_big < 0.05, f"linear scan too slow: {t_big:.6f}s of CPU for ~4MB"
 
 
+def test_strip_is_linear_when_noise_regions_are_all_closed():
+    """Many CLOSED regions must not rescan for the absent openers (#440).
+
+    Each consumed region used to pay two find() scans of the whole remaining
+    body for the openers that were not there -- O(k*n) in k closed regions.
+    """
+    from app.extraction.classify import strip_html_noise
+
+    one_region = "<script>" + "b" * 100 + "</script>"
+    small = cpu_seconds(lambda: strip_html_noise(one_region * 1_000))
+    big = cpu_seconds(lambda: strip_html_noise(one_region * 4_000))
+    assert big < small * 7, f"closed-region flood is super-linear: {small:.6f}s -> {big:.6f}s"
+    assert big < 1.0, f"{big:.6f}s of CPU for ~468KB is not a linear scan"
+
+
+def test_strip_is_linear_when_text_has_many_lt_but_no_gt():
+    """A page of bare ``<`` tokens with no ``>`` must not backtrack (#440).
+
+    The tail tag-strip ``<[^>]+>`` re-scanned to end-of-string at every ``<``
+    on such text -- the same O(k*n) class, hiding behind the scanner fix.
+    """
+    from app.extraction.classify import strip_html_noise
+
+    big = cpu_seconds(lambda: strip_html_noise("<b" * 100_000))
+    assert big < 1.0, f"{big:.6f}s of CPU for 200KB of bare '<' tokens is not a linear strip"
+
+
 def test_strip_unclosed_script_neutralizes_to_end_and_keeps_preceding_text():
     """An unclosed <script> swallows the remainder (browser-consistent)."""
     out = _strip("<p>visible</p><script>alert(1);<p>hidden tail</p>")

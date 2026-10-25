@@ -159,3 +159,36 @@ class TestPayloadPolicy:
         )
         twice = payload_policy({"policy": {"credentials": dict(once.credentials)}}, MODEL_DEFAULTS_TIER)
         assert dict(twice.credentials) == dict(once.credentials)
+
+
+class TestCredentialValueInjection:
+    """#441: a credential is a header VALUE at one remove -- a bearer token rides
+    Authorization verbatim, so the CR/LF/NUL law that governs policy.headers
+    values governs every secret field too.
+    """
+
+    @pytest.mark.parametrize(
+        ("kind", "field", "filler"),
+        [
+            ("bearer", "token", {}),
+            ("basic", "username", {"password": "p"}),
+            ("basic", "password", {"username": "u"}),
+        ],
+    )
+    def test_injectable_secret_fields_are_refused(self, kind, field, filler):
+        payload = {"kind": kind, field: "v\r\nX-Smuggled: 1", **filler}
+        with pytest.raises(ValueError):
+            Credential(**payload)
+
+    def test_apply_credentials_guards_the_built_value_even_past_the_model(self):
+        """Defense in depth at the assembly edge: a Credential that skipped
+        validation (model_construct, or a future door) still cannot put CRLF
+        on the wire through apply_credentials.
+        """
+        smuggled = Credential.model_construct(kind="bearer", token="t\r\nX-Smuggled: 1")
+        with pytest.raises(ValueError):
+            apply_credentials(
+                {},
+                canonical("https://private.example/page"),
+                {"https://private.example": smuggled},
+            )

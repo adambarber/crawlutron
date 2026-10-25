@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import re
 from typing import Final, NamedTuple
 
 from app.models.classification_evidence import ClassificationEvidenceRecord
@@ -274,16 +273,49 @@ def _evidence(
     )
 
 
-# Compiled at import: strip_html_noise runs per page on every strategy attempt,
-# and the lazy-global compile also carried a benign double-compile race under threads.
-_TAGS_RE = re.compile(r"<[^>]+>")
-
-
 # Cap the scan input: linear, so the bound covers resources, not correctness.
+
+
+def _strip_remaining_tags(text: str) -> str:
+    """Replace every ``<[^>]+>`` match with a space, linearly (#440): the regex
+    form backtracked to end-of-string at each ``<`` when no ``>`` existed
+    anywhere, and a page of bare ``<`` tokens made that O(k*n).
+    """
+    out: list[str] = []
+    pos = 0
+    while True:
+        lt = text.find("<", pos)
+        if lt == -1:
+            out.append(text[pos:])
+            return "".join(out)
+        gt = text.find(">", lt + 1)
+        if gt == -1:
+            # Unterminated tag: the regex found no match, so the tail stays verbatim.
+            out.append(text[pos:])
+            return "".join(out)
+        if gt == lt + 1:
+            # ``<>``: the pattern needs one+ chars between; keep the '<' verbatim.
+            out.append(text[pos : lt + 1])
+            pos = lt + 1
+            continue
+        out.append(text[pos:lt])
+        out.append(" ")
+        pos = gt + 1
 
 
 #: Openers whose closers are stripped before classification: a declaration.
 _NOISE_OPENERS: Final = ("<script", "<style", "<!--")
+
+
+def _refresh_opener_positions(lower: str, next_at: dict[str, int], pos: int) -> dict[str, int]:
+    """Carry each opener's next occurrence past ``pos``: an absent (-1) opener
+    stays absent forever, and a stale position is found again from ``pos`` --
+    forward-only finds, so the whole scan stays linear (#440).
+    """
+    for opener, at in next_at.items():
+        if at != -1 and at < pos:
+            next_at[opener] = lower.find(opener, pos)
+    return next_at
 
 
 def strip_html_noise(html: str | None) -> str:
@@ -296,10 +328,12 @@ def strip_html_noise(html: str | None) -> str:
     out: list[str] = []
     pos = 0
     lower = body.lower()
+    # Each opener's next occurrence rides the loop (#440): re-finding from pos every
+    # iteration made a page of many closed regions rescan the remainder per region.
+    next_at: dict[str, int] = {opener: lower.find(opener) for opener in _NOISE_OPENERS}
     while pos < len(body):
-        # The openers are a set, not a branch per tag: each branch added two lines
-        # and a tag to remember; the list is what the scan knows about noise.
-        candidates = [idx for idx in (lower.find(opener, pos) for opener in _NOISE_OPENERS) if idx != -1]
+        # The openers are a set, not a branch per tag; carried positions are its memory.
+        candidates = [idx for idx in next_at.values() if idx != -1]
 
         if not candidates:
             out.append(body[pos:])
@@ -321,6 +355,7 @@ def strip_html_noise(html: str | None) -> str:
                 # Not a real opener (``<scriptable``): keep the token verbatim.
                 out.append(body[start : start + 2])
                 pos = start + 2
+                next_at = _refresh_opener_positions(lower, next_at, pos)
                 continue
             closer = f"</{tag}"
 
@@ -332,9 +367,10 @@ def strip_html_noise(html: str | None) -> str:
         # Consume through the closing tag's ``>`` (handles attributes/space).
         gt = body.find(">", end)
         pos = len(body) if gt == -1 else gt + 1
+        next_at = _refresh_opener_positions(lower, next_at, pos)
 
     without_noise = "".join(out)
-    return _TAGS_RE.sub(" ", without_noise)
+    return _strip_remaining_tags(without_noise)
 
 
 def _html_has_no_user_visible_content(html: str | None) -> bool:

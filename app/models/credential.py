@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validator, model_validator
+
+from app.safety.header_values import reject_injectable_header_value
 
 
 class Credential(BaseModel):
@@ -39,6 +41,17 @@ class Credential(BaseModel):
             description="Basic password (kind=basic).",
         ),
     ] = None
+
+    @field_validator("token", "username", "password")
+    @classmethod
+    def _reject_injectable_secret_values(cls, value: str | None, info: ValidationInfo) -> str | None:
+        """A credential is a header VALUE at one remove: a bearer token rides
+        Authorization verbatim, so the wire law applies to every secret field,
+        at the read edge (#441).
+        """
+        if value is not None and info.field_name is not None:
+            reject_injectable_header_value(info.field_name, value)
+        return value
 
     @model_validator(mode="after")
     def _match_kind(self) -> Credential:
