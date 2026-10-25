@@ -118,7 +118,7 @@ def batch_is_http_heavy(
     counted = 0
     http_count = 0
     for _, task in islice(frontier, sample):
-        if task.domain is None:
+        if not task.domain:
             continue
         counted += 1
         if _pinned_strategy(scheduler, task) in HTTP_STRATEGIES:
@@ -294,7 +294,6 @@ class RecursiveState:
             index=self.next_index,
             original_url=link.original_url,
             normalized_url=link.normalized_url,
-            domain=link.normalized_url.host,
         )
         self.next_index += 1
         return link.depth, task
@@ -316,7 +315,6 @@ async def _seed_recursive_frontier(
             index=state.next_index,
             original_url=seed.raw,
             normalized_url=seed,
-            domain=seed.site,
         )
         frontier.append((0, task))
         state.next_index += 1

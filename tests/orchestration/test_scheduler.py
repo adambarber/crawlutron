@@ -232,7 +232,6 @@ class TestCircuitBreakerSpillsOnResult:
             index=0,
             original_url="http://example.com/",
             normalized_url=canonical("http://example.com/"),
-            domain="example.com",
         )
         # The delivery channel decides the return: with no sink, ``run`` hands back the index-keyed mapping
         # (the docstring's "otherwise" branch).

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from app.models.crawl_task import scheduler_domain_key
 from app.models.host_policy import HostPolicy
 from app.models.normalized_url import NormalizedUrl
 from app.models.render_options import RenderOptions
@@ -24,5 +25,5 @@ class CrawlJob:
 
     @property
     def domain(self) -> str:
-        """The registrable site every scheduler component keys on."""
-        return self.url.site
+        """The canonical scheduler key; derived so no caller can mis-key it."""
+        return scheduler_domain_key(self.url)
