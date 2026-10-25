@@ -156,6 +156,10 @@ def _eval_selector[SelectorResult](
     try:
         return fut.result(timeout=timeout)
     except concurrent.futures.TimeoutError:
+        # Cancel once the runaway finishes and wait it out: without this the
+        # future stays queued and four pathological selectors pin the whole pool.
+        fut.cancel()
+        concurrent.futures.wait([fut], timeout=timeout)
         return _EXTRACTION_SELECTOR_SENTINEL
 
 
