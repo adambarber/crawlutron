@@ -1,7 +1,7 @@
 """#381: the recursive path threads the occupied set as a value.
 
-Each expansion seeds its dedupe from the previous outcome's ``known_after``;
-the per-expansion frontier identity walk is gone from the admission seam."""
+Each expansion unions the previous outcome's ``known_delta`` in; the
+per-expansion frontier identity walk is gone from the admission seam."""
 
 from __future__ import annotations
 

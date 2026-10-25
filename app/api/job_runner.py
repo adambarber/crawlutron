@@ -219,7 +219,7 @@ async def _entry_result(
     """Record one entry's result into ``job``; returns ``1`` if it failed.
 
     ``known`` is the batch's threaded occupied set (#381): admission folds its
-    ``known_after`` back in, so the next entry dedupes against the value.
+    ``known_delta`` back in, so the next entry dedupes against the value.
     """
     if item is None:
         # The batch's own shaping envelope names the unanswered URL and carries
@@ -247,7 +247,7 @@ async def _entry_result(
         url_attr = item.normalized_url.raw if item.normalized_url else "<unknown>"
         logger.warning("link_admission_failed", extra={"url": url_attr})
         admitted = AdmissionOutcome()
-    known |= admitted.known_after
+    known |= admitted.known_delta  # unioning the delta copies nothing whole (#519)
     job.stats["total_discovered"] = job.stats.get("total_discovered", 0) + admitted.accepted
     return failed
 

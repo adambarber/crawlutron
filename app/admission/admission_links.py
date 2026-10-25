@@ -63,9 +63,9 @@ class AdmissionOutcome:
     # Candidates dropped because their canonical identity was already admitted;
     # counted apart from cap_blocked so a cap report never hides a dedupe.
     duplicates_skipped: int = 0
-    # The caller's ``known`` set after the run (their own is never mutated, #159),
-    # so the next pass dedupes against the occupied set instead of re-deriving it.
-    known_after: frozenset[NormalizedUrl] = frozenset()
+    # The identities this pass newly reserved (#519): callers union the delta;
+    # the old whole-set ``known_after`` is gone, its last consumer threads this.
+    known_delta: frozenset[NormalizedUrl] = frozenset()
 
 
 def _link_values(link: Any) -> tuple[str, str] | None:
@@ -99,16 +99,19 @@ class _ChunkOutcome:
 
 @dataclass
 class _AdmissionPass[T]:
-    """The policy, dedupe set, and output frontier one admission run carries; ``reserved``
-    is the run's own occupied set. The caller's ``known`` is read-only: it seeds ``reserved``
-    once and is never handed to the front line for in-place growth (#159)."""
+    """The policy, dedupe sets, and output frontier one admission run carries.
+
+    ``known`` is the caller's occupied set, read-only; ``added`` is the run's own
+    growth, so dedupe checks both and neither set is copied (#159, #519).
+    """
 
     robots_allows: RobotsAllows
     respect_robots: bool
     robots_crawl_delay: RobotsCrawlDelay | None
     commit_crawl_delay: CommitCrawlDelay
     max_pages: int
-    reserved: set[NormalizedUrl]
+    known: set[NormalizedUrl]
+    added: set[NormalizedUrl]
     frontier: MutableSequence[T]
     make_entry: Callable[[AdmittedLink], T]
 
@@ -121,13 +124,13 @@ def _prepare_admission[T](
     scope_pattern: BoundedPattern | None,
     want_document_bodies: bool,
     host_policy: HostPolicy,
-) -> tuple[set[NormalizedUrl], int, Iterator[AdmittedLink]]:
-    """The occupied set and candidate stream a link-admission pass runs over.
+) -> tuple[set[NormalizedUrl], Iterator[AdmittedLink]]:
+    """The run's added-set and candidate stream a link-admission pass runs over.
 
     ``known`` is the caller's FULL occupied set -- visited, in-flight and frontier
-    identities together (#381): it seeds ``reserved`` by value and is never mutated.
+    identities together (#381). It is read, never copied or mutated (#159, #519).
     """
-    reserved: set[NormalizedUrl] = set(known)
+    added: set[NormalizedUrl] = set()
     candidates = iter(
         _candidate_stream(
             links,
@@ -138,7 +141,7 @@ def _prepare_admission[T](
             host_policy=host_policy,
         )
     )
-    return reserved, len(reserved), candidates
+    return added, candidates
 
 
 def _collect_chunk(candidates: Iterator[AdmittedLink], chunk_limit: int) -> list[AdmittedLink]:
@@ -159,14 +162,14 @@ async def _admit_chunk[T](
     current_occupied: int,
 ) -> _ChunkOutcome:
     """Admit one chunk against robots, dedupe, and the page cap."""
-    reserved = pass_.reserved
+    known, added = pass_.known, pass_.added
     accepted = 0
     robots_blocked = 0
     duplicates_skipped = 0
     occupied_delta = 0
-    if reserved:
+    if known or added:
         before = len(chunk)
-        chunk = [c for c in chunk if c.normalized_url not in reserved]
+        chunk = [c for c in chunk if c.normalized_url not in known and c.normalized_url not in added]
         duplicates_skipped += before - len(chunk)
         if not chunk:
             return _ChunkOutcome(accepted, robots_blocked, duplicates_skipped, False, False, 0)
@@ -180,23 +183,23 @@ async def _admit_chunk[T](
         if not allowed:
             robots_blocked += 1
             continue
-        # `reserved` can grow inside this loop, so two aliases within one chunk
+        # `added` can grow inside this loop, so two aliases within one chunk
         # are caught here too, and the crawl-delay check is a robots artifact.
-        if candidate.normalized_url in reserved:
+        if candidate.normalized_url in known or candidate.normalized_url in added:
             duplicates_skipped += 1
             continue
         if pass_.respect_robots and pass_.robots_crawl_delay is not None:
             delay = await pass_.robots_crawl_delay(candidate.normalized_url)
             if delay is not None and delay > 0:
                 pass_.commit_crawl_delay(candidate.normalized_url.site, delay)
-        if candidate.normalized_url in reserved:
+        if candidate.normalized_url in known or candidate.normalized_url in added:
             continue
         capacity = remaining_page_capacity(current_occupied + occupied_delta, pass_.max_pages)
         if capacity is not None and capacity <= 0:
             return _ChunkOutcome(accepted, robots_blocked, duplicates_skipped, True, True, occupied_delta)
         pass_.frontier.append(pass_.make_entry(candidate))
         accepted += 1
-        reserved.add(candidate.normalized_url)
+        added.add(candidate.normalized_url)
         occupied_delta += 1
     return _ChunkOutcome(accepted, robots_blocked, duplicates_skipped, False, False, occupied_delta)
 
@@ -206,7 +209,7 @@ async def _admission_loop[T](
     candidates: Iterator[AdmittedLink],
 ) -> tuple[int, bool, int, int]:
     """Consume the candidate stream chunk by chunk; returns the running tally."""
-    current_occupied = len(pass_.reserved)
+    current_occupied = len(pass_.known) + len(pass_.added)
     accepted = 0
     cap_blocked = False
     robots_blocked = 0
@@ -248,10 +251,11 @@ async def admit_discovered_links[T](
     host_policy: HostPolicy,
 ) -> AdmissionOutcome:
     """Admit ``links`` against the occupied set ``known`` (full: visited, in-flight,
-    frontier -- #381); ``known_after`` returns the updated value to thread."""
+    frontier -- #381). The run never mutates or copies it; the outcome carries
+    the DELTA it added, which callers union into their own set (#159, #519)."""
     if source_depth >= max_depth:
         return AdmissionOutcome()
-    reserved, _occupied, candidates = _prepare_admission(
+    added, candidates = _prepare_admission(
         links,
         known=known,
         next_depth=source_depth + 1,
@@ -265,7 +269,8 @@ async def admit_discovered_links[T](
         robots_crawl_delay=robots_crawl_delay,
         commit_crawl_delay=commit_crawl_delay,
         max_pages=max_pages,
-        reserved=reserved,
+        known=known,
+        added=added,
         frontier=frontier,
         make_entry=make_entry,
     )
@@ -277,7 +282,7 @@ async def admit_discovered_links[T](
         cap_blocked=cap_blocked,
         robots_blocked=robots_blocked,
         duplicates_skipped=duplicates_skipped,
-        known_after=frozenset(reserved),
+        known_delta=frozenset(added),
     )
 
 

@@ -290,8 +290,8 @@ class RecursiveState:
     visited: set[NormalizedUrl]
     next_index: int
     ramp: float
-    # The threaded occupied set (#381): the previous admission's ``known_after``,
-    # so each expansion dedupes against the value instead of re-deriving it.
+    # The threaded occupied set (#381): each admission's ``known_delta`` unioned
+    # in, so each expansion dedupes against the value without re-deriving it.
     known: set[NormalizedUrl]
     page_count: int = 0
     transient_requeues: dict[NormalizedUrl, int] = field(default_factory=dict)
@@ -384,9 +384,9 @@ async def _expand_recursive_result(
         commit_crawl_delay=lambda domain, delay: run.scheduler.set_domain_min_delay(domain, delay),
         host_policy=run.host_policy,
     )
-    # Empty only on the max-depth early return: never wipe a seeded set with it.
-    if outcome.known_after:
-        state.known = set(outcome.known_after)
+    # The delta is the primary path: unioning it copies nothing whole (#519).
+    # The max-depth early return yields an empty delta, a no-op here.
+    state.known |= outcome.known_delta
 
 
 async def commit_recursive_results(

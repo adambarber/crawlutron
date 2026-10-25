@@ -94,10 +94,10 @@ async def test_admission_robots_work_stops_at_remaining_capacity():
     assert outcome.cap_blocked is True
 
 
-async def test_known_is_read_only_and_known_after_threads_the_occupied_set():
-    """The caller's ``known`` set is never mutated in place (#159); the updated
-    occupied set is RETURNED so a caller can thread it across admission passes
-    instead of re-deriving it from scratch each batch."""
+async def test_known_is_read_only_and_known_delta_threads_the_occupied_set():
+    """The caller's ``known`` set is never mutated in place (#159); the pass returns
+    the DELTA it reserved (#519), so a caller threads the occupied set by unioning
+    it instead of re-deriving it from scratch each batch."""
     owned = {canonical("https://example.test/root")}
     known_snapshot = frozenset(owned)
     frontier: list[NormalizedUrl] = []
@@ -114,14 +114,16 @@ async def test_known_is_read_only_and_known_after_threads_the_occupied_set():
     )
 
     # The set the caller handed in is untouched: dedupe and reserve live on the
-    # admission run's own occupied set, and the caller stays the owner.
+    # admission run's own added-set, and the caller stays the owner.
     assert owned == set(known_snapshot)
-    # The returned occupied set reflects everything admitted, so a second pass
-    # can seed its dedupe from it rather than re-scanning the whole job state.
-    assert outcome.known_after == known_snapshot | {
-        canonical("https://example.test/child"),
-        canonical("https://example.test/other"),
-    }
+    # The returned delta is exactly what this pass added, so unioning it threads
+    # the occupied set rather than re-scanning the whole job state.
+    assert outcome.known_delta == frozenset(
+        {
+            canonical("https://example.test/child"),
+            canonical("https://example.test/other"),
+        }
+    )
 
 
 async def _robots_all_admit(_url: NormalizedUrl) -> bool:
