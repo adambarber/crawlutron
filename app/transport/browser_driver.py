@@ -219,7 +219,7 @@ class BrowserDriver:
         """
         if (
             self._browser is None
-            or getattr(self._browser, "is_closed", False)
+            or _browser_closed(self._browser)
             or self._render_count >= self._max_browser_renders
         ):
             if self._browser is not None:
@@ -366,3 +366,11 @@ class BrowserDriver:
     async def _async_sleep(self, seconds: float) -> None:
         """Wait between page steps, off the event loop. See :func:`async_sleep`."""
         await async_sleep(self._sleep, seconds)
+
+
+def _browser_closed(browser: Any) -> bool:
+    """Whether ``browser`` is closed, calling an ``is_closed`` method (Playwright)
+    or reading a bool attribute/property, and defaulting to open when it publishes none.
+    """
+    probe = getattr(browser, "is_closed", False)
+    return probe() if callable(probe) else bool(probe)

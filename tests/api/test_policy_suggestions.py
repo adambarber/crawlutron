@@ -9,6 +9,7 @@ import pytest
 
 from app.api.policy_suggestions import policy_suggestions
 from app.config.settings import CrawlerSettings
+from app.models.caller_identity import CallerIdentity
 from app.models.json_value import JsonValue
 from app.storage.result_store import CrawlResultStore
 from tests._assertions import completed_crawl
@@ -22,9 +23,14 @@ def result_store(tmp_path) -> CrawlResultStore:
     return CrawlResultStore(tmp_path / "results.db")
 
 
+#: The default keyed caller the endpoint tests crawl and roll up as; records the
+#: crawl endpoint stores ride the same identity, so scoping keeps them visible.
+KEY_A = CallerIdentity(caller_id="key_a", authenticated=True)
+
+
 @pytest.fixture
 async def client(result_store, job_store):
-    async with policy_client(result_store, job_store) as crawl_client:
+    async with policy_client(result_store, job_store, caller=KEY_A) as crawl_client:
         yield crawl_client
 
 
@@ -184,9 +190,9 @@ class _PagingStore(CrawlResultStore):
         super().__init__(*args, **kwargs)
         self.page_calls: list[int] = []
 
-    def payloads_page(self, *, limit: int, cursor=None):
+    def payloads_page(self, *, limit: int, cursor=None, owner=None):
         self.page_calls.append(limit)
-        return super().payloads_page(limit=limit, cursor=cursor)
+        return super().payloads_page(limit=limit, cursor=cursor, owner=owner)
 
 
 async def test_the_rollup_reads_bounded_pages_never_the_whole_table(tmp_path):
@@ -260,3 +266,47 @@ async def test_validation_and_rollup_run_off_the_event_loop(tmp_path, monkeypatc
     await policy_suggestions(result_store=store, settings=CrawlerSettings.from_mapping({}))
 
     assert on_loop == [], f"loop-thread work: {on_loop}"
+
+
+async def test_an_unauthenticated_request_is_refused(result_store, job_store):
+    """#514: no key, no rollup -- the evidence surface is not anonymous."""
+    async with policy_client(result_store, job_store) as client:
+        response = await client.get("/v1/policy-suggestions")
+
+    assert response.status_code == 401, response.text
+
+
+_FOREIGN_TRACE_NAME = "crawl_foreign"
+
+
+def _foreign_row() -> dict[str, JsonValue]:
+    return _stored_trace(_FOREIGN_TRACE_NAME, "https://foreign.test/blocked")
+
+
+async def test_a_keyed_caller_does_not_see_another_callers_evidence(result_store, job_store):
+    """#514: a keyed non-operator caller's rollup covers only its own records."""
+    await result_store.aput(_FOREIGN_TRACE_NAME, _foreign_row(), owner="key_b")
+
+    async with policy_client(result_store, job_store, caller=KEY_A) as client:
+        body = (await client.get("/v1/policy-suggestions")).json()
+
+    assert body["suggestions"] == [], "a foreign caller's evidence leaked into the rollup"
+    assert body["records_examined"] == 0
+
+
+async def test_the_operator_token_sees_the_cross_tenant_rollup(result_store, job_store):
+    """#514: the full rollup is operator-tier, mirroring the /metrics detail gate."""
+    await result_store.aput(_FOREIGN_TRACE_NAME, _foreign_row(), owner="key_b")
+
+    async with policy_client(
+        result_store,
+        job_store,
+        caller=KEY_A,
+        key_admin_token="test-admin-token",
+    ) as client:
+        response = await client.get("/v1/policy-suggestions", headers={"X-API-Key": "test-admin-token"})
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["records_examined"] == 1
+    assert [s["host"] for s in body["suggestions"]] == [canonical("https://foreign.test/blocked").site]

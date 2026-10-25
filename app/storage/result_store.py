@@ -104,40 +104,67 @@ class CrawlResultStore(CoordinationStore):
             return None
         return json.loads(payload)
 
-    def payloads_page(
-        self, *, limit: int, cursor: tuple[float, str] | None = None
-    ) -> list[tuple[tuple[float, str], JsonValue]]:
-        """One bounded page of retained payloads, newest first, each with its
-        (stored_at, request_id) continuation cursor; an empty page ends the scan.
-        The request_id half keeps equal-``stored_at`` rows in a stable order.
-        """
+    def _cutoff(self) -> float:
         now = self._clock()
-        cutoff = now - self._ttl_seconds if self._ttl_seconds > 0 else 0.0
+        return now - self._ttl_seconds if self._ttl_seconds > 0 else 0.0
+
+    def payloads_page(
+        self, *, limit: int, cursor: tuple[float, str] | None = None, owner: str | None = None
+    ) -> list[tuple[tuple[float, str], JsonValue]]:
+        """One bounded page of retained payloads, newest first, with its
+        (stored_at, request_id) continuation cursor; an empty page ends the scan.
+        When ``owner`` is given, only rows owned by that caller are returned.
+        """
+        cutoff = self._cutoff()
         with self._lock:
             if cursor is None:
-                rows = self._conn.execute(
-                    "SELECT stored_at, request_id, payload FROM results"
-                    " WHERE stored_at >= ? ORDER BY stored_at DESC, request_id DESC LIMIT ?",
-                    (cutoff, limit),
-                ).fetchall()
+                if owner is None:
+                    rows = self._conn.execute(
+                        "SELECT stored_at, request_id, payload FROM results"
+                        " WHERE stored_at >= ? ORDER BY stored_at DESC, request_id DESC LIMIT ?",
+                        (cutoff, limit),
+                    ).fetchall()
+                else:
+                    rows = self._conn.execute(
+                        "SELECT stored_at, request_id, payload FROM results"
+                        " WHERE stored_at >= ? AND owner = ?"
+                        " ORDER BY stored_at DESC, request_id DESC LIMIT ?",
+                        (cutoff, owner, limit),
+                    ).fetchall()
             else:
                 at, request_id = cursor
-                rows = self._conn.execute(
-                    "SELECT stored_at, request_id, payload FROM results"
-                    " WHERE stored_at >= ? AND (stored_at < ? OR (stored_at = ? AND request_id < ?))"
-                    " ORDER BY stored_at DESC, request_id DESC LIMIT ?",
-                    (cutoff, at, at, request_id, limit),
-                ).fetchall()
+                if owner is None:
+                    rows = self._conn.execute(
+                        "SELECT stored_at, request_id, payload FROM results"
+                        " WHERE stored_at >= ? AND (stored_at < ? OR (stored_at = ? AND request_id < ?))"
+                        " ORDER BY stored_at DESC, request_id DESC LIMIT ?",
+                        (cutoff, at, at, request_id, limit),
+                    ).fetchall()
+                else:
+                    rows = self._conn.execute(
+                        "SELECT stored_at, request_id, payload FROM results"
+                        " WHERE stored_at >= ? AND owner = ?"
+                        " AND (stored_at < ? OR (stored_at = ? AND request_id < ?))"
+                        " ORDER BY stored_at DESC, request_id DESC LIMIT ?",
+                        (cutoff, owner, at, at, request_id, limit),
+                    ).fetchall()
         return [((stored_at, request_id), json.loads(payload)) for stored_at, request_id, payload in rows]
 
-    def retained_count(self) -> int:
-        """Rows the TTL window still retains -- the rollup's honest denominator."""
-        now = self._clock()
-        cutoff = now - self._ttl_seconds if self._ttl_seconds > 0 else 0.0
+    def retained_count(self, *, owner: str | None = None) -> int:
+        """Rows the TTL window still retains -- the rollup's honest denominator.
+        When ``owner`` is given, only rows owned by that caller are counted.
+        """
+        cutoff = self._cutoff()
         with self._lock:
-            row = self._conn.execute(
-                "SELECT COUNT(*) FROM results WHERE stored_at >= ?", (cutoff,)
-            ).fetchone()
+            if owner is None:
+                row = self._conn.execute(
+                    "SELECT COUNT(*) FROM results WHERE stored_at >= ?", (cutoff,)
+                ).fetchone()
+            else:
+                row = self._conn.execute(
+                    "SELECT COUNT(*) FROM results WHERE stored_at >= ? AND owner = ?",
+                    (cutoff, owner),
+                ).fetchone()
         return int(row[0]) if row is not None else 0
 
     # One ``atwin`` twin per operation: the sync signature is declared once and
