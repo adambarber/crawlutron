@@ -5,6 +5,23 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Security
+- **`/v1/keys` is operator-only; a caller key no longer mints or revokes keys
+  (#436).** `get_keys_caller` fell through to ordinary verification whenever
+  the presented secret was not the operator token, so ANY live caller key
+  could mint fresh unbounded identities (`max_pages=0, max_concurrency=0`
+  default to unbounded), revoke any other tenant's key by id, and read every
+  tenant's labels and quotas -- a cross-tenant authz break one POST away.
+  The door now accepts only the configured operator token
+  (`CRAWLUTRON_KEY_ADMIN_TOKEN`) and fails closed when none is configured,
+  which is the contract `.env.example` and `CrawlerSettings` already
+  documented ("empty disables issuance/listing/revocation over HTTP") and
+  `scripts/e2e_verify.py` already assumed. The refusal is the door's existing
+  401 `invalid_api_key` envelope -- no store lookup, so the keys door is not
+  a key-validity oracle, and callers learn nothing about which keys are live.
+  Refusals are pinned in `tests/api/test_caller_auth.py`: a tenant key cannot
+  mint, list, or revoke, and the sealed door stays sealed without a token.
+
 ### Changed
 - **An app class may no longer promise a container interface nobody asked for.**
   `_LockedDomainCookieStore` subclassed `MutableMapping[str, str]`, and ten of
