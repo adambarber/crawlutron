@@ -1,6 +1,6 @@
 """Persist completed single-request crawl results for later retrieval, fixing the
 202 webhook's missing ``status_url`` and the crawl work lost on a dropped
-connection. Payloads store keyed by ``request_id`` with TTL + count guardrails.
+connection. Payloads store keyed by ``request_id`` with TTL + count + byte guardrails.
 """
 
 from __future__ import annotations
@@ -12,6 +12,14 @@ from pathlib import Path
 from app.models.json_value import JsonValue
 from app.storage.coordination_store import CoordinationStore, atwin
 from app.storage.migrations import StoreSchema
+
+# The write-edge byte cap (#443): one retained row is a whole crawl response, so
+# without a byte bound the entry cap bounds rows, never retained bytes.
+_MAX_PAYLOAD_BYTES = 4 * 1024 * 1024
+
+
+class PayloadTooLargeError(ValueError):
+    """A serialized payload past the store's byte cap, refused before persistence."""
 
 
 class CrawlResultStore(CoordinationStore):
@@ -28,21 +36,30 @@ class CrawlResultStore(CoordinationStore):
         *,
         ttl_seconds: float = 3600.0,
         max_entries: int = 1000,
+        max_payload_bytes: int = _MAX_PAYLOAD_BYTES,
         clock=None,
     ) -> None:
         super().__init__(db_path)
         self._ttl_seconds = max(0.0, float(ttl_seconds))
         self._max_entries = max(1, int(max_entries))
+        self._max_payload_bytes = max(1, int(max_payload_bytes))
         self._clock = clock or time.time
 
     def put(self, request_id: str, payload: JsonValue, *, owner: str = "") -> None:
         """Store a completed response; ``owner=""`` is the shared anonymous bucket."""
+        # json.dumps defaults to ensure_ascii, so the dump is pure ASCII and its
+        # length in characters IS its length in bytes: no second copy to measure.
+        blob = json.dumps(payload)
+        if len(blob) > self._max_payload_bytes:
+            raise PayloadTooLargeError(
+                f"serialized payload is {len(blob)} bytes; the cap is {self._max_payload_bytes}"
+            )
         stored_at = self._clock()
         with self._lock:
             self._prune(stored_at)
             self._conn.execute(
                 "INSERT OR REPLACE INTO results (request_id, stored_at, payload, owner) VALUES (?, ?, ?, ?)",
-                (request_id, stored_at, json.dumps(payload), owner),
+                (request_id, stored_at, blob, owner),
             )
             self._conn.commit()
             # Enforce entry cap after insert (drop oldest beyond the cap).
@@ -87,26 +104,49 @@ class CrawlResultStore(CoordinationStore):
             return None
         return json.loads(payload)
 
-    def payloads(self) -> list[JsonValue]:
-        """Every retained payload, newest first -- the same TTL filter as :meth:`get`,
-        so an expired row cannot report evidence the store has declared gone.
-        Newest-first lets a caller reading a bounded prefix see the recent records.
+    def payloads_page(
+        self, *, limit: int, cursor: tuple[float, str] | None = None
+    ) -> list[tuple[tuple[float, str], JsonValue]]:
+        """One bounded page of retained payloads, newest first, each with its
+        (stored_at, request_id) continuation cursor; an empty page ends the scan.
+        The request_id half keeps equal-``stored_at`` rows in a stable order.
         """
         now = self._clock()
         cutoff = now - self._ttl_seconds if self._ttl_seconds > 0 else 0.0
         with self._lock:
-            rows = self._conn.execute(
-                "SELECT payload FROM results WHERE stored_at >= ? ORDER BY stored_at DESC",
-                (cutoff,),
-            ).fetchall()
-        return [json.loads(row[0]) for row in rows]
+            if cursor is None:
+                rows = self._conn.execute(
+                    "SELECT stored_at, request_id, payload FROM results"
+                    " WHERE stored_at >= ? ORDER BY stored_at DESC, request_id DESC LIMIT ?",
+                    (cutoff, limit),
+                ).fetchall()
+            else:
+                at, request_id = cursor
+                rows = self._conn.execute(
+                    "SELECT stored_at, request_id, payload FROM results"
+                    " WHERE stored_at >= ? AND (stored_at < ? OR (stored_at = ? AND request_id < ?))"
+                    " ORDER BY stored_at DESC, request_id DESC LIMIT ?",
+                    (cutoff, at, at, request_id, limit),
+                ).fetchall()
+        return [((stored_at, request_id), json.loads(payload)) for stored_at, request_id, payload in rows]
+
+    def retained_count(self) -> int:
+        """Rows the TTL window still retains -- the rollup's honest denominator."""
+        now = self._clock()
+        cutoff = now - self._ttl_seconds if self._ttl_seconds > 0 else 0.0
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT COUNT(*) FROM results WHERE stored_at >= ?", (cutoff,)
+            ).fetchone()
+        return int(row[0]) if row is not None else 0
 
     # One ``atwin`` twin per operation: the sync signature is declared once and
     # ``owner=`` rides through **kwargs, so the twins cannot drift from the base.
     aput = atwin(put)
     aget = atwin(get)
     aget_for_caller = atwin(get_for_caller)
-    apayloads = atwin(payloads)
+    apayloads_page = atwin(payloads_page)
+    aretained_count = atwin(retained_count)
 
     def _prune(self, now: float) -> None:
         if self._ttl_seconds <= 0:

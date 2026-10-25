@@ -285,10 +285,19 @@ async def _probe_policy_suggestions(monkeypatch, tmp_path):
     from app.api import policy_suggestions as module
     from app.models.trace_response import TraceResponse
 
-    async def _payloads():
-        return _blocked_records()
+    async def _payloads_page(*, limit, cursor=None):
+        if cursor is not None:
+            return []
+        return [((0.0, record["request_id"]), record) for record in _blocked_records()][:limit]
 
-    store = type("Store", (), {"apayloads": staticmethod(_payloads)})()
+    async def _retained_count():
+        return len(_blocked_records())
+
+    store = type(
+        "Store",
+        (),
+        {"apayloads_page": staticmethod(_payloads_page), "aretained_count": staticmethod(_retained_count)},
+    )()
 
     from_handler = await module.policy_suggestions(result_store=store, settings=_denied_settings())
     assert from_handler.suggestions == []

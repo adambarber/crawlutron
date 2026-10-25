@@ -105,9 +105,13 @@ class LoopGuardResultStore(CrawlResultStore):
         _refuse_on_loop("CrawlResultStore.get_for_caller")
         return super().get_for_caller(request_id, caller_id)
 
-    def payloads(self):
-        _refuse_on_loop("CrawlResultStore.payloads")
-        return super().payloads()
+    def payloads_page(self, *, limit, cursor=None):
+        _refuse_on_loop("CrawlResultStore.payloads_page")
+        return super().payloads_page(limit=limit, cursor=cursor)
+
+    def retained_count(self):
+        _refuse_on_loop("CrawlResultStore.retained_count")
+        return super().retained_count()
 
     def close(self):
         _refuse_on_loop("CrawlResultStore.close")

@@ -124,7 +124,7 @@ async def test_one_malformed_retained_row_does_not_kill_the_rollup(tmp_path, cap
     # A retained row whose results are not a list -- TraceResponse.model_validate rejects it.
     await store.aput("crawl_bad", {"request_id": "crawl_bad", "results": "not-a-list"})
 
-    body = await store.apayloads()
+    body = await store.apayloads_page(limit=10)
     assert len(body) == 2
     with caplog.at_level(logging.WARNING):
         response = await policy_suggestions(result_store=store, settings=CrawlerSettings.from_mapping({}))
@@ -158,7 +158,105 @@ async def test_an_expired_record_is_not_offered_as_evidence(tmp_path):
     store = CrawlResultStore(tmp_path / "expired-results.db", ttl_seconds=10, clock=lambda: now[0])
     await store.aput("crawl_old", {"request_id": "crawl_old", "results": []})
 
-    assert await store.apayloads() != []
+    assert await store.apayloads_page(limit=10) != []
     now[0] += 11
 
-    assert await store.apayloads() == []
+    assert await store.apayloads_page(limit=10) == []
+
+
+def _stored_trace(request_id: str, url: str) -> dict[str, JsonValue]:
+    """A minimal retained row that parses as a blocked TraceResponse."""
+    page: dict[str, JsonValue] = {
+        "normalized_url": url,
+        "status": "blocked",
+        "classification": "access_denied",
+        "selected_strategy": None,
+        "attempted_strategies": [],
+        "classification_evidence": [],
+    }
+    return {"request_id": request_id, "results": [page]}
+
+
+class _PagingStore(CrawlResultStore):
+    """The real store, recording the bounded page reads the rollup makes."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.page_calls: list[int] = []
+
+    def payloads_page(self, *, limit: int, cursor=None):
+        self.page_calls.append(limit)
+        return super().payloads_page(limit=limit, cursor=cursor)
+
+
+async def test_the_rollup_reads_bounded_pages_never_the_whole_table(tmp_path):
+    """#443: one GET must not stream the table; the rollup scans bounded pages."""
+    store = _PagingStore(tmp_path / "paged.db")
+    store.put("crawl_blocked", _stored_trace("crawl_blocked", "https://page.test/x"))
+
+    response = await policy_suggestions(result_store=store, settings=CrawlerSettings.from_mapping({}))
+
+    assert store.page_calls, "the rollup read the store without paging"
+    # Page size stays bounded (_PAGE_SIZE); the window cap is the other bound.
+    assert max(store.page_calls) <= 50, store.page_calls
+    assert response.records_examined == 1
+    assert [s.host for s in response.suggestions] == [canonical("https://page.test/x").site]
+
+
+async def test_rows_past_the_read_window_are_reported_not_hidden(tmp_path):
+    """#449: the rollup reads a bounded window, newest first; the rows it does
+    not reach are reported as skipped, never silently read or silently hidden."""
+    now = [1000.0]
+    store = CrawlResultStore(tmp_path / "window.db", ttl_seconds=3600, clock=lambda: now[0])
+    # The oldest row is the ONLY evidence for old.test: one past the window.
+    now[0] += 1
+    store.put("crawl_old", _stored_trace("crawl_old", "https://old.test/"))
+    # The newest 500 rows are the window (_MAX_RECORDS): all new.test evidence.
+    for i in range(500):
+        now[0] += 1
+        store.put(f"crawl_{i}", _stored_trace(f"crawl_{i}", f"https://new.test/{i}"))
+
+    response = await policy_suggestions(result_store=store, settings=CrawlerSettings.from_mapping({}))
+
+    assert response.records_examined == 501
+    assert response.records_skipped == 1, "the unread row was hidden or read anyway"
+    assert [s.host for s in response.suggestions] == [canonical("https://new.test/").site]
+
+
+async def test_validation_and_rollup_run_off_the_event_loop(tmp_path, monkeypatch):
+    """#449: per-row pydantic validation and the host rollup are CPU work;
+    either running on the loop stalls every concurrent request."""
+    import asyncio
+
+    from app.models.normalized_url import admit_or_none
+    from app.models.trace_response import TraceResponse
+
+    store = CrawlResultStore(tmp_path / "offloop.db")
+    store.put("crawl_blocked", _stored_trace("crawl_blocked", "https://offloop.test/"))
+
+    on_loop: list[str] = []
+    real_validate = TraceResponse.model_validate
+    real_admit = admit_or_none
+
+    def _validate_spy(value):
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            return real_validate(value)
+        on_loop.append("model_validate")
+        return real_validate(value)
+
+    def _admit_spy(candidate, *, policy):
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            return real_admit(candidate, policy=policy)
+        on_loop.append("admit_or_none")
+        return real_admit(candidate, policy=policy)
+
+    monkeypatch.setattr(TraceResponse, "model_validate", _validate_spy)
+    monkeypatch.setattr("app.api.policy_suggestions.admit_or_none", _admit_spy)
+
+    await policy_suggestions(result_store=store, settings=CrawlerSettings.from_mapping({}))
+
+    assert on_loop == [], f"loop-thread work: {on_loop}"

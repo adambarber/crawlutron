@@ -6,6 +6,7 @@ a deny entry with evidence; policy is read only to get a host off a stored URL.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 
 from pydantic import ValidationError
@@ -34,6 +35,14 @@ needs.
 
 _DENY_RULE: CandidateRule = "denied_hosts"
 
+# The read bounds of one rollup request (#443/#449): pages keep peak memory at
+# one bounded page, and the window caps the rows read so one GET is bounded work.
+_PAGE_SIZE = 50
+_MAX_RECORDS = 500
+# Distinct signatures one host's suggestion reports: deduped in O(1) (never a
+# list scan) and capped so the review surface stays a finding list, not a log.
+_MAX_SIGNATURES = 32
+
 
 def _host_of(url_text: str, *, host_policy: HostPolicy) -> str | None:
     """The registrable site of a stored URL, or None if this deployment refuses it.
@@ -59,7 +68,7 @@ def build_policy_suggestions(
     blocked_attempts: dict[str, int] = {}
     observed_attempts: dict[str, int] = {}
     classifications: dict[str, set[CrawlClassification]] = {}
-    signatures: dict[str, list[str]] = {}
+    signatures: dict[str, dict[str, None]] = {}
     evidence: dict[str, list[ClassificationEvidence]] = {}
 
     for record in records:
@@ -73,9 +82,10 @@ def build_policy_suggestions(
             blocked_attempts[host] = blocked_attempts.get(host, 0) + 1
             classifications.setdefault(host, set()).add(page.classification)
             for item in page.classification_evidence:
-                seen = signatures.setdefault(host, [])
-                if item.signature not in seen:
-                    seen.append(item.signature)
+                # dict-as-ordered-set: first-seen order on the wire, O(1) membership.
+                seen = signatures.setdefault(host, {})
+                if len(seen) < _MAX_SIGNATURES and item.signature not in seen:
+                    seen[item.signature] = None
                 sampled = evidence.setdefault(host, [])
                 if len(sampled) < _EVIDENCE_SAMPLE:
                     sampled.append(item)
@@ -87,7 +97,7 @@ def build_policy_suggestions(
             blocked_attempts=blocked_attempts[host],
             observed_attempts=observed_attempts[host],
             classifications=sorted(classifications[host]),
-            signatures=signatures.get(host, []),
+            signatures=list(signatures.get(host, {})),
             evidence=evidence.get(host, []),
             rationale=_rationale(
                 host,
@@ -151,10 +161,29 @@ async def policy_suggestions(
     result_store: ResultStoreDep,
     settings: SettingsDep,
 ) -> PolicySuggestionsResponse:
-    """Propose candidate host rules from every retained crawl record."""
-    records, skipped = _valid_traces(await result_store.apayloads())
-    return build_policy_suggestions(
-        records, host_policy=HostPolicy.from_settings(settings), records_skipped=skipped
+    """Propose candidate host rules from a bounded window of retained records."""
+    host_policy = HostPolicy.from_settings(settings)
+    records: list[TraceResponse] = []
+    skipped = 0
+    read = 0
+    cursor: tuple[float, str] | None = None
+    while read < _MAX_RECORDS:
+        page = await result_store.apayloads_page(limit=min(_PAGE_SIZE, _MAX_RECORDS - read), cursor=cursor)
+        if not page:
+            break
+        cursor = page[-1][0]
+        read += len(page)
+        # Validation is per-row pydantic work; running it (and the rollup below)
+        # on the loop is what stalled every concurrent request (#449).
+        page_records, page_skipped = await asyncio.to_thread(_valid_traces, [payload for _, payload in page])
+        records.extend(page_records)
+        skipped += page_skipped
+    if read >= _MAX_RECORDS:
+        # Window full: count the rows it did not reach instead of guessing, so
+        # records_examined stays honest (rows expiring mid-scan clamp at zero).
+        skipped += max(await result_store.aretained_count() - read, 0)
+    return await asyncio.to_thread(
+        build_policy_suggestions, records, host_policy=host_policy, records_skipped=skipped
     )
 
 

@@ -1,5 +1,7 @@
 """Result retrieval by request_id (fixes dead status_url + lost sync results)."""
 
+import pytest
+
 from app.storage.result_store import CrawlResultStore
 
 
@@ -66,3 +68,58 @@ async def test_status_url_roundtrip_via_api(async_client):
     # Unknown id -> 404
     missing = await async_client.get("/v1/crawl/crawl_doesnotexist")
     assert missing.status_code == 404
+
+
+def test_a_payload_past_the_byte_cap_is_refused_not_retained(tmp_path):
+    """#443: the write edge refuses an oversized payload before persistence."""
+    from app.storage.result_store import PayloadTooLargeError
+
+    store = CrawlResultStore(tmp_path / "cap.db", max_payload_bytes=128)
+    oversized = {"request_id": "crawl_huge", "results": [], "pad": "x" * 512}
+
+    with pytest.raises(PayloadTooLargeError):
+        store.put("crawl_huge", oversized)
+
+    assert store.get("crawl_huge") is None, "a refused payload was retained anyway"
+
+
+def test_a_payload_within_the_byte_cap_is_retained(tmp_path):
+    """The cap refuses the oversized, not the ordinary: a crawl response that
+    fits must still round-trip after the write edge learns to measure."""
+    store = CrawlResultStore(tmp_path / "cap.db", max_payload_bytes=1024)
+    payload = {"request_id": "crawl_ok", "results": [{"status": "success"}], "pad": "y" * 128}
+
+    store.put("crawl_ok", payload)
+
+    assert store.get("crawl_ok") == payload
+
+
+def test_page_reads_are_bounded_and_continue_by_cursor():
+    """#443: a page read returns at most ``limit`` rows and a cursor that
+    continues the scan; the whole table is never materialized at once."""
+    clock, _ = _clock()
+    store = CrawlResultStore(":memory:", ttl_seconds=3600, max_entries=10, clock=clock)
+    for i in range(5):
+        store.put(f"crawl_{i}", _payload(str(i)))
+
+    # One stored_at for every row, so the scan is discriminated by request_id:
+    # the cursor must carry both or the ties swallow rows.
+    first = store.payloads_page(limit=2)
+    second = store.payloads_page(limit=2, cursor=first[-1][0])
+    third = store.payloads_page(limit=2, cursor=second[-1][0])
+
+    ids = [payload["request_id"] for _, payload in first + second + third]
+    assert ids == ["crawl_4", "crawl_3", "crawl_2", "crawl_1", "crawl_0"], ids
+    assert store.payloads_page(limit=2, cursor=third[-1][0]) == [], "the scan did not end"
+
+
+def test_retained_count_is_the_ttl_window_size():
+    """The honest denominator: how many rows the TTL window still holds."""
+    clock, advance = _clock()
+    store = CrawlResultStore(":memory:", ttl_seconds=300, max_entries=10, clock=clock)
+    store.put("crawl_kept", _payload("kept"))
+    store.put("crawl_gone", _payload("gone"))
+    advance(301)
+    store.put("crawl_late", _payload("late"))
+
+    assert store.retained_count() == 1

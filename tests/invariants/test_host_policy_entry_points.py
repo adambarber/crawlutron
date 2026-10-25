@@ -34,6 +34,22 @@ def _call_edges(
     modules: tuple[tuple[pathlib.Path, ast.Module], ...],
     index: dict[str, list[tuple[pathlib.Path, ast.Module, DefinitionNode]]],
 ) -> dict[str, set[str]]:
+    def same_tree_target(
+        tree: ast.Module, callee: str
+    ) -> list[tuple[pathlib.Path, ast.Module, DefinitionNode]]:
+        # The same-tree fallback for a bare-name call the import resolver cannot
+        # see: one module-local definition with that name, or nothing.
+        matches = [
+            (candidate_name, candidate)
+            for candidate_name, candidate in index.items()
+            if len(candidate) == 1
+            and candidate[0][1] is tree
+            and getattr(candidate[0][2], "name", None) == callee
+        ]
+        if len(matches) == 1:
+            return matches[0][1]
+        return []
+
     edges: dict[str, set[str]] = {name: set() for name in index}
     for name, candidates in index.items():
         if len(candidates) != 1:
@@ -45,15 +61,12 @@ def _call_edges(
             resolved = resolved_call_name(tree, child)
             target = index.get(resolved, [])
             if not target and isinstance(child.func, ast.Name):
-                matches = [
-                    (candidate_name, candidate)
-                    for candidate_name, candidate in index.items()
-                    if len(candidate) == 1
-                    and candidate[0][1] is tree
-                    and getattr(candidate[0][2], "name", None) == child.func.id
-                ]
-                if len(matches) == 1:
-                    target = matches[0][1]
+                target = same_tree_target(tree, child.func.id)
+            offloaded = resolved == "asyncio.to_thread" and child.args and isinstance(child.args[0], ast.Name)
+            if not target and offloaded:
+                # asyncio.to_thread(f, ...) calls f: the offload convention is a
+                # real call edge the plain resolver cannot see on its own.
+                target = same_tree_target(tree, child.args[0].id)
             if len(target) == 1 and target[0][2] is not node:
                 target_name = next(
                     candidate_name
