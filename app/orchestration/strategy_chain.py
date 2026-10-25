@@ -19,6 +19,7 @@ from app.transport.strategy_request import StrategyRequest
 from app.vocabulary.strategies import BROWSER_STRATEGIES, HTTP_CFFI_IMPERSONATE, HTTP_STRATEGIES
 
 if TYPE_CHECKING:
+    from app.config.settings import CrawlerSettings
     from app.models.crawl_diagnostics import CrawlDiagnostics
     from app.models.crawl_policy import CrawlPolicy
     from app.models.crawl_result import EngineCrawlResult
@@ -64,6 +65,7 @@ class _ChainContext:
     robots_sitemaps: list[str] | None
     host_policy: HostPolicy
     global_concurrency: int | None
+    settings: CrawlerSettings | None = None
 
     def request_for(self, strategy: CrawlStrategyName) -> StrategyRequest:
         """The page's identity for one ladder step.
@@ -179,6 +181,7 @@ class _ChainRun:
             caller_validators=context.caller_validators,
             robots_sitemaps=context.robots_sitemaps,
             global_concurrency=context.global_concurrency,
+            settings=context.settings,
         )
 
     async def run_browser(self, strategy: CrawlStrategyName) -> EngineCrawlResult:
@@ -196,6 +199,7 @@ class _ChainRun:
         return await browser_strategy_result(
             request=context.request_for(strategy),
             browser_worker=context.browser_worker,
+            settings=context.settings,
         )
 
     def record(self, strategy: CrawlStrategyName, result: EngineCrawlResult) -> None:
@@ -295,6 +299,7 @@ async def execute_crawl_chain(
     robots_sitemaps: list[str] | None = None,
     host_policy: HostPolicy,
     global_concurrency: int | None = None,
+    settings: CrawlerSettings | None = None,
 ) -> EngineCrawlResult:
     context = _ChainContext(
         original_url=original_url,
@@ -311,6 +316,7 @@ async def execute_crawl_chain(
         robots_sitemaps=robots_sitemaps,
         host_policy=host_policy,
         global_concurrency=global_concurrency,
+        settings=settings,
     )
     base_ladder = starting_strategies(context.policy.strategies, None, context.domain)
     start = 0

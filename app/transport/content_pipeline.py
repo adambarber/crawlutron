@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from app.admission.policy import discovery_flags
+from app.config.settings import CrawlerSettings
 from app.extraction.content import (
     Selectors,
     extract_content,
@@ -59,15 +60,16 @@ async def run_extraction(
     policy: CrawlPolicy,
     default_method: str,
     html: bool,
+    settings: CrawlerSettings | None = None,
 ) -> ExtractedContent:
     """Run the configured extractor once, off the loop: a fourth mode is one
-    change here, not a branch per caller. ``content`` is the raw body, ``decoded``
-    its text form; ``policy`` the selectors, ``html`` gates trafilatura."""
+    change here, not a branch per caller. ``settings`` is the crawl's resolved
+    settings, so extraction never re-reads the env (#509)."""
     selectors = Selectors(css=policy.css_selector, xpath=policy.xpath)
     if extraction == EXTRACTION_DOCUMENT:
         # The document extractor is typed for bytes; a browser render has text.
         payload = content.encode("utf-8", "replace") if isinstance(content, str) else content
-        extracted = await adocument_extract(payload, final_url)
+        extracted = await adocument_extract(payload, final_url, settings)
         method = EXTRACTION_METHOD_DOCUMENT
     elif extraction == EXTRACTION_TRAFILATURA:
         if not html:

@@ -47,6 +47,7 @@ async def extract_http_phase(ctx: HttpStrategyContext, resp: FetchedResponse) ->
         policy=ctx.policy,
         default_method=EXTRACTION_METHOD_HTTP_HTML if html_body else EXTRACTION_METHOD_HTTP_BODY,
         html=html_body,
+        settings=ctx.settings,
     )
     text, markdown = extracted.text, extracted.markdown
     if ctx.extraction == EXTRACTION_DOCUMENT and (resp.content_type or "").lower().startswith("text/"):
