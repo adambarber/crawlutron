@@ -1,6 +1,6 @@
-"""``authorization`` stays while other spoofable headers are banned, because
-credentialed crawling of what one owns is real use and a ban would push
-secrets into URLs; origin-keyed fields ride the existing cross-host scrub.
+"""Authorization is not a raw-header knob: a raw header bypasses the origin
+scoping in crawl_policy; credentials ride policy.credentials, scoped to one
+origin, and origin-keyed fields use the existing cross-host scrub.
 """
 
 import pytest
