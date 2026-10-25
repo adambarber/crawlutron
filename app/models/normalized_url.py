@@ -206,9 +206,13 @@ __all__ = ["NormalizedUrl", "admit_or_none"]
 def admit_or_none(candidate: str | NormalizedUrl | None, *, policy: HostPolicy) -> NormalizedUrl | None:
     """Admit ``candidate`` as a public page URL, or drop it.
     The constructor is the enforcement chokepoint; this is the one None-returning
-    wrapper every egress door shares. An already-admitted value returns unchanged.
+    wrapper every egress door shares. An admitted value is re-checked per door.
     """
     if isinstance(candidate, NormalizedUrl):
+        # Re-run the policy predicate: a value admitted under one posture can
+        # cross a stricter door, and deny-list accounting must not be bypassed.
+        if host_policy_reason(candidate.host, policy=policy) or host_egress_reason(candidate.host):
+            return None
         return candidate
     if not candidate or not candidate.strip():
         return None

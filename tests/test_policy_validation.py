@@ -38,6 +38,15 @@ class TestPolicyValidation:
             == "https://example.com/wiki"
         )
 
+    def test_admit_or_none_rechecks_policy_on_admitted_value(self):
+        # #520: the fast path must re-run the policy predicate on an already
+        # admitted value: it may cross a stricter door, so only parsing is reused.
+        admitted = NormalizedUrl("https://hostile.test/x", policy=UNRESTRICTED_HOST_POLICY)
+        strict = HostPolicy.from_strings("example.com", "")
+        assert admit_or_none(admitted, policy=strict) is None
+        friendly = NormalizedUrl("https://example.com/x", policy=UNRESTRICTED_HOST_POLICY)
+        assert admit_or_none(friendly, policy=strict) is friendly
+
     def test_host_allow_list_restricts_targets(self):
         policy = HostPolicy.from_strings("example.com", "")
         assert NormalizedUrl("https://Example.com:8443/page", policy=policy).raw
