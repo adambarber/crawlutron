@@ -160,6 +160,8 @@ def _request_id_of(payload: JsonValue) -> str | None:
 async def policy_suggestions(
     result_store: ResultStoreDep,
     settings: SettingsDep,
+    *,
+    owner: str | None = None,
 ) -> PolicySuggestionsResponse:
     """Propose candidate host rules from a bounded window of retained records."""
     host_policy = HostPolicy.from_settings(settings)
@@ -168,7 +170,9 @@ async def policy_suggestions(
     read = 0
     cursor: tuple[float, str] | None = None
     while read < _MAX_RECORDS:
-        page = await result_store.apayloads_page(limit=min(_PAGE_SIZE, _MAX_RECORDS - read), cursor=cursor)
+        page = await result_store.apayloads_page(
+            limit=min(_PAGE_SIZE, _MAX_RECORDS - read), cursor=cursor, owner=owner
+        )
         if not page:
             break
         cursor = page[-1][0]
@@ -181,7 +185,7 @@ async def policy_suggestions(
     if read >= _MAX_RECORDS:
         # Window full: count the rows it did not reach instead of guessing, so
         # records_examined stays honest (rows expiring mid-scan clamp at zero).
-        skipped += max(await result_store.aretained_count() - read, 0)
+        skipped += max(await result_store.aretained_count(owner=owner) - read, 0)
     return await asyncio.to_thread(
         build_policy_suggestions, records, host_policy=host_policy, records_skipped=skipped
     )

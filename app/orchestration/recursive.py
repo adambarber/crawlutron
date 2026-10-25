@@ -13,7 +13,12 @@ from dataclasses import dataclass, field, replace
 from itertools import islice
 from typing import NamedTuple, Protocol, cast
 
-from app.admission.admission_links import AdmittedLink, admit_discovered_links, gather_robots_decisions
+from app.admission.admission_links import (
+    AdmittedLink,
+    admit_discovered_links,
+    gather_robots_decisions,
+    remaining_page_capacity,
+)
 from app.models.crawl_result import EngineCrawlResult
 from app.models.crawl_task import CrawlTask
 from app.models.host_policy import HostPolicy
@@ -210,11 +215,13 @@ async def _resource_admitted_batch(ctx: _BatchContext) -> list[_Admitted]:
     else:
         state.ramp = max(float(run.global_concurrency), state.ramp * scale)
     base = max(1, int(state.ramp))
-    batch_size = min(
-        len(state.frontier),
-        max(1, base * concurrency_multiplier),
-        max(1, run.max_pages - state.page_count),
-    )
+    # The cap reads through the one remaining-capacity helper so the unbounded
+    # sentinel (max_pages<=0) means "no term", never a clamped one-page budget (#515).
+    bounds = [len(state.frontier), max(1, base * concurrency_multiplier)]
+    remaining = remaining_page_capacity(state.page_count, run.max_pages)
+    if remaining is not None:
+        bounds.append(max(1, remaining))
+    batch_size = min(bounds)
     if scale < 1.0:
         limited_by = "cpu" if run.resource_gate.cpu_ratio() >= run.resource_gate.memory_ratio() else "memory"
         logger.debug(

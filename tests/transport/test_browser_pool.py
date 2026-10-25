@@ -16,6 +16,7 @@ from app.transport.browser_pool import (
     set_browser_pool,
 )
 from tests._browser_doubles import FakeBrowserPool
+from tests._browser_page_doubles import BrowserFakeContextManager
 from tests._policy_factories import canonical
 
 
@@ -340,6 +341,62 @@ class TestWorkerExtractorErrorDegrades:
 
         result = await _bare_driver().auto_accept_cookie_consent(_page(query_selector=_consent_query), True)
         assert result
+
+
+class _MethodClosedBrowserDouble:
+    """Playwright-shaped: ``is_closed`` is a METHOD (bound = always truthy)."""
+
+    def __init__(self):
+        self.is_closed_calls = 0
+
+    def is_closed(self) -> bool:
+        self.is_closed_calls += 1
+        return False
+
+    async def new_page(self, **_kwargs):
+        return _page()
+
+
+class _ReusingContextManager(BrowserFakeContextManager):
+    """The shared browser context-manager double; ``__aexit__`` returns None."""
+
+
+class _ClosedBrowserScenario:
+    """Driver + browser double whose ``is_closed`` the test can flip."""
+
+    def __init__(self, *, max_browser_renders: int = 5):
+        self.browser = _MethodClosedBrowserDouble()
+        self.cm = _ReusingContextManager(self.browser)
+        self.driver = BrowserDriver(
+            browser_factory=lambda **_kwargs: self.cm, max_browser_renders=max_browser_renders
+        )
+
+
+async def test_a_method_shaped_is_closed_probe_does_not_relaunch_every_render():
+    """#516: a bound ``is_closed`` method is always truthy, so the truthy probe
+    relaunched the browser on every render, defeating the recycle bound."""
+    scenario = _ClosedBrowserScenario()
+
+    await scenario.driver.open_page({})
+    scenario.driver.note_render()
+    await scenario.driver.open_page({})
+
+    assert scenario.cm.enters == 1, "the second render relaunched the browser"
+    assert scenario.browser.is_closed_calls == 1, "the closed probe was not consulted"
+
+
+async def test_a_closed_browser_is_replaced_not_reused():
+    """#516: the fixed probe must still detect closure -- a closed browser is
+    released and a fresh one launched, never reused."""
+    scenario = _ClosedBrowserScenario()
+
+    await scenario.driver.open_page({})
+    scenario.driver.note_render()
+    scenario.browser.is_closed = lambda: True  # the browser was closed underneath us
+    await scenario.driver.open_page({})
+
+    assert scenario.cm.enters == 2, "a closed browser was reused"
+    assert scenario.cm.exits == 1, "the closed browser was not released through the chokepoint"
 
 
 class TestCloseLeavesNoStaleRendererToAcquire:

@@ -276,12 +276,12 @@ async def _probe_policy_suggestions(monkeypatch, tmp_path):
     from app.api import policy_suggestions as module
     from app.models.trace_response import TraceResponse
 
-    async def _payloads_page(*, limit, cursor=None):
+    async def _payloads_page(*, limit, cursor=None, owner=None):
         if cursor is not None:
             return []
         return [((0.0, record["request_id"]), record) for record in _blocked_records()][:limit]
 
-    async def _retained_count():
+    async def _retained_count(*, owner=None):
         return len(_blocked_records())
 
     store = type(
