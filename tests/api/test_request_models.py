@@ -200,6 +200,20 @@ class TestExtraKeysAreRefusedOnTheInputSide:
             assert models[name](not_a_real_setting=1) is not None, name
 
 
+def test_validator_values_honor_the_header_value_law():
+    """Cached validators ride If-None-Match/If-Modified-Since verbatim, so each
+    is a header value at one remove: the #441 law applies at the model edge --
+    CRLF in if_none_match is refused (a 422 at the API) (#525 SEC-08)."""
+    from app.models.fetch_validators import FetchValidators
+
+    with pytest.raises(ValidationError, match="if_none_match"):
+        FetchValidators(if_none_match='"v1"\r\nX-Smuggled: 1')
+    with pytest.raises(ValidationError, match="if_modified_since"):
+        FetchValidators(if_modified_since="Tue, 01 Jan 2030 00:00:00 GMT\nX: 1")
+    with pytest.raises(ValidationError, match="if_none_match"):
+        FetchValidators(if_none_match='"a\x00b"')
+
+
 def _sample_field(model: type[BaseModel]) -> dict[str, object]:
     """One minimal valid instance of ``model``, for the extra-key assertions.
 

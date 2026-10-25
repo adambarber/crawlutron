@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validator
+
+from app.safety.header_values import reject_injectable_header_value
 
 
 class FetchValidators(BaseModel):
@@ -26,3 +28,14 @@ class FetchValidators(BaseModel):
             description="Last-Modified date from a previous crawl result; sent as If-Modified-Since.",
         ),
     ] = None
+
+    @field_validator("if_none_match", "if_modified_since")
+    @classmethod
+    def _reject_injectable_validator_values(cls, value: str | None, info: ValidationInfo) -> str | None:
+        """A cached validator is a header VALUE at one remove: it rides
+        If-None-Match/If-Modified-Since verbatim, so the #441 wire law applies
+        at the model edge (#525 SEC-08).
+        """
+        if value is not None and info.field_name is not None:
+            reject_injectable_header_value(info.field_name, value)
+        return value
