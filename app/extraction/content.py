@@ -40,6 +40,7 @@ __all__ = [
     "EXTRACTION_DOC_MAX_INPUT_BYTES",
     "ExtractedContent",
     "Selectors",
+    "decode_body",
     "detect_pagination",
     "extract_content",
     "extract_discovered_links",
@@ -64,18 +65,23 @@ __all__ = [
 ]
 
 
-def _decode(body: bytes | bytearray | str) -> str:
+def decode_body(body: bytes | bytearray | str) -> str:
+    """Lossy-UTF-8 text of a body; the extraction path's one decode point."""
     if isinstance(body, (bytes, bytearray)):
         return bytes(body).decode("utf-8", "replace")
     return body
 
 
-def is_html(content_type: str | None, body: bytes | str) -> bool:
+def _is_html_text(text: str) -> bool:
+    """The sniff over already-decoded text, shared by ``is_html`` and ``extract_content``."""
+    return text.lstrip().lower().startswith(("<html", "<!doctype html>"))
+
+
+def is_html(content_type: str | None, body: bytes | str, *, decoded: str | None = None) -> bool:
     ct = (content_type or "").lower()
     if "html" in ct:
         return True
-    text = _decode(body).lstrip().lower()
-    return text.startswith("<html") or text.startswith("<!doctype html>")
+    return _is_html_text(decoded if decoded is not None else decode_body(body))
 
 
 def looks_like_document(content_type: str | None, body: bytes | str, url: NormalizedUrl | None) -> bool:
@@ -105,9 +111,10 @@ def extract_content(
     The HTML branch hands the selector pair to ``extract_html`` (which routes it); a selector
     means nothing to a non-DOM body, so the full content is extracted and the fallback logged.
     """
-    # ONE decision, read twice (drop report + dispatch): the predicate decodes
-    # the whole body, so two evaluations meant two full decodes per non-HTML request.
-    html_body = is_html(content_type, content)
+    # ONE decision, read twice (drop report + dispatch): the predicate decodes the whole
+    # body, so one decode per request shares its text with the HTML branch (#348).
+    decoded = content if isinstance(content, str) else decode_body(content)
+    html_body = is_html(content_type, content, decoded=decoded)
     if selectors and not html_body:
         logger.warning(
             "extraction_selector_ignored_non_html",
@@ -119,7 +126,7 @@ def extract_content(
             },
         )
     if html_body:
-        return extract_html(_decode(content), url, selectors)
+        return extract_html(decoded, url, selectors)
     if looks_like_document(content_type, content, url):
         body = (
             bytes(content)
@@ -127,5 +134,5 @@ def extract_content(
             else content.encode("utf-8", "replace")
         )
         return extract_document(body, url)
-    text = _decode(content).strip()
+    text = decoded.strip()
     return ExtractedContent(text or None, text or None)
