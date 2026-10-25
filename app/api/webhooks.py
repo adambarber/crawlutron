@@ -9,6 +9,7 @@ import asyncio
 import functools
 import hashlib
 import hmac
+import io
 import json
 import logging
 import os
@@ -211,6 +212,18 @@ def max_webhook_size() -> int:
     return _parse_webhook_size(os.environ.get("CRAWLUTRON_MAX_WEBHOOK_SIZE"))
 
 
+def _serialize_webhook_payload(payload: Mapping[str, Any], cap: int) -> bytes | None:
+    """The webhook body as bytes, or ``None`` once it passes ``cap`` -- the
+    running buffer is the only whole-payload copy, so a capped payload never
+    holds the full str and the full bytes at once (#342)."""
+    buffer = io.BytesIO()
+    for chunk in json.JSONEncoder().iterencode(payload):
+        buffer.write(chunk.encode("utf-8"))
+        if buffer.tell() > cap:
+            return None
+    return buffer.getvalue()
+
+
 async def post_webhook(
     webhook_url: str,
     payload: Mapping[str, Any],
@@ -221,11 +234,13 @@ async def post_webhook(
     Best-effort: nothing raises -- a lost callback is logged, so it cannot corrupt
     an already-recorded outcome (#450); validation lives in the pin per attempt.
     """
-    payload_bytes = json.dumps(dict(payload)).encode("utf-8")
-    if len(payload_bytes) > max_webhook_size():
+    cap = max_webhook_size()
+    payload_bytes = _serialize_webhook_payload(payload, cap)
+    if payload_bytes is None:
+        # The exact size is never materialised; the cap floor is what is known.
         logger.warning(
             "webhook_payload_too_large",
-            extra={"url": webhook_url, "size": len(payload_bytes)},
+            extra={"url": webhook_url, "size": cap},
         )
         return
     attempts = webhook_max_attempts()
