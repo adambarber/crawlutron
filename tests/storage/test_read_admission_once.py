@@ -10,7 +10,7 @@ from tests._policy_factories import UNRESTRICTED_HOST_POLICY, canonical
 from tests._policy_factories import job_store as store_on
 
 _RESTRICTED = "example.com"
-_OK_FRONTIER = ["https://example.com", "https://example.com/ok"]
+_OK_FRONTIER = ["https://example.com/", "https://example.com/ok"]
 
 
 def _job_with_frontier(store: JobStore, urls: list[str]) -> JobStore:

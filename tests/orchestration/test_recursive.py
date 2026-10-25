@@ -33,7 +33,7 @@ class TestRecursiveCrawl:
         out = await crawled_results(pages, limits=LINKED_PAIR_LIMITS)
         assert out["submitted_count"] == 1
         urls = {r.normalized_url.raw for r in out["results"]}
-        assert "http://example.com" in urls
+        assert "http://example.com/" in urls
         assert "http://example.com/a" in urls
         assert "http://example.com/b" in urls
 
@@ -131,7 +131,7 @@ class TestRecursiveCrawlServer:
         }
         response = await run_crawl_async(payload)
         urls = {r.normalized_url.raw for r in response["results"]}
-        assert base_url in urls
+        assert base_url + "/" in urls  # #520: the root slash survives on the raw
         assert base_url + "/page2" in urls
 
     async def test_memory_strip_both_modes_include_html_false(self):

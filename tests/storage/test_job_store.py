@@ -18,9 +18,9 @@ def test_jobstore_create_and_load(job_store):
     job = job_store.create("http://example.com/", {"strategies": ["HTTP_DECLARED_CRAWLER"]})
 
     assert job.job_id
-    assert job.root_url == "http://example.com"
+    assert job.root_url == "http://example.com/"
     assert job.status == JobStatus.PENDING
-    assert job.frontier == [FrontierEntry(url=canonical("http://example.com"), depth=0)]
+    assert job.frontier == [FrontierEntry(url=canonical("http://example.com/"), depth=0)]
     assert job.visited == set()
 
     loaded = job_store.load(job.job_id)
@@ -42,7 +42,7 @@ def test_jobstore_save_updates_state(job_store):
     loaded = job_store.load(job.job_id)
     # DATA plane flows through save...
     assert loaded.frontier == [FrontierEntry(url=canonical("http://example.com/page2"), depth=0)]
-    assert loaded.visited == {canonical("http://example.com")}
+    assert loaded.visited == {canonical("http://example.com/")}
     assert len(loaded.results) == 1
     assert loaded.stats["total_crawled"] == 1
     # ...but the STATUS plane moves only via set_status ().
@@ -101,7 +101,7 @@ def test_crawljobstate_serialization(job_store):
         FrontierEntry(url=canonical("http://example.com/a"), depth=0),
         FrontierEntry(url=canonical("http://example.com/b"), depth=0),
     ]
-    assert loaded.visited == {canonical("http://example.com")}
+    assert loaded.visited == {canonical("http://example.com/")}
     assert len(loaded.results) == 1
 
 
@@ -311,8 +311,8 @@ def test_create_canonicalizes_root_and_initial_frontier(tmp_path):
     job = store.create("HTTPS://Example.test:443/", CrawlPolicy())
     loaded = loaded_job(store, job.job_id)
 
-    assert loaded.root_url == "https://example.test"
-    assert loaded.frontier == [FrontierEntry(url=canonical("https://example.test"), depth=0)]
+    assert loaded.root_url == "https://example.test/"
+    assert loaded.frontier == [FrontierEntry(url=canonical("https://example.test/"), depth=0)]
 
 
 def test_load_resolves_unreadable_policy_to_the_declared_defaults(tmp_path):

@@ -24,7 +24,7 @@ async def test_bfs_crawls_all_discovered_leaves():
         await crawled_urls(pages, limits={"max_depth": 2, "max_pages": 1000, "max_discovered_links": 2000})
     )
     # root, hub, and all 300 leaves must be present.
-    assert "http://example.com" in urls
+    assert "http://example.com/" in urls
     assert "http://example.com/hub" in urls
     for i in range(300):
         assert f"http://example.com/l{i}" in urls

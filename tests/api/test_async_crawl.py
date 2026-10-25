@@ -263,7 +263,7 @@ class TestAsyncCrawlJobStoreIntegration:
             assert job.kind == JobKind.SINGLE_SHOT
             # Roots are stored in canonical page-identity form: NormalizedUrl admission is the single source
             # of truth for page identity, so the submitted trailing slash is normalized away.
-            assert job.root_url == "http://example.com"
+            assert job.root_url == "http://example.com/"
             assert job.status == JobStatus.PENDING
             assert job.frontier == []
             assert job.visited == set()

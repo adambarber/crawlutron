@@ -268,7 +268,7 @@ class TestRequeueOvercommitContract:
             _requeue_context(),
         )
 
-        assert [entry.url.raw for entry in job.frontier] == ["https://c.test"]
+        assert [entry.url.raw for entry in job.frontier] == ["https://c.test/"]
         assert outcome.accepted == 1
         assert outcome.cap_overcommitted == 1
         assert outcome.cap_blocked is False, "admitting past the cap is not a refusal"

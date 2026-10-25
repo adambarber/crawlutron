@@ -272,8 +272,9 @@ class TestFrontierIdentityRefusesRejectedTargets:
         from app.admission.admission_links import frontier_identity
 
         got = frontier_identity("https://example.gov/page/", host_policy=HostPolicy.unrestricted())
-        # The identity is the admitted value, and its text is the page's durable identity.
-        assert got is not None and got.raw == "https://example.gov/page", (
+        # The identity is the admitted value, and its text is the page's durable identity
+        # (#520: the path's trailing slash is part of it).
+        assert got is not None and got.raw == "https://example.gov/page/", (
             f"a public target lost its identity: {got!r}"
         )
 

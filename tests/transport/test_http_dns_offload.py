@@ -67,6 +67,6 @@ async def test_pinned_hop_offloads_the_pin_rule_to_thread():
     assert seen, "the pin rule was never invoked"
     assert seen["thread"] is not threading.current_thread()
     assert seen["thread"].name.startswith("dns-resolve")
-    assert pinned_url == "http://example.com"
+    assert pinned_url == "http://example.com/"
     assert hop_headers == {}
     assert chain.url == canonical("http://example.com/")

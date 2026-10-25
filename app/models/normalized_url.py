@@ -64,8 +64,10 @@ def _canonical_parts(url: str, *, policy: HostPolicy) -> tuple[str, str, str, st
     if port == default_port:
         port = None
     netloc = _bracketed_netloc(host, port)
-    path = _strip_trailing_colon(parsed.path or "").rstrip("/")
-    query = _strip_trailing_colon(parsed.query)
+    # Path and query are identity: a trailing colon or slash in them can name a
+    # distinct resource (#520), so only the authority segment is normalized here.
+    path = parsed.path or ""
+    query = parsed.query
     if query:
         # Drop known tracking parameters so UTM-variants canonicalize to one key;
         # the rest are sorted, so parameter order alone canonicalizes identically.

@@ -51,22 +51,26 @@ async def test_discovered_link_delay_commits_in_order_and_breaks_at_cap():
 
 
 async def test_duplicate_canonical_spellings_do_not_consume_capacity():
+    # #520: the slash variant is distinct path text and consumes capacity; the
+    # tracking-param variant is the same value and does not.
     frontier: list[NormalizedUrl] = []
     outcome = await admit(
         [
             "https://example.test/child?utm_source=one",
+            "https://example.test/child",
             "https://example.test/child/",
             "https://example.test/other",
             "https://example.test/third",
         ],
         frontier=frontier,
-        max_pages=2,
+        max_pages=3,
         respect_robots=False,
     )
 
-    assert outcome.accepted == 2
+    assert outcome.accepted == 3
     assert [url.raw for url in frontier] == [
         "https://example.test/child",
+        "https://example.test/child/",
         "https://example.test/other",
     ]
     assert outcome.cap_blocked is True

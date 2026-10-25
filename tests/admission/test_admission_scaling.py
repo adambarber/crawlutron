@@ -56,7 +56,7 @@ async def test_engine_throttles_batches_under_pressure(monkeypatch, cpu_ratio, m
     out, waits = await _crawl_under_pressure(monkeypatch, cpu_ratio=cpu_ratio, memory_ratio=memory_ratio)
     # Engine results carry the value object; identity is its ``.raw`` text.
     assert {r.normalized_url.raw for r in out["results"]} == {
-        "http://example.com",
+        "http://example.com/",
         "http://example.com/a",
     }
     assert waits, f"engine dispatched without consulting the resource gate under {saturated} pressure"

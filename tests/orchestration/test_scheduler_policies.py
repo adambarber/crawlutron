@@ -247,10 +247,10 @@ class TestSchedulerPolicies:
         assert ret is not None
         # Results are keyed by job index so callers align them with their own job.
         assert sorted(ret) == [0, 1, 2, 3]
-        # Canonical, not the seed text: the job's URL is an admitted value, so the trailing slash the seed
-        # carried is gone by the time it is a job member.
+        # Canonical, not the seed text: the job's URL is an admitted value; #520 keeps the
+        # path text verbatim, so the seed's trailing slash survives onto the job member.
         assert [ret[i].normalized_url for i in sorted(ret)] == [
-            canonical(f"http://h{i}.example.com") for i in range(4)
+            canonical(f"http://h{i}.example.com/") for i in range(4)
         ]
 
 

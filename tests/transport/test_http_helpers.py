@@ -66,13 +66,13 @@ class TestValidationHelpers:
     def test_checked_payload_urls_dedupes_on_admitted_identity(self) -> None:
         from app.models.crawl_request import CrawlRequest
 
-        # ``NormalizedUrl`` admission already treats fragment / trailing-slash / tracking-param / param-order
-        # variants as the SAME page.
+        # ``NormalizedUrl`` admission treats fragment / tracking-param / param-order
+        # variants as the SAME page; #520 keeps path text verbatim, so /x/ stays distinct.
         urls = [
             "https://a.gov/x",
-            "https://a.gov/x/#section",  # fragment dropped -> same page
-            "https://a.gov/x/?utm_source=tw",  # tracking param dropped -> same page
-            "https://a.gov/x/",  # trailing slash stripped -> same page
+            "https://a.gov/x/#section",  # fragment dropped -> the /x/ page, not /x
+            "https://a.gov/x/?utm_source=tw",  # tracking param dropped -> same /x/ page
+            "https://a.gov/x/",  # same page again
             "https://a.gov/y?a=1&b=2",
             "https://a.gov/y?b=2&a=1",  # param order only -> same page
             "https://a.gov/z",
@@ -83,6 +83,7 @@ class TestValidationHelpers:
             host_policy=HostPolicy.unrestricted(),
         ) == [
             "https://a.gov/x",
+            "https://a.gov/x/#section",
             "https://a.gov/y?a=1&b=2",
             "https://a.gov/z",
         ]

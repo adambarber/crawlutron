@@ -212,8 +212,8 @@ class TestWholeSiteAdmissionContract:
         assert finished.stats["cap_overcommitted"] == 1
 
     async def test_canonical_root_alias_counts_once(self, client, job_store):
-        root = "https://example.test"
-        self_alias = "https://example.test/"
+        root = "https://example.test/root"
+        self_alias = f"{root}?utm_source=tw"  # #520: "root/" is distinct now; the query alias is not
         job = await self._admission_scenario(client, job_store, root, [self_alias], self._policy(1, 2))
 
         assert job.visited == {canonical(root)}
@@ -404,11 +404,11 @@ class TestWholeSiteAdmissionContract:
             results=[
                 _canned_result(root, links=[f"{child}?utm_source=one", f"{child}/", other]),
                 _canned_result(child),
+                _canned_result(f"{child}/"),
                 _canned_result(other),
             ],
-            policy=job_limits(max_depth=1, max_pages=3),
+            policy=job_limits(max_depth=1, max_pages=4),
         )
-
-        assert job.stats["total_discovered"] == 2
-        assert job.visited == {canonical(root), canonical(child), canonical(other)}
-        assert len(job.results) == 3
+        assert job.stats["total_discovered"] == 3  # #520: the slash variant is distinct path text
+        assert job.visited == {canonical(root), canonical(child), canonical(f"{child}/"), canonical(other)}
+        assert len(job.results) == 4

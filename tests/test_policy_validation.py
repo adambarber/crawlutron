@@ -20,10 +20,22 @@ class TestPolicyValidation:
         with pytest.raises(ValueError):
             NormalizedUrl("http://127.0.0.1/x", policy=UNRESTRICTED_HOST_POLICY)
 
-    def test_trailing_colon_path(self):
+    def test_trailing_colon_kept_in_path_and_query(self):
+        # #520: a trailing colon in path/query is identity (a distinct wiki page,
+        # a distinct query). Only the authority segment may shed a trailing colon.
         assert (
-            NormalizedUrl("https://example.com/seg:", policy=UNRESTRICTED_HOST_POLICY).raw
-            == "https://example.com/seg"
+            NormalizedUrl("https://example.com/wiki/Colon:", policy=UNRESTRICTED_HOST_POLICY).raw
+            == "https://example.com/wiki/Colon:"
+        )
+        assert (
+            NormalizedUrl("https://example.com/search?q=foo:", policy=UNRESTRICTED_HOST_POLICY).raw
+            == "https://example.com/search?q=foo%3A"  # %3A is the same query value re-encoded
+        )
+
+    def test_trailing_colon_in_authority_still_stripped(self):
+        assert (
+            NormalizedUrl("https://example.com:/wiki", policy=UNRESTRICTED_HOST_POLICY).raw
+            == "https://example.com/wiki"
         )
 
     def test_host_allow_list_restricts_targets(self):
@@ -133,7 +145,8 @@ class TestPolicyValidation:
     def test_public_integer_literal_allowed(self, monkeypatch):
         # Numeric but public (1.1.1.1) stays reachable.
         monkeypatch.setenv("CRAWLUTRON_ALLOW_PRIVATE_TARGETS", "0")
-        assert NormalizedUrl("http://16843009/", policy=UNRESTRICTED_HOST_POLICY).raw == "http://16843009"
+        # #520: the root slash is part of the path now, not stripped.
+        assert NormalizedUrl("http://16843009/", policy=UNRESTRICTED_HOST_POLICY).raw == "http://16843009/"
 
     def test_wrapping_integer_to_loopback_blocked(self, monkeypatch):
         # Oversized integers wrap mod 2**32 on resolvers: this one lands on 127.0.0.1 and must be rejected,

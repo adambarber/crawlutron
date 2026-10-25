@@ -58,7 +58,7 @@ async def test_recursive_crawl_never_fetches_policy_blocked_discovered_host(allo
     )
 
     assert response["results"][0].status == "success"
-    assert calls == ["https://allowed.test"]
+    assert calls == ["https://allowed.test/"]
 
 
 async def test_sitemap_blocked_host_is_refused_before_page_fetch():
