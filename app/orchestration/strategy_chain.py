@@ -229,8 +229,12 @@ class _ChainRun:
             return None
         state.cffi_retry_done = True
         from app.transport.browser import get_browser_cookies_for
+        from app.transport.request_profile import cookie_namespace_for
 
-        cookie_header = get_browser_cookies_for(self.context.normalized_url.site)
+        # The crawl's own namespace, from the policy ``crawl_request`` bound
+        # it from (#437): another caller's session never rides this retry.
+        namespace = cookie_namespace_for(self.context.policy.request_profile)
+        cookie_header = get_browser_cookies_for(self.context.normalized_url.site, namespace=namespace)
         if not cookie_header:
             return None
             # headers is dict[str, str] built from validated values plus this cookie, so there

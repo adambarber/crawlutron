@@ -11,6 +11,7 @@ from app.models.normalized_url import NormalizedUrl
 from app.transport import browser as browser_mod
 from app.transport.browser_cookies import harvest_session_cookies
 from app.transport.browser_driver import BrowserDriver
+from app.transport.cookie_jar import COOKIE_NAMESPACE
 from tests._browser_doubles import BrowserFakePage, FakeBrowserDriver, ScriptedPage, build_pinned_renderer
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY, canonical
 
@@ -50,6 +51,38 @@ class TestCookieHarvestCompletes:
             await harvest_session_cookies(_page_with_context(), url)
             # The synchronous read the cffi retry performs must see cookies NOW.
             assert browser_mod.get_browser_cookies_for(domain) == "sess=abc123"
+
+
+class TestHarvestIsPartitionedByCookieNamespace:
+    """The harvest store must key by the crawl's cookie namespace (#437).
+
+    The persistent jar pins every slot to a caller namespace; the harvest
+    store keyed only by domain, leaking one caller's session to the next.
+    """
+
+    async def test_harvested_cookies_never_surface_to_another_caller(self):
+        url = canonical("http://harvest-leak.test/page")
+        with isolated_browser_cookies(url) as domain:
+            harvest_token = COOKIE_NAMESPACE.set("caller-a")
+            try:
+                await harvest_session_cookies(_page_with_context(), url)
+            finally:
+                COOKIE_NAMESPACE.reset(harvest_token)
+
+            other_token = COOKIE_NAMESPACE.set("caller-b")
+            try:
+                leaked = browser_mod.get_browser_cookies_for(domain)
+            finally:
+                COOKIE_NAMESPACE.reset(other_token)
+
+            own_token = COOKIE_NAMESPACE.set("caller-a")
+            try:
+                own = browser_mod.get_browser_cookies_for(domain)
+            finally:
+                COOKIE_NAMESPACE.reset(own_token)
+
+        assert leaked is None, f"caller-b's retry saw caller-a's cookies: {leaked!r}"
+        assert own == "sess=abc123", "the harvesting caller lost its own session to the partition"
 
 
 class _WedgedContext:

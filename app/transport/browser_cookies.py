@@ -1,4 +1,4 @@
-"""Per-domain browser cookie store with harvest helpers."""
+"""Namespaced browser cookie store with harvest helpers."""
 
 from __future__ import annotations
 
@@ -6,6 +6,7 @@ import logging
 from typing import Any
 
 from app.models.normalized_url import NormalizedUrl
+from app.transport.cookie_jar import COOKIE_NAMESPACE
 from app.transport.cookie_store import InMemoryCookieStore
 
 logger = logging.getLogger(__name__)
@@ -32,8 +33,19 @@ def _split_header(header: str) -> dict[str, str]:
     return parsed
 
 
+def _running_namespace(namespace: str | None) -> str:
+    """The namespace a cookie op keys by: an explicit one, else the crawl's.
+
+    ``None`` defers to ``COOKIE_NAMESPACE`` so the harvest and the retry land
+    in the same caller's slot without a parameter chain through the worker.
+    """
+    if namespace is not None:
+        return namespace
+    return COOKIE_NAMESPACE.get()
+
+
 class _LockedDomainCookieStore:
-    """Browser-harvest store: the in-memory medium at one implicit namespace."""
+    """Browser-harvest store: the in-memory medium, keyed per caller namespace."""
 
     __slots__ = ("_store",)
 
@@ -42,11 +54,11 @@ class _LockedDomainCookieStore:
         # lock of its own (no delegating-lock alias to deadlock against).
         self._store = InMemoryCookieStore(max_hosts_per_namespace=max_entries)
 
-    def store(self, domain: str, header: str) -> None:
-        self._store.put("", domain, _split_header(header))
+    def store(self, domain: str, header: str, namespace: str = "") -> None:
+        self._store.put(namespace, domain, _split_header(header))
 
-    def touch_get(self, domain: str) -> str | None:
-        cookies = self._store.load("", domain)
+    def touch_get(self, domain: str, namespace: str = "") -> str | None:
+        cookies = self._store.load(namespace, domain)
         if not cookies:
             return None
         return "; ".join(f"{name}={value}" for name, value in cookies.items())
@@ -62,7 +74,7 @@ BROWSER_COOKIES_BY_DOMAIN = _LockedDomainCookieStore(BROWSER_COOKIES_MAX)
 
 
 def reset_process_state() -> None:
-    """Drop every cookie the renderer has accumulated for a domain.
+    """Drop every cookie the renderer has accumulated, in every namespace.
 
     The store is process-wide and bounded, not cleared, so a browser test that
     renders once leaves its domain's cookies for the next test to assert against.
@@ -71,20 +83,25 @@ def reset_process_state() -> None:
 
 
 def has_process_state() -> bool:
-    """Whether any domain's cookies are held right now."""
+    """Whether any namespace holds a cookie right now."""
     return len(BROWSER_COOKIES_BY_DOMAIN) > 0
 
 
-def store_browser_cookies(domain: str, header: str) -> None:
-    """Record a harvested cookie header, evicting the LRU entry past the cap."""
-    BROWSER_COOKIES_BY_DOMAIN.store(domain, header)
+def store_browser_cookies(domain: str, header: str, *, namespace: str | None = None) -> None:
+    """Record a harvested cookie header, evicting the LRU entry past the cap.
+
+    Keyed by the caller's namespace (#437): one caller's harvested session
+    never surfaces to another caller's jar.
+    """
+    BROWSER_COOKIES_BY_DOMAIN.store(domain, header, _running_namespace(namespace))
 
 
-def get_browser_cookies_for(domain: str) -> str | None:
-    return BROWSER_COOKIES_BY_DOMAIN.touch_get(domain)
+def get_browser_cookies_for(domain: str, *, namespace: str | None = None) -> str | None:
+    """The harvested header for ``domain`` in the caller's namespace (#437)."""
+    return BROWSER_COOKIES_BY_DOMAIN.touch_get(domain, _running_namespace(namespace))
 
 
-async def harvest_session_cookies(page: Any, url: NormalizedUrl) -> None:
+async def harvest_session_cookies(page: Any, url: NormalizedUrl, *, namespace: str | None = None) -> None:
     """Capture the page's cookies before the context closes.
 
     Runs synchronously: the retry reads the store right after the render."""
@@ -95,7 +112,7 @@ async def harvest_session_cookies(page: Any, url: NormalizedUrl) -> None:
         cookies = await context.cookies(url.raw)
         header = "; ".join(f"{c['name']}={c['value']}" for c in cookies if c.get("name"))
         if header:
-            store_browser_cookies(url.site, header)
+            store_browser_cookies(url.site, header, namespace=namespace)
             logger.info("browser_cookies_harvested", extra={"domain": url.site, "count": len(cookies)})
     except Exception as error:
         logger.debug("browser_cookies_harvest_failed", extra={"error": str(error)})
