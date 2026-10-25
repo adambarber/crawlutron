@@ -6,7 +6,13 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from app.api import job_runner
-from tests._assertions import accepted_crawl, completed_crawl, poll_webhook_delivery, submit_async_crawl
+from tests._assertions import (
+    accepted_crawl,
+    completed_crawl,
+    plaintext_webhook_refusal,
+    poll_webhook_delivery,
+    submit_async_crawl,
+)
 from tests._async_harnesses import crawl_api as _crawl_api
 from tests._fetcher_factories import make_crawl_payload
 from tests._job_harnesses import loaded_job, single_shot_job
@@ -180,6 +186,17 @@ class TestAsyncCrawlApi:
             json=crawl_api.payload(async_mode=True, webhook_url="not-a-valid-url"),
         )
         assert resp.status_code == 422
+        assert resp.json()["code"] == "validation_error"
+
+    async def test_v1_crawl_plaintext_webhook_refused(self, crawl_api, monkeypatch):
+        """A plaintext http:// webhook rides the signature and payload TLS-less (#499).
+        The door refuses it unless the operator opted out; this test opts out."""
+        with plaintext_webhook_refusal(monkeypatch):
+            resp = await crawl_api.client.post(
+                "/v1/crawl",
+                json=crawl_api.payload(async_mode=True, webhook_url="http://receiver.example/hook"),
+            )
+        assert resp.status_code == 422, resp.text
         assert resp.json()["code"] == "validation_error"
 
     async def test_v1_crawl_async_mode_concurrent_limit(self, crawl_api, monkeypatch):

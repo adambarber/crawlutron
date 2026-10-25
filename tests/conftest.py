@@ -167,6 +167,13 @@ def fast_sleeps(request):
 
 
 @pytest.fixture(autouse=True)
+def plaintext_webhook_opt_in(monkeypatch):
+    """Door tests deliver to the plaintext loopback sink, so every test starts opted
+    in (#499); a refusal test drops the env to exercise the closed door."""
+    monkeypatch.setenv("CRAWLUTRON_ALLOW_PLAINTEXT_WEBHOOK", "1")
+
+
+@pytest.fixture(autouse=True)
 def stub_cffi_fetcher(request, monkeypatch):
     """Replace the real curl_cffi TLS-impersonation fetcher in tests.
 

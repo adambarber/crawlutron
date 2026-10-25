@@ -33,8 +33,10 @@ def test_webhook_module_has_no_dependency_wiring_state():
         assert not hasattr(wm, name), f"dead-island name reappeared: {name}"
     assert set(wm.__all__) == {
         "deliver_pinned_webhook",
+        "ensure_https_webhook_url",
         "max_webhook_size",
         "post_webhook",
+        "reset_plaintext_webhook_memo",
         "validate_webhook_url",
         "validate_webhook_url_async",
     }

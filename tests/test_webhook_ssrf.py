@@ -6,13 +6,20 @@ pinned IP (DNS-rebinding safe) while preserving the original Host header.
 import pytest
 
 from app.api.webhooks import (
+    ensure_https_webhook_url,
+)
+from app.api.webhooks import (
     post_webhook as _post_webhook,
 )
 from app.api.webhooks import (
     validate_webhook_url as _validate_webhook_url,
 )
 from app.safety.validation import HostPolicy
-from tests._assertions import block_private_targets, host_resolves_to
+from tests._assertions import (
+    block_private_targets,
+    host_resolves_to,
+    plaintext_webhook_refusal,
+)
 from tests._webhook_doubles import assert_delivered_once, record_webhook_delivery
 
 
@@ -55,6 +62,28 @@ class TestWebhookUrlValidation:
                 "http://localhost:8080/callback",
                 host_policy=HostPolicy.unrestricted(),
             )
+
+
+class TestPlaintextWebhookRefusal:
+    """#499: the HMAC scheme protects integrity, not confidentiality, so a
+    plaintext http:// webhook rides signature AND payload TLS-less. Doors
+    refuse it unless the operator opted out."""
+
+    def test_a_plaintext_webhook_url_is_refused(self, monkeypatch):
+        with plaintext_webhook_refusal(monkeypatch), pytest.raises(ValueError, match="https://"):
+            ensure_https_webhook_url("http://receiver.example/hook")
+
+    def test_an_https_webhook_url_is_accepted(self):
+        ensure_https_webhook_url("https://receiver.example/hook")
+
+    def test_the_operator_opt_in_admits_plaintext(self, monkeypatch):
+        from app.api.webhooks import reset_plaintext_webhook_memo
+
+        monkeypatch.setenv("CRAWLUTRON_ALLOW_PLAINTEXT_WEBHOOK", "1")
+        try:
+            ensure_https_webhook_url("http://receiver.example/hook")
+        finally:
+            reset_plaintext_webhook_memo()
 
 
 class TestWebhookDeliveryPinning:
