@@ -11,6 +11,8 @@ import socket
 import ssl
 
 import httpx
+from curl_cffi.requests.exceptions import CertificateVerifyError
+from curl_cffi.requests.exceptions import SSLError as CffiSSLError
 
 from app.models.browser_pool_exhausted import BrowserPoolExhaustedError
 from app.models.taxonomy import Classification, CrawlStrategyName
@@ -60,7 +62,9 @@ CLASSIFICATION_BY_EXCEPTION: tuple[tuple[tuple[type[BaseException], ...], Classi
         ),
         "connection_error",
     ),
-    ((ssl.SSLError,), "tls_error"),
+    ((ssl.SSLError, CffiSSLError, CertificateVerifyError), "tls_error"),
+    # #439: curl_cffi's TLS failures are classified tls_error too -- they share
+    # the row above.
     ((httpx.HTTPStatusError,), "http_status_error"),
     ((httpx.HTTPError,), "http_error"),
     ((ValueError,), "value_error"),

@@ -8,11 +8,12 @@ from __future__ import annotations
 
 import asyncio
 import functools
+import logging
 import time
 from collections.abc import Callable
 from typing import Any
 
-from curl_cffi.requests.exceptions import RequestException
+from curl_cffi.requests.exceptions import RequestException, SSLError
 from curl_cffi.requests.models import STREAM_END
 
 from app.models.http_fetch_result import HttpFetchResult
@@ -24,6 +25,8 @@ from app.transport.decompression import decompress_body as _decompress_body
 from app.transport.request_profile import TransportHeaders, store_set_cookies
 from app.transport.timeouts import Timeouts
 from app.vocabulary.limits import DEFAULT_MAX_CONTENT_LENGTH_BYTES
+
+logger = logging.getLogger(__name__)
 
 
 async def default_http_fetcher(
@@ -195,7 +198,15 @@ async def cffi_fetch(
         raise AssertionError("apinned_hops raises on a body that neither returned nor advanced")
     except DecompressionError:
         raise
-    except Exception:  # any cffi failure falls back to plain httpx
+    except SSLError:
+        # A TLS-handshake failure means impersonation never completed: serving
+        # the page via plain httpx would be a silent capability lie (#439).
+        raise
+    except Exception as error:  # other cffi failures fall back, but visibly
+        logger.warning(
+            "cffi_fetch_fallback",
+            extra={"url": url.raw, "error_code": type(error).__name__},
+        )
         return None
 
 
@@ -220,6 +231,10 @@ async def _handle_cffi_hop(
             stream=True,
             timeout=float(timeout_seconds),
         )
+    except SSLError:
+        # A TLS-handshake failure means impersonation never completed: serving
+        # the page via plain httpx would be a silent capability lie (#439).
+        raise
     except Exception:
         # Fall back to plain httpx for this request on transport errors.
         return None
