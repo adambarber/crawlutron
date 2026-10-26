@@ -7,7 +7,6 @@ stops and reports that stall instead of spinning.
 from __future__ import annotations
 
 import asyncio
-import logging
 import time
 from collections import deque
 from collections.abc import Awaitable, Callable
@@ -21,8 +20,6 @@ from app.vocabulary.taxonomy import CrawlClassification
 
 if TYPE_CHECKING:
     from app.orchestration.recursive import RecursiveRunState, RecursiveState
-
-logger = logging.getLogger(__name__)
 
 # How long a recursion tolerates admission making NO progress before it stops.
 NO_PROGRESS_STALL_SECONDS: float = 60.0
@@ -84,22 +81,23 @@ async def crawl_batches(
     shutdown_event: asyncio.Event,
     metrics: Any,
     max_pages: int,
+    *,
+    start_runner: Callable[[RecursiveRunState, RecursiveState, Any], Awaitable[list[tuple[int, CrawlTask]]]],
+    crawl_batch: Callable[
+        [RecursiveRunState, list[tuple[int, CrawlTask]]],
+        Awaitable[dict[int, EngineCrawlResult] | None],
+    ],
+    commit_batch: Callable[
+        [RecursiveRunState, RecursiveState, list[tuple[int, CrawlTask]], dict[int, EngineCrawlResult] | None],
+        Awaitable[None],
+    ],
 ) -> None:
-    """Drive admission batches until drain / cap / shutdown / admission-stall.
-
-    Imported lazily so this module does not import ``recursive`` at load time.
-    """
-    from app.orchestration.recursive import (
-        admit_recursive_batch,
-        commit_recursive_results,
-        crawl_recursive_batch,
-    )
-
+    """Drive admission batches until drain / cap / shutdown / admission-stall."""
     while state.frontier and (max_pages <= 0 or state.page_count < max_pages):
         if shutdown_event.is_set():
             return
         page_count_before = state.page_count
-        allowed_jobs = await admit_recursive_batch(run, state, metrics)
+        allowed_jobs = await start_runner(run, state, metrics)
         if not allowed_jobs and stall_guard.stalled():
             await fail_remaining_frontier(run.spill, run.spill_write, state.frontier)
             return
@@ -107,8 +105,8 @@ async def crawl_batches(
             # Zero-admission pass: yield the turn -- never hot-spin the gates.
             await asyncio.sleep(0)
             continue
-        scheduled_results = await crawl_recursive_batch(run, allowed_jobs)
-        await commit_recursive_results(run, state, allowed_jobs, scheduled_results)
+        scheduled_results = await crawl_batch(run, allowed_jobs)
+        await commit_batch(run, state, allowed_jobs, scheduled_results)
         if allowed_jobs or state.page_count > page_count_before:
             stall_guard.record_progress()
 

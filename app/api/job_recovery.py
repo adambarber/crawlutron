@@ -3,10 +3,15 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
 
-from app.api.job_lifecycle import is_running, start_job, start_tracked_task
+from app.api.job_lifecycle import is_running, start_tracked_task
 from app.config.settings import CrawlerSettings
 from app.storage.job_store import JobKind, JobStatus, JobStore
+
+# The spawn seam is injected so this module never imports the runner; it
+# spawns a job the way ``app.api.job_runner.start_job`` does.
+type _StartRunner = Callable[..., "asyncio.Task"]
 
 _DRAIN_TASK_ID = "_recovery_backlog_drain"
 
@@ -57,13 +62,14 @@ async def _drain_backlog(
     job_store: JobStore,
     settings: CrawlerSettings,
     shutdown_event: asyncio.Event,
+    start_runner: _StartRunner,
 ) -> None:
     """Start queued backlog rows as recovery slots free, never above ``limit``."""
     for job_id in backlog:
         if len(live) >= limit:
             done, live = await asyncio.wait(live, return_when=asyncio.FIRST_COMPLETED)
             live -= done
-        live.add(start_job(job_id, job_store, settings, shutdown_event))
+        live.add(start_runner(job_id, job_store, settings, shutdown_event))
     if live:
         # Hold the last slots until their runners exit so the drain never
         # outlives the work it queued.
@@ -74,10 +80,13 @@ async def recover_and_start_pending_jobs(
     job_store: JobStore,
     settings: CrawlerSettings,
     shutdown_event: asyncio.Event,
+    start_runner: _StartRunner,
 ) -> int:
     """Lifespan startup: retire crash orphans, then run every PENDING job.
 
-    Bounded by recovery_start_limit (#523 COR-09); backlog rows queue behind a drain task."""
+    ``start_runner`` is injected by the caller (usually ``job_runner.start_job``)
+    so recovery never imports the runner; bounded per #523 COR-09.
+    """
     await recover_orphaned_running_jobs(job_store)
     limit = recovery_start_limit(settings)
     started = 0
@@ -97,14 +106,14 @@ async def recover_and_start_pending_jobs(
         if len(live) >= limit:
             backlog.append(summary["job_id"])
             continue
-        live.add(start_job(summary["job_id"], job_store, settings, shutdown_event))
+        live.add(start_runner(summary["job_id"], job_store, settings, shutdown_event))
         started += 1
     if backlog:
         # #523 COR-09: queued rows wait for a slot instead of each spawning a
         # runner at boot; the drain rides the #448 registry so shutdown drains it.
         start_tracked_task(
             _DRAIN_TASK_ID,
-            lambda: _drain_backlog(backlog, live, limit, job_store, settings, shutdown_event),
+            lambda: _drain_backlog(backlog, live, limit, job_store, settings, shutdown_event, start_runner),
         )
         started += len(backlog)
     return started

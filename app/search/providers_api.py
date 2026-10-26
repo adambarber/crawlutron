@@ -6,6 +6,7 @@ and SSRF screening live in the base. The registry stays in ``providers.py``.
 from __future__ import annotations
 
 import abc
+from typing import Any
 
 from app.models.host_policy import HostPolicy
 from app.models.json_value import JsonValue
@@ -17,11 +18,13 @@ from app.search.providers import (
     BaseProvider,
     ProviderCall,
     SearchProviderError,
+    SearchProviderUnavailable,
     SearchResult,
     collect_results,
     parse_provider_json,
     provider_message,
 )
+from app.search.providers_html import DuckDuckGoProvider
 
 
 class ApiKeyProvider(BaseProvider):
@@ -152,9 +155,38 @@ class SerperProvider(ApiKeyProvider):
         )
 
 
+def get_search_provider(settings: Any) -> BaseProvider:
+    """Resolve the configured search provider; raise
+    :class:`SearchProviderUnavailable` when an explicit provider was selected
+    but its API key is missing. Lives here: it constructs this family."""
+    requested = (settings.search_provider or "auto").strip().lower()
+    host_policy = HostPolicy.from_settings(settings)
+    available: dict[str, BaseProvider] = {
+        provider.name: provider
+        for provider in (
+            TavilyProvider(settings.tavily_api_key, host_policy) if settings.tavily_api_key else None,
+            BraveProvider(settings.brave_api_key, host_policy) if settings.brave_api_key else None,
+            SerperProvider(settings.serper_api_key, host_policy) if settings.serper_api_key else None,
+        )
+        if provider is not None
+    }
+    if requested == "auto":
+        return next(iter(available.values())) if available else DuckDuckGoProvider(host_policy)
+    if requested == "duckduckgo":
+        return DuckDuckGoProvider(host_policy)
+    provider = available.get(requested)
+    if provider is not None:
+        return provider
+    raise SearchProviderUnavailable(
+        f"search provider '{requested}' is not configured; "
+        f"set CRAWLUTRON_{requested.upper()}_API_KEY (or CRAWLUTRON_SEARCH_PROVIDER=duckduckgo)"
+    )
+
+
 __all__ = [
     "ApiKeyProvider",
     "BraveProvider",
     "SerperProvider",
     "TavilyProvider",
+    "get_search_provider",
 ]

@@ -258,36 +258,8 @@ def active_search_provider_name(settings: Any) -> str:
     return providers[0] if providers else "duckduckgo"
 
 
-def get_search_provider(settings: Any) -> BaseProvider:
-    """Resolve the configured search provider; raise :class:`SearchProviderUnavailable`
-    when an explicit provider was selected but its API key is missing."""
-    # Imported here, not at module top, to break the provider-family cycle: the
-    # api/html modules import the shared contract from this module.
-    from app.search.providers_api import BraveProvider, SerperProvider, TavilyProvider
-    from app.search.providers_html import DuckDuckGoProvider
-
-    requested = (settings.search_provider or "auto").strip().lower()
-    host_policy = HostPolicy.from_settings(settings)
-    available: dict[str, BaseProvider] = {
-        provider.name: provider
-        for provider in (
-            TavilyProvider(settings.tavily_api_key, host_policy) if settings.tavily_api_key else None,
-            BraveProvider(settings.brave_api_key, host_policy) if settings.brave_api_key else None,
-            SerperProvider(settings.serper_api_key, host_policy) if settings.serper_api_key else None,
-        )
-        if provider is not None
-    }
-    if requested == "auto":
-        return next(iter(available.values())) if available else DuckDuckGoProvider(host_policy)
-    if requested == "duckduckgo":
-        return DuckDuckGoProvider(host_policy)
-    provider = available.get(requested)
-    if provider is not None:
-        return provider
-    raise SearchProviderUnavailable(
-        f"search provider '{requested}' is not configured; "
-        f"set CRAWLUTRON_{requested.upper()}_API_KEY (or CRAWLUTRON_SEARCH_PROVIDER=duckduckgo)"
-    )
+# get_search_provider moved to providers_api (#542): the factory constructs
+# this family's implementations; this contract module imports nothing back.
 
 
 __all__ = [
@@ -306,7 +278,6 @@ __all__ = [
     "clip_text",
     "collect_results",
     "configured_search_providers",
-    "get_search_provider",
     "normalize_result_url",
     "parse_provider_json",
     "provider_message",

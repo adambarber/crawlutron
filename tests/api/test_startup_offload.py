@@ -148,14 +148,14 @@ class TestStartupRecoveryStaysOffTheLoop:
     pins that the recovery never blocks the loop that just booted the service."""
 
     async def test_recovery_rewinds_and_starts_without_touching_the_loop(self, loop_guard_store):
-        from app.api.job_runner import recover_and_start_pending_jobs
+        from app.api.job_runner import recover_and_start_pending_jobs, start_job
 
         job_runner.reset_job_runner()
         job_runner.install_execute_crawl(ScriptedExecute(results=[_canned_result(_ROOT)]))
         try:
             job = await _off_loop(_seed_job, loop_guard_store, _ROOT, {"limits": {"max_depth": 1}})
             await recover_and_start_pending_jobs(
-                loop_guard_store, CrawlerSettings.from_mapping({}), asyncio.Event()
+                loop_guard_store, CrawlerSettings.from_mapping({}), asyncio.Event(), start_job
             )
             status = await _await_terminal_status(loop_guard_store, job.job_id)
             assert status == "completed"

@@ -12,11 +12,8 @@ from app.models.search_request import SearchRequest
 from app.models.search_response import SearchResponse
 from app.models.search_result_item import SearchResultItem
 from app.runtime.metrics import get_metrics
-from app.search.providers import (
-    SearchProviderError,
-    SearchProviderUnavailable,
-    get_search_provider,
-)
+from app.search.providers import SearchProviderError, SearchProviderUnavailable
+from app.search.providers_api import get_search_provider
 
 logger = logging.getLogger(__name__)
 

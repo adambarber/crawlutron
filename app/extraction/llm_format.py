@@ -9,6 +9,7 @@ from html import unescape
 from typing import Any, cast, get_args, get_type_hints
 
 from app.extraction.classify import strip_html_noise
+from app.extraction.trees import parse_html_tree
 from app.models.json_value import JsonValue
 from app.models.normalized_url import NormalizedUrl
 from app.models.page_metadata import PageMetadata
@@ -58,9 +59,8 @@ def extract_llm_metadata(html: str, url: NormalizedUrl | None) -> PageMetadata:
     source = url.raw if url is not None else ""
     metadata: PageMetadata = {"source_url": source}
     html = truncate_html_input(html)
-    # Lazy import avoids a circular import: extraction.py imports this module
-    # at module level, so this direction must stay lazy.
-    from app.extraction.content import parse_html_tree
+    # parse_html_tree comes from app.extraction.trees, the parser's owner; the
+    # old lazy detour through extraction.content closed a four-module cycle.
 
     tree = parse_html_tree(html)
     if tree is None:

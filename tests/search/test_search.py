@@ -1,7 +1,5 @@
 """The shared search contract: ``provider_http``, ``collect_results``, the
-registry, the endpoint skip and the #386 pin boundary. Per-family providers
-are tested in ``test_providers_api.py`` and ``test_providers_html.py``.
-"""
+registry, the endpoint skip and the #386 pin boundary."""
 
 from __future__ import annotations
 
@@ -17,9 +15,8 @@ from app.search.providers import (
     SearchProviderUnavailable,
     collect_results,
     configured_search_providers,
-    get_search_provider,
 )
-from app.search.providers_api import BraveProvider, SerperProvider, TavilyProvider
+from app.search.providers_api import BraveProvider, SerperProvider, TavilyProvider, get_search_provider
 from app.search.providers_html import DuckDuckGoProvider
 from tests._assertions import one_search_result, provider_results
 

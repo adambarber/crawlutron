@@ -175,7 +175,7 @@ class TestRunnerLifecycle:
         with single_shot_job(job_id="pending-shot") as (store, job):
             assert (
                 await job_runner.recover_and_start_pending_jobs(
-                    store, CrawlerSettings.from_mapping({}), asyncio.Event()
+                    store, CrawlerSettings.from_mapping({}), asyncio.Event(), job_runner.start_job
                 )
                 == 0
             )
@@ -205,7 +205,7 @@ class TestRunnerLifecycle:
         with single_shot_orphan(job_id="orphan-shot-2") as (store, job):
             await job_runner.recover_orphaned_running_jobs(store)
             started = await job_runner.recover_and_start_pending_jobs(
-                store, CrawlerSettings.from_mapping({}), asyncio.Event()
+                store, CrawlerSettings.from_mapping({}), asyncio.Event(), job_runner.start_job
             )
 
             assert started == 0
@@ -244,7 +244,9 @@ class TestRunnerLifecycle:
         settings = CrawlerSettings.from_mapping({"CRAWLUTRON_GLOBAL_CONCURRENCY": "2"})
         job_ids = [job_store.create(GRAPH_ROOT, CrawlPolicy()).job_id for _ in range(10)]
 
-        await job_runner.recover_and_start_pending_jobs(job_store, settings, asyncio.Event())
+        await job_runner.recover_and_start_pending_jobs(
+            job_store, settings, asyncio.Event(), job_runner.start_job
+        )
         # Give spawned runners their registration turn.
         await asyncio.sleep(0.05)
         spawned = sum(1 for job_id in job_ids if job_lifecycle.is_running(job_id))
@@ -265,7 +267,7 @@ class TestRunnerLifecycle:
         job_store.create(GRAPH_CHILD, CrawlPolicy())
 
         started = await job_runner.recover_and_start_pending_jobs(
-            job_store, _CS.from_mapping({}), _asyncio.Event()
+            job_store, _CS.from_mapping({}), _asyncio.Event(), job_runner.start_job
         )
         assert started == 2
         assert job_runner.is_running(job.job_id)

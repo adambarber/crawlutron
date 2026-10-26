@@ -6,8 +6,8 @@ from app.search.providers import (
     SearchProviderUnavailable,
     active_search_provider_name,
     configured_search_providers,
-    get_search_provider,
 )
+from app.search.providers_api import get_search_provider
 
 __all__ = [
     "BaseProvider",

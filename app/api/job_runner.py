@@ -24,11 +24,10 @@ from app.admission.admission_links import AdmissionOutcome, remaining_page_capac
 from app.admission.policy import read_policy
 from app.api.crawl_executor import execute_crawl as _real_execute_crawl
 from app.api.job_lifecycle import (
+    cancel_all_tasks,
     cancel_job_task,
     is_running,
-    reset_job_runner,
     shutdown_job_runner,
-    start_job,
     start_tracked_task,
     tracked_task,
 )
@@ -374,6 +373,34 @@ async def _transition(
     if await job_store.aset_status(job_id, to, expected=expected):
         return "ok"
     return "missing" if await job_store.aload(job_id) is None else "conflict"
+
+
+def reset_job_runner() -> None:
+    """Best-effort synchronous teardown for test fixtures (no await needed).
+
+    The registry part is ``cancel_all_tasks``; this also resets the
+    execute-crawl seam this module owns.
+    """
+    cancel_all_tasks()
+    reset_execute_crawl()
+
+
+def start_job(
+    job_id: str,
+    job_store: JobStore,
+    settings: Any,
+    shutdown_event: asyncio.Event,
+    *,
+    preclaimed: bool = False,
+) -> asyncio.Task:
+    """Spawn (or return) the runner task; preclaimed rows were flipped by caller.
+
+    Lives here because it spawns ``run_job``; the registry module never
+    imports back into this one.
+    """
+    return start_tracked_task(
+        job_id, lambda: run_job(job_id, job_store, settings, shutdown_event, preclaimed=preclaimed)
+    )
 
 
 async def pause_job(job_id: str, job_store: JobStore) -> str:
