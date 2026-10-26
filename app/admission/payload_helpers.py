@@ -47,9 +47,9 @@ def checked_payload_urls(
     host_policy: HostPolicy,
     urls: list[str] | None = None,
 ) -> list[str]:
-    """Deduplicated URL batch, collapsed by page identity, validated first, and
-    rejected if it exceeds the batch cap. ``urls`` forwarding skips re-derivation
-    (it still caps and validates) -- the one rule engine and every router share.
+    """A deduplicated, validated URL batch under the batch cap. ``urls``
+    forwarding skips re-derivation -- it still validates and caps, but is NOT
+    deduplicated (pinned by test_checked_payload_urls_accepts_a_forwarded_batch_without_rederiving).
     """
     if urls is not None:
         for url in urls:
