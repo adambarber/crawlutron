@@ -153,7 +153,7 @@ def build_pinned_request(url: NormalizedUrl, headers: dict[str, str]) -> tuple[s
     if url.query:
         connect_url = f"{connect_url}?{url.query}"
     out_headers = dict(headers)
-    out_headers["Host"] = f"{url.host}{port}"
+    out_headers["Host"] = f"[{url.host}]{port}" if ":" in url.host else f"{url.host}{port}"
     return connect_url, out_headers
 
 

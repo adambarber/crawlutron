@@ -18,3 +18,10 @@ def test_dict_payload_message_wins():
     error = ProtocolValidationError(400, {"error": {"message": "bad version"}})
     assert str(error) == "bad version"
     assert error.payload == {"error": {"message": "bad version"}}
+
+
+def test_none_message_falls_back_to_default():
+    # #493: a present-but-None message read as str(None); JsonValue admits None,
+    # so only a non-empty string may carry the payload's message.
+    error = ProtocolValidationError(400, {"error": {"message": None}})
+    assert str(error) == "validation error"

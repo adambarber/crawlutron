@@ -59,6 +59,10 @@ def _canonical_parts(url: str, *, policy: HostPolicy) -> tuple[str, str, str, st
 
     scheme = parsed.scheme
     host = parsed.hostname.lower().rstrip(".")
+    # #494: a bracketed host that is not an IPv6 literal is IPvFuture (RFC 3986);
+    # nothing here dials one, so refuse rather than de-bracket it into a hostname.
+    if parsed.netloc.startswith("[") and ":" not in host:
+        raise ValueError("ipvfuture_refused")
     reason = host_policy_reason(host, policy=policy) or host_egress_reason(host)
     if reason:
         raise ValueError(reason)
