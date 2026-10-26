@@ -11,6 +11,9 @@ from app.models.host_policy import HostPolicy
 from app.models.json_value import JsonValue
 from app.search import providers as _providers
 from app.search.providers import (
+    BRAVE_URL,
+    SERPER_URL,
+    TAVILY_URL,
     BaseProvider,
     ProviderCall,
     SearchProviderError,
@@ -19,10 +22,6 @@ from app.search.providers import (
     parse_provider_json,
     provider_message,
 )
-
-_TAVILY_URL = "https://api.tavily.com/search"
-_BRAVE_URL = "https://api.search.brave.com/res/v1/web/search"
-_SERPER_URL = "https://google.serper.dev/search"
 
 
 class ApiKeyProvider(BaseProvider):
@@ -104,7 +103,7 @@ class TavilyProvider(ApiKeyProvider):
         # Tavily carries the key in the JSON body, not a header.
         return ProviderCall(
             "POST",
-            _TAVILY_URL,
+            TAVILY_URL,
             json_body={
                 "api_key": self._api_key,
                 "query": query,
@@ -129,7 +128,7 @@ class BraveProvider(ApiKeyProvider):
     def _call(self, query: str, limit: int) -> ProviderCall:
         return ProviderCall(
             "GET",
-            _BRAVE_URL,
+            BRAVE_URL,
             params={"q": query, "count": limit, "safesearch": "off"},
             headers={"X-Subscription-Token": self._api_key, "Accept": "application/json"},
         )
@@ -147,7 +146,7 @@ class SerperProvider(ApiKeyProvider):
     def _call(self, query: str, limit: int) -> ProviderCall:
         return ProviderCall(
             "POST",
-            _SERPER_URL,
+            SERPER_URL,
             json_body={"q": query, "num": limit},
             headers={"X-API-KEY": self._api_key, "Content-Type": "application/json"},
         )

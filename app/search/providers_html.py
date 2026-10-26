@@ -13,15 +13,14 @@ from lxml import html as lxml_html
 from app.models.host_policy import HostPolicy
 from app.search import providers as _providers
 from app.search.providers import (
+    DUCKDUCKGO_REDIRECT,
+    DUCKDUCKGO_URL,
     BaseProvider,
     SearchProviderError,
     SearchResult,
     clip_text,
     normalize_result_url,
 )
-
-_DUCKDUCKGO_URL = "https://html.duckduckgo.com/html/"
-_DUCKDUCKGO_REDIRECT = "//duckduckgo.com/l/"
 
 _DUCKDUCKGO_UA = (
     "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"
@@ -42,7 +41,7 @@ class DuckDuckGoProvider(BaseProvider):
         """Post the query to the scraped HTML endpoint."""
         return await _providers.provider_http(
             "POST",
-            _DUCKDUCKGO_URL,
+            DUCKDUCKGO_URL,
             data={"q": query},
             headers={"User-Agent": _DUCKDUCKGO_UA},
             timeout_seconds=timeout_seconds,
@@ -97,7 +96,7 @@ class DuckDuckGoProvider(BaseProvider):
 def _duckduckgo_target(href: str, *, policy: HostPolicy) -> str | None:
     """Resolve a DDG result link: unwrap the ``//duckduckgo.com/l/?uddg=<enc>``
     wrapper to the encoded target when present, else admit ``href`` itself."""
-    if href.startswith(_DUCKDUCKGO_REDIRECT):
+    if href.startswith(DUCKDUCKGO_REDIRECT):
         parsed = urlsplit(href)
         uddg = parse_qs(parsed.query).get("uddg")
         if uddg:

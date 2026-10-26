@@ -30,15 +30,15 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-_TAVILY_URL = "https://api.tavily.com/search"
-_BRAVE_URL = "https://api.search.brave.com/res/v1/web/search"
-_SERPER_URL = "https://google.serper.dev/search"
-_DUCKDUCKGO_URL = "https://html.duckduckgo.com/html/"
-_DUCKDUCKGO_REDIRECT = "//duckduckgo.com/l/"
+TAVILY_URL = "https://api.tavily.com/search"
+BRAVE_URL = "https://api.search.brave.com/res/v1/web/search"
+SERPER_URL = "https://google.serper.dev/search"
+DUCKDUCKGO_URL = "https://html.duckduckgo.com/html/"
+DUCKDUCKGO_REDIRECT = "//duckduckgo.com/l/"
 
 #: The whole provider endpoint registry: every URL a provider fetch may target.
 #: Read by the #386 trust-boundary test (no caller input reaches this set).
-PROVIDER_ENDPOINTS = frozenset((_TAVILY_URL, _BRAVE_URL, _SERPER_URL, _DUCKDUCKGO_URL))
+PROVIDER_ENDPOINTS = frozenset((TAVILY_URL, BRAVE_URL, SERPER_URL, DUCKDUCKGO_URL))
 
 # Result text from a search engine is untrusted; truncate titles/snippets so a
 # hostile provider cannot push unbounded strings into responses.
@@ -292,6 +292,11 @@ def get_search_provider(settings: Any) -> BaseProvider:
 
 __all__ = [
     "PROVIDER_ENDPOINTS",
+    "BRAVE_URL",
+    "DUCKDUCKGO_REDIRECT",
+    "DUCKDUCKGO_URL",
+    "SERPER_URL",
+    "TAVILY_URL",
     "BaseProvider",
     "ProviderCall",
     "SearchProviderError",
