@@ -276,13 +276,16 @@ async def _recurse_sitemap(
         return etag, last_modified
     if text is None:
         return etag, last_modified
-    locs = _LOC_PATTERN.findall(text)
-    if "<sitemapindex" in text.lower():
+    if len(text) >= _COLLECT_OFFLOAD_MIN_BYTES:
+        # Large bodies run their whole scan in a worker thread -- findall on a
+        # 10MB sitemapindex holds the loop just like the page path (#544/P6).
+        locs, lowered = await asyncio.to_thread(_scan_sitemap_text, text)
+    else:
+        locs, lowered = _scan_sitemap_text(text)
+    if "<sitemapindex" in lowered:
         children = locs[: max(0, walk.max_urls - len(walk.page_urls))]
         await _fanout_sitemap_children(walk, current_url, children, depth)
         return etag, last_modified
-    # Past the threshold the association runs in a worker thread: a 50k-entry
-    # sitemap must not hold the event loop for its scan (#526).
     if len(text) >= _COLLECT_OFFLOAD_MIN_BYTES:
         await asyncio.to_thread(_collect_page_entries, text, current_url, walk.page_urls)
     else:
@@ -293,6 +296,12 @@ async def _recurse_sitemap(
 # In-flight cold walks, keyed like the cache (#498): parallel callers of one
 # cold sitemap share one upstream walk instead of each walking it.
 _INFLIGHT_SITEMAP: dict[tuple[str, HostPolicy], asyncio.Task[set]] = {}
+
+
+def _scan_sitemap_text(text: str) -> tuple[list[str], str]:
+    """(locs, lowered) for one sitemap body -- the loop-blocking scan that
+    large bodies offload (#526, #544/P6)."""
+    return _LOC_PATTERN.findall(text), text.lower()
 
 
 def _cache_walk_result(
