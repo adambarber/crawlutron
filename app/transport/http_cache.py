@@ -26,6 +26,7 @@ from app.transport.http_response import (
     response_result_fields,
     serialize_response,
 )
+from app.transport.request_profile import cookie_namespace_for
 from app.vocabulary.taxonomy import status_for_classification
 
 __all__ = [
@@ -85,6 +86,7 @@ async def revalidate_content_cache(ctx: HttpStrategyContext) -> None:
         ctx.extraction,
         ctx.policy.css_selector,
         ctx.policy.xpath,
+        cookie_namespace=cookie_namespace_for(ctx.policy.request_profile),
     )
     ctx.ckey = ckey
     cached = await ctx.content_cache.aget(ckey)
