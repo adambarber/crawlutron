@@ -6,6 +6,7 @@ import ast
 import pathlib
 
 from tests.chokepoint_walks import (
+    REPO_ROOT,
     assignment_targets,
     calls_named_leaf,
     functions,
@@ -179,69 +180,67 @@ AGE_BASED_DELETION_CONSULTS_OWNERSHIP = Rule(
 )
 
 
-# --- 4c: the webhook semaphore is touched only through its loop accessor -----
+# --- 4c: the webhook semaphore lives in one loop-bound holder ---------------
 
-_SEMAPHORE_GLOBALS = frozenset({"_async_crawl_semaphore", "_async_crawl_semaphore_loop"})
+#: The one holder name: it pairs the semaphore with the loop that built it.
+_SEMAPHORE_HOLDER_GLOBAL = "_SEMAPHORE_HOLDER"
 
-
-# The accessor binds the cached instance to the running loop; the public reset
-# clears it so a test swapping the builder observes its patch immediately.
+# The accessor rebinds the holder to the running loop; the public reset empties
+# it so a test swapping the builder observes its patch immediately.
 _SEMAPHORE_WRITERS = frozenset({"async_crawl_semaphore", "reset_process_state"})
 
 
-def _semaphore_global_touch_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
-    """The loop-bound semaphore module globals are touched only by the writers.
+def _semaphore_holder_touch_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
+    """The holder's name is touched only by its two writers.
 
-    The cached instance is bound to the running loop by its single home and
-    cleared on rebuild; assigning it elsewhere is a loop-bound violation.
+    The holder pairs the semaphore with the loop that built it; reaching around
+    the accessor is how a Semaphore gets awaited off its own loop.
     """
     return [
         offender_at(
             path,
             node,
             f"{node.id} touched outside {'/'.join(sorted(_SEMAPHORE_WRITERS))}; "
-            f"use the accessor so the instance stays bound to the running loop",
+            f"use the accessor so the semaphore stays bound to its loop",
         )
         for node in name_reads(tree)
-        if node.id in _SEMAPHORE_GLOBALS
+        if node.id == _SEMAPHORE_HOLDER_GLOBAL
         and (scopes := _enclosing_defs(node, tree))
         and not set(scopes).intersection(_SEMAPHORE_WRITERS)
     ]
 
 
-SEMAPHORE_GLOBALS_ARE_LOOP_BOUND = Rule(
-    name="semaphore-globals-are-loop-bound",
-    find=_semaphore_global_touch_offenders,
+SEMAPHORE_HOLDER_IS_SINGLE_AND_LOOP_BOUND = Rule(
+    name="semaphore-holder-is-single-and-loop-bound",
+    find=_semaphore_holder_touch_offenders,
     summary=(
-        "The cached Semaphore is bound to the loop that built it, so reading or "
-        "assigning the global anywhere but the accessor is a Semaphore awaited "
-        "off its own loop; go through the accessor instead"
+        "The webhook semaphore and its loop live in one holder, and only the "
+        "accessor and the reset may touch it; reaching around the accessor is "
+        "how a Semaphore gets awaited off its own loop"
     ),
     bite=lambda: (
         Bites(
-            "async def f():\n    return _async_crawl_semaphore.acquire()\n",
-            "use the accessor so the instance stays bound to the running loop",
+            "async def f():\n    return _SEMAPHORE_HOLDER.semaphore.acquire()\n",
+            "use the accessor so the semaphore stays bound to its loop",
         ),
-        # A direct write is the same bypass.
+        # A direct rebind is the same bypass.
         Bites(
-            "def f():\n    _async_crawl_semaphore = None\n",
-            "use the accessor so the instance stays bound to the running loop",
+            "def f():\n    global _SEMAPHORE_HOLDER\n    _SEMAPHORE_HOLDER = None\n",
+            "use the accessor so the semaphore stays bound to its loop",
         ),
     ),
     clean=lambda: (
-        # The module-level declaration is the definition, not a touch.
-        "_async_crawl_semaphore: asyncio.Semaphore | None = None\n",
-        # The accessor itself is exempt, including the companion loop global.
+        # The module-level construction is the definition, not a touch.
+        "_SEMAPHORE_HOLDER = _SemaphoreHolder()\n",
+        # The accessor itself is the sanctioned rebinding writer.
         "def async_crawl_semaphore():\n"
-        "    global _async_crawl_semaphore, _async_crawl_semaphore_loop\n"
-        "    if _async_crawl_semaphore is None:\n"
-        "        _async_crawl_semaphore = _build_async_crawl_semaphore()\n"
-        "    return _async_crawl_semaphore\n",
-        # The public reset is the other sanctioned writer: it clears the cache.
+        "    global _SEMAPHORE_HOLDER\n"
+        "    _SEMAPHORE_HOLDER = _SemaphoreHolder(_build(), None)\n"
+        "    return _SEMAPHORE_HOLDER.semaphore\n",
+        # The public reset is the other sanctioned writer: it empties the holder.
         "def reset_process_state():\n"
-        "    global _async_crawl_semaphore, _async_crawl_semaphore_loop\n"
-        "    _async_crawl_semaphore = None\n"
-        "    _async_crawl_semaphore_loop = None\n",
+        "    global _SEMAPHORE_HOLDER\n"
+        "    _SEMAPHORE_HOLDER = _SemaphoreHolder()\n",
     ),
 )
 
@@ -251,10 +250,47 @@ RULES = Registry(
         HANDLE_MINTING_IS_SINGLE_SOURCED,
         DOMAIN_POLITENESS_FLOOR_ONLY_VIA_THE_SETTER,
         AGE_BASED_DELETION_CONSULTS_OWNERSHIP,
-        SEMAPHORE_GLOBALS_ARE_LOOP_BOUND,
+        SEMAPHORE_HOLDER_IS_SINGLE_AND_LOOP_BOUND,
     )
 )
 
 
 def test_no_rule_violations():
     RULES.check_all_clean()
+
+
+# The holder's runtime semantics, locked where the AST rule locks its shape.
+
+
+def test_the_holder_is_one_value_with_exactly_the_two_fields():
+    """Single holder: the semaphore and its loop are one dataclass value, not two globals."""
+    source = (REPO_ROOT / "app/api/async_crawl_runner.py").read_text(encoding="utf-8")
+    tree = ast.parse(source)
+    holders = [
+        node for node in tree.body if isinstance(node, ast.ClassDef) and node.name == "_SemaphoreHolder"
+    ]
+    assert len(holders) == 1, "the holder type must be defined exactly once"
+    fields = [stmt.target.id for stmt in holders[0].body if isinstance(stmt, ast.AnnAssign)]
+    assert fields == ["semaphore", "loop"], "the holder carries exactly the semaphore and its loop"
+
+
+def test_the_holder_is_loop_bound_and_reset_clears_it():
+    """A foreign running loop forces a rebuild through the public accessor, and
+    the public reset empties the holder so the next accessor rebuilds fresh."""
+    import asyncio
+
+    import app.api.async_crawl_runner as runner
+
+    async def _accessor_on_this_loop():
+        return runner.async_crawl_semaphore()
+
+    runner.reset_process_state()
+    first = runner.async_crawl_semaphore()
+    foreign = asyncio.new_event_loop()
+    try:
+        rebuilt = foreign.run_until_complete(_accessor_on_this_loop())
+        assert rebuilt is not first, "a loop change must rebuild, not reuse"
+    finally:
+        foreign.close()
+    runner.reset_process_state()
+    assert runner.async_crawl_semaphore() is not first, "post-reset access must rebuild"

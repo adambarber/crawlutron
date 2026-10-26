@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+from dataclasses import dataclass
 
 from app.api.crawl_executor import execute_crawl
 from app.api.job_runner import arecord_terminal_failure
@@ -26,10 +27,18 @@ from app.storage.job_store import TERMINAL_STATUSES, CrawlJobState, JobStatus
 
 logger = logging.getLogger(__name__)
 
-# Module-level semaphore: bounded so a flood of 202s cannot spawn unbounded
+
+# Module-level holder: bounded so a flood of 202s cannot spawn unbounded
 # concurrent crawls; loop-bound, rebuilt when the loop changes, width re-read from environ.
-_async_crawl_semaphore: asyncio.Semaphore | None = None
-_async_crawl_semaphore_loop: asyncio.AbstractEventLoop | None = None
+@dataclass(frozen=True)
+class _SemaphoreHolder:
+    """The webhook semaphore and the loop it was built for, as one value."""
+
+    semaphore: asyncio.Semaphore
+    loop: asyncio.AbstractEventLoop | None
+
+
+_SEMAPHORE_HOLDER: _SemaphoreHolder | None = None
 
 
 def _build_async_crawl_semaphore() -> asyncio.Semaphore:
@@ -44,29 +53,29 @@ def _build_async_crawl_semaphore() -> asyncio.Semaphore:
 def async_crawl_semaphore() -> asyncio.Semaphore:
     """Return the webhook-crawl semaphore bound to the running event loop.
 
-    Lazily constructed (no event-loop dependency at import) and rebuilt when the
-    running loop is not the one the cached semaphore was built for.
+    Lazily constructed (no event-loop dependency at import) and rebuilt whenever
+    the running loop is not the one the holder's cached semaphore was built for.
     """
-    global _async_crawl_semaphore, _async_crawl_semaphore_loop
+    global _SEMAPHORE_HOLDER
     try:
         loop = asyncio.get_running_loop()
     except RuntimeError:
         loop = None
-    if _async_crawl_semaphore is None or _async_crawl_semaphore_loop is not loop:
-        _async_crawl_semaphore = _build_async_crawl_semaphore()
-        _async_crawl_semaphore_loop = loop
-    return _async_crawl_semaphore
+    holder = _SEMAPHORE_HOLDER
+    if holder is None or holder.loop is not loop:
+        holder = _SemaphoreHolder(_build_async_crawl_semaphore(), loop)
+        _SEMAPHORE_HOLDER = holder
+    return holder.semaphore
 
 
 def reset_process_state() -> None:
-    """Drop the cached webhook-crawl semaphore and its event-loop binding.
+    """Drop the webhook-crawl semaphore holder.
 
     The semaphore is process-wide: a test that swaps the builder needs the
     cache cleared, exactly as the pooled clients clear their session cache.
     """
-    global _async_crawl_semaphore, _async_crawl_semaphore_loop
-    _async_crawl_semaphore = None
-    _async_crawl_semaphore_loop = None
+    global _SEMAPHORE_HOLDER
+    _SEMAPHORE_HOLDER = None
 
 
 async def run_async_crawl(

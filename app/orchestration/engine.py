@@ -315,9 +315,9 @@ class ResultSpill:
             self.count += 1
 
     def load_ordered(self, *, policy: HostPolicy) -> list[EngineCrawlResult]:
-        """Reassemble all spilled results in submission order (one pass into index slots,
-        no sort) into real EngineCrawlResult objects via ``from_wire``. The full set
-        is materialized in RAM -- the JSON contract -- which is the caller's to pay.
+        """Reassemble all spilled results in submission order, one pass, via ``from_wire``.
+        Mid-crawl each page lives on disk; reassembly materializes the full admitted set in
+        RAM -- the JSON contract -- bounded by the batch wire cap (500) or max_pages (2000).
         """
         self._fh.flush()
         slots: dict[int, EngineCrawlResult] = {}
