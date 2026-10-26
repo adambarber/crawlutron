@@ -4,6 +4,7 @@ no longer referenced -- the logging helper lives at :mod:`app.runtime.logging_co
 """
 
 import asyncio
+import logging
 import os
 import shutil
 import sys
@@ -151,6 +152,33 @@ def pytest_collection_modifyitems(config, items):
     for item in items:
         if "browser" in item.keywords:
             item.add_marker(skip_no_browser)
+
+
+# 435: zero-run xdist workers abort natively when teardown races the camoufox
+# import graph's shutdown; unbuffered streams shrink that race.
+try:
+    sys.stdout.reconfigure(line_buffering=False, write_through=True)
+    sys.stderr.reconfigure(line_buffering=False, write_through=True)
+    os.environ["PYTHONUNBUFFERED"] = "1"
+    os.environ["PYTHONDONTWRITEBYTECODE"] = "1"  # no pyc writes during collection
+except (AttributeError, ValueError):
+    logging.getLogger(__name__).debug("stream reconfigure unavailable")
+
+
+def pytest_sessionfinish(session, exitstatus):  # args unused; hook signature
+    """#435: the abort fires under the interpreter's exit-time flush.
+
+    Re-flushing synchronously here moves the summary's pending output to the
+    OS before teardown begins, so the race window starts already drained."""
+    import time
+
+    time.sleep(0.05)
+    try:
+        del session, exitstatus
+        sys.stdout.flush()
+        sys.stderr.flush()
+    except (ValueError, OSError):
+        logging.getLogger(__name__).debug("final flush unavailable")
 
 
 @pytest.fixture(autouse=True)
