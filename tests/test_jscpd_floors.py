@@ -21,6 +21,8 @@ from tests._jscpd_gate_helpers import (
     _roots_of,
     _run_against_empty_tree,
     _stub_report,
+    scan_run_stub,
+    stub_resolver_probe,
 )
 
 
@@ -129,11 +131,11 @@ def _configure_scan_config(monkeypatch, tmp_path, ignore: list[str]) -> list[lis
     )
     commands: list[list[str]] = []
 
-    def run(command, **_kwargs):
-        commands.append(command)
+    def scan(command) -> object:
         raise AssertionError("jscpd must not run against an unvalidated scan config")
 
-    monkeypatch.setattr(res.subprocess, "run", run)
+    stub_resolver_probe(monkeypatch)
+    scan_run_stub(monkeypatch, commands, scan)
     return commands
 
 

@@ -8,7 +8,33 @@ from pathlib import Path
 
 from app.models.jscpd_report import JscpdDuplicate, JscpdLocation
 from scripts import _jscpd_pair_resolution as res
+from scripts import executables as ex
 from scripts import jscpd_gate as gate
+
+
+def stub_resolver_probe(monkeypatch) -> None:
+    """Accept the resolver's venv preprobe; these stubs model the scan, not resolution."""
+    monkeypatch.setattr(ex, "_probe", lambda candidate: True)
+
+
+def answer_version_preprobe(command: list[str]) -> object | None:
+    """Answer the resolver's ``--version`` preprobe so the scan stub is the only jscpd run."""
+    if command[1:] != ["--version"]:
+        return None
+    return type("Completed", (), {"returncode": 0, "stdout": "jscpd 5.3.2", "stderr": ""})()
+
+
+def scan_run_stub(monkeypatch, commands: list[list[str]], scan) -> None:
+    """subprocess.run that records commands, answers the preprobe, delegates scans to ``scan``."""
+
+    def run(command, **_kwargs):
+        commands.append(command)
+        answered = answer_version_preprobe(command)
+        if answered is not None:
+            return answered
+        return scan(command)
+
+    monkeypatch.setattr(res.subprocess, "run", run)
 
 
 def _args(threshold: float = 0) -> argparse.Namespace:
@@ -130,9 +156,9 @@ def _stub_report(
 ) -> list[list[str]]:
     commands: list[list[str]] = []
     _intercept_declared_files(monkeypatch, duplicates)
+    stub_resolver_probe(monkeypatch)
 
-    def run(command, **_kwargs):
-        commands.append(command)
+    def scan(command) -> object:
         positionals = command[command.index("--fail-on-empty") + 1 :]
         roots = [argument for argument in positionals if argument in _KNOWN_ROOTS]
         scoped = _scoped_duplicates(duplicates, roots)
@@ -151,7 +177,7 @@ def _stub_report(
         (output / "jscpd-report.json").write_text(json.dumps(report), encoding="utf-8")
         return type("Completed", (), {"returncode": 0, "stdout": "", "stderr": ""})()
 
-    monkeypatch.setattr(res.subprocess, "run", run)
+    scan_run_stub(monkeypatch, commands, scan)
     return commands
 
 
