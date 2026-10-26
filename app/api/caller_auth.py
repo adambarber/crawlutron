@@ -249,7 +249,7 @@ async def admit(
         )
         namespace = effective_cookie_namespace(policy.request_profile, active)
         # #537: scrub a refused key_-shaped declaration so the engine cannot re-derive it.
-        if namespace or namespace != cookie_namespace_for(policy.request_profile):
+        if namespace != cookie_namespace_for(policy.request_profile):
             profile = dict(policy.request_profile)
             profile["cookie_namespace"] = namespace
             policy = policy.model_copy(update={"request_profile": profile})
