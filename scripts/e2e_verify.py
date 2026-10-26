@@ -176,6 +176,9 @@ def _refused_401(response: httpx.Response) -> bool:
 
 def main(argv: list[str] | None = None) -> int:
     args = argv if argv is not None else sys.argv[1:]
+    if args in (["-h"], ["--help"]):
+        print(__doc__.strip())
+        return 0
     base = args[0] if len(args) > 0 else "http://127.0.0.1:8765"
     target = args[1] if len(args) > 1 else "https://example.com/"
 

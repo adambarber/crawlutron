@@ -318,8 +318,25 @@ class TestWebhookSignature:
         assert signature.startswith("sha256="), (
             f"no HMAC signature header; receiver cannot verify this callback: {signature!r}"
         )
-        expected = hmac.new(b"s3cret-webhook-key", delivered[0].content, hashlib.sha256).hexdigest()
-        assert signature == f"sha256={expected}", "the signature does not cover the exact body"
+        timestamp = delivered[0].headers.get("X-Crawlutron-Webhook-Timestamp", "")
+        assert timestamp, "no timestamp header; the replay window cannot be enforced"
+        expected = hmac.new(
+            b"s3cret-webhook-key",
+            timestamp.encode() + b"." + delivered[0].content,
+            hashlib.sha256,
+        ).hexdigest()
+        assert signature == f"sha256={expected}", (
+            "the signature does not bind the timestamp; a captured delivery can be replayed"
+        )
+
+    async def test_body_only_signature_does_not_verify(self, monkeypatch):
+        monkeypatch.setenv("CRAWLUTRON_WEBHOOK_SECRET", "s3cret-webhook-key")
+        delivered = await _post_webhook(monkeypatch)
+
+        body_only = hmac.new(b"s3cret-webhook-key", delivered[0].content, hashlib.sha256).hexdigest()
+        assert delivered[0].headers["X-Crawlutron-Webhook-Signature"] != f"sha256={body_only}", (
+            "a body-only signature verifies; the timestamp never entered the digest"
+        )
 
     async def test_no_signature_header_when_secret_unset(self, monkeypatch):
         monkeypatch.delenv("CRAWLUTRON_WEBHOOK_SECRET", raising=False)
@@ -348,6 +365,18 @@ class TestWebhookRetryBackoff:
 
         assert len(delivered) == 1, (
             f"a 4xx receiver was tried {len(delivered)} times; a permanent refusal must not be retried"
+        )
+
+    async def test_3xx_is_not_delivery(self, monkeypatch):
+        """A 3xx means the receiver did not answer with a final verdict at the
+        callback URL: it is not delivery, so it follows the transient policy and
+        is retried rather than silently counted as success."""
+        monkeypatch.setenv("CRAWLUTRON_WEBHOOK_BACKOFF_BASE_MS", "0")
+        delivered = await _post_webhook(monkeypatch, status_code=302)
+
+        assert len(delivered) >= 2, (
+            f"a 302 receiver was tried {len(delivered)} times; a 3xx is not delivery "
+            "and must be retried, not accepted as delivered"
         )
 
     async def test_retry_sleeps_with_exponential_backoff(self, monkeypatch):

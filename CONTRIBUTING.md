@@ -45,6 +45,9 @@ python scripts/e2e_verify.py            # against the default service
 python scripts/e2e_verify.py http://host:port https://example.org
 ```
 
+This harness is a manual live-smoke command, not a CI gate: operators run it
+against a deployed instance to confirm the live surface end to end.
+
 Run `scripts/probe_session.py` to probe an arbitrary site through the real
 browser + curl_cffi fetch ladder. Both scripts are import-safe: importing
 them has no side effects, and the keyed checks only run when
