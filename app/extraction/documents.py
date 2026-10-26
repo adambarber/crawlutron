@@ -6,6 +6,7 @@ import asyncio
 import concurrent.futures
 import functools
 import logging
+import os
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import Any, Literal, NamedTuple, TypeVar
@@ -40,7 +41,7 @@ class Selectors:
         return self.css is not None or self.xpath is not None
 
 
-# Shared selector-extraction pool, bounded to 4 workers; built on demand and torn
+# Shared selector-extraction pool; built on demand and torn
 # down to ``None`` by shutdown_doc_extraction_executor.
 _EXTRACTION_EXECUTOR: concurrent.futures.ThreadPoolExecutor | None = None
 
@@ -61,6 +62,14 @@ def _doc_executor() -> concurrent.futures.ThreadPoolExecutor:
     return _DOC_EXECUTOR
 
 
+def extraction_thread_count() -> int:
+    """Pool size for selector extraction: the operator's knob, else the CPU."""
+    try:
+        return get_env_int("CRAWLUTRON_EXTRACTION_THREADS", max(4, os.cpu_count() or 4), lo=1)
+    except ValueError:
+        return max(4, os.cpu_count() or 4)
+
+
 def _extraction_executor() -> concurrent.futures.ThreadPoolExecutor:
     """The shared pool, created on demand; recreate-on-demand is the documented
     lifespan-restart contract (#87), so shutdown ends threads, not extraction.
@@ -68,7 +77,7 @@ def _extraction_executor() -> concurrent.futures.ThreadPoolExecutor:
     global _EXTRACTION_EXECUTOR
     if _EXTRACTION_EXECUTOR is None:
         _EXTRACTION_EXECUTOR = concurrent.futures.ThreadPoolExecutor(
-            max_workers=4, thread_name_prefix="extraction"
+            max_workers=extraction_thread_count(), thread_name_prefix="extraction"
         )
     return _EXTRACTION_EXECUTOR
 

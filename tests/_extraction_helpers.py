@@ -29,6 +29,18 @@ from app.transport.fetchers import default_http_fetcher as _production_default_h
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY
 
 
+def pin_selector_pool(monkeypatch):
+    """Set the documented knob to 4 and shut the live pool so the next
+    ``_extraction_executor`` call rebuilds at the pinned size.
+    """
+    import asyncio
+
+    from app.extraction.content import shutdown_doc_extraction_executor
+
+    monkeypatch.setenv("CRAWLUTRON_EXTRACTION_THREADS", "4")
+    asyncio.run(shutdown_doc_extraction_executor())
+
+
 class _SettingsOverrides(TypedDict, total=False):
     """The subset of CrawlerSettings fields tests may override."""
 

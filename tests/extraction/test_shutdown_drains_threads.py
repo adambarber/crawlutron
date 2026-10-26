@@ -11,6 +11,8 @@ from app.extraction import content as ext_content
 from app.extraction.content import Selectors, extract_selected
 from tests._extraction_helpers import settings_with
 
+pytestmark = pytest.mark.usefixtures("four_worker_selector_pool")
+
 
 @pytest.mark.real_sleeps
 def test_shutdown_refuses_queued_work_instead_of_orphaning_it(monkeypatch):
