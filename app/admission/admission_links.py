@@ -40,6 +40,8 @@ _MAX_SCOPE_PATTERN_LEN = 256
 # One chunk carries a whole default batch (#354): the chunk is a fan-out bound,
 # not politeness -- same-origin fetches coalesce in the robots cache below.
 _ROBOTS_ADMISSION_CHUNK_SIZE = 50
+# Chunk groups gathered concurrently (#544/P10): 4 x 50 = up to 200 origins in flight.
+_ROBOTS_CHUNKS_IN_FLIGHT = 4
 # How long a chunk may gather robots decisions past the per-check timeout before
 # the whole chunk fails closed: a slow origin must not cost chunks × timeout (#343).
 _ROBOTS_CHUNK_DEADLINE_SLACK_SECONDS = 5.0
@@ -343,6 +345,23 @@ async def _gather_chunk_deadline[T](
         return [fail_closed] * len(urls)
 
 
+async def _gather_chunk(
+    check: Callable[[NormalizedUrl], Awaitable[tuple[bool, float | None]]],
+    chunk: list[NormalizedUrl],
+    fail_closed: tuple[bool, float | None],
+    timeout_seconds: float | None,
+    deadline_slack_seconds: float,
+) -> list[tuple[bool, float | None]]:
+    """One chunk's deadline gather with T fixed to the decision shape (mypy)."""
+    return await _gather_chunk_deadline(
+        chunk,
+        check,
+        fail_closed,
+        timeout_seconds=timeout_seconds,
+        deadline_slack_seconds=deadline_slack_seconds,
+    )
+
+
 async def gather_robots_decisions(
     urls: list[NormalizedUrl],
     robots_allows: RobotsAllows,
@@ -363,17 +382,22 @@ async def gather_robots_decisions(
             return False, None
 
     decisions: list[tuple[bool, float | None]] = []
-    for offset in range(0, len(urls), _ROBOTS_ADMISSION_CHUNK_SIZE):
-        chunk = urls[offset : offset + _ROBOTS_ADMISSION_CHUNK_SIZE]
-        decisions.extend(
-            await _gather_chunk_deadline(
-                chunk,
-                check,
-                (False, None),
-                timeout_seconds=timeout_seconds,
-                deadline_slack_seconds=deadline_slack_seconds,
+    chunks = [
+        urls[o : o + _ROBOTS_ADMISSION_CHUNK_SIZE] for o in range(0, len(urls), _ROBOTS_ADMISSION_CHUNK_SIZE)
+    ]
+    # Bounded-concurrent chunks: each is independently deadline-bounded, so a
+    # 200-cold-origin page costs ceil(chunks/4) deadlines, not chunks (#544/P10).
+    for group in (
+        chunks[i : i + _ROBOTS_CHUNKS_IN_FLIGHT] for i in range(0, len(chunks), _ROBOTS_CHUNKS_IN_FLIGHT)
+    ):
+        group_results = await asyncio.gather(
+            *(
+                _gather_chunk(check, chunk, (False, None), timeout_seconds, deadline_slack_seconds)
+                for chunk in group
             )
         )
+        for chunk_decisions in group_results:
+            decisions.extend(chunk_decisions)
     return decisions
 
 
