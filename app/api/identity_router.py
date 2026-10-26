@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING
 from fastapi import APIRouter
 
 from app.api._depends_singletons import settings_dep, shutdown_event_dep
-from app.api.caller_auth import admit, auth_denials, quota_denials
+from app.api.caller_auth import admit, auth_denials, bound_render_cookie_namespace, quota_denials
 from app.api.dependencies import CallerDep, TrackingDep
 from app.api.main_helpers import request_gate
 from app.api.map_endpoint import map_site
@@ -87,7 +87,10 @@ async def render(
     requested = len(payload.urls) if payload.urls is not None else 1
     with request_gate("render_request_rejected", logger=logger, reject=render_rejection):
         async with admit(caller, requested, tracking=tracking):
-            return await render_handler(payload, settings=settings)
+            # #483: the render door has no policy carrier, so the caller's cookie
+            # namespace is bound here -- a keyed harvest never lands in the shared slot.
+            async with bound_render_cookie_namespace(caller):
+                return await render_handler(payload, settings=settings)
 
 
 @router.post(
