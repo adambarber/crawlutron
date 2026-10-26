@@ -299,6 +299,19 @@ async def _absorb_batch(
     return failed
 
 
+def _resolve_redirects(
+    items: Sequence[EngineCrawlResult], resolved: dict[NormalizedUrl, EngineCrawlResult]
+) -> None:
+    """Fill the redirect gaps in ``resolved`` in place.
+
+    A produced result must also answer its final and normalized identities;
+    first admission wins, so ``setdefault`` never displaces the original."""
+    for produced in items:
+        for key in (produced.final_url, produced.normalized_url):
+            if key is not None:
+                resolved.setdefault(key, produced)
+
+
 async def run_job(
     job_id: str,
     job_store: JobStore,
@@ -317,9 +330,11 @@ async def run_job(
         context = JobAdmissionContext.create(job.policy, job.tier, settings, fetch_and_decode)
         await _seed_sitemaps(job, context, job_store)
         while True:
-            job = await job_store.aload(job_id)
-            if job is None:
+            # State-only reload (#538): a full read re-decodes the page history per batch only to discard it.
+            state = await job_store.areload_state(job_id)
+            if state is None:
                 return
+            job = replace(state, results=job.results, visited=job.visited)
             if await _should_stop(job, job_id, job_store, shutdown_event):
                 return
             batch = _pop_frontier(job)
@@ -337,17 +352,14 @@ async def run_job(
             if reloaded is None:
                 return
             job = replace(reloaded, results=job.results, visited=job.visited)
-            # ``original_url`` wins the identity, redirects fill the gaps; each
-            # produced result is admitted under the job's own host policy.
+            # ``original_url`` wins the identity, redirects fill the gaps; each produced result is admitted
+            # under the job's own host policy.
             resolved: dict[NormalizedUrl, EngineCrawlResult] = {}
             for produced in items:
                 admitted_original = admit_or_none(produced.original_url, policy=job.host_policy)
                 if admitted_original is not None:
                     resolved.setdefault(admitted_original, produced)
-            for produced in items:
-                for key in (produced.final_url, produced.normalized_url):
-                    if key is not None:
-                        resolved.setdefault(key, produced)
+            _resolve_redirects(items, resolved)
             failed = await _absorb_batch(job, batch, resolved, context)
             job.stats["total_crawled"] = len(job.visited)
             if failed:
