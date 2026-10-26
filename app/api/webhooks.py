@@ -106,6 +106,15 @@ def webhook_backoff_base_ms() -> int:
     return get_env_int("CRAWLUTRON_WEBHOOK_BACKOFF_BASE_MS", _WEBHOOK_BACKOFF_MS_DEFAULT, lo=0)
 
 
+def webhook_drain_deadline_seconds() -> float:
+    """The total shutdown-drain budget (#364): one delivery's worst path --
+    every attempt, plus its backoffs -- from the existing retry budget."""
+    attempts = webhook_max_attempts()
+    base_s = webhook_backoff_base_ms() / 1000.0
+    backoff_total = sum(min(base_s * (2**a), 60.0) for a in range(attempts - 1))
+    return attempts * Timeouts.defaults().read + backoff_total
+
+
 async def deliver_pinned_webhook(
     webhook_url: str,
     payload_bytes: bytes,
@@ -171,10 +180,23 @@ async def _backoff_sleep(attempt: int, base_ms: int) -> None:
 
 async def drain_webhook_deliveries() -> None:
     """Await every in-flight delivery once (shutdown), so a cancelled runner's
-    callback is delivered before the stores close."""
-    for task in list(_DELIVERIES):
+    callback is delivered before the stores close -- under a total deadline:
+    one hung receiver must not wedge shutdown past the delivery budget (#364).
+    """
+    tasks = list(_DELIVERIES)
+    if not tasks:
+        return
+    try:
+        done, pending = await asyncio.wait(tasks, timeout=webhook_drain_deadline_seconds())
+    except asyncio.CancelledError:
+        raise
+    for task in pending:
+        task.cancel()
+        # The delivery already logged its loss; abandonment is named here.
+        logger.warning("webhook_drain_abandoned", extra={"task": repr(task)})
+    for task in done:
         try:
-            await task
+            task.result()
         except asyncio.CancelledError:
             pass
         except Exception as exc:
