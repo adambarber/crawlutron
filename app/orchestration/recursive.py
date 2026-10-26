@@ -8,7 +8,7 @@ from collections import deque
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass, field, replace
 from itertools import islice
-from typing import Any, NamedTuple, Protocol, cast
+from typing import NamedTuple, Protocol, cast
 
 from app.admission.admission_links import (
     AdmittedLink,
@@ -20,7 +20,7 @@ from app.models.crawl_result import EngineCrawlResult
 from app.models.crawl_task import CrawlTask
 from app.models.host_policy import HostPolicy
 from app.models.normalized_url import NormalizedUrl
-from app.orchestration.admission_stall import AdmissionStallGuard, crawl_batches
+from app.orchestration.admission_stall import AdmissionStallGuard, BatchStages, crawl_batches
 from app.orchestration.results import failed_result_for
 from app.orchestration.scheduler import DomainScheduler
 from app.orchestration.spill_sink import SpillSink, write_spill
@@ -419,13 +419,6 @@ async def _start_recursive_state(
     return state
 
 
-_BATCH_STAGES: dict[str, Any] = {
-    "start_runner": admit_recursive_batch,
-    "crawl_batch": crawl_recursive_batch,
-    "commit_batch": commit_recursive_results,
-}
-
-
 async def run_recursive_crawl(
     *,
     jobs: list[CrawlTask],
@@ -483,7 +476,7 @@ async def run_recursive_crawl(
         shutdown_event,
         get_metrics(),
         max_pages,
-        **_BATCH_STAGES,
+        BatchStages(admit_recursive_batch, crawl_recursive_batch, commit_recursive_results),
     )
 
 
