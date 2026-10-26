@@ -16,6 +16,7 @@ from app.orchestration.doc_pool import (
     DocWorkerSpawnError,
     terminate_doc_process,
 )
+from app.runtime.metrics import MetricsStore
 from tests._doc_pool_fixtures import _seeded
 from tests._extraction_helpers import settings_with
 from tests._lock_doubles import DelegatingLock
@@ -329,6 +330,37 @@ def test_extract_document_degrades_when_no_worker_can_be_acquired(fake_pool, mon
     assert not thread.is_alive(), "extract_document wedged waiting for a worker"
     result = result_box["result"]
     assert result.text is None and result.markdown is None
+
+
+def test_a_starved_acquire_increments_the_doc_pool_unavailable_counter(fake_pool, monkeypatch):
+    """A degrade is counted, not just logged (#346): the wedge alert must exist.
+
+    The pool's only slot is busy, so a second acquisition runs out of budget
+    and must land exactly one increment on the counter and the exposition."""
+    stuck = stub_worker(4242)
+    pool, _spawner = _seeded(fake_pool, stuck)
+    stuck.busy = True
+    store = MetricsStore()
+    monkeypatch.setattr("app.runtime.metrics.metrics", store)
+
+    assert pool.acquire(0.05) is None, "the acquisition did not degrade on the busy pool"
+    assert store.snapshot().extraction_doc_pool_unavailable_total == 1.0
+    assert "crawler_extraction_doc_pool_unavailable_total 1.0" in store.as_prometheus(caller_detail=False)
+
+
+def test_a_failed_spawn_increments_the_doc_pool_unavailable_counter(monkeypatch):
+    """A spawn that never became ready ends the acquisition as a degrade (#346):
+    the counter must count it with the timeout path, or the wedge undercount."""
+
+    def failing_spawn(ready_timeout: float) -> DocWorker:
+        raise DocWorkerSpawnError("worker did not become ready")
+
+    pool = DocExtractionPool(spawn=failing_spawn, worker_count=lambda: 1, enabled=lambda: True)
+    store = MetricsStore()
+    monkeypatch.setattr("app.runtime.metrics.metrics", store)
+
+    assert pool.acquire(0.05) is None, "the acquisition did not degrade on the failed spawn"
+    assert store.snapshot().extraction_doc_pool_unavailable_total == 1.0
 
 
 # --- 4/5/6: -----------------------------------------------------------------
