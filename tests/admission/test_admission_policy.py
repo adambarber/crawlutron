@@ -64,6 +64,16 @@ async def test_max_pages_ceiling_value_is_exactly_2000(limit, ok):
             )
 
 
+async def test_max_pages_infinity_is_rejected_not_a_500():
+    # #533: JSON accepts Infinity, and int(float("inf")) raises OverflowError,
+    # which escaped the wire edge as an unhandled 500 instead of the 422 envelope.
+    with pytest.raises(ValueError, match="invalid_policy_limits"):
+        payload_policy(
+            {"url": "http://example.com/", "policy": {"limits": {"max_pages": float("inf")}}},
+            PolicyTier.model_defaults(),
+        )
+
+
 async def test_max_pages_zero_bounded_at_engine():
     # Wide fixture: root links to 150 leaf pages. With max_pages=0 the crawl must be bounded
     # (DEFAULT_MAX_PAGES=100), not crawl all 151 reachable pages.

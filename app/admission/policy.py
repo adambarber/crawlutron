@@ -262,7 +262,7 @@ def validate_wire_policy(raw: Any, tier: PolicyTier | None = None) -> CrawlPolic
     try:
         if int(requested_pages or 0) <= 0:
             limits["max_pages"] = DEFAULT_MAX_PAGES
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         raise ValueError("invalid_policy_limits") from None
     # A body cap of 0 and an absent cap mean the same thing to the consumer
     # (`if explicit:`), and 0 is what the wire echo has always carried.
