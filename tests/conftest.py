@@ -19,7 +19,11 @@ from tests._app_factory import service_app
 
 # Fixtures live one-per-file in ``tests/fixtures/`` so each one's setup/teardown contract is legible on its
 # own rather than welded to the test module that happened to want it first.
-pytest_plugins = ("tests.fixtures.stub_builder", "tests.fixtures.factory")
+pytest_plugins = (
+    "tests.fixtures.stub_builder",
+    "tests.fixtures.factory",
+    "tests.fixtures.four_worker_selector_pool",
+)
 
 # The real asyncio.sleep, kept so the zero-second patch below can still yield.
 _ORIGINAL_ASYNCIO_SLEEP = asyncio.sleep

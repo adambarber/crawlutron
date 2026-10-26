@@ -22,6 +22,7 @@ from app.config.env import get_env_int
 from app.config.settings import CrawlerSettings
 from app.models.crawl_request import CrawlRequest
 from app.models.host_policy import HostPolicy
+from app.models.normalized_url import NormalizedUrl
 from app.runtime.metrics import get_metrics
 from app.storage.job_store import TERMINAL_STATUSES, CrawlJobState, JobStatus
 
@@ -86,12 +87,11 @@ async def run_async_crawl(
     job_store,
     result_store,
     shutdown_event: asyncio.Event,
-    urls: list[str] | None = None,
+    url_pairs: list[tuple[str, NormalizedUrl]] | None = None,
 ) -> None:
     """Run a single-shot crawl in the background, persisting results to job_store
     through PENDING -> RUNNING -> COMPLETED/FAILED and POSTing when ``webhook_url``
-    is set. ``payload`` is the declared request model; ``urls`` carries the batch.
-    """
+    is set. ``url_pairs`` carries the gate's admitted batch, never rebuilt."""
     webhook_policy = HostPolicy.from_settings(crawl_settings)
     try:
         # #462: claim RUNNING only after the semaphore is ours; a queued job must
@@ -101,7 +101,7 @@ async def run_async_crawl(
             if job is None:
                 return
             response_payload = await _crawl_and_build_response(
-                request_id, payload, crawl_settings, shutdown_event, urls, job, job_store
+                request_id, payload, crawl_settings, shutdown_event, url_pairs, job, job_store
             )
         # #463: deliver outside the semaphore -- a retrying webhook (up to 60s
         # of backoff) must not gate another caller's crawl capacity.
@@ -142,7 +142,7 @@ async def _crawl_and_build_response(
     payload: CrawlRequest,
     crawl_settings: CrawlerSettings,
     shutdown_event: asyncio.Event,
-    urls: list[str] | None,
+    url_pairs: list[tuple[str, NormalizedUrl]] | None,
     job,
     job_store,
 ) -> dict[str, object]:
@@ -155,7 +155,7 @@ async def _crawl_and_build_response(
         payload,
         settings=crawl_settings,
         shutdown_event=shutdown_event,
-        urls=urls,
+        url_pairs=url_pairs,
     )
     result["request_id"] = request_id
     get_metrics().observe_crawl(results=result.get("results", []), caller_id=job.owner)

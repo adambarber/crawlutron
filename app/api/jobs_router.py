@@ -100,7 +100,7 @@ async def create_job(
             job_store=job_store, concurrency_tracker=getattr(request.app.state, "concurrency_tracker", None)
         )
         async with admit(caller, bound, tracking=tracking, reserve_slot=False):
-            job = await job_store.acreate(checked[0], resolved_policy, owner=caller.caller_id)
+            job = await job_store.acreate(checked[0][0], resolved_policy, owner=caller.caller_id)
     except ValueError as error:
         raise validation_http_error(error) from error
     job_runner.start_job(job.job_id, job_store, settings, shutdown_event)

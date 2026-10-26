@@ -224,7 +224,6 @@ async def _probe_async_runner(monkeypatch, tmp_path):
             job_store,
             results_store,
             asyncio.Event(),
-            urls=[_BLOCKED_URL],
         ),
         effects,
     )

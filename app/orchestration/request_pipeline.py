@@ -68,7 +68,7 @@ class PipelineDependencies:
 class PipelineState:
     payload: CrawlRequest
     settings: CrawlerSettings
-    urls: list[str]
+    url_pairs: list[tuple[str, NormalizedUrl]]
     policy: CrawlPolicy
     fetcher: HttpFetcher
     cffi: HttpFetcher
@@ -93,21 +93,13 @@ class PipelineState:
     spill: SpillSink | None = None
 
 
-def _build_jobs(state: PipelineState) -> list[CrawlTask]:
-    jobs: list[CrawlTask] = []
-    for index, original_url in enumerate(state.urls):
-        try:
-            normalized_url = NormalizedUrl(original_url, policy=state.host_policy)
-        except ValueError as error:
-            raise ValueError(f"invalid_url: {error}") from error
-        jobs.append(
-            CrawlTask(
-                index=index,
-                original_url=original_url,
-                normalized_url=normalized_url,
-            )
-        )
-    return jobs
+def build_jobs(state: PipelineState) -> list[CrawlTask]:
+    """One task per admitted pair; the pair's NormalizedUrl is reused, never
+    rebuilt -- the gate's construction is the only one on the entry path."""
+    return [
+        CrawlTask(index=index, original_url=original_url, normalized_url=normalized_url)
+        for index, (original_url, normalized_url) in enumerate(state.url_pairs)
+    ]
 
 
 def _compute_ram_derived_concurrency(state: PipelineState) -> int:
@@ -381,7 +373,7 @@ async def _response(state: PipelineState) -> ProducerEnvelope:
         raise TypeError("spill must be set before the response is assembled")
     response: ProducerEnvelope = {
         "request_id": new_request_id(),
-        "submitted_count": len(state.urls),
+        "submitted_count": len(state.url_pairs),
         "policy_schema_version": POLICY_SCHEMA_VERSION,
         "results": await asyncio.to_thread(
             functools.partial(state.spill.load_ordered, policy=state.host_policy)
@@ -393,7 +385,7 @@ async def _response(state: PipelineState) -> ProducerEnvelope:
 
 
 async def _run(state: PipelineState) -> ProducerEnvelope:
-    state.jobs = _build_jobs(state)
+    state.jobs = build_jobs(state)
     state.scheduler = _build_scheduler(state)
     state.validators_by_url = _build_validators(state)
     limits = state.policy.limits

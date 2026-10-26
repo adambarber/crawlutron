@@ -111,8 +111,9 @@ async def render_request(
     """
     active_settings = settings or CrawlerSettings.from_mapping()
     host_policy = HostPolicy.from_settings(active_settings)
-    submitted = _admitted_urls(payload, active_settings, host_policy)
-    urls = [NormalizedUrl(u, policy=host_policy) for u in submitted]
+    submitted_pairs = _admitted_pairs(payload, active_settings, host_policy)
+    submitted = [text for text, _ in submitted_pairs]
+    urls = [normalized for _, normalized in submitted_pairs]
     options = render_options_for(payload, active_settings)
     started = time.monotonic()
 
@@ -135,18 +136,20 @@ async def render_request(
     return _render_envelope(by_index, submitted, urls)
 
 
-def _admitted_urls(payload: RenderRequest, settings: CrawlerSettings, host_policy: HostPolicy) -> list[str]:
-    """The batch cap shared with the engine, and the admitted text values.
+def _admitted_pairs(
+    payload: RenderRequest,
+    settings: CrawlerSettings,
+    host_policy: HostPolicy,
+) -> list[tuple[str, NormalizedUrl]]:
+    """The batch cap shared with the engine, and the admitted pairs.
 
     Submitted texts stay beside admitted values so the wire's ``original_url``
-    echoes text.
+    echoes text; the NormalizedUrl is reused, never rebuilt.
     """
-    return list(
-        checked_payload_urls(
-            payload,
-            settings.max_batch_size,
-            host_policy=host_policy,
-        )
+    return checked_payload_urls(
+        payload,
+        settings.max_batch_size,
+        host_policy=host_policy,
     )
 
 

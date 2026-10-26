@@ -224,7 +224,6 @@ class WatchSweeper:
             payload,
             settings=self._settings,
             shutdown_event=self._shutdown_event,
-            urls=[watch.url],
         )
         if not envelope["results"]:
             logger.warning("watch_check_produced_no_result", extra={"watch_id": watch.watch_id})

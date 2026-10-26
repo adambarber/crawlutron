@@ -26,6 +26,7 @@ from app.models.caller_identity import CallerIdentity
 from app.models.crawl_request import CrawlRequest
 from app.models.host_policy import HostPolicy
 from app.models.json_value import JsonValue
+from app.models.normalized_url import NormalizedUrl
 from app.models.result_record import ProducerEnvelope
 from app.models.trace_response import TraceResponse
 from app.models.unified_crawl_response import UnifiedCrawlResponse
@@ -94,21 +95,55 @@ async def crawl(
             _serialize_or_reject([], payload.output_format)
         # Batch size is gated pre-202: an oversized async batch fails unseen.
         host_policy = HostPolicy.from_settings(settings)
-        checked = checked_payload_urls(payload, settings.max_batch_size, host_policy=host_policy)
+        checked_pairs = checked_payload_urls(payload, settings.max_batch_size, host_policy=host_policy)
+        return await _admitted_crawl(
+            payload,
+            active_caller=active_caller,
+            settings=settings,
+            job_store=job_store,
+            result_store=result_store,
+            concurrency_tracker=concurrency_tracker,
+            shutdown_event=shutdown_event,
+            host_policy=host_policy,
+            checked_pairs=checked_pairs,
+            request=request,
+            webhook_url=payload.webhook_url,
+        )
+
+
+async def _admitted_crawl(
+    payload: CrawlRequest,
+    *,
+    active_caller: CallerIdentity,
+    settings: CrawlerSettings,
+    job_store,
+    result_store: CrawlResultStore,
+    concurrency_tracker: CallerConcurrencyTracker | None,
+    shutdown_event: asyncio.Event,
+    host_policy: HostPolicy,
+    checked_pairs: list[tuple[str, NormalizedUrl]],
+    request: Request | None,
+    webhook_url: str | None,
+) -> JSONResponse | Response | UnifiedCrawlResponse:
+    """One admission for both doors: sync holds a slot for the crawl's life; async
+    persists a durable job row. Gate, admit, and dispatch stay one block."""
+    with request_gate("crawl_request_rejected", logger=_logger, reject=_crawl_rejection):
         async with admit(
             active_caller,
             payload.policy.limits.max_pages,
             tracking=Tracking(job_store=job_store, concurrency_tracker=concurrency_tracker),
             payload=payload,
-            reserve_slot=not (payload.async_mode or payload.webhook_url),
+            reserve_slot=not (payload.async_mode or webhook_url),
         ) as owner:
             # Built after admission (a slot exists); calling runs nothing.
             crawl_awaitable = (
                 None
-                if payload.async_mode or payload.webhook_url
-                else execute_crawl(payload, settings=settings, shutdown_event=shutdown_event, urls=checked)
+                if payload.async_mode or webhook_url
+                else execute_crawl(
+                    payload, settings=settings, shutdown_event=shutdown_event, url_pairs=checked_pairs
+                )
             )
-            if payload.async_mode or payload.webhook_url:
+            if payload.async_mode or webhook_url:
                 return await _accepted_async(
                     payload,
                     settings=settings,
@@ -116,14 +151,14 @@ async def crawl(
                     result_store=result_store,
                     shutdown_event=shutdown_event,
                     host_policy=host_policy,
-                    checked=checked,
+                    checked=checked_pairs,
                     owner=owner,
-                    webhook_url=payload.webhook_url,
+                    webhook_url=webhook_url,
                 )
             return await _run_sync_crawl(
                 payload,
                 result_store=result_store,
-                checked=checked,
+                checked=checked_pairs,
                 owner=owner,
                 request=request,
                 crawl_awaitable=crawl_awaitable if crawl_awaitable is not None else _missing_sync_awaitable(),
@@ -143,7 +178,7 @@ async def _accepted_async(
     result_store: CrawlResultStore,
     shutdown_event: asyncio.Event,
     host_policy: HostPolicy,
-    checked: list[str],
+    checked: list[tuple[str, NormalizedUrl]],
     owner: str,
     webhook_url: str | None,
 ) -> JSONResponse:
@@ -163,7 +198,7 @@ async def _accepted_async(
     # store's tier, and two tier sources drift apart the moment they differ.
     await job_store.acreate_single_shot(
         request_id,
-        checked[0],
+        checked[0][0],
         payload.policy,
         owner=owner,
     )
@@ -179,7 +214,7 @@ async def _accepted_async(
             job_store,
             result_store,
             shutdown_event,
-            urls=checked,
+            url_pairs=checked,
         ),
     )
     get_metrics().observe_crawl(accepted=True, caller_id=owner)
@@ -198,7 +233,7 @@ async def _run_sync_crawl(
     payload: CrawlRequest,
     *,
     result_store: CrawlResultStore,
-    checked: list[str],
+    checked: list[tuple[str, NormalizedUrl]],
     owner: str,
     request: Request | None,
     crawl_awaitable: Awaitable[ProducerEnvelope],
