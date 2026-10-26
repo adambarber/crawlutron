@@ -64,9 +64,9 @@ _OWNER_PUBLIC_SURFACE_RATCHET = {
     "app/orchestration/pool.py": (2, 2),
     # CookieJar transport module with equivalence pin for contributor derivation (#418).
     "app/transport/cookie_jar.py": (13, 8),
-    # #441: the header-VALUE wire law, shared by the policy, credential, and
-    # transport edges.
-    "app/safety/header_values.py": (2, 2),
+    # #441 + #544/S3: the header wire law for names and values, shared by the
+    # policy, credential, and transport edges.
+    "app/safety/header_values.py": (3, 3),
     # Four transport/spill surfaces pinned with their true public doors; growing
     # any of these needs an explicit ratchet edit, shrinking auto-tightens.
     "app/orchestration/spill_sink.py": (2, 2),
