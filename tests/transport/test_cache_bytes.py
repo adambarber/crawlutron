@@ -7,6 +7,7 @@ import json
 import pytest
 
 import app.transport.content_cache as cc
+import app.transport.content_cache_internals as cci
 from app.transport.content_cache import ContentCache
 from tests._cache_fixtures import (
     _make_cache,
@@ -154,6 +155,22 @@ class TestContentCacheByteBudget:
         with pytest.raises(OSError):
             cache.set("k", {"body": "v"}, ttl=60)
         assert on_disk_bytes(cache) == 0
+
+    def test_cache_writes_are_best_effort(self, tmp_path, monkeypatch):
+        """The disk writer declares durable=False: entries are reproducible, so a
+        power loss may drop one whole but the fsync-per-store ceiling is gone (#357)."""
+        kwargs: list[dict] = []
+        real_write = cci.atomic_write_text
+
+        def spy(path, data, **kw):
+            kwargs.append(kw)
+            return real_write(path, data, **kw)
+
+        monkeypatch.setattr(cci, "atomic_write_text", spy)
+        cache = _make_cache(tmp_path)
+        cache.set("k", {"body": "v"}, ttl=60)
+        assert on_disk_bytes(cache) > 0
+        assert kwargs == [{"durable": False}], kwargs
 
     async def test_aget_cold_reads_honor_mirror_count_cap(self, tmp_path, monkeypatch):
         """Twins: aget's disk-hit mirror enforces the same count cap as

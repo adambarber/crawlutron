@@ -56,7 +56,8 @@ def decode_envelope(raw: bytes) -> CacheEnvelope | None:
 
 def atomic_write(path: Path, data: str) -> None:
     """Persist a pre-serialized envelope atomically (the default disk writer)."""
-    atomic_write_text(path, data)
+    # A cache entry is reproducible from the origin, so it writes best-effort (#357).
+    atomic_write_text(path, data, durable=False)
 
 
 def scan_cache_dir(

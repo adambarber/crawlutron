@@ -214,7 +214,7 @@ class CookieJar:
         """
         from app.safety.atomic_write import atomic_write_text
 
-        atomic_write_text(path, json.dumps(self._legacy_slots()))
+        atomic_write_text(path, json.dumps(self._legacy_slots()), durable=False)  # best-effort (#357)
 
     def import_file_into(self, path: str) -> None:
         """Merge a legacy JSON jar's shared namespace into this jar; the file format
