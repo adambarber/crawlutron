@@ -85,6 +85,35 @@ class TestPlaintextWebhookRefusal:
         finally:
             reset_plaintext_webhook_memo()
 
+    def test_the_opt_in_warns_once_per_distinct_env_value(self, monkeypatch, caplog):
+        """The memo warns once per distinct env value, not per call, and an env
+        change (or removal) lands on the very next call (#499 residual)."""
+        import logging
+
+        from app.api import webhooks
+
+        webhooks.reset_plaintext_webhook_memo()
+        try:
+            with caplog.at_level(logging.WARNING, logger="app.api.webhooks"):
+                monkeypatch.setenv("CRAWLUTRON_ALLOW_PLAINTEXT_WEBHOOK", "1")
+                assert webhooks.allow_plaintext_webhooks() is True
+                assert webhooks.allow_plaintext_webhooks() is True
+                assert len(caplog.records) == 1, "the memo must warn once, not per call"
+
+                monkeypatch.setenv("CRAWLUTRON_ALLOW_PLAINTEXT_WEBHOOK", "true")
+                assert webhooks.allow_plaintext_webhooks() is True
+                assert len(caplog.records) == 2, "a changed env value must warn its new decision"
+
+                monkeypatch.delenv("CRAWLUTRON_ALLOW_PLAINTEXT_WEBHOOK")
+                assert webhooks.allow_plaintext_webhooks() is False
+                assert len(caplog.records) == 2, "an override must land on the next call"
+
+                monkeypatch.setenv("CRAWLUTRON_ALLOW_PLAINTEXT_WEBHOOK", "1")
+                assert webhooks.allow_plaintext_webhooks() is True
+                assert len(caplog.records) == 3, "the next distinct value warns again"
+        finally:
+            webhooks.reset_plaintext_webhook_memo()
+
 
 class TestWebhookDeliveryPinning:
     async def test_delivery_posts_to_pinned_ip(self, monkeypatch):
