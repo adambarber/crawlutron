@@ -5,6 +5,7 @@ drops what does not survive; identity is derived on read, never from a stored fl
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
 from enum import StrEnum
 from functools import lru_cache
@@ -14,6 +15,37 @@ from app.admission.policy import PolicyTier, read_policy
 from app.models.crawl_policy import CrawlPolicy
 from app.models.host_policy import HostPolicy
 from app.models.normalized_url import NormalizedUrl, admit_or_none
+
+
+class OrderedUrlSet(dict[NormalizedUrl, None]):
+    """A set of admitted URLs that remembers insertion order.
+
+    The persist delta (#539) slices the collection by a high-water position,
+    which only a stable order makes sound; reads behave like the set replaced.
+    """
+
+    def __init__(self, urls: Iterable[NormalizedUrl] = ()) -> None:
+        super().__init__()
+        for url in urls:
+            self[url] = None
+
+    def add(self, url: NormalizedUrl) -> None:
+        """Admit one URL at the end of the order (a repeat keeps its position)."""
+        self[url] = None
+
+    def discard(self, url: NormalizedUrl) -> None:
+        """Drop one URL; the remaining members keep their relative order."""
+        self.pop(url, None)
+
+    def __eq__(self, other: object) -> bool:
+        if isinstance(other, (set, frozenset)):
+            return set(self) == other
+        if isinstance(other, OrderedUrlSet):
+            return dict.__eq__(self, other)
+        return NotImplemented
+
+    def __repr__(self) -> str:
+        return f"OrderedUrlSet({list(self)!r})"
 
 
 class JobKind(StrEnum):
@@ -157,11 +189,12 @@ def normalize_frontier(
     return [entries[url] for url in order]
 
 
-def normalize_visited(visited: list[str], *, host_policy: HostPolicy) -> set[NormalizedUrl]:
+def normalize_visited(visited: list[str], *, host_policy: HostPolicy) -> OrderedUrlSet:
     """Coerce a persisted visited column to admitted values, keeping only what
     admits: text must pass admission, an admitted value keeps its identity.
+    The collection is the insertion-ordered set; the load lands in one order.
     """
-    normalized: set[NormalizedUrl] = set()
+    normalized = OrderedUrlSet()
     for url in visited:
         if isinstance(url, str) and url:
             admitted = _admit_cached(url, host_policy)
@@ -175,6 +208,7 @@ __all__ = [
     "FrontierEntry",
     "JobKind",
     "JobStatus",
+    "OrderedUrlSet",
     "job_max_pages",
     "normalize_frontier",
     "normalize_visited",

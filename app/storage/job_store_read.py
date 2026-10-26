@@ -15,7 +15,7 @@ from app.models.host_policy import HostPolicy
 from app.models.json_value import JsonValue
 from app.models.normalized_url import NormalizedUrl, admit_or_none
 
-from .job_store_collections import FrontierEntry, FrontierEntryDict
+from .job_store_collections import FrontierEntry, FrontierEntryDict, OrderedUrlSet
 from .job_store_state import CrawlJobRow, CrawlJobState, _normalized_stats
 
 
@@ -98,10 +98,10 @@ def _merge_live_collections(
     *,
     root_url: str,
     host_policy: HostPolicy,
-    visited: set[NormalizedUrl],
+    visited: OrderedUrlSet,
     frontier: list[FrontierEntry],
     in_flight: list[FrontierEntry],
-) -> tuple[set[NormalizedUrl], list[FrontierEntry], list[FrontierEntry]]:
+) -> tuple[OrderedUrlSet, list[FrontierEntry], list[FrontierEntry]]:
     """The live merge the row read's normalization once duplicated: the root folds
     to depth 0, visited wins, in_flight folds to the frontier's shallowest depth,
     over records, never over forgiven wire shapes."""

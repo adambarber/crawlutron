@@ -6,7 +6,7 @@ from collections.abc import Callable
 from contextlib import contextmanager
 
 from app.models.crawl_policy import CrawlPolicy
-from app.storage.job_store import CrawlJobState, FrontierEntry, JobStatus, JobStore
+from app.storage.job_store import CrawlJobState, FrontierEntry, JobStatus, JobStore, OrderedUrlSet
 from tests._policy_factories import canonical, job_store
 
 
@@ -152,7 +152,7 @@ def make_crawled_job_store(tmpdir: str, pages: int) -> tuple[JobStore, CrawlJobS
     job = store.create("http://example.test/a", CrawlPolicy())
     # Visited holds admitted values now; results stay the persisted wire dicts the store actually keeps,
     # naming each page by its raw identity.
-    job.visited = {canonical(f"http://example.test/p/{i}") for i in range(pages)}
+    job.visited = OrderedUrlSet(canonical(f"http://example.test/p/{i}") for i in range(pages))
     job.results = [{"url": url.raw, "status": "success"} for url in job.visited]
     store.save(job)
     return store, job

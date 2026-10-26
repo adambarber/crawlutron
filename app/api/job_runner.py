@@ -338,7 +338,7 @@ async def run_job(
             state = await job_store.areload_state(job_id)
             if state is None:
                 return
-            job = replace(state, results=job.results, visited=job.visited)
+            job = replace(state, results=job.results, visited=job.visited, visited_mark=job.visited_mark)
             if await _should_stop(job, job_id, job_store, shutdown_event):
                 return
             batch = _pop_frontier(job)
@@ -355,7 +355,7 @@ async def run_job(
             reloaded = await job_store.areload_state(job_id)
             if reloaded is None:
                 return
-            job = replace(reloaded, results=job.results, visited=job.visited)
+            job = replace(reloaded, results=job.results, visited=job.visited, visited_mark=job.visited_mark)
             # ``original_url`` wins the identity, redirects fill the gaps; each produced result is admitted
             # under the job's own host policy.
             resolved: dict[NormalizedUrl, EngineCrawlResult] = {}

@@ -109,6 +109,41 @@ class TokenBucket:
 # Upper bound on how long any single job will sleep on a domain cooldown.
 MAX_COOLDOWN_WAIT = 300.0
 
+
+async def _park_open_breaker(scheduler: DomainScheduler, domain: str) -> None:
+    """Record the open window as a domain cooldown and sleep it out, capped.
+    The same park a 429 takes; the caller re-checks the breaker after it."""
+    expiry = scheduler._circuit_open_until.get(domain)
+    remaining = 0.0 if expiry is None else max(0.0, expiry - time.monotonic())
+    if remaining > 0:
+        scheduler.set_domain_cooldown(domain, remaining)
+        await asyncio.sleep(min(remaining, MAX_COOLDOWN_WAIT))
+
+
+async def _skip_if_breaker_open[Job: ScheduledJob, Result: SchedulerResult](
+    scheduler: DomainScheduler,
+    job: Job,
+    deliver: Callable[[int, Result], Awaitable[None]],
+    failed_result: Callable[[Job, BaseException], Result],
+) -> bool:
+    """Park an open breaker (cooldown path), report whether the job is handled;
+    past the cap the envelope is terminal. Shared by the pre-run check and the
+    post-nap re-check (#541), so a nap cannot skip a peer's trip.
+    """
+    if not scheduler.is_circuit_open(job.domain):
+        return False
+    await _park_open_breaker(scheduler, job.domain)
+    if scheduler.is_circuit_open(job.domain):
+        # In on_result mode the failed envelope must take the same channel: a
+        # direct dict write once raised, was swallowed, and the job vanished.
+        await deliver(
+            job.index,
+            failed_result(job, CircuitBreakerOpen(scheduler._domain_cooldowns.get(job.domain))),
+        )
+        return True
+    return False
+
+
 # Purge the cooldown/circuit mappings at most once per this many sets, so a
 # 429-heavy crawl does not rebuild both dicts per result. ``run`` purges up front.
 COOLDOWN_PURGE_INTERVAL = 100
@@ -404,16 +439,8 @@ class DomainScheduler:
         """Breaker skip (True = handled) or the gated worker run; False = done."""
         # Circuit breaker: if open, PARK the batch (cooldown path) instead of
         # re-dispatching into the breaker; past the cap the envelope is terminal.
-        if self.is_circuit_open(job.domain):
-            await self._park_open_breaker(job.domain)
-            if self.is_circuit_open(job.domain):
-                # In on_result mode the failed envelope must take the same channel:
-                # a direct dict write once raised, was swallowed, and the job vanished.
-                await deliver(
-                    job.index,
-                    failed_result(job, CircuitBreakerOpen(self._domain_cooldowns.get(job.domain))),
-                )
-                return True
+        if await _skip_if_breaker_open(self, job, deliver, failed_result):
+            return True
 
         # Token bucket rate limiting.
         if self._max_rps > 0:
@@ -427,12 +454,21 @@ class DomainScheduler:
                 # and the next caller's consume sees the negative balance.
                 await asyncio.sleep(wait_seconds)
 
+        # The per-domain delay is a per-fire wait, never a gate hold (#541):
+        # compute inside the gate, RELEASE for the sleep; no gate sees a sleep.
         async with domain_gates[job.domain]:
-            # Jitter sleeps while holding ONLY the per-domain gate: sleeping
-            # inside global_gate would burn a global slot on pure waiting.
-            base_delay = self.current_delay(job.domain)
-            delay_sleep = jittered_delay(base_delay)
-            await asyncio.sleep(delay_sleep)
+            delay_sleep = jittered_delay(self.current_delay(job.domain))
+        await asyncio.sleep(delay_sleep)
+        # The nap must not skip backoff that fired while it slept: a peer's
+        # breaker trip or 429 cooldown parks us here, outside every gate.
+        if await _skip_if_breaker_open(self, job, deliver, failed_result):
+            return True
+        cooldown_expiry = self._domain_cooldowns.get(job.domain)
+        if cooldown_expiry is not None:
+            remaining = cooldown_expiry - time.time()
+            if remaining > 0:
+                await asyncio.sleep(min(remaining, MAX_COOLDOWN_WAIT))
+        async with domain_gates[job.domain]:
             async with global_gate:
                 try:
                     result = await worker(job)
@@ -447,15 +483,6 @@ class DomainScheduler:
                 # a delivery failure, not a charge against the domain's breaker.
                 await deliver(job.index, result)
         return False
-
-    async def _park_open_breaker(self, domain: str) -> None:
-        """Record the open window as a domain cooldown and sleep it out, capped.
-        The same park a 429 takes; the caller re-checks the breaker after it."""
-        expiry = self._circuit_open_until.get(domain)
-        remaining = 0.0 if expiry is None else max(0.0, expiry - time.monotonic())
-        if remaining > 0:
-            self.set_domain_cooldown(domain, remaining)
-            await asyncio.sleep(min(remaining, MAX_COOLDOWN_WAIT))
 
     @property
     def domain_cooldowns(self) -> dict[str, float]:

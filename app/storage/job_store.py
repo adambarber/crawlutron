@@ -23,6 +23,7 @@ from .job_store_collections import (
     FrontierEntry,
     JobKind,
     JobStatus,
+    OrderedUrlSet,
     job_max_pages,
 )
 from .job_store_read import (
@@ -53,6 +54,7 @@ __all__ = [
     "JobStatusView",
     "JobStore",
     "Expected",
+    "OrderedUrlSet",
     "job_max_pages",
     "normalize_job_state",
 ]

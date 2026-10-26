@@ -9,7 +9,7 @@ from concurrent.futures import ThreadPoolExecutor
 from app.admission.policy import read_policy
 from app.config.settings import CrawlerSettings
 from app.models.crawl_policy import CrawlPolicy
-from app.storage.job_store import CrawlJobState, FrontierEntry, JobStatus
+from app.storage.job_store import CrawlJobState, FrontierEntry, JobStatus, OrderedUrlSet
 from tests._job_harnesses import frontier, loaded_job, make_job_store, raw_job_row, write_row_policy
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY, canonical, deployment_tier, job_store
 
@@ -21,7 +21,7 @@ def test_jobstore_create_and_load(job_store):
     assert job.root_url == "http://example.com/"
     assert job.status == JobStatus.PENDING
     assert job.frontier == [FrontierEntry(url=canonical("http://example.com/"), depth=0)]
-    assert job.visited == set()
+    assert job.visited == {}
 
     loaded = job_store.load(job.job_id)
     assert loaded is not None
@@ -34,7 +34,7 @@ def test_jobstore_create_and_load(job_store):
 def test_jobstore_save_updates_state(job_store):
     job = job_store.create("http://example.com/", CrawlPolicy())
     job.frontier = frontier(["http://example.com/page2"])
-    job.visited = {canonical("http://example.com/")}
+    job.visited = OrderedUrlSet([canonical("http://example.com/")])
     job.results = [{"url": "http://example.com/", "status": "success"}]
     job.stats = {"total_discovered": 2, "total_crawled": 1, "total_failed": 0}
     job_store.save(job)
@@ -85,7 +85,7 @@ def test_crawljobstate_serialization(job_store):
         policy={"strategies": ["HTTP_DECLARED_CRAWLER"]},
         status=JobStatus.RUNNING,
         frontier=frontier(["http://example.com/a", "http://example.com/b"]),
-        visited={canonical("http://example.com/")},
+        visited=OrderedUrlSet([canonical("http://example.com/")]),
         results=[{"url": "http://example.com/", "status": "success"}],
         stats={"total_discovered": 3, "total_crawled": 1, "total_failed": 0},
     )
