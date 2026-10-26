@@ -137,10 +137,10 @@ async def _skip_if_breaker_open[Job: ScheduledJob, Result: SchedulerResult](
     if scheduler.is_circuit_open(job.domain):
         # In on_result mode the failed envelope must take the same channel: a
         # direct dict write once raised, was swallowed, and the job vanished.
-        await deliver(
-            job.index,
-            failed_result(job, CircuitBreakerOpen(scheduler._domain_cooldowns.get(job.domain))),
-        )
+        expiry = scheduler._circuit_open_until.get(job.domain)
+        remaining = 0 if expiry is None else max(0, round(expiry - time.monotonic()))
+        skip = CircuitBreakerOpen(f"{job.domain} circuit open: {remaining}s of cooldown remain")
+        await deliver(job.index, failed_result(job, skip))
         return True
     return False
 
@@ -263,6 +263,8 @@ class DomainScheduler:
     def record_failure(self, domain: str) -> None:
         """Increment the failure counter; escalate the circuit-breaker cooldown
         exponentially with each threshold-crossing batch of failures."""
+        # The threshold counts TOTAL observations, not distinct URLs: a requeued
+        # retry (requeue_transient, up to 3) charges the breaker again (#347).
         self._domain_failures[domain] += 1
         # Each ``threshold`` failures escalates one step (base, base*2, ...,
         # capped); forty consecutive failures park a domain for the max cooldown.

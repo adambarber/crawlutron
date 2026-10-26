@@ -49,6 +49,7 @@ class CountersSnapshot:
     search_errors_total: float = 0.0
     search_total_elapsed_ms: float = 0.0
     resource_throttle_batches_total: float = 0.0
+    extraction_doc_pool_unavailable_total: float = 0.0
     strategy_counts: dict[str, float] = field(default_factory=dict)
     classification_counts: dict[str, float] = field(default_factory=dict)
     search_provider_counts: dict[str, float] = field(default_factory=dict)
@@ -115,6 +116,7 @@ class MetricsStore:
             search_errors_total=source.get("search_errors_total", 0.0),
             search_total_elapsed_ms=source.get("search_total_elapsed_ms", 0.0),
             resource_throttle_batches_total=source.get("resource_throttle_batches_total", 0.0),
+            extraction_doc_pool_unavailable_total=source.get("extraction_doc_pool_unavailable_total", 0.0),
             strategy_counts=self._labelled(source, _STRATEGY_PREFIX),
             classification_counts=self._labelled(source, _CLASSIFICATION_PREFIX),
             search_provider_counts=self._labelled(source, _PROVIDER_PREFIX),
@@ -184,6 +186,13 @@ class MetricsStore:
         a read-then-write that loses increments under concurrent setters.
         """
         self._add("resource_throttle_batches_total", 1)
+
+    def record_doc_pool_unavailable(self) -> None:
+        """Count one document acquisition that degraded: no worker within the
+        budget (a wedged or retired slot), or a spawn that never became ready.
+        The doc-pool wedge alert (#346) -- a warning log alone is invisible.
+        """
+        self._add("extraction_doc_pool_unavailable_total", 1)
 
     @property
     def counters(self) -> CoordinationCounters | None:
@@ -297,6 +306,11 @@ def _exposition(record: CountersSnapshot, store: MetricsStore, *, caller_detail:
     )
     counter("crawler_search_results_total", record.search_results_total, "Total web search results returned.")
     counter("crawler_search_errors_total", record.search_errors_total, "Total failed web search requests.")
+    counter(
+        "crawler_extraction_doc_pool_unavailable_total",
+        record.extraction_doc_pool_unavailable_total,
+        "Document-extraction acquisitions degraded: no pool worker was available within the budget.",
+    )
     lines.extend(_by_provider_lines(record))
     if caller_detail:
         lines.extend(_by_caller_lines(record))

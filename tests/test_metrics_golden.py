@@ -46,6 +46,10 @@ _COUNTS_BLOCK = (
     "# HELP crawler_search_errors_total Total failed web search requests.\n"
     "# TYPE crawler_search_errors_total counter\n"
     "crawler_search_errors_total 1.0\n"
+    "# HELP crawler_extraction_doc_pool_unavailable_total Document-extraction acquisitions"
+    " degraded: no pool worker was available within the budget.\n"
+    "# TYPE crawler_extraction_doc_pool_unavailable_total counter\n"
+    "crawler_extraction_doc_pool_unavailable_total 1.0\n"
 )
 
 _PROVIDER_BLOCK = """\
@@ -127,6 +131,7 @@ def _observed_store() -> MetricsStore:
     store.observe_crawl(caller_id="key-1")
     store.observe_search(provider="tavily", results=5, elapsed_ms=2_500, caller_id="key-1")
     store.observe_search(provider="brave", results=4, errors=1)
+    store.record_doc_pool_unavailable()
     store.record_throttle()
     return store
 

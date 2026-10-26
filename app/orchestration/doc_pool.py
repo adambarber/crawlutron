@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, TypedDict
 from markitdown import MarkItDown
 
 from app.orchestration.pool import SyncPool
+from app.runtime.metrics import get_metrics
 
 logger = logging.getLogger(__name__)
 
@@ -224,6 +225,7 @@ class DocExtractionPool:
         try:
             return self._spawn(ready_timeout)
         except (OSError, DocWorkerSpawnError) as exc:
+            get_metrics().record_doc_pool_unavailable()
             logger.warning(
                 "extraction_document_spawn_failed",
                 extra={"error": str(exc), "ready_timeout": ready_timeout},
@@ -241,6 +243,7 @@ class DocExtractionPool:
         """Whether the acquisition budget still has time, and say so when it does not."""
         if deadline - time.monotonic() > 0:
             return True
+        get_metrics().record_doc_pool_unavailable()
         logger.warning(
             "extraction_document_pool_unavailable",
             extra={"slots": len(self._slots or []), "workers": want},
