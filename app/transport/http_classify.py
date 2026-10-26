@@ -20,6 +20,12 @@ from app.vocabulary.extraction import (
     EXTRACTION_TRAFILATURA,
 )
 
+__all__ = [
+    "classify_extracted_content",
+    "extract_http_phase",
+    "request_profile_diagnostics",
+]
+
 
 async def extract_http_phase(ctx: HttpStrategyContext, resp: FetchedResponse) -> ExtractedHttpContent:
     """Decode the body, run the selected extractor, measure content.
