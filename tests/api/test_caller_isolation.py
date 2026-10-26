@@ -207,7 +207,71 @@ def test_effective_cookie_namespace_defaults_to_caller(tmp_path):
     # #226: an authenticated caller's profile override must NOT reassign the key-derived
     # namespace -- otherwise a tenant can claim another key_id and read/write its jar.
     assert effective_cookie_namespace({"cookie_namespace": "tenant-x"}, caller) == caller.caller_id
+    # #537: the anonymous passthrough holds only for namespaces that cannot collide
+    # with a keyed identity; a key_*-shaped declaration is refused, not honored.
     assert effective_cookie_namespace({"cookie_namespace": "tenant-x"}, anonymous) == "tenant-x"
+    key_shaped = f"key_{record.key_id.removeprefix('key_')}"
+    assert effective_cookie_namespace({"cookie_namespace": key_shaped}, anonymous) == ""
+
+
+def test_anonymous_crawl_cannot_read_keyed_callers_jar(tmp_path):
+    """#537: an anonymous key_*-shaped cookie_namespace declaration gets the shared
+    default, never the keyed jar: two tenants (keyed, anonymous), same domain."""
+    from app.models.caller_identity import CallerIdentity
+    from app.storage.coordination_cookies import SharedCookieStore
+    from app.transport.cookie_jar import CookieJar
+    from tests._policy_factories import canonical
+
+    jar = CookieJar(SharedCookieStore(tmp_path / "coordination.db"))
+    keys = CallerKeyStore(tmp_path / "keys.db")
+    record = keys.verify_key(keys.issue_key("agent-a").secret)
+    assert record is not None
+    keyed = CallerIdentity(caller_id=record.key_id, authenticated=True)
+    anonymous = CallerIdentity()
+    target = canonical("http://example.com/")
+
+    # The keyed tenant's crawl stores a session under its pinned key-id namespace.
+    keyed_namespace = effective_cookie_namespace({}, keyed)
+    assert keyed_namespace == record.key_id
+    jar.add_cookie_header(target, "session=secret", namespace=keyed_namespace)
+
+    # The anonymous caller declares that exact key id and must not see the cookie.
+    anonymous_namespace = effective_cookie_namespace({"cookie_namespace": record.key_id}, anonymous)
+    assert jar.cookie_header_for(target, namespace=anonymous_namespace) == ""
+
+
+def test_anonymous_crawl_cannot_read_keyed_callers_jar_via_admission(tmp_path):
+    """#537: end to end -- the namespace written back into the durable profile by
+    admission is not the declared key id, so the engine never crawls under it."""
+    from tests.factories.client import quota_client
+
+    async def run():
+        async with quota_client(tmp_path) as (client, store, results, keys):
+            # #537: mint the victim key directly; the crawl below is anonymous, so no
+            # key-issuance round trip belongs in this scenario.
+            key_id = keys.issue_key("agent-a").key_id
+
+            crawl = await client.post(
+                "/v1/crawl",
+                json={
+                    "url": "http://example.com/",
+                    "async_mode": True,
+                    "policy": {
+                        "limits": {"max_pages": 1},
+                        "request_profile": {"cookie_namespace": key_id},
+                    },
+                },
+            )
+            assert crawl.status_code == 202, crawl.text
+            stored = _stored_request(store, crawl)
+            declared = stored.policy.request_profile.get("cookie_namespace")
+            assert declared != key_id, (
+                f"anonymous key_-shaped declaration leaked into the durable row: {declared!r}"
+            )
+
+    import asyncio
+
+    asyncio.run(run())
 
 
 def test_page_quota_rejects_over_budget_crawls():

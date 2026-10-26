@@ -184,13 +184,16 @@ def is_operator(request: Request) -> bool:
 
 
 def effective_cookie_namespace(profile: Mapping[str, JsonValue], caller: CallerIdentity) -> str:
-    """The cookie namespace for one crawl: for an authenticated caller, pinned to the key id
-    (a caller-supplied override could claim another caller's key and share their jar); an anonymous
-    caller keeps whatever the profile declares.
+    """The cookie namespace for one crawl: for an authenticated caller, pinned to the key id; an
+    anonymous caller keeps a tenant declaration, but a key_-shaped one fails closed (#537) to
+    the shared default -- key ids are minted ``key_<hex>``, so it would name another's jar.
     """
     if caller.authenticated and caller.caller_id:
         return caller.caller_id
-    return cookie_namespace_for(profile)
+    declared = cookie_namespace_for(profile)
+    if declared.startswith("key_"):
+        return ""
+    return declared
 
 
 def resolve_page_limit(caller: CallerIdentity, requested_max_pages: int) -> int:
@@ -245,7 +248,8 @@ async def admit(
             update={"limits": payload.policy.limits.model_copy(update={"max_pages": resolved})}
         )
         namespace = effective_cookie_namespace(policy.request_profile, active)
-        if namespace:
+        # #537: scrub a refused key_-shaped declaration so the engine cannot re-derive it.
+        if namespace or namespace != cookie_namespace_for(policy.request_profile):
             profile = dict(policy.request_profile)
             profile["cookie_namespace"] = namespace
             policy = policy.model_copy(update={"request_profile": profile})

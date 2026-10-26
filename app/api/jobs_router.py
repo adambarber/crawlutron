@@ -33,6 +33,7 @@ from app.models.job_create_response import JobCreateResponse
 from app.models.job_list_response import JobListResponse
 from app.models.job_status_response import JobStatusResponse
 from app.storage.job_store import JobStatusView
+from app.transport.request_profile import cookie_namespace_for
 from app.vocabulary.limits import DEFAULT_JOB_LIST_LIMIT, MAX_JOB_LIST_LIMIT
 
 router = APIRouter(prefix="/v1/jobs", tags=["Crawler"], responses=auth_denials())
@@ -88,7 +89,8 @@ async def create_job(
         # #195/#226: persist the caller's effective cookie namespace so a keyed whole-site job
         # crawls under its own jar partition; the durable row outlives the admitting request.
         namespace = effective_cookie_namespace(resolved_policy.request_profile, caller)
-        if namespace:
+        # #537: a refused key id must not survive in the durable row for the engine to re-derive.
+        if namespace or namespace != cookie_namespace_for(resolved_policy.request_profile):
             profile = dict(resolved_policy.request_profile)
             profile["cookie_namespace"] = namespace
             resolved_policy = resolved_policy.model_copy(update={"request_profile": profile})
