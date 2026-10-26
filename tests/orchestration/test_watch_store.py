@@ -188,3 +188,21 @@ def test_get_of_unknown_watch_is_none(watch_store):
 def test_non_positive_interval_is_rejected(watch_store):
     with pytest.raises(ValueError):
         register(watch_store, interval=0)
+
+
+def test_deactivate_records_the_terminal_reason_it_was_given(watch_store):
+    """The stored reason is the terminal classification the caller carries (#368)."""
+    state = register(watch_store)
+
+    watch_store.deactivate(
+        state.watch_id,
+        now=NOW,
+        next_check_at=NOW + INTERVAL,
+        reason=CrawlClassification.robots_disallowed,
+    )
+
+    reloaded = watch_store.get(state.watch_id)
+    assert reloaded.status.name == "DEACTIVATED"
+    assert reloaded.last_outcome == CrawlClassification.robots_disallowed, (
+        "deactivate hardcoded site_error, losing the robots refusal reason"
+    )
