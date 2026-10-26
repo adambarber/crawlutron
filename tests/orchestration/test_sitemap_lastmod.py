@@ -1,5 +1,6 @@
 """Sitemap lastmod association: linear, and off the loop when large (#526)."""
 
+import asyncio
 import time
 
 from app.orchestration.fetch_helpers import SITEMAP_CACHE, fetch_sitemap_urls
@@ -17,6 +18,11 @@ def _entries(n: int) -> str:
         f"<url><loc>http://x.test/p{i}</loc><lastmod>2024-06-0{1 + i % 3}T00:00:00Z</lastmod></url>"
         for i in range(n)
     )
+
+
+def _sitemapindex(body: str) -> str:
+    """Wrap one body in a sitemapindex envelope."""
+    return f"<sitemapindex>{body}</sitemapindex>"
 
 
 def _sitemap_fetcher(body: str):
@@ -79,4 +85,23 @@ async def test_large_sitemap_association_runs_off_the_event_loop(monkeypatch):
     await _walk(body, 30_000)
     assert "_collect_page_entries" in seen, (
         f"the large-body lastmod association ran on the event loop (to_thread saw: {seen})"
+    )
+
+
+async def test_large_sitemapindex_scan_runs_off_the_event_loop(monkeypatch):
+    """A sitemapindex body offloads its findall+lower too (#544/P6)."""
+    seen = install_to_thread_spy(monkeypatch)
+    body = _sitemapindex(_entries(20_000))
+    assert len(body) >= 262_144
+
+    async def _capped_walk():
+        try:
+            return await _walk(body, 4)
+        finally:
+            pass
+
+    # max_urls=4 caps the child fan-out: the index is huge, the walk is not.
+    await asyncio.wait_for(_capped_walk(), timeout=10)
+    assert "_scan_sitemap_text" in seen, (
+        f"the large sitemapindex scan ran on the event loop (to_thread saw: {seen})"
     )

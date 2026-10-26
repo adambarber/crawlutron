@@ -40,6 +40,8 @@ _MAX_SCOPE_PATTERN_LEN = 256
 # One chunk carries a whole default batch (#354): the chunk is a fan-out bound,
 # not politeness -- same-origin fetches coalesce in the robots cache below.
 _ROBOTS_ADMISSION_CHUNK_SIZE = 50
+# Chunk groups gathered concurrently (#544/P10): 4 x 50 = up to 200 origins in flight.
+_ROBOTS_CHUNKS_IN_FLIGHT = 4
 # How long a chunk may gather robots decisions past the per-check timeout before
 # the whole chunk fails closed: a slow origin must not cost chunks × timeout (#343).
 _ROBOTS_CHUNK_DEADLINE_SLACK_SECONDS = 5.0
@@ -159,12 +161,17 @@ async def _admit_chunk[T](
         if not chunk:
             return _ChunkOutcome(accepted, robots_blocked, duplicates_skipped, False, False, 0)
     if pass_.respect_robots:
-        allowed_values = await _gather_robots_allowed(
-            [candidate.normalized_url for candidate in chunk],
-            pass_.robots_allows,
-            timeout_seconds=pass_.robots_timeout_seconds,
-            deadline_slack_seconds=pass_.robots_deadline_slack_seconds,
-        )
+        # One fan-out law (#544 N3): the pass uses the chunked decision path, so
+        # no robots gather ever fans out past the chunk bound.
+        allowed_values = [
+            allowed
+            for allowed, _ in await gather_robots_decisions(
+                [candidate.normalized_url for candidate in chunk],
+                pass_.robots_allows,
+                timeout_seconds=pass_.robots_timeout_seconds,
+                deadline_slack_seconds=pass_.robots_deadline_slack_seconds,
+            )
+        ]
     else:
         allowed_values = [True] * len(chunk)
     for candidate, allowed in zip(chunk, allowed_values, strict=True):
@@ -338,6 +345,23 @@ async def _gather_chunk_deadline[T](
         return [fail_closed] * len(urls)
 
 
+async def _gather_chunk(
+    check: Callable[[NormalizedUrl], Awaitable[tuple[bool, float | None]]],
+    chunk: list[NormalizedUrl],
+    fail_closed: tuple[bool, float | None],
+    timeout_seconds: float | None,
+    deadline_slack_seconds: float,
+) -> list[tuple[bool, float | None]]:
+    """One chunk's deadline gather with T fixed to the decision shape (mypy)."""
+    return await _gather_chunk_deadline(
+        chunk,
+        check,
+        fail_closed,
+        timeout_seconds=timeout_seconds,
+        deadline_slack_seconds=deadline_slack_seconds,
+    )
+
+
 async def gather_robots_decisions(
     urls: list[NormalizedUrl],
     robots_allows: RobotsAllows,
@@ -358,43 +382,23 @@ async def gather_robots_decisions(
             return False, None
 
     decisions: list[tuple[bool, float | None]] = []
-    for offset in range(0, len(urls), _ROBOTS_ADMISSION_CHUNK_SIZE):
-        chunk = urls[offset : offset + _ROBOTS_ADMISSION_CHUNK_SIZE]
-        decisions.extend(
-            await _gather_chunk_deadline(
-                chunk,
-                check,
-                (False, None),
-                timeout_seconds=timeout_seconds,
-                deadline_slack_seconds=deadline_slack_seconds,
+    chunks = [
+        urls[o : o + _ROBOTS_ADMISSION_CHUNK_SIZE] for o in range(0, len(urls), _ROBOTS_ADMISSION_CHUNK_SIZE)
+    ]
+    # Bounded-concurrent chunks: each is independently deadline-bounded, so a
+    # 200-cold-origin page costs ceil(chunks/4) deadlines, not chunks (#544/P10).
+    for group in (
+        chunks[i : i + _ROBOTS_CHUNKS_IN_FLIGHT] for i in range(0, len(chunks), _ROBOTS_CHUNKS_IN_FLIGHT)
+    ):
+        group_results = await asyncio.gather(
+            *(
+                _gather_chunk(check, chunk, (False, None), timeout_seconds, deadline_slack_seconds)
+                for chunk in group
             )
         )
+        for chunk_decisions in group_results:
+            decisions.extend(chunk_decisions)
     return decisions
-
-
-async def _gather_robots_allowed(
-    urls: list[NormalizedUrl],
-    robots_allows: RobotsAllows,
-    *,
-    timeout_seconds: float | None = None,
-    deadline_slack_seconds: float = _ROBOTS_CHUNK_DEADLINE_SLACK_SECONDS,
-) -> list[bool]:
-    async def check(url: NormalizedUrl) -> bool:
-        try:
-            return await robots_allows(url)
-        except Exception:
-            # A single failing robots check disallows that URL without dropping the
-            # batch: fail closed, matching ``gather_robots_decisions``.
-            _logger.warning("robots_check_failed", extra={"url": url.raw})
-            return False
-
-    return await _gather_chunk_deadline(
-        urls,
-        check,
-        False,
-        timeout_seconds=timeout_seconds,
-        deadline_slack_seconds=deadline_slack_seconds,
-    )
 
 
 def _is_url_text(value: Any) -> bool:

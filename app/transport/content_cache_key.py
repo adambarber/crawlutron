@@ -23,10 +23,11 @@ def build_content_cache_key(
     extraction: str | None,
     css_selector: str | None,
     xpath: str | None,
+    cookie_namespace: str = "",
 ) -> str:
     """Stable content-cache key mirroring what http.py stores under -- a shared
-    helper reconstructing a future fetch's exact key. ``base_headers`` is
-    serialized whole, including ``Cookie``, to prevent cross-tenant poisoning.
+    helper reconstructing a future fetch's exact key (#544/S5: the cookie
+    namespace partitions callers whose header sets collide).
     """
     # pre-flip key was built from, so every entry already on disk stays addressable after
     # the object flip.
@@ -34,6 +35,7 @@ def build_content_cache_key(
         "http",
         normalized_url.raw,
         strategy,
+        cookie_namespace,
         json.dumps(sorted(base_headers.items()), separators=(",", ":")),
         extraction,
         css_selector,

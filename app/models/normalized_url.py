@@ -52,6 +52,10 @@ def _canonical_parts(url: str, *, policy: HostPolicy) -> tuple[str, str, str, st
         raise ValueError("unsupported_scheme")
     if not parsed.hostname:
         raise ValueError("invalid_url")
+    if parsed.username or parsed.password:
+        # Userinfo is not a crawlable identity: credentials belong in
+        # policy.credentials (origin-scoped), never in the URL itself.
+        raise ValueError("userinfo_refused")
 
     scheme = parsed.scheme
     host = parsed.hostname.lower().rstrip(".")
