@@ -232,6 +232,18 @@ repos:
         pass_filenames: false
         stages: [pre-commit]
 
+      # The repo rule "every commit cites an issue" was convention-only (#492): none of
+      # the pre-commit-stage hooks reads the message. This one does, at commit-msg stage.
+      - id: commit-citation
+        name: commit message cites an issue
+        entry: >-
+          bash -c 'for d in "$(git rev-parse --show-toplevel)/docker/browser-crawler" "$(git rev-parse --show-toplevel)"; do [ -x "$d/scripts/gate" ] && exec bash "$d/scripts/gate" "$@"; done; echo "scripts/gate not found in either layout" >&2; exit 1' gate
+          .venv/bin/python -m scripts.commit_citation_gate
+        language: system
+        files: *service_trigger
+        pass_filenames: true
+        stages: [commit-msg]
+
       # The project-specific safety predicates (chokepoint detectors). They are
       # the real architecture gate and the only exit path for those rules.
       - id: safety-invariants

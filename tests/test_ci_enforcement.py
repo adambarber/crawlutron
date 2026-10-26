@@ -164,7 +164,9 @@ def test_ci_runs_every_precommit_hook_through_one_surface() -> None:
     assert not [hook_id for hook_id, _ in hooks if hook_id in {"jscpd-app", "jscpd-tests"}]
 
     assert all("pre-push" not in (block.get("stages") or []) for _, block in hooks)
-    assert all(block.get("stages") == ["pre-commit"] for _, block in hooks)
+    # Content gates run at pre-commit; a commit-msg hook cannot run in CI's
+    # --all-files pass (no message exists), so exactly that stage is allowed too.
+    assert all(block.get("stages") in (["pre-commit"], ["commit-msg"]) for _, block in hooks)
 
     entry = _entry(jscpd)
     assert ".venv/bin/python -m scripts.jscpd_gate all" in entry
