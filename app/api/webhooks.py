@@ -212,7 +212,7 @@ def max_webhook_size() -> int:
     return _parse_webhook_size(os.environ.get("CRAWLUTRON_MAX_WEBHOOK_SIZE"))
 
 
-def _serialize_webhook_payload(payload: Mapping[str, Any], cap: int) -> bytes | None:
+def _serialize_webhook_payload(payload: Mapping[str, object], cap: int) -> bytes | None:
     """The webhook body as bytes, or ``None`` once it passes ``cap`` -- the
     running buffer is the only whole-payload copy, so a capped payload never
     holds the full str and the full bytes at once (#342)."""
