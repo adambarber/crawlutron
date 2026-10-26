@@ -194,4 +194,7 @@ async def store_http_caches(ctx: HttpStrategyContext, resp: FetchedResponse) -> 
             # OFF convention (#394) stores nothing rather than inverting it.
             return
         with contextlib.suppress(Exception):
-            await ctx.content_cache.aset(ctx.ckey, serialize_response(resp.raw), ttl=ttl)
+            # The full-body base64 is part of the offloaded write, never argument
+            # construction: encoding a multi-MB body on the loop stalls it (#535).
+            payload = await asyncio.to_thread(serialize_response, resp.raw)
+            await ctx.content_cache.aset(ctx.ckey, payload, ttl=ttl)
