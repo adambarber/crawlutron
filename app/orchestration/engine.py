@@ -361,7 +361,7 @@ async def crawl_request(
     payload: CrawlRequest | Mapping[str, object],
     *,
     settings: CrawlerSettings | None = None,
-    urls: list[str] | None = None,
+    url_pairs: list[tuple[str, NormalizedUrl]] | None = None,
     browser_worker: CrawlWorker | None = None,
     http_fetcher: HttpFetcher | None = None,
     cffi_fetcher: HttpFetcher | None = None,
@@ -382,8 +382,10 @@ async def crawl_request(
     active_settings = settings or CrawlerSettings.from_mapping()
     host_policy = HostPolicy.from_settings(active_settings)
     # One batch cap -- the same gate the async endpoint uses before accepting, so
-    # sync and async cannot drift; a forwarded batch skips re-derivation, not the cap.
-    urls = checked_payload_urls(payload, active_settings.max_batch_size, urls=urls, host_policy=host_policy)
+    # sync and async cannot drift. Pairs keep the one admitted NormalizedUrl (#351).
+    url_pairs = checked_payload_urls(
+        payload, active_settings.max_batch_size, url_pairs=url_pairs, host_policy=host_policy
+    )
     policy = payload_policy(payload, PolicyTier.from_settings(active_settings))
     fetcher = http_fetcher or default_http_fetcher
     # A binding of the one fetcher, not a second entry point: the impersonating
@@ -397,7 +399,7 @@ async def crawl_request(
         state = PipelineState(
             payload=payload,
             settings=active_settings,
-            urls=urls,
+            url_pairs=url_pairs,
             policy=policy,
             fetcher=fetcher,
             cffi=cffi,

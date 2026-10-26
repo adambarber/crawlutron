@@ -5,11 +5,14 @@ import gzip
 import brotli
 import pytest
 
+from app.admission.payload_helpers import checked_payload_urls
 from app.admission.policy import read_policy
 from app.config.settings import CrawlerSettings
 from app.extraction.content import forms_from
 from app.extraction.document_text import format_extracted_document_text
 from app.extraction.trees import walkable
+from app.models.crawl_request import CrawlRequest
+from app.models.normalized_url import NormalizedUrl
 from app.orchestration.engine import crawl_request
 from app.safety.validation import HostPolicy
 from app.transport.cache import HttpCache
@@ -51,15 +54,9 @@ class TestCrawlRequest:
 
     def test_checked_payload_urls_is_the_shared_batch_gate(self) -> None:
         """One chokepoint returns in-range urls and rejects oversized batches."""
-        from app.admission.payload_helpers import checked_payload_urls
-        from app.models.crawl_request import CrawlRequest
-
         within = CrawlRequest(urls=["http://example.com/a", "http://example.com/a", "http://example.com/b"])
-        assert checked_payload_urls(
-            within,
-            10,
-            host_policy=HostPolicy.unrestricted(),
-        ) == ["http://example.com/a", "http://example.com/b"]
+        pairs = checked_payload_urls(within, 10, host_policy=HostPolicy.unrestricted())
+        assert [text for text, _ in pairs] == ["http://example.com/a", "http://example.com/b"]
         oversized = CrawlRequest(urls=[f"http://example.com/{i}" for i in range(11)])
         with pytest.raises(ValueError, match=r"^batch_size_exceeded$"):
             checked_payload_urls(
@@ -72,38 +69,38 @@ class TestCrawlRequest:
         """Tier-2 the endpoint gate's result may be handed to the engine so
         the batch is parsed once per request. A forwarded batch is returned as
         the job set without re-deriving from the payload..."""
-        from app.admission.payload_helpers import checked_payload_urls
-        from app.models.crawl_request import CrawlRequest
-
-        forwarded = ["http://example.com/a", "http://example.com/b"]
+        policy = HostPolicy.unrestricted()
+        forwarded = [
+            ("http://example.com/a", NormalizedUrl("http://example.com/a", policy=policy)),
+            ("http://example.com/b", NormalizedUrl("http://example.com/b", policy=policy)),
+        ]
         oversized_payload = CrawlRequest(urls=[f"http://example.com/{i}" for i in range(11)])
-        assert (
-            checked_payload_urls(
-                oversized_payload,
-                10,
-                urls=forwarded,
-                host_policy=HostPolicy.unrestricted(),
-            )
-            == forwarded
+        outcome = checked_payload_urls(
+            oversized_payload,
+            10,
+            url_pairs=forwarded,
+            host_policy=policy,
         )
+        assert outcome == forwarded
 
     def test_forwarded_batch_still_faces_the_cap(self) -> None:
         """...but the cap still applies to a forwarded batch (invariant: the
-        engine-internal ceiling cannot be bypassed by supplying urls)."""
-        from app.admission.payload_helpers import checked_payload_urls
-        from app.models.crawl_request import CrawlRequest
-
-        forwarded = [f"http://example.com/{i}" for i in range(11)]
+        engine-internal ceiling cannot be bypassed by supplying url_pairs)."""
+        policy = HostPolicy.unrestricted()
+        forwarded = [
+            (f"http://example.com/{i}", NormalizedUrl(f"http://example.com/{i}", policy=policy))
+            for i in range(11)
+        ]
         with pytest.raises(ValueError, match=r"^batch_size_exceeded$"):
             checked_payload_urls(
                 CrawlRequest(url="http://example.com/x"),
                 10,
-                urls=forwarded,
-                host_policy=HostPolicy.unrestricted(),
+                url_pairs=forwarded,
+                host_policy=policy,
             )
 
     async def test_crawl_request_consumes_the_forwarded_batch(self) -> None:
-        """Engine handoff: with urls supplied, those URLs become the job set --
+        """Engine handoff: with url_pairs supplied, those URLs become the job set --
         the engine does not re-run _payload_urls over the payload."""
         fetched: list[str] = []
 
@@ -113,9 +110,13 @@ class TestCrawlRequest:
         policy = read_policy(
             {**base.model_dump(), "limits": {**base.limits.model_dump(), "respect_robots": False}}
         )
+        forwarded_pair = (
+            "http://example.com/a",
+            NormalizedUrl("http://example.com/a", policy=HostPolicy.unrestricted()),
+        )
         result = await crawl_request(
             {"urls": ["http://example.com/a", "http://example.com/a/?utm_source=tw"], "policy": policy},
-            urls=["http://example.com/a"],
+            url_pairs=[forwarded_pair],
             http_fetcher=spy_fetcher,
             cache=HttpCache(),
         )

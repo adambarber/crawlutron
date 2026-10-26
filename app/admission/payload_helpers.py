@@ -18,9 +18,9 @@ if TYPE_CHECKING:
     from app.models.host_policy import HostPolicy
 
 
-def _validated_url(url: str, *, host_policy: HostPolicy) -> str:
+def _validated_url(url: str, *, host_policy: HostPolicy) -> NormalizedUrl:
     try:
-        return str(NormalizedUrl(url, policy=host_policy))
+        return NormalizedUrl(url, policy=host_policy)
     except ValueError as error:
         reason = str(error)
         if reason in {"unsupported_scheme", "invalid_url"}:
@@ -45,26 +45,26 @@ def checked_payload_urls(
     max_batch_size: int,
     *,
     host_policy: HostPolicy,
-    urls: list[str] | None = None,
-) -> list[str]:
-    """A deduplicated, validated URL batch under the batch cap. ``urls``
-    forwarding skips re-derivation -- it still validates and caps, but is NOT
-    deduplicated (pinned by test_checked_payload_urls_accepts_a_forwarded_batch_without_rederiving).
+    url_pairs: list[tuple[str, NormalizedUrl]] | None = None,
+) -> list[tuple[str, NormalizedUrl]]:
+    """The admitted batch as ``(original_text, NormalizedUrl)`` pairs, deduped on
+    admitted identity and capped; the value is kept so consumers never rebuild it.
+    Forwarded ``url_pairs`` are the door's own admission, capped not re-derived.
     """
-    if urls is not None:
-        for url in urls:
-            if not isinstance(url, str):
+    if url_pairs is not None:
+        for text, normalized in url_pairs:
+            if not isinstance(text, str) or not isinstance(normalized, NormalizedUrl):
                 raise ValueError("invalid_url")
-            _validated_url(url, host_policy=host_policy)
-        batch = urls
+        batch = list(url_pairs)
     else:
         seen: set[str] = set()
         batch = []
         for url in _single_or_batch_urls(payload):
-            key = _validated_url(url, host_policy=host_policy)
+            normalized = _validated_url(url, host_policy=host_policy)
+            key = str(normalized)
             if key not in seen:
                 seen.add(key)
-                batch.append(url)
+                batch.append((url, normalized))
     if len(batch) > max_batch_size:
         raise ValueError("batch_size_exceeded")
     return batch

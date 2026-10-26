@@ -10,6 +10,7 @@ from app.api.render import render_options_for
 from app.config.settings import CrawlerSettings
 from app.extraction.document_text import format_extracted_document_text
 from app.extraction.trees import FrameCollector, frames_from, walkable
+from app.models.crawl_request import CrawlRequest
 from app.safety.validation import HostPolicy
 from app.transport.fetch_policy import (
     fetch_with_retries,
@@ -41,31 +42,26 @@ from tests._policy_factories import canonical, make_base_policy
 
 class TestValidationHelpers:
     def test_checked_payload_urls_errors(self) -> None:
-        from app.models.crawl_request import CrawlRequest
+        pairs = checked_payload_urls(CrawlRequest(url="http://x/"), 10, host_policy=HostPolicy.unrestricted())
+        assert [text for text, _ in pairs] == ["http://x/"]
 
-        assert checked_payload_urls(
-            CrawlRequest(url="http://x/"),
+    @pytest.mark.parametrize(
+        ("raw_urls", "expected"),
+        [
+            (["http://x/", "http://y/"], ["http://x/", "http://y/"]),
+            (["http://x/", "http://x/", "http://y/", "http://x/"], ["http://x/", "http://y/"]),
+        ],
+        ids=["batch", "dedupes_exact_duplicates"],
+    )
+    def test_checked_payload_urls_batch_url_field(self, raw_urls: list[str], expected: list[str]) -> None:
+        pairs = checked_payload_urls(
+            CrawlRequest(urls=raw_urls),
             10,
             host_policy=HostPolicy.unrestricted(),
-        ) == ["http://x/"]
-        assert checked_payload_urls(
-            CrawlRequest(urls=["http://x/", "http://y/"]),
-            10,
-            host_policy=HostPolicy.unrestricted(),
-        ) == ["http://x/", "http://y/"]
-
-    def test_checked_payload_urls_dedupes_exact_duplicates(self) -> None:
-        from app.models.crawl_request import CrawlRequest
-
-        assert checked_payload_urls(
-            CrawlRequest(urls=["http://x/", "http://x/", "http://y/", "http://x/"]),
-            10,
-            host_policy=HostPolicy.unrestricted(),
-        ) == ["http://x/", "http://y/"]
+        )
+        assert [text for text, _ in pairs] == expected
 
     def test_checked_payload_urls_dedupes_on_admitted_identity(self) -> None:
-        from app.models.crawl_request import CrawlRequest
-
         # ``NormalizedUrl`` admission treats fragment / tracking-param / param-order
         # variants as the SAME page; #520 keeps path text verbatim, so /x/ stays distinct.
         urls = [
@@ -77,11 +73,8 @@ class TestValidationHelpers:
             "https://a.gov/y?b=2&a=1",  # param order only -> same page
             "https://a.gov/z",
         ]
-        assert checked_payload_urls(
-            CrawlRequest(urls=urls),
-            10,
-            host_policy=HostPolicy.unrestricted(),
-        ) == [
+        pairs = checked_payload_urls(CrawlRequest(urls=urls), 10, host_policy=HostPolicy.unrestricted())
+        assert [text for text, _ in pairs] == [
             "https://a.gov/x",
             "https://a.gov/x/#section",
             "https://a.gov/y?a=1&b=2",

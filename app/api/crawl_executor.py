@@ -36,12 +36,11 @@ async def execute_crawl(
     *,
     settings,
     shutdown_event: asyncio.Event | None,
-    urls: list[str] | None = None,
+    url_pairs: list[tuple[str, NormalizedUrl]] | None = None,
 ) -> ProducerEnvelope:
     """Run a crawl shared by every crawl entry point. ``payload`` is the declared
     :class:`CrawlRequest` model; an invalid URL surfaces as 422, a missing pool as
-    503 only for a browser-needed chain. ``urls`` forwards the gated batch.
-    """
+    503 only for a browser-needed chain. ``url_pairs`` forwards the gate's batch."""
     active_settings = settings or CrawlerSettings.from_mapping()
     host_policy = HostPolicy.from_settings(active_settings)
     if payload.url is not None:
@@ -51,7 +50,7 @@ async def execute_crawl(
             return await crawl_request(
                 payload,
                 settings=active_settings,
-                urls=urls,
+                url_pairs=url_pairs,
                 browser_worker=None,
                 shutdown_event=shutdown_event,
             )
@@ -62,7 +61,7 @@ async def execute_crawl(
     return await crawl_request(
         payload,
         settings=settings,
-        urls=urls,
+        url_pairs=url_pairs,
         browser_worker=pooled_worker,
         shutdown_event=shutdown_event,
     )

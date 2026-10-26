@@ -238,7 +238,7 @@ repos:
         name: chokepoint safety invariants
         entry: >-
           bash -c 'for d in "$(git rev-parse --show-toplevel)/docker/browser-crawler" "$(git rev-parse --show-toplevel)"; do [ -x "$d/scripts/gate" ] && exec bash "$d/scripts/gate" "$@"; done; echo "scripts/gate not found in either layout" >&2; exit 1' gate
-          .venv/bin/python -m pytest -q -o addopts=
+          .venv/bin/python -m pytest -q -o addopts= -n 4
           tests/invariants/ tests/test_metrics_budget.py
           tests/test_env_regression.py tests/test_store_pragma_chokepoint.py
           tests/membership_gate.py
