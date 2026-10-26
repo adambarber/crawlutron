@@ -7,10 +7,13 @@ import time
 from collections import defaultdict
 from collections.abc import Awaitable, Callable
 from secrets import SystemRandom
-from typing import Protocol, TypeVar
+from typing import TYPE_CHECKING, Protocol, TypeVar
 
 from app.orchestration.scheduler_exceptions import CircuitBreakerOpen
 from app.vocabulary.taxonomy import DOMAIN_HEALTH_BY_STATUS, ResultStatus
+
+if TYPE_CHECKING:
+    from app.config.settings import CrawlerSettings
 
 logger = logging.getLogger(__name__)
 
@@ -112,6 +115,27 @@ COOLDOWN_PURGE_INTERVAL = 100
 
 
 class DomainScheduler:
+    @classmethod
+    def from_settings(
+        cls,
+        settings: CrawlerSettings,
+        *,
+        global_limit: int,
+        max_rps: float,
+    ) -> DomainScheduler:
+        """The single construction path: every knob reads its settings home,
+        never re-defaulted here; coercions are part of the contract."""
+        return cls(
+            global_limit=max(1, int(global_limit)),
+            per_domain_limit=max(1, int(settings.per_domain_concurrency)),
+            delay_seconds=max(0.0, float(settings.per_domain_delay_ms) / 1000),
+            max_rps=max(0.0, float(max_rps)),
+            adaptive=bool(settings.adaptive_throttling),
+            adaptive_min_delay=float(settings.adaptive_min_delay),
+            adaptive_max_delay=float(settings.adaptive_max_delay),
+            adaptive_latency_factor=float(settings.adaptive_latency_factor),
+        )
+
     def __init__(
         self,
         *,

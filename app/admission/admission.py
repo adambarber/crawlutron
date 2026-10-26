@@ -95,15 +95,10 @@ class JobAdmissionContext:
         limits = normalized.limits
         host_policy = HostPolicy.from_settings(settings)
         robots = RobotsGate(normalized, host_policy, fetch_and_decode)
-        scheduler = DomainScheduler(
+        scheduler = DomainScheduler.from_settings(
+            settings,
             global_limit=max(1, int(getattr(settings, "global_concurrency", 4))),
-            per_domain_limit=max(1, int(getattr(settings, "per_domain_concurrency", 2))),
-            delay_seconds=max(0.0, float(getattr(settings, "per_domain_delay_ms", 500)) / 1000),
             max_rps=limits.max_rps,
-            adaptive=bool(getattr(settings, "adaptive_throttling", True)),
-            adaptive_min_delay=float(getattr(settings, "adaptive_min_delay", 0.5)),
-            adaptive_max_delay=float(getattr(settings, "adaptive_max_delay", 30.0)),
-            adaptive_latency_factor=float(getattr(settings, "adaptive_latency_factor", 1.0)),
         )
         discovery = discovery_flags(normalized)
         return cls(

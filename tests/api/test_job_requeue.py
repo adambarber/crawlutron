@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-from unittest.mock import MagicMock
 
 from app.api import job_runner
 from app.config.settings import CrawlerSettings
@@ -308,7 +307,7 @@ class TestWholeSiteRedirectedUrlResolution:
 
         job_runner.install_execute_crawl(fake_execute_crawl)
 
-        await drive_job(job_id, job_store, settings=MagicMock())
+        await drive_job(job_id, job_store, settings=CrawlerSettings.from_mapping({}))
 
         finished = job_store.load(job_id)
         assert finished is not None

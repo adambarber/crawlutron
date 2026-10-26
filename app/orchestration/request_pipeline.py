@@ -118,18 +118,14 @@ def _compute_ram_derived_concurrency(state: PipelineState) -> int:
 
 
 def _build_scheduler(state: PipelineState) -> DomainScheduler:
-    limits = state.policy.limits
-    return DomainScheduler(
-        # The scheduler's own connection ceiling is the RAM-derived admission
-        # ceiling, not a hardcoded constant: the two cannot diverge (#350).
+    """Delegates to the single construction path; this layer only supplies the
+    RAM-derived connection ceiling (#350) and the policy's RPS cap."""
+    # The scheduler's own connection ceiling is the RAM-derived admission
+    # ceiling, not a hardcoded constant: the two cannot diverge (#350).
+    return DomainScheduler.from_settings(
+        state.settings,
         global_limit=_compute_ram_derived_concurrency(state),
-        per_domain_limit=state.settings.per_domain_concurrency,
-        delay_seconds=state.settings.per_domain_delay_ms / 1000,
-        max_rps=limits.max_rps,
-        adaptive=state.settings.adaptive_throttling,
-        adaptive_min_delay=state.settings.adaptive_min_delay,
-        adaptive_max_delay=state.settings.adaptive_max_delay,
-        adaptive_latency_factor=state.settings.adaptive_latency_factor,
+        max_rps=state.policy.limits.max_rps,
     )
 
 
