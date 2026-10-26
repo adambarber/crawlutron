@@ -7,8 +7,6 @@ import logging
 from collections.abc import Callable, Coroutine
 from typing import Any
 
-from app.storage.job_store import JobStore
-
 logger = logging.getLogger(__name__)
 
 
@@ -47,14 +45,15 @@ async def shutdown_job_runner() -> None:
     await drain_webhook_deliveries()
 
 
-def reset_job_runner() -> None:
-    """Best-effort synchronous teardown for test fixtures (no await needed)."""
-    from app.api.job_runner import reset_execute_crawl
+def cancel_all_tasks() -> None:
+    """Cancel every registered task and clear the registry, without awaiting.
 
+    The registry-owned teardown primitive; ``app.api.job_runner`` layers its
+    execute-crawl reset on top of this (#542 moved that reset there).
+    """
     for task in list(_tasks.values()):
         task.cancel()
     _tasks.clear()
-    reset_execute_crawl()
 
 
 def start_tracked_task(
@@ -93,25 +92,6 @@ async def _track_then_run(
     failure can never land in a task the registry never saw (#448)."""
     await asyncio.sleep(0)
     return await factory()
-
-
-def start_job(
-    job_id: str,
-    job_store: JobStore,
-    settings: Any,
-    shutdown_event: asyncio.Event,
-    *,
-    preclaimed: bool = False,
-) -> asyncio.Task:
-    """Spawn (or return) the runner task; preclaimed rows were flipped by caller.
-
-    The runner lives in :mod:`app.api.job_runner`; the import here is at call
-    time, breaking the recovery→runner cycle without a registry-side dep."""
-    from app.api.job_runner import run_job
-
-    return start_tracked_task(
-        job_id, lambda: run_job(job_id, job_store, settings, shutdown_event, preclaimed=preclaimed)
-    )
 
 
 def cancel_job_task(job_id: str) -> None:

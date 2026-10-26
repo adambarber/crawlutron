@@ -344,12 +344,13 @@ async def _recover_jobs_and_start_sweep(_app: FastAPI, settings: CrawlerSettings
     The shutdown event is minted in the lifespan, not at import: an import-time
     event is set by the first teardown and cancels every later run's crawls.
     """
-    from .api.job_runner import recover_and_start_pending_jobs
+    from .api.job_recovery import recover_and_start_pending_jobs
+    from .api.job_runner import start_job
     from .api.watch_sweep import sweep_watches_forever
 
     shutdown_event = asyncio.Event()
     _app.state.shutdown_event = shutdown_event
-    await recover_and_start_pending_jobs(job_store, settings, shutdown_event)
+    await recover_and_start_pending_jobs(job_store, settings, shutdown_event, start_job)
     _app.state.watch_sweep_task = asyncio.create_task(
         sweep_watches_forever(
             watch_store,

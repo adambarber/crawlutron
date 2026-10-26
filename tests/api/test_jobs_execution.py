@@ -130,7 +130,7 @@ class TestCrashRecovery:
 
         job_runner.install_execute_crawl(ScriptedExecute(results=[_canned_result(GRAPH_ROOT)]))
         await job_runner.recover_and_start_pending_jobs(
-            job_store, CrawlerSettings.from_mapping({}), asyncio.Event()
+            job_store, CrawlerSettings.from_mapping({}), asyncio.Event(), job_runner.start_job
         )
         assert await _wait_status(job_store, job.job_id, {"completed", "failed"}) == "completed"
 

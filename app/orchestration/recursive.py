@@ -1,7 +1,4 @@
-"""Recursive crawl dispatch (bounded BFS) with self-tuning admission.
-One home for the whole recursive walk: the resource-gated batch admission stages
-and the dispatch loop that drives them.
-"""
+"""Recursive crawl dispatch (bounded BFS) with self-tuning admission."""
 
 from __future__ import annotations
 
@@ -23,7 +20,7 @@ from app.models.crawl_result import EngineCrawlResult
 from app.models.crawl_task import CrawlTask
 from app.models.host_policy import HostPolicy
 from app.models.normalized_url import NormalizedUrl
-from app.orchestration.admission_stall import AdmissionStallGuard, crawl_batches
+from app.orchestration.admission_stall import AdmissionStallGuard, BatchStages, crawl_batches
 from app.orchestration.results import failed_result_for
 from app.orchestration.scheduler import DomainScheduler
 from app.orchestration.spill_sink import SpillSink, write_spill
@@ -43,8 +40,7 @@ logger = logging.getLogger(__name__)
 # A transiently-failed URL is requeued, not dead; the cap stops an unreachable host.
 MAX_TRANSIENT_REQUEUES = 3
 
-# One admitted item as it flows down the pipeline: (depth, task), named once so every
-# stage boundary states the shape by reference instead of re-spelling it.
+# One admitted item: (depth, task), named once so stage boundaries reference it.
 type _Admitted = tuple[int, CrawlTask]
 
 
@@ -97,19 +93,13 @@ class _BatchContext(NamedTuple):
 
 
 class _PinProvider(Protocol):
-    """The one scheduler method admission reads: ``get_pinned_strategy``. Naming
-    the surface, not the class, states the real requirement -- anything that can
-    answer the pin lookup, the real scheduler and the test double alike.
-    """
+    """The one scheduler method admission reads: ``get_pinned_strategy``."""
 
     def get_pinned_strategy(self, domain: str) -> str | None: ...
 
 
 def _pinned_strategy(scheduler: _PinProvider, task: CrawlTask) -> str | None:
-    """The strategy this task's domain is pinned to, or None when unpinned -- the
-    one place per-domain pinning is read, previously a ``getattr`` guard spelled
-    three ways under different local names.
-    """
+    """The strategy this task's domain is pinned to, or None when unpinned."""
     return scheduler.get_pinned_strategy(task.domain)
 
 
@@ -454,11 +444,6 @@ async def run_recursive_crawl(
     robots_timeout_seconds: float = 30.0,
     stall_guard: AdmissionStallGuard | None = None,
 ) -> None:
-    """Bounded recursive BFS with self-tuning resource admission: writes results
-    to ``spill`` and expands the frontier from each result's discovered links.
-    The caller owns the closures, so this stays a pure dispatch function.
-    """
-    metrics = get_metrics()
     run = RecursiveRunState(
         scheduler=scheduler,
         worker=worker,
@@ -484,7 +469,15 @@ async def run_recursive_crawl(
         spill_write=write_spill,
     )
     state = await _start_recursive_state(run, jobs)
-    await crawl_batches(run, state, stall_guard or AdmissionStallGuard(), shutdown_event, metrics, max_pages)
+    await crawl_batches(
+        run,
+        state,
+        stall_guard or AdmissionStallGuard(),
+        shutdown_event,
+        get_metrics(),
+        max_pages,
+        BatchStages(admit_recursive_batch, crawl_recursive_batch, commit_recursive_results),
+    )
 
 
 __all__ = [

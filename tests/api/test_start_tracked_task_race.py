@@ -4,6 +4,8 @@ stale callback evict a replacement task's registration."""
 import asyncio
 from collections.abc import Callable
 
+from app.api import job_runner
+
 
 def _finishable_and_blocked_factories() -> tuple[Callable, Callable, asyncio.Event]:
     """A factory that finishes in one turn, and one held open by an event."""
@@ -31,14 +33,14 @@ async def _reap(job_lifecycle, job_id: str, b_release: asyncio.Event) -> None:
     live = job_lifecycle.tracked_task(job_id)
     if live is not None:
         await asyncio.gather(live, return_exceptions=True)
-    job_lifecycle.reset_job_runner()
+    job_runner.reset_job_runner()
 
 
 async def test_a_task_that_never_gets_registered_is_still_awaitable_by_the_caller():
     """An early failure must be surfaced to the caller, never swallowed."""
     from app.api import job_lifecycle
 
-    job_lifecycle.reset_job_runner()
+    job_runner.reset_job_runner()
     job_id = "escape-job"
     boom = RuntimeError("escaped before registration")
 
@@ -50,14 +52,14 @@ async def test_a_task_that_never_gets_registered_is_still_awaitable_by_the_calle
         result = await asyncio.gather(task, return_exceptions=True)
         assert result == [boom], "the early failure must be surfaced, not swallowed"
     finally:
-        job_lifecycle.reset_job_runner()
+        job_runner.reset_job_runner()
 
 
 async def test_a_failed_task_is_never_reported_as_running():
     """After an early failure the registry must not claim the job is running."""
     from app.api import job_lifecycle
 
-    job_lifecycle.reset_job_runner()
+    job_runner.reset_job_runner()
     job_id = "failed-owner-job"
 
     async def fail_now():
@@ -71,14 +73,14 @@ async def test_a_failed_task_is_never_reported_as_running():
         assert job_lifecycle.is_running(job_id) is False
         assert job_lifecycle.tracked_task(job_id) is None
     finally:
-        job_lifecycle.reset_job_runner()
+        job_runner.reset_job_runner()
 
 
 async def test_replacement_task_registration_survives_the_predecessors_callback():
     """#448: A's queued done-callback pops the slot and evicts the live B."""
     from app.api import job_lifecycle
 
-    job_lifecycle.reset_job_runner()
+    job_runner.reset_job_runner()
     job_id = "evict-job"
     fast, slow, b_release = _finishable_and_blocked_factories()
 
@@ -105,7 +107,7 @@ async def test_the_registry_slot_is_only_reclaimed_by_its_own_task():
     """Companion invariant: only the registered task's own completion reclaims."""
     from app.api import job_lifecycle
 
-    job_lifecycle.reset_job_runner()
+    job_runner.reset_job_runner()
     job_id = "slot-owner-job"
     fast, slow, b_release = _finishable_and_blocked_factories()
 
