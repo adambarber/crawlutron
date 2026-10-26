@@ -69,9 +69,9 @@ async def _fetch_http_phase(ctx: HttpStrategyContext) -> _FetchedWithRetries:
 
 def _binary_result_if_needed(ctx: HttpStrategyContext, resp: FetchedResponse) -> EngineCrawlResult | None:
     """Return the terminal no-text result for a binary response."""
-    if ctx.extraction == EXTRACTION_DOCUMENT or not fetch_policy.looks_like_binary_body(
-        resp.body, resp.content_type, resp.final_url
-    ):
+    if ctx.extraction == EXTRACTION_DOCUMENT or resp.status_code == 413:
+        return None
+    if not fetch_policy.looks_like_binary_body(resp.body, resp.content_type, resp.final_url):
         return None
     result = binary_no_text_result(
         original_url=ctx.original_url,

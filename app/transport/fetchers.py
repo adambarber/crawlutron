@@ -403,11 +403,13 @@ def http_413(url: NormalizedUrl, final_url: NormalizedUrl, started: float) -> Ht
 def _cffi_too_large_result(
     url: NormalizedUrl, current_url: NormalizedUrl, response: Any, elapsed_ms: int
 ) -> HttpFetchResult:
+    # Synthetic headers, never echoed (#137): echoing content-encoding turned the
+    # empty refusal body into a decompression fault instead of the size verdict.
     return HttpFetchResult(
         url=url,
         final_url=current_url,
         status_code=413,
-        headers={key.lower(): value for key, value in response.headers.items()},
+        headers={"content-type": "application/octet-stream"},
         body=b"",
         elapsed_ms=elapsed_ms,
     )

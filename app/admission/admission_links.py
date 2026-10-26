@@ -63,6 +63,9 @@ class AdmissionOutcome:
     # Candidates dropped because their canonical identity was already admitted;
     # counted apart from cap_blocked so a cap report never hides a dedupe.
     duplicates_skipped: int = 0
+    # Candidates dropped for failing URL admission itself (malformed, unsafe,
+    # or off-policy) -- counted apart from the other refusals (#134).
+    invalid_skipped: int = 0
     # The identities this pass newly reserved (#519): callers union the delta;
     # the old whole-set ``known_after`` is gone, its last consumer threads this.
     known_delta: frozenset[NormalizedUrl] = frozenset()
@@ -114,34 +117,9 @@ class _AdmissionPass[T]:
     added: set[NormalizedUrl]
     frontier: MutableSequence[T]
     make_entry: Callable[[AdmittedLink], T]
-
-
-def _prepare_admission[T](
-    links: Iterable[Any],
-    *,
-    known: set[NormalizedUrl],
-    next_depth: int,
-    scope_pattern: BoundedPattern | None,
-    want_document_bodies: bool,
-    host_policy: HostPolicy,
-) -> tuple[set[NormalizedUrl], Iterator[AdmittedLink]]:
-    """The run's added-set and candidate stream a link-admission pass runs over.
-
-    ``known`` is the caller's FULL occupied set -- visited, in-flight and frontier
-    identities together (#381). It is read, never copied or mutated (#159, #519).
-    """
-    added: set[NormalizedUrl] = set()
-    candidates = iter(
-        _candidate_stream(
-            links,
-            next_depth=next_depth,
-            known=known,
-            scope_pattern=scope_pattern,
-            want_document_bodies=want_document_bodies,
-            host_policy=host_policy,
-        )
-    )
-    return added, candidates
+    # Candidates dropped by the candidate stream for failing URL admission
+    # (malformed, unsafe, off-policy) -- written by the stream, read at the end.
+    invalid_skipped: int = 0
 
 
 def _collect_chunk(candidates: Iterator[AdmittedLink], chunk_limit: int) -> list[AdmittedLink]:
@@ -257,14 +235,7 @@ async def admit_discovered_links[T](
     the DELTA it added, which callers union into their own set (#159, #519)."""
     if source_depth >= max_depth:
         return AdmissionOutcome()
-    added, candidates = _prepare_admission(
-        links,
-        known=known,
-        next_depth=source_depth + 1,
-        scope_pattern=scope_pattern,
-        want_document_bodies=want_document_bodies,
-        host_policy=host_policy,
-    )
+    added: set[NormalizedUrl] = set()
     admission_pass = _AdmissionPass(
         robots_allows=robots_allows,
         respect_robots=respect_robots,
@@ -276,6 +247,17 @@ async def admit_discovered_links[T](
         frontier=frontier,
         make_entry=make_entry,
     )
+    candidates = iter(
+        _candidate_stream(
+            links,
+            next_depth=source_depth + 1,
+            known=known,
+            scope_pattern=scope_pattern,
+            want_document_bodies=want_document_bodies,
+            host_policy=host_policy,
+            pass_=admission_pass,
+        )
+    )
     accepted, cap_blocked, robots_blocked, duplicates_skipped = await _admission_loop(
         admission_pass, candidates
     )
@@ -284,6 +266,7 @@ async def admit_discovered_links[T](
         cap_blocked=cap_blocked,
         robots_blocked=robots_blocked,
         duplicates_skipped=duplicates_skipped,
+        invalid_skipped=admission_pass.invalid_skipped,
         known_delta=frozenset(added),
     )
 
@@ -395,7 +378,7 @@ def frontier_identity(value: Any, *, host_policy: HostPolicy) -> NormalizedUrl |
     return identity
 
 
-def _candidate_stream(
+def _candidate_stream[T](
     links: Iterable[Any],
     *,
     next_depth: int,
@@ -403,6 +386,7 @@ def _candidate_stream(
     scope_pattern: BoundedPattern | None,
     want_document_bodies: bool,
     host_policy: HostPolicy,
+    pass_: _AdmissionPass[T],
 ) -> Iterable[AdmittedLink]:
     for link in links:
         values = _link_values(link)
@@ -410,7 +394,10 @@ def _candidate_stream(
             continue
         normalized_raw, original = values
         normalized = admit_or_none(normalized_raw, policy=host_policy)
-        if normalized is None or normalized in known:
+        if normalized is None:
+            pass_.invalid_skipped += 1
+            continue
+        if normalized in known:
             continue
         if is_analytics_host(normalized):
             continue
