@@ -12,6 +12,10 @@ from typing import Any
 
 def json_default(obj: Any) -> Any:
     """Fallback for objects that are not natively JSON-serializable."""
+    # pydantic SecretStr/SecretBytes: serialize the actual secret value
+    getter = getattr(obj, "get_secret_value", None)
+    if callable(getter):
+        return getter()
     reducer = getattr(obj, "model_dump", None)
     if callable(reducer):
         return reducer()

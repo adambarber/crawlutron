@@ -45,8 +45,16 @@ def authorization_value(credential: Credential) -> str:
     to raise here, three layers down, on the first request that used a bad one).
     """
     if credential.kind == "bearer":
-        return f"Bearer {credential.token}"
-    raw = f"{credential.username}:{credential.password}".encode()
+        tok = credential.token
+        if tok is None:
+            raise ValueError("bearer credential must have token")
+        secret = tok.get_secret_value() if hasattr(tok, "get_secret_value") else tok
+        return f"Bearer {secret}"
+    pwd = credential.password
+    if pwd is None:
+        raise ValueError("basic credential must have password")
+    pwd_secret = pwd.get_secret_value() if hasattr(pwd, "get_secret_value") else pwd
+    raw = f"{credential.username}:{pwd_secret}".encode()
     return f"Basic {base64.b64encode(raw).decode()}"
 
 
