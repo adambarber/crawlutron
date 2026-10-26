@@ -102,11 +102,13 @@ def build_jobs(state: PipelineState) -> list[CrawlTask]:
     ]
 
 
-def _compute_ram_derived_concurrency(state: PipelineState) -> int:
+def compute_ram_derived_concurrency(state: PipelineState) -> int:
     """The RAM-derived HTTP concurrency ceiling this process may sustain, the
     value weighted admission and the scheduler's connection ceiling both honor."""
     limit = read_memory_stats().total_bytes or 0
-    return max(1, max_http_concurrency_for(limit, derive_browser_pool_size()))
+    # #367: reserve the doc pool too, exactly as build_admission_policy does, so
+    # the scheduler ceiling and admission's max_http_concurrency cannot diverge.
+    return max(1, max_http_concurrency_for(limit, derive_browser_pool_size(), doc_workers=doc_worker_count()))
 
 
 def _build_scheduler(state: PipelineState) -> DomainScheduler:
@@ -116,7 +118,7 @@ def _build_scheduler(state: PipelineState) -> DomainScheduler:
     # ceiling, not a hardcoded constant: the two cannot diverge (#350).
     return DomainScheduler.from_settings(
         state.settings,
-        global_limit=_compute_ram_derived_concurrency(state),
+        global_limit=compute_ram_derived_concurrency(state),
         max_rps=state.policy.limits.max_rps,
     )
 

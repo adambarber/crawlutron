@@ -20,6 +20,7 @@ from app.models.caller_identity import CallerIdentity
 from app.models.caller_key import CallerKey
 from app.models.error_response import ErrorResponse
 from app.models.json_value import JsonValue
+from app.transport.cookie_jar import COOKIE_NAMESPACE
 from app.transport.request_profile import cookie_namespace_for
 
 if TYPE_CHECKING:
@@ -196,6 +197,21 @@ def effective_cookie_namespace(profile: Mapping[str, JsonValue], caller: CallerI
     return declared
 
 
+@asynccontextmanager
+async def bound_render_cookie_namespace(caller: CallerIdentity | None):
+    """Bind the render door's cookie namespace for the caller (#483).
+
+    /v1/render has no policy carrier, so a keyed caller's browser harvest is
+    pinned to the key id here; an anonymous render keeps the shared default.
+    """
+    namespace = caller.caller_id if caller is not None and caller.authenticated and caller.caller_id else ""
+    token = COOKIE_NAMESPACE.set(namespace)
+    try:
+        yield
+    finally:
+        COOKIE_NAMESPACE.reset(token)
+
+
 def resolve_page_limit(caller: CallerIdentity, requested_max_pages: int) -> int:
     """Resolve an omitted (zero) page limit to the caller's bound.
 
@@ -291,6 +307,7 @@ __all__ = [
     "admit",
     "anonymous_caller",
     "auth_denials",
+    "bound_render_cookie_namespace",
     "check_concurrency_quota",
     "check_page_quota",
     "effective_cookie_namespace",
