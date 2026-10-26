@@ -76,6 +76,17 @@ class TestBuildPinnedRequest:
         assert parsed.query == "x=1"
         assert headers["Host"] == "v6.example"
 
+    def test_host_header_brackets_resolved_ipv6(self, monkeypatch):
+        # #495: the Host header composes the original v6 literal with a port; unbracketed
+        # it reads as an ambiguous host:port (RFC 7230 5.4) and never as the literal.
+        block_private_targets(monkeypatch)
+        canonical("http://[2606:4700::1111]:8080/x")
+        literal = canonical("http://[2606:4700::1111]:8080/x")
+        v6_addrs = [(socket.AF_INET6, socket.SOCK_STREAM, 6, "", ("2606:4700::1111", 8080, 0, 0))]
+        with _resolve_as(v6_addrs):
+            _, headers = build_pinned_request(literal, {})
+        assert headers["Host"] == "[2606:4700::1111]:8080"
+
 
 class TestOneResolutionPerHop:
     """#383: the fresh pin IS the SSRF validation, so the builder must not
