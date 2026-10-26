@@ -152,8 +152,8 @@ class JobStore:
 
     def set_status(self, job_id: str, new: JobStatus, *, expected: Expected) -> bool:
         """Atomic compare-and-set on the row's status (the control plane).
-        Returns True iff the row existed in one of the ``expected`` states and now
-        holds ``new``; False means missing-or-conflict, so the caller's view is stale.
+        True iff the row existed LIVE in an ``expected`` state and now holds
+        ``new``. A tombstoned row is never CASed, mirroring ``save()`` (#363).
         """
         wanted = {expected} if isinstance(expected, JobStatus) else set(expected)
         with self._lock:
@@ -161,7 +161,8 @@ class JobStore:
             # ever constructed from values.
             cur = self._conn.execute(
                 "UPDATE crawl_jobs SET status = ?, updated_at = ? "
-                "WHERE job_id = ? AND status IN (SELECT value FROM json_each(?))",
+                "WHERE job_id = ? AND deleted_at IS NULL "
+                "AND status IN (SELECT value FROM json_each(?))",
                 (new.value, time.time(), job_id, json.dumps(sorted(s.value for s in wanted))),
             )
             self._conn.commit()

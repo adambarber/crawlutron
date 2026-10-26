@@ -149,3 +149,15 @@ def test_status_assignment_detector_bites():
         and any(isinstance(t, ast.Attribute) and t.attr == "status" for t in n.targets)
     ]
     assert hits == [1]
+
+
+def test_set_status_cannot_flip_a_tombstoned_row(tmp_path):
+    """A deleted job's status is frozen: a late runner's CAS must not land (#363)."""
+    store = _store(tmp_path)
+    job = _running_job(store, "j-gone")
+    assert store.delete(job.job_id) is True
+
+    assert store.set_status("j-gone", JobStatus.COMPLETED, expected=JobStatus.RUNNING) is False
+    # The row is still gone to every reader: nothing changed, nothing resurrected.
+    assert store.load("j-gone") is None
+    assert store.exists("j-gone") is False
