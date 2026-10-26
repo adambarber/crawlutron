@@ -383,6 +383,7 @@ async def _expand_recursive_result(
         robots_crawl_delay=run.robots_crawl_delay,
         commit_crawl_delay=lambda domain, delay: run.scheduler.set_domain_min_delay(domain, delay),
         host_policy=run.host_policy,
+        robots_timeout_seconds=run.robots_timeout_seconds,
     )
     # The delta is the primary path: unioning it copies nothing whole (#519).
     # The max-depth early return yields an empty delta, a no-op here.

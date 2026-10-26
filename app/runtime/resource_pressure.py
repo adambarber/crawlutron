@@ -13,6 +13,7 @@ from app.runtime.pressure_probes import LoopLagProbe, read_cpu_quota, read_cpu_u
 __all__ = [
     "CpuGate",
     "LoopLagProbe",
+    "default_executor_workers",
     "read_cpu_quota",
     "read_cpu_usage_seconds",
 ]
@@ -36,6 +37,27 @@ _DOC_TASK_RAM_BYTES = get_env_int("CRAWLUTRON_DOC_TASK_RAM_BYTES", 300 * 1024 * 
 # Default persistent markitdown worker count; mirrors the 3 GiB container
 # ceiling the compose pins. Overridable via CRAWLUTRON_EXTRACTION_DOC_WORKERS.
 _DEFAULT_DOC_WORKERS = 2
+
+
+# The shared asyncio.to_thread pool: the interpreter's implicit default is
+# min(32, cpu+4) queued unboundedly; the floor keeps small boxes responsive.
+_DEFAULT_EXECUTOR_FLOOR = 8
+_DEFAULT_EXECUTOR_CAP = 32
+
+
+def default_executor_workers() -> int:
+    """Thread count for the loop's shared default executor (#360), env-overridable."""
+    cpus = read_cpu_quota()
+    if cpus is None:
+        import os
+
+        cpus = os.cpu_count() or 4
+    derived = min(_DEFAULT_EXECUTOR_CAP, int(cpus) + 4)
+    try:
+        configured = get_env_int("CRAWLUTRON_DEFAULT_EXECUTOR_WORKERS", derived, lo=1)
+    except ValueError:
+        configured = _DEFAULT_EXECUTOR_FLOOR
+    return max(_DEFAULT_EXECUTOR_FLOOR, min(_DEFAULT_EXECUTOR_CAP, configured))
 
 
 _ADMIT_YIELD_SECONDS = get_env_float("CRAWLUTRON_ADMIT_YIELD_SECONDS", 0.05, lo=0.0)

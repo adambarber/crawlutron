@@ -346,13 +346,25 @@ class BrowserDriver:
         await safe_close_page(page)
 
     async def lazy_load_scroll(self, page: Any, browser_profile: dict[str, Any] | None = None) -> None:
-        """Scroll to the bottom repeatedly to trigger lazy-loaded content."""
+        """Scroll to the bottom repeatedly to trigger lazy-loaded content.
+
+        The scroll evaluate returns the page height; two stable polls stop the
+        pass early so a static page pays no fixed-delay tax (#356)."""
         steps, delay = self.scroll_config_for(browser_profile)
+        previous_height: float | None = None
+        stable_polls = 0
         for _ in range(steps):
             try:
-                await page.evaluate("() => window.scrollTo(0, document.body.scrollHeight)")
+                height = await page.evaluate(
+                    "() => { const h = document.body.scrollHeight; window.scrollTo(0, h); return h; }"
+                )
             except Exception:  # scrolling is best-effort
                 return
+            if isinstance(height, (int, float)):
+                stable_polls = stable_polls + 1 if height == previous_height else 0
+                previous_height = height
+                if stable_polls >= 2:
+                    return
             await self._async_sleep(delay)
 
     def harvest_timeout_for(self, browser_profile: dict[str, Any] | None) -> float:
