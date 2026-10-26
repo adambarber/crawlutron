@@ -4,11 +4,48 @@ import fcntl
 import inspect
 import os
 import time
+import tracemalloc
 
 from app.orchestration.engine import ResultSpill
 from app.orchestration.spill_sink import SpillSink
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY
 from tests._result_builders import Spill, engine_result
+
+
+class TestTheReassemblyHoldsOneAdmittedSet:
+    """The #158 ceiling contract: reassembly RAM is the materialized set -- linear in
+    the admitted results, no super-linear overhead -- and the set itself is bounded
+    by the crawl's own caps (batch wire cap 500; recursive max_pages cap 2000).
+    """
+
+    _N = 200
+    _FACTOR = 3  # linear doubles (~2x plus fixed overhead); an O(n^2) reassembly reads ~4x
+
+    def _allocated_peak(self, build) -> int:
+        tracemalloc.start()
+        built = build()
+        _current, peak = tracemalloc.get_traced_memory()
+        tracemalloc.stop()
+        assert built, "the measured build produced nothing"
+        return peak
+
+    async def _reassembly_peak(self, n: int) -> int:
+        """tracemalloc peak of one load_ordered over an n-result spill."""
+        spill = ResultSpill()
+        try:
+            for i in range(n):
+                await spill.write(i, engine_result(f"https://spill.test/{i}", "rendered"))
+            return self._allocated_peak(lambda: spill.load_ordered(policy=UNRESTRICTED_HOST_POLICY))
+        finally:
+            spill.close()
+
+    async def test_reassembly_peak_grows_linearly_with_the_admitted_set(self):
+        peak_n = await self._reassembly_peak(self._N)
+        peak_2n = await self._reassembly_peak(2 * self._N)
+        assert peak_2n <= self._FACTOR * peak_n, (
+            f"reassembly peak at 2n ({peak_2n}) exceeds {self._FACTOR}x the peak at n "
+            f"({peak_n}): load_ordered is allocating super-linearly in the admitted set"
+        )
 
 
 class TestLoadOrderedContract:

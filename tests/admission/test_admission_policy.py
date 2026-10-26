@@ -43,6 +43,27 @@ async def test_max_pages_above_upper_bound_is_rejected_not_clamped():
         )
 
 
+@pytest.mark.parametrize(
+    ("limit", "ok"),
+    [(2000, True), (2001, False)],
+    ids=["at-the-ceiling", "one-past-the-ceiling"],
+)
+async def test_max_pages_ceiling_value_is_exactly_2000(limit, ok):
+    """#158's spill ceiling: 2000 is the largest admitted set load_ordered reassembles."""
+    if ok:
+        policy = payload_policy(
+            {"url": "http://example.com/", "policy": {"limits": {"max_pages": limit}}},
+            PolicyTier.model_defaults(),
+        )
+        assert policy.limits.max_pages == limit
+    else:
+        with pytest.raises(ValueError, match="invalid_policy_limits"):
+            payload_policy(
+                {"url": "http://example.com/", "policy": {"limits": {"max_pages": limit}}},
+                PolicyTier.model_defaults(),
+            )
+
+
 async def test_max_pages_zero_bounded_at_engine():
     # Wide fixture: root links to 150 leaf pages. With max_pages=0 the crawl must be bounded
     # (DEFAULT_MAX_PAGES=100), not crawl all 151 reachable pages.
