@@ -25,9 +25,9 @@ class LoopGuardJobStore(JobStore):
         _refuse_on_loop("JobStore.save")
         return super().save(job)
 
-    def set_status(self, job_id, new: JobStatus, *, expected=None):
+    def set_status(self, job_id, new: JobStatus, *, expected=None, error=None):
         _refuse_on_loop("JobStore.set_status")
-        return super().set_status(job_id, new, expected=expected)
+        return super().set_status(job_id, new, expected=expected, error=error)
 
     def load(self, job_id):
         _refuse_on_loop("JobStore.load")

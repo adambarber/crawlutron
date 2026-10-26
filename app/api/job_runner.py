@@ -75,15 +75,14 @@ def install_execute_crawl(fn: ExecuteCrawl) -> None:
 
 
 async def arecord_terminal_failure(job_store: JobStore, job_id: str, error: str) -> bool:
-    """Stamp ``error`` on a RUNNING job and flip it to FAILED; True iff the FAILED
-    write landed. A job past RUNNING is left as-is and reports False.
+    """Flip a RUNNING job to FAILED with ``error`` in the same CAS write; True iff
+    it landed. A job past RUNNING is left as-is and reports False: no partial
+    stamp, so a lost CAS cannot leave the error on a non-FAILED row (#365).
     """
     job = await job_store.aload(job_id)
     if job is None or job.status is not JobStatus.RUNNING:
         return False
-    job.error = error
-    await job_store.asave(job)
-    return await job_store.aset_status(job_id, JobStatus.FAILED, expected=JobStatus.RUNNING)
+    return await job_store.aset_status(job_id, JobStatus.FAILED, expected=JobStatus.RUNNING, error=error)
 
 
 def reset_execute_crawl() -> None:

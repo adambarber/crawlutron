@@ -149,3 +149,56 @@ def test_status_assignment_detector_bites():
         and any(isinstance(t, ast.Attribute) and t.attr == "status" for t in n.targets)
     ]
     assert hits == [1]
+
+
+def test_set_status_cannot_flip_a_tombstoned_row(tmp_path):
+    """A deleted job's status is frozen: a late runner's CAS must not land (#363)."""
+    store = _store(tmp_path)
+    job = _running_job(store, "j-gone")
+    assert store.delete(job.job_id) is True
+
+    assert store.set_status("j-gone", JobStatus.COMPLETED, expected=JobStatus.RUNNING) is False
+    # The row is still gone to every reader: nothing changed, nothing resurrected.
+    assert store.load("j-gone") is None
+    assert store.exists("j-gone") is False
+
+
+class TestErrorStampingGatedOnTheFailedCas:
+    """The error field is stamped only when the FAILED CAS lands (#365)."""
+
+    async def test_a_lost_cas_leaves_the_error_field_untouched(self, tmp_path):
+        from app.api.job_runner import arecord_terminal_failure
+        from app.storage.job_store import Expected
+
+        store = make_job_store(tmp_path)
+        _running_job(store)
+        # The concurrent transition lands between this path's load and its
+        # CAS: the load sees RUNNING, but the FAILED write loses the race.
+
+        async def racing_aload(job_id: str):
+            return store.load(job_id)
+
+        async def failing_aset_status(
+            job_id: str, new: JobStatus, *, expected: Expected, error: str | None = None
+        ) -> bool:
+            return False
+
+        store.aload = racing_aload
+        store.aset_status = failing_aset_status
+
+        landed = await arecord_terminal_failure(store, "j1", "engine exploded")
+
+        assert landed is False
+        assert store.load("j1").error is None, "the error was stamped on a row the FAILED CAS did not land on"
+
+    async def test_a_won_cas_stamps_the_error(self, tmp_path):
+        from app.api.job_runner import arecord_terminal_failure
+
+        store = make_job_store(tmp_path)
+        _running_job(store)
+
+        landed = await arecord_terminal_failure(store, "j1", "engine exploded")
+
+        assert landed is True
+        assert store.load("j1").error == "engine exploded"
+        assert store.load("j1").status is JobStatus.FAILED

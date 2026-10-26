@@ -180,7 +180,12 @@ class WatchSweeper:
         # A robots-txt refusal is terminal: stop sweeping it rather than re-checking
         # a host that declined us forever (same lifecycle as a revoked owner, #207).
         if status_for_classification(classification) == "skipped":
-            await self._store.adeactivate(watch.watch_id, now=now, next_check_at=now + watch.interval_seconds)
+            await self._store.adeactivate(
+                watch.watch_id,
+                now=now,
+                next_check_at=now + watch.interval_seconds,
+                reason=classification,
+            )
             return classification
         # A delivered change is what a webhook exists to say: any success-status
         # classification except "not_modified" (a 304 that proved freshness).

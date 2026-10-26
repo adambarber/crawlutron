@@ -7,6 +7,7 @@ import asyncio
 import contextlib
 import hashlib
 import hmac
+import logging
 import pathlib
 import socket
 import threading
@@ -404,3 +405,54 @@ class TestShutdownDrainsInFlightWebhookDelivery:
         await webhooks.drain_webhook_deliveries()
 
         assert completed.is_set(), "the in-flight webhook callback was dropped at shutdown"
+
+
+class TestShutdownDrainIsBounded:
+    """A hung delivery cannot wedge shutdown: the drain has a total deadline
+    and logs what it abandoned (#364)."""
+
+    async def test_a_hanging_delivery_abandons_within_the_deadline(self, monkeypatch, caplog):
+        from app.api import webhooks
+
+        started = asyncio.Event()
+        never = asyncio.Event()
+
+        async def hung_delivery(url, payload, *, host_policy):
+            started.set()
+            await never.wait()
+
+        monkeypatch.setattr(webhooks, "deliver_pinned_webhook", hung_delivery)
+
+        webhooks.start_webhook_delivery(
+            "http://webhook.example.com/cb",
+            {"results": []},
+            host_policy=HostPolicy.unrestricted(),
+        )
+        await started.wait()
+
+        # The production budget derives from the retry constants (covered by the
+        # formula test); boundedness here is proven with a tiny deadline.
+        monkeypatch.setattr(webhooks, "webhook_drain_deadline_seconds", lambda: 0.05)
+        caplog.set_level(logging.WARNING, logger=webhooks.logger.name)
+
+        deadline = asyncio.get_running_loop().time() + 10
+        await webhooks.drain_webhook_deliveries()
+        assert asyncio.get_running_loop().time() <= deadline, (
+            "the drain waited past its deadline on a hung delivery"
+        )
+        abandoned = [r for r in caplog.records if r.getMessage() == "webhook_drain_abandoned"]
+        assert abandoned, "the drain abandoned a hung delivery without logging it"
+
+
+def test_drain_deadline_is_the_retry_budget():
+    """The drain deadline is one delivery's worst path from the retry budget (#364)."""
+    from app.api import webhooks
+
+    attempts = webhooks.webhook_max_attempts()
+    base_s = webhooks.webhook_backoff_base_ms() / 1000.0
+    expected = attempts * 30.0 + sum(min(base_s * (2**a), 60.0) for a in range(attempts - 1))
+
+    deadline = webhooks.webhook_drain_deadline_seconds()
+
+    assert deadline == expected
+    assert deadline == pytest.approx(90.6)

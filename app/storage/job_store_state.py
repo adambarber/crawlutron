@@ -338,3 +338,13 @@ __all__ = [
     "CrawlJobState",
     "JobAccumulators",
 ]
+
+
+_CAS_STATUS_SQL = """
+      -- json_each keeps the expected set a BOUND parameter; COALESCE keeps the
+      -- stored error on an error-less CAS (the stamp rides the CAS, #365).
+      UPDATE crawl_jobs SET status = ?, updated_at = ?,
+                             error = COALESCE(?, error)
+      WHERE job_id = ? AND deleted_at IS NULL
+        AND status IN (SELECT value FROM json_each(?))
+"""

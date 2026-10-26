@@ -224,10 +224,17 @@ class WatchStore(CoordinationStore):
             )
             self._conn.commit()
 
-    def deactivate(self, watch_id: str, *, now: float, next_check_at: float) -> None:
+    def deactivate(
+        self,
+        watch_id: str,
+        *,
+        now: float,
+        next_check_at: float,
+        reason: CrawlClassification = CrawlClassification.site_error,
+    ) -> None:
         """Stop a watch being checked: terminal status plus a reschedule far out.
-        Used when the owner's key was revoked, so a dead identity cannot issue
-        checks forever; the row and its history stay for the operator to read.
+        ``reason`` carries the terminal classification to the row (#368); the
+        row and its history stay for the operator to read.
         """
         with self._lock:
             self._conn.execute(
@@ -242,7 +249,7 @@ class WatchStore(CoordinationStore):
                     updated_at = ?
                 WHERE watch_id = ?
                 """,
-                (WatchStatus.DEACTIVATED, CrawlClassification.site_error, next_check_at, now, watch_id),
+                (WatchStatus.DEACTIVATED, reason, next_check_at, now, watch_id),
             )
             self._conn.commit()
 
