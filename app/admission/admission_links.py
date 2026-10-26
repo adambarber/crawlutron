@@ -37,7 +37,9 @@ RobotsCrawlDelay = Callable[[NormalizedUrl], Awaitable[float | None]]
 CommitCrawlDelay = Callable[[str, float], None]
 T = TypeVar("T")
 _MAX_SCOPE_PATTERN_LEN = 256
-_ROBOTS_ADMISSION_CHUNK_SIZE = 16
+# One chunk carries a whole default batch (#354): the chunk is a fan-out bound,
+# not politeness -- same-origin fetches coalesce in the robots cache below.
+_ROBOTS_ADMISSION_CHUNK_SIZE = 50
 # How long a chunk may gather robots decisions past the per-check timeout before
 # the whole chunk fails closed: a slow origin must not cost chunks × timeout (#343).
 _ROBOTS_CHUNK_DEADLINE_SLACK_SECONDS = 5.0
