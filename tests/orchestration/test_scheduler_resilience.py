@@ -104,6 +104,147 @@ async def test_domain_delay_does_not_block_other_domains(monkeypatch):
     assert fast_started.is_set(), "the fast domain was never served"
 
 
+def _nap_until_peer_recorded(monkeypatch, real_sleep, committed: asyncio.Event):
+    """Sequenced sleep shim: the SECOND jitter nap blocks until ``committed``
+    fires, so the job's post-nap re-check cannot race the peer's commit; every
+    requested delay is still recorded. Zero wall clock."""
+    sleeps = recorder(monkeypatch)
+    jitter_naps = 0
+
+    async def _sleep(delay, *args, **kwargs):
+        nonlocal jitter_naps
+        del args, kwargs
+        if not committed.is_set():
+            jitter_naps += 1
+            if jitter_naps > 1:
+                await committed.wait()
+        sleeps.delays.append(delay)
+        await real_sleep(0)
+
+    monkeypatch.setattr(asyncio, "sleep", _sleep)
+    return sleeps
+
+
+def _two_same_domain_jobs():
+    """The pair every gate test drives: two jobs, one registrable domain."""
+    return [make_job(0, "http://example.com/a"), make_job(1, "http://example.com/b")]
+
+
+async def _run_two_jobs(scheduler, worker):
+    """Drive the pair; with no sink, ``run`` must hand back the mapping."""
+    results = await scheduler.run(_two_same_domain_jobs(), worker, failed_result=engine_envelope)
+    assert results is not None, "without a sink, run returns the index-keyed mapping"
+    return results
+
+
+class TestJitterSleepDoesNotHoldTheDomainGate:
+    """#541: the per-domain delay is a per-fire wait, never a gate hold."""
+
+    async def test_second_same_domain_job_starts_while_the_first_jitter_sleeps(self, monkeypatch):
+        """Two same-domain jobs: the second must START while the first's jitter
+        sleep is still running -- the gate is free during the nap.
+        """
+        scheduler = make_scheduler(_PerDomainDelayScheduler, adaptive=False)
+        second_jitter_began = asyncio.Event()
+        starvation: list[str] = []
+        yield_to_loop = asyncio.sleep
+        jitter_naps = 0
+
+        async def _sleep(delay, *args, **kwargs):
+            nonlocal jitter_naps
+            del args, kwargs
+            if delay >= 0.2:
+                # A jitter nap. The FIRST one must not hold the domain gate:
+                # the peer's own nap has to begin while it is in flight.
+                jitter_naps += 1
+                if jitter_naps == 1:
+                    try:
+                        await asyncio.wait_for(second_jitter_began.wait(), 2.0)
+                    except TimeoutError:
+                        starvation.append(
+                            "the second same-domain job never started while the first jitter slept"
+                        )
+                    return
+                second_jitter_began.set()
+                return
+            await yield_to_loop(0)
+
+        monkeypatch.setattr(asyncio, "sleep", _sleep)
+
+        async def worker(job):
+            await yield_to_loop(0)
+            return make_result(job.url.raw, job.domain)
+
+        results = await _run_two_jobs(scheduler, worker)
+
+        assert sorted(results) == [0, 1], "both jobs must still run"
+        assert not starvation, (
+            f"{starvation[0]}: the jitter sleep is being awaited while holding the "
+            "per-domain gate, so a same-domain peer duty-cycles behind it"
+        )
+
+    async def test_a_cooldown_firing_during_the_nap_is_not_skipped(self, monkeypatch):
+        """A 429 cooldown that lands while a peer naps must park the peer before
+        its worker: the nap re-checks the domain's cooldown on the way back in.
+        """
+        real_sleep = asyncio.sleep  # bound before the patch: the shim's own yields
+        scheduler = make_scheduler(delay_seconds=0.05, adaptive=False)
+        cooldown_committed = asyncio.Event()
+        sleeps = _nap_until_peer_recorded(monkeypatch, real_sleep, cooldown_committed)
+
+        async def worker(job):
+            if job.index == 0:
+                # The 429 lands while the second job is inside its jitter nap.
+                scheduler.set_domain_cooldown("example.com", 0.5)
+                cooldown_committed.set()
+                return make_result(job.url.raw, job.domain)
+            assert sleeps.requests_over(0.45), (
+                "the worker ran without awaiting the cooldown that fired during its "
+                f"nap; the recorded sleep requests were {sleeps.delays}"
+            )
+            return make_result(job.url.raw, job.domain)
+
+        results = await _run_two_jobs(scheduler, worker)
+
+        assert all(result.status == "success" for result in results.values()), (
+            f"the cooldown must park, not fail, the napped job: {results}"
+        )
+        assert sleeps.requests_over(0.45), (
+            f"no cooldown wait was requested at all (requests: {sleeps.delays})"
+        )
+
+    async def test_a_breaker_trip_during_the_nap_parks_the_napped_job(self, monkeypatch):
+        """The circuit half of the same re-check: a trip that lands while a peer
+        naps must park it on the open breaker, not wave it at the origin."""
+        real_sleep = asyncio.sleep  # bound before the patch: the shim's own yields
+        scheduler = make_scheduler(
+            circuit_threshold=1,
+            circuit_cooldown_base=30.0,
+            circuit_cooldown=600.0,
+            delay_seconds=0.05,
+            adaptive=False,
+        )
+        trip_committed = asyncio.Event()
+        sleeps = _nap_until_peer_recorded(monkeypatch, real_sleep, trip_committed)
+
+        async def worker(job):
+            if job.index == 0:
+                scheduler.record_failure("example.com")  # trips at threshold 1
+                trip_committed.set()
+            await real_sleep(0)
+            return make_result(job.url.raw, job.domain)
+
+        results = await _run_two_jobs(scheduler, worker)
+
+        assert results[1].status != "success", (
+            "a breaker trip during the nap must park (and then skip) the napped "
+            f"job, not run it at an open circuit: {results[1].status}"
+        )
+        assert sleeps.requests_over(25.0), (
+            f"the napped job never parked on the open breaker (park sleep missing): {sleeps.delays}"
+        )
+
+
 async def test_zero_delay_requests_no_sleep_at_all(monkeypatch):
     """The inverse: a domain configured with no delay must request no wait.
 
