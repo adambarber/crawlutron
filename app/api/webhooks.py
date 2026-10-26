@@ -136,8 +136,9 @@ async def deliver_pinned_webhook(
     request_headers = {"Content-Type": "application/json", **connect_headers}
     secret = webhook_secret()
     if secret:
-        request_headers[_SIGNATURE_HEADER] = _signature(payload_bytes, secret)
-        request_headers[_TIMESTAMP_HEADER] = str(int(time.time()))
+        timestamp = str(int(time.time()))
+        request_headers[_SIGNATURE_HEADER] = _signature(payload_bytes, secret, timestamp)
+        request_headers[_TIMESTAMP_HEADER] = timestamp
     # The pin connect URL now carries the validated IP for HTTPS too; keep the
     # original hostname as TLS SNI so real-site TLS still attests and routes.
     extensions = sni_extension(normalized.scheme, normalized.host)
@@ -161,15 +162,19 @@ async def deliver_pinned_webhook(
                     extra={"limit_bytes": max_webhook_size()},
                 )
             status = response.status_code
-            if status >= 500 or status == 429:
+            # 3xx is not delivery: the receiver never gave a final verdict at the
+            # callback URL, so it follows the transient policy and is retried.
+            if 300 <= status < 400 or status >= 500 or status == 429:
                 raise DeliveryFailed(f"transient webhook status {status}", retryable=True)
             if status >= 400:
                 raise DeliveryFailed(f"webhook receiver refused ({status})", retryable=False)
 
 
-def _signature(payload_bytes: bytes, secret: str) -> str:
-    """HMAC-SHA256 of the exact body; the receiver recomputes over the same bytes."""
-    digest = hmac.new(secret.encode(), payload_bytes, hashlib.sha256).hexdigest()
+def _signature(payload_bytes: bytes, secret: str, timestamp: str) -> str:
+    """HMAC-SHA256 binding the timestamp into the digest: the receiver recomputes
+    over ``timestamp + "." + body`` (both from the delivery), so a captured
+    signature cannot be replayed outside the timestamp window."""
+    digest = hmac.new(secret.encode(), timestamp.encode() + b"." + payload_bytes, hashlib.sha256).hexdigest()
     return f"sha256={digest}"
 
 
