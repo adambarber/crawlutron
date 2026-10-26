@@ -409,4 +409,5 @@ __all__ = [
     "handle_map",
     "handle_render",
     "handle_search",
+    "http_exception_message",
 ]

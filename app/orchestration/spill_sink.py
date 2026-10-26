@@ -14,6 +14,8 @@ from app.models.crawl_result import EngineCrawlResult
 from app.models.host_policy import HostPolicy
 from app.runtime.resource_lifecycle import ResourceLifecycle
 
+__all__ = ["SpillSink", "write_spill"]
+
 
 class SpillSink(Protocol):
     def write(self, index: int, result: EngineCrawlResult) -> Awaitable[None] | None: ...

@@ -18,6 +18,20 @@ from app.vocabulary.identity import DEFAULT_USER_AGENT
 if TYPE_CHECKING:
     from app.config.settings import CrawlerSettings
 
+__all__ = [
+    "LoopBoundPooledClient",
+    "T",
+    "bind_to_running_loop",
+    "close_async_http_client",
+    "discard_if_unowned_loop",
+    "drain_pending_client_closes",
+    "get_async_http_client",
+    "has_process_state",
+    "http_singleton",
+    "reset_process_state",
+    "swap_pooled_builders",
+]
+
 _DEFAULT_HTTP_CLIENT: httpx.AsyncClient | None = None
 
 

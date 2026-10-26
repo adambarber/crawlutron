@@ -67,6 +67,12 @@ _OWNER_PUBLIC_SURFACE_RATCHET = {
     # #441: the header-VALUE wire law, shared by the policy, credential, and
     # transport edges.
     "app/safety/header_values.py": (2, 2),
+    # Four transport/spill surfaces pinned with their true public doors; growing
+    # any of these needs an explicit ratchet edit, shrinking auto-tightens.
+    "app/orchestration/spill_sink.py": (2, 2),
+    "app/transport/http_cache.py": (4, 4),
+    "app/transport/http_classify.py": (3, 3),
+    "app/transport/pooled_clients.py": (11, 10),
 }
 
 
