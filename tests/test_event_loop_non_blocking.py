@@ -15,6 +15,7 @@ import pytest
 
 import app.transport.content_cache as cc
 from app.api.job_runner import run_job
+from app.config.settings import CrawlerSettings
 from app.models.crawl_policy import CrawlPolicy
 from app.models.result_record import ProducerEnvelope
 from app.orchestration.engine import ResultSpill
@@ -269,7 +270,9 @@ class TestJobRunnerSavesOffTheEventLoop:
         shutdown.set()  # exit at the first batch boundary, before any crawl
 
         async def scenario() -> int:
-            runner = asyncio.ensure_future(run_job(job.job_id, store, None, shutdown))
+            runner = asyncio.ensure_future(
+                run_job(job.job_id, store, CrawlerSettings.from_mapping({}), shutdown)
+            )
             await asyncio.wait_for(runner, timeout=15)
             return observed[0]
 

@@ -123,17 +123,17 @@ class DomainScheduler:
         global_limit: int,
         max_rps: float,
     ) -> DomainScheduler:
-        """The single construction path from settings: every knob with a home
-        in the settings object is read there, never re-defaulted here."""
+        """The single construction path: every knob reads its settings home,
+        never re-defaulted here; coercions are part of the contract."""
         return cls(
-            global_limit=global_limit,
-            per_domain_limit=settings.per_domain_concurrency,
-            delay_seconds=settings.per_domain_delay_ms / 1000,
-            max_rps=max_rps,
-            adaptive=settings.adaptive_throttling,
-            adaptive_min_delay=settings.adaptive_min_delay,
-            adaptive_max_delay=settings.adaptive_max_delay,
-            adaptive_latency_factor=settings.adaptive_latency_factor,
+            global_limit=max(1, int(global_limit)),
+            per_domain_limit=max(1, int(settings.per_domain_concurrency)),
+            delay_seconds=max(0.0, float(settings.per_domain_delay_ms) / 1000),
+            max_rps=max(0.0, float(max_rps)),
+            adaptive=bool(settings.adaptive_throttling),
+            adaptive_min_delay=float(settings.adaptive_min_delay),
+            adaptive_max_delay=float(settings.adaptive_max_delay),
+            adaptive_latency_factor=float(settings.adaptive_latency_factor),
         )
 
     def __init__(
