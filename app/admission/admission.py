@@ -22,7 +22,7 @@ from app.orchestration.fetch_helpers import fetch_sitemap_urls
 from app.orchestration.robots import FetchAndDecode, RobotsRules, load_robots_rules, robots_allows
 from app.orchestration.scheduler import DomainScheduler
 from app.safety.safe_regex import BoundedPattern
-from app.storage.job_store import FrontierEntry, job_max_pages
+from app.storage.job_store import CrawlJobState, FrontierEntry, job_max_pages
 from app.transport.fetchers import default_http_fetcher
 
 if TYPE_CHECKING:
@@ -116,7 +116,7 @@ class JobAdmissionContext:
         )
 
 
-def admitted_page_identities(job: Any, *, host_policy: HostPolicy) -> set[NormalizedUrl]:
+def admitted_page_identities(job: CrawlJobState, *, host_policy: HostPolicy) -> set[NormalizedUrl]:
     """Union of canonical identities already admitted across the job's state.
     No normalization pass here: entries are canonical by construction (ingress and
     the shared chokepoint normalize once at the storage boundary).
@@ -155,7 +155,7 @@ def normalize_sitemap_candidates(
     return candidates
 
 
-def _record_cap_flag(job: Any, stat_key: str, level: int, event: str) -> None:
+def _record_cap_flag(job: CrawlJobState, stat_key: str, level: int, event: str) -> None:
     """Set a once-only cap stat on ``job``, logging the first time only. Private:
     the two cap signals are this module's whole cap vocabulary, and a public
     version would let a caller pair a stat key with the wrong log event.
@@ -169,18 +169,18 @@ def _record_cap_flag(job: Any, stat_key: str, level: int, event: str) -> None:
     job.stats[stat_key] = 1
 
 
-def record_cap_truncated(job: Any) -> None:
+def record_cap_truncated(job: CrawlJobState) -> None:
     """The crawl hit its page cap and stopped adding pages."""
     _record_cap_flag(job, "cap_truncated", logging.INFO, "job_runner_cap_truncated")
 
 
-def record_cap_overcommitted(job: Any) -> None:
+def record_cap_overcommitted(job: CrawlJobState) -> None:
     """The crawl was admitted past its cap; the overflow is reported, not refused."""
     _record_cap_flag(job, "cap_overcommitted", logging.WARNING, "job_runner_cap_overcommitted")
 
 
 async def admit_job_links(
-    job: Any,
+    job: CrawlJobState,
     links: Iterable[Any],
     *,
     source_depth: int,
@@ -214,7 +214,7 @@ async def admit_job_links(
 
 
 def _requeue_page_identities(
-    job: Any,
+    job: CrawlJobState,
     known: set[NormalizedUrl],
     candidates: Iterable[tuple[NormalizedUrl, int]],
 ) -> tuple[list[FrontierEntry], int]:
@@ -237,7 +237,7 @@ def _requeue_page_identities(
 
 
 def requeue_admitted_pages(
-    job: Any,
+    job: CrawlJobState,
     entries: Iterable[FrontierEntry],
     context: JobAdmissionContext,
 ) -> AdmissionOutcome:

@@ -46,6 +46,7 @@ from app.models.result_record import ProducerEnvelope
 from app.models.taxonomy import Classification
 from app.orchestration.robots import FetchAndDecode
 from app.storage.job_store import (
+    CrawlJobState,
     FrontierEntry,
     JobStatus,
     JobStore,
@@ -89,7 +90,7 @@ def reset_execute_crawl() -> None:
     _execute_crawl = _real_execute_crawl
 
 
-def _pop_frontier(job: Any) -> list[FrontierEntry]:
+def _pop_frontier(job: CrawlJobState) -> list[FrontierEntry]:
     normalize_job_state(job)
     max_pages = job_max_pages(job.policy, job.tier)
     if job.in_flight:
@@ -114,7 +115,7 @@ def _pop_frontier(job: Any) -> list[FrontierEntry]:
     return batch
 
 
-def job_engine_payload(job: Any, batch: Sequence[FrontierEntry]) -> CrawlRequest:
+def job_engine_payload(job: CrawlJobState, batch: Sequence[FrontierEntry]) -> CrawlRequest:
     """Build one non-recursive engine batch from a whole-site job.
 
     The runner owns the durable frontier; the engine is a single-page fetcher per
@@ -179,7 +180,7 @@ async def pace_delayed_batch(
     )
 
 
-async def _seed_job_sitemaps(job: Any, context: JobAdmissionContext) -> None:
+async def _seed_job_sitemaps(job: CrawlJobState, context: JobAdmissionContext) -> None:
     candidates = await fetch_job_sitemap_candidates(job.root_url, context)
     outcome = await admit_job_links(job, candidates, source_depth=-1, context=context)
     job.stats["total_discovered"] = job.stats.get("total_discovered", 0) + outcome.accepted
@@ -199,7 +200,7 @@ async def _load_and_claim(job_id: str, job_store: JobStore, *, preclaimed: bool)
     return job
 
 
-async def _seed_sitemaps(job: Any, context: JobAdmissionContext, job_store: JobStore) -> None:
+async def _seed_sitemaps(job: CrawlJobState, context: JobAdmissionContext, job_store: JobStore) -> None:
     """Seed discovery sitemaps when the policy calls for them."""
     if not (context.max_depth > 0 and context.seed_sitemaps):
         return
@@ -208,7 +209,7 @@ async def _seed_sitemaps(job: Any, context: JobAdmissionContext, job_store: JobS
 
 
 async def _entry_result(
-    job: Any,
+    job: CrawlJobState,
     identity: NormalizedUrl,
     item: EngineCrawlResult | None,
     depth: int,
@@ -251,7 +252,9 @@ async def _entry_result(
     return failed
 
 
-async def _should_stop(job: Any, job_id: str, job_store: JobStore, shutdown_event: asyncio.Event) -> bool:
+async def _should_stop(
+    job: CrawlJobState, job_id: str, job_store: JobStore, shutdown_event: asyncio.Event
+) -> bool:
     """Whether the loop ends this iteration; a shutdown sets PAUSED first."""
     if job.status in {JobStatus.PAUSED, JobStatus.CANCELLED}:
         return True
@@ -261,7 +264,9 @@ async def _should_stop(job: Any, job_id: str, job_store: JobStore, shutdown_even
     return False
 
 
-async def _mark_complete_if_empty(job: Any, job_id: str, job_store: JobStore, batch: Sequence[Any]) -> bool:
+async def _mark_complete_if_empty(
+    job: CrawlJobState, job_id: str, job_store: JobStore, batch: Sequence[Any]
+) -> bool:
     """Mark the job COMPLETED when its frontier yielded nothing; else ``False``."""
     if batch:
         return False
@@ -271,7 +276,7 @@ async def _mark_complete_if_empty(job: Any, job_id: str, job_store: JobStore, ba
 
 
 async def _absorb_batch(
-    job: Any,
+    job: CrawlJobState,
     batch: Sequence[Any],
     resolved: dict[NormalizedUrl, EngineCrawlResult],
     context: JobAdmissionContext,
