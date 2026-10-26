@@ -31,9 +31,15 @@ class ProtocolValidationError(Exception):
         if isinstance(payload, dict):
             error = payload.get("error")
             if isinstance(error, dict):
-                message = error.get("message", "validation error")
-            else:
-                message = "validation error"
+                payload_message = error.get("message")
+            # A present-but-None message must not render as str(None) (#493).
+            message = (
+                payload_message
+                if isinstance(payload_message, str) and payload_message
+                else "validation error"
+            )
+        else:
+            message = "validation error"
         super().__init__(str(message))
         self.status_code = status_code
         self.payload = payload
