@@ -10,6 +10,7 @@ from secrets import SystemRandom
 from typing import TYPE_CHECKING, Protocol, TypeVar
 
 from app.orchestration.scheduler_exceptions import CircuitBreakerOpen
+from app.orchestration.scheduler_purge import new_rate_and_pin_state, purge_scheduler_maps
 from app.vocabulary.taxonomy import DOMAIN_HEALTH_BY_STATUS, ResultStatus
 
 if TYPE_CHECKING:
@@ -173,28 +174,20 @@ class DomainScheduler:
         self._adaptive_latency_factor = max(0.0, adaptive_latency_factor)
         self._adaptive_smoothing = min(1.0, max(0.0, adaptive_smoothing))
 
-        # Track when domains are allowed to be hit again to implement domain-level cooldowns
         self._domain_cooldowns: dict[str, float] = {}
 
-        # Consecutive circuit-breaker trips per domain (drives exponential backoff).
         self._circuit_trip_count: dict[str, int] = defaultdict(int)
 
-        # Token buckets per domain for RPS rate limiting
         self._token_buckets: dict[str, TokenBucket] = {}
 
-        # Circuit breaker: consecutive failures per domain
         self._domain_failures: dict[str, int] = defaultdict(int)
         self._circuit_open_until: dict[str, float] = {}
+        # Adaptive latency (EMA), its last-seen clock, and per-job strategy pins.
+        self._domain_latency_ema, self._domain_last_seen, self._domain_strategy_pins = (
+            new_rate_and_pin_state()
+        )
 
-        # Adaptive throttling state: EMA of observed latency (ms) per domain.
-        self._domain_latency_ema: dict[str, float] = {}
-
-        # Per-job strategy pinning: once a domain proves it needs a strategy,
-        # later fetches in the same job start there, not from the cheapest rung.
-        self._domain_strategy_pins: dict[str, tuple[str, float]] = {}
-
-        # Purging both dicts per 429 made heavy crawls quadratic; the purge is
-        # amortized to one per interval (``run`` still purges up front).
+        # Amortized purge: per-429 purging made heavy crawls quadratic.
         self._sets_since_purge = 0
 
     def set_domain_cooldown(self, domain: str, seconds: float) -> None:
@@ -273,6 +266,7 @@ class DomainScheduler:
         self._domain_latency_ema[domain] = (
             latency_ms if prev is None else prev * (1.0 - alpha) + latency_ms * alpha
         )
+        self._domain_last_seen[domain] = self._clock()
 
     def get_pinned_strategy(self, domain: str) -> str | None:
         """Return the strategy pinned for ``domain`` within this job, or None.
@@ -325,17 +319,26 @@ class DomainScheduler:
             self._domain_min_delay[domain] = max(self._domain_min_delay.get(domain, 0.0), clamped)
 
     def purge_expired(self) -> None:
-        """Drop cooldown and circuit-breaker entries that have already elapsed."""
-        now = time.time()
-        self._domain_cooldowns = {d: exp for d, exp in self._domain_cooldowns.items() if exp > now}
-        now_mono = time.monotonic()
-        self._circuit_open_until = {d: exp for d, exp in self._circuit_open_until.items() if exp > now_mono}
-        pin_now = self._clock()
-        self._domain_strategy_pins = {
-            d: (strat, at)
-            for d, (strat, at) in self._domain_strategy_pins.items()
-            if pin_now - at <= _STRATEGY_PIN_TTL_SECONDS
-        }
+        """Drop cooldown/circuit/pin entries elapsed, plus idle rate state (#544/P9)."""
+        maps = (
+            self._domain_cooldowns,
+            self._circuit_open_until,
+            self._domain_strategy_pins,
+            self._domain_latency_ema,
+            self._domain_last_seen,
+            self._token_buckets,
+        )
+        out = purge_scheduler_maps(
+            *maps, self._clock(), self._circuit_cooldown_max, _STRATEGY_PIN_TTL_SECONDS
+        )
+        (
+            self._domain_cooldowns,
+            self._circuit_open_until,
+            self._domain_strategy_pins,
+            self._domain_latency_ema,
+            self._domain_last_seen,
+            self._token_buckets,
+        ) = out
 
     async def run(
         self,

@@ -209,10 +209,9 @@ def _job_row_params(job: CrawlJobState) -> tuple:
 
 
 class JobAccumulators:
-    """The growing part of a job: its append-only page history and visited set.
-    They live in their own tables so a batch is one INSERT per new page, not a
-    re-serialization of everything crawled (the live row is rewritten wholesale).
-    """
+    """The growing part of a job: its append-only page history and visited set,
+    in their own tables so a batch is one INSERT per new page (row is
+    batch-bounded: frontier pops per batch, in_flight by concurrency)."""
 
     def __init__(self, conn: sqlite3.Connection) -> None:
         self._conn = conn
