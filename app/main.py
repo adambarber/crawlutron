@@ -16,6 +16,7 @@ from app.config.env import get_env_float, get_env_int
 from app.models.address_class import is_loopback_bind
 from app.models.host_policy import HostPolicy
 from app.runtime.logging_config import configure_service_logging
+from app.runtime.resource_pressure import default_executor_workers
 from app.vocabulary.identity import SERVICE_ID, SERVICE_VERSION
 
 from .config.settings import CrawlerSettings
@@ -276,12 +277,30 @@ else:
     app = None
 
 
+def install_default_executor(loop: asyncio.AbstractEventLoop) -> None:
+    """Size the loop's shared asyncio.to_thread executor once (#360).
+
+    Python's implicit default is min(32, cpu+4) with an unbounded queue; the
+    explicit install makes the bound derived, named and operator-tunable.
+    """
+    from concurrent.futures import ThreadPoolExecutor
+
+    try:
+        executor = ThreadPoolExecutor(max_workers=default_executor_workers(), thread_name_prefix="asyncio")
+        loop.set_default_executor(executor)
+    except Exception:
+        # Sizing must never take down startup: the loop falls back to its own
+        # implicit default, the exact behavior this install exists to improve.
+        logging.getLogger(__name__).warning("default_executor_install_failed", exc_info=True)
+
+
 async def _startup_services(_app: FastAPI, settings: CrawlerSettings) -> None:
     """Start the readiness sampler, pools, cookies, metrics, jobs and watches.
 
     Startup order is load-bearing: the pool initializes before cookies load,
     cookies load before job recovery (a clear-then-populate load drops them).
     """
+    install_default_executor(asyncio.get_running_loop())
     from .health.readiness import READINESS_STATE
     from .orchestration.engine import resource_gate
 
