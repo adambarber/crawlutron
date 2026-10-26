@@ -4,6 +4,7 @@ Failing each job requeued it up to 3x into the still-open breaker: synthetic
 retry storms, zero fetches, transient_requeues polluted."""
 
 import asyncio
+import re
 
 from app.models.crawl_task import CrawlTask
 from app.orchestration.scheduler import DomainScheduler
@@ -131,3 +132,24 @@ async def test_recursive_batch_over_an_open_breaker_runs_not_requeues(monkeypatc
     assert all(r.status == "success" for r in result.spill.writes.values()), (
         f"expected successes after parking out the window, got {result.spill.writes}"
     )
+
+
+async def test_the_breaker_skip_names_the_open_window_not_none():
+    """The skip's exception names the domain and remaining window (#347): its text
+    is the log's ``error_detail``, and "None" tells an operator nothing."""
+    scheduler = make_scheduler(circuit_cooldown_base=30.0)
+    trip_circuit(scheduler, "example.com")
+    seen: list[BaseException] = []
+
+    def envelope(job, error):
+        seen.append(error)
+        return engine_envelope(job, error)
+
+    async def worker(job):
+        raise AssertionError(f"the worker must not run while the breaker is open: {job}")
+
+    results = await scheduler.run([_task(0, "http://example.com/a")], worker, failed_result=envelope)
+
+    assert results is not None and results[0].classification == "circuit_breaker_open", results
+    assert seen, "the skip never built an envelope"
+    assert re.fullmatch(r"example\.com circuit open: \d+s of cooldown remain", str(seen[0])), str(seen[0])

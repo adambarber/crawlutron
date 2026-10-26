@@ -63,6 +63,8 @@ def async_crawl_semaphore() -> asyncio.Semaphore:
     except RuntimeError:
         loop = None
     holder = _SEMAPHORE_HOLDER
+    # Check-then-set is safe because asyncio is cooperative: one loop per thread
+    # runs this to completion between awaits -- nothing can interleave (#347).
     if holder is None or holder.loop is not loop:
         holder = _SemaphoreHolder(_build_async_crawl_semaphore(), loop)
         _SEMAPHORE_HOLDER = holder

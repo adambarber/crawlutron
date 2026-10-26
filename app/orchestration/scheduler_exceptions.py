@@ -7,6 +7,6 @@ can key off the type without a cycle -- classification lives at the chokepoint.
 
 class CircuitBreakerOpen(RuntimeError):
     """Raised when a domain's breaker is open and the job is skipped; the classifier
-    distinguishes it from a network error (a scheduler capacity decision, not a transport
-    outcome), keeping redaction/taxonomy checks in the single envelope chokepoint.
+    tells it apart from a network error (capacity, not a transport outcome). The message
+    names the domain and remaining cooldown seconds -- never a bare counter value (#347).
     """
