@@ -2,6 +2,9 @@ __pycache__/
 *.py[cod]
 .pytest_cache/
 report/
+# Build artifacts from `python -m build` / editable installs (#26).
+dist/
+build/
 # Both spellings: a linked worktree reaches the venv through a `.venv` symlink,
 # which the trailing-slash form does not match -- and a committed symlink into
 # one checkout's venv is worse than no venv at all.
