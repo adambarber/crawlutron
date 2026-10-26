@@ -10,6 +10,7 @@ import json
 import sqlite3
 import time
 from dataclasses import dataclass, field
+from itertools import islice
 from typing import TYPE_CHECKING, Any, TypedDict
 
 from app.admission.policy import PolicyTier, read_policy
@@ -25,6 +26,7 @@ from .job_store_collections import (
     FrontierEntryDict,
     JobKind,
     JobStatus,
+    OrderedUrlSet,
     _entry_payload,
     normalize_frontier,
     normalize_visited,
@@ -97,7 +99,12 @@ class CrawlJobState:
     status: JobStatus = JobStatus.PENDING
     # Whole-site fields (used when kind == WHOLE_SITE)
     frontier: list[FrontierEntry] = field(default_factory=list)
-    visited: set[NormalizedUrl] = field(default_factory=set)
+    # Insertion-ordered set: the persist delta slices by position; only a
+    # stable order makes that sound (see OrderedUrlSet).
+    visited: OrderedUrlSet = field(default_factory=OrderedUrlSet)
+    # High-water of what this process already sent: 0 on create, len on load
+    # -- never the table's count, which a sibling's inserts make lie (#140).
+    visited_mark: int = 0
     in_flight: list[FrontierEntry] = field(default_factory=list)
     transient_retries: dict[NormalizedUrl, int] = field(default_factory=dict)  # admitted url -> retry count
     # Single-shot fields (kind == SINGLE_SHOT): root_url holds the first URL (or
@@ -156,6 +163,9 @@ class CrawlJobState:
             host_policy=host_policy,
             tier=tier,
         )
+        # A load's visited set IS the persisted set: this process starts its
+        # delta at the end of it (a create starts at 0 -- the default).
+        job.visited_mark = len(job.visited)
         return job
 
 
@@ -295,13 +305,24 @@ class JobAccumulators:
         )
 
     def _append_visited(self, job: CrawlJobState) -> None:
-        """Insert newly visited pages; ``INSERT OR IGNORE`` over the (job_id, url)
-        key makes an already-stored URL a no-op, so no pre-read is needed."""
+        """Insert only the visited tail this state has not sent yet, keyed off
+        the live ``visited_mark`` (the ``_append_results`` pattern): the set is
+        insertion-ordered, so the slice after the mark is exactly what is new.
+        """
         job_id = job.job_id
+        # A set that shrank below the mark (retry-requeue discard) resyncs, and
+        # INSERT OR IGNORE stays: the ignore is the #140 cross-process guard.
+        if job.visited_mark > len(job.visited):
+            self._conn.execute('DELETE FROM "crawl_job_visited" WHERE job_id = ?', (job_id,))
+            job.visited_mark = 0
+        mark = job.visited_mark
+        if mark == len(job.visited):
+            return
         self._conn.executemany(
             'INSERT OR IGNORE INTO "crawl_job_visited" (job_id, url) VALUES (?, ?)',
-            ((job_id, url.raw) for url in job.visited),
+            ((job_id, url.raw) for url in islice(job.visited, mark, None)),
         )
+        job.visited_mark = len(job.visited)
 
 
 def _create_job(

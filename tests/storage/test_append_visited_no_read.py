@@ -1,4 +1,4 @@
-"""#519 item 2: ``_append_visited`` persists without reading the stored set."""
+"""Visited persistence: #519 removed the pre-read; #539 adds the write delta."""
 
 from __future__ import annotations
 
@@ -17,7 +17,7 @@ def _crawled_job(store: JobStore, count: int):
     job = store.create("https://example.com/", CrawlPolicy())
     pages = [{"url": url, "status": "success"} for url in _page_urls(count)]
     job.results.extend(pages)
-    job.visited.update(canonical(page["url"]) for page in pages)
+    job.visited.update({canonical(page["url"]): None for page in pages})
     return job
 
 
@@ -57,25 +57,38 @@ def _on_disk_visited(db_path, job_id: str | None = None) -> list[str]:
         ]
 
 
+def _visited_statements(statements: list[str], verb: str) -> list[str]:
+    """The traced statements of one verb against the visited table; the trace
+    sees one entry per executemany row, so this count IS the wire count."""
+    return [s for s in statements if "crawl_job_visited" in s.lower() and s.lstrip().upper().startswith(verb)]
+
+
+def _traced_crawled_job(tmp_path, statements: list[str], pages: int, *, grown: tuple[str, ...] = ()):
+    """A traced store whose job of ``pages`` pages is saved once; pass ``grown``
+    to also perform the SECOND save over those urls, tracing only its cost."""
+    store = _store_with_traced_connection(tmp_path, statements)
+    job = _crawled_job(store, pages)
+    store.save(job)
+    if grown:
+        statements.clear()
+        job.visited.update({canonical(url): None for url in grown})
+        store.save(job)
+    return store, job
+
+
 def test_persisting_overlapping_batches_never_selects_the_stored_visited_set(tmp_path):
     """A batch persist must run zero reads against the visited table.
 
-    ``INSERT OR IGNORE`` over (job_id, url) is idempotent by construction, so
-    the old pre-read's set difference computed nothing the statement did not."""
+    The high-water mark (#539) lives on the live state, so the write delta
+    needs no read at all: the mark never consults the table.
+    """
     statements: list[str] = []
-    store = _store_with_traced_connection(tmp_path, statements)
-    job = _crawled_job(store, 20)
-    store.save(job)
-
-    statements.clear()
-    job.visited.add(canonical("https://example.com/p0"))  # overlapping member
-    job.visited.add(canonical("https://example.com/fresh"))
-    store.save(job)
+    store, job = _traced_crawled_job(
+        tmp_path, statements, 20, grown=("https://example.com/p0", "https://example.com/fresh")
+    )
     store.save(job)  # resave with nothing new
 
-    visited_reads = [
-        s for s in statements if "crawl_job_visited" in s.lower() and s.lstrip().upper().startswith("SELECT")
-    ]
+    visited_reads = _visited_statements(statements, "SELECT")
     assert visited_reads == [], f"the persist re-read the stored visited set: {visited_reads}"
 
 
@@ -89,7 +102,7 @@ def test_overlapping_visited_members_round_trip_without_duplicate_rows(tmp_path)
 
     overlap = canonical("https://example.com/p0")
     assert overlap in job.visited
-    job.visited.update([overlap, canonical("https://example.com/p1")])
+    job.visited.update({overlap: None, canonical("https://example.com/p1"): None})
     job.visited.add(canonical("https://example.com/extra"))
     store.save(job)
     store.save(job)
@@ -98,6 +111,59 @@ def test_overlapping_visited_members_round_trip_without_duplicate_rows(tmp_path)
 
     assert len(rows) == len(set(rows)), "duplicate visited rows landed"
     assert len(rows) == 11
+
+
+def test_second_save_inserts_only_the_new_visited_tail(tmp_path):
+    """#539: a save must INSERT only the urls the table does not hold yet.
+
+    The trace sees one statement per executemany row, so the count IS the
+    wire count: a second save sends the new tail, not the whole set again."""
+    statements: list[str] = []
+    store, job = _traced_crawled_job(
+        tmp_path, statements, 20, grown=("https://example.com/new-a", "https://example.com/new-b")
+    )
+
+    inserts = _visited_statements(statements, "INSERT")
+    assert len(inserts) == 2, (
+        f"the second save sent {len(inserts)} visited INSERTs for 2 new urls -- "
+        "the whole set is still re-sent per save"
+    )
+
+
+def test_a_fresh_process_save_inserts_nothing_already_stored(tmp_path):
+    """A newly loaded job's first save must be a no-op, not a re-send.
+
+    Everything a load brought back is already persisted, so the first save of
+    a resumed process sends nothing -- the delta survives the boundary."""
+    statements: list[str] = []
+    store_a = _store_with_traced_connection(tmp_path, statements)
+    job = _crawled_job(store_a, 20)
+    store_a.save(job)
+
+    reload_statements: list[str] = []
+    store_b = _store_with_traced_connection(store_a.db_path.parent, reload_statements)
+    reloaded = store_b.load(job.job_id)
+    assert reloaded is not None
+    store_b.save(reloaded)
+
+    inserts = _visited_statements(reload_statements, "INSERT")
+    assert inserts == [], f"a save of a freshly loaded job re-INSERTed {len(inserts)} already-stored urls"
+
+
+def test_shrinking_visited_resyncs_the_stored_rows(tmp_path):
+    """A visited set that shrank below the stored mark (the retry-requeue path
+    discards) must resync: the on-disk rows land exactly on the live set."""
+    store = store_on(tmp_path / "jobs.db")
+    job = _crawled_job(store, 10)
+    store.save(job)
+
+    discarded = canonical("https://example.com/p3")
+    job.visited.discard(discarded)
+    store.save(job)
+
+    rows = _on_disk_visited(store.db_path, job.job_id)
+    assert set(rows) == {url.raw for url in job.visited}, "the shrink was not resynced"
+    assert len(rows) == 9
 
 
 def test_the_sibling_page_guard_still_holds_on_the_shared_file(tmp_path):
