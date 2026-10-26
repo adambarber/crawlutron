@@ -117,6 +117,8 @@ async def admit(
     robots_allows=None,
     robots_crawl_delay=None,
     commit_crawl_delay=None,
+    robots_timeout_seconds: float | None = None,
+    robots_deadline_slack_seconds: float = 5.0,
     host_policy: HostPolicy = UNRESTRICTED_HOST_POLICY,
 ):
     """Run production ``admit_discovered_links`` and return its real outcome.
@@ -137,6 +139,8 @@ async def admit(
         robots_allows=_robots_allow_all if robots_allows is None else robots_allows,
         robots_crawl_delay=robots_crawl_delay,
         commit_crawl_delay=_commit_nothing if commit_crawl_delay is None else commit_crawl_delay,
+        robots_timeout_seconds=robots_timeout_seconds,
+        robots_deadline_slack_seconds=robots_deadline_slack_seconds,
         host_policy=host_policy,
     )
 

@@ -117,6 +117,11 @@ class _AdmissionPass[T]:
     added: set[NormalizedUrl]
     frontier: MutableSequence[T]
     make_entry: Callable[[AdmittedLink], T]
+    # Per-check robots timeout feeding the chunk deadline (#366): the bound the
+    # gather would hang past, None (the legacy gather) only when unstated.
+    robots_timeout_seconds: float | None = None
+    # Slack past that timeout before the chunk deadline fires (#343).
+    robots_deadline_slack_seconds: float = _ROBOTS_CHUNK_DEADLINE_SLACK_SECONDS
     # Candidates dropped by the candidate stream for failing URL admission
     # (malformed, unsafe, off-policy) -- written by the stream, read at the end.
     invalid_skipped: int = 0
@@ -153,7 +158,10 @@ async def _admit_chunk[T](
             return _ChunkOutcome(accepted, robots_blocked, duplicates_skipped, False, False, 0)
     if pass_.respect_robots:
         allowed_values = await _gather_robots_allowed(
-            [candidate.normalized_url for candidate in chunk], pass_.robots_allows
+            [candidate.normalized_url for candidate in chunk],
+            pass_.robots_allows,
+            timeout_seconds=pass_.robots_timeout_seconds,
+            deadline_slack_seconds=pass_.robots_deadline_slack_seconds,
         )
     else:
         allowed_values = [True] * len(chunk)
@@ -229,6 +237,8 @@ async def admit_discovered_links[T](
     robots_crawl_delay: RobotsCrawlDelay | None,
     commit_crawl_delay: CommitCrawlDelay,
     host_policy: HostPolicy,
+    robots_timeout_seconds: float | None = None,
+    robots_deadline_slack_seconds: float = _ROBOTS_CHUNK_DEADLINE_SLACK_SECONDS,
 ) -> AdmissionOutcome:
     """Admit ``links`` against the occupied set ``known`` (full: visited, in-flight,
     frontier -- #381). The run never mutates or copies it; the outcome carries
@@ -246,6 +256,8 @@ async def admit_discovered_links[T](
         added=added,
         frontier=frontier,
         make_entry=make_entry,
+        robots_timeout_seconds=robots_timeout_seconds,
+        robots_deadline_slack_seconds=robots_deadline_slack_seconds,
     )
     candidates = iter(
         _candidate_stream(
@@ -296,6 +308,34 @@ def compile_scope_pattern(scope_regex: Any) -> BoundedPattern | None:
         raise ValueError(f"scope_regex does not compile: {exc}") from exc
 
 
+async def _gather_chunk_deadline[T](
+    urls: list[NormalizedUrl],
+    check: Callable[[NormalizedUrl], Awaitable[T]],
+    fail_closed: T,
+    *,
+    timeout_seconds: float | None,
+    deadline_slack_seconds: float = _ROBOTS_CHUNK_DEADLINE_SLACK_SECONDS,
+) -> list[T]:
+    """Run one chunk's robots checks under the #343 wall-clock deadline.
+
+    No timeout is the legacy unbounded gather; past the deadline the chunk
+    fails closed so a stalled origin costs the slack, not chunks × timeout.
+    """
+    aws = [check(url) for url in urls]
+    if timeout_seconds is None:
+        return list(await asyncio.gather(*aws))
+    try:
+        return list(
+            await asyncio.wait_for(
+                asyncio.gather(*aws),
+                timeout=timeout_seconds + deadline_slack_seconds,
+            )
+        )
+    except TimeoutError:
+        _logger.warning("robots_chunk_deadline_exceeded", extra={"chunk_size": len(urls)})
+        return [fail_closed] * len(urls)
+
+
 async def gather_robots_decisions(
     urls: list[NormalizedUrl],
     robots_allows: RobotsAllows,
@@ -318,24 +358,25 @@ async def gather_robots_decisions(
     decisions: list[tuple[bool, float | None]] = []
     for offset in range(0, len(urls), _ROBOTS_ADMISSION_CHUNK_SIZE):
         chunk = urls[offset : offset + _ROBOTS_ADMISSION_CHUNK_SIZE]
-        if timeout_seconds is None:
-            chunk_decisions = await asyncio.gather(*(check(url) for url in chunk))
-        else:
-            # A per-chunk wall-clock deadline: a stalled origin must not hold up
-            # the pass, and a deadline-refusing chunk fails closed (#343).
-            try:
-                chunk_decisions = await asyncio.wait_for(
-                    asyncio.gather(*(check(url) for url in chunk)),
-                    timeout=timeout_seconds + deadline_slack_seconds,
-                )
-            except TimeoutError:
-                _logger.warning("robots_chunk_deadline_exceeded", extra={"chunk_size": len(chunk)})
-                chunk_decisions = [(False, None)] * len(chunk)
-        decisions.extend(chunk_decisions)
+        decisions.extend(
+            await _gather_chunk_deadline(
+                chunk,
+                check,
+                (False, None),
+                timeout_seconds=timeout_seconds,
+                deadline_slack_seconds=deadline_slack_seconds,
+            )
+        )
     return decisions
 
 
-async def _gather_robots_allowed(urls: list[NormalizedUrl], robots_allows: RobotsAllows) -> list[bool]:
+async def _gather_robots_allowed(
+    urls: list[NormalizedUrl],
+    robots_allows: RobotsAllows,
+    *,
+    timeout_seconds: float | None = None,
+    deadline_slack_seconds: float = _ROBOTS_CHUNK_DEADLINE_SLACK_SECONDS,
+) -> list[bool]:
     async def check(url: NormalizedUrl) -> bool:
         try:
             return await robots_allows(url)
@@ -345,7 +386,13 @@ async def _gather_robots_allowed(urls: list[NormalizedUrl], robots_allows: Robot
             _logger.warning("robots_check_failed", extra={"url": url.raw})
             return False
 
-    return list(await asyncio.gather(*(check(url) for url in urls)))
+    return await _gather_chunk_deadline(
+        urls,
+        check,
+        False,
+        timeout_seconds=timeout_seconds,
+        deadline_slack_seconds=deadline_slack_seconds,
+    )
 
 
 def _is_url_text(value: Any) -> bool:

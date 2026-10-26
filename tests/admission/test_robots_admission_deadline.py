@@ -1,11 +1,12 @@
 """Robots batch admission must be bounded by a wall clock, not chunks × the
-per-check robots timeout (#343): a slow origin must not cost the whole pass."""
+per-check robots timeout (#343); #366 extends that bound to the hot
+link-admission path, whose robots gather otherwise hangs chunks × timeout."""
 
 import asyncio
 import time
 
 from app.admission.admission_links import gather_robots_decisions
-from tests._policy_factories import canonical
+from tests._policy_factories import admit, canonical
 
 
 async def test_robots_admission_pass_is_wall_clock_bounded():
@@ -32,3 +33,44 @@ async def test_robots_admission_pass_is_wall_clock_bounded():
     # closed so the pass is bounded rather than chunks × 30s of hanging.
     assert elapsed < 2.0
     assert decisions == [(False, None), (False, None), (False, None)]
+
+
+async def test_link_admission_hung_robots_fails_closed_within_deadline():
+    """Link admission's robots gather (#366) carries the same per-chunk
+    wall-clock deadline: a hung robots_allows fails the chunk closed within
+    the deadline instead of hanging admission."""
+    links = [f"http://stuck{i}.example/page" for i in range(2)]
+
+    async def allows(url):
+        await asyncio.Event().wait()
+        return True
+
+    started = time.monotonic()
+    outcome = await asyncio.wait_for(
+        admit(
+            links,
+            frontier=[],
+            max_pages=10,
+            robots_allows=allows,
+            robots_timeout_seconds=0.05,
+            robots_deadline_slack_seconds=0.05,
+        ),
+        timeout=5.0,
+    )
+    elapsed = time.monotonic() - started
+
+    assert elapsed < 2.0
+    # Both candidates failed closed: nothing admitted, two robots blocks.
+    assert (outcome.accepted, outcome.robots_blocked) == (0, 2)
+
+
+async def test_link_admission_without_deadline_waits_for_checks():
+    """No timeout stated, no deadline: the legacy gather still waits for every
+    check, so the fast path is unchanged when a caller passes nothing."""
+    links = ["http://quick.example/page"]
+
+    async def allows(url):
+        return True
+
+    outcome = await admit(links, frontier=[], max_pages=10, robots_allows=allows)
+    assert (outcome.accepted, outcome.robots_blocked) == (1, 0)
