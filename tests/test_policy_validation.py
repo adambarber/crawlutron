@@ -151,6 +151,20 @@ class TestPolicyValidation:
         with pytest.raises(ValueError):
             NormalizedUrl("http://[fe80::1%25eth0]/", policy=UNRESTRICTED_HOST_POLICY)
 
+    def test_scoped_public_ipv6_zone_id_refused(self, monkeypatch):
+        # #496: Python 3.12 ipaddress parses scoped literals as PUBLIC, so the
+        # NOT_AN_ADDRESS-only guard admitted them; refusal is unconditional.
+        monkeypatch.setenv("CRAWLUTRON_ALLOW_PRIVATE_TARGETS", "0")
+        with pytest.raises(ValueError):
+            NormalizedUrl("http://[2606:4700::1111%25eth0]/", policy=UNRESTRICTED_HOST_POLICY)
+
+    def test_ipvfuture_literal_refused(self, monkeypatch):
+        # #494: no resolver or browser dials an IPvFuture literal; fail closed at
+        # admission rather than de-bracketing it into a hostname (#442 residual).
+        monkeypatch.setenv("CRAWLUTRON_ALLOW_PRIVATE_TARGETS", "0")
+        with pytest.raises(ValueError):
+            NormalizedUrl("http://[v1.a.b]/", policy=UNRESTRICTED_HOST_POLICY)
+
     def test_public_integer_literal_allowed(self, monkeypatch):
         # Numeric but public (1.1.1.1) stays reachable.
         monkeypatch.setenv("CRAWLUTRON_ALLOW_PRIVATE_TARGETS", "0")
