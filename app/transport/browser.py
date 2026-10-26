@@ -26,7 +26,7 @@ from app.transport.browser_cookies import (
     reset_process_state,
     store_browser_cookies,
 )
-from app.transport.browser_driver import BrowserDriver, async_sleep
+from app.transport.browser_driver import BrowserDriver
 from app.transport.browser_render_phases import (
     ReleasePlan,
     RenderCollaborators,
@@ -41,6 +41,7 @@ from app.transport.browser_targets import (
     make_ssrf_websocket_handler,
     resolve_browser_target,
 )
+from app.transport.driver_config import async_sleep
 from app.transport.pinned_transport import ResolverBudgetExceeded
 
 if TYPE_CHECKING:

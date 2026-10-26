@@ -35,8 +35,8 @@ from app.orchestration.scheduler import DomainScheduler
 from app.orchestration.spill_sink import SpillSink, write_spill
 from app.orchestration.strategy_chain import execute_crawl_chain
 from app.runtime.memory_pressure import read_memory_stats
+from app.runtime.pressure_gates import ResourceGate
 from app.runtime.resource_pressure import (
-    ResourceGate,
     TaskRamBudget,
     WeightedAdmission,
     build_admission_policy,

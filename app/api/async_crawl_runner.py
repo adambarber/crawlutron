@@ -15,8 +15,8 @@ from app.api.job_runner import arecord_terminal_failure
 from app.api.response_shaping import (
     EnvelopeOptions,
     abuild_unified_crawl_response,
-    build_unified_result,
 )
+from app.api.unified_shaping import build_unified_result
 from app.config.env import get_env_int
 from app.config.settings import CrawlerSettings
 from app.models.crawl_request import CrawlRequest

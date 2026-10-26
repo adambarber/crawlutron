@@ -432,21 +432,25 @@ def _pipeline_dependencies(
 
 def reset_process_state() -> None:
     """Rebuild every process-wide cache the engine shares across crawls.
-    The robots cache, shared HTTP cache and resource gate are one unit of crawl
-    lifetime, reset together -- the gate memoizes a CPU reading, so partial resets hide stale state.
+    The robots cache, HTTP cache, resource gate and content cache are one unit
+    of crawl lifetime -- partial resets hide stale state and surviving entries.
     """
     robots_cache.clear()
     global _SHARED_HTTP_CACHE, _resource_gate
     _SHARED_HTTP_CACHE = HttpCache()
     # The shared admission gate, reset with the caches; see :func:`resource_gate`.
     _resource_gate = ResourceGate()
+    # The lazy content cache is part of the same lifetime: empty it when built.
+    if _SHARED_CONTENT_CACHE is not None:
+        _SHARED_CONTENT_CACHE.clear()
 
 
 def has_process_state() -> bool:
-    """Whether either shared cache still holds an entry.
+    """Whether any shared cache still holds an entry.
     The resource gate is reset too but is not in the probe, deliberately: a
     fresh gate is unsampled, not empty, with no predicate to ask; its memoized reading lives in cgroup_sense.
     """
     # ``_SHARED_HTTP_CACHE`` defines no ``__len__``, so bool() is constant True;
     # read the entry mapping instead, or the probe reports state after every reset.
-    return bool(robots_cache) or bool(_SHARED_HTTP_CACHE._data)
+    content_holds = _SHARED_CONTENT_CACHE is not None and bool(_SHARED_CONTENT_CACHE._index)
+    return bool(robots_cache) or bool(_SHARED_HTTP_CACHE._data) or content_holds

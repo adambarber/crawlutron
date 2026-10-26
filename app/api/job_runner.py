@@ -16,7 +16,6 @@ from app.admission.admission import (
     admit_job_links,
     admitted_page_identities,
     fetch_job_sitemap_candidates,
-    job_max_pages,
     record_cap_overcommitted,
     record_cap_truncated,
     requeue_admitted_pages,
@@ -51,6 +50,7 @@ from app.storage.job_store import (
     FrontierEntry,
     JobStatus,
     JobStore,
+    job_max_pages,
     normalize_job_state,
 )
 from app.vocabulary.limits import MAX_URL_TRANSIENT_ATTEMPTS

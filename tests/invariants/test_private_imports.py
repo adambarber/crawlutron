@@ -20,7 +20,7 @@ from tests.chokepoint_walks import (
     resolved_expr_name,
     trees_under,
 )
-from tests.rules import Registry, Rule
+from tests.rules import Bites, Registry, Rule
 
 _TESTS_DIR = REPO_ROOT / "tests"
 
@@ -312,6 +312,110 @@ SCRIPTS_PRIVATE_IMPORTS = Rule(
 )
 
 SCRIPTS_RULES = Registry((SCRIPTS_PRIVATE_IMPORTS,))
+
+
+# ----------------------------------------------------------------------- a public name is imported from its
+# owner (definition site or declared __all__ re-export)
+
+_OWNER_PUBLIC: dict[str, frozenset[str]] | None = None
+
+
+def _declared_all(tree: ast.Module) -> set[str]:
+    """The module's own ``__all__`` entries: its declared public doors."""
+    for node in tree.body:
+        if isinstance(node, ast.Assign) and any(
+            isinstance(t, ast.Name) and t.id == "__all__" for t in node.targets
+        ):
+            return {e.value for e in getattr(node.value, "elts", ()) if isinstance(e, ast.Constant)}
+    return set()
+
+
+def _module_public_names(tree: ast.Module) -> frozenset[str]:
+    """Names a module itself publishes: top-level bindings plus ``__all__``."""
+    bound = {
+        node.name
+        for node in tree.body
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
+    }
+    bound |= _declared_all(tree)
+    for node in tree.body:
+        if isinstance(node, ast.Assign):
+            bound.update(t.id for t in node.targets if isinstance(t, ast.Name))
+        elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+            bound.add(node.target.id)
+    return frozenset(bound)
+
+
+def _owner_public_names() -> dict[str, frozenset[str]]:
+    """``module -> public names`` for every app module, parsed once per process."""
+    global _OWNER_PUBLIC
+    if _OWNER_PUBLIC is None:
+        _OWNER_PUBLIC = {_module_of(path): _module_public_names(tree) for path, tree in trees_under(_APP_DIR)}
+    return _OWNER_PUBLIC
+
+
+def _non_owner_public_imports(tree: ast.Module, path: pathlib.Path) -> list[str]:
+    """Public app names this module from-imports from a non-owner module.
+
+    A name imports from its definition site or a ``__all__``-declared re-export;
+    anything else is an undeclared pass-through. Private names are the rule above."""
+    owners = _owner_public_names()
+    here = _module_of(path)
+    found: list[str] = []
+    app_imports = (
+        node
+        for node in from_imports(tree)
+        if node.module and node.module.startswith("app") and not node.level
+    )
+    for node in app_imports:
+        owner, _, _leaf = node.module.rpartition(".")
+        if owner == here or node.module == here:
+            continue
+        defined = owners.get(node.module)
+        if defined is None:
+            continue
+        for alias in node.names:
+            if alias.name.startswith("_"):
+                continue
+            if f"{node.module}.{alias.name}" in owners:
+                continue
+            if alias.name in defined:
+                continue
+            found.append(
+                f"{relative_posix(path)}:{node.lineno}: {node.module}.{alias.name} is not "
+                f"{node.module}'s to give -- import it from the module that defines it"
+            )
+    return found
+
+
+PUBLIC_OWNER_WELDS = Rule(
+    name="app-imports-public-names-from-their-owners",
+    find=_non_owner_public_imports,
+    summary=(
+        "imports a public app name from a module that neither defines it nor declares "
+        "the re-export in __all__; import the name from its definition site -- an "
+        "undeclared pass-through is a second home for one declaration"
+    ),
+    bite=lambda: (
+        Bites("from app.safety.validation import HostPolicy\n", "HostPolicy"),
+        Bites("from app.admission.admission import job_max_pages\n", "job_max_pages"),
+    ),
+    clean=lambda: (
+        # The definition site is the whole point.
+        "from app.models.host_policy import HostPolicy\n",
+        # A declared __all__ re-export is a public door.
+        "from app.storage.job_store import job_max_pages\n",
+        "from app.transport.http_client_pool import get_async_http_client\n",
+        # A submodule import names a module, not a name.
+        "from app.transport import content_cache\n",
+        # Relative imports are intra-package.
+        "from .job_store_collections import TERMINAL_STATUSES\n",
+    ),
+)
+
+
+def test_app_imports_public_names_from_their_owners():
+    Registry((PUBLIC_OWNER_WELDS,)).check_all_clean()
 
 
 def test_app_has_no_cross_module_private_welds():
