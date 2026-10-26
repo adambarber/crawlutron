@@ -6,7 +6,7 @@ from collections.abc import Callable
 from contextlib import contextmanager
 
 from app.models.crawl_policy import CrawlPolicy
-from app.storage.job_store import CrawlJobState, Expected, FrontierEntry, JobStatus, JobStore
+from app.storage.job_store import CrawlJobState, FrontierEntry, JobStatus, JobStore
 from tests._policy_factories import canonical, job_store
 
 
@@ -66,6 +66,14 @@ class _StoreListener:
         self._bus.discard(self)
 
 
+def _publishing_set_status(self, job_id, new, *, expected, error=None) -> bool:
+    """The real CAS, then a bus publish when the write landed."""
+    changed = self._real_set_status(job_id, new, expected=expected, error=error)
+    if changed:
+        self.status_bus.publish(job_id)
+    return changed
+
+
 class InstrumentedJobStore(JobStore):
     """A real ``JobStore`` that also publishes every write it receives to a bus.
 
@@ -81,11 +89,7 @@ class InstrumentedJobStore(JobStore):
         self._real_set_status: Callable[..., bool] = JobStore.set_status.__get__(self)
         self._real_save: Callable[[CrawlJobState], None] = JobStore.save.__get__(self)
 
-    def set_status(self, job_id: str, new: JobStatus, *, expected: Expected) -> bool:
-        changed = self._real_set_status(job_id, new, expected=expected)
-        if changed:
-            self.status_bus.publish(job_id)
-        return changed
+    set_status = _publishing_set_status
 
     def save(self, job: CrawlJobState) -> None:
         self._real_save(job)

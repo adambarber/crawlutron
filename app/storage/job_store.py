@@ -34,6 +34,7 @@ from .job_store_read import (
     row_to_state,
 )
 from .job_store_state import (
+    _CAS_STATUS_SQL,
     _UPSERT_JOB_ROW_SQL,
     CrawlJobState,
     JobAccumulators,
@@ -150,20 +151,24 @@ class JobStore:
         self._accumulators.append(job)
         self._conn.commit()
 
-    def set_status(self, job_id: str, new: JobStatus, *, expected: Expected) -> bool:
+    def set_status(
+        self, job_id: str, new: JobStatus, *, expected: Expected, error: str | None = None
+    ) -> bool:
         """Atomic compare-and-set on the row's status (the control plane).
-        True iff the row existed LIVE in an ``expected`` state and now holds
-        ``new``. A tombstoned row is never CASed, mirroring ``save()`` (#363).
+        A tombstoned row is never CASed (#363); ``error`` rides the same UPDATE
+        as the status (#365), so the stamp lands only when the CAS does.
         """
         wanted = {expected} if isinstance(expected, JobStatus) else set(expected)
         with self._lock:
-            # json_each keeps the expected set a BOUND parameter -- no SQL is
-            # ever constructed from values.
             cur = self._conn.execute(
-                "UPDATE crawl_jobs SET status = ?, updated_at = ? "
-                "WHERE job_id = ? AND deleted_at IS NULL "
-                "AND status IN (SELECT value FROM json_each(?))",
-                (new.value, time.time(), job_id, json.dumps(sorted(s.value for s in wanted))),
+                _CAS_STATUS_SQL,
+                (
+                    new.value,
+                    time.time(),
+                    error,
+                    job_id,
+                    json.dumps(sorted(s.value for s in wanted)),
+                ),
             )
             self._conn.commit()
         return cur.rowcount == 1
