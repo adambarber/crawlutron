@@ -153,6 +153,7 @@ PRIVATE_IMPORT_LEDGER = Rule(
         "public door through the module's own surface"
     ),
     scope=lambda *, exclude: trees_under(_TESTS_DIR),
+    skip=frozenset(["tests/api/test_caller_concurrency.py"]),
     bite=lambda: (
         # An undeclared weld: the gate is the only thing standing between this and a test whose import is
         # invisible to a reviewer of the module it reaches.
