@@ -207,6 +207,13 @@ class _SpillLine(TypedDict):
     r: dict[str, JsonValue]
 
 
+def _spill_encode(index: int, result: EngineCrawlResult) -> str:
+    """Build one spill line -- ``to_dict`` plus ``json.dumps`` -- as ONE offloaded
+    unit: the worker lambda runs both, so neither the multi-MB dict walk nor the
+    dump lands on the event loop (#536)."""
+    return json.dumps({"i": index, "r": to_dict(result)})
+
+
 def _spill_line(line: str) -> _SpillLine:
     """One spill line, checked: a line this writer did not write (wrong keys, a
     non-int index) raises instead of slipping a corrupt record into the ordering."""
@@ -217,11 +224,6 @@ def _spill_line(line: str) -> _SpillLine:
     if not shape_ok:
         raise TypeError(f"spill line is not a {_SpillLine.__name__}: {line[:80]!r}")
     return cast(_SpillLine, entry)
-
-
-def _spill_index(entry: _SpillLine) -> int:
-    """The line's submission index as the integer the writer wrote."""
-    return entry["i"]
 
 
 class ResultSpill:
@@ -307,9 +309,9 @@ class ResultSpill:
                 continue
 
     async def write(self, index: int, result: EngineCrawlResult) -> None:
-        # Offload the (potentially large) json.dumps to a worker thread so the
-        # event loop is never stalled serializing results.
-        line = await asyncio.to_thread(json.dumps, {"i": index, "r": to_dict(result)})
+        # Offload the WHOLE line build -- to_dict walking a multi-MB result plus
+        # json.dumps of it -- so neither step ever runs on the event loop (#536).
+        line = await asyncio.to_thread(_spill_encode, index, result)
         async with self._write_lock:
             self._fh.write(line + "\n")
             self.count += 1
@@ -326,9 +328,8 @@ class ResultSpill:
                 line = line.strip()
                 if not line:
                     continue
-                slots[_spill_index(_spill_line(line))] = from_wire(
-                    EngineCrawlResult, _spill_line(line)["r"], policy=policy
-                )
+                entry = _spill_line(line)  # parsed once per line (N1): index + payload read off the one dict
+                slots[entry["i"]] = from_wire(EngineCrawlResult, entry["r"], policy=policy)
         return [slots[key] for key in sorted(slots)]
 
     def close(self) -> None:
