@@ -8,8 +8,8 @@ import pytest
 
 import app.runtime.pressure_probes as pressure_probes
 import app.storage.sqlite_store as sqlite_store
-from app.orchestration.doc_pool import doc_task_hooks
-from app.orchestration.doc_pool import test_hooks_enabled as hooks_seam_enabled
+from app.extraction.doc_pool import doc_task_hooks
+from app.extraction.doc_pool import test_hooks_enabled as hooks_seam_enabled
 
 
 def _assert_no_trace_env_readers(monkeypatch, env_var: str, module):

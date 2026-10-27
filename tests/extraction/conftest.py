@@ -1,4 +1,4 @@
-"""Orchestration-package fixtures shared by the doc-pool suites."""
+"""Extraction-package fixtures shared by the doc-pool suites."""
 
 from __future__ import annotations
 

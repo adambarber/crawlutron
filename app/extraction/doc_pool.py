@@ -15,8 +15,8 @@ from typing import TYPE_CHECKING, TypedDict
 
 from markitdown import MarkItDown
 
-from app.orchestration.pool import SyncPool
 from app.runtime.metrics import get_metrics
+from app.runtime.pool import SyncPool
 
 logger = logging.getLogger(__name__)
 

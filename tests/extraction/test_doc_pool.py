@@ -10,7 +10,7 @@ import time
 import app.extraction.content as ext_mod
 import app.extraction.documents as docex
 from app.extraction.content import ExtractedContent
-from app.orchestration.doc_pool import (
+from app.extraction.doc_pool import (
     DocExtractionPool,
     DocWorker,
     DocWorkerSpawnError,

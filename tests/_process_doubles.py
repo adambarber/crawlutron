@@ -5,7 +5,7 @@ join after death); three copies previously froze three ideas of ``exitcode``."""
 
 from __future__ import annotations
 
-from app.orchestration.doc_pool import DocExtractionPool, DocWorker
+from app.extraction.doc_pool import DocExtractionPool, DocWorker
 
 
 class StubProc:

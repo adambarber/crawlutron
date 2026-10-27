@@ -4,9 +4,9 @@ BrowserPool awaits a coroutine (AsyncPool); DocExtractionPool blocks a thread (S
 Each is proven statically conformant by a typed-annotation assignment mypy checks.
 """
 
-import app.orchestration.pool as pool_mod
-from app.orchestration.doc_pool import DocExtractionPool, DocWorker
-from app.orchestration.pool import AsyncPool, SyncPool
+import app.runtime.pool as pool_mod
+from app.extraction.doc_pool import DocExtractionPool, DocWorker
+from app.runtime.pool import AsyncPool, SyncPool
 from app.transport.browser_pool import BrowserPool, BrowserRenderer
 
 # Static conformance: these assignments are type-checked by mypy at the module level. If either

@@ -17,10 +17,10 @@ from trafilatura import extract as _trafilatura_extract
 
 from app.config.env import get_env_int, parse_bool_env
 from app.config.settings import CrawlerSettings
+from app.extraction.doc_pool import DocExtractionPool, doc_task_hooks
 from app.extraction.llm_format import text_from_html
 from app.extraction.trees import parse_html_tree
 from app.models.normalized_url import NormalizedUrl
-from app.orchestration.doc_pool import DocExtractionPool, doc_task_hooks
 from app.runtime.resource_pressure import doc_worker_count
 
 logger = logging.getLogger(__name__)
