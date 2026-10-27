@@ -55,6 +55,27 @@ def host_resolves_to(monkeypatch, ip: str, *, resolver=None):
         yield resolved
 
 
+def resolves_in_sequence(monkeypatch, *ips: str) -> list[str]:
+    """A fresh-resolve stub answering with ``ips`` in order (the last repeats),
+    recording every host it was asked for.
+
+    The browser stability check (#540) is a verdict over CONSECUTIVE fresh
+    answers, so the stub hands out a scripted sequence rather than one pinned
+    IP: answer n goes to lookup n."""
+    import socket
+
+    block_private_targets(monkeypatch)
+    asked: list[str] = []
+
+    def _getaddrinfo(host, *args, **kwargs):
+        asked.append(host)
+        ip = ips[min(len(asked) - 1, len(ips) - 1)]
+        return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", (ip, 0))]
+
+    monkeypatch.setattr(socket, "getaddrinfo", _getaddrinfo)
+    return asked
+
+
 def assert_dns_pinning_uses_first_resolution(monkeypatch, rebound_ip, public_ip="93.184.216.34") -> None:
     import socket
     from unittest.mock import patch

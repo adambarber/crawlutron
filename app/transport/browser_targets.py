@@ -15,7 +15,7 @@ from app.models.normalized_url import NormalizedUrl
 from app.safety.json_safe import json_default
 from app.transport.pinned_transport import (
     bounded_thread_resolve,
-    check_ssrf_protection,
+    check_ssrf_protection_stable,
 )
 from app.vocabulary.hosts import is_analytics_host as _is_analytics_url
 
@@ -114,13 +114,15 @@ async def _resolve_ssrf_pinned_url(
 ) -> tuple[str, dict[str, str]] | None:
     """Pin the request URL per scheme; None after aborting (fail closed).
 
-    HTTPS validates fresh (SNI/certs need the hostname; never TTL-cached, #387);
-    plain HTTP re-pins through the caller's rule.
+    HTTPS validates fresh and stable (#387, #540); plain HTTP re-pins through
+    the caller's rule.
     """
     try:
         if request_scheme == "https":
+            # Two fresh resolves must agree (#540): the browser dials after this check
+            # with no dial ownership, so a changed answer is the rebinding signature.
             await _BOUNDED(
-                lambda: check_ssrf_protection(admitted, use_cache=False),
+                lambda: check_ssrf_protection_stable(admitted),
                 timeout_seconds=timeout_seconds,
             )
             return request.url, {}
@@ -152,10 +154,10 @@ def make_ssrf_websocket_handler(*, policy: HostPolicy, timeout_seconds: float | 
             normalized = await _BOUNDED(
                 lambda: NormalizedUrl(http_equivalent, policy=policy), timeout_seconds=timeout_seconds
             )
-            # The browser dials its own WS connect too; validation must be fresh, never
-            # TTL-cached, so a rebind in the cache window cannot reach a private address (#387).
+            # Fresh and stable, never TTL-cached (#387); a changed answer between
+            # immediate repeats is the rebinding signature (#540).
             await _BOUNDED(
-                lambda: check_ssrf_protection(normalized, use_cache=False),
+                lambda: check_ssrf_protection_stable(normalized),
                 timeout_seconds=timeout_seconds,
             )
         except Exception:

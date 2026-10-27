@@ -88,6 +88,35 @@ def _resolve_ips(hostname: str, *, use_cache: bool = True) -> list[str]:
 
 # Pass ``use_cache=False`` where the caller cannot pin its connect (the browser
 # re-resolves at connect), so validation is contemporaneous with that connect (#387).
+def _public_verdict(hostname: str, ips: list[str]) -> None:
+    """The one public-only law over a resolved answer: any private member
+    raises the shared refusal. Both check verdicts and the pin read this."""
+    for ip in ips:
+        if not is_public_ip_value(ip):
+            raise ValueError(
+                f"SSRF protection: hostname {hostname} resolves to private/loopback IP {ip}"
+            ) from None
+
+
+def _resolve_or_refuse(hostname: str, *, use_cache: bool) -> list[str]:
+    """One resolve (cached or fresh) with the shared fail-closed fault law."""
+    try:
+        return _resolve_ips(hostname, use_cache=use_cache)
+    except (socket.gaierror, socket.herror, OSError, TimeoutError):
+        # Any OS resolver fault (gaierror, herror, a degraded resolver's timeout/OSError)
+        # is not a valid public target: fail closed, never reach loopback via the pin.
+        raise ValueError(f"SSRF protection: cannot resolve hostname {hostname}") from None
+
+
+def _validated_fresh_answer(url: NormalizedUrl) -> set[str]:
+    """One fresh (uncached) resolve, asserted all-public: the shared verdict body
+    of ``check_ssrf_protection`` (one resolve) and ``check_ssrf_protection_stable``
+    (two, compared)."""
+    ips = _resolve_or_refuse(url.host, use_cache=False)
+    _public_verdict(url.host, ips)
+    return set(ips)
+
+
 def check_ssrf_protection(url: NormalizedUrl, *, use_cache: bool = True) -> None:
     """Resolve the URL's host and abort if any IP is private/loopback. The host
     is read off the admitted value (nothing left to re-parse). Set
@@ -95,18 +124,24 @@ def check_ssrf_protection(url: NormalizedUrl, *, use_cache: bool = True) -> None
     """
     if allow_private_targets():
         return
-    hostname = url.host
-    try:
-        ips = _resolve_ips(hostname, use_cache=use_cache)
-    except (socket.gaierror, socket.herror, OSError, TimeoutError):
-        # Any OS resolver fault (gaierror, herror, a degraded resolver's timeout/OSError)
-        # is not a valid public target: fail closed, never reach loopback via the pin.
-        raise ValueError(f"SSRF protection: cannot resolve hostname {hostname}") from None
-    for ip in ips:
-        if not is_public_ip_value(ip):
-            raise ValueError(
-                f"SSRF protection: hostname {hostname} resolves to private/loopback IP {ip}"
-            ) from None
+    _public_verdict(url.host, _resolve_or_refuse(url.host, use_cache=use_cache))
+
+
+def check_ssrf_protection_stable(url: NormalizedUrl) -> None:
+    """The browser-family verdict (#540): TWO fresh resolves must agree.
+
+    Last verifiable moment without dial ownership: a changed answer is the
+    rebinding signature (residual documented on the ticket).
+    """
+    if allow_private_targets():
+        return
+    first = _validated_fresh_answer(url)
+    second = _validated_fresh_answer(url)
+    if first != second:
+        raise ValueError(
+            f"SSRF protection: hostname {url.host} DNS answer changed between fresh "
+            f"resolves ({sorted(first)} -> {sorted(second)}); refusing an unstable target"
+        )
 
 
 def resolve_and_pin_host(url: NormalizedUrl) -> tuple[str, str]:
