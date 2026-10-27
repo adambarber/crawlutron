@@ -6,10 +6,22 @@
 [workspace]
 base_branch = "main"
 
+[env]
+# Setup children receive the declared keys and NOTHING ambient (Injection is a
+# complete environment, hardstand#398 diagnosis): without PATH, pre-commit's
+# internal `git` calls fail with "git failed. Is it installed".
+PATH = "/usr/bin:/bin:/usr/local/bin:/opt/homebrew/bin"
+
 [[resource]]
 kind          = "worktree"
 provider      = "git.worktree"
 branch_prefix = "work"
+
+# The env namespace axis: present so [env] keys resolve (validation refused
+# PATH with only git.worktree — "no adapter resolves this key").
+[[resource]]
+kind     = "env"
+provider = "env.namespace"
 
 # Setup: reuse the main checkout's existing venv via symlink — no downloads.
 # The main checkout already has a working .venv with all dev deps installed.
@@ -34,7 +46,7 @@ run = "ln -sfn ../../.venv .venv"
 
 [[setup]]
 name = "bind-workspace-tree"
-run = "printf '%s\n' \"$PWD\" > .venv/lib/python3.12/site-packages/!hardstand-workspace.pth"
+run = "printf '%s\\n' \"$PWD\" > .venv/lib/python3.12/site-packages/!hardstand-workspace.pth"
 
 # #553 residual: a fresh workspace's git hooks do not exist until pre-commit
 # installs them -- without this step a workspace commit runs ZERO gates and
@@ -50,6 +62,7 @@ run = ".venv/bin/pre-commit install --hook-type commit-msg --hook-type pre-commi
 [[actions]]
 name = "pytest"
 kind = "exec"
+env = ["PATH"]
 run = ".venv/bin/python -m pytest"
 
 [[actions]]
