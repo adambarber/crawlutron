@@ -149,7 +149,9 @@ def test_hop_by_hop_headers_are_refused_through_every_model_embedding_the_policy
     A ban enforced on CrawlPolicy alone would be bypassed by any model that
     embeds it, which is the same chokepoint gap this list exists to close.
     """
-    import pytest as _pytest  # noqa: F401  (parametrize imported at module top)
+    import pytest as _pytest
+
+    del _pytest
 
     from app.models.crawl_request import CrawlRequest
     from app.models.job_create_request import JobCreateRequest

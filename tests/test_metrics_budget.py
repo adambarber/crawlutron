@@ -187,8 +187,13 @@ def _root_gate(
     root: Path, budgets: dict[str, int]
 ) -> tuple[Callable[[str], list[Offender]], Callable[[str], int]]:
     """The offenders/measurement pair one root gate builds, written once."""
-    candidates = lambda: _root_candidates(root)  # noqa: E731
-    trees = lambda: trees_under(root)  # noqa: E731
+
+    def candidates() -> list[Offender]:
+        return _root_candidates(root)
+
+    def trees() -> dict[Path, ast.Module]:
+        return trees_under(root)
+
     return _build_gate(candidates, trees, budgets)
 
 

@@ -12,18 +12,32 @@ from app.vocabulary.limits import LARGE_CRAWL_GUIDANCE
 from app.vocabulary.strategies import CFFI_IMPERSONATE_TARGET, HTTP_DECLARED_CRAWLER
 
 STRATEGY_DESCRIPTIONS = {
-    CrawlStrategy.HTTP_DECLARED_CRAWLER: "Direct HTTP using a transparent crawler user agent and caller-approved headers.",  # noqa: E501
+    CrawlStrategy.HTTP_DECLARED_CRAWLER: (
+        "Direct HTTP using a transparent crawler user agent and caller-approved headers."
+    ),
     CrawlStrategy.HTTP_CFFI_IMPERSONATE: f"TLS-fingerprint-impersonated HTTP via curl_cffi "
     f"({CFFI_IMPERSONATE_TARGET}) with browser-shaped headers, for sites that reject clients "
     f"presenting a non-browser TLS fingerprint.",
-    CrawlStrategy.BROWSER_HEADLESS: "Firefox rendering in headless mode using Camoufox for JavaScript-dependent pages.",  # noqa: E501
-    CrawlStrategy.BROWSER_HEADED_WARMED: "Headed Firefox with configured warmup URLs for challenge-prone municipal systems.",  # noqa: E501
+    CrawlStrategy.BROWSER_HEADLESS: (
+        "Firefox rendering in headless mode using Camoufox for JavaScript-dependent pages."
+    ),
+    CrawlStrategy.BROWSER_HEADED_WARMED: (
+        "Headed Firefox with configured warmup URLs for challenge-prone municipal systems."
+    ),
 }
 
 EXTRACTION_DESCRIPTIONS = {
-    CrawlExtractionMethod.FULL: "Unified output pipeline: trafilatura HTML main text, markitdown for documents, plain-text passthrough.",  # noqa: E501
-    CrawlExtractionMethod.TRAFILATURA: "HTML-only main-text extraction for noisy HTML; does not parse PDF or binary documents.",  # noqa: E501
-    CrawlExtractionMethod.DOCUMENT: "Document/body extraction via markitdown for PDFs and non-HTML responses when text evidence is needed.",  # noqa: E501
+    CrawlExtractionMethod.FULL: (
+        "Unified output pipeline: trafilatura HTML main text, markitdown for documents, "
+        "plain-text passthrough."
+    ),
+    CrawlExtractionMethod.TRAFILATURA: (
+        "HTML-only main-text extraction for noisy HTML; does not parse PDF or binary documents."
+    ),
+    CrawlExtractionMethod.DOCUMENT: (
+        "Document/body extraction via markitdown for PDFs and non-HTML responses "
+        "when text evidence is needed."
+    ),
 }
 
 GUIDANCE = [

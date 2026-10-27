@@ -54,7 +54,7 @@ def discovery_payload() -> DiscoveryPayload:
             "GET /v1/policy-suggestions",
             "POST /mcp",
         ],
-        "description": "Policy-driven universal crawler execution service for script-tool municipal crawling.",  # noqa: E501
+        "description": "Policy-driven universal crawler execution service.",
         "auth": {
             "caller_keys": "Present X-API-Key (or Authorization: Bearer) on crawl/job/result requests; "
             "jobs and results created under a key are readable only under it. Anonymous requests crawl as a "
