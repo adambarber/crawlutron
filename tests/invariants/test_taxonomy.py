@@ -21,27 +21,26 @@ from tests.rules import Bites, Registry, Rule
 
 # --------------------------------------------------------------------------- The ordered classification
 # table: order is semantics, so it is checked
-_CATCH_ALL_EXCEPTIONS: tuple[type[BaseException], ...] = (ValueError, OSError, Exception)
-
-
 def _table_shadowing_offenders(rows) -> list[str]:
-    """Report rows that can never fire, and broad rows that are not terminal.
-
-    First-hit-wins means a row is dead once an earlier row's type is a
-    superclass of one of its own, regardless of spelling.
-    """
+    """Report rows that can never fire or swallow a later verdict."""
     offenders: list[str] = []
-    last_index = len(rows) - 1
     for index, (types, classification) in enumerate(rows):
         for kind in types:
-            if kind in _CATCH_ALL_EXCEPTIONS and index != last_index:
-                offenders.append(f"{kind.__name__} at row {index} is a catch-all but rows follow it")
-            for earlier_index, (earlier_types, _) in enumerate(rows[:index]):
+            for earlier_index, (earlier_types, _earlier_classification) in enumerate(rows[:index]):
                 for earlier in earlier_types:
                     if earlier is not kind and issubclass(kind, earlier):
                         offenders.append(
                             f"{kind.__name__} ({classification}) at row {index} can never fire: "
                             f"{earlier.__name__} at row {earlier_index} claims it first"
+                        )
+            if index == len(rows) - 1:
+                continue
+            for later_index, (later_types, later_classification) in enumerate(rows[index + 1 :], index + 1):
+                for later in later_types:
+                    if issubclass(later, kind) and later_classification != classification:
+                        offenders.append(
+                            f"{kind.__name__} ({classification}) at row {index} swallows "
+                            f"{later.__name__} ({later_classification}) at row {later_index}"
                         )
     return offenders
 

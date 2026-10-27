@@ -237,9 +237,13 @@ class TestRuleScope:
         target.write_text(source, encoding="utf-8")
         return target
 
-    def test_a_rule_declares_the_tree_it_is_swept_over(self, tmp_path):
+    def _planted_urljoin_rule(self, tmp_path: pathlib.Path):
+        """Plant the two-arg urljoin function; a rule swept over the plant's tree."""
         self._planted(tmp_path, "def f(a, b):\n    return urljoin(a, b)\n")
-        rule = _urljoin_rule(scope=lambda *, exclude: trees_under(tmp_path))
+        return _urljoin_rule(scope=lambda *, exclude: trees_under(tmp_path))
+
+    def test_a_rule_declares_the_tree_it_is_swept_over(self, tmp_path):
+        rule = self._planted_urljoin_rule(tmp_path)
         with pytest.raises(AssertionError) as caught:
             Registry((rule,)).check_all_clean()
         assert "x.py" in str(caught.value)
@@ -249,8 +253,7 @@ class TestRuleScope:
 
         ``Rule.scan`` and ``Registry.check_all_clean`` are separate callers of
         the same sweep; both have to read the declared scope."""
-        self._planted(tmp_path, "def f(a, b):\n    return urljoin(a, b)\n")
-        rule = _urljoin_rule(scope=lambda *, exclude: trees_under(tmp_path))
+        rule = self._planted_urljoin_rule(tmp_path)
         with pytest.raises(AssertionError):
             rule.scan()
 

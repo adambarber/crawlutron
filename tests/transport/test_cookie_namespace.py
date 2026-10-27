@@ -43,18 +43,23 @@ def test_empty_namespace_uses_legacy_shared_slot():
     assert jar.cookie_header_for(canonical("http://x.example/p")) == "k=v"
 
 
+def _assert_namespace_view(jar, namespace: str, expected: str) -> None:
+    """One namespace's cookie view of the shared example URL."""
+    assert jar.cookie_header_for(canonical("http://x.example/"), namespace=namespace) == expected
+
+
 def test_clear_with_namespace_only_clears_that_namespace():
     jar = two_tenant_jar()
     jar.clear(namespace=TENANT_A)
-    assert jar.cookie_header_for(canonical("http://x.example/"), namespace=TENANT_A) == ""
-    assert jar.cookie_header_for(canonical("http://x.example/"), namespace=TENANT_B) == "b=2"
+    _assert_namespace_view(jar, TENANT_A, "")
+    _assert_namespace_view(jar, TENANT_B, "b=2")
 
 
 def test_clear_without_namespace_clears_everything():
     jar = two_tenant_jar()
     jar.clear()
-    assert jar.cookie_header_for(canonical("http://x.example/"), namespace=TENANT_A) == ""
-    assert jar.cookie_header_for(canonical("http://x.example/"), namespace=TENANT_B) == ""
+    _assert_namespace_view(jar, TENANT_A, "")
+    _assert_namespace_view(jar, TENANT_B, "")
 
 
 def test_save_and_load_roundtrip_uses_legacy_namespace():

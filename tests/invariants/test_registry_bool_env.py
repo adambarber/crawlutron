@@ -141,16 +141,15 @@ def _bool_env_observations(tree: ast.AST, path: pathlib.Path, prop: Property) ->
 
 @_module_aware
 def _bool_env_offenders(tree: ast.AST, path: pathlib.Path, prop: Property) -> list[str]:
-    offenders: list[str] = []
     tree_sets = _bool_env_tree_sets(tree, _PROPERTY_MODULES.get())
     excluded = _owner_definition_ids(tree, path, prop)
-    for name, node in _property_nodes(tree, path, prop):
-        context = _resolvedlocal_nodes(tree, node, excluded, modules=_PROPERTY_MODULES.get(), prop=prop)
-        if _bool_env_node_observation(context, tree_sets)[1]:
-            offenders.append(
-                offender(path, getattr(node, "lineno", 1), f"{name} reimplements boolean environment parsing")
-            )
-    return offenders
+    return [
+        offender(path, getattr(node, "lineno", 1), f"{name} reimplements boolean environment parsing")
+        for name, node in _property_nodes(tree, path, prop)
+        if _bool_env_node_observation(
+            _resolvedlocal_nodes(tree, node, excluded, modules=_PROPERTY_MODULES.get(), prop=prop), tree_sets
+        )[1]
+    ]
 
 
 def test_bool_env_has_one_implementation():

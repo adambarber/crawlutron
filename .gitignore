@@ -15,6 +15,7 @@ build/
 .cache/
 .mypy_cache/
 .ruff_cache/
+.gate_fanout/
 .coverage
 htmlcov/
 # Session-analysis residue written by the cortexkit tooling. It is ephemeral

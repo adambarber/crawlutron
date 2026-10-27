@@ -1,6 +1,5 @@
 """SSRF protection: blocked IP ranges, unresolved hosts, DNS pinning, local mode and fixture enforcement."""
 
-import contextlib
 import ipaddress
 import socket
 
@@ -279,6 +278,55 @@ class TestFrontierIdentityRefusesRejectedTargets:
         )
 
 
+class TestDegradedResolverFailsClosed:
+    """A degraded resolver raises socket.timeout/OSError, not just gaierror; the
+    SSRF gate must fail closed with the ValueError shape for every one of them."""
+
+    @pytest.mark.parametrize(
+        ("exc", "where"),
+        [
+            (TimeoutError("degraded resolver"), "check"),
+            (OSError("resolver died"), "check"),
+            (TimeoutError("degraded resolver"), "pin"),
+            (OSError("resolver died"), "pin"),
+        ],
+        ids=["timeout-check", "oserror-check", "timeout-pin", "oserror-pin"],
+    )
+    def test_non_gaierror_resolution_faults_fail_closed(self, monkeypatch, exc, where):
+        block_private_targets(monkeypatch)
+
+        def degraded(host, *args, **kwargs):
+            raise exc
+
+        monkeypatch.setattr(http_mod.socket, "getaddrinfo", degraded)
+        url = canonical("http://example.com/")
+        gate = check_ssrf_protection if where == "check" else resolve_and_pin_host
+        with pytest.raises(ValueError, match="cannot resolve hostname"):
+            gate(url)
+
+    def test_unbounded_resolution_is_bounded_by_the_dns_budget(self, monkeypatch):
+        # A hung resolver must surface as the fail-closed ValueError within the
+        # dns_wait_for budget (#383), never wait unbounded on the caller's thread.
+        import threading
+        import time
+
+        def tiny_wait(timeout_seconds):
+            return 0.1
+
+        def hung(host, *args, **kwargs):
+            threading.Event().wait(timeout=1.0)
+            raise AssertionError("resolver should have been abandoned")
+
+        block_private_targets(monkeypatch)
+        monkeypatch.setattr(http_mod, "dns_wait_for", tiny_wait)
+        monkeypatch.setattr(http_mod.socket, "getaddrinfo", hung)
+        started = time.monotonic()
+        with pytest.raises(ValueError, match="cannot resolve hostname"):
+            check_ssrf_protection(canonical("http://bfg-bounded.example/"))
+        # Unbounded would block >=1s on the hung resolver; the budget abandons at 0.1s.
+        assert time.monotonic() - started < 0.9, "the resolve was not bounded by the DNS budget"
+
+
 class TestSsrfDnsPinning:
     def test_resolves_once_and_pins_ip(self, monkeypatch):
         with host_resolves_to(monkeypatch, "93.184.216.34") as resolved:
@@ -303,11 +351,9 @@ class TestSsrfDnsPinning:
 @pytest.mark.usefixtures("ssrf_guard_required")
 def test_ssrf_fixture_passes_when_opted_out(monkeypatch):
     """The happy path: opt out, then exercise the helper. Should pass."""
-    monkeypatch.setenv("CRAWLUTRON_ALLOW_PRIVATE_TARGETS", "0")
-    # Call the real helper; it will fail to resolve but the call itself counts as "exercised", which is what
-    # the fixture checks.
-    with contextlib.suppress(Exception):
-        http_mod.check_ssrf_protection(canonical("http://example.invalid/"))
+    with host_resolves_to(monkeypatch, "93.184.216.34"):
+        # Hermetic: the resolver is stubbed, so this never reaches real DNS.
+        http_mod.check_ssrf_protection(canonical("http://example.com/"))
 
 
 @pytest.mark.usefixtures("ssrf_guard_required")

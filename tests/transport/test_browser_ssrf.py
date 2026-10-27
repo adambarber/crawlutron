@@ -18,7 +18,7 @@ from tests._browser_doubles import (
     render_pinned,
     stub_pinned_request,
 )
-from tests._browser_page_doubles import FakePageContext
+from tests._browser_page_doubles import FakePageContext, _ContextSwappingPage
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY, canonical
 
 # -------------------------------------------------------------------------- document.py: SSRF gate on urlopen
@@ -144,15 +144,6 @@ async def test_render_registers_ssrf_route_guard(monkeypatch):
     assert any(pattern == "**/*" for pattern, _ in page.context.route_calls)
 
 
-class _ContextOnlyPage(BrowserFakePage):
-    """A page whose own route surface is absent: the guard install must land on
-    the context, the surface every page/worker the context spawns shares."""
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.context = _GuardedContext()
-
-
 class _GuardedContext(FakePageContext):
     """A context double recording route and websocket installs at context scope."""
 
@@ -162,6 +153,13 @@ class _GuardedContext(FakePageContext):
 
     def route_web_socket(self, pattern, handler):
         self.ws_calls.append((pattern, handler))
+
+
+class _ContextOnlyPage(_ContextSwappingPage):
+    """A page whose own route surface is absent: the guard install must land on
+    the context, the surface every page/worker the context spawns shares."""
+
+    context_cls = _GuardedContext
 
 
 async def test_ssrf_guards_install_at_context_level(monkeypatch):

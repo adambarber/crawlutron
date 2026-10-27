@@ -6,8 +6,8 @@ never connected allowed targets. These tests cover both, on the installed-Playwr
 from __future__ import annotations
 
 from tests._assertions import block_private_targets, host_resolves_to
-from tests._browser_doubles import BrowserFakePage, pinned_page_renderer, render_bare
-from tests._browser_page_doubles import FakePageContext
+from tests._browser_doubles import pinned_page_renderer, render_bare
+from tests._browser_page_doubles import FakePageContext, _ContextSwappingPage
 
 _PUBLIC = "1.2.3.4"
 
@@ -21,12 +21,10 @@ class _WSGuardContext(FakePageContext):
         super().route_web_socket(url, handler)
 
 
-class _WSBearingPage(BrowserFakePage):
+class _WSBearingPage(_ContextSwappingPage):
     """A page whose CONTEXT records the websocket guard the renderer installs."""
 
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.context = _WSGuardContext()
+    context_cls = _WSGuardContext
 
     @property
     def ws_handler(self):

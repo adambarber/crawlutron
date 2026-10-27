@@ -43,20 +43,29 @@ async def test_https_subresource_is_not_rewritten_to_a_pinned_ip(monkeypatch) ->
     assert route.continued_headers is ROUTE_ARG_UNSET
 
 
+def _counting_resolver(lookups: list[str], ip: str = "1.2.3.4"):
+    """A stubbed getaddrinfo recording every host it was asked for."""
+
+    def counting(host, *args, **kwargs):
+        lookups.append(host)
+        return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", (ip, 0))]
+
+    return counting
+
+
+def _pinned_handler(monkeypatch, lookups: list[str]):
+    """An SSRF route handler over the stubbed, recording resolver, opted out."""
+    block_private_targets(monkeypatch)
+    monkeypatch.setattr(socket, "getaddrinfo", _counting_resolver(lookups))
+    return ssrf_route_handler()
+
+
 async def test_https_subresource_revalidates_fresh_per_request(monkeypatch) -> None:
     """HTTPS validation must not trust a cached answer: the browser re-resolves
     at connect, so a cached validation up to the TTL stale would let a rebind in
     that window past -- each subresource validates against a fresh resolve (#387)."""
-    block_private_targets(monkeypatch)
     lookups: list[str] = []
-    real_getaddrinfo = socket.getaddrinfo
-
-    def counting(addr, *args, **kwargs):
-        lookups.append(addr)
-        return real_getaddrinfo(addr, *args, **kwargs)
-
-    monkeypatch.setattr(socket, "getaddrinfo", counting)
-    handler = ssrf_route_handler()
+    handler = _pinned_handler(monkeypatch, lookups)
     await handler(FakeRoute(), FakeRequest("https://1.2.3.4/a", "document"))
     await handler(FakeRoute(), FakeRequest("https://1.2.3.4/b", "document"))
     # Two subresources -> two fresh validations, never one cached answer reused.
@@ -86,16 +95,8 @@ async def test_http_subresource_still_connects_to_the_fresh_pinned_ip(monkeypatc
     """Plain HTTP keeps the pin: the connection is forced to the resolved IP
     with the original hostname preserved, and the resolve stays uncached so a
     DNS rebind inside the cache TTL cannot slip past the check."""
-    block_private_targets(monkeypatch)
     lookups: list[str] = []
-    real_getaddrinfo = socket.getaddrinfo
-
-    def counting(host, *args, **kwargs):
-        lookups.append(host)
-        return real_getaddrinfo(host, *args, **kwargs)
-
-    monkeypatch.setattr(socket, "getaddrinfo", counting)
-    handler = ssrf_route_handler()
+    handler = _pinned_handler(monkeypatch, lookups)
     route = FakeRoute()
     await handler(route, FakeRequest("http://1.2.3.4/x", "document"))
     assert route.decision == "continue"

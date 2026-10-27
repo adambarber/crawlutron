@@ -155,14 +155,19 @@ def test_no_limit_falls_back_to_one(monkeypatch):
     assert bp.derive_browser_pool_size() == 1
 
 
-def test_pool_uses_derived_size(monkeypatch):
+def _three_gib_memory(monkeypatch) -> None:
+    """The derived-size branch's memory reading: 3 GiB derives a pool of two."""
     monkeypatch.setattr(rp, "read_memory_stats", lambda: _Mem(3 * 1024**3))
+
+
+def test_pool_uses_derived_size(monkeypatch):
+    _three_gib_memory(monkeypatch)
     pool = bp.BrowserPool()
     assert pool.pool_size == 2
 
 
 def test_explicit_pool_size_arg_wins(monkeypatch):
-    monkeypatch.setattr(rp, "read_memory_stats", lambda: _Mem(3 * 1024**3))
+    _three_gib_memory(monkeypatch)
     pool = bp.BrowserPool(pool_size=1)
     assert pool.pool_size == 1
 

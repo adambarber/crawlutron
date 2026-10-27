@@ -4,9 +4,11 @@ Only a stable error code is exposed in ``error``/``diagnostics``; the raw
 DNs/paths/stack detail is logged server-side, never returned to the caller.
 """
 
+import asyncio
 import json
 import logging
 import socket
+import ssl
 
 import httpx
 
@@ -46,6 +48,39 @@ def test_classify_error_codes_map_to_stable_values():
     assert classify_error_code(DecompressionTooLargeError("big")) == "payload_too_large"
     # Unknown exception -> generic network_error, never the raw message.
     assert classify_error_code(RuntimeError("secret /app/x")) == "network_error"
+
+
+def test_every_network_fault_reaches_a_terminal_code():
+    """OSError is the base of every network fault: a degraded resolver raising a
+    bare OSError (or socket.timeout) must classify terminally, not network_error."""
+    for exc, expected in _NETWORK_FAULT_CASES:
+        assert classify_error_code(exc) == expected, (
+            f"{type(exc).__name__} fell to {classify_error_code(exc)!r}, expected {expected!r}"
+        )
+
+
+def test_specific_rows_win_over_the_oserror_base():
+    """Order is the correctness property: gaierror/herror stay dns_error and ssl
+    stays tls_error even though OSError is their base and also has a row."""
+    assert classify_error_code(socket.gaierror("x")) == "dns_error"
+    assert classify_error_code(socket.herror("x")) == "dns_error"
+    assert classify_error_code(ssl.SSLError("x")) == "tls_error"
+    assert classify_error_code(ConnectionResetError("x")) == "connection_error"
+
+
+def test_resolver_budget_still_maps_dns_error():
+    """The bounded resolver's verdict must not be swallowed by the TimeoutError
+    or OSError rows: the request never got to navigate (#383/#405)."""
+    from app.transport.pinned_transport import ResolverBudgetExceeded
+
+    assert classify_error_code(ResolverBudgetExceeded("over budget")) == "dns_error"
+
+
+def test_cancelled_error_is_never_a_network_fault():
+    """asyncio.CancelledError inherits BaseException directly; neither the
+    OSError nor the ValueError row may claim a cancellation."""
+    assert not issubclass(asyncio.CancelledError, OSError)
+    assert classify_error_code(asyncio.CancelledError()) == "network_error"
 
 
 async def test_http_strategy_result_hides_raw_dns_error():
@@ -129,6 +164,15 @@ _ERROR_CODE_CASES = (
     (httpx.ConnectError("down"), "connection_error"),
     (ValueError("bad"), "value_error"),
     (RuntimeError("unknown"), "network_error"),
+)
+
+# A degraded resolver surfaces OSError-family faults no specific row claims; every
+# network fault must reach a terminal code, never the network_error default.
+_NETWORK_FAULT_CASES = (
+    (TimeoutError("degraded resolver"), "connection_error"),
+    (OSError("resolver died"), "connection_error"),
+    (socket.gaierror("resolution refused"), "dns_error"),
+    (ssl.SSLError("handshake failed"), "tls_error"),
 )
 
 _NEW_ERROR_CODES = (

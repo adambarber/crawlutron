@@ -1,4 +1,7 @@
-# Quality gates for crawlutron.
+# Quality gates for crawlutron. The eight pre-commit-stage hooks run THROUGH
+# scripts/gate_fanout, which starts every gate child at once on the first hook
+# of a run and lets each hook wait only on its own child; the commands after
+# each entry's `--` remain the single declaration of what that gate runs.
 #
 # This file lives INSIDE the service and IS the repository's own
 # `.pre-commit-config.yaml`: the service is now its own repository, so pre-commit
@@ -87,7 +90,7 @@ repos:
         name: ruff check
         entry: >-
           bash -c 'for d in "$(git rev-parse --show-toplevel)/docker/browser-crawler" "$(git rev-parse --show-toplevel)"; do [ -x "$d/scripts/gate" ] && exec bash "$d/scripts/gate" "$@"; done; echo "scripts/gate not found in either layout" >&2; exit 1' gate
-          .venv/bin/python -m ruff check app tests scripts
+          .venv/bin/python -m scripts.gate_fanout ruff -- .venv/bin/python -m ruff check app tests scripts
         language: system
         files: &service_trigger ^(docker/browser-crawler/|(?!docker/))
         pass_filenames: false
@@ -102,7 +105,7 @@ repos:
         name: ruff format
         entry: >-
           bash -c 'for d in "$(git rev-parse --show-toplevel)/docker/browser-crawler" "$(git rev-parse --show-toplevel)"; do [ -x "$d/scripts/gate" ] && exec bash "$d/scripts/gate" "$@"; done; echo "scripts/gate not found in either layout" >&2; exit 1' gate
-          .venv/bin/python -m ruff format --check app tests scripts
+          .venv/bin/python -m scripts.gate_fanout ruff-format -- .venv/bin/python -m ruff format --check app tests scripts
         language: system
         files: *service_trigger
         pass_filenames: false
@@ -137,44 +140,28 @@ repos:
         name: pyright budget
         entry: >-
           bash -c 'for d in "$(git rev-parse --show-toplevel)/docker/browser-crawler" "$(git rev-parse --show-toplevel)"; do [ -x "$d/scripts/gate" ] && exec bash "$d/scripts/gate" "$@"; done; echo "scripts/gate not found in either layout" >&2; exit 1' gate
-          .venv/bin/python -m pytest tests/test_pyright_budget.py -q -o addopts=""
+          .venv/bin/python -m scripts.gate_fanout pyright -- .venv/bin/python -m pytest tests/test_pyright_budget.py -q -o addopts=""
         language: system
         files: *service_trigger
         pass_filenames: false
         stages: [pre-commit]
 
-      # Copy/paste detection is a design gate, scored per tree. The checked-in
-      # wrapper reads jscpd JSON and requires a non-empty scan of every root;
-      # the command-line thresholds below are the only threshold source, and a
-      # duplicate at that floor is a finding with no exemption path.
+      # Copy/paste detection is a design gate. The wrapper reads jscpd JSON and
+      # requires a non-empty scan of every root; the command-line thresholds
+      # below are the only threshold source, and a duplicate at that floor is a
+      # finding with no exemption path.
       #
-      # One floor for every root, because one flat floor cannot serve both
-      # trees: at 8 lines / 40 tokens this whole service reported exactly one
-      # pair and both sides of it were in `app/`, so production duplication was
-      # invisible behind a number picked for test scaffolding. A per-root split
-      # is the other answer and is not taken either, because a single number that
-      # every root is held to is the one that cannot be quietly relaxed for the
-      # tree it is inconvenient in.
-      #
-      # `--min-lines N` counts NEWLINES, not lines: a fragment jscpd reports as
-      # `139:5 - 142:18` spans four lines but contains three, so N admits
-      # fragments of N+1 lines. The number in the hook name is therefore the
-      # token floor and one less than the line floor it enforces. A gate that
-      # enforces more than its label claims is the failure mode this note
-      # exists to prevent: at a nominal 4/25 the scan reported zero pairs over
-      # 79,971 lines while 17 real clones sat below it, and "green" was
-      # reporting a mislabelled threshold rather than a clean tree.
-      #
-      # Zero tolerance: a duplicate at the floor is removed, never carried. Each
-      # root is still scanned by its own jscpd invocation, because jscpd's
-      # reported names are relative to the scan root. The number ratchets down,
-      # not up.
+      # Floor tightened 3/30 -> 2/30 (2026-10-27): the whole repo measures ZERO
+      # pairs at 2/30 over 687 sources, and the helper-clone-sweep hook's unique
+      # reach (two-line cross-file clones) is subsumed by this floor while the
+      # sweep's logic-only scope stays as the second consumer of the same
+      # floors. The floor ratchets down, not up.
       - id: jscpd
-        name: jscpd per tree (3 lines / 30 tokens, zero tolerance)
+        name: jscpd per tree (2 lines / 30 tokens, zero tolerance)
         entry: >-
           bash -c 'for d in "$(git rev-parse --show-toplevel)/docker/browser-crawler" "$(git rev-parse --show-toplevel)"; do [ -x "$d/scripts/gate" ] && exec bash "$d/scripts/gate" "$@"; done; echo "scripts/gate not found in either layout" >&2; exit 1' gate
-          .venv/bin/python -m scripts.jscpd_gate all
-          --min-lines 3
+          .venv/bin/python -m scripts.gate_fanout jscpd -- .venv/bin/python -m scripts.jscpd_gate all
+          --min-lines 2
           --min-tokens 30
           --threshold 0
         language: system
@@ -182,7 +169,7 @@ repos:
         pass_filenames: false
         stages: [pre-commit]
 
-      # The second sweep, wired as a real gate: the 3/30 per-tree gate cannot see
+      # The second sweep, wired as a real gate: the per-tree gate cannot see
       # a two-line repetition between two helper files (app/, scripts/, tests/_*),
       # so this 2/30 gate over the helper surface fails on any cross-file LOGIC
       # clone. Preamble and within-file repetition are not findings.
@@ -190,7 +177,7 @@ repos:
         name: jscpd helper surface (2 lines / 30 tokens, logic clones)
         entry: >-
           bash -c 'for d in "$(git rev-parse --show-toplevel)/docker/browser-crawler" "$(git rev-parse --show-toplevel)"; do [ -x "$d/scripts/gate" ] && exec bash "$d/scripts/gate" "$@"; done; echo "scripts/gate not found in either layout" >&2; exit 1' gate
-          .venv/bin/python -m scripts.jscpd_logic_gate
+          .venv/bin/python -m scripts.gate_fanout helper-clone-sweep -- .venv/bin/python -m scripts.jscpd_logic_gate
         language: system
         files: *service_trigger
         pass_filenames: false
@@ -204,7 +191,7 @@ repos:
         name: mypy
         entry: >-
           bash -c 'for d in "$(git rev-parse --show-toplevel)/docker/browser-crawler" "$(git rev-parse --show-toplevel)"; do [ -x "$d/scripts/gate" ] && exec bash "$d/scripts/gate" "$@"; done; echo "scripts/gate not found in either layout" >&2; exit 1' gate
-          .venv/bin/python -m mypy
+          .venv/bin/python -m scripts.gate_fanout mypy -- .venv/bin/python -m mypy
         language: system
         files: *service_trigger
         pass_filenames: false
@@ -226,7 +213,7 @@ repos:
         name: vulture dead code (min-confidence 90, zero tolerance)
         entry: >-
           bash -c 'for d in "$(git rev-parse --show-toplevel)/docker/browser-crawler" "$(git rev-parse --show-toplevel)"; do [ -x "$d/scripts/gate" ] && exec bash "$d/scripts/gate" "$@"; done; echo "scripts/gate not found in either layout" >&2; exit 1' gate
-          .venv/bin/python -m vulture app tests scripts --min-confidence 90
+          .venv/bin/python -m scripts.gate_fanout vulture -- .venv/bin/python -m vulture app tests scripts --min-confidence 90
         language: system
         files: *service_trigger
         pass_filenames: false
@@ -250,7 +237,7 @@ repos:
         name: chokepoint safety invariants
         entry: >-
           bash -c 'for d in "$(git rev-parse --show-toplevel)/docker/browser-crawler" "$(git rev-parse --show-toplevel)"; do [ -x "$d/scripts/gate" ] && exec bash "$d/scripts/gate" "$@"; done; echo "scripts/gate not found in either layout" >&2; exit 1' gate
-          .venv/bin/python -m pytest -q -o addopts= -n 4
+          .venv/bin/python -m scripts.gate_fanout safety-invariants -- .venv/bin/python -m pytest -q -o addopts= -n 6
           tests/invariants/ tests/test_metrics_budget.py
           tests/test_env_regression.py tests/test_store_pragma_chokepoint.py
           tests/membership_gate.py

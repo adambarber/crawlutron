@@ -6,6 +6,7 @@ the class: batches survive, healthy items keep their type.
 from __future__ import annotations
 
 import random
+from collections.abc import Callable
 from dataclasses import replace
 from typing import cast
 
@@ -128,26 +129,37 @@ def _poison(kind: str, index: int) -> object:
 BatchItem = EngineCrawlResult | CrawlResult
 
 
-def _random_batch(
+def _engine_build(rng: random.Random, index: int) -> tuple[EngineCrawlResult, tuple[str, str]]:
+    classification = rng.choice(HEALTHY_CLASSIFICATIONS)
+    return _healthy(index, classification), (status_for_classification(classification), classification)
+
+
+def _render_build(rng: random.Random, index: int) -> tuple[CrawlResult, tuple[str, str]]:
+    return cast(CrawlResult, _healthy_render(index)), ("success", "rendered")
+
+
+def _random_batch[T](
     rng: random.Random,
-) -> tuple[list[EngineCrawlResult], list[tuple[str, str] | None], list[str | None]]:
-    """Per position, either ``(status, classification)`` for a healthy item whose
-    real type must survive, or None for a poison slot (survival is its only
-    contract); ``kinds`` lets the sweep prove every strategy ran.
+    build: Callable[[random.Random, int], tuple[T, tuple[str, str]]],
+    result_type: type[T],
+) -> tuple[list[T], list[tuple[str, str] | None], list[str | None]]:
+    """Per position, the builder's healthy (item, expectation) pair, or a poison
+    slot cast to ``result_type`` — survival is poison's only contract; ``kinds``
+    lets the sweep prove every strategy ran.
     """
-    batch: list[EngineCrawlResult] = []
+    batch: list[object] = []
     expected: list[tuple[str, str] | None] = []
     kinds: list[str | None] = []
     for index in range(rng.randint(BATCH_MIN, BATCH_MAX)):
         if rng.random() < HEALTHY_PROBABILITY:
-            classification = rng.choice(HEALTHY_CLASSIFICATIONS)
-            batch.append(_healthy(index, classification))
-            expected.append((status_for_classification(classification), classification))
+            item, expectation = build(rng, index)
+            batch.append(item)
+            expected.append(expectation)
             kinds.append(None)
         else:
             kind = rng.choice(POISON_KINDS)
             # The cast IS the property: poison is not a result, and the guard must hold anyway.
-            batch.append(cast(EngineCrawlResult, _poison(kind, index)))
+            batch.append(cast(result_type, _poison(kind, index)))
             expected.append(None)
             kinds.append(kind)
     return batch, expected, kinds
@@ -179,7 +191,7 @@ class TestBatchShapeProperty:
         seen_healthy = 0
         for seed in SEEDS:
             rng = random.Random(seed)
-            batch, expected, kinds = _random_batch(rng)
+            batch, expected, kinds = _random_batch(rng, _engine_build, EngineCrawlResult)
             seen_kinds.update(kind for kind in kinds if kind is not None)
             seen_healthy += sum(1 for kind in kinds if kind is None)
             shaped = build_unified_crawl_response(batch).results
@@ -192,14 +204,14 @@ class TestBatchShapeProperty:
         """Both response builders must carry the same per-item contract."""
         for seed in SEEDS:
             rng = random.Random(1000 + seed)
-            batch, expected, _ = _random_batch(rng)
+            batch, expected, _ = _random_batch(rng, _engine_build, EngineCrawlResult)
             response = build_unified_crawl_response(batch, options=EnvelopeOptions(request_id=f"r{seed}"))
             _check_shaped(response.results, expected)
 
     async def test_async_builder_survives_the_same_batches(self):
         for seed in SEEDS:
             rng = random.Random(2000 + seed)
-            batch, expected, _ = _random_batch(rng)
+            batch, expected, _ = _random_batch(rng, _engine_build, EngineCrawlResult)
             response = await abuild_unified_crawl_response(
                 batch, adapt=build_unified_result, options=EnvelopeOptions(request_id=f"r{seed}")
             )
@@ -210,15 +222,7 @@ class TestBatchShapeProperty:
         comprehension); its batch is the render record, so the poison cast targets it."""
         for seed in SEEDS:
             rng = random.Random(3000 + seed)
-            batch: list[CrawlResult] = []
-            expected: list[tuple[str, str] | None] = []
-            for index in range(rng.randint(BATCH_MIN, BATCH_MAX)):
-                if rng.random() < HEALTHY_PROBABILITY:
-                    batch.append(_healthy_render(index))
-                    expected.append(("success", "rendered"))
-                else:
-                    batch.append(cast(CrawlResult, _poison(rng.choice(POISON_KINDS), index)))
-                    expected.append(None)
+            batch, expected, _ = _random_batch(rng, _render_build, CrawlResult)
             shaped = await abuild_unified_crawl_response(batch, adapt=render_result_to_unified)
             _check_shaped(shaped.results, expected)
             response = await abuild_unified_crawl_response(
