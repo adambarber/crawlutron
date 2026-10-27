@@ -54,6 +54,21 @@ _DNS_CACHE_MAX = 4096
 _DNS_CACHE: BoundedTTLCache[str, list[str]] = BoundedTTLCache(max_entries=_DNS_CACHE_MAX, ttl=_DNS_TTL)
 
 
+def _bounded_addrinfo(hostname: str) -> list[str]:
+    """One getaddrinfo on the shared DNS executor, bounded by the DNS posture (#383):
+    a resolve that outlasts the budget raises the classifiable ResolverBudgetExceeded
+    instead of waiting unbounded on the caller's thread."""
+    wait_for = dns_wait_for(None)
+    future = DNS_EXECUTOR.submit(socket.getaddrinfo, hostname, None)
+    done, _ = concurrent.futures.wait({future}, timeout=wait_for)
+    if not done:
+        future.cancel()
+        raise ResolverBudgetExceeded(f"DNS resolution exceeded the {wait_for:.1f}s budget") from None
+    # The sockaddr slot is ``str | int | None`` (AF_INET6 scope id), but a resolved
+    # address is always a string here; coerce so the list[str] contract holds.
+    return [str(entry[4][0]) for entry in future.result()]
+
+
 def _resolve_ips(hostname: str, *, use_cache: bool = True) -> list[str]:
     """Resolve a hostname to its IPs on a short-TTL cache (raw addrinfo list,
     IPv6 included; socket.gaierror on failure). The pinning path passes
@@ -63,10 +78,7 @@ def _resolve_ips(hostname: str, *, use_cache: bool = True) -> list[str]:
         cached = _DNS_CACHE.get(hostname)
         if cached is not None:
             return cached
-    addrinfo = socket.getaddrinfo(hostname, None)
-    # The sockaddr slot is ``str | int | None`` (AF_INET6 scope id), but a resolved
-    # address is always a string here; coerce so the list[str] contract holds.
-    ips = [str(entry[4][0]) for entry in addrinfo]
+    ips = _bounded_addrinfo(hostname)
     if use_cache:
         # Only the validation path populates the cache; the pinning path resolves
         # fresh, or a rebound private IP would poison the shared validation cache.
@@ -86,9 +98,9 @@ def check_ssrf_protection(url: NormalizedUrl, *, use_cache: bool = True) -> None
     hostname = url.host
     try:
         ips = _resolve_ips(hostname, use_cache=use_cache)
-    except socket.gaierror:
-        # An unresolvable hostname is not a valid public target: fail closed rather
-        # than let it reach loopback via the pin fallback.
+    except (socket.gaierror, socket.herror, OSError, TimeoutError):
+        # Any OS resolver fault (gaierror, herror, a degraded resolver's timeout/OSError)
+        # is not a valid public target: fail closed, never reach loopback via the pin.
         raise ValueError(f"SSRF protection: cannot resolve hostname {hostname}") from None
     for ip in ips:
         if not is_public_ip_value(ip):
@@ -110,9 +122,9 @@ def resolve_and_pin_host(url: NormalizedUrl) -> tuple[str, str]:
         # Resolve FRESH (no cache): the pin governs the connection, so it is
         # re-validated every call and a rebind inside the TTL cannot bypass it.
         ips = _resolve_ips(hostname, use_cache=False)
-    except socket.gaierror:
-        # Fail closed: returning the hostname lets the client re-resolve at connect
-        # time with no validation applied.
+    except (socket.gaierror, socket.herror, OSError, TimeoutError):
+        # Fail closed against every OS resolver fault: returning the hostname would
+        # let the client re-resolve at connect time with no validation applied.
         raise ValueError(f"SSRF protection: cannot resolve hostname {hostname}") from None
     if not ips:
         raise ValueError(f"SSRF protection: hostname {hostname} has no public IP")

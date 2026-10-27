@@ -62,12 +62,15 @@ CLASSIFICATION_BY_EXCEPTION: tuple[tuple[tuple[type[BaseException], ...], Classi
         ),
         "connection_error",
     ),
-    ((ssl.SSLError, CffiSSLError, CertificateVerifyError), "tls_error"),
-    # #439: curl_cffi's TLS failures are classified tls_error too -- they share
-    # the row above.
     ((httpx.HTTPStatusError,), "http_status_error"),
     ((httpx.HTTPError,), "http_error"),
+    # #439: curl_cffi's TLS failures are classified tls_error too -- they share
+    # the row below; it must precede the OSError row (SSLError's base IS OSError).
+    ((ssl.SSLError, CffiSSLError, CertificateVerifyError), "tls_error"),
     ((ValueError,), "value_error"),
+    # OSError is the base of every network fault (a degraded resolver raises bare
+    # timeout/OSError); the table's closing catch-all keeps every verdict terminal.
+    ((OSError,), "connection_error"),
 )
 
 
