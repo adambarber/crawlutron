@@ -3,9 +3,13 @@
 from __future__ import annotations
 
 import argparse
+import socket
 import sqlite3
+import uuid
 from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
+from datetime import datetime, timezone
+from getpass import getuser
 from pathlib import Path
 
 from yoyo import get_backend, read_migrations
@@ -33,7 +37,27 @@ class LegacySchemaMismatch(RuntimeError):
     """An unmarked table exists but does not match the current declared schema."""
 
 
-class _MemorySQLiteBackend(SQLiteBackend):
+class _CrawlutronLogBackend(SQLiteBackend):
+    """SQLiteBackend whose migration-log rows resolve the hostname once per process."""
+
+    _cached_fqdn: str | None = None
+
+    def get_log_data(self, migration=None, operation="apply"):
+        assert operation in {"apply", "rollback", "mark", "unmark"}
+        if _CrawlutronLogBackend._cached_fqdn is None:
+            _CrawlutronLogBackend._cached_fqdn = socket.getfqdn()
+        return {
+            "id": str(uuid.uuid1()),
+            "migration_id": migration.id if migration else None,
+            "migration_hash": migration.hash if migration else None,
+            "username": getuser(),
+            "hostname": _CrawlutronLogBackend._cached_fqdn,
+            "created_at_utc": datetime.now(timezone.utc).replace(tzinfo=None),
+            "operation": operation,
+        }
+
+
+class _MemorySQLiteBackend(_CrawlutronLogBackend):
     def connect(self, dburi: DatabaseURI) -> sqlite3.Connection:
         conn = self.driver.connect(
             f"file:{dburi.database}?mode=memory&cache=shared",
@@ -55,7 +79,9 @@ def _backend(db_path: str | Path, memory_name: str | None) -> DatabaseBackend:
         backend.init_database()
         return backend
     path = Path(db_path).resolve()
-    return get_backend(f"sqlite:///{path.as_posix()}")
+    backend = get_backend(f"sqlite:///{path.as_posix()}")
+    backend.__class__ = _CrawlutronLogBackend
+    return backend
 
 
 @contextmanager
