@@ -207,16 +207,16 @@ def test_effective_cookie_namespace_defaults_to_caller(tmp_path):
     # #226: an authenticated caller's profile override must NOT reassign the key-derived
     # namespace -- otherwise a tenant can claim another key_id and read/write its jar.
     assert effective_cookie_namespace({"cookie_namespace": "tenant-x"}, caller) == caller.caller_id
-    # #537: the anonymous passthrough holds only for namespaces that cannot collide
-    # with a keyed identity; a key_*-shaped declaration is refused, not honored.
-    assert effective_cookie_namespace({"cookie_namespace": "tenant-x"}, anonymous) == "tenant-x"
+    # #559: the anonymous passthrough is gone -- a declaration names no boundary, so
+    # every declared namespace is refused to the shared default (#537's key_ check is a subset).
+    assert effective_cookie_namespace({"cookie_namespace": "tenant-x"}, anonymous) == ""
     key_shaped = f"key_{record.key_id.removeprefix('key_')}"
     assert effective_cookie_namespace({"cookie_namespace": key_shaped}, anonymous) == ""
 
 
 def test_anonymous_crawl_cannot_read_keyed_callers_jar(tmp_path):
-    """#537: an anonymous key_*-shaped cookie_namespace declaration gets the shared
-    default, never the keyed jar: two tenants (keyed, anonymous), same domain."""
+    """#537, subsumed by #559: an anonymous key_*-shaped cookie_namespace declaration
+    gets the shared default, never the keyed jar: two tenants (keyed, anonymous), same domain."""
     from app.models.caller_identity import CallerIdentity
     from app.storage.coordination_cookies import SharedCookieStore
     from app.transport.cookie_jar import CookieJar
@@ -241,8 +241,9 @@ def test_anonymous_crawl_cannot_read_keyed_callers_jar(tmp_path):
 
 
 def test_anonymous_crawl_cannot_read_keyed_callers_jar_via_admission(tmp_path):
-    """#537: end to end -- the namespace written back into the durable profile by
-    admission is not the declared key id, so the engine never crawls under it."""
+    """#537, tightened by #559: an anonymous key_*-shaped declaration is now refused
+    at the door with 422 (it was 202 + a scrubbed durable row) -- the key id is a
+    declaration like any other, and declarations are refused for anonymous."""
     from tests.factories.client import quota_client
 
     async def run():
@@ -262,12 +263,11 @@ def test_anonymous_crawl_cannot_read_keyed_callers_jar_via_admission(tmp_path):
                     },
                 },
             )
-            assert crawl.status_code == 202, crawl.text
-            stored = _stored_request(store, crawl)
-            declared = stored.policy.request_profile.get("cookie_namespace")
-            assert declared != key_id, (
-                f"anonymous key_-shaped declaration leaked into the durable row: {declared!r}"
-            )
+            assert crawl.status_code == 422, crawl.text
+            body = crawl.json()
+            envelope = body if "code" in body else body["detail"]
+            assert envelope["code"] == "anonymous_cookie_namespace"
+            assert store.list_jobs() == [], "a refused declaration must not persist a row"
 
     import asyncio
 

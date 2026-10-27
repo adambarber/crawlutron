@@ -6,6 +6,26 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Security
+- **Anonymous callers may no longer declare a cookie namespace (#559).**
+  `request_profile.cookie_namespace` was honored verbatim for anonymous
+  crawls, so any anonymous caller could name a tenant's jar (e.g.
+  `tenant-x`) and read another anonymous tenant's persisted cookies through
+  the shared store -- the F-1 residual from the external re-review: the
+  keyed-vs-anonymous collision was closed (#537) but anonymous-vs-anonymous
+  was not. A declared namespace is cooperation between authenticated callers
+  (keyed crawls are pinned to their key id, #226), never an anonymous tenant
+  boundary: anonymous is ONE bounded shared identity (M1 #206). Owner ruling:
+  fail closed. Every policy-carrying door (`/v1/crawl`, `/v1/map`, `/v1/jobs`,
+  and the MCP crawl/map tools through the same `admit` seam) now returns 422
+  `anonymous_cookie_namespace` for an anonymous declaration instead of the
+  #537-style silent downgrade, and `effective_cookie_namespace` refuses every
+  anonymous declaration to the shared default (the profile scrub-back stays as
+  defense in depth for seams that bypass the doors). The render door has no
+  policy carrier and keeps its #483 binding; the watch sweeper synthesizes
+  keyed-owner namespaces internally and is untouched. Refusals pinned red-first
+  in `tests/api/test_caller_isolation.py` (unit flip, crawl/map/jobs door 422s,
+  shared-jar isolation, and the #537 end-to-end test tightened to the door
+  refusal); the walk-past (refusal disabled) failed all six guard tests.
 - **Webhook doors refuse plaintext `http://` (#499).** `webhook_url` was accepted
   at both doors -- the crawl 202 path and watch registration -- with any
   `http://` scheme: the HMAC signature scheme protects integrity, not

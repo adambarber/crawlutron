@@ -19,6 +19,7 @@ from app.api.caller_auth import (
     auth_denials,
     effective_cookie_namespace,
     quota_denials,
+    refuse_anonymous_cookie_namespace,
     resolve_page_limit,
 )
 from app.api.dependencies import CallerDep, JobStoreDep, SettingsDep, ShutdownEventDep
@@ -87,7 +88,8 @@ async def create_job(
             update={"limits": resolved_policy.limits.model_copy(update={"max_pages": bound})}
         )
         # #195/#226: persist the caller's effective cookie namespace so a keyed whole-site job
-        # crawls under its own jar partition; the durable row outlives the admitting request.
+        # crawls under its own jar partition; #559 refuses an anonymous declaration here first.
+        refuse_anonymous_cookie_namespace(caller, resolved_policy.request_profile)
         namespace = effective_cookie_namespace(resolved_policy.request_profile, caller)
         # #537: a refused key id must not survive in the durable row for the engine to re-derive.
         if namespace or namespace != cookie_namespace_for(resolved_policy.request_profile):

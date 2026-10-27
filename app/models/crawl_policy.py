@@ -112,8 +112,10 @@ class CrawlPolicy(BaseModel):
         "user_agent_family (for example desktop_chrome), user_agents, accept_languages, "
         "fingerprint_seed, fingerprint_rotation, cookie_jar, cookie_namespace, and cookies. "
         "cookie_jar is one of per_host, session, or none; only per_host/session apply the static "
-        "cookies map (which stays inert without cookie_jar). cookie_namespace isolates the "
-        "persistent jar per tenant. Applied only to direct HTTP strategies and echoed in diagnostics.",
+        "cookies map (which stays inert without cookie_jar). cookie_namespace partitions the "
+        "persistent jar; it is not a caller-facing knob -- keyed crawls are pinned to their key "
+        "id (#226) and an anonymous crawl that declares one is refused with 422 (#559). "
+        "Applied only to direct HTTP strategies and echoed in diagnostics.",
         json_schema_extra=REQUEST_PROFILE_KEYS_JSON,
     )
     browser_profile: dict[str, Any] = Field(
