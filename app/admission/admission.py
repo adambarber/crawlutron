@@ -248,7 +248,6 @@ def requeue_admitted_pages(
     job state, the shape the first admission used."""
     if known is None:
         known = admitted_page_identities(job, host_policy=context.host_policy)
-    known = admitted_page_identities(job, host_policy=context.host_policy)
     accepted_entries, overcommitted = _requeue_page_identities(
         job,
         known,

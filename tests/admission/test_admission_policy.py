@@ -2,6 +2,7 @@
 
 import asyncio
 from types import SimpleNamespace
+from unittest.mock import patch
 
 import pytest
 
@@ -281,6 +282,35 @@ class _RequeueJob:
 
 def _requeue_context():
     return SimpleNamespace(host_policy=HostPolicy.unrestricted())
+
+
+def test_requeue_honors_the_threaded_known_set():
+    """A threaded ``known`` (#548) is used as-is, not re-derived (#558).
+
+    The dead re-derivation wiped the threaded set on every transient retry
+    -- an O(visited) backslide the caller's discard-then-requeue sequencing
+    accidentally masked.
+    """
+    job = _RequeueJob(policy={"limits": {"max_pages": 5}}, visited=["https://far.test/"])
+    known = {canonical("https://near.test/")}
+
+    with patch(
+        "app.admission.admission.admitted_page_identities",
+        side_effect=AssertionError("threaded set re-derived"),
+    ):
+        outcome = requeue_admitted_pages(
+            job,
+            [
+                FrontierEntry(url=canonical("https://near.test/"), depth=1),
+                FrontierEntry(url=canonical("https://new.test/"), depth=1),
+            ],
+            _requeue_context(),
+            known=known,
+        )
+
+    assert [entry.url.raw for entry in job.frontier] == ["https://new.test/"]
+    assert outcome.accepted == 1
+    assert canonical("https://near.test/") in known
 
 
 class TestRequeueOvercommitContract:
