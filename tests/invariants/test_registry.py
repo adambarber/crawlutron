@@ -6,7 +6,7 @@ from collections.abc import Mapping, Sequence
 from contextvars import ContextVar
 from functools import cache
 
-from tests.chokepoint_walks import app_trees, local_nodes, nodes_of, resolved_call_name
+from tests.chokepoint_walks import app_trees, local_subtree, nodes_of, resolved_call_name
 from tests.invariants._shared import DefinitionNode, _module_definition_index, _relative_app_path
 from tests.property_registry import PROPERTY_BY_NAME, PROPERTY_REGISTRY, Property
 
@@ -89,7 +89,7 @@ def _resolvedlocal_nodes(
             continue
         seen.add(current_key)
         resolved.append((current_tree, current))
-        for child in local_nodes(current):
+        for child in local_subtree(current):
             if not isinstance(child, ast.Call):
                 continue
             if isinstance(child.func, ast.Name):
