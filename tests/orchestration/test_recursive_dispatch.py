@@ -13,8 +13,8 @@ from app.models.discovered_link import DiscoveredLink
 from app.models.host_policy import HostPolicy
 from app.orchestration.admission_stall import AdmissionStallGuard
 from app.orchestration.recursive import RecursiveRunState, admit_recursive_batch
-from app.orchestration.scheduler import DomainScheduler
 from app.runtime.metrics import get_metrics
+from app.transport.scheduler import DomainScheduler
 from app.vocabulary.strategies import BROWSER_HEADLESS
 from tests._policy_factories import canonical
 from tests._recursive_harnesses import ContentionFreeGate, drive_recursive_crawl, make_crawl_task

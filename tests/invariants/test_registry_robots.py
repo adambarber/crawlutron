@@ -170,9 +170,7 @@ def _parser_definition(tree: ast.AST, path: pathlib.Path, node: ast.AST) -> bool
         return False
     _source, _literals = _source_and_literals(node)
     name = node.name.lower()
-    if _relative_app_path(path) == "app/orchestration/robots_parse.py" and (
-        "robot" in name or "parse" in name
-    ):
+    if _relative_app_path(path) == "app/transport/robots_parse.py" and ("robot" in name or "parse" in name):
         return True
     if "robot" in name and any(token in name for token in ("parse", "rule", "directive")):
         return True

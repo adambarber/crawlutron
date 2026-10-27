@@ -27,17 +27,17 @@ from app.models.crawl_result import EngineCrawlResult
 from app.models.host_policy import HostPolicy
 from app.models.json_value import JsonValue
 from app.models.serialization import from_wire, to_dict
-from app.orchestration import robots as _robots_policy
 from app.orchestration.request_pipeline import (
     PipelineDependencies,
     PipelineState,
     run_crawl_request,
 )
-from app.orchestration.robots import FetchAndDecode
 from app.runtime.pressure_gates import ResourceGate
+from app.transport import robots as _robots_policy
 from app.transport.cache import HttpCache
 from app.transport.content_cache import ContentCache
 from app.transport.fetchers import default_http_fetcher, impersonating_fetcher
+from app.transport.robots import FetchAndDecode
 
 if TYPE_CHECKING:
     from app.models.crawl_policy import CrawlPolicy

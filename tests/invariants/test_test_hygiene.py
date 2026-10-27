@@ -350,13 +350,13 @@ def _scheduler_run_positional_names() -> tuple[str, ...]:
 
     Read from production, not typed: the count and names tell a double from an
     unrelated ``run``, and a hand-kept tuple stales when the signature grows."""
-    tree = parsed(REPO_ROOT / "app" / "orchestration" / "scheduler.py")
+    tree = parsed(REPO_ROOT / "app" / "transport" / "scheduler.py")
     for node in nodes_of(tree):
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == "run":
             args = node.args
             return tuple(a.arg for a in args.posonlyargs + args.args if a.arg not in {"self", "cls"})
     raise AssertionError(
-        "app/orchestration/scheduler.py no longer has a run(); the rule it backs is unverifiable"
+        "app/transport/scheduler.py no longer has a run(); the rule it backs is unverifiable"
     )
 
 

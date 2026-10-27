@@ -9,8 +9,8 @@ from collections.abc import Awaitable, Callable
 from secrets import SystemRandom
 from typing import TYPE_CHECKING, Protocol, TypeVar
 
-from app.orchestration.scheduler_exceptions import CircuitBreakerOpen
-from app.orchestration.scheduler_purge import new_rate_and_pin_state, purge_scheduler_maps
+from app.transport.scheduler_exceptions import CircuitBreakerOpen
+from app.transport.scheduler_purge import new_rate_and_pin_state, purge_scheduler_maps
 from app.vocabulary.taxonomy import DOMAIN_HEALTH_BY_STATUS, ResultStatus
 
 if TYPE_CHECKING:

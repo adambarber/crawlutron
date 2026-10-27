@@ -304,7 +304,7 @@ def test_scheduler_reads_the_taxonomy_domain_health_table():
     """
     import typing
 
-    import app.orchestration.scheduler as scheduler
+    import app.transport.scheduler as scheduler
     from app.vocabulary import taxonomy
 
     members = set(typing.get_args(taxonomy.ResultStatus))

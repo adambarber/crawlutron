@@ -1,7 +1,7 @@
 """One scheduler construction home: DomainScheduler.from_settings (#482)."""
 
 from app.config.settings import CrawlerSettings
-from app.orchestration.scheduler import DomainScheduler
+from app.transport.scheduler import DomainScheduler
 
 _KNOBS = (
     "_per_domain_limit",

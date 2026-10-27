@@ -7,7 +7,7 @@ the wire shape and the reply length the parent observes.
 import pytest
 
 from app.extraction.content import extract_document
-from app.orchestration.doc_pool import DocWorker
+from app.extraction.doc_pool import DocWorker
 from tests._doc_pool_fixtures import fresh_doc_pool
 from tests._extraction_helpers import settings_with
 from tests._process_doubles import StubProc

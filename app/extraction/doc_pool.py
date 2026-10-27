@@ -15,8 +15,8 @@ from typing import TYPE_CHECKING, TypedDict
 
 from markitdown import MarkItDown
 
-from app.orchestration.pool import SyncPool
 from app.runtime.metrics import get_metrics
+from app.runtime.pool import SyncPool
 
 logger = logging.getLogger(__name__)
 
@@ -142,7 +142,7 @@ def _markitdown_extract(body: bytes) -> str | None:
     return res.text_content if res is not None else None
 
 
-def _doc_worker_main(conn) -> None:
+def doc_worker_main(conn) -> None:
     """Persistent worker entry: serve markitdown tasks until killed or orphaned.
     Each task arrives as ``(body, hooks, cap)`` from the parent's per-call payload
     (never process-global state); a ``die`` hook exits without sending, like a segfault.
@@ -178,6 +178,9 @@ def _doc_worker_main(conn) -> None:
     finally:
         with suppress(Exception):
             conn.close()
+        # Clean pipe-EOF exit skips native teardown (os._exit), so onnxruntime's telemetry
+        # WorkerThread never races module finalization into the recursive-mutex abort (#510).
+        os._exit(0)
 
 
 class DocWorkerSpawnError(RuntimeError):
@@ -191,7 +194,7 @@ def spawn_doc_worker(ready_timeout: float = SPAWN_READY_TIMEOUT) -> DocWorker:
     for its own imports here, not inside the caller's conversion budget.
     """
     parent_conn, child_conn = WORKER_CONTEXT.Pipe(duplex=True)
-    proc = WORKER_CONTEXT.Process(target=_doc_worker_main, args=(child_conn,), daemon=True)
+    proc = WORKER_CONTEXT.Process(target=doc_worker_main, args=(child_conn,), daemon=True)
     proc.start()
     child_conn.close()  # parent keeps only its end of the pipe
     worker = DocWorker(proc, parent_conn)

@@ -9,7 +9,7 @@ from app.extraction.content import (
     looks_like_document,
     text_from_html,
 )
-from app.orchestration.doc_pool import doc_task_hooks, install_doc_pool_hooks
+from app.extraction.doc_pool import doc_task_hooks, install_doc_pool_hooks
 from tests._extraction_helpers import (
     detect_pagination,
     doc_worker_acquisitions,

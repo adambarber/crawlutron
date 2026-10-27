@@ -1,5 +1,5 @@
 import app.extraction.documents as docex
-from app.orchestration.doc_pool import DocExtractionPool, DocWorker
+from app.extraction.doc_pool import DocExtractionPool, DocWorker
 from tests._process_doubles import StubSpawner
 
 
@@ -7,7 +7,7 @@ def fresh_doc_pool(monkeypatch, *, spawn=None) -> DocExtractionPool:
     """A fresh, isolated real pool installed over both module bindings, so a test's
     extraction (documents.DOC_POOL) and its health assertions (content's re-export) agree."""
     import app.extraction.content as ext_mod
-    import app.orchestration.doc_pool as doc_pool_mod
+    import app.extraction.doc_pool as doc_pool_mod
 
     pool = DocExtractionPool(
         spawn=spawn or doc_pool_mod.spawn_doc_worker,

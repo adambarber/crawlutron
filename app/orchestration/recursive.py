@@ -22,7 +22,6 @@ from app.models.host_policy import HostPolicy
 from app.models.normalized_url import NormalizedUrl
 from app.orchestration.admission_stall import AdmissionStallGuard, BatchStages, crawl_batches
 from app.orchestration.results import failed_result_for
-from app.orchestration.scheduler import DomainScheduler
 from app.orchestration.spill_sink import SpillSink, write_spill
 from app.runtime.metrics import MetricsStore, get_metrics
 from app.runtime.pressure_gates import ResourceGate
@@ -31,6 +30,7 @@ from app.runtime.resource_pressure import (
     default_admission_policy,
 )
 from app.safety.safe_regex import BoundedPattern
+from app.transport.scheduler import DomainScheduler
 from app.vocabulary.limits import ENGINE_BATCH_CONCURRENCY_MULTIPLIER
 from app.vocabulary.strategies import BROWSER_STRATEGIES, HTTP_STRATEGIES
 from app.vocabulary.taxonomy import is_transient_classification

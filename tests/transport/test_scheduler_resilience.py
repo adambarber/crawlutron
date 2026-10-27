@@ -8,7 +8,7 @@ from app.models.crawl_job import CrawlJob
 from app.models.crawl_result import EngineCrawlResult
 from app.models.taxonomy import Classification
 from app.orchestration.results import TerminalResult
-from app.orchestration.scheduler import DomainScheduler
+from app.transport.scheduler import DomainScheduler
 from tests._policy_factories import canonical
 from tests._result_builders import make_job, make_result
 from tests._scheduler_doubles import FailingSink, engine_envelope, make_scheduler, ok_worker, run_through
@@ -19,7 +19,7 @@ def test_run_still_purges_up_front(monkeypatch):
     """The batch entry point keeps its up-front purge so a long run cannot grow
     the dicts without bound even when no 429 fires."""
     now = [1000.0]
-    monkeypatch.setattr("app.orchestration.scheduler.time.time", lambda: now[0])
+    monkeypatch.setattr("app.transport.scheduler.time.time", lambda: now[0])
     scheduler = make_scheduler()
     scheduler.set_domain_cooldown("stale.test", 10.0)
     assert "stale.test" in scheduler.domain_cooldowns

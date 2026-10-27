@@ -44,7 +44,6 @@ from app.models.normalized_url import NormalizedUrl, admit_or_none
 from app.models.result_factory import terminal_attempt
 from app.models.result_record import ProducerEnvelope
 from app.models.taxonomy import Classification
-from app.orchestration.robots import FetchAndDecode
 from app.storage.job_store import (
     CrawlJobState,
     FrontierEntry,
@@ -53,6 +52,7 @@ from app.storage.job_store import (
     job_max_pages,
     normalize_job_state,
 )
+from app.transport.robots import FetchAndDecode
 from app.vocabulary.limits import MAX_URL_TRANSIENT_ATTEMPTS
 from app.vocabulary.taxonomy import is_transient_classification, status_for_classification
 

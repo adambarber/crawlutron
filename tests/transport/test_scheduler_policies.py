@@ -7,7 +7,7 @@ import pytest
 
 from app.models.crawl_job import CrawlJob
 from app.models.crawl_result import EngineCrawlResult
-from app.orchestration.scheduler import COOLDOWN_PURGE_INTERVAL, DomainScheduler, TokenBucket
+from app.transport.scheduler import COOLDOWN_PURGE_INTERVAL, DomainScheduler, TokenBucket
 from tests._policy_factories import canonical
 from tests._result_builders import make_job, make_result
 from tests._scheduler_doubles import engine_envelope, make_scheduler, ok_worker, trip_circuit
@@ -19,7 +19,7 @@ from tests._timing_harnesses import recorder
 class TestSchedulerCircuitBreaker:
     def test_record_success_resets_the_escalation_ladder(self, monkeypatch):
         now = [0.0]
-        monkeypatch.setattr("app.orchestration.scheduler.time.monotonic", lambda: now[0])
+        monkeypatch.setattr("app.transport.scheduler.time.monotonic", lambda: now[0])
         scheduler = make_scheduler(circuit_threshold=1, circuit_cooldown_base=30.0, circuit_cooldown=600.0)
         scheduler.record_failure("example.com")  # t=0: first window, base cooldown
         assert scheduler.is_circuit_open("example.com")
@@ -75,7 +75,7 @@ class TestSchedulerPolicies:
         return TokenBucket(rate=rate, capacity=capacity)
 
     def test_token_bucket_basic(self):
-        from app.orchestration.scheduler import TokenBucket as _Bucket
+        from app.transport.scheduler import TokenBucket as _Bucket
 
         bucket = _Bucket(rate=10.0, capacity=5)
         wait = bucket.consume(1.0)
@@ -103,7 +103,7 @@ class TestSchedulerPolicies:
         trip_circuit(scheduler, "example.com")
         # Half-open: after the window elapses the breaker re-admits the domain.
         real = time.monotonic
-        monkeypatch.setattr("app.orchestration.scheduler.time.monotonic", lambda: real() + 10_000.0)
+        monkeypatch.setattr("app.transport.scheduler.time.monotonic", lambda: real() + 10_000.0)
         assert not (scheduler.is_circuit_open("example.com"))
 
     def test_scheduler_record_latency(self):
@@ -131,7 +131,7 @@ class TestSchedulerPolicies:
         """Consecutive trips escalate the cooldown
         exponentially (base -> doubled -> ... -> cap)."""
         now = [0.0]
-        monkeypatch.setattr("app.orchestration.scheduler.time.monotonic", lambda: now[0])
+        monkeypatch.setattr("app.transport.scheduler.time.monotonic", lambda: now[0])
         s = make_scheduler(
             circuit_threshold=5,
             circuit_cooldown_base=30.0,
@@ -169,26 +169,26 @@ class TestSchedulerPolicies:
         assert s.current_delay("a.com") == 5.0
 
     def test_parse_robots_crawl_delay_specific_group_wins(self):
-        from app.orchestration.robots_parse import parse_robots_crawl_delay as _parse_robots_crawl_delay
+        from app.transport.robots_parse import parse_robots_crawl_delay as _parse_robots_crawl_delay
 
         text = "User-agent: *\nCrawl-delay: 1\nUser-agent: crawlutron\nCrawl-delay: 4\n"
         assert _parse_robots_crawl_delay(text) == 4.0
 
     def test_parse_robots_crawl_delay_star_only(self):
-        from app.orchestration.robots_parse import parse_robots_crawl_delay as _parse_robots_crawl_delay
+        from app.transport.robots_parse import parse_robots_crawl_delay as _parse_robots_crawl_delay
 
         text = "User-agent: *\nCrawl-delay: 3\n"
         assert _parse_robots_crawl_delay(text) == 3.0
 
     def test_parse_robots_crawl_delay_absent(self):
-        from app.orchestration.robots_parse import parse_robots_crawl_delay as _parse_robots_crawl_delay
+        from app.transport.robots_parse import parse_robots_crawl_delay as _parse_robots_crawl_delay
 
         assert _parse_robots_crawl_delay("User-agent: *\nDisallow: /\n") is None
 
     def test_set_domain_min_delay_is_capped_at_the_politeness_ceiling(self):
         """A huge (finite) robots Crawl-delay must not install an
         unbounded politeness floor — the scheduler clamps it at the write."""
-        from app.orchestration.scheduler import MAX_COOLDOWN_WAIT
+        from app.transport.scheduler import MAX_COOLDOWN_WAIT
 
         scheduler = make_scheduler(global_limit=10, per_domain_limit=10)
         scheduler.set_domain_min_delay("example.com", 1e12)
@@ -276,7 +276,7 @@ class TestCooldownPurgeCadence:
         once the interval elapses only expired entries drop, and the fresh
         cooldown for the setting domain survives."""
         fake_now = [1000.0]
-        monkeypatch.setattr("app.orchestration.scheduler.time.time", lambda: fake_now[0])
+        monkeypatch.setattr("app.transport.scheduler.time.time", lambda: fake_now[0])
         scheduler = make_scheduler()
         scheduler.set_domain_cooldown("old.test", 10.0)
         fake_now[0] = 1100.0  # the first cooldown has elapsed
@@ -289,7 +289,7 @@ class TestCooldownPurgeCadence:
     def test_a_fresh_cooldown_is_never_purged_by_the_amortized_run(self, monkeypatch):
         """The domain that just earned a cooldown is never removed by the purge
         that follows its own set."""
-        monkeypatch.setattr("app.orchestration.scheduler.time.time", lambda: 1000.0)
+        monkeypatch.setattr("app.transport.scheduler.time.time", lambda: 1000.0)
         scheduler = make_scheduler()
         scheduler.set_domain_cooldown("rate-limited.test", 30.0)
         assert "rate-limited.test" in scheduler.domain_cooldowns

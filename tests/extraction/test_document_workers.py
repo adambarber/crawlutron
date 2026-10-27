@@ -14,7 +14,7 @@ from app.extraction.content import (
     extract_selected,
     parse_html_tree,
 )
-from app.orchestration.doc_pool import (
+from app.extraction.doc_pool import (
     DocExtractionPool,
     install_doc_pool_hooks,
     spawn_doc_worker,

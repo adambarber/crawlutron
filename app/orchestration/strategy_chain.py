@@ -29,7 +29,7 @@ if TYPE_CHECKING:
     from app.models.http_fetcher import HttpFetcher
     from app.models.normalized_url import NormalizedUrl
     from app.models.taxonomy import Classification, CrawlError
-    from app.orchestration.scheduler import DomainScheduler
+    from app.transport.scheduler import DomainScheduler
 
 from app.vocabulary.taxonomy import (
     BROWSER_BLOCKED_CLASSIFICATIONS,

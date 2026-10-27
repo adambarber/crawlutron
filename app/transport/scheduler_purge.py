@@ -8,7 +8,7 @@ import time
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from app.orchestration.scheduler import TokenBucket
+    from app.transport.scheduler import TokenBucket
 
 __all__ = ["new_rate_and_pin_state", "purge_scheduler_maps"]
 

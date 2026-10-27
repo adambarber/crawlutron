@@ -52,7 +52,7 @@ ROBOTS_LINE_SCANNER_LIVES_IN_ONE_PLACE = Rule(
     name="robots-line-scanner-lives-in-one-place",
     find=_robots_scanner_offenders,
     summary=(
-        "app/orchestration/robots_parse.iter_robots_fields is the single scanner for robots"
+        "app/transport/robots_parse.iter_robots_fields is the single scanner for robots"
         " consumers, so the shared line-walk cannot drift on the empty-value gate"
     ),
     bite=lambda: Bites(

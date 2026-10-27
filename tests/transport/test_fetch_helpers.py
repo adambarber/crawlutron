@@ -7,7 +7,7 @@ this core now lives in one place, and both call sites are pinned.
 import gzip
 from dataclasses import dataclass, field
 
-from app.orchestration.fetch_helpers import fetch_and_decode, fetch_decode_discovery, fetch_text
+from app.transport.fetch_helpers import fetch_and_decode, fetch_decode_discovery, fetch_text
 from app.vocabulary.limits import DISCOVERY_BODY_MAX_BYTES
 
 

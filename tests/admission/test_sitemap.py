@@ -6,9 +6,9 @@ from functools import partial
 from app.admission.policy import read_policy
 from app.models.normalized_url import NormalizedUrl
 from app.orchestration.engine import parse_lastmod, seed_is_fresh, stale_seeds
-from app.orchestration.fetch_helpers import SITEMAP_CACHE, fetch_sitemap_urls
 from app.transport.content_cache import ContentCache
 from app.transport.content_cache_key import build_content_cache_key
+from app.transport.fetch_helpers import SITEMAP_CACHE, fetch_sitemap_urls
 from app.transport.request_profile import headers_for_strategy
 from app.vocabulary.limits import SITEMAP_CACHE_TTL_SECONDS, SITEMAP_FAILURE_TTL_SECONDS
 from tests._assertions import install_to_thread_spy

@@ -266,7 +266,7 @@ _DISCOVERY_FETCH = "fetch_decode_discovery"
 
 
 # The chokepoint module that legitimately owns what it bans.
-_DISCOVERY_CHOKEPOINT = "app/orchestration/fetch_helpers.py"
+_DISCOVERY_CHOKEPOINT = "app/transport/fetch_helpers.py"
 
 
 def _is_discovery_fetch(value: ast.AST | None) -> bool:

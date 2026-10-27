@@ -8,7 +8,7 @@ from __future__ import annotations
 import pytest
 
 from app.models.host_policy import HostPolicy
-from app.orchestration.robots import (
+from app.transport.robots import (
     ROBOTS_FAILURE_TTL_SECONDS,
     RobotsRules,
     load_robots_rules,

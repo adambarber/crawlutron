@@ -9,7 +9,7 @@ import re
 
 import pytest
 
-from app.orchestration.robots import robots_allows, robots_pattern_to_regex
+from app.transport.robots import robots_allows, robots_pattern_to_regex
 from tests._policy_factories import canonical
 
 
