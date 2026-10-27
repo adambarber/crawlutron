@@ -17,6 +17,7 @@ from tests.chokepoint_walks import (
     local_nodes,
     offender_at,
     parent_map,
+    parsed,
     resolved_call_name,
     resolved_expr_name,
 )
@@ -127,7 +128,7 @@ def _inner_edge_callers() -> frozenset[str]:
     calling execute_crawl the edge disappears and the exemption seals shut."""
     if not _MAP_ENDPOINT.exists():
         return frozenset()
-    inner_tree = ast.parse(_MAP_ENDPOINT.read_text(encoding="utf-8"))
+    inner_tree = parsed(_MAP_ENDPOINT)
     inner_name = _INNER_EXECUTOR_EDGE[1].rsplit(".", 1)[-1]
     callers = frozenset(
         f"{_INNER_EXECUTOR_EDGE[0].rsplit('.', 1)[0]}.{fn.name}"

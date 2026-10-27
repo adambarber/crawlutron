@@ -15,6 +15,7 @@ from tests.chokepoint_walks import (
     app_offenders,
     nodes_of,
     offender_at,
+    parsed,
     trees_under,
 )
 from tests.invariants._shared import assert_trees_clean
@@ -349,7 +350,7 @@ def _scheduler_run_positional_names() -> tuple[str, ...]:
 
     Read from production, not typed: the count and names tell a double from an
     unrelated ``run``, and a hand-kept tuple stales when the signature grows."""
-    tree = ast.parse((REPO_ROOT / "app" / "orchestration" / "scheduler.py").read_text(encoding="utf-8"))
+    tree = parsed(REPO_ROOT / "app" / "orchestration" / "scheduler.py")
     for node in nodes_of(tree):
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == "run":
             args = node.args

@@ -6,7 +6,7 @@ import ast
 import re
 from functools import lru_cache
 
-from tests.chokepoint_walks import REPO_ROOT
+from tests.chokepoint_walks import REPO_ROOT, parsed
 from tests.invariants.test_knob_contracts import _consumed_knobs
 
 
@@ -26,9 +26,7 @@ def _app_and_scripts_sources() -> list[tuple[str, ast.Module]]:
         for path in sorted((REPO_ROOT / base).rglob("*.py")):
             if "__pycache__" in path.parts:
                 continue
-            found.append(
-                (path.relative_to(REPO_ROOT).as_posix(), ast.parse(path.read_text(encoding="utf-8")))
-            )
+            found.append((path.relative_to(REPO_ROOT).as_posix(), parsed(path)))
     return found
 
 

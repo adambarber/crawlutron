@@ -11,7 +11,7 @@ import pathlib
 from collections.abc import Callable, Iterable
 from pathlib import Path
 
-from tests.chokepoint_walks import REPO_ROOT, app_trees, relative_posix, resolved_call_name
+from tests.chokepoint_walks import REPO_ROOT, app_trees, parsed, relative_posix, resolved_call_name
 from tests.property_registry import Property
 
 __all__ = [
@@ -35,7 +35,7 @@ def app_names() -> set[str]:
     for path in (REPO_ROOT / "app").rglob("*.py"):
         if "__pycache__" in path.parts:
             continue
-        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+        for node in ast.walk(parsed(path)):
             if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
                 names.add(node.name)
             elif isinstance(node, ast.Attribute):

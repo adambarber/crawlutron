@@ -27,6 +27,25 @@ _NODES_BY_KIND: weakref.WeakKeyDictionary[ast.AST, dict[str, tuple[ast.AST, ...]
 )
 
 
+# One parse per (path, mtime_ns, size) per session; every tree reader funnels here.
+_PARSE_CACHE: dict[tuple[str, int, int], ast.Module] = {}
+
+
+def parsed(path: pathlib.Path) -> ast.Module:
+    """The AST of `path`, parsed once per session and shared.
+
+    Keyed on mtime and size so an edited file is re-parsed, never stale:
+    a detector reading the cache still sees a freshly planted violation.
+    """
+    stat = path.stat()
+    key = (str(path), stat.st_mtime_ns, stat.st_size)
+    tree = _PARSE_CACHE.get(key)
+    if tree is None:
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        _PARSE_CACHE[key] = tree
+    return tree
+
+
 def nodes_of(root: ast.AST) -> tuple[ast.AST, ...]:
     """``tuple(ast.walk(root))``, materialized once per root and shared.
 
@@ -106,16 +125,13 @@ def trees_under(directory: pathlib.Path) -> tuple[tuple[pathlib.Path, ast.Module
 
 @cache
 def _trees_under(directory: pathlib.Path) -> tuple[tuple[pathlib.Path, ast.Module], ...]:
-    return tuple(
-        (path, ast.parse(path.read_text(encoding="utf-8"), filename=str(path)))
-        for path in sorted(directory.rglob("*.py"))
-    )
+    return tuple((path, parsed(path)) for path in sorted(directory.rglob("*.py")))
 
 
 def file_tree(relative: str) -> tuple[pathlib.Path, ast.Module]:
     """Parse one module by its repo-relative path (e.g. app/api/webhooks.py)."""
     path = REPO_ROOT / relative
-    return path, ast.parse(path.read_text(encoding="utf-8"))
+    return path, parsed(path)
 
 
 def offender(path: pathlib.Path, lineno: int, detail: str = "") -> str:
