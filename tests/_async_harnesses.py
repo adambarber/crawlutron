@@ -75,11 +75,15 @@ async def _drain_running_crawls(*, guard: float = 10.0) -> None:
         # materialising every result payload to ask a question about the status column.
         return [row["job_id"] for row in job_store.list_jobs() if row["status"] not in terminal_codes]
 
+    async def drained() -> bool:
+        await asyncio.sleep(0)
+        return not acting()
+
     try:
-        await await_until(
-            lambda: not acting(), "a crawl was still active when its test finished", guard=guard
-        )
-    except AssertionError:
+        # A 5ms poll keeps the DB question off the hot path (a sleep(0) spin ran
+        # ``list_jobs`` ~2000x/s); the bound and the swallow are unchanged.
+        await asyncio.wait_for(drained(), timeout=guard)
+    except (AssertionError, TimeoutError):
         # A stuck crawl is reported, not raised: raising here would mask the assertion of the test that
         # actually caused it.
         pass

@@ -5,7 +5,7 @@ from __future__ import annotations
 import ast
 import pathlib
 
-from tests.chokepoint_walks import app_trees, has_method_call, local_nodes, nodes_of, offender
+from tests.chokepoint_walks import app_trees, has_method_call, local_subtree, nodes_of, offender
 from tests.invariants._shared import _relative_app_path
 from tests.invariants.test_registry import (
     _PROPERTY_MODULES,
@@ -56,7 +56,7 @@ def _bool_env_literal_sets(
     nodes: list[tuple[ast.AST, ast.AST]],
 ) -> tuple[dict[int, set[str]], dict[str, set[str]]]:
     direct: dict[int, set[str]] = {}
-    descendants = [child for _owner_tree, node in nodes for child in local_nodes(node)]
+    descendants = [child for _owner_tree, node in nodes for child in local_subtree(node)]
     for child in descendants:
         if (
             isinstance(child, (ast.Set, ast.List, ast.Tuple, ast.Dict))
@@ -83,7 +83,9 @@ def _bool_env_node_observation(
 ) -> tuple[bool, int]:
     direct, named = _bool_env_literal_sets(nodes)
     named = {**tree_sets, **named} if tree_sets else named
-    local_nodes_with_tree = [(owner_tree, child) for owner_tree, node in nodes for child in local_nodes(node)]
+    local_nodes_with_tree = [
+        (owner_tree, child) for owner_tree, node in nodes for child in local_subtree(node)
+    ]
     has_normalization = any(
         has_method_call(owner_tree, child, _BOOL_ENV_NORMALIZATION_METHODS)
         for owner_tree, child in local_nodes_with_tree
@@ -105,7 +107,7 @@ def _bool_env_node_observation(
                 and isinstance(part.value, ast.Name)
                 and part.value.id in named
             )
-            for part in local_nodes(child)
+            for part in local_subtree(child)
         ):
             count += 1
     return True, count
@@ -141,16 +143,15 @@ def _bool_env_observations(tree: ast.AST, path: pathlib.Path, prop: Property) ->
 
 @_module_aware
 def _bool_env_offenders(tree: ast.AST, path: pathlib.Path, prop: Property) -> list[str]:
-    offenders: list[str] = []
     tree_sets = _bool_env_tree_sets(tree, _PROPERTY_MODULES.get())
     excluded = _owner_definition_ids(tree, path, prop)
-    for name, node in _property_nodes(tree, path, prop):
-        context = _resolvedlocal_nodes(tree, node, excluded, modules=_PROPERTY_MODULES.get(), prop=prop)
-        if _bool_env_node_observation(context, tree_sets)[1]:
-            offenders.append(
-                offender(path, getattr(node, "lineno", 1), f"{name} reimplements boolean environment parsing")
-            )
-    return offenders
+    return [
+        offender(path, getattr(node, "lineno", 1), f"{name} reimplements boolean environment parsing")
+        for name, node in _property_nodes(tree, path, prop)
+        if _bool_env_node_observation(
+            _resolvedlocal_nodes(tree, node, excluded, modules=_PROPERTY_MODULES.get(), prop=prop), tree_sets
+        )[1]
+    ]
 
 
 def test_bool_env_has_one_implementation():

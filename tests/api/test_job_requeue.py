@@ -34,6 +34,13 @@ def _started_hung_job(job_store, root=GRAPH_ROOT):
     return job, hang, settings
 
 
+def _assert_single_visit(job, root: str, status: str) -> None:
+    """One job, one page, one result with the expected status."""
+    assert job.visited == {canonical(root)}
+    assert len(job.results) == 1
+    assert job.results[0]["status"] == status
+
+
 class TestTransientFailureRequeue:
     """A TRANSIENT failure (network/dns/tls/timeout/browser crash) re-queues
     for bounded retries; a PERMANENT one (not_found/site_error/gone) is
@@ -49,9 +56,7 @@ class TestTransientFailureRequeue:
         # outcome is the eventual success.
         assert job.status == JobStatus.COMPLETED
         assert engine.attempts[root] == 3
-        assert job.visited == {canonical(root)}
-        assert len(job.results) == 1
-        assert job.results[0]["status"] == "success"
+        _assert_single_visit(job, root, "success")
         assert job.stats["total_crawled"] == 1
         assert job.stats["total_failed"] == 0
 
@@ -63,9 +68,7 @@ class TestTransientFailureRequeue:
         # terminal failure so the whole-site job can end.
         assert job.status == JobStatus.COMPLETED
         assert engine.attempts[root] == self._CAP
-        assert job.visited == {canonical(root)}
-        assert len(job.results) == 1
-        assert job.results[0]["status"] == "failed"
+        _assert_single_visit(job, root, "failed")
         assert job.results[0]["error"] == "retries_exhausted"
         assert job.stats["total_failed"] == 1
         assert job.frontier == []

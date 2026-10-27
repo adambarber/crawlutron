@@ -26,7 +26,7 @@ from app.storage.migrations import (
     schema_drift,
     stamp_store,
 )
-from app.storage.migrations.runner import LegacySchemaMismatch
+from app.storage.migrations.runner import LegacySchemaMismatch, migrate_store
 from app.storage.result_store import CrawlResultStore
 from app.storage.watch_store import WatchStore
 from tests._policy_factories import canonical, job_store
@@ -184,6 +184,21 @@ def test_fresh_database_is_empty_and_current_after_migrations(tmp_path, schema):
     assert conn.execute(f"SELECT COUNT(*) FROM {CURRENT_SCHEMAS[schema].table_name}").fetchone()[0] == 0
     assert _BOOKKEEPING_TABLES <= _table_names(conn)
     _assert_migration_recorded(conn, schema)
+    conn.close()
+
+
+def test_migration_apply_does_not_resolve_hostnames_per_migration(tmp_path, monkeypatch):
+    """Migration logging must not reverse-resolve DNS per applied migration."""
+
+    def refused_getfqdn(name=None):
+        raise AssertionError("socket.getfqdn() called during migration apply")
+
+    monkeypatch.setattr("socket.getfqdn", refused_getfqdn)
+    db_path = tmp_path / "jobs.db"
+    migrate_store(db_path, StoreSchema.CRAWL_JOBS)
+    conn = sqlite3.connect(db_path)
+    recorded = conn.execute("SELECT COUNT(*) FROM _yoyo_log").fetchone()[0]
+    assert recorded > 0
     conn.close()
 
 

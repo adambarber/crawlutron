@@ -9,9 +9,10 @@ from __future__ import annotations
 import ast
 import pathlib
 from collections.abc import Callable, Iterable
+from functools import cache
 from pathlib import Path
 
-from tests.chokepoint_walks import REPO_ROOT, app_trees, relative_posix, resolved_call_name
+from tests.chokepoint_walks import REPO_ROOT, app_trees, nodes_of, parsed, relative_posix, resolved_call_name
 from tests.property_registry import Property
 
 __all__ = [
@@ -26,16 +27,27 @@ __all__ = [
 
 
 def app_names() -> set[str]:
-    """Every name the app tree spells, at any depth and in any position.
+    """Every name the app tree spells: every def/class/attr/alias a detector could target.
 
-    Definitions alone are too narrow: attribute spellings exist in app/, so the
-    universe is every def/class/attr/alias spelling a detector could target.
+    Memoized on the files' mtime/size key, so an edited tree re-collects.
     """
+    return _app_names(_app_tree_key())
+
+
+def _app_tree_key() -> tuple[tuple[str, int, int], ...]:
+    """The parse-cache key of every app module, one stat pass per call."""
+    return tuple((str(p), p.stat().st_mtime_ns, p.stat().st_size) for p in _app_file_paths())
+
+
+def _app_file_paths() -> list[pathlib.Path]:
+    return [path for path in (REPO_ROOT / "app").rglob("*.py") if "__pycache__" not in path.parts]
+
+
+@cache
+def _app_names(_key: tuple[tuple[str, int, int], ...]) -> set[str]:
     names: set[str] = set()
-    for path in (REPO_ROOT / "app").rglob("*.py"):
-        if "__pycache__" in path.parts:
-            continue
-        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+    for path in _app_file_paths():
+        for node in ast.walk(parsed(path)):
             if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
                 names.add(node.name)
             elif isinstance(node, ast.Attribute):
@@ -56,7 +68,7 @@ def function_defs(tree: ast.AST) -> list[FunctionNode]:
     The opening move of most shape detectors, written once; a parenthesised
     copy in each detector is how two end up walking different node sets.
     """
-    return [node for node in ast.walk(tree) if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))]
+    return [node for node in nodes_of(tree) if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))]
 
 
 def assert_trees_clean(
@@ -246,8 +258,33 @@ def _module_name(path: pathlib.Path) -> str:
 type DefinitionNode = ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef
 
 
+# A caller's module set: the cached app-tuple, a synthetic list, or none.
+type ModuleSet = tuple[tuple[pathlib.Path, ast.Module], ...] | list[tuple[pathlib.Path, ast.Module]] | None
+
+
 def _module_definition_index(
-    modules: tuple[tuple[pathlib.Path, ast.Module], ...] | None,
+    modules: ModuleSet,
+) -> dict[str, list[tuple[pathlib.Path, ast.Module, DefinitionNode]]]:
+    """Module-qualified definition index over `modules`, built once per tuple.
+
+    Callers pass the same cached trees tuple session-wide, so one build serves
+    every registry site; ``None`` or a list (synthetic proofs) is uncached.
+    """
+    if isinstance(modules, list) or modules is None:
+        return _index_modules(modules)
+    return _module_definition_index_cached(modules)
+
+
+@cache
+def _module_definition_index_cached(
+    modules: tuple[tuple[pathlib.Path, ast.Module], ...],
+) -> dict[str, list[tuple[pathlib.Path, ast.Module, DefinitionNode]]]:
+    """The cached tuple branch of :func:`_module_definition_index`."""
+    return _index_modules(modules)
+
+
+def _index_modules(
+    modules: ModuleSet,
 ) -> dict[str, list[tuple[pathlib.Path, ast.Module, DefinitionNode]]]:
     index: dict[str, list[tuple[pathlib.Path, ast.Module, DefinitionNode]]] = {}
     for path, tree in modules or ():

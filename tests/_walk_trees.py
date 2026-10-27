@@ -6,7 +6,7 @@ import tokenize
 from collections.abc import Callable, Iterable, Iterator
 from functools import cache
 
-from tests._walk_primitives import APP_ROOT, REPO_ROOT, _narrow, trees_under
+from tests._walk_primitives import APP_ROOT, REPO_ROOT, _narrow, parsed, trees_under
 
 # app/safety/safe_regex.py is the sanctioned regex wrapper (stdlib `re` for literals; the third-party `regex`
 # engine for bounded execution). It owns the banned primitives, so a full-tree walk excludes it.
@@ -82,12 +82,12 @@ def _app_files(exclude: frozenset[str]) -> tuple[pathlib.Path, ...]:
 
 @cache
 def _app_trees(exclude: frozenset[str]) -> tuple[tuple[pathlib.Path, ast.Module], ...]:
-    """The one read-and-parse of app/*.py, memoized per exclude set.
+    """``(path, tree)`` per exclude set, sharing each file's one cached parse.
 
-    Built from ``_app_files`` under the same key, so a caller that wants only
-    the paths and a caller that wants the trees share one glob.
+    The exclude-set key is per-list only; the parse lives in ``parsed``, keyed
+    on the file itself, so fifteen exclude lists still parse each file once.
     """
-    return tuple((path, ast.parse(path.read_text(encoding="utf-8"))) for path in _app_files(exclude))
+    return tuple((path, parsed(path)) for path in _app_files(exclude))
 
 
 def relative_posix(path: pathlib.Path) -> str:

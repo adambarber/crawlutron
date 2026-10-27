@@ -25,6 +25,7 @@ from tests._walk_primitives import (
     offender,
     offender_at,
     parent_map,
+    parsed,
     trees_under,
 )
 from tests._walk_readers import (
@@ -128,6 +129,7 @@ __all__ = [
     "offenders_over_functions",
     "or_nodes",
     "parent_map",
+    "parsed",
     "plain_imports",
     "real_members",
     "relative_posix",

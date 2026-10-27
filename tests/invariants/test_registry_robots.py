@@ -10,7 +10,6 @@ from tests.chokepoint_walks import (
     app_trees,
     has_method_call,
     local_call_leaf_names,
-    local_nodes,
     local_subtree,
     offender,
     resolved_call_name,
@@ -94,7 +93,7 @@ def _robot_signal(node: ast.AST) -> bool:
 
 
 def _call_leaf_names(tree: ast.AST, node: ast.AST):
-    for child in local_nodes(node):
+    for child in local_subtree(node):
         if isinstance(child, ast.Call):
             yield resolved_call_name(tree, child).rsplit(".", 1)[-1].lower()
 
@@ -191,7 +190,7 @@ def _cache_call_count(tree: ast.AST, node: ast.AST) -> int:
     return sum(
         isinstance(child, ast.Call)
         and resolved_call_name(tree, child).rsplit(".", 1)[-1].lower().endswith("boundedttlcache")
-        for child in local_nodes(node)
+        for child in local_subtree(node)
     )
 
 
@@ -265,8 +264,8 @@ def _robots_shared_parser(
 @_module_aware
 def _robots_policy_offenders(tree: ast.AST, path: pathlib.Path, prop: Property) -> list[str]:
     offenders: list[str] = []
-    excluded = _owner_definition_ids(tree, path, prop)
     module_paths = _robot_module_paths(tree, path, _PROPERTY_MODULES.get())
+    excluded = _owner_definition_ids(tree, path, prop)
     for name, node in _property_nodes(tree, path, prop):
         nodes = _resolvedlocal_nodes(tree, node, excluded, modules=_PROPERTY_MODULES.get(), prop=prop)
         capabilities = _robot_capabilities_from_nodes(
@@ -285,7 +284,7 @@ def _robots_policy_offenders(tree: ast.AST, path: pathlib.Path, prop: Property) 
                 child.func.id
                 if isinstance(child.func, ast.Name)
                 else resolved_call_name(tree, child).rsplit(".", 1)[-1]
-                for child in local_nodes(node)
+                for child in local_subtree(node)
                 if isinstance(child, ast.Call)
             }
             if builders & local_calls and _robots_fetch_like(tree, node):
@@ -319,9 +318,9 @@ def _observe_robots_policy(tree: ast.AST, path: pathlib.Path, prop: Property) ->
         if _relative_app_path(path) == prop.owner_module
         else [node for _name, node in _property_nodes(tree, path, prop)]
     )
-    module_paths = _robot_module_paths(tree, path, None)
     for node in contexts:
         resolved = _resolvedlocal_nodes(tree, node, modules=None, prop=prop)
+        module_paths = _robot_module_paths(tree, path, None)
         for fingerprint, count in _robot_capabilities_from_nodes(
             tree, path, prop, resolved, module_paths, suppress_shared=False
         ).items():

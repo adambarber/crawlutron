@@ -143,6 +143,9 @@ async def crawled_results(
     return await crawl_request(
         {"url": url, "policy": body},
         http_fetcher=fetcher,
+        # The cffi impersonation slot binds the same scripted fetcher: a leaf with an
+        # empty body would otherwise ride the REAL curl_cffi transport (not hermetic).
+        cffi_fetcher=fetcher,
         cache=HttpCache(),
         spill_path=spill_path,
         content_cache=content_cache,

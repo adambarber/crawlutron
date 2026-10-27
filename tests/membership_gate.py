@@ -90,8 +90,13 @@ def _module_constants(tree: ast.AST) -> dict[str, str]:
     return values
 
 
+#: What a keyword detector accepts as its name collection: one name, a set
+#: of them, or the dict form (iterating a mapping yields the name set).
+type KeywordNames = str | frozenset[str] | set[str] | Mapping[str, object] | None
+
+
 def _primitive_keyword_calls(
-    tree: ast.AST, *, arg_names: str | frozenset[str] | set[str] | Mapping[str, object] | None = None
+    tree: ast.AST, *, arg_names: KeywordNames = None
 ) -> list[tuple[ast.Call, ast.keyword]]:
     """Yield ``(call, keyword)`` for every keyword of a result-primitive call.
 
@@ -108,7 +113,7 @@ type FieldMembers = dict[str, set[str]]
 
 
 def _named_primitive_keyword_calls(
-    tree: ast.AST, *, arg_names: str | frozenset[str] | set[str] | Mapping[str, object] | None = None
+    tree: ast.AST, *, arg_names: KeywordNames = None
 ) -> Iterator[tuple[ast.Call, str, ast.expr]]:
     """``_primitive_keyword_calls``, each keyword paired with its name and value.
 

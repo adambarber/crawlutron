@@ -15,7 +15,7 @@ from typing import Any
 from fastapi import HTTPException
 from pydantic import BaseModel, ValidationError
 
-from app.api.caller_auth import Tracking, admit
+from app.api.caller_auth import Tracking, admit, bound_render_cookie_namespace
 from app.api.crawl_executor import execute_crawl
 from app.api.main_helpers import request_gate
 from app.api.map_endpoint import map_site
@@ -294,12 +294,15 @@ async def handle_render(
             is_error=True,
         )
     requested = len(payload.urls) if payload.urls is not None else 1
-    return await _admit_tool(
-        caller,
-        requested,
-        tracking=Tracking(job_store=job_store, concurrency_tracker=concurrency_tracker),
-        work=lambda: _tool_result(render_endpoint_handler(payload, settings=settings)),
-    )
+    # #483: the namespace binds around the whole admit, so the gate and the work
+    # both run under it; an MCP render's harvest keys by the caller's key id.
+    async with bound_render_cookie_namespace(_caller_for(caller)):
+        return await _admit_tool(
+            caller,
+            requested,
+            tracking=Tracking(job_store=job_store, concurrency_tracker=concurrency_tracker),
+            work=lambda: _tool_result(render_endpoint_handler(payload, settings=settings)),
+        )
 
 
 async def handle_search(

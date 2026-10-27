@@ -9,6 +9,7 @@ import ast
 import math
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
+from functools import cache
 from pathlib import Path
 
 from scripts.ast_scopes import is_scope_opener
@@ -118,11 +119,11 @@ _METRIC_LIMITS = {
 }
 
 
+@cache
 def _candidates(tree: ast.AST) -> list[tuple[str, int, tuple[int, str]]]:
     """Every (metric, line, (size, label)) this tree offers, over-limit or not.
 
-    Measuring first and filtering once keeps the per-node cases to a single
-    expression; the line travels because method names repeat."""
+    Cached per tree: the gate asks per metric, and a re-walk per ask was its cost."""
     found: list[tuple[str, int, tuple[int, str]]] = []
     for node in nodes_of(tree):
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
@@ -198,7 +199,7 @@ scripts_offenders, scripts_measurement = _root_gate(REPO_ROOT / "scripts", _SCRI
 #: by #419 -- its row and ledger record are gone, the zero test is the gate.
 _TESTS_BUDGETS = {
     "abc size": 0,
-    "largest class": 330,
+    "largest class": 329,
     "block length": 0,
 }
 
@@ -219,7 +220,7 @@ def test_the_tests_budget_measurement_reaches_tests() -> None:
     over-long fn in tests/."""
     assert suite_measurement("abc size") == 0
     assert suite_measurement("block length") == 0
-    assert suite_measurement("largest class") == 330
+    assert suite_measurement("largest class") == 329
     _assert_overlong_fn()
 
 

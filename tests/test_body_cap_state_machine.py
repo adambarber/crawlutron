@@ -145,8 +145,7 @@ async def test_declared_body_over_cap_drains_only_up_to_the_cap():
     past it the client is pinned or lying, and Connection: close aborts it (#525)."""
     messages = [
         {"type": "http.request", "body": b"X" * 4, "more_body": True},
-        {"type": "http.request", "body": b"X" * 4, "more_body": True},
-        {"type": "http.request", "body": b"X" * 4, "more_body": True},
+        *[{"type": "http.request", "body": b"X" * 4, "more_body": True} for _ in range(2)],
         {"type": "http.request", "body": b"", "more_body": False},
     ]
     response = await _refused_response(messages, declared=4096)

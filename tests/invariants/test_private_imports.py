@@ -16,6 +16,7 @@ from tests.chokepoint_walks import (
     assignment_targets,
     from_imports,
     nodes_of,
+    parsed,
     relative_posix,
     resolved_expr_name,
     trees_under,
@@ -439,7 +440,7 @@ def _conftest_trees(*, exclude: frozenset[str] = frozenset()) -> tuple[tuple[pat
     ``trees_under`` rglobs, so handed a FILE it returns nothing -- green while
     inspecting zero files: the empty-trigger construction error."""
     del exclude
-    tree = ast.parse(_CONFTEST.read_text(encoding="utf-8"), filename=str(_CONFTEST))
+    tree = parsed(_CONFTEST)
     return ((_CONFTEST, tree),)
 
 

@@ -330,8 +330,7 @@ class TestWholeSiteAdmissionContract:
         finished = await run_seeded_scripted_job(
             job_store, root, self._policy(1, 2), engine, frontier=[root, root_alias, child]
         )
-        assert engine.attempts == {root: 1, child: 1}
-        assert finished.visited == {canonical(root), canonical(child)}
+        assert_pair_crawled_once(finished, engine, root, child)
         assert finished.stats["cap_truncated"] == 0
 
     async def test_chunked_in_flight_recovery_never_loses_admitted_urls(self, job_store):

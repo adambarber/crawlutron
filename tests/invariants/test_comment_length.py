@@ -7,10 +7,12 @@ The count is a budget ratchet, fed by one scan, that only moves down.
 from __future__ import annotations
 
 import ast
+import pathlib
 import re
 from collections.abc import Callable
 
 from scripts.extract_comments import over_line_docstrings
+from tests._walk_primitives import parsed
 from tests.chokepoint_walks import REPO_ROOT
 
 #: The most consecutive full-line ``#`` comments a block may run.
@@ -89,6 +91,7 @@ def _root_findings[T](
 
     ``include_gate_bash`` adds the entry-point scripts (scripts/gate and
     scripts/run-tests.sh) to the sweep; the docstring scan never asks for them.
+    ``collect`` gets the file's source; tree-taking readers parse via ``parsed``.
     """
     files = sorted((REPO_ROOT / root).rglob("*.py"))
     if include_gate_bash and root == "scripts":
@@ -106,32 +109,37 @@ def _root_findings[T](
     return found
 
 
+def _root_tree_findings[T](
+    root: str, collect: Callable[[ast.Module, pathlib.Path], list[T]]
+) -> dict[str, list[T]]:
+    """:func:`_root_findings` for a tree-taking ``collect``: the session parse cache
+    serves every reader, so the docstring gates stop re-parsing each file."""
+    found: dict[str, list[T]] = {}
+    for path in sorted((REPO_ROOT / root).rglob("*.py")):
+        if "__pycache__" in path.parts:
+            continue
+        findings = collect(parsed(path), path)
+        if findings:
+            found[path.relative_to(REPO_ROOT).as_posix()] = findings
+    return found
+
+
 def _root_runs(root: str) -> dict[str, list[tuple[int, int]]]:
     """Every long run under one root, as ``{file: [(start, end), ...]}``."""
     return _root_findings(root, long_comment_runs, include_gate_bash=True)
 
 
 def _root_docstrings(root: str) -> dict[str, list[tuple[int, int, str]]]:
-    """Every over-limit docstring under one root, as ``{file: [(start, end, kind)]}``.
-
-    The extractor owns the walk; this gate parses once per file, applies the
-    length decision, and checks the root's budget.
-    """
-
-    def collect(source: str) -> list[tuple[int, int, str]]:
-        tree = ast.parse(source)
-        return over_line_docstrings(tree, DOC_LIMIT)
-
-    return _root_findings(root, collect)
+    """Every over-limit docstring under one root, as ``{file: [(start, end, kind)]}."""
+    return _root_tree_findings(root, lambda tree, _path: over_line_docstrings(tree, DOC_LIMIT))
 
 
-def demoted_docstrings(source: str) -> list[tuple[int, int, str]]:
+def demoted_docstrings(tree: ast.Module) -> list[tuple[int, int, str]]:
     """Every docstring that sits below the first statement, so it documents nothing.
 
     A string expression is a docstring only when it is the first statement;
     below an annotation it is a dead string the object does not carry.
     """
-    tree = ast.parse(source)
     found: list[tuple[int, int, str]] = []
     for node in ast.walk(tree):
         if not isinstance(node, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
@@ -224,11 +232,13 @@ def test_zero_long_comment_runs_everywhere() -> None:
 
 def test_no_overlong_docstring_anywhere() -> None:
     """Zero over-limit docstrings in app/, tests/ and scripts/ -- no budget, no exemption."""
-
-    def collect(source: str) -> list[tuple[int, int, str]]:
-        return over_line_docstrings(ast.parse(source), DOC_LIMIT)
-
-    offenders = [_format_overlong_docstring(name, item) for name, item in _zero_everywhere(collect)]
+    offenders = [
+        _format_overlong_docstring(name, item)
+        for name, items in _root_tree_findings(
+            "app", lambda tree, _p: over_line_docstrings(tree, DOC_LIMIT)
+        ).items()
+        for item in items
+    ]
     assert not offenders, "\n".join(offenders)
 
 
@@ -240,7 +250,7 @@ def test_no_docstring_sits_below_the_first_statement() -> None:
     """
     failures: list[str] = []
     for root in ("app", "tests", "scripts"):
-        for name, items in _root_findings(root, demoted_docstrings).items():
+        for name, items in _root_tree_findings(root, lambda tree, _p: demoted_docstrings(tree)).items():
             for lineno, _end, symbol in items:
                 failures.append(f"{name}:{lineno}: {symbol} has a docstring that documents nothing")
     assert not failures, "\n".join(failures)
