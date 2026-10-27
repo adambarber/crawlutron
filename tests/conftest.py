@@ -17,12 +17,12 @@ import pytest
 
 from tests._app_factory import service_app
 
-# Fixtures live one-per-file in ``tests/fixtures/`` so each one's setup/teardown contract is legible on its
-# own rather than welded to the test module that happened to want it first.
+# Fixtures live one-per-file in ``tests/fixtures/``: one legible contract each, never welded to a first user.
 pytest_plugins = (
     "tests.fixtures.stub_builder",
     "tests.fixtures.factory",
     "tests.fixtures.four_worker_selector_pool",
+    "tests.network_guard",
 )
 
 # The real asyncio.sleep, kept so the zero-second patch below can still yield.
