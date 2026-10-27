@@ -12,14 +12,14 @@ from dataclasses import dataclass
 from app.models.host_policy import HostPolicy
 from app.models.http_fetcher import HttpFetcher
 from app.models.normalized_url import NormalizedUrl
-from app.orchestration.fetch_helpers import fetch_and_decode as default_fetch_and_decode
-from app.orchestration.fetch_helpers import single_flight
-from app.orchestration.robots_parse import (
+from app.safety.bounded_ttl import BoundedTTLCache
+from app.transport.fetch_helpers import fetch_and_decode as default_fetch_and_decode
+from app.transport.fetch_helpers import single_flight
+from app.transport.robots_parse import (
     parse_robots_crawl_delay,
     parse_robots_rules,
     parse_robots_sitemaps,
 )
-from app.safety.bounded_ttl import BoundedTTLCache
 from app.vocabulary.robots import RobotsSource
 
 ROBOTS_CACHE_MAX_ENTRIES = 2048

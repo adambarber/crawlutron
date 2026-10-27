@@ -13,17 +13,17 @@ from app.models.host_policy import HostPolicy
 from app.models.normalized_url import NormalizedUrl
 from app.orchestration import engine as engine_mod
 from app.orchestration.engine import crawl_request
-from app.orchestration.robots import robots_allows, robots_pattern_to_regex
-from app.orchestration.robots_parse import (
+from app.safety.bounded_ttl import BoundedTTLCache
+from app.transport.cache import HttpCache
+from app.transport.fetch_policy import discovery_diagnostics
+from app.transport.robots import robots_allows, robots_pattern_to_regex
+from app.transport.robots_parse import (
     iter_robots_fields,
     parse_robots_crawl_delay,
     parse_robots_rules,
     parse_robots_sitemaps,
     select_robots_values,
 )
-from app.safety.bounded_ttl import BoundedTTLCache
-from app.transport.cache import HttpCache
-from app.transport.fetch_policy import discovery_diagnostics
 from app.vocabulary.identity import SERVICE_ID
 from tests._fetcher_factories import routed_fetcher
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY, canonical, crawl_policy
@@ -173,14 +173,14 @@ class TestSitemapParser:
     def test_uses_the_shared_tokenizer(self):
         # A regression that re-rolls its own splitlines() scan would still pass the value assertions above;
         # this pins the consolidation itself.
-        from app.orchestration import robots_parse
+        from app.transport import robots_parse
 
         src = _module_source(robots_parse)
         assert src.count("splitlines()") == 1
 
 
 def _groups(text, accepts):
-    from app.orchestration.robots_parse import robots_groups
+    from app.transport.robots_parse import robots_groups
 
     return robots_groups(text, accepts)
 
@@ -337,7 +337,7 @@ async def test_purge_handles_production_shaped_entries():
 
     import app.orchestration.engine as em
     from app.orchestration.engine import crawl_request
-    from app.orchestration.robots import ROBOTS_CACHE_MAX_ENTRIES
+    from app.transport.robots import ROBOTS_CACHE_MAX_ENTRIES
 
     em.robots_cache.clear()
     try:

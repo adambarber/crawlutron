@@ -6,12 +6,12 @@ graph LR
     admission_admission --> models_crawl_extraction_method
     admission_admission --> models_host_policy
     admission_admission --> models_normalized_url
-    admission_admission --> orchestration_fetch_helpers
-    admission_admission --> orchestration_robots
-    admission_admission --> orchestration_scheduler
     admission_admission --> safety_safe_regex
     admission_admission --> storage_job_store
+    admission_admission --> transport_fetch_helpers
     admission_admission --> transport_fetchers
+    admission_admission --> transport_robots
+    admission_admission --> transport_scheduler
     admission_admission_links --> admission_scope_match
     admission_admission_links --> models_host_policy
     admission_admission_links --> models_normalized_url
@@ -132,8 +132,8 @@ graph LR
     api_job_runner --> models_result_factory
     api_job_runner --> models_result_record
     api_job_runner --> models_taxonomy
-    api_job_runner --> orchestration_robots
     api_job_runner --> storage_job_store
+    api_job_runner --> transport_robots
     api_job_runner --> vocabulary_limits
     api_job_runner --> vocabulary_taxonomy
     api_jobs_router --> admission_payload_helpers
@@ -213,11 +213,11 @@ graph LR
     api_render --> models_result_factory
     api_render --> orchestration_classification
     api_render --> orchestration_results
-    api_render --> orchestration_robots
-    api_render --> orchestration_scheduler
     api_render --> orchestration_worker
     api_render --> storage_ids
     api_render --> transport_fetchers
+    api_render --> transport_robots
+    api_render --> transport_scheduler
     api_render --> vocabulary_robots
     api_render_endpoint --> api_exceptions
     api_render_endpoint --> api_render
@@ -523,9 +523,9 @@ graph LR
     orchestration_admission_stall --> vocabulary_taxonomy
     orchestration_classification --> models_browser_pool_exhausted
     orchestration_classification --> models_taxonomy
-    orchestration_classification --> orchestration_scheduler_exceptions
     orchestration_classification --> transport_decompression
     orchestration_classification --> transport_pinned_transport
+    orchestration_classification --> transport_scheduler_exceptions
     orchestration_classification --> vocabulary_taxonomy
     orchestration_engine --> admission_admission_links
     orchestration_engine --> admission_payload_helpers
@@ -538,7 +538,6 @@ graph LR
     orchestration_engine --> models_json_value
     orchestration_engine --> models_serialization
     orchestration_engine --> orchestration_request_pipeline
-    orchestration_engine --> orchestration_robots
     orchestration_engine --> runtime_pressure_gates
     orchestration_engine --> transport_cache
     orchestration_engine --> transport_content_cache
@@ -546,14 +545,7 @@ graph LR
     orchestration_engine --> transport_cookie_jar
     orchestration_engine --> transport_fetchers
     orchestration_engine --> transport_request_profile
-    orchestration_fetch_helpers --> models_host_policy
-    orchestration_fetch_helpers --> models_http_fetch_result
-    orchestration_fetch_helpers --> models_http_fetcher
-    orchestration_fetch_helpers --> models_normalized_url
-    orchestration_fetch_helpers --> safety_bounded_ttl
-    orchestration_fetch_helpers --> transport_body_decode
-    orchestration_fetch_helpers --> transport_decompression
-    orchestration_fetch_helpers --> vocabulary_limits
+    orchestration_engine --> transport_robots
     orchestration_recursive --> admission_admission_links
     orchestration_recursive --> models_crawl_result
     orchestration_recursive --> models_crawl_task
@@ -561,12 +553,12 @@ graph LR
     orchestration_recursive --> models_normalized_url
     orchestration_recursive --> orchestration_admission_stall
     orchestration_recursive --> orchestration_results
-    orchestration_recursive --> orchestration_scheduler
     orchestration_recursive --> orchestration_spill_sink
     orchestration_recursive --> runtime_metrics
     orchestration_recursive --> runtime_pressure_gates
     orchestration_recursive --> runtime_resource_pressure
     orchestration_recursive --> safety_safe_regex
+    orchestration_recursive --> transport_scheduler
     orchestration_recursive --> vocabulary_limits
     orchestration_recursive --> vocabulary_strategies
     orchestration_recursive --> vocabulary_taxonomy
@@ -584,11 +576,8 @@ graph LR
     orchestration_request_pipeline --> models_host_policy
     orchestration_request_pipeline --> models_normalized_url
     orchestration_request_pipeline --> models_result_record
-    orchestration_request_pipeline --> orchestration_fetch_helpers
     orchestration_request_pipeline --> orchestration_recursive
     orchestration_request_pipeline --> orchestration_results
-    orchestration_request_pipeline --> orchestration_robots
-    orchestration_request_pipeline --> orchestration_scheduler
     orchestration_request_pipeline --> orchestration_spill_sink
     orchestration_request_pipeline --> orchestration_strategy_chain
     orchestration_request_pipeline --> runtime_memory_pressure
@@ -598,6 +587,9 @@ graph LR
     orchestration_request_pipeline --> storage_ids
     orchestration_request_pipeline --> transport_cache
     orchestration_request_pipeline --> transport_content_cache
+    orchestration_request_pipeline --> transport_fetch_helpers
+    orchestration_request_pipeline --> transport_robots
+    orchestration_request_pipeline --> transport_scheduler
     orchestration_results --> models_crawl_diagnostics
     orchestration_results --> models_crawl_result
     orchestration_results --> models_crawl_strategy_attempt
@@ -606,17 +598,6 @@ graph LR
     orchestration_results --> models_taxonomy
     orchestration_results --> orchestration_classification
     orchestration_results --> vocabulary_taxonomy
-    orchestration_robots --> models_host_policy
-    orchestration_robots --> models_http_fetcher
-    orchestration_robots --> models_normalized_url
-    orchestration_robots --> orchestration_fetch_helpers
-    orchestration_robots --> orchestration_robots_parse
-    orchestration_robots --> safety_bounded_ttl
-    orchestration_robots --> vocabulary_robots
-    orchestration_robots_parse --> vocabulary_identity
-    orchestration_scheduler --> orchestration_scheduler_exceptions
-    orchestration_scheduler --> orchestration_scheduler_purge
-    orchestration_scheduler --> vocabulary_taxonomy
     orchestration_spill_sink --> models_crawl_result
     orchestration_spill_sink --> models_host_policy
     orchestration_spill_sink --> runtime_resource_lifecycle
@@ -843,6 +824,14 @@ graph LR
     transport_driver_config --> vocabulary_browser
     transport_driver_config --> vocabulary_limits
     transport_driver_pages --> transport_driver_config
+    transport_fetch_helpers --> models_host_policy
+    transport_fetch_helpers --> models_http_fetch_result
+    transport_fetch_helpers --> models_http_fetcher
+    transport_fetch_helpers --> models_normalized_url
+    transport_fetch_helpers --> safety_bounded_ttl
+    transport_fetch_helpers --> transport_body_decode
+    transport_fetch_helpers --> transport_decompression
+    transport_fetch_helpers --> vocabulary_limits
     transport_fetch_policy --> admission_policy
     transport_fetch_policy --> models_crawl_diagnostics
     transport_fetch_policy --> models_crawl_policy
@@ -853,10 +842,10 @@ graph LR
     transport_fetch_policy --> models_normalized_url
     transport_fetch_policy --> models_robots_diagnostics
     transport_fetch_policy --> orchestration_classification
-    transport_fetch_policy --> orchestration_fetch_helpers
-    transport_fetch_policy --> orchestration_robots_parse
     transport_fetch_policy --> transport_body_decode
     transport_fetch_policy --> transport_decompression
+    transport_fetch_policy --> transport_fetch_helpers
+    transport_fetch_policy --> transport_robots_parse
     transport_fetch_policy --> vocabulary_limits
     transport_fetchers --> models_http_fetch_result
     transport_fetchers --> models_http_fetcher
@@ -936,6 +925,17 @@ graph LR
     transport_request_profile --> transport_cookie_jar
     transport_request_profile --> vocabulary_identity
     transport_request_profile --> vocabulary_strategies
+    transport_robots --> models_host_policy
+    transport_robots --> models_http_fetcher
+    transport_robots --> models_normalized_url
+    transport_robots --> safety_bounded_ttl
+    transport_robots --> transport_fetch_helpers
+    transport_robots --> transport_robots_parse
+    transport_robots --> vocabulary_robots
+    transport_robots_parse --> vocabulary_identity
+    transport_scheduler --> transport_scheduler_exceptions
+    transport_scheduler --> transport_scheduler_purge
+    transport_scheduler --> vocabulary_taxonomy
     transport_strategy_request --> models_crawl_policy
     transport_strategy_request --> models_host_policy
     transport_strategy_request --> models_normalized_url

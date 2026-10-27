@@ -13,9 +13,9 @@ from httpx import AsyncClient
 
 from app.admission.policy import PolicyLike
 from app.api import job_runner
-from app.orchestration.robots import RobotsRules
-from app.orchestration.robots_parse import parse_robots_rules
 from app.storage.job_store import CrawlJobState, JobStatus, JobStore
+from app.transport.robots import RobotsRules
+from app.transport.robots_parse import parse_robots_rules
 from app.vocabulary.robots import RobotsSource
 from tests._job_harnesses import (
     ScriptedExecute,
@@ -284,7 +284,7 @@ class TestWholeSiteAdmissionContract:
         )
 
     async def test_robots_crawl_delay_is_committed_before_admission(self, client, job_store, monkeypatch):
-        from app.orchestration.scheduler import DomainScheduler
+        from app.transport.scheduler import DomainScheduler
 
         root = "https://example.test/root"
         child = "https://example.test/child"

@@ -18,12 +18,12 @@ from app.admission.scope_match import scope_allows
 from app.models.crawl_extraction_method import CrawlExtractionMethod
 from app.models.host_policy import HostPolicy
 from app.models.normalized_url import NormalizedUrl, admit_or_none
-from app.orchestration.fetch_helpers import fetch_sitemap_urls
-from app.orchestration.robots import FetchAndDecode, RobotsRules, load_robots_rules, robots_allows
-from app.orchestration.scheduler import DomainScheduler
 from app.safety.safe_regex import BoundedPattern
 from app.storage.job_store import CrawlJobState, FrontierEntry, job_max_pages
+from app.transport.fetch_helpers import fetch_sitemap_urls
 from app.transport.fetchers import default_http_fetcher
+from app.transport.robots import FetchAndDecode, RobotsRules, load_robots_rules, robots_allows
+from app.transport.scheduler import DomainScheduler
 
 if TYPE_CHECKING:
     from app.models.crawl_policy import CrawlPolicy

@@ -9,8 +9,8 @@ from app.models.crawl_policy_limits import CrawlPolicyLimits
 from app.models.crawl_result import CrawlResult
 from app.models.result_factory import terminal_attempt
 from app.models.serialization import to_dict
-from app.orchestration.scheduler import DomainScheduler
 from app.transport.browser import BrowserRenderer
+from app.transport.scheduler import DomainScheduler
 from app.vocabulary.extraction import EXTRACTION_DOCUMENT, EXTRACTION_TRAFILATURA
 from app.vocabulary.strategies import BROWSER_HEADLESS, HTTP_DECLARED_CRAWLER
 from tests._assertions import browser_available

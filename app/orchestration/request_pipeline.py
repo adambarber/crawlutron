@@ -22,16 +22,12 @@ from app.models.crawl_worker import CrawlWorker
 from app.models.host_policy import HostPolicy
 from app.models.normalized_url import NormalizedUrl, admit_or_none
 from app.models.result_record import ProducerEnvelope
-from app.orchestration import robots as robots_policy
-from app.orchestration.fetch_helpers import fetch_sitemap_urls
 from app.orchestration.recursive import run_recursive_crawl
 from app.orchestration.results import (
     TerminalResult,
     engine_result_from_exception,
     skipped_engine_result,
 )
-from app.orchestration.robots import FetchAndDecode, RobotsRules
-from app.orchestration.scheduler import DomainScheduler
 from app.orchestration.spill_sink import SpillSink, write_spill
 from app.orchestration.strategy_chain import execute_crawl_chain
 from app.runtime.memory_pressure import read_memory_stats
@@ -46,8 +42,12 @@ from app.runtime.resource_pressure import (
 )
 from app.safety.safe_regex import BoundedPattern
 from app.storage.ids import new_request_id
+from app.transport import robots as robots_policy
 from app.transport.cache import HttpCache
 from app.transport.content_cache import ContentCache
+from app.transport.fetch_helpers import fetch_sitemap_urls
+from app.transport.robots import FetchAndDecode, RobotsRules
+from app.transport.scheduler import DomainScheduler
 
 if TYPE_CHECKING:
     from app.models.http_fetcher import HttpFetcher

@@ -1,19 +1,18 @@
 """Capability layers never import up into orchestration.
 
-Orchestration decides *what to do*; extraction and admission are the layers it
-calls. A lower layer importing orchestration inverts the dependency (the engine
-imports extraction and admission; they must not import the engine's home
-package). Ownership moves fix violations; this gate refuses new ones. The gate
-widens per ticket: #163 (extraction) here now, #162 (admission) next; the
-transport band (browser/browser_pool/browser_result/fetch_policy/http) is the
-same shape tracked separately.
+Orchestration decides *what to do*; extraction, admission and transport are the
+layers it calls. A lower layer importing orchestration inverts the dependency
+(the engine imports extraction and admission; they must not import the engine's
+home package). Ownership moves fix violations; this gate refuses new ones.
+#163 sealed the extraction band, #162 the admission band; the transport band
+(browser/browser_pool/browser_result/fetch_policy/http) is tracked in #564.
 """
 
 from __future__ import annotations
 
 from scripts.module_graph import build_graph
 
-_LOWERS = ("app.extraction",)
+_LOWERS = ("app.extraction", "app.admission")
 
 
 def _orchestration_imports() -> list[str]:

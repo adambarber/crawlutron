@@ -321,7 +321,7 @@ One edit heals sitemap seeding, robots, credentials, and `origin_of` idempotence
 
 An empty result is not `None`, so it's served as *fresh*; the `put` runs even when the walk raised, stalled, hit a decompression cap, or produced a partial fanout. `SITEMAP_CACHE_TTL_SECONDS = 3600`. One transient network blip — or a hostile origin that stalls its first sitemap response, or a gzip bomb → `DecompressionTooLargeError` → `text is None` — silently disables sitemap seeding for that origin for an hour. Contrast the robots module next door, which has a 60 s failure TTL *and* single-flight; sitemaps have neither.
 
-**Fix sketch:** don't cache nothing — either skip the `put` when `not page_urls and root_etag is None and root_lm is None`, or store with a short failure TTL mirroring `ROBOTS_FAILURE_TTL_SECONDS`, and add a `_inflight` single-flight keyed like `app/orchestration/robots.py:98`:
+**Fix sketch:** don't cache nothing — either skip the `put` when `not page_urls and root_etag is None and root_lm is None`, or store with a short failure TTL mirroring `ROBOTS_FAILURE_TTL_SECONDS`, and add a `_inflight` single-flight keyed like `app/transport/robots.py:98`:
 
 ```python
 if not page_urls:
@@ -401,7 +401,7 @@ Task A finishes → its callback is scheduled via `call_soon` → before it runs
 - **Metrics commit per counter, per request** — `app/runtime/metrics.py:58-62,110-111,144-147`: each `_add` is its own SQLite upsert **+ commit**, and caller-tagged observations additionally snapshot the whole counters table to count distinct series. Under load, request completion serializes on SQLite fsyncs. Batch deltas into one transaction; keep the distinct-caller set in memory.
 - **Cookie-retry success never pins the strategy** — `app/orchestration/strategy_chain.py:214-215,305-307`: domains needing the HTTP→browser→cookie-harvest→cffi flow re-climb the whole ladder every page. Pin on the retry-success return.
 - **`truncate_html_input` counts chars, not bytes** — `app/safety/bounded_io.py:22,29-30`: astral-heavy pages occupy up to 4× the declared 4 MiB bound. Count UTF-8 bytes or rename honestly.
-- **Mixed wall/monotonic clocks in one class** — `app/orchestration/scheduler.py:154,313,227`: NTP steps extend/erase cooldowns; store durations from one monotonic source. Related P3s: four per-domain dicts never purged (safe today because schedulers are per-job — pin that contract in a comment or extend `purge_expired`), and `CircuitBreakerOpen`'s message embeds a raw epoch float.
+- **Mixed wall/monotonic clocks in one class** — `app/transport/scheduler.py:154,313,227`: NTP steps extend/erase cooldowns; store durations from one monotonic source. Related P3s: four per-domain dicts never purged (safe today because schedulers are per-job — pin that contract in a comment or extend `purge_expired`), and `CircuitBreakerOpen`'s message embeds a raw epoch float.
 
 ### 3.11 [P2] Browser pool: dead liveness guard, cancellation tab-leak, self-duplicating init
 
@@ -438,7 +438,7 @@ Task A finishes → its callback is scheduled via `call_soon` → before it runs
 
 Verified sound under adversarial reading (so you don't have to re-litigate them):
 
-- **Robots fail-closed matrix** — 401/403/429 → Disallow-all (deliberately stricter than RFC 9309, documented); 5xx/transport → Disallow-all with 60 s TTL; 8 MiB cap failure → closed; cache keyed `(origin, HostPolicy)` with per-entry TTL and single-flight; every re-read URL re-admitted against the live policy (`app/orchestration/robots.py:57-98`, `serialization.py:60-70`).
+- **Robots fail-closed matrix** — 401/403/429 → Disallow-all (deliberately stricter than RFC 9309, documented); 5xx/transport → Disallow-all with 60 s TTL; 8 MiB cap failure → closed; cache keyed `(origin, HostPolicy)` with per-entry TTL and single-flight; every re-read URL re-admitted against the live policy (`app/transport/robots.py:57-98`, `serialization.py:60-70`).
 - **REP matcher** — `*`/`$` semantics, path+query matching, longest-match with Allow winning ties, empty patterns skipped, dual bounded LRU pattern cache (`robots.py:106-203`). Two spec-fidelity P3s only: group selection is substring-in-token (`robots_parse.py:65`) and per-directive `accepts` changes group boundaries (`:70-75`).
 - **Sitemap egress** — every `<loc>` re-admitted via `resolve`+`admit_or_none`; recursion capped (depth 3, 10k URLs); regexes linear.
 - **Crawl-loop bookkeeping** — transient requeue bounded (3) and visited-discarding; shutdown restores popped jobs to the frontier in order; `save()` is INSERT-only for `status`/`owner` so control-plane state can't be clobbered; accumulator graft on reload correct; doc-pool acquire/release paired with retire-and-reap.
@@ -471,7 +471,7 @@ LOC figures below are estimates verified by reading; "dead" items were grep-conf
 | D10 | `FrameCollector` + re-exports (zero callers; "back-compat" for an internal API) | `app/extraction/trees.py:75-95` + `content.py` exports | ~25 |
 | D11 | `parse_count` tally machinery (zero callers; a lock on the hot parse path exists only for it) | `app/extraction/trees.py:34-52` | ~12 |
 | D12 | Dead engine alias re-exports (`RobotsMatcher`, `load_robots_rules`, `cached_sitemaps`) | `app/orchestration/engine.py:45-48` | ~4 |
-| D13 | `_MatchAll` + empty-pattern branch (unreachable: `robots_allows` skips empties first) | `app/orchestration/robots.py:177-183` | ~6 |
+| D13 | `_MatchAll` + empty-pattern branch (unreachable: `robots_allows` skips empties first) | `app/transport/robots.py:177-183` | ~6 |
 | D14 | `own_session` / `owns_process_state` (zero callers) | `app/transport/pooled_cffi.py:54-64` | ~7 |
 | D15 | `_swap_cffi_builder` (zero callers; `pooled_client_builders(cffi=…)` is the used path) | `app/transport/http_client_pool.py:29-38` | ~10 |
 | D16 | `CrawlResultStore.get`/`aget` (unfiltered reads; no callers) | `app/storage/result_store.py:51-55,94` | ~10 |
@@ -495,7 +495,7 @@ LOC figures below are estimates verified by reading; "dead" items were grep-conf
 | T3 | **Payload-TypedDict ↔ response-BaseModel triads** — every field written twice, drift undetected | `agent_hints.py:95-112`↔`agent_hints_response.py`; `capabilities.py:39-56`↔`capabilities_response.py`; `well_known.py:5-58`↔`discovery_response.py`; `DiscoveredLink`↔`DiscoveredLinkResponse` | Build the BaseModel once (or `model_validate(payload)`); `DiscoveredLinkResponse.from_record(link)` (pattern exists in `KeySummary`) | ~80 |
 | T4 | **Taxonomy spelled twice** — 36-member `Classification` Literal vs `CrawlClassification` StrEnum; 6-member `CrawlStatus` vs `ResultStatus` | `app/models/taxonomy.py` vs `app/vocabulary/taxonomy.py`; `app/models/crawl_status.py` | StrEnum is the source; derive the Literal (`Literal[tuple(CrawlClassification)]`) + runtime gate test. Kills the two-hand-edit-per-new-classification drift class | ~50 |
 | T5 | **Origin law, three spellings, already diverged** (§2.10) | `credentials.origin_of`, `NormalizedUrl.origin`, `host_policy._normalize_policy_host` | `NormalizedUrl.origin` canonical; others project through it | ~15 |
-| T6 | **Scheduler-from-settings, 3 spellings, one already missing knobs** (render's copy omits `max_rps`/adaptive) | `render.py:165-171`, `admission.py:65-78`, site crawler | `scheduler_from_settings(settings, **overrides)` in `app/orchestration/scheduler.py` | ~20 |
+| T6 | **Scheduler-from-settings, 3 spellings, one already missing knobs** (render's copy omits `max_rps`/adaptive) | `render.py:165-171`, `admission.py:65-78`, site crawler | `scheduler_from_settings(settings, **overrides)` in `app/transport/scheduler.py` | ~20 |
 | T7 | **Robots decision-application loop** — same zip→spill-denied→set-delay→collect skeleton | `request_pipeline.py:291-308` vs `recursive.py:124-153` | `apply_robots_decisions(jobs, decisions, *, on_denied, on_delay)` | ~20 |
 | T8 | **Terminal-result constructors** — `result_factory` re-spells attempt kwargs `terminal_attempt` owns | `result_factory.py:143-151` vs `results.py:121-171` | Route attempt assembly through `terminal_attempt` | ~10 |
 | T9 | **Fetch+decompress+decode discovery pipeline, 3rd spelling** | `orchestration/fetch_helpers._call_fetcher`, `transport/fetch_policy._fetch_robots_text`, document fetch tail | Consolidate on `fetch_helpers` | ~15 |

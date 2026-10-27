@@ -23,9 +23,9 @@ from app.models.http_fetcher import HttpFetcher
 from app.models.normalized_url import NormalizedUrl
 from app.models.robots_diagnostics import RobotsDiagnostics
 from app.orchestration.classification import classify_error_code
-from app.orchestration.robots_parse import parse_robots_crawl_delay, parse_robots_sitemaps
 from app.transport.body_decode import decode_body
 from app.transport.decompression import decompress_body as _decompress_body
+from app.transport.robots_parse import parse_robots_crawl_delay, parse_robots_sitemaps
 from app.vocabulary.limits import DEFAULT_MAX_CONTENT_LENGTH_BYTES, DISCOVERY_BODY_MAX_BYTES
 
 _RETRY_BACKOFF_BASE_SECONDS = 0.25
@@ -230,7 +230,7 @@ async def _collect_sitemaps(
     """Fetch one or more sitemaps down to ``(loc, lastmod)`` pairs."""
     locs: list[str] = []
     lastmod: dict[str, Any] = {}
-    from app.orchestration.fetch_helpers import fetch_sitemap_urls
+    from app.transport.fetch_helpers import fetch_sitemap_urls
 
     for sitemap_url in (a for a in (normalized_url.resolve(e) for e in candidate_urls) if a is not None):
         with contextlib.suppress(Exception):

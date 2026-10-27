@@ -2,7 +2,7 @@
 
 import asyncio
 
-from app.orchestration.fetch_helpers import SITEMAP_CACHE, fetch_sitemap_urls
+from app.transport.fetch_helpers import SITEMAP_CACHE, fetch_sitemap_urls
 from tests._fetcher_factories import concurrent_fetcher
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY, canonical
 

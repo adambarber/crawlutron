@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from app.config.settings import CrawlerSettings
 from app.orchestration.engine import crawl_request
-from app.orchestration.robots import robots_allows
-from app.orchestration.robots_parse import parse_robots_rules
+from app.transport.robots import robots_allows
+from app.transport.robots_parse import parse_robots_rules
 from app.vocabulary.strategies import HTTP_DECLARED_CRAWLER
 from tests._fetcher_factories import routed_fetcher
 from tests._policy_factories import canonical

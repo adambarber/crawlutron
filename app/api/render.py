@@ -20,17 +20,17 @@ from app.models.host_policy import HostPolicy
 from app.models.normalized_url import NormalizedUrl
 from app.models.render_request import RenderRequest
 from app.models.result_factory import terminal_crawl_result
-from app.orchestration import robots as _robots_policy
 from app.orchestration.classification import classify_error_code
 from app.orchestration.results import (
     crawl_result_from_engine_result,
     failed_result_for,
 )
-from app.orchestration.robots import RobotsRules
-from app.orchestration.scheduler import DomainScheduler
 from app.orchestration.worker import call_worker
 from app.storage.ids import new_request_id
+from app.transport import robots as _robots_policy
 from app.transport.fetchers import default_http_fetcher
+from app.transport.robots import RobotsRules
+from app.transport.scheduler import DomainScheduler
 from app.vocabulary.robots import RobotsSource
 
 #: The policy a render batch that does not honor robots is judged against: one

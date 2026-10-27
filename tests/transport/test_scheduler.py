@@ -7,7 +7,7 @@ import pytest
 from app.models.crawl_job import CrawlJob
 from app.models.crawl_result import EngineCrawlResult
 from app.models.crawl_task import CrawlTask
-from app.orchestration.scheduler import DomainScheduler, jittered_delay
+from app.transport.scheduler import DomainScheduler, jittered_delay
 from tests._policy_factories import canonical
 from tests._result_builders import make_job, make_result
 from tests._scheduler_doubles import engine_envelope, make_scheduler, ok_worker, trip_circuit

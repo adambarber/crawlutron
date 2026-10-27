@@ -39,7 +39,7 @@ _OWNER_PUBLIC_SURFACE_RATCHET = {
     "app/safety/safe_regex.py": (7, 2),
     # robots_pattern_to_regex is public (#190) -- robots_allows itself calls it -- so the
     # parity/per-host tests drive that real contract; the matcher class behind it stays private.
-    "app/orchestration/robots.py": (13, 4),
+    "app/transport/robots.py": (13, 4),
     "app/safety/bounded_io.py": (4, 2),
     "app/transport/decompression.py": (5, 2),
     "app/admission/credentials.py": (3, 3),
@@ -69,7 +69,7 @@ _OWNER_PUBLIC_SURFACE_RATCHET = {
     "app/safety/header_values.py": (3, 3),
     # Four transport/spill surfaces pinned with their true public doors; growing
     # any of these needs an explicit ratchet edit, shrinking auto-tightens.
-    "app/orchestration/scheduler_purge.py": (2, 2),
+    "app/transport/scheduler_purge.py": (2, 2),
     "app/orchestration/spill_sink.py": (2, 2),
     "app/transport/http_cache.py": (4, 4),
     "app/transport/http_classify.py": (3, 3),
@@ -114,7 +114,7 @@ _SURFACE_DECLARING_EXEMPT = frozenset(
         "app/orchestration/admission_stall.py",
         "app/orchestration/recursive.py",
         "app/orchestration/request_pipeline.py",
-        "app/orchestration/robots_parse.py",
+        "app/transport/robots_parse.py",
         "app/orchestration/strategy_chain.py",
         "app/orchestration/worker.py",
         "app/runtime/logging_config.py",

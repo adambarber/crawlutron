@@ -26,8 +26,8 @@ if TYPE_CHECKING:
     from app.models.http_fetcher import HttpFetcher
     from app.models.result_record import ProducerEnvelope
     from app.models.taxonomy import CrawlStrategyName
-    from app.orchestration.scheduler import DomainScheduler
     from app.runtime.pressure_gates import ResourceGate
+    from app.transport.scheduler import DomainScheduler
 
 #: The policy limits a scripted crawl is run under, in wire shape.
 Limits = dict[str, object]
@@ -261,8 +261,8 @@ async def run_chain(
 
     Fetcher slots, host policy and scheduler set once (``scheduler`` stays a
     parameter); omitting ``cffi_fetcher`` means it behaves like the http step."""
-    from app.orchestration.scheduler import DomainScheduler
     from app.orchestration.strategy_chain import execute_crawl_chain
+    from app.transport.scheduler import DomainScheduler
 
     if scheduler is None:
         scheduler = DomainScheduler(global_limit=1, per_domain_limit=1, delay_seconds=0.0)

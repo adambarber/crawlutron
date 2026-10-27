@@ -1,6 +1,6 @@
 """Idle scheduler state for retired domains is purged, not retained (#544/P9)."""
 
-from app.orchestration.scheduler import COOLDOWN_PURGE_INTERVAL, DomainScheduler, TokenBucket
+from app.transport.scheduler import COOLDOWN_PURGE_INTERVAL, DomainScheduler, TokenBucket
 
 
 def _scheduler() -> DomainScheduler:

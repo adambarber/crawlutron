@@ -8,7 +8,7 @@ from app.admission.admission import RobotsGate
 from app.models.crawl_policy import CrawlPolicy
 from app.models.host_policy import HostPolicy
 from app.orchestration.engine import crawl_request
-from app.orchestration.robots import (
+from app.transport.robots import (
     ROBOTS_FAILURE_TTL_SECONDS,
     FetchAndDecode,
     load_robots_rules,
@@ -112,7 +112,7 @@ async def test_engine_and_job_single_flight_each_collapse_same_origin_misses():
 
 async def test_owner_preserves_4xx_and_5xx_ttl_semantics():
 
-    import app.orchestration.robots as owner
+    import app.transport.robots as owner
 
     robots_cache.clear()
     statuses = iter((404, 500))

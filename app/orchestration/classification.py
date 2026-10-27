@@ -16,9 +16,9 @@ from curl_cffi.requests.exceptions import SSLError as CffiSSLError
 
 from app.models.browser_pool_exhausted import BrowserPoolExhaustedError
 from app.models.taxonomy import Classification, CrawlStrategyName
-from app.orchestration.scheduler_exceptions import CircuitBreakerOpen
 from app.transport.decompression import DecompressionError, DecompressionTooLargeError
 from app.transport.pinned_transport import ResolverBudgetExceeded
+from app.transport.scheduler_exceptions import CircuitBreakerOpen
 from app.vocabulary.taxonomy import is_transient_classification
 
 _logger = logging.getLogger(__name__)

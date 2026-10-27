@@ -414,7 +414,7 @@ def _clear_sitemap_cache() -> None:
     Tests inject fake fetchers serving different content for the same
     sitemap URLs; without this the shared cache leaks across tests.
     """
-    import app.orchestration.fetch_helpers as fh
+    import app.transport.fetch_helpers as fh
 
     fh.reset_process_state()
 

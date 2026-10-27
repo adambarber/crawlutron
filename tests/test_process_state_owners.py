@@ -17,7 +17,7 @@ from tests.chokepoint_walks import REPO_ROOT
 OWNERS: tuple[str, ...] = (
     "app.runtime.cgroup_sense",
     "app.orchestration.engine",
-    "app.orchestration.fetch_helpers",
+    "app.transport.fetch_helpers",
     "app.transport.browser_cookies",
     "app.transport.cookie_jar",
     "app.transport.pooled_clients",
