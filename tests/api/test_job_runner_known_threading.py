@@ -187,10 +187,13 @@ async def test_pop_frontier_no_set_build_on_unlimited_job(tmp_path, monkeypatch)
 @pytest.mark.asyncio
 async def test_transient_requeue_survives_known_threading(tmp_path):
     """#548: a transient entry must still be requeued under the threaded known
-    set. Main's fresh derivation excludes the identity (it left in_flight);
-    a threaded set must discard it the same way or the retry is dropped."""
+    set. The caller discards the identity from ``known`` before requeueing so
+    the retry can re-admit; the frontier must end with exactly one copy (#558:
+    production pops the batch out of the frontier first, so the seeded copy is
+    removed here to mirror that)."""
     state = _make_state(frontier_pages=1)
     entry = state.frontier[0]
+    state.frontier.clear()  # _pop_frontier removed the batch; absorb requeues it
     resolved = {entry.url: _make_engine_result(entry.url.raw)}
     resolved[entry.url] = replace(
         _make_engine_result(entry.url.raw),
@@ -211,7 +214,9 @@ async def test_transient_requeue_survives_known_threading(tmp_path):
         "test_transient_requeue_survives_known_threading)"
     )
     assert state.transient_retries.get(entry.url) == 1
-    assert entry.url not in known  # discarded so the requeue can re-admit it
+    # The caller discarded it so the requeue could re-admit; the requeue
+    # re-occupies the set (the retry is queued, so it counts against the cap).
+    assert entry.url in known
 
 
 if __name__ == "__main__":
