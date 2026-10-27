@@ -198,7 +198,7 @@ scripts_offenders, scripts_measurement = _root_gate(REPO_ROOT / "scripts", _SCRI
 #: by #419 -- its row and ledger record are gone, the zero test is the gate.
 _TESTS_BUDGETS = {
     "abc size": 0,
-    "largest class": 330,
+    "largest class": 329,
     "block length": 0,
 }
 
@@ -219,7 +219,7 @@ def test_the_tests_budget_measurement_reaches_tests() -> None:
     over-long fn in tests/."""
     assert suite_measurement("abc size") == 0
     assert suite_measurement("block length") == 0
-    assert suite_measurement("largest class") == 330
+    assert suite_measurement("largest class") == 329
     _assert_overlong_fn()
 
 

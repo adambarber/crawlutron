@@ -98,6 +98,17 @@ class BrowserFakePage:
         return await self.on_wait_for_selector(selector, timeout=timeout, **kwargs)
 
 
+class _ContextSwappingPage(BrowserFakePage):
+    """A page double that swaps in a subclass-supplied context class by default."""
+
+    context_cls: type = FakePageContext
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        if kwargs.get("context") is None:
+            self.context = self.context_cls()
+
+
 class ScriptedPage(BrowserFakePage):
     """A page that answers the renderer's real reads and records its writes; ``answers``
     maps an expression fragment to what the page reports, ``on_goto`` is the hook for

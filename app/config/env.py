@@ -66,6 +66,12 @@ def in_range[T: (int, float)](lo: T, hi: T) -> Callable[[T], T | None]:
     return within
 
 
+def _warn_invalid_default(name: str, error: object, fallback: int | float) -> None:
+    logging.getLogger(__name__).warning(
+        "invalid_env_default", extra={"env_name": name, "fallback": fallback, "error": str(error)}
+    )
+
+
 def _as_int_default(value, *, name) -> int:
     """Coerce a caller-supplied default to a finite int; never raise.
 
@@ -76,8 +82,8 @@ def _as_int_default(value, *, name) -> int:
         if isinstance(value, float) and not math.isfinite(value):
             raise ValueError(value)
         return int(value)
-    except (TypeError, ValueError, OverflowError):
-        logging.getLogger(__name__).warning("invalid_env_default", extra={"env_name": name, "fallback": 0})
+    except (TypeError, ValueError, OverflowError) as error:
+        _warn_invalid_default(name, error, 0)
         return 0
 
 
@@ -85,8 +91,8 @@ def _as_float_default(value, *, name) -> float:
     """Coerce a caller-supplied default to a finite float; never raise."""
     try:
         result = float(value)
-    except (TypeError, ValueError, OverflowError):
-        logging.getLogger(__name__).warning("invalid_env_default", extra={"env_name": name, "fallback": 0.0})
+    except (TypeError, ValueError, OverflowError) as error:
+        _warn_invalid_default(name, error, 0.0)
         return 0.0
     if not math.isfinite(result):
         logging.getLogger(__name__).warning(

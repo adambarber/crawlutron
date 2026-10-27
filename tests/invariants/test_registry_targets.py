@@ -53,7 +53,7 @@ def _public_target_counts(nodes: list[tuple[ast.AST, ast.AST]]) -> tuple[int, in
 
 @_module_aware
 def _public_target_offenders(tree: ast.AST, path: pathlib.Path, prop: Property) -> list[str]:
-    offenders: list[str] = []
+    offenders = []
     for name, node, nodes in _property_sites(tree, path, prop, modules=_PROPERTY_MODULES.get()):
         parses, ranges = _public_target_counts(nodes)
         if parses and ranges:
@@ -93,20 +93,21 @@ def test_public_target_detector_quiet_on_runtime_computed_name():
 
 
 def _observe_public_target(tree: ast.AST, path: pathlib.Path, prop: Property) -> dict[str, int]:
-    walk = _PropertyObservations(tree, path, prop)
-    if _relative_app_path(path) == prop.owner_module:
-        owner_ids = _owner_definition_ids(tree, path, prop)
-        owner_nodes = [
-            node
-            for node in nodes_of(tree)
-            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and id(node) in owner_ids
-        ]
-        owner_parses, owner_ranges = _public_target_counts([(tree, node) for node in owner_nodes])
-        if owner_parses and owner_ranges:
-            walk.record("ipaddress_range_verdict", min(owner_parses, owner_ranges))
+    if _relative_app_path(path) != prop.owner_module:
+        walk = _PropertyObservations(tree, path, prop)
+        for _name, _node, nodes in _property_sites(tree, path, prop, modules=None):
+            parses, ranges = _public_target_counts(nodes)
+            if parses and ranges:
+                walk.record("ipaddress_range_verdict", min(parses, ranges))
         return walk.counts
-    for _name, _node, nodes in _property_sites(tree, path, prop, modules=None):
-        parses, ranges = _public_target_counts(nodes)
-        if parses and ranges:
-            walk.record("ipaddress_range_verdict", min(parses, ranges))
+    walk = _PropertyObservations(tree, path, prop)
+    owner_ids = _owner_definition_ids(tree, path, prop)
+    owner_nodes = [
+        node
+        for node in nodes_of(tree)
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and id(node) in owner_ids
+    ]
+    owner_parses, owner_ranges = _public_target_counts([(tree, node) for node in owner_nodes])
+    if owner_parses and owner_ranges:
+        walk.record("ipaddress_range_verdict", min(owner_parses, owner_ranges))
     return walk.counts

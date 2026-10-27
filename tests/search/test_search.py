@@ -338,8 +338,15 @@ async def test_provider_http_pins_the_connect_to_the_resolved_ip(monkeypatch):
     def two_phase(host, *args, **kwargs):
         _ = (args, kwargs)
         state["resolves"] += 1
-        ip = "1.2.3.4" if state["resolves"] == 1 else "169.254.169.254"
-        return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", (ip, 80))]
+        return [
+            (
+                socket.AF_INET,
+                socket.SOCK_STREAM,
+                6,
+                "",
+                ("1.2.3.4" if state["resolves"] == 1 else "169.254.169.254", 80),
+            )
+        ]
 
     monkeypatch.setattr(socket, "getaddrinfo", two_phase)
     seen: list[str] = []
