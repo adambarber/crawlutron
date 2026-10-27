@@ -18,6 +18,24 @@ branch_prefix = "work"
 name = "link-venv"
 run = "ln -sfn ../../.venv .venv"
 
+# Setup, part 2 (#488): bind the WORKSPACE tree into the shared venv's sys.path.
+#
+# The shared venv carries hatchling editable installs whose .pth files point at
+# the MAIN checkout (/Users/.../crawlutron). From the workspace CWD that pointer
+# is shadowed (sys.path[0] = '' wins), so in-workspace mypy/pytest/ruff all see
+# the workspace tree. But any interpreter of the shared venv invoked from OUTSIDE
+# the workspace resolved `app` to MAIN's tree via the editable pointer — red:
+# `import app` from a foreign CWD printed main's path. Fix, zero downloads, no
+# main clobbering: site-packages processes .pth files alphabetically and appends
+# each path to sys.path in that order, so a pth whose name sorts BEFORE
+# `_editable_impl_crawlutron.pth` (ASCII '!' < '_') lands the workspace tree
+# earlier in sys.path — workspace-first from any CWD. Stale pths after teardown
+# are harmless: paths that no longer exist are skipped by site processing.
+
+[[setup]]
+name = "bind-workspace-tree"
+run = "printf '%s\n' \"$PWD\" > .venv/lib/python3.12/site-packages/!hardstand-workspace.pth"
+
 # Actions that agents can run inside the workspace
 
 [[actions]]

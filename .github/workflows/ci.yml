@@ -87,6 +87,16 @@ jobs:
           cache-dependency-path: pyproject.toml
       - name: Install package + dev dependencies
         run: pip install -e ".[dev]"
+      # Camoufox downloads ~200 MB of Firefox on first use (#490). The binary
+      # lands in the platform cache dir (camoufox.utils.INSTALL_DIR --
+      # ~/.cache/camoufox on Linux) and is version-locked by the pin in
+      # pyproject.toml, so a cache keyed on that pin skips the fetch on warm
+      # runs and the fetch itself re-validates the files on a miss.
+      - name: Cache Camoufox browser binary
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/camoufox
+          key: camoufox-${{ runner.os }}-${{ hashFiles('pyproject.toml') }}
       - name: Install Camoufox browser binary
         run: python3 -m camoufox fetch
       - name: Run pytest (browser)
