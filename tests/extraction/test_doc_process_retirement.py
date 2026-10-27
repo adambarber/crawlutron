@@ -2,7 +2,46 @@
 
 from __future__ import annotations
 
+import os
+
+import app.orchestration.doc_pool as dp
 from app.orchestration.doc_pool import DocExtractionPool, spawn_doc_worker
+
+
+class _EofPipe:
+    """A pipe whose first recv raises EOFError: the clean pipe-close exit."""
+
+    def send(self, item):
+        pass
+
+    def recv(self):
+        raise EOFError
+
+    def close(self):
+        pass
+
+
+def test_clean_exit_skips_native_teardown(monkeypatch):
+    """A worker that sees pipe EOF must exit through os._exit(0), never return
+    into interpreter shutdown.
+
+    #510: onnxruntime's telemetry WorkerThread aborts the process during native
+    module finalization ('libc++abi: recursive_mutex lock failed'). The abort is
+    not suppressible from our side -- the only seal is that the worker never
+    runs native teardown at all. os._exit(0) on the clean path removes the
+    faulty code path (masking would be swallowing the abort line instead)."""
+    exits: list[int] = []
+    monkeypatch.setattr(os, "_exit", lambda code=0: exits.append(code))
+    monkeypatch.setattr(dp, "configure_doc_worker_runtime", lambda: None)
+    monkeypatch.setattr(dp, "configure_doc_worker_logging", lambda: None)
+
+    dp.doc_worker_main(_EofPipe())
+
+    assert exits == [0], (
+        "the clean pipe-close exit must terminate the worker via os._exit(0) -- "
+        "returning into interpreter shutdown races onnxruntime's telemetry "
+        "thread into the libc++ recursive-mutex abort (#510)"
+    )
 
 
 def test_doc_worker_runtime_disables_onnxruntime_telemetry(monkeypatch):
