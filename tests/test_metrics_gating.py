@@ -86,10 +86,10 @@ def _bind_singleton(tmp_path) -> None:
     get_metrics().bind_counters(CoordinationCounters(tmp_path / "counters.db"))
 
 
-async def _metrics_client(key_admin_token: str = "test-admin-token"):  # noqa: S107
+async def _metrics_client(*, admin_token: str):
     app = FastAPI()
     app.include_router(metrics_router)
-    app.state.key_admin_token = key_admin_token
+    app.state.key_admin_token = admin_token
     transport = ASGITransport(app=app)
     return AsyncClient(transport=transport, base_url="http://test")
 
@@ -98,7 +98,7 @@ async def test_metrics_endpoint_gates_caller_detail_behind_operator_token(tmp_pa
     _bind_singleton(tmp_path)
     get_metrics().observe_crawl(caller_id="key_a")
 
-    client = await _metrics_client()
+    client = await _metrics_client(admin_token="test-admin-token")
     async with client:
         base = await client.get("/metrics")
         assert base.status_code == 200

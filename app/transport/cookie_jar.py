@@ -9,7 +9,6 @@ import contextvars
 import json
 import os
 import time
-import urllib.request
 from collections.abc import Callable, Iterator
 from http import cookiejar as _cookiejar_module
 from http.cookiejar import Cookie, DefaultCookiePolicy
@@ -21,6 +20,7 @@ from app.models.registrable_domain import is_public_suffix
 from app.storage.coordination_cookies import DEFAULT_MAX_HOSTS_PER_NAMESPACE
 from app.storage.coordination_store import atwin
 from app.transport.cookie_store import InMemoryCookieStore
+from app.transport.header_carrier import HeaderCarrier, cookie_header_request
 
 if TYPE_CHECKING:
     from app.storage.coordination_cookies import SharedCookieStore
@@ -88,8 +88,8 @@ class RecordingSendPolicy(DefaultCookiePolicy):
         super().__init__(rfc2965=False, strict_ns_domain=DefaultCookiePolicy.DomainStrict)
         self.accepted: list[Cookie] = []
 
-    def return_ok(self, cookie: Cookie, request: urllib.request.Request) -> bool:
-        ok = super().return_ok(cookie, request)
+    def return_ok(self, cookie: Cookie, request: HeaderCarrier) -> bool:  # type: ignore[override]  # stdlib over-narrow
+        ok = super().return_ok(cookie, request)  # type: ignore[arg-type]  # pyright: ignore[reportArgumentType]
         if ok:
             self.accepted.append(cookie)
         return ok
@@ -435,9 +435,8 @@ def sendable_cookie_header(
         cookie = cookie_from(name, record)
         slots[id(cookie)] = slot
         jar.set_cookie(cookie)
-    # Header-carrier for cookiejar matching only; never opened.
-    request = urllib.request.Request(url.raw)  # noqa: S310
-    jar.add_cookie_header(request)
+    request = cookie_header_request(url.raw)
+    jar.add_cookie_header(request)  # type: ignore[arg-type]  # pyright: ignore[reportArgumentType]  # stdlib over-narrow
     header = request.get_header("Cookie") or ""
     return header, {slots[id(cookie)] for cookie in policy.accepted}
 

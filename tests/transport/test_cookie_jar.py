@@ -9,11 +9,16 @@ import json
 import os
 import re
 import tempfile
-import urllib.request
 from http.cookiejar import CookieJar as StdCookieJar
 from unittest.mock import patch
 
-from app.transport.cookie_jar import CookieJar, RecordingSendPolicy, cookie_from, global_cookie_jar
+from app.transport.cookie_jar import (
+    CookieJar,
+    RecordingSendPolicy,
+    cookie_from,
+    cookie_header_request,
+    global_cookie_jar,
+)
 from tests._cookie_helpers import cookie_file, read_cookie_file
 from tests._policy_factories import canonical
 from tests._thread_fanout import run_thread_fanout
@@ -225,7 +230,7 @@ def _build_jar_slots(records):
 def _old_derive_contributors(records, url):
     """OLD derivation: contributors = all slots whose cookie name is in header."""
     policy, jar, slots_map = _build_jar_slots(records)
-    request = urllib.request.Request(url.raw)  # noqa: S310
+    request = cookie_header_request(url.raw)
     jar.add_cookie_header(request)
     header = request.get_header("Cookie") or ""
     # OLD: parse header for names, then ALL slots with those names are contributors

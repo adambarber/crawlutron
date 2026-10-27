@@ -170,7 +170,7 @@ def _openapi_tags() -> list[dict[str, str]]:
     return [
         {
             "name": "Health",
-            "description": "Lightweight liveness and crawl-capacity readiness endpoints for local orchestration.",  # noqa: E501
+            "description": "Liveness and crawl-capacity readiness endpoints for local orchestration.",
         },
         {
             "name": "Discovery",
