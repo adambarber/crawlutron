@@ -12,7 +12,7 @@ from collections.abc import Callable, Iterable
 from functools import cache
 from pathlib import Path
 
-from tests.chokepoint_walks import REPO_ROOT, app_trees, parsed, relative_posix, resolved_call_name
+from tests.chokepoint_walks import REPO_ROOT, app_trees, nodes_of, parsed, relative_posix, resolved_call_name
 from tests.property_registry import Property
 
 __all__ = [
@@ -27,15 +27,26 @@ __all__ = [
 
 
 def app_names() -> set[str]:
-    """Every name the app tree spells, at any depth and in any position.
+    """Every name the app tree spells: every def/class/attr/alias a detector could target.
 
-    Definitions alone are too narrow: attribute spellings exist in app/, so the
-    universe is every def/class/attr/alias spelling a detector could target.
+    Memoized on the files' mtime/size key, so an edited tree re-collects.
     """
+    return _app_names(_app_tree_key())
+
+
+def _app_tree_key() -> tuple[tuple[str, int, int], ...]:
+    """The parse-cache key of every app module, one stat pass per call."""
+    return tuple((str(p), p.stat().st_mtime_ns, p.stat().st_size) for p in _app_file_paths())
+
+
+def _app_file_paths() -> list[pathlib.Path]:
+    return [path for path in (REPO_ROOT / "app").rglob("*.py") if "__pycache__" not in path.parts]
+
+
+@cache
+def _app_names(_key: tuple[tuple[str, int, int], ...]) -> set[str]:
     names: set[str] = set()
-    for path in (REPO_ROOT / "app").rglob("*.py"):
-        if "__pycache__" in path.parts:
-            continue
+    for path in _app_file_paths():
         for node in ast.walk(parsed(path)):
             if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
                 names.add(node.name)
@@ -57,7 +68,7 @@ def function_defs(tree: ast.AST) -> list[FunctionNode]:
     The opening move of most shape detectors, written once; a parenthesised
     copy in each detector is how two end up walking different node sets.
     """
-    return [node for node in ast.walk(tree) if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))]
+    return [node for node in nodes_of(tree) if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))]
 
 
 def assert_trees_clean(

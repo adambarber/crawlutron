@@ -9,6 +9,7 @@ import ast
 import math
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
+from functools import cache
 from pathlib import Path
 
 from scripts.ast_scopes import is_scope_opener
@@ -118,11 +119,11 @@ _METRIC_LIMITS = {
 }
 
 
+@cache
 def _candidates(tree: ast.AST) -> list[tuple[str, int, tuple[int, str]]]:
     """Every (metric, line, (size, label)) this tree offers, over-limit or not.
 
-    Measuring first and filtering once keeps the per-node cases to a single
-    expression; the line travels because method names repeat."""
+    Cached per tree: the gate asks per metric, and a re-walk per ask was its cost."""
     found: list[tuple[str, int, tuple[int, str]]] = []
     for node in nodes_of(tree):
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
