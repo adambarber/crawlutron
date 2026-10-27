@@ -9,8 +9,11 @@ base_branch = "main"
 [env]
 # Setup children receive the declared keys and NOTHING ambient (Injection is a
 # complete environment, hardstand#398 diagnosis): without PATH, pre-commit's
-# internal `git` calls fail with "git failed. Is it installed".
-PATH = "/usr/bin:/bin:/usr/local/bin:/opt/homebrew/bin"
+# internal `git` calls fail with "git failed. Is it installed". The leading
+# relative entry puts the workspace's venv first (PATH entries resolve against
+# the child's CWD = the workspace), so tool-resolution via shutil.which and
+# bare `python`/`git` find the venv's tools (#557).
+PATH = ".venv/bin:/usr/bin:/bin:/usr/local/bin:/opt/homebrew/bin"
 
 [[resource]]
 kind          = "worktree"
@@ -63,36 +66,49 @@ run = ".venv/bin/pre-commit install --hook-type commit-msg --hook-type pre-commi
 name = "pytest"
 kind = "exec"
 env = ["PATH"]
+timeout = 90s
 run = ".venv/bin/python -m pytest"
 
 [[actions]]
 name = "pytest-fast"
 kind = "exec"
+env = ["PATH"]
+timeout = 90s
 run = ".venv/bin/python -m pytest -q"
 
 [[actions]]
 name = "ruff"
 kind = "exec"
+env = ["PATH"]
+timeout = 30s
 run = ".venv/bin/ruff check"
 
 [[actions]]
 name = "mypy"
 kind = "exec"
+env = ["PATH"]
+timeout = 60s
 run = ".venv/bin/mypy"
 
 [[actions]]
 name = "pre-commit"
 kind = "exec"
+env = ["PATH"]
+timeout = 90s
 run = ".venv/bin/pre-commit run --all-files"
 
 [[actions]]
 name = "lint"
 kind = "exec"
+env = ["PATH"]
+timeout = 60s
 run = ".venv/bin/make lint"
 
 [[actions]]
 name = "typecheck"
 kind = "exec"
+env = ["PATH"]
+timeout = 60s
 run = ".venv/bin/make typecheck"
 
 [[actions]]
