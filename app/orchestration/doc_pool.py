@@ -21,6 +21,16 @@ from app.runtime.metrics import get_metrics
 logger = logging.getLogger(__name__)
 
 
+def configure_doc_worker_runtime() -> None:
+    """Quiet the native stack the worker carries, before any conversion runs."""
+    try:
+        import onnxruntime  # type: ignore[import-untyped]
+
+        onnxruntime.disable_telemetry_events()
+    except Exception:
+        logging.getLogger(__name__).debug("onnxruntime telemetry disable unavailable")
+
+
 # The doc-pool death-simulation seam (#359): tests install a hooks payload here
 # (a per-process holder, never env) and the worker honors what the parent ships.
 class DocPoolHooks(TypedDict):
@@ -59,6 +69,10 @@ ACQUIRE_RECHECK_SECONDS = 1.0
 # Grace period for a document worker to honor SIGTERM before we escalate.
 TERMINATE_GRACE_SECONDS = 5.0
 
+# A worker parked at ``recv()`` sees the pipe close and exits through full, clean
+# teardown; the grace only has to cover noticing the EOF.
+RETIRE_GRACE_SECONDS = 1.0
+
 # How long a spawned worker may take to finish importing and report ready.
 # The pool passes the caller's remaining acquisition budget instead.
 SPAWN_READY_TIMEOUT = 30.0
@@ -78,11 +92,12 @@ class DocWorker:
         self.retired = False
 
 
-def terminate_doc_process(proc) -> None:
-    """Terminate a runaway document-extraction process and reap it.
-    SIGTERM alone is not enough: a wedged native conversion absorbs it and holds
-    pipe/memory/slot for the service life, so escalate to SIGKILL and join lest a zombie lingers.
-    """
+def terminate_doc_process(proc, conn=None) -> None:
+    """Terminate a runaway document-extraction process and reap it."""
+    if conn is not None:  # graceful: parked worker exits on EOF, escalation on missed grace
+        with suppress(Exception):
+            conn.close()
+        proc.join(timeout=RETIRE_GRACE_SECONDS)
     with suppress(Exception):
         proc.terminate()
     with suppress(Exception):
@@ -133,6 +148,7 @@ def _doc_worker_main(conn) -> None:
     (never process-global state); a ``die`` hook exits without sending, like a segfault.
     """
     try:
+        configure_doc_worker_runtime()
         configure_doc_worker_logging()
         # Readiness is signalled here, after the child's imports: the parent's
         # conversion budget must not pay for this worker's start-up.
@@ -329,9 +345,7 @@ class DocExtractionPool:
         the lock -- so no acquisition ever hands a doomed worker to the next caller.
         """
         worker.retired = True
-        terminate_doc_process(worker.proc)
-        with suppress(Exception):
-            worker.conn.close()
+        terminate_doc_process(worker.proc, worker.conn)
 
     def release(self, worker: DocWorker) -> None:
         """Hand a slot back and wake everyone waiting for it."""
