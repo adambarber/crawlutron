@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections.abc import Callable
 
 from app.api.job_lifecycle import is_running, start_tracked_task
@@ -14,6 +15,8 @@ from app.storage.job_store import JobKind, JobStatus, JobStore
 type _StartRunner = Callable[..., "asyncio.Task"]
 
 _DRAIN_TASK_ID = "_recovery_backlog_drain"
+
+_logger = logging.getLogger(__name__)
 
 
 def _is_resumable_kind(kind: str) -> bool:
@@ -99,7 +102,14 @@ async def recover_and_start_pending_jobs(
         # anything else -- retire it terminal instead of leaving it pending forever.
         if not _is_resumable_kind(summary["kind"]):
             # #461: retire terminal via CAS; a lost CAS means it moved meanwhile.
-            await job_store.aset_status(summary["job_id"], JobStatus.FAILED, expected=JobStatus.PENDING)
+            claimed = await job_store.aset_status(
+                summary["job_id"], JobStatus.FAILED, expected=JobStatus.PENDING
+            )
+            if not claimed:
+                _logger.warning(
+                    "recovery_cas_lost",
+                    extra={"job_id": summary["job_id"]},
+                )
             continue
         if await job_store.aload(summary["job_id"]) is None:
             continue

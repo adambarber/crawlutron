@@ -31,6 +31,10 @@ class CallerConcurrencyTracker:
         count = self._in_flight.get(caller_id, 0) - 1
         if count <= 0:
             self._in_flight.pop(caller_id, None)
+            lock = self._slot_locks.get(caller_id)
+            # #511: evict a fully idle lock (not held, no waiters).
+            if lock is not None and not lock.locked() and not getattr(lock, "_waiters", ()):
+                del self._slot_locks[caller_id]
         else:
             self._in_flight[caller_id] = count
 

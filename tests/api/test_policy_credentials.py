@@ -25,7 +25,7 @@ class TestWireModel:
 
     def test_policy_accepts_origin_keyed_credentials(self):
         policy = CrawlPolicy(credentials={"https://private.example": {"kind": "bearer", "token": "t"}})
-        assert policy.credentials["https://private.example"].token == "t"
+        assert policy.credentials["https://private.example"].token.get_secret_value() == "t"
 
     def test_policy_rejects_non_origin_keys(self):
         # A path/query key can never match a per-hop origin lookup: reject, never silently normalize a
@@ -87,7 +87,7 @@ class TestPayloadPolicy:
             MODEL_DEFAULTS_TIER,
         )
         assert list(policy.credentials) == ["https://private.example"]
-        assert policy.credentials["https://private.example"].token == "t"
+        assert policy.credentials["https://private.example"].token.get_secret_value() == "t"
 
     def test_malformed_credential_is_rejected_not_dropped(self):
         with pytest.raises(ValueError, match="credentials"):

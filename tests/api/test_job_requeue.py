@@ -323,3 +323,32 @@ class TestWholeSiteRedirectedUrlResolution:
         assert finished.stats.get("total_failed", 0) == 0, finished.stats
         # And the frontier URL must be committed visited (not re-crawled).
         assert canonical(frontier_url) in finished.visited, finished.visited
+
+
+async def test_recovery_cas_lost_logs_warning(caplog):
+    """The #461 recovery CAS skip logs 'recovery_cas_lost' when the row
+    moved between the scan and the retire attempt."""
+    import logging
+    from unittest.mock import AsyncMock, MagicMock
+
+    from app.api import job_recovery
+    from app.config.settings import CrawlerSettings
+    from app.storage.job_store import JobKind, JobStatus
+
+    mock_store = MagicMock()
+    mock_store.alist_jobs = AsyncMock(
+        return_value=[
+            {"job_id": "unresumable-1", "status": JobStatus.PENDING.value, "kind": JobKind.SINGLE_SHOT.value}
+        ]
+    )
+    mock_store.aset_status = AsyncMock(return_value=False)  # lost CAS
+    mock_store.aload = AsyncMock(return_value=None)
+
+    with caplog.at_level(logging.WARNING, logger="app.api.job_recovery"):
+        await job_recovery.recover_and_start_pending_jobs(
+            mock_store, CrawlerSettings.from_mapping({}), asyncio.Event(), lambda *a, **k: None
+        )
+    assert any(
+        r.message == "recovery_cas_lost" and getattr(r, "job_id", None) == "unresumable-1"
+        for r in caplog.records
+    )
