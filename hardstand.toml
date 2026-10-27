@@ -46,7 +46,7 @@ run = "ln -sfn ../../.venv .venv"
 
 [[setup]]
 name = "bind-workspace-tree"
-run = "printf '%s\\n' \"$PWD\" > .venv/lib/python3.12/site-packages/!hardstand-workspace.pth"
+run = "printf %s $PWD > .venv/lib/python3.12/site-packages/!hardstand-workspace.pth"
 
 # #553 residual: a fresh workspace's git hooks do not exist until pre-commit
 # installs them -- without this step a workspace commit runs ZERO gates and
