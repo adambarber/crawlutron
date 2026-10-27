@@ -70,6 +70,17 @@ dev = [
     "pytest-httpx>=0.10",
     "pytest-xdist>=3.0",
     "pytest-randomly>=4.0",
+    # The hook-chain timeout: the safety-invariants gate runs pytest with
+    # --timeout=30 (9x the slowest measured legit invariant), so a hang fails
+    # the gate instead of wedging the commit chain. A gate tool, hence pinned
+    # exact like the other gates despite living among the test packages.
+    "pytest-timeout==2.4.0",
+    # Coverage measurement, opt-in only (`make coverage`). No threshold, no
+    # fail-under: measurement exists so the number is real; policy is separate.
+    "pytest-cov==7.1.0",
+    # Coverage engine itself, pinned so the gate surface doesn't float. The
+    # dev extra installs it; CI's enforcement job builds from -e .[dev].
+    "coverage==7.12.0",
     "ruff==0.16.8",
     "jscpd==5.3.2",
     "pre-commit==4.6.2",
@@ -121,6 +132,33 @@ Security = "https://github.com/adambarber/crawlutron/blob/main/SECURITY.md"
 
 [tool.hatch.build.targets.wheel]
 packages = ["app"]
+
+# Coverage engine config -- the ONE declaration the pre-push coverage hook and
+# any future CI consumer read. `core = "sysmon"` (PEP 669 sys.monitoring) is
+# the overhead lever on Python 3.12: tracing via the interpreter's native
+# monitoring hooks instead of the C trace function roughly halves the cost of
+# the tracer (measured below, see the hook's comment). `branch` stays off for
+# the default surface -- statement coverage is the measured number; branch is
+# the deeper weekly surface (see the pre-push hook's config comment).
+[tool.coverage.run]
+core = "sysmon"
+branch = false
+# The deeper, non-default surface (weekly / pre-release, paired with the
+# mutation-proof evidence story): run it by hand with
+#   python -m coverage run --branch --dynamic-context=test_function -m pytest -q --cov=app
+#   python -m coverage report --skip-covered --sort=cover
+# --dynamic-context needs the tracer started by pytest-cov to record test
+# names per line; branch coverage adds arc data on top. Neither is default:
+# both cost measurably more than the statement-only sysmon surface.
+dynamic_context = false  # the deeper weekly surface enables it via CLI flag
+
+[tool.coverage.report]
+# Non-code arcs the tree carries by design; none suppress a real gap.
+exclude_lines = [
+    "if TYPE_CHECKING:",
+    "@overload",
+    "raise NotImplementedError",
+]
 
 [tool.ruff]
 line-length = 110

@@ -36,6 +36,15 @@ run = "ln -sfn ../../.venv .venv"
 name = "bind-workspace-tree"
 run = "printf '%s\n' \"$PWD\" > .venv/lib/python3.12/site-packages/!hardstand-workspace.pth"
 
+# #553 residual: a fresh workspace's git hooks do not exist until pre-commit
+# installs them -- without this step a workspace commit runs ZERO gates and
+# still looks green. Installs both stages explicitly (pre-commit install alone
+# covers only pre-commit, not commit-msg).
+
+[[setup]]
+name = "install-git-hooks"
+run = ".venv/bin/pre-commit install --hook-type commit-msg --hook-type pre-commit"
+
 # Actions that agents can run inside the workspace
 
 [[actions]]

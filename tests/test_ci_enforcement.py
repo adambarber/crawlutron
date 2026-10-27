@@ -163,10 +163,17 @@ def test_ci_runs_every_precommit_hook_through_one_surface() -> None:
     assert "jscpd-tests" not in config
     assert not [hook_id for hook_id, _ in hooks if hook_id in {"jscpd-app", "jscpd-tests"}]
 
-    assert all("pre-push" not in (block.get("stages") or []) for _, block in hooks)
-    # Content gates run at pre-commit; a commit-msg hook cannot run in CI's
-    # --all-files pass (no message exists), so exactly that stage is allowed too.
-    assert all(block.get("stages") in (["pre-commit"], ["commit-msg"]) for _, block in hooks)
+    # #557: coverage runs at pre-push (per-commit measurement trains
+    # --no-verify) and stays out of CI's enforcement surface.
+    assert all(block.get("stages") in (["pre-commit"], ["commit-msg"], ["pre-push"]) for _, block in hooks)
+    coverage_hooks = [(hook_id, block) for hook_id, block in hooks if hook_id == "coverage"]
+    assert len(coverage_hooks) == 1, "exactly one coverage surface hook"
+    assert coverage_hooks[0][1].get("stages") == ["pre-push"], (
+        "the coverage hook must run at pre-push, not per-commit"
+    )
+    assert "--cov-fail-under" not in config, (
+        "coverage is measured-descriptive; a threshold is an owner ruling, not a default"
+    )
 
     entry = _entry(jscpd)
     assert ".venv/bin/python -m scripts.jscpd_gate all" in entry

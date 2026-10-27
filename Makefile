@@ -15,7 +15,7 @@ HOOK_CONFIG := $(SUITE_DIR)/.pre-commit-config.yaml
 VENV_BIN := $(SUITE_DIR)/.venv/bin
 PRE_COMMIT ?= $(if $(wildcard $(VENV_BIN)/pre-commit),$(VENV_BIN)/pre-commit,pre-commit)
 
-.PHONY: help install test test-fast test-all lint typecheck clean
+.PHONY: help install test test-fast test-all coverage lint typecheck clean
 
 help:
 	@echo "crawlutron development tasks:"
@@ -23,6 +23,8 @@ help:
 	@echo "  make test      - run the fast hermetic test suite (default pytest)"
 	@echo "  make test-fast - alias for 'make test'"
 	@echo "  make test-all  - run the full suite including browser-marked tests"
+	@echo "  make coverage  - run the coverage hook by id (pre-push stage; measured-descriptive)"
+	@echo "  make coverage-report - show the collected coverage report (after make coverage)"
 	@echo "  make lint      - run the ruff hook (the style gate)"
 	@echo "  make typecheck - run the mypy hook (the fail type gate)"
 	@echo "  make clean     - remove caches and build artifacts"
@@ -35,6 +37,22 @@ test test-fast:
 
 test-all:
 	cd "$(SUITE_DIR)" && $(PYTHON) -m pytest -o addopts=
+
+# Coverage is opt-in and lives in .pre-commit-config.yaml as the `coverage`
+# hook, `stages: [pre-push]`: a ~45s measurement on every commit would train
+# --no-verify, but on pre-push it stays real without the per-commit tax.
+# This target delegates by hook id rather than restating the command -- the
+# Makefile is not a second declaration of any gate (the contract test
+# enforces that). Measurement only: no --cov-fail-under, no threshold. Policy
+# on the number is a separate owner ruling.
+coverage:
+	cd "$(SUITE_DIR)" && $(PRE_COMMIT) run coverage --all-files --config "$(HOOK_CONFIG)" --hook-stage pre-push
+
+# The human-readable report, deliberately a separate step from the timed
+# measurement: report generation costs real seconds that would otherwise sit
+# inside the hook's wall time. Run `make coverage` first, then this.
+coverage-report:
+	cd "$(SUITE_DIR)" && $(PYTHON) -m coverage report --skip-covered --sort=cover
 
 # lint and typecheck run the pre-commit hooks by ID rather than restating their
 # commands. They used to spell the commands out, which made this file a second
