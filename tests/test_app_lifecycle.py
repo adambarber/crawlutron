@@ -142,8 +142,12 @@ class TestAppLifecycleEdges:
         assert body["status"] == "accepted", body
         assert body["webhook_url"] == "http://unreachable.invalid/", body
 
-        # The background runner POSTs the (failing) webhook; under fast_sleeps the
-        # retries spin on the loop, so the logged loss surfaces without a real wait.
+        # #513: drain-join the delivery task (the #364 budget) instead of polling
+        # caplog dispatch; the bound covers the crawl reaching its failure callback.
+        import time as _time
+
+        from app.api.webhooks import drain_webhook_deliveries
+
         def _delivery_failed() -> bool:
             return any(
                 record.getMessage() == "webhook_delivery_failed"
@@ -151,10 +155,11 @@ class TestAppLifecycleEdges:
                 for record in caplog.records
             )
 
-        import time as _time
-
-        deadline = _time.monotonic() + 5.0
+        deadline = _time.monotonic() + 30.0
         while not _delivery_failed() and _time.monotonic() < deadline:
+            await drain_webhook_deliveries()
+            if _delivery_failed():
+                break
             await asyncio.sleep(0)
         assert _delivery_failed(), "the failed webhook delivery was never recorded"
 
