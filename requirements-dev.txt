@@ -18,6 +18,14 @@ pre-commit==4.6.2
 pyyaml>=6.0
 pytest-randomly>=4.0.0
 pytest-xdist>=3.0.0  # parallel suite runs: pytest -n auto (suite is xdist-safe)
+# Hook-chain timeout (safety-invariants runs pytest with --timeout=30). Gate
+# tool: pinned exact, matching pyproject's dev extra.
+pytest-timeout==2.4.0
+# Opt-in coverage measurement (`make coverage`). Not in the hook chain: the
+# measured overhead on the default battery is ~11.6%, above the 10% bar.
+pytest-cov==7.1.0
+# Coverage engine itself, pinned so the gate surface doesn't float.
+coverage==7.12.0
 # Static type-checking. This is a real gate, not an advisory: the app tree is
 # mypy-clean (0 errors across 85 files) and CI runs `python3 -m mypy app` as
 # part of the required quality gate. Pinned so a new mypy release cannot turn

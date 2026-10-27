@@ -27,14 +27,25 @@ from tests.test_precommit_ci_contract import (
 
 
 def test_all_hooks_share_one_trigger() -> None:
-    """The five ``files:`` values are one YAML anchor, so they cannot drift apart.
+    """The five ENFORCEMENT hooks' ``files:`` values are one YAML anchor.
 
     The trigger was copied five times and never compared -- a ``.gitignore`` edit
-    slipped through with every hook Skipped; they are now ``&service_trigger``."""
+    slipped through with every hook Skipped; they are now ``&service_trigger``.
+
+    #557: coverage is a measurement surface, not an enforcement gate. Its
+    scope is ``^(app|tests)/`` and its stage is pre-push, so the divergent
+    files value cannot silently skip a gate; the one-surface law holds it."""
     hooks = _hook_blocks(CONFIG_PATH.read_text(encoding="utf-8"))
-    triggers = {_field(block, "files") for _, block in hooks}
+    enforcement = [(hook_id, block) for hook_id, block in hooks if hook_id != "coverage"]
+    triggers = {_field(block, "files") for _, block in enforcement}
     assert triggers == {ENFORCEMENT_TRIGGER_PATTERN}, (
-        f"hooks must all share the one trigger {ENFORCEMENT_TRIGGER_PATTERN!r}; got {sorted(triggers)}"
+        f"enforcement hooks must all share the one trigger {ENFORCEMENT_TRIGGER_PATTERN!r}; "
+        f"got {sorted(triggers)}"
+    )
+    coverage = [(hook_id, block) for hook_id, block in hooks if hook_id == "coverage"]
+    assert coverage, "the coverage surface must exist as its own hook"
+    assert all(_field(block, "files") == "^(app|tests)/" for _, block in coverage), (
+        "the coverage hook's trigger is scoped to the measured tree, not the service trigger"
     )
 
 
@@ -57,7 +68,11 @@ def test_every_gate_fires_on_every_enforcement_input() -> None:
     was the live instance -- a commit that hid a clone ran no hook at all."""
     hooks = _hook_blocks(CONFIG_PATH.read_text(encoding="utf-8"))
     assert hooks
+    # #557: coverage is a measurement surface, not an enforcement gate. It is
+    # exempt here alone; the one-surface law still holds it elsewhere.
     for hook_id, block in hooks:
+        if hook_id == "coverage":
+            continue
         pattern = _field(block, "files")
         for name in ENFORCEMENT_INPUTS:
             # Both layouts: nested under the parent repo, and at the repository root once the service is
