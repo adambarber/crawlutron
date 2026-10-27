@@ -53,8 +53,10 @@ readable only under that key: `GET /v1/crawl/{request_id}`, its `/trace`, and
 the `/v1/jobs` reads answer 404 to any other caller. Requests with no key are
 anonymous and keep the legacy behavior (anonymous rows stay anonymous-readable).
 A wrong or revoked key is 401; a crawl past the key's page or concurrency
-quota is 429 `quota_exceeded`. Unless `request_profile.cookie_namespace` is set,
-a keyed crawl's cookies are namespaced to the key id. Per-caller request counts
+quota is 429 `quota_exceeded`. A keyed crawl's cookies are always namespaced to
+the key id; anonymous crawls share one bounded cookie jar and a declaration of
+`request_profile.cookie_namespace` on any door is refused with 422
+`anonymous_cookie_namespace` (#559). Per-caller request counts
 are exposed in `/metrics` as `crawler_crawl_requests_total{caller="<key_id>"}`.
 
 Operator token (`CRAWLUTRON_KEY_ADMIN_TOKEN`) rotation is a redeploy: set a new

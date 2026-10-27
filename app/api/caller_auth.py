@@ -184,17 +184,31 @@ def is_operator(request: Request) -> bool:
     return bool(admin_token) and _constant_time_eq(secret, admin_token)
 
 
+def refuse_anonymous_cookie_namespace(caller: CallerIdentity, profile: Mapping[str, JsonValue]) -> None:
+    """422 when an anonymous caller declares a cookie namespace (#559).
+
+    Anonymous is ONE bounded shared identity (M1 #206), so a declared namespace is not a
+    tenant boundary; the door refuses the declaration instead of downgrading (#537).
+    """
+    if (caller.authenticated and caller.caller_id) or not cookie_namespace_for(profile):
+        return
+    raise http_error(
+        422,
+        "anonymous_cookie_namespace",
+        "Anonymous callers may not declare request_profile.cookie_namespace; "
+        "anonymous crawling shares one bounded cookie jar. Present an API key to "
+        "crawl under your key id's namespace.",
+    )
+
+
 def effective_cookie_namespace(profile: Mapping[str, JsonValue], caller: CallerIdentity) -> str:
-    """The cookie namespace for one crawl: for an authenticated caller, pinned to the key id; an
-    anonymous caller keeps a tenant declaration, but a key_-shaped one fails closed (#537) to
-    the shared default -- key ids are minted ``key_<hex>``, so it would name another's jar.
+    """The cookie namespace for one crawl: a keyed caller is pinned to its key id (#226);
+    an anonymous caller gets the shared default -- ANY declaration is refused (#559,
+    extending #537 to every namespace). Doors return 422; this scrub covers bypass seams.
     """
     if caller.authenticated and caller.caller_id:
         return caller.caller_id
-    declared = cookie_namespace_for(profile)
-    if declared.startswith("key_"):
-        return ""
-    return declared
+    return ""
 
 
 @asynccontextmanager
@@ -260,11 +274,14 @@ async def admit(
     active = caller if caller is not None else anonymous_caller()
     resolved = resolve_page_limit(active, requested_pages)
     if payload is not None:
+        # #559: an anonymous namespace declaration is refused at the door (422),
+        # not silently downgraded; the declared profile is the caller's claim.
+        refuse_anonymous_cookie_namespace(active, payload.policy.request_profile)
         policy = payload.policy.model_copy(
             update={"limits": payload.policy.limits.model_copy(update={"max_pages": resolved})}
         )
         namespace = effective_cookie_namespace(policy.request_profile, active)
-        # #537: scrub a refused key_-shaped declaration so the engine cannot re-derive it.
+        # #537/#559: scrub a refused declaration so the engine cannot re-derive it.
         if namespace != cookie_namespace_for(policy.request_profile):
             profile = dict(policy.request_profile)
             profile["cookie_namespace"] = namespace
@@ -316,5 +333,6 @@ __all__ = [
     "identity_for_key",
     "is_operator",
     "quota_denials",
+    "refuse_anonymous_cookie_namespace",
     "resolve_page_limit",
 ]

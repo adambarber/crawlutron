@@ -57,8 +57,9 @@ It is a powerful SSRF-enabled service that:
   exemption is local-dev only. Setting it logs a `SSRF private-target guard
   DISABLED` WARNING at first use; treat that line in your logs as a finding.
 - Keep `CRAWLUTRON_COOKIE_PERSISTENCE_ENABLED=false` unless you
-  understand the cross-tenant cookie-leak risk; multi-tenant deployments
-  should additionally set `request_profile.cookie_namespace`.
+  understand the cross-tenant cookie-leak risk. Keyed crawls are always
+  namespaced to their key id; anonymous crawls share one bounded jar and may
+  not declare `request_profile.cookie_namespace` (the declaration is a 422).
 - Run behind a reverse proxy that strips `Server` headers and adds
   request-id logging.
 
