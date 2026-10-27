@@ -130,9 +130,17 @@ class TestAppLifecycleEdges:
         assert body["code"] == "validation_error"
         assert isinstance(body["details"]["errors"], list)
 
-    async def test_crawl_endpoint_webhook_error(self, async_client, caplog):
+    async def test_crawl_endpoint_webhook_error(self, async_client, caplog, monkeypatch):
         # Crawl a valid URL whose webhook is undeliverable: best-effort delivery
         # must not crash the request, and the loss must be recorded.
+        from app.api import async_crawl_runner
+
+        async def _failing_crawl(*args, **kwargs):
+            raise RuntimeError("scripted crawl failure (#513)")
+
+        # #513: the crawl is stubbed at the runner's execute seam so the failure path
+        # runs without real robots/DNS I/O -- the #513 flake was this I/O exceeding the window.
+        monkeypatch.setattr(async_crawl_runner, "execute_crawl", _failing_crawl)
         with caplog.at_level(logging.WARNING, logger="app.api.webhooks"):
             resp = await async_client.post(
                 "/v1/crawl", json={"url": "http://example.com/", "webhook_url": "http://unreachable.invalid/"}
@@ -142,10 +150,9 @@ class TestAppLifecycleEdges:
         assert body["status"] == "accepted", body
         assert body["webhook_url"] == "http://unreachable.invalid/", body
 
-        # #513: drain-join the delivery task (the #364 budget) instead of polling
-        # caplog dispatch; the bound covers the crawl reaching its failure callback.
-        import time as _time
-
+        # #513: await the runner task itself (the 202 body carries its request_id) --
+        # the failure webhook posts inline inside it, so no dispatch race is possible.
+        from app.api.job_lifecycle import tracked_task
         from app.api.webhooks import drain_webhook_deliveries
 
         def _delivery_failed() -> bool:
@@ -155,12 +162,11 @@ class TestAppLifecycleEdges:
                 for record in caplog.records
             )
 
-        deadline = _time.monotonic() + 30.0
-        while not _delivery_failed() and _time.monotonic() < deadline:
-            await drain_webhook_deliveries()
-            if _delivery_failed():
-                break
-            await asyncio.sleep(0)
+        runner = tracked_task(body["request_id"])
+        assert runner is not None, "the 202's request_id must be a tracked runner task"
+        done, pending = await asyncio.wait({runner}, timeout=30.0)
+        assert not pending, "the webhook crawl runner wedged past 30s"
+        await drain_webhook_deliveries()
         assert _delivery_failed(), "the failed webhook delivery was never recorded"
 
     async def test_map_endpoint_value_error(self, async_client):
