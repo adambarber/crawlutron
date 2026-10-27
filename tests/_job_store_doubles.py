@@ -119,6 +119,16 @@ def frontier(urls: list[str], depth: int = 0) -> list[FrontierEntry]:
     return [FrontierEntry(url=canonical(url), depth=depth) for url in urls]
 
 
+def seed_frontier(job: CrawlJobState, entries: list[FrontierEntry]) -> None:
+    """Wholesale frontier replacement with the removal log kept honest (#547).
+
+    The store persists the queue delta-only: a replacement logs every old row
+    for deletion and re-lands the whole new list in order."""
+    job.frontier_removed.extend(entry.url for entry in job.frontier)
+    job.frontier_mark = 0
+    job.frontier = entries
+
+
 @contextmanager
 def single_shot_job(job_id: str = "test-id", root: str = "http://example.com/"):
     """A throwaway store holding one fresh SINGLE_SHOT job; yield ``(store, job)``.

@@ -92,6 +92,8 @@ def reset_execute_crawl() -> None:
 
 def pop_frontier(job: CrawlJobState) -> list[FrontierEntry]:
     normalize_job_state(job)
+    # Normalization's drops are already logged (the merge records them, #547);
+    # only the pops this function performs need logging here.
     max_pages = job_max_pages(job.policy, job.tier)
     if job.in_flight:
         # Cap arithmetic without the whole-set copy (#548): a live URL sits in exactly
@@ -105,6 +107,9 @@ def pop_frontier(job: CrawlJobState) -> list[FrontierEntry]:
     if capacity is not None and capacity <= 0:
         if job.frontier:
             record_cap_truncated(job)
+        # The whole queue is dropped (#547): log every entry so the persist
+        # deletes exactly their rows.
+        job.frontier_removed.extend(entry.url for entry in job.frontier)
         del job.frontier[:]
         return []
     count = min(BATCH_SIZE, len(job.frontier))
@@ -112,8 +117,12 @@ def pop_frontier(job: CrawlJobState) -> list[FrontierEntry]:
         count = min(count, capacity)
     if capacity is not None and count == capacity and count < len(job.frontier):
         record_cap_truncated(job)
+        job.frontier_removed.extend(entry.url for entry in job.frontier[count:])
         del job.frontier[count:]
     batch = list(job.frontier[:count])
+    # The popped prefix's rows are deleted by the next persist (#547).
+    job.frontier_removed.extend(entry.url for entry in batch)
+    job.frontier_mark = max(0, job.frontier_mark - count)
     del job.frontier[:count]
     return batch
 

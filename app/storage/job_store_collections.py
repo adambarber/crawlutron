@@ -150,22 +150,22 @@ def normalize_frontier(
     root_url: str | NormalizedUrl | None,
     policy: CrawlPolicy,
     host_policy: HostPolicy,
-) -> list[FrontierEntry]:
+) -> tuple[list[FrontierEntry], list[str]]:
     """Coerce a persisted frontier's entry records into ``FrontierEntry``s.
 
-    Always canonicalize: coerce shape, keep the shallowest depth, drop the
-    unusable. A non-list column reads as an empty queue, fail-closed.
-    """
+    Canonicalize: coerce shape, keep the shallowest depth, drop the unusable.
+    Returns the dropped records' raw urls too, so rows can be deleted (#547)."""
     if not isinstance(values, list):
-        return []
+        return [], []
     canonical_root = (
         root_url if isinstance(root_url, NormalizedUrl) else admit_or_none(root_url, policy=host_policy)
     )
     legacy_depth = policy.limits.max_depth
     entries: dict[NormalizedUrl, FrontierEntry] = {}
     order: list[NormalizedUrl] = []
+    dropped: list[str] = []
 
-    def _keep_shallowest(url: NormalizedUrl, entry_depth: int) -> None:
+    def _keep_shallowest(url: NormalizedUrl, entry_depth: int, raw_url: str) -> None:
         """First sighting keeps its slot; a later shallower one replaces it."""
         previous = entries.get(url)
         if previous is None:
@@ -173,6 +173,8 @@ def normalize_frontier(
             order.append(url)
         elif entry_depth < previous.depth:
             entries[url] = FrontierEntry(url=url, depth=entry_depth)
+        else:
+            dropped.append(raw_url)
 
     for value in values:
         if not isinstance(value, dict):
@@ -185,8 +187,8 @@ def normalize_frontier(
         if url is None:
             continue
         entry_depth = 0 if url == canonical_root else _entry_depth(depth, legacy_depth)
-        _keep_shallowest(url, entry_depth)
-    return [entries[url] for url in order]
+        _keep_shallowest(url, entry_depth, raw_url)
+    return [entries[url] for url in order], dropped
 
 
 def normalize_visited(visited: list[str], *, host_policy: HostPolicy) -> OrderedUrlSet:

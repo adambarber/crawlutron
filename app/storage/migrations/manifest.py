@@ -54,9 +54,8 @@ CRAWL_JOBS_SCHEMA = TableSchema(
         ColumnSchema("root_url", "TEXT", True, "''"),
         ColumnSchema("policy", "TEXT", True, "'{}'"),
         ColumnSchema("status", "TEXT", True, None),
-        # The outstanding queue only: `visited`/`results` are companion tables now
-        # (COMPANION_SCHEMAS); `frontier` mutates as a queue, so it stays a column.
-        ColumnSchema("frontier", "TEXT", True, "'[]'"),
+        # The outstanding queue lives in its own delta-appended table (#547);
+        # nothing queue-shaped remains on the row.
         ColumnSchema("in_flight", "TEXT", True, "'[]'"),
         ColumnSchema("transient_retries", "TEXT", True, "'{}'"),
         ColumnSchema("created_at", "REAL", True, None),
@@ -90,10 +89,27 @@ CRAWL_JOB_VISITED_SCHEMA = TableSchema(
     ),
 )
 
+# The frontier queue (#547): one row per outstanding entry, keyed by URL with
+# an ordinal position; the writer reconciles delta-only past a high-water mark.
+CRAWL_JOB_FRONTIER_SCHEMA = TableSchema(
+    name="crawl_job_frontier",
+    columns=(
+        ColumnSchema("job_id", "TEXT", False, None, 1),
+        ColumnSchema("url", "TEXT", False, None, 2),
+        ColumnSchema("pos", "INTEGER", True, "0"),
+        ColumnSchema("depth", "INTEGER", True, "0"),
+    ),
+    indexes=(IndexSchema("crawl_job_frontier_order", ("job_id", "pos")),),
+)
+
 # Tables in a store schema's lifecycle that are not its single primary table:
 # created, drift-checked and rolled back together, so none can be half-migrated.
 COMPANION_SCHEMAS: dict[StoreSchema, tuple[TableSchema, ...]] = {
-    StoreSchema.CRAWL_JOBS: (CRAWL_JOB_RESULTS_SCHEMA, CRAWL_JOB_VISITED_SCHEMA),
+    StoreSchema.CRAWL_JOBS: (
+        CRAWL_JOB_RESULTS_SCHEMA,
+        CRAWL_JOB_VISITED_SCHEMA,
+        CRAWL_JOB_FRONTIER_SCHEMA,
+    ),
 }
 
 RESULTS_SCHEMA = TableSchema(
@@ -196,6 +212,8 @@ LEGACY_COLUMNS = {
         # stamping path brings it forward instead of refusing to start.
         ColumnSchema("visited", "TEXT", True, "'[]'"),
         ColumnSchema("results", "TEXT", True, "'[]'"),
+        # Present only on a database that has not run 0006 yet (#547).
+        ColumnSchema("frontier", "TEXT", True, "'[]'"),
     ),
     StoreSchema.RESULTS: (),
     StoreSchema.COORDINATION_COUNTERS: (),
@@ -211,6 +229,7 @@ MIGRATION_SEQUENCES = {
         "0003_crawl_jobs_split_accumulators",
         "0004_crawl_jobs_add_owner",
         "0005_crawl_jobs_add_deleted_at",
+        "0006_crawl_jobs_split_frontier",
     ),
     StoreSchema.RESULTS: ("0001_results_initial", "0002_results_add_owner"),
     StoreSchema.COORDINATION_COUNTERS: ("0001_coordination_counters_initial",),
