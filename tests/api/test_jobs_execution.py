@@ -402,11 +402,11 @@ class TestWholeSiteJobExecution:
             canonical("http://example.test/c"),
         }
 
-    async def test_batch_admission_derives_the_occupied_set_once_per_batch(
+    async def test_batch_admission_derives_the_occupied_set_once_at_start(
         self, client, job_store, monkeypatch
     ):
-        """#381: the occupied set is derived once per batch and threaded by value
-        (the reserved delta), not re-derived from job state for every entry."""
+        """#548: the occupied set is derived ONCE at loop start and threaded by
+        value (the reserved delta), not re-derived per batch."""
         import app.api.job_runner as job_runner_module
 
         calls: list[int] = []
@@ -424,7 +424,7 @@ class TestWholeSiteJobExecution:
             results=[_canned_result(GRAPH_ROOT, links=[GRAPH_CHILD, "http://example.test/c"])],
         )
         assert_settled(job, visited=[GRAPH_ROOT, GRAPH_CHILD, "http://example.test/c"], crawled=3)
-        assert len(calls) == 2  # one per batch (root, then the two-entry batch), not per entry
+        assert len(calls) == 1  # once at loop start, then threaded via the known set
 
     async def test_an_intra_batch_duplicate_is_deduped_against_the_first_admission(self, client, job_store):
         """#402: each entry's admission folds back (``known |= known_delta``), so the

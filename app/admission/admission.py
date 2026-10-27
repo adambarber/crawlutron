@@ -240,7 +240,14 @@ def requeue_admitted_pages(
     job: CrawlJobState,
     entries: Iterable[FrontierEntry],
     context: JobAdmissionContext,
+    known: set[NormalizedUrl] | None = None,
 ) -> AdmissionOutcome:
+    """Re-admit already-admitted identities onto the frontier.
+
+    ``known`` threads the caller's occupied set (#548); ``None`` derives it from
+    job state, the shape the first admission used."""
+    if known is None:
+        known = admitted_page_identities(job, host_policy=context.host_policy)
     known = admitted_page_identities(job, host_policy=context.host_policy)
     accepted_entries, overcommitted = _requeue_page_identities(
         job,

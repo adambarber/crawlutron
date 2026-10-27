@@ -90,13 +90,16 @@ def reset_execute_crawl() -> None:
     _execute_crawl = _real_execute_crawl
 
 
-def _pop_frontier(job: CrawlJobState) -> list[FrontierEntry]:
+def pop_frontier(job: CrawlJobState) -> list[FrontierEntry]:
     normalize_job_state(job)
     max_pages = job_max_pages(job.policy, job.tier)
     if job.in_flight:
-        fixed = set(job.visited) | {entry.url for entry in job.in_flight}
-        if max_pages > 0 and len(fixed) > max_pages:
-            record_cap_overcommitted(job)
+        # Cap arithmetic without the whole-set copy (#548): a live URL sits in exactly
+        # one collection, so the union's size is this sum; visited len is O(1).
+        if max_pages > 0:
+            fixed_count = len(job.visited) + sum(1 for entry in job.in_flight if entry.url not in job.visited)
+            if fixed_count > max_pages:
+                record_cap_overcommitted(job)
         return list(job.in_flight[:BATCH_SIZE])
     capacity = remaining_page_capacity(len(job.visited), max_pages)
     if capacity is not None and capacity <= 0:
@@ -275,18 +278,21 @@ async def _mark_complete_if_empty(
     return True
 
 
-async def _absorb_batch(
+async def absorb_batch(
     job: CrawlJobState,
     batch: Sequence[Any],
     resolved: dict[NormalizedUrl, EngineCrawlResult],
     context: JobAdmissionContext,
+    known: set[NormalizedUrl],
 ) -> int:
-    """Fold one resolved batch into ``job``; returns the failed count."""
+    """Fold one resolved batch into ``job`` under the threaded known set (#548)."""
     failed = 0
-    known = admitted_page_identities(job, host_policy=context.host_policy)
     for entry in batch:
         identity = entry.url
         job.in_flight = [pending for pending in job.in_flight if pending.url != identity]
+        # The identity leaves in_flight here; the threaded set must forget it too,
+        # or the requeue below would dedupe against its own URL (#548).
+        known.discard(identity)
         item = resolved.get(identity)
         transient = item is None or is_transient_classification(item.classification)
         if transient and job.transient_retries.get(identity, 0) + 1 < MAX_URL_TRANSIENT_ATTEMPTS:
@@ -295,11 +301,17 @@ async def _absorb_batch(
                 job,
                 (FrontierEntry(url=identity, depth=entry.depth),),
                 context,
+                known=known,
             )
             continue
         job.transient_retries.pop(identity, None)
         job.visited.add(identity)
+        known.add(identity)
         failed += await _entry_result(job, identity, item, entry.depth, context, known)
+    # The batch's own counters fold here: one absorb, one save, one stats write.
+    job.stats["total_crawled"] = len(job.visited)
+    if failed:
+        job.stats["total_failed"] = job.stats.get("total_failed", 0) + failed
     return failed
 
 
@@ -333,6 +345,8 @@ async def run_job(
     try:
         context = JobAdmissionContext.create(job.policy, job.tier, settings, fetch_and_decode)
         await _seed_sitemaps(job, context, job_store)
+        # The occupied set is threaded across the loop (#548): one derivation here.
+        known = admitted_page_identities(job, host_policy=context.host_policy)
         while True:
             # State-only reload (#538): a full read re-decodes the page history per batch only to discard it.
             state = await job_store.areload_state(job_id)
@@ -341,7 +355,7 @@ async def run_job(
             job = replace(state, results=job.results, visited=job.visited, visited_mark=job.visited_mark)
             if await _should_stop(job, job_id, job_store, shutdown_event):
                 return
-            batch = _pop_frontier(job)
+            batch = pop_frontier(job)
             if await _mark_complete_if_empty(job, job_id, job_store, batch):
                 return
             if not job.in_flight:
@@ -356,18 +370,14 @@ async def run_job(
             if reloaded is None:
                 return
             job = replace(reloaded, results=job.results, visited=job.visited, visited_mark=job.visited_mark)
-            # ``original_url`` wins the identity, redirects fill the gaps; each produced result is admitted
-            # under the job's own host policy.
+            # ``original_url`` wins the identity; redirects fill the gaps (#519).
             resolved: dict[NormalizedUrl, EngineCrawlResult] = {}
             for produced in items:
                 admitted_original = admit_or_none(produced.original_url, policy=job.host_policy)
                 if admitted_original is not None:
                     resolved.setdefault(admitted_original, produced)
             _resolve_redirects(items, resolved)
-            failed = await _absorb_batch(job, batch, resolved, context)
-            job.stats["total_crawled"] = len(job.visited)
-            if failed:
-                job.stats["total_failed"] = job.stats.get("total_failed", 0) + failed
+            await absorb_batch(job, batch, resolved, context, known)
             await job_store.asave(job)
     except asyncio.CancelledError:
         raise
