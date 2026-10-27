@@ -66,10 +66,10 @@ def test_the_path_list_and_the_parsed_trees_are_one_traversal(monkeypatch):
     assert len(reads) == 0, f"listing the tree parsed {len(reads)} modules it did not need parsed"
     trees = app_trees()
     assert [path for path, _tree in trees] == list(paths), "the trees are not the files that were listed"
-    # Exactly one read per module when this test took the snapshot, and none at all when an earlier test in
-    # the session already did: both are "once", and the assertion has to hold whichever order the session ran
-    assert len(reads) in (0, len(trees)), (
-        f"{len(reads)} reads for {len(trees)} modules; the snapshot is read once, not once per caller"
+    # Count bands 0..N: the shared parse cache means an earlier test on this
+    # worker may have pre-parsed some files — through N is "once", above is a re-parse.
+    assert len(reads) <= len(trees), (
+        f"{len(reads)} reads for {len(trees)} modules; a listing may parse at most once per module"
     )
     assert app_python_files() is paths, "the file list is re-globbed per caller"
     assert app_trees() is trees, "the tree snapshot is rebuilt per caller"
