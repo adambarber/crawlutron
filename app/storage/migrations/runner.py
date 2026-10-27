@@ -8,7 +8,7 @@ import sqlite3
 import uuid
 from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from getpass import getuser
 from pathlib import Path
 
@@ -43,7 +43,6 @@ class _CrawlutronLogBackend(SQLiteBackend):
     _cached_fqdn: str | None = None
 
     def get_log_data(self, migration=None, operation="apply"):
-        assert operation in {"apply", "rollback", "mark", "unmark"}
         if _CrawlutronLogBackend._cached_fqdn is None:
             _CrawlutronLogBackend._cached_fqdn = socket.getfqdn()
         return {
@@ -52,7 +51,7 @@ class _CrawlutronLogBackend(SQLiteBackend):
             "migration_hash": migration.hash if migration else None,
             "username": getuser(),
             "hostname": _CrawlutronLogBackend._cached_fqdn,
-            "created_at_utc": datetime.now(timezone.utc).replace(tzinfo=None),
+            "created_at_utc": datetime.now(UTC).replace(tzinfo=None),
             "operation": operation,
         }
 
