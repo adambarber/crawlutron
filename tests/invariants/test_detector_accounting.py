@@ -8,7 +8,7 @@ import ast
 import pathlib
 from dataclasses import dataclass
 
-from tests.chokepoint_walks import REPO_ROOT, calls_to_any, from_imports, functions
+from tests.chokepoint_walks import REPO_ROOT, calls_to_any, from_imports, functions, parsed
 from tests.invariants._armed_detectors import hand_rolled_detectors
 
 INVARIANTS_ROOT = REPO_ROOT / "tests" / "invariants"
@@ -128,7 +128,7 @@ def _survey(root: pathlib.Path) -> tuple[list[DetectorEntry], list[DetectorEntry
     for path in sorted(root.rglob("*.py")):
         if "__pycache__" in path.parts:
             continue
-        tree = ast.parse(path.read_text(encoding="utf-8"))
+        tree = parsed(path)
         wired = _wired_finds(tree)
         for node in functions(tree):
             if not node.name.endswith(DETECTOR_SUFFIX):

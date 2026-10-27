@@ -16,6 +16,7 @@ from tests.chokepoint_walks import (
     local_subtree,
     offender_at,
     parent_map,
+    parsed,
     resolved_call_name,
 )
 from tests.rules import Bites, Rule, Trips
@@ -470,7 +471,7 @@ def test_host_policy_detector_accepts_fixed_extraction_boundaries():
     ever flags these, the sanction needs a second look.
     """
     path = REPO_ROOT / "app" / "extraction" / "content.py"
-    tree = ast.parse(path.read_text(encoding="utf-8"))
+    tree = parsed(path)
     assert not [
         offender
         for offender in _required_host_policy_offenders(tree, path)

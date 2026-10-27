@@ -9,7 +9,7 @@ import ast
 import pathlib
 import re
 
-from tests.chokepoint_walks import REPO_ROOT, assignment_targets, relative_posix
+from tests.chokepoint_walks import REPO_ROOT, assignment_targets, parsed, relative_posix
 from tests.invariants._shared import _declared_public_symbols
 from tests.property_registry import Property
 
@@ -202,7 +202,7 @@ def test_property_owner_public_surfaces_equal_all():
     offenders: list[str] = []
     for relative in _OWNER_PUBLIC_SURFACE_RATCHET:
         path = REPO_ROOT / relative
-        tree = ast.parse(path.read_text(encoding="utf-8"))
+        tree = parsed(path)
         offenders.extend(_public_surface_offenders(tree, path, _PUBLIC_SURFACE_PROPERTY))
     assert not offenders, "property owner public surface drifted: " + ", ".join(offenders)
 
@@ -216,7 +216,7 @@ def _all_surface_modules(root: pathlib.Path = REPO_ROOT / "app") -> set[str]:
         rel = relative_posix(path)
         if path.name == "__init__.py" or rel.startswith("app/models/"):
             continue
-        if _declared_public_symbols(ast.parse(path.read_text(encoding="utf-8"))) is None:
+        if _declared_public_symbols(parsed(path)) is None:
             continue
         found.add(rel)
     return found
@@ -249,7 +249,7 @@ def _surface_budget_offenders(*, grown: bool) -> list[str]:
     offenders: list[str] = []
     for relative, (surface_budget, entry_budget) in _OWNER_PUBLIC_SURFACE_RATCHET.items():
         path = REPO_ROOT / relative
-        surface_count, entry_count = _owner_surface_counts(ast.parse(path.read_text(encoding="utf-8")))
+        surface_count, entry_count = _owner_surface_counts(parsed(path))
         over = surface_count > surface_budget or entry_count > entry_budget
         under = surface_count < surface_budget or entry_count < entry_budget
         if over if grown else under:
@@ -323,7 +323,7 @@ def _models_home_offenders(root: pathlib.Path = _MODELS_ROOT) -> list[str]:
     for path in sorted(root.glob("*.py")):
         if path.name == "__init__.py":
             continue
-        declared_types = _declared_types(ast.parse(path.read_text(encoding="utf-8")))
+        declared_types = _declared_types(parsed(path))
         # A private class is not a name a reader goes looking up, for the same reason a module constant is
         # not; only public declarations pick the module's name.
         public_types = {name for name in declared_types if not name.startswith("_")}
@@ -346,7 +346,7 @@ def _models_reexport_offenders(root: pathlib.Path = _MODELS_ROOT) -> list[str]:
 
     ``from app.models import X`` lets a type live in the wrong file and still
     import cleanly -- the drift one-concept-per-file makes impossible."""
-    tree = ast.parse((root / "__init__.py").read_text(encoding="utf-8"))
+    tree = parsed(root / "__init__.py")
     return [
         f"app/models/__init__.py imports "
         f"{', '.join(alias.name for alias in node.names)} -- re-exporting makes a type"
@@ -375,7 +375,7 @@ def _models_multitype_offenders(root: pathlib.Path = _MODELS_ROOT) -> list[str]:
             continue
         if path.name in _COHESIVE_MODULES or path.name in _MODELS_CONCERN_MODULES:
             continue
-        declared = _declared_types(ast.parse(path.read_text(encoding="utf-8")))
+        declared = _declared_types(parsed(path))
         public_types = {name for name in declared if not name.startswith("_")}
         if len(public_types) > 1:
             offenders.append(f"{path.name} co-locates {sorted(public_types)}")
@@ -415,7 +415,7 @@ def test_models_concern_modules_still_exist():
     present = {path.name for path in _MODELS_ROOT.glob("*.py")}
     assert not _MODELS_CONCERN_MODULES - present, "exempted module no longer exists"
     for name in _MODELS_CONCERN_MODULES & present:
-        tree = ast.parse((_MODELS_ROOT / name).read_text(encoding="utf-8"))
+        tree = parsed(_MODELS_ROOT / name)
         assert not (classes := {n.name for n in tree.body if isinstance(n, ast.ClassDef)}), (
             f"{name} is exempt as holding a concern but declares {sorted(classes)};"
             " drop the exemption so the named-for-their-home rule governs it"

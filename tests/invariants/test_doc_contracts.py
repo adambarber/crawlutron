@@ -13,7 +13,7 @@ from app.models.crawl_policy import CrawlPolicy
 from app.models.crawl_request import CrawlRequest
 from app.models.json_value import JsonValue
 from app.models.render_request import RenderRequest
-from tests.chokepoint_walks import REPO_ROOT
+from tests.chokepoint_walks import REPO_ROOT, parsed
 from tests.invariants.test_knob_contracts import (
     _KNOB_PATTERN,
     _consumed_knobs,
@@ -199,7 +199,7 @@ def _app_symbol_definitions(root: pathlib.Path = REPO_ROOT) -> dict[str, frozens
     """
     definitions: dict[str, set[str]] = {}
     for path in sorted((root / "app").rglob("*.py")):
-        tree = ast.parse(path.read_text(encoding="utf-8"))
+        tree = parsed(path)
         relative = path.relative_to(root).as_posix()
         for node in tree.body:
             if isinstance(node, ast.ClassDef | ast.FunctionDef | ast.AsyncFunctionDef):

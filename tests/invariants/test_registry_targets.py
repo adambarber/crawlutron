@@ -5,7 +5,7 @@ from __future__ import annotations
 import ast
 import pathlib
 
-from tests.chokepoint_walks import REPO_ROOT, app_trees, local_nodes, nodes_of, offender, resolved_call_name
+from tests.chokepoint_walks import REPO_ROOT, app_trees, local_subtree, nodes_of, offender, resolved_call_name
 from tests.invariants._shared import _relative_app_path
 from tests.invariants.test_registry import (
     _PROPERTY_MODULES,
@@ -26,7 +26,7 @@ _PUBLIC_RANGE_ATTRIBUTES = frozenset(
 def _public_range_accesses(nodes: list[tuple[ast.AST, ast.AST]]) -> int:
     count = 0
     for owner_tree, node in nodes:
-        for child in local_nodes(node):
+        for child in local_subtree(node):
             if isinstance(child, ast.Attribute) and child.attr in _PUBLIC_RANGE_ATTRIBUTES:
                 count += 1
             elif isinstance(child, ast.Call):
@@ -45,7 +45,7 @@ def _public_target_counts(nodes: list[tuple[ast.AST, ast.AST]]) -> tuple[int, in
     parses = sum(
         resolved_call_name(owner_tree, call) == "ipaddress.ip_address"
         for owner_tree, node in nodes
-        for call in local_nodes(node)
+        for call in local_subtree(node)
         if isinstance(call, ast.Call)
     )
     return parses, _public_range_accesses(nodes)

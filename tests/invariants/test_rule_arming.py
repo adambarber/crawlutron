@@ -10,7 +10,7 @@ import importlib
 import re
 from collections.abc import Iterator, Sequence
 
-from tests.chokepoint_walks import REPO_ROOT
+from tests.chokepoint_walks import REPO_ROOT, parsed
 from tests.invariants._armed_detectors import ArmedHandRolled, hand_rolled_detectors
 from tests.invariants._shared import app_names
 from tests.rules import Registry, Rule
@@ -65,7 +65,7 @@ def declared_rules() -> Iterator[ArmedRule]:
     Derived from the tree rather than a module list: a left-out module is a
     rule nothing audits."""
     for path in sorted((REPO_ROOT / "tests" / "invariants").glob("test_*.py")):
-        module = ast.parse(path.read_text(encoding="utf-8"))
+        module = parsed(path)
         functions = _function_index(module)
         constants = _string_constants(module)
         for node in ast.walk(module):
