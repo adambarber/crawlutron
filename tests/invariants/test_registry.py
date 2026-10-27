@@ -4,6 +4,7 @@ import ast
 import pathlib
 from collections.abc import Mapping, Sequence
 from contextvars import ContextVar
+from functools import cache
 
 from tests.chokepoint_walks import app_trees, local_nodes, nodes_of, resolved_call_name
 from tests.invariants._shared import DefinitionNode, _module_definition_index, _relative_app_path
@@ -54,6 +55,20 @@ def _module_aware(detector):
     return wrapped
 
 
+@cache
+def _tree_definitions(tree: ast.AST) -> dict[str, list[ast.AST]]:
+    """Every function name in `tree` -> its definitions, built once per tree.
+
+    Keyed by identity like ``nodes_of``: the resolution loop asks it for every
+    site, and a per-call rebuild was the registry gates' dominant cost.
+    """
+    definitions: dict[str, list[ast.AST]] = {}
+    for candidate in nodes_of(tree):
+        if isinstance(candidate, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            definitions.setdefault(candidate.name, []).append(candidate)
+    return definitions
+
+
 def _resolvedlocal_nodes(
     tree: ast.AST,
     node: ast.AST,
@@ -62,10 +77,7 @@ def _resolvedlocal_nodes(
     modules: tuple[tuple[pathlib.Path, ast.Module], ...] | None = None,
     prop: Property | None = None,
 ) -> list[tuple[ast.AST, ast.AST]]:
-    definitions: dict[str, list[ast.AST]] = {}
-    for candidate in nodes_of(tree):
-        if isinstance(candidate, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            definitions.setdefault(candidate.name, []).append(candidate)
+    definitions = _tree_definitions(tree)
     module_index = _module_definition_index(modules)
     resolved: list[tuple[ast.AST, ast.AST]] = []
     seen: set[tuple[int, int]] = set()

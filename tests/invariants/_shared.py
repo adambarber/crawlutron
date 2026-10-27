@@ -9,6 +9,7 @@ from __future__ import annotations
 import ast
 import pathlib
 from collections.abc import Callable, Iterable
+from functools import cache
 from pathlib import Path
 
 from tests.chokepoint_walks import REPO_ROOT, app_trees, parsed, relative_posix, resolved_call_name
@@ -246,8 +247,33 @@ def _module_name(path: pathlib.Path) -> str:
 type DefinitionNode = ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef
 
 
+# A caller's module set: the cached app-tuple, a synthetic list, or none.
+type ModuleSet = tuple[tuple[pathlib.Path, ast.Module], ...] | list[tuple[pathlib.Path, ast.Module]] | None
+
+
 def _module_definition_index(
-    modules: tuple[tuple[pathlib.Path, ast.Module], ...] | None,
+    modules: ModuleSet,
+) -> dict[str, list[tuple[pathlib.Path, ast.Module, DefinitionNode]]]:
+    """Module-qualified definition index over `modules`, built once per tuple.
+
+    Callers pass the same cached trees tuple session-wide, so one build serves
+    every registry site; ``None`` or a list (synthetic proofs) is uncached.
+    """
+    if isinstance(modules, list) or modules is None:
+        return _index_modules(modules)
+    return _module_definition_index_cached(modules)
+
+
+@cache
+def _module_definition_index_cached(
+    modules: tuple[tuple[pathlib.Path, ast.Module], ...],
+) -> dict[str, list[tuple[pathlib.Path, ast.Module, DefinitionNode]]]:
+    """The cached tuple branch of :func:`_module_definition_index`."""
+    return _index_modules(modules)
+
+
+def _index_modules(
+    modules: ModuleSet,
 ) -> dict[str, list[tuple[pathlib.Path, ast.Module, DefinitionNode]]]:
     index: dict[str, list[tuple[pathlib.Path, ast.Module, DefinitionNode]]] = {}
     for path, tree in modules or ():
