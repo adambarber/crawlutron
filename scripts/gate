@@ -10,13 +10,13 @@ if [ "$#" -eq 0 ]; then
     exit 1
 fi
 
-# Dual layout, tried service-first then repo-root (docs/gate-helper.md). The
-# nested candidate never exists here; the check is what survives vendoring.
-top=$(git rev-parse --show-toplevel)
-if [ -d "$top/docker/browser-crawler" ]; then
-    service_root="$top/docker/browser-crawler"
+# Dual layout, service-first then repo-root; the nested candidate never exists
+# here (docs/gate-helper.md). #487: derive the root from THIS script's own
+self_dir=$(cd "$(dirname "$0")" && pwd -P)  # location, not the caller's CWD: git rev-parse --show-toplevel answers from the caller, so a gate invoked from outside any repository died with exit 128 before its command. This script lives in the service it gates, so the service root is its grandparent.
+if [ -d "$self_dir/../docker/browser-crawler" ]; then
+    service_root=$(cd "$self_dir/../docker/browser-crawler" && pwd -P)
 else
-    service_root="$top"
+    service_root=$(cd "$self_dir/.." && pwd -P)
 fi
 cd "$service_root"
 
