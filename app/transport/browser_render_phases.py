@@ -153,12 +153,18 @@ async def warmup_pages(
     wait_for_ready: Callable[[RenderPage], Awaitable[None]],
     warmup_urls: list[str],
     policy: HostPolicy,
+    timeout_seconds: float,
 ) -> None:
-    """Visit the warmup URLs (no Host header needed) before the real navigation."""
+    """Visit the warmup URLs (no Host header needed) before the real navigation.
+
+    Every warmup goto carries the one render-phase budget (#482): before #532
+    the navigation was unbounded (Playwright's default).
+    """
+    warmup_budget = render_phase_seconds(timeout_seconds)
     for warmup_url in warmup_urls:
         normalized_warmup = NormalizedUrl(warmup_url, policy=policy)
         # The driver's goto takes text -- .raw projects at that external-API edge.
-        await page.goto(normalized_warmup.raw, wait_until="domcontentloaded")
+        await page.goto(normalized_warmup.raw, wait_until="domcontentloaded", timeout=warmup_budget)
         await wait_for_ready(page)
 
 
@@ -308,6 +314,7 @@ async def guarded_render(
         wait_for_ready=collaborators.driver.wait_for_ready_state,
         warmup_urls=collaborators.warmup_urls,
         policy=collaborators.policy,
+        timeout_seconds=options.timeout_seconds,
     )
     await navigate_with_host_override(
         page,
