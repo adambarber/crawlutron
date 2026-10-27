@@ -40,6 +40,7 @@ from tests._job_store_doubles import (
     loaded_job,
     make_crawled_job_store,
     make_job_store,
+    seed_frontier,
     single_shot_job,
     single_shot_orphan,
 )
@@ -255,6 +256,7 @@ __all__ = [
     "run_seeded_job",
     "run_seeded_scripted_job",
     "run_to_terminal",
+    "seed_frontier",
     "single_shot_job",
     "single_shot_orphan",
     "submit_blocked_job",

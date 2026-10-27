@@ -98,11 +98,15 @@ class JobStore:
         self._accumulators = JobAccumulators(self._conn)
 
     def _row_to_job(self, row: sqlite3.Row, *, with_accumulators: bool = True) -> CrawlJobState:
-        """One row, read through the declared record (the walk lives beside it)."""
+        """One row, read through the declared record (the walk lives beside it).
+
+        The frontier always loads (#547): the runner's state-only reload owns
+        the queue, so only results/visited are with-accumulators collections."""
         return row_to_state(
             row,
             visited=self._accumulators.read_visited(row["job_id"]) if with_accumulators else [],
             results=self._accumulators.read_results(row["job_id"]) if with_accumulators else [],
+            frontier=self._accumulators.read_frontier(row["job_id"]),
             host_policy=self._host_policy,
             tier=self.tier,
         )
@@ -136,16 +140,14 @@ class JobStore:
     def save(self, job: CrawlJobState) -> None:
         """Persist job DATA to SQLite (thread-safe). ``status`` and ``owner`` are
         INSERT-only -- the UPDATE path never touches them -- so a stale whole-row
-        save cannot clobber a pause/cancel or transfer ownership.
-        """
+        save cannot clobber a pause/cancel or transfer ownership."""
         with self._lock:
             self._persist(job)
 
     def _persist(self, job: CrawlJobState) -> None:
         """Write job state to SQLite. Caller must hold ``self._lock``.
         No normalization pass: identity is established at ingress. A tombstoned
-        (deleted) job is a no-op here, so a late ``save`` cannot resurrect it.
-        """
+        (deleted) job is a no-op here, so a late ``save`` cannot resurrect it."""
         if self._is_tombstoned(job.job_id):
             return
         job.updated_at = time.time()
@@ -176,17 +178,14 @@ class JobStore:
         return cur.rowcount == 1
 
     def load(self, job_id: str) -> CrawlJobState | None:
-        """Load job state from SQLite. Returns None if not found.
-        The whole job: live state plus page history and visited set. A caller that
-        needs only live state must use ``reload_state``, not pay for the accumulators.
-        """
+        """Load the whole job: live state plus page history and visited set.
+        Live state only? Use ``reload_state``; don't pay for the accumulators."""
         return self._read_row(job_id, with_accumulators=True)
 
     def reload_state(self, job_id: str) -> CrawlJobState | None:
         """The live state of a job, without its page history or visited set.
-        The batch loop reloads once per batch to pick up what it wrote and keeps
-        its own accumulators; they come back empty because it is the one writer.
-        """
+        The batch loop reloads once per batch; the accumulators come back empty
+        because it is the one writer."""
         return self._read_row(job_id, with_accumulators=False)
 
     def _read_row(
@@ -196,19 +195,20 @@ class JobStore:
         Row, history and visited set are read under one hold of the lock; ``owner``
         narrows to the caller's own row before any deserialization."""
         with self._lock:
+            # The row and its collections read under one hold of the lock;
+            # ``owner`` narrows to the caller's own row before deserialization.
+            columns = (
+                "SELECT job_id, kind, owner, root_url, policy, status, "
+                "created_at, updated_at, error, stats, in_flight, transient_retries "
+                "FROM crawl_jobs "
+            )
             if owner is None:
                 row = self._conn.execute(
-                    "SELECT job_id, kind, owner, root_url, policy, status, frontier, "
-                    "created_at, updated_at, error, stats, in_flight, transient_retries "
-                    "FROM crawl_jobs WHERE job_id = ? AND deleted_at IS NULL",
-                    (job_id,),
+                    columns + "WHERE job_id = ? AND deleted_at IS NULL", (job_id,)
                 ).fetchone()
             else:
                 row = self._conn.execute(
-                    "SELECT job_id, kind, owner, root_url, policy, status, frontier, "
-                    "created_at, updated_at, error, stats, in_flight, transient_retries "
-                    "FROM crawl_jobs WHERE job_id = ? AND owner = ? AND deleted_at IS NULL",
-                    (job_id, owner),
+                    columns + "WHERE job_id = ? AND owner = ? AND deleted_at IS NULL", (job_id, owner)
                 ).fetchone()
             if row is None:
                 return None

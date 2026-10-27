@@ -24,6 +24,7 @@ def row_to_state(
     *,
     visited: list[str],
     results: list[dict[str, JsonValue]],
+    frontier: list[FrontierEntryDict],
     host_policy: HostPolicy,
     tier: PolicyTier,
 ) -> CrawlJobState:
@@ -32,7 +33,6 @@ def row_to_state(
     guesses the shape it wrote."""
     job_id = row["job_id"]
     policy: dict[str, JsonValue] = json.loads(row["policy"])
-    frontier: list[FrontierEntryDict] = json.loads(row["frontier"])
     stats: dict[str, int] = json.loads(row["stats"]) if row["stats"] else {}
     in_flight: list[FrontierEntryDict] = json.loads(row["in_flight"])
     transient_retries: dict[str, int] = json.loads(row["transient_retries"])
@@ -70,7 +70,7 @@ def normalize_job_state(job: CrawlJobState) -> CrawlJobState:
     admitted_root = admit_or_none(job.root_url, policy=job.host_policy)
     root_url = admitted_root.raw if admitted_root is not None else ""
     policy = read_policy(job.policy, job.tier)
-    visited, frontier, in_flight = _merge_live_collections(
+    visited, frontier, in_flight, dropped = _merge_live_collections(
         root_url=root_url,
         host_policy=job.host_policy,
         visited=job.visited,
@@ -87,6 +87,10 @@ def normalize_job_state(job: CrawlJobState) -> CrawlJobState:
     job.root_url = root_url
     job.policy = policy
     job.visited = visited
+    # The merge drops entries visited or in_flight already covers (#547): those
+    # drops are the queue's deletions, logged so the next persist deletes them.
+    job.frontier_removed.extend(entry.url for entry in dropped)
+    job.frontier_mark = len(frontier)
     job.frontier = frontier
     job.in_flight = in_flight
     job.transient_retries = transient_retries
@@ -101,10 +105,10 @@ def _merge_live_collections(
     visited: OrderedUrlSet,
     frontier: list[FrontierEntry],
     in_flight: list[FrontierEntry],
-) -> tuple[OrderedUrlSet, list[FrontierEntry], list[FrontierEntry]]:
+) -> tuple[OrderedUrlSet, list[FrontierEntry], list[FrontierEntry], list[FrontierEntry]]:
     """The live merge the row read's normalization once duplicated: the root folds
-    to depth 0, visited wins, in_flight folds to the frontier's shallowest depth,
-    over records, never over forgiven wire shapes."""
+    to depth 0, visited wins, in_flight folds to the frontier's shallowest depth.
+    Returns the dropped frontier entries too, so the caller can log deletions."""
     canonical_root = admit_or_none(root_url, policy=host_policy)
     folded_frontier = [
         entry
@@ -124,10 +128,14 @@ def _merge_live_collections(
         if entry.url not in visited
     ]
     in_flight_ids = {entry.url for entry in folded_in_flight}
-    kept_frontier = [
-        entry for entry in folded_frontier if entry.url not in visited and entry.url not in in_flight_ids
-    ]
-    return visited, kept_frontier, folded_in_flight
+    kept_frontier = []
+    dropped_frontier = []
+    for entry in folded_frontier:
+        if entry.url not in visited and entry.url not in in_flight_ids:
+            kept_frontier.append(entry)
+        else:
+            dropped_frontier.append(entry)
+    return visited, kept_frontier, folded_in_flight, dropped_frontier
 
 
 # Every field the job response exposes, shared by single and list reads so the
@@ -135,7 +143,7 @@ def _merge_live_collections(
 _JOB_STATUS_PROJECTION = """
     SELECT job_id, root_url, status, created_at, updated_at, stats, error, owner,
            COALESCE(kind, 'whole_site') AS kind,
-           json_array_length(frontier) AS frontier_size,
+           (SELECT count(*) FROM crawl_job_frontier f WHERE f.job_id = crawl_jobs.job_id) AS frontier_size,
            COALESCE(json_extract(stats, '$.cap_truncated'), 0) AS cap_truncated
       FROM crawl_jobs
 """

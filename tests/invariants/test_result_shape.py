@@ -249,8 +249,8 @@ CRAWL_RESPONSE_ENVELOPE_FIELDS_ARE_PASSED_BY_ONE_OWNER = Rule(
 def _job_row_accumulator_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
     """Flag SQL that reads or writes a dropped ``crawl_jobs`` column.
 
-    ``results``/``visited`` were JSON columns (quadratic batch rewrites), now
-    append-only tables; the banned set is read from the migration manifest."""
+    ``results``/``visited``/``frontier`` were JSON columns (quadratic batch
+    rewrites), now tables; the banned set is read from the migration manifest."""
     if "migrations" in path.parts:
         return []
     banned = {column.name for column in LEGACY_COLUMNS[StoreSchema.CRAWL_JOBS]}
@@ -270,17 +270,20 @@ def _job_row_accumulator_offenders(tree: ast.AST, path: pathlib.Path) -> list[st
 CRAWL_JOBS_ACCUMULATORS_ARE_NEVER_ROW_COLUMNS = Rule(
     name="crawl-jobs-accumulators-are-never-row-columns",
     find=_job_row_accumulator_offenders,
-    summary=("Append-only accumulators belong in crawl_job_results / crawl_job_visited, not on the job row"),
+    summary=(
+        "Append-only accumulators belong in crawl_job_results / crawl_job_visited /"
+        " crawl_job_frontier, not on the job row"
+    ),
     excludes=SANCTIONED,
     bite=lambda: Bites(
-        'def f(conn, job):\n    return conn.execute("UPDATE crawl_jobs SET visited = ?", (job.visited,))\n',
-        "visited",
+        'def f(conn, job):\n    return conn.execute("UPDATE crawl_jobs SET frontier = ?", (job.frontier,))\n',
+        "frontier",
     ),
     clean=lambda: (
         # The live shape: subqueries over the accumulator tables aliased back to names that CONTAIN the
         # dropped columns. A substring match would reject this, which is why the detector matches whole words.
         "def f(conn, job):\n"
-        '    conn.execute("UPDATE crawl_jobs SET frontier = ?", (job.frontier,))\n'
+        "    conn.execute('INSERT INTO \"crawl_job_frontier\" (job_id, url) VALUES (?, ?)')\n"
         "    conn.execute('INSERT INTO \"crawl_job_results\" (job_id, seq, payload) VALUES (?, ?, ?)')\n"
         "    conn.execute('INSERT INTO \"crawl_job_visited\" (job_id, url) VALUES (?, ?)')\n"
         '    conn.execute("SELECT (SELECT count(*) FROM crawl_job_results r WHERE r.job_id = job.job_id) '

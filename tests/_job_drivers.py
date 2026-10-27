@@ -8,6 +8,7 @@ from app.admission.policy import PolicyLike
 from app.models.crawl_request import CrawlRequest
 from app.models.crawl_result import EngineCrawlResult
 from app.storage.job_store import CrawlJobState, FrontierEntry, JobStatus
+from tests._job_store_doubles import seed_frontier
 from tests._policy_factories import canonical
 
 
@@ -38,7 +39,7 @@ def _seed_job(
 ):
     job = job_store.create(root_url, policy if policy is not None else {})
     if kw.get("frontier") is not None:
-        job.frontier = [FrontierEntry(url=canonical(url), depth=0) for url in kw["frontier"]]
+        seed_frontier(job, [FrontierEntry(url=canonical(url), depth=0) for url in kw["frontier"]])
     if kw.get("in_flight") is not None:
         job.in_flight = [FrontierEntry(url=canonical(url), depth=0) for url in kw["in_flight"]]
     job_store.save(job)

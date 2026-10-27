@@ -10,7 +10,14 @@ from app.admission.policy import read_policy
 from app.config.settings import CrawlerSettings
 from app.models.crawl_policy import CrawlPolicy
 from app.storage.job_store import CrawlJobState, FrontierEntry, JobStatus, OrderedUrlSet
-from tests._job_harnesses import frontier, loaded_job, make_job_store, raw_job_row, write_row_policy
+from tests._job_harnesses import (
+    frontier,
+    loaded_job,
+    make_job_store,
+    raw_job_row,
+    seed_frontier,
+    write_row_policy,
+)
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY, canonical, deployment_tier, job_store
 
 
@@ -33,7 +40,7 @@ def test_jobstore_create_and_load(job_store):
 
 def test_jobstore_save_updates_state(job_store):
     job = job_store.create("http://example.com/", CrawlPolicy())
-    job.frontier = frontier(["http://example.com/page2"])
+    seed_frontier(job, frontier(["http://example.com/page2"]))
     job.visited = OrderedUrlSet([canonical("http://example.com/")])
     job.results = [{"url": "http://example.com/", "status": "success"}]
     job.stats = {"total_discovered": 2, "total_crawled": 1, "total_failed": 0}
@@ -234,16 +241,15 @@ def test_load_logs_warning_on_corruption(tmp_path, caplog):
         connection.execute(
             """
             INSERT INTO crawl_jobs
-            (job_id, root_url, policy, status, frontier,
+            (job_id, root_url, policy, status,
              created_at, updated_at, error, stats)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 "corrupt-id",
                 "http://example.com/",
                 "{}",
                 "pending",
-                "[]",
                 0.0,
                 0.0,
                 None,
@@ -285,24 +291,28 @@ class TestJobStoreEdges:
 
 
 def test_a_bare_text_frontier_element_is_not_an_entry(tmp_path):
-    """The text-or-value tolerance is gone: the write side emits entry records only.
+    """The shape forgiveness is gone: the write side emits entry rows only.
 
-    A row carrying bare text (only possible from a foreign writer) reads that
-    element as nothing, fail-closed, instead of re-deriving an undeclared shape.
+    A queue row carrying an unusable url (only possible from a foreign writer)
+    reads as nothing, fail-closed, instead of re-deriving an undeclared shape.
     """
     store = make_job_store(tmp_path)
     root = "https://example.test/root"
-    child = "https://example.test/child"
     job = store.create(root, {"limits": {"max_depth": 2}})
     with raw_job_row(store) as connection:
+        connection.execute('DELETE FROM "crawl_job_frontier" WHERE job_id = ?', (job.job_id,))
         connection.execute(
-            "UPDATE crawl_jobs SET frontier = ?, in_flight = ? WHERE job_id = ?",
-            (json.dumps([root, child]), json.dumps([root, child]), job.job_id),
+            'INSERT INTO "crawl_job_frontier" (job_id, url, pos, depth) VALUES (?, ?, ?, ?)',
+            (job.job_id, "", 99, 0),
+        )
+        connection.execute(
+            "UPDATE crawl_jobs SET in_flight = ? WHERE job_id = ?",
+            (json.dumps([root]), job.job_id),
         )
 
     loaded = loaded_job(store, job.job_id)
 
-    assert loaded.frontier == [], "bare text must not be read as a frontier entry"
+    assert loaded.frontier == [], "a bare url must not be read as a frontier entry"
     assert loaded.in_flight == [], "bare text must not be read as an in-flight entry"
 
 
@@ -354,10 +364,13 @@ def test_load_honors_an_explicitly_disabled_robots_limit(tmp_path):
 def test_normalize_frontier_keeps_shallowest_duplicate_depth(tmp_path):
     store = make_job_store(tmp_path)
     job = store.create("https://example.test/root", {"limits": {"max_depth": 4}})
-    job.frontier = [
-        FrontierEntry(canonical("https://example.test/child"), 4),
-        FrontierEntry(canonical("https://example.test/child?utm_source=test"), 1),
-    ]
+    seed_frontier(
+        job,
+        [
+            FrontierEntry(canonical("https://example.test/child"), 4),
+            FrontierEntry(canonical("https://example.test/child?utm_source=test"), 1),
+        ],
+    )
     store.save(job)
 
     loaded = store.load(job.job_id)
@@ -402,6 +415,9 @@ def test_cross_list_duplicate_keeps_shallowest_depth():
         connection.execute("SELECT * FROM crawl_jobs").fetchone(),
         visited=[],
         results=[],
+        # The queue's read (#547): the frontier row the fold consults, in the
+        # declared dict shape read_frontier returns.
+        frontier=[{"url": "https://example.test/child", "depth": 1}],
         host_policy=UNRESTRICTED_HOST_POLICY,
         tier=deployment_tier(),
     )

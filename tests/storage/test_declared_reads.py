@@ -45,7 +45,9 @@ def test_a_frontier_entry_that_is_not_an_entry_fails_at_persist(tmp_path):
     the frontier is a writer bug and dies at persist, not in the reader."""
     store = make_job_store(tmp_path)
     job = store.create("https://example.test/root", {"limits": {"max_depth": 2}})
-    job.frontier = ["https://example.test/bare"]
+    # An APPEND is the delta the write edge serializes: the bare string must die
+    # there, never land as a row.
+    job.frontier.append("https://example.test/bare")
     try:
         store.save(job)
     except (AttributeError, TypeError):

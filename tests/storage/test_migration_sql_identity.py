@@ -82,6 +82,7 @@ _BASE_TABLE_SQL: dict[str, str] = {
 _UNPINNED: dict[str, str] = {
     "0002_crawl_jobs_drop_canonicalized": "hand-written drop with a bespoke rollback",
     "0003_crawl_jobs_split_accumulators": "carries history across into companion tables",
+    "0006_crawl_jobs_split_frontier": "carries the queue across into a companion table",
 }
 
 
