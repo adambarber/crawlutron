@@ -10,7 +10,7 @@ import asyncio
 import base64
 import time
 from collections.abc import Awaitable, Callable
-from typing import TYPE_CHECKING, NamedTuple, Protocol, cast
+from typing import TYPE_CHECKING, NamedTuple, cast
 
 from app.extraction.classify import classify_page
 from app.models.browser_profile_record import BrowserProfileRecord
@@ -29,6 +29,7 @@ from app.transport.browser_targets import (
     make_ssrf_route_handler,
     make_ssrf_websocket_handler,
 )
+from app.transport.render_page import RenderPage
 from app.transport.timeouts import render_phase_seconds
 from app.vocabulary.browser import BrowserAction
 
@@ -41,31 +42,6 @@ if TYPE_CHECKING:
 import logging
 
 logger = logging.getLogger(__name__)
-
-
-class GuardContext(Protocol):
-    """The context surface the SSRF guards install on (route + websocket)."""
-
-    async def route(self, pattern: str, handler: Callable[..., object]) -> object: ...
-
-    def route_web_socket(self, pattern: str, handler: Callable[..., object]) -> object: ...
-
-
-class RenderPage(Protocol):
-    """The page surface the render phases call; a double needs exactly this."""
-
-    url: str
-    context: GuardContext
-
-    def on(self, event: str, handler: Callable[..., object]) -> object: ...
-
-    async def goto(self, url: str, wait_until: str = "load", **kwargs: object) -> object: ...
-
-    async def set_extra_http_headers(self, headers: dict[str, str]) -> object: ...
-
-    async def evaluate(self, expression: str, *args: object, **kwargs: object) -> object: ...
-
-    async def screenshot(self, **kwargs: object) -> bytes: ...
 
 
 class WireGuard(NamedTuple):

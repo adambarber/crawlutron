@@ -2,13 +2,13 @@
 
 import asyncio
 import threading
-from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from pydantic import ValidationError
 
 from app.models.crawl_policy import CrawlPolicy
+from app.models.intercepted_xhr_record import InterceptedXhrRecord
 from app.transport.browser_driver import BrowserDriver
 from app.transport.browser_targets import make_response_handler, make_ssrf_route_handler
 from tests._browser_doubles import (
@@ -221,7 +221,7 @@ class _FakeResponse:
 
 
 async def test_response_handler_caps_entries_and_payload_size():
-    collected: list[dict[str, Any]] = []
+    collected: list[InterceptedXhrRecord] = []
     handler = make_response_handler(collected)
 
     # Over the entry cap: only the first max_entries (10) are kept.
@@ -247,7 +247,7 @@ async def test_response_handler_caps_the_url_it_retains():
     The URL was the one unbounded field: multi-MB page-controlled text went
     into result metadata through a bound documented to cover the whole entry.
     """
-    collected: list[dict[str, Any]] = []
+    collected: list[InterceptedXhrRecord] = []
     handler = make_response_handler(collected)
     long_url = "https://x/api?" + "k" * 500_000
 
@@ -262,7 +262,7 @@ async def test_response_handler_caps_the_url_it_retains():
 
 
 async def test_response_handler_does_not_flag_a_url_within_the_cap():
-    collected: list[dict[str, Any]] = []
+    collected: list[InterceptedXhrRecord] = []
     handler = make_response_handler(collected)
 
     await handler(_FakeResponse("https://x/api/data", {"a": 1}))

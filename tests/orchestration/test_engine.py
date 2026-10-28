@@ -209,7 +209,10 @@ class TestEngineChainEdges:
             policy={"strategies": [BROWSER_HEADLESS]},
             browser_worker=_fake_browser(
                 html="<html><body>x</body></html>",
-                metadata={"intercepted_xhr": [{"url": "u", "payload": {}}], "screenshot": "BASE64IMG"},
+                metadata={
+                    "intercepted_xhr": [{"url": "u", "payload": {}}],
+                    "screenshot": [{"selector": "s", "screenshot": "BASE64IMG"}],
+                },
             ),
         )
         diag = result.diagnostics

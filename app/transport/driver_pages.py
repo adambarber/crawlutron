@@ -5,23 +5,19 @@ from __future__ import annotations
 import base64
 import contextlib
 from collections.abc import Callable
-from typing import Any
 
 from app.models.screenshot_diagnostics import ScreenshotDiagnostics
 from app.transport.driver_config import async_sleep
+from app.transport.render_page import PageElement, RenderPage
 
 
-async def safe_close_page(page: Any) -> None:
+async def safe_close_page(page: RenderPage) -> None:
     """Best-effort page teardown."""
-    if page is None:
-        return
     with contextlib.suppress(Exception):  # best-effort teardown
-        close = getattr(page, "close", None)
-        if close is not None:
-            await close()
+        await page.close()
 
 
-async def flatten_shadow_dom(page: Any) -> None:
+async def flatten_shadow_dom(page: RenderPage) -> None:
     # Move each open shadow root's children into its light-DOM host (closed
     # roots are inaccessible); collect first, then move, to avoid mutation.
     with contextlib.suppress(Exception):  # flattening is best-effort; never fail a render over it
@@ -120,7 +116,7 @@ _CONSENT_FALLBACK_JS = """() => {
 }"""
 
 
-async def auto_accept_cookie_consent(page: Any, enabled: bool, sleep: Callable[[float], None]) -> bool:
+async def auto_accept_cookie_consent(page: RenderPage, enabled: bool, sleep: Callable[[float], None]) -> bool:
     """Auto-click cookie consent buttons when the caller opts in."""
     if not enabled:
         return False
@@ -142,12 +138,12 @@ async def auto_accept_cookie_consent(page: Any, enabled: bool, sleep: Callable[[
         return False
 
 
-async def capture_element_screenshots(page: Any, selectors: list[str]) -> list[ScreenshotDiagnostics]:
+async def capture_element_screenshots(page: RenderPage, selectors: list[str]) -> list[ScreenshotDiagnostics]:
     """Capture targeted element screenshots as base64."""
     shots: list[ScreenshotDiagnostics] = []
     for selector in selectors:
         with contextlib.suppress(Exception):  # best-effort per-element capture
-            element = await page.query_selector(selector)
+            element: PageElement | None = await page.query_selector(selector)
             if element is None:
                 continue
             data = base64.b64encode(await element.screenshot()).decode("ascii")
