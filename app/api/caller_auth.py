@@ -6,7 +6,6 @@ caller, a wrong key is a 401. Ownership elsewhere is an exact id match.
 
 from __future__ import annotations
 
-import os
 import secrets
 from collections.abc import AsyncIterator, Mapping
 from contextlib import asynccontextmanager
@@ -16,6 +15,7 @@ from typing import TYPE_CHECKING, NoReturn, TypedDict
 from fastapi import Request
 
 from app.api.exceptions import http_error
+from app.config.settings import CrawlerSettings
 from app.models.caller_identity import CallerIdentity
 from app.models.caller_key import CallerKey
 from app.models.error_response import ErrorResponse
@@ -110,7 +110,7 @@ def quota_denials() -> dict[int | str, dict[str, object]]:
 
 
 def _key_admin_token(request: Request) -> str:
-    """The configured operator token, or '' when unset."""
+    """The configured operator token, or '' when unset (#142: via the settings home)."""
     state = getattr(request, "app", None)
     state = getattr(state, "state", None) if state is not None else None
     if state is not None:
@@ -122,7 +122,7 @@ def _key_admin_token(request: Request) -> str:
             token = getattr(settings, "key_admin_token", None)
             if isinstance(token, str) and token:
                 return token
-    return os.environ.get("CRAWLUTRON_KEY_ADMIN_TOKEN", "")
+    return CrawlerSettings.from_mapping().key_admin_token
 
 
 def _constant_time_eq(secret: str, token: str) -> bool:

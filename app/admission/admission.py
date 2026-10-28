@@ -97,7 +97,7 @@ class JobAdmissionContext:
         robots = RobotsGate(normalized, host_policy, fetch_and_decode)
         scheduler = DomainScheduler.from_settings(
             settings,
-            global_limit=max(1, int(getattr(settings, "global_concurrency", 4))),
+            global_limit=settings.global_concurrency,
             max_rps=limits.max_rps,
         )
         discovery = discovery_flags(normalized)

@@ -169,3 +169,21 @@ async def test_keys_door_is_sealed_when_no_operator_token_is_configured(tmp_path
         )
 
         _assert_401(minted)
+
+
+def test_operator_token_fallback_reads_settings_home(monkeypatch):
+    """#142: with no app state, the operator token resolves through
+    CrawlerSettings (the declared home), not a raw os.environ get."""
+    from types import SimpleNamespace
+
+    import app.api.caller_auth as caller_auth
+
+    monkeypatch.setenv("CRAWLUTRON_KEY_ADMIN_TOKEN", "tok-from-env")
+
+    # State carries no token and no settings: the fallback lands on the funnel.
+    presenting = {"x-api-key": "tok-from-env"}
+    request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace()), headers=presenting)
+    assert caller_auth.is_operator(request) is True
+
+    request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace()), headers={})
+    assert caller_auth.is_operator(request) is False

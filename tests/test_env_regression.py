@@ -100,3 +100,33 @@ def test_no_bare_env_int_or_float_in_app():
                 elif isinstance(arg, ast.Name) and arg.id in env_aliases:
                     offenders.append(offender_at(path, node, f"bare {callee} on env-read alias {arg.id!r}"))
     assert not offenders, "Bare env int/float reintroduced: " + "; ".join(offenders)
+
+
+# --------------------------------------------------------------------------- #142: the operator
+# token is read through its settings home
+
+
+def test_operator_token_read_through_settings_home():
+    """#142: ``CRAWLUTRON_KEY_ADMIN_TOKEN`` is declared once (CrawlerSettings,
+    wired in settings._search_fields) and every read routes through that home.
+    A raw ``os.environ.get`` re-declares the token's source and drifts the
+    moment the settings home is re-homed (a mapping face, a file, a secret
+    store) -- the caller-side copy silently keeps reading the environment.
+    """
+    offenders = []
+    for path, tree in app_trees(exclude=frozenset()):
+        rel = str(path)
+        if rel.endswith("app/config/settings.py"):
+            continue
+        for node in call_nodes(tree):
+            first = node.args[0] if node.args else None
+            is_token_read = (
+                isinstance(first, ast.Constant)
+                and first.value == "CRAWLUTRON_KEY_ADMIN_TOKEN"
+                and _is_env_get(node)
+            )
+            if is_token_read:
+                offenders.append(
+                    offender_at(path, node, "CRAWLUTRON_KEY_ADMIN_TOKEN read outside CrawlerSettings")
+                )
+    assert not offenders, "Operator token read outside its settings home: " + ", ".join(offenders)
