@@ -4,12 +4,14 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from dataclasses import dataclass, replace
-from typing import TYPE_CHECKING, Any, cast, get_args
+from typing import TYPE_CHECKING, cast, get_args
 
 from app.models.cooldown_diagnostics import CooldownDiagnostics
 from app.models.crawl_strategy import CrawlStrategy
 from app.models.taxonomy import CrawlStrategyName
 from app.transport.browser_result import browser_strategy_result
+from app.transport.cache import HttpCache
+from app.transport.content_cache import ContentCache
 from app.transport.http import http_strategy_result
 from app.transport.results import (
     TerminalResult,
@@ -58,8 +60,8 @@ class _ChainContext:
     http_fetcher: HttpFetcher
     cffi_fetcher: HttpFetcher
     browser_worker: CrawlWorker | None
-    cache: Any
-    content_cache: Any
+    cache: HttpCache | None
+    content_cache: ContentCache | None
     scheduler: DomainScheduler | None
     domain: str
     caller_validators: dict[str, str] | None
@@ -292,8 +294,8 @@ async def execute_crawl_chain(
     http_fetcher: HttpFetcher,
     cffi_fetcher: HttpFetcher,
     browser_worker: CrawlWorker | None,
-    cache: Any = None,
-    content_cache: Any = None,
+    cache: HttpCache | None = None,
+    content_cache: ContentCache | None = None,
     scheduler: DomainScheduler | None = None,
     domain: str = "",
     caller_validators: dict[str, str] | None = None,

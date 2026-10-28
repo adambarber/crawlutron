@@ -15,6 +15,8 @@ from typing import TYPE_CHECKING, Any, NamedTuple, cast
 from app.models.crawl_result import EngineCrawlResult
 from app.models.crawl_task import CrawlTask
 from app.models.taxonomy import Classification, CrawlError
+from app.orchestration.spill_sink import SpillSink
+from app.runtime.metrics import MetricsStore
 from app.transport.results import TerminalResult, failed_engine_result
 from app.vocabulary.taxonomy import CrawlClassification
 
@@ -49,7 +51,7 @@ class AdmissionStallGuard:
 
 
 async def fail_remaining_frontier(
-    spill: Any,
+    spill: SpillSink,
     spill_write: Callable[[Any, int, EngineCrawlResult], Awaitable[None]],
     frontier: deque[tuple[int, CrawlTask]],
 ) -> None:
@@ -74,7 +76,9 @@ async def fail_remaining_frontier(
         )
 
 
-type _AdmitFn = Callable[[RecursiveRunState, RecursiveState, Any], Awaitable[list[tuple[int, CrawlTask]]]]
+type _AdmitFn = Callable[
+    [RecursiveRunState, RecursiveState, MetricsStore], Awaitable[list[tuple[int, CrawlTask]]]
+]
 type _CrawlFn = Callable[
     [RecursiveRunState, list[tuple[int, CrawlTask]]],
     Awaitable[dict[int, EngineCrawlResult] | None],
@@ -98,7 +102,7 @@ async def crawl_batches(
     state: RecursiveState,
     stall_guard: AdmissionStallGuard,
     shutdown_event: asyncio.Event,
-    metrics: Any,
+    metrics: MetricsStore,
     max_pages: int,
     stages: BatchStages,
 ) -> None:
@@ -109,7 +113,8 @@ async def crawl_batches(
         page_count_before = state.page_count
         allowed_jobs = await stages.start_runner(run, state, metrics)
         if not allowed_jobs and stall_guard.stalled():
-            await fail_remaining_frontier(run.spill, run.spill_write, state.frontier)
+            if run.spill is not None:
+                await fail_remaining_frontier(run.spill, run.spill_write, state.frontier)
             return
         if not allowed_jobs:
             # Zero-admission pass: yield the turn -- never hot-spin the gates.

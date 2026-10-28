@@ -9,11 +9,12 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from enum import StrEnum
 from functools import lru_cache
-from typing import Any, TypedDict
+from typing import TypedDict
 
 from app.admission.policy import PolicyTier, read_policy
 from app.models.crawl_policy import CrawlPolicy
 from app.models.host_policy import HostPolicy
+from app.models.json_value import JsonValue as JsonValue
 from app.models.normalized_url import NormalizedUrl, admit_or_none
 
 
@@ -97,7 +98,7 @@ class FrontierEntryDict(TypedDict):
 type _PersistedJSON = object
 
 
-def job_max_pages(policy: Any, tier: PolicyTier | None = None) -> int:
+def job_max_pages(policy: CrawlPolicy | dict[str, JsonValue] | None, tier: PolicyTier | None = None) -> int:
     return read_policy(policy, tier).limits.max_pages
 
 

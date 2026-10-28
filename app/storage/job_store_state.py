@@ -11,7 +11,7 @@ import sqlite3
 import time
 from dataclasses import dataclass, field
 from itertools import islice
-from typing import TYPE_CHECKING, Any, TypedDict
+from typing import TYPE_CHECKING, TypedDict
 
 from app.admission.policy import PolicyTier, read_policy
 from app.admission.policy import stored_policy as _stored_policy
@@ -43,7 +43,7 @@ def _default_stats() -> dict[str, int]:
     return {key: 0 for key in _STATS_KEYS}
 
 
-def _normalized_stats(value: Any) -> dict[str, int]:
+def _normalized_stats(value: object) -> dict[str, int]:
     stats = _default_stats()
     if isinstance(value, dict):
         for key in (*_STATS_KEYS, "total_discovered"):
@@ -206,7 +206,7 @@ def _retries_payload(retries: dict[NormalizedUrl, int]) -> dict[str, int]:
     return {url.raw: attempts for url, attempts in retries.items()}
 
 
-def _job_row_params(job: CrawlJobState) -> tuple:
+def _job_row_params(job: CrawlJobState) -> tuple[object, ...]:
     """The live-state columns of the job row, in ``_UPSERT_JOB_ROW_SQL`` order.
     Separate from the statement so the two cannot drift: a column added to the
     SQL without a matching entry here is a TypeError at first persist, not a silent drop.

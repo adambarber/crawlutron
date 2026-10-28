@@ -10,7 +10,6 @@ import logging
 import logging.handlers
 import os
 from datetime import UTC, datetime
-from typing import Any
 
 _RESERVED_LOGRECORD_ATTRS = {
     "name",
@@ -44,7 +43,7 @@ class _JsonFormatter(logging.Formatter):
     """
 
     def format(self, record: logging.LogRecord) -> str:
-        payload: dict[str, Any] = {
+        payload: dict[str, object] = {
             "timestamp": datetime.fromtimestamp(record.created, tz=UTC).isoformat(),
             "level": record.levelname,
             "logger": record.name,

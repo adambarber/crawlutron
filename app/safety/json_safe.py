@@ -7,10 +7,9 @@ Three ``default=`` fallbacks had drifted (store, output shaper, bare ``str``); e
 from __future__ import annotations
 
 import datetime
-from typing import Any
 
 
-def json_default(obj: Any) -> Any:
+def json_default(obj: object) -> object:
     """Fallback for objects that are not natively JSON-serializable."""
     # pydantic SecretStr/SecretBytes: serialize the actual secret value
     getter = getattr(obj, "get_secret_value", None)

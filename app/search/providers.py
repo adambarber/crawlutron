@@ -26,6 +26,7 @@ from app.transport.pinned_transport import (
 from app.transport.timeouts import Timeouts
 
 if TYPE_CHECKING:
+    from app.config.settings import CrawlerSettings
     from app.models.json_value import JsonValue
 
 logger = logging.getLogger(__name__)
@@ -236,7 +237,7 @@ class ProviderCall:
     headers: dict[str, str] | None = None
 
 
-def configured_search_providers(settings: Any) -> list[str]:
+def configured_search_providers(settings: CrawlerSettings) -> list[str]:
     """Names of providers that have the credentials they need, in priority order.
 
     ``auto`` falls back to the keyless DuckDuckGo provider when this is empty.
@@ -252,7 +253,7 @@ def configured_search_providers(settings: Any) -> list[str]:
     return names
 
 
-def active_search_provider_name(settings: Any) -> str:
+def active_search_provider_name(settings: CrawlerSettings) -> str:
     """The provider ``auto`` selection would pick for these settings."""
     providers = configured_search_providers(settings)
     return providers[0] if providers else "duckduckgo"

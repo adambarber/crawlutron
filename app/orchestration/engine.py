@@ -14,8 +14,9 @@ import os
 import tempfile
 import time
 from collections.abc import Iterable, Mapping
+from contextvars import Token
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any, TypedDict, cast
+from typing import TYPE_CHECKING, Protocol, TypedDict, cast
 
 from app.admission.admission_links import compile_scope_pattern
 from app.admission.payload_helpers import checked_payload_urls, payload_policy
@@ -126,7 +127,19 @@ def parse_lastmod(lastmod: str | None) -> float | None:
     return ts
 
 
-def seed_is_fresh(url: NormalizedUrl, lastmod: str | None, content_cache: Any, policy: CrawlPolicy) -> bool:
+class SeedCache(Protocol):
+    """What the seed-freshness check reads off a cache; ContentCache is the
+    reference implementation, and test doubles satisfy it structurally."""
+
+    def cached_at_of(self, key: str) -> float | None: ...
+
+
+def seed_is_fresh(
+    url: NormalizedUrl,
+    lastmod: str | None,
+    content_cache: SeedCache | None,
+    policy: CrawlPolicy,
+) -> bool:
     """True if ``url`` is cached and the sitemap ``lastmod`` is not newer than
     our cache timestamp, i.e. our cached copy is fresh and the crawl can skip
     re-fetching it.
@@ -162,7 +175,7 @@ def seed_is_fresh(url: NormalizedUrl, lastmod: str | None, content_cache: Any, p
 
 def stale_seeds(
     candidates: Iterable[tuple[NormalizedUrl, str | None]],
-    content_cache: Any,
+    content_cache: SeedCache | None,
     policy: CrawlPolicy,
 ) -> set[NormalizedUrl]:
     """Batch the sitemap freshness filter (call from a worker thread): each verdict
@@ -351,7 +364,7 @@ def _set_cookie_namespace(policy: CrawlPolicy):
     return COOKIE_NAMESPACE.set(cookie_namespace_for(policy.request_profile))
 
 
-def _reset_cookie_namespace(token: Any) -> None:
+def _reset_cookie_namespace(token: Token[str]) -> None:
     from app.transport.cookie_jar import COOKIE_NAMESPACE
 
     COOKIE_NAMESPACE.reset(token)

@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import time
 from collections.abc import Awaitable, Callable
-from typing import Any
+from typing import Any, cast
 
 from app.runtime.memory_pressure import MemoryGate, ResourceGauge
 from app.runtime.pressure_probes import (
@@ -37,9 +37,11 @@ class CpuGate(ResourceGauge):
         sample_seconds: float = 0.25,
         min_window_seconds: float = 0.05,
         cpu_budget: float | None = None,
-        **kwargs: Any,
+        **kwargs: object,
     ):
-        super().__init__(target=target, **kwargs)
+        # Validated boundary: CpuGate only adds sample knobs; any other kwarg is
+        # a ResourceGauge parameter the base validates itself.
+        super().__init__(target=target, **cast("dict[str, Any]", kwargs))
         self.sample_seconds = sample_seconds
         self.min_window_seconds = min_window_seconds
         self._cpu_budget = cpu_budget if cpu_budget is not None else DEFAULT_CPU_BUDGET

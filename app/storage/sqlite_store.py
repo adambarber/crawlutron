@@ -8,7 +8,7 @@ import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from app.storage.migrations.manifest import StoreSchema
@@ -30,7 +30,7 @@ class ColumnInfo:
     name: str
     sqlite_type: str
     not_null: int
-    default: Any
+    default: object
     primary_key_position: int
 
 
