@@ -4,9 +4,8 @@ from fastapi import APIRouter
 
 from app.api.policy_defaults import BROWSER_FALLBACK_POLICY, DOCUMENT_EXTRACTION_POLICY
 from app.models.agent_hints_response import AgentHintsPayload, AgentHintsResponse
-from app.models.crawl_extraction_method import CrawlExtractionMethod
 from app.models.crawl_strategy import CrawlStrategy
-from app.vocabulary.extraction import EXTRACTION_TRAFILATURA
+from app.vocabulary.extraction import EXTRACTION_DESCRIPTIONS, EXTRACTION_TRAFILATURA
 from app.vocabulary.identity import SERVICE_ID
 from app.vocabulary.limits import LARGE_CRAWL_GUIDANCE
 from app.vocabulary.strategies import CFFI_IMPERSONATE_TARGET, HTTP_DECLARED_CRAWLER
@@ -23,20 +22,6 @@ STRATEGY_DESCRIPTIONS = {
     ),
     CrawlStrategy.BROWSER_HEADED_WARMED: (
         "Headed Firefox with configured warmup URLs for challenge-prone municipal systems."
-    ),
-}
-
-EXTRACTION_DESCRIPTIONS = {
-    CrawlExtractionMethod.FULL: (
-        "Unified output pipeline: trafilatura HTML main text, markitdown for documents, "
-        "plain-text passthrough."
-    ),
-    CrawlExtractionMethod.TRAFILATURA: (
-        "HTML-only main-text extraction for noisy HTML; does not parse PDF or binary documents."
-    ),
-    CrawlExtractionMethod.DOCUMENT: (
-        "Document/body extraction via markitdown for PDFs and non-HTML responses "
-        "when text evidence is needed."
     ),
 }
 
@@ -123,7 +108,7 @@ def agent_hints_payload() -> AgentHintsPayload:
         "strategies": {
             strategy.value: description for strategy, description in STRATEGY_DESCRIPTIONS.items()
         },
-        "extractions": {method.value: description for method, description in EXTRACTION_DESCRIPTIONS.items()},
+        "extractions": dict(EXTRACTION_DESCRIPTIONS),
         "guidance": GUIDANCE,
         "example_policies": EXAMPLE_POLICIES,
     }
