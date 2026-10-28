@@ -51,11 +51,8 @@ async def recover_orphaned_running_jobs(job_store: JobStore) -> int:
 
 
 def recovery_start_limit(settings: CrawlerSettings) -> int:
-    """How many runners boot recovery may hold at once.
-
-    Sized like the create path's global concurrency: one runner per global
-    slot, floored at 1 (#523 COR-09)."""
-    return max(1, int(getattr(settings, "global_concurrency", 4)))
+    """Boot recovery's runner cap: one runner per global slot (#523 COR-09, #142)."""
+    return max(1, int(settings.global_concurrency))
 
 
 async def _drain_backlog(

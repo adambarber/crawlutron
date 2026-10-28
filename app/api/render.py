@@ -125,7 +125,7 @@ async def render_request(
     await _run_render_batch(
         jobs,
         worker=worker,
-        scheduler=_render_scheduler(active_settings),
+        scheduler=render_scheduler(active_settings),
         urls=urls,
         submitted=submitted,
         by_index=by_index,
@@ -191,12 +191,16 @@ def _terminal_robot_refusals(
     return by_index
 
 
-def _render_scheduler(settings: CrawlerSettings) -> DomainScheduler:
-    """The per-domain scheduler the render batch runs under."""
-    return DomainScheduler(
+def render_scheduler(settings: CrawlerSettings) -> DomainScheduler:
+    """The render batch's per-domain scheduler, built through from_settings (#142).
+
+    Every knob reads its settings home (adaptive throttling honored, RPS the
+    0.0 service posture -- render carries no policy carrier).
+    """
+    return DomainScheduler.from_settings(
+        settings,
         global_limit=settings.global_concurrency,
-        per_domain_limit=settings.per_domain_concurrency,
-        delay_seconds=settings.per_domain_delay_ms / 1000,
+        max_rps=0.0,
     )
 
 
@@ -295,4 +299,4 @@ def _render_envelope(
     }
 
 
-__all__ = ["render_options_for", "render_request"]
+__all__ = ["render_options_for", "render_request", "render_scheduler"]
