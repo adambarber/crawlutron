@@ -240,8 +240,8 @@ def _walked() -> dict[str, int]:
     return {"annotation": sum(1 for _candidate in walk(candidates))}
 
 
-# The walk's reach floor drops with the tree's declared records: the 96 #389
-# leaves is the count itself, so the floor is a reach proof, not the ratchet.
+# The walk's reach floor drops with the tree's declared records; the floor is
+# a reach proof (walked must EXCEED it), not the ratchet itself.
 test_collector_sees_the_whole_tree = collector_sees_the_whole_tree(
     _walked, {"annotation": 96}, subject="typing"
 )

@@ -144,6 +144,8 @@ def build_unified_result(item: EngineCrawlResult) -> UnifiedCrawlResult:
         headers=item.headers,
         content_type=item.content_type,
         extraction_method=item.extraction_method,
+        # to_dict is a declared dict[str, JsonValue] producer; this cast names
+        # that proven boundary — it asserts nothing new.
         diagnostics=cast(dict[str, JsonValue], _result_to_dict(item).get("diagnostics", {})),
         discovered_link_count=item.discovered_link_count,
         discovered_links_truncated=item.discovered_links_truncated,
