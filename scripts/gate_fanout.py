@@ -106,7 +106,11 @@ def _wait_own(hook_id: str, status_dir: Path) -> int:
     deadline = time.monotonic() + WALL_SECONDS
     while time.monotonic() < deadline:
         if rc.is_file():
-            return int(rc.read_text())
+            # A torn read (child mid-write) surfaces as an empty file; a file
+            # present but empty is not a verdict — keep polling until bytes land.
+            text = rc.read_text()
+            if text.strip():
+                return int(text)
         if pidfile.is_file() and not _alive(int(pidfile.read_text())):
             break
         time.sleep(0.05)
@@ -136,7 +140,9 @@ def _child(rc_path: str, argv: list[str]) -> int:
         time.sleep(3)
         attempts.append(subprocess.run(argv, cwd=SERVICE_ROOT, capture_output=True, text=True, check=False))
     final = attempts[-1]
-    Path(rc_path).write_text(str(final.returncode))
+    tmp = Path(f"{rc_path}.tmp")
+    tmp.write_text(str(final.returncode))
+    tmp.replace(rc_path)
     print(*[attempt.stdout for attempt in attempts], sep="")
     print(*[attempt.stderr for attempt in attempts], sep="", file=sys.stderr)
     return final.returncode
