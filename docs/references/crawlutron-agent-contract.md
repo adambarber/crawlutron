@@ -181,6 +181,11 @@ responses. A synchronous `POST /v1/crawl` has **no server-side time ceiling**: i
 returns only when the whole bounded recursion finishes, so its duration scales with
 `max_depth`, `max_pages`, per-domain politeness delays, and the per-URL budget
 (`limits.total_url_budget_seconds`, which fails a single tarpit URL, not the crawl).
+Per-domain concurrency, delays, and circuit breakers are enforced **within one
+request** (each request runs its own scheduler); concurrent requests each enforce
+them independently, so serializing or pacing across requests is the caller's job
+— the service is stateless and does not aggregate per-domain politeness across
+callers, requests, or worker processes.
 For large or recursive crawls, submit with `async_mode=true` (or `webhook_url`) to
 get an immediate 202 + `status_url` and poll it, or use `POST /v1/jobs` for durable,
 resumable whole-site jobs. Use `GET /v1/crawl/{request_id}` both to poll an async

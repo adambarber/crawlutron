@@ -40,6 +40,9 @@ GUIDANCE = [
     "Use attempt history to generate reviewable policy suggestions.",
     "Treat discovered_links as bounded extraction output only; the service dedupes within a request by "
     "canonical page identity but callers still own cross-request frontier queueing and persistence.",
+    "Per-domain concurrency, delays, and circuit breakers are enforced within one request (each request "
+    "runs its own scheduler); concurrent requests each enforce them independently, so cross-request "
+    "per-domain politeness is yours to pace.",
     "Never the same page twice: /v1/crawl collapses URLs that normalize to one page (host case, default "
     "port, fragment, trailing slash, UTM/tracking params, and query-param order are all canonicalized), and "
     "successful fetches are reused across requests within the content-cache TTL. Callers own cross-run "
