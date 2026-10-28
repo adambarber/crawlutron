@@ -5,6 +5,7 @@ builders, so it must move to ``asyncio.to_thread`` and return plain data.
 """
 
 import asyncio
+from typing import get_type_hints
 
 from lxml import etree
 
@@ -226,4 +227,28 @@ async def test_both_strategies_agree_on_the_discovery_result_fields(monkeypatch)
         assert getattr(http, field) == getattr(browser, field), field
     assert {link.normalized_url for link in http.discovered_links} == {
         link.normalized_url for link in browser.discovered_links
+    }
+
+
+# Red-first proof (#482): the post-fetch envelope is a fixed seven-key record
+# produced once and read by hand; this test pins the declaration that holds it.
+
+
+def test_the_discovery_envelope_declares_its_seven_keys():
+    """The post-fetch envelope is a declared TypedDict, not a dict[str, Any].
+
+    The key set lives once, at the producer; every consumer annotation names
+    it, so a producer that stops selecting a key fails here, not silently at
+    a reader.
+    """
+    from app.extraction.discovery import PostFetchDiscovery
+
+    assert set(get_type_hints(PostFetchDiscovery)) == {
+        "diagnostics",
+        "discovered_links",
+        "discovered_link_count",
+        "discovered_links_truncated",
+        "js_endpoints",
+        "next_page_url",
+        "llm_metadata",
     }

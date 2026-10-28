@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import time
 from dataclasses import replace
-from typing import Any, NamedTuple
+from typing import Any, NamedTuple, cast
 
 from app.admission.policy import discovery_flags
 from app.config.settings import CrawlerSettings
@@ -20,6 +20,7 @@ from app.transport import body_decode, fetch_policy
 from app.transport.cache import HttpCache
 from app.transport.content_cache import ContentCache
 from app.transport.content_pipeline import (
+    PostFetchDiscovery,
     discover_after_fetch,
     discovery_result_fields,
     post_fetch_diagnostics,
@@ -169,7 +170,7 @@ async def _merge_discovery_diagnostics(
     resp: FetchedResponse,
     extracted: ExtractedHttpContent,
     diagnostics: CrawlDiagnostics,
-    post_fetch: dict[str, Any],
+    post_fetch: PostFetchDiscovery,
 ) -> None:
     """Fold the fetch-policy discovery block and retry-after into diagnostics.
 
@@ -178,7 +179,8 @@ async def _merge_discovery_diagnostics(
     """
     discovery_block = any(discovery_flags(ctx.policy))
     if discovery_block:
-        diagnostics.update(post_fetch["diagnostics"])
+        # Same cross-bag merge boundary as browser_result._browser_diagnostics.
+        diagnostics.update(cast(CrawlDiagnostics, post_fetch["diagnostics"]))
     retry_after = fetch_policy.retry_after_seconds(resp.headers)
     if retry_after is not None:
         diagnostics["cooldown"] = {"retry_after_seconds": retry_after, "scope": "domain"}

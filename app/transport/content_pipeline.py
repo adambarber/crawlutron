@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, Any
 from app.admission.policy import discovery_flags
 from app.config.settings import CrawlerSettings
 from app.extraction.content import (
+    PostFetchDiscovery,
     Selectors,
     extract_content,
     extract_html,
@@ -92,7 +93,7 @@ async def discover_after_fetch(
     status: str,
     policy: CrawlPolicy,
     host_policy: HostPolicy,
-) -> dict[str, Any]:
+) -> PostFetchDiscovery:
     """One post-fetch discovery parse shared by both strategies; switches are
 
     derived from the policy here, not passed in, so both paths cannot disagree
@@ -118,7 +119,7 @@ async def discover_after_fetch(
 
 
 def discovery_result_fields(
-    post_fetch: dict[str, Any],
+    post_fetch: PostFetchDiscovery,
     *,
     classification_evidence: list[ClassificationEvidenceRecord],
 ) -> dict[str, Any]:
@@ -137,7 +138,7 @@ def discovery_result_fields(
 
 
 def post_fetch_diagnostics(
-    post_fetch: dict[str, Any],
+    post_fetch: PostFetchDiscovery,
     final_url: NormalizedUrl | None,
     host_policy: HostPolicy,
 ) -> CrawlDiagnostics:
@@ -160,6 +161,7 @@ def post_fetch_diagnostics(
 
 __all__ = [
     "ExtractedContent",
+    "PostFetchDiscovery",
     "discover_after_fetch",
     "discovery_result_fields",
     "post_fetch_diagnostics",
