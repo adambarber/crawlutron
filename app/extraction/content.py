@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from app.extraction.discovery import (
+    PostFetchDiscovery,
     detect_pagination,
     extract_discovered_links,
     extract_js_endpoints,
@@ -62,6 +63,7 @@ __all__ = [
     "walkable",
     "shutdown_doc_extraction_executor",
     "text_from_html",
+    "PostFetchDiscovery",
 ]
 
 

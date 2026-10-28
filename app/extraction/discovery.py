@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 from html import unescape
-from typing import Any
+from typing import Any, TypedDict
 
 from app.extraction.documents import ExtractedContent
 from app.extraction.llm_format import (
@@ -16,6 +16,21 @@ from app.models.discovered_link import DiscoveredLink
 from app.models.host_policy import HostPolicy
 from app.models.normalized_url import NormalizedUrl, admit_or_none
 from app.safety.validation import filter_js_endpoints
+
+
+class PostFetchDiscovery(TypedDict):
+    """The post-fetch discovery envelope (#482): one parse's products, declared
+    once at the producer. A consumer that reads a key the producer stopped
+    selecting is now a type error, not a silent None.
+    """
+
+    diagnostics: dict[str, Any]
+    discovered_links: list[DiscoveredLink]
+    discovered_link_count: int
+    discovered_links_truncated: bool
+    js_endpoints: list[dict[str, str]]
+    next_page_url: NormalizedUrl | None
+    llm_metadata: ExtractedPageMetadata
 
 
 def extract_discovered_links(
@@ -88,42 +103,40 @@ def extract_post_fetch_discovery(
     include_js_endpoints: bool = False,
     include_metadata: bool = False,
     host_policy: HostPolicy,
-) -> dict[str, Any]:
+) -> PostFetchDiscovery:
     """Sync post-fetch discovery for the result builders: parse HTML once and
     derive diagnostics, links, endpoints, and the hint in pure-CPU passes, with
     the hint egress-filtered at the producer (a builder once leaked ``javascript:``).
     """
     tree = parse_html_tree(html) if html and (include_diagnostics or include_links) else None
-    diagnostics = html_diagnostics(html, final_url, tree=tree) if include_diagnostics else {}
+    envelope: PostFetchDiscovery = {
+        "diagnostics": {},
+        "discovered_links": [],
+        "discovered_link_count": 0,
+        "discovered_links_truncated": False,
+        "js_endpoints": [],
+        "next_page_url": None,
+        "llm_metadata": {},
+    }
+    if include_diagnostics:
+        envelope["diagnostics"] = dict(html_diagnostics(html, final_url, tree=tree))
     if include_links:
-        discovered_links, discovered_link_count, discovered_links_truncated = extract_discovered_links(
-            html, final_url, max_links=max_links, tree=tree
-        )
-    else:
-        discovered_links, discovered_link_count, discovered_links_truncated = [], 0, False
-    js_endpoints = (
-        extract_js_endpoints(
+        links, count, truncated = extract_discovered_links(html, final_url, max_links=max_links, tree=tree)
+        envelope["discovered_links"] = links
+        envelope["discovered_link_count"] = count
+        envelope["discovered_links_truncated"] = truncated
+    if include_js_endpoints:
+        envelope["js_endpoints"] = extract_js_endpoints(
             html,
             js_base_url if js_base_url is not None else final_url,
             host_policy=host_policy,
         )
-        if include_js_endpoints
-        else []
-    )
     # Metadata rides the tree parsed for THIS call, never its own parse; an
     # empty dict means "no tree" and shaping falls back to its single parse.
-    llm_metadata: ExtractedPageMetadata = {}
     if include_metadata and tree is not None and final_url:
-        llm_metadata = llm_metadata_from_tree(tree, final_url)
-    return {
-        "diagnostics": diagnostics,
-        "discovered_links": discovered_links,
-        "discovered_link_count": discovered_link_count,
-        "discovered_links_truncated": discovered_links_truncated,
-        "js_endpoints": js_endpoints,
-        "next_page_url": detect_pagination(html, final_url),
-        "llm_metadata": llm_metadata,
-    }
+        envelope["llm_metadata"] = llm_metadata_from_tree(tree, final_url)
+    envelope["next_page_url"] = detect_pagination(html, final_url)
+    return envelope
 
 
 # --- Katana-inspired advanced discovery ---

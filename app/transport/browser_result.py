@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from app.admission.render_options import resolve_render_options
+from app.models.crawl_diagnostics import CrawlDiagnostics
 from app.models.crawl_job import CrawlJob
 from app.models.crawl_policy import CrawlPolicy
 from app.models.crawl_strategy_attempt import CrawlStrategyAttempt
@@ -14,6 +15,7 @@ from app.runtime.worker_dispatch import call_worker
 from app.transport.body_decode import quality_score
 from app.transport.content_pipeline import (
     ExtractedContent,
+    PostFetchDiscovery,
     discover_after_fetch,
     discovery_result_fields,
     post_fetch_diagnostics,
@@ -24,7 +26,6 @@ from app.vocabulary.extraction import EXTRACTION_METHOD_DOM_TEXT
 
 if TYPE_CHECKING:
     from app.config.settings import CrawlerSettings
-    from app.models.crawl_diagnostics import CrawlDiagnostics
     from app.models.crawl_result import EngineCrawlResult
     from app.models.crawl_worker import CrawlWorker
     from app.models.host_policy import HostPolicy
@@ -86,7 +87,7 @@ async def _discover_browser_content(
     result: Any,
     policy: CrawlPolicy,
     host_policy: HostPolicy,
-) -> dict[str, Any]:
+) -> PostFetchDiscovery:
     return await discover_after_fetch(
         html=result.html,
         final_url=result.final_url,
@@ -102,7 +103,7 @@ def _browser_diagnostics(
     content: ExtractedContent,
     policy: CrawlPolicy,
     host_policy: HostPolicy,
-    post_fetch: dict[str, Any],
+    post_fetch: PostFetchDiscovery,
 ) -> CrawlDiagnostics:
     diagnostics: CrawlDiagnostics = {
         "browser_profile": policy.browser_profile,
@@ -112,7 +113,9 @@ def _browser_diagnostics(
             "html_length": len((result.html or "").strip()),
         },
     }
-    diagnostics.update(post_fetch["diagnostics"])
+    # Two disclosure bags by design (parse's, result's); the fold is the
+    # boundary. TypedDict.update refuses the cross-bag shape, so cast names it.
+    diagnostics.update(cast(CrawlDiagnostics, post_fetch["diagnostics"]))
     for key in ("intercepted_xhr", "screenshot"):
         value = result.metadata.get(key)
         if value:
@@ -129,7 +132,7 @@ def _build_browser_result(
     result: Any,
     content: ExtractedContent,
     diagnostics: CrawlDiagnostics,
-    post_fetch: dict[str, Any],
+    post_fetch: PostFetchDiscovery,
 ) -> EngineCrawlResult:
     attempt = CrawlStrategyAttempt(
         strategy=strategy,

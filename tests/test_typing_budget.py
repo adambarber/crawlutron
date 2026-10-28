@@ -25,9 +25,8 @@ from tests.chokepoint_walks import REPO_ROOT, nodes_of, trees_under
 _METRIC = "undeclared record"
 _ANY = "bare Any"
 
-# 143 -> 137 (#135/#136); 134 -> 130 -> 129 (#419 TypedDicts, #359 DocPoolHooks).
-# bare Any: 161 -> 159 (#419); -> 158 (#523); -> 143 (#542: CrawlJobState job seams).
-_BUDGETS = {_METRIC: 129, _ANY: 143}
+# 129 -> 122 (#482: PostFetchDiscovery removed 8, its diagnostics bag adds 1).
+_BUDGETS = {_METRIC: 122, _ANY: 143}
 
 # A record is anything whose key set a caller might depend on.
 _RECORD_ROOTS = frozenset(
