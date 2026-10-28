@@ -147,6 +147,9 @@ def test_property_owner_duplicate_is_not_sanctioned():
     path = REPO_ROOT / "app" / "config" / "env.py"
     owner_ids = _owner_definition_ids(tree, path, prop)
     duplicate = _duplicate_def_nodes(tree)[1]
-    assert len(owner_ids) == 1
+    assert len(owner_ids) == 1, (
+        "a duplicate def must not register a second owner id; the owner set is "
+        f"identity-keyed, so both nodes of one shape collapse to one: got {len(owner_ids)}"
+    )
     assert not _property_owner(path, prop, tree=tree, node=duplicate)
     assert _bool_env_offenders(tree, path, prop)

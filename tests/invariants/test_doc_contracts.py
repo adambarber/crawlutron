@@ -348,7 +348,10 @@ def test_doc_example_gate_bites(tmp_path):
         encoding="utf-8",
     )
     offenders = _doc_example_offenders(root=tmp_path, documents=["doc_ghost.md"])
-    assert len(offenders) == 1, offenders
+    assert len(offenders) == 1, (
+        "a request example a model rejects must produce exactly one offender "
+        f"(one doc, one fence): got {offenders}"
+    )
     assert "rejected by CrawlRequest" in offenders[0], offenders
 
 

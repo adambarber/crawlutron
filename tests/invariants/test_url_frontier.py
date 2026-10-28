@@ -246,7 +246,10 @@ def test_resolved_call_name_handles_getattr_alias_and_static_name():
     )
     calls = [node for node in nodes_of(source) if isinstance(node, ast.Call)]
     attribute_calls = [call for call in calls if isinstance(call.func, ast.Name)]
-    assert len(attribute_calls) == 3
+    assert len(attribute_calls) == 3, (
+        "the call-name resolver must see the static name, the getattr alias and the "
+        f"aliased-ga spelling; found {len(attribute_calls)}: {attribute_calls}"
+    )
     assert all(resolved_call_name(source, call) == "ipaddress.ip_address" for call in attribute_calls)
 
 
