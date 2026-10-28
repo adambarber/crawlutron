@@ -8,8 +8,7 @@ import subprocess
 from pathlib import Path
 
 from scripts.executables import GIT, require_executable
-from tests.test_ci_enforcement import _jobs
-from tests.test_precommit_ci_contract import (
+from tests._ci_contract import (
     CONFIG_PATH,
     ENFORCEMENT_INPUTS,
     ENFORCEMENT_TRIGGER_PATTERN,
@@ -23,6 +22,7 @@ from tests.test_precommit_ci_contract import (
     _entry,
     _field,
     _hook_blocks,
+    _jobs,
 )
 
 

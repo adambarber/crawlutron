@@ -14,9 +14,9 @@ from tests.chokepoint_walks import (
     resolved_expr_name,
     trees_under,
 )
-from tests.invariants.test_tree_immutability import _tests_tree
-from tests.invariants.test_tree_imports import _test_tree_module_names
 from tests.rules import Bites, Registry, Rule, Silent
+from tests.trees import test_tree_module_names as _test_tree_module_names
+from tests.trees import tree_under_tests as _tests_tree
 
 # =========================================================================== NO PUBLIC PRIMITIVE IN THE
 # VOCABULARY LAYER MAY GO UNREFERENCED The suite has a convention rather than a registry for this: a leading

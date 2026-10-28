@@ -20,18 +20,11 @@ from app.runtime.metrics import MetricsStore
 from app.storage.caller_key_store import CallerKeyStore
 from app.storage.job_store import JobStatus, JobStore
 from app.storage.result_store import CrawlResultStore
+from tests._api_harnesses import stored_request as _stored_request
 from tests._async_harnesses import expect_quota_refused
 from tests.factories.client import isolation_client, post_crawl, quota_client
 from tests.factories.store import complete_job, seed_owned_job
 from tests.factories.store import job_store as make_store
-
-
-def _stored_request(store: JobStore, response):
-    """The stored job a 202 crawl response names; the post succeeded."""
-    assert response.status_code == 202, response.text
-    stored = store.load(response.json()["request_id"])
-    assert stored is not None
-    return stored
 
 
 def test_single_shot_job_carries_its_owner(tmp_path):

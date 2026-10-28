@@ -21,6 +21,7 @@ from tests.chokepoint_walks import (
     resolved_expr_name,
     trees_under,
 )
+from tests.invariants._shared import _private_from_import_names
 from tests.rules import Bites, Registry, Rule
 
 _TESTS_DIR = REPO_ROOT / "tests"
@@ -204,8 +205,8 @@ def test_no_rule_violations():
     RULES.check_all_clean()
 
 
-# --------------------------------------------------------------------------- app/ reaching into app/
 # ---------------------------------------------------------------------------
+
 
 _APP_DIR = REPO_ROOT / "app"
 
@@ -220,16 +221,7 @@ def _cross_module_private_names(tree: ast.Module, path: pathlib.Path) -> dict[st
     ``body_decode.decode_body`` names the owner module, not the bind; a private
     from-import (``from app.other import _priv``) is the same weld as a read."""
     here = _module_of(path)
-    found: dict[str, int] = {}
-    for node in from_imports(tree):
-        if not node.module or not node.module.startswith("app") or node.level:
-            continue
-        owner, _, attr = node.module.rpartition(".")
-        if owner == here or node.module == here:
-            continue
-        for alias in node.names:
-            if alias.name.startswith("_") and not alias.name.startswith("__"):
-                found.setdefault(f"{node.module}.{alias.name}", node.lineno)
+    found: dict[str, int] = _private_from_import_names(tree, lambda module: module.startswith("app"), here)
     for key, lineno in _attribute_reach_keys(tree, {}):
         if not key.startswith("app."):
             continue

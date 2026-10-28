@@ -13,6 +13,7 @@ from app.config.settings import CrawlerSettings
 from app.storage.job_store import TERMINAL_STATUSES, JobStatus, JobStore
 from app.storage.result_store import CrawlResultStore
 from app.storage.watch_store import WatchStore
+from tests._api_harnesses import spy_on_history_reads
 from tests._job_harnesses import ScriptedExecute, _seed_job, make_crawled_job_store, make_job_store
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY, deployment_tier
 from tests._result_builders import _canned_result
@@ -22,26 +23,8 @@ from tests.api._offload_doubles import (
     LoopGuardWatchStore,
     _off_loop,
 )
-from tests.api.test_store_offload import _ROOT
 
-
-def spy_on_history_reads(monkeypatch):
-    """Wrap the accumulator readers, recording every full-accumulator read.
-
-    The spy wraps ``JobAccumulators`` (not ``load``) so the real reads still
-    run; every caller asserts on the recorded names."""
-    from app.storage.job_store import JobAccumulators
-
-    reached: list[str] = []
-    for name in ("read_results", "read_visited"):
-        real = getattr(JobAccumulators, name)
-
-        def wrapper(self, job_id, *, _name=name, _real=real):
-            reached.append(_name)
-            return _real(self, job_id)
-
-        monkeypatch.setattr(JobAccumulators, name, wrapper)
-    return reached
+_ROOT = "http://example.test/a"
 
 
 class TestStatusReadNeverMaterializesTheCrawl:

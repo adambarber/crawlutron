@@ -9,10 +9,11 @@ from app.orchestration.recursive import batch_is_http_heavy
 from app.runtime.memory_pressure import batch_scale
 from app.runtime.resource_pressure import ResourceGate
 from app.vocabulary.strategies import BROWSER_HEADLESS, HTTP_DECLARED_CRAWLER
+from tests._admission_doubles import PinnedGate
+from tests._admission_doubles import pinned_resource_gate as _pinned_resource_gate
 from tests._fetcher_factories import LINKED_PAIR_LIMITS, crawled_results, site_linking_to
 from tests._recursive_harnesses import drive_recursive_crawl, make_crawl_task
 from tests._scheduler_doubles import FakeScheduler as _Scheduler
-from tests.admission.test_admission import _pinned_resource_gate
 
 # --- governance ---
 
@@ -150,42 +151,6 @@ class TestBatchIsHttpHeavy:
         # First task unpinned, second pinned HTTP; sample=1 looks only at first
         frontier = [(0, make_crawl_task(0, "z.gov")), (0, make_crawl_task(0, "a.gov"))]
         assert batch_is_http_heavy(sched, frontier, sample=1) is False
-
-
-# --------------------------------------------------------------------------- Dispatcher wiring: apply
-# http_scale_factor for HTTP-heavy batches.
-class PinnedGate(ResourceGate):
-    """A ResourceGate with fixed scales and ratios, recording consultations.
-
-    It subclasses the production type so dispatch is compiled against the same
-    boundary, and skips ``__init__`` to avoid live gates reading the host cgroup.
-    """
-
-    def __init__(self, *, batch=1.0, http=1.0, mem=0.0, cpu=0.0):
-        self.batch = batch
-        self.http = http
-        self._mem = mem
-        self._cpu = cpu
-        self.calls: list[str] = []
-
-    async def wait_while_saturated(self, max_wait_seconds: float | None = None):
-        # The parameter is part of the signature this double stands in for. Dropping it would let a caller
-        # passing a budget through be type-checked against a gate that silently cannot receive one.
-        self.calls.append("wait")
-
-    def batch_scale_factor(self):
-        self.calls.append("batch")
-        return self.batch
-
-    def http_scale_factor(self):
-        self.calls.append("http")
-        return self.http
-
-    def memory_ratio(self):
-        return self._mem
-
-    def cpu_ratio(self):
-        return self._cpu
 
 
 async def _ok_worker(job):

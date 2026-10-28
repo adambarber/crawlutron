@@ -18,12 +18,12 @@ from app.extraction.doc_pool import (
 )
 from app.runtime.metrics import MetricsStore
 from tests._doc_pool_fixtures import _seeded
+from tests._extraction_harnesses import acquire_the_replacement as _acquire_the_replacement
 from tests._extraction_helpers import settings_with
 from tests._lock_doubles import DelegatingLock
 from tests._process_doubles import (
     StubConn,
     StubProc,
-    StubSpawner,
     install_unkillable_doc_worker,
     stub_proc,
     stub_worker,
@@ -41,16 +41,6 @@ def _recording_lock(lock, acquirer_thread: dict[str, int], acquirer_inside: thre
             return got
 
     return _RecordingLock(lock)
-
-
-def _acquire_the_replacement(pool: DocExtractionPool, spawner: StubSpawner, pid: int, bound: float = 0.3):
-    """Acquire from a pool whose only slots are unusable; report the spawn too.
-
-    Three tests ask the same grow-past-a-bad-slot question; the short bound is
-    part of the arrangement, not a detail. Returns ``(spawned, worker)``."""
-    spawner.hand_out(stub_worker(pid))
-    worker = pool.acquire(bound)
-    return spawner.asked, worker
 
 
 def _acquire_with_bound(pool: DocExtractionPool, bound: float = 0.25):

@@ -5,9 +5,11 @@ per-expansion frontier identity walk is gone from the admission seam."""
 
 from __future__ import annotations
 
+from tests._admission_runs import link as _link
+from tests._admission_runs import run as _run
+from tests._admission_runs import task as _task
 from tests._policy_factories import canonical
 from tests._result_builders import make_engine_result
-from tests.orchestration.test_recursive_dispatch import _link, _run, _task
 
 
 async def test_expansions_thread_the_occupied_set(monkeypatch):

@@ -6,7 +6,7 @@ import ast
 import pathlib
 
 from tests.chokepoint_walks import TESTS_DIR, app_python_files, app_trees, nodes_of, trees_under
-from tests.invariants.test_tree_imports import _app_reads
+from tests.trees import app_reads as _app_reads
 
 
 def test_every_detector_sees_the_same_app_trees():

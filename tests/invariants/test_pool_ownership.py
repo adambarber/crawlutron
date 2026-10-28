@@ -6,8 +6,8 @@ import ast
 import pathlib
 
 from tests.chokepoint_walks import REPO_ROOT, nodes_of, offender_at, relative_posix, unary_ops
+from tests.invariants._proof_paths import ELSEWHERE as _ELSEWHERE
 from tests.invariants._shared import _enclosing_calls
-from tests.invariants.test_ownership import _ELSEWHERE
 from tests.rules import Bites, Registry, Rule, Silent
 
 _DOC_POOL_CLASS = "DocExtractionPool"

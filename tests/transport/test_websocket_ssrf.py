@@ -8,6 +8,7 @@ from __future__ import annotations
 from tests._assertions import block_private_targets, host_resolves_to
 from tests._browser_doubles import pinned_page_renderer, render_bare
 from tests._browser_page_doubles import FakePageContext, _ContextSwappingPage
+from tests._pool_ws_doubles import FakeWS as _FakeWS
 
 _PUBLIC = "1.2.3.4"
 
@@ -29,22 +30,6 @@ class _WSBearingPage(_ContextSwappingPage):
     @property
     def ws_handler(self):
         return self.context.ws_handler
-
-
-class _FakeWS:
-    """A stand-in for Playwright's ``WebSocketRoute``: ``url``/``close()``/``connect_to_server()``."""
-
-    def __init__(self, url):
-        self.url = url
-        self.closed_count = 0
-        self.connect_calls = 0
-
-    async def close(self, **kwargs):
-        self.closed_count += 1
-
-    def connect_to_server(self):
-        self.connect_calls += 1
-        return self
 
 
 async def test_ws_guard_is_installed_and_closes_unsafe_connects_safe(monkeypatch):

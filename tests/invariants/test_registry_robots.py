@@ -14,8 +14,7 @@ from tests.chokepoint_walks import (
     offender,
     resolved_call_name,
 )
-from tests.invariants._shared import _relative_app_path
-from tests.invariants.test_registry import (
+from tests.invariants._registry_machinery import (
     _PROPERTY_MODULES,
     _module_aware,
     _observed_property_count,
@@ -25,6 +24,7 @@ from tests.invariants.test_registry import (
     _property_nodes,
     _property_suppressed,
     _PropertyObservations,
+    _relative_app_path,
     _resolvedlocal_nodes,
 )
 from tests.property_registry import Property
@@ -260,7 +260,7 @@ def _robots_shared_parser(
 
 
 @_module_aware
-def _robots_policy_offenders(tree: ast.AST, path: pathlib.Path, prop: Property) -> list[str]:
+def robots_policy_offenders(tree: ast.AST, path: pathlib.Path, prop: Property) -> list[str]:
     offenders: list[str] = []
     module_paths = _robot_module_paths(tree, path, _PROPERTY_MODULES.get())
     excluded = _owner_definition_ids(tree, path, prop)
@@ -300,7 +300,7 @@ def test_robots_policy_has_one_implementation():
     prop = _property("robots-policy")
     offenders: list[str] = []
     for path, tree in app_trees(exclude=frozenset()):
-        offenders.extend(_robots_policy_offenders(tree, path, prop))
+        offenders.extend(robots_policy_offenders(tree, path, prop))
     assert _observed_property_count(prop), "robots-policy detector observed no fingerprint occurrences"
     assert not offenders, "robots policy has a second implementation: " + ", ".join(offenders)
 
@@ -324,3 +324,9 @@ def _observe_robots_policy(tree: ast.AST, path: pathlib.Path, prop: Property) ->
         ).items():
             walk.record(fingerprint, count)
     return walk.counts
+
+
+# The registry's observation dispatch: this module owns the robots-policy walk.
+from tests.invariants._registry_machinery import _OBSERVERS  # noqa: E402
+
+_OBSERVERS["robots-policy"] = _observe_robots_policy

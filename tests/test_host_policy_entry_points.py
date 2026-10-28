@@ -5,6 +5,7 @@ import asyncio
 import pytest
 
 from app.storage.result_store import CrawlResultStore
+from tests._host_policy_entry_table import host_policy_entry_table as _table_entries
 from tests._host_policy_probes import (
     _BLOCKED_URL,
     _assert_refused,
@@ -17,7 +18,6 @@ from tests._host_policy_probes import (
 )
 from tests._http_test_helpers import minimal_request
 from tests._policy_factories import canonical
-from tests.invariants.test_host_policy_entry_points import _table_entries
 
 
 async def _probe_crawl_endpoint(monkeypatch, tmp_path):

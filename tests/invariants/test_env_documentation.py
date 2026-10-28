@@ -7,7 +7,7 @@ import re
 from functools import lru_cache
 
 from tests.chokepoint_walks import REPO_ROOT, parsed
-from tests.invariants.test_knob_contracts import _consumed_knobs
+from tests.invariants._env_knobs import _consumed_knobs
 
 
 #: The .env.example lines that document a live knob (not commented-out examples).

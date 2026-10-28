@@ -3,7 +3,11 @@ from __future__ import annotations
 import ast
 
 from tests.chokepoint_walks import app_offenders
-from tests.invariants.test_bounds import _ALWAYS_DECODABLE_ENCODINGS, _ENCODING_TOKEN, _KNOWN_ENCODINGS
+from tests.invariants._encoding_sets import (
+    _ALWAYS_DECODABLE_ENCODINGS,
+    _ENCODING_TOKEN,
+    _KNOWN_ENCODINGS,
+)
 
 
 def _decodable_encoding_tokens() -> set[str]:

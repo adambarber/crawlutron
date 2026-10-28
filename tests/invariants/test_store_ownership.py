@@ -15,7 +15,7 @@ from tests.chokepoint_walks import (
     resolved_call_name,
     writes,
 )
-from tests.invariants.test_ownership import _ELSEWHERE
+from tests.invariants._proof_paths import ELSEWHERE as _ELSEWHERE
 from tests.rules import Bites, Registry, Rule, Silent
 
 # --- browser instance release ------------------------------------------------- Both the per-attempt reset

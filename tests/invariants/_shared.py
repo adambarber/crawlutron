@@ -262,6 +262,31 @@ type DefinitionNode = ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef
 type ModuleSet = tuple[tuple[pathlib.Path, ast.Module], ...] | list[tuple[pathlib.Path, ast.Module]] | None
 
 
+def _private_from_import_names(
+    tree: ast.Module,
+    targets: Callable[[str], bool],
+    here: str,
+) -> dict[str, int]:
+    """``module.name -> lineno`` for private names from-imported across a boundary.
+
+    Both private-import gates (app/-internal and the suite's support surface)
+    walk the same shape: every ``from X import _y`` whose module passes
+    ``targets`` and is not the importing module's own name."""
+    found: dict[str, int] = {}
+    from tests.chokepoint_walks import from_imports
+
+    for node in from_imports(tree):
+        if not node.module or node.level or not targets(node.module):
+            continue
+        owner, _, _leaf = node.module.rpartition(".")
+        if owner == here or node.module == here:
+            continue
+        for alias in node.names:
+            if alias.name.startswith("_") and not alias.name.startswith("__"):
+                found.setdefault(f"{node.module}.{alias.name}", node.lineno)
+    return found
+
+
 def _module_definition_index(
     modules: ModuleSet,
 ) -> dict[str, list[tuple[pathlib.Path, ast.Module, DefinitionNode]]]:

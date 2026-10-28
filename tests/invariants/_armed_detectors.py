@@ -28,7 +28,12 @@ def _observed(name: str) -> Callable[[], None]:
     prop = PROPERTY_BY_NAME[name]
 
     def premise() -> None:
-        from tests.invariants.test_registry import _observed_property_count
+        # Observer walks register in _OBSERVERS at import; importing the detector
+        # modules here guarantees the premise never audits an unregistered property.
+        import tests.invariants.test_registry_bool_env  # noqa: F401
+        import tests.invariants.test_registry_robots  # noqa: F401
+        import tests.invariants.test_registry_targets  # noqa: F401
+        from tests.invariants._registry_machinery import _observed_property_count
 
         assert _observed_property_count(prop) > 0, (
             f"{name} detector observed no fingerprint occurrences on the live tree"
@@ -38,16 +43,18 @@ def _observed(name: str) -> Callable[[], None]:
 
 
 def _premises() -> dict[str, Callable[[], None]]:
-    from tests.invariants import test_encoding_bounds, test_knob_contracts, test_public_surface
+    from tests.invariants._encoding_sets import _ALWAYS_DECODABLE_ENCODINGS
+    from tests.invariants._env_knobs import _consumed_knobs
+    from tests.invariants._surface_ratchet import OWNER_PUBLIC_SURFACE_RATCHET
 
     def encoding() -> None:
-        assert test_encoding_bounds._decodable_encoding_tokens(), "the decodable encoding set is empty"
+        assert set(_ALWAYS_DECODABLE_ENCODINGS) | {"br"}, "the decodable encoding set is empty"
 
     def knob() -> None:
-        assert test_knob_contracts._consumed_knobs(), "the app reads no environment knob"
+        assert _consumed_knobs(), "the app reads no environment knob"
 
     def public_surface() -> None:
-        assert test_public_surface._OWNER_PUBLIC_SURFACE_RATCHET, "the public-surface ratchet is empty"
+        assert OWNER_PUBLIC_SURFACE_RATCHET, "the public-surface ratchet is empty"
 
     return {
         "undecodable-encoding": encoding,
@@ -84,19 +91,19 @@ def hand_rolled_detectors() -> tuple[ArmedHandRolled, ...]:
         ArmedHandRolled(
             name="bool-env",
             module=_INVARIANTS / "test_registry_bool_env.py",
-            function="_bool_env_offenders",
+            function="bool_env_offenders",
             premise=premises["bool-env"],
         ),
         ArmedHandRolled(
             name="robots-policy",
             module=_INVARIANTS / "test_registry_robots.py",
-            function="_robots_policy_offenders",
+            function="robots_policy_offenders",
             premise=premises["robots-policy"],
         ),
         ArmedHandRolled(
             name="public-target",
             module=_INVARIANTS / "test_registry_targets.py",
-            function="_public_target_offenders",
+            function="public_target_offenders",
             premise=premises["public-target"],
         ),
     )

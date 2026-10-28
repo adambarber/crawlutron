@@ -6,8 +6,7 @@ import ast
 import pathlib
 
 from tests.chokepoint_walks import REPO_ROOT, app_trees, local_subtree, nodes_of, offender, resolved_call_name
-from tests.invariants._shared import _relative_app_path
-from tests.invariants.test_registry import (
+from tests.invariants._registry_machinery import (
     _PROPERTY_MODULES,
     _module_aware,
     _observed_property_count,
@@ -15,6 +14,7 @@ from tests.invariants.test_registry import (
     _property,
     _property_sites,
     _PropertyObservations,
+    _relative_app_path,
 )
 from tests.property_registry import Property
 
@@ -52,7 +52,7 @@ def _public_target_counts(nodes: list[tuple[ast.AST, ast.AST]]) -> tuple[int, in
 
 
 @_module_aware
-def _public_target_offenders(tree: ast.AST, path: pathlib.Path, prop: Property) -> list[str]:
+def public_target_offenders(tree: ast.AST, path: pathlib.Path, prop: Property) -> list[str]:
     offenders = []
     for name, node, nodes in _property_sites(tree, path, prop, modules=_PROPERTY_MODULES.get()):
         parses, ranges = _public_target_counts(nodes)
@@ -67,7 +67,7 @@ def test_public_target_has_one_implementation():
     prop = _property("public-target")
     offenders: list[str] = []
     for path, tree in app_trees(exclude=frozenset()):
-        offenders.extend(_public_target_offenders(tree, path, prop))
+        offenders.extend(public_target_offenders(tree, path, prop))
     assert _observed_property_count(prop), "public-target detector observed no fingerprint occurrences"
     assert not offenders, "public-address policy has a second implementation: " + ", ".join(offenders)
 
@@ -85,7 +85,7 @@ def test_public_target_detector_quiet_on_runtime_computed_name():
         "    name = attribute_name()\n"
         "    return not getattr(ipaddress, name)(value).is_private\n"
     )
-    assert not _public_target_offenders(
+    assert not public_target_offenders(
         runtime_name,
         REPO_ROOT / "app" / "_synthetic.py",
         _property("public-target"),
@@ -111,3 +111,9 @@ def _observe_public_target(tree: ast.AST, path: pathlib.Path, prop: Property) ->
     if owner_parses and owner_ranges:
         walk.record("ipaddress_range_verdict", min(owner_parses, owner_ranges))
     return walk.counts
+
+
+# The registry's observation dispatch: this module owns the public-target walk.
+from tests.invariants._registry_machinery import _OBSERVERS  # noqa: E402
+
+_OBSERVERS["public-target"] = _observe_public_target

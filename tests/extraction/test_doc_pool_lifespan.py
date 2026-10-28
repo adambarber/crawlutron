@@ -7,10 +7,10 @@ import app.extraction.documents as docex
 from app.extraction.doc_pool import DocWorker, install_doc_pool_hooks
 from tests._app_factory import service_app
 from tests._doc_pool_fixtures import _seeded, fresh_doc_pool
+from tests._extraction_harnesses import acquire_the_replacement as _acquire_the_replacement
 from tests._extraction_helpers import settings_with
 from tests._lifespan_doubles import stub_heavy_teardown
 from tests._process_doubles import install_unkillable_doc_worker, stub_worker
-from tests.extraction.test_doc_pool import _acquire_the_replacement
 
 
 class TestLifespanDocPoolTeardown:

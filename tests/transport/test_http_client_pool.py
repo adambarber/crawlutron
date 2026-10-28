@@ -4,6 +4,7 @@ import contextlib
 
 import app.transport.http_client_pool as http_mod
 from app.transport.http_client_pool import get_async_http_client
+from tests._pool_ws_doubles import FakeClient as _FakeClient
 
 
 class TestPooledClientBuilders:
@@ -48,12 +49,3 @@ class TestAsyncHttpClientLifecycle:
         # Build a client, then close it: the close path exercises a live one.
         get_async_http_client()
         await close_async_http_client()
-
-
-class _FakeClient:
-    def __init__(self):
-        self.is_closed = False
-        self._bound_loop = None
-
-    async def aclose(self):
-        self.is_closed = True

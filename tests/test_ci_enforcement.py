@@ -3,151 +3,26 @@
 from __future__ import annotations
 
 import re
-import subprocess
-from typing import cast
 
 import pytest
-import yaml
 
 from scripts import jscpd_gate as gate
-from scripts.executables import BASH, require_executable
-from tests.test_precommit_ci_contract import (
+from tests._ci_contract import (
     CONFIG_PATH,
     ENFORCEMENT_COMMAND,
     ENFORCEMENT_TRIGGER_PATTERN,
-    ERREXIT_SHELL,
     REPORTING_JOBS,
     SERVICE_ROOT,
     WORKFLOW_PATH,
+    _assert_failure_propagation,
     _assert_no_config_exclude,
     _entry,
     _field,
     _hook_blocks,
+    _jobs,
     _require_exactly_one_jscpd_gate,
+    _required_needs,
 )
-
-
-def _required_needs(workflow: str) -> set[str]:
-    required = _required_job(workflow)
-    needs = required.get("needs")
-    assert isinstance(needs, list) and needs, "the required aggregate must declare needs"
-    return {str(job) for job in needs}
-
-
-def _required_job(workflow: str) -> dict[str, object]:
-    """The required aggregate job block, as the record its checks read."""
-    required = _jobs(workflow).get("required")
-    assert isinstance(required, dict), "CI must declare the required aggregate job"
-    return required
-
-
-def _jobs(workflow: str) -> dict[str, dict[str, object]]:
-    document = yaml.safe_load(workflow)
-    assert isinstance(document, dict), "the workflow must be a mapping"
-    jobs = document.get("jobs")
-    assert isinstance(jobs, dict) and jobs, "the workflow must declare jobs"
-    return cast("dict[str, dict[str, object]]", jobs)
-
-
-def _result_assertion(job: str) -> str:
-    return 'test "${{ needs.' + job + '.result }}" = "success"'
-
-
-def _required_gate_step(workflow: str) -> dict[str, object]:
-    for step in _required_steps(workflow):
-        if str(step.get("run", "")).strip():
-            return step
-    raise AssertionError("the required aggregate must run a script")
-
-
-def _required_steps(workflow: str) -> list[dict[str, object]]:
-    """The required aggregate's steps, as the records their checks read."""
-    steps = _required_job(workflow).get("steps")
-    assert isinstance(steps, list) and steps, "the required aggregate must declare steps"
-    return steps
-
-
-def _required_gate_script(workflow: str) -> str:
-    """The shell the required aggregate actually runs, expressions intact."""
-    return str(_required_gate_step(workflow)["run"])
-
-
-def _required_gate_shell(workflow: str) -> str:
-    """The aggregate's shell, which the gate depends on and so must be declared: the
-    script is a chain of `test` lines, and without errexit its exit code is the LAST
-    line's, so a mid-chain failure reports success by accident.
-    """
-    shell = _required_gate_step(workflow).get("shell")
-    assert shell == ERREXIT_SHELL, (
-        f"the required aggregate must declare shell {ERREXIT_SHELL!r}, found {shell!r}: "
-        "without errexit its exit code is the last test line's, not the failing one"
-    )
-    return str(shell)
-
-
-def _render_results(script: str, results: dict[str, str]) -> str:
-    for job, result in results.items():
-        script = script.replace("${{ needs." + job + ".result }}", result)
-    assert "${{" not in script, f"unrendered expression left in the required script:\n{script}"
-    return script
-
-
-def _run_script(script: str) -> subprocess.CompletedProcess[str]:
-    """Execute as GitHub executes it: `bash -e {0}`."""
-    return subprocess.run(
-        [require_executable(BASH), "-e", "-c", script], capture_output=True, text=True, check=False
-    )
-
-
-def _assert_no_continue_on_error(block: dict[str, object], label: str) -> None:
-    """Reject any `continue-on-error` GitHub could evaluate true: `${{ true }}` loads
-    as a STRING, so an `is not True` check passes the value GitHub runs as true --
-    the only safe value is absent or the literal scalar `false`.
-    """
-    value = block.get("continue-on-error")
-    assert value is False or value is None, (
-        f"{label} is continue-on-error={value!r}, so needs.result is hollow; "
-        "it must be false or absent (expressions are evaluated by GitHub)"
-    )
-
-
-def _assert_failure_propagation(workflow: str) -> None:
-    """A required check that cannot fail is not a gate: `continue-on-error: true`
-    (which GitHub reports as success) and deleting the result assertion both slipped
-    the old contract -- the refusal is checked by running the aggregate's script.
-    """
-    jobs = _jobs(workflow)
-    required = _required_job(workflow)
-    _assert_no_continue_on_error(required, "the required aggregate")
-    assert required.get("if") == "${{ always() }}", "the required aggregate must run even when a need fails"
-    for name, job in jobs.items():
-        _assert_no_continue_on_error(job, name)
-        steps = job.get("steps")
-        assert isinstance(steps, list)
-        for step in steps:
-            _assert_no_continue_on_error(step, f"a step in {name}")
-
-    needs = _required_needs(workflow)
-    assert "enforcement" in needs, "the required aggregate must depend on enforcement"
-    assert REPORTING_JOBS <= needs, (
-        f"the required aggregate must depend on every reporting job, missing {REPORTING_JOBS - needs}"
-    )
-    _required_gate_shell(workflow)
-    script = _required_gate_script(workflow)
-    for job_name in sorted(needs):
-        assert _result_assertion(job_name) in script, (
-            f"the required aggregate never asserts needs.{job_name}.result succeeded"
-        )
-
-    results = {job: "success" for job in needs}
-    assert _run_script(_render_results(script, results)).returncode == 0, "all-green must pass"
-    for job_name in sorted(needs):
-        for outcome in ("failure", "cancelled", "skipped"):
-            broken = dict(results, **{job_name: outcome})
-            completed = _run_script(_render_results(script, broken))
-            assert completed.returncode != 0, (
-                f"needs.{job}.result = {outcome} still passed the required aggregate:\n{completed.stdout}"
-            )
 
 
 def test_ci_runs_every_precommit_hook_through_one_surface() -> None:

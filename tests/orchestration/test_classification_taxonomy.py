@@ -16,9 +16,11 @@ from app.vocabulary.taxonomy import (
     CrawlClassification,
     status_for_classification,
 )
+from tests._classification_sets import GROUPING_ASSIGNMENTS as _GROUPING_ASSIGNMENTS
+from tests._classification_sets import GROUPINGS as _GROUPINGS
+from tests._classification_sets import UNRECOGNIZED_LABELS
 from tests._result_builders import skipped_result
 from tests.chokepoint_walks import app_trees, nodes_of
-from tests.orchestration.test_classification import _GROUPING_ASSIGNMENTS, _GROUPINGS, UNRECOGNIZED_LABELS
 
 
 def _classifiable_labels() -> list[str]:

@@ -6,8 +6,8 @@ the fix reads the cap through ``remaining_page_capacity`` (no term when 0).
 
 from app.orchestration.recursive import admit_recursive_batch
 from app.runtime.metrics import get_metrics
+from tests._admission_runs import minimum_admission_run as _minimum_admission_run
 from tests._recursive_harnesses import make_crawl_task
-from tests.orchestration.test_recursive_dispatch import _minimum_admission_run
 
 
 async def test_an_unbounded_recursive_crawl_is_not_clamped_to_one_page_per_pass():

@@ -5,26 +5,15 @@ from __future__ import annotations
 import ast
 import pathlib
 
-from tests.chokepoint_walks import (
-    TESTS_DIR,
-    call_nodes,
-    nodes_of,
-    offender_at,
-    resolved_expr_name,
-    trees_under,
-)
+from tests.chokepoint_walks import call_nodes, nodes_of, offender_at, resolved_expr_name
 from tests.rules import Bites, Rule, Trips
+from tests.trees import tree_under_tests as tests_tree
 
 
-#: Every rule in this file governs ``tests/``, not ``app/``. One owner for the answer, so the rules below
-#: cannot disagree about the tree they sweep.
+#: One owner for the answer, so the rules below
 def _tests_tree(*, exclude: frozenset[str]) -> tuple[tuple[pathlib.Path, ast.Module], ...]:
-    """The test tree, swept whole.
-
-    A drop-in for ``app_trees`` that ignores ``exclude``; exemptions are named
-    against ``app/`` modules, not a ``tests/`` list.
-    """
-    return trees_under(TESTS_DIR)
+    """The test tree, swept whole; this file's own import of the shared one."""
+    return tests_tree(exclude=exclude)
 
 
 # =========================================================================== NO TEST MAY MUTATE THE
