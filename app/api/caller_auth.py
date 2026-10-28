@@ -19,6 +19,7 @@ from app.config.settings import CrawlerSettings
 from app.models.caller_identity import CallerIdentity
 from app.models.caller_key import CallerKey
 from app.models.error_response import ErrorResponse
+from app.models.request_profile_record import RequestProfileRecord
 from app.transport.cookie_jar import COOKIE_NAMESPACE
 from app.transport.request_profile import cookie_namespace_for
 
@@ -183,7 +184,7 @@ def is_operator(request: Request) -> bool:
     return bool(admin_token) and _constant_time_eq(secret, admin_token)
 
 
-def refuse_anonymous_cookie_namespace(caller: CallerIdentity, profile: Mapping[str, object]) -> None:
+def refuse_anonymous_cookie_namespace(caller: CallerIdentity, profile: RequestProfileRecord) -> None:
     """422 when an anonymous caller declares a cookie namespace (#559).
 
     Anonymous is ONE bounded shared identity (M1 #206), so a declared namespace is not a

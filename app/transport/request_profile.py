@@ -8,19 +8,20 @@ from __future__ import annotations
 
 import hashlib
 import os
-from collections.abc import Iterable, Mapping
-from typing import Any, Protocol, runtime_checkable
+from collections.abc import Iterable
+from typing import Protocol, runtime_checkable
 
 from app.admission.credentials import apply_credentials as apply_credentials
 from app.models.crawl_policy import CrawlPolicy
 from app.models.normalized_url import NormalizedUrl
+from app.models.request_profile_record import RequestProfileRecord
 from app.transport import cookie_jar
 from app.transport.cookie_jar import COOKIE_NAMESPACE
 from app.vocabulary.identity import DEFAULT_USER_AGENT
 from app.vocabulary.strategies import HTTP_CFFI_IMPERSONATE
 
 
-def cookie_namespace_for(profile: Mapping[str, Any]) -> str:
+def cookie_namespace_for(profile: RequestProfileRecord) -> str:
     """Return a per-request cookie namespace, or ``""`` for the shared default,
     so multi-tenant callers (who set ``cookie_namespace`` to a tenant id) never
     leak cookies across callers; empty or unset keeps the legacy shared behavior.
@@ -29,7 +30,7 @@ def cookie_namespace_for(profile: Mapping[str, Any]) -> str:
     return str(value).strip() if isinstance(value, str) else ""
 
 
-def cookie_header_for_url(profile: Mapping[str, Any], url: NormalizedUrl) -> str:
+def cookie_header_for_url(profile: RequestProfileRecord, url: NormalizedUrl) -> str:
     """Build a Cookie header from policy cookies and the persistent jar."""
     host = url.host
     parts: list[str] = []
@@ -105,7 +106,7 @@ _BUILTIN_ACCEPT_LANGUAGES = [
 ]
 
 
-def _rotating_index(profile: Mapping[str, Any], domain: str, pool_size: int) -> int:
+def _rotating_index(profile: RequestProfileRecord, domain: str, pool_size: int) -> int:
     """Deterministic per-host pool index so repeated crawls of the same host keep a
     stable fingerprint (the disk content-cache key stays consistent) while different
     hosts rotate through the pool."""
@@ -113,19 +114,20 @@ def _rotating_index(profile: Mapping[str, Any], domain: str, pool_size: int) -> 
     return int(hashlib.sha256(seed).hexdigest(), 16) % pool_size
 
 
-def select_fingerprint(profile: Mapping[str, Any], url: NormalizedUrl) -> dict[str, str]:
+def select_fingerprint(profile: RequestProfileRecord, url: NormalizedUrl) -> dict[str, str]:
     """Select fingerprint signals for a host; rotation is deterministic per host.
     Explicit pools are preferred, falling back to built-ins; anchoring on the
     host keeps them complementary to TLS impersonation, never conflicting.
     """
     domain = url.host
     out: dict[str, str] = {}
-    ua_pool = list(profile.get("user_agents") or [])
+    # Pools arrive as JsonValue lists; only string entries are identity signals.
+    ua_pool = [ua for ua in profile.get("user_agents") or [] if isinstance(ua, str)]
     if not ua_pool and profile.get("fingerprint_rotation"):
         ua_pool = _BUILTIN_USER_AGENTS
     if ua_pool:
         out["user_agent"] = ua_pool[_rotating_index(profile, domain, len(ua_pool))]
-    al_pool = list(profile.get("accept_languages") or [])
+    al_pool = [al for al in profile.get("accept_languages") or [] if isinstance(al, str)]
     if not al_pool and profile.get("fingerprint_rotation"):
         al_pool = _BUILTIN_ACCEPT_LANGUAGES
     if al_pool:
@@ -146,7 +148,7 @@ def headers_for_strategy(
     policy: CrawlPolicy,
     url: NormalizedUrl,
     *,
-    profile: Mapping[str, Any] | None = None,
+    profile: RequestProfileRecord | None = None,
 ) -> dict[str, str]:
     resolved_profile = profile if profile is not None else policy.request_profile
     headers = {

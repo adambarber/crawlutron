@@ -9,8 +9,9 @@ from __future__ import annotations
 import asyncio
 import concurrent.futures
 import socket
+import typing
 from collections.abc import AsyncIterator, Callable
-from typing import Any, Protocol
+from typing import Protocol
 
 import httpx
 
@@ -214,7 +215,13 @@ def sni_extension(scheme: str, host: str) -> dict[str, str] | None:
     return None
 
 
-def apinned_stream(client, chain, pinned_url, hop_headers, timeout):
+def apinned_stream(
+    client: httpx.AsyncClient,
+    chain: _RedirectChain,
+    pinned_url: str,
+    hop_headers: dict[str, str],
+    timeout: httpx.Timeout,
+) -> typing.AsyncContextManager[httpx.Response]:
     """Open the one SSRF-pinned httpx stream for a hop: GET to the validated IP
     with the logical hostname carried as TLS SNI and redirects left to the chain."""
     return client.stream(
@@ -364,7 +371,7 @@ class _RedirectChain:
             lambda: self._rule(self.url, self.headers), timeout_seconds=self.timeout_seconds
         )
 
-    async def advance(self, response: Any) -> bool:
+    async def advance(self, response: httpx.Response) -> bool:
         """Step to the next hop; return True when the caller should re-request.
 
         False means terminal - read the body. Awaited: a cross-origin hop reads

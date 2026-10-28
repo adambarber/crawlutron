@@ -58,7 +58,7 @@ async def extract_http_phase(ctx: HttpStrategyContext, resp: FetchedResponse) ->
     )
     text, markdown = extracted.text, extracted.markdown
     if ctx.extraction == EXTRACTION_DOCUMENT and (resp.content_type or "").lower().startswith("text/"):
-        text = format_extracted_document_text(text, source_url=resp.final_url)
+        text = format_extracted_document_text(text, source_url=resp.final_url.raw)
         markdown = text
 
     return ExtractedHttpContent(

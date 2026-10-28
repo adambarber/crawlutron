@@ -11,8 +11,9 @@ import functools
 import logging
 import time
 from collections.abc import Callable
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
+import httpx
 from curl_cffi.requests.exceptions import RequestException, SSLError
 from curl_cffi.requests.models import STREAM_END
 
@@ -25,6 +26,9 @@ from app.transport.decompression import decompress_body as _decompress_body
 from app.transport.request_profile import TransportHeaders, store_set_cookies
 from app.transport.timeouts import Timeouts
 from app.vocabulary.limits import DEFAULT_MAX_CONTENT_LENGTH_BYTES
+
+if TYPE_CHECKING:
+    pass
 
 logger = logging.getLogger(__name__)
 
@@ -80,7 +84,7 @@ async def default_http_fetcher(
 
 
 async def _stream_terminal_hop(
-    client,
+    client: httpx.AsyncClient,
     *,
     chain,
     url,

@@ -11,7 +11,7 @@ import contextlib
 import inspect
 import re
 from collections.abc import Iterable
-from typing import Any, cast
+from typing import cast
 
 from app.admission.policy import DiscoveryFlags, discovery_flags
 from app.models.crawl_diagnostics import CrawlDiagnostics
@@ -121,7 +121,7 @@ _ROBOTS_DIAGNOSTICS: RobotsDiagnostics = {
 }
 
 
-def _robots_diagnostics(evaluation: str, **overrides: Any) -> RobotsDiagnostics:
+def _robots_diagnostics(evaluation: str, **overrides: object) -> RobotsDiagnostics:
     """The ``diagnostics["robots"]`` block for one outcome: the base supplies every
     key, ``evaluation`` names how the answer was reached, and ``allowed`` stays
     True on the failure path -- a False would read as a denial.
@@ -131,16 +131,18 @@ def _robots_diagnostics(evaluation: str, **overrides: Any) -> RobotsDiagnostics:
 
 
 async def _fetch_robots_text(
-    http_fetcher: Any, robots_url: NormalizedUrl, headers: dict[str, str], timeout_seconds: int
+    http_fetcher: HttpFetcher, robots_url: NormalizedUrl, headers: dict[str, str], timeout_seconds: int
 ) -> str:
     """Fetch + decode one robots.txt body, tolerating a sync test double."""
-    robots_response: Any = http_fetcher(robots_url, headers, timeout_seconds)
+    robots_response = http_fetcher(robots_url, headers, timeout_seconds)
     if inspect.iscoroutine(robots_response):
+        # The protocol's return is a coroutine when the fetcher is async.
         robots_response = await robots_response
-    robots_headers = {key.lower(): value for key, value in robots_response.headers.items()}
+    response: _HttpFetchResult = cast(_HttpFetchResult, robots_response)
+    robots_headers = {key.lower(): value for key, value in response.headers.items()}
     return decode_body(
         _decompress_body(
-            robots_response.body,
+            response.body,
             robots_headers.get("content-encoding", ""),
             max_output_bytes=DISCOVERY_BODY_MAX_BYTES,
         ),
@@ -151,7 +153,7 @@ async def _fetch_robots_text(
 async def _fetch_robot_directives(
     *,
     normalized_url: NormalizedUrl,
-    http_fetcher: Any,
+    http_fetcher: HttpFetcher,
     headers: dict[str, str],
     timeout_seconds: int,
 ) -> tuple[float | None, list[str]]:
@@ -177,7 +179,7 @@ async def _diagnose_robots(
     *,
     normalized_url: NormalizedUrl,
     headers: dict[str, str],
-    http_fetcher: Any,
+    http_fetcher: HttpFetcher,
     timeout_seconds: int,
     flags: DiscoveryFlags,
     engine_robots_sitemaps: list[str] | None,
@@ -222,14 +224,14 @@ async def _diagnose_robots(
 async def _collect_sitemaps(
     *,
     normalized_url: NormalizedUrl,
-    http_fetcher: Any,
+    http_fetcher: HttpFetcher,
     host_policy: HostPolicy,
     timeout_seconds: int,
     candidate_urls: list[str],
-) -> tuple[list[str], dict[str, Any]]:
+) -> tuple[list[str], dict[str, str]]:
     """Fetch one or more sitemaps down to ``(loc, lastmod)`` pairs."""
     locs: list[str] = []
-    lastmod: dict[str, Any] = {}
+    lastmod: dict[str, str] = {}
     from app.transport.fetch_helpers import fetch_sitemap_urls
 
     for sitemap_url in (a for a in (normalized_url.resolve(e) for e in candidate_urls) if a is not None):
@@ -268,7 +270,7 @@ async def discovery_diagnostics(
     policy: CrawlPolicy,
     host_policy: HostPolicy,
     headers: dict[str, str],
-    http_fetcher: Any,
+    http_fetcher: HttpFetcher,
     engine_robots_sitemaps: list[str] | None,
     robots_evaluated: bool,
 ) -> CrawlDiagnostics:
