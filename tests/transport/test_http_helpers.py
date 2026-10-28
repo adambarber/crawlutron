@@ -3,6 +3,7 @@
 import asyncio
 
 import pytest
+from pydantic import ValidationError
 
 from app.admission.payload_helpers import checked_payload_urls
 from app.admission.policy import PolicyTier, read_policy
@@ -11,6 +12,7 @@ from app.config.settings import CrawlerSettings
 from app.extraction.document_text import format_extracted_document_text
 from app.extraction.trees import FrameCollector, frames_from, walkable
 from app.models.crawl_request import CrawlRequest
+from app.models.render_request import RenderRequest
 from app.safety.validation import HostPolicy
 from app.transport.fetch_policy import (
     fetch_with_retries,
@@ -81,8 +83,11 @@ class TestValidationHelpers:
         ]
 
     def test_render_options_error(self) -> None:
-        with pytest.raises(ValueError, match=r"^invalid_options$"):
-            render_options_for({"options": "bad"}, CrawlerSettings.from_mapping())
+        with pytest.raises(ValidationError):
+            render_options_for(
+                RenderRequest.model_validate({"url": "http://x/", "options": "bad"}),
+                CrawlerSettings.from_mapping(),
+            )
 
     def test_payload_policy_errors(self) -> None:
         from app.admission.policy import validate_wire_policy

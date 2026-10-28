@@ -9,7 +9,6 @@ import asyncio
 import logging
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import replace
-from typing import Any
 
 from app.admission.admission import (
     JobAdmissionContext,
@@ -37,6 +36,7 @@ from app.api.job_recovery import (
 )
 from app.api.response_shaping import failed_unified_result
 from app.api.unified_shaping import abuild_unified_result
+from app.config.settings import CrawlerSettings
 from app.models.crawl_request import CrawlRequest
 from app.models.crawl_result import CrawlResult, EngineCrawlResult
 from app.models.crawl_task import CrawlTask
@@ -133,8 +133,7 @@ def job_engine_payload(job: CrawlJobState, batch: Sequence[FrontierEntry]) -> Cr
     The runner owns the durable frontier; the engine is a single-page fetcher per
     batch. Two owners of one property was the defect, so engine recursion is off.
     """
-    # The engine's wire shape carries text in ``urls``; the entry's URL is an
-    # admitted value by construction, so this projects identity, not validation.
+    # The wire shape carries text in ``urls``; the entry's URL is admitted by construction.
     urls = [entry.url.raw for entry in batch]
     policy = read_policy(job.policy, job.tier)
     # Model_copy is safe because max_depth=0 is a declared value and this line
@@ -198,7 +197,7 @@ async def _seed_job_sitemaps(job: CrawlJobState, context: JobAdmissionContext) -
     job.stats["total_discovered"] = job.stats.get("total_discovered", 0) + outcome.accepted
 
 
-async def _load_and_claim(job_id: str, job_store: JobStore, *, preclaimed: bool) -> Any | None:
+async def _load_and_claim(job_id: str, job_store: JobStore, *, preclaimed: bool) -> CrawlJobState | None:
     """Load a job and claim it, or ``None`` when there is nothing to run."""
     job = await job_store.aload(job_id)
     if job is None:
@@ -277,7 +276,7 @@ async def _should_stop(
 
 
 async def _mark_complete_if_empty(
-    job: CrawlJobState, job_id: str, job_store: JobStore, batch: Sequence[Any]
+    job: CrawlJobState, job_id: str, job_store: JobStore, batch: Sequence[FrontierEntry]
 ) -> bool:
     """Mark the job COMPLETED when its frontier yielded nothing; else ``False``."""
     if batch:
@@ -289,7 +288,7 @@ async def _mark_complete_if_empty(
 
 async def absorb_batch(
     job: CrawlJobState,
-    batch: Sequence[Any],
+    batch: Sequence[FrontierEntry],
     resolved: dict[NormalizedUrl, EngineCrawlResult],
     context: JobAdmissionContext,
     known: set[NormalizedUrl],
@@ -340,7 +339,7 @@ def _resolve_redirects(
 async def run_job(
     job_id: str,
     job_store: JobStore,
-    settings: Any,
+    settings: CrawlerSettings,
     shutdown_event: asyncio.Event,
     fetch_and_decode: FetchAndDecode | None = None,
     *,
@@ -424,7 +423,7 @@ def reset_job_runner() -> None:
 def start_job(
     job_id: str,
     job_store: JobStore,
-    settings: Any,
+    settings: CrawlerSettings,
     shutdown_event: asyncio.Event,
     *,
     preclaimed: bool = False,
@@ -444,10 +443,11 @@ async def pause_job(job_id: str, job_store: JobStore) -> str:
     return await _transition(job_store, job_id, JobStatus.PAUSED, expected=JobStatus.RUNNING)
 
 
-async def resume_job(job_id: str, job_store: JobStore, settings: Any, shutdown_event: asyncio.Event) -> str:
+async def resume_job(
+    job_id: str, job_store: JobStore, settings: CrawlerSettings, shutdown_event: asyncio.Event
+) -> str:
     """Resume a paused job by respawning its runner task."""
-    # A stale predecessor task still owning the slot must not leave a RUNNING
-    # row with no runner (#523 COR-08): take the registry's slot-lock path.
+    # A stale predecessor owning the slot must not leave a RUNNING row with no runner (#523):
     outcome = await _transition(job_store, job_id, JobStatus.RUNNING, expected=JobStatus.PAUSED)
     if outcome == "ok":
         # The flip above is this process's claim, so the runner is told not to

@@ -7,8 +7,9 @@ entry point lives in ``app.api``; existing callers import from ``app.api.render`
 from __future__ import annotations
 
 import time
+from collections.abc import Mapping
 from dataclasses import replace
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from app.admission.payload_helpers import checked_payload_urls
 from app.admission.render_options import resolve_render_options
@@ -17,6 +18,7 @@ from app.models.crawl_job import CrawlJob
 from app.models.crawl_policy import POLICY_SCHEMA_VERSION
 from app.models.crawl_result import CrawlResult
 from app.models.host_policy import HostPolicy
+from app.models.json_value import JsonValue
 from app.models.normalized_url import NormalizedUrl
 from app.models.render_request import RenderRequest
 from app.models.result_factory import terminal_crawl_result
@@ -44,13 +46,13 @@ if TYPE_CHECKING:
     from app.models.result_record import RenderEnvelope
 
 
-def render_options_for(payload: RenderRequest | dict[str, Any], settings: CrawlerSettings) -> RenderOptions:
-    if isinstance(payload, RenderRequest):
-        options = payload.options.model_dump(exclude_none=True) if payload.options is not None else {}
-    else:
-        options = payload.get("options") or {}
-        if not isinstance(options, dict):
-            raise ValueError("invalid_options")
+def render_options_for(payload: RenderRequest, settings: CrawlerSettings) -> RenderOptions:
+    """The validated request model's knobs merged over the settings defaults;
+    ``RenderRequest`` is the wire boundary, so this funnel never sees raw shape.
+    """
+    options: Mapping[str, JsonValue] = (
+        payload.options.model_dump(exclude_none=True) if payload.options is not None else {}
+    )
     # The /v1/render caller owns every capture knob, browser_profile included.
     return resolve_render_options(
         options,

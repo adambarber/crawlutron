@@ -5,12 +5,14 @@ capture is the pipeline's on the crawl path, payload is the caller's include_htm
 """
 
 import pytest
+from pydantic import ValidationError
 
 from app.admission.policy import read_policy
 from app.admission.render_options import policy_wants_html, resolve_render_options
 from app.api.render import render_options_for
 from app.config.settings import CrawlerSettings
 from app.models.render_options import RenderOptions
+from app.models.render_request import RenderRequest
 from app.transport.browser_result import browser_strategy_result
 from app.vocabulary.limits import MAX_HEADER_VALUE_BYTES, MAX_HTTP_TIMEOUT_SECONDS, MAX_RETRIES
 from tests._browser_doubles import _fake_browser
@@ -26,6 +28,14 @@ SETTINGS_OVERRIDES = {
 
 def _settings() -> CrawlerSettings:
     return CrawlerSettings.from_mapping(SETTINGS_OVERRIDES)
+
+
+def _request(options: object) -> RenderRequest:
+    """The wire boundary the endpoint itself validates: options are declared or refused."""
+    body = {"url": "http://example.com/"}
+    if options is not None:
+        body["options"] = options
+    return RenderRequest.model_validate(body)
 
 
 class TestResolveRenderOptions:
@@ -140,15 +150,14 @@ class TestRenderEndpointConsumesResolver:
     """``/v1/render`` is a resolver consumer, keeping its caller-controlled capture."""
 
     def test_render_options_forwards_browser_profile(self):
-        options = render_options_for(
-            {"options": {"timeout_seconds": 3, "browser_profile": {"lazy_scroll_steps": 2}}},
-            _settings(),
-        )
-        assert options.timeout_seconds == 3
-        assert options.browser_profile == {"lazy_scroll_steps": 2}
+        """The door refuses caller browser_profile in options (extra=forbid): the
+        profile knob is policy-owned, carried on the crawl path, not this one.
+        """
+        with pytest.raises(ValidationError):
+            _request({"browser_profile": {"lazy_scroll_steps": 2}})
 
     def test_render_options_uses_settings_defaults(self):
-        options = render_options_for({"options": {}}, _settings())
+        options = render_options_for(_request({}), _settings())
         assert options.timeout_seconds == 11
         # 4, not 7: 7 is above the deployment's retry ceiling, so it is now refused there. The per-job
         # equivalent of "7 is a real value" is test_caller_retry_count_is_bounded_per_job.
@@ -157,29 +166,21 @@ class TestRenderEndpointConsumesResolver:
         assert options.browser_profile == {}
 
     def test_render_caller_still_controls_capture(self):
-        options = render_options_for({"options": {"include_html": False}}, _settings())
+        options = render_options_for(_request({"include_html": False}), _settings())
         assert options.include_html is False
 
     def test_invalid_options_shape_still_rejected(self):
-        with pytest.raises(ValueError, match="invalid_options"):
-            render_options_for({"options": "nope"}, _settings())
+        with pytest.raises(ValidationError):
+            _request("nope")
 
     def test_the_endpoint_clamps_absurd_caller_knobs(self):
         """#444: the /v1/render funnel ceilinged its caller's knobs -- the door
-        a raw-dict caller reaches, so the clamp must sit on this path too.
+        a validated caller reaches, so the clamp must sit on this path too.
         """
-        options = render_options_for({"options": {"timeout_seconds": 10**9, "max_retries": 999}}, _settings())
+        options = render_options_for(_request({"timeout_seconds": 10**9, "max_retries": 999}), _settings())
 
         assert options.timeout_seconds == MAX_HTTP_TIMEOUT_SECONDS
         assert options.max_retries == MAX_RETRIES
-
-    def test_the_endpoint_refuses_an_oversized_profile_string(self):
-        """#444: the oversized-string refusal reaches the endpoint funnel."""
-        with pytest.raises(ValueError, match="browser_profile user_agent"):
-            render_options_for(
-                {"options": {"browser_profile": {"user_agent": "B" * (MAX_HEADER_VALUE_BYTES + 1)}}},
-                _settings(),
-            )
 
 
 def _browser_policy() -> dict[str, object]:

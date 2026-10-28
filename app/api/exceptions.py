@@ -6,7 +6,7 @@ Extracted from ``app/main.py`` so the FastAPI app factory stays thin.
 from __future__ import annotations
 
 import logging
-from typing import Any, cast
+from typing import cast
 
 from fastapi import HTTPException, Request
 from fastapi.exceptions import RequestValidationError
@@ -33,7 +33,7 @@ def error_envelope(code: str, message: str, details: JsonValue | None = None) ->
 MALFORMED_DETAIL_CODE = "malformed_error_detail"
 
 
-def error_envelope_from_detail(detail: Any, status_code: int) -> ErrorEnvelope:
+def error_envelope_from_detail(detail: object, status_code: int) -> ErrorEnvelope:
     """The only way an ``HTTPException`` detail becomes an error envelope.
 
     Conforming detail (built by ``http_error``) unwraps 1:1; anything else is logged

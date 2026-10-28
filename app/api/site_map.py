@@ -6,9 +6,8 @@ feeds, gathered in a normal crawl); ``build_site_map`` yields a de-duplicated, s
 
 from __future__ import annotations
 
-from typing import Any
-
 from app.api.response_shaping import frontier_link_url
+from app.models.crawl_diagnostics import CrawlDiagnostics
 from app.models.crawl_result import EngineCrawlResult
 from app.models.host_policy import HostPolicy
 from app.models.normalized_url import NormalizedUrl, admit_or_none
@@ -24,9 +23,9 @@ def build_site_map(crawl_response: ProducerEnvelope, *, host_policy: HostPolicy)
     """
     results = crawl_response["results"]
     result = results[0] if results else None
-    diagnostics = result.diagnostics if result is not None else {}
-    robots: dict[str, Any] = dict(diagnostics.get("robots") or {})
-    discovery: dict[str, Any] = dict(diagnostics.get("discovery") or {})
+    diagnostics: CrawlDiagnostics = result.diagnostics if result is not None else {}
+    robots = diagnostics.get("robots")
+    discovery = diagnostics.get("discovery")
 
     root = (result.final_url or result.normalized_url) if result is not None else None
     if root is None and result is not None:
@@ -42,9 +41,11 @@ def build_site_map(crawl_response: ProducerEnvelope, *, host_policy: HostPolicy)
         return normalized.raw if normalized is not None else None
 
     links = _discovered_link_roots(result, root=root, host_policy=host_policy)
-    sitemaps = [n for u in robots.get("sitemaps", []) or [] if (n := _normalize(u))]
-    sitemap_urls = [n for u in discovery.get("sitemap_urls", []) or [] if (n := _normalize(u))]
-    feeds = [n for u in discovery.get("feeds", []) or [] if (n := _normalize(u))]
+    sitemaps = [n for u in (robots.get("sitemaps") or []) if (n := _normalize(u))] if robots else []
+    sitemap_urls = (
+        [n for u in (discovery.get("sitemap_urls") or []) if (n := _normalize(u))] if discovery else []
+    )
+    feeds = [n for u in (discovery.get("feeds") or []) if (n := _normalize(u))] if discovery else []
 
     all_urls: list[str] = []
     seen: set[str] = set()

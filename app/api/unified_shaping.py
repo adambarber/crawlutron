@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Mapping
-from typing import Any, cast
+from typing import cast
 
 from app.extraction.llm_format import (
     PageMetadata as ExtractedPageMetadata,
@@ -166,12 +166,12 @@ def _json_str(value: JsonValue | None) -> str | None:
     return value if isinstance(value, str) else None
 
 
-def _render_diagnostics(metadata: Mapping[str, Any]) -> dict[str, Any]:
+def _render_diagnostics(metadata: Mapping[str, JsonValue]) -> dict[str, JsonValue]:
     """What the browser worker's ``metadata`` becomes on the render wire.
     Every key survives: the two carried in a declared field are read out, the rest
     pass through unchanged, so a new worker key lands in diagnostics by default.
     """
-    diagnostics: dict[str, Any] = {
+    diagnostics: dict[str, JsonValue] = {
         key: value
         for key, value in metadata.items()
         if key not in _RENDER_METADATA_AS_MODEL_FIELD | _RENDER_METADATA_AS_TOP_LEVEL

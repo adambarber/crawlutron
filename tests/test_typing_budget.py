@@ -25,9 +25,9 @@ from tests.chokepoint_walks import REPO_ROOT, nodes_of, trees_under
 _METRIC = "undeclared record"
 _ANY = "bare Any"
 
-# Batches 1+2 both landed: models declared (Batch 1), admission/api closed unions (Batch 2).
-# Live counts on the merged tree (both batches' edits present).
-_BUDGETS = {_METRIC: 50, _ANY: 113}
+# Batches 1+2 fully landed: models declared (Batch 1), admission/api closed unions (2a) +
+# api doors typed (2b). Live counts on the merged tree.
+_BUDGETS = {_METRIC: 38, _ANY: 108}
 
 # A record is anything whose key set a caller might depend on.
 _RECORD_ROOTS = frozenset(
