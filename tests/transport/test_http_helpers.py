@@ -4,7 +4,7 @@ import asyncio
 
 import pytest
 
-from app.admission.payload_helpers import checked_payload_urls, payload_policy
+from app.admission.payload_helpers import checked_payload_urls
 from app.admission.policy import PolicyTier, read_policy
 from app.api.render import render_options_for
 from app.config.settings import CrawlerSettings
@@ -85,18 +85,20 @@ class TestValidationHelpers:
             render_options_for({"options": "bad"}, CrawlerSettings.from_mapping())
 
     def test_payload_policy_errors(self) -> None:
+        from app.admission.policy import validate_wire_policy
+
         tier = PolicyTier.model_defaults()
         cases: list[tuple[dict[str, object], str]] = [
-            ({"policy": "x"}, "invalid_policy"),
-            ({"policy": {"limits": "x"}}, "invalid_policy_limits"),
-            ({"policy": {"headers": "x"}}, "invalid_policy_headers"),
-            ({"policy": {"strategies": "x"}}, "invalid_policy_strategies"),
-            ({"policy": {"request_profile": "x"}}, "invalid_policy_profile"),
-            ({"policy": {"extraction": "bogus"}}, "invalid_policy_extraction"),
+            ("x", "invalid_policy"),
+            ({"limits": "x"}, "invalid_policy_limits"),
+            ({"headers": "x"}, "invalid_policy_headers"),
+            ({"strategies": "x"}, "invalid_policy_strategies"),
+            ({"request_profile": "x"}, "invalid_policy_profile"),
+            ({"extraction": "bogus"}, "invalid_policy_extraction"),
         ]
-        for payload, expected in cases:
+        for policy, expected in cases:
             with pytest.raises(ValueError, match=rf"^{expected}$"):
-                payload_policy(payload, tier)
+                validate_wire_policy(policy, tier)
 
     def test_retry_after_seconds_invalid(self) -> None:
         assert retry_after_seconds({"retry-after": "notanint"}) is None

@@ -6,7 +6,7 @@ Centralizes URL extraction and policy normalization used by both
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from app.admission.policy import PolicyTier, validate_wire_policy
 from app.models.crawl_request import CrawlRequest
@@ -70,14 +70,15 @@ def checked_payload_urls(
     return batch
 
 
-def payload_policy(payload: CrawlRequest | dict[str, Any], tier: PolicyTier) -> CrawlPolicy:
-    """The validated crawl policy a request carries, tier defaults absorbed.
+def payload_policy(payload: CrawlRequest, tier: PolicyTier) -> CrawlPolicy:
+    """The validated crawl policy the request model carries, tier defaults absorbed.
 
-    The ``dict`` arm is a documented wire-dict tolerance valve: the unverified
-    wire ``policy`` is validated here (not after coercion), keeping the wire path.
+    The #425 typed funnel keeps the wire path: the unverified wire ``policy`` is
+    validated here (not after coercion), and only the model crosses downstream.
     """
-    raw = payload.policy.model_dump() if isinstance(payload, CrawlRequest) else payload.get("policy") or {}
-    return validate_wire_policy(raw, tier)
+    if isinstance(payload, CrawlRequest):
+        return validate_wire_policy(payload.policy.model_dump(), tier)
+    raise TypeError("payload_policy takes a CrawlRequest; validate the wire payload first")
 
 
 __all__ = ["checked_payload_urls", "payload_policy"]

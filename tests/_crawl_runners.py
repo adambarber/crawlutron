@@ -9,6 +9,7 @@ from urllib.parse import urlparse
 from app.admission.policy import read_policy
 from app.models.host_policy import HostPolicy
 from app.models.http_fetch_result import HttpFetchResult
+from app.models.json_value import JsonValue
 from app.orchestration.engine import crawl_request
 from app.transport.cache import HttpCache
 from app.transport.content_cache import CONTENT_CACHE_MAX_TOTAL_BYTES, ContentCache
@@ -30,7 +31,7 @@ if TYPE_CHECKING:
     from app.transport.scheduler import DomainScheduler
 
 #: The policy limits a scripted crawl is run under, in wire shape.
-Limits = dict[str, object]
+Limits = dict[str, JsonValue]
 
 
 class _CrawlPayloadKwargs(TypedDict, total=False):
@@ -50,7 +51,7 @@ class _CrawledRunKwargs(TypedDict, total=False):
     policy record would restate the request models' field set (#412)."""
 
     limits: Limits
-    policy: dict[str, object]
+    policy: dict[str, JsonValue]
 
 
 def make_crawl_payload(
@@ -60,12 +61,12 @@ def make_crawl_payload(
     timeout_seconds: int = 10,
     max_retries: int = 0,
     max_discovered_links: int = 50,
-    **extra: object,
-) -> dict[str, object]:
-    payload: dict[str, object] = {
+    **extra: JsonValue,
+) -> dict[str, JsonValue]:
+    payload: dict[str, JsonValue] = {
         "url": url,
         "policy": {
-            "strategies": strategies if strategies is not None else [HTTP_DECLARED_CRAWLER],
+            "strategies": list(strategies) if strategies is not None else [HTTP_DECLARED_CRAWLER],
             "limits": {
                 "timeout_seconds": timeout_seconds,
                 "max_retries": max_retries,
@@ -83,16 +84,16 @@ def build_payload(
     urls: Sequence[str] | None = None,
     strategies: Sequence[str] | None = None,
     limits: Limits | None = None,
-    **extra: object,
-) -> dict[str, object]:
-    payload: dict[str, object] = {}
+    **extra: JsonValue,
+) -> dict[str, JsonValue]:
+    payload: dict[str, JsonValue] = {}
     if url:
         payload["url"] = url
     if urls:
-        payload["urls"] = urls
-    policy_block: dict[str, object] = {}
+        payload["urls"] = list(urls)
+    policy_block: dict[str, JsonValue] = {}
     if strategies is not None:
-        policy_block["strategies"] = strategies
+        policy_block["strategies"] = list(strategies)
     if limits is not None:
         policy_block["limits"] = limits
     if policy_block:
@@ -128,7 +129,7 @@ async def crawled_results(
     *,
     url: str = "http://example.com/",
     limits: Limits | None = None,
-    policy: dict[str, object] | None = None,
+    policy: dict[str, JsonValue] | None = None,
     spill_path: str | None = None,
     content_cache: ContentCache | None = None,
     calls: list[str] | None = None,
@@ -138,7 +139,7 @@ async def crawled_results(
 
     Payload, fetcher and cache wiring are stated once so a hand-rolled call
     cannot differ from a routed one; ``limits`` is the limits sub-mapping."""
-    body: dict[str, object] = {"limits": dict(limits or {}), **(policy or {})}
+    body: dict[str, JsonValue] = {"limits": dict(limits or {}), **(policy or {})}
     fetcher = tap_fetcher(site_fetcher(pages), calls) if calls is not None else site_fetcher(pages)
     return await crawl_request(
         {"url": url, "policy": body},
@@ -195,7 +196,7 @@ def cache_with_etag(url: str, etag: str = "v1") -> HttpCache:
 async def crawled_result(
     url: str,
     *,
-    policy: CrawlPolicy | dict[str, object] | None = None,
+    policy: CrawlPolicy | dict[str, JsonValue] | None = None,
     http_fetcher: HttpFetcher | None = None,
     browser_worker: CrawlWorker | None = None,
     cache: HttpCache | None = None,
@@ -219,7 +220,10 @@ async def crawled_result(
 
 
 async def run_crawl_async(
-    payload: dict[str, object], *, cache: HttpCache | None = None, browser_worker: CrawlWorker | None = None
+    payload: dict[str, JsonValue],
+    *,
+    cache: HttpCache | None = None,
+    browser_worker: CrawlWorker | None = None,
 ) -> ProducerEnvelope:
     if cache is None:
         cache = HttpCache()
@@ -253,7 +257,7 @@ async def run_chain(
     fetcher: HttpFetcher | None = None,
     *,
     cffi_fetcher: HttpFetcher | None = None,
-    policy: CrawlPolicy | dict[str, object],
+    policy: CrawlPolicy | dict[str, JsonValue],
     scheduler: DomainScheduler | None = None,
     browser_worker: CrawlWorker | None = None,
 ) -> EngineCrawlResult:
@@ -282,7 +286,7 @@ async def run_chain(
 
 async def run_cached_twice(
     url: str,
-    policy: CrawlPolicy | dict[str, object],
+    policy: CrawlPolicy | dict[str, JsonValue],
     fetcher: HttpFetcher,
     cache: HttpCache,
     content_cache: ContentCache,
@@ -354,7 +358,7 @@ def _spawn_fetch(fn: Callable[[object], HttpFetchResult]) -> HttpFetchResult:
 
 
 def strategy_request(
-    url: str, policy: CrawlPolicy | dict[str, object], strategy: CrawlStrategyName
+    url: str, policy: CrawlPolicy | dict[str, JsonValue], strategy: CrawlStrategyName
 ) -> StrategyRequest:
     """The page identity these factories hand the real strategy entry points.
 
@@ -381,7 +385,7 @@ class _CrawlHttpKwargs(TypedDict, total=False):
 
 async def run_http_strategy(
     url: str,
-    policy: CrawlPolicy | dict[str, object],
+    policy: CrawlPolicy | dict[str, JsonValue],
     http_fetcher: HttpFetcher,
     **kwargs: Unpack[_CrawlHttpKwargs],
 ) -> EngineCrawlResult:

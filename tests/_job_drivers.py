@@ -7,6 +7,7 @@ from typing import TypedDict, Unpack
 from app.admission.policy import PolicyLike
 from app.models.crawl_request import CrawlRequest
 from app.models.crawl_result import EngineCrawlResult
+from app.models.json_value import JsonValue
 from app.storage.job_store import CrawlJobState, FrontierEntry, JobStatus
 from tests._job_store_doubles import seed_frontier
 from tests._policy_factories import canonical
@@ -149,12 +150,12 @@ def recording_execute(execute, captured: list[CrawlRequest]):
     return _execute
 
 
-def job_limits(max_depth: int = 2, max_pages: int = 0, **extra) -> PolicyLike:
+def job_limits(max_depth: int = 2, max_pages: int = 0, **extra: JsonValue) -> PolicyLike:
     """A whole-site job policy carrying nothing but its limits.
 
     Restated inline, two runner tests capped pages at different depths while
     reading identically; unset limits are filled in by ``_execution_policy``."""
-    limits: dict[str, object] = {"max_depth": max_depth, "max_pages": max_pages}
+    limits: dict[str, JsonValue] = {"max_depth": max_depth, "max_pages": max_pages}
     limits.update(extra)
     return {"limits": limits}
 

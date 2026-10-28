@@ -9,8 +9,8 @@ import asyncio
 import logging
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from typing import Any
 
+from app.admission.admission_links import LinkCandidate
 from app.api.unified_shaping import (
     build_unified_result,
     render_result_to_unified,
@@ -28,7 +28,7 @@ _logger = logging.getLogger(__name__)
 
 
 def frontier_link_url(
-    link: Any,
+    link: LinkCandidate,
     *,
     policy: HostPolicy,
     resolve_against: NormalizedUrl | None = None,
@@ -119,10 +119,10 @@ def _shape_all[ResultT: AnyResult](
     return shaped
 
 
-def _peek_failed_fields(item: Any) -> dict[str, Any]:
+def _peek_failed_fields(item: object) -> dict[str, NormalizedUrl | str | None]:
     """Best-effort field reads off whatever arrived at the batch's last guard.
-    Deliberately ``Any`` (the per-item path can raise), read by ``getattr`` with
-    a default -- the items are dataclasses now -- never raising out of the guard.
+    Reads by ``getattr`` with a default -- the items are dataclasses now -- never
+    raising out of the guard, so the parameter stays ``object``, not a pretend type.
     """
     if isinstance(item, NormalizedUrl):
         # A page the batch never answered, held by the runner as an admitted
@@ -142,7 +142,7 @@ def _peek_failed_fields(item: Any) -> dict[str, Any]:
         return {}
 
 
-def failed_unified_result(item: Any) -> UnifiedCrawlResult:
+def failed_unified_result(item: object) -> UnifiedCrawlResult:
     """A shape failure becomes a terminal failure for that item, not the batch,
     mirroring the job runner's ``failed += 1`` on a dropped item. Fields that
     need no interpretation are carried through, so the caller still sees which URL failed.
@@ -173,7 +173,7 @@ def failed_unified_result(item: Any) -> UnifiedCrawlResult:
         # site_error is a FAILED_CLASSIFICATIONS member, so its status entry is
         # "failed"; mapping it as unknown_error ("blocked") would disagree.
         classification=CrawlClassification.site_error,
-        error=peeked.get("error") or "result_shaping_failed",
+        error=error if isinstance(error := peeked.get("error"), str) and error else "result_shaping_failed",
     )
 
 

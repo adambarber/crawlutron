@@ -393,8 +393,9 @@ class TestSeedingIsOffLoop:
 
         from app.admission.payload_helpers import payload_policy
         from app.admission.policy import PolicyTier
+        from app.models.crawl_request import CrawlRequest
 
-        derived = payload_policy(payload, PolicyTier.model_defaults())
+        derived = payload_policy(CrawlRequest.model_validate(payload), PolicyTier.model_defaults())
         cache = _cache_with_fresh(tmp_path, fresh_url, "2020-01-01T00:00:00Z", derived)
         fetched: list[str] = []
 

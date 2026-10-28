@@ -8,7 +8,8 @@ import pytest
 
 from app.admission.admission import requeue_admitted_pages
 from app.admission.payload_helpers import payload_policy
-from app.admission.policy import PolicyTier
+from app.admission.policy import PolicyTier, validate_wire_policy
+from app.models.crawl_request import CrawlRequest
 from app.models.host_policy import HostPolicy
 from app.models.normalized_url import NormalizedUrl
 from app.runtime.resource_pressure import (
@@ -30,19 +31,15 @@ from tests._policy_factories import admit, canonical
     ids=["default-is-bounded-not-unlimited", "zero-falls-back-to-default", "positive-preserved"],
 )
 async def test_payload_max_pages_resolves_to_a_bounded_positive_number(limits, expected):
-    policy = payload_policy(
-        {"url": "http://example.com/", "policy": {"limits": limits}}, PolicyTier.model_defaults()
-    )
+    request = CrawlRequest.model_validate({"url": "http://example.com/", "policy": {"limits": limits}})
+    policy = payload_policy(request, PolicyTier.model_defaults())
     assert policy.limits.max_pages == expected
 
 
 async def test_max_pages_above_upper_bound_is_rejected_not_clamped():
     # The model declares le=2000.
     with pytest.raises(ValueError, match="invalid_policy_limits"):
-        payload_policy(
-            {"url": "http://example.com/", "policy": {"limits": {"max_pages": 99999}}},
-            PolicyTier.model_defaults(),
-        )
+        validate_wire_policy({"limits": {"max_pages": 99999}}, PolicyTier.model_defaults())
 
 
 @pytest.mark.parametrize(
@@ -53,27 +50,21 @@ async def test_max_pages_above_upper_bound_is_rejected_not_clamped():
 async def test_max_pages_ceiling_value_is_exactly_2000(limit, ok):
     """#158's spill ceiling: 2000 is the largest admitted set load_ordered reassembles."""
     if ok:
-        policy = payload_policy(
-            {"url": "http://example.com/", "policy": {"limits": {"max_pages": limit}}},
-            PolicyTier.model_defaults(),
+        request = CrawlRequest.model_validate(
+            {"url": "http://example.com/", "policy": {"limits": {"max_pages": limit}}}
         )
+        policy = payload_policy(request, PolicyTier.model_defaults())
         assert policy.limits.max_pages == limit
     else:
         with pytest.raises(ValueError, match="invalid_policy_limits"):
-            payload_policy(
-                {"url": "http://example.com/", "policy": {"limits": {"max_pages": limit}}},
-                PolicyTier.model_defaults(),
-            )
+            validate_wire_policy({"limits": {"max_pages": limit}}, PolicyTier.model_defaults())
 
 
 async def test_max_pages_infinity_is_rejected_not_a_500():
     # #533: JSON accepts Infinity, and int(float("inf")) raises OverflowError,
     # which escaped the wire edge as an unhandled 500 instead of the 422 envelope.
     with pytest.raises(ValueError, match="invalid_policy_limits"):
-        payload_policy(
-            {"url": "http://example.com/", "policy": {"limits": {"max_pages": float("inf")}}},
-            PolicyTier.model_defaults(),
-        )
+        validate_wire_policy({"limits": {"max_pages": float("inf")}}, PolicyTier.model_defaults())
 
 
 async def test_max_pages_zero_bounded_at_engine():
