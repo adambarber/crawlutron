@@ -103,7 +103,7 @@ def test_the_content_length_budget_is_split_across_workers(monkeypatch):
     from app.transport import content_cache_key as cck
 
     budget = 16 * 1024 * 1024
-    monkeypatch.setattr(cck, "RAM_SAFETY_BYTES", budget)
+    monkeypatch.setattr(cck, "content_ram_budget_bytes", lambda: budget)
     uncapped = CrawlPolicyLimits()
 
     # 16 MiB across one worker clears the 10 MiB per-page default, so the default binds and is reported
@@ -195,3 +195,16 @@ def test_the_browser_tier_stays_inside_the_ram_budget(monkeypatch):
     monkeypatch.setenv("CRAWLUTRON_WORKERS", str(affordable + 1))
     over = rp.derive_browser_pool_size(limit) * (affordable + 1) * browser_bytes
     assert over > budget
+
+
+def test_the_content_ram_budget_is_read_at_call_time_not_import_time(monkeypatch):
+    """A frozen-at-import budget is indistinguishable from a derived one once wrong:
+    the only evidence is that a later env change takes effect, so the knob is
+    re-read per call through the declared derivation, never a module snapshot.
+    """
+    from app.transport import content_cache_key as cck
+
+    monkeypatch.delenv("CRAWLUTRON_CONTENT_RAM_BUDGET_BYTES", raising=False)
+    assert cck.content_ram_budget_bytes() == 1 * 1024 * 1024 * 1024
+    monkeypatch.setenv("CRAWLUTRON_CONTENT_RAM_BUDGET_BYTES", "4194304")
+    assert cck.content_ram_budget_bytes() == 4 * 1024 * 1024
