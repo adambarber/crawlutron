@@ -151,6 +151,8 @@ COOLDOWN_PURGE_INTERVAL = 100
 
 
 class DomainScheduler:
+    """Per-instance domain pacing/breakers/rate accounting; nothing shared."""
+
     @classmethod
     def from_settings(
         cls,

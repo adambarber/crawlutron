@@ -261,7 +261,7 @@ All 36 values appear in `supported_classifications` (TC-CAP-01) and counters
 | TC-VAL-01 | `url` xor `urls` | Neither `url` nor `urls` → `422 missing_url`. Both provided → `200` (lenient: service uses `urls`, ignores `url`). Enforcing a strict xor is deferred hardening. |
 | TC-VAL-02 | `batch_size_exceeded` | `> max_batch_size` (50) URLs → `422`. |
 | TC-VAL-03 | schema/field validation | Invalid policy field → `422` with `details.errors`. |
-| TC-CONC-01 | Global + per-domain concurrency | Many parallel requests; scheduler enforces `global_concurrency=4`, `per_domain_concurrency=2`, `per_domain_delay_ms=500`. |
+| TC-CONC-01 | Global + per-domain concurrency | Many parallel URLs in one request; the request's scheduler enforces `global_concurrency=4`, `per_domain_concurrency=2`, `per_domain_delay_ms=500`. Parallel API requests each get their own scheduler (limits are per request, not service-wide). |
 | TC-RATE-01 | `max_rps` | Sustained ≤ configured RPS per domain. |
 | TC-LOG-01 | Structured logging | `/app/logs/crawlutron.jsonl` receives redacted, structured log lines (no secret leakage). |
 | TC-LIFECYCLE-01 | Graceful shutdown | `SIGTERM` → browser renderer closed, in-flight crawls finish/abort cleanly via `shutdown_event`. |

@@ -315,7 +315,10 @@ Every crawl result carries a `classification` from a fixed enum of **36 values**
   pause/cancel-able whole-site jobs. Read timeouts on the sync path must cover the
   chosen policy and batch size.
 - **Rate limiting** is enforced via `global_concurrency`, `per_domain_concurrency`,
-  and `per_domain_delay_ms`. Exceeding `max_batch_size` is rejected.
+  and `per_domain_delay_ms`, scoped to a single request: each request runs its
+  own scheduler, so concurrent requests each enforce the limits independently
+  and a service-wide per-domain bound is not provided (callers pacing many
+  concurrent requests own the aggregate). Exceeding `max_batch_size` is rejected.
 - **Webhooks / async**: provide `webhook_url` to receive results asynchronously, or
   `async_mode=true` to get a `202 Accepted` with a `status_url` to poll
   `GET /v1/crawl/{request_id}`. Both return immediately instead of blocking on the
